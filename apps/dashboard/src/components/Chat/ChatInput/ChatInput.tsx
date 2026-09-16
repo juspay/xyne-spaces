@@ -335,6 +335,8 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
     const [isBulkCreateTicketsModalOpen, setIsBulkCreateTicketsModalOpen] = useState(false);
     const [bulkParentTitle, setBulkParentTitle] = useState('');
     const [bulkSubTitles, setBulkSubTitles] = useState<string[]>([]);
+    // Index 0 is the parent's, matching what BulkCreateTicketsModal reads.
+    const [bulkDescriptions, setBulkDescriptions] = useState<string[]>([]);
     const [recentScheduledFor, setRecentScheduledFor] = useState<number | null>(null);
 
     const {
@@ -1221,12 +1223,15 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
                   onCreateTicket: (description: string | undefined) => {
                     void (async () => {
                       if (!isSupportChannel) {
-                        const titles = parseTicketsFromText(description || '');
-                        if (titles.length >= 2) {
-                          setBulkParentTitle(titles[0] ?? '');
-                          setBulkSubTitles(titles.slice(1));
+                        const drafts = parseTicketsFromText(description || '');
+                        if (drafts.length >= 2) {
+                          setBulkParentTitle(drafts[0]?.title ?? '');
+                          setBulkSubTitles(drafts.slice(1).map(d => d.title));
+                          setBulkDescriptions(drafts.map(d => d.description));
+                          // The composer keeps its content until the tickets
+                          // actually exist: handleTicketCreated clears it, so
+                          // cancelling the modal leaves the draft untouched.
                           setIsBulkCreateTicketsModalOpen(true);
-                          inputBoxRef.current?.clearContent();
                           return;
                         }
                       }
@@ -1359,12 +1364,14 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
               setIsBulkCreateTicketsModalOpen(false);
               setBulkParentTitle('');
               setBulkSubTitles([]);
+              setBulkDescriptions([]);
             }}
             channelId={channelId}
             projectId={(channel.projectId as string | null) || ''}
             mode={BulkTicketMode.PARENT_SUB}
             parentTitle={bulkParentTitle}
             subTitleTitles={bulkSubTitles}
+            subDescriptions={bulkDescriptions}
             sourceConversationId={conversationId ?? undefined}
             onTicketCreated={handleTicketCreated}
           />

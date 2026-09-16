@@ -20,6 +20,16 @@ import { DatabaseClient } from '@/database/client';
 
 const prisma = DatabaseClient.getInstance();
 
+const plural = (count: number): string => (count === 1 ? '' : 's');
+
+/** Nudge title for a batch that failed to create rows, to link them, or both. */
+const summariseFailures = (failed: number, unlinked: number): string => {
+  const parts: string[] = [];
+  if (failed > 0) parts.push(`${failed} ticket${plural(failed)} failed to create`);
+  if (unlinked > 0) parts.push(`${unlinked} not linked to the parent`);
+  return parts.join(', ');
+};
+
 /**
  * Processes bulk-ticket-creation batches off the request path.
  *
@@ -27,16 +37,18 @@ const prisma = DatabaseClient.getInstance();
  *  - Every item is access-checked again here ({@link validateChannelAccess}),
  *    not just at enqueue time, so a job can never create a ticket in a channel
  *    the requester cannot reach even if the payload is tampered with.
- *  - Per-row idempotency: a `clientRowId` is recorded in a Redis set keyed by
- *    the batch `jobKey` as soon as its ticket exists — before the sub-ticket
- *    link, which can fail on its own. If the job stalls and Bull re-runs it,
- *    rows that already produced a ticket are skipped instead of duplicated.
+ *  - Per-row idempotency: a row's ticket id is recorded in Redis as soon as the
+ *    ticket exists, and the row counts as done only once it is linked as well.
+ *    A re-run therefore skips finished rows, and finishes the link for a row
+ *    whose ticket was already created rather than creating a second one.
  *  - Failures are collected and a single failure nudge is created on the last
  *    attempt that will run (not per-item, not per-attempt) so the user can
- *    retry failed tickets from the nudge card.
- *  - Throws only if every ticket failed, so Bull retries make sense for
- *    transient total failures. Partial failures never throw; they are reported
- *    on the spot, since no retry is coming.
+ *    retry failed tickets from the nudge card. It hangs off the best message
+ *    the batch has ({@link BulkTicketCreationWorker.resolveNudgeAnchor}),
+ *    because a nudge with nothing to hang off is never shown to anyone.
+ *  - Throws if every ticket failed, and if any ticket is left unlinked, so Bull
+ *    gives those links another attempt. Partial creation failures do not throw:
+ *    re-creating is the user's call, offered through the nudge.
  */
 class BulkTicketCreationWorker {
   private isInitialized = false;
@@ -80,21 +92,33 @@ class BulkTicketCreationWorker {
     const data = job.data;
     const client = bulkTicketCreationQueue.getQueue().client;
     const doneKey = `bulk-ticket:done:${job.id}`;
+    const ticketKey = `bulk-ticket:ticket:${job.id}`;
+
+    const parentTicketId = await this.resolveParentTicket(job, client);
 
     const failures: Array<{ input: BulkTicketCreationInput; error: string }> = [];
+    const linkFailures: Array<{ input: BulkTicketCreationInput; ticketId: string; error: string }> =
+      [];
     let created = 0;
     let skipped = 0;
-    let linkFailures = 0;
+    let relinked = 0;
+    // All-parents batches have no parent and may have no source: the first
+    // ticket the batch manages to create is then the only place a nudge can go.
+    let firstCreatedTicketId: string | null = null;
 
     for (let index = 0; index < data.subTickets.length; index += 1) {
       const item = data.subTickets[index]!;
-      const rowId = item.clientRowId ?? String(index);
+      const rowId = item.clientRowId || String(index);
 
       const alreadyDone = await client.sismember(doneKey, rowId);
       if (alreadyDone) {
         skipped += 1;
         continue;
       }
+
+      // Set only once the ticket exists, so the catch below can tell a ticket
+      // that was never created from one that was created but not linked.
+      let ticketId = await client.hget(ticketKey, rowId);
 
       try {
         const access = await validateChannelAccess(
@@ -103,85 +127,118 @@ class BulkTicketCreationWorker {
           data.parentWorkspaceId,
         );
         if (!access.hasAccess) {
-          failures.push({ input: item, error: access.reason ?? 'Access denied' });
+          const reason = access.reason ?? 'Access denied';
+          if (ticketId) {
+            linkFailures.push({ input: item, ticketId, error: reason });
+          } else {
+            failures.push({ input: item, error: reason });
+          }
           continue;
         }
 
-        const ticket = await this.ticketController.createBulkTicketItem(item, data.userId, {
-          fromTicketsTab: data.fromTicketsTab === true,
-        });
-
-
-        await client.sadd(doneKey, rowId);
-        created += 1;
-
-        if (data.mode === BulkTicketMode.PARENT_SUB && data.parentTicketId) {
-          try {
-            await createSubTicket({
-              parentTicketId: data.parentTicketId,
-              title: item.title,
-              description: item.description ?? null,
-              createdBy: data.userId,
-              assignedTo: item.assignedTo ?? null,
-              mappedTicketId: ticket.id,
-            });
-          } catch (linkError) {
-            linkFailures += 1;
-            logger.error('[BULK-TICKET-WORKER] Ticket created but not linked to its parent', {
-              jobId: job.id,
-              ticketId: ticket.id,
-              parentTicketId: data.parentTicketId,
-              error: linkError,
-            });
-          }
+        if (ticketId) {
+          // A previous attempt created this ticket and failed on the link.
+          relinked += 1;
+        } else {
+          const ticket = await this.ticketController.createBulkTicketItem(item, data.userId, {
+            fromTicketsTab: data.fromTicketsTab === true,
+          });
+          ticketId = ticket.id;
+          await client.hset(ticketKey, rowId, ticketId);
+          firstCreatedTicketId ??= ticketId;
+          created += 1;
         }
+
+        if (data.mode === BulkTicketMode.PARENT_SUB && parentTicketId) {
+          await createSubTicket({
+            parentTicketId,
+            title: item.title,
+            description: item.description ?? null,
+            createdBy: data.userId,
+            assignedTo: item.assignedTo ?? null,
+            mappedTicketId: ticketId,
+          });
+        }
+
+        // Done means created *and* linked. A row that got its ticket but not
+        // its link stays open, so the next attempt can finish it.
+        await client.sadd(doneKey, rowId);
       } catch (error) {
+        const message = error instanceof Error ? error.message : 'Unknown error';
+
+        if (ticketId) {
+          logger.error('[BULK-TICKET-WORKER] Ticket created but not linked to its parent', {
+            jobId: job.id,
+            ticketId,
+            parentTicketId,
+            error,
+          });
+          linkFailures.push({ input: item, ticketId, error: message });
+          continue;
+        }
+
         logger.error('[BULK-TICKET-WORKER] Failed to create ticket', {
           jobId: job.id,
           title: item.title,
           error,
         });
-        failures.push({
-          input: item,
-          error: error instanceof Error ? error.message : 'Unknown error',
-        });
+        failures.push({ input: item, error: message });
       }
     }
 
     await client.expire(doneKey, 24 * 60 * 60);
+    await client.expire(ticketKey, 24 * 60 * 60);
 
     logger.info('[BULK-TICKET-WORKER] Batch complete', {
       jobId: job.id,
       total: data.subTickets.length,
       created,
       skipped,
+      relinked,
       failed: failures.length,
-      linkFailures,
+      unlinked: linkFailures.length,
     });
 
     const isTotalFailure = failures.length === data.subTickets.length && data.subTickets.length > 0;
-    const willRetry = isTotalFailure && job.attemptsMade + 1 < (job.opts?.attempts ?? 1);
+    // Unlinked rows are worth another attempt on their own: the retry only has
+    // the link left to do, so it is cheap and cannot duplicate a ticket.
+    const hasMoreAttempts = job.attemptsMade + 1 < (job.opts?.attempts ?? 1);
+    const willRetry = (isTotalFailure || linkFailures.length > 0) && hasMoreAttempts;
 
-    if (failures.length > 0) {
+    if (failures.length > 0 || linkFailures.length > 0) {
       logger.warn('[BULK-TICKET-WORKER] Some tickets in the batch failed', {
         jobId: job.id,
         willRetry,
         failures: failures.map(f => ({ title: f.input.title, error: f.error })),
+        unlinked: linkFailures.map(l => ({
+          title: l.input.title,
+          ticketId: l.ticketId,
+          error: l.error,
+        })),
       });
 
       if (!willRetry) {
-        if (data.sourceMessageId && data.projectId) {
+        const anchorMessageId = await this.resolveNudgeAnchor({
+          data,
+          parentTicketId,
+          fallbackTicketId: firstCreatedTicketId,
+        });
+
+        if (anchorMessageId && data.projectId) {
           await this.createFailureNudge({
             jobId: job.id,
             data,
+            parentTicketId,
+            anchorMessageId,
             failures,
+            linkFailures,
           });
         } else {
-          logger.warn('[BULK-TICKET-WORKER] Skipping failure nudge — missing sourceMessageId or projectId', {
+          logger.warn('[BULK-TICKET-WORKER] Nowhere to put the failure nudge', {
             jobId: job.id,
-            sourceMessageId: data.sourceMessageId,
+            anchorMessageId,
             projectId: data.projectId,
-            failureCount: failures.length,
+            failureCount: failures.length + linkFailures.length,
           });
         }
       }
@@ -190,23 +247,117 @@ class BulkTicketCreationWorker {
     if (isTotalFailure) {
       throw new Error(`All ${data.subTickets.length} ticket(s) failed to create`);
     }
+
+    // Throwing hands the remaining links back to Bull; the rows that are done
+    // are skipped on the next attempt, so only the links are retried.
+    if (linkFailures.length > 0) {
+      throw new Error(
+        `${linkFailures.length} ticket(s) created but not linked to parent ${parentTicketId}`,
+      );
+    }
   }
 
+  /**
+   * The parent of a parent-sub batch, created here rather than at enqueue time.
+   * Its id is remembered per job, so a retry links to the parent the first
+   * attempt made instead of creating a second one.
+   */
+  private async resolveParentTicket(
+    job: Job<BulkTicketCreationJobData>,
+    client: ReturnType<typeof bulkTicketCreationQueue.getQueue>['client'],
+  ): Promise<string | null> {
+    const data = job.data;
+    if (data.parentTicketId) return data.parentTicketId;
+    if (!data.parent) return null;
+
+    const parentKey = `bulk-ticket:parent:${job.id}`;
+    const existing = await client.get(parentKey);
+    if (existing) return existing;
+
+    const access = await validateChannelAccess(
+      data.parent.channelId,
+      data.userId,
+      data.parentWorkspaceId,
+    );
+    if (!access.hasAccess) {
+      throw new Error(`Parent ticket channel is not accessible: ${access.reason ?? 'Access denied'}`);
+    }
+
+    const parent = await this.ticketController.createBulkTicketItem(data.parent, data.userId, {
+      fromTicketsTab: data.fromTicketsTab === true,
+    });
+    await client.set(parentKey, parent.id, 'EX', 24 * 60 * 60);
+    return parent.id;
+  }
+
+  /**
+   * The message a failure nudge can hang off. Nudges are only rendered under a
+   * message, so this walks from the most specific anchor a batch has to the
+   * least: the message a retry came from, the parent ticket's own creation
+   * message (every parent-sub batch has one), the conversation the batch was
+   * started from, and finally the first ticket the batch created — which for a
+   * tickets-tab batch is the only thing that exists.
+   */
+  private async resolveNudgeAnchor({
+    data,
+    parentTicketId,
+    fallbackTicketId,
+  }: {
+    data: BulkTicketCreationJobData;
+    parentTicketId: string | null;
+    fallbackTicketId: string | null;
+  }): Promise<string | null> {
+    if (data.sourceMessageId) return data.sourceMessageId;
+
+    for (const ticketId of [parentTicketId, fallbackTicketId]) {
+      if (!ticketId) continue;
+      // `messageId` is the ticket's creation message — the head of its thread,
+      // which is where the ticket card itself renders.
+      const ticket = await prisma.ticket.findUnique({
+        where: { id: ticketId },
+        select: { messageId: true },
+      });
+      if (ticket?.messageId) return ticket.messageId;
+    }
+
+    if (data.sourceConversationId) {
+      const conversation = await prisma.conversation.findUnique({
+        where: { conversationId: data.sourceConversationId },
+        select: { initialMessageId: true },
+      });
+      if (conversation?.initialMessageId) return conversation.initialMessageId;
+    }
+
+    return null;
+  }
+
+  /**
+   * One nudge for everything that needs attention. Only `failures` go into
+   * `failedInputs`, because that is what the card's Retry re-creates — a row
+   * whose ticket already exists must never be re-created, so unlinked rows are
+   * named in the description instead and left for the user to link.
+   */
   private async createFailureNudge({
     jobId,
     data,
+    parentTicketId,
+    anchorMessageId,
     failures,
+    linkFailures,
   }: {
     jobId: string | number;
     data: BulkTicketCreationJobData;
+    parentTicketId: string | null;
+    anchorMessageId: string;
     failures: Array<{ input: BulkTicketCreationInput; error: string }>;
+    linkFailures: Array<{ input: BulkTicketCreationInput; ticketId: string; error: string }>;
   }): Promise<void> {
     try {
       let existingParentTicket: { id: string; xyneId: string; conversationId: string } | null = null;
       let parentTitle: string | null = null;
-      if (data.parentTicketId) {
+      if (parentTicketId) {
         const parent = await prisma.ticket.findUnique({
-          where: { id: data.parentTicketId },
+          where: { id: parentTicketId },
           select: { id: true, xyneId: true, conversationId: true, title: true },
         });
         if (parent) {
@@ -234,22 +385,27 @@ class BulkTicketCreationWorker {
       }));
 
       await nudgeService.persistCandidates({
-        sourceId: data.sourceMessageId!,
+        sourceId: anchorMessageId,
         sourceType: (data.sourceType as SurfaceAreaType) ?? SurfaceAreaType.MESSAGE,
         nudgeKind: NudgeKind.BULK_TICKET_CREATION_FAILED,
         workspaceId: data.parentWorkspaceId,
         priority: 'high',
         candidates: [
           {
-            title: `${failures.length} ticket${failures.length === 1 ? '' : 's'} failed to create`,
-            description: failures.map(f => `• ${f.input.title}`).join('\n'),
+            title: summariseFailures(failures.length, linkFailures.length),
+            description: [
+              ...failures.map(f => `• ${f.input.title}`),
+              ...linkFailures.map(
+                l => `• ${l.input.title} — created, but not linked to the parent`,
+              ),
+            ].join('\n'),
             priority: 'high',
             actions: {
               actionType: 'RETRY_BULK_TICKET_CREATION',
-              mode: data.parentTicketId ? 'parent-sub' : 'all-parents',
+              mode: parentTicketId ? 'parent-sub' : 'all-parents',
               channelId: data.channelId,
               projectId: data.projectId,
-              parentTicketId: data.parentTicketId,
+              parentTicketId,
               parentTitle,
               existingParentTicket,
               failedInputs,

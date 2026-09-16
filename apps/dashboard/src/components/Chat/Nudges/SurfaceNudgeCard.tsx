@@ -647,7 +647,7 @@ export const SurfaceNudgeCard: React.FC<SurfaceNudgeCardProps> = ({
                 ? ['', ...retryFailedInputs.map(f => f.description)]
                 : [retryParentTitle, ...retryFailedInputs.map(f => f.description)]
           }
-          clientRowIds={retryFailedInputs.map(f => f.clientRowId ?? '')}
+          clientRowIds={retryFailedInputs.map(f => f.clientRowId)}
           existingParentTicket={retryExistingParentTicket}
           sourceMessageId={retryExistingParentTicket ? nudge.sourceId : undefined}
           onTicketCreated={() => {

@@ -45,12 +45,20 @@ export interface BulkTicketCreationJobData {
   userId: string;
   /** Workspace of the authenticated user — the ceiling for per-item access. */
   parentWorkspaceId: string;
-  /** Set for parent-sub mode: the parent every item is mapped under. */
+  /** Set for parent-sub mode when the parent already exists. */
   parentTicketId: string | null;
+  /**
+   * Parent to create before the batch, when parent-sub mode is starting a new
+   * one. It is created by the worker rather than at enqueue time so that a
+   * failed enqueue leaves nothing behind for the user to duplicate.
+   */
+  parent?: BulkTicketCreationInput;
   /** Tickets to create asynchronously. */
   subTickets: BulkTicketCreationInput[];
-  /** Optional source message, for failure nudge tracking. */
+  /** Optional source message, the most specific failure-nudge anchor. */
   sourceMessageId?: string;
+  /** Conversation the batch was started from; a fallback nudge anchor. */
+  sourceConversationId?: string;
   /** Batch came from the tickets tab, which decides chat posting per channel. */
   fromTicketsTab?: boolean;
   /** Source type for nudge persistence. */
@@ -61,18 +69,13 @@ export interface BulkTicketCreationJobData {
   projectId?: string;
 }
 
-/** Failure record for partial batch failures. */
-export interface BulkTicketCreationFailure {
-  clientRowId: string;
-  title: string;
-  error?: string;
-}
-
-/** Backend → dashboard response for a successfully enqueued batch. */
+/**
+ * Backend → dashboard response for a successfully enqueued batch. The endpoint
+ * answers 202 before any ticket exists, so per-ticket outcomes belong to the
+ * worker, not to this response.
+ */
 export interface CreateBulkTicketResponse {
+  /** Echoed back only when the caller supplied `existingParentTicketId`. */
   parentTicketId?: string;
   enqueuedSubTickets: number;
-  failedSubTickets?: number;
-  failedTitles?: string[];
-  failures?: BulkTicketCreationFailure[];
 }
