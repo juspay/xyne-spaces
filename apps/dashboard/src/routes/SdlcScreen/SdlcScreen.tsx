@@ -3661,7 +3661,6 @@ export default function SdlcScreen(): ReactElement {
                     key={selectedCanvasId}
                     canvasId={selectedCanvasId}
                     showAskAiAction={false}
-                    showPageTitle={false}
                   />
                 </div>
               ) : section === 'workflows' ? (
@@ -4601,7 +4600,6 @@ export default function SdlcScreen(): ReactElement {
                 key={readerCanvasId}
                 canvasId={readerCanvasId}
                 showAskAiAction={false}
-                showPageTitle={false}
               />
             </div>
           </div>
