@@ -1,3 +1,10 @@
+## [1.323.0-release-20260916.7](https://github.com/juspay/xyne-spaces/compare/v1.323.0-release-20260916.6...v1.323.0-release-20260916.7) (2026-09-16)
+
+
+### Features
+
+* bitbucket connector for workflow ([#1881](https://github.com/juspay/xyne-spaces/issues/1881)) ([#1922](https://github.com/juspay/xyne-spaces/issues/1922)) ([c81567a](https://github.com/juspay/xyne-spaces/commit/c81567af6d446dc4f327132b314cb1d325cf337f))
+
 ## [1.323.0-release-20260916.6](https://github.com/juspay/xyne-spaces/compare/v1.323.0-release-20260916.5...v1.323.0-release-20260916.6) (2026-09-16)
 
 
