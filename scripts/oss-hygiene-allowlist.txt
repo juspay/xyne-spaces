@@ -1,0 +1,23 @@
+# OSS hygiene sweep allowlist — files that still legitimately match the sweep.
+#
+# RULES:
+#   - Every entry must carry a removal condition. The goal is an empty file.
+#   - This list relaxes ONLY the internal-hostname check; credential-shaped
+#     patterns are enforced everywhere with no exceptions.
+#   - Entries are exact repository paths, one per line. '#' starts a comment.
+#
+# Frozen Prisma migrations (checksummed — cannot be edited in place; content is
+# rewritten by the pre-publish history squash, then these entries are deleted):
+apps/xyne-claw-auth/backend/prisma/migrations/20260421180000_add_juspay_internal_tools_server/migration.sql
+apps/xyne-claw-auth/backend/prisma/migrations/20260629180000_add_jusbiz_mcp_server/migration.sql
+# Production deployment manifest — carries deployment-real hosts (ssh host pin,
+# preview base URL). Scheduled to move to the private overlay repo via the
+# ordered two-repo move (private copy merges FIRST, then this file is deleted
+# from the public repo). Remove this entry as part of that move:
+claw-deployments/xyne-claw-deployment.yaml
+# Guard tests whose DETECTOR REGEX SOURCES contain pattern tokens by design —
+# they assert that configs do NOT contain internal references. If the fixtures
+# they check are ever removed, remove these entries too:
+apps/xyne-claw-auth/backend/src/mcp/adapters/adapter-defaults.test.ts
+apps/electron/test/electron-config.test.ts
+packages/xyne-claw-shared/src/tools/sandbox/repo-configs.test.ts
