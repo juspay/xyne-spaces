@@ -1677,7 +1677,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
         >
           <div
             className={`
-            overflow-hidden transition-all flex flex-col relative
+            overflow-hidden transition-[border-color,opacity] flex flex-col relative
             ${isMobile ? 'bg-background rounded-[26px] text-foreground shadow-sm' : 'bg-background rounded-2xl border text-foreground shadow-none'}
             ${
               !isMobile && artifactComposerDefinition
@@ -1946,7 +1946,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                         <DropdownMenuTrigger asChild>
                           <button
                             type='button'
-                            className='p-1.5 rounded hover:bg-accent transition-all duration-200 ease-in-out'
+                            className='p-1.5 rounded hover:bg-accent transition-colors duration-200 ease-in-out'
                             aria-label='Add content'
                             disabled={disabled || isSending}
                           >
@@ -2036,7 +2036,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                         }}
                         data-track-category='CHAT_INPUT'
                         data-track-name='INSERT_USER_MENTION'
-                        className='p-1.5 rounded hover:bg-accent transition-all duration-200 ease-in-out'
+                        className='p-1.5 rounded hover:bg-accent transition-colors duration-200 ease-in-out'
                         aria-label='Mention user'
                         data-testid='mention-user-btn'
                         disabled={disabled || isSending}
@@ -2060,7 +2060,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                         }}
                         data-track-category='CHAT_INPUT'
                         data-track-name='INSERT_CHANNEL_MENTION'
-                        className='p-1.5 rounded hover:bg-accent transition-all duration-200 ease-in-out'
+                        className='p-1.5 rounded hover:bg-accent transition-colors duration-200 ease-in-out'
                         aria-label='Mention channel'
                         disabled={disabled || isSending}
                       >
@@ -2081,7 +2081,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                         onClick={() => setShowFormatToolbar(prev => !prev)}
                         data-track-category='CHAT_INPUT'
                         data-track-name='TOGGLE_FORMAT_TOOLBAR'
-                        className={`p-1.5 rounded transition-all duration-200 ease-in-out ${
+                        className={`p-1.5 rounded transition-colors duration-200 ease-in-out ${
                           showFormatToolbar
                             ? 'bg-accent text-foreground'
                             : 'hover:bg-accent text-muted-foreground'
@@ -2125,7 +2125,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                         onClick={onCancel}
                         data-track-category='CHAT_INPUT'
                         data-track-name='CANCEL_EDITING'
-                        className='p-2 rounded-md bg-muted text-foreground hover:bg-border transition-all duration-200 ease-in-out focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary focus-visible:outline-offset-2'
+                        className='p-2 rounded-md bg-muted text-foreground hover:bg-border transition-colors duration-200 ease-in-out focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary focus-visible:outline-offset-2'
                         aria-label='Cancel editing'
                       >
                         <X className='h-4 w-4' />
@@ -2149,7 +2149,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                     <div className='relative flex items-center'>
                       {onCreateTicket ? (
                         <div
-                          className={`flex items-stretch rounded-md overflow-hidden transition-all duration-200 ease-in-out ${
+                          className={`flex items-stretch rounded-md overflow-hidden transition-[color,background-color,opacity] duration-200 ease-in-out ${
                             hasSendableContent && !sendDisabled
                               ? artifactComposerDefinition
                                 ? 'bg-orange-500 text-white'
@@ -2236,7 +2236,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                       ) : onScheduleSend ? (
                         // No ticket creation but schedule send is available — split button
                         <div
-                          className={`flex items-stretch rounded-md overflow-hidden transition-all duration-200 ease-in-out ${
+                          className={`flex items-stretch rounded-md overflow-hidden transition-[color,background-color,opacity] duration-200 ease-in-out ${
                             hasSendableContent
                               ? artifactComposerDefinition
                                 ? 'bg-orange-500 text-white'
@@ -2354,7 +2354,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                             type='button'
                             onClick={() => void handleSend('send_button')}
                             disabled={disabled || sendDisabled || isSending || !hasSendableContent}
-                            className={`${compact ? 'flex size-8 items-center justify-center rounded-full p-0' : 'rounded-md p-2'} transition-all duration-200 ease-in-out focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary focus-visible:outline-offset-2 ${
+                            className={`${compact ? 'flex size-8 items-center justify-center rounded-full p-0' : 'rounded-md p-2'} transition-[color,background-color,opacity] duration-200 ease-in-out focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary focus-visible:outline-offset-2 ${
                               hasSendableContent && !disabled && !sendDisabled
                                 ? 'bg-primary text-primary-foreground hover:bg-primary/90'
                                 : 'bg-muted text-muted-foreground cursor-not-allowed opacity-80'
