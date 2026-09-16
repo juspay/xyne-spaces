@@ -16,6 +16,7 @@ import type {
   DeviceInfo,
   ElectronProcessSample,
   MetricKey,
+  Point,
   ScriptDrain,
   ZeroConnectionEvent,
   ZeroConnectionName,
@@ -65,8 +66,13 @@ export interface WindowSummary {
   startedAt: number;
   endedAt: number;
   durationMs: number;
-  /** Raw samples per metric, in order. Derived p95 metrics are excluded — see `window.ts`. */
-  samples: Partial<Record<MetricKey, number[]>>;
+  /**
+   * Timestamped samples per metric, in order. Timestamps are kept because a
+   * value that sits high and one that is still climbing are different findings
+   * with different answers, and only the slope separates them. Derived p95
+   * metrics are excluded — see `window.ts`.
+   */
+  samples: Partial<Record<MetricKey, Point[]>>;
   longTasks: { t: number; durationMs: number }[];
   /** Total main-thread time spent inside long tasks during the window. */
   blockedMs: number;

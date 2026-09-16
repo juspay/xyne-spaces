@@ -5,6 +5,7 @@ import type {
   ApiDrain,
   ElectronProcessSample,
   MetricKey,
+  Point,
   ScriptDrain,
   ZeroConnectionEvent,
   ZeroOpStat,
@@ -78,7 +79,7 @@ export class RunWindow {
     const endedAt = this.endedAt ?? Date.now();
     const durationMs = Math.max(0, endedAt - this.startedAt);
 
-    const samples: Partial<Record<MetricKey, number[]>> = {};
+    const samples: Partial<Record<MetricKey, Point[]>> = {};
     const longTasks: { t: number; durationMs: number }[] = [];
     const scripts = new Map<string, ScriptDrain>();
     const api = new Map<string, { row: ApiDrain; durations: number[] }>();
@@ -99,7 +100,7 @@ export class RunWindow {
       switch (event.kind) {
         case 'metric': {
           const bucket = samples[event.key] ?? [];
-          bucket.push(event.v);
+          bucket.push({ t: event.t, v: event.v });
           samples[event.key] = bucket;
           break;
         }
