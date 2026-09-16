@@ -5103,13 +5103,7 @@ dmChannelsLatestMessagesPaginated: defineQuery(
 
   // Reverse of applicationReleaseTicketsByReleaseId: the release(s) a dev ticket
   // belongs to. Keep in sync with the shared copy.
-  // ticketId is a plain z.string(), NOT z.string().min(1). ThreadPannel calls this for
-  // every thread with derivedTicketId = '' when the thread isn't a ticket, and zero-react's
-  // useQuery runs the args validator (addContextToQuery → query.fn) BEFORE it honours
-  // `enabled: false` — so .min(1) threw "Validation failed for query
-  // applicationReleaseTicketsByDevTicketId" and crashed the panel to the error boundary
-  // for any non-ticket thread. Introduced in #1613 (1a8329b1c7), fixed in #1937.
-  // '' simply matches no rows; the caller (useReleaseForDevTicket) still gates on enabled.
+  // ticketId may be '' (non-ticket thread): useQuery validates args before `enabled`.
   applicationReleaseTicketsByDevTicketId: defineQuery(
     z.object({ ticketId: z.string() }),
     ({ args: { ticketId } }) => {
