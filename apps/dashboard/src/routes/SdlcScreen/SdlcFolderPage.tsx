@@ -473,17 +473,24 @@ export function SdlcFolderPage(props: {
     const stored = tabsByFolder[props.folder.id] ?? [];
     // Items get deleted; the stored tab list does not hear about it. Dropping
     // the ones that no longer resolve keeps ghosts labelled 'Link' out of the
-    // strip.
-    return stored.filter(tab =>
-      tab.kind === 'BROWSER'
-        ? true
-        : tab.kind === 'LINK'
-          ? props.maps.linkById.has(tab.id)
-          : tab.kind === 'ATTACHMENT'
-            ? props.maps.fileById.has(tab.id)
-            : props.maps.canvasById.has(tab.id),
+    // strip. The open tab is the exception: a row that has not replicated yet —
+    // a just-created artifact, a link opened from a shared url — is on screen,
+    // and filtering it out would leave the effect below adding it to a list
+    // that drops it again on every render.
+    const open = props.activeTab;
+    return stored.filter(
+      tab =>
+        (open && tab.kind === open.kind && tab.id === open.id) ||
+        (tab.kind === 'BROWSER'
+          ? true
+          : tab.kind === 'LINK'
+            ? props.maps.linkById.has(tab.id)
+            : tab.kind === 'ATTACHMENT'
+              ? props.maps.fileById.has(tab.id)
+              : props.maps.canvasById.has(tab.id)),
     );
-  }, [tabsByFolder, props.folder.id, props.maps]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tabsByFolder, props.folder.id, props.maps, props.activeTab?.kind, props.activeTab?.id]);
   const [dragging, setDragging] = useState<{
     type: 'FOLDER' | 'CANVAS' | 'LINK' | 'ATTACHMENT';
     id: string;
@@ -570,12 +577,12 @@ export function SdlcFolderPage(props: {
   // A link into a folder names one item; it joins the strip so the tab bar and
   // the address bar never disagree about what is open.
   const active = props.activeTab;
-  /** Tabs closed here, ignored until the url stops naming them. */
-  const closedRef = useRef<Set<string>>(new Set());
+  /** The tab closed here, ignored for as long as the url still names it. */
+  const closedRef = useRef<string | null>(null);
 
   /** Opening is the answer to having closed it, so it forgets the closure. */
   const openTab = (tab: FolderTab | null): void => {
-    if (tab) closedRef.current.delete(`${tab.kind}:${tab.id}`);
+    closedRef.current = null;
     props.onOpenTab(tab);
   };
 
@@ -633,8 +640,15 @@ export function SdlcFolderPage(props: {
   }, [active?.kind, active?.id]);
 
   useEffect(() => {
-    if (!active) return;
-    if (closedRef.current.has(`${active.kind}:${active.id}`)) return;
+    if (!active) {
+      closedRef.current = null;
+      return;
+    }
+    // Still the tab that was just closed: its navigation has not landed yet.
+    if (closedRef.current === `${active.kind}:${active.id}`) return;
+    // The url names something else, so the closure is spent. Reaching that tab
+    // again — the back button, a url someone re-shares — has to put it back.
+    closedRef.current = null;
     if (tabs.some(tab => tab.kind === active.kind && tab.id === active.id)) return;
     setTabs([...tabs, active]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -679,7 +693,7 @@ export function SdlcFolderPage(props: {
     // later. Until it does, the url still names this tab, and the effect that
     // keeps the open tab in the strip would put it straight back — which read
     // as the first click doing nothing.
-    closedRef.current.add(`${tab.kind}:${tab.id}`);
+    closedRef.current = `${tab.kind}:${tab.id}`;
     setTabs(remaining);
     if (active && active.kind === tab.kind && active.id === tab.id) {
       openTab(remaining.at(-1) ?? null);

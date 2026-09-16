@@ -1,4 +1,5 @@
 import { Request, Response } from 'express';
+import { randomUUID } from 'crypto';
 import {
   MessageAttachmentRepository,
   CreateMessageAttachmentInput,
@@ -788,6 +789,7 @@ export class AttachmentController {
         throw new Error('workspaceId required: no authenticated workspace');
       }
       const attachmentData: CreateMessageAttachmentInput[] = uploadedFiles.map(file => ({
+        id: randomUUID(),
         entityId,
         entityType,
         originalFilename: file.originalName,
@@ -807,17 +809,19 @@ export class AttachmentController {
 
       await this.messageAttachmentRepository.createMany(attachmentData);
 
-      // Fetch the attachments we just created for this entity. Used to return
-      // IDs to the caller and to enqueue Vespa indexing.
-      const savedAttachments = await this.messageAttachmentRepository.findByEntityIdAndType(entityId, entityType);
-
-      const responseAttachments =
+      // Read back exactly the rows this request wrote. Their ids were generated
+      // above for that reason: entityId is the hub channel for SDLC_HUB, so
+      // asking for the entity's attachments would hand us every file in the hub,
+      // and taking the newest few of those would pick up a concurrent upload by
+      // another member — filing their file into this caller's folder.
+      const createdIds = attachmentData.map(attachment => attachment.id as string);
+      const savedAttachments =
         entityType === AttachmentEntityType.FORM_ENTITY_VALUE ||
         entityType === AttachmentEntityType.SDLC_HUB
-          ? [...savedAttachments]
-              .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
-              .slice(0, files.length)
-          : savedAttachments;
+          ? await this.messageAttachmentRepository.findByIds(createdIds)
+          : await this.messageAttachmentRepository.findByEntityIdAndType(entityId, entityType);
+
+      const responseAttachments = savedAttachments;
 
       if (placement && responseAttachments.length > 0) {
         await db.sdlcEntityLink.createMany({

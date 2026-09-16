@@ -40,7 +40,22 @@ export function requestSdlcFrameReset(): void {
  */
 export function openLinkFromSdlcFrame(url: string): boolean {
   if (!isFramedSdlcSurface() || !isElectronApp()) return false;
-  window.parent.postMessage({ type: SDLC_FRAME_MESSAGE.openLink, url }, window.location.origin);
+  // Attachment urls are relative in this bundle (API_BASE_URL is /sdlc-api), and
+  // the host parses what it is sent with `new URL`, which throws on those and
+  // drops the message. Resolve against our own location so the host gets an
+  // absolute url, and hand the caller back its fallback if it cannot be one.
+  let absolute: string;
+  try {
+    const resolved = new URL(url, window.location.href);
+    if (resolved.protocol !== 'http:' && resolved.protocol !== 'https:') return false;
+    absolute = resolved.href;
+  } catch {
+    return false;
+  }
+  window.parent.postMessage(
+    { type: SDLC_FRAME_MESSAGE.openLink, url: absolute },
+    window.location.origin,
+  );
   return true;
 }
 
@@ -162,7 +177,7 @@ export function embedPageOverElement(url: string, element: HTMLElement): () => v
   resize.observe(document.documentElement);
   // Overlays are portalled to the body, so their arrival is a body mutation.
   const overlays = new MutationObserver(sync);
-  overlays.observe(document.body, { childList: true, subtree: true });
+  overlays.observe(document.body, { childList: true });
   window.addEventListener('scroll', sync, true);
 
   return () => {
