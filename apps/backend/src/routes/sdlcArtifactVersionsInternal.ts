@@ -7,17 +7,10 @@ import { SdlcArtifactVersionStore } from '@/sdlc/SdlcArtifactVersionStore';
 const router = Router();
 const store = new SdlcArtifactVersionStore();
 
-const selectorSchema = z.discriminatedUnion('type', [
-  z.object({
-    type: z.literal('WIKI_PAGE'),
-    path: z.string().trim().min(1).max(512),
-    includeArchived: z.boolean().optional(),
-  }).strict(),
-  z.object({
-    type: z.literal('SDLC_CANVAS'),
-    canvasId: z.string().trim().min(1).max(256),
-  }).strict(),
-]);
+const selectorSchema = z.object({
+  type: z.literal('SDLC_CANVAS'),
+  canvasId: z.string().trim().min(1).max(256),
+}).strict();
 
 const bindingSchema = z.object({
   repoIds: sdlcRepoIdsSchema,
@@ -66,28 +59,7 @@ router.post(
   '/current/list',
   route(async (req, res) => {
     const trusted = binding(req);
-    const body = req.body as Record<string, unknown>;
-    const rawKinds = Array.isArray(body.kinds) ? body.kinds : [];
-    const mappedKinds = rawKinds.map((kind) => {
-      const value = String(kind);
-      if (value === 'PRD' || value === 'TECH_DOC') return 'ARTIFACT';
-      return value;
-    });
-    const kinds = [
-      ...new Set(
-        mappedKinds.filter((kind): kind is 'WIKI' | 'BASELINE' | 'ARTIFACT' =>
-          ['WIKI', 'BASELINE', 'ARTIFACT'].includes(kind)
-        )
-      ),
-    ];
-    if (kinds.length !== new Set(mappedKinds).size) {
-      throw new AppError('Unsupported artifact kind', 400);
-    }
-    const artifacts = await store.listArtifacts({
-      ...trusted,
-      ...(kinds.length > 0 ? { kinds } : {}),
-      includeArchived: body.includeArchived === true,
-    });
+    const artifacts = await store.listArtifacts(trusted);
     res.status(200).json({ success: true, artifacts });
   })
 );
