@@ -8,54 +8,29 @@
  *   GET /attachments/:id/download?format=webp — full-size lossless WebP
  *   GET /attachments/:id/thumbnail            — ≤1024px WebP, generated on demand
  *
- * These helpers detect HEIC attachments (MIME type with filename fallback,
- * mirroring the backend's isHeicAttachment) and derive the rendition URL and
- * filename to use when fetching or downloading one.
+ * Detection and filename derivation live in @xyne/shared so the client and
+ * backend agree on what counts as HEIC; this module adds the client-side
+ * URL derivation plus the local (pre-upload) draft-preview conversion.
  */
 
-/** MIME types under which HEIC/HEIF attachments arrive. */
-const HEIC_MIME_TYPES: ReadonlySet<string> = new Set([
-  'image/heic',
-  'image/heif',
-  'image/heic-sequence',
-  'image/heif-sequence',
-]);
+import { isHeicAttachment, toWebpFilename } from '@xyne/shared';
 
-/** Extensions treated as HEIC when the reported MIME type is unusable. */
-const HEIC_EXTENSIONS: readonly string[] = ['.heic', '.heif', '.hif'];
-
-/**
- * Whether an attachment is a HEIC/HEIF image. Detection by MIME type first,
- * then filename extension — browsers do not always report a HEIC MIME type
- * (Chrome on Linux reports application/octet-stream).
- */
-export function isHeicAttachment(mimetype: string, fileName: string): boolean {
-  const type = (mimetype || '').toLowerCase();
-  if (HEIC_MIME_TYPES.has(type)) return true;
-
-  const name = (fileName || '').toLowerCase();
-  return HEIC_EXTENSIONS.some(extension => name.endsWith(extension));
-}
+export { isHeicAttachment, toWebpFilename };
 
 /**
  * Download URL for the WebP rendition of an HEIC attachment. Accepts either
- * an attachment id or an already-resolved `/attachments/:id/download` URL.
+ * an attachment id or an already-resolved URL.
  */
 export function heicWebpDownloadUrl(source: string): string {
+  if (!source) return source;
   const base =
     source.startsWith('/') || source.startsWith('http')
       ? source
       : `/attachments/${source}/download`;
-  return `${base}?format=webp`;
-}
-
-/** `IMG_1234.heic` → `IMG_1234.webp`; falls back to appending `.webp` when unnamed. */
-export function toWebpFilename(fileName: string): string {
-  const dot = fileName.lastIndexOf('.');
-  if (dot > 0 && dot > fileName.lastIndexOf('/')) {
-    return `${fileName.slice(0, dot)}.webp`;
-  }
-  return `${fileName || 'image'}.webp`;
+  // fileUrl can already carry a query string (e.g. signed URLs) — append with
+  // the right separator instead of blindly concatenating another '?'.
+  const separator = base.includes('?') ? '&' : '?';
+  return `${base}${separator}format=webp`;
 }
 
 /**

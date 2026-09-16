@@ -1557,9 +1557,6 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                 setHeicPreviewId(attachmentId);
                 setHeicPreviewName(file.name);
                 setIsViewerOpen(true);
-              } else {
-                setSelectedFile(file);
-                setIsViewerOpen(true);
               }
             });
           return;

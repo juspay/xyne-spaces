@@ -136,10 +136,10 @@ const Preview: React.FC<{
   isInMultiImageGroup,
   onImageBlobUrlChange,
 }) => {
-  const isImage = isImageFile(mimeType);
   const isVideo = isVideoFile(mimeType);
   const isDocumentWithThumbnail = isPreviewableDocument(mimeType) && !!thumbnailUrl;
   const isHeic = isHeicAttachment(mimeType, fileName);
+  const isImage = isImageFile(mimeType) || isHeic;
 
   const [imageBlobUrl, setImageBlobUrl] = useState<string | null>(null);
 
@@ -1276,7 +1276,9 @@ export const MessageAttachment: React.FC<MessageAttachmentProps> = ({
     attachment.mimetype === 'text/plain' || attachment.originalFilename.endsWith('.txt');
   const isCodeFile = isCodeFileByName(attachment.originalFilename);
   const isVideo = isVideoFile(attachment.mimetype);
-  const isImage = isImageFile(attachment.mimetype);
+  const isImage =
+    isImageFile(attachment.mimetype) ||
+    isHeicAttachment(attachment.mimetype, attachment.originalFilename);
 
   const handleCardClick = (): void => {
     const fallback: AttachmentRef = {

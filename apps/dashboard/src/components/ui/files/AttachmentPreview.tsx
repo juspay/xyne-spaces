@@ -66,15 +66,17 @@ export const AttachmentPreview: React.FC<AttachmentPreviewProps> = ({
     };
   }, [videoLightboxUrl]);
 
-  const category = getFileCategory({
-    type: getMimeType(file),
-    name: getFileName(file),
-  });
-  const isTextFile = getMimeType(file) === 'text/plain' || getFileName(file).endsWith('.txt');
-  const fileId = getFileId(file);
   // HEIC can't render from local bytes in most browsers — drafts convert it
   // client-side, uploaded HEICs use the server-generated WebP thumbnail.
   const isHeic = isHeicAttachment(getMimeType(file), getFileName(file));
+  const category = isHeic
+    ? 'image'
+    : getFileCategory({
+        type: getMimeType(file),
+        name: getFileName(file),
+      });
+  const isTextFile = getMimeType(file) === 'text/plain' || getFileName(file).endsWith('.txt');
+  const fileId = getFileId(file);
 
   // UploadedFile HEIC thumbnails live behind /attachments/:id/thumbnail; the
   // file is already server-side, but the rendition may still be generating,
