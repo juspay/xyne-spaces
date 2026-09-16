@@ -183,6 +183,12 @@ export interface MainThreadAttribution {
   components: HotFrame[];
   /** The heaviest root-to-leaf call path, which shows how the app got there. */
   hotPath: { name: string; totalMs: number }[];
+  /**
+   * True when sampling stopped before the window did because its buffer filled.
+   * The numbers still describe real execution, but only of the period actually
+   * sampled — which `durationMs` reports.
+   */
+  truncated: boolean;
 }
 
 export interface ProbeResults {

@@ -50,6 +50,8 @@ interface ProfilerLike {
   readonly sampleInterval: number;
   readonly stopped: boolean;
   stop: () => Promise<ProfilerTrace>;
+  /** The spec makes Profiler an EventTarget; guarded in case an engine differs. */
+  addEventListener?: (type: string, listener: () => void) => void;
 }
 
 type ProfilerCtor = new (options: {
@@ -73,6 +75,7 @@ function unsupported(reason: string): MainThreadAttribution {
     frames: [],
     components: [],
     hotPath: [],
+    truncated: false,
   };
 }
 
@@ -117,6 +120,7 @@ export function startMainThreadSampler(expectedDurationMs: number): MainThreadSa
 
   const startedAt = performance.now();
   const active = profiler;
+  let truncated = false;
 
   const read = async (): Promise<MainThreadAttribution> => {
     if (active.stopped) {
@@ -124,7 +128,8 @@ export function startMainThreadSampler(expectedDurationMs: number): MainThreadSa
     }
     try {
       const trace = await active.stop();
-      return summariseTrace(trace, active.sampleInterval, performance.now() - startedAt);
+      const summary = summariseTrace(trace, active.sampleInterval, performance.now() - startedAt);
+      return { ...summary, truncated };
     } catch (error) {
       return unsupported(
         error instanceof Error ? error.message : 'The profiler could not be read.',
@@ -137,11 +142,25 @@ export function startMainThreadSampler(expectedDurationMs: number): MainThreadSa
   // error skipped its stop would keep costing the user main-thread time long
   // after the run they asked for ended.
   let settled: Promise<MainThreadAttribution> | null = null;
-
-  return {
-    stop: (): Promise<MainThreadAttribution> => {
-      settled ??= read();
-      return settled;
-    },
+  const finish = (): Promise<MainThreadAttribution> => {
+    settled ??= read();
+    return settled;
   };
+
+  // A full buffer means the profiler stops collecting. Reading it here keeps
+  // whatever was captured up to that point; without this the run would reach
+  // its end, find a stopped profiler, and report no attribution at all — losing
+  // every sample precisely on the longest runs, which are the ones someone
+  // chose because the problem was hard to catch.
+  try {
+    active.addEventListener?.('samplebufferfull', () => {
+      truncated = true;
+      void finish();
+    });
+  } catch {
+    // An engine without the event still works; it just cannot warn about
+    // truncation, and the headroom above makes overflow unlikely anyway.
+  }
+
+  return { stop: finish };
 }

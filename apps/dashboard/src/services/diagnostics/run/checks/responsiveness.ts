@@ -453,6 +453,11 @@ export const mainThreadAttribution: Check = context => {
 
   const { confidence, reason } = seriesConfidence(context, attribution.busySamples, 50, 200);
   const component = attribution.components[0];
+  // A truncated sample still describes real execution, but only of the stretch
+  // it covered — so it must not be read as a picture of the whole run.
+  const truncationNote = attribution.truncated
+    ? ` Sampling filled its buffer and stopped after ${Math.round(attribution.durationMs / 1000)}s, so this covers only the first part of the run.`
+    : '';
   const where = top.resource
     ? `${top.resource}${top.line === null ? '' : `:${top.line}`}`
     : 'an unknown source';
@@ -462,8 +467,8 @@ export const mainThreadAttribution: Check = context => {
     title: 'Where the time went',
     category: 'responsiveness',
     status,
-    confidence,
-    confidenceReason: `${reason} Sampled every ${attribution.sampleIntervalMs}ms.`,
+    confidence: attribution.truncated && confidence === 'high' ? 'medium' : confidence,
+    confidenceReason: `${reason} Sampled every ${attribution.sampleIntervalMs}ms.${truncationNote}`,
     summary: dominant
       ? `${top.name} used ${ms(top.selfMs)} of main-thread time — ${percent(top.selfSharePercent)} of everything the thread did.`
       : `No single function dominated; ${top.name} was the largest at ${percent(top.selfSharePercent)}.`,

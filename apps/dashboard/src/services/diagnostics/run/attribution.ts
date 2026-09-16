@@ -52,47 +52,63 @@ export function summariseTrace(
   durationMs: number,
 ): MainThreadAttribution {
   const interval = sampleIntervalMs > 0 ? sampleIntervalMs : 10;
-  const selfMs = new Map<string, number>();
-  const totalMs = new Map<string, number>();
-  const meta = new Map<string, ProfilerFrame>();
 
-  // Leaf samples per stack, for the hot-path walk below.
+  // Everything below is indexed by frame number rather than keyed by string.
+  // The walk to the root runs once per sample and a deep React stack is ~40
+  // frames, so a three-minute run visits on the order of a million frames —
+  // building a key string at each one made the analysis step itself a visible
+  // freeze, which is not a thing a performance tool gets to do.
+  const frameCount = trace.frames.length;
+  const canonical = new Int32Array(frameCount);
+  const canonicalByKey = new Map<string, number>();
+  for (let i = 0; i < frameCount; i++) {
+    const frame = trace.frames[i];
+    if (!frame) {
+      canonical[i] = i;
+      continue;
+    }
+    const key = frameKey(frame);
+    const existing = canonicalByKey.get(key);
+    if (existing === undefined) {
+      canonicalByKey.set(key, i);
+      canonical[i] = i;
+    } else {
+      canonical[i] = existing;
+    }
+  }
+
+  const selfSamples = new Float64Array(frameCount);
+  const totalSamples = new Float64Array(frameCount);
+  // Generation marker: which sample last counted this frame, so a recursive
+  // function is counted once per sample without allocating a Set each time.
+  const seenInSample = new Int32Array(frameCount).fill(-1);
+
   const leafSamples = new Map<number, number>();
   let busySamples = 0;
 
-  for (const sample of trace.samples) {
-    if (sample.stackId === undefined) continue;
+  for (let index = 0; index < trace.samples.length; index++) {
+    const sample = trace.samples[index];
+    if (!sample || sample.stackId === undefined) continue;
     busySamples += 1;
     leafSamples.set(sample.stackId, (leafSamples.get(sample.stackId) ?? 0) + 1);
 
     const leafStack = trace.stacks[sample.stackId];
     if (!leafStack) continue;
-
-    const leafFrame = trace.frames[leafStack.frameId];
-    if (leafFrame) {
-      const key = frameKey(leafFrame);
-      meta.set(key, leafFrame);
-      selfMs.set(key, (selfMs.get(key) ?? 0) + interval);
+    const leafCanonical = canonical[leafStack.frameId];
+    if (leafCanonical !== undefined) {
+      selfSamples[leafCanonical] = (selfSamples[leafCanonical] ?? 0) + 1;
     }
 
-    // Walk to the root, counting each function once per sample: a recursive
-    // function that appears eight times in one stack still only had the thread
-    // for the length of that one sample.
-    const seen = new Set<string>();
     let cursor: number | undefined = sample.stackId;
     let guard = 0;
     while (cursor !== undefined && guard < 1024) {
       guard += 1;
       const stack: { frameId: number; parentId?: number } | undefined = trace.stacks[cursor];
       if (!stack) break;
-      const frame = trace.frames[stack.frameId];
-      if (frame) {
-        const key = frameKey(frame);
-        if (!seen.has(key)) {
-          seen.add(key);
-          meta.set(key, frame);
-          totalMs.set(key, (totalMs.get(key) ?? 0) + interval);
-        }
+      const id = canonical[stack.frameId];
+      if (id !== undefined && seenInSample[id] !== index) {
+        seenInSample[id] = index;
+        totalSamples[id] = (totalSamples[id] ?? 0) + 1;
       }
       cursor = stack.parentId;
     }
@@ -100,28 +116,32 @@ export function summariseTrace(
 
   const busyMs = busySamples * interval;
 
-  const frames: HotFrame[] = [...meta.entries()]
-    .map(([key, frame]) => {
-      const self = selfMs.get(key) ?? 0;
-      const total = totalMs.get(key) ?? 0;
-      return {
-        name: frame.name || '(anonymous)',
-        kind: classify(frame.name),
-        resource: shortenResource(
-          frame.resourceId === undefined ? undefined : trace.resources[frame.resourceId],
-        ),
-        line: frame.line ?? null,
-        column: frame.column ?? null,
-        selfMs: self,
-        totalMs: total,
-        selfSharePercent: busyMs > 0 ? (self / busyMs) * 100 : 0,
-        totalSharePercent: busyMs > 0 ? (total / busyMs) * 100 : 0,
-      } satisfies HotFrame;
-    })
-    .filter(frame => frame.selfMs >= MIN_REPORTED_MS || frame.totalMs >= MIN_REPORTED_MS);
+  const frames: HotFrame[] = [];
+  for (let i = 0; i < frameCount; i++) {
+    if (canonical[i] !== i) continue;
+    const self = (selfSamples[i] ?? 0) * interval;
+    const total = (totalSamples[i] ?? 0) * interval;
+    if (self < MIN_REPORTED_MS && total < MIN_REPORTED_MS) continue;
+
+    const frame = trace.frames[i];
+    if (!frame) continue;
+    frames.push({
+      name: frame.name || '(anonymous)',
+      kind: classify(frame.name),
+      resource: shortenResource(
+        frame.resourceId === undefined ? undefined : trace.resources[frame.resourceId],
+      ),
+      line: frame.line ?? null,
+      column: frame.column ?? null,
+      selfMs: self,
+      totalMs: total,
+      selfSharePercent: busyMs > 0 ? (self / busyMs) * 100 : 0,
+      totalSharePercent: busyMs > 0 ? (total / busyMs) * 100 : 0,
+    });
+  }
 
   const bySelf = [...frames].sort((a, b) => b.selfMs - a.selfMs).slice(0, MAX_ROWS);
-  const components = [...frames]
+  const components = frames
     .filter(frame => frame.kind === 'component')
     .sort((a, b) => b.totalMs - a.totalMs)
     .slice(0, MAX_ROWS);
@@ -137,6 +157,8 @@ export function summariseTrace(
     frames: bySelf,
     components,
     hotPath: buildHotPath(trace, leafSamples, interval),
+    // Set by the caller, which is what knows whether the buffer filled.
+    truncated: false,
   };
 }
 
