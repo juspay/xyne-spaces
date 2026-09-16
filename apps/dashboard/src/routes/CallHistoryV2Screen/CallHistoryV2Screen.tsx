@@ -896,7 +896,7 @@ const StartCallPill = ({
   return (
     <div
       className={cn(
-        'fixed bottom-7 z-10 -translate-x-1/2',
+        'fixed bottom-7 z-50 -translate-x-1/2',
         isMobile ? 'left-1/2' : 'left-[calc(50%+30px)]',
       )}
     >
@@ -914,7 +914,7 @@ const StartCallPill = ({
             data-testid='new-call-button'
             data-track-category='CALLS'
             data-track-name='start-a-call-pill'
-            className='gap-2 rounded-xl bg-foreground px-4 py-2 text-sm font-semibold text-background shadow-lg hover:bg-foreground/90 cursor-pointer z-60'
+            className='gap-2 rounded-xl bg-foreground px-4 py-2 text-sm font-semibold text-background shadow-lg hover:bg-foreground/90 cursor-pointer'
           >
             <PhoneDefault variant='Solid' className='size-3.5' />
             Start a call
