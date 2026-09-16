@@ -9,6 +9,7 @@ import {
   AutoDraftStatus,
   MailboxState,
   WorkspaceRole,
+  SavedConfigVisibility,
 } from '@xyne/shared';
 import React, { ReactElement, useMemo, useState, useEffect, useCallback, useRef } from 'react';
 import { toast } from 'sonner';
@@ -199,6 +200,9 @@ import { DeskMetricsDashboard } from '../../components/xyne-desk/DeskMetrics';
 import { TopicsExplorer } from '../../components/xyne-desk/TopicsExplorer';
 import { AutoLabelWizard } from '../../components/xyne-desk/AutoLabelWizard/AutoLabelWizard';
 import { DeskReportPanel } from '../../components/xyne-desk/DeskReport';
+import { DeskSavedViewsControls } from '../../components/xyne-desk/DeskSavedViewsControls';
+import { useDeskTicketSavedViews } from '../../hooks/useDeskTicketSavedViews';
+import { valuesToFilters } from '../../utils/savedViewSerialization';
 import {
   useChannelIntegrationInfo,
   clearChannelConnectedEmailCache,
@@ -877,6 +881,74 @@ const SupportScreen = (): ReactElement => {
   const hasMoreFiltersActive = moreFiltersActiveCount > 0;
   const hasAnyFilterActive =
     hasAssigneeFilter || hasPriorityFilter || hasStagesFilter || hasMoreFiltersActive;
+
+  // Desk ticket saved views
+  const ticketViewsChannelId =
+    selectedChannelId && selectedChannelId !== ALL_CHANNELS_ID ? selectedChannelId : '';
+  const activeTicketViewId = filtersState.context.activeViewId;
+  const setActiveTicketViewId = useCallback(
+    (id: string | null) => {
+      sendFilters({ type: 'SET_ACTIVE_VIEW_ID', activeViewId: id });
+    },
+    [sendFilters],
+  );
+  const {
+    savedViews: deskSavedViews,
+    savedViewsLoaded,
+    saveView: saveDeskView,
+    updateView: updateDeskView,
+    deleteView: deleteDeskView,
+    applySavedView: applyDeskSavedView,
+  } = useDeskTicketSavedViews(ticketViewsChannelId, setFilters);
+
+  // Self-heal: clear a stale activeViewId that no longer exists in the list.
+  // Guard on savedViewsLoaded so we don't clear before the query returns data.
+  useEffect(() => {
+    if (
+      savedViewsLoaded &&
+      activeTicketViewId &&
+      !deskSavedViews.find(v => v.id === activeTicketViewId)
+    ) {
+      setActiveTicketViewId(null);
+    }
+  }, [savedViewsLoaded, activeTicketViewId, deskSavedViews, setActiveTicketViewId]);
+
+  const handleSaveDeskView = async (
+    name: string,
+    visibility: SavedConfigVisibility,
+  ): Promise<string | undefined> => {
+    return saveDeskView(name, filters, visibility);
+  };
+
+  const handleUpdateDeskView = async (viewId: string): Promise<void> => {
+    await updateDeskView(viewId, filters);
+  };
+
+  const isDeskViewDirty = useMemo(() => {
+    if (!activeTicketViewId) return false;
+    const activeView = deskSavedViews.find(v => v.id === activeTicketViewId);
+    if (!activeView?.values) return false;
+    const viewFilters = valuesToFilters(activeView.values);
+    const sortDeep = (v: unknown): unknown => {
+      if (Array.isArray(v)) {
+        const mapped = v.map(sortDeep);
+        if (mapped.every(item => typeof item !== 'object' || item === null)) {
+          return [...mapped].sort();
+        }
+        return mapped;
+      }
+      if (v !== null && typeof v === 'object') {
+        const rec = v as Record<string, unknown>;
+        return Object.fromEntries(
+          Object.keys(rec)
+            .sort()
+            .map(k => [k, sortDeep(rec[k])]),
+        );
+      }
+      return v;
+    };
+    return JSON.stringify(sortDeep(filters)) !== JSON.stringify(sortDeep(viewFilters));
+  }, [activeTicketViewId, deskSavedViews, filters]);
 
   const {
     rowRef: filterRowRef,
@@ -1594,6 +1666,9 @@ const SupportScreen = (): ReactElement => {
   const [myAdminParticipations] = useCachedQuery(queries.myChannelParticipations({}));
   const isChannelAdmin = (myAdminParticipations ?? []).some(
     p => p.channelId === preferenceChannelId,
+  );
+  const isTicketViewsChannelAdmin = (myAdminParticipations ?? []).some(
+    p => p.channelId === ticketViewsChannelId,
   );
   const isDeskOwner = !!userID && channelPreference?.ownerUserId === userID;
   const canManageDeskInsights = isDeskOwner || isChannelAdmin;
@@ -3363,18 +3438,29 @@ const SupportScreen = (): ReactElement => {
                             )}
                           </Popover.Root>
 
-                          {hasAnyFilterActive && (
+                          {(isDeskViewDirty || (!activeTicketViewId && hasAnyFilterActive)) && (
                             <Button
                               variant='outline'
                               size='sm'
                               className='rounded-[10px] border-border hover:bg-muted text-muted-foreground'
-                              onClick={() => setFilters({})}
+                              onClick={() => {
+                                const activeView = deskSavedViews.find(
+                                  v => v.id === activeTicketViewId,
+                                );
+                                if (activeView) {
+                                  applyDeskSavedView(activeView);
+                                } else {
+                                  setFilters({});
+                                }
+                              }}
                               data-track-category='Support'
                               data-track-name='CLEAR_SUPPORT_FILTERS'
                             >
                               <div className='flex items-center gap-1.5'>
                                 <X className='w-3 h-3' />
-                                <span className='font-medium'>Clear</span>
+                                <span className='font-medium'>
+                                  {activeTicketViewId ? 'Reset view' : 'Clear'}
+                                </span>
                               </div>
                             </Button>
                           )}
@@ -3479,6 +3565,23 @@ const SupportScreen = (): ReactElement => {
                         </Popover.Root>
                       )}
                       <div ref={actionsRestRef} className='flex items-center gap-2'>
+                        {/* Desk saved views — only shown when a specific channel is selected */}
+                        {ticketViewsChannelId && (
+                          <DeskSavedViewsControls
+                            savedViews={deskSavedViews}
+                            activeViewId={activeTicketViewId}
+                            onActiveViewChange={setActiveTicketViewId}
+                            currentUserId={userID}
+                            isChannelAdmin={isTicketViewsChannelAdmin}
+                            onApply={view => applyDeskSavedView(view)}
+                            onSave={handleSaveDeskView}
+                            onUpdate={handleUpdateDeskView}
+                            onDelete={deleteDeskView}
+                            currentFilters={filters}
+                            dynamicFieldDefs={deskDynamicFields}
+                            trackCategory='Support'
+                          />
+                        )}
                         {/* View Toggle */}
                         <div className='flex items-center border border-border rounded-lg overflow-hidden'>
                           <button

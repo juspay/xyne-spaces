@@ -42,6 +42,7 @@ import {
   ActivityClassification, LinkVisibility,
   NudgeState,
   SavedConfigContextType,
+  SavedConfigVisibility,
   Status,
   ProjectType,
   TicketPriority,
@@ -5625,9 +5626,30 @@ dmChannelsLatestMessagesPaginated: defineQuery(
   savedConfigsByUser: defineQuery(z.object({ userId: z.string() }), ({ args: { userId } }) => {
     return zql.saved_user_configurations
       .where('userId', userId)
+      .where('contextType', SavedConfigContextType.BOARD)
       .related('values')
       .orderBy('createdAt', 'desc');
   }),
+
+  savedDeskTicketConfigsByChannel: defineQuery(
+    z.object({ channelId: z.string() }),
+    ({ args: { channelId }, ctx }) => {
+      return zql.saved_user_configurations
+        .where('contextType', SavedConfigContextType.DESK_TICKET)
+        .where('contextId', channelId)
+        .where(({ cmp, or }) =>
+          or(cmp('userId', '=', ctx.userID), cmp('visibility', '=', SavedConfigVisibility.PUBLIC)),
+        )
+        // Only expose results to users who are members of the channel.
+        // This prevents non-members from reading public views (and their filter data)
+        // by guessing or obtaining a channelId they don't have access to.
+        .whereExists('contextChannel', ch =>
+          ch.whereExists('participants', p => p.where('userId', ctx.userID)),
+        )
+        .related('values')
+        .orderBy('createdAt', 'desc');
+    },
+  ),
 
   savedConfigsSharedWithUser: defineQuery(
     z.object({ userId: z.string() }),

@@ -11119,10 +11119,18 @@ export const mutators = defineMutators({
         args: { id, name, contextType, contextId, visibility, timestamp, values },
       }) => {
         const allUserConfigs = await tx.run(
-          zql.saved_user_configurations.where('userId', ctx.userID).where('contextId', contextId),
+          zql.saved_user_configurations
+            .where('userId', ctx.userID)
+            .where('contextType', contextType)
+            .where('contextId', contextId),
         );
+        const isDeskContext = contextType === SavedConfigContextType.DESK_TICKET;
         if (allUserConfigs.some(c => c.name.toLowerCase() === name.toLowerCase())) {
-          throw new Error('A saved view with this name already exists for this board');
+          throw new Error(
+            isDeskContext
+              ? 'A saved view with this name already exists for this channel'
+              : 'A saved view with this name already exists for this board',
+          );
         }
 
         await tx.mutate.saved_user_configurations.insert({
@@ -11182,6 +11190,7 @@ export const mutators = defineMutators({
           const allUserConfigs = await tx.run(
             zql.saved_user_configurations
               .where('userId', ctx.userID)
+              .where('contextType', config.contextType)
               .where('contextId', config.contextId),
           );
           if (
@@ -11189,7 +11198,12 @@ export const mutators = defineMutators({
               c => c.id !== configId && c.name.toLowerCase() === name.toLowerCase(),
             )
           ) {
-            throw new Error('A saved view with this name already exists for this board');
+            const isDesk = config.contextType === SavedConfigContextType.DESK_TICKET;
+            throw new Error(
+              isDesk
+                ? 'A saved view with this name already exists for this channel'
+                : 'A saved view with this name already exists for this board',
+            );
           }
         }
 
