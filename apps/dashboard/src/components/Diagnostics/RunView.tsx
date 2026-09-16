@@ -3,7 +3,11 @@ import { CheckCard } from './CheckCard';
 import { HotFrameTable } from './HotFrameTable';
 import { useRun } from './useRun';
 import { CHECK_STATUS_STYLES } from '../../services/diagnostics/thresholds';
-import { runController, DEFAULT_OBSERVE_MS } from '../../services/diagnostics/run';
+import {
+  runController,
+  DEFAULT_OBSERVE_MS,
+  isSelfProfilingSupported,
+} from '../../services/diagnostics/run';
 import type { CheckResult, CheckStatus, RunReport } from '../../services/diagnostics/run';
 
 /**
@@ -102,6 +106,13 @@ function StartCard({
       <p className='mt-2 text-xs leading-relaxed text-neutral-600 dark:text-neutral-300'>
         <span className='font-medium'>Reproduce the problem while it runs.</span> The run can only
         report on what happens during it, so open the slow screen or send the message that fails.
+      </p>
+      {/* Said before the wait rather than after it: a user who needs function
+          names should know in advance that this browser cannot produce them. */}
+      <p className='mt-2 text-xs leading-relaxed text-neutral-500 dark:text-neutral-400'>
+        {isSelfProfilingSupported()
+          ? 'This browser can attribute main-thread time to specific functions and components.'
+          : 'This browser cannot attribute main-thread time to function names. Everything else is still measured; use the desktop app or Chrome for naming.'}
       </p>
 
       <div className='mt-3 flex flex-wrap items-center gap-2'>

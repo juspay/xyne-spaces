@@ -116,20 +116,32 @@ export function startMainThreadSampler(expectedDurationMs: number): MainThreadSa
   }
 
   const startedAt = performance.now();
+  const active = profiler;
+
+  const read = async (): Promise<MainThreadAttribution> => {
+    if (active.stopped) {
+      return unsupported('The profiler stopped early, most likely because its buffer filled.');
+    }
+    try {
+      const trace = await active.stop();
+      return summariseTrace(trace, active.sampleInterval, performance.now() - startedAt);
+    } catch (error) {
+      return unsupported(
+        error instanceof Error ? error.message : 'The profiler could not be read.',
+      );
+    }
+  };
+
+  // Memoised so stopping twice is safe. The caller stops this on its normal
+  // path and again during cleanup, and a profiler left sampling because an
+  // error skipped its stop would keep costing the user main-thread time long
+  // after the run they asked for ended.
+  let settled: Promise<MainThreadAttribution> | null = null;
 
   return {
-    stop: async (): Promise<MainThreadAttribution> => {
-      if (profiler.stopped) {
-        return unsupported('The profiler stopped early, most likely because its buffer filled.');
-      }
-      try {
-        const trace = await profiler.stop();
-        return summariseTrace(trace, profiler.sampleInterval, performance.now() - startedAt);
-      } catch (error) {
-        return unsupported(
-          error instanceof Error ? error.message : 'The profiler could not be read.',
-        );
-      }
+    stop: (): Promise<MainThreadAttribution> => {
+      settled ??= read();
+      return settled;
     },
   };
 }

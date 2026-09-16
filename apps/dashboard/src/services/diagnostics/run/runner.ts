@@ -5,8 +5,8 @@ import { diagnosticsStore } from '../store';
 import { buildCheckContext, headlineFor, overallStatus, runChecks } from './checks';
 import { clearReports, loadReports, saveReport } from './history';
 import { runCpuBenchmark } from './probes/cpuBenchmark';
-import { startEventLoopLagProbe } from './probes/eventLoopLag';
-import { startMainThreadSampler } from './probes/sampler';
+import { startEventLoopLagProbe, type EventLoopLagProbe } from './probes/eventLoopLag';
+import { startMainThreadSampler, type MainThreadSampler } from './probes/sampler';
 import { runStorageProbe } from './probes/storage';
 import { RunWindow } from './window';
 import { ENGINE_VERSION, type ProbeResults, type RunProgress, type RunReport } from './types';
@@ -100,6 +100,12 @@ class RunController {
     // Bound late: the window only exists once probing is done, and the handler
     // must point at the one actually being measured.
     let observationWindow: RunWindow | null = null;
+    // Hoisted out of the try so cleanup can always reach them. Both hold real
+    // resources — a running sampler and a repeating timer — and an error
+    // between starting and stopping them would otherwise leave the profiler
+    // sampling long after the run the user asked for had ended.
+    let sampler: MainThreadSampler | null = null;
+    let lagProbe: EventLoopLagProbe | null = null;
     const onVisibilityChange = (): void => {
       if (document.hidden) observationWindow?.noteHidden();
     };
@@ -132,11 +138,11 @@ class RunController {
       if (document.hidden) measured.noteHidden();
 
       diagnosticsStore.beginRunWindow(measured);
-      const lagProbe = startEventLoopLagProbe();
-      // Sampling runs only inside the observation window. It costs a little
-      // main-thread time itself, which is the price of being able to name what
-      // is using the rest of it.
-      const sampler = startMainThreadSampler(duration);
+      lagProbe = startEventLoopLagProbe();
+      // Sampling starts here and nowhere else, so it runs only inside a run's
+      // observation window. It costs a little main-thread time itself, which is
+      // the price of being able to name what is using the rest of it.
+      sampler = startMainThreadSampler(duration);
 
       const completed = await this.observe(measured, windowStartedAt, duration);
       probes.eventLoop = lagProbe.stop();
@@ -188,6 +194,10 @@ class RunController {
       return null;
     } finally {
       this.stopTicker();
+      // Both are memoised no-ops once already stopped, so this only does work
+      // on the paths that did not reach their normal stop.
+      lagProbe?.stop();
+      void sampler?.stop();
       this.active = false;
     }
   }
