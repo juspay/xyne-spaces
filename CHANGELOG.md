@@ -1,3 +1,10 @@
+## [1.323.0-release-20260916.1](https://github.com/juspay/xyne-spaces/compare/v1.322.0...v1.323.0-release-20260916.1) (2026-09-16)
+
+
+### Features
+
+* massive perf improvement for screen share and video streams ([#1894](https://github.com/juspay/xyne-spaces/issues/1894)) ([4f19220](https://github.com/juspay/xyne-spaces/commit/4f1922077634ce1497c70841aea57d820ab9232c))
+
 ## [1.322.0](https://github.com/juspay/xyne-spaces/compare/v1.321.0...v1.322.0) (2026-09-15)
 
 
