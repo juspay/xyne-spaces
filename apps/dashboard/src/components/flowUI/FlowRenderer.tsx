@@ -1,5 +1,6 @@
 import { logger, Event as LogEvent } from '../../utils/logger';
 import React, { useState, useCallback, useMemo, useEffect, useRef } from 'react';
+import { ChevronDown } from 'lucide-react';
 import { FlowContext, FlowContextValue, type FlowMessageContext } from './FlowContext';
 import { NodeRegistry } from './nodes/NodeRegistry';
 import type {
@@ -34,6 +35,13 @@ export const FlowRenderer: React.FC<FlowRendererProps> = ({
   compact = false,
   messageContext,
 }) => {
+  // A bounded popup has no page scrollbar behind it, so a screen taller than the
+  // box gives no sign that it continues. That matters more now the action bar is
+  // pinned: the buttons are visible from the start, and someone can submit
+  // without ever seeing the fields below.
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const [hasMoreBelow, setHasMoreBelow] = useState(false);
+
   const [validationError, setValidationError] = useState<string | null>(null);
   const [validatedFlow, setValidatedFlow] = useState<FlowDefinition | null>(null);
   const [state, setState] = useState<FlowState>(flow.state);
@@ -354,6 +362,31 @@ export const FlowRenderer: React.FC<FlowRendererProps> = ({
     ],
   );
 
+  useEffect(() => {
+    const el = bodyRef.current;
+    if (!el) return;
+
+    // 8px of slack: sub-pixel rounding at the end of a scroll otherwise leaves a
+    // fraction behind and the pointer never clears.
+    const measure = (): void => {
+      setHasMoreBelow(el.scrollHeight - el.scrollTop - el.clientHeight > 8);
+    };
+
+    measure();
+    el.addEventListener('scroll', measure, { passive: true });
+
+    // The body is a fixed-height flex child, so its own box never changes when
+    // the content inside it grows — watch the children too, or a validation error
+    // appearing leaves the pointer stale.
+    const observer = new ResizeObserver(measure);
+    for (const child of Array.from(el.children)) observer.observe(child);
+
+    return (): void => {
+      el.removeEventListener('scroll', measure);
+      observer.disconnect();
+    };
+  }, [validatedFlow]);
+
   if (validationError) {
     return (
       <div className='rounded-lg border border-destructive bg-destructive/10 p-4 text-sm text-destructive'>
@@ -368,15 +401,61 @@ export const FlowRenderer: React.FC<FlowRendererProps> = ({
     return <div className='animate-pulse bg-muted h-32 rounded-lg' />;
   }
 
+  // A trailing row or button is the screen's action bar; anything else at the
+  // end is ordinary content and stays in the body.
+  const components = validatedFlow.components;
+  const last = components.length > 0 ? components[components.length - 1] : undefined;
+  // A trailing `row` is only an action bar if it actually holds buttons. A row of
+  // two text columns at the end of a screen is content, and pulling it into the
+  // footer would put a divider above it and pin it for no reason.
+  const isActionBar =
+    last?.type === 'button' ||
+    (last?.type === 'row' && (last.children ?? []).some(child => child.type === 'button'));
+
+  const title = validatedFlow.title && (
+    <h2 className={compact ? 'text-sm font-semibold' : 'text-base font-semibold'}>
+      {validatedFlow.title}
+    </h2>
+  );
+
+  // `compact` is only ever true inside FlowScreenManager's action popup, which is
+  // a fixed, centred box with no page scrollbar behind it. Bound the height here
+  // and split the screen into a scrolling body and a real footer, so the action
+  // bar sits below the scrollport rather than being positioned out of it: no
+  // sticky, no negative margins, and the buttons keep their place in the DOM and
+  // in this renderer's FlowContext.
+  //
+  // Inline rendering (compact=false, the channel) is untouched — it has the page
+  // to scroll in and should keep flowing at its natural height.
+  if (compact) {
+    return (
+      <FlowContext.Provider value={contextValue}>
+        <div className='flow-ui-compact flex flex-col max-h-[70vh]'>
+          <div ref={bodyRef} className='flex-1 min-h-0 overflow-y-auto flex flex-col gap-3'>
+            {title}
+            {(isActionBar ? components.slice(0, -1) : components).map(renderComponent)}
+          </div>
+
+          {hasMoreBelow && (
+            <div className='shrink-0 flex items-center justify-center pt-1 text-muted-foreground'>
+              <ChevronDown className='size-4 motion-safe:animate-bounce' />
+              <span className='sr-only'>More content below — scroll to see the rest</span>
+            </div>
+          )}
+
+          {isActionBar && last && (
+            <div className='shrink-0 border-t border-border pt-3 mt-3'>{renderComponent(last)}</div>
+          )}
+        </div>
+      </FlowContext.Provider>
+    );
+  }
+
   return (
     <FlowContext.Provider value={contextValue}>
-      <div className={compact ? 'flow-ui-compact' : 'flow-ui-container max-w-2xl w-full'}>
-        {validatedFlow.title && (
-          <h2 className={compact ? 'text-sm font-semibold mb-2' : 'text-base font-semibold mb-3'}>
-            {validatedFlow.title}
-          </h2>
-        )}
-        {validatedFlow.components.map(renderComponent)}
+      <div className='flow-ui-container max-w-2xl w-full flex flex-col gap-4'>
+        {title}
+        {components.map(renderComponent)}
       </div>
     </FlowContext.Provider>
   );
