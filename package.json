@@ -37,7 +37,8 @@
     "test": "./tools/xyne-automation/scripts/run-test.sh",
     "test:integrity": "pnpm --filter xyne-automation run test:integrity",
     "test:push": "./tools/xyne-automation/scripts/push-report-branch.sh",
-    "test:enum": "bash scripts/validate-no-new-enums.sh"
+    "test:enum": "bash scripts/validate-no-new-enums.sh",
+    "test:raw-sql": "bash scripts/validate-no-raw-sql.sh"
   },
   "devDependencies": {
     "@clack/prompts": "^1.7.0",
