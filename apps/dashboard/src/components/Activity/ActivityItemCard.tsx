@@ -122,9 +122,16 @@ export const ActivityItemCard = ({
       baseRoute === '/chat/activity' && supportTargetPath
         ? supportTargetPath.replace(/^\/support\//, `${baseRoute}/ticket/`)
         : undefined;
+    // Same idea for recordings: the Activity panel has its own outlet route for
+    // them, so opening one keeps the activity list mounted on the left instead of
+    // navigating the whole page to /recordings/:id.
+    const embeddedRecordingPath =
+      baseRoute === '/chat/activity' && targetPath.startsWith('/recordings/')
+        ? targetPath.replace(/^\/recordings\//, `${baseRoute}/recording/`)
+        : undefined;
     const defaultPath = isDeskChannel
       ? (embeddedTicketPath ?? supportTargetPath ?? (channelId ? `/support/${channelId}` : ''))
-      : targetPath;
+      : (embeddedRecordingPath ?? targetPath);
     const path = resolveSdlcActivityTarget({
       activity,
       channelType: channel?.type,
