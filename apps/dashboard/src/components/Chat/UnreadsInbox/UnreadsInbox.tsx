@@ -22,7 +22,21 @@ import { ThreadMessages } from '../ThreadPannel';
 // and can't rely on margin-between-siblings like a normal-flow list can.
 const ROW_GAP = 16;
 const COLLAPSED_ROW_ESTIMATE = 56 + ROW_GAP;
-const OPEN_ROW_ESTIMATE = (): number => window.innerHeight * 0.6 + 56 + ROW_GAP;
+
+// Fallback until a channel's real content height is measured (contentHeights
+// below). Not unreadCount-based — unreadCounts tracks unread activities, not
+// message-list length.
+const FALLBACK_OPEN_PANEL_HEIGHT_RATIO = 0.6;
+
+// Caps real measured content height at a full screen. Must be an explicit
+// pixel height, not CSS max-height/auto — ChatListV4's virtualized list
+// needs a resolved height to scroll internally.
+const getOpenPanelHeight = (measuredHeight: number | undefined): number => {
+  const height = measuredHeight ?? window.innerHeight * FALLBACK_OPEN_PANEL_HEIGHT_RATIO;
+  return Math.min(window.innerHeight, height);
+};
+const OPEN_ROW_ESTIMATE = (measuredHeight: number | undefined): number =>
+  getOpenPanelHeight(measuredHeight) + 56 + ROW_GAP;
 
 const UnreadsInbox = (): ReactElement => {
   const channelData = useAllVisibleChannels();
@@ -50,6 +64,13 @@ const UnreadsInbox = (): ReactElement => {
   // (derived from its own output below) exists for this render — one render
   // stale is fine, measureElement corrects the real height immediately after.
   const openChannelIdsRef = useRef<Set<string>>(new Set());
+  // Real content height per open channel, reported via onTotalHeightChange.
+  const [contentHeights, setContentHeights] = useState<Record<string, number>>({});
+  const handleTotalHeightChange = useCallback((channelId: string, height: number) => {
+    setContentHeights(prev =>
+      prev[channelId] === height ? prev : { ...prev, [channelId]: height },
+    );
+  }, []);
 
   const handleMarkAsRead = (channelId: string) => {
     const draft = getDraft(channelId, null);
@@ -110,9 +131,9 @@ const UnreadsInbox = (): ReactElement => {
       (index: number) => {
         const item = unreadItems[index];
         const isOpen = !!item && openChannelIdsRef.current.has(item.id);
-        return isOpen ? OPEN_ROW_ESTIMATE() : COLLAPSED_ROW_ESTIMATE;
+        return isOpen ? OPEN_ROW_ESTIMATE(item && contentHeights[item.id]) : COLLAPSED_ROW_ESTIMATE;
       },
-      [unreadItems],
+      [unreadItems, contentHeights],
     ),
     getItemKey: useCallback((index: number) => unreadItems[index]?.id ?? index, [unreadItems]),
     overscan: 4,
@@ -244,7 +265,10 @@ const UnreadsInbox = (): ReactElement => {
 
                     {isOpen && (
                       <div className='overflow-hidden rounded-b-lg'>
-                        <div className='animate-in slide-in-from-top-2 fade-in duration-200 h-[calc(60vh)] flex flex-col relative z-0'>
+                        <div
+                          className='animate-in slide-in-from-top-2 fade-in duration-200 flex flex-col relative z-0'
+                          style={{ height: getOpenPanelHeight(contentHeights[channel.id]) }}
+                        >
                           <ConversationPanelV2
                             channelId={channel.id}
                             previousChannelId={null}
@@ -255,6 +279,9 @@ const UnreadsInbox = (): ReactElement => {
                             skipSubscription={true}
                             unreadsOnly={true}
                             onThreadClick={handleThreadClick}
+                            onTotalHeightChange={height =>
+                              handleTotalHeightChange(channel.id, height)
+                            }
                           />
                         </div>
                       </div>

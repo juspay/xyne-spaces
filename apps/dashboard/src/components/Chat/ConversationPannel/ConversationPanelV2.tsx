@@ -118,6 +118,7 @@ const ConversationPanelV2 = ({
   useLocalTabState = false,
   unreadsOnly,
   onThreadClick,
+  onTotalHeightChange,
 }: {
   channelId: string;
   previousChannelId: string | null;
@@ -160,6 +161,8 @@ const ConversationPanelV2 = ({
   useLocalTabState?: boolean;
   unreadsOnly?: boolean;
   onThreadClick?: (channelId: string, conversationId: string) => void;
+  // Reports the message list's real total content height (px).
+  onTotalHeightChange?: (height: number) => void;
 }): ReactElement => {
   const { baseRoute } = useRouteContext();
   const channel = useChannel(channelId);
@@ -342,6 +345,7 @@ const ConversationPanelV2 = ({
                   {...(onOpenThread && { onOpenThread })}
                   unreadsOnly={unreadsOnly ?? false}
                   {...(onThreadClick && { onThreadClick })}
+                  {...(onTotalHeightChange && { onTotalHeightChange })}
                 />
               )}
               {hideComposer ? null : shouldShowJoinChannel ? (
