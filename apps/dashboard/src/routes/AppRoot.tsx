@@ -57,7 +57,6 @@ import ProjectsScreen from './ProjectsScreen/ProjectsScreen';
 import UserGroupsScreen from './UserGroupsScreen/UserGroupsScreen';
 import ProjectDetailScreen from './ProjectDetailScreen/ProjectDetailScreen';
 import SdlcScreen from './SdlcScreen/SdlcScreen';
-import { SdlcDebuggerPanel } from './SdlcScreen/SdlcDebuggerPanel';
 import SdlcWindow from './SdlcScreen/SdlcWindow';
 import { APP_BASE_PATH, isSdlcSurface } from '../config';
 import SdlcFrameHost from './SdlcScreen/SdlcFrameHost';
@@ -211,7 +210,6 @@ import { AIOnboardingOverlay } from '../components/AIOnboarding/AIOnboardingOver
 import XyneAISidebar from '../components/Chat/XyneAISidebar/XyneAISidebar';
 import { BrowserPanel, BrowserPanelHandler } from '../components/BrowserPanel';
 import { xyneAIStreamManager } from '../services/XyneAI';
-import { useExternalDebuggerStore } from '../store/useExternalDebuggerStore';
 import { AttachmentGalleryModal } from '../components/FileViewer/FileViewerModal';
 import { CreateTicketWindow } from '../components/Tickets/CreateTicketModal/CreateTicketWindow';
 import { AttachmentCitationPreview } from '../components/FileViewer/AttachmentCitationPreview';
@@ -507,7 +505,6 @@ const AppRoot = (): ReactElement => {
   const xyneAIResearchContext = useSelector(xyneAIActor, state => state.context.researchContext);
   const xyneAIInitialQuery = useSelector(xyneAIActor, state => state.context.initialQuery);
   const xyneAIAutoSendNonce = useSelector(xyneAIActor, state => state.context.autoSendNonce);
-  const isSdlcDebuggerOpen = useExternalDebuggerStore(state => state.target !== null);
   const { isMobile } = usePlatform();
   // No-op outside the SDLC bundle's framed instance.
   useSdlcFrameBridge();
@@ -518,15 +515,15 @@ const AppRoot = (): ReactElement => {
   // Get current location to check if we're on onboarding
   const location = useLocation();
   const sdlcChannelId = location.pathname.match(/\/sdlc\/([^/]+)/)?.[1] ?? null;
-  // On an SDLC route the iframe lane renders its own Ask AI panel, so the host
-  // must not also render one (that would double it).
-  const isSdlcRoute = /\/sdlc(\/|$)/.test(location.pathname);
+  // On an SDLC or Workflows route the iframe lane renders its own Ask AI panel, so
+  // the host must not also render one (that would double it).
+  const isSdlcRoute =
+    /\/sdlc(\/|$)/.test(location.pathname) || /^\/[^/]+\/workflows(\/|$)/.test(location.pathname);
   const previousSdlcChannelIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     const previousChannelId = previousSdlcChannelIdRef.current;
     if (previousChannelId && previousChannelId !== sdlcChannelId) {
-      useExternalDebuggerStore.getState().close();
       setIsXyneDebuggerOpen(false);
     }
     previousSdlcChannelIdRef.current = sdlcChannelId;
@@ -576,15 +573,10 @@ const AppRoot = (): ReactElement => {
       (typeof state.value === 'object' && state.value !== null && 'connected' in state.value) ||
       state.value === 'connecting',
   );
-  const showSdlcDebuggerPanel = isSdlcDebuggerOpen && !isMobile && sdlcChannelId === null;
   // On SDLC routes the framed lane renders its own Ask AI panel inside the iframe,
   // so the host must not also show one (covers both /sdlc and /sdlc/<channelId>).
   const showXyneAIPanel =
-    isXyneAIDrawerOpen &&
-    !isMobile &&
-    !isOnAIChatExperiencePage &&
-    !isSdlcRoute &&
-    !showSdlcDebuggerPanel;
+    isXyneAIDrawerOpen && !isMobile && !isOnAIChatExperiencePage && !isSdlcRoute;
   // The SDLC lane ships Ask AI inside its own frame (see the isInPanelWebview
   // branch), so this is what decides whether that in-frame panel is showing.
   const showSdlcFrameXyneAI = isSdlcSurface && isXyneAIDrawerOpen && !isMobile && !isOnAIPage;
@@ -808,7 +800,6 @@ const AppRoot = (): ReactElement => {
                           <Outlet />
                         </main>
                       ) : showXyneAIPanel ||
-                        showSdlcDebuggerPanel ||
                         browserPanelState === 'open' ||
                         webviewState === 'closed' ||
                         webviewState === 'idle' ? (
@@ -818,13 +809,11 @@ const AppRoot = (): ReactElement => {
                             className='flex-1 no-scrollbar overflow-auto'
                             autoSaveId='app-root-browser'
                             panelIds={
-                              showSdlcDebuggerPanel
-                                ? ['app-root-left', 'app-root-sdlc-debugger']
-                                : showXyneAIPanel
-                                  ? ['app-root-left', 'app-root-xyneai']
-                                  : showBrowserPanel
-                                    ? ['app-root-left', 'app-root-browser']
-                                    : ['app-root-left']
+                              showXyneAIPanel
+                                ? ['app-root-left', 'app-root-xyneai']
+                                : showBrowserPanel
+                                  ? ['app-root-left', 'app-root-browser']
+                                  : ['app-root-left']
                             }
                           >
                             <Panel
@@ -833,7 +822,7 @@ const AppRoot = (): ReactElement => {
                               defaultSize={
                                 showXyneAIPanel
                                   ? `${100 - XYNE_AI_PANEL_DEFAULT_SIZE}%`
-                                  : showSdlcDebuggerPanel || showBrowserPanel
+                                  : showBrowserPanel
                                     ? '65%'
                                     : '100%'
                               }
@@ -848,24 +837,7 @@ const AppRoot = (): ReactElement => {
                                 </main>
                               </div>
                             </Panel>
-                            {showSdlcDebuggerPanel ? (
-                              <>
-                                <Separator className='w-[2px] transition-colors cursor-col-resize flex items-center justify-center group'>
-                                  <div
-                                    id='panel-resize-divider'
-                                    className='w-[2px] h-full bg-transparent group-hover:bg-primary group-active:bg-primary'
-                                  ></div>
-                                </Separator>
-                                <Panel
-                                  id='app-root-sdlc-debugger'
-                                  defaultSize='35%'
-                                  minSize='30%'
-                                  maxSize='55%'
-                                >
-                                  <SdlcDebuggerPanel />
-                                </Panel>
-                              </>
-                            ) : showXyneAIPanel ? (
+                            {showXyneAIPanel ? (
                               <>
                                 <Separator className='w-[2px] transition-colors cursor-col-resize flex items-center justify-center group'>
                                   <div
@@ -1074,20 +1046,6 @@ const AppRoot = (): ReactElement => {
                           />
                         </Drawer>
                       )}
-                      {isMobile && !isInPanelWebview && (
-                        <Drawer
-                          open={isSdlcDebuggerOpen}
-                          onOpenChange={open => {
-                            if (!open) useExternalDebuggerStore.getState().close();
-                          }}
-                          title='Debugger'
-                          description='Inspect this SDLC run'
-                        >
-                          <div className='h-[85vh]'>
-                            <SdlcDebuggerPanel />
-                          </div>
-                        </Drawer>
-                      )}
                     </SdlcFrameProvider>
                   </EditProvider>
                 </SlashCommandArtifactSideEffectProvider>
@@ -1107,6 +1065,10 @@ const SdlcRouteElement = (): ReactElement =>
 /** A ticket page, but still inside the hub's frame so its history stays in one router. */
 const SdlcTicketRouteElement = (): ReactElement =>
   isSdlcSurface ? <TicketView /> : <SdlcFrameViewport />;
+
+/** Real screen in the lane bundle; the framed placeholder in the main one, as for SDLC. */
+const WorkflowsRouteElement = (): ReactElement =>
+  isSdlcSurface ? <WorkflowScreen /> : <SdlcFrameViewport />;
 
 export const router = createBrowserRouter(
   [
@@ -1479,7 +1441,7 @@ export const router = createBrowserRouter(
                   path: 'workflows/*',
                   element: (
                     <ResourceProtectedRoute resourceName='WORKFLOWS' minAccess='READ'>
-                      <WorkflowScreen />
+                      <WorkflowsRouteElement />
                     </ResourceProtectedRoute>
                   ),
                 },
@@ -1651,6 +1613,14 @@ export const router = createBrowserRouter(
                 },
                 {
                   path: 'sdlc/:channelId/:section',
+                  element: (
+                    <ResourceProtectedRoute resourceName='SDLC' minAccess='READ'>
+                      <SdlcRouteElement />
+                    </ResourceProtectedRoute>
+                  ),
+                },
+                {
+                  path: 'sdlc/:channelId/workflows/*',
                   element: (
                     <ResourceProtectedRoute resourceName='SDLC' minAccess='READ'>
                       <SdlcRouteElement />

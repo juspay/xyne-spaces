@@ -27,7 +27,6 @@ interface ProjectRepository {
   accessJobStatus: string;
   accessCapabilities: unknown;
   accessJobErrorMessage: string | null;
-  setupExecution: { status: string } | null;
 }
 
 export function ProjectRepositoriesSection(props: {

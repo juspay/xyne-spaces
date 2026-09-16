@@ -35,9 +35,7 @@ export const DEFAULT_USER_PREFERENCES: UserPreferences = {
   sdlcFolderTabs: {},
   sdlcFolderTreeExpanded: {},
   sdlcExplorerCollapsed: false,
-  sdlcSidebarSectionsCollapsed: Object.fromEntries(
-    ['sdlc-sidebar-artifacts', 'sdlc-sidebar-repositories'].map(id => [id, true]),
-  ),
+  sdlcSidebarSectionsCollapsed: { 'sdlc-sidebar-artifacts': true },
   sdlcSidebarSectionHeights: {},
   sdlcShowClosedTracks: false,
 };

@@ -1,3 +1,25 @@
+## [1.318.0-release-20260915.4](https://github.com/juspay/xyne-spaces/compare/v1.318.0-release-20260915.3...v1.318.0-release-20260915.4) (2026-09-16)
+
+
+### Features
+
+* Hub Knowledge and Wiki as SDLC hub workflows (non-claw) [backport to release-20260915] ([#1873](https://github.com/juspay/xyne-spaces/issues/1873)) ([b6db94b](https://github.com/juspay/xyne-spaces/commit/b6db94bc0675d4538448905eb11a79f2d0917ff2)), closes [#1838](https://github.com/juspay/xyne-spaces/issues/1838) [#1781](https://github.com/juspay/xyne-spaces/issues/1781) [#1838](https://github.com/juspay/xyne-spaces/issues/1838) [#1864](https://github.com/juspay/xyne-spaces/issues/1864)
+
+## [1.318.0-release-20260915.3](https://github.com/juspay/xyne-spaces/compare/v1.318.0-release-20260915.2...v1.318.0-release-20260915.3) (2026-09-16)
+
+
+### Features
+
+* bitbucket connector for workflow release 15 ([#1882](https://github.com/juspay/xyne-spaces/issues/1882)) ([d941e4b](https://github.com/juspay/xyne-spaces/commit/d941e4b5e323d2fcd3ebe47ac5935c7bba151365))
+* fix ticket count sync and fetch older tickets ([#1875](https://github.com/juspay/xyne-spaces/issues/1875)) ([8f7e13a](https://github.com/juspay/xyne-spaces/commit/8f7e13ab848654e3525320d3f2c9a31fd2c3bd30))
+
+## [1.318.0-release-20260915.2](https://github.com/juspay/xyne-spaces/compare/v1.318.0-release-20260915.1...v1.318.0-release-20260915.2) (2026-09-15)
+
+
+### Features
+
+* github connector for workflows ([#1864](https://github.com/juspay/xyne-spaces/issues/1864)) ([6639438](https://github.com/juspay/xyne-spaces/commit/66394380c40173f3148d3833eeb8fa610a0d2e5d))
+
 ## [1.318.0-release-20260915.1](https://github.com/juspay/xyne-spaces/compare/v1.317.3...v1.318.0-release-20260915.1) (2026-09-15)
 
 

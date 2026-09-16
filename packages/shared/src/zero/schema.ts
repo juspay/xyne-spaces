@@ -3391,6 +3391,11 @@ export const sdlcEntityLinkTableRelationships = relationships(sdlcEntityLinkTabl
     destField: ['id'],
     destSchema: channelTable,
   }),
+  workflow: one({
+    sourceField: ['targetId'],
+    destField: ['id'],
+    destSchema: workflowTable,
+  }),
 }));
 
 export const sdlcArtifactTableRelationships = relationships(sdlcArtifactTable, ({ one }) => ({
