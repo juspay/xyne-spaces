@@ -52,7 +52,9 @@ const isInsideOverlay = (): boolean => {
   const el = document.activeElement;
   return (
     el instanceof HTMLElement &&
-    !!el.closest('[role="dialog"],[role="menu"],[role="listbox"],[data-radix-popper-content-wrapper]')
+    !!el.closest(
+      '[role="dialog"],[role="menu"],[role="listbox"],[data-radix-popper-content-wrapper]',
+    )
   );
 };
 const isActivatableFocused = (): boolean => {
@@ -285,7 +287,9 @@ export const TicketTable: React.FC<TicketTableProps> = ({
   const [highlightedIndex, setHighlightedIndex] = useState<number | null>(null);
   const rowCount = tickets.length;
   useEffect(() => {
-    setHighlightedIndex(prev => (prev !== null && prev >= rowCount ? Math.max(0, rowCount - 1) : prev));
+    setHighlightedIndex(prev =>
+      prev !== null && prev >= rowCount ? Math.max(0, rowCount - 1) : prev,
+    );
   }, [rowCount]);
 
   const moveBy = useCallback(
@@ -343,9 +347,7 @@ export const TicketTable: React.FC<TicketTableProps> = ({
   useEffect(() => {
     lastRequestedAtRef.current = -1;
   }, [onLoadMore]);
-  const lastRenderedIndex = virtualItems.length
-    ? virtualItems[virtualItems.length - 1]!.index
-    : -1;
+  const lastRenderedIndex = virtualItems.length ? virtualItems[virtualItems.length - 1]!.index : -1;
   useEffect(() => {
     if (!hasMore || isLoadingMore || !onLoadMore) return;
     if (lastRenderedIndex < 0 || tickets.length === 0) return;

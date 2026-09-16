@@ -36,8 +36,7 @@ export const TableGroupSection = ({
   const ticketTags = useMemo(() => {
     const map = new Map<string, TicketTag[]>();
     for (const ticket of tickets) {
-      const mappings =
-        (ticket as { tagMappings?: ReadonlyArray<RowTagMapping> }).tagMappings ?? [];
+      const mappings = (ticket as { tagMappings?: ReadonlyArray<RowTagMapping> }).tagMappings ?? [];
       if (mappings.length > 0) {
         map.set(
           ticket.id,

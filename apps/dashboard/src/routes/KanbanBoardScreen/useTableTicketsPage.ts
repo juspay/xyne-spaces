@@ -334,4 +334,3 @@ export const useTableTicketsPage = (
     isSearchMode,
   };
 };
-
