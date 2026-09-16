@@ -151,11 +151,6 @@ function buildDeskFilterSql(filters: LabelUnreadFilters): Prisma.Sql {
  * emailCount > 0 AND (no email_reads row exists for (ticketId, userId)
  * OR email_reads.lastReadEmailAt < ticket.lastEmailAt).
  * Labels with zero unread are omitted from the map.
- *
- * `t."isArchived" = false` was ADDED to align with the desk list base
- * constraint (supportTicketsPageV3/V4 both start from `isArchived = false`):
- * badge counts must equal what the desk list would show. This changes mode A
- * behavior — archived tickets are no longer counted.
  */
 export async function getLabelUnreadCounts(
   auth: { userId: string; workspaceId: string },
@@ -169,6 +164,7 @@ export async function getLabelUnreadCounts(
       ON er."ticketId" = t."id" AND er."userId" = ${auth.userId}
     WHERE m."channelId" = ${channelId}
       AND m."workspaceId" = ${auth.workspaceId}
+      AND m."createdBy" = ${auth.userId}
       AND t."isArchived" = false
       AND t."emailCount" > 0
       AND (er."lastReadEmailAt" IS NULL OR er."lastReadEmailAt" < t."lastEmailAt")
@@ -184,8 +180,9 @@ export async function getLabelUnreadCounts(
 
 /**
  * Mode B: unread count for ONE label restricted by a desk filter payload.
- * Same base query as mode A (including the isArchived alignment and the
- * verbatim unread predicate), pinned to a single labelId.
+ * Same base query as mode A (including the isArchived alignment, the verbatim
+ * unread predicate, and the createdBy ownership scoping — labels are private
+ * per user), pinned to a single labelId.
  */
 export async function getLabelUnreadCount(
   auth: { userId: string; workspaceId: string },
@@ -203,6 +200,7 @@ export async function getLabelUnreadCount(
     WHERE m."channelId" = ${channelId}
       AND m."workspaceId" = ${auth.workspaceId}
       AND m."labelId" = ${labelId}
+      AND m."createdBy" = ${auth.userId}
       AND t."isArchived" = false
       AND t."emailCount" > 0
       AND (er."lastReadEmailAt" IS NULL OR er."lastReadEmailAt" < t."lastEmailAt")
