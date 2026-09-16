@@ -1316,15 +1316,17 @@ export class CallRepository {
         await this.syncArtifactLifecycle(tx, call, MessageArtifactStatus.COMPLETED, endedAt);
       }
 
-      // Clear conversation.callId when call ends (for conversation calls)
+      // Clear conversation.callId when call ends (for conversation calls). Only if it
+      // still points at this room: room_finished for a stale room can land after a
+      // newer call has already started in the same conversation.
       const callMetadata = call.metadata as CallMetadata | null;
       if (callMetadata?.conversationId) {
         try {
-          await tx.conversation.update({
-            where: { conversationId: callMetadata.conversationId },
+          const { count } = await tx.conversation.updateMany({
+            where: { conversationId: callMetadata.conversationId, callId: callExternalId },
             data: { callId: null },
           });
-          logger.info(`[handleRoomFinished] Cleared conversation.callId for conversation ${callMetadata.conversationId}`);
+          if (count > 0) logger.info(`[handleRoomFinished] Cleared conversation.callId for conversation ${callMetadata.conversationId}`);
         } catch (err) {
           logger.error(`[handleRoomFinished] Failed to clear conversation.callId for conversation ${callMetadata.conversationId}`, err);
         }
