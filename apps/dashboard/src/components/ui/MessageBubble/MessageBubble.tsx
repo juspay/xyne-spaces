@@ -1117,6 +1117,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                       statusEmoji={sender?.statusEmoji}
                       statusContent={sender?.statusContent}
                       statusExpiryAt={sender?.statusExpiryAt}
+                      activityStatus={sender?.activityStatus}
                       size='sm'
                       showOnHover={true}
                     />
@@ -1143,6 +1144,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                       statusEmoji={sender?.statusEmoji}
                       statusContent={sender?.statusContent}
                       statusExpiryAt={sender?.statusExpiryAt}
+                      activityStatus={sender?.activityStatus}
                       size='sm'
                       showOnHover={true}
                     />

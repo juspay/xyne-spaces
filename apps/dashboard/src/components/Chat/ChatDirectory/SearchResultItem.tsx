@@ -340,11 +340,12 @@ const UserSearchResultItem = ({
         >
           {result.title}
         </span>
-        {!isDeactivated && (user?.statusEmoji || user?.statusContent) && (
+        {!isDeactivated && (user?.activityStatus || user?.statusEmoji || user?.statusContent) && (
           <StatusIndicator
             statusEmoji={user?.statusEmoji}
             statusContent={user?.statusContent}
             statusExpiryAt={user?.statusExpiryAt}
+            activityStatus={user?.activityStatus}
             size='sm'
           />
         )}

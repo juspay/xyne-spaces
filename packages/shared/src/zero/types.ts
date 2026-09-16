@@ -493,6 +493,11 @@ export enum UserStatus {
 }
 
 // @ts-ignore TS1294
+export enum UserActivityStatus {
+  IN_CALL = 'IN_CALL',
+}
+
+// @ts-ignore TS1294
 export enum UserType {
   USER = 'USER',
   BOT = 'BOT',

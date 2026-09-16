@@ -212,6 +212,7 @@ export const DmListItem = ({
                   statusEmoji={targetUser?.statusEmoji}
                   statusContent={targetUser?.statusContent}
                   statusExpiryAt={targetUser?.statusExpiryAt}
+                  activityStatus={targetUser?.activityStatus}
                   size='sm'
                   className='text-[14px]'
                 />
@@ -331,6 +332,7 @@ export const DmListItem = ({
                 statusEmoji={targetUser?.statusEmoji}
                 statusContent={targetUser?.statusContent}
                 statusExpiryAt={targetUser?.statusExpiryAt}
+                activityStatus={targetUser?.activityStatus}
                 size='sm'
                 className='flex-shrink-0 text-[14px]'
               />
