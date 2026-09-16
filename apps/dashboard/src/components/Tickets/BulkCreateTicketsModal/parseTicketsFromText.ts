@@ -1,29 +1,29 @@
 /**
- * Parse a multi-line text block into a list of ticket titles.
+ * Parse a composer draft into one ticket per blank-line-separated block.
  *
- * Items are separated by blank lines (double newlines) per the user's example
- * (`Go live tasks\n\nCode Hygiene\n\nTask 2`). If the text has no blank-line
- * separators, fall back to single-newline splitting so a plain list also works.
- * The first element is the parent ticket title; the rest are sub-ticket titles.
+ * Only a blank line starts a new ticket. A single newline stays inside the
+ * block it belongs to, so an ordinary multi-line description stays one ticket
+ * ("Login fails on Safari\nSteps: …" is not two tickets). Within a block the
+ * first line is the title and whatever follows is its description, so nothing
+ * the user typed is dropped on the way into the bulk modal.
  */
-export function parseTicketsFromText(text: string): string[] {
-  const normalized = text
-    .replace(/\r\n/g, '\n')
-    .replace(/\r/g, '\n')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim();
+export interface ParsedTicketDraft {
+  title: string;
+  description: string;
+}
+
+export function parseTicketsFromText(text: string): ParsedTicketDraft[] {
+  const normalized = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
 
   if (!normalized) return [];
 
-  let lines = normalized
-    .split(/\n{2,}/)
-    .map(s => s.trim())
-    .filter(Boolean);
-  if (lines.length <= 1) {
-    lines = normalized
-      .split('\n')
-      .map(s => s.trim())
-      .filter(Boolean);
-  }
-  return lines;
+  return normalized
+    .split(/\n[ \t]*\n/)
+    .map(block => block.trim())
+    .filter(Boolean)
+    .map(block => {
+      const [firstLine = '', ...rest] = block.split('\n');
+      return { title: firstLine.trim(), description: rest.join('\n').trim() };
+    })
+    .filter(draft => draft.title.length > 0);
 }
