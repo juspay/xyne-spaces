@@ -23,7 +23,17 @@ import { ParticipantInfo_Kind } from '@livekit/protocol';
 import { emitCallEnded, emitCallStarted } from '@/automations/triggers/call.trigger';
 import { noteTakerWebhookController } from '@/controllers/noteTakerWebhookController';
 import { buildCallInviteUrl } from '@/utils/urlUtils';
-import { isTrackInChannel } from '@/sdlc/sdlcChannelMembership';
+import { validateOwnerInChannel } from '@/sdlc/entityLinkService';
+import type { EntityLinkOwner } from '@xyne/shared/sdlc';
+
+/** The owners a call may be filed against; mirrors sdlcCallLinkSchema. */
+const SDLC_CALL_OWNER_TYPES: readonly string[] = [
+  'CANVAS',
+  'TRACK',
+  'FOLDER',
+  'LINK',
+  'ATTACHMENT',
+];
 import { activityService } from '@/services/activity/activityService';
 
 class LiveKitWebhookController {
@@ -520,23 +530,24 @@ class LiveKitWebhookController {
         // and its conversation exist, record the entity mapping. Owner is a
         // canvas or a track — either way the same two links are written:
         //   OWNER -> CALL (relation CALL) and OWNER -> CONVERSATION (DISCUSSION).
-        const sdlcLink = (roomMetadata as {
-          sdlcLink?: { ownerType?: string; ownerId?: string };
-        }).sdlcLink;
+        const sdlcLink = (
+          roomMetadata as {
+            sdlcLink?: { ownerType?: string; ownerId?: string };
+          }
+        ).sdlcLink;
         if (sdlcLink?.ownerType && sdlcLink.ownerId) {
           try {
             const linkWorkspaceId = channelRecord?.workspaceId ?? null;
-            const ownerValid =
-              sdlcLink.ownerType === 'CANVAS'
-                ? Boolean(
-                    await this.db.canvas.findFirst({
-                      where: { id: sdlcLink.ownerId, channelId },
-                      select: { id: true },
-                    }),
-                  )
-                : sdlcLink.ownerType === 'TRACK'
-                  ? await isTrackInChannel(this.db, sdlcLink.ownerId, channelId)
-                  : false;
+            const ownerValid = SDLC_CALL_OWNER_TYPES.includes(sdlcLink.ownerType)
+              ? await validateOwnerInChannel(
+                  this.db,
+                  {
+                    sourceType: sdlcLink.ownerType as EntityLinkOwner['sourceType'],
+                    sourceId: sdlcLink.ownerId,
+                  },
+                  channelId
+                )
+              : false;
             if (linkWorkspaceId && ownerValid) {
               await this.db.sdlcEntityLink.createMany({
                 data: [

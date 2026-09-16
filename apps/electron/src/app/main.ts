@@ -300,7 +300,7 @@ app.on('web-contents-created', (_event, webContents) => {
             if (invitePath) {
               mainWindow.webContents.send('navigate-to', invitePath);
             } else {
-              mainWindow.webContents.send('open-in-browser-panel', url);
+              mainWindow.webContents.send('open-in-browser-panel', url, webContents.id);
             }
           }
         }

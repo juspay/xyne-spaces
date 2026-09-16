@@ -199,6 +199,16 @@ export function setupIpcHandlers(): void {
     event.returnValue = preloadPath;
   });
 
+  // Focus the embedder. A <webview> guest holds focus in its own web contents,
+  // and nothing in the renderer can take it back — window.focus() and blurring
+  // the element both leave it where it is. Until focus returns, the first click
+  // on the app's own chrome is spent transferring it and never reaches the DOM,
+  // so buttons beside an embedded page appear to need two clicks.
+  ipcMain.handle('focus-host-webcontents', (event) => {
+    if (!isMainWindowSender(event)) return;
+    event.sender.focus();
+  });
+
   // Copy Xyne auth cookies from defaultSession to the persist:xyne-spaces
   // partition before opening a Xyne URL in the browser panel. Called by the
   // renderer (CMD+click / open-in-panel flow) right before dispatching the

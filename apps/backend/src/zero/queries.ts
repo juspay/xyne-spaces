@@ -4664,6 +4664,18 @@ dmChannelsLatestMessagesPaginated: defineQuery(
         link.where('channelId', channelId).where('relationType', SDLC_TRACK_FLAT_RELATION),
       ),
   ),
+  getSdlcHubLinks: defineQuery(
+    z.object({ channelId: z.string() }),
+    ({ args: { channelId } }) => zql.links.where("channelId", channelId),
+  ),
+  getSdlcHubFiles: defineQuery(
+    z.object({ channelId: z.string() }),
+    ({ args: { channelId } }) =>
+      zql.message_attachments
+        .where("entityType", AttachmentEntityType.SDLC_HUB)
+        .where("entityId", channelId)
+        .where("isDeleted", false),
+  ),
   getSdlcTracks: defineQuery(z.object({ channelId: z.string() }), ({ args: { channelId } }) =>
     zql.sdlc_tracks
       .whereExists('sdlcEntityLinks', link =>

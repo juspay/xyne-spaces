@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { useLocation } from 'react-router-dom';
 import { useSelector } from '@xstate/react';
 import { isElectronApp } from '../../utils/electronApp';
+import { routePopupToEmbeddedWebview } from '../../utils/embeddedWebviewRegistry';
 import { browserPanelActor } from '../../machines/browserPanelMachine';
 import { xyneAIActor } from '../../machines/xyneAIMachine';
 import { logger, Event } from '../../utils/logger';
@@ -30,7 +31,11 @@ export function BrowserPanelHandler(): null {
     const api = window.electronAPI;
     if (!api?.onOpenInBrowserPanel) return;
 
-    const cleanup = api.onOpenInBrowserPanel((url: string) => {
+    const cleanup = api.onOpenInBrowserPanel((url: string, sourceWebContentsId?: number) => {
+      // A page embedded elsewhere in the app keeps its own popups: following a
+      // link inside it should stay where the reader is looking.
+      if (routePopupToEmbeddedWebview(url, sourceWebContentsId)) return;
+
       xyneAIActor.send({ type: 'CLOSE' });
 
       logger.info(Event.BROWSER_LINK_CLICK, { url, openedIn: 'in-app' });
