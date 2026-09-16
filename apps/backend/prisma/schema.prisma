@@ -3250,7 +3250,10 @@ model Link {
   createdAt   DateTime       @default(now())
   updatedAt   DateTime       @updatedAt
 
-  @@unique([createdBy, url, channelId]) // No duplicate URLs per user per channel
+  // Deliberately not unique: the same reference is filed in several SDLC folders
+  // as a matter of course. Channel link lists still refuse duplicates, enforced in
+  // the createLink mutator rather than by the database.
+  @@index([createdBy, url, channelId])
   @@index([channelId, visibility]) // Fast lookup of channel links by visibility
   @@index([channelId, createdBy]) // Fast lookup of user's links in channel
   @@map("links")
