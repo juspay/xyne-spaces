@@ -696,9 +696,10 @@ export const KanbanColumns: React.FC<KanbanColumnsProps> = ({
         const stageTickets = ticketsByStage[stage.id] || [];
         const ticketIds = stageTickets.map(t => t.id);
         const stageCount = stageCountById[stage.id] ?? stageTickets.length;
-        const serverStageCount = countsAreReliable
-          ? (stageCounts?.[stage.id] ?? stageCounts?.[stage.name])
-          : undefined;
+        const serverStageCount =
+          countsAreReliable && stageCounts
+            ? (stageCounts[stage.id] ?? stageCounts[stage.name] ?? 0)
+            : undefined;
         const columnKey = `${keyPrefix}${stage.id}`;
         const handleAddTicket = onAddTicketInColumn
           ? (): void =>

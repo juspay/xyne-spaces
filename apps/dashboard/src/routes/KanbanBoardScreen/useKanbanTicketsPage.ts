@@ -367,6 +367,7 @@ export const useKanbanTicketsPage = (
   // Mirrors ticketsState so the page merge can be computed in the effect body rather
   // than inside a setState updater (updaters must stay pure — StrictMode calls them twice).
   const ticketsStateRef = useRef<TicketsState>({ queryKey: '', tickets: [] });
+  const expectedCountRef = useRef<number | undefined>(undefined);
   const [nextCursor, setNextCursor] = useState<KanbanCursor | null>(null);
   const [hasMore, setHasMore] = useState(true);
   const isLoadingMoreRef = useRef(false);
@@ -657,6 +658,7 @@ export const useKanbanTicketsPage = (
   const fetchCursor = fetchCursorState?.queryKey === queryKey ? fetchCursorState.cursor : null;
   const tickets = ticketsState.queryKey === queryKey ? ticketsState.tickets : [];
   ticketsStateRef.current = ticketsState;
+  expectedCountRef.current = options.expectedCount;
 
   if (windowAnchorRef.current?.queryKey !== queryKey) {
     windowAnchorRef.current = {
@@ -801,7 +803,8 @@ export const useKanbanTicketsPage = (
       // An absent count (loading, or a set the counts API does not model) falls back to
       // climbing. The ladder is bounded and monotonic, so a count that over-reports costs
       // a few no-op probes and never loops.
-      const countAllowsMoreRows = options.expectedCount === undefined || options.expectedCount > 0;
+      const expectedCount = expectedCountRef.current;
+      const countAllowsMoreRows = expectedCount === undefined || expectedCount > 0;
       if (countAllowsMoreRows && !shouldUseDirectVespaRows && windowStep < WINDOW_STEPS_MS.length) {
         setWindowStep(step => step + 1);
         return;
@@ -869,16 +872,27 @@ export const useKanbanTicketsPage = (
     tieSlack,
     windowStep,
     options.pageSize,
-    // The count usually arrives AFTER the first page. Without it here, a column that
-    // probed empty while the count was still loading would stay concluded — the 0 -> N
-    // transition has to be able to re-enter the widening branch above.
-    options.expectedCount,
     options.excludeFlowSteps,
     effectivePage,
     effectivePageDetailsType,
     shouldUseDirectVespaRows,
     preserveRelevanceOrder,
   ]);
+
+  const previousExpectedCountRef = useRef<number | undefined>(undefined);
+  useEffect(() => {
+    const previous = previousExpectedCountRef.current;
+    const next = options.expectedCount;
+    previousExpectedCountRef.current = next;
+
+    if (next === undefined || next <= 0) return;
+    if (previous !== undefined && previous > 0) return; // not a 0 -> positive transition
+    if (shouldUseDirectVespaRows) return;
+    // Anything still paging, or already holding rows, does not need re-entry.
+    if (hasMore || ticketsStateRef.current.tickets.length > 0) return;
+
+    setWindowStep(step => (step < WINDOW_STEPS_MS.length ? step + 1 : step));
+  }, [options.expectedCount, shouldUseDirectVespaRows, hasMore]);
 
   const loadMore = useCallback(() => {
     if (isLoadingMoreRef.current || !hasMore || !nextCursor) return;
