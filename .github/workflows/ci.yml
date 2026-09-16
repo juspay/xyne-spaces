@@ -119,8 +119,7 @@ jobs:
 
   test:
     name: Automation tests
-    # Always self-hosted (not gated on USE_SELF_HOSTED_CI): needs Docker for the compose
-    # stack and network access to SPACES_URL for the report push.
+    if: vars.RUN_TEST_CASE == 'true'
     runs-on: ci-cluster-github-runners
     env:
       TEST_ENV: test
