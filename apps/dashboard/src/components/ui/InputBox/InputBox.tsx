@@ -55,6 +55,7 @@ import { FilePreviewModal } from '../../FileViewer/FileViewerModal';
 import {
   convertHeicFileToPreviewBlob,
   isHeicAttachment,
+  sniffHeicFile,
   toWebpFilename,
 } from '../../../services/heicAttachmentService';
 import type { MentionResult } from '@xyne/shared';
@@ -1538,11 +1539,21 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
       [providerRemoveDroppedFile, disableDraftUpload],
     );
 
-    const handlePreview = (file: File | UploadedFile, attachmentId?: string): void => {
-      const isHeic = isHeicAttachment(
-        file instanceof File ? file.type : file.mimeType,
-        file instanceof File ? file.name : file.originalName,
-      );
+    const handlePreview = async (
+      file: File | UploadedFile,
+      attachmentId?: string,
+    ): Promise<void> => {
+      // Local Files: the ftyp brand beats the browser's type/extension guess
+      // (a renamed .jpg can carry HEIC bytes). UploadedFiles have no local
+      // bytes, so they stay on metadata — which upload-time sniffing has
+      // already corrected server-side.
+      const sniffedHeic = file instanceof File ? await sniffHeicFile(file) : null;
+      const isHeic =
+        sniffedHeic ??
+        isHeicAttachment(
+          file instanceof File ? file.type : file.mimeType,
+          file instanceof File ? file.name : file.originalName,
+        );
       if (isHeic) {
         // Local HEIC File: convert client-side (cached from the chip's preview)
         // and open the local-file viewer — works before the upload finishes.
@@ -1818,7 +1829,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                           key={`file-${attachmentId}-${index}`}
                           file={file}
                           onRemove={() => void handleRemoveAttachment({ attachmentId, file })}
-                          onPreview={() => handlePreview(file, attachmentId)}
+                          onPreview={() => void handlePreview(file, attachmentId)}
                           isUploading={false}
                         />
                       ))}
@@ -1894,7 +1905,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                     key={attachmentId}
                     file={file}
                     onRemove={() => void handleRemoveAttachment({ attachmentId, file })}
-                    onPreview={() => handlePreview(file, attachmentId)}
+                    onPreview={() => void handlePreview(file, attachmentId)}
                     isUploading={false}
                   />
                 ))}

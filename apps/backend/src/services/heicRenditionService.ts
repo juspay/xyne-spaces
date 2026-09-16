@@ -22,7 +22,7 @@ export { isHeicAttachment, toWebpFilename }
  * Decoding goes through heic-decode (libheif compiled to WASM with the HEVC
  * decoder included), not sharp: sharp's prebuilt libheif is built without
  * libde265, so it cannot decode the HEVC-compressed HEICs iPhones produce.
- * sharp handles the resize + WebP-lossless encode once pixels are in memory.
+ * sharp handles the resize + WebP encode once pixels are in memory.
  *
  * Renditions are cached in GCS keyed on the sha256 of the storage *path*.
  * Attachment bytes are immutable once uploaded, so the path is a stable key —
@@ -213,9 +213,11 @@ async function convertBufferToWebp(
             })
         }
 
-        const webp = await pipeline
-            .webp({ lossless: true, quality: 100, effort: 5 })
-            .toBuffer()
+        // Lossy q85, not lossless: lossless WebP of already-lossy HEVC pixels
+        // inflates ~10x for no visible gain, and the original HEIC remains the
+        // fidelity source for downloads. (Parameter changes bump the cache
+        // version segment so stale renditions are never served.)
+        const webp = await pipeline.webp({ quality: 85, effort: 4 }).toBuffer()
 
         logger.info("[HeicRendition] Converted HEIC to WebP", {
             cacheKey,
@@ -239,7 +241,7 @@ async function convertBufferToWebp(
 }
 
 /**
- * Returns a WebP-lossless rendition of the HEIC file at `storagePath`,
+ * Returns a browser-renderable (lossy q85) WebP rendition of the HEIC file at
  * generating and caching it on first request. `full` re-encodes the decoded
  * pixels without resizing; `thumb` fits within 1024px on the long edge.
  * `storage` is the bucket the original lives in (see getAttachmentStorage) —

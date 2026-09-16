@@ -1,6 +1,7 @@
 import { storageService } from './storage/index.js';
 import { logger } from '../utils/logger';
 import { decodeUploadFilename } from '../utils/filename';
+import { isHeicBuffer } from '@xyne/shared';
 
 export interface UploadedFileResult {
   originalName: string;
@@ -61,6 +62,16 @@ export async function uploadFiles(
       let filePath = existingStoragePath;
       let fileSize = file.size;
 
+      // The multipart Content-Type is the browser's extension-based guess —
+      // wrong for HEIC on Chrome/Linux (application/octet-stream) and for
+      // renamed files (.jpg carrying HEIC bytes). The buffer is in hand here,
+      // so the ftyp brand is the truth: correcting it at ingestion makes every
+      // downstream isHeicAttachment decision (renditions, chips, deletion
+      // sweeps) operate on reality instead of the guess.
+      const effectiveMimeType = isHeicBuffer(file.buffer)
+        ? 'image/heic'
+        : file.mimetype || 'application/octet-stream';
+
       if (!filePath) {
         if (!file.buffer || file.buffer.length === 0) {
           throw new Error(`No file content found for ${file.originalname}`);
@@ -68,7 +79,7 @@ export async function uploadFiles(
 
         const storageResult = await storageService.uploadFile(file.buffer, {
           filename: decodedName,
-          contentType: file.mimetype || 'application/octet-stream',
+          contentType: effectiveMimeType,
           metadata: {
             originalName: decodedName,
             uploadedAt: new Date().toISOString(),
@@ -87,7 +98,7 @@ export async function uploadFiles(
 
       // Handle thumbnail for video and document files (frontend-generated)
       let thumbnailUrl: string | undefined;
-      const fileMimeType = file.mimetype || 'application/octet-stream';
+      const fileMimeType = effectiveMimeType;
       const isVideo = fileMimeType.startsWith('video/');
       const isDocument = [
         'application/pdf',

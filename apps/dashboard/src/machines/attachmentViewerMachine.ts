@@ -309,7 +309,7 @@ export const attachmentViewerMachine = createMachine(
           }
 
           // HEIC cannot render from its original bytes in most browsers; fetch
-          // the backend's lossless WebP rendition instead (generated + cached
+          // the backend's lossy (q85) WebP rendition instead (generated + cached
           // server-side on first request).
           if (isHeicAttachment(mimeType, fileName)) {
             return fetchFile(
