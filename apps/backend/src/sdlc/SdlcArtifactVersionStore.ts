@@ -209,29 +209,22 @@ export class SdlcArtifactVersionStore {
       return { repoIds: null, channelId: channel.id, projectId: channel.projectId };
     }
 
-    const [repos, memberships] = await Promise.all([
-      this.prisma.repo.findMany({
-        where: { id: { in: named }, workspaceId: input.workspaceId, projectId: { not: null } },
-        select: { id: true, projectId: true },
-      }),
-      this.prisma.sdlcEntityLink.findMany({
-        where: {
-          workspaceId: input.workspaceId,
-          sourceType: 'CHANNEL',
-          targetType: 'REPOSITORY',
-          targetId: { in: named },
-          relationType: SDLC_MEMBERSHIP_RELATION,
-          ...(input.channelId ? { channelId: input.channelId } : {}),
-          channel: { participants: { some: { userId: input.userId } } },
-        },
-        orderBy: { createdAt: 'asc' },
-        select: { channelId: true, targetId: true },
-      }),
-    ]);
+    const memberships = await this.prisma.sdlcEntityLink.findMany({
+      where: {
+        workspaceId: input.workspaceId,
+        sourceType: 'CHANNEL',
+        targetType: 'REPOSITORY',
+        targetId: { in: named },
+        relationType: SDLC_MEMBERSHIP_RELATION,
+        ...(input.channelId ? { channelId: input.channelId } : {}),
+        channel: { participants: { some: { userId: input.userId } } },
+      },
+      orderBy: { createdAt: 'asc' },
+      select: { channelId: true, targetId: true },
+    });
     const reachable = new Set(memberships.map((m) => m.targetId));
-    const projectId = repos.find((repo) => repo.projectId)?.projectId;
     const channelId = input.channelId ?? memberships[0]?.channelId;
-    if (!projectId || !channelId || named.some((id: string) => !reachable.has(id))) {
+    if (!channelId || named.some((id: string) => !reachable.has(id))) {
       throw new AppError('SDLC artifact not found', 404);
     }
     if (!input.channelId && new Set(memberships.map((m) => m.channelId)).size > 1) {
@@ -240,7 +233,13 @@ export class SdlcArtifactVersionStore {
         409
       );
     }
-    return { repoIds: named, channelId, projectId };
+    // The hub's project, not the repository's: a hub may cover repositories from other projects.
+    const channel = await this.prisma.channel.findFirst({
+      where: { id: channelId, workspaceId: input.workspaceId },
+      select: { projectId: true },
+    });
+    if (!channel?.projectId) throw new AppError('SDLC hub not found', 404);
+    return { repoIds: named, channelId, projectId: channel.projectId };
   }
 
   private async canvasFilter(scope: {

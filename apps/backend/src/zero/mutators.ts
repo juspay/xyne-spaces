@@ -11458,6 +11458,10 @@ export function createMutators(
           if (!repo) {
             throw new Error('Repository not found');
           }
+          // An SDLC repository's credential link and access checks belong to its URL.
+          if (url !== undefined && url !== repo.url && repo.projectId) {
+            throw new Error('Register the new link as a repository instead of changing this one');
+          }
 
           await tx.mutate.repos.update({
             id,
