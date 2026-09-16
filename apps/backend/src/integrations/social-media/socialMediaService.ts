@@ -12,31 +12,22 @@ import { ExternalSourcePlatform, type IngestionOptions } from '@/integrations/co
 import { logger } from '@/utils/logger';
 import { acquireLock, releaseLock } from '@/utils/distributedLock';
 
-const TAG = '[SocialMediaDesk]';
+export { InteractionReplyValidationError };
+
+const TAG = '[SocialMediaService]';
 const SYNC_LOCK_TTL_SECONDS = 30 * 60;
 
 type SocialMediaSource = ExternalSource & {
   channelId: string;
   workspaceId: string;
+  boardId: string | null;
   ownerUserId: string;
 };
-
-function plainText(value: string): string {
-  return value
-    .replace(/<br\s*\/?>/gi, '\n')
-    .replace(/<\/p>/gi, '\n')
-    .replace(/<[^>]+>/g, '')
-    .replace(/&nbsp;/gi, ' ')
-    .replace(/&amp;/gi, '&')
-    .replace(/&lt;/gi, '<')
-    .replace(/&gt;/gi, '>')
-    .trim();
-}
 
 class SocialMediaService {
   private async getSourceContext(sourceId: string): Promise<SocialMediaSource> {
     const source = await db.externalSource.findUnique({ where: { id: sourceId } });
-    if (!source || !source.isActive || !source.channelId || !source.ownerUserId) {
+    if (!source?.isActive || !source.channelId || !source.ownerUserId) {
       throw new Error('Active social media source is not configured');
     }
     return source as SocialMediaSource;
@@ -50,9 +41,7 @@ class SocialMediaService {
       ttlSeconds: SYNC_LOCK_TTL_SECONDS,
     });
     if (!lock) {
-      logger.debug(`${TAG} Source sync skipped because another worker owns the lock`, {
-        sourceId,
-      });
+      logger.debug(`${TAG} Source sync skipped because another worker owns the lock`, { sourceId });
       return { synced: 0 };
     }
 
@@ -60,13 +49,7 @@ class SocialMediaService {
       const syncStartedAt = new Date();
       const source = await this.getSourceContext(sourceId);
       const adapter = adapterRegistry.getAdapter(source.sourceType);
-      const results = await externalSourceCore.ingest(
-        adapter,
-        source.name,
-        undefined,
-        source,
-        options,
-      );
+      const results = await externalSourceCore.ingest(adapter, source.name, undefined, source, options);
       const synced = results.filter((result) => result.action === 'created').length;
       if (source.sourceType === ExternalSourcePlatform.GOOGLE_PLAY) {
         await db.externalSource.update({
@@ -92,10 +75,10 @@ class SocialMediaService {
     userId: string;
     body: string;
   }): Promise<Email> {
-    const body = plainText(params.body);
+    const body = params.body.trim();
     if (!body) throw new InteractionReplyValidationError('Reply body is required');
 
-    const review = await db.email.findFirst({
+    const inboundEmail = await db.email.findFirst({
       where: {
         conversationId: params.conversationId,
         workspaceId: params.workspaceId,
@@ -103,49 +86,51 @@ class SocialMediaService {
       },
       orderBy: { createdAt: 'asc' },
     });
-    if (!review) throw new Error('Review conversation not found');
+    if (!inboundEmail) throw new Error('Conversation not found');
+
     const externalMessage = await db.externalMessage.findFirst({
       where: {
         workspaceId: params.workspaceId,
         entityType: ExternalEntityType.EMAIL,
-        messageId: review.id,
+        messageId: inboundEmail.id,
       },
     });
-    if (!externalMessage) throw new Error('Review conversation not found');
+    if (!externalMessage) throw new Error('Conversation not found');
+
     const source = await this.getSourceContext(externalMessage.externalSourceId);
-    if (source.workspaceId !== params.workspaceId) throw new Error('Review conversation not found');
+    if (source.workspaceId !== params.workspaceId) throw new Error('Conversation not found');
+
     const adapter = adapterRegistry.getAdapter(source.sourceType);
     if (!adapter.sendInteractionReply) {
-      throw new Error(`Replies are not supported for source ${source.sourceType}`);
+      throw new Error(`Replies are not supported for source type: ${source.sourceType}`);
     }
+
     const user = await db.user.findUnique({
       where: { id: params.userId },
       select: { name: true },
     });
+
     const normalizedReply = await adapter.sendInteractionReply({
       source,
-      externalThreadId: review.externalThreadId,
-      subject: review.subject,
+      externalThreadId: inboundEmail.externalThreadId,
+      subject: inboundEmail.subject,
       body,
       userId: params.userId,
       authorName: user?.name ?? source.displayName,
     });
-    const [result] = await externalSourceCore.sync(
-      adapter,
-      source.name,
-      normalizedReply,
-      source,
-    );
+
+    const [result] = await externalSourceCore.sync(adapter, source.name, normalizedReply, source);
     if (!result?.entityId) throw new Error('Social media reply was not persisted');
+
     const interaction = await db.email.findUnique({ where: { id: result.entityId } });
     if (!interaction) throw new Error('Social media reply was not persisted');
-    const occurredAt = normalizedReply.metadata.timestamp;
 
     const ticket = await db.ticket.findFirst({
       where: { conversationId: params.conversationId, workspaceId: params.workspaceId },
       select: { id: true },
     });
     if (ticket) {
+      const occurredAt = normalizedReply.metadata.timestamp;
       await db.$transaction([
         db.ticket.updateMany({
           where: { id: ticket.id, firstRespondedAt: null },
@@ -168,6 +153,13 @@ class SocialMediaService {
         }),
       ]);
     }
+
+    logger.info(`${TAG} Reply sent`, {
+      conversationId: params.conversationId,
+      sourceType: source.sourceType,
+      interactionId: interaction.id,
+    });
+
     return interaction;
   }
 }

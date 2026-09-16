@@ -22,6 +22,7 @@ export enum ExternalSourcePlatform {
   APP_DESK = 'app-desk',
   OZONETEL = 'ozonetel',
   GOOGLE_PLAY = 'google-play-reviews',
+  INSTAGRAM = 'instagram',
 }
 
 export interface IngestionOptions {
@@ -93,6 +94,7 @@ export interface NormalizedData {
     replyTo?: string[];
     type?: EmailType;
     sentByUserId?: string;
+    skipBlockingCheck?: boolean;
     rating?: number;
     clientVersionName?: string;
     clientVersionCode?: string;
@@ -249,7 +251,7 @@ export interface ExternalSourceAdapter {
    */
   sendMailNew?(ctx: NewMailContext): Promise<MailReplyResult>;
 
-  /** Optional: provider reply sender for non-email Desk interactions. */
+  /** Optional: provider reply sender for non-email Desk interactions (e.g. Instagram DMs). */
   sendInteractionReply?(ctx: InteractionReplyContext): Promise<NormalizedData>;
 }
 
