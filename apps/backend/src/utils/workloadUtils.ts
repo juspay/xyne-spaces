@@ -71,6 +71,78 @@ export async function syncUserWorkload(
   createdBy: string,
   userRoleIds?: string[],
 ): Promise<void> {
+  await syncWorkloadForUsers(
+    [userId],
+    userGroupId,
+    boardId,
+    createdBy,
+    userRoleIds !== undefined ? new Map([[userId, userRoleIds]]) : undefined,
+  );
+}
+
+/**
+ * All roleIds held by each of the given users, in one pair of queries.
+ * Pre-resolved entries in `provided` are used as-is (callers that already know a
+ * user's roles should pass them, exactly as the single-user path allowed).
+ */
+async function resolveUserRoleIds(
+  userIds: string[],
+  provided?: Map<string, string[]>,
+): Promise<Map<string, string[]>> {
+  const resolved = new Map<string, string[]>();
+  const missing: string[] = [];
+  for (const userId of userIds) {
+    const preResolved = provided?.get(userId);
+    if (preResolved !== undefined) resolved.set(userId, preResolved);
+    else missing.push(userId);
+  }
+  if (missing.length === 0) return resolved;
+
+  const [directMappings, groupMappings] = await Promise.all([
+    db.userRoleMapping.findMany({
+      where: { userId: { in: missing }, role: { isActive: true } },
+      select: { userId: true, roleId: true },
+    }),
+    db.userGroupMapping.findMany({
+      where: { userId: { in: missing }, roleId: { not: null }, role: { isActive: true } },
+      select: { userId: true, roleId: true },
+    }),
+  ]);
+
+  const roleIdsByUserId = new Map<string, Set<string>>(missing.map(id => [id, new Set<string>()]));
+  for (const mapping of directMappings) roleIdsByUserId.get(mapping.userId)?.add(mapping.roleId);
+  for (const mapping of groupMappings) {
+    if (mapping.roleId) roleIdsByUserId.get(mapping.userId)?.add(mapping.roleId);
+  }
+  for (const [userId, roleIds] of roleIdsByUserId) resolved.set(userId, Array.from(roleIds));
+  return resolved;
+}
+
+/**
+ * Bulk form of {@link syncUserWorkload} and the single implementation of the
+ * workload counting rules — the single-user function delegates here.
+ *
+ * Counting semantics are unchanged: a ticket counts toward a user's workload on
+ * this board when it is directly assigned to them, or when it carries a role
+ * assignment for a role they hold that is configured in `metadata.assignmentRoles`
+ * of any board in the project. `activeTasks` further restricts to
+ * statusV2 IN (TODO, STARTED).
+ *
+ * Query count is fixed regardless of pool size (board, project roles, role
+ * assignments, user roles, tickets, existing rows), and rows whose counts did not
+ * change are left untouched — so refreshing on the assignment hot path does not
+ * produce no-op writes or no-op Zero pokes.
+ */
+export async function syncWorkloadForUsers(
+  userIds: string[],
+  userGroupId: string,
+  boardId: string,
+  createdBy: string,
+  userRoleIdsByUserId?: Map<string, string[]>,
+): Promise<void> {
+  const uniqueUserIds = Array.from(new Set(userIds.filter(Boolean)));
+  if (uniqueUserIds.length === 0) return;
+
   const board = await db.board.findUnique({
     where: { id: boardId },
     select: { projectId: true, workspaceId: true },
@@ -80,62 +152,87 @@ export async function syncUserWorkload(
     return;
   }
 
-  const [projectAssignmentRoleIds, resolvedUserRoleIds] = await Promise.all([
-    getProjectAssignmentRoleIds(board.projectId),
-    userRoleIds !== undefined ? Promise.resolve(userRoleIds) : getUserRoleIds(userId),
-  ]);
-  const workloadRoleIds = projectAssignmentRoleIds.filter(id => resolvedUserRoleIds.includes(id));
+  const projectAssignmentRoleIds = await getProjectAssignmentRoleIds(board.projectId);
 
-  let roleMatchedTicketIds: string[] = [];
-  if (workloadRoleIds.length > 0) {
+  const ticketIdsByRoleId = new Map<string, Set<string>>();
+  if (projectAssignmentRoleIds.length > 0) {
     const roleAssignments = await db.ticketAssignment.findMany({
-      where: { roleId: { in: workloadRoleIds } },
-      select: { ticketId: true },
+      where: { roleId: { in: projectAssignmentRoleIds } },
+      select: { ticketId: true, roleId: true },
     });
-    roleMatchedTicketIds = Array.from(new Set(roleAssignments.map(ta => ta.ticketId)));
+    for (const assignment of roleAssignments) {
+      if (!assignment.roleId) continue;
+      if (!ticketIdsByRoleId.has(assignment.roleId)) ticketIdsByRoleId.set(assignment.roleId, new Set());
+      ticketIdsByRoleId.get(assignment.roleId)!.add(assignment.ticketId);
+    }
   }
 
-  const ticketWhere = {
-    boardId: boardId,
-    userGroupId: userGroupId,
-    OR: [
-      { assignedTo: userId },
-      ...(roleMatchedTicketIds.length > 0 ? [{ id: { in: roleMatchedTicketIds } }] : []),
-    ],
-  };
-
-  const [activeTasks, totalTasks] = await Promise.all([
-    db.ticket.count({
-      where: { ...ticketWhere, statusV2: { in: [TicketStatusV2.TODO, TicketStatusV2.STARTED] } },
+  const [roleIdsByUserId, tickets, existingRows] = await Promise.all([
+    resolveUserRoleIds(uniqueUserIds, userRoleIdsByUserId),
+    // Counted in memory so the OR between "assigned to me" and "matches my role"
+    // dedupes per ticket exactly like the previous per-user COUNT queries did.
+    db.ticket.findMany({
+      where: { boardId, userGroupId },
+      select: { id: true, assignedTo: true, statusV2: true },
     }),
-    db.ticket.count({ where: ticketWhere }),
+    withWorkspaceScope(() =>
+      repositories.userWorkloadMapping.findMany({
+        where: { userGroupId, boardId, userId: { in: uniqueUserIds } },
+      }),
+    ),
   ]);
 
-  // Writes the row of the assignee rather than the caller, so it runs above the caller's own scope.
-  await withWorkspaceScope(() =>
-    repositories.userWorkloadMapping.upsert({
-      where: {
-        userId_userGroupId_boardId: {
+  const existingByUserId = new Map(existingRows.map(row => [row.userId, row]));
+
+  for (const userId of uniqueUserIds) {
+    const userRoleIds = roleIdsByUserId.get(userId) ?? [];
+    const workloadRoleIds = projectAssignmentRoleIds.filter(id => userRoleIds.includes(id));
+    const roleMatchedTicketIds = new Set<string>();
+    for (const roleId of workloadRoleIds) {
+      for (const ticketId of ticketIdsByRoleId.get(roleId) ?? []) roleMatchedTicketIds.add(ticketId);
+    }
+
+    let activeTasks = 0;
+    let totalTasks = 0;
+    for (const ticket of tickets) {
+      if (ticket.assignedTo !== userId && !roleMatchedTicketIds.has(ticket.id)) continue;
+      totalTasks += 1;
+      if (ticket.statusV2 === TicketStatusV2.TODO || ticket.statusV2 === TicketStatusV2.STARTED) {
+        activeTasks += 1;
+      }
+    }
+
+    const existing = existingByUserId.get(userId);
+    if (existing && existing.activeTasks === activeTasks && existing.totalTasks === totalTasks) {
+      continue;
+    }
+
+    // Writes the row of the assignee rather than the caller, so it runs above the caller's own scope.
+    await withWorkspaceScope(() =>
+      repositories.userWorkloadMapping.upsert({
+        where: {
+          userId_userGroupId_boardId: {
+            userId,
+            userGroupId,
+            boardId,
+          },
+        },
+        create: {
           userId,
           userGroupId,
           boardId,
+          workspaceId: board.workspaceId,
+          activeTasks,
+          totalTasks,
+          createdBy,
         },
-      },
-      create: {
-        userId,
-        userGroupId,
-        boardId,
-        workspaceId: board.workspaceId,
-        activeTasks,
-        totalTasks,
-        createdBy,
-      },
-      update: {
-        activeTasks,
-        totalTasks,
-      },
-    }),
-  );
+        update: {
+          activeTasks,
+          totalTasks,
+        },
+      }),
+    );
+  }
 }
 
 /**

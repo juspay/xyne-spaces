@@ -2,6 +2,7 @@ import { repositories } from '@/database/repositories';
 import { UserResponsibility } from '@xyne/shared';
 import { withWorkspaceScope } from '@/database/tenant/context';
 import { notificationService } from '@/services/notificationService';
+import { syncWorkloadForUsers } from './workloadUtils';
 import { logger } from './logger';
 import type {
   UserGroupMapping,
@@ -187,6 +188,45 @@ async function filterMappingsToChannelParticipants(
  * Returns: { assignedUserId } or { reason: "NO_ON_CALL_USERS" | "EXCLUDED_USER_ONLY_CANDIDATE" }
  * @param projectId - Optional project ID to scope workload calculation to boards in the same project only
  */
+/**
+ * Recorded as `createdBy` on workload rows the engine creates itself: the refresh
+ * below is driven by the assignment decision, not by any one user's action.
+ */
+const WORKLOAD_SYNC_ACTOR = 'system';
+
+/**
+ * Refresh the candidates' workload rows from ticket truth, then read them back.
+ *
+ * `user_workload_mappings` is the scorer's only input, so a row that is never
+ * updated after an assignment freezes that user's load at its old value and the
+ * least-loaded pick keeps landing on them (XYNE-55777). Doing the refresh here —
+ * inside the engine, for exactly the users about to be scored — means every
+ * assignment path gets it by construction and no caller has to remember to sync
+ * after it persists an assignment.
+ *
+ * Best-effort by design: a refresh failure must never block an assignment, and
+ * the counts are recomputed from committed ticket state on the next evaluation.
+ */
+async function loadWorkloadMappings(
+  userGroupId: string,
+  boardId: string,
+  userIds: string[],
+): Promise<UserWorkloadMapping[]> {
+  try {
+    await syncWorkloadForUsers(userIds, userGroupId, boardId, WORKLOAD_SYNC_ACTOR);
+  } catch (error) {
+    logger.error(
+      `[Assignment] Workload refresh failed for userGroupId ${userGroupId}, boardId ${boardId}; scoring on existing rows`,
+      error,
+    );
+  }
+  return withWorkspaceScope(() =>
+    repositories.userWorkloadMapping.findMany({
+      where: { userGroupId, userId: { in: userIds } },
+    }),
+  );
+}
+
 export async function evaluateAssignmentRule(
   userGroupId: string,
   boardId: string,
@@ -308,14 +348,7 @@ export async function evaluateAssignmentRule(
 
   // Get workload mappings and board scores for boards in this user group
   let [allWorkloadMappings, allBoardScores, userGroup] = await Promise.all([
-    withWorkspaceScope(() =>
-      repositories.userWorkloadMapping.findMany({
-        where: {
-          userGroupId,
-          userId: { in: finalEligibleUserIds },
-        },
-      }),
-    ),
+    loadWorkloadMappings(userGroupId, boardId, finalEligibleUserIds),
     repositories.boardComplexityScore.findMany({
       where: { userGroupId },
     }),
@@ -771,9 +804,7 @@ export async function evaluateAllRoles(
   let [userStates, expertiseMappings, allWorkloadMappings, allBoardScores, userGroup] = await Promise.all([
     repositories.userAssignmentState.findMany({ where: { userGroupId, userId: { in: allUserIds } } }),
     repositories.userExpertiseMapping.findMany({ where: { userGroupId, boardId, userId: { in: allUserIds } } }),
-    withWorkspaceScope(() =>
-      repositories.userWorkloadMapping.findMany({ where: { userGroupId, userId: { in: allUserIds } } }),
-    ),
+    loadWorkloadMappings(userGroupId, boardId, allUserIds),
     repositories.boardComplexityScore.findMany({ where: { userGroupId } }),
     repositories.userGroups.findById(userGroupId),
   ]);
@@ -927,9 +958,7 @@ export async function evaluateRoleSlots(
   let [userStates, expertiseMappings, allWorkloadMappings, allBoardScores, userGroup] = await Promise.all([
     repositories.userAssignmentState.findMany({ where: { userGroupId, userId: { in: allUserIds } } }),
     repositories.userExpertiseMapping.findMany({ where: { userGroupId, boardId, userId: { in: allUserIds } } }),
-    withWorkspaceScope(() =>
-      repositories.userWorkloadMapping.findMany({ where: { userGroupId, userId: { in: allUserIds } } }),
-    ),
+    loadWorkloadMappings(userGroupId, boardId, allUserIds),
     repositories.boardComplexityScore.findMany({ where: { userGroupId } }),
     repositories.userGroups.findById(userGroupId),
   ]);
