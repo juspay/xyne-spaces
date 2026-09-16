@@ -270,7 +270,9 @@ const CalendarMonthView = ({
                                       ? 'bg-muted/50 text-muted-foreground'
                                       : variant === 'declined'
                                         ? 'bg-transparent text-muted-foreground'
-                                        : 'bg-primary/10 text-foreground',
+                                        : variant === 'highlighted'
+                                          ? 'bg-primary text-primary-foreground'
+                                          : 'bg-primary/10 text-foreground',
                                   )}
                                 >
                                   {isMaybe && variant !== 'past' && (
@@ -286,7 +288,9 @@ const CalendarMonthView = ({
                                       'w-0.5 h-3.5 rounded-full shrink-0 max-sm:mt-0.5 max-sm:hidden',
                                       variant === 'past' || variant === 'declined'
                                         ? 'bg-muted-foreground/50'
-                                        : 'bg-primary',
+                                        : variant === 'highlighted'
+                                          ? 'bg-primary-foreground'
+                                          : 'bg-primary',
                                     )}
                                   />
                                   <div className='flex min-w-0 flex-1 items-baseline max-sm:flex-col max-sm:items-stretch gap-1 max-sm:gap-0'>
@@ -318,7 +322,10 @@ const CalendarMonthView = ({
                                     {!isMobile && call.startsAt && (
                                       <span
                                         className={cn(
-                                          'shrink-0 tabular-nums text-xs text-muted-foreground opacity-70',
+                                          'shrink-0 tabular-nums text-xs opacity-70',
+                                          variant === 'highlighted'
+                                            ? 'text-primary-foreground'
+                                            : 'text-muted-foreground',
                                           isDeclined && 'line-through',
                                         )}
                                       >
