@@ -16,7 +16,7 @@ import type { AgentWidgetBinding } from "@prisma/client";
  */
 describe("normalizePrUrl", () => {
   it("strips protocol, lowercases, and drops trailing slashes", () => {
-    expect(normalizePrUrl("HTTPS://Bitbucket.Juspay.net/projects/XYN/repos/spaces/pull-requests/42/")).toBe(
+    expect(normalizePrUrl("HTTPS://Bitbucket.Example.com/projects/XYN/repos/spaces/pull-requests/42/")).toBe(
       "bitbucket.example.com/projects/xyn/repos/spaces/pull-requests/42",
     );
   });

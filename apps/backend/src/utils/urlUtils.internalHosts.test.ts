@@ -42,7 +42,7 @@ describe('urlUtils internal host detection (deployment-derived)', () => {
     ).not.toBeNull();
     // Deployment-specific hostnames must NOT be recognized when not configured.
     expect(
-      urlUtils.parseInternalUrl('https://spaces.xyne.juspay.net/chat/dir/ch1/conv1'),
+      urlUtils.parseInternalUrl('https://spaces.internal.example/chat/dir/ch1/conv1'),
     ).toBeNull();
   });
 
