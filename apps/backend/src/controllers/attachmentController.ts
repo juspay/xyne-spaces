@@ -10,7 +10,7 @@ import { storageService, getStorageService } from '../services/storage/index';
 import { normalizeStoragePath } from '@xyne/storage';
 import { logger } from '../utils/logger';
 import { setSafeDownloadHeaders } from '../utils/safeAttachmentDownload';
-import { getHeicRendition, isHeicAttachment, toWebpFilename } from '../services/heicRenditionService';
+import { getHeicRendition, HeicRenditionError, isHeicAttachment, toWebpFilename } from '../services/heicRenditionService';
 import { MessageAttachment } from '@prisma/client';
 import { AttachmentEntityType, ChannelVisibility } from '@xyne/shared';
 import {
@@ -384,8 +384,7 @@ export class AttachmentController {
 
       // Opt-in browser-renderable rendition: the original HEIC stays the
       // canonical bytes; ?format=webp serves a lossless WebP derivative
-      // (generated + cached on first request). Any conversion failure falls
-      // back to serving the original unchanged.
+      // (generated + cached on first request).
       if (req.query.format === 'webp' && isHeicAttachment(attachment.mimetype, attachment.originalFilename)) {
         try {
           const webpBuffer = await getHeicRendition(service, filePath, 'full');
@@ -400,10 +399,14 @@ export class AttachmentController {
           res.send(webpBuffer);
           return;
         } catch (error) {
-          logger.warn('[AttachmentController] HEIC→WebP rendition failed; serving original', {
+          const code = error instanceof HeicRenditionError ? error.code : 'CONVERSION_FAILED';
+          logger.warn('[AttachmentController] HEIC→WebP rendition failed', {
             attachmentId,
+            code,
             error: error instanceof Error ? error.message : String(error),
           });
+          res.status(502).json({ error: 'Failed to generate WebP rendition', code });
+          return;
         }
       }
 

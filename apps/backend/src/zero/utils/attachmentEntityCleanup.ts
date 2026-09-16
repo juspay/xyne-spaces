@@ -1,6 +1,7 @@
 import type { Transaction } from '@rocicorp/zero';
 import { AttachmentEntityType, type Schema } from '@xyne/shared';
 import { storageService } from '@/services/storage';
+import { deleteHeicRenditions, isHeicAttachment } from '@/services/heicRenditionService';
 import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
 import { zql } from '../queries';
@@ -25,6 +26,9 @@ async function deleteEntityAttachmentsByType(
           await storageService.deleteFile(url);
           if (thumbnailUrl) {
             await storageService.deleteFile(thumbnailUrl);
+          }
+          if (isHeicAttachment(attachment.mimetype, attachment.originalFilename)) {
+            await deleteHeicRenditions(url);
           }
         }
       } catch (error) {
@@ -83,6 +87,9 @@ export async function cleanupDelayedMessageAttachmentsPrisma(
         await storageService.deleteFile(attachment.url);
         if (attachment.thumbnailUrl) {
           await storageService.deleteFile(attachment.thumbnailUrl);
+        }
+        if (isHeicAttachment(attachment.mimetype, attachment.originalFilename)) {
+          await deleteHeicRenditions(attachment.url);
         }
       }
     } catch (error) {

@@ -2,9 +2,12 @@ import { createHash } from "crypto"
 import decode from "heic-decode"
 import pLimit from "p-limit"
 import sharp from "sharp"
-import { isPreconditionFailed } from "@xyne/storage"
+import { isPreconditionFailed, normalizeStoragePath } from "@xyne/storage"
+import { isHeicAttachment, toWebpFilename } from "@xyne/shared"
 import { logger } from "@/utils/logger"
 import { storageService } from "@/services/storage"
+
+export { isHeicAttachment, toWebpFilename }
 
 /**
  * Server-side HEIC → WebP renditions for chat attachments.
@@ -20,9 +23,13 @@ import { storageService } from "@/services/storage"
  * decoder included), not sharp: sharp's prebuilt libheif is built without
  * libde265, so it cannot decode the HEVC-compressed HEICs iPhones produce.
  * sharp handles the resize + WebP-lossless encode once pixels are in memory.
- * WebP lossless is bit-exact relative to the decoded HEIC pixels (verified:
- * roundtrip is pixel-identical), so no fidelity is lost beyond the HEIC's own
- * compression.
+ *
+ * Renditions are cached in GCS keyed on the sha256 of the storage *path*.
+ * Attachment bytes are immutable once uploaded, so the path is a stable key —
+ * and unlike a content hash it costs nothing to compute, which keeps cache
+ * hits at one small WebP read instead of a full-resolution download of the
+ * original. The v1 segment lets future conversion-parameter changes start a
+ * fresh cache instead of serving stale renditions forever.
  */
 
 export type HeicRenditionKind = "full" | "thumb"
@@ -36,6 +43,7 @@ const THUMB_LONG_EDGE = 1024
 // default limitInputPixels and comfortably above any real phone camera output
 // while keeping a maliciously large ispe header from OOM-ing the pod.
 const MAX_PIXELS = 50_000_000
+const WEBP_MAX_SIDE = 16383
 
 // Decode + encode are CPU- and memory-bound; an uncapped flood of first-time
 // requests would run one full-image decode per request and risk OOM-ing the
@@ -43,38 +51,13 @@ const MAX_PIXELS = 50_000_000
 const HEIC_MAX_CONCURRENCY = Number(process.env.HEIC_MAX_CONCURRENCY) || 2
 const conversionLimit = pLimit(HEIC_MAX_CONCURRENCY)
 
-// Cached in GCS, keyed on the sha256 of the *original* bytes — attachments
-// are immutable once uploaded, so entries are content-addressed and never
-// need to expire. Renditions land in the same bucket as the original.
-const GCS_CACHE_PREFIX = "heic-rendition-cache"
+// Concurrent first views of the same attachment share one conversion instead
+// of queueing one full decode per viewer behind the limiter.
+const inFlightConversions = new Map<string, Promise<Buffer>>()
 
-const HEIC_MIME_TYPES = new Set([
-    "image/heic",
-    "image/heif",
-    "image/heic-sequence",
-    "image/heif-sequence",
-])
+const TRANSIENT_FAILURE_TTL_MS = 60_000
 
-const HEIC_EXTENSIONS = [".heic", ".heif", ".hif"]
-
-/**
- * HEIC detection for an attachment. The client-supplied MIME type is checked
- * first, but not every browser reports one for HEIC (Chrome on Linux reports
- * application/octet-stream), so the filename extension is accepted as a
- * fallback — the same dual check the client applies when deciding to request
- * a rendition, so the two stay in agreement.
- */
-export function isHeicAttachment(mimetype: string, originalFilename: string): boolean {
-    if (HEIC_MIME_TYPES.has((mimetype || "").split(";")[0].trim().toLowerCase())) return true
-    const lower = (originalFilename || "").toLowerCase()
-    return HEIC_EXTENSIONS.some(ext => lower.endsWith(ext))
-}
-
-/** 'IMG_4032.heic' → 'IMG_4032.webp' (used for the rendition's download name). */
-export function toWebpFilename(originalFilename: string): string {
-    const stem = (originalFilename || "").replace(/\.[^./\\]+$/, "")
-    return `${stem || "image"}.webp`
-}
+const GCS_CACHE_PREFIX = "heic-rendition-cache/v1"
 
 export class HeicRenditionError extends Error {
     constructor(
@@ -84,6 +67,27 @@ export class HeicRenditionError extends Error {
         super(message)
         this.name = "HeicRenditionError"
     }
+}
+
+interface FailureMarker {
+    code: HeicRenditionError["code"]
+    at: number
+}
+
+function cacheBasePath(storagePath: string): string {
+    const normalized = normalizeStoragePath(storagePath)
+    const pathHash = createHash("sha256").update(normalized).digest("hex")
+    return `${GCS_CACHE_PREFIX}/${pathHash}`
+}
+
+function isPermanentFailure(code: HeicRenditionError["code"]): boolean {
+    return code === "NOT_HEIC" || code === "TOO_LARGE"
+}
+
+function isFailureMarkerActive(marker: FailureMarker | null): marker is FailureMarker {
+    if (!marker) return false
+    if (isPermanentFailure(marker.code)) return true
+    return Date.now() - marker.at < TRANSIENT_FAILURE_TTL_MS
 }
 
 async function readGcsCache(storage: typeof storageService, gcsPath: string): Promise<Buffer | null> {
@@ -99,15 +103,29 @@ async function readGcsCache(storage: typeof storageService, gcsPath: string): Pr
     }
 }
 
+async function readFailureMarker(
+    storage: typeof storageService,
+    markerPath: string,
+): Promise<FailureMarker | null> {
+    try {
+        const exists = await storage.fileExists(markerPath)
+        if (!exists) return null
+        const raw = await storage.getFileBuffer(markerPath)
+        return JSON.parse(raw.toString("utf8")) as FailureMarker
+    } catch {
+        return null
+    }
+}
+
 async function writeGcsCache(
     storage: typeof storageService,
     gcsPath: string,
     buffer: Buffer,
-    contentHash: string,
+    cacheKey: string,
 ): Promise<void> {
     try {
-        // Content-addressed, so a collision means another replica already
-        // cached the identical bytes concurrently — not an error.
+        // Path-keyed, so a collision means another replica already cached the
+        // identical rendition concurrently — not an error.
         await storage.uploadFileV2(buffer, {
             path: gcsPath,
             contentType: "image/webp",
@@ -116,13 +134,36 @@ async function writeGcsCache(
     } catch (err) {
         if (isPreconditionFailed(err)) return
         logger.warn("[HeicRendition] Failed to write GCS cache entry", {
-            contentHash,
+            cacheKey,
             error: err instanceof Error ? err.message : String(err),
         })
     }
 }
 
-async function convertBufferToWebp(buffer: Buffer, kind: HeicRenditionKind, contentHash: string): Promise<Buffer> {
+async function writeFailureMarker(
+    storage: typeof storageService,
+    markerPath: string,
+    code: HeicRenditionError["code"],
+): Promise<void> {
+    try {
+        const marker: FailureMarker = { code, at: Date.now() }
+        await storage.uploadFileV2(Buffer.from(JSON.stringify(marker)), {
+            path: markerPath,
+            contentType: "application/json",
+        })
+    } catch (err) {
+        logger.warn("[HeicRendition] Failed to write failure marker", {
+            markerPath,
+            error: err instanceof Error ? err.message : String(err),
+        })
+    }
+}
+
+async function convertBufferToWebp(
+    buffer: Buffer,
+    kind: HeicRenditionKind,
+    cacheKey: string,
+): Promise<Buffer> {
     // decode.all parses item handles first, so dimensions are known (and
     // checkable) before the decoder allocates width*height*4 bytes of WASM
     // memory for the actual pixel decode.
@@ -144,6 +185,12 @@ async function convertBufferToWebp(buffer: Buffer, kind: HeicRenditionKind, cont
         if (image.width * image.height > MAX_PIXELS) {
             throw new HeicRenditionError(
                 `HEIC too large to convert: ${image.width}x${image.height}`,
+                "TOO_LARGE",
+            )
+        }
+        if (Math.max(image.width, image.height) > WEBP_MAX_SIDE) {
+            throw new HeicRenditionError(
+                `HEIC exceeds WebP's ${WEBP_MAX_SIDE}px side limit: ${image.width}x${image.height}`,
                 "TOO_LARGE",
             )
         }
@@ -171,7 +218,7 @@ async function convertBufferToWebp(buffer: Buffer, kind: HeicRenditionKind, cont
             .toBuffer()
 
         logger.info("[HeicRendition] Converted HEIC to WebP", {
-            contentHash,
+            cacheKey,
             kind,
             width,
             height,
@@ -196,27 +243,77 @@ async function convertBufferToWebp(buffer: Buffer, kind: HeicRenditionKind, cont
  * generating and caching it on first request. `full` re-encodes the decoded
  * pixels without resizing; `thumb` fits within 1024px on the long edge.
  * `storage` is the bucket the original lives in (see getAttachmentStorage) —
- * renditions are cached alongside it, content-addressed by the original's
- * sha256.
+ * renditions are cached alongside it, keyed by the original's storage path.
  */
 export async function getHeicRendition(
     storage: typeof storageService,
     storagePath: string,
     kind: HeicRenditionKind,
 ): Promise<Buffer> {
-    const buffer = await storage.getFileBuffer(storagePath)
-    const contentHash = createHash("sha256").update(buffer).digest("hex")
-    const cachePath = `${GCS_CACHE_PREFIX}/${contentHash}/${kind}.webp`
+    const base = cacheBasePath(storagePath)
+    const cachePath = `${base}/${kind}.webp`
+    const markerPath = `${base}/${kind}.failed`
+    const flightKey = `${base}/${kind}`
 
     const gcsHit = await readGcsCache(storage, cachePath)
     if (gcsHit) {
-        logger.info("[HeicRendition] GCS cache hit", { contentHash, kind })
+        logger.info("[HeicRendition] GCS cache hit", { cacheKey: flightKey })
         return gcsHit
     }
 
-    const webp = await conversionLimit(() => convertBufferToWebp(buffer, kind, contentHash))
+    const marker = await readFailureMarker(storage, markerPath)
+    if (isFailureMarkerActive(marker)) {
+        throw new HeicRenditionError(
+            `HEIC previously failed conversion (${marker.code}); see failure marker`,
+            marker.code,
+        )
+    }
 
-    await writeGcsCache(storage, cachePath, webp, contentHash)
+    const existingFlight = inFlightConversions.get(flightKey)
+    if (existingFlight) return existingFlight
 
-    return webp
+    const flight = (async (): Promise<Buffer> => {
+        try {
+            // Only a genuine cache miss pays for the full-resolution download.
+            const buffer = await storage.getFileBuffer(storagePath)
+            const webp = await conversionLimit(() => convertBufferToWebp(buffer, kind, flightKey))
+            await writeGcsCache(storage, cachePath, webp, flightKey)
+            return webp
+        } catch (err) {
+            if (err instanceof HeicRenditionError) {
+                await writeFailureMarker(storage, markerPath, err.code)
+            }
+            throw err
+        } finally {
+            inFlightConversions.delete(flightKey)
+        }
+    })()
+    inFlightConversions.set(flightKey, flight)
+    return flight
+}
+
+/**
+ * Best-effort deletion of every cached rendition and failure marker for the
+ * attachment at `storagePath`. Called from attachment delete paths so a
+ * deleted message does not leave derived copies of its file behind — the
+ * originals are removed by the callers themselves.
+ */
+export async function deleteHeicRenditions(
+    storagePath: string,
+    storage: typeof storageService = storageService,
+): Promise<void> {
+    if (!storagePath) return
+    const base = cacheBasePath(storagePath)
+    const paths = (["full.webp", "thumb.webp", "full.failed", "thumb.failed"] as const).map(
+        (name) => `${base}/${name}`,
+    )
+    await Promise.all(
+        paths.map(async (path) => {
+            try {
+                await storage.deleteFile(path)
+            } catch {
+                // Missing entries are the common case; deletion is best-effort.
+            }
+        }),
+    )
 }
