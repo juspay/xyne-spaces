@@ -1,3 +1,10 @@
+## [1.323.0-release-20260916.8](https://github.com/juspay/xyne-spaces/compare/v1.323.0-release-20260916.7...v1.323.0-release-20260916.8) (2026-09-16)
+
+
+### Features
+
+* SDLC folders open as pages, with links, files and an embedded browser ([#1930](https://github.com/juspay/xyne-spaces/issues/1930)) ([12c785b](https://github.com/juspay/xyne-spaces/commit/12c785bfda6ca41e090f8249bc81db7d8b8da461))
+
 ## [1.323.0-release-20260916.7](https://github.com/juspay/xyne-spaces/compare/v1.323.0-release-20260916.6...v1.323.0-release-20260916.7) (2026-09-16)
 
 
