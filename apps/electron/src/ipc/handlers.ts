@@ -205,7 +205,12 @@ export function setupIpcHandlers(): void {
   // on the app's own chrome is spent transferring it and never reaches the DOM,
   // so buttons beside an embedded page appear to need two clicks.
   ipcMain.handle('focus-host-webcontents', (event) => {
-    if (!isMainWindowSender(event)) return;
+    // Any top frame of a window this app opened, not only the main one: folder
+    // windows embed pages too, and there the main-window check would both
+    // refuse the focus and log a blocked-sender warning on every pointerenter.
+    const sender = BrowserWindow.fromWebContents(event.sender);
+    const frame = event.senderFrame;
+    if (!sender || sender.isDestroyed() || !frame || frame.parent !== null) return;
     event.sender.focus();
   });
 

@@ -584,6 +584,9 @@ export default function SdlcScreen(): ReactElement {
   };
   useEffect(() => {
     setPreviewCanvasId(null);
+    // Links and files are hub-scoped, so one from the previous track would still
+    // resolve here and go on showing its preview column.
+    setPreviewItem(null);
   }, [selectedTrackId]);
   const openTracks = useMemo(
     () => tracks.filter(track => track.status !== 'COMPLETED' && track.status !== 'ARCHIVED'),
@@ -1370,7 +1373,11 @@ export default function SdlcScreen(): ReactElement {
     openLink(url, event ?? null);
   };
 
-  const folderPageSearch = (folderId: string, tab: FolderTab | null): string => {
+  const folderPageSearch = (
+    folderId: string,
+    tab: FolderTab | null,
+    withDiscussion = false,
+  ): string => {
     const search = new URLSearchParams();
     if (selectedTrackId) search.set('track', selectedTrackId);
     search.set('folder', folderId);
@@ -1378,6 +1385,10 @@ export default function SdlcScreen(): ReactElement {
     if (tab?.kind === 'ATTACHMENT') search.set('file', tab.id);
     if (tab?.kind === 'LINK') search.set('link', tab.id);
     if (tab?.kind === 'BROWSER') search.set('browse', '1');
+    if (withDiscussion) {
+      search.set('discussion', '1');
+      search.set('chat', 'conversations');
+    }
     return search.toString();
   };
 
@@ -1389,10 +1400,19 @@ export default function SdlcScreen(): ReactElement {
     );
   };
 
+  /** Stable identity: the folder page memoises its tree and tabs on this. */
+  const folderPageMaps = useMemo(
+    () => ({ folderById, canvasById: folderPageCanvasById, linkById, fileById }),
+    [folderById, folderPageCanvasById, linkById, fileById],
+  );
+
   const openFolderPage = (
     folderId: string,
     tab: FolderTab | null = null,
     event?: { metaKey: boolean; ctrlKey: boolean },
+    /** Opens the conversation panel in the same navigation, rather than a second
+     *  one that would replace this entry and take the tab with it. */
+    withDiscussion = false,
   ): void => {
     if (!channelId) return;
     if (shouldOpenInNewWindow(event) && openFolderInWindow(folderId, tab)) return;
@@ -1420,7 +1440,10 @@ export default function SdlcScreen(): ReactElement {
       const folder = folderById.get(folderId);
       setFolderDiscussion(folder ? { type: 'FOLDER', id: folder.id, name: folder.name } : null);
     }
-    navigateWithinSdlc(`/sdlc/${channelId}/tracks`, `?${folderPageSearch(folderId, tab)}`);
+    navigateWithinSdlc(
+      `/sdlc/${channelId}/tracks`,
+      `?${folderPageSearch(folderId, tab, withDiscussion)}`,
+    );
   };
 
   const closeFolderPage = (): void => {
@@ -1741,6 +1764,23 @@ export default function SdlcScreen(): ReactElement {
     setArtifactDialog(null);
     clearArtifactDialogFields();
     setPendingArtifactFolder(null);
+  };
+
+  /**
+   * Closing the Add dialog, from wherever. Its `open` is derived from
+   * addItemParent, and Radix reports only the dismissals it handles itself
+   * (Esc, the overlay) — so the X and Cancel buttons have to run this too, or
+   * the next folder's dialog opens holding the last one's files and link.
+   */
+  const closeAddItemDialog = (): void => {
+    setAddItemParent(null);
+    returnFocusToFinder();
+    setPendingUploads([]);
+    setRefusedUploads([]);
+    setLinkUrl('');
+    setLinkTitle('');
+    setLinkPreview(null);
+    resetArtifactDialog();
   };
 
   const relatedArtifactsForPayload = (): Array<{ canvasId: string; title: string }> =>
@@ -3580,7 +3620,7 @@ export default function SdlcScreen(): ReactElement {
                   key={openFolder.id}
                   channelId={channel.id}
                   folder={openFolder}
-                  maps={{ folderById, canvasById: folderPageCanvasById, linkById, fileById }}
+                  maps={folderPageMaps}
                   activeTab={activeFolderTab}
                   onOpenTab={tab => openFolderPage(openFolder.id, tab)}
                   onDiscuss={item => {
@@ -3591,8 +3631,7 @@ export default function SdlcScreen(): ReactElement {
                       return;
                     }
                     const kind = item.type;
-                    openFolderPage(openFolder.id, { kind, id: item.id });
-                    setDiscussionUrl({ open: true, conversationId: null });
+                    openFolderPage(openFolder.id, { kind, id: item.id }, undefined, true);
                   }}
                   discussingId={
                     showRightPanel
@@ -4130,17 +4169,7 @@ export default function SdlcScreen(): ReactElement {
       <Dialog
         open={addItemParent !== null}
         onOpenChange={open => {
-          if (!open) {
-            setAddItemParent(null);
-            returnFocusToFinder();
-            setPendingUploads([]);
-            setRefusedUploads([]);
-            setRefusedUploads([]);
-            setLinkUrl('');
-            setLinkTitle('');
-            setLinkPreview(null);
-            resetArtifactDialog();
-          }
+          if (!open) closeAddItemDialog();
         }}
         title='Add to folder'
         className='max-w-[860px]'
@@ -4168,10 +4197,7 @@ export default function SdlcScreen(): ReactElement {
               type='button'
               title='Close'
               aria-label='Close'
-              onClick={() => {
-                setAddItemParent(null);
-                returnFocusToFinder();
-              }}
+              onClick={closeAddItemDialog}
               className='flex size-7 shrink-0 items-center justify-center rounded-[7px] text-muted-foreground hover:bg-muted hover:text-foreground'
               data-track-category='SdlcHub'
               data-track-name='AddItemDialogClosed'
@@ -4317,10 +4343,7 @@ export default function SdlcScreen(): ReactElement {
                   <Button
                     type='button'
                     variant='outline'
-                    onClick={() => {
-                      setAddItemParent(null);
-                      returnFocusToFinder();
-                    }}
+                    onClick={closeAddItemDialog}
                     data-track-category='SdlcHub'
                     data-track-name='UploadCancelled'
                   >
@@ -4416,10 +4439,7 @@ export default function SdlcScreen(): ReactElement {
                   <Button
                     type='button'
                     variant='outline'
-                    onClick={() => {
-                      setAddItemParent(null);
-                      returnFocusToFinder();
-                    }}
+                    onClick={closeAddItemDialog}
                     data-track-category='SdlcHub'
                     data-track-name='AddLinkCancelled'
                   >

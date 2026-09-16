@@ -2604,6 +2604,24 @@ export function createMutators(
               ) {
                 throw new Error('Invalid SDLC discussion owner');
               }
+              if (entityLinkContext.trackRollUp) {
+                // An artifact carries the same flat edge a folder does, so the
+                // track it claims to roll up to has to be the one that edge
+                // names. Without this the caller picks the track, and the
+                // conversation surfaces in one it may not be able to reach.
+                const canvasEdge = await tx.run(
+                  zql.sdlc_entity_links
+                    .where('channelId', channelId)
+                    .where('sourceType', 'TRACK')
+                    .where('targetType', 'CANVAS')
+                    .where('targetId', entityLinkContext.sourceId)
+                    .where('relationType', SDLC_TRACK_FLAT_RELATION)
+                    .one()
+                );
+                if (!canvasEdge || entityLinkContext.trackRollUp.trackId !== canvasEdge.sourceId) {
+                  throw new Error('Invalid SDLC discussion owner');
+                }
+              }
             }
           }
 
