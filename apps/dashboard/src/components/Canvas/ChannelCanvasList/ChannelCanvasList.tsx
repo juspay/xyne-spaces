@@ -2,12 +2,13 @@ import React, { useMemo, useState } from 'react';
 import { ChevronDown, ChevronRight, FileText, Folder, Plus, Search } from 'lucide-react';
 import type { Canvas, CanvasFolder } from '../Canvas.types';
 import Input from '../../ui/Input';
-import { Button } from '../../ui/Button/Button';
+
 import { Dialog } from '../../ui/Dialog';
 import { CanvasDeleteModal } from '../CanvasDeleteModal';
 import { CanvasRow } from '../CanvasRow';
 import { getDisplayedCanvases } from '../canvasListFilters';
 import { filterStarredCanvases, withStarredCanvasState } from '../canvasFilters';
+import { useCanvasesWithRestLabels } from '../useCanvasLabels';
 import { DelayedSpinner } from '../../ui/DelayedSpinner';
 
 type FilterTab = 'all' | 'created_by_me' | 'shared';
@@ -64,7 +65,11 @@ export const ChannelCanvasList: React.FC<ChannelCanvasListProps> = ({
   const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(new Set());
   const [deletingCanvas, setDeletingCanvas] = useState<Canvas | null>(null);
 
-  const canvasesWithStarState = useMemo(() => withStarredCanvasState(canvases), [canvases]);
+  const canvasesWithLabels = useCanvasesWithRestLabels(canvases);
+  const canvasesWithStarState = useMemo(
+    () => withStarredCanvasState(canvasesWithLabels),
+    [canvasesWithLabels],
+  );
 
   const displayedCanvases = useMemo(
     () =>
@@ -252,19 +257,18 @@ export const ChannelCanvasList: React.FC<ChannelCanvasListProps> = ({
                         </span>
                       </button>
                       {onCreateCanvasInFolder && (
-                        <Button
-                          variant='ghost'
+                        <button
                           className='p-1 opacity-70 group-hover:opacity-100 hover:bg-muted rounded transition-all disabled:opacity-40'
                           onClick={() => onCreateCanvasInFolder(folderGroup.folder)}
                           disabled={isCreatingCanvas}
                           title='Create canvas in folder'
                           data-testid={`channel-folder-create-canvas-${folderGroup.folder.id}`}
-                          trackId='create_canvas_in_channel_folder'
+                          data-ph-capture-attribute-track-id='create_canvas_in_channel_folder'
                           data-track-category='CANVAS'
                           data-track-name='Create_Canvas_In_Channel_Folder'
                         >
                           <Plus className='w-4 h-4 text-muted-foreground' />
-                        </Button>
+                        </button>
                       )}
                     </div>
                     {!isCollapsed &&

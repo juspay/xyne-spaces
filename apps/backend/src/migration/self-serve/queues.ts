@@ -19,7 +19,8 @@ export class MigrationQueues {
         new Bull<JobRef>(name, {
           redis: { ...getBaseRedisOptions('bullmq'), lazyConnect: false },
           defaultJobOptions: { attempts: 1, removeOnComplete: true, removeOnFail: true },
-          settings: { lockDuration: 5 * 60_000, stalledInterval: 30_000, maxStalledCount: 1 },
+          // lockDuration covers the slowest single-conversation job so an in-progress one isn't treated as stalled.
+          settings: { lockDuration: 30 * 60_000, stalledInterval: 30_000, maxStalledCount: 1 },
         }),
       );
     }

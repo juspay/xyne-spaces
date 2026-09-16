@@ -490,6 +490,11 @@ export const CallCard = ({
                         }}
                         data-track-category='CALLS'
                         data-track-name='join-call'
+                        data-track-metadata={JSON.stringify({
+                          source: 'call_history_list',
+                          callId: call.externalId,
+                          callStatus: call.status,
+                        })}
                         className='size-7 flex items-center justify-center border border-border rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent'
                       >
                         <HuddleIcon size={16} />

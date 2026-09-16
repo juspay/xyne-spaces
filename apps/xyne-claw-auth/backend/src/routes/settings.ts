@@ -23,7 +23,7 @@ const log = createLogger("settings");
 
 const router = Router();
 
-const VALID_PROVIDERS = new Set(["spaces", "copilot", "claude", "codex", "litellm"]);
+const VALID_PROVIDERS = new Set(["spaces", "copilot", "claude", "codex", "openrouter", "litellm"]);
 
 const GITHUB_CLIENT_ID = "Ov23li8tweQw6odWQebz";
 const GITHUB_DEVICE_CODE_URL = "https://github.com/login/device/code";

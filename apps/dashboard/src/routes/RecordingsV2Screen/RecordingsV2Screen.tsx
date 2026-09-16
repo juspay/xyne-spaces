@@ -449,7 +449,6 @@ const RecordingsV2Screen = (): ReactElement => {
                 <RecordingDateFilter value={selectedDatePreset} onChange={setSelectedDatePreset} />
 
                 <RecordingPeopleFilter
-                  creators={users}
                   currentUserId={currentUser?.id}
                   selectedUserId={selectedCreatorId}
                   onUserChange={handleCreatorChange}

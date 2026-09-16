@@ -57,6 +57,15 @@ export interface ToolboxSelection {
   gateway?: string[];
 }
 
+/**
+ * An agent's toolbox plus the other agents it may delegate to. Kept separate
+ * from ToolboxSelection because subagents and the subagent wizard share that
+ * type and have no notion of calling another agent.
+ */
+export interface AgentToolboxSelection extends Required<ToolboxSelection> {
+  callableAgents: string[];
+}
+
 /** A research-agent product or repository option (id + display name). */
 export interface ResearchAgentOption {
   id: string;

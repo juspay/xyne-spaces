@@ -424,16 +424,26 @@ router.get("/:slug", asyncHandler(async (req: Request<{ slug: string }>, res: Re
 
   const record = agent as unknown as Record<string, unknown>;
   const viewerId = getRequesterId(req);
-  let canEdit = s2sKeyMatches(req.headers["x-s2s-key"]);
+  const isS2S = s2sKeyMatches(req.headers["x-s2s-key"]);
+  let canEdit = isS2S;
   if (!canEdit && viewerId) {
     const access = await getAgentEditAccess(viewerId, req.params.slug, getOrgId(req)).catch(() => null);
     canEdit = Boolean(access?.canEdit) || (await isClawAdmin(viewerId));
   }
-  // Any org viewer may READ the full agent: sanitizeAgent scrubs the only
-  // inline secrets (signingSecret/spacesAppToken), and provider/MCP creds live
-  // behind their own ACL'd endpoints. Read-only is enforced by the write
-  // routes, NOT by hiding fields — so return the full shape (non-admins get a
-  // complete read-only view) plus a canEdit flag for the UI to gate editing.
+  // The slug is caller-supplied, so org scope alone is tenant isolation, not
+  // authorization: a same-org user must not read another user's private agent
+  // (system prompt / tools / knowledge base) by guessing its slug. Gate the
+  // full read to agents the viewer may actually see — owned, shared, or global —
+  // the same visibility used on the execution path. Editors/admins (canEdit) and
+  // internal S2S callers are already past this. A not-visible agent resolves to
+  // 404, never 403, so the slug is not confirmed to someone probing.
+  if (!canEdit) {
+    const visible = await agentRepository.findBySlugVisibleTo(req.params.slug, orgId, viewerId);
+    if (!visible) {
+      logAgentScopedMiss(req, "agents/get", req.params.slug, orgId);
+      throw notFound("Agent not found");
+    }
+  }
   ok(res, { ...sanitizeAgent(record), canEdit });
 }));
 
@@ -3926,6 +3936,129 @@ router.post(
 );
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Agent-level GitHub Copilot device-code login. Mirrors the user-level flow in
+// settings.ts, but stores the token as an AGENT credential so every run of this
+// agent uses it, rather than binding it to the person who signed in.
+//
+// Note this spends the signing-in user's Copilot seat on behalf of everyone who
+// runs the agent — unlike Claude/ChatGPT team accounts, Copilot is licensed per
+// user. Owner-or-admin only, and the acting user is recorded on the credential.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const AGENT_COPILOT_DEVICE_PREFIX = "gh-device-agent:";
+
+router.post(
+  "/:slug/provider-credentials/copilot/github-login",
+  requireAgentOwnerOrAdmin,
+  async (req: Request<{ slug: string }>, res: Response) => {
+    try {
+      const agent = req.agentContext!.agent;
+      const ghRes = await fetch(GITHUB_DEVICE_CODE_URL, {
+        method: "POST",
+        headers: { Accept: "application/json" },
+        body: new URLSearchParams({ client_id: GITHUB_CLIENT_ID, scope: "read:user" }),
+      });
+      if (!ghRes.ok) {
+        const text = await ghRes.text().catch(() => "");
+        res.status(502).json({ success: false, error: `GitHub error: ${text.slice(0, 200)}` });
+        return;
+      }
+      const data = (await ghRes.json()) as {
+        device_code: string;
+        user_code: string;
+        verification_uri: string;
+        expires_in: number;
+        interval: number;
+      };
+      const redis = redisService.getConnection();
+      await redis.set(
+        `${AGENT_COPILOT_DEVICE_PREFIX}${agent.id}`,
+        JSON.stringify({ device_code: data.device_code, interval: data.interval }),
+        "EX",
+        DEVICE_CODE_TTL,
+      );
+      res.json({
+        success: true,
+        data: {
+          userCode: data.user_code,
+          verificationUri: data.verification_uri,
+          expiresIn: data.expires_in,
+          interval: data.interval,
+        },
+      });
+    } catch (err) {
+      log.error("[agents] copilot/github-login error:", err);
+      res.status(500).json({ success: false, error: "Failed to initiate GitHub login" });
+    }
+  },
+);
+
+router.post(
+  "/:slug/provider-credentials/copilot/github-poll",
+  requireAgentOwnerOrAdmin,
+  async (req: Request<{ slug: string }>, res: Response) => {
+    try {
+      const agent = req.agentContext!.agent;
+      const requesterId = getRequesterId(req);
+      const key = `${AGENT_COPILOT_DEVICE_PREFIX}${agent.id}`;
+      const redis = redisService.getConnection();
+      const raw = await redis.get(key);
+      if (!raw) {
+        res.status(400).json({ success: false, error: "No pending login — start again" });
+        return;
+      }
+      const { device_code } = JSON.parse(raw) as { device_code: string };
+
+      const ghRes = await fetch(GITHUB_ACCESS_TOKEN_URL, {
+        method: "POST",
+        headers: { Accept: "application/json" },
+        body: new URLSearchParams({
+          client_id: GITHUB_CLIENT_ID,
+          device_code,
+          grant_type: "urn:ietf:params:oauth:grant-type:device_code",
+        }),
+      });
+      const data = (await ghRes.json()) as {
+        access_token?: string;
+        error?: string;
+        error_description?: string;
+      };
+
+      if (data.access_token) {
+        const encrypted = encrypt(data.access_token, CONFIG.encryptionKey);
+        await agentProviderCredentialsRepository.upsert(agent.id, "copilot", {
+          encryptedKey: encrypted.ciphertext,
+          iv: encrypted.iv,
+          authTag: encrypted.authTag,
+          authType: "oauth_token",
+          baseUrl: "https://api.githubcopilot.com",
+          ...(requesterId ? { createdByUserId: requesterId } : {}),
+        });
+        await redis.del(key);
+        res.json({ success: true, data: { status: "approved" } });
+        return;
+      }
+      if (data.error === "authorization_pending") {
+        res.json({ success: true, data: { status: "pending" } });
+        return;
+      }
+      if (data.error === "slow_down") {
+        res.json({ success: true, data: { status: "slow_down" } });
+        return;
+      }
+      await redis.del(key);
+      res.status(400).json({
+        success: false,
+        error: data.error_description ?? data.error ?? "Authorization failed",
+      });
+    } catch (err) {
+      log.error("[agents] copilot/github-poll error:", err);
+      res.status(500).json({ success: false, error: "GitHub login failed" });
+    }
+  },
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Agent-level Codex model list — mirror of `/settings/codex/models` but reads
 // the agent-scoped credential. ChatGPT OAuth tokens cannot hit OpenAI's
 // `/v1/models` (missing `api.model.read` scope, returns 403); Codex CLI works
@@ -4284,6 +4417,17 @@ router.post(
       const apiKey = (body.apiKey ?? "").trim();
       const model = (body.model ?? "").trim() || null;
       const baseUrl = (body.baseUrl ?? "").trim() || null;
+      // A custom provider baseUrl is fetched server-side at model-probe and at
+      // runtime; refuse an internal / private / metadata destination at save so
+      // one can never be persisted (the probe/runtime paths validate too).
+      if (baseUrl) {
+        try {
+          await assertSafeOutboundUrl(baseUrl);
+        } catch {
+          res.status(400).json({ success: false, error: "baseUrl must be a public https(s) endpoint" });
+          return;
+        }
+      }
       const authType = (body.authType ?? "").trim() || null;
       const rawEffort = typeof body.reasoningEffort === "string" ? body.reasoningEffort.trim() : body.reasoningEffort;
       let reasoningEffort: string | null;

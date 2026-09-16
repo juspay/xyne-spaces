@@ -32,6 +32,28 @@ function parseRecordingParticipantIds(stored: string | null): string[] {
 }
 
 /**
+ * The outbound mirror of a Call on the organizer's Google Calendar, recorded
+ * under `calls.metadata.googleCalendarPush`. Absent until the call has been
+ * pushed; removed again when the remote event is deleted.
+ */
+export type GoogleCalendarPushState = {
+  /** Google's event id on the organizer's primary calendar. */
+  eventId: string;
+  /** ExternalSource the event was written through, so a reconnect is detectable. */
+  sourceId: string;
+  /** Organizer whose calendar owns the event — the only account allowed to edit it. */
+  organizerUserId: string;
+  /**
+   * Digest of the event body last written. A reconcile whose payload hashes to
+   * this skips the PATCH entirely — Google emails every attendee on an event
+   * update, so a no-op write is not free.
+   */
+  contentHash: string;
+  htmlLink?: string;
+  syncedAt: string;
+};
+
+/**
  * Shape of `calls.metadata` as written by this repository.
  * `artifactMessageId` is set only for calls started from a slash-command
  * artifact card, and links the call back to the message that owns it.
@@ -40,6 +62,7 @@ export interface CallMetadata {
   systemMessageId?: string;
   conversationId?: string;
   artifactMessageId?: string;
+  googleCalendarPush?: GoogleCalendarPushState;
 }
 
 const getArtifactMessageId = (metadata: Prisma.JsonValue | null): string | undefined =>
@@ -233,6 +256,27 @@ export class CallRepository {
         endsAt: { lt: new Date() },
         ...(excludeOrigins?.length && { callOrigin: { notIn: excludeOrigins } }),
       },
+      take,
+    });
+  }
+
+  /**
+   * All calls whose detailed summary has sat in 'pending' since
+   * before `staleBefore` with no row activity. Summary generation runs
+   * in-process in the API, so a backend restart mid-run leaves the row
+   * 'pending' forever — this is the query the validation worker sweeps.
+   * updatedAt is part of the predicate so a fresh manual regenerate on an old
+   * recording (which re-publishes 'pending' and bumps updatedAt) is not swept
+   * on the next cycle.
+   */
+  async findStalePendingSummaryCalls(take: number, staleBefore: Date): Promise<Call[]> {
+    return DatabaseClient.getInstance().call.findMany({
+      where: {
+        endedAt: { lt: staleBefore },
+        updatedAt: { lt: staleBefore },
+        metadata: { path: ['detailedSummaryStatus'], equals: 'pending' },
+      },
+      orderBy: { endedAt: 'asc' },
       take,
     });
   }
@@ -770,6 +814,88 @@ export class CallRepository {
   }
 
   /**
+   * Everything the outbound Google Calendar push needs to mirror a call, in a
+   * single query. Not `findByExternalId`: the push job runs outside any tenant
+   * scope and knows only a call id, so it reads the row's own `workspaceId`
+   * here and opens a scope with it before doing anything else.
+   */
+  async findForCalendarPush(callId: string): Promise<{
+    id: string;
+    externalId: string;
+    workspaceId: string;
+    title: string | null;
+    description: string | null;
+    status: string;
+    callOrigin: string;
+    createdByUserId: string;
+    roomLink: string | null;
+    startsAt: Date | null;
+    endsAt: Date | null;
+    timezone: string;
+    metadata: Prisma.JsonValue | null;
+    updatedAt: Date;
+  } | null> {
+    return await DatabaseClient.getInstance().call.findUnique({
+      where: { id: callId },
+      select: {
+        id: true,
+        externalId: true,
+        workspaceId: true,
+        title: true,
+        description: true,
+        status: true,
+        callOrigin: true,
+        createdByUserId: true,
+        roomLink: true,
+        startsAt: true,
+        endsAt: true,
+        timezone: true,
+        metadata: true,
+        updatedAt: true,
+      },
+    });
+  }
+
+  /** `updatedAt` alone, to detect a call edited while a push job was running. */
+  async findCalendarPushRevision(callId: string): Promise<Date | null> {
+    const row = await DatabaseClient.getInstance().call.findUnique({
+      where: { id: callId },
+      select: { updatedAt: true },
+    });
+    return row?.updatedAt ?? null;
+  }
+
+  /**
+   * Record (or clear) the Google Calendar event this call is mirrored to.
+   *
+   * Written as a jsonb merge rather than a read-modify-write of the whole
+   * column: `calls.metadata` also carries `systemMessageId` / `conversationId`
+   * written by unrelated flows, and a push job that round-tripped the object
+   * would silently drop whichever of those landed in between.
+   */
+  async setGoogleCalendarPushState(
+    callId: string,
+    state: GoogleCalendarPushState | null,
+  ): Promise<void> {
+    const db = DatabaseClient.getInstance();
+
+    if (state === null) {
+      await db.$executeRaw`
+        UPDATE "calls"
+        SET "metadata" = COALESCE("metadata", '{}'::jsonb) - 'googleCalendarPush'
+        WHERE "id" = ${callId}
+      `;
+      return;
+    }
+
+    await db.$executeRaw`
+      UPDATE "calls"
+      SET "metadata" = COALESCE("metadata", '{}'::jsonb) || ${JSON.stringify({ googleCalendarPush: state })}::jsonb
+      WHERE "id" = ${callId}
+    `;
+  }
+
+  /**
    * Get all participants for a call with their response status.
    * Used to check for active participants when auto-ending calls.
    * - ACCEPTED: participant is currently in the call
@@ -873,6 +999,53 @@ export class CallRepository {
       },
     });
     queueCallVespaFeed(callId, { source: CallVespaFeedSource.CallRepositoryMarkAllParticipantsAsLeft });
+  }
+
+  /**
+   * Mark a call's ACCEPTED participants as LEFT. Returns the number of rows updated.
+   */
+  async markStrandedParticipantsAsLeft(callId: string, leftAt: Date): Promise<number> {
+    const { count } = await DatabaseClient.getInstance().callParticipant.updateMany({
+      where: {
+        callId,
+        response: InvitationResponse.ACCEPTED,
+      },
+      data: {
+        response: InvitationResponse.LEFT,
+        leftAt,
+      },
+    });
+
+    if (count > 0) {
+      queueCallVespaFeed(callId, { source: CallVespaFeedSource.CallRepositoryMarkParticipantAsLeft });
+    }
+
+    return count;
+  }
+
+  /**
+   * Find calls that are no longer live but still have ACCEPTED participants.
+   */
+  async findCallsWithStrandedParticipants(
+    take: number,
+  ): Promise<Array<{ id: string; endedAt: Date | null }>> {
+    const stranded = await DatabaseClient.getInstance().callParticipant.findMany({
+      where: {
+        response: InvitationResponse.ACCEPTED,
+        call: { status: { notIn: [CallStatus.ACTIVE, CallStatus.IN_PROGRESS] } },
+      },
+      select: { callId: true },
+      distinct: ['callId'],
+      take,
+    });
+
+    if (stranded.length === 0) return [];
+
+    return await DatabaseClient.getInstance().call.findMany({
+      where: { id: { in: stranded.map((p) => p.callId) } },
+      select: { id: true, endedAt: true },
+      orderBy: { endedAt: 'asc' },
+    });
   }
 
   /**
@@ -1143,15 +1316,17 @@ export class CallRepository {
         await this.syncArtifactLifecycle(tx, call, MessageArtifactStatus.COMPLETED, endedAt);
       }
 
-      // Clear conversation.callId when call ends (for conversation calls)
+      // Clear conversation.callId when call ends (for conversation calls). Only if it
+      // still points at this room: room_finished for a stale room can land after a
+      // newer call has already started in the same conversation.
       const callMetadata = call.metadata as CallMetadata | null;
       if (callMetadata?.conversationId) {
         try {
-          await tx.conversation.update({
-            where: { conversationId: callMetadata.conversationId },
+          const { count } = await tx.conversation.updateMany({
+            where: { conversationId: callMetadata.conversationId, callId: callExternalId },
             data: { callId: null },
           });
-          logger.info(`[handleRoomFinished] Cleared conversation.callId for conversation ${callMetadata.conversationId}`);
+          if (count > 0) logger.info(`[handleRoomFinished] Cleared conversation.callId for conversation ${callMetadata.conversationId}`);
         } catch (err) {
           logger.error(`[handleRoomFinished] Failed to clear conversation.callId for conversation ${callMetadata.conversationId}`, err);
         }
@@ -1419,6 +1594,9 @@ export class CallRepository {
       now: Date;
       callOrigin?: CallOrigin;
       artifactMessageId?: string;
+      /** Transcription agent this call was pinned to at creation time (from room metadata). */
+      agentName?: string;
+      dispatchStatus?: string;
     }
   ): Promise<{ call: Call; invitedParticipantIds: string[] }> {
     const {
@@ -1436,6 +1614,8 @@ export class CallRepository {
       now,
       callOrigin,
       artifactMessageId,
+      agentName,
+      dispatchStatus,
     } = params;
 
     const isHeadless = callType === CallType.HEADLESS;
@@ -1466,6 +1646,8 @@ export class CallRepository {
             systemMessageId: messageId,
             conversationId,
             ...(artifactMessageId && { artifactMessageId }),
+            ...(agentName && { agentName }),
+            ...(dispatchStatus && { dispatchStatus }),
           },
         },
       });

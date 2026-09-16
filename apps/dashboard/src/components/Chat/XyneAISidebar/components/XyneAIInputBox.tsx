@@ -59,7 +59,12 @@ import { posthogService } from '../../../../services/Analytics/posthogService';
 import type { CollectionSummary } from '../../../../services/Knowledge/collectionService';
 import { useCachedQuery } from '../../../../hooks/useCachedQuery';
 import { queries } from '../../../../zero/queries';
-import type { ThreadInfo, CanvasInfo, SelectionInfo } from '../../../../machines/xyneAIMachine';
+import type {
+  ThreadInfo,
+  CanvasInfo,
+  SelectionInfo,
+  WorkflowInfo,
+} from '../../../../machines/xyneAIMachine';
 import type { VisibleChannel } from '../../../../machines/stateMachine';
 import { useNavigate } from 'react-router-dom';
 import { xyneAIActor } from '../../../../machines/xyneAIMachine';
@@ -80,7 +85,6 @@ import type { Channel } from '@xyne/shared';
 import { ChannelVisibility } from '@xyne/shared';
 import type { DisplaySearchResult } from '../../../../types/search';
 import { TabType } from '../../ChatDirectory/ChannelCommandMenu.types';
-import { Button } from '../../../ui/Button/Button';
 
 // Browser context interface
 export interface BrowserContext {
@@ -115,6 +119,8 @@ export interface XyneAIInputBoxProps {
   showChannelTag?: boolean;
   threadInfo?: ThreadInfo | null | undefined;
   canvasInfo?: CanvasInfo | null | undefined;
+  workflowInfo?: WorkflowInfo | null | undefined;
+  onRemoveWorkflowInfo?: ((e: React.MouseEvent) => void) | undefined;
   selectionInfos?: SelectionInfo[];
   inputValue: string;
   onInputChange: (value: string) => void;
@@ -232,6 +238,8 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
       scopeType: _scopeType,
       threadInfo,
       canvasInfo,
+      workflowInfo,
+      onRemoveWorkflowInfo,
       selectionInfos = EMPTY_SELECTION_INFOS,
       inputValue,
       onInputChange,
@@ -1742,6 +1750,8 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
           onThreadClick={handleThreadPillClick}
           onRemoveThread={handleRemoveThreadInfo}
           canvasInfo={activeCanvasInfo}
+          workflowInfo={workflowInfo ?? null}
+          onRemoveWorkflowInfo={onRemoveWorkflowInfo ?? ((): void => {})}
           onCanvasInfoClick={handleCanvasPillClick}
           onRemoveCanvasInfo={handleRemoveCanvasInfo}
           selectionInfos={activeSelectionInfos}
@@ -1951,10 +1961,11 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
                     disabled={isStreaming}
                     onStateChange={({ isRecording }) => setIsVoiceRecording(isRecording)}
                   />
-                  <Button
-                    variant='ghost'
+                  <button
                     onClick={isStreaming ? onAbort : onSubmit}
-                    trackId={isStreaming ? 'abort_message' : 'submit_message'}
+                    data-ph-capture-attribute-track-id={
+                      isStreaming ? 'abort_message' : 'submit_message'
+                    }
                     disabled={!isStreaming && !inputValue.trim()}
                     className={`rounded-full transition-colors shrink-0 p-2 ${
                       isStreaming
@@ -1971,7 +1982,7 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
                     ) : (
                       <ArrowUp className='w-4 h-4' />
                     )}
-                  </Button>
+                  </button>
                 </div>
               </div>
             )}

@@ -25,5 +25,8 @@ module.exports = {
     // transforms it alongside test code.
     '^@xyne/shared/server/encryption-key-ring$':
       '<rootDir>/../../packages/shared/src/server/encryption-key-ring.ts',
+    // @xyne/shared ships ESM in dist/, which jest cannot parse. Point at the TS
+    // source so ts-jest transforms it.
+    '^@xyne/shared/(.*)$': '<rootDir>/../../packages/shared/src/$1',
   },
 };

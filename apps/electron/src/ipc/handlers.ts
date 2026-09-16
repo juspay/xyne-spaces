@@ -666,6 +666,14 @@ export function setupIpcHandlers(): void {
     syncRecordingState(false);
   });
 
+  // Seeds the renderer's meeting state. The 'meeting:detected' broadcast is
+  // fire-and-forget, so a renderer that reloads mid-meeting would otherwise
+  // never learn one is running and would ring a call it should have silenced.
+  ipcMain.handle('meeting:get-current', () => meetingDetectorService.getCurrentMeeting());
+
+  // Same reason, for the signal that actually silences the ring.
+  ipcMain.handle('mic:get-state', () => meetingDetectorService.getMicActive());
+
   // Meeting detection toggle (user preference from settings)
   ipcMain.on('meeting-detection:set-enabled', (_event, enabled: boolean) => {
     Logger.info(
@@ -675,12 +683,10 @@ export function setupIpcHandlers(): void {
       { enabled },
       'MeetingDetector',
     );
-    if (enabled) {
-      meetingDetectorService.start();
-    } else {
-      hideMeetingPopup();
-      meetingDetectorService.stop();
-    }
+    // Only the "record this meeting?" popup. Stopping the detector here used to
+    // take the mic signal down with it, so a user who turned detection off got a
+    // full-volume ringtone through every Zoom call.
+    meetingDetectorService.setPopupEnabled(enabled);
   });
 
   // Browser Settings handlers

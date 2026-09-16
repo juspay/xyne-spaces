@@ -25,7 +25,6 @@ import {
 } from '../../../services/Chat/conversationService';
 import { useUnreadThreadConversationIds } from '../../../hooks/useUnreadThreadsCount';
 import { TwinDraftIndicator } from '../TwinReplyDraft/TwinDraftIndicator';
-import { Button } from '../../ui/Button/Button';
 
 const PAGE_SIZE = 10;
 const THREAD_LIST_SORT_STORAGE_PREFIX = 'xyne:user-threads-sort';
@@ -333,16 +332,15 @@ const UserThreads = (): ReactElement => {
         <div className='flex min-h-10 justify-center py-4'>
           {isLoadingMore && <Loader2 className='animate-spin text-muted-foreground' />}
           {loadError && hasConversations && (
-            <Button
-              variant='link'
+            <button
               className='text-sm text-primary hover:underline'
               onClick={retryLoad}
-              trackId='retry_thread_list_page'
+              data-ph-capture-attribute-track-id='retry_thread_list_page'
               data-track-category='USER_THREADS'
               data-track-name='RETRY_THREAD_LIST_PAGE'
             >
               Try loading more again
-            </Button>
+            </button>
           )}
         </div>
       ),
@@ -401,16 +399,15 @@ const UserThreads = (): ReactElement => {
           ) : loadError && !hasConversations ? (
             <div className='flex h-full flex-col items-center justify-center gap-3 p-8 text-center'>
               <p className='text-muted-foreground'>{loadError}</p>
-              <Button
-                variant='link'
+              <button
                 className='text-sm text-primary hover:underline'
                 onClick={retryLoad}
-                trackId='retry_thread_list'
+                data-ph-capture-attribute-track-id='retry_thread_list'
                 data-track-category='USER_THREADS'
                 data-track-name='RETRY_THREAD_LIST'
               >
                 Try again
-              </Button>
+              </button>
             </div>
           ) : !hasConversations ? (
             <div className='flex flex-col items-center justify-center h-full p-8 text-center'>

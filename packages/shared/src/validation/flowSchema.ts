@@ -205,6 +205,7 @@ export const buttonComponentSchema = baseComponentSchema.extend({
     variant: z.enum(['primary', 'secondary', 'destructive', 'ghost', 'outline']).optional(),
     size: z.enum(['sm', 'md', 'lg']).optional(),
     icon: z.string().optional(),
+    url: z.string().optional(),
     action: flowActionSchema.optional(),
   }).strict(),
 });
@@ -1072,6 +1073,14 @@ export const flowDefinitionSchema = z.object({
   state: flowStateSchema,
 });
 
+
+/**
+ * - EPHEMERAL  → card shown to the one recipient
+ * - OPENSCREEN → same payload, opened as a popup regardless of where it was posted
+ */
+export const MESSAGE_DELIVERY = ['EPHEMERAL', 'OPENSCREEN'] as const;
+export type MessageDelivery = (typeof MESSAGE_DELIVERY)[number];
+
 // ============================================================================
 // ACTION REQUEST (frontend → Xyne backend)
 // ============================================================================
@@ -1084,6 +1093,7 @@ export const actionRequestSchema = z.object({
     flowJSON: flowDefinitionSchema,
     messageId: z.string().min(1),
     conversationId: z.string().min(1),
+    token: z.string().optional(),
   }),
 });
 

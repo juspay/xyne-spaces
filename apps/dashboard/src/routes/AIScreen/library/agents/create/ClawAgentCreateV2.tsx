@@ -34,6 +34,7 @@ import { KnowledgeCapabilityRow } from '../../shared/pickers/knowledge/Knowledge
 import { McpCapabilityRow } from '../../shared/pickers/mcp/McpCapabilityRow';
 import { SkillsCapabilityRow } from '../../shared/pickers/skill/SkillsCapabilityRow';
 import { SubagentCapabilityRow } from '../../shared/pickers/subagent/SubagentCapabilityRow';
+import { CallableAgentCapabilityRow } from '../../shared/pickers/callableAgent/CallableAgentCapabilityRow';
 
 function inlineWidth(value: string, placeholder: string): string {
   return `${Math.max(value.length, placeholder.length) - 2}ch`;
@@ -299,16 +300,33 @@ const ClawAgentCreateV2 = ({ agent }: ClawAgentCreateV2Props = {}): ReactElement
 
             <McpCapabilityRow
               selection={state.tools}
-              onSelectionChange={tools => update({ tools })}
+              onSelectionChange={tools =>
+                update({ tools: { ...tools, callableAgents: state.tools.callableAgents } })
+              }
               suggestContext={{
                 systemPrompt: state.systemPrompt,
                 description: state.description,
               }}
             />
 
+            {/* Delegation is a live grant against an existing agent, so this row
+                only appears once the agent exists (edit, not create). */}
+            {agent && (
+              <CallableAgentCapabilityRow
+                agentSlug={agent.slug}
+                agentOwnerUserId={agent.ownerUserId}
+                selected={state.tools.callableAgents}
+                onSelectedChange={callableAgents =>
+                  update({ tools: { ...state.tools, callableAgents } })
+                }
+              />
+            )}
+
             <SubagentCapabilityRow
               selection={state.tools}
-              onSelectionChange={tools => update({ tools })}
+              onSelectionChange={tools =>
+                update({ tools: { ...tools, callableAgents: state.tools.callableAgents } })
+              }
               suggestContext={{
                 systemPrompt: state.systemPrompt,
                 description: state.description,
@@ -317,7 +335,9 @@ const ClawAgentCreateV2 = ({ agent }: ClawAgentCreateV2Props = {}): ReactElement
 
             <BuiltinCapabilityRow
               selection={state.tools}
-              onSelectionChange={tools => update({ tools })}
+              onSelectionChange={tools =>
+                update({ tools: { ...tools, callableAgents: state.tools.callableAgents } })
+              }
               suggestContext={{
                 systemPrompt: state.systemPrompt,
                 description: state.description,

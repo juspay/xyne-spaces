@@ -8,7 +8,6 @@ import { getStageColor } from '../../routes/KanbanBoardScreen/KanbanBoardScreen.
 import { surfaceMutationError } from '../../utils/zeroMutationToast';
 import { cn } from '../../utils/classNames';
 import { StagePicker } from '../Tickets/TicketListView/StagePicker';
-import { Button } from '../ui/Button/Button';
 
 export interface ReleaseStageOption {
   name: string;
@@ -20,6 +19,7 @@ export interface ReleaseStageOption {
 interface ReleaseStagePickerProps {
   ticketId: string;
   stageName: string | null | undefined;
+  statusV2?: string | null | undefined;
   // Stages sourced from the ticket's board (queries.stagesByBoards). Pass
   // an empty array if the board has no stages configured yet.
   stages: readonly ReleaseStageOption[];
@@ -44,6 +44,7 @@ interface ReleaseStagePickerProps {
 export function ReleaseStagePicker({
   ticketId,
   stageName,
+  statusV2,
   stages,
   boardId,
   onAfterChange,
@@ -60,6 +61,7 @@ export function ReleaseStagePicker({
         ticketId={ticketId}
         stageName={stageName}
         stageLabel={stageName ?? '—'}
+        statusV2={statusV2}
         boardId={boardId}
         onAfterStageChange={onAfterChange}
       />
@@ -132,9 +134,8 @@ export function ReleaseStagePicker({
           </div>
         ) : (
           stages.map(stage => (
-            <Button
+            <button
               key={stage.name}
-              variant='ghost'
               type='button'
               onClick={e => {
                 e.stopPropagation();
@@ -146,14 +147,14 @@ export function ReleaseStagePicker({
               )}
               data-track-category='Release'
               data-track-name='SelectRowStage'
-              trackId='select_release_stage'
+              data-ph-capture-attribute-track-id='select_release_stage'
             >
               <span
                 className='inline-block w-1.5 h-1.5 rounded-full'
                 style={{ backgroundColor: getStageColor(stage.name) }}
               />
               <span className='text-foreground'>{stage.name}</span>
-            </Button>
+            </button>
           ))
         )}
       </div>

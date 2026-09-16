@@ -8,6 +8,7 @@ import { mutators } from '../../../zero/mutators';
 import { queries } from '../../../zero/queries';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { getStageColor } from '../../../routes/KanbanBoardScreen/KanbanBoardScreen.utils';
+import { StageIndicator } from '../../../utils/board/stageStatusIcon';
 import { cn } from '../../../utils/classNames';
 import { surfaceMutationError } from '../../../utils/zeroMutationToast';
 import { useAuth } from '../../../hooks/useAuth';
@@ -18,12 +19,12 @@ import { getReachableStageIds, findMatchingTransition } from '../../../utils/sta
 import { StageFormModal } from '../StageFormModal/StageFormModal';
 import type { StageVisitEta } from '../StageFormFields/useStageForm';
 import type { Stage } from '../../../routes/KanbanBoardScreen/KanbanBoardScreen.types';
-import { Button } from '../../ui/Button/Button';
 
 interface StagePickerProps {
   ticketId: string;
   stageName: string | null | undefined;
   stageLabel: string;
+  statusV2?: string | null | undefined;
   boardId?: string | null;
   /**
    * When provided, called instead of mutating Zero / opening StageFormModal.
@@ -168,6 +169,7 @@ export function StagePicker({
   ticketId,
   stageName,
   stageLabel,
+  statusV2,
   boardId,
   onStageChange,
   onAfterStageChange,
@@ -626,8 +628,6 @@ export function StagePicker({
     setOpen(false);
   };
 
-  const dotColor = getStageColor(currentStage);
-
   const trigger = (
     <button
       type='button'
@@ -641,9 +641,12 @@ export function StagePicker({
       data-track-category='Tickets'
       data-track-name='ToggleRowStage'
     >
-      <span
-        className='inline-block w-1.5 h-1.5 rounded-full'
-        style={{ backgroundColor: dotColor }}
+      <StageIndicator
+        stages={stages}
+        stageName={currentStage}
+        fallbackStatus={statusV2}
+        isNonLinearBoard={isNonLinear}
+        size={12}
       />
       <span>{stageLabel}</span>
       <ChevronDown className='w-3 h-3 opacity-60' />
@@ -663,11 +666,10 @@ export function StagePicker({
       >
         <div className='flex flex-col'>
           {reachableStages.map(stage => (
-            <Button
+            <button
               key={stage}
-              variant='ghost'
               type='button'
-              trackId='ticket_set_stage_row'
+              data-ph-capture-attribute-track-id='ticket_set_stage_row'
               onClick={e => {
                 e.stopPropagation();
                 setStage(stage);
@@ -679,12 +681,14 @@ export function StagePicker({
               data-track-category='Tickets'
               data-track-name='SelectRowStage'
             >
-              <span
-                className='inline-block w-1.5 h-1.5 rounded-full'
-                style={{ backgroundColor: getStageColor(stage) }}
+              <StageIndicator
+                stages={stages}
+                stageName={stage}
+                isNonLinearBoard={isNonLinear}
+                size={12}
               />
               <span className='text-foreground'>{stage}</span>
-            </Button>
+            </button>
           ))}
         </div>
       </Popover>

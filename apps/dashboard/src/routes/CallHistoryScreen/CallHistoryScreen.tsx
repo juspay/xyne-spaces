@@ -44,7 +44,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '../../components/ui/dropdown-menu';
-import { useActiveUserSearch, useUsers } from '../../hooks/useUsers';
+import { useActiveUsers, useActiveUserSearch, useUsers } from '../../hooks/useUsers';
 import { useAllChannels } from '../../hooks/useChannels';
 import { useZero } from '../../hooks/useZero';
 import { cn } from '../../utils/classNames';
@@ -60,6 +60,7 @@ import {
   FILTER_LABELS,
 } from './callHistoryItem.utils';
 import { CallLabelFilter } from './CallLabelFilter';
+import { CallParticipantFilter } from './CallParticipantFilter';
 import { useResolvedRecordingLabels } from '../../hooks/useResolvedRecordingLabels';
 import { normalizeRecordingTags } from '../../utils/recordingUtils';
 import { CallExternalChatDialog } from '../../components/Call/CallExternalChatDialog/CallExternalChatDialog';
@@ -74,10 +75,13 @@ import { UpcomingCallsList } from '../../components/Call/UpcomingCallsList';
 import { useSearchMetrics } from '../../hooks/useSearchMetrics';
 import type { DisplaySearchResult } from '../../types/search';
 import { getUserDisplayName } from '../../utils/userDisplayName';
-import { MentionType, TabType } from '../../components/Chat/ChatDirectory/ChannelCommandMenu.types';
+import { ChipType, TabType } from '../../components/Chat/ChatDirectory/ChannelCommandMenu.types';
 import { type InitialQueryData } from '../../components/Chat/ChatDirectory/LexicalSearchInput';
 import { CallHistorySearchPanel } from './CallHistorySearchPanel';
 import { useCalendarSync } from '../../hooks/useCalendarSync';
+
+/** A chip the call search filters on: a `with:` user or an `in:` channel. */
+type CallSearchMention = { id: string; type: ChipType; prefix?: string; name?: string };
 
 interface EmptyStateProps {
   icon: LucideIcon;
@@ -259,6 +263,7 @@ const CallHistoryScreen = (): ReactElement => {
   });
   const [recentCallFilter, setRecentCallFilter] = useState<RecentCallFilter>('all');
   const [selectedLabels, setSelectedLabels] = useState<string[]>([]);
+  const [selectedParticipantIds, setSelectedParticipantIds] = useState<string[]>([]);
   const [upcomingDay, setUpcomingDay] = useState<Date>(() => {
     const d = new Date();
     d.setHours(0, 0, 0, 0);
@@ -304,8 +309,9 @@ const CallHistoryScreen = (): ReactElement => {
   } = useCallHistory(user?.id);
 
   const allUsers = useUsers();
+  const activeUsers = useActiveUsers();
   const allChannels = useAllChannels();
-  const [callMentionSearchType, setCallMentionSearchType] = useState<MentionType | null>(null);
+  const [callMentionSearchType, setCallMentionSearchType] = useState<ChipType | null>(null);
   const [callMentionSearchQuery, setCallMentionSearchQuery] = useState('');
   const [selectedMentionIndex, setSelectedMentionIndex] = useState(0);
   const [hasNavigatedMentions, setHasNavigatedMentions] = useState(false);
@@ -327,26 +333,54 @@ const CallHistoryScreen = (): ReactElement => {
     mentionSearchType: callMentionSearchType,
   });
   const titleSearchQuery = searchQuery.trim();
+  // The search box and the Participants dropdown are two sources of `with:` chips: the box
+  // owns the ones the user typed (only these seed its editor), the dropdown owns the ones
+  // they picked. Both are merged below into the single mentions list the search hook takes.
+  const [callSearchEditorMentions, setCallSearchEditorMentions] = useState<CallSearchMention[]>([]);
+  const participantMentions = useMemo<CallSearchMention[]>(
+    () =>
+      selectedParticipantIds.map(userId => {
+        const participant = allUsers.find(candidate => candidate.id === userId);
+        return {
+          id: userId,
+          type: ChipType.USER,
+          prefix: 'with:',
+          name: participant ? getUserDisplayName(participant) : userId,
+        };
+      }),
+    [allUsers, selectedParticipantIds],
+  );
+  useEffect(() => {
+    const merged = [...callSearchEditorMentions];
+    const seen = new Set(merged.map(mention => `${mention.type}:${mention.id}`));
+    for (const mention of participantMentions) {
+      const key = `${mention.type}:${mention.id}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      merged.push(mention);
+    }
+    setCallSearchSelectedMentions(merged);
+  }, [callSearchEditorMentions, participantMentions, setCallSearchSelectedMentions]);
   const userMentionResults = useActiveUserSearch(
-    callMentionSearchType === MentionType.USER ? callMentionSearchQuery : '',
+    callMentionSearchType === ChipType.USER ? callMentionSearchQuery : '',
     8,
   );
   const selectedCallSearchUserIds = useMemo(
     () =>
       callSearchSelectedMentions
-        .filter(mention => mention.type === MentionType.USER)
+        .filter(mention => mention.type === ChipType.USER)
         .map(mention => mention.id),
     [callSearchSelectedMentions],
   );
   const selectedCallSearchChannelIds = useMemo(
     () =>
       callSearchSelectedMentions
-        .filter(mention => mention.type === MentionType.CHANNEL)
+        .filter(mention => mention.type === ChipType.CHANNEL)
         .map(mention => mention.id),
     [callSearchSelectedMentions],
   );
   const channelMentionResults = useMemo(() => {
-    if (callMentionSearchType !== MentionType.CHANNEL) return [];
+    if (callMentionSearchType !== ChipType.CHANNEL) return [];
     const query = callMentionSearchQuery.trim().toLowerCase();
     const selected = new Set(selectedCallSearchChannelIds);
 
@@ -377,24 +411,24 @@ const CallHistoryScreen = (): ReactElement => {
   const hasCallSearchFilters =
     selectedCallSearchUserIds.length > 0 || selectedCallSearchChannelIds.length > 0;
   const callSearchInitialQuery = useMemo<InitialQueryData | null>(() => {
-    const mentions = callSearchSelectedMentions
-      .filter(mention => mention.type === MentionType.USER || mention.type === MentionType.CHANNEL)
+    const mentions = callSearchEditorMentions
+      .filter(mention => mention.type === ChipType.USER || mention.type === ChipType.CHANNEL)
       .map(mention => ({
         id: mention.id,
         name: mention.name || mention.id,
         type: mention.type,
-        prefix: mention.type === MentionType.USER ? ('with:' as const) : ('in:' as const),
+        prefix: mention.type === ChipType.USER ? ('with:' as const) : ('in:' as const),
       }));
 
     return searchQuery || mentions.length > 0 ? { text: searchQuery, mentions } : null;
-  }, [callSearchSelectedMentions, searchQuery]);
+  }, [callSearchEditorMentions, searchQuery]);
   const isRestoringCallSearchRef = useRef(false);
 
   useEffect(() => {
-    if (outlet && (searchQuery || callSearchSelectedMentions.length > 0)) {
+    if (outlet && (searchQuery || callSearchEditorMentions.length > 0)) {
       isRestoringCallSearchRef.current = true;
     }
-  }, [callSearchSelectedMentions.length, outlet, searchQuery]);
+  }, [callSearchEditorMentions.length, outlet, searchQuery]);
 
   const closeCallMentionSearch = useCallback(() => {
     setCallMentionSearchType(null);
@@ -409,7 +443,7 @@ const CallHistoryScreen = (): ReactElement => {
         closeCallMentionSearch();
         return;
       }
-      setCallMentionSearchType(MentionType.USER);
+      setCallMentionSearchType(ChipType.USER);
       setCallMentionSearchQuery(query);
       setSelectedMentionIndex(0);
       setHasNavigatedMentions(false);
@@ -423,7 +457,7 @@ const CallHistoryScreen = (): ReactElement => {
         closeCallMentionSearch();
         return;
       }
-      setCallMentionSearchType(MentionType.CHANNEL);
+      setCallMentionSearchType(ChipType.CHANNEL);
       setCallMentionSearchQuery(query);
       setSelectedMentionIndex(0);
       setHasNavigatedMentions(false);
@@ -432,28 +466,26 @@ const CallHistoryScreen = (): ReactElement => {
   );
 
   const handleCallSearchChange = useCallback(
-    (text: string, mentions: Array<{ id: string; type: MentionType; prefix?: string }>) => {
+    (text: string, mentions: Array<{ id: string; type: ChipType; prefix?: string }>) => {
       if (isRestoringCallSearchRef.current) {
         if (!text && mentions.length === 0) return;
         isRestoringCallSearchRef.current = false;
       }
 
       setSearchQuery(text);
-      setCallSearchSelectedMentions(
+      setCallSearchEditorMentions(
         mentions
-          .filter(
-            mention => mention.type === MentionType.USER || mention.type === MentionType.CHANNEL,
-          )
+          .filter(mention => mention.type === ChipType.USER || mention.type === ChipType.CHANNEL)
           .map(mention => {
-            const existingMention = callSearchSelectedMentions.find(
+            const existingMention = callSearchEditorMentions.find(
               selected => selected.id === mention.id && selected.type === mention.type,
             );
             const user =
-              mention.type === MentionType.USER
+              mention.type === ChipType.USER
                 ? allUsers.find(candidate => candidate.id === mention.id)
                 : undefined;
             const channel =
-              mention.type === MentionType.CHANNEL
+              mention.type === ChipType.CHANNEL
                 ? allChannels.find(candidate => candidate.id === mention.id)
                 : undefined;
 
@@ -464,18 +496,12 @@ const CallHistoryScreen = (): ReactElement => {
                 (user ? getUserDisplayName(user) : channel?.name) ||
                 mention.id,
               type: mention.type,
-              prefix: mention.type === MentionType.USER ? 'with:' : 'in:',
+              prefix: mention.type === ChipType.USER ? 'with:' : 'in:',
             };
           }),
       );
     },
-    [
-      allChannels,
-      allUsers,
-      callSearchSelectedMentions,
-      setCallSearchSelectedMentions,
-      setSearchQuery,
-    ],
+    [allChannels, allUsers, callSearchEditorMentions, setSearchQuery],
   );
 
   const handleInsertMentionReady = useCallback(
@@ -951,7 +977,7 @@ const CallHistoryScreen = (): ReactElement => {
             }}
             callMentionSearchType={callMentionSearchType}
             callMentionSearchQuery={callMentionSearchQuery}
-            callSearchSelectedMentions={callSearchSelectedMentions}
+            callSearchSelectedMentions={callSearchEditorMentions}
             callSearchInitialQuery={callSearchInitialQuery}
             filteredUserMentionResults={filteredUserMentionResults}
             channelMentionResults={channelMentionResults}
@@ -984,6 +1010,7 @@ const CallHistoryScreen = (): ReactElement => {
               onClick={() => setIsInstantCallModalOpen(true)}
               data-track-category='CALLS'
               data-track-name='start-instant-call'
+              data-track-metadata={JSON.stringify({ source: 'call_history_tile' })}
               className='flex items-center gap-4 p-2.5 sm:p-4 rounded-xl border border-border hover:bg-accent/50 transition-colors text-left'
             >
               <div className='size-6 rounded-md bg-action-primary flex items-center justify-center shrink-0'>
@@ -1004,6 +1031,7 @@ const CallHistoryScreen = (): ReactElement => {
               onClick={() => setIsScheduleModalOpen(true)}
               data-track-category='CALLS'
               data-track-name='schedule-call'
+              data-track-metadata={JSON.stringify({ source: 'call_history_tile' })}
               className='flex items-center gap-4 p-2.5 sm:p-4 rounded-xl border border-border hover:bg-accent/50 transition-colors text-left'
             >
               <div className='size-6 rounded-md bg-blue-500 flex items-center justify-center shrink-0'>
@@ -1274,6 +1302,11 @@ const CallHistoryScreen = (): ReactElement => {
                   Recents
                 </span>
                 <div className='flex items-center gap-2'>
+                  <CallParticipantFilter
+                    users={activeUsers}
+                    selectedUserIds={selectedParticipantIds}
+                    onSelectedUserIdsChange={setSelectedParticipantIds}
+                  />
                   <CallLabelFilter
                     labels={manualCallLabels}
                     selectedLabels={selectedLabels}

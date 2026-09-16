@@ -77,9 +77,32 @@ const PROVIDER_META: Record<ProviderId, { name: string; description: string; ico
       description: 'Code generation and editing',
       icon: Code2,
     },
+    openrouter: {
+      name: 'OpenRouter',
+      description: 'One key, many models across providers',
+      icon: Plug,
+    },
+    litellm: {
+      name: 'LiteLLM (own key)',
+      description: 'Use models allowed by your Grid/LiteLLM key',
+      icon: KeyRound,
+    },
   };
 
-const PROVIDERS: ProviderId[] = ['copilot', 'claude', 'codex'];
+const PROVIDERS: ProviderId[] = ['copilot', 'claude', 'codex', 'openrouter', 'litellm'];
+
+/* eslint-disable @typescript-eslint/naming-convention */
+const DEFAULT_MODEL_BY_PROVIDER: Partial<Record<ProviderId, string>> = {
+  claude: 'claude-sonnet-4-5',
+  codex: 'gpt-4.1',
+};
+
+const DEFAULT_BASE_URL_BY_PROVIDER: Partial<Record<ProviderId, string>> = {
+  claude: 'https://api.anthropic.com',
+  codex: 'https://api.openai.com/v1',
+  openrouter: 'https://openrouter.ai/api/v1',
+};
+/* eslint-enable @typescript-eslint/naming-convention */
 const EMPTY_CREDENTIALS: ProviderCredential[] = [];
 const EMPTY_ROUTING: Array<{ subagentName: string; provider: string }> = [];
 const EMPTY_SUBAGENTS: string[] = [];
@@ -547,6 +570,12 @@ const GenericProviderConfigForm = ({
 }): ReactElement => {
   const isClaude = provider === 'claude';
   const isCodex = provider === 'codex';
+  const isLitellm = provider === 'litellm';
+  // Only these two have an OAuth flow and a fetchable model catalogue; the rest
+  // are plain API-key providers. LiteLLM additionally has no reasoning knob —
+  // the same rules credentialForm.ts encodes for the agent-level form.
+  const hasOauthOption = isClaude || isCodex;
+  const hasModelCatalog = isClaude || isCodex;
   const [existing, setExisting] = useState<ProviderCredential | undefined>();
   const [apiKey, setApiKey] = useState('');
   const [authType, setAuthType] = useState<AuthType>('api_key');
@@ -575,11 +604,8 @@ const GenericProviderConfigForm = ({
       .then(credential => {
         if (cancelled) return;
         setExisting(credential);
-        setModel(credential?.model ?? (isClaude ? 'claude-sonnet-4-5' : 'gpt-4.1'));
-        setBaseUrl(
-          credential?.baseUrl ??
-            (isClaude ? 'https://api.anthropic.com' : 'https://api.openai.com/v1'),
-        );
+        setModel(credential?.model ?? DEFAULT_MODEL_BY_PROVIDER[provider] ?? '');
+        setBaseUrl(credential?.baseUrl ?? DEFAULT_BASE_URL_BY_PROVIDER[provider] ?? '');
         setAuthType(credential?.authType === 'oauth_token' ? 'oauth_token' : 'api_key');
         if (
           credential?.reasoningEffort === 'low' ||
@@ -593,12 +619,13 @@ const GenericProviderConfigForm = ({
     return (): void => {
       cancelled = true;
     };
-  }, [provider, userId, isClaude]);
+  }, [provider, userId]);
 
   const hasKey = existing?.hasApiKey ?? false;
   const isOauth = authType === 'oauth_token';
 
   useEffect(() => {
+    if (!hasModelCatalog) return undefined;
     if (!hasKey && credentialNonce === 0) return undefined;
     let cancelled = false;
     setModelsError(null);
@@ -616,7 +643,7 @@ const GenericProviderConfigForm = ({
     return (): void => {
       cancelled = true;
     };
-  }, [hasKey, userId, isClaude, credentialNonce]);
+  }, [hasKey, userId, isClaude, hasModelCatalog, credentialNonce]);
 
   const handleSave = async (): Promise<void> => {
     if (!apiKey && !hasKey) {
@@ -629,8 +656,7 @@ const GenericProviderConfigForm = ({
       await upsertProviderCredential(userId, provider, {
         model,
         baseUrl,
-        authType,
-        reasoningEffort,
+        ...(isLitellm ? {} : { authType, reasoningEffort }),
         ...(apiKey ? { apiKey } : {}),
       });
       await onMutate();
@@ -735,149 +761,153 @@ const GenericProviderConfigForm = ({
         </div>
       )}
 
-      <div>
-        <span className='mb-1.5 block text-xs font-medium text-muted-foreground'>Auth method</span>
-        <div className='grid grid-cols-2 gap-2'>
-          <AuthMethodOption
-            label='API Key'
-            sublabel={isClaude ? 'Usage-based, Console key' : 'Usage-based, Platform key'}
-            selected={authType === 'api_key'}
-            onSelect={() => setAuthType('api_key')}
-          />
-          <AuthMethodOption
-            label={isClaude ? 'OAuth Token' : 'ChatGPT OAuth Token'}
-            sublabel={isClaude ? 'Pro/Max subscription' : 'ChatGPT Plus/Pro subscription'}
-            selected={authType === 'oauth_token'}
-            onSelect={() => setAuthType('oauth_token')}
-          />
-        </div>
+      {hasOauthOption && (
+        <div>
+          <span className='mb-1.5 block text-xs font-medium text-muted-foreground'>
+            Auth method
+          </span>
+          <div className='grid grid-cols-2 gap-2'>
+            <AuthMethodOption
+              label='API Key'
+              sublabel={isClaude ? 'Usage-based, Console key' : 'Usage-based, Platform key'}
+              selected={authType === 'api_key'}
+              onSelect={() => setAuthType('api_key')}
+            />
+            <AuthMethodOption
+              label={isClaude ? 'OAuth Token' : 'ChatGPT OAuth Token'}
+              sublabel={isClaude ? 'Pro/Max subscription' : 'ChatGPT Plus/Pro subscription'}
+              selected={authType === 'oauth_token'}
+              onSelect={() => setAuthType('oauth_token')}
+            />
+          </div>
 
-        {isOauth && isClaude && (
-          <div className='mt-2 flex flex-col gap-2 rounded-lg border border-[var(--claw-ai-border)] bg-[var(--claw-ai-surface)] px-3 py-2.5 text-xs text-[var(--claw-ai-fg)]'>
-            {!claudeFlow ? (
-              <>
-                <p>
-                  Sign in with your Claude account. This captures a refreshable token, so it
-                  won&apos;t silently expire like a pasted one.
-                </p>
-                <Button size='sm' onClick={() => void startClaudeOAuth()} disabled={claudeBusy}>
-                  {claudeBusy ? (
+          {isOauth && isClaude && (
+            <div className='mt-2 flex flex-col gap-2 rounded-lg border border-[var(--claw-ai-border)] bg-[var(--claw-ai-surface)] px-3 py-2.5 text-xs text-[var(--claw-ai-fg)]'>
+              {!claudeFlow ? (
+                <>
+                  <p>
+                    Sign in with your Claude account. This captures a refreshable token, so it
+                    won&apos;t silently expire like a pasted one.
+                  </p>
+                  <Button size='sm' onClick={() => void startClaudeOAuth()} disabled={claudeBusy}>
+                    {claudeBusy ? (
+                      <Loader2 className='size-4 animate-spin' />
+                    ) : (
+                      <KeyRound className='size-4' />
+                    )}
+                    {claudeBusy ? 'Opening...' : 'Sign in with Claude'}
+                  </Button>
+                  <p className='text-muted-foreground'>
+                    Or run <code className='rounded bg-background px-1'>claude setup-token</code>{' '}
+                    and paste the token below.
+                  </p>
+                </>
+              ) : (
+                <>
+                  <p>
+                    Paste the code Anthropic shows you below.{' '}
+                    <a
+                      href={claudeFlow.url}
+                      target='_blank'
+                      rel='noopener noreferrer'
+                      className='underline underline-offset-2'
+                    >
+                      Re-open tab
+                    </a>
+                  </p>
+                  <Input
+                    value={claudeCode}
+                    onChange={event => setClaudeCode(event.target.value)}
+                    placeholder='Paste code or callback URL'
+                  />
+                  <div className='flex gap-2'>
+                    <Button
+                      size='sm'
+                      onClick={() => void completeClaudeOAuth()}
+                      disabled={claudeBusy || !claudeCode.trim()}
+                    >
+                      {claudeBusy ? 'Verifying...' : 'Complete sign-in'}
+                    </Button>
+                    <Button
+                      size='sm'
+                      variant='ghost'
+                      onClick={() => {
+                        setClaudeFlow(null);
+                        setClaudeCode('');
+                      }}
+                    >
+                      Cancel
+                    </Button>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+
+          {isOauth && isCodex && (
+            <div className='mt-2 flex flex-col gap-2 rounded-lg border border-[var(--claw-ai-border)] bg-[var(--claw-ai-surface)] px-3 py-2.5 text-xs text-[var(--claw-ai-fg)]'>
+              {!codexFlow ? (
+                <Button
+                  size='sm'
+                  onClick={() => void startCodexOAuth()}
+                  data-track-category='claw-settings'
+                  data-track-name='START_CODEX_OAUTH'
+                  disabled={codexBusy}
+                >
+                  {codexBusy ? (
                     <Loader2 className='size-4 animate-spin' />
                   ) : (
                     <KeyRound className='size-4' />
                   )}
-                  {claudeBusy ? 'Opening...' : 'Sign in with Claude'}
+                  {codexBusy ? 'Opening...' : 'Sign in with ChatGPT'}
                 </Button>
-                <p className='text-muted-foreground'>
-                  Or run <code className='rounded bg-background px-1'>claude setup-token</code> and
-                  paste the token below.
-                </p>
-              </>
-            ) : (
-              <>
-                <p>
-                  Paste the code Anthropic shows you below.{' '}
-                  <a
-                    href={claudeFlow.url}
-                    target='_blank'
-                    rel='noopener noreferrer'
-                    className='underline underline-offset-2'
-                  >
-                    Re-open tab
-                  </a>
-                </p>
-                <Input
-                  value={claudeCode}
-                  onChange={event => setClaudeCode(event.target.value)}
-                  placeholder='Paste code or callback URL'
-                />
-                <div className='flex gap-2'>
-                  <Button
-                    size='sm'
-                    onClick={() => void completeClaudeOAuth()}
-                    disabled={claudeBusy || !claudeCode.trim()}
-                  >
-                    {claudeBusy ? 'Verifying...' : 'Complete sign-in'}
-                  </Button>
-                  <Button
-                    size='sm'
-                    variant='ghost'
-                    onClick={() => {
-                      setClaudeFlow(null);
-                      setClaudeCode('');
-                    }}
-                  >
-                    Cancel
-                  </Button>
-                </div>
-              </>
-            )}
-          </div>
-        )}
-
-        {isOauth && isCodex && (
-          <div className='mt-2 flex flex-col gap-2 rounded-lg border border-[var(--claw-ai-border)] bg-[var(--claw-ai-surface)] px-3 py-2.5 text-xs text-[var(--claw-ai-fg)]'>
-            {!codexFlow ? (
-              <Button
-                size='sm'
-                onClick={() => void startCodexOAuth()}
-                data-track-category='claw-settings'
-                data-track-name='START_CODEX_OAUTH'
-                disabled={codexBusy}
-              >
-                {codexBusy ? (
-                  <Loader2 className='size-4 animate-spin' />
-                ) : (
-                  <KeyRound className='size-4' />
-                )}
-                {codexBusy ? 'Opening...' : 'Sign in with ChatGPT'}
-              </Button>
-            ) : (
-              <>
-                <p>
-                  Paste the code from the OpenAI page below.{' '}
-                  <a
-                    href={codexFlow.url}
-                    target='_blank'
-                    rel='noopener noreferrer'
-                    className='underline underline-offset-2'
-                  >
-                    Re-open tab
-                  </a>
-                </p>
-                <Input
-                  value={codexCode}
-                  onChange={event => setCodexCode(event.target.value)}
-                  placeholder='Paste code or callback URL'
-                />
-                <div className='flex gap-2'>
-                  <Button
-                    size='sm'
-                    onClick={() => void completeCodexOAuth()}
-                    data-track-category='claw-settings'
-                    data-track-name='COMPLETE_CODEX_OAUTH'
-                    disabled={codexBusy || !codexCode.trim()}
-                  >
-                    {codexBusy ? 'Verifying...' : 'Complete sign-in'}
-                  </Button>
-                  <Button
-                    size='sm'
-                    variant='ghost'
-                    onClick={() => {
-                      setCodexFlow(null);
-                      setCodexCode('');
-                    }}
-                    data-track-category='claw-settings'
-                    data-track-name='CANCEL_CODEX_OAUTH'
-                  >
-                    Cancel
-                  </Button>
-                </div>
-              </>
-            )}
-          </div>
-        )}
-      </div>
+              ) : (
+                <>
+                  <p>
+                    Paste the code from the OpenAI page below.{' '}
+                    <a
+                      href={codexFlow.url}
+                      target='_blank'
+                      rel='noopener noreferrer'
+                      className='underline underline-offset-2'
+                    >
+                      Re-open tab
+                    </a>
+                  </p>
+                  <Input
+                    value={codexCode}
+                    onChange={event => setCodexCode(event.target.value)}
+                    placeholder='Paste code or callback URL'
+                  />
+                  <div className='flex gap-2'>
+                    <Button
+                      size='sm'
+                      onClick={() => void completeCodexOAuth()}
+                      data-track-category='claw-settings'
+                      data-track-name='COMPLETE_CODEX_OAUTH'
+                      disabled={codexBusy || !codexCode.trim()}
+                    >
+                      {codexBusy ? 'Verifying...' : 'Complete sign-in'}
+                    </Button>
+                    <Button
+                      size='sm'
+                      variant='ghost'
+                      onClick={() => {
+                        setCodexFlow(null);
+                        setCodexCode('');
+                      }}
+                      data-track-category='claw-settings'
+                      data-track-name='CANCEL_CODEX_OAUTH'
+                    >
+                      Cancel
+                    </Button>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
       {(!isOauth || isClaude) && (
         <LabeledInput
@@ -920,25 +950,34 @@ const GenericProviderConfigForm = ({
         )}
       </div>
 
-      <LabeledInput label='Base URL' value={baseUrl} onChange={setBaseUrl} />
-
-      <LabeledSelect
-        label='Reasoning Effort'
-        value={reasoningEffort}
-        options={[
-          { value: 'low', label: 'Low - fastest, minimal think time' },
-          { value: 'medium', label: 'Medium - balanced (default)' },
-          { value: 'high', label: 'High - deepest reasoning, slowest' },
-        ]}
-        onValueChange={value => {
-          if (value === 'low' || value === 'medium' || value === 'high') {
-            setReasoningEffort(value);
-          }
-        }}
+      <LabeledInput
+        label='Base URL'
+        value={baseUrl}
+        onChange={setBaseUrl}
+        {...(isLitellm ? { hint: 'Leave blank to use the platform LiteLLM proxy' } : {})}
       />
-      <p className='-mt-3 text-xs text-muted-foreground'>
-        Only applies to reasoning-capable models. Lower means faster per-turn responses.
-      </p>
+
+      {!isLitellm && (
+        <>
+          <LabeledSelect
+            label='Reasoning Effort'
+            value={reasoningEffort}
+            options={[
+              { value: 'low', label: 'Low - fastest, minimal think time' },
+              { value: 'medium', label: 'Medium - balanced (default)' },
+              { value: 'high', label: 'High - deepest reasoning, slowest' },
+            ]}
+            onValueChange={value => {
+              if (value === 'low' || value === 'medium' || value === 'high') {
+                setReasoningEffort(value);
+              }
+            }}
+          />
+          <p className='-mt-3 text-xs text-muted-foreground'>
+            Only applies to reasoning-capable models. Lower means faster per-turn responses.
+          </p>
+        </>
+      )}
 
       {error && <p className='text-sm text-destructive'>{error}</p>}
 

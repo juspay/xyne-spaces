@@ -8,6 +8,7 @@ import { callShareService } from '@/services/callShareService';
 import { decrypt, encrypt } from '@/services/encryptionService';
 import { convertBlockNoteToMarkdown } from '@/services/canvasService';
 import { GoogleDocsApiError, googleDocsService } from '@/services/googleDocsService';
+import { callSubject } from '@/utils/callTypeUtils';
 import { readFromYSweet } from '@/utils/ysweetUtils';
 import {
   appendRecordingGoogleDocLink,
@@ -19,7 +20,6 @@ import { markdownToPlainText } from '@/utils/markdownToPlainText';
 import { logger } from '@/utils/logger';
 
 const RECORDING_DOC_SOURCE_TYPE = 'google-recording-doc';
-const HEADLESS_CALL_TYPE = 'HEADLESS';
 const RecordingGoogleDocParamsSchema = z.object({
   callId: z.string().trim().min(1, 'Recording ID is required'),
 });
@@ -124,11 +124,7 @@ export class RecordingGoogleDocController {
       const { callId } = parsedParams.data;
 
       const call = await repositories.calls.findByExternalId(callId);
-      if (
-        !call ||
-        call.callType !== HEADLESS_CALL_TYPE ||
-        (call.workspaceId !== null && call.workspaceId !== workspaceId)
-      ) {
+      if (!call || (call.workspaceId !== null && call.workspaceId !== workspaceId)) {
         res.status(404).json({ success: false, error: 'Recording not found' });
         return;
       }
@@ -136,7 +132,10 @@ export class RecordingGoogleDocController {
         call.createdByUserId !== userId ||
         !(await callShareService.canView(call, userId, workspaceId))
       ) {
-        res.status(403).json({ success: false, error: 'Only the recording owner can export it' });
+        res.status(403).json({
+          success: false,
+          error: `Only the ${callSubject(call)} owner can export it`,
+        });
         return;
       }
 
@@ -159,7 +158,9 @@ export class RecordingGoogleDocController {
         // modal lists them so a second export is a deliberate choice, not a
         // duplicate someone makes because the earlier doc is out of sight.
         documents: readRecordingGoogleDocLinks(call.metadata),
-        unavailableReason: 'Connect Google Docs to create a document from this recording.',
+        unavailableReason: `Connect Google Docs to create a document from this ${callSubject(
+          call,
+        )}.`,
       });
     } catch (error) {
       logger.error('[RecordingGoogleDoc] Failed to prepare export context', { error });
@@ -184,11 +185,7 @@ export class RecordingGoogleDocController {
 
     try {
       const call = await repositories.calls.findByExternalId(callId);
-      if (
-        !call ||
-        call.callType !== HEADLESS_CALL_TYPE ||
-        (call.workspaceId !== null && call.workspaceId !== workspaceId)
-      ) {
+      if (!call || (call.workspaceId !== null && call.workspaceId !== workspaceId)) {
         res.status(404).json({ success: false, error: 'Recording not found' });
         return;
       }
@@ -197,7 +194,10 @@ export class RecordingGoogleDocController {
         call.createdByUserId !== userId ||
         !(await callShareService.canView(call, userId, workspaceId))
       ) {
-        res.status(403).json({ success: false, error: 'Only the recording owner can export it' });
+        res.status(403).json({
+          success: false,
+          error: `Only the ${callSubject(call)} owner can export it`,
+        });
         return;
       }
 

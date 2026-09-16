@@ -45,6 +45,7 @@ export { ReactionsACL } from './reactions-acl';
 export { ReposACL } from './repos-acl';
 export { SdlcEntityLinksACL } from './sdlc-entity-links-acl';
 export { SdlcArtifactsACL } from './sdlc-artifacts-acl';
+export * from './sdlc-folders-acl';
 export { SdlcTracksACL } from './sdlc-tracks-acl';
 export { RecurringCallParticipantsACL } from './recurring-call-participants-acl';
 export { RolesACL } from './roles-acl';
@@ -71,7 +72,6 @@ export { UserRoleMappingsACL } from './user-role-mappings-acl';
 export { UserPresenceACL } from './user-presence-acl';
 export { UsersACL } from './users-acl';
 export { UserWorkloadMappingsACL } from './user-workload-mappings-acl';
-export { WorkflowExecutionsACL } from './workflow-executions-acl';
 export { WorkflowsACL } from './workflows-acl';
 /** @deprecated Use ChannelRecapsACL instead */
 export { ChannelDailyRecapsACL } from './channel-daily-recaps-acl';

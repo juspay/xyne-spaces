@@ -1,4 +1,9 @@
+import { UserActivityStatus } from '@xyne/shared';
+
 export const DEFAULT_STATUS_EMOJI = '💬';
+
+export const IN_CALL_STATUS_EMOJI = '🎧';
+export const IN_CALL_STATUS_TEXT = 'In a call';
 
 export interface ExpiryOption {
   label: string;
@@ -105,4 +110,45 @@ export const formatExpiryTime = (expiryAt: number | null, useUntilFormat = false
     day: 'numeric',
   });
   return useUntilFormat ? `Until ${dateText}, ${timeText}` : `${dateText}, ${timeText}`;
+};
+
+export interface UserStatusSource {
+  activityStatus?: string | null | undefined;
+  statusEmoji?: string | null | undefined;
+  statusContent?: string | null | undefined;
+  statusExpiryAt?: number | null | undefined;
+}
+
+export interface ResolvedUserStatus {
+  emoji: string | null;
+  content: string | null;
+  expiryAt: number | null;
+  isInCall: boolean;
+  hasStatus: boolean;
+}
+
+export const resolveUserStatus = (
+  user: UserStatusSource | null | undefined,
+): ResolvedUserStatus => {
+  if (user?.activityStatus === UserActivityStatus.IN_CALL) {
+    return {
+      emoji: IN_CALL_STATUS_EMOJI,
+      content: IN_CALL_STATUS_TEXT,
+      expiryAt: null,
+      isInCall: true,
+      hasStatus: true,
+    };
+  }
+
+  const emoji = user?.statusEmoji ?? null;
+  const expiryAt = user?.statusExpiryAt ?? null;
+  const hasStatus = Boolean(emoji) && !isStatusExpired(expiryAt);
+
+  return {
+    emoji: hasStatus ? emoji : null,
+    content: hasStatus ? (user?.statusContent ?? null) : null,
+    expiryAt: hasStatus ? expiryAt : null,
+    isInCall: false,
+    hasStatus,
+  };
 };

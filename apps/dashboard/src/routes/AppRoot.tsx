@@ -57,7 +57,6 @@ import ProjectsScreen from './ProjectsScreen/ProjectsScreen';
 import UserGroupsScreen from './UserGroupsScreen/UserGroupsScreen';
 import ProjectDetailScreen from './ProjectDetailScreen/ProjectDetailScreen';
 import SdlcScreen from './SdlcScreen/SdlcScreen';
-import { SdlcDebuggerPanel } from './SdlcScreen/SdlcDebuggerPanel';
 import SdlcWindow from './SdlcScreen/SdlcWindow';
 import { APP_BASE_PATH, isSdlcSurface } from '../config';
 import SdlcFrameHost from './SdlcScreen/SdlcFrameHost';
@@ -86,8 +85,12 @@ import { IncomingCallDevHarness } from '../components/Call/IncomingCall/Incoming
 import { GlobalCallOverlay } from '../components/Call/CallOverlay/GlobalCallOverlay';
 import { MobileCallHeader } from '../components/Call/MobileCallHeader/MobileCallHeader';
 import { NotificationHandler } from '../components/NotificationHandler/NotificationHandler';
+import { EphemeralFlowHost } from '../components/flowUI/EphemeralFlowHost';
 import { ElectronBadgeSync } from '../components/ElectronBadgeSync/ElectronBadgeSync';
-import { ElectronUpdateNudge } from '../components/ElectronUpdateNudge/ElectronUpdateNudge';
+import {
+  ElectronUpdateNudge,
+  ELECTRON_UPDATE_NUDGE_ENABLED,
+} from '../components/ElectronUpdateNudge/ElectronUpdateNudge';
 import { SosAlertBanner } from '../components/SosAlert/SosAlertBanner';
 import { SlashCommandArtifactBanner } from '../components/Chat/SlashCommandArtifactBanner';
 import { SlashCommandArtifactSideEffectProvider } from '../components/Chat/SlashCommandArtifactSideEffects';
@@ -128,6 +131,8 @@ import CallDetailScreen from './CallDetailScreen/CallDetailScreen';
 import RecordingsRoute from './RecordingsRoute/RecordingsRoute';
 import RecordingDetailRoute from './RecordingDetailRoute/RecordingDetailRoute';
 import { RecordingOverlay } from '../components/Recording/RecordingOverlay/RecordingOverlay';
+import { RecordingCameraBubble } from '../components/Recording/RecordingCameraBubble/RecordingCameraBubble';
+import { ScreenPickerHost } from '../components/ScreenPicker/ScreenPickerHost';
 import { useRecordingVersion } from '../hooks/useRecordingVersion';
 import { stopRecordingForTeardown } from '../hooks/useRecordingStore';
 import { isElectronApp } from '../utils/electronApp';
@@ -206,7 +211,6 @@ import { AIOnboardingOverlay } from '../components/AIOnboarding/AIOnboardingOver
 import XyneAISidebar from '../components/Chat/XyneAISidebar/XyneAISidebar';
 import { BrowserPanel, BrowserPanelHandler } from '../components/BrowserPanel';
 import { xyneAIStreamManager } from '../services/XyneAI';
-import { useExternalDebuggerStore } from '../store/useExternalDebuggerStore';
 import { AttachmentGalleryModal } from '../components/FileViewer/FileViewerModal';
 import { CreateTicketWindow } from '../components/Tickets/CreateTicketModal/CreateTicketWindow';
 import { AttachmentCitationPreview } from '../components/FileViewer/AttachmentCitationPreview';
@@ -217,6 +221,7 @@ import { ResourceAccessScreen } from './ResourceAccessScreen/ResourceAccessScree
 import { RoleManagementScreen } from './RoleManagementScreen';
 import { TagReviewView } from '../components/tags/TagReview/TagReviewView';
 import { ResourceProtectedRoute } from '../components/Auth/ResourceProtectedRoute';
+import { WorkflowScreen } from './WorkflowScreen';
 import { GuestBlockedRoute } from '../components/Auth/GuestBlockedRoute';
 import { ToolbarProtectedRoute } from '../components/Auth/ToolbarProtectedRoute';
 import { WorkspaceManagementScreen } from './WorkspaceManagementScreen';
@@ -492,11 +497,15 @@ const AppRoot = (): ReactElement => {
   const xyneAIKbDocName = useSelector(xyneAIActor, state => state.context.kbDocName);
   const xyneAIKbFolderId = useSelector(xyneAIActor, state => state.context.kbFolderId);
   const xyneAIKbFolderName = useSelector(xyneAIActor, state => state.context.kbFolderName);
+  const xyneAIWorkflowInfo = useSelector(xyneAIActor, state => state.context.workflowInfo);
+  const xyneAIWorkflowDismissed = useSelector(
+    xyneAIActor,
+    state => state.context.workflowDismissed,
+  );
   const xyneAIKbOpenNonce = useSelector(xyneAIActor, state => state.context.kbOpenNonce);
   const xyneAIResearchContext = useSelector(xyneAIActor, state => state.context.researchContext);
   const xyneAIInitialQuery = useSelector(xyneAIActor, state => state.context.initialQuery);
   const xyneAIAutoSendNonce = useSelector(xyneAIActor, state => state.context.autoSendNonce);
-  const isSdlcDebuggerOpen = useExternalDebuggerStore(state => state.target !== null);
   const { isMobile } = usePlatform();
   // No-op outside the SDLC bundle's framed instance.
   useSdlcFrameBridge();
@@ -507,15 +516,15 @@ const AppRoot = (): ReactElement => {
   // Get current location to check if we're on onboarding
   const location = useLocation();
   const sdlcChannelId = location.pathname.match(/\/sdlc\/([^/]+)/)?.[1] ?? null;
-  // On an SDLC route the iframe lane renders its own Ask AI panel, so the host
-  // must not also render one (that would double it).
-  const isSdlcRoute = /\/sdlc(\/|$)/.test(location.pathname);
+  // On an SDLC or Workflows route the iframe lane renders its own Ask AI panel, so
+  // the host must not also render one (that would double it).
+  const isSdlcRoute =
+    /\/sdlc(\/|$)/.test(location.pathname) || /^\/[^/]+\/workflows(\/|$)/.test(location.pathname);
   const previousSdlcChannelIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     const previousChannelId = previousSdlcChannelIdRef.current;
     if (previousChannelId && previousChannelId !== sdlcChannelId) {
-      useExternalDebuggerStore.getState().close();
       setIsXyneDebuggerOpen(false);
     }
     previousSdlcChannelIdRef.current = sdlcChannelId;
@@ -565,15 +574,13 @@ const AppRoot = (): ReactElement => {
       (typeof state.value === 'object' && state.value !== null && 'connected' in state.value) ||
       state.value === 'connecting',
   );
-  const showSdlcDebuggerPanel = isSdlcDebuggerOpen && !isMobile && sdlcChannelId === null;
   // On SDLC routes the framed lane renders its own Ask AI panel inside the iframe,
   // so the host must not also show one (covers both /sdlc and /sdlc/<channelId>).
   const showXyneAIPanel =
-    isXyneAIDrawerOpen &&
-    !isMobile &&
-    !isOnAIChatExperiencePage &&
-    !isSdlcRoute &&
-    !showSdlcDebuggerPanel;
+    isXyneAIDrawerOpen && !isMobile && !isOnAIChatExperiencePage && !isSdlcRoute;
+  // The SDLC lane ships Ask AI inside its own frame (see the isInPanelWebview
+  // branch), so this is what decides whether that in-frame panel is showing.
+  const showSdlcFrameXyneAI = isSdlcSurface && isXyneAIDrawerOpen && !isMobile && !isOnAIPage;
   const showBrowserPanel = browserPanelState === 'open' && !location.pathname.endsWith('/browser');
 
   const shouldShowMobileHeader =
@@ -708,66 +715,83 @@ const AppRoot = (): ReactElement => {
                         />
                       )}
                       {isInPanelWebview ? (
-                        isSdlcSurface && isXyneAIDrawerOpen && !isMobile && !isOnAIPage ? (
-                          // SDLC lane (chrome-free iframe) with Ask AI open: render the
-                          // XyneAI panel INSIDE the frame so Ask AI ships with this lane.
-                          <div className='flex h-screen flex-col'>
-                            <ResizableGroup
-                              orientation='horizontal'
-                              className='flex-1 no-scrollbar overflow-auto'
-                              autoSaveId='sdlc-frame-xyneai'
-                            >
-                              <Panel
-                                id='sdlc-frame-content'
-                                defaultSize={`${100 - XYNE_AI_PANEL_DEFAULT_SIZE}%`}
-                              >
-                                <main className='h-full flex-1 no-scrollbar overflow-auto'>
-                                  <EditWarningModal />
-                                  <Outlet />
-                                </main>
-                              </Panel>
-                              <Separator className='group flex w-[2px] cursor-col-resize items-center justify-center transition-colors'>
-                                <div className='h-full w-[2px] bg-transparent group-hover:bg-primary group-active:bg-primary' />
-                              </Separator>
-                              <Panel
-                                id='sdlc-frame-xyneai'
-                                defaultSize={`${XYNE_AI_PANEL_DEFAULT_SIZE}%`}
-                                maxSize={isXyneDebuggerOpen ? '55%' : '50%'}
-                                minSize={isXyneDebuggerOpen ? `${XYNE_AI_PANEL_MIN_SIZE}%` : '25%'}
-                              >
-                                <XyneAISidebarZIndexShell>
-                                  <XyneAISidebar
-                                    channelId={xyneAIChannelId}
-                                    threadInfo={xyneAIThreadInfo}
-                                    startFreshChat={xyneAIStartFreshChat}
-                                    canvasInfo={xyneAICanvasInfo}
-                                    initialContextSelections={xyneAIInitialContextSelections}
-                                    contextOpenNonce={xyneAIContextOpenNonce}
-                                    kbCollectionId={xyneAIKbCollectionId ?? ''}
-                                    kbChannelId={xyneAIKbChannelId ?? ''}
-                                    kbDocId={xyneAIKbDocId ?? ''}
-                                    kbDocName={xyneAIKbDocName ?? ''}
-                                    kbFolderId={xyneAIKbFolderId ?? ''}
-                                    kbFolderName={xyneAIKbFolderName ?? ''}
-                                    kbOpenNonce={xyneAIKbOpenNonce}
-                                    researchContext={xyneAIResearchContext}
-                                    initialQuery={xyneAIInitialQuery ?? undefined}
-                                    autoSendNonce={xyneAIAutoSendNonce}
-                                    onDebuggerOpenChange={setIsXyneDebuggerOpen}
-                                  />
-                                </XyneAISidebarZIndexShell>
-                              </Panel>
-                            </ResizableGroup>
-                          </div>
-                        ) : (
-                          // Inside the browser-panel webview (or SDLC lane with Ask AI
-                          // closed) — render only the route content. No GlobalTopBar /
-                          // AppSidebar / right panels / ChatDirectory.
-                          <main className='flex-1 h-screen'>
-                            <EditWarningModal />
-                            <Outlet />
-                          </main>
-                        )
+                        // Inside the browser-panel webview / SDLC lane: only the route
+                        // content, no GlobalTopBar / AppSidebar / right panels /
+                        // ChatDirectory. The Ask AI panel joins it as a sibling.
+                        //
+                        // The group is rendered whether or not Ask AI is open, and only
+                        // the assistant's own Panel is conditional. Swapping between two
+                        // different layouts moved <Outlet /> to another position in the
+                        // tree, so React unmounted the whole route and built it again —
+                        // opening Ask AI rebuilt the canvas editor and its Y-Sweet
+                        // connection, and the reader lost their place in the document.
+                        <div className='flex h-screen flex-col'>
+                          <ResizableGroup
+                            orientation='horizontal'
+                            className='flex-1 no-scrollbar overflow-auto'
+                            autoSaveId='sdlc-frame-xyneai'
+                            // The assistant's Panel is conditional, so the group
+                            // has to say which panels it is rendering — without
+                            // it the saved two-panel layout is restored over one
+                            // panel, and the split comes back wrong after Ask AI
+                            // has been closed and opened again.
+                            panelIds={
+                              showSdlcFrameXyneAI
+                                ? ['sdlc-frame-content', 'sdlc-frame-xyneai']
+                                : ['sdlc-frame-content']
+                            }
+                          >
+                            {/* defaultSize is read once, on mount: with the
+                                group now always rendered it must describe the
+                                whole width, and the split comes from the saved
+                                layout the ids above select. */}
+                            <Panel id='sdlc-frame-content' defaultSize='100%'>
+                              <main className='h-full flex-1 no-scrollbar overflow-auto'>
+                                <EditWarningModal />
+                                <Outlet />
+                              </main>
+                            </Panel>
+                            {showSdlcFrameXyneAI && (
+                              <>
+                                <Separator className='group flex w-[2px] cursor-col-resize items-center justify-center transition-colors'>
+                                  <div className='h-full w-[2px] bg-transparent group-hover:bg-primary group-active:bg-primary' />
+                                </Separator>
+                                <Panel
+                                  id='sdlc-frame-xyneai'
+                                  defaultSize={`${XYNE_AI_PANEL_DEFAULT_SIZE}%`}
+                                  maxSize={isXyneDebuggerOpen ? '55%' : '50%'}
+                                  minSize={
+                                    isXyneDebuggerOpen ? `${XYNE_AI_PANEL_MIN_SIZE}%` : '25%'
+                                  }
+                                >
+                                  <XyneAISidebarZIndexShell>
+                                    <XyneAISidebar
+                                      channelId={xyneAIChannelId}
+                                      threadInfo={xyneAIThreadInfo}
+                                      startFreshChat={xyneAIStartFreshChat}
+                                      canvasInfo={xyneAICanvasInfo}
+                                      initialContextSelections={xyneAIInitialContextSelections}
+                                      contextOpenNonce={xyneAIContextOpenNonce}
+                                      kbCollectionId={xyneAIKbCollectionId ?? ''}
+                                      kbChannelId={xyneAIKbChannelId ?? ''}
+                                      kbDocId={xyneAIKbDocId ?? ''}
+                                      workflowInfo={xyneAIWorkflowInfo}
+                                      workflowDismissed={xyneAIWorkflowDismissed}
+                                      kbDocName={xyneAIKbDocName ?? ''}
+                                      kbFolderId={xyneAIKbFolderId ?? ''}
+                                      kbFolderName={xyneAIKbFolderName ?? ''}
+                                      kbOpenNonce={xyneAIKbOpenNonce}
+                                      researchContext={xyneAIResearchContext}
+                                      initialQuery={xyneAIInitialQuery ?? undefined}
+                                      autoSendNonce={xyneAIAutoSendNonce}
+                                      onDebuggerOpenChange={setIsXyneDebuggerOpen}
+                                    />
+                                  </XyneAISidebarZIndexShell>
+                                </Panel>
+                              </>
+                            )}
+                          </ResizableGroup>
+                        </div>
                       ) : isOnboarding ? (
                         // Onboarding screen - full width without sidebar
                         <main
@@ -777,7 +801,6 @@ const AppRoot = (): ReactElement => {
                           <Outlet />
                         </main>
                       ) : showXyneAIPanel ||
-                        showSdlcDebuggerPanel ||
                         browserPanelState === 'open' ||
                         webviewState === 'closed' ||
                         webviewState === 'idle' ? (
@@ -787,13 +810,11 @@ const AppRoot = (): ReactElement => {
                             className='flex-1 no-scrollbar overflow-auto'
                             autoSaveId='app-root-browser'
                             panelIds={
-                              showSdlcDebuggerPanel
-                                ? ['app-root-left', 'app-root-sdlc-debugger']
-                                : showXyneAIPanel
-                                  ? ['app-root-left', 'app-root-xyneai']
-                                  : showBrowserPanel
-                                    ? ['app-root-left', 'app-root-browser']
-                                    : ['app-root-left']
+                              showXyneAIPanel
+                                ? ['app-root-left', 'app-root-xyneai']
+                                : showBrowserPanel
+                                  ? ['app-root-left', 'app-root-browser']
+                                  : ['app-root-left']
                             }
                           >
                             <Panel
@@ -802,7 +823,7 @@ const AppRoot = (): ReactElement => {
                               defaultSize={
                                 showXyneAIPanel
                                   ? `${100 - XYNE_AI_PANEL_DEFAULT_SIZE}%`
-                                  : showSdlcDebuggerPanel || showBrowserPanel
+                                  : showBrowserPanel
                                     ? '65%'
                                     : '100%'
                               }
@@ -817,24 +838,7 @@ const AppRoot = (): ReactElement => {
                                 </main>
                               </div>
                             </Panel>
-                            {showSdlcDebuggerPanel ? (
-                              <>
-                                <Separator className='w-[2px] transition-colors cursor-col-resize flex items-center justify-center group'>
-                                  <div
-                                    id='panel-resize-divider'
-                                    className='w-[2px] h-full bg-transparent group-hover:bg-primary group-active:bg-primary'
-                                  ></div>
-                                </Separator>
-                                <Panel
-                                  id='app-root-sdlc-debugger'
-                                  defaultSize='35%'
-                                  minSize='30%'
-                                  maxSize='55%'
-                                >
-                                  <SdlcDebuggerPanel />
-                                </Panel>
-                              </>
-                            ) : showXyneAIPanel ? (
+                            {showXyneAIPanel ? (
                               <>
                                 <Separator className='w-[2px] transition-colors cursor-col-resize flex items-center justify-center group'>
                                   <div
@@ -862,6 +866,8 @@ const AppRoot = (): ReactElement => {
                                       kbCollectionId={xyneAIKbCollectionId ?? ''}
                                       kbChannelId={xyneAIKbChannelId ?? ''}
                                       kbDocId={xyneAIKbDocId ?? ''}
+                                      workflowInfo={xyneAIWorkflowInfo}
+                                      workflowDismissed={xyneAIWorkflowDismissed}
                                       kbDocName={xyneAIKbDocName ?? ''}
                                       kbFolderId={xyneAIKbFolderId ?? ''}
                                       kbFolderName={xyneAIKbFolderName ?? ''}
@@ -941,10 +947,13 @@ const AppRoot = (): ReactElement => {
                           ) : (
                             <RecordingOverlay />
                           )}
+                          <RecordingCameraBubble />
+                          <ScreenPickerHost />
                           <GlobalUploadProgress />
                           <NotificationHandler />
+                          <EphemeralFlowHost />
                           <ElectronBadgeSync />
-                          <ElectronUpdateNudge />
+                          {ELECTRON_UPDATE_NUDGE_ENABLED && <ElectronUpdateNudge />}
                           <SosAlertBanner />
                           <CallFromRecentsHandler />
                           <CloudAgentFloatingHost />
@@ -990,6 +999,8 @@ const AppRoot = (): ReactElement => {
                             kbCollectionId={xyneAIKbCollectionId ?? ''}
                             kbChannelId={xyneAIKbChannelId ?? ''}
                             kbDocId={xyneAIKbDocId ?? ''}
+                            workflowInfo={xyneAIWorkflowInfo}
+                            workflowDismissed={xyneAIWorkflowDismissed}
                             kbDocName={xyneAIKbDocName ?? ''}
                             kbFolderId={xyneAIKbFolderId ?? ''}
                             kbFolderName={xyneAIKbFolderName ?? ''}
@@ -1024,6 +1035,8 @@ const AppRoot = (): ReactElement => {
                             kbCollectionId={xyneAIKbCollectionId ?? ''}
                             kbChannelId={xyneAIKbChannelId ?? ''}
                             kbDocId={xyneAIKbDocId ?? ''}
+                            workflowInfo={xyneAIWorkflowInfo}
+                            workflowDismissed={xyneAIWorkflowDismissed}
                             kbDocName={xyneAIKbDocName ?? ''}
                             kbFolderId={xyneAIKbFolderId ?? ''}
                             kbFolderName={xyneAIKbFolderName ?? ''}
@@ -1033,20 +1046,6 @@ const AppRoot = (): ReactElement => {
                             autoSendNonce={xyneAIAutoSendNonce}
                             onDebuggerOpenChange={setIsXyneDebuggerOpen}
                           />
-                        </Drawer>
-                      )}
-                      {isMobile && !isInPanelWebview && (
-                        <Drawer
-                          open={isSdlcDebuggerOpen}
-                          onOpenChange={open => {
-                            if (!open) useExternalDebuggerStore.getState().close();
-                          }}
-                          title='Debugger'
-                          description='Inspect this SDLC run'
-                        >
-                          <div className='h-[85vh]'>
-                            <SdlcDebuggerPanel />
-                          </div>
                         </Drawer>
                       )}
                     </SdlcFrameProvider>
@@ -1064,6 +1063,14 @@ const AppRoot = (): ReactElement => {
 /** Real screen in the SDLC bundle; the framed placeholder in the main one. */
 const SdlcRouteElement = (): ReactElement =>
   isSdlcSurface ? <SdlcScreen /> : <SdlcFrameViewport />;
+
+/** A ticket page, but still inside the hub's frame so its history stays in one router. */
+const SdlcTicketRouteElement = (): ReactElement =>
+  isSdlcSurface ? <TicketView /> : <SdlcFrameViewport />;
+
+/** Real screen in the lane bundle; the framed placeholder in the main one, as for SDLC. */
+const WorkflowsRouteElement = (): ReactElement =>
+  isSdlcSurface ? <WorkflowScreen /> : <SdlcFrameViewport />;
 
 export const router = createBrowserRouter(
   [
@@ -1411,6 +1418,13 @@ export const router = createBrowserRouter(
                         // ahead of the shared `:channelId` route.
                         { path: 'ticket/:channelId', element: <ActivitySupportTicket /> },
                         { path: 'ticket/:channelId/:ticketId', element: <ActivitySupportTicket /> },
+                        // Recordings opened from the Activity list render here for the
+                        // same reason — the list stays mounted on the left instead of
+                        // the page navigating away to the standalone /recordings/:id.
+                        {
+                          path: 'recording/:recordingId',
+                          element: <RecordingDetailRoute embedded />,
+                        },
                         ...sharedChatRoutes,
                       ],
                     },
@@ -1429,6 +1443,16 @@ export const router = createBrowserRouter(
                 {
                   path: 'search-results',
                   element: <SearchResults />,
+                },
+                {
+                  // Splat: @xyne/workflow-ui owns every screen below /workflows and
+                  // routes between them itself, handing the sub-path back via onNavigate.
+                  path: 'workflows/*',
+                  element: (
+                    <ResourceProtectedRoute resourceName='WORKFLOWS' minAccess='READ'>
+                      <WorkflowsRouteElement />
+                    </ResourceProtectedRoute>
+                  ),
                 },
                 {
                   path: 'product-insights',
@@ -1601,6 +1625,22 @@ export const router = createBrowserRouter(
                   element: (
                     <ResourceProtectedRoute resourceName='SDLC' minAccess='READ'>
                       <SdlcRouteElement />
+                    </ResourceProtectedRoute>
+                  ),
+                },
+                {
+                  path: 'sdlc/:channelId/workflows/*',
+                  element: (
+                    <ResourceProtectedRoute resourceName='SDLC' minAccess='READ'>
+                      <SdlcRouteElement />
+                    </ResourceProtectedRoute>
+                  ),
+                },
+                {
+                  path: 'sdlc/:channelId/tickets/:ticketId',
+                  element: (
+                    <ResourceProtectedRoute resourceName='SDLC' minAccess='READ'>
+                      <SdlcTicketRouteElement />
                     </ResourceProtectedRoute>
                   ),
                 },
@@ -1982,6 +2022,38 @@ export const router = createBrowserRouter(
               </ZeroProvider>
             </EncryptionBootstrapProvider>
           ),
+        },
+        {
+          path: '/newWindow/chat/canvas',
+          element: (
+            <EncryptionBootstrapProvider>
+              <ZeroProvider>
+                <ZeroFallbackProvider>
+                  <InitialStateLoader>
+                    <EditProvider>
+                      <div className='h-full bg-background'>
+                        <CanvasPanel />
+                      </div>
+                      <AttachmentGalleryModal />
+                      <AttachmentCitationPreview />
+                      <ThreadCitationModal />
+                      <TranscriptCitationModal />
+                    </EditProvider>
+                  </InitialStateLoader>
+                </ZeroFallbackProvider>
+              </ZeroProvider>
+            </EncryptionBootstrapProvider>
+          ),
+          children: [
+            {
+              index: true,
+              element: null,
+            },
+            {
+              path: ':canvasId',
+              element: <CanvasScreen />,
+            },
+          ],
         },
         {
           path: '/newWindow/create-ticket',

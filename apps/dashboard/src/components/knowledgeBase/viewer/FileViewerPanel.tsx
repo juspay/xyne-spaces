@@ -373,13 +373,12 @@ export const FileViewerPanel: React.FC<{
           </button>
         </Tooltip>
 
-        <Button
-          variant='ghost'
+        <button
           type='button'
           onClick={() => {
             void handleDownload();
           }}
-          trackId='download_document'
+          data-ph-capture-attribute-track-id='download_document'
           aria-label='Download'
           title='Download'
           className='grid h-8 w-8 place-items-center rounded-md text-muted-foreground transition hover:bg-secondary hover:text-foreground'
@@ -387,7 +386,7 @@ export const FileViewerPanel: React.FC<{
           data-track-name='file-viewer-download'
         >
           <Download className='h-4 w-4' strokeWidth={1.75} />
-        </Button>
+        </button>
       </div>
 
       <div className='flex min-w-0 items-center gap-2 px-5 py-2.5'>

@@ -1,6 +1,6 @@
 import { ReactElement } from 'react';
 import { AlertTriangle, Brain, CheckCircle2, Info, Loader2, XCircle } from 'lucide-react';
-import { Button } from '@/components/ui/Button/Button';
+
 import { Tooltip } from '@/components/ui/Tooltip/Tooltip';
 import { cn } from '@/utils/classNames';
 import type { DigitalTwinStatus } from '@/services/claw/digitalTwinTypes';
@@ -65,18 +65,17 @@ export const DigitalTwinBanner = ({
               </p>
             </div>
           </div>
-          <Button
-            variant='ghost'
+          <button
             type='button'
             onClick={onEnable}
-            trackId='digital_twin_enable'
+            data-ph-capture-attribute-track-id='digital_twin_enable'
             data-track-category='Claw Agents'
             data-track-name='Digital Twin enable'
             className='mt-3.5 flex w-full items-center justify-center gap-2 rounded-lg bg-emerald-600 px-3.5 py-2 text-[13px] font-semibold text-white transition hover:bg-emerald-600/90'
           >
             <Brain className='size-4' />
             Enable Digital Twin
-          </Button>
+          </button>
         </div>
       </div>
     );
@@ -116,17 +115,16 @@ export const DigitalTwinBanner = ({
               <span className='text-xs font-semibold text-foreground'>Backfill stalled</span>
               <span className='text-[11px] text-muted-foreground'>No progress in 30 s</span>
             </div>
-            <Button
-              variant='ghost'
+            <button
               type='button'
               onClick={onDisable}
-              trackId='digital_twin_disable_and_retry_backfill'
+              data-ph-capture-attribute-track-id='digital_twin_disable_and_retry_backfill'
               data-track-category='Claw Agents'
               data-track-name='Digital Twin disable and retry backfill'
               className='rounded-lg border border-border bg-card px-2.5 py-1 text-[11px] font-semibold text-foreground transition hover:bg-muted'
             >
               Disable &amp; retry
-            </Button>
+            </button>
           </div>
         )}
 

@@ -159,7 +159,7 @@ export class AuthV2Controller {
     if (refreshToken) {
       try {
         const refreshTokenExpiry = new Date();
-        refreshTokenExpiry.setDate(refreshTokenExpiry.getDate() + 30);
+        refreshTokenExpiry.setDate(refreshTokenExpiry.getDate() + config.session.expiryDays);
 
         const deviceInfo = JSON.stringify({
           userAgent: req.headers['user-agent'],
@@ -634,7 +634,7 @@ export class AuthV2Controller {
 
         res.cookie('xyne_last_workspace', workspaceId, {
           ...cookieBase,
-          maxAge: 30 * 24 * 60 * 60 * 1000,
+          maxAge: config.session.expiryDays * 24 * 60 * 60 * 1000,
         });
 
         res.cookie(`xyne_ws_${workspaceId}_token`, jwtToken, {
@@ -932,6 +932,34 @@ export class AuthV2Controller {
       logger.info(`${tag()} User has ${workspaces.length} workspace(s) before invitation check`);
       const userExistsButRemoved = await this.userService.userExistsButNoActiveWorkspaces(googleUserData.email);
 
+      // Domain-conflict detection, mirroring handleCallback. Without it the Electron renderer
+      // receives workspaces: [] for a user whose email domain already maps to an enterprise org
+      // and offers "create an organization" instead of the request-to-join UI.
+      let domainConflict = null;
+      let domainConflictError = null;
+      let publicEmailError = null;
+
+      if (workspaces.length === 0 && !userExistsButRemoved) {
+        if (stateData.enterpriseLogin) {
+          try {
+            await organizationDomainService.assertCanCreateOrgForEmail(googleUserData.email);
+          } catch (error) {
+            if (error instanceof PublicEmailDomainError) {
+              publicEmailError = error;
+            } else if (error instanceof OrganizationDomainConflictError) {
+              domainConflictError = error;
+            }
+          }
+        }
+
+        if (!domainConflictError && !publicEmailError) {
+          domainConflict = await organizationDomainService.findEnterpriseWorkspaceByEmailDomain(googleUserData.email);
+          domainConflictError = domainConflict
+            ? new OrganizationDomainConflictError(domainConflict.domain, domainConflict)
+            : null;
+        }
+      }
+
       const isProduction = process.env.NODE_ENV === 'production';
 
       // If an invitation is pending: set google_access_token so the Electron renderer can later
@@ -998,7 +1026,7 @@ export class AuthV2Controller {
 
         res.cookie('xyne_last_workspace', workspaceId, {
           ...cookieBase,
-          maxAge: 30 * 24 * 60 * 60 * 1000,
+          maxAge: config.session.expiryDays * 24 * 60 * 60 * 1000,
         });
 
         res.cookie(`xyne_ws_${workspaceId}_token`, jwtToken, {
@@ -1059,6 +1087,10 @@ export class AuthV2Controller {
         picture: googleUserData.picture,
         workspaces,
         userExistsButRemoved,
+        ...(domainConflictError ? { domainConflictError: domainConflictError.message } : {}),
+        ...(domainConflict ? { enterpriseJoinOrgName: domainConflict.name } : {}),
+        ...(domainConflict ? { enterpriseJoinWorkspaces: JSON.stringify(domainConflict.workspaces) } : {}),
+        ...(publicEmailError ? { publicEmailDomainError: publicEmailError.message } : {}),
       });
     } catch (error) {
       logger.error(`${tag()} Google OAuth login failed (platform=electron):`, error);
@@ -1144,6 +1176,9 @@ export class AuthV2Controller {
 
       // Native does PKCE inside the Google SDK, so only the web branch verifies it server-side.
       let codeVerifier: string | undefined;
+      // Only the web branch carries OAuth state, so enterpriseLogin is captured there and stays
+      // undefined for native (same effect as an absent flag on the web callback).
+      let enterpriseLogin: boolean | undefined;
       if (!isMobileNative) {
         const state = (req.query.state || req.body?.state) as string | undefined;
         if (!state) {
@@ -1159,6 +1194,7 @@ export class AuthV2Controller {
         }
         // Web-mobile carries state — adopt the flowId minted in initiateLogin for the trace.
         flowId = stateData.flowId ?? 'mobile-login';
+        enterpriseLogin = stateData.enterpriseLogin;
         logger.info(`${tag()} Google OAuth state validated (platform=${stateData.platform})`);
         await oauthStateServiceV2.deleteState(state);
         codeVerifier = (await pkceServiceV2.getAndDeleteVerifier(state)) ?? undefined;
@@ -1240,9 +1276,40 @@ export class AuthV2Controller {
         return;
       }
 
-      const workspaces = await this.userService.getWorkspacesByEmail(googleUserData.email);
+      const workspaces = this.getEnterpriseAwareWorkspaces(
+        await this.userService.getWorkspacesByEmail(googleUserData.email),
+        enterpriseLogin,
+      );
       logger.info(`${tag()} User has ${workspaces.length} workspace(s) before invitation check`);
       const userExistsButRemoved = await this.userService.userExistsButNoActiveWorkspaces(googleUserData.email);
+
+      // Domain-conflict detection, mirroring handleCallback. Without it the mobile client
+      // receives workspaces: [] for a user whose email domain already maps to an enterprise org
+      // and offers "create an organization" instead of the request-to-join UI.
+      let domainConflict = null;
+      let domainConflictError = null;
+      let publicEmailError = null;
+
+      if (workspaces.length === 0 && !userExistsButRemoved) {
+        if (enterpriseLogin) {
+          try {
+            await organizationDomainService.assertCanCreateOrgForEmail(googleUserData.email);
+          } catch (error) {
+            if (error instanceof PublicEmailDomainError) {
+              publicEmailError = error;
+            } else if (error instanceof OrganizationDomainConflictError) {
+              domainConflictError = error;
+            }
+          }
+        }
+
+        if (!domainConflictError && !publicEmailError) {
+          domainConflict = await organizationDomainService.findEnterpriseWorkspaceByEmailDomain(googleUserData.email);
+          domainConflictError = domainConflict
+            ? new OrganizationDomainConflictError(domainConflict.domain, domainConflict)
+            : null;
+        }
+      }
 
       const isProduction = process.env.NODE_ENV === 'production';
       const cookieOptions = {
@@ -1296,7 +1363,7 @@ export class AuthV2Controller {
 
         res.cookie('xyne_last_workspace', workspaceId, {
           ...cookieBase,
-          maxAge: 30 * 24 * 60 * 60 * 1000,
+          maxAge: config.session.expiryDays * 24 * 60 * 60 * 1000,
         });
 
         res.cookie(`xyne_ws_${workspaceId}_token`, jwtToken, {
@@ -1341,6 +1408,10 @@ export class AuthV2Controller {
           picture: googleUserData.picture,
           workspaces,
           userExistsButRemoved,
+          ...(domainConflictError ? { domainConflictError: domainConflictError.message } : {}),
+          ...(domainConflict ? { enterpriseJoinOrgName: domainConflict.name } : {}),
+          ...(domainConflict ? { enterpriseJoinWorkspaces: JSON.stringify(domainConflict.workspaces) } : {}),
+          ...(publicEmailError ? { publicEmailDomainError: publicEmailError.message } : {}),
         });
         return;
       }
@@ -1355,6 +1426,14 @@ export class AuthV2Controller {
         picture: googleUserData.picture || '',
         workspaces: JSON.stringify(workspaces),
       });
+      if (domainConflictError && domainConflict) {
+        params.set('domainConflictError', domainConflictError.message);
+        params.set('enterpriseJoinOrgName', domainConflict.name);
+        params.set('enterpriseJoinWorkspaces', JSON.stringify(domainConflict.workspaces));
+      }
+      if (publicEmailError) {
+        params.set('publicEmailDomainError', publicEmailError.message);
+      }
 
       res.redirect(`${frontendUrl}?${params.toString()}`);
       return;
@@ -1571,7 +1650,7 @@ export class AuthV2Controller {
       if (pendingRefreshToken || provider==AuthProvider.EMAIL) {
         try {
           const refreshTokenExpiry = new Date();
-          refreshTokenExpiry.setDate(refreshTokenExpiry.getDate() + 30);
+          refreshTokenExpiry.setDate(refreshTokenExpiry.getDate() + config.session.expiryDays);
 
           const deviceInfo = JSON.stringify({
             userAgent: req.headers['user-agent'],
@@ -1623,7 +1702,7 @@ export class AuthV2Controller {
       // Set last workspace pointer
       res.cookie('xyne_last_workspace', workspaceId, {
         ...cookieOptions,
-        maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
+        maxAge: config.session.expiryDays * 24 * 60 * 60 * 1000,
       });
 
       if (sessionId) {
@@ -1755,7 +1834,7 @@ export class AuthV2Controller {
       if (pendingRefreshToken) {
         try {
           const refreshTokenExpiry = new Date();
-          refreshTokenExpiry.setDate(refreshTokenExpiry.getDate() + 30);
+          refreshTokenExpiry.setDate(refreshTokenExpiry.getDate() + config.session.expiryDays);
 
           const deviceInfo = JSON.stringify({
             userAgent: req.headers['user-agent'],
@@ -1807,14 +1886,14 @@ export class AuthV2Controller {
       if (sessionId) {
         res.cookie('user_session_id', sessionId, {
           ...cookieOptions,
-          maxAge: config.session.expiryDays * 24 * 60 * 60 * 1000, // 30 days
+          maxAge: config.session.expiryDays * 24 * 60 * 60 * 1000,
         });
       }
       
       // Set last workspace pointer
       res.cookie('xyne_last_workspace', targetWorkspaceId, {
         ...cookieOptions,
-        maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
+        maxAge: config.session.expiryDays * 24 * 60 * 60 * 1000,
       });
 
       setOnboardingCookie(res, isNewUser, {
@@ -1948,10 +2027,15 @@ export class AuthV2Controller {
 
         // Verify session exists and is valid
         let validSessionId: string | null = null;
+        let sessionRefreshExpiry: Date | null = null;
         if (sessionId) {
           const currentSession = await this.userSessionService.getSessionById(sessionId);
           if (currentSession && currentSession.status === 'ACTIVE') {
             validSessionId = currentSession.id;
+            // Reusing the session (fixed window): the DB refreshTokenExpiry is NOT
+            // extended on switch, so the cookies must reflect its remaining life,
+            // never a fresh now+expiryDays (which would outlive the DB record).
+            sessionRefreshExpiry = currentSession.refreshTokenExpiry;
             logger.info(`[SWITCH-WORKSPACE] Reusing existing session: ${validSessionId}`);
           }
         }
@@ -1959,6 +2043,12 @@ export class AuthV2Controller {
         if (!validSessionId) {
           logger.warn(`[SWITCH-WORKSPACE] No valid session found for workspace switch`);
         }
+
+        // Session-scoped cookie lifetime: exact remaining validity of the reused
+        // session so user_session_id (and the pointer) match the DB row.
+        const sessionCookieMaxAge = sessionRefreshExpiry
+          ? sessionRefreshExpiry.getTime() - Date.now()
+          : config.session.expiryDays * 24 * 60 * 60 * 1000;
 
         const token = jwtService.generateToken({
           sub: targetUser.id,
@@ -1974,11 +2064,11 @@ export class AuthV2Controller {
 
         // Set workspace-specific cookies
         res.cookie(`xyne_ws_${workspaceId}_token`, token, { ...cookieBase, maxAge: config.jwt.expirationSeconds * 1000 });
-        res.cookie('xyne_last_workspace', workspaceId, { ...cookieBase, maxAge: 30 * 24 * 60 * 60 * 1000 });
+        res.cookie('xyne_last_workspace', workspaceId, { ...cookieBase, maxAge: sessionCookieMaxAge });
 
         // Set global session cookie (reusing existing session)
         if (validSessionId) {
-          res.cookie('user_session_id', validSessionId, { ...cookieBase, maxAge: 30 * 24 * 60 * 60 * 1000 });
+          res.cookie('user_session_id', validSessionId, { ...cookieBase, maxAge: sessionCookieMaxAge });
         }
 
         logger.info(`[SWITCH-WORKSPACE] User ${currentUser.email} switched to workspace ${workspaceId}`);
@@ -2126,7 +2216,7 @@ export class AuthV2Controller {
         if (pendingRefreshToken) {
           try {
             const refreshTokenExpiry = new Date();
-            refreshTokenExpiry.setDate(refreshTokenExpiry.getDate() + 30);
+            refreshTokenExpiry.setDate(refreshTokenExpiry.getDate() + config.session.expiryDays);
             const deviceInfo = JSON.stringify({
               userAgent: req.headers['user-agent'],
               acceptLanguage: req.headers['accept-language'],
@@ -2178,7 +2268,7 @@ export class AuthV2Controller {
 
         res.cookie('xyne_last_workspace', targetWorkspaceId, {
           ...cookieOptions,
-          maxAge: 30 * 24 * 60 * 60 * 1000,
+          maxAge: config.session.expiryDays * 24 * 60 * 60 * 1000,
         });
 
         const isNewUser = !(await this.userService.hasCompletedOnboarding(userData.email));
@@ -2291,7 +2381,7 @@ export class AuthV2Controller {
       if (currentSession?.refreshToken) {
         try {
           const refreshTokenExpiry = new Date();
-          refreshTokenExpiry.setDate(refreshTokenExpiry.getDate() + 30);
+          refreshTokenExpiry.setDate(refreshTokenExpiry.getDate() + config.session.expiryDays);
           const newSession = await this.userSessionService.createSession({
             userId: workspaceUser.id,
             refreshToken: currentSession.refreshToken,
@@ -2325,7 +2415,7 @@ export class AuthV2Controller {
       if (newSessionId) {
         res.cookie('user_session_id', newSessionId, { ...cookieBase, maxAge: config.session.expiryDays * 24 * 60 * 60 * 1000 });
       }
-      res.cookie('xyne_last_workspace', targetWorkspaceId, { ...cookieBase, maxAge: 30 * 24 * 60 * 60 * 1000 });
+      res.cookie('xyne_last_workspace', targetWorkspaceId, { ...cookieBase, maxAge: config.session.expiryDays * 24 * 60 * 60 * 1000 });
       const isNewUser = !(await this.userService.hasCompletedOnboarding(fullUser.email));
       setOnboardingCookie(res, isNewUser, {
         secure: isProduction,

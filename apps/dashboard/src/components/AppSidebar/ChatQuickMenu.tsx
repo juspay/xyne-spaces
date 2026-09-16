@@ -1,4 +1,4 @@
-import { type ReactElement } from 'react';
+import { createElement, useMemo, type ReactElement } from 'react';
 import { Link } from 'react-router-dom';
 import {
   ChatPlus,
@@ -8,8 +8,18 @@ import {
   SendPlaneSlant,
   ListAiGenerated,
 } from '@xyne/icons';
+import { Radar as RadarIcon } from 'lucide-react';
+import { type PikaIconProps } from '@xyne/icons';
 import { type PikaIcon } from './navigationConfig';
+import { useAuth } from '../../hooks/useAuth';
+import { useRadarEnabled } from '../../hooks/radarCacConfig';
 import { QUICK_NAV_ROW_CLASS, QuickNavList } from './RailQuickNav';
+
+// @xyne/icons has no radar glyph, so this borrows lucide's the way
+// AudioWaveIcon does in navigationConfig — `variant` is dropped rather than
+// passed through to the <svg>.
+const RadarNavIcon = ({ variant: _variant, ...props }: PikaIconProps): ReactElement =>
+  createElement(RadarIcon, props);
 
 const CHAT_NAV_ITEMS: {
   key: string;
@@ -30,7 +40,21 @@ const CHAT_NAV_ITEMS: {
   { key: 'bookmarks', label: 'Bookmarks', to: '/chat/bookmarks', icon: BookmarkDefault },
   { key: 'drafts-sent', label: 'Drafts & Sent', to: '/chat/drafts-sent', icon: SendPlaneSlant },
   { key: 'recap', label: 'Recap', to: '/chat/dir/recap', icon: ListAiGenerated },
+  { key: 'radar', label: 'Radar', to: '/chat/dir/radar', icon: RadarNavIcon },
 ];
+
+/**
+ * The rows this user may actually open. Radar's route is registered
+ * unconditionally (the rollout gate lives inside RadarPanel), so the CAC check
+ * has to drop the row here or people outside the rollout get a dead link.
+ */
+const useChatNavItems = (): typeof CHAT_NAV_ITEMS => {
+  const radarEnabled = useRadarEnabled(useAuth().user?.email);
+  return useMemo(
+    () => CHAT_NAV_ITEMS.filter(item => item.key !== 'radar' || radarEnabled),
+    [radarEnabled],
+  );
+};
 
 export const ChatQuickMenu = ({
   prefixWs,
@@ -42,7 +66,7 @@ export const ChatQuickMenu = ({
   onDismiss?: () => void;
 }): ReactElement => (
   <QuickNavList heading='Chat'>
-    {CHAT_NAV_ITEMS.map(item => {
+    {useChatNavItems().map(item => {
       const Icon = item.icon;
       return (
         <Link

@@ -8,7 +8,6 @@ import { XyneDelete } from '../../../icons/xyne-ai';
 import { formatRelativeTime } from '../../../../utils/dateUtils';
 import { AgentSelector } from './AgentSelector';
 import type { AgentOption } from './AgentSelector';
-import { Button } from '../../../ui/Button/Button';
 
 interface ConversationHistoryProps {
   conversations: ConversationHistoryType[];
@@ -540,14 +539,13 @@ const ConversationItem = ({
           description='Manage this conversation'
         >
           <div className='flex flex-col bg-popover rounded-t-[20px] overflow-hidden'>
-            <Button
-              variant='ghost'
+            <button
               onClick={e => {
                 e.stopPropagation();
                 onDelete();
                 setOpenDropdownId(null);
               }}
-              trackId='delete_conversation'
+              data-ph-capture-attribute-track-id='delete_conversation'
               className='w-full px-4 py-4 text-left text-sm active:bg-accent flex items-center gap-3 text-destructive touch-manipulation'
               data-track-category='XyneAI'
               data-track-name='DELETE_CONVERSATION'
@@ -555,7 +553,7 @@ const ConversationItem = ({
             >
               <XyneDelete color='currentColor' />
               <span>Delete</span>
-            </Button>
+            </button>
           </div>
         </Drawer>
       ) : (
@@ -576,14 +574,13 @@ const ConversationItem = ({
           }
           className='w-48 p-0 bg-popover border border-border rounded-lg shadow-lg'
         >
-          <Button
-            variant='ghost'
+          <button
             onClick={e => {
               e.stopPropagation();
               onDelete();
               setOpenDropdownId(null);
             }}
-            trackId='delete_conversation'
+            data-ph-capture-attribute-track-id='delete_conversation'
             className='w-full px-4 py-2 text-left text-sm hover:bg-accent flex items-center gap-2 text-destructive'
             data-track-category='XyneAI'
             data-track-name='DELETE_DESKTOP'
@@ -591,7 +588,7 @@ const ConversationItem = ({
           >
             <XyneDelete color='currentColor' />
             <span>Delete</span>
-          </Button>
+          </button>
         </Popover>
       )}
     </div>

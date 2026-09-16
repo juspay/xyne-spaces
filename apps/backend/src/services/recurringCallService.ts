@@ -9,6 +9,7 @@ import { scheduledCallNotificationService } from '@/services/scheduledCallNotifi
 import { addHHMMDuration } from '@/utils/dateUtils';
 import { DatabaseClient } from '@/database/client';
 import { CallVespaFeedSource, queueCallVespaFeed } from '@/services/callVespaQueue';
+import { queueCallCalendarPush, queueCallCalendarPushMany } from '@/queues/callCalendarPushQueue';
 import { runWithContext } from '@/database/tenant/context';
 import { buildCallInviteUrl } from '@/utils/urlUtils';
 
@@ -118,6 +119,10 @@ class RecurringCallService {
       }, tx);
 
       queueCallVespaFeed(callId, { source: CallVespaFeedSource.RecurringCallServiceCreateInstance });
+      // Every materialized instance — first creation, buffer replenishment,
+      // regeneration, the auto-end chain — passes through here, so this one
+      // hook puts the whole series on the organizer's calendar.
+      queueCallCalendarPush(callId, 'recurringCallService.createInstance');
 
       // Send immediate CALL_SCHEDULED notifications + activities for the first instance only
       if (notifyParticipants) {
@@ -422,6 +427,12 @@ class RecurringCallService {
     scheduledInstanceIds.forEach((callId) => queueCallVespaFeed(callId, {
       source: CallVespaFeedSource.RecurringCallServiceRegenerateFutureInstancesCancelledInstance,
     }));
+    // The replacements were pushed by createInstance; these are the instances
+    // the new rule superseded, so withdraw their calendar events.
+    queueCallCalendarPushMany(
+      scheduledInstanceIds,
+      'recurringCallService.regenerateFutureInstances',
+    );
 
     return callIds;
   }
@@ -522,6 +533,8 @@ class RecurringCallService {
       repositories.scheduledCalls.cancelSeries({ seriesId, now, tx }),
     );
 
+    queueCallCalendarPushMany(futureInstanceIds, 'recurringCallService.cancelSeries');
+
     return result;
   }
 
@@ -547,9 +560,13 @@ class RecurringCallService {
       }
     }
 
-    return db.$transaction(async (tx) =>
+    const result = await db.$transaction(async (tx) =>
       repositories.scheduledCalls.deleteSeries({ seriesId, tx }),
     );
+
+    queueCallCalendarPushMany(instanceIds, 'recurringCallService.deleteSeries');
+
+    return result;
   }
 }
 

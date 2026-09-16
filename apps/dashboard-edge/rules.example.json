@@ -1,0 +1,31 @@
+{
+  "rules": [
+    {
+      "id": "sdlc",
+      "match": { "path_prefix": "/sdlc-app/" },
+      "lane": "main-sdlc",
+      "strip_prefix": "/sdlc-app"
+    },
+    {
+      "id": "playground-header",
+      "match": { "header": { "name": "x-route-env", "exact": "playground" } },
+      "lane": "release-20260902"
+    },
+    {
+      "id": "playground-cookie",
+      "match": { "cookie": { "name": "x-route-env", "regex": "^playground$" } },
+      "lane": "release-20260902"
+    },
+    {
+      "id": "devqa",
+      "match": { "user_agent": { "regex": "devqa-xyne-([A-Za-z0-9_-]+)" } },
+      "lane": "devqa-xyne-$1",
+      "cache": "never"
+    },
+    {
+      "id": "default",
+      "match": { "path_prefix": "/" },
+      "lane": "main"
+    }
+  ]
+}

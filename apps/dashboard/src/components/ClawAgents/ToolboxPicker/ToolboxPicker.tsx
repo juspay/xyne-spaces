@@ -17,7 +17,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo, type ReactNode } from 'react';
 import { Sparkles, ChevronRight, Loader2, Check, X, Info } from 'lucide-react';
 import { suggestTools } from '@/services/claw/clawToolsService';
-import { Button } from '@/components/ui/Button';
+
 import { Dialog } from '@/components/ui/Dialog';
 import type {
   AvailableTools,
@@ -673,17 +673,16 @@ export function ToolboxPicker({
           <span className='min-w-0 flex-1 truncate'>
             Couldn&apos;t suggest tools — {suggestionError}
           </span>
-          <Button
+          <button
             type='button'
-            variant='ghost'
-            trackId='claw_toolbox_resuggest'
+            data-ph-capture-attribute-track-id='claw_toolbox_resuggest'
             data-track-category='Claw Agents'
             data-track-name='Re-suggest tools'
             onClick={reRollSuggestion}
             className='shrink-0 font-medium underline-offset-2 hover:underline'
           >
             Try again
-          </Button>
+          </button>
           <button
             type='button'
             data-track-category='Claw Agents'
@@ -848,17 +847,16 @@ export function ToolboxPicker({
                 >
                   <Sparkles size={12} /> Accept all {total}
                 </button>
-                <Button
+                <button
                   type='button'
-                  variant='ghost'
-                  trackId='claw_toolbox_resuggest'
+                  data-ph-capture-attribute-track-id='claw_toolbox_resuggest'
                   data-track-category='Claw Agents'
                   data-track-name='Re-suggest tools'
                   onClick={reRollSuggestion}
                   className='rounded bg-muted px-3 py-1.5 text-[12px] font-medium text-foreground transition-colors hover:bg-muted/70'
                 >
                   Re-suggest
-                </Button>
+                </button>
               </div>
             </div>
           );
@@ -868,17 +866,16 @@ export function ToolboxPicker({
         <div className='flex items-center gap-2 rounded-md bg-emerald-500/10 px-2.5 py-1.5 text-[12px] text-emerald-600 dark:text-emerald-400'>
           <Check size={13} className='shrink-0' />
           <span className='flex-1'>Suggestions applied</span>
-          <Button
+          <button
             type='button'
-            variant='ghost'
-            trackId='claw_toolbox_resuggest'
+            data-ph-capture-attribute-track-id='claw_toolbox_resuggest'
             data-track-category='Claw Agents'
             data-track-name='Re-suggest tools'
             onClick={reRollSuggestion}
             className='shrink-0 font-medium underline-offset-2 hover:underline'
           >
             Re-suggest
-          </Button>
+          </button>
         </div>
       )}
     </div>
@@ -942,10 +939,9 @@ export function ToolboxPicker({
           >
             Cancel
           </button>
-          <Button
+          <button
             type='button'
-            variant='ghost'
-            trackId='claw_toolbox_suggest_submit'
+            data-ph-capture-attribute-track-id='claw_toolbox_suggest_submit'
             data-track-category='Claw Agents'
             data-track-name='Submit suggest tools'
             onClick={submitRefine}
@@ -953,7 +949,7 @@ export function ToolboxPicker({
             className='inline-flex items-center gap-1.5 rounded-md bg-foreground px-4 py-2 text-sm font-medium text-background transition-colors hover:bg-foreground/90 disabled:opacity-40 disabled:cursor-not-allowed'
           >
             <Sparkles size={14} /> Suggest
-          </Button>
+          </button>
         </div>
       </Dialog>
     </>

@@ -37,6 +37,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { withProfiler } from '../../../utils/withProfiler';
 import { getInitialMessageFromConversation } from '../../../utils/conversationMessageHelpers';
 import { usePendingForChannel, buildPendingChannelConversation } from '@xyne/shared/messages';
+import { useEphemeralChannelConversations } from '../../../hooks/useEphemeralMessages';
 import { MessageHoverToolbar } from '../HoverActionsToolbar/MessageHoverToolbar';
 
 export type ChatListProps = {
@@ -50,6 +51,8 @@ export type ChatListProps = {
   linkedConversationId?: string | null;
   channelScopeType?: ChannelScopeType | undefined;
   skipMarkAsReadRef: React.RefObject<boolean>;
+  unreadsOnly?: boolean;
+  onThreadClick?: (channelId: string, conversationId: string) => void;
 };
 
 type Anchor = {
@@ -205,6 +208,8 @@ const ChatListV4: React.FC<ChatListProps> = ({
   linkedConversationId,
   channelScopeType,
   skipMarkAsReadRef,
+  unreadsOnly,
+  onThreadClick,
 }) => {
   // Save scroll position when unmounting due to /browser fullscreen navigation.
   useEffect(() => {
@@ -226,7 +231,12 @@ const ChatListV4: React.FC<ChatListProps> = ({
   const { baseRoute } = useRouteContext();
   const { isEditingMessage, requestEdit } = useMessageEdit();
   const channelParticipation = useChannelParticipation(channelId);
-  const isMember = !!channelParticipation;
+  const isDmScope =
+    channelScopeType === ChannelScopeType.DM || channelScopeType === ChannelScopeType.GROUP_DM;
+  // A closed DM isn't in the seeded status map at mount, so participation is briefly undefined;
+  // treat an opened DM/group-DM as a member so ConversationsACL loads messages (its participant
+  // check still re-verifies real membership — a non-participant gets nothing, not a leak).
+  const isMember = !!channelParticipation || isDmScope;
   const channel = useVisibleChannel(channelId);
 
   const [newConversationsAnchor, setNewConversationsAnchor] = useState<Anchor | null>(
@@ -324,8 +334,23 @@ const ChatListV4: React.FC<ChatListProps> = ({
     return [...base, ...pendingRows];
   }, [conversations, pendingForChannel]);
 
+  // In unreads-only mode (the Unreads inbox), hide everything the user has
+  // already seen; pending rows carry the newest timestamps so they survive.
+  const filteredConversations = useMemo(() => {
+    if (!unreadsOnly || !channelParticipation?.lastViewedAt) return conversationsWithPending;
+    return conversationsWithPending.filter(
+      conv => conv.createdAt > channelParticipation.lastViewedAt,
+    );
+  }, [conversationsWithPending, unreadsOnly, channelParticipation?.lastViewedAt]);
+
+  const ephemeralConversations = useEphemeralChannelConversations(channelId);
+  const conversationsWithEphemeral = useMemo(() => {
+    if (ephemeralConversations.length === 0) return filteredConversations;
+    return [...filteredConversations, ...ephemeralConversations];
+  }, [filteredConversations, ephemeralConversations]);
+
   const { combinedMessages, itemHeights } = useCombinedMesseges(
-    conversationsWithPending,
+    conversationsWithEphemeral,
     isMobile,
     newConversationBoundary?.index ?? -1,
   );
@@ -344,8 +369,14 @@ const ChatListV4: React.FC<ChatListProps> = ({
   // Container for the shared hover toolbar overlay (Slack pattern): one
   // toolbar for the whole list, positioned over the hovered row.
   const hoverToolbarContainerRef = useRef<HTMLDivElement>(null);
+  // Require resolved participation: while it's undefined, `?.conversationSeenCutoffAt !== null`
+  // is spuriously true and — now that DMs default isMember to true — would route to the cutoff
+  // path with a null anchor, skipping both load paths and leaving the list stuck empty.
   const shouldUseCutoffQuery =
-    channelParticipation?.conversationSeenCutoffAt !== null && isMember && !linkedConversationId;
+    !!channelParticipation &&
+    channelParticipation.conversationSeenCutoffAt !== null &&
+    isMember &&
+    !linkedConversationId;
 
   // ── TanStack Virtualizer ──────────────────────────────────────────────────────
   // anchorTo: 'end' replaces Virtuoso's firstItemIndex trick and alignToBottom.
@@ -475,17 +506,19 @@ const ChatListV4: React.FC<ChatListProps> = ({
     }
 
     Promise.all([
-      zero.run(
-        queries.channelConversationsPaginatedV3({
-          channelId,
-          isMember,
-          ...(conversationIdsFilter && { conversationIds: conversationIdsFilter }),
-          start: oldConversationsAnchorRef.current,
-          direction: 'forward',
-          limit: PAGE_SIZE,
-        }),
-        { type: 'complete' },
-      ),
+      !unreadsOnly
+        ? zero.run(
+            queries.channelConversationsPaginatedV3({
+              channelId,
+              isMember,
+              ...(conversationIdsFilter && { conversationIds: conversationIdsFilter }),
+              start: oldConversationsAnchorRef.current,
+              direction: 'forward',
+              limit: PAGE_SIZE,
+            }),
+            { type: 'complete' },
+          )
+        : Promise.resolve([]),
       newConversationsAnchor &&
         zero.run(
           queries.channelConversationsPaginatedV3({
@@ -604,7 +637,7 @@ const ChatListV4: React.FC<ChatListProps> = ({
 
   const fetchOlderMessages = useCallback(() => {
     // isFetchingOlder=true → suppressed (previous fetch in flight).
-    if (isFetchingOlderRef.current || hasReachedChannelStartRef.current) return;
+    if (isFetchingOlderRef.current || hasReachedChannelStartRef.current || unreadsOnly) return;
     isFetchingOlderRef.current = true;
     zero
       .run(
@@ -1108,6 +1141,10 @@ const ChatListV4: React.FC<ChatListProps> = ({
         onOpenThreadOverride(conversationId, e);
         return;
       }
+      if (onThreadClick) {
+        onThreadClick(channelId, conversationId);
+        return;
+      }
       const conversation = conversations.find(c => c.conversationId === conversationId);
       const conversationMetadata = conversation?.metadata as { ticketId?: string } | null;
       const initMsg = conversation ? getInitialMessageFromConversation(conversation) : null;
@@ -1124,7 +1161,7 @@ const ChatListV4: React.FC<ChatListProps> = ({
         standaloneNavigate(navigate, `${baseRoute}/${channelId}/${conversationId}`, { event: e });
       }
     },
-    [channelId, conversations, navigate, onOpenThreadOverride],
+    [channelId, conversations, navigate, onOpenThreadOverride, onThreadClick],
   );
 
   const isEventFromChannelInput = useCallback(

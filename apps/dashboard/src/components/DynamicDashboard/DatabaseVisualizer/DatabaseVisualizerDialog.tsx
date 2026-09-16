@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, type ReactElement, type ReactNode } from 
 import { useQuery } from '@tanstack/react-query';
 import { AlertCircle, Loader2, RefreshCw, Search, Trash2, X } from 'lucide-react';
 import { Dialog } from '../../ui/Dialog';
-import { Button } from '../../ui/Button/Button';
+
 import { SegmentedToggle } from '../../ui/SegmentedToggle/SegmentedToggle';
 import { listDataSources } from '../../../services/DynamicDashboard/dataSourcesService';
 import { dataSourceKeys, useDataSourceMutations } from '../../../hooks/useDataSources';
@@ -254,19 +254,18 @@ export function DatabaseVisualizerDialog({
             >
               Cancel
             </button>
-            <Button
-              variant='default'
+            <button
               type='button'
               onClick={onRefreshConfirmed}
               disabled={refreshMutation.isPending}
-              trackId='reingest_data_source'
+              data-ph-capture-attribute-track-id='reingest_data_source'
               data-track-category='DYNAMIC_DASHBOARD'
               data-track-name='Db_Viz_Refresh_Source_Confirm'
               className='h-9 px-3 rounded-lg text-sm font-medium text-primary-foreground bg-primary hover:bg-primary/90 transition-colors disabled:opacity-50 inline-flex items-center gap-1.5'
             >
               {refreshMutation.isPending && <Loader2 size={13} className='animate-spin' />}
               Re-ingest
-            </Button>
+            </button>
           </div>
         </div>
       </Dialog>
@@ -299,19 +298,18 @@ export function DatabaseVisualizerDialog({
             >
               Cancel
             </button>
-            <Button
-              variant='destructive'
+            <button
               type='button'
               onClick={onDeleteConfirmed}
               disabled={deleteMutation.isPending}
-              trackId='delete_data_source'
+              data-ph-capture-attribute-track-id='delete_data_source'
               data-track-category='DYNAMIC_DASHBOARD'
               data-track-name='Db_Viz_Delete_Source_Confirm'
               className='h-9 px-3 rounded-lg text-sm font-medium text-white bg-rose-600 hover:bg-rose-700 transition-colors disabled:opacity-50 inline-flex items-center gap-1.5'
             >
               {deleteMutation.isPending && <Loader2 size={13} className='animate-spin' />}
               Delete
-            </Button>
+            </button>
           </div>
         </div>
       </Dialog>

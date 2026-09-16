@@ -195,13 +195,12 @@ const Settings = ({
             className='w-40 p-1'
           >
             <div className='space-y-0.5'>
-              <Button
-                variant='ghost'
+              <button
                 onClick={() => {
                   setLivePresenceStatus('ONLINE');
                   setPresencePopoverOpen(false);
                 }}
-                trackId='set_presence_online'
+                data-ph-capture-attribute-track-id='set_presence_online'
                 className='w-full flex items-center gap-2 px-2 py-1.5 text-sm rounded-md hover:bg-muted transition-colors text-left'
                 data-track-category='Settings'
                 data-track-name='SetPresenceOnline'
@@ -211,14 +210,13 @@ const Settings = ({
                 {livePresenceStatus !== 'AWAY' && (
                   <Check className='size-3 ml-auto text-muted-foreground' />
                 )}
-              </Button>
-              <Button
-                variant='ghost'
+              </button>
+              <button
                 onClick={() => {
                   setLivePresenceStatus('AWAY');
                   setPresencePopoverOpen(false);
                 }}
-                trackId='set_presence_away'
+                data-ph-capture-attribute-track-id='set_presence_away'
                 className='w-full flex items-center gap-2 px-2 py-1.5 text-sm rounded-md hover:bg-muted transition-colors text-left'
                 data-track-category='Settings'
                 data-track-name='SetPresenceAway'
@@ -228,7 +226,7 @@ const Settings = ({
                 {livePresenceStatus === 'AWAY' && (
                   <Check className='size-3 ml-auto text-muted-foreground' />
                 )}
-              </Button>
+              </button>
             </div>
           </Popover>
         </div>
@@ -353,22 +351,21 @@ const Settings = ({
             {!showCustomDatePicker ? (
               <div className='space-y-0.5'>
                 {pauseOptions.map(option => (
-                  <Button
+                  <button
                     key={option.minutes}
-                    variant='ghost'
                     onClick={e => {
                       e.stopPropagation();
                       handlePauseNotifications(option.minutes);
                     }}
-                    trackId='pause_notifications'
-                    trackProps={{ duration: option.minutes }}
+                    data-ph-capture-attribute-track-id='pause_notifications'
+                    data-ph-capture-attribute-duration={option.minutes}
                     className='w-full flex items-center gap-2 px-2 py-1.5 text-sm rounded-md hover:bg-accent transition-colors text-left'
                     data-track-category='Settings'
                     data-track-name='PauseNotifications'
                     data-track-metadata={JSON.stringify({ duration: option.minutes })}
                   >
                     <span>{option.label}</span>
-                  </Button>
+                  </button>
                 ))}
                 <button
                   onClick={e => {

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useInfiniteQuery } from '@tanstack/react-query';
 import {
   ArrowLeft,
@@ -20,6 +20,7 @@ import {
 import { Skeleton } from '../../../ui/Skeleton';
 import { Button } from '../../../ui/Button/Button';
 import { DateRangeFilter, type DateRangeValue } from '../../../ui/DateRangeFilter/DateRangeFilter';
+import { loadRunFilters, saveRunFilters } from '../../AutomationsList/AutomationFiltersBar/filters';
 import { fetchAutomationRuns } from '../../../../api/automationsApi';
 import type { AutomationRunStatus, AutomationRunSummary } from '../../Automation.types';
 import type { RunHistoryProps } from './RunHistory.types';
@@ -60,8 +61,24 @@ export function RunHistory({
   onOpenRun,
   onBack,
 }: RunHistoryProps): React.ReactElement {
-  const [statusFilter, setStatusFilter] = useState<StatusFilterValue>('all');
-  const [dateRange, setDateRange] = useState<DateRangeValue | null>(null);
+  const [saved] = useState(() => loadRunFilters(automationId));
+  const [statusFilter, setStatusFilter] = useState(saved.status as StatusFilterValue);
+  const [dateRange, setDateRange] = useState<DateRangeValue | null>(saved.dateRange);
+
+  // The route reuses this component across automations; without this the previous
+  // automation's filters would be saved over the new one's.
+  const [loadedFor, setLoadedFor] = useState(automationId);
+  if (loadedFor !== automationId) {
+    const next = loadRunFilters(automationId);
+    setLoadedFor(automationId);
+    setStatusFilter(next.status as StatusFilterValue);
+    setDateRange(next.dateRange);
+  }
+
+  useEffect(() => {
+    if (loadedFor !== automationId) return;
+    saveRunFilters(automationId, statusFilter, dateRange);
+  }, [automationId, loadedFor, statusFilter, dateRange]);
 
   const { data, fetchNextPage, hasNextPage, isFetchingNextPage, isLoading, isError, refetch } =
     useInfiniteQuery({
@@ -145,10 +162,9 @@ export function RunHistory({
         {isError ? (
           <div className='py-16 text-center text-sm text-red-600'>
             Failed to load runs.
-            <Button
-              variant='ghost'
+            <button
               type='button'
-              trackId='automation_run_history_retry'
+              data-ph-capture-attribute-track-id='automation_run_history_retry'
               data-track-category='automation-runs'
               data-track-name='run-history-retry'
               onClick={() => {
@@ -157,7 +173,7 @@ export function RunHistory({
               className='ml-2 underline hover:no-underline'
             >
               Retry
-            </Button>
+            </button>
           </div>
         ) : isLoading ? (
           <div className='flex flex-col'>

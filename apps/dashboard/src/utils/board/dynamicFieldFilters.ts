@@ -96,7 +96,6 @@ export const buildDynamicFieldFilterEntries = (
 };
 
 const SCALAR_EQUALITY_FIELD_TYPES = new Set<FormFieldType>([
-  FormFieldType.SINGLE_SELECT,
   FormFieldType.BOOLEAN,
   FormFieldType.NUMBER,
 ]);

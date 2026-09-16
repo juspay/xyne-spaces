@@ -1,4 +1,4 @@
-import { isBaselineCanvasType } from '@xyne/shared/sdlc';
+import { isHubKnowledgeArtifactType } from '@xyne/shared/sdlc';
 import type { SdlcDiscussion, SdlcEntityType, SdlcRelationType } from '@xyne/shared';
 
 interface CanvasSummary {
@@ -17,7 +17,7 @@ interface LinkSummary {
 }
 
 export interface SdlcDiscussionContext {
-  owner: { canvasId: string; title: string; kind: 'PIPELINE' | 'REPO_KNOWLEDGE' | 'WIKI' };
+  owner: { canvasId: string; title: string; kind: 'PIPELINE' | 'HUB_KNOWLEDGE' | 'WIKI' };
   surface: { type: NonNullable<SdlcDiscussion['surfaceType']>; id: string };
 }
 
@@ -28,8 +28,8 @@ export function resolveCanvasDiscussionOwner(
   const canvas = canvases.find(item => item.id === canvasId);
   if (!canvas?.sdlcArtifact) return null;
   const artifactType = canvas.sdlcArtifact.artifactType;
-  if (isBaselineCanvasType(artifactType)) {
-    return { canvasId: canvas.id, title: canvas.title, kind: 'REPO_KNOWLEDGE' };
+  if (isHubKnowledgeArtifactType(artifactType)) {
+    return { canvasId: canvas.id, title: canvas.title, kind: 'HUB_KNOWLEDGE' };
   }
   if (artifactType === 'WIKI') {
     return { canvasId: canvas.id, title: canvas.title, kind: 'WIKI' };
@@ -40,9 +40,7 @@ export function resolveCanvasDiscussionOwner(
 export function resolveSdlcDiscussionContext(input: {
   selectedCanvasId: string | null;
   selectedWikiPage: { canvasId: string; title: string } | null;
-  selectedTicketId: string | null;
   selectedConversationId: string | null;
-  ticketIds: readonly string[];
   canvases: readonly CanvasSummary[];
   links: readonly LinkSummary[];
 }): SdlcDiscussionContext | null {
@@ -59,16 +57,6 @@ export function resolveSdlcDiscussionContext(input: {
   if (input.selectedCanvasId) {
     const owner = resolveCanvasDiscussionOwner(input.selectedCanvasId, input.canvases);
     return owner ? { owner, surface: { type: 'CANVAS', id: input.selectedCanvasId } } : null;
-  }
-  if (input.selectedTicketId) {
-    if (!input.ticketIds.includes(input.selectedTicketId)) return null;
-    const sourceLink = input.links.find(
-      link => link.relationType === 'TICKET' && link.targetId === input.selectedTicketId,
-    );
-    const owner = sourceLink
-      ? resolveCanvasDiscussionOwner(sourceLink.sourceId, input.canvases)
-      : null;
-    return owner ? { owner, surface: { type: 'TICKET', id: input.selectedTicketId } } : null;
   }
   if (!input.selectedConversationId) return null;
   const discussionLink = input.links.find(

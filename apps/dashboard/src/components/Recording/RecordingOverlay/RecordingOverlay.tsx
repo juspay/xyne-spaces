@@ -279,17 +279,16 @@ export function RecordingOverlay(): React.ReactElement | null {
                 )}
               </button>
 
-              <Button
-                variant='ghost'
+              <button
                 onClick={handleStop}
                 disabled={isStarting}
                 className='flex items-center justify-center w-10 h-10 rounded-full bg-destructive hover:bg-destructive/85 transition-colors'
                 data-track-category='RecordingOverlay'
                 data-track-name='stop_recording'
-                trackId='stop_recording'
+                data-ph-capture-attribute-track-id='stop_recording'
               >
                 <Square className='w-4 h-4 text-destructive-foreground fill-current' />
-              </Button>
+              </button>
             </div>
           </div>
 

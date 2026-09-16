@@ -2,13 +2,11 @@ import React, { useContext, useEffect, useState } from 'react';
 import { MaximizeTwoArrow, Spinner } from '@xyne/icons';
 import type { AgentDraftProps, FlowComponent } from '@xyne/shared';
 import { useFlow } from '../../FlowContext';
-import { useAgentProgress } from '../../../../hooks/useAgentProgress';
 import { cn } from '../../../../utils/classNames';
 import { AuditLine, CardShell, Mention, StatusChip } from '../cardPrimitives';
 import Avatar from '../../../ui/Avatar/Avatar';
 import { AgentPreview, InsideAgentPreviewContext } from './AgentPreview';
 import { ChatWithAgentButton } from './ChatWithAgentButton';
-import { Button } from '../../../ui/Button/Button';
 
 /**
  * The `agent` artifact's DRAFT variant — an agent an agent proposed, awaiting
@@ -60,11 +58,6 @@ export const DraftAgentCard: React.FC<{ node: FlowComponent; props: AgentDraftPr
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [node.id]);
 
-  // Approving mid-run dispatches work that collides with the active run at the
-  // runtime session lock. The server also fails this closed; disabling the
-  // button is just the clearer signal.
-  const { agents } = useAgentProgress(conversationId || undefined);
-  const agentRunning = agents.length > 0;
   const locked = state.submitting || decided || pending !== null;
 
   const toggle = (id: string): void => {
@@ -81,7 +74,7 @@ export const DraftAgentCard: React.FC<{ node: FlowComponent; props: AgentDraftPr
   };
 
   const submit = async (actionId: 'agent-draft-approve' | 'agent-draft-decline'): Promise<void> => {
-    if (locked || (actionId === 'agent-draft-approve' && agentRunning)) {
+    if (locked) {
       return;
     }
     setPending(actionId === 'agent-draft-approve' ? 'approve' : 'reject');
@@ -132,8 +125,7 @@ export const DraftAgentCard: React.FC<{ node: FlowComponent; props: AgentDraftPr
     </div>
   );
 
-  const approveLabel =
-    pending === 'approve' ? 'Creating…' : agentRunning ? 'Agent is working…' : 'Create Agent';
+  const approveLabel = pending === 'approve' ? 'Creating…' : 'Create Agent';
 
   const interactive = decided ? undefined : { selected, onToggle: toggle, disabled: locked };
 
@@ -154,26 +146,20 @@ export const DraftAgentCard: React.FC<{ node: FlowComponent; props: AgentDraftPr
   // expanded preview footer (submit() closes the preview on a decision).
   const actionControls = (
     <div className='flex w-full items-center justify-between gap-3'>
-      <Button
+      <button
         type='button'
-        variant='ghost'
         onClick={() => void submit('agent-draft-decline')}
         disabled={locked}
         className={cn(ghostButton, 'px-2.5')}
         data-track-category='AGENT_ARTIFACT'
         data-track-name='CLICK_DECLINE'
-        trackId='agent_draft_decline'
+        data-ph-capture-attribute-track-id='agent_draft_decline'
       >
         {pending === 'reject' && <Spinner size={14} className='animate-spin' />}
         {pending === 'reject' ? 'Declining…' : 'Decline'}
-      </Button>
+      </button>
 
       <div className='flex shrink-0 items-center gap-2'>
-        {agentRunning && (
-          <span className='hidden text-xs text-muted-foreground sm:inline'>
-            Approve once it finishes.
-          </span>
-        )}
         {/* Placeholder from the frame — no edit flow exists yet. Rendered so the
             layout matches the design; wire it up when the behaviour is decided. */}
         <button
@@ -188,21 +174,18 @@ export const DraftAgentCard: React.FC<{ node: FlowComponent; props: AgentDraftPr
         >
           Edit
         </button>
-        <Button
+        <button
           type='button'
-          variant='ghost'
           onClick={() => void submit('agent-draft-approve')}
-          disabled={locked || agentRunning}
+          disabled={locked}
           className={cn(primaryButton, 'px-2.5')}
           data-track-category='AGENT_ARTIFACT'
           data-track-name='CLICK_APPROVE'
-          trackId='agent_draft_approve'
+          data-ph-capture-attribute-track-id='agent_draft_approve'
         >
-          {(pending === 'approve' || agentRunning) && (
-            <Spinner size={14} className='animate-spin' />
-          )}
+          {pending === 'approve' && <Spinner size={14} className='animate-spin' />}
           {approveLabel}
-        </Button>
+        </button>
       </div>
     </div>
   );

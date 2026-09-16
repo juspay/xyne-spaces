@@ -17,6 +17,7 @@ export interface TicketPreviousValue {
   userGroupId: string | null;
   createdBy: string;
   channelId: string | null;
+  metadata: unknown;
 }
 
 export interface TicketStageEtaPreviousValue {

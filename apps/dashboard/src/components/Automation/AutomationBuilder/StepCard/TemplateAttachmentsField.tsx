@@ -17,7 +17,7 @@ import remarkGfm from 'remark-gfm';
 import { toast } from 'sonner';
 import { Dialog } from '../../../ui/Dialog/Dialog';
 import { Popover } from '../../../ui/Popover/Popover';
-import { Button } from '../../../ui/Button/Button';
+
 import { cn } from '../../../../utils/classNames';
 import {
   fetchAutomationTemplateContent,
@@ -474,19 +474,18 @@ export function TemplateAttachmentsField({
             >
               Cancel
             </button>
-            <Button
-              variant='ghost'
+            <button
               type='button'
               data-track-category='automation-builder'
               data-track-name='template-editor-apply'
-              trackId='automation_template_save'
+              data-ph-capture-attribute-track-id='automation_template_save'
               disabled={editorLoading || editorSaving}
               onClick={() => void saveEditor()}
               className='flex h-9 items-center gap-2 rounded-md bg-foreground px-3 text-sm text-background hover:opacity-90 disabled:opacity-50'
             >
               {editorSaving ? <Loader2 className='size-3.5 animate-spin' /> : null}
               {editorSession?.kind === 'new' ? 'Create and attach' : 'Apply changes'}
-            </Button>
+            </button>
           </div>
         </div>
       </Dialog>

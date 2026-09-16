@@ -1,11 +1,12 @@
 import { Request, Response } from 'express';
 import { logger } from '@/utils/logger';
 import { repositories } from '@/database/repositories';
-import { SsrfBlockedError } from '@/utils/ssrfGuard';
+import { SsrfBlockedError, safeWebhookFetch } from '@/utils/ssrfGuard';
 import { signWebhookPayload } from '@/apps/core/eventSubscriptionUtils';
 import { prepareAppWebhookDispatch } from '@/apps/core/appUrlResolver';
 import { decrypt } from '@/services/encryptionService';
 import { SNS_CONFIRM_ACTION_ID } from './amazonSnsWebhookParser';
+import { mintFlowToken, verifyFlowToken } from '@/apps/core/flowToken';
 import { incomingWebhookController } from './incomingWebhookController';
 import {
   validateActionRequest,
@@ -62,14 +63,34 @@ export class FlowController {
     }
 
     try {
-      // 3. Look up the message to get the appId (stored in <xyne-flow> content tag)
-      const message = await repositories.messages.findById(messageId);
-      if (!message) {
-        res.status(404).json({ error: `Message not found: ${messageId}` });
-        return;
+      // 3. Resolve the appId — the decision that picks which app's signing secret
+      // and webhook this action is dispatched to, so it must never come from the
+      // client unverified.
+      //
+      // A token means the card was posted via chat.postEphemeral and was never
+      // persisted: the signed token is the only record of its owning app, and it
+      // is bound to this user and this messageId. Without one, this is an ordinary
+      // persisted flow message and the appId is read back from its stored content,
+      // exactly as before.
+      let appId: string | null;
+      if (context.token) {
+        if (!userId) {
+          res.status(401).json({ error: 'Unauthenticated' });
+          return;
+        }
+        appId = verifyFlowToken(context.token, userId, messageId);
+        if (!appId) {
+          res.status(403).json({ error: 'Invalid or expired flow token' });
+          return;
+        }
+      } else {
+        const message = await repositories.messages.findById(messageId);
+        if (!message) {
+          res.status(404).json({ error: `Message not found: ${messageId}` });
+          return;
+        }
+        appId = parseAppIdFromContent(message.content);
       }
-
-      const appId = parseAppIdFromContent(message.content);
       if (!appId) {
         res.status(400).json({ error: 'Message is not a flow UI message or missing appId' });
         return;
@@ -108,13 +129,22 @@ export class FlowController {
         return;
       }
 
+      // The token is Xyne's own capability, not the app's business — strip it so
+      // it is neither logged nor stored downstream.
+      let outboundFlowJSON = flowResult.data;
+      if (context.token && flowResult.data.data) {
+        const rest = { ...(flowResult.data.data as Record<string, unknown>) };
+        delete rest['__xyneFlowToken'];
+        outboundFlowJSON = { ...flowResult.data, data: rest };
+      }
+
       // 5. Build the payload sent to the app backend
       const appPayload = {
         actionId,
         type,
         values,
         context: {
-          flowJSON: flowResult.data,
+          flowJSON: outboundFlowJSON,
           messageId,
           conversationId,
           userId: userId ?? null,
@@ -134,9 +164,11 @@ export class FlowController {
         'X-Source': 'XyneSpaces',
       };
       let dispatchUrl: string;
+      let dispatchIsInternal = false;
       try {
         const prepared = await prepareAppWebhookDispatch(installedApp.webhookUrl, dispatchHeaders);
         dispatchUrl = prepared.url;
+        dispatchIsInternal = prepared.isInternal;
       } catch (err) {
         if (err instanceof SsrfBlockedError) {
           logger.warn('[FLOW-ACTION] Blocked SSRF-unsafe webhook URL', { appId, reason: err.message });
@@ -147,14 +179,18 @@ export class FlowController {
         return;
       }
 
-      // 6. Call the app backend synchronously.
-      const appResponse = await fetch(dispatchUrl, {
+      // 6. Call the app backend synchronously. Internal = trusted-config pod URL
+      // (plain client); external = user-supplied, so pin the connection (rebinding-safe).
+      const dispatchInit: RequestInit = {
         method: 'POST',
         headers: dispatchHeaders,
         body,
         redirect: 'manual',
         signal: AbortSignal.timeout(30_000),
-      });
+      };
+      const appResponse = dispatchIsInternal
+        ? await fetch(dispatchUrl, dispatchInit)
+        : await safeWebhookFetch(dispatchUrl, dispatchInit);
 
       if (!appResponse.ok) {
         const text = await appResponse.text().catch(() => 'unknown error');
@@ -197,6 +233,20 @@ export class FlowController {
             details: formatValidationErrors(screenResult),
           });
           return;
+        }
+
+        // Re-mint for the screen the user is about to see. An ephemeral flow holds
+        // no server state, so the next step's authority has to travel with it —
+        // and a multi-step flow left open past the TTL would otherwise 403 on a
+        // step the user has no way to retry.
+        if (context.token && userId) {
+          appData.flowJSON = {
+            ...appData.flowJSON,
+            data: {
+              ...(appData.flowJSON.data ?? {}),
+              __xyneFlowToken: mintFlowToken({ appId, userId, messageId }),
+            },
+          };
         }
       }
 

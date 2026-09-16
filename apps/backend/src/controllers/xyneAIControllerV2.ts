@@ -31,9 +31,6 @@ import {
   buildSdlcAskAiContext,
   resolveSdlcAskAiSelectedArtifact,
 } from '@/sdlc/sdlcAskAiContext';
-import { sdlcVcs } from '@/sdlc/vcs';
-import { computeWikiFreshness } from '@/sdlc/wiki/wikiFreshness';
-import { parseWikiExecutionContext } from '@/sdlc/wiki/wikiRunState';
 
 const emptyToUndefined = (val: unknown) => (val === '' ? undefined : val);
 
@@ -94,6 +91,13 @@ const XyneAIRequestSchemaV2 = z.object({
   conversation_id: z.preprocess(emptyToUndefined, z.string().optional()),
   canvasId: z.string().optional(),
   canvas_id: z.string().optional(),
+  workflowContext: z
+    .object({
+      workflowId: z.string().min(1).nullish(),
+      executionId: z.string().min(1).nullish(),
+      stepId: z.string().min(1).nullish(),
+    })
+    .optional(),
   // Legacy aliases for canvasId (pre-XYNE-17290). Merged into canvasId below.
   canvasViewAccessId: z.string().optional(),
   canvas_view_access_id: z.string().optional(),
@@ -254,6 +258,7 @@ export class XyneAIControllerV2 {
       canvas_id,
       canvasViewAccessId,
       canvas_view_access_id,
+      workflowContext,
       createCanvasEnabled: createCanvasEnabledCC,
       create_canvas_enabled: createCanvasEnabledSC,
       webSearchEnabled: webSearchEnabledCC,
@@ -434,46 +439,9 @@ export class XyneAIControllerV2 {
               }
             : selectedCanvas,
         );
-        // Baseline knowledge-document injection is disabled until the standalone
-        // baseline approval flow returns; READY baselines gate artifact creation instead.
-        const approvedBaseline: Array<{ title: string; content: string }> = [];
         const linkedContext = sdlcRepo.workspaceId
           ? await resolveAuthorizedSdlcLinkedContext(db, contextLinks, userId, sdlcRepo.workspaceId)
           : [];
-        const [baseBranchHeadSha, wikiRunLinks] = await Promise.all([
-          sdlcVcs.resolveBaseBranchHead(sdlcRepo.id).catch(() => null),
-          db.sdlcEntityLink.findMany({
-            where: {
-              sourceType: 'REPOSITORY',
-              sourceId: sdlcRepo.id,
-              targetType: 'WORKFLOW_EXECUTION',
-              relationType: 'WIKI_RUN',
-            },
-            orderBy: { createdAt: 'desc' },
-            take: 50,
-            select: { targetId: true },
-          }),
-        ]);
-        const latestSuccessfulWiki = wikiRunLinks.length
-          ? await db.workflowExecution.findFirst({
-              where: {
-                id: { in: wikiRunLinks.map((link) => link.targetId) },
-                workflowType: 'SDLC_WIKI',
-                status: 'SUCCESS',
-              },
-              orderBy: { createdAt: 'desc' },
-              select: { context: true },
-            })
-          : null;
-        let wikiCommitSha: string | null = null;
-        if (latestSuccessfulWiki?.context) {
-          try {
-            const wikiContext = parseWikiExecutionContext(latestSuccessfulWiki.context);
-            wikiCommitSha = wikiContext.targetHeadSha ?? wikiContext.cursorSha;
-          } catch {
-            wikiCommitSha = null;
-          }
-        }
         // Membership points at the repository through the polymorphic targetId, so
         // no relation covers it: read the edges, then the repositories they name.
         const siblingLinks = await db.sdlcEntityLink.findMany({
@@ -504,10 +472,8 @@ export class XyneAIControllerV2 {
             url: sibling.canonicalUrl || sibling.url,
           })),
           channelId: effectiveChannelIds[0],
-          baselineDocuments: approvedBaseline,
           linkedContext,
           ...(selectedArtifact ? { selectedArtifact } : {}),
-          wikiFreshness: computeWikiFreshness({ wikiCommitSha, baseBranchHeadSha }),
         });
       }
 
@@ -610,6 +576,7 @@ export class XyneAIControllerV2 {
           ticketIds: effectiveTicketIds,
           callIds: effectiveCallIds,
           ...(effectiveCanvasId && { canvasId: effectiveCanvasId }),
+          ...(workflowContext && { workflowContext }),
           attachedContext: mergedAttachedContext,
           attachments,
           messageAttachmentIds,
@@ -1094,11 +1061,28 @@ export class XyneAIControllerV2 {
       res.status(400).json({ success: false, error: 'convId is required' });
       return;
     }
+    // Run-page cursor. claw caps the page (default 25) and pages it with a
+    // `before` runId; validated here rather than forwarded raw because both
+    // values end up in a downstream URL. Anything malformed is dropped, which
+    // just means "first page" — claw also warns about a cursor it ignored.
+    const rawLimit = req.query.limit;
+    const rawBefore = req.query.before;
+    const paging = {
+      ...(typeof rawLimit === 'string' && /^\d+$/.test(rawLimit) ? { limit: rawLimit } : {}),
+      ...(typeof rawBefore === 'string' && /^[A-Za-z0-9_.-]{1,128}$/.test(rawBefore)
+        ? { before: rawBefore }
+        : {}),
+    };
     try {
+      // `result` is forwarded untouched. The bundle carries `warnings`,
+      // `totalRuns`, `truncated` and per-event trace payloads whose shape is
+      // owned by xyne-claw's materializer; whitelisting fields here would blank
+      // debugger panels the next time that format grows one.
       const result = await getClawDebugArtifacts(
         { headers: req.headers, userId },
         convId,
-        (req.query.agentSlug as string) || 'ask-ai'
+        (req.query.agentSlug as string) || 'ask-ai',
+        paging
       );
       res.json(result);
     } catch (error) {

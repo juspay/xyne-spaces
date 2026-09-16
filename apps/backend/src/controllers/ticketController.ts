@@ -43,6 +43,7 @@ import { config } from '../config/env';
 import { superpositionClient } from '@/services/superpositionClient';
 import { randomUUID } from 'crypto';
 import { linkCreatedEntities, resolveInheritedOwner } from '@/sdlc/entityLinkService';
+import { activityService } from '@/services/activity/activityService';
 import { entityLinkOwnerSchema, type EntityLinkOwner } from '@xyne/shared';
 import { vespaQueue } from '@/queues/vespaQueue';
 import { messageClassificationQueue } from '@/queues/messageClassificationQueue';
@@ -1303,6 +1304,10 @@ export class TicketController {
         void maybeCreateEntryApprovalRequest(ticket.id, ticket.createdBy, ticket.stageName);
       }
 
+      if (sourceConversationId) {
+        void activityService.fillSdlcOwner(sourceConversationId, validatedConversation.channelId);
+      }
+
       const ticketChannelId = sourceConversationId ? validatedConversation.channelId : channelId;
       if (ticketChannelId) {
         try {
@@ -2329,6 +2334,67 @@ export class TicketController {
     } catch (err) {
       logger.error('[TicketController] unmergeTicket error:', err);
       res.status(500).json({ error: 'Failed to unmerge ticket' });
+    }
+  };
+
+  /**
+   * POST /api/tickets/bulk-tags
+   * Add and/or remove tags across many tickets in ONE request using additive
+   * semantics (other labels are preserved). Workspace scoping is enforced in
+   * the service from the authenticated session — ticket ids in the body are
+   * NEVER trusted for cross-workspace access.
+   */
+  bulkUpdateTags = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const userId = req.user?.id;
+      const workspaceId = req.user?.workspaceId;
+      if (!userId || !workspaceId) {
+        res.status(401).json({ error: 'User not authenticated' });
+        return;
+      }
+
+      const { ticketIds, addTags, removeTags } = req.body ?? {};
+
+      if (
+        !Array.isArray(ticketIds) ||
+        ticketIds.length === 0 ||
+        ticketIds.some((id: unknown) => typeof id !== 'string')
+      ) {
+        res.status(400).json({ error: 'ticketIds must be a non-empty array of strings' });
+        return;
+      }
+
+      const MAX_BULK = 1000;
+      if (ticketIds.length > MAX_BULK) {
+        res.status(400).json({ error: `ticketIds cannot exceed ${MAX_BULK} per request` });
+        return;
+      }
+
+      const isStringArray = (v: unknown): boolean =>
+        v === undefined || (Array.isArray(v) && v.every(t => typeof t === 'string'));
+      if (!isStringArray(addTags) || !isStringArray(removeTags)) {
+        res.status(400).json({ error: 'addTags and removeTags must be arrays of strings' });
+        return;
+      }
+
+      const hasAdd = Array.isArray(addTags) && addTags.length > 0;
+      const hasRemove = Array.isArray(removeTags) && removeTags.length > 0;
+      if (!hasAdd && !hasRemove) {
+        res.status(400).json({ error: 'At least one of addTags or removeTags is required' });
+        return;
+      }
+
+      const result = await ticketService.bulkUpdateTicketTags(
+        ticketIds as string[],
+        { addTags: addTags as string[] | undefined, removeTags: removeTags as string[] | undefined },
+        workspaceId,
+        userId,
+      );
+
+      res.json({ success: true, ...result });
+    } catch (err) {
+      logger.error('[TicketController] bulkUpdateTags error:', err);
+      res.status(500).json({ error: 'Failed to bulk update ticket tags' });
     }
   };
 

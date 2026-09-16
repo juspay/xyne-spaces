@@ -5,10 +5,10 @@ import { clawAgentDetailKey } from '@/hooks/useClawAgentDetail';
 import { updateClawAgent } from '@/services/claw/clawAuthAgentsService';
 import { clawErrorText } from '@/services/claw/clawRequest';
 import type { Agent } from '@/services/claw/clawAuthAgentTypes';
-import type { ToolboxSelection } from '@/services/claw/clawToolsTypes';
+import type { AgentToolboxSelection } from '@/services/claw/clawToolsTypes';
 import { readToolSelection } from '../../create/agentDraft';
 
-export type ToolSelection = Required<ToolboxSelection>;
+export type ToolSelection = AgentToolboxSelection;
 
 export type ManageSectionId = 'subagents' | 'mcp' | 'builtin';
 
@@ -34,7 +34,8 @@ export function selectionEqual(a: ToolSelection, b: ToolSelection): boolean {
     sameList(a.subagents, b.subagents) &&
     sameList(a.direct, b.direct) &&
     sameList(a.custom, b.custom) &&
-    sameList(a.gateway, b.gateway)
+    sameList(a.gateway, b.gateway) &&
+    sameList(a.callableAgents, b.callableAgents)
   );
 }
 

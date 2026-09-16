@@ -32,11 +32,12 @@ import { type GCalEvent } from '@/services/googleCalendarCallStore';
 import { type CalendarCredentials } from '@/services/calendarTokenRefresh';
 import { isTeamEligible } from '@/services/calendarSyncConfig';
 import { resolveXyneCallForEvent, resolveXyneChannelForUser } from '@/services/xyneCallService';
-import {
-  reconcileEventConference,
-  escapeHtmlAttribute,
-} from '@/services/calendarConferencePatcher';
+import { reconcileEventConference } from '@/services/calendarConferencePatcher';
 import { buildCalendarExternalId } from '@/services/calendarCallStore.utils';
+import {
+  escapeHtmlAttribute,
+  isXyneOriginatedEvent,
+} from '@/services/calendarEventPayload';
 import { DatabaseClient } from '@/database/client';
 import { logger } from '@/utils/logger';
 
@@ -48,6 +49,7 @@ type SkipReason =
   | 'missing_id_or_organizer'
   | 'cancelled'
   | 'unsupported_event_type'
+  | 'xyne_originated'
   | 'not_organizer'
   | 'not_eligible';
 
@@ -74,6 +76,10 @@ function isEligibleShape(event: GCalEvent): SkipReason | null {
   if (!event.id || !event.organizer?.email) return 'missing_id_or_organizer';
   if (event.status === 'cancelled') return 'cancelled';
   if (event.eventType && SKIPPED_EVENT_TYPES.has(event.eventType)) return 'unsupported_event_type';
+  // Xyne pushed this event out from a call it already owns (callCalendarPushService).
+  // It carries its own Xyne link; resolving a *second* hosted Call for it would
+  // fork the meeting in two.
+  if (isXyneOriginatedEvent(event.extendedProperties?.private)) return 'xyne_originated';
   return null;
 }
 

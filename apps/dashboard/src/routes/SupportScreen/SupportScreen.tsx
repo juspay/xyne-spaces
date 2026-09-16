@@ -8,6 +8,8 @@ import {
   NotificationLevel,
   AutoDraftStatus,
   MailboxState,
+  WorkspaceRole,
+  SavedConfigVisibility,
 } from '@xyne/shared';
 import React, { ReactElement, useMemo, useState, useEffect, useCallback, useRef } from 'react';
 import { toast } from 'sonner';
@@ -133,7 +135,7 @@ import JoinChannel from '../../components/Chat/JoinChannel/JoinChannel';
 import { mutators } from '../../zero/mutators';
 import { Button } from '../../components/ui/Button/Button';
 import { Badge } from '../../components/ui/Badge/Badge';
-import { useAuthContextValues } from '../../hooks/useAuth';
+import { useAuth, useAuthContextValues } from '../../hooks/useAuth';
 import { usePlatform } from '../../hooks/usePlatform';
 import { TicketListView } from '../../components/Tickets/TicketListView';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
@@ -198,6 +200,9 @@ import { DeskMetricsDashboard } from '../../components/xyne-desk/DeskMetrics';
 import { TopicsExplorer } from '../../components/xyne-desk/TopicsExplorer';
 import { AutoLabelWizard } from '../../components/xyne-desk/AutoLabelWizard/AutoLabelWizard';
 import { DeskReportPanel } from '../../components/xyne-desk/DeskReport';
+import { DeskSavedViewsControls } from '../../components/xyne-desk/DeskSavedViewsControls';
+import { useDeskTicketSavedViews } from '../../hooks/useDeskTicketSavedViews';
+import { valuesToFilters } from '../../utils/savedViewSerialization';
 import {
   useChannelIntegrationInfo,
   clearChannelConnectedEmailCache,
@@ -237,7 +242,7 @@ import { WorkspaceDeskEmailCard } from '../../components/xyne-desk/WorkspaceDesk
 import { WorkspaceOzonetelCard } from '../../components/xyne-desk/WorkspaceOzonetelCard/WorkspaceOzonetelCard';
 
 // Unified type for tickets from the supportTicketsFiltered query
-type SupportTicket = QueryResultType<typeof queries.supportTicketsFilteredV3>[number];
+type SupportTicket = QueryResultType<typeof queries.supportTicketsFilteredV4>[number];
 
 const ChannelInfoModal = ({
   channelId,
@@ -574,6 +579,7 @@ const SupportScreen = (): ReactElement => {
   const canAccessProjects = useHasResourceAccess('PROJECTS');
   const [searchParams, setSearchParams] = useSearchParams();
   const { userID } = useAuthContextValues();
+  const isGuest = useAuth().user?.role === WorkspaceRole.GUEST;
   const { isMobile } = usePlatform();
   const zero = useZero();
   const queryClient = useQueryClient();
@@ -875,6 +881,74 @@ const SupportScreen = (): ReactElement => {
   const hasMoreFiltersActive = moreFiltersActiveCount > 0;
   const hasAnyFilterActive =
     hasAssigneeFilter || hasPriorityFilter || hasStagesFilter || hasMoreFiltersActive;
+
+  // Desk ticket saved views
+  const ticketViewsChannelId =
+    selectedChannelId && selectedChannelId !== ALL_CHANNELS_ID ? selectedChannelId : '';
+  const activeTicketViewId = filtersState.context.activeViewId;
+  const setActiveTicketViewId = useCallback(
+    (id: string | null) => {
+      sendFilters({ type: 'SET_ACTIVE_VIEW_ID', activeViewId: id });
+    },
+    [sendFilters],
+  );
+  const {
+    savedViews: deskSavedViews,
+    savedViewsLoaded,
+    saveView: saveDeskView,
+    updateView: updateDeskView,
+    deleteView: deleteDeskView,
+    applySavedView: applyDeskSavedView,
+  } = useDeskTicketSavedViews(ticketViewsChannelId, setFilters);
+
+  // Self-heal: clear a stale activeViewId that no longer exists in the list.
+  // Guard on savedViewsLoaded so we don't clear before the query returns data.
+  useEffect(() => {
+    if (
+      savedViewsLoaded &&
+      activeTicketViewId &&
+      !deskSavedViews.find(v => v.id === activeTicketViewId)
+    ) {
+      setActiveTicketViewId(null);
+    }
+  }, [savedViewsLoaded, activeTicketViewId, deskSavedViews, setActiveTicketViewId]);
+
+  const handleSaveDeskView = async (
+    name: string,
+    visibility: SavedConfigVisibility,
+  ): Promise<string | undefined> => {
+    return saveDeskView(name, filters, visibility);
+  };
+
+  const handleUpdateDeskView = async (viewId: string): Promise<void> => {
+    await updateDeskView(viewId, filters);
+  };
+
+  const isDeskViewDirty = useMemo(() => {
+    if (!activeTicketViewId) return false;
+    const activeView = deskSavedViews.find(v => v.id === activeTicketViewId);
+    if (!activeView?.values) return false;
+    const viewFilters = valuesToFilters(activeView.values);
+    const sortDeep = (v: unknown): unknown => {
+      if (Array.isArray(v)) {
+        const mapped = v.map(sortDeep);
+        if (mapped.every(item => typeof item !== 'object' || item === null)) {
+          return [...mapped].sort();
+        }
+        return mapped;
+      }
+      if (v !== null && typeof v === 'object') {
+        const rec = v as Record<string, unknown>;
+        return Object.fromEntries(
+          Object.keys(rec)
+            .sort()
+            .map(k => [k, sortDeep(rec[k])]),
+        );
+      }
+      return v;
+    };
+    return JSON.stringify(sortDeep(filters)) !== JSON.stringify(sortDeep(viewFilters));
+  }, [activeTicketViewId, deskSavedViews, filters]);
 
   const {
     rowRef: filterRowRef,
@@ -1246,10 +1320,11 @@ const SupportScreen = (): ReactElement => {
       searchParams.get('settings') === 'open' || searchParams.get('openSettings') === 'signatures',
   );
   const [isMetricsOpen, setIsMetricsOpen] = useState(() => searchParams.get('metrics') === 'open');
+  // Guests can't read email_channel_preferences (Zero ACL), so gate them on role instead.
   const metricsEnabled =
     !!selectedChannelId &&
     selectedChannelId !== ALL_CHANNELS_ID &&
-    !!channelPreference?.metricsEnabled;
+    (isGuest || !!channelPreference?.metricsEnabled);
   const [isReportOpen, setIsReportOpen] = useState(() => searchParams.get('report') === 'open');
   const [isTopicsOpen, setIsTopicsOpen] = useState(() => searchParams.get('topics') === 'open');
   const [showCreateChannelModal, setShowCreateChannelModal] = useState(false);
@@ -1585,18 +1660,40 @@ const SupportScreen = (): ReactElement => {
   // Mailbox folders are email-only, so other desk types get no folder filter on their list.
   const selectedChannelHasMailboxFolders =
     sortedEmailChannels.find(c => c.id === selectedChannelId)?.type === ChannelType.EMAIL;
+  // Desk insight panels (metrics, report, topics) are restricted to the desk owner
+  // and channel admins, matching canManage in useDeskSettingsForm.
+  // myChannelParticipations only returns this user's ADMIN participations.
+  const [myAdminParticipations] = useCachedQuery(queries.myChannelParticipations({}));
+  const isChannelAdmin = (myAdminParticipations ?? []).some(
+    p => p.channelId === preferenceChannelId,
+  );
+  const isTicketViewsChannelAdmin = (myAdminParticipations ?? []).some(
+    p => p.channelId === ticketViewsChannelId,
+  );
+  const isDeskOwner = !!userID && channelPreference?.ownerUserId === userID;
+  const canManageDeskInsights = isDeskOwner || isChannelAdmin;
+  const myAdminChannelIds = useMemo(
+    () => new Set((myAdminParticipations ?? []).map(p => p.channelId)),
+    [myAdminParticipations],
+  );
   // Topics Explorer rolls up one desk at a time, behind the same preference as metrics.
   const canExploreTopics =
+    canManageDeskInsights &&
     isSelectedChannelJoined &&
     selectedChannelId !== ALL_CHANNELS_ID &&
     !!channelPreference?.metricsEnabled;
 
+  // Only desks the caller manages belong in the comparison picker: the
+  // aggregate route skips anything else as 'forbidden', which read as silently
+  // missing data. Ownership of OTHER desks isn't readable client-side (the ACL
+  // has no all-preferences query), but desk creators are enrolled as channel
+  // ADMIN participants, so the admin set covers the owner case in practice.
   const metricsSelectableDesks = useMemo(
     () =>
       sortedEmailChannels
-        .filter(c => joinedChannelIds.has(c.id))
+        .filter(c => joinedChannelIds.has(c.id) && myAdminChannelIds.has(c.id))
         .map(c => ({ id: c.id, name: c.name?.trim() || 'Untitled desk' })),
-    [sortedEmailChannels, joinedChannelIds],
+    [sortedEmailChannels, joinedChannelIds, myAdminChannelIds],
   );
   // A selected channelId that doesn't appear in useEmailChannels() means the
   // channel either doesn't exist or is a private channel the user isn't in —
@@ -1666,6 +1763,7 @@ const SupportScreen = (): ReactElement => {
     channelId: string;
     conversationId: string;
     stageName?: string | null | undefined;
+    statusV2?: string | null | undefined;
     priority?: string | null | undefined;
     assignedTo?: string | null | undefined;
     userGroupId?: string | null | undefined;
@@ -1695,6 +1793,7 @@ const SupportScreen = (): ReactElement => {
       channelId: string;
       conversationId: string;
       stageName?: string | null | undefined;
+      statusV2?: string | null | undefined;
       priority?: string | null | undefined;
       assignedTo?: string | null | undefined;
       userGroupId?: string | null | undefined;
@@ -1716,6 +1815,7 @@ const SupportScreen = (): ReactElement => {
             channelId: row.channelId,
             conversationId: row.conversationId,
             stageName: row.stageName,
+            statusV2: row.statusV2,
             priority: row.priority,
             assignedTo: row.assignedTo,
             userGroupId: row.userGroupId,
@@ -1757,6 +1857,7 @@ const SupportScreen = (): ReactElement => {
         channelId: string;
         conversationId: string;
         stageName?: string | null | undefined;
+        statusV2?: string | null | undefined;
         priority?: string | null | undefined;
         assignedTo?: string | null | undefined;
         userGroupId?: string | null | undefined;
@@ -1779,6 +1880,7 @@ const SupportScreen = (): ReactElement => {
               channelId: row.channelId,
               conversationId: row.conversationId,
               stageName: row.stageName,
+              statusV2: row.statusV2,
               priority: row.priority,
               assignedTo: row.assignedTo,
               userGroupId: row.userGroupId,
@@ -1815,6 +1917,7 @@ const SupportScreen = (): ReactElement => {
             channelId: ticket.channelId ?? '',
             conversationId: ticket.conversationId ?? '',
             stageName: ticket.stageName,
+            statusV2: ticket.statusV2,
             priority: ticket.priority,
             assignedTo: ticket.assignedTo,
             userGroupId: ticket.userGroupId,
@@ -1865,7 +1968,11 @@ const SupportScreen = (): ReactElement => {
     () =>
       deskBoardGatesStageMoves
         ? []
-        : availableStages.map(stage => ({ id: stage.name, name: stage.name })),
+        : availableStages.map(stage => ({
+            id: stage.name,
+            name: stage.name,
+            defaultTicketStatusV2: stage.status,
+          })),
     [availableStages, deskBoardGatesStageMoves],
   );
 
@@ -2849,36 +2956,39 @@ const SupportScreen = (): ReactElement => {
                           </button>
                         </Tooltip>
                       )}
-                      {isSelectedChannelJoined && metricsEnabled && (
-                        <Tooltip content='Desk metrics' side='bottom'>
-                          <button
-                            onClick={() => {
-                              const base = selectedChannelId
-                                ? `${supportBase}/${selectedChannelId}`
-                                : supportBase;
-                              if (isMetricsOpen) {
-                                void navigate(base, { replace: true });
-                              } else {
-                                void navigate(`${base}?metrics=open`);
-                              }
-                            }}
-                            className={cn(
-                              'p-1.5 rounded transition-colors',
-                              isMetricsOpen
-                                ? 'bg-muted text-foreground'
-                                : 'text-muted-foreground hover:text-foreground hover:bg-accent',
-                            )}
-                            data-track-category='Support'
-                            data-track-name='OpenDeskMetrics'
-                            data-track-metadata={JSON.stringify({ channelId: selectedChannelId })}
-                          >
-                            <BarChart3 size={16} />
-                          </button>
-                        </Tooltip>
-                      )}
+                      {isSelectedChannelJoined &&
+                        metricsEnabled &&
+                        (canManageDeskInsights || isGuest) && (
+                          <Tooltip content='Desk metrics' side='bottom'>
+                            <button
+                              onClick={() => {
+                                const base = selectedChannelId
+                                  ? `${supportBase}/${selectedChannelId}`
+                                  : supportBase;
+                                if (isMetricsOpen) {
+                                  void navigate(base, { replace: true });
+                                } else {
+                                  void navigate(`${base}?metrics=open`);
+                                }
+                              }}
+                              className={cn(
+                                'p-1.5 rounded transition-colors',
+                                isMetricsOpen
+                                  ? 'bg-muted text-foreground'
+                                  : 'text-muted-foreground hover:text-foreground hover:bg-accent',
+                              )}
+                              data-track-category='Support'
+                              data-track-name='OpenDeskMetrics'
+                              data-track-metadata={JSON.stringify({ channelId: selectedChannelId })}
+                            >
+                              <BarChart3 size={16} />
+                            </button>
+                          </Tooltip>
+                        )}
                       {isSelectedChannelJoined &&
                         selectedChannelId !== ALL_CHANNELS_ID &&
-                        channelPreference?.deskReportEnabled && (
+                        channelPreference?.deskReportEnabled &&
+                        canManageDeskInsights && (
                           <Tooltip content='Desk report' side='bottom'>
                             <button
                               onClick={() => {
@@ -3328,18 +3438,29 @@ const SupportScreen = (): ReactElement => {
                             )}
                           </Popover.Root>
 
-                          {hasAnyFilterActive && (
+                          {(isDeskViewDirty || (!activeTicketViewId && hasAnyFilterActive)) && (
                             <Button
                               variant='outline'
                               size='sm'
                               className='rounded-[10px] border-border hover:bg-muted text-muted-foreground'
-                              onClick={() => setFilters({})}
+                              onClick={() => {
+                                const activeView = deskSavedViews.find(
+                                  v => v.id === activeTicketViewId,
+                                );
+                                if (activeView) {
+                                  applyDeskSavedView(activeView);
+                                } else {
+                                  setFilters({});
+                                }
+                              }}
                               data-track-category='Support'
                               data-track-name='CLEAR_SUPPORT_FILTERS'
                             >
                               <div className='flex items-center gap-1.5'>
                                 <X className='w-3 h-3' />
-                                <span className='font-medium'>Clear</span>
+                                <span className='font-medium'>
+                                  {activeTicketViewId ? 'Reset view' : 'Clear'}
+                                </span>
                               </div>
                             </Button>
                           )}
@@ -3444,6 +3565,23 @@ const SupportScreen = (): ReactElement => {
                         </Popover.Root>
                       )}
                       <div ref={actionsRestRef} className='flex items-center gap-2'>
+                        {/* Desk saved views — only shown when a specific channel is selected */}
+                        {ticketViewsChannelId && (
+                          <DeskSavedViewsControls
+                            savedViews={deskSavedViews}
+                            activeViewId={activeTicketViewId}
+                            onActiveViewChange={setActiveTicketViewId}
+                            currentUserId={userID}
+                            isChannelAdmin={isTicketViewsChannelAdmin}
+                            onApply={view => applyDeskSavedView(view)}
+                            onSave={handleSaveDeskView}
+                            onUpdate={handleUpdateDeskView}
+                            onDelete={deleteDeskView}
+                            currentFilters={filters}
+                            dynamicFieldDefs={deskDynamicFields}
+                            trackCategory='Support'
+                          />
+                        )}
                         {/* View Toggle */}
                         <div className='flex items-center border border-border rounded-lg overflow-hidden'>
                           <button
@@ -3628,40 +3766,46 @@ const SupportScreen = (): ReactElement => {
                   userID={userID}
                 />
               )}
-              {isMetricsOpen && selectedChannelId && selectedChannelId !== ALL_CHANNELS_ID && (
-                <DeskMetricsDashboard
-                  open
-                  onClose={() => {
-                    const base = selectedChannelId
-                      ? `${supportBase}/${selectedChannelId}`
-                      : supportBase;
-                    void navigate(base, { replace: true });
-                  }}
-                  channelId={selectedChannelId}
-                  channelName={selectedChannelName ?? undefined}
-                  availableDesks={metricsSelectableDesks}
-                  customFieldDefinitions={deskDynamicFields}
-                  availableStages={availableStages}
-                  onTicketClick={ticket => {
-                    void navigate(`${supportBase}/${ticket.channelId}/${ticket.xyneId}`, {
-                      state: { ticketId: ticket.ticketId, shouldNavigateBack: true },
-                    });
-                  }}
-                />
-              )}
-              {isReportOpen && selectedChannelId && selectedChannelId !== ALL_CHANNELS_ID && (
-                <DeskReportPanel
-                  open
-                  onClose={() => {
-                    const base = selectedChannelId
-                      ? `${supportBase}/${selectedChannelId}`
-                      : supportBase;
-                    void navigate(base, { replace: true });
-                  }}
-                  channelId={selectedChannelId}
-                  channelName={selectedChannelName ?? undefined}
-                />
-              )}
+              {isMetricsOpen &&
+                selectedChannelId &&
+                selectedChannelId !== ALL_CHANNELS_ID &&
+                (canManageDeskInsights || isGuest) && (
+                  <DeskMetricsDashboard
+                    open
+                    onClose={() => {
+                      const base = selectedChannelId
+                        ? `${supportBase}/${selectedChannelId}`
+                        : supportBase;
+                      void navigate(base, { replace: true });
+                    }}
+                    channelId={selectedChannelId}
+                    channelName={selectedChannelName ?? undefined}
+                    availableDesks={metricsSelectableDesks}
+                    customFieldDefinitions={deskDynamicFields}
+                    availableStages={availableStages}
+                    onTicketClick={ticket => {
+                      void navigate(`${supportBase}/${ticket.channelId}/${ticket.xyneId}`, {
+                        state: { ticketId: ticket.ticketId, shouldNavigateBack: true },
+                      });
+                    }}
+                  />
+                )}
+              {isReportOpen &&
+                selectedChannelId &&
+                selectedChannelId !== ALL_CHANNELS_ID &&
+                canManageDeskInsights && (
+                  <DeskReportPanel
+                    open
+                    onClose={() => {
+                      const base = selectedChannelId
+                        ? `${supportBase}/${selectedChannelId}`
+                        : supportBase;
+                      void navigate(base, { replace: true });
+                    }}
+                    channelId={selectedChannelId}
+                    channelName={selectedChannelName ?? undefined}
+                  />
+                )}
               {isTopicsOpen && selectedChannelId && canExploreTopics && (
                 <TopicsExplorer
                   open
@@ -4136,6 +4280,11 @@ type SupportTicketDetailProps = {
     title: string;
     lastEmailAt?: number | null;
   }>;
+  /**
+   * Show the prev/next adjacent-ticket controls (chevrons + j/k shortcuts). Defaults to shown;
+   * the search-results pane disables them since there's no ticket list to page through there.
+   */
+  showAdjacentNav?: boolean;
 };
 
 type TicketReplyKind = 'app' | 'channel';
@@ -4160,6 +4309,7 @@ export const SupportTicketDetail = ({
   navBasePath,
   onBack,
   navTickets,
+  showAdjacentNav = true,
 }: SupportTicketDetailProps): ReactElement => {
   const {
     workspaceId: routeWorkspaceId,
@@ -4501,7 +4651,7 @@ export const SupportTicketDetail = ({
       if (!channelId) return [];
       const { conversationIdWhitelist: _ciw, ...restTicketFilter } = ticketFilter;
       return (await zero.run(
-        queries.supportTicketsPageV3({
+        queries.supportTicketsPageV4({
           channelId,
           isMember,
           ...restTicketFilter,
@@ -4552,7 +4702,7 @@ export const SupportTicketDetail = ({
     try {
       const { conversationIdWhitelist: _ciw, ...restTicketFilter } = ticketFilter;
       const result = (await zero.run(
-        queries.supportTicketsPageV3({
+        queries.supportTicketsPageV4({
           channelId,
           isMember,
           ...restTicketFilter,
@@ -4624,6 +4774,7 @@ export const SupportTicketDetail = ({
       scope: 'global',
       description: 'Next ticket',
       category: 'Support',
+      enabled: showAdjacentNav,
     },
   );
   useShortcut(
@@ -4635,6 +4786,7 @@ export const SupportTicketDetail = ({
       scope: 'global',
       description: 'Previous ticket',
       category: 'Support',
+      enabled: showAdjacentNav,
     },
   );
   useShortcut(
@@ -4803,22 +4955,26 @@ export const SupportTicketDetail = ({
           <div className='h-full flex flex-col overflow-hidden relative'>
             <div className='w-full px-6 py-4 flex flex-col gap-2.5 flex-shrink-0 sticky top-0 bg-background z-10 border-b border-border'>
               <div className='flex flex-wrap items-center gap-2 min-w-0 overflow-hidden'>
-                <button
-                  type='button'
-                  onClick={() => {
-                    if (onBack) {
-                      onBack();
-                      return;
-                    }
-                    goBackToTicketList();
-                  }}
-                  className='p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0'
-                  aria-label='Back to ticket list'
-                  data-track-category='Support'
-                  data-track-name='BackToList'
-                >
-                  <ArrowLeft size={18} />
-                </button>
+                {/* Hidden in the search-results pane (showAdjacentNav=false): it hosts the ticket
+                    with its own close header and has no ticket list to return to. */}
+                {showAdjacentNav && (
+                  <button
+                    type='button'
+                    onClick={() => {
+                      if (onBack) {
+                        onBack();
+                        return;
+                      }
+                      goBackToTicketList();
+                    }}
+                    className='p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0'
+                    aria-label='Back to ticket list'
+                    data-track-category='Support'
+                    data-track-name='BackToList'
+                  >
+                    <ArrowLeft size={18} />
+                  </button>
+                )}
                 <span className='bg-border py-[3px] px-3 flex items-center justify-center text-xs text-foreground rounded-md font-mono shrink-0 whitespace-nowrap'>
                   {ticketIdParam}
                 </span>
@@ -4840,52 +4996,56 @@ export const SupportTicketDetail = ({
 
                 {/* Prev/Next + Status pill + ··· overflow menu */}
                 <div className='flex items-center gap-1.5 min-w-0 shrink-0'>
-                  <div className='flex items-center gap-0.5'>
-                    <Tooltip
-                      side='bottom'
-                      delayDuration={300}
-                      content={
-                        <span className='flex items-center gap-2'>
-                          Previous ticket
-                          <kbd className='px-1 py-px rounded bg-background/15 border border-background/20 text-[10px] font-mono uppercase'>
-                            K
-                          </kbd>
-                        </span>
-                      }
-                    >
-                      <button
-                        type='button'
-                        onClick={() => void navigateAdjacent('backward')}
-                        className='p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors'
-                        data-track-category='Support'
-                        data-track-name='PrevTicket'
+                  {/* Adjacent-ticket paging — hidden in the search-results pane (no ticket list
+                      to page through); the status pill + overflow menu below stay visible. */}
+                  {showAdjacentNav && (
+                    <div className='flex items-center gap-0.5'>
+                      <Tooltip
+                        side='bottom'
+                        delayDuration={300}
+                        content={
+                          <span className='flex items-center gap-2'>
+                            Previous ticket
+                            <kbd className='px-1 py-px rounded bg-background/15 border border-background/20 text-[10px] font-mono uppercase'>
+                              K
+                            </kbd>
+                          </span>
+                        }
                       >
-                        <ChevronUp size={16} />
-                      </button>
-                    </Tooltip>
-                    <Tooltip
-                      side='bottom'
-                      delayDuration={300}
-                      content={
-                        <span className='flex items-center gap-2'>
-                          Next ticket
-                          <kbd className='px-1 py-px rounded bg-background/15 border border-background/20 text-[10px] font-mono uppercase'>
-                            J
-                          </kbd>
-                        </span>
-                      }
-                    >
-                      <button
-                        type='button'
-                        onClick={() => void navigateAdjacent('forward')}
-                        className='p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors'
-                        data-track-category='Support'
-                        data-track-name='NextTicket'
+                        <button
+                          type='button'
+                          onClick={() => void navigateAdjacent('backward')}
+                          className='p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors'
+                          data-track-category='Support'
+                          data-track-name='PrevTicket'
+                        >
+                          <ChevronUp size={16} />
+                        </button>
+                      </Tooltip>
+                      <Tooltip
+                        side='bottom'
+                        delayDuration={300}
+                        content={
+                          <span className='flex items-center gap-2'>
+                            Next ticket
+                            <kbd className='px-1 py-px rounded bg-background/15 border border-background/20 text-[10px] font-mono uppercase'>
+                              J
+                            </kbd>
+                          </span>
+                        }
                       >
-                        <ChevronDown size={16} />
-                      </button>
-                    </Tooltip>
-                  </div>
+                        <button
+                          type='button'
+                          onClick={() => void navigateAdjacent('forward')}
+                          className='p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors'
+                          data-track-category='Support'
+                          data-track-name='NextTicket'
+                        >
+                          <ChevronDown size={16} />
+                        </button>
+                      </Tooltip>
+                    </div>
+                  )}
                   {/* Status pill */}
                   {ticket && (
                     <div className='border border-border rounded-md overflow-hidden shrink-0'>
@@ -4893,6 +5053,7 @@ export const SupportTicketDetail = ({
                         ticketId={ticket.id}
                         stageName={ticket.stageName}
                         stageLabel={ticket.stageName || 'To Do'}
+                        statusV2={ticket.statusV2}
                         boardId={boardId}
                       />
                     </div>

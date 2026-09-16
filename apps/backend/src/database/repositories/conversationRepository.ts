@@ -10,6 +10,12 @@ export interface CreateConversationInput {
   channelId: string;
   createdBy: string;
   initialMessageId: string;
+  /**
+   * Snapshot of the initial message, built with buildInitialMessageMd. The V3
+   * read path renders from this and has no join to fall back on, so a
+   * conversation created without it shows an empty message.
+   */
+  initial_message_md?: string | null;
   parentMessageId?: string;
   pinned?: boolean;
   doNotPostToChannel?: boolean;
@@ -73,6 +79,9 @@ export class ConversationRepository extends BaseRepository<Conversation, CreateC
         workspaceId: channel.workspaceId,
         createdBy: data.createdBy,
         initialMessageId: data.initialMessageId,
+        ...(data.initial_message_md !== undefined && {
+          initial_message_md: data.initial_message_md,
+        }),
         parentMessageId: data.parentMessageId,
         pinned: data.pinned || false,
         ...(data.doNotPostToChannel !== undefined && {
@@ -190,6 +199,66 @@ export class ConversationRepository extends BaseRepository<Conversation, CreateC
             OR: [{ lastReadAt: null }, { lastReadAt: { lt: effectiveReplyCreatedAt } }],
           },
           data: { lastReadAt: effectiveReplyCreatedAt },
+        });
+      }
+    }
+
+    return result;
+  }
+
+  /**
+   * One conversations write for a thread reply.
+   *
+   * The reply count bump, the replies_md append and the lastActivityAt patch
+   * used to be three separate commits against the same row. Each conversations write is replayed
+   * through every subscribed Zero pipeline, so collapsing them cuts the fan-out
+   * per reply by three. replyCount uses an atomic increment rather than the
+   * previous read-then-write, which also removes a lost-update race between
+   * concurrent replies.
+   */
+  async findRepliesMd(conversationId: string): Promise<string | null> {
+    const row = await this.db.conversation.findUnique({
+      where: { conversationId },
+      select: { replies_md: true },
+    });
+    return row?.replies_md ?? null;
+  }
+
+  async applyThreadReply(params: {
+    conversationId: string;
+    repliesMd: string | null;
+    lastActivityAt: Date;
+    replyCreatedAt?: Date | null;
+    markParticipantsRead?: boolean;
+  }): Promise<Conversation> {
+    const { conversationId, repliesMd, lastActivityAt, replyCreatedAt, markParticipantsRead } =
+      params;
+
+    const result = await this.db.conversation.update({
+      where: { conversationId },
+      data: {
+        replyCount: { increment: 1 },
+        lastActivityAt,
+        replies_md: repliesMd,
+      },
+    });
+
+    if (replyCreatedAt) {
+      await this.db.conversationParticipant.updateMany({
+        where: {
+          conversationId,
+          OR: [{ lastReplyAt: null }, { lastReplyAt: { lt: replyCreatedAt } }],
+        },
+        data: { lastReplyAt: replyCreatedAt },
+      });
+
+      if (markParticipantsRead) {
+        await this.db.conversationParticipant.updateMany({
+          where: {
+            conversationId,
+            OR: [{ lastReadAt: null }, { lastReadAt: { lt: replyCreatedAt } }],
+          },
+          data: { lastReadAt: replyCreatedAt },
         });
       }
     }

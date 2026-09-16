@@ -37,6 +37,8 @@ COPY apps/dashboard apps/dashboard
 # logger.ts imports the version from the repo-root package.json (../../../package.json)
 COPY package.json /package.json
 
+ENV NODE_OPTIONS="--max-old-space-size=8192"
+
 # Run validation (TypeScript + ESLint)
 # validate:raw, not validate: the image has no scripts/ directory, and an image
 # build has no use for the interactive agent handoff the wrapper adds.
@@ -96,6 +98,11 @@ RUN pnpm --filter xyne-spaces-dashboard run ${BUILD_SCRIPT}
 RUN apt-get update && apt-get install -y zip && \
     mkdir -p /repo/apps/dashboard/releases && \
     cd /repo/apps/dashboard/dist && zip -r ../releases/dashboard.zip .
+
+
+FROM scratch AS bundle
+COPY --from=builder /repo/apps/dashboard/dist /
+COPY --from=builder /repo/apps/dashboard/releases /releases
 
 # Production image with nginx
 FROM nginx:alpine AS runner

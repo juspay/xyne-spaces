@@ -6,6 +6,14 @@ import { recordingStore as _rawStore } from '../stores/recordingStore';
 import { calculateRecordingElapsedMs } from '../utils/recordingUtils';
 import { formatDuration } from '../utils/dateUtils';
 import { setWorkspaceSwitchToast } from '../utils/workspaceSwitchToast';
+import { Track } from 'livekit-client';
+import { toast } from 'sonner';
+import { logger, Event } from '../utils/logger';
+import {
+  isLocalVideoEnabled,
+  toggleLocalVideo,
+  type RecordingVideoSource,
+} from '../utils/recordingMedia';
 
 interface RecordingStoreSnapshot {
   status: 'active' | 'done' | 'error' | 'stopped';
@@ -36,6 +44,7 @@ export type RecordingStoreEvent =
     }
   | { type: 'pauseRecording' }
   | { type: 'resumeRecording' }
+  | { type: 'syncLocalMedia'; room: unknown }
   | { type: 'stopRecording'; silent?: boolean }
   | { type: 'setStatus'; status: RecordingState['status'] }
   | { type: 'error'; error: string }
@@ -120,6 +129,59 @@ export function stopRecordingForNavigation(): void {
     description: `Recording saved (${durationMs ? formatDuration(durationMs) : 'Unknown duration'})`,
   });
   stopRecordingForTeardown({ silent: true });
+}
+
+async function toggleRecordingVideo(source: RecordingVideoSource): Promise<void> {
+  const { room, status } = store.getSnapshot().context;
+  if (!room || status !== 'recording') return;
+
+  const isCamera = source === Track.Source.Camera;
+  const wasEnabled = isLocalVideoEnabled(room, source);
+
+  try {
+    await toggleLocalVideo(room, source);
+  } catch (error) {
+    logger.error(Event.RECORDING_ERROR, {
+      error: `${isCamera ? 'Camera' : 'Screen share'} toggle failed: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    });
+    // Dismissing the screen picker also rejects, so only camera failures are surfaced.
+    if (isCamera && !wasEnabled) {
+      toast.error('Could not turn on camera', {
+        description: 'Please check your camera permission and try again',
+      });
+    }
+  } finally {
+    store.send({ type: 'syncLocalMedia', room });
+  }
+}
+
+export function toggleRecordingCamera(): void {
+  void toggleRecordingVideo(Track.Source.Camera);
+}
+
+export function toggleRecordingScreenShare(): void {
+  void toggleRecordingVideo(Track.Source.ScreenShare);
+}
+
+export interface RecordingVideoControls {
+  isCameraEnabled: boolean;
+  isScreenShareEnabled: boolean;
+  onToggleCamera: () => void;
+  onToggleScreenShare: () => void;
+}
+
+export function useRecordingVideoControls(): RecordingVideoControls {
+  const isCameraEnabled = useRecordingStore(ctx => ctx.isCameraEnabled);
+  const isScreenShareEnabled = useRecordingStore(ctx => ctx.isScreenShareEnabled);
+
+  return {
+    isCameraEnabled,
+    isScreenShareEnabled,
+    onToggleCamera: toggleRecordingCamera,
+    onToggleScreenShare: toggleRecordingScreenShare,
+  };
 }
 
 export interface UseTranscriptStreamReturn {

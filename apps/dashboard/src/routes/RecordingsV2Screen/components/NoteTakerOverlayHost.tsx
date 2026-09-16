@@ -5,7 +5,11 @@ import { AnimatePresence } from 'framer-motion';
 import { toast } from 'sonner';
 import { refreshOatsRecordings } from '../../../hooks/usePaginatedOatsRecordings';
 import { useMarkMoment } from '../../../hooks/useMarkMoment';
-import { sendRecordingEvent, useRecordingStore } from '../../../hooks/useRecordingStore';
+import {
+  sendRecordingEvent,
+  useRecordingStore,
+  useRecordingVideoControls,
+} from '../../../hooks/useRecordingStore';
 import { recordingService } from '../../../services/Recording/recordingService';
 import { isElectronApp } from '../../../utils/electronApp';
 import {
@@ -29,6 +33,7 @@ export function NoteTakerOverlayHost(): ReactElement {
   const transcripts = useRecordingStore(context => context.transcripts);
   const markedMoments = useRecordingStore(context => context.markedMoments);
   const isMinimized = useRecordingStore(context => context.isTranscriptMinimized);
+  const videoControls = useRecordingVideoControls();
   const { markMoment } = useMarkMoment();
   const { showOfflineBanner } = useZeroOfflineState();
   const isActive = status === 'recording' || status === 'paused';
@@ -135,6 +140,7 @@ export function NoteTakerOverlayHost(): ReactElement {
             onPause={() => sendRecordingEvent({ type: 'pauseRecording' })}
             onResume={() => sendRecordingEvent({ type: 'resumeRecording' })}
             onMarkMoment={markMoment}
+            {...videoControls}
             isMinimized={isMinimized}
             onMinimize={handleMinimize}
             onExpand={handleExpand}

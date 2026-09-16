@@ -154,11 +154,10 @@ export const ShortcutPickerModal: React.FC<ShortcutPickerModalProps> = ({
                   {appName}
                 </p>
                 {appShortcuts.map(shortcut => (
-                  <Button
+                  <button
                     key={shortcut.commandName}
-                    variant='ghost'
                     type='button'
-                    trackId='run_shortcut'
+                    data-ph-capture-attribute-track-id='run_shortcut'
                     disabled={dispatching === shortcut.commandName}
                     onClick={() => void handleSelect(shortcut)}
                     data-track-category='shortcut-picker'
@@ -181,7 +180,7 @@ export const ShortcutPickerModal: React.FC<ShortcutPickerModalProps> = ({
                     {dispatching === shortcut.commandName && (
                       <span className='text-xs text-muted-foreground self-center'>Running…</span>
                     )}
-                  </Button>
+                  </button>
                 ))}
               </div>
             ))

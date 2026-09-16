@@ -30,10 +30,9 @@ import { CallTriggerModal } from '../../Call/CallTriggerModal/CallTriggerModal';
 import { VisibleChannel } from '../../../machines/stateMachine';
 import { useUser } from '../../../hooks/useUsers';
 import { isOneToOneDMChannel } from '../ChatDirectory/ChatDirectory.utils';
-import { isStatusExpired } from '../../../utils/statusUtils';
+import { resolveUserStatus } from '../../../utils/statusUtils';
 import { StatusIndicator } from '../../ui/StatusIndicator';
 import { XyneAIStar } from '../../icons/xyne-ai';
-import { Button } from '../../ui/Button';
 
 interface ConversationHeaderMobileProps {
   channelId: string;
@@ -157,17 +156,17 @@ const ConversationHeaderMobile = ({
               </p>
               {channel &&
               isOneToOneDMChannel(channel.scopeType) &&
-              dmUser?.statusEmoji &&
-              (!dmUser.statusExpiryAt || !isStatusExpired(dmUser.statusExpiryAt)) ? (
+              resolveUserStatus(dmUser).hasStatus ? (
                 <small className='text-muted-foreground text-xs truncate max-w-[200px] flex items-center gap-1'>
                   <StatusIndicator
-                    statusEmoji={dmUser.statusEmoji}
-                    statusContent={dmUser.statusContent}
-                    statusExpiryAt={dmUser.statusExpiryAt}
+                    statusEmoji={dmUser?.statusEmoji}
+                    statusContent={dmUser?.statusContent}
+                    statusExpiryAt={dmUser?.statusExpiryAt}
+                    activityStatus={dmUser?.activityStatus}
                     size='sm'
                     showOnHover={false}
                   />
-                  {dmUser.statusContent}
+                  {resolveUserStatus(dmUser).content}
                 </small>
               ) : (
                 <small className='text-muted-foreground text-xs'>
@@ -189,10 +188,9 @@ const ConversationHeaderMobile = ({
                 <UserPlus size={16} />
                 <span className='text-sm font-medium text-foreground'>Add</span>
               </button>
-              <Button
-                variant='ghost'
+              <button
                 onClick={handleStarToggle}
-                trackId='toggle_star_channel'
+                data-ph-capture-attribute-track-id='toggle_star_channel'
                 className={cn(
                   'w-full border flex items-center justify-center gap-2 rounded-lg py-1.5 px-2 h-[34px] transition-all duration-100',
                   isStarred ? 'bg-muted border-border' : 'bg-background border-border',
@@ -212,7 +210,7 @@ const ConversationHeaderMobile = ({
                 <span className='text-sm font-medium text-foreground'>
                   {isStarred ? 'Unstar' : 'Star'}
                 </span>
-              </Button>
+              </button>
               <button
                 onClick={(): void => void navigate('/chat/search')}
                 disabled={true}
@@ -305,6 +303,7 @@ const ConversationHeaderMobile = ({
               isMember={!!channelUserStatus}
               className={cn('rounded-full', floatingButtonClass)}
               disabled={channel.isArchived}
+              trackSource='chat_header_mobile'
             />
           </div>
         </div>

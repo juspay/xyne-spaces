@@ -26,7 +26,7 @@ import { scheduledCallNotificationService } from '@/services/scheduledCallNotifi
 import { normalizeStoragePath } from '@xyne/storage';
 import { sdlcCallLinkSchema, type SdlcCallLink } from '@xyne/shared';
 import { callRecordingService } from '@/services/callRecordingService';
-import { isRecording } from '@/utils/callTypeUtils';
+import { isRecording, isRecordingType } from '@/utils/callTypeUtils';
 import { config } from '@/config/env';
 import { callDocumentService, numberTranscriptSegments, buildParticipantMap } from '@/services/callDocumentService';
 import {
@@ -73,7 +73,7 @@ const UpdateCallLabelsSchema = z.object({
   labels: z.array(z.string().trim().min(1).max(80)).max(50),
 });
 
-const RegenerateHeadlessSummarySchema = z.object({
+const RegenerateSummarySchema = z.object({
   summaryTemplateId: z.string().trim().min(1),
   // Optional explicit model tier (e.g. the "Try the thinking model" button).
   // Omitted → the creator's saved preference is used.
@@ -415,6 +415,7 @@ export class CallController {
         artifactMessageId,
         sdlcLink,
         summaryModelPreference,
+        recordingType,
       } = req.body;
       // Recording summary LLM tier the client carried from its localStorage;
       // stamped onto the detailed summary canvas so headless call-end
@@ -441,6 +442,10 @@ export class CallController {
       if (isHeadless) {
         if (!['AUDIO', 'VIDEO'].includes(callType)) {
           res.status(400).json({ success: false, error: 'Invalid call type' });
+          return;
+        }
+        if (recordingType !== undefined && !isRecordingType(recordingType)) {
+          res.status(400).json({ success: false, error: `Invalid recordingType. Must be one of: ${Object.values(RecordingType).join(', ')}` });
           return;
         }
 
@@ -508,15 +513,20 @@ export class CallController {
           }
         }
 
+        stage = 'transcription_agent_resolution';
+        const headlessAgentName = await livekitService.resolveAgentNameForUser(userId);
+
         const roomLink = buildCallInviteUrl(callExternalId);
         const roomMetadata = JSON.stringify({
           callType: CallType.HEADLESS,
-          sttModel: sttModel || 'azure',
+          sttModel: sttModel || 'google',
           createdBy: userId,
           workspaceId: req.user!.workspaceId,
           notesCanvasId,
           detailedSummaryCanvasId,
+          ...(recordingType && { recordingType }),
           ...(channelId && conversationId ? { channelId, conversationId } : {}),
+          ...(headlessAgentName && { agentName: headlessAgentName }),
         });
 
         stage = 'livekit_room_creation';
@@ -527,6 +537,13 @@ export class CallController {
           metadata: roomMetadata,
         });
         logger.info(`[${callExternalId}] livekit_room_created | user_id=${userId}, path=note_taker`);
+
+        stage = 'transcription_agent_dispatch';
+        if (headlessAgentName) {
+          await livekitService.dispatchTranscriptionAgentForCall(callExternalId, headlessAgentName);
+        } else {
+          logger.error(`[${callExternalId}] transcription_agent_dispatch_skipped | reason=no_active_agent_name_configured`);
+        }
 
         stage = 'initiator_user_lookup';
         const initiator = await db.user.findUnique({ where: { id: userId }, select: { picture: true } });
@@ -761,18 +778,22 @@ export class CallController {
         }
       }
 
+      stage = 'transcription_agent_resolution';
+      const agentName = await livekitService.resolveAgentNameForUser(userId);
+
       // Create LiveKit room with metadata
       // The webhook will create all DB records when first participant joins
       const roomMetadata = JSON.stringify({
         channelId: channel.id,
         callOrigin: conversationId ? CallOrigin.CONVERSATION : CallOrigin.CHANNEL,
         callType,
-        sttModel: sttModel || 'azure',
+        sttModel: sttModel || 'google',
         createdBy: userId,
         ...(conversationId && { conversationId }),
         ...(linkedArtifactMessageId && { artifactMessageId: linkedArtifactMessageId }),
         ...(invitedUserIds && invitedUserIds.length > 0 && { invitedUserIds }),
         ...(validatedSdlcLink && { sdlcLink: validatedSdlcLink }),
+        ...(agentName && { agentName }),
       });
 
       stage = 'livekit_room_creation';
@@ -785,6 +806,16 @@ export class CallController {
 
       logger.info(`[${callExternalId}] livekit_room_created | user_id=${userId}`);
 
+      // Explicit dispatch — the worker now runs with agent_name set, so it no longer
+      // auto-joins; every call must be dispatched. Best-effort, with its own retry
+      // chain (dispatchTranscriptionAgentForCall); must not fail call creation.
+      stage = 'transcription_agent_dispatch';
+      if (agentName) {
+        await livekitService.dispatchTranscriptionAgentForCall(callExternalId, agentName);
+      } else {
+        logger.error(`[${callExternalId}] transcription_agent_dispatch_skipped | reason=no_active_agent_name_configured`);
+      }
+
       setTimeout(async () => {
         try {
           const room = await livekitService.getRoomInfo(callExternalId!);
@@ -796,6 +827,11 @@ export class CallController {
           const hasAgent = participants.some(p => p.identity.startsWith('agent-'));
           if (!hasAgent) {
             logger.error(`[${callExternalId}] agent_failed_to_join | reason=timeout_30s`);
+            // Second safety net behind dispatchTranscriptionAgentForCall's own ~9s claim
+            // check — covers e.g. a worker that claimed the job but crashed before publishing.
+            if (agentName) {
+              void livekitService.ensureTranscriptionAgent(callExternalId!, agentName, { reason: 'timeout_30s_no_agent_participant' });
+            }
           }
         } catch (error) {
           // Room might already be closed or API error, ignore as it's a best-effort diagnostic log
@@ -962,18 +998,24 @@ export class CallController {
           return;
         }
 
-        // If room exists (entered due to SCHEDULED status), delete it before creating a fresh one
+        // Resolved from the call's creator, not the joining participant — so the agent
+        // choice is deterministic regardless of which participant's join happens to
+        // trigger this block, rather than depending on join order.
+        const activeCall = call;
         if (roomInfo) {
           logger.info(`Found existing room ${callId}, deleting before creating new one`);
           await livekitService.deleteRoom(callId);
           logger.info(`Deleted existing room ${callId}`);
         }
 
+        const joinAgentName = await livekitService.resolveAgentNameForUser(activeCall.createdByUserId);
+
         // Prepare room metadata
         const roomMetadata = JSON.stringify({
           channelId: channel.id,
-          createdBy: call.createdByUserId,
-          ...(call.status === CallStatus.SCHEDULED && { scheduledCallId: call.id }),
+          createdBy: activeCall.createdByUserId,
+          ...(activeCall.status === CallStatus.SCHEDULED && { scheduledCallId: activeCall.id }),
+          ...(joinAgentName && { agentName: joinAgentName }),
         });
 
         // Create LiveKit room
@@ -984,6 +1026,19 @@ export class CallController {
           metadata: roomMetadata,
         });
 
+        if (joinAgentName) {
+          const dispatch = await livekitService.dispatchTranscriptionAgentForCall(callId, joinAgentName);
+          await repositories.calls.update(activeCall.id, {
+            metadata: {
+              ...(activeCall.metadata as Record<string, unknown> ?? {}),
+              agentName: joinAgentName,
+              ...(dispatch?.dispatchId && { dispatchId: dispatch.dispatchId }),
+              dispatchStatus: dispatch ? 'dispatched' : 'failed',
+            },
+          });
+        } else {
+          logger.error(`[${callId}] transcription_agent_dispatch_skipped | reason=no_active_agent_name_configured`);
+        }
       }
 
       // Removed users re-enter through the admit queue.
@@ -1501,6 +1556,8 @@ export class CallController {
               : null,
           citationSegments,
           hasRecording: !!uploadedRecording,
+          recordingType: uploadedRecording?.recordingType ?? null,
+          attachmentId: uploadedRecording?.attachmentId ?? null,
         },
       });
     } catch (error) {
@@ -1677,7 +1734,7 @@ export class CallController {
         res.status(404).json({ success: false, error: 'Call not found' });
         return;
       }
-      if (!(await this.isCallAudience(call, userId))) {
+      if (!(await callShareService.isCallAudience(call, userId))) {
         res.status(403).json({ success: false, error: 'You do not have access to this call' });
         return;
       }
@@ -1702,9 +1759,10 @@ export class CallController {
   };
 
   /**
-   * POST /api/calls/recordings/:callId/generate-summary
-   * Kick off detailed-summary generation for a headless recording and return
-   * 202 immediately. Progress is observable through
+   * POST /api/calls/recordings/:callId/generate-summary  (recordings)
+   * POST /api/calls/:callId/generate-summary             (calls)
+   * Kick off detailed-summary generation with an explicitly chosen template and
+   * return 202 immediately. Progress is observable through
    * Call.metadata.detailedSummaryStatus ('pending' → 'ready' | 'failed'),
    * which Zero replicates to the open screen; completion also notifies the
    * owner (RECORDING_SUMMARY_READY). The underlying LLM call retries
@@ -1720,19 +1778,21 @@ export class CallController {
     }
 
     try {
-      const input = RegenerateHeadlessSummarySchema.parse(req.body);
+      const input = RegenerateSummarySchema.parse(req.body);
       const call = await repositories.calls.findByExternalId(callId);
 
       if (
         !call ||
-        call.callType !== CallType.HEADLESS ||
         (call.workspaceId !== null && call.workspaceId !== req.user!.workspaceId)
       ) {
         res.status(404).json({ success: false, error: 'Recording not found' });
         return;
       }
 
-      if (call.createdByUserId !== userId) {
+      const canRegenerate = isRecording(call)
+        ? call.createdByUserId === userId
+        : await callShareService.isCallAudience(call, userId);
+      if (!canRegenerate) {
         res.status(403).json({ success: false, error: 'Access denied' });
         return;
       }
@@ -1836,7 +1896,7 @@ export class CallController {
         return;
       }
 
-      if (!(await this.isCallAudience(call, userId))) {
+      if (!(await callShareService.isCallAudience(call, userId))) {
         res.status(403).json({ success: false, error: 'You do not have access to this call' });
         return;
       }
@@ -1967,7 +2027,7 @@ export class CallController {
         return;
       }
 
-      if (!(await this.isCallAudience(call, userId))) {
+      if (!(await callShareService.isCallAudience(call, userId))) {
         res.status(403).json({ success: false, error: 'You do not have access to this call' });
         return;
       }
@@ -2071,7 +2131,7 @@ export class CallController {
         return;
       }
 
-      if (!(await this.isCallAudience(call, userId))) {
+      if (!(await callShareService.isCallAudience(call, userId))) {
         res.status(403).json({ success: false, error: 'You do not have access to this call' });
         return;
       }
@@ -2649,38 +2709,9 @@ export class CallController {
    * channel members can view/download them even if they didn't join the call.
    * Mutating ops (start/stop/rename/delete) stay participant/starter-gated.
    */
-  /**
-   * Whether a caller belongs to a call's audience: its host, anyone who took part, or a
-   * member of the channel it happened in. A channel call is offered to the channel, so a
-   * member who could not attend can still read what came out of it.
-   */
-  private async isCallAudience(
-    call: { id: string; channelId: string | null; createdByUserId: string },
-    userId: string,
-  ): Promise<boolean> {
-    if (call.createdByUserId === userId) return true;
-    if (await repositories.calls.findParticipant(call.id, userId)) return true;
-    if (!call.channelId) return false;
-    return repositories.channelParticipants.isParticipant(call.channelId, userId);
-  }
-
   private async assertCanViewCallRecordings(callId: string, userId: string): Promise<boolean> {
     const call = await repositories.calls.findByExternalId(callId);
-    if (!call) return false;
-    if (call.createdByUserId === userId) return true;
-    if (
-      call.callType === CallType.HEADLESS &&
-      call.workspaceId &&
-      (await callShareService.canView(call, userId, call.workspaceId))
-    ) {
-      return true;
-    }
-    const participant = await repositories.calls.findParticipant(call.id, userId);
-    if (participant) return true;
-    if (call.channelId) {
-      return repositories.channelParticipants.isParticipant(call.channelId, userId);
-    }
-    return false;
+    return !!call && callShareService.canViewRecordings(call, userId);
   }
 
   /**
@@ -2700,7 +2731,7 @@ export class CallController {
       return;
     }
 
-    if (!Object.values(RecordingType).includes(recordingType)) {
+    if (!isRecordingType(recordingType)) {
       res.status(400).json({ success: false, error: `Invalid recordingType. Must be one of: ${Object.values(RecordingType).join(', ')}` });
       return;
     }
@@ -3035,6 +3066,10 @@ export class CallController {
     });
 
     await repositories.entityAccess.deleteForResource(ShareableEntityType.NOTE_TAKER, call.id);
+
+    // Recording attachments aren't linked to the call, so remove them before it cascades away.
+    const recordings = await repositories.callRecordings.listByCallId(call.id);
+    await repositories.messageAttachments.deleteByRecordingIds(recordings.map(recording => recording.id));
 
     // Delete the call record
     await repositories.calls.delete(call.id);

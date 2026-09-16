@@ -89,13 +89,27 @@ export const navigateToSearchResult = async (
 };
 
 /**
- * Navigate to a user (create or open DM channel)
- *
- * Logic:
- * 1. Check if DM channel already exists with this user
- * 2. If exists, navigate to it
- * 3. If not, create new DM channel and navigate
+ * Resolve the 1:1 DM channel id for a user — returns the existing DM if there is
+ * one, otherwise creates it. Shared by navigateToUser (navigates to it) and the
+ * full-screen search pane (opens the chat in-pane) so both take the same path.
  */
+export const resolveOrCreateDmChannelId = async (
+  userId: string,
+  channelData: Channel[],
+): Promise<string> => {
+  const existingDmChannel = channelData.find(
+    channel =>
+      channel.scopeType === ChannelScopeType.DM &&
+      channel.participants?.length === 2 &&
+      channel.participants?.some(p => p.userId === userId),
+  );
+  if (existingDmChannel) return existingDmChannel.id;
+
+  const dmResponse = await channelService.createDm({ participantIds: [userId] });
+  return dmResponse.id;
+};
+
+/** Open (or create) the user's 1:1 DM and navigate to it. */
 export const navigateToUser = async (
   result: DisplaySearchResult,
   navigate: NavigateFunction,
@@ -109,33 +123,16 @@ export const navigateToUser = async (
     return;
   }
 
-  // Look for existing 1:1 DM channel with this user
-  const existingDmChannel = channelData.find(channel => {
-    // Check if it's a 1:1 DM channel (scopeType DM with exactly 2 participants)
-    // and if the searched user is the other participant
-    return (
-      channel.scopeType === ChannelScopeType.DM &&
-      channel.participants?.length === 2 &&
-      channel.participants?.some(p => p.userId === result.id)
-    );
-  });
-
-  if (existingDmChannel) {
-    void navigate(`/chat/dir/${existingDmChannel.id}`);
-  } else {
-    try {
-      const dmResponse = await channelService.createDm({
-        participantIds: [result.id],
-      });
-      void navigate(`/chat/dir/${dmResponse.id}`);
-    } catch (error) {
-      logger.error(LogEvent.FRONTEND_ERROR, {
-        type: 'migrated_console_error',
-        message: String('[SEARCH-NAVIGATION] Failed to create DM:'),
-        error: error,
-      });
-      throw new Error('Failed to start conversation with user');
-    }
+  try {
+    const channelId = await resolveOrCreateDmChannelId(result.id, channelData);
+    void navigate(`/chat/dir/${channelId}`);
+  } catch (error) {
+    logger.error(LogEvent.FRONTEND_ERROR, {
+      type: 'migrated_console_error',
+      message: String('[SEARCH-NAVIGATION] Failed to create DM:'),
+      error: error,
+    });
+    throw new Error('Failed to start conversation with user');
   }
 };
 

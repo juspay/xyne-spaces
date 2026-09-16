@@ -1,11 +1,15 @@
 import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react';
 import { toast } from 'sonner';
 import type { User } from '@xyne/shared/machines';
-import { useActiveUsers, useUsersById, useSelf, searchUsers } from './useUsers';
+import { useUsersById, useSelf } from './useUsers';
+import { useRankedActivePeople } from './useRankedPeopleSearch';
 import { recordingService } from '../services/Recording/recordingService';
 import type { RecordingParticipantShare } from '../services/Recording/recordingService';
 import { getRecordingParticipantIds, logRecordingError } from '../utils/recordingUtils';
 import { getApiErrorMessage } from '../utils/apiError';
+
+/** Suggestions offered per keystroke. Everything above this is never decorated. */
+const RESULT_LIMIT = 6;
 
 interface UseRecordingParticipantsArgs {
   recordingExternalId: string;
@@ -50,7 +54,6 @@ export function useRecordingParticipants({
   const [pending, setPending] = useState<ReadonlyMap<string, 'add' | 'remove'>>(new Map());
   const searchRef = useRef<HTMLInputElement>(null);
 
-  const users = useActiveUsers();
   const usersById = useUsersById();
   const self = useSelf();
 
@@ -100,15 +103,35 @@ export function useRecordingParticipants({
   );
 
   const trimmedQuery = query.trim();
+
+  // Ranked with the shared people recipe (token match -> MFU affinity -> DM recency),
+  // the same one the recording share modal and the call pickers use. It replaces a
+  // `users.filter(...)` that copied the entire active roster on every keystroke just
+  // to drop the handful of people already added, and it gives this search two things
+  // the raw `searchUsers` call never had: affinity ordering, and the substring
+  // fallback that makes a single typed character match at all (Fuse's
+  // `minMatchCharLength: 2` silently returns nothing for one-character queries).
+  //
+  // Over-fetch by the current participant count so removing them below can still
+  // fill `RESULT_LIMIT`.
+  //
+  // `seedDmContactsAtRest` is off because the results list is hidden until something
+  // is typed — the browse state would be built over the whole roster and thrown away.
+  const rankedPeople = useRankedActivePeople(trimmedQuery, RESULT_LIMIT + participantIds.length, {
+    seedDmContactsAtRest: false,
+  });
+
   const results = useMemo(() => {
     if (!trimmedQuery) return [];
     const already = new Set(participantIds);
-    return searchUsers(
-      users.filter(user => !already.has(user.id)),
-      trimmedQuery,
-      6,
-    );
-  }, [trimmedQuery, users, participantIds]);
+    const matches: User[] = [];
+    for (const user of rankedPeople) {
+      if (already.has(user.id)) continue;
+      matches.push(user);
+      if (matches.length >= RESULT_LIMIT) break;
+    }
+    return matches;
+  }, [trimmedQuery, rankedPeople, participantIds]);
 
   useEffect(() => setHighlighted(0), [trimmedQuery]);
   const activeIndex = highlighted < results.length ? highlighted : 0;

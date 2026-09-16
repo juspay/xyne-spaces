@@ -91,6 +91,7 @@ import {
   TicketStageRequestStatus,
   TicketStatus,
   TicketStatusV2,
+  UserActivityStatus,
   UserPresenceStatus,
   UserResponsibility,
   UserStatus,
@@ -494,26 +495,10 @@ export const workflowTable = table('workflows')
     eventType: string(),
     automationSeriesId: string().optional(),
     scheduledAt: number().optional(),
+    folderId: string().optional(),
+    summary: string().optional(),
     createdAt: number(),
     updatedAt: number(),
-  })
-  .primaryKey('id');
-
-export const workflowExecutionTable = table('workflow_executions')
-  .columns({
-    workspaceId: string(), // denormalized tenant key (stamped on insert)
-    id: string(),
-    workflowId: string(),
-    workflowType: string().optional(),
-    status: string(),
-    parentWorkflowExecutionId: string().optional(),
-    sourceStepsId: string().optional(),
-    stepInputOverrideData: string().optional(),
-    tag: string(),
-    createdAt: number(),
-    updatedAt: number(),
-    ignoreDuration: number(),
-    createdBy: string().optional(),
   })
   .primaryKey('id');
 
@@ -565,6 +550,7 @@ export const userTable = table('users')
     /** Assignment availability promoted from user_presence for query performance (dual-written) */
     assignmentUnavailableUntil: number().optional(),
     calendarVisibility: enumeration<CalendarVisibility>(),
+    activityStatus: enumeration<UserActivityStatus>().optional(),
   })
   .primaryKey('id');
 
@@ -1082,6 +1068,7 @@ export const activityTable = table('activities')
     conversationId: string().optional(),
     channelId: string().optional(),
     canvasId: string().optional(),
+    trackId: string().optional(),
     blockId: string().optional(),
     conversationSeenCutoffAt: number().optional(),
     actorId: string(),
@@ -1359,6 +1346,7 @@ export const canvasVersionTable = table('canvas_versions')
 export const canvasCommentThreadTable = table('canvas_comment_threads' /* CanvasCommentThread */)
   .columns({
     id: string(),
+    workspaceId: string().optional(), // denormalized tenant key (stamped on insert; nullable during backfill release)
     canvasId: string(),
     blockId: string(),
     anchorText: string().optional(),
@@ -1375,6 +1363,7 @@ export const canvasCommentThreadTable = table('canvas_comment_threads' /* Canvas
 export const canvasCommentTable = table('canvas_comments' /* CanvasComment */)
   .columns({
     id: string(),
+    workspaceId: string().optional(), // denormalized tenant key (stamped on insert; nullable during backfill release)
     threadId: string(),
     canvasId: string(),
     body: string(),
@@ -1509,6 +1498,17 @@ export const sdlcArtifactTable = table('sdlc_artifacts')
   .primaryKey('artifactId');
 
 // Tracks carry no scope column: the CHANNEL -> TRACK edge in sdlc_entity_links places them.
+export const sdlcFolderTable = table('sdlc_folders')
+  .columns({
+    workspaceId: string(),
+    id: string(),
+    name: string(),
+    createdBy: string(),
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey('id');
+
 export const sdlcTrackTable = table('sdlc_tracks')
   .columns({
     workspaceId: string(),
@@ -1663,6 +1663,7 @@ export const emailChannelPreferenceTable = table('email_channel_preferences')
     autoDraftAgentSlug: string().optional(),
     metricsEnabled: boolean().optional(),
     frtStageNames: string().optional(),
+    metricsGuestVisibility: string().optional(),
     appWebhookDeliveryEnabled: boolean().optional(),
     deskReportEnabled: boolean().optional(),
     deskReportAgentSlug: string().optional(),
@@ -2959,43 +2960,7 @@ export const workflowTableRelationships = relationships(workflowTable, ({ one, m
     destField: ['id'],
     destSchema: ticketTable,
   }),
-  workflowExecutions: many({
-    sourceField: ['id'],
-    destField: ['workflowId'],
-    destSchema: workflowExecutionTable,
-  }),
 }));
-
-export const workflowExecutionTableRelationships = relationships(
-  workflowExecutionTable,
-  ({ one, many }) => ({
-    workflow: one({
-      sourceField: ['workflowId'],
-      destField: ['id'],
-      destSchema: workflowTable,
-    }),
-    parentWorkflowExecution: one({
-      sourceField: ['parentWorkflowExecutionId'],
-      destField: ['id'],
-      destSchema: workflowExecutionTable,
-    }),
-    childWorkflowExecutions: many({
-      sourceField: ['id'],
-      destField: ['parentWorkflowExecutionId'],
-      destSchema: workflowExecutionTable,
-    }),
-    pullRequests: many({
-      sourceField: ['id'],
-      destField: ['workflowExecutionId'],
-      destSchema: pullRequestsTable,
-    }),
-    createdByUser: one({
-      sourceField: ['createdBy'],
-      destField: ['id'],
-      destSchema: userTable,
-    }),
-  }),
-);
 
 
 export const userGroupTableRelationships = relationships(userGroupTable, ({ one, many }) => ({
@@ -3408,11 +3373,6 @@ export const repoTableRelationships = relationships(repoTable, ({ one, many }) =
     destField: ['id'],
     destSchema: projectTable,
   }),
-  setupExecution: one({
-    sourceField: ['sdlcSetupExecutionId'],
-    destField: ['id'],
-    destSchema: workflowExecutionTable,
-  }),
   // Membership edges pointing here. targetId is polymorphic, so readers filter
   // by relationType.
   sdlcEntityLinks: many({
@@ -3434,6 +3394,11 @@ export const sdlcEntityLinkTableRelationships = relationships(sdlcEntityLinkTabl
     destField: ['id'],
     destSchema: channelTable,
   }),
+  workflow: one({
+    sourceField: ['targetId'],
+    destField: ['id'],
+    destSchema: workflowTable,
+  }),
 }));
 
 export const sdlcArtifactTableRelationships = relationships(sdlcArtifactTable, ({ one }) => ({
@@ -3446,6 +3411,15 @@ export const sdlcArtifactTableRelationships = relationships(sdlcArtifactTable, (
     sourceField: ['artifactId'],
     destField: ['id'],
     destSchema: canvasTable,
+  }),
+}));
+
+export const sdlcFolderTableRelationships = relationships(sdlcFolderTable, ({ many }) => ({
+  // Edges pointing here. targetId is polymorphic, so readers filter by relationType.
+  sdlcEntityLinks: many({
+    sourceField: ['id'],
+    destField: ['targetId'],
+    destSchema: sdlcEntityLinkTable,
   }),
 }));
 
@@ -4082,11 +4056,6 @@ export const canvasUserStatusTableRelationships = relationships(
 );
 
 export const pullRequestsTableRelationships = relationships(pullRequestsTable, ({ one }) => ({
-  workflowExecution: one({
-    sourceField: ['workflowExecutionId'],
-    destField: ['id'],
-    destSchema: workflowExecutionTable,
-  }),
   ticket: one({
     sourceField: ['ticketId'],
     destField: ['id'],
@@ -4650,6 +4619,12 @@ export const savedUserConfigurationTableRelationships = relationships(
       destField: ['viewId'],
       destSchema: viewAccessTable,
     }),
+    // Used only for DESK_TICKET configs where contextId holds a channelId.
+    contextChannel: one({
+      sourceField: ['contextId'],
+      destField: ['id'],
+      destSchema: channelTable,
+    }),
   }),
 );
 
@@ -4798,7 +4773,6 @@ export const schema = createSchema({
     userWorkloadMappingTable,
     userExpertiseMappingTable,
     workflowTable,
-    workflowExecutionTable,
     userGroupTable,
     userTable,
     userPresenceTable,
@@ -4853,6 +4827,7 @@ export const schema = createSchema({
     repoTable,
     sdlcEntityLinkTable,
     sdlcArtifactTable,
+    sdlcFolderTable,
     sdlcTrackTable,
     emailTable,
     emailDraftTable,
@@ -4937,7 +4912,6 @@ export const schema = createSchema({
     userWorkloadMappingTableRelationships,
     userExpertiseMappingTableRelationships,
     workflowTableRelationships,
-    workflowExecutionTableRelationships,
     userGroupTableRelationships,
     userTableRelationships,
     userPresenceTableRelationships,
@@ -4953,6 +4927,7 @@ export const schema = createSchema({
     repoTableRelationships,
     sdlcEntityLinkTableRelationships,
     sdlcArtifactTableRelationships,
+    sdlcFolderTableRelationships,
     sdlcTrackTableRelationships,
     messageTableRelationships,
     messageArtifactTableRelationships,
@@ -5067,7 +5042,6 @@ export type Board = Row<typeof schema.tables.boards>;
 export type Stage = Row<typeof schema.tables.stages>;
 export type StagePRStatusMapping = Row<typeof schema.tables.stage_pr_status_mappings>;
 export type Workflow = Row<typeof schema.tables.workflows>;
-export type WorkflowExecution = Row<typeof schema.tables.workflow_executions>;
 export type UserGroup = Row<typeof schema.tables.user_groups>;
 export type User = Row<typeof schema.tables.users>;
 export type UserGroupMapping = Row<typeof schema.tables.user_group_mappings>;
@@ -5125,6 +5099,7 @@ export type Email = Row<typeof schema.tables.emails>;
 export type Repo = Row<typeof schema.tables.repos>;
 export type SdlcEntityLink = Row<typeof schema.tables.sdlc_entity_links>;
 export type SdlcArtifact = Row<typeof schema.tables.sdlc_artifacts>;
+export type SdlcFolder = Row<typeof schema.tables.sdlc_folders>;
 export type SdlcTrack = Row<typeof schema.tables.sdlc_tracks>;
 export type EmailDraft = Row<typeof schema.tables.email_drafts>;
 export type ConversationLabel = Row<typeof schema.tables.conversation_labels>;

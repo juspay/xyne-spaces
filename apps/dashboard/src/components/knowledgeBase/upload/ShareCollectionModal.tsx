@@ -891,18 +891,17 @@ export const ShareCollectionModal = ({
                         <div className='flex items-center gap-1 pr-1'>
                           <span className='text-xs text-muted-foreground'>Viewer</span>
                           {collectionRole === 'OWNER' && (
-                            <Button
-                              variant='ghost'
+                            <button
                               type='button'
                               onClick={() => handleRemoveAccess(row)}
-                              trackId='remove_collection_access'
+                              data-ph-capture-attribute-track-id='remove_collection_access'
                               aria-label={`Remove ${row.channel?.name || 'channel'} access`}
                               data-track-category='knowledge-base'
                               data-track-name='access-remove-channel'
                               className='p-1 rounded-md text-muted-foreground hover:bg-muted hover:text-red-600'
                             >
                               <X size={14} />
-                            </Button>
+                            </button>
                           )}
                         </div>
                       ) : locked ? (

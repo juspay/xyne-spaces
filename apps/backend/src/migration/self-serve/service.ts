@@ -164,6 +164,20 @@ export class SlackMigrationService {
     return toView(updated);
   }
 
+  /** "Get latest messages": queue an incremental re-collection. Only while AWAITING_APPROVAL and with the token still held. */
+  async refresh(id: string, actor: Actor): Promise<MigrationJobView> {
+    const job = await this.mustGet(id, actor);
+    if (job.status !== MigrationStatus.AWAITING_APPROVAL) {
+      throw new HttpError(409, 'INVALID_STATE', `Only a migration awaiting approval can fetch latest messages (current: ${job.status})`);
+    }
+    if (!job.encryptedToken) {
+      throw new HttpError(409, 'TOKEN_UNAVAILABLE', 'The Slack token is no longer available for this job — re-submit to migrate newer messages.');
+    }
+    const updated = await this.store.update(id, { status: MigrationStatus.REFRESHING, refreshRequested: true, currentQueue: QueueName.COLLECTION, error: undefined });
+    await this.queues.enqueue(QueueName.COLLECTION, id, 'end');
+    return toView(updated);
+  }
+
   async stop(id: string, actor: Actor): Promise<MigrationJobView> {
     const job = await this.mustGet(id, actor);
     if (job.status === MigrationStatus.QUEUED) {

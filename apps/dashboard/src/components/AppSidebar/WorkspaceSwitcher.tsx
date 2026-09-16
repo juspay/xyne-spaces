@@ -14,7 +14,6 @@ import {
 import { queryClient } from '../../services/clients/queryClient';
 import { useCanCreateWorkspace } from '../../hooks/usePermissions';
 import { confirmRecordingInterrupt } from '../Recording/RecordingInterruptGuard/RecordingInterruptGuard';
-import { Button } from '../ui/Button/Button';
 
 type CreateWorkspaceType = (typeof WorkspaceType)[keyof typeof WorkspaceType];
 
@@ -339,11 +338,10 @@ export const WorkspaceSwitcher: React.FC = () => {
                 const isSwitching = switching === ws.id;
                 const count = activityCounts.get(ws.id) || 0;
                 return (
-                  <Button
+                  <button
                     key={ws.id}
-                    variant='ghost'
                     onClick={() => void handleSwitch(ws.id)}
-                    trackId='switch_workspace'
+                    data-ph-capture-attribute-track-id='switch_workspace'
                     disabled={isSwitching}
                     data-track-category='Workspace_Switcher'
                     data-track-name='Switch_Workspace'
@@ -372,7 +370,7 @@ export const WorkspaceSwitcher: React.FC = () => {
                         <Check size={14} className='text-green-500' />
                       ) : null}
                     </div>
-                  </Button>
+                  </button>
                 );
               })
             )}
@@ -421,11 +419,10 @@ export const WorkspaceSwitcher: React.FC = () => {
                       const isSwitching = switching === ws.id;
                       const count = activityCounts.get(ws.id) || 0;
                       return (
-                        <Button
+                        <button
                           key={ws.id}
-                          variant='ghost'
                           onClick={() => void handleSwitch(ws.id)}
-                          trackId='switch_workspace_signin'
+                          data-ph-capture-attribute-track-id='switch_workspace_signin'
                           disabled={isSwitching}
                           data-track-category='Workspace_Switcher'
                           data-track-name='Switch_Workspace_SignIn'
@@ -455,7 +452,7 @@ export const WorkspaceSwitcher: React.FC = () => {
                               <Check size={12} className='text-green-500' />
                             ) : null}
                           </div>
-                        </Button>
+                        </button>
                       );
                     })
                   )}
@@ -483,17 +480,16 @@ export const WorkspaceSwitcher: React.FC = () => {
                     autoFocus
                   />
                   <div className='flex gap-2'>
-                    <Button
+                    <button
                       type='submit'
-                      variant='ghost'
-                      trackId='create_workspace'
+                      data-ph-capture-attribute-track-id='create_workspace'
                       disabled={creating || !workspaceName.trim()}
                       data-track-category='Workspace_Switcher'
                       data-track-name='Create_Workspace'
                       className='h-auto flex-1 py-1.5 text-xs font-medium bg-primary text-primary-foreground rounded-md disabled:opacity-50 hover:bg-primary hover:opacity-90'
                     >
                       {creating ? 'Creating…' : 'Create'}
-                    </Button>
+                    </button>
                     <button
                       type='button'
                       onClick={() => {

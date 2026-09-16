@@ -28,6 +28,34 @@ export async function availableServerIds(
   return new Set([...personal.map((c) => c.mcpServerId), ...shared.map((s) => s.id)]);
 }
 
+export interface ConnectorAvailability {
+  personal: Set<string>;
+  org: Set<string>;
+}
+
+export async function availabilityForServerIds(
+  userId: string,
+  serverIds: string[],
+): Promise<ConnectorAvailability> {
+  if (serverIds.length === 0) return { personal: new Set(), org: new Set() };
+
+  const [personal, shared] = await Promise.all([
+    prisma.userMcpConnection.findMany({
+      where: { userId, mcpServerId: { in: serverIds } },
+      select: { mcpServerId: true },
+    }),
+    prisma.mcpServer.findMany({
+      where: { id: { in: serverIds }, ...GLOBAL_FALLBACK_WHERE },
+      select: { id: true },
+    }),
+  ]);
+
+  return {
+    personal: new Set(personal.map((c) => c.mcpServerId)),
+    org: new Set(shared.map((s) => s.id)),
+  };
+}
+
 export async function availableServerTypes(
   userId: string,
   serverTypes: string[],

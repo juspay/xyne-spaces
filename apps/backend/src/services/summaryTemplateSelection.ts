@@ -1,4 +1,5 @@
 import type { Prisma, SummaryTemplate } from '@prisma/client';
+import { getEnabledSummaryTemplateSections } from './summaryTemplateSections';
 
 const MAX_TRANSCRIPT_CHARS = 60_000;
 const MAX_STRUCTURE_CHARS = 2_000;
@@ -25,7 +26,9 @@ function isStructuredSection(
   );
 }
 
-export function formatSummaryTemplateSections(sections: Prisma.JsonValue): string {
+export function formatSummaryTemplateSections(rawSections: Prisma.JsonValue): string {
+  // Sections a Scribe admin disabled stay stored on the template but never reach a prompt.
+  const sections = getEnabledSummaryTemplateSections(rawSections);
   if (typeof sections === 'string') return sections.trim();
   if (sections === null) return '';
   if (Array.isArray(sections) && sections.length === 0) return '';

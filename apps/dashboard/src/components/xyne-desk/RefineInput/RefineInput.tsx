@@ -1,6 +1,5 @@
 import { useState, forwardRef } from 'react';
 import { ArrowRight } from 'lucide-react';
-import { Button } from '../../ui/Button/Button';
 
 interface RefineInputProps {
   onSubmit: (instruction: string) => void;
@@ -41,19 +40,18 @@ export const RefineInput = forwardRef<HTMLInputElement, RefineInputProps>(
           data-track-category='AIDraft'
           data-track-name='RefineInput'
         />
-        <Button
+        <button
           type='button'
-          variant='ghost'
           onClick={handleSubmit}
           disabled={disabled || !value.trim()}
           className='absolute right-1 top-1/2 -translate-y-1/2 p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-30 disabled:cursor-not-allowed transition-colors'
           aria-label='Send refinement'
           data-track-category='AIDraft'
           data-track-name='SubmitRefinement'
-          trackId='refine_draft'
+          data-ph-capture-attribute-track-id='refine_draft'
         >
           <ArrowRight size={14} />
-        </Button>
+        </button>
       </div>
     );
   },

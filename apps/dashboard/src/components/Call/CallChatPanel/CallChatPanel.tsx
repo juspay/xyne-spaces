@@ -4,7 +4,7 @@ import { X, Send, User } from 'lucide-react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { cn } from '../../../utils/classNames';
-import { Button } from '../../ui/Button/Button';
+
 import { useCallChat } from '../hooks/useCallChat';
 import type { ChatMessage } from '../hooks/useCallChat';
 
@@ -241,11 +241,10 @@ export function CallChatPanel({
               target.style.height = `${Math.min(target.scrollHeight, 128)}px`;
             }}
           />
-          <Button
-            variant='ghost'
+          <button
             onClick={() => void handleSend()}
             disabled={!input.trim() || isSending}
-            trackId='send_call_chat_message'
+            data-ph-capture-attribute-track-id='send_call_chat_message'
             data-track-category='CALLS'
             data-track-name='SEND_CALL_CHAT_MESSAGE'
             className={cn(
@@ -256,7 +255,7 @@ export function CallChatPanel({
             )}
           >
             <Send size={16} />
-          </Button>
+          </button>
         </div>
       </div>
     </div>

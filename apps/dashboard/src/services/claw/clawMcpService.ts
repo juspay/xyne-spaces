@@ -5,6 +5,7 @@ import type {
   UserConnection,
 } from './clawMcpTypes';
 import { clawApiRequest } from './clawRequest';
+import { currentOAuthReturnTo } from '../../routes/AIScreen/library/shared/pickers/mcp/oauthReturnTo';
 
 /** All registered MCP servers/connectors (the catalog). */
 export function listMcpServers(): Promise<McpServer[]> {
@@ -48,7 +49,7 @@ export async function deleteAgentMcpConnection(
 export async function startMcpOAuth(userId: string, serverType: string): Promise<string> {
   const data = await clawApiRequest<{ authUrl: string }>(
     `/users/${encodeURIComponent(userId)}/oauth/${encodeURIComponent(serverType)}/authorize`,
-    { method: 'POST', body: JSON.stringify({}), userId },
+    { method: 'POST', body: JSON.stringify({ returnTo: currentOAuthReturnTo() }), userId },
   );
   return data.authUrl;
 }
@@ -124,11 +125,22 @@ export function deleteMcpConnection(userId: string, connectionId: string): Promi
  * than creating a credential-less connection that would sit permanently
  * unhealthy.
  */
-export function mcpRequiresCredentials(server: McpServer): boolean {
+export function mcpRequiresCredentials(
+  server: McpServer,
+  /**
+   * Fields resolved from the server-side registry (useMcpCredentialFields).
+   * Pass these whenever they are available: `mcp_servers.credentialForm` is
+   * nullable and unset in some environments for connectors whose fields live
+   * only in code, and deciding from the columns alone then skips the form and
+   * posts an empty credential bag.
+   */
+  resolvedFields?: readonly CredentialField[],
+): boolean {
   if (server.oauth) return false;
   if (server.type === 'google' || server.type === 'microsoft' || server.type === 'xyne-spaces') {
     return false;
   }
+  if (resolvedFields) return resolvedFields.length > 0;
   const hasFormFields = (server.credentialForm?.fields?.length ?? 0) > 0;
   const hasSchema = !!server.credentialSchema && Object.keys(server.credentialSchema).length > 0;
   return hasFormFields || hasSchema;
