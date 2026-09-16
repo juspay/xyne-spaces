@@ -206,7 +206,7 @@ const canRepresentGroupInVespa = (
   return true;
 };
 
-const getDynamicFieldScalarFilters = (
+export const getDynamicFieldScalarFilters = (
   filters: TicketFilters | undefined,
   zeroOnlyDynamicFieldIds: string[] | undefined,
 ): DynamicFieldScalarFilter[] | undefined => {
@@ -228,7 +228,7 @@ const getDynamicFieldScalarFilters = (
   return scalarFilters.length > 0 ? scalarFilters : undefined;
 };
 
-const getFormFieldValue = (
+export const getFormFieldValue = (
   groupBy: KanbanPageGroupBy | undefined,
   groupKey: string | undefined,
 ): string | number | boolean | undefined => {
@@ -245,7 +245,7 @@ const getFormFieldValue = (
   return groupKey;
 };
 
-const toQueryFilters = (
+export const toQueryFilters = (
   filters: TicketFilters | undefined,
 ): KanbanTicketsPageQueryArgs['filters'] => {
   if (!filters) return undefined;

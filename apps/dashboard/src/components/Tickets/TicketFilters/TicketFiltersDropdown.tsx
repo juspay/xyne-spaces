@@ -1057,7 +1057,6 @@ export const TicketFiltersDropdown = ({
               ref={inputRef}
               type='text'
               placeholder='Search Tickets'
-              autoFocus={!isMobile}
               value={searchValue ?? ''}
               onChange={e => onSearchChange?.(e.target.value)}
               className='w-full h-8 text-sm bg-transparent text-foreground rounded-lg pl-10 pr-[52px] focus:outline-none'

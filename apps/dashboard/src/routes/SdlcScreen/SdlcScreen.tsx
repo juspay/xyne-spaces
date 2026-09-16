@@ -3072,7 +3072,10 @@ export default function SdlcScreen(): ReactElement {
     return (
       <div key={item.id} className='mb-0.5'>
         <button
-          onClick={() => navigateWithinSdlc(`/sdlc/${channelId}/${item.id}`)}
+          onClick={event => {
+            navigateWithinSdlc(`/sdlc/${channelId}/${item.id}`);
+            event.currentTarget.blur();
+          }}
           {...(section === item.id && { 'aria-current': 'page' as const })}
           className={cn(
             'flex h-[32px] w-full items-center gap-2.5 rounded-[6px] px-2 text-[13px] text-sidebar-foreground transition-colors',
