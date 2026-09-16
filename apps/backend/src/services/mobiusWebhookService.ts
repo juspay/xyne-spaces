@@ -58,13 +58,17 @@ export class MobiusWebhookService {
       }
 
       const payload = parsed.data;
-      logger.info(`[Mobius-Webhook] Received event: ${payload.event_name} (release ${payload.release_id}) for workspace: ${workspaceId}`);
+      logger.info('[Mobius-Webhook] Received event', {
+        workspaceId,
+        event: payload.event_name,
+        releaseId: payload.release_id,
+      });
 
       const dedupId = payload.id;
       if (dedupId) {
         const isFirstDelivery = await this.claimEvent(workspaceId, dedupId);
         if (!isFirstDelivery) {
-          logger.info(`[Mobius-Webhook] Duplicate event ${dedupId} ignored for workspace ${workspaceId}`);
+          logger.info('[Mobius-Webhook] Duplicate event ignored', { workspaceId, eventId: dedupId });
           return { success: true, message: 'Duplicate event ignored' };
         }
       }
@@ -91,7 +95,7 @@ export class MobiusWebhookService {
 
         const bot = await unifiedBotUserService.getBotByBotId(MOBIUS_RELEASE_BOT_ID, workspaceId);
         if (!bot) {
-          logger.error(`[Mobius-Webhook] Release bot user not found in workspace ${workspaceId}`);
+          logger.error('[Mobius-Webhook] Release bot user not found', { workspaceId });
           await this.releaseEvent(workspaceId, dedupId);
           return { success: false, message: 'Release bot user not found' };
         }
@@ -117,7 +121,11 @@ export class MobiusWebhookService {
           },
         });
 
-        logger.info(`[Mobius-Webhook] Recorded release-update activity on ticket ${ticket.xyneId} (event ${payload.event_name})`);
+        logger.info('[Mobius-Webhook] Recorded release-update activity', {
+          workspaceId,
+          ticket: ticket.xyneId,
+          event: payload.event_name,
+        });
         return { success: true, message: 'Release update recorded' };
       } catch (error) {
         await this.releaseEvent(workspaceId, dedupId);
