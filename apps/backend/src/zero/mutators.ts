@@ -16362,9 +16362,8 @@ export function createMutators(
             deskReportRangeDays,
           },
         }) => {
-          // Mirrors the dlEmail claim check in channelController: one address
-          // routes to exactly one desk, or a desk owner could siphon another
-          // desk's mail by listing its address here.
+          // One address routes to one desk; channelController enforces the same
+          // rule in the other direction when a DL desk is created.
           if (dlAliases) {
             const claimed = parseDlAliases(dlAliases);
             if (claimed.length > 0) {
@@ -16376,7 +16375,9 @@ export function createMutators(
                 .flatMap(other => dlAddressesFor(other))
                 .find(address => claimed.includes(address));
               if (taken) {
-                throw new Error(`${taken} is already used by another desk in this workspace`);
+                throw new ApplicationError(
+                  `${taken} is already used by another desk in this workspace`,
+                );
               }
             }
           }

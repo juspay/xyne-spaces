@@ -17,7 +17,7 @@ import { MessageRepository } from '../../database/repositories/messageRepository
 import { ChannelRepository } from '../../database/repositories/channelRepository';
 import { EmailChannelPreferenceRepository } from '../../database/repositories/emailChannelPreferenceRepository';
 import { ExternalSource, ExternalMessage } from '@prisma/client';
-import { isDeskChannelType, ExternalEntityType, EmailType, EmailMergeMode, ChannelType, MessageDirection, MessageType } from '@xyne/shared';
+import { isDeskChannelType, ExternalEntityType, EmailType, EmailMergeMode, ChannelType, MessageDirection, MessageType, DeskType } from '@xyne/shared';
 import { logger } from '../../utils/logger';
 import { conversationService } from '../../services/conversationService';
 import { emailService } from '../../services/emailService';
@@ -464,6 +464,7 @@ export class ExternalSourceCore {
     const candidates = await db.emailChannelPreference.findMany({
       where: {
         workspaceId,
+        deskType: DeskType.DL,
         OR: [{ dlEmail: { in: addrs, mode: 'insensitive' } }, { NOT: { dlAliases: null } }],
       },
       select: { channelId: true, dlEmail: true, dlAliases: true },
