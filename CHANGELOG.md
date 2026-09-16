@@ -1,3 +1,10 @@
+## [1.332.1](https://github.com/juspay/xyne-spaces/compare/v1.332.0...v1.332.1) (2026-09-16)
+
+
+### Bug Fixes
+
+* embedded-browser popups in popped-out windows, and pasted media in canvas ([#1940](https://github.com/juspay/xyne-spaces/issues/1940)) ([87cecda](https://github.com/juspay/xyne-spaces/commit/87cecda60e068b4a76e1a571ce8f60b59947fe31)), closes [#1931](https://github.com/juspay/xyne-spaces/issues/1931)
+
 ## [1.332.0](https://github.com/juspay/xyne-spaces/compare/v1.331.0...v1.332.0) (2026-09-16)
 
 
