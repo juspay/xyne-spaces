@@ -1459,6 +1459,13 @@ export const router = createBrowserRouter(
                         // ahead of the shared `:channelId` route.
                         { path: 'ticket/:channelId', element: <ActivitySupportTicket /> },
                         { path: 'ticket/:channelId/:ticketId', element: <ActivitySupportTicket /> },
+                        // Recordings opened from the Activity list render here for the
+                        // same reason — the list stays mounted on the left instead of
+                        // the page navigating away to the standalone /recordings/:id.
+                        {
+                          path: 'recording/:recordingId',
+                          element: <RecordingDetailRoute embedded />,
+                        },
                         ...sharedChatRoutes,
                       ],
                     },
