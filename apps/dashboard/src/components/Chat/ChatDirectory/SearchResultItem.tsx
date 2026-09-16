@@ -21,6 +21,9 @@ import { useUser } from '../../../hooks/useUsers';
 import { isUserDeactivated, getUserDisplayName } from '../../../utils/userDisplayName';
 import { StatusIndicator } from '../../ui/StatusIndicator';
 import { TicketPriority } from '@xyne/shared';
+import { cn } from '../../../utils/classNames';
+import { queries } from '../../../zero/queries';
+import { useCachedQuery } from '../../../hooks/useCachedQuery';
 
 interface SearchResultItemProps {
   result: DisplaySearchResult;
@@ -193,6 +196,116 @@ const TicketAssigneeSegment = ({
   const name = (resolved && resolved !== 'Unknown' ? resolved : assigneeName) || 'Unassigned';
 
   return <span className='min-w-0 max-w-[30ch] truncate'>{name}</span>;
+};
+
+const TicketSearchResultItem = ({
+  result,
+  channelTag,
+  onSelect,
+  isSelected,
+  handleMouseDown,
+  handleMouseEnter,
+  handleMouseLeave,
+}: {
+  result: DisplaySearchResult;
+  channelTag?: { name: string; icon?: ReactElement | undefined } | undefined;
+  onSelect: (result: DisplaySearchResult) => Promise<void> | void;
+  isSelected: boolean;
+  handleMouseDown?: ((e: ReactMouseEvent) => void) | undefined;
+  handleMouseEnter?: (() => void) | undefined;
+  handleMouseLeave?: (() => void) | undefined;
+}): ReactElement => {
+  // Archived state isn't carried on the search result (Vespa doesn't index it), so
+  // hydrate it per-row from Zero by ticket id — `result.id` is the ticket's Zero id.
+  // Same on-demand single-row lookup pattern that inline ticket links use.
+  const [ticket] = useCachedQuery(queries.ticketByIdV2({ ticketId: result.id }), {
+    enabled: !!result.id,
+  });
+  const isArchived = !!ticket?.isArchived;
+
+  // Line 1: icon | ticketId | · | title. Line 2 (MetaLine): status · priority
+  // · assigned-to, closed by the channel as a trailing "in <name>" phrase.
+  // Only the title / channel / assignee truncate; every field reuses an
+  // existing construct (no new icons).
+  const ticketId = result.searchContext?.xyneId;
+  const idSegment = result.subtitle?.split(' | ')[0];
+  const ticketIdHtml =
+    ticketId && idSegment?.includes('<hi>') && idSegment.replace(/<\/?hi>/g, '') === ticketId
+      ? idSegment
+      : undefined;
+  const rawTs = result.metadata.timestamp;
+  const createdAt = rawTs && rawTs !== 'N/A' ? utcToIst(rawTs) : '';
+  const status = result.searchContext?.ticketStatus;
+  const priority = result.searchContext?.priority;
+  const assigneeId = result.searchContext?.assignedTo;
+  const assigneeName = result.searchContext?.assigneeName;
+
+  const metaSegments: ReactElement[] = [];
+  if (status) {
+    metaSegments.push(<TicketStatusSegment key='status' status={status} />);
+  }
+  if (priority) {
+    metaSegments.push(<TicketPrioritySegment key='priority' priority={priority} />);
+  }
+  metaSegments.push(
+    <TicketAssigneeSegment key='assignee' assigneeId={assigneeId} assigneeName={assigneeName} />,
+  );
+
+  return (
+    <Command.Item
+      key={result.id}
+      value={`backend-${result.type}-${result.id}`}
+      data-result-id={result.id}
+      data-result-type={result.type}
+      data-ticket-id={result.id}
+      onSelect={() => void onSelect(result)}
+      onMouseDownCapture={handleMouseDown}
+      onMouseEnter={handleMouseEnter}
+      onMouseLeave={handleMouseLeave}
+      className={cn(
+        'flex w-full items-center gap-3 p-3 rounded-lg cursor-pointer hover:bg-accent aria-selected:bg-accent mt-1.5',
+        // Archived tickets read as inactive: dim the whole row. The "Archived" pill
+        // next to the title carries the actual meaning so this doesn't rely on colour.
+        isArchived && 'opacity-55',
+      )}
+    >
+      <span className='flex shrink-0 items-center'>{getResultIcon(result)}</span>
+      <div className='flex min-w-0 flex-1 flex-col gap-0.5'>
+        <div className='flex items-center gap-1.5 min-w-0'>
+          {ticketId && (
+            <>
+              <span className='shrink-0 whitespace-nowrap text-[15px] leading-[1.2] tracking-[-0.1px] text-muted-foreground'>
+                {ticketIdHtml ? <RenderMessageWithHTML message={ticketIdHtml} /> : ticketId}
+              </span>
+              <span className='shrink-0 text-[14px] font-medium leading-[1.2] tracking-[-0.28px] text-muted-foreground'>
+                ·
+              </span>
+            </>
+          )}
+          <span className='min-w-0 *:truncate text-[15px] leading-[1.2] tracking-[-0.1px] text-foreground'>
+            <RenderMessageWithHTML message={result.title} />
+          </span>
+          {isArchived && (
+            <span className='shrink-0 rounded bg-muted px-1.5 py-0.5 text-[11px] font-medium leading-none text-muted-foreground'>
+              Archived
+            </span>
+          )}
+        </div>
+        <div className='flex min-w-0 items-center justify-between gap-2'>
+          <MetaLine
+            segments={metaSegments}
+            trailing={channelTag ? <ChannelSegment channelTag={channelTag} /> : undefined}
+          />
+          {createdAt && (
+            <span className='shrink-0 whitespace-nowrap text-xs text-muted-foreground'>
+              {createdAt}
+            </span>
+          )}
+        </div>
+      </div>
+      {isSelected && <SelectedBadge />}
+    </Command.Item>
+  );
 };
 
 const AttachmentSearchResultItem = ({
@@ -526,85 +639,18 @@ const SearchResultItem = ({
       );
     }
 
-    case 'ticket': {
-      // Line 1: icon | ticketId | · | title. Line 2 (MetaLine): status · priority
-      // · assigned-to, closed by the channel as a trailing "in <name>" phrase.
-      // Only the title / channel / assignee truncate; every field reuses an
-      // existing construct (no new icons).
-      const ticketId = result.searchContext?.xyneId;
-      const idSegment = result.subtitle?.split(' | ')[0];
-      const ticketIdHtml =
-        ticketId && idSegment?.includes('<hi>') && idSegment.replace(/<\/?hi>/g, '') === ticketId
-          ? idSegment
-          : undefined;
-      const rawTs = result.metadata.timestamp;
-      const createdAt = rawTs && rawTs !== 'N/A' ? utcToIst(rawTs) : '';
-      const status = result.searchContext?.ticketStatus;
-      const priority = result.searchContext?.priority;
-      const assigneeId = result.searchContext?.assignedTo;
-      const assigneeName = result.searchContext?.assigneeName;
-
-      const metaSegments: ReactElement[] = [];
-      if (status) {
-        metaSegments.push(<TicketStatusSegment key='status' status={status} />);
-      }
-      if (priority) {
-        metaSegments.push(<TicketPrioritySegment key='priority' priority={priority} />);
-      }
-      metaSegments.push(
-        <TicketAssigneeSegment
-          key='assignee'
-          assigneeId={assigneeId}
-          assigneeName={assigneeName}
-        />,
-      );
-
+    case 'ticket':
       return (
-        <Command.Item
-          key={result.id}
-          value={`backend-${result.type}-${result.id}`}
-          data-result-id={result.id}
-          data-result-type={result.type}
-          data-ticket-id={result.id}
-          onSelect={() => void onSelect(result)}
-          onMouseDownCapture={handleMouseDown}
-          onMouseEnter={handleMouseEnter}
-          onMouseLeave={handleMouseLeave}
-          className='flex w-full items-center gap-3 p-3 rounded-lg cursor-pointer hover:bg-accent aria-selected:bg-accent mt-1.5'
-        >
-          <span className='flex shrink-0 items-center'>{getResultIcon(result)}</span>
-          <div className='flex min-w-0 flex-1 flex-col gap-0.5'>
-            <div className='flex items-center gap-1.5 min-w-0'>
-              {ticketId && (
-                <>
-                  <span className='shrink-0 whitespace-nowrap text-[15px] leading-[1.2] tracking-[-0.1px] text-muted-foreground'>
-                    {ticketIdHtml ? <RenderMessageWithHTML message={ticketIdHtml} /> : ticketId}
-                  </span>
-                  <span className='shrink-0 text-[14px] font-medium leading-[1.2] tracking-[-0.28px] text-muted-foreground'>
-                    ·
-                  </span>
-                </>
-              )}
-              <span className='min-w-0 *:truncate text-[15px] leading-[1.2] tracking-[-0.1px] text-foreground'>
-                <RenderMessageWithHTML message={result.title} />
-              </span>
-            </div>
-            <div className='flex min-w-0 items-center justify-between gap-2'>
-              <MetaLine
-                segments={metaSegments}
-                trailing={channelTag ? <ChannelSegment channelTag={channelTag} /> : undefined}
-              />
-              {createdAt && (
-                <span className='shrink-0 whitespace-nowrap text-xs text-muted-foreground'>
-                  {createdAt}
-                </span>
-              )}
-            </div>
-          </div>
-          {isSelected && <SelectedBadge />}
-        </Command.Item>
+        <TicketSearchResultItem
+          result={result}
+          channelTag={channelTag}
+          onSelect={onSelect}
+          isSelected={isSelected}
+          handleMouseDown={handleMouseDown}
+          handleMouseEnter={handleMouseEnter}
+          handleMouseLeave={handleMouseLeave}
+        />
       );
-    }
 
     case 'attachment':
       return (
