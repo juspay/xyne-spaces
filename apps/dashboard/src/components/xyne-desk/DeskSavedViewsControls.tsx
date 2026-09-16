@@ -141,9 +141,16 @@ function FilterPreviewCard({
   );
 }
 
-/** Recursively sort object keys so JSON.stringify gives a stable result regardless of insertion order. */
+/** Recursively sort object keys AND primitive arrays so JSON.stringify gives a stable result. */
 function sortKeysDeep(val: unknown): unknown {
-  if (Array.isArray(val)) return val.map(sortKeysDeep);
+  if (Array.isArray(val)) {
+    const mapped = val.map(sortKeysDeep);
+    // Sort arrays of primitives so order differences don't count as dirty.
+    if (mapped.every(v => typeof v !== 'object' || v === null)) {
+      return [...mapped].sort();
+    }
+    return mapped;
+  }
   if (val !== null && typeof val === 'object') {
     return Object.fromEntries(
       Object.keys(val as Record<string, unknown>)
