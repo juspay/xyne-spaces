@@ -1,3 +1,10 @@
+## [1.332.0](https://github.com/juspay/xyne-spaces/compare/v1.331.0...v1.332.0) (2026-09-16)
+
+
+### Features
+
+* Feature/calender sidebar calls ([#564](https://github.com/juspay/xyne-spaces/issues/564)) ([f52fc33](https://github.com/juspay/xyne-spaces/commit/f52fc338de89e8682a822d997afdeb6e79f0260a))
+
 ## [1.331.0](https://github.com/juspay/xyne-spaces/compare/v1.330.0...v1.331.0) (2026-09-16)
 
 
