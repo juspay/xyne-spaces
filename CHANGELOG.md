@@ -1,3 +1,40 @@
+## [1.328.0](https://github.com/juspay/xyne-spaces/compare/v1.327.0...v1.328.0) (2026-09-16)
+
+
+### Features
+
+* raw sql query guard in ci ([#1903](https://github.com/juspay/xyne-spaces/issues/1903)) ([4bff953](https://github.com/juspay/xyne-spaces/commit/4bff9530448c52318f4146d2a4518b021187e1ad))
+
+## [1.327.0](https://github.com/juspay/xyne-spaces/compare/v1.326.0...v1.327.0) (2026-09-16)
+
+
+### Features
+
+* add canvas title icon picker ([#1890](https://github.com/juspay/xyne-spaces/issues/1890)) ([5f07736](https://github.com/juspay/xyne-spaces/commit/5f07736d0e18f8bb5bd955a5a99eb2ef3009cac4))
+* fix ticket count sync and fetch older tickets ([#1874](https://github.com/juspay/xyne-spaces/issues/1874)) ([663f471](https://github.com/juspay/xyne-spaces/commit/663f4714d10962dbc893d6447f360323754dffb6))
+
+## [1.326.0](https://github.com/juspay/xyne-spaces/compare/v1.325.0...v1.326.0) (2026-09-16)
+
+
+### Features
+
+* make ALL-tab grouping CAC-driven per rank profile ([#1899](https://github.com/juspay/xyne-spaces/issues/1899)) ([db565fd](https://github.com/juspay/xyne-spaces/commit/db565fdc31478cf9a4855d94b3fc897fb12320eb))
+
+## [1.325.0](https://github.com/juspay/xyne-spaces/compare/v1.324.0...v1.325.0) (2026-09-16)
+
+
+### Features
+
+* added-export-option-in-ticket-table-view ([#1820](https://github.com/juspay/xyne-spaces/issues/1820)) ([03ab50c](https://github.com/juspay/xyne-spaces/commit/03ab50cdb67d641bf80be0fa611a0cef5e07e679))
+* bitbucket connector for workflow ([#1881](https://github.com/juspay/xyne-spaces/issues/1881)) ([e8c7ba4](https://github.com/juspay/xyne-spaces/commit/e8c7ba436ea31cdc3353075ec5400c2f1635bf6c))
+* participant filter ([#1726](https://github.com/juspay/xyne-spaces/issues/1726)) ([5f8fcfe](https://github.com/juspay/xyne-spaces/commit/5f8fcfe767d4f6da77f14d5b92e13f29383c178d))
+
+
+### Bug Fixes
+
+* emit MESSAGE_RECEIVED on message update ([#1762](https://github.com/juspay/xyne-spaces/issues/1762)) ([5862dcb](https://github.com/juspay/xyne-spaces/commit/5862dcbd8868176eaca36a19805c1cdc5515c4fa))
+* recording activity click breadcrumb ([#1743](https://github.com/juspay/xyne-spaces/issues/1743)) ([1fd5ed6](https://github.com/juspay/xyne-spaces/commit/1fd5ed6f100a523a14f5eb4d62d4e836b0f5e8b0))
+
 ## [1.324.0](https://github.com/juspay/xyne-spaces/compare/v1.323.0...v1.324.0) (2026-09-16)
 
 

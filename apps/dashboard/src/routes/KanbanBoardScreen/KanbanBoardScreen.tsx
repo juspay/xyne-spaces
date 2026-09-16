@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useCallback, useEffect, useRef, useDeferredValue } from 'react';
-import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams, useOutletContext } from 'react-router-dom';
 import type { QueryResultType } from '@rocicorp/zero';
 import { toast } from 'sonner';
 import { useQuery } from '@tanstack/react-query';
@@ -8,7 +8,7 @@ import { useAuth } from '../../hooks/useAuth';
 import { useCanCreateTicket, usePermissions } from '../../hooks/usePermissions';
 import { usePlatform } from '../../hooks/usePlatform';
 import { useRouteContext } from '../../hooks/useRouteContext';
-import { TextAlignJustify, FileSpreadsheet, Archive } from 'lucide-react';
+import { TextAlignJustify, FileSpreadsheet, Archive, Copy } from 'lucide-react';
 import {
   PlusDefault as Plus,
   FilterHorizontal as Settings2,
@@ -35,6 +35,8 @@ import {
   SearchDefault as Search,
   KanbanBoard as SquareKanban,
   GridTable,
+  Hashtag,
+  LayersTo,
   EyeOff,
 } from '@xyne/icons';
 import { CalendarView } from '../../components/Tickets/CalendarView';
@@ -60,6 +62,7 @@ import {
 } from '@dnd-kit/core';
 import { TicketCard } from '../../components/Tickets/TicketCard/TicketCard';
 import { TicketFiltersDropdown } from '../../components/Tickets/TicketFilters';
+import type { ProjectsScreenOutletContext } from '../ProjectsScreen/ProjectsScreen';
 import { CreateTicketModal } from '../../components/Tickets/CreateTicketModal/CreateTicketModal';
 import {
   clearCreateTicketParams,
@@ -162,6 +165,14 @@ import {
 } from './KanbanBoardScreen.utils';
 import { TicketTable } from '../../components/Tickets/TicketTable/TicketTable';
 import {
+  buildTicketExportPayload,
+  ticketPayloadToCsv,
+  ticketPayloadToJson,
+  buildTicketExportFilename,
+  downloadTextFile,
+} from '../../components/Tickets/TicketTable/ticketTableExport';
+import { copyTextToClipboard } from '../../utils/clipboardUtils';
+import {
   getActivityDescription,
   getActivityIcon,
 } from '../../components/Tickets/TicketActivity/TicketActivity';
@@ -243,7 +254,10 @@ const WORKSPACE_VIEW_NUMERIC_KEYS = [
   'createdDateEnd',
 ] as const satisfies (keyof TicketFilters)[];
 
-const DERIVED_COLUMNS = ['stage', 'board'];
+// `stage` is force-managed by the sub-status effect, so it is never persisted as
+// a user column. `board` is a normal user-controlled, persisted column (it must
+// survive in the draft / session / saved views like every other column).
+const DERIVED_COLUMNS = ['stage'];
 
 const DEFAULT_VISIBLE_COLUMNS = ['assignee', 'dueDate', 'status', 'priority', 'tags'];
 
@@ -313,16 +327,8 @@ interface BoardKanbanScreenProps {
    * URL-level precedence explicitly or a stale draft would shadow it.
    */
   hasSharedSeed?: boolean;
-  viewMode?:
-    | 'my-tickets'
-    | 'user-tickets'
-    | 'group-tickets'
-    | 'board'
-    | 'project'
-    | 'workspace-view';
+  viewMode?: 'my-tickets' | 'board' | 'project' | 'workspace-view';
   channelId?: string;
-  filterByUserId?: string;
-  filterByGroupId?: string;
   // Project Views builder (workspace-view mode):
   workspaceId?: string;
   viewId?: string;
@@ -420,13 +426,14 @@ const availableColumns = [
   { key: 'stage', label: 'Sub-status', icon: <CircleCheckBig className='h-4 w-4' /> },
   { key: 'createdAt', label: 'Created At', icon: <Clock className='h-4 w-4' /> },
   { key: 'createdBy', label: 'Created By', icon: <User className='h-4 w-4' /> },
+  { key: 'board', label: 'Board', icon: <SquareKanban className='h-4 w-4' /> },
+  { key: 'channel', label: 'Channel', icon: <Hashtag className='h-4 w-4' /> },
+  { key: 'type', label: 'Type', icon: <LayersTo className='h-4 w-4' /> },
 ];
 
 const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   viewMode: viewModeProp,
   channelId,
-  filterByUserId,
-  filterByGroupId,
   workspaceId,
   viewId,
   initialName,
@@ -440,6 +447,11 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     projectId?: string;
     boardId?: string;
   }>();
+  const outletContext = useOutletContext<unknown>();
+  const projectsScreenContext =
+    outletContext && typeof outletContext === 'object' && 'leftHeaderSlot' in outletContext
+      ? (outletContext as ProjectsScreenOutletContext)
+      : null;
   const navigate = useNavigate();
   const { user } = useAuth();
   const { isMobile } = usePlatform();
@@ -530,12 +542,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
       viewModeProp === 'workspace-view' && !hasSharedSeed ? readViewDraft(viewDraftKey) : null,
     [viewModeProp, viewDraftKey, hasSharedSeed],
   );
-  const persistedColumnsKey =
-    viewModeProp === 'my-tickets' ||
-    viewModeProp === 'user-tickets' ||
-    viewModeProp === 'group-tickets'
-      ? viewModeProp
-      : null;
+  const persistedColumnsKey = viewModeProp === 'my-tickets' ? viewModeProp : null;
   const [visibleColumns, setVisibleColumns] = useState<Set<string>>(
     () =>
       new Set(
@@ -652,8 +659,6 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   const viewMode = useMemo(() => {
     if (viewModeProp === 'workspace-view') return 'workspace-view';
     if (viewModeProp === 'my-tickets') return 'my-tickets'; // Show user's tickets
-    if (viewModeProp === 'user-tickets') return 'user-tickets'; // Show specific user's tickets
-    if (viewModeProp === 'group-tickets') return 'group-tickets'; // Show specific group's tickets
     if (viewModeProp === 'board') return 'board';
     if (boardId) return 'board'; // Show specific board
     if (viewModeProp === 'project') return 'project';
@@ -666,7 +671,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   // initialFilters are applied, preventing double queries with stale storage filters.
   const [hasSeededWorkspaceView, setHasSeededWorkspaceView] = useState(!isWorkspaceView);
   // A workspace view queries as a project view with no projectId; scope comes from filters.boards.
-  const queryViewMode: 'project' | 'board' | 'my-tickets' | 'user-tickets' | 'group-tickets' =
+  const queryViewMode: 'project' | 'board' | 'my-tickets' =
     viewMode === 'workspace-view' ? 'project' : viewMode;
 
   // Get user's channel status for selectedBoardId persistence
@@ -918,33 +923,6 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     });
   }, [showSubStatus]);
 
-  // Automatically show Board column when "All Boards" is selected
-  useEffect(() => {
-    const isAllBoardsSelected = !filters.boards || filters.boards.length === 0;
-
-    if (isAllBoardsSelected && channelId && viewMode === 'project') {
-      // Add "board" column when All Boards is selected
-      setVisibleColumns(prev => {
-        if (!prev.has('board')) {
-          const next = new Set(prev);
-          next.add('board');
-          return next;
-        }
-        return prev;
-      });
-    } else {
-      // Remove "board" column when a specific board is selected
-      setVisibleColumns(prev => {
-        if (prev.has('board')) {
-          const next = new Set(prev);
-          next.delete('board');
-          return next;
-        }
-        return prev;
-      });
-    }
-  }, [filters.boards, channelId, viewMode]);
-
   // Wrapper functions to send events to machine
   const setFilters = useCallback(
     (nextFilters: TicketFilters) => {
@@ -1114,7 +1092,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     if (boardsMatch) {
       setHasSeededWorkspaceView(true);
     }
-  }, [isWorkspaceView, hasSeededWorkspaceView, filters.boards, initialFilters?.boards]);
+  }, [isWorkspaceView, hasSeededWorkspaceView, filters, initialFilters?.boards]);
 
   const [isSavingWorkspaceView, setIsSavingWorkspaceView] = useState(false);
   const [isSavePopoverOpen, setIsSavePopoverOpen] = useState(false);
@@ -1313,9 +1291,8 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   const filteredSingleBoardId = explicitBoardId ?? soleScopeBoardId ?? null;
 
   // Get all boards for the project (needed for channel stage view and create ticket modal)
-  // In my-tickets/user-tickets/group-tickets, fetch ALL boards (no project filter) since tickets can span projects
-  const isMyTicketsView =
-    viewMode === 'my-tickets' || viewMode === 'user-tickets' || viewMode === 'group-tickets';
+  // In my-tickets, fetch ALL boards (no project filter) since tickets can span projects
+  const isMyTicketsView = viewMode === 'my-tickets';
 
   // Fetch full board details only when a single board is selected
   const [selectedBoardDetail] = useCachedQuery(
@@ -1656,13 +1633,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     }
 
     // For project and my-tickets views, use status-based columns
-    if (
-      viewMode === 'project' ||
-      viewMode === 'workspace-view' ||
-      viewMode === 'my-tickets' ||
-      viewMode === 'user-tickets' ||
-      viewMode === 'group-tickets'
-    ) {
+    if (viewMode === 'project' || viewMode === 'workspace-view' || viewMode === 'my-tickets') {
       return getStatusColumns();
     }
 
@@ -1743,12 +1714,10 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   // restricts tickets to only that specific channel.
   const ticketsQueryParams = useMemo(() => {
     const params: FlowStepVisibilityOptions & {
-      viewMode: 'project' | 'board' | 'my-tickets' | 'user-tickets' | 'group-tickets';
+      viewMode: 'project' | 'board' | 'my-tickets';
       projectId?: string;
       boardId?: string;
       boardIds?: string[];
-      userId?: string;
-      groupId?: string;
       formEntityValueFieldIds?: string[];
     } = { viewMode: queryViewMode };
 
@@ -1785,13 +1754,6 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
       params.excludeFlowSteps = true;
     }
 
-    // Pass user/group filters for specific viewModes
-    if (viewMode === 'user-tickets' && filterByUserId) {
-      params.userId = filterByUserId;
-    } else if (viewMode === 'group-tickets' && filterByGroupId) {
-      params.groupId = filterByGroupId;
-    }
-
     // Pass fieldIds for which to fetch formEntityValues (when filtering/grouping by dynamic fields)
     if (fevFieldIds.length > 0) {
       params.formEntityValueFieldIds = fevFieldIds;
@@ -1804,8 +1766,6 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     isWorkspaceView,
     boardId,
     effectiveProjectId,
-    filterByUserId,
-    filterByGroupId,
     filteredSingleBoardId,
     fevFieldIds,
     filters.boards,
@@ -1823,9 +1783,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
           // kanban pagination path uses. Without this clause the table, calendar and
           // flow layouts render no rows at all in a saved view.
           (isWorkspaceView && workspaceViewReady) ||
-          viewMode === 'my-tickets' ||
-          (viewMode === 'user-tickets' && !!filterByUserId) ||
-          (viewMode === 'group-tickets' && !!filterByGroupId)),
+          viewMode === 'my-tickets'),
     },
   );
   if (shouldUseLegacyTicketsQuery && ticketsDetails.type === 'complete') {
@@ -1966,7 +1924,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     workspaceSelectedBoards,
   ]);
 
-  // Clear invalid board filters in my-tickets/user-tickets/group-tickets views
+  // Clear invalid board filters in my-tickets views
   useEffect(() => {
     // Early return if not in my-tickets view
     if (!isMyTicketsView) return;
@@ -2722,6 +2680,74 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     }
     return map;
   }, [allUsers]);
+  const userGroupNamesById = useMemo(
+    () => new Map(allUserGroups.map(group => [group.id, group.name])),
+    [allUserGroups],
+  );
+  // Board names for the optional Board column / export. Resolve only the boards
+  // actually present in the current table rows, and only while in table view.
+  const tableBoardIds = useMemo(
+    () =>
+      Array.from(
+        new Set((filteredTickets ?? []).map(t => t.boardId).filter((id): id is string => !!id)),
+      ),
+    [filteredTickets],
+  );
+  const [tableBoards] = useCachedQuery(queries.boardsByIds({ boardIds: tableBoardIds }), {
+    enabled: layoutView === 'table' && tableBoardIds.length > 0,
+  });
+  const boardNamesById = useMemo(
+    () => new Map((tableBoards ?? []).map(board => [board.id, board.name])),
+    [tableBoards],
+  );
+  // CSV/JSON export of the current table view. Ungated — it only serializes the
+  // already-visible, filtered tickets, so it needs no TICKET-REPORTS permission.
+  const channelNamesById = useMemo(
+    () => new Map(allChannels.map(c => [c.id, c.name])),
+    [allChannels],
+  );
+  const handleTicketExport = useCallback(
+    (action: 'download-csv' | 'download-json' | 'copy-csv' | 'copy-json'): void => {
+      // Built lazily on click — serializing every filtered row is wasted work
+      // until the user actually triggers an export.
+      const payload = buildTicketExportPayload(filteredTickets ?? [], {
+        tagsByTicketId,
+        userNamesById,
+        userGroupNamesById,
+        channelNamesById,
+        boardNamesById,
+        visibleColumns: tableVisibleColumns,
+      });
+      if (payload.rows.length === 0) {
+        toast.info('No tickets to export.');
+        return;
+      }
+      const isCsv = action.endsWith('csv');
+      const content = isCsv ? ticketPayloadToCsv(payload) : ticketPayloadToJson(payload);
+      const label = isCsv ? 'CSV' : 'JSON';
+      if (action.startsWith('download')) {
+        downloadTextFile(
+          buildTicketExportFilename(isCsv ? 'csv' : 'json'),
+          content,
+          isCsv ? 'text/csv;charset=utf-8' : 'application/json',
+        );
+        toast.success(`${label} downloaded`);
+        return;
+      }
+      void copyTextToClipboard(content)
+        .then(() => toast.success(`Copied ${label} to clipboard`))
+        .catch(() => toast.error(`Failed to copy ${label}`));
+    },
+    [
+      filteredTickets,
+      tagsByTicketId,
+      userNamesById,
+      userGroupNamesById,
+      channelNamesById,
+      boardNamesById,
+      tableVisibleColumns,
+    ],
+  );
   const flowRunExportRows = useMemo(() => {
     if (!isFlowBoard || !flowModel) return [];
     return buildFlowRunExportRows({
@@ -3677,7 +3703,11 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     // Use last known tickets as fallback when localTickets is empty/null.
     // This prevents the view from disappearing when filters are applied in group-by mode.
     // IMPORTANT: Apply current filters to fallback tickets so stale data doesn't show.
-    if (lastKnownKanbanTickets !== null && lastKnownKanbanTickets.tickets.length > 0) {
+    if (
+      workspaceViewReady &&
+      lastKnownKanbanTickets !== null &&
+      lastKnownKanbanTickets.tickets.length > 0
+    ) {
       // Apply current filters to the fallback tickets
       const filteredFallback = applyTicketFilters(
         lastKnownKanbanTickets.tickets,
@@ -3691,6 +3721,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     }
     return localTickets ?? [];
   }, [
+    workspaceViewReady,
     localTickets,
     deferredFilters,
     tagsByTicketId,
@@ -3733,9 +3764,13 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
 
     const mapped = entries.map(([groupName, groupTickets]) => {
       const serverCountGroup = isKanbanLayout ? kanbanCounts.groupsByKey.get(groupName) : undefined;
-      const serverColumnCounts = shouldUseStatusColumns
-        ? (serverCountGroup?.statuses ?? {})
-        : (serverCountGroup?.stages ?? {});
+      const countsUsable =
+        shouldFetchKanbanCounts && !kanbanCounts.isLoading && !kanbanCounts.error;
+      const serverColumnCounts = !countsUsable
+        ? undefined
+        : shouldUseStatusColumns
+          ? (serverCountGroup?.statuses ?? {})
+          : (serverCountGroup?.stages ?? {});
       const ticketsByColumn = shouldUseStatusColumns
         ? groupTicketsByStatus(groupTickets, stages)
         : groupTicketsByStage(groupTickets, stages, canReorder && !hasSearchTerm);
@@ -3895,16 +3930,27 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   );
 
   const filteredAvailableColumns = useMemo(() => {
-    if (layoutView === 'table' || layoutView === 'flow') {
-      // In table mode, hide TicketCard metadata columns
+    // Columns only the AG-Grid table renders; the TicketCard-based views (kanban,
+    // calendar, flow) have no cell for them, so keep them out of those pickers so
+    // those views stay exactly as they were.
+    const tableOnly = ['board', 'channel', 'type'];
+    if (layoutView === 'table') {
+      // Table view exposes every ticket field as a toggleable column. `stage` is
+      // force-added (see `tableVisibleColumns`), so keep it out of the picker.
+      return availableColumns.filter(col => col.key !== 'stage');
+    }
+    if (layoutView === 'flow') {
+      // In flow mode, hide TicketCard metadata columns
       return availableColumns.filter(
-        col => !['stage', 'board', 'createdAt', 'createdBy'].includes(col.key),
+        col => !['stage', 'createdAt', 'createdBy', ...tableOnly].includes(col.key),
       );
     }
     if (layoutView === 'calendar') {
-      return availableColumns.filter(col => !['stage', 'board', 'createdBy'].includes(col.key));
+      return availableColumns.filter(
+        col => !['stage', 'createdBy', ...tableOnly].includes(col.key),
+      );
     }
-    return availableColumns.filter(col => col.key !== 'status');
+    return availableColumns.filter(col => !['status', ...tableOnly].includes(col.key));
   }, [layoutView]);
 
   if (showTicketReport && channelId && effectiveProjectId) {
@@ -3938,6 +3984,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
         {(effectiveProjectId || viewMode === 'my-tickets' || isWorkspaceView) && (
           <div className='flex-1 min-w-0'>
             <TicketFiltersDropdown
+              startSlot={projectsScreenContext?.leftHeaderSlot}
               filters={filters}
               onFiltersChange={setFilters}
               projectId={
@@ -4161,6 +4208,70 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
           </div>
           {/* Layout View Toggle (flow boards only have the flow view) */}
           <div className='flex items-center gap-2'>
+            {/* CSV/JSON export — table view only, exports the filtered rows */}
+            {layoutView === 'table' && (
+              <DropdownMenu.Root>
+                <DropdownMenu.Trigger asChild>
+                  <Button
+                    type='button'
+                    variant='outline'
+                    size='sm'
+                    className='rounded-[10px] border-border'
+                    data-track-category='Tickets'
+                    data-track-name='OpenTableExportMenu'
+                  >
+                    <Download className='size-4' />
+                    <span>Export</span>
+                    <ChevronDownIcon className='h-3.5 w-3.5' />
+                  </Button>
+                </DropdownMenu.Trigger>
+                <DropdownMenu.Portal>
+                  <DropdownMenu.Content
+                    align='end'
+                    sideOffset={6}
+                    className='z-50 min-w-48 rounded-lg border border-border bg-background p-1 shadow-xl'
+                  >
+                    <DropdownMenu.Item
+                      onSelect={() => handleTicketExport('download-csv')}
+                      className='flex cursor-pointer items-center gap-2 rounded-md px-3 py-2 text-xs text-foreground outline-none data-[highlighted]:bg-muted'
+                      data-track-category='Tickets'
+                      data-track-name='DownloadTicketsCsv'
+                    >
+                      <FileText className='h-4 w-4 text-emerald-600' />
+                      Download CSV
+                    </DropdownMenu.Item>
+                    <DropdownMenu.Item
+                      onSelect={() => handleTicketExport('download-json')}
+                      className='flex cursor-pointer items-center gap-2 rounded-md px-3 py-2 text-xs text-foreground outline-none data-[highlighted]:bg-muted'
+                      data-track-category='Tickets'
+                      data-track-name='DownloadTicketsJson'
+                    >
+                      <FileText className='h-4 w-4 text-blue-500' />
+                      Download JSON
+                    </DropdownMenu.Item>
+                    <DropdownMenu.Separator className='my-1 h-px bg-border' />
+                    <DropdownMenu.Item
+                      onSelect={() => handleTicketExport('copy-csv')}
+                      className='flex cursor-pointer items-center gap-2 rounded-md px-3 py-2 text-xs text-foreground outline-none data-[highlighted]:bg-muted'
+                      data-track-category='Tickets'
+                      data-track-name='CopyTicketsCsv'
+                    >
+                      <Copy className='h-4 w-4 text-muted-foreground' />
+                      Copy to clipboard (CSV)
+                    </DropdownMenu.Item>
+                    <DropdownMenu.Item
+                      onSelect={() => handleTicketExport('copy-json')}
+                      className='flex cursor-pointer items-center gap-2 rounded-md px-3 py-2 text-xs text-foreground outline-none data-[highlighted]:bg-muted'
+                      data-track-category='Tickets'
+                      data-track-name='CopyTicketsJson'
+                    >
+                      <Copy className='h-4 w-4 text-muted-foreground' />
+                      Copy to clipboard (JSON)
+                    </DropdownMenu.Item>
+                  </DropdownMenu.Content>
+                </DropdownMenu.Portal>
+              </DropdownMenu.Root>
+            )}
             {!isFlowBoard && (
               <div className='flex items-center rounded-xl bg-muted border'>
                 <Tooltip content='Kanban'>
@@ -5422,6 +5533,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                       availableTags={availableTags || []}
                       visibleColumns={tableVisibleColumns}
                       isComfortView={isComfortView}
+                      boardNamesById={boardNamesById}
                     />
                   </div>
                 )}
