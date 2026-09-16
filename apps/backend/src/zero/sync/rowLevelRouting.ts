@@ -33,10 +33,14 @@ export interface UserDelta {
 export interface RouteResult {
   /** ownerUserId → the rows/keys to deliver to that user for this delta. */
   perUser: Map<string, UserDelta>;
-  /** Puts dropped because their parent row is not (yet) indexed — fail-closed, never broadcast. */
+  /** Puts dropped because their parent isn't indexed / a root put's routeColumn is null — fail-closed. */
   unroutablePuts: number;
   /** Deletes dropped because no owner-map entry exists for the key — fail-closed, never broadcast. */
   unroutableDels: number;
+  /** Root rows whose owner CHANGED (routeColumn differs from the map). Owner columns are immutable for
+   *  the target tables, so this should stay 0 in prod — a non-zero count means the assumption is wrong
+   *  (the caller pins lastOwnerChangeOffset for resume + should alert). */
+  ownerChanges: number;
 }
 
 type ChildMeta = { childColumn: string; parentColumn: string };
@@ -83,7 +87,9 @@ export function seedRowLevel(
   // Roots first so every related row can resolve its parent's owner in the second pass.
   for (const cr of rows) {
     if (cr.tableName !== meta.rootTable) continue;
-    const owner = String(cr.row[meta.routeColumn]);
+    const raw = cr.row[meta.routeColumn];
+    if (raw === null || raw === undefined) continue; // no owner to route by → drop (schema says NOT NULL)
+    const owner = String(raw);
     ownerMap.set(rowKey(cr.tableName, cr.row, pk), owner);
     addToBucket(owner, cr);
   }
@@ -116,6 +122,7 @@ export function routeDelta(
   const perUser = new Map<string, UserDelta>();
   let unroutablePuts = 0;
   let unroutableDels = 0;
+  let ownerChanges = 0;
   const slot = (userId: string): UserDelta => {
     let d = perUser.get(userId);
     if (!d) perUser.set(userId, (d = { upserts: [], deletes: [] }));
@@ -126,9 +133,14 @@ export function routeDelta(
   //    are immutable in practice — but handle it: delete from the old owner, put to the new.
   for (const u of diff.upserts) {
     if (u.tableName !== meta.rootTable) continue;
-    const newOwner = String(u.row[meta.routeColumn]);
+    const raw = u.row[meta.routeColumn];
+    if (raw === null || raw === undefined) { unroutablePuts++; continue; } // NOT-NULL by schema — count if reality disagrees
+    const newOwner = String(raw);
     const prev = ownerMap.get(u.key);
-    if (prev !== undefined && prev !== newOwner) slot(prev).deletes.push(u.key);
+    if (prev !== undefined && prev !== newOwner) {
+      ownerChanges++;
+      slot(prev).deletes.push(u.key);
+    }
     ownerMap.set(u.key, newOwner);
     slot(newOwner).upserts.push({ tableName: u.tableName, row: u.row });
   }
@@ -149,7 +161,7 @@ export function routeDelta(
     slot(owner).deletes.push(key);
     ownerMap.delete(key);
   }
-  return { perUser, unroutablePuts, unroutableDels };
+  return { perUser, unroutablePuts, unroutableDels, ownerChanges };
 }
 
 /**

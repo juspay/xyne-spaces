@@ -91,6 +91,11 @@ interface RowLevelInstance {
   owner: Map<string, string>;
   /** Has the owner map been seeded from a snapshot yet? Reset on a `cleared` boundary. */
   seeded: boolean;
+  /** Offset of the last dispatch that changed a row's owner. A resume from BEFORE this can't reproduce
+   *  the synthesized del-to-old (it's not in the stream) → snapshot fallback. In-memory (resets on
+   *  restart), which is safe: owner changes are ~never (immutable columns) and the obs counter alerts if
+   *  one ever fires, so a resume spanning a pre-restart owner change is an already-flagged rarity. */
+  lastOwnerChangeOffset?: string;
 }
 
 export class Fanout {
@@ -670,16 +675,24 @@ export class Fanout {
       deletes: (diff?.deletes ?? []) as string[],
       cleared: false,
     };
-    const { perUser, unroutablePuts, unroutableDels } = routeDelta(streamDiff, live.owner, live.meta, PK);
+    const { perUser, unroutablePuts, unroutableDels, ownerChanges } = routeDelta(streamDiff, live.owner, live.meta, PK);
+    // Pin the owner-change offset so a resume from before it falls back to a snapshot (the synthesized
+    // del-to-old is not in the stream). Owner columns are immutable in practice → alert if this fires.
+    if (ownerChanges > 0) {
+      live.lastOwnerChangeOffset = id;
+      obsEmit('sync-rowlevel', { event: 'owner-change', instanceKey, ownerChanges, offset: id });
+    }
 
     // Deliver each owner's slice to that owner's HYDRATED clients (a deferred client's snapshot below
     // already includes this delta, so it must not also receive it — no double-delivery).
+    let deliveredToHydrated = false;
     for (const [userId, ud] of perUser) {
       if (ud.upserts.length === 0 && ud.deletes.length === 0) continue;
       const userClients = this.#rowLevelByUser.get(instanceKey)?.get(userId);
       if (!userClients) continue;
       for (const c of userClients) {
         if (c.hydrated) {
+          deliveredToHydrated = true;
           this.#emitRowLevel(c, 'sync:delta', { instanceKey, upserts: ud.upserts, deletes: ud.deletes, offset: id, version });
         }
       }
@@ -689,7 +702,11 @@ export class Fanout {
     // entry) — AFTER the live delivery above.
     for (const c of [...subs]) if (!c.hydrated) await this.#hydrateRowLevel(c);
 
-    if (unroutablePuts > 0 || unroutableDels > 0) {
+    // Report unroutables ONLY when this delta actually delivered to a hydrated client. The first delta
+    // after a (re)seed re-applies against the post-delta snapshot (applyPoke persists snapshot+entry
+    // atomically), so its dels legitimately find no map entry — a benign seed overlap, not a real drop;
+    // suppressing when nobody was hydrated to miss anything keeps the counter trustworthy.
+    if (deliveredToHydrated && (unroutablePuts > 0 || unroutableDels > 0)) {
       obsEmit('sync-rowlevel', { event: 'unroutable', instanceKey, unroutablePuts, unroutableDels });
     }
     obsEmit('stream-diff', {
@@ -755,6 +772,11 @@ export class Fanout {
    */
   async #tryResumeRowLevel(client: RowLevelClient, inst: RowLevelInstance): Promise<boolean> {
     const instanceKey = client.dataInstanceKey;
+    // An owner change synthesized a del-to-old that the raw stream doesn't carry; a resume from before
+    // it would replay the moved root as "not mine" and keep the stale row → snapshot instead (rare×rare).
+    if (inst.lastOwnerChangeOffset && compareStreamId(client.sinceOffset as string, inst.lastOwnerChangeOffset) < 0) {
+      return false;
+    }
     const firstId = await this.#store.firstId(instanceKey);
     const retained = firstId !== null && compareStreamId(firstId, client.sinceOffset as string) <= 0;
     if (!retained) return false;

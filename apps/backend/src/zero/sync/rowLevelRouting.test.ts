@@ -93,12 +93,27 @@ test('routeDelta: a delete with no map entry is DROPPED fail-closed (never broad
 
 // ── routeDelta: owner change (defensive — owner columns immutable in practice) ───────────────────
 
-test('routeDelta: a root owner change emits delete-to-old + put-to-new', () => {
+test('routeDelta: a root owner change emits delete-to-old + put-to-new and counts the change', () => {
   const owner = new Map([['draft_messages:D1', 'U1']]);
   const r = routeDelta(diff({ upserts: [put('draft_messages', { id: 'D1', userId: 'U2' })] }), owner, META, PK);
   assert.deepEqual(r.perUser.get('U1')?.deletes, ['draft_messages:D1']);
   assert.deepEqual(r.perUser.get('U2')?.upserts.map((u) => u.row.id), ['D1']);
   assert.equal(owner.get('draft_messages:D1'), 'U2');
+  assert.equal(r.ownerChanges, 1);
+});
+
+test('routeDelta: a root put with a null routeColumn is UNROUTABLE (not a "null" owner bucket)', () => {
+  const owner = new Map<string, string>();
+  const r = routeDelta(diff({ upserts: [put('draft_messages', { id: 'D7', userId: null })] }), owner, META, PK);
+  assert.equal(r.perUser.size, 0);
+  assert.equal(r.unroutablePuts, 1);
+  assert.equal(owner.has('draft_messages:D7'), false);
+});
+
+test('routeDelta: a same-owner re-put does NOT count as an owner change', () => {
+  const owner = new Map([['draft_messages:D1', 'U1']]);
+  const r = routeDelta(diff({ upserts: [put('draft_messages', { id: 'D1', userId: 'U1' })] }), owner, META, PK);
+  assert.equal(r.ownerChanges, 0);
 });
 
 // ── projectDeltaForUser (resume, read-only) ─────────────────────────────────────────────────────
