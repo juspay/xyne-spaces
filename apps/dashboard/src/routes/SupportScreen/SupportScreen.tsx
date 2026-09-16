@@ -912,12 +912,6 @@ const SupportScreen = (): ReactElement => {
       setActiveTicketViewId(null);
     }
   }, [savedViewsLoaded, activeTicketViewId, deskSavedViews, setActiveTicketViewId]);
-  const [myAdminParticipations] = useCachedQuery(queries.myChannelParticipations({}), {
-    enabled: !!ticketViewsChannelId,
-  });
-  const isTicketViewsChannelAdmin = (myAdminParticipations ?? []).some(
-    p => p.channelId === ticketViewsChannelId,
-  );
 
   const handleSaveDeskView = async (
     name: string,
@@ -1666,6 +1660,9 @@ const SupportScreen = (): ReactElement => {
   const [myAdminParticipations] = useCachedQuery(queries.myChannelParticipations({}));
   const isChannelAdmin = (myAdminParticipations ?? []).some(
     p => p.channelId === preferenceChannelId,
+  );
+  const isTicketViewsChannelAdmin = (myAdminParticipations ?? []).some(
+    p => p.channelId === ticketViewsChannelId,
   );
   const isDeskOwner = !!userID && channelPreference?.ownerUserId === userID;
   const canManageDeskInsights = isDeskOwner || isChannelAdmin;
