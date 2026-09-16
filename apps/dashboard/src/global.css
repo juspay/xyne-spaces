@@ -2934,25 +2934,34 @@ html .bn-code-block-source-popup-ok-button:hover {
      Clamped so a short viewport keeps a usable amount and a tall one does not
      open a chasm. */
   --canvas-bottom-space: clamp(96px, 25vh, 280px);
-  --canvas-block-content-offset: 14px;
 }
 
 .canvas-editor-title-column {
   box-sizing: border-box;
   width: 100%;
-  max-width: var(--canvas-content-width);
+  max-width: calc(var(--canvas-content-width) + 2 * var(--canvas-gutter));
   margin-inline: auto;
-  padding-left: var(--canvas-block-content-offset);
+  padding-left: 0;
   padding-right: 0;
 }
 
-.canvas-editor-title-column {
-  box-sizing: border-box;
-  width: 100%;
-  max-width: var(--canvas-content-width);
-  margin-inline: auto;
-  padding-left: var(--canvas-block-content-offset);
-  padding-right: 0;
+.canvas-editor-title-row {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  position: relative;
+}
+
+.canvas-editor-title-icon-gutter {
+  display: flex;
+  position: absolute;
+  right: calc(100% + 12px);
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.canvas-editor-title-label-row {
+  padding-left: 0;
 }
 
 /* Starts on the first block's left edge and follows the width handles. */
