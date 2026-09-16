@@ -1,4 +1,6 @@
 const { contextBridge, ipcRenderer } = require('electron');
+const { FIRST_PARTY_HOST_SUFFIX } = require('../app/config');
+const { isFirstPartyHostname } = require('../app/firstPartyHosts');
 
 // Preload runs in the renderer, but the electron tsconfig omits the DOM lib.
 // Declare the minimal `window` surface the origin check actually reads.
@@ -33,8 +35,8 @@ function isTrustedOrigin(): boolean {
     if (protocol.startsWith('xyne-spaces')) return true;
     // Bundled local HTML: loading/error pages, meeting popup, recording pill, recorder
     if (protocol === 'file:') return true;
-    // First-party Xyne web app + auth origins (prod + sandbox live under *.xyne.juspay.net)
-    if (protocol === 'https:' && (hostname === 'xyne.juspay.net' || hostname.endsWith('.xyne.juspay.net'))) {
+    // First-party web app + auth origins (hosts under the configured first-party suffix)
+    if (protocol === 'https:' && isFirstPartyHostname(hostname, FIRST_PARTY_HOST_SUFFIX)) {
       return true;
     }
     // Local development

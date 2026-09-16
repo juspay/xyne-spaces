@@ -8,7 +8,8 @@
  */
 
 const CONFIG = {
-  HEALTH_CHECK_URL: 'https://app.spaces.xyne.juspay.net/api/health',
+  // Internal deployments: point this at your deployment's health endpoint.
+  HEALTH_CHECK_URL: 'https://app.spaces.example.com/api/health',
   DEEP_LINK_PROTOCOL: 'xyne-spaces',
   VPN_CHECK_INTERVAL_MS: 30000, // 30 seconds
   VPN_CHECK_TIMEOUT_MS: 5000, // 5 second timeout
