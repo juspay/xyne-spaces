@@ -28,6 +28,7 @@ import { organizationsRouter } from "../routes/organizations.js";
 // TEMPORARY — delete after backfill of agents.signingSecret is complete.
 import { adminBackfillSigningSecretsRouter } from "../routes/admin-backfill-signing-secrets.js";
 import { dashboardRouter } from "../routes/dashboard.js";
+import { messagingRouter } from "../surfaces/messaging/routes/index.js";
 import { agentChatRouter, agentChatInternalRouter } from "../routes/agent-chat.js";
 import { artifactAppsRouter } from "../routes/artifact-apps.js";
 import { artifactAppAgentsRouter } from "../routes/artifact-app-agents.js";
@@ -145,6 +146,9 @@ function mountCoreApi(app: Express): void {
   app.use(`${BASE}/cli`, cliAuthRouter);
   // Public Slack ingress; authenticates itself with the per-install HMAC secret.
   app.use(`${BASE}/surfaces/slack`, slackRouter);
+  // Messaging channels (WhatsApp, Telegram, …): admin API is user-authed inside
+  // the router; the per-account webhook ingress self-authenticates per plugin.
+  app.use(`${BASE}/surfaces/:channel`, messagingRouter);
   app.use(`${BASE}/chain-workflows`, requireAuth, requireNoAccessToken, chainWorkflowsRouter);
   app.use(`${BASE}/spaces`, requireAuth, requireNoAccessToken, spacesRouter);
   app.use(`${BASE}/tools`, requireAuth, requireNoAccessToken, toolsRouter);
