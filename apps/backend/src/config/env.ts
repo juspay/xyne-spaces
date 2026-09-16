@@ -481,6 +481,7 @@ const envSchema = Joi.object({
   // Comma-separated Google OAuth error codes that, when returned by the client
   // that owns a refresh token, mean the token is permanently revoked.
   GOOGLE_AUTH_PERMANENT_ERRORS: Joi.string().default('invalid_grant,invalid_token'),
+  GOOGLE_AUTH_CLIENT_ERRORS: Joi.string().default('unauthorized_client,invalid_client'),
   // Email fetch
   EMAIL_FETCH_BATCH_SIZE: Joi.number().integer().default(10),
   EMAIL_FETCH_BATCH_DELAY_MS: Joi.number().integer().default(5000),
@@ -1153,6 +1154,10 @@ export const config = {
   },
   // Google OAuth error codes from the owning client that mean permanent revocation.
   googleAuthPermanentErrors: (envVars.GOOGLE_AUTH_PERMANENT_ERRORS as string)
+    .split(',')
+    .map((code: string) => code.trim())
+    .filter(Boolean),
+  googleAuthClientErrors: (envVars.GOOGLE_AUTH_CLIENT_ERRORS as string)
     .split(',')
     .map((code: string) => code.trim())
     .filter(Boolean),

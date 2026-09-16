@@ -2,7 +2,7 @@ import { OAuth2Client, gaxios } from 'google-auth-library';
 import axios from 'axios';
 import { AuthProvider } from '@xyne/shared';
 import { config } from '../config/env';
-import { logger as baseLogger } from '../utils/logger';
+import { logger } from '../utils/logger';
 import { UserSessionService } from '../services/userSessionService';
 import { accountDeactivationService } from '../services/accountDeactivationService';
 import {
@@ -11,7 +11,6 @@ import {
   orderedGoogleClientKeys,
 } from '../services/googleOAuthClients';
 
-const logger = baseLogger.child({ module: 'SessionRefreshValidator' });
 const userSessionService = new UserSessionService();
 
 // The session shape both middlewares load via userSessionService.getSessionById
@@ -28,7 +27,7 @@ export type RefreshVerdict =
 // doesn't own the token (unauthorized_client / invalid_client) — that is NOT a
 // revocation, so we try the next client.
 const OWNING_CLIENT_REVOKED = config.googleAuthPermanentErrors;
-const WRONG_CLIENT = ['unauthorized_client', 'invalid_client'];
+const WRONG_CLIENT = config.googleAuthClientErrors;
 
 /**
  * Verify a Google refresh token against the client that minted it.
@@ -71,6 +70,7 @@ async function isGoogleRefreshTokenRevoked(
       logger.error(`[Refresh-Validate] Unexpected Google error (${code}) via ${creds.label} client`, {
         userId: user.id,
         googleError: code,
+        client: creds.id
       });
       sawTransient = true; // network / 5xx — inconclusive
     }
