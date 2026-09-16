@@ -111,10 +111,22 @@ export function deskTicketTrackingMetadata(
  * compose modal and a reply composer are open on the same ticket at once.
  */
 export function newComposerSessionId(): string {
-  const rnd =
-    typeof crypto !== 'undefined' && 'randomUUID' in crypto
-      ? crypto.randomUUID()
-      : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+  // A correlation key, not a secret — but Math.random() trips CodeQL on every
+  // event the id flows into, so the fallback uses the CSPRNG too. No crypto at
+  // all (never the case in the browsers we ship to) degrades to a timestamp.
+  // Typed as possibly-undefined so the runtime checks below don't narrow to
+  // `never` (lib.dom declares both methods as always present).
+  const c: Crypto | undefined = typeof crypto !== 'undefined' ? crypto : undefined;
+  let rnd: string;
+  if (c && typeof c.randomUUID === 'function') {
+    rnd = c.randomUUID();
+  } else if (c && typeof c.getRandomValues === 'function') {
+    const bytes = c.getRandomValues(new Uint8Array(16));
+    const hex = Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('');
+    rnd = `${Date.now().toString(36)}-${hex}`;
+  } else {
+    rnd = `${Date.now().toString(36)}-no-crypto`;
+  }
   return `cs-${rnd}`;
 }
 
