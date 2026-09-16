@@ -84,3 +84,21 @@ export async function resolveSdlcRepositoryForUser(
     };
   }
 }
+
+export async function loadSdlcHubKnowledge(channelId: string, userId: string): Promise<string | undefined> {
+  const s2sKey = process.env["INTERNAL_S2S_KEY"] ?? process.env["XYNE_CLAW_S2S_KEY"] ?? "";
+  if (!s2sKey) return undefined;
+  const response = (await spacesFetch(
+    "/api/internal/sdlc/agent/hub-knowledge",
+    // Runs at every SDLC run start, which the 30 s default would stall.
+    { method: "POST", body: JSON.stringify({ channelId, actorUserId: userId }), signal: AbortSignal.timeout(5_000) },
+    { s2sKey, baseUrl: CONFIG.spacesInternalUrl },
+  )) as { documents?: Array<{ title: string; markdown: string }> };
+  const documents = response.documents ?? [];
+  if (documents.length === 0) return undefined;
+  return [
+    "# Hub Knowledge",
+    "Standing context for this SDLC hub, generated from its repositories. It can lag the code, so check the code before relying on a detail.",
+    ...documents.map((document) => `## ${document.title}\n\n${document.markdown}`),
+  ].join("\n\n");
+}

@@ -1,3 +1,23 @@
+## [1.329.1](https://github.com/juspay/xyne-spaces/compare/v1.329.0...v1.329.1) (2026-09-16)
+
+
+### Bug Fixes
+
+* corrected connected apps ui ([#1911](https://github.com/juspay/xyne-spaces/issues/1911)) ([9c64009](https://github.com/juspay/xyne-spaces/commit/9c640094ff4f6a5205771547f4f82778b4ec18bb))
+* stop radar's filter drawing the whole workspace ([#1904](https://github.com/juspay/xyne-spaces/issues/1904)) ([aeacb27](https://github.com/juspay/xyne-spaces/commit/aeacb275319a1567ea370ee0b52dd3ee14cca1d6))
+
+## [1.329.0](https://github.com/juspay/xyne-spaces/compare/v1.328.0...v1.329.0) (2026-09-16)
+
+
+### Features
+
+* revamp tickets sidebar into ticket views ([#1859](https://github.com/juspay/xyne-spaces/issues/1859)) ([b349d9f](https://github.com/juspay/xyne-spaces/commit/b349d9fd802f8258d785146f03fa73db63f40b73))
+
+
+### Bug Fixes
+
+* new saved view shows no tickets or counts until reload ([#1908](https://github.com/juspay/xyne-spaces/issues/1908)) ([98e5cc0](https://github.com/juspay/xyne-spaces/commit/98e5cc02508fb549d0510243a18668777d0cc601))
+
 ## [1.328.0](https://github.com/juspay/xyne-spaces/compare/v1.327.0...v1.328.0) (2026-09-16)
 
 

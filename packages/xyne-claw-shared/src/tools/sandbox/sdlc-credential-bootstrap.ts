@@ -1,22 +1,12 @@
 import type { Session } from "@xyne/kata-sdk";
 
-interface SdlcRuntimeCredentialBindingBase {
+export interface SdlcRuntimeCredentialBinding {
   agentSlug: "sdlc-agent";
   repoId: string;
+  operation: "INTERACTIVE";
+  interactiveGrant: string;
+  conversationId: string;
 }
-
-export type SdlcRuntimeCredentialBinding = SdlcRuntimeCredentialBindingBase & (
-  | {
-      operation: "CLONE" | "PUSH";
-      executionId: string;
-      sessionId: string;
-    }
-  | {
-      operation: "INTERACTIVE";
-      interactiveGrant: string;
-      conversationId: string;
-    }
-);
 
 export interface SdlcCredentialEnvelope {
   version: 1;

@@ -80,8 +80,8 @@ process-compose."xyne-space-services" = {
       "./docker/livekit.yaml" = "/etc/livekit.yaml:ro";
     };
     environment = {
-      LIVEKIT_API_KEY = "devkey";
-      LIVEKIT_API_SECRET = "devsecret";
+      LIVEKIT_API_KEY = "localdevkey";
+      LIVEKIT_API_SECRET = "localdevsecret";
     };
     command = "--config /etc/livekit.yaml --dev";
   };

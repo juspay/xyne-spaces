@@ -1827,6 +1827,9 @@ importers:
       '@types/pdfkit':
         specifier: ^0.17.6
         version: 0.17.6
+      '@xyne/icons':
+        specifier: workspace:*
+        version: link:../../../packages/icons
       '@xyne/shared':
         specifier: workspace:*
         version: link:../../../packages/shared
