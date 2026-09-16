@@ -2737,36 +2737,24 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     () => new Map(allChannels.map(c => [c.id, c.name])),
     [allChannels],
   );
-  const ticketExportPayload = useMemo(
-    () =>
-      buildTicketExportPayload(filteredTickets ?? [], {
+  const handleTicketExport = useCallback(
+    (action: 'download-csv' | 'download-json' | 'copy-csv' | 'copy-json'): void => {
+      // Built lazily on click — serializing every filtered row is wasted work
+      // until the user actually triggers an export.
+      const payload = buildTicketExportPayload(filteredTickets ?? [], {
         tagsByTicketId,
         userNamesById,
         userGroupNamesById,
         channelNamesById,
         boardNamesById,
         visibleColumns: tableVisibleColumns,
-      }),
-    [
-      filteredTickets,
-      tagsByTicketId,
-      userNamesById,
-      userGroupNamesById,
-      channelNamesById,
-      boardNamesById,
-      tableVisibleColumns,
-    ],
-  );
-  const handleTicketExport = useCallback(
-    (action: 'download-csv' | 'download-json' | 'copy-csv' | 'copy-json'): void => {
-      if (ticketExportPayload.rows.length === 0) {
+      });
+      if (payload.rows.length === 0) {
         toast.info('No tickets to export.');
         return;
       }
       const isCsv = action.endsWith('csv');
-      const content = isCsv
-        ? ticketPayloadToCsv(ticketExportPayload)
-        : ticketPayloadToJson(ticketExportPayload);
+      const content = isCsv ? ticketPayloadToCsv(payload) : ticketPayloadToJson(payload);
       const label = isCsv ? 'CSV' : 'JSON';
       if (action.startsWith('download')) {
         downloadTextFile(
@@ -2781,7 +2769,15 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
         .then(() => toast.success(`Copied ${label} to clipboard`))
         .catch(() => toast.error(`Failed to copy ${label}`));
     },
-    [ticketExportPayload],
+    [
+      filteredTickets,
+      tagsByTicketId,
+      userNamesById,
+      userGroupNamesById,
+      channelNamesById,
+      boardNamesById,
+      tableVisibleColumns,
+    ],
   );
   const flowRunExportRows = useMemo(() => {
     if (!isFlowBoard || !flowModel) return [];
