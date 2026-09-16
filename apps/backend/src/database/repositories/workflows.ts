@@ -100,9 +100,18 @@ export class TicketRepository extends BaseRepository<Ticket, CreateTicketInput, 
     return updatedTicket;
   }
 
+  /**
+   * Hard-deletes a ticket. Ticket relations are app-level (relationMode="prisma"), and Prisma
+   * Client refuses (P2014) to delete a ticket while required children still exist. Read rows and
+   * ticket form values are cleared here; other required children (activities, tags, assignments,
+   * stage ETAs, workflows, ...) must be removed by the caller first — see the Jira purge in
+   * jiraMigrationController for the full ordering.
+   */
   async delete(id: string): Promise<Ticket> {
-    return await this.db.ticket.delete({
-      where: { id },
+    return await this.db.$transaction(async tx => {
+      await tx.emailRead.deleteMany({ where: { ticketId: id } });
+      await tx.formEntityValues.deleteMany({ where: { entityId: id, entityType: 'TICKET' } });
+      return tx.ticket.delete({ where: { id } });
     });
   }
 

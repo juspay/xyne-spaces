@@ -146,7 +146,7 @@ model Ticket {
   ticketType       String?
   isArchived       Boolean           @default(false)
   kanbanPosition   String?
-  lastEmailAt      DateTime          // Timestamp of most recent email in the ticket's conversation; powers Gmail-style ordering. No @default(now()) because Zero needs every write to flow through the application — every ticket-create call site sets this explicitly.
+  lastEmailAt      DateTime          // Timestamp of most recent email in the ticket's conversation; powers Gmail-style ordering. No @default(now()) because Zero needs every write to flow through the application — every ticket-create call site sets this explicitly. Any UPDATE must go through advanceLastEmailAt (src/database/ticketLastEmailAt.ts), which also flags email_reads.hasNewEmail — otherwise label unread badges go stale.
   emailCount       Int?              // Denormalized count of emails in the conversation; lets the list row show the count badge without fetching the emails relation. Nullable until backfilled.
   classificationData   Json?             // Full AI classification output (rawOutput, resolvedGroupId, isManualOverride, classifiedAt)
   aiCategory           String?           // Top-level category from AI classification (indexed for querying)
@@ -172,6 +172,11 @@ model Ticket {
   workflows          Workflow[]
   stageEtaEntries    TicketStageEta[]
   assignments        TicketAssignment[]
+  // App-level relations (relationMode="prisma", no DB FK). Prisma Client still emulates
+  // onDelete: deleting a conversation that has a ticket throws P2014 (Restrict).
+  conversation       Conversation           @relation("TicketConversation", fields: [conversationId], references: [conversationId])
+  emailReads         EmailRead[]
+  formEntityValues   FormEntityValues[]
 
   @@index([status])
   @@index([assignedTo, status])
@@ -2042,6 +2047,9 @@ model Conversation {
   createdByUser   User                     @relation("ConversationCreatedBy", fields: [createdBy], references: [id])
   participants    ConversationParticipant[]
   messageAttachments MessageAttachment[]
+  tickets         Ticket[]                 @relation("TicketConversation")
+  labelMappings   ConversationLabelMapping[]
+  emailDrafts     EmailDraft[]
 
   @@index([channelId, lastActivityAt])
   @@index([workspaceId]) // ACL workspace filtering
@@ -2140,6 +2148,10 @@ model EmailDraft {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  // App-level relation (relationMode="prisma", no DB FK). Cascade, not the optional-relation
+  // default SetNull: nulling conversationId would turn a reply draft into a compose draft.
+  conversation Conversation? @relation(fields: [conversationId], references: [conversationId], onDelete: Cascade)
+
   @@unique([userId, conversationId])
   @@index([userId, conversationId, id])
   @@index([conversationId])
@@ -2155,8 +2167,15 @@ model EmailRead {
   userId          String
   lastReadEmailId String
   lastReadEmailAt DateTime
+  // Denormalized unread signal: true once tickets.lastEmailAt moves past lastReadEmailAt.
+  // Set by advanceLastEmailAt (src/database/ticketLastEmailAt.ts) whenever lastEmailAt
+  // changes; cleared by the emailRead.markAsRead / bulkMarkAsRead Zero mutators.
+  hasNewEmail     Boolean  @default(false)
   createdAt       DateTime
   updatedAt       DateTime @updatedAt
+
+  // App-level relation (relationMode="prisma", no DB FK); Restrict: delete read rows before the ticket.
+  ticket          Ticket   @relation(fields: [ticketId], references: [id])
 
   @@unique([ticketId, userId])
   @@index([userId])
@@ -2197,6 +2216,10 @@ model ConversationLabelMapping {
   workspaceId    String
   createdBy      String   // Owner — the agent who applied the label (no FK constraint)
   createdAt      DateTime @default(now())
+
+  // App-level relation (relationMode="prisma", no DB FK). Cascade: a mapping is meaningless
+  // once its conversation is gone, so it must not block the conversation delete.
+  conversation   Conversation @relation(fields: [conversationId], references: [conversationId], onDelete: Cascade)
 
   // The unique's conversationId prefix also serves the per-thread chips read.
   @@unique([conversationId, labelId]) // A label can only be applied once per conversation
@@ -3588,6 +3611,11 @@ model FormEntityValues {
   actualFieldValue Json?   // Value stored as Json for structured data (parse based on fieldType)
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
+
+  // App-level relation (relationMode="prisma", no DB FK) for entityType = 'TICKET' rows only.
+  // entityId is polymorphic, so ALWAYS pair `ticket`/`formEntityValues` queries with
+  // entityType: 'TICKET'. Restrict: delete ticket values before the ticket.
+  ticket          Ticket   @relation(fields: [entityId], references: [id])
 
   @@index([entityId, entityType])
   @@index([fieldId])

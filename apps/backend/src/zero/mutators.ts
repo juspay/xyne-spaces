@@ -13416,11 +13416,12 @@ export function createMutators(
           );
           if (existing) {
             const existingAt = existing.lastReadEmailAt;
-            if (typeof existingAt !== 'number' || existingAt < lastReadEmailAt) {
+            if (typeof existingAt !== 'number' || existingAt < lastReadEmailAt || existing.hasNewEmail) {
               await tx.mutate.email_reads.update({
                 id: existing.id,
                 lastReadEmailId,
                 lastReadEmailAt,
+                hasNewEmail: false,
                 updatedAt,
               });
             }
@@ -13432,6 +13433,7 @@ export function createMutators(
               userId: ctx.userID,
               lastReadEmailId,
               lastReadEmailAt,
+              hasNewEmail: false,
               createdAt: updatedAt,
               updatedAt,
             });
@@ -13482,7 +13484,8 @@ export function createMutators(
               if (ex) {
                 if (
                   typeof ex.lastReadEmailAt === 'number' &&
-                  ex.lastReadEmailAt >= lastReadEmailAt
+                  ex.lastReadEmailAt >= lastReadEmailAt &&
+                  !ex.hasNewEmail
                 ) {
                   return undefined;
                 }
@@ -13490,6 +13493,7 @@ export function createMutators(
                   id: ex.id,
                   lastReadEmailAt,
                   lastReadEmailId,
+                  hasNewEmail: false,
                   updatedAt: timestamp,
                 });
               }
@@ -13500,6 +13504,7 @@ export function createMutators(
                 userId: ctx.userID,
                 lastReadEmailAt,
                 lastReadEmailId,
+                hasNewEmail: false,
                 createdAt: timestamp,
                 updatedAt: timestamp,
               });

@@ -11,6 +11,7 @@ import {
 import { MessageRepository, CreateMessageInput } from '@/database/repositories/messageRepository';
 import { EmailRepository } from '@/database/repositories/emailRepository';
 import { syncTicketEmailCount } from '@/database/syncTicketEmailCount';
+import { advanceLastEmailAt } from '@/database/ticketLastEmailAt';
 import {
   MessageAttachmentRepository,
   CreateMessageAttachmentInput,
@@ -1567,10 +1568,7 @@ export class EmailService {
 
       if (ticketRow) {
         if (receivedAt && receivedAt > ticketRow.lastEmailAt) {
-          await this.prisma.ticket.update({
-            where: { id: ticketRow.id },
-            data: { lastEmailAt: receivedAt },
-          });
+          await advanceLastEmailAt(this.prisma, { ticketId: ticketRow.id }, receivedAt);
         }
 
         await syncTicketEmailCount(this.prisma, conversationId);
@@ -2470,10 +2468,7 @@ export class EmailService {
         }, null);
         if (ticketId && latestReceived) {
           if (!vespaMatchConversationId || !existingTicketLastEmailAt || latestReceived > existingTicketLastEmailAt) {
-            await tx.ticket.update({
-              where: { id: ticketId },
-              data: { lastEmailAt: latestReceived },
-            });
+            await advanceLastEmailAt(tx, { ticketId }, latestReceived);
           }
         }
 
