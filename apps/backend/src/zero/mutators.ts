@@ -303,10 +303,7 @@ export type AuthData = {
   memberId: string;
 };
 
-export type ParticipantOperationType =
-  | 'participants_added'
-  | 'participants_removed'
-  | 'participants_joined';
+export type ParticipantOperationType = 'participants_added' | 'participants_removed' | 'participants_joined';
 
 // Shared helper for NON_LINEAR stage transitions: compute the ETA deadline from the visit's
 // SLA mode (NONE / FIXED_HOURS / STAGE_DEFAULT). Visit-versioning logic (the new-version vs
@@ -2125,16 +2122,14 @@ export function createMutators(
 
           // Prevent changing the channel creator's role
           if (targetUserId === channel.createdBy) {
-            throw new Error("Cannot change the channel creator's role");
+            throw new Error('Cannot change the channel creator\'s role');
           }
 
           // Check if target user is a participant
-          const targetParticipant = await tx.run(
-            zql.channel_participants
-              .where('channelId', channelId)
-              .where('userId', targetUserId)
-              .one()
-          );
+          const targetParticipant = await tx.run(zql.channel_participants
+            .where('channelId', channelId)
+            .where('userId', targetUserId)
+            .one());
 
           if (!targetParticipant) {
             throw new Error('Target user is not a participant in this channel');
@@ -2544,12 +2539,12 @@ export function createMutators(
                 .where('channelId', channelId)
                 .where('targetType', 'CONVERSATION')
                 .where('targetId', conversationId)
-                .where('relationType', 'DISCUSSION')
+                .where('relationType', 'DISCUSSION'),
             );
             if (existingDiscussion.length > 0) {
               throw new Error('Conversation already has an SDLC discussion owner');
             }
-            if (entityLinkContext.trackRollUp && entityLinkContext.sourceType === 'TRACK') {
+            if (entityLinkContext.trackRollUp && entityLinkContext.sourceType !== 'FOLDER') {
               throw new Error('Invalid SDLC discussion owner');
             }
             if (entityLinkContext.sourceType === 'TRACK') {
@@ -2560,34 +2555,27 @@ export function createMutators(
                   .where('targetType', 'TRACK')
                   .where('targetId', entityLinkContext.sourceId)
                   .where('relationType', SDLC_TRACK_MEMBERSHIP_RELATION)
-                  .one()
+                  .one(),
               );
               if (!trackEdge) {
                 throw new Error('Invalid SDLC discussion owner');
               }
-            } else if (
-              entityLinkContext.sourceType === 'FOLDER' ||
-              entityLinkContext.sourceType === 'ATTACHMENT' ||
-              entityLinkContext.sourceType === 'LINK'
-            ) {
-              // None of these carry a hub column; the flat edge every track item
-              // gets is what says which hub they are in and which track they roll
-              // up to, so one lookup answers both questions.
-              const itemEdge = await tx.run(
+            } else if (entityLinkContext.sourceType === 'FOLDER') {
+              const folderEdge = await tx.run(
                 zql.sdlc_entity_links
                   .where('channelId', channelId)
                   .where('sourceType', 'TRACK')
-                  .where('targetType', entityLinkContext.sourceType)
+                  .where('targetType', 'FOLDER')
                   .where('targetId', entityLinkContext.sourceId)
                   .where('relationType', SDLC_TRACK_FLAT_RELATION)
-                  .one()
+                  .one(),
               );
-              if (!itemEdge) {
+              if (!folderEdge) {
                 throw new Error('Invalid SDLC discussion owner');
               }
               if (
                 entityLinkContext.trackRollUp &&
-                entityLinkContext.trackRollUp.trackId !== itemEdge.sourceId
+                entityLinkContext.trackRollUp.trackId !== folderEdge.sourceId
               ) {
                 throw new Error('Invalid SDLC discussion owner');
               }
@@ -2603,24 +2591,6 @@ export function createMutators(
                 !artifact
               ) {
                 throw new Error('Invalid SDLC discussion owner');
-              }
-              if (entityLinkContext.trackRollUp) {
-                // An artifact carries the same flat edge a folder does, so the
-                // track it claims to roll up to has to be the one that edge
-                // names. Without this the caller picks the track, and the
-                // conversation surfaces in one it may not be able to reach.
-                const canvasEdge = await tx.run(
-                  zql.sdlc_entity_links
-                    .where('channelId', channelId)
-                    .where('sourceType', 'TRACK')
-                    .where('targetType', 'CANVAS')
-                    .where('targetId', entityLinkContext.sourceId)
-                    .where('relationType', SDLC_TRACK_FLAT_RELATION)
-                    .one()
-                );
-                if (!canvasEdge || entityLinkContext.trackRollUp.trackId !== canvasEdge.sourceId) {
-                  throw new Error('Invalid SDLC discussion owner');
-                }
               }
             }
           }
@@ -11625,14 +11595,14 @@ export function createMutators(
             name: args.name,
             updatedAt: args.timestamp,
           });
-        }
+        },
       ),
 
       moveSdlcItem: defineMutator(
         z.object({
           linkId: z.string(),
           channelId: z.string(),
-          itemType: z.enum(['FOLDER', 'CANVAS', 'LINK', 'ATTACHMENT']),
+          itemType: z.enum(['FOLDER', 'CANVAS']),
           itemId: z.string(),
           parentType: z.enum(['TRACK', 'FOLDER']),
           parentId: z.string(),
@@ -11808,129 +11778,7 @@ export function createMutators(
             createdBy: authData.sub,
             createdAt: args.timestamp,
           });
-        }
-      ),
-
-      /**
-       * Files something that already exists into a folder: an uploaded file, whose
-       * row the upload endpoint wrote, or a link, whose row this creates. Both get
-       * the pair of edges every track item carries — containment for where it sits,
-       * flat for which track it belongs to however deep it is filed.
-       */
-      addSdlcFolderItem: defineMutator(
-        z.object({
-          itemType: z.enum(['ATTACHMENT', 'LINK']),
-          itemId: z.string(),
-          containmentLinkId: z.string(),
-          flatLinkId: z.string(),
-          channelId: z.string(),
-          trackId: z.string(),
-          parentType: z.enum(['TRACK', 'FOLDER']),
-          parentId: z.string(),
-          /** Present only when itemType is LINK; the row does not exist yet. */
-          link: z
-            .object({
-              url: z.string().min(1),
-              title: z.string().trim().min(1).max(300),
-              description: z.string().trim().max(2000).optional(),
-              favicon: z.string().optional(),
-            })
-            .optional(),
-          timestamp: z.number(),
-        }),
-        async ({ tx, args }) => {
-          const participant = await tx.run(
-            zql.channel_participants
-              .where('channelId', args.channelId)
-              .where('userId', authData.sub)
-              .one()
-          );
-          if (!participant) {
-            throw new Error('Hub membership required');
-          }
-          const trackEdge = await tx.run(
-            zql.sdlc_entity_links
-              .where('channelId', args.channelId)
-              .where('targetType', 'TRACK')
-              .where('targetId', args.trackId)
-              .where('relationType', SDLC_TRACK_MEMBERSHIP_RELATION)
-              .one()
-          );
-          if (!trackEdge) {
-            throw new Error('Track not found in this hub');
-          }
-          if (args.parentType === 'FOLDER') {
-            const parentTrack = await tx.run(
-              zql.sdlc_entity_links
-                .where('channelId', args.channelId)
-                .where('sourceType', 'TRACK')
-                .where('targetType', 'FOLDER')
-                .where('targetId', args.parentId)
-                .where('relationType', SDLC_TRACK_FLAT_RELATION)
-                .one()
-            );
-            if (!parentTrack || parentTrack.sourceId !== args.trackId) {
-              throw new Error('Parent folder belongs to another track');
-            }
-          } else if (args.parentId !== args.trackId) {
-            throw new Error('An item at the root belongs to the track it is added in');
-          }
-
-          if (args.itemType === 'LINK') {
-            if (!args.link) {
-              throw new Error('A link needs a url and a title');
-            }
-            await tx.mutate.links.insert({
-              id: args.itemId,
-              workspaceId: authData.workspaceId,
-              channelId: args.channelId,
-              url: args.link.url,
-              title: args.link.title,
-              description: args.link.description ?? null,
-              favicon: args.link.favicon ?? null,
-              visibility: LinkVisibility.DEFAULT,
-              createdBy: authData.sub,
-              createdAt: args.timestamp,
-              updatedAt: args.timestamp,
-            });
-          } else {
-            // The upload endpoint stamps the hub on the row; anything else is not
-            // this hub's file and must not be filed into its tree.
-            const attachment = await tx.run(zql.message_attachments.where('id', args.itemId).one());
-            if (
-              !attachment ||
-              attachment.entityType !== AttachmentEntityType.SDLC_HUB ||
-              attachment.entityId !== args.channelId
-            ) {
-              throw new Error('File not found in this hub');
-            }
-          }
-
-          await tx.mutate.sdlc_entity_links.insert({
-            id: args.containmentLinkId,
-            workspaceId: authData.workspaceId,
-            channelId: args.channelId,
-            sourceType: args.parentType,
-            sourceId: args.parentId,
-            targetType: args.itemType,
-            targetId: args.itemId,
-            relationType: SDLC_CONTAINMENT_RELATION,
-            createdBy: authData.sub,
-            createdAt: args.timestamp,
-          });
-          await tx.mutate.sdlc_entity_links.insert({
-            id: args.flatLinkId,
-            workspaceId: authData.workspaceId,
-            channelId: args.channelId,
-            sourceType: 'TRACK',
-            sourceId: args.trackId,
-            targetType: args.itemType,
-            targetId: args.itemId,
-            relationType: SDLC_TRACK_FLAT_RELATION,
-            createdBy: authData.sub,
-            createdAt: args.timestamp,
-          });
-        }
+        },
       ),
 
       createTrack: defineMutator(

@@ -8187,7 +8187,7 @@ export const mutators = defineMutators({
       z.object({
         linkId: z.string(),
         channelId: z.string(),
-        itemType: z.enum(['FOLDER', 'CANVAS', 'LINK', 'ATTACHMENT']),
+        itemType: z.enum(['FOLDER', 'CANVAS']),
         itemId: z.string(),
         parentType: z.enum(['TRACK', 'FOLDER']),
         parentId: z.string(),
@@ -8359,128 +8359,6 @@ export const mutators = defineMutators({
           sourceId: args.trackId,
           targetType: 'FOLDER',
           targetId: args.id,
-          relationType: SDLC_TRACK_FLAT_RELATION,
-          createdBy: ctx.userID,
-          createdAt: args.timestamp,
-        });
-      },
-    ),
-
-    /**
-     * Files something that already exists into a folder: an uploaded file, whose
-     * row the upload endpoint wrote, or a link, whose row this creates. Both get
-     * the pair of edges every track item carries — containment for where it sits,
-     * flat for which track it belongs to however deep it is filed.
-     */
-    addSdlcFolderItem: defineMutator(
-      z.object({
-        itemType: z.enum(['ATTACHMENT', 'LINK']),
-        itemId: z.string(),
-        containmentLinkId: z.string(),
-        flatLinkId: z.string(),
-        channelId: z.string(),
-        trackId: z.string(),
-        parentType: z.enum(['TRACK', 'FOLDER']),
-        parentId: z.string(),
-        /** Present only when itemType is LINK; the row does not exist yet. */
-        link: z
-          .object({
-            url: z.string().min(1),
-            title: z.string().trim().min(1).max(300),
-            description: z.string().trim().max(2000).optional(),
-            favicon: z.string().optional(),
-          })
-          .optional(),
-        timestamp: z.number(),
-      }),
-      async ({ tx, ctx, args }) => {
-        const participant = await tx.run(
-          zql.channel_participants
-            .where('channelId', args.channelId)
-            .where('userId', ctx.userID)
-            .one(),
-        );
-        if (!participant) {
-          throw new Error('Hub membership required');
-        }
-        const trackEdge = await tx.run(
-          zql.sdlc_entity_links
-            .where('channelId', args.channelId)
-            .where('targetType', 'TRACK')
-            .where('targetId', args.trackId)
-            .where('relationType', SDLC_TRACK_MEMBERSHIP_RELATION)
-            .one(),
-        );
-        if (!trackEdge) {
-          throw new Error('Track not found in this hub');
-        }
-        if (args.parentType === 'FOLDER') {
-          const parentTrack = await tx.run(
-            zql.sdlc_entity_links
-              .where('channelId', args.channelId)
-              .where('sourceType', 'TRACK')
-              .where('targetType', 'FOLDER')
-              .where('targetId', args.parentId)
-              .where('relationType', SDLC_TRACK_FLAT_RELATION)
-              .one(),
-          );
-          if (!parentTrack || parentTrack.sourceId !== args.trackId) {
-            throw new Error('Parent folder belongs to another track');
-          }
-        } else if (args.parentId !== args.trackId) {
-          throw new Error('An item at the root belongs to the track it is added in');
-        }
-
-        if (args.itemType === 'LINK') {
-          if (!args.link) {
-            throw new Error('A link needs a url and a title');
-          }
-          await tx.mutate.links.insert({
-            id: args.itemId,
-            workspaceId: ctx.workspaceId,
-            channelId: args.channelId,
-            url: args.link.url,
-            title: args.link.title,
-            description: args.link.description ?? null,
-            favicon: args.link.favicon ?? null,
-            visibility: LinkVisibility.DEFAULT,
-            createdBy: ctx.userID,
-            createdAt: args.timestamp,
-            updatedAt: args.timestamp,
-          });
-        } else {
-          // The upload endpoint stamps the hub on the row; anything else is not
-          // this hub's file and must not be filed into its tree.
-          const attachment = await tx.run(zql.message_attachments.where('id', args.itemId).one());
-          if (
-            !attachment ||
-            attachment.entityType !== AttachmentEntityType.SDLC_HUB ||
-            attachment.entityId !== args.channelId
-          ) {
-            throw new Error('File not found in this hub');
-          }
-        }
-
-        await tx.mutate.sdlc_entity_links.insert({
-          id: args.containmentLinkId,
-          workspaceId: ctx.workspaceId,
-          channelId: args.channelId,
-          sourceType: args.parentType,
-          sourceId: args.parentId,
-          targetType: args.itemType,
-          targetId: args.itemId,
-          relationType: SDLC_CONTAINMENT_RELATION,
-          createdBy: ctx.userID,
-          createdAt: args.timestamp,
-        });
-        await tx.mutate.sdlc_entity_links.insert({
-          id: args.flatLinkId,
-          workspaceId: ctx.workspaceId,
-          channelId: args.channelId,
-          sourceType: 'TRACK',
-          sourceId: args.trackId,
-          targetType: args.itemType,
-          targetId: args.itemId,
           relationType: SDLC_TRACK_FLAT_RELATION,
           createdBy: ctx.userID,
           createdAt: args.timestamp,

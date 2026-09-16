@@ -2,8 +2,6 @@ import { ReactElement, useEffect, useRef, useState } from 'react';
 import { useLocation, useParams } from 'react-router-dom';
 import { SDLC_APP_BASE_PATH } from '../../config';
 import { useCallJoinOrInitiate } from '../../hooks/useCallJoinOrInitiate';
-import { openLink } from '../../utils/openLink';
-import { SdlcEmbeddedWebview } from './SdlcEmbeddedWebview';
 import { parseSdlcFrameMessage, SDLC_FRAME_MESSAGE } from './sdlcFrameMessages';
 import { SDLC_WINDOW_FRAME_NAME } from './useSdlcFrameBridge';
 
@@ -50,13 +48,6 @@ const SdlcWindow = (): ReactElement => {
         return;
       }
 
-      if (message.type === SDLC_FRAME_MESSAGE.openLink) {
-        // Forced in-app: the lane asked for this because it wants the link in
-        // the app, not handed to the operating system.
-        openLink(message.url, null, { force: 'in-app' });
-        return;
-      }
-
       if (message.type === SDLC_FRAME_MESSAGE.reset) {
         setSrc(`${SDLC_APP_BASE_PATH}/${workspaceId}/sdlc?_reset=${Date.now()}`);
         setResetCount(count => count + 1);
@@ -68,23 +59,15 @@ const SdlcWindow = (): ReactElement => {
   }, [workspaceId]);
 
   return (
-    <div className='relative h-full w-full'>
-      <iframe
-        key={resetCount}
-        ref={iframeRef}
-        src={src}
-        title='SDLC'
-        name={SDLC_WINDOW_FRAME_NAME}
-        className='h-full w-full border-0'
-        allow='clipboard-read; clipboard-write'
-      />
-      {/* The window fills its wrapper, so the frame's own coordinates are the
-          wrapper's; no offset to add. */}
-      <SdlcEmbeddedWebview
-        offset={{ top: 0, left: 0 }}
-        getFrameWindow={() => iframeRef.current?.contentWindow ?? null}
-      />
-    </div>
+    <iframe
+      key={resetCount}
+      ref={iframeRef}
+      src={src}
+      title='SDLC'
+      name={SDLC_WINDOW_FRAME_NAME}
+      className='h-full w-full border-0'
+      allow='clipboard-read; clipboard-write'
+    />
   );
 };
 

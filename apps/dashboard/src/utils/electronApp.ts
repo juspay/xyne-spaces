@@ -1,4 +1,3 @@
-import type { EntityLinkSourceType } from '@/contexts/EntityLinkContext';
 import { logger, Event as LogEvent } from './logger';
 import type { CSSProperties } from 'react';
 import type { ElectronAPI } from '../types/electron';
@@ -218,7 +217,10 @@ export interface CreateTicketPopoutDraft {
   tab?: string | null | undefined;
   sourceConversationId?: string | null | undefined;
   sourceMessageId?: string | null | undefined;
-  entityLinkContext?: { sourceType: EntityLinkSourceType; sourceId: string } | null | undefined;
+  entityLinkContext?:
+    | { sourceType: 'CANVAS' | 'TRACK' | 'FOLDER'; sourceId: string }
+    | null
+    | undefined;
   initialMessageId?: string | null | undefined;
   parentTicketId?: string | null | undefined;
   isFromSubTicket?: boolean | undefined;

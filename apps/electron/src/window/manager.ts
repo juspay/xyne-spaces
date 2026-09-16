@@ -144,15 +144,6 @@ function applyWindowPolicy(win: BrowserWindow): void {
         return { action: 'deny' };
       }
 
-      const childWebPreferences = {
-        nodeIntegration: false,
-        contextIsolation: true,
-        webviewTag: true,
-        preload: path.join(__dirname, '..', 'preload.js'),
-        backgroundThrottling: false,
-        spellcheck: true,
-      };
-
       if (urlObj.pathname.startsWith('/newWindow/create-ticket')) {
         return {
           action: 'allow',
@@ -161,7 +152,6 @@ function applyWindowPolicy(win: BrowserWindow): void {
             height: 820,
             minWidth: 640,
             minHeight: 600,
-            webPreferences: childWebPreferences,
           },
         };
       }
@@ -176,15 +166,19 @@ function applyWindowPolicy(win: BrowserWindow): void {
             minHeight: 600,
             titleBarStyle: 'hiddenInset',
             trafficLightPosition: { x: 19, y: 20 },
-            webPreferences: childWebPreferences,
+            webPreferences: {
+              nodeIntegration: false,
+              contextIsolation: true,
+              webviewTag: true,
+              preload: path.join(__dirname, '..', 'preload.js'),
+              backgroundThrottling: false,
+              spellcheck: true,
+            },
           },
         };
       }
 
-      return {
-        action: 'allow',
-        overrideBrowserWindowOptions: { webPreferences: childWebPreferences },
-      };
+      return { action: 'allow' };
 
     } catch (error) {
       log.warn('Failed to parse URL in setWindowOpenHandler:', details.url, error);

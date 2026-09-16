@@ -293,13 +293,6 @@ app.on('web-contents-created', (_event, webContents) => {
         const urlObj = new URL(url);
         if (urlObj.protocol === 'http:' || urlObj.protocol === 'https:') {
           const mainWindow = getMainWindow();
-          // The renderer that embedded this webview is the one holding the
-          // handler for it. In the main window that is the main window; for a
-          // folder opened in its own window it is that window, and sending the
-          // popup to the main one instead would throw the page into the app's
-          // browser panel — the thing the embedded tabs exist to avoid.
-          const host = webContents.hostWebContents;
-          const embedder = host && !host.isDestroyed() ? host : null;
           if (mainWindow && !mainWindow.isDestroyed()) {
             // A call invite followed inside the browser panel still belongs to
             // the app, not to another panel tab.
@@ -307,14 +300,8 @@ app.on('web-contents-created', (_event, webContents) => {
             if (invitePath) {
               mainWindow.webContents.send('navigate-to', invitePath);
             } else {
-              (embedder ?? mainWindow.webContents).send(
-                'open-in-browser-panel',
-                url,
-                webContents.id,
-              );
+              mainWindow.webContents.send('open-in-browser-panel', url);
             }
-          } else if (embedder) {
-            embedder.send('open-in-browser-panel', url, webContents.id);
           }
         }
       } catch (e) {

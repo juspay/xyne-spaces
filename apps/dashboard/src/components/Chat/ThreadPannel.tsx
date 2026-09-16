@@ -143,6 +143,7 @@ interface ThreadMessagesProps {
   defaultTab?: TabType;
   headerActionsContainer?: HTMLElement | null;
   tabbedView?: boolean;
+  overflowActionsOnly?: boolean;
 }
 
 export const ThreadMessages = ({
@@ -167,6 +168,7 @@ export const ThreadMessages = ({
   onUserClick,
   defaultTab,
   headerActionsContainer,
+  overflowActionsOnly = false,
   tabbedView = false,
 }: ThreadMessagesProps = {}): ReactElement => {
   const {
@@ -1203,7 +1205,7 @@ export const ThreadMessages = ({
   const simpleViewHeaderActions = (
     <div className='flex items-center gap-1 shrink-0' style={APP_NO_DRAG_STYLE}>
       {/* Ask AI */}
-      {!isStandaloneWindow() && (
+      {!overflowActionsOnly && !isStandaloneWindow() && (
         <Tooltip content='Ask AI Conversation'>
           <Button
             size='sm'
@@ -1229,7 +1231,7 @@ export const ThreadMessages = ({
       )}
 
       {/* Initiate Call Button */}
-      {derivedConversationId && !channel?.isArchived && (
+      {!overflowActionsOnly && derivedConversationId && !channel?.isArchived && (
         <ThreadCallButton
           onStartCall={handleInitiateCall}
           onScheduleCall={() => setIsScheduleCallModalOpen(true)}
@@ -1244,7 +1246,7 @@ export const ThreadMessages = ({
       )}
 
       {/* Start Recording (Take Notes) Button */}
-      {derivedConversationId && !channel?.isArchived && (
+      {!overflowActionsOnly && derivedConversationId && !channel?.isArchived && (
         <ThreadRecordingButton
           onStartRecording={handleStartRecordingFromThread}
           hasActiveRecording={recordingStatus !== 'idle' && recordingStatus !== 'error'}
@@ -1256,26 +1258,6 @@ export const ThreadMessages = ({
           }}
         />
       )}
-
-      {headerActionsContainer &&
-        channel?.projectId &&
-        !hasTicketInMessages &&
-        !channel?.isArchived && (
-          <Tooltip content='Create ticket'>
-            <Button
-              size='sm'
-              variant='ghost'
-              onClick={handleCreateTicket}
-              className='h-7 w-7 rounded-lg'
-              aria-label='Create ticket'
-              data-testid='thread-create-ticket-header-button'
-              data-track-category='THREAD_PANEL'
-              data-track-name='CREATE_TICKET_FROM_THREAD_HEADER'
-            >
-              <TicketToken size={16} />
-            </Button>
-          </Tooltip>
-        )}
 
       {/* Overflow menu */}
       <DropdownMenu>
@@ -1358,25 +1340,22 @@ export const ThreadMessages = ({
               <span className='flex-1'>Open in new window</span>
             </DropdownMenuItem>
           )}
-          {!headerActionsContainer &&
-            channel?.projectId &&
-            !hasTicketInMessages &&
-            !channel?.isArchived && (
-              <DropdownMenuItem
-                className='gap-2'
-                onClick={handleCreateTicket}
-                data-testid='thread-create-ticket-button'
-                data-track-category='THREAD_PANEL'
-                data-track-name='CREATE_TICKET_FROM_THREAD'
-                data-track-metadata={JSON.stringify({
-                  channelId: channel?.id,
-                  projectId: channel?.projectId,
-                })}
-              >
-                <TicketToken size={16} className='shrink-0' />
-                <span className='flex-1'>Create ticket</span>
-              </DropdownMenuItem>
-            )}
+          {channel?.projectId && !hasTicketInMessages && !channel?.isArchived && (
+            <DropdownMenuItem
+              className='gap-2'
+              onClick={handleCreateTicket}
+              data-testid='thread-create-ticket-button'
+              data-track-category='THREAD_PANEL'
+              data-track-name='CREATE_TICKET_FROM_THREAD'
+              data-track-metadata={JSON.stringify({
+                channelId: channel?.id,
+                projectId: channel?.projectId,
+              })}
+            >
+              <TicketToken size={16} className='shrink-0' />
+              <span className='flex-1'>Create ticket</span>
+            </DropdownMenuItem>
+          )}
         </DropdownMenuContent>
       </DropdownMenu>
 

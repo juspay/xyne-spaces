@@ -31,30 +31,21 @@ export async function ensureLink(
   return { created: result.count > 0 };
 }
 
-/**
- * The track an item belongs to, read off the flat edge every track item carries.
- * One lookup whatever the item is and however deep it is filed, because the flat
- * edge does not move when containment does.
- */
-export async function resolveItemTrackId(
+export async function resolveFolderTrackId(
   db: Db,
-  targetType: string,
-  targetId: string
+  folderId: string
 ): Promise<string | null> {
   const edge = await db.sdlcEntityLink.findFirst({
     where: {
       sourceType: 'TRACK',
-      targetType,
-      targetId,
+      targetType: 'FOLDER',
+      targetId: folderId,
       relationType: SDLC_TRACK_FLAT_RELATION,
     },
     select: { sourceId: true },
   });
   return edge?.sourceId ?? null;
 }
-
-export const resolveFolderTrackId = (db: Db, folderId: string): Promise<string | null> =>
-  resolveItemTrackId(db, 'FOLDER', folderId);
 
 export async function validateOwnerInChannel(
   db: Db,
@@ -64,12 +55,8 @@ export async function validateOwnerInChannel(
   if (owner.sourceType === 'TRACK') {
     return isTrackInChannel(db, owner.sourceId, channelId);
   }
-  if (
-    owner.sourceType === 'FOLDER' ||
-    owner.sourceType === 'ATTACHMENT' ||
-    owner.sourceType === 'LINK'
-  ) {
-    const trackId = await resolveItemTrackId(db, owner.sourceType, owner.sourceId);
+  if (owner.sourceType === 'FOLDER') {
+    const trackId = await resolveFolderTrackId(db, owner.sourceId);
     return trackId ? isTrackInChannel(db, trackId, channelId) : false;
   }
   return isCanvasInChannel(db, owner.sourceId, channelId);
@@ -90,9 +77,7 @@ export async function resolveInheritedOwner(
   return link &&
     (link.sourceType === 'CANVAS' ||
       link.sourceType === 'TRACK' ||
-      link.sourceType === 'FOLDER' ||
-      link.sourceType === 'ATTACHMENT' ||
-      link.sourceType === 'LINK')
+      link.sourceType === 'FOLDER')
     ? { sourceType: link.sourceType, sourceId: link.sourceId }
     : null;
 }
@@ -184,14 +169,12 @@ export async function linkCreatedEntities(
         );
       }
     } else {
-      // A folder, a file or a link owns the ticket it spawned, the same way an
-      // artifact does; only a track has no edge of its own to add.
-      if (owner.sourceType !== 'TRACK') {
+      if (owner.sourceType === 'FOLDER') {
         await ensureLink(
           db,
           {
             channelId,
-            sourceType: owner.sourceType,
+            sourceType: 'FOLDER',
             sourceId: owner.sourceId,
             targetType: 'TICKET',
             targetId: ticketId,
@@ -201,9 +184,9 @@ export async function linkCreatedEntities(
         );
       }
       const trackId =
-        owner.sourceType === 'TRACK'
-          ? owner.sourceId
-          : await resolveItemTrackId(db, owner.sourceType, owner.sourceId);
+        owner.sourceType === 'FOLDER'
+          ? await resolveFolderTrackId(db, owner.sourceId)
+          : owner.sourceId;
       if (trackId) {
         await ensureLink(
           db,

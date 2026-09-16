@@ -152,12 +152,8 @@ const electronAPI = {
     return () => ipcRenderer.removeListener('app-window-limit-reached', listener);
   },
 
-  /** Moves focus off an embedded <webview> guest and back to the app. */
-  focusHostWebContents: (): Promise<void> => ipcRenderer.invoke('focus-host-webcontents'),
-
-  onOpenInBrowserPanel: (callback: (url: string, sourceWebContentsId?: number) => void) => {
-    const listener = (_event: unknown, url: string, sourceWebContentsId?: number) =>
-      callback(url, sourceWebContentsId);
+  onOpenInBrowserPanel: (callback: (url: string) => void) => {
+    const listener = (_event: unknown, url: string) => callback(url);
     ipcRenderer.on('open-in-browser-panel', listener);
     return () => ipcRenderer.removeListener('open-in-browser-panel', listener);
   },

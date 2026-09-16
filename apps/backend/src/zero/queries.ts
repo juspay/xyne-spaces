@@ -4701,34 +4701,6 @@ dmChannelsLatestMessagesPaginated: defineQuery(
         link.where('channelId', channelId).where('relationType', SDLC_TRACK_FLAT_RELATION),
       ),
   ),
-  getSdlcHubLinks: defineQuery(
-    z.object({ channelId: z.string() }),
-    // Same visibility rule channelLinks applies: LinksACL checks workspace and
-    // channel membership but deliberately not visibility, so a query that asks
-    // for every link in the hub would sync other members' PERSONAL ones.
-    ({ ctx, args: { channelId } }) =>
-      zql.links.where("channelId", channelId).where(({ or, cmp, and, exists }) =>
-        or(
-          cmp("visibility", "=", LinkVisibility.DEFAULT),
-          and(
-            cmp("visibility", "=", LinkVisibility.PERSONAL),
-            cmp("createdBy", "=", ctx.userID)
-          ),
-          and(
-            cmp("visibility", "=", LinkVisibility.PERSONAL),
-            exists("sharedWith", (sw) => sw.where("userId", "=", ctx.userID))
-          )
-        )
-      ),
-  ),
-  getSdlcHubFiles: defineQuery(
-    z.object({ channelId: z.string() }),
-    ({ args: { channelId } }) =>
-      zql.message_attachments
-        .where("entityType", AttachmentEntityType.SDLC_HUB)
-        .where("entityId", channelId)
-        .where("isDeleted", false),
-  ),
   getSdlcTracks: defineQuery(z.object({ channelId: z.string() }), ({ args: { channelId } }) =>
     zql.sdlc_tracks
       .whereExists('sdlcEntityLinks', link =>

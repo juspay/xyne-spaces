@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactElement, type ReactNode } from 'react';
-import { ChevronLeft, X } from 'lucide-react';
+import { ChevronLeft, Folder } from 'lucide-react';
 import type { SdlcDiscussion } from '@xyne/shared';
 import type { ThreadInfo } from '../../machines/xyneAIMachine';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
@@ -29,24 +29,17 @@ interface SdlcChatPanelProps {
   /** Thread header's Ask AI. Raised so the host can route it past the frame. */
   onAskAI?: (threadInfo?: ThreadInfo) => void;
   title: string;
-  onClose: () => void;
   /**
    * Set when the conversations belong to something inside the track rather than
    * to the track itself, so the bar says whose it is and offers the way back.
    */
-  scopeHeader?: { name: string; icon?: ReactNode; onExit?: () => void };
+  scopeHeader?: { name: string; onExit: () => void };
   /**
    * Marks each row in the list with where it came from. A track's list carries
    * the conversations of every folder inside it, which otherwise arrive with
    * nothing to say they were not started on the track itself.
    */
   renderConversationBadge?: (conversationId: string) => ReactNode;
-  /**
-   * Calls, tickets and Ask AI for whatever this panel is about. Shown on the
-   * list; a thread portals its own actions into the same place, so the bar
-   * never carries two sets at once.
-   */
-  listActions?: ReactNode;
 }
 
 const noopUserClick = (): void => {};
@@ -59,10 +52,8 @@ export function SdlcChatPanel({
   onSelectConversation,
   onAskAI,
   title,
-  onClose,
   scopeHeader,
   renderConversationBadge,
-  listActions,
 }: SdlcChatPanelProps): ReactElement {
   /**
    * The thread's own actions render in this panel's bar rather than in the page
@@ -109,15 +100,12 @@ export function SdlcChatPanel({
    * already sits under the page header naming the track, so it gets none.
    * Sticky as well as shrink-0, to hold whichever element ends up scrolling.
    */
-  const canGoBack = threadOpen || Boolean(scopeHeader?.onExit);
-  // This panel's own header band. It matches the page header's 52px so the two
-  // meet across a divider that now runs the full height of the page.
-  const header = (
-    <div className='z-10 flex h-[52px] shrink-0 items-center gap-1.5 border-b bg-background/95 px-3 backdrop-blur'>
-      {canGoBack && (
+  const header =
+    scopeHeader || threadOpen ? (
+      <div className='sticky top-0 z-10 flex shrink-0 items-center gap-1.5 border-b border-border bg-background px-2.5 py-1.5'>
         <button
           type='button'
-          onClick={() => (threadOpen ? onSelectConversation(null) : scopeHeader?.onExit?.())}
+          onClick={() => (threadOpen ? onSelectConversation(null) : scopeHeader?.onExit())}
           title={threadOpen ? 'Back to conversations' : 'Back to the track'}
           aria-label={threadOpen ? 'Back to conversations' : 'Back to the track'}
           className='shrink-0 rounded p-0.5 text-muted-foreground transition-colors hover:bg-foreground/[0.08] hover:text-foreground'
@@ -126,34 +114,17 @@ export function SdlcChatPanel({
         >
           <ChevronLeft className='size-4' />
         </button>
-      )}
-      {scopeHeader?.icon ?? null}
-      <span className='min-w-0 flex-1 truncate text-[13px] font-semibold tracking-[-0.01em]'>
-        {scopeHeader?.name ?? title}
-      </span>
-      {!threadOpen && listActions ? (
-        <div className='flex shrink-0 items-center gap-1.5 [&_button]:!size-7 [&_button]:!rounded-lg'>
-          {listActions}
-        </div>
-      ) : null}
-      {/* Where ThreadMessages portals its overflow menu. */}
-      <div
-        ref={setHeaderActionsEl}
-        className='flex shrink-0 items-center [&>div]:animate-in [&>div]:fade-in [&>div]:duration-300 [&>div]:!gap-1.5'
-      />
-      <button
-        type='button'
-        onClick={onClose}
-        title='Close chat'
-        aria-label='Close chat'
-        className='shrink-0 rounded-lg p-1 text-muted-foreground transition-colors hover:bg-foreground/[0.08] hover:text-foreground'
-        data-track-category='SdlcHub'
-        data-track-name='SdlcChatClosed'
-      >
-        <X className='size-4' />
-      </button>
-    </div>
-  );
+        {scopeHeader && <Folder className='size-3.5 shrink-0 fill-primary/25 text-primary/70' />}
+        <span className='min-w-0 flex-1 truncate text-[12.5px] font-semibold tracking-[-0.01em]'>
+          {scopeHeader?.name ?? title}
+        </span>
+        {/* Where ThreadMessages portals its overflow menu. */}
+        <div
+          ref={setHeaderActionsEl}
+          className='flex shrink-0 items-center [&>div]:animate-in [&>div]:fade-in [&>div]:duration-300 [&>div]:!gap-1.5'
+        />
+      </div>
+    ) : null;
 
   return (
     <SearchResultsContext.Provider value={ticketCardClickOverride}>
@@ -179,6 +150,7 @@ export function SdlcChatPanel({
               {...(onAskAI && { onAskAI })}
               headerActionsContainer={headerActionsEl}
               hideHeader
+              overflowActionsOnly
               {...(selectedTicketId ? { ticketId: selectedTicketId } : { tabbedView: true })}
               disableAskAI
             />
