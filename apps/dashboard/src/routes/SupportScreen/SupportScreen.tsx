@@ -930,7 +930,13 @@ const SupportScreen = (): ReactElement => {
     if (!activeView?.values) return false;
     const viewFilters = valuesToFilters(activeView.values);
     const sortDeep = (v: unknown): unknown => {
-      if (Array.isArray(v)) return v.map(sortDeep);
+      if (Array.isArray(v)) {
+        const mapped = v.map(sortDeep);
+        if (mapped.every(item => typeof item !== 'object' || item === null)) {
+          return [...mapped].sort();
+        }
+        return mapped;
+      }
       if (v !== null && typeof v === 'object') {
         const rec = v as Record<string, unknown>;
         return Object.fromEntries(
