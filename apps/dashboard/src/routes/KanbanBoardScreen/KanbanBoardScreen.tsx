@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useCallback, useEffect, useRef, useDeferredValue } from 'react';
-import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams, useOutletContext } from 'react-router-dom';
 import type { QueryResultType } from '@rocicorp/zero';
 import { toast } from 'sonner';
 import { useQuery } from '@tanstack/react-query';
@@ -62,6 +62,7 @@ import {
 } from '@dnd-kit/core';
 import { TicketCard } from '../../components/Tickets/TicketCard/TicketCard';
 import { TicketFiltersDropdown } from '../../components/Tickets/TicketFilters';
+import type { ProjectsScreenOutletContext } from '../ProjectsScreen/ProjectsScreen';
 import { CreateTicketModal } from '../../components/Tickets/CreateTicketModal/CreateTicketModal';
 import {
   clearCreateTicketParams,
@@ -326,16 +327,8 @@ interface BoardKanbanScreenProps {
    * URL-level precedence explicitly or a stale draft would shadow it.
    */
   hasSharedSeed?: boolean;
-  viewMode?:
-    | 'my-tickets'
-    | 'user-tickets'
-    | 'group-tickets'
-    | 'board'
-    | 'project'
-    | 'workspace-view';
+  viewMode?: 'my-tickets' | 'board' | 'project' | 'workspace-view';
   channelId?: string;
-  filterByUserId?: string;
-  filterByGroupId?: string;
   // Project Views builder (workspace-view mode):
   workspaceId?: string;
   viewId?: string;
@@ -441,8 +434,6 @@ const availableColumns = [
 const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   viewMode: viewModeProp,
   channelId,
-  filterByUserId,
-  filterByGroupId,
   workspaceId,
   viewId,
   initialName,
@@ -456,6 +447,11 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     projectId?: string;
     boardId?: string;
   }>();
+  const outletContext = useOutletContext<unknown>();
+  const projectsScreenContext =
+    outletContext && typeof outletContext === 'object' && 'leftHeaderSlot' in outletContext
+      ? (outletContext as ProjectsScreenOutletContext)
+      : null;
   const navigate = useNavigate();
   const { user } = useAuth();
   const { isMobile } = usePlatform();
@@ -546,12 +542,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
       viewModeProp === 'workspace-view' && !hasSharedSeed ? readViewDraft(viewDraftKey) : null,
     [viewModeProp, viewDraftKey, hasSharedSeed],
   );
-  const persistedColumnsKey =
-    viewModeProp === 'my-tickets' ||
-    viewModeProp === 'user-tickets' ||
-    viewModeProp === 'group-tickets'
-      ? viewModeProp
-      : null;
+  const persistedColumnsKey = viewModeProp === 'my-tickets' ? viewModeProp : null;
   const [visibleColumns, setVisibleColumns] = useState<Set<string>>(
     () =>
       new Set(
@@ -668,8 +659,6 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   const viewMode = useMemo(() => {
     if (viewModeProp === 'workspace-view') return 'workspace-view';
     if (viewModeProp === 'my-tickets') return 'my-tickets'; // Show user's tickets
-    if (viewModeProp === 'user-tickets') return 'user-tickets'; // Show specific user's tickets
-    if (viewModeProp === 'group-tickets') return 'group-tickets'; // Show specific group's tickets
     if (viewModeProp === 'board') return 'board';
     if (boardId) return 'board'; // Show specific board
     if (viewModeProp === 'project') return 'project';
@@ -682,7 +671,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   // initialFilters are applied, preventing double queries with stale storage filters.
   const [hasSeededWorkspaceView, setHasSeededWorkspaceView] = useState(!isWorkspaceView);
   // A workspace view queries as a project view with no projectId; scope comes from filters.boards.
-  const queryViewMode: 'project' | 'board' | 'my-tickets' | 'user-tickets' | 'group-tickets' =
+  const queryViewMode: 'project' | 'board' | 'my-tickets' =
     viewMode === 'workspace-view' ? 'project' : viewMode;
 
   // Get user's channel status for selectedBoardId persistence
@@ -1302,9 +1291,8 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   const filteredSingleBoardId = explicitBoardId ?? soleScopeBoardId ?? null;
 
   // Get all boards for the project (needed for channel stage view and create ticket modal)
-  // In my-tickets/user-tickets/group-tickets, fetch ALL boards (no project filter) since tickets can span projects
-  const isMyTicketsView =
-    viewMode === 'my-tickets' || viewMode === 'user-tickets' || viewMode === 'group-tickets';
+  // In my-tickets, fetch ALL boards (no project filter) since tickets can span projects
+  const isMyTicketsView = viewMode === 'my-tickets';
 
   // Fetch full board details only when a single board is selected
   const [selectedBoardDetail] = useCachedQuery(
@@ -1645,13 +1633,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     }
 
     // For project and my-tickets views, use status-based columns
-    if (
-      viewMode === 'project' ||
-      viewMode === 'workspace-view' ||
-      viewMode === 'my-tickets' ||
-      viewMode === 'user-tickets' ||
-      viewMode === 'group-tickets'
-    ) {
+    if (viewMode === 'project' || viewMode === 'workspace-view' || viewMode === 'my-tickets') {
       return getStatusColumns();
     }
 
@@ -1732,12 +1714,10 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   // restricts tickets to only that specific channel.
   const ticketsQueryParams = useMemo(() => {
     const params: FlowStepVisibilityOptions & {
-      viewMode: 'project' | 'board' | 'my-tickets' | 'user-tickets' | 'group-tickets';
+      viewMode: 'project' | 'board' | 'my-tickets';
       projectId?: string;
       boardId?: string;
       boardIds?: string[];
-      userId?: string;
-      groupId?: string;
       formEntityValueFieldIds?: string[];
     } = { viewMode: queryViewMode };
 
@@ -1774,13 +1754,6 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
       params.excludeFlowSteps = true;
     }
 
-    // Pass user/group filters for specific viewModes
-    if (viewMode === 'user-tickets' && filterByUserId) {
-      params.userId = filterByUserId;
-    } else if (viewMode === 'group-tickets' && filterByGroupId) {
-      params.groupId = filterByGroupId;
-    }
-
     // Pass fieldIds for which to fetch formEntityValues (when filtering/grouping by dynamic fields)
     if (fevFieldIds.length > 0) {
       params.formEntityValueFieldIds = fevFieldIds;
@@ -1793,8 +1766,6 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     isWorkspaceView,
     boardId,
     effectiveProjectId,
-    filterByUserId,
-    filterByGroupId,
     filteredSingleBoardId,
     fevFieldIds,
     filters.boards,
@@ -1812,9 +1783,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
           // kanban pagination path uses. Without this clause the table, calendar and
           // flow layouts render no rows at all in a saved view.
           (isWorkspaceView && workspaceViewReady) ||
-          viewMode === 'my-tickets' ||
-          (viewMode === 'user-tickets' && !!filterByUserId) ||
-          (viewMode === 'group-tickets' && !!filterByGroupId)),
+          viewMode === 'my-tickets'),
     },
   );
   if (shouldUseLegacyTicketsQuery && ticketsDetails.type === 'complete') {
@@ -1955,7 +1924,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     workspaceSelectedBoards,
   ]);
 
-  // Clear invalid board filters in my-tickets/user-tickets/group-tickets views
+  // Clear invalid board filters in my-tickets views
   useEffect(() => {
     // Early return if not in my-tickets view
     if (!isMyTicketsView) return;
@@ -4015,6 +3984,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
         {(effectiveProjectId || viewMode === 'my-tickets' || isWorkspaceView) && (
           <div className='flex-1 min-w-0'>
             <TicketFiltersDropdown
+              startSlot={projectsScreenContext?.leftHeaderSlot}
               filters={filters}
               onFiltersChange={setFilters}
               projectId={
