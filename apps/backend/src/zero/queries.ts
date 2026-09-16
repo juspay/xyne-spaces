@@ -1895,9 +1895,6 @@ export const queries = defineQueries({
     ({ args: { ticketId } }) => {
       return zql.workflows
         .where('ticketId', ticketId)
-        .related('workflowExecutions', (executionQuery) =>
-          executionQuery.orderBy('createdAt', 'asc')
-        )
         .orderBy('createdAt', 'asc');
     }
   ),

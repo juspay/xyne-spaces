@@ -1621,13 +1621,12 @@ export const queries = defineQueries({
    * Automations live on the `workflows` table with `workflowType='Automations'`.
    * The four queries below are the Zero-backed reads the dashboard uses in
    * place of the legacy `/api/automations/*` GETs. Live-sync means the list
-   * + builder + run history all auto-update as the worker mutates the rows
-   * (status flips DRAFT→ACTIVE, new `workflow_executions` rows appear as
-   * runs fire, etc.).
+   * + builder auto-update as the worker mutates the rows (status flips
+   * DRAFT→ACTIVE, etc.). Run history lives in `workflow.workflow_executions`,
+   * which Zero does not replicate, so it is read over REST.
    *
    * Workspace scoping: every read takes `workspaceId` and filters at the query
-   * level. Execution rows have no `workspaceId` of their own — they're scoped
-   * via the parent workflow (`workflow.workspaceId`).
+   * level.
    */
   automationsList: defineQuery(
     z.object({ workspaceId: z.string() }),
@@ -1657,7 +1656,6 @@ export const queries = defineQueries({
     ({ args: { ticketId } }) => {
       return zql.workflows
         .where('ticketId', ticketId)
-        .related('workflowExecutions', executionQuery => executionQuery.orderBy('createdAt', 'asc'))
         .orderBy('createdAt', 'asc');
     },
   ),

@@ -55,7 +55,6 @@ import {
   UserPresenceACL,
   UsersACL,
   UserWorkloadMappingsACL,
-  WorkflowExecutionsACL,
   WorkflowsACL,
   ReposACL,
   SavedUserConfigurationsACL,
@@ -198,8 +197,6 @@ export class QueryACLFactory {
         return new UserWorkloadMappingsACL(ctx) as BaseQueryACL<TTable>;
       case 'users':
         return new UsersACL(ctx) as BaseQueryACL<TTable>;
-      case 'workflow_executions':
-        return new WorkflowExecutionsACL(ctx) as BaseQueryACL<TTable>;
       case 'workflows':
         return new WorkflowsACL(ctx) as BaseQueryACL<TTable>;
       case 'repos':

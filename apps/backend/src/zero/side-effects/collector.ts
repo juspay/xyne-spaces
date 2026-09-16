@@ -294,7 +294,6 @@ function extractEntityId(table: TableName, args: any): string | null {
     case 'stages':
     case 'user_group_mappings':
     case 'workflows':
-    case 'workflow_executions':
     case 'user_groups':
     case 'users':
     case 'user_presence':
