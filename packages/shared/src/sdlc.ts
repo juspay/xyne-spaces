@@ -229,7 +229,7 @@ export type SdlcRelationType = z.infer<typeof sdlcRelationTypeSchema>;
 
 export const sdlcDiscussionSchema = z
   .object({
-    repoId: z.string().min(1),
+    repoId: z.string().min(1).optional(),
     ownerType: z.enum([
       "CANVAS",
       "TRACK",
@@ -306,8 +306,7 @@ export type SdlcCallLink = z.infer<typeof sdlcCallLinkSchema>;
 export const createSdlcChannelSchema = z.object({
   projectId: z.string().min(1),
   name: z.string().trim().min(1).max(120),
-  // At least one: a hub with no repositories has no screen to render.
-  repoIds: z.array(z.string().min(1)).min(1).max(100),
+  repoIds: z.array(z.string().min(1)).max(100).default([]),
 });
 export type CreateSdlcChannelInput = z.infer<typeof createSdlcChannelSchema>;
 
@@ -322,29 +321,83 @@ export const attachSdlcRepositorySchema = z.object({
   projectId: z.string().min(1),
   name: z.string().trim().min(1).max(120).optional(),
   url: z.string().trim().min(1).max(2048),
-  baseBranch: z.string().trim().min(1).max(255).default("main"),
+  // Omitted: the Provider's default branch, or main when it cannot be read.
+  baseBranch: z.string().trim().min(1).max(255).optional(),
+  // Required only when more than one credential serves the link's host.
+  credentialId: z.string().min(1).optional(),
 });
 export type AttachSdlcRepositoryInput = z.infer<
   typeof attachSdlcRepositorySchema
 >;
 
-export const SDLC_VCS_PROVIDERS = ["GITHUB"] as const;
+export const resolveSdlcRepositoryLinkSchema = z.object({
+  projectId: z.string().min(1),
+  url: z.string().trim().min(1).max(2048),
+});
+export type ResolveSdlcRepositoryLinkInput = z.infer<
+  typeof resolveSdlcRepositoryLinkSchema
+>;
+
+export const SDLC_VCS_PROVIDERS = ["GITHUB", "BITBUCKET_SERVER"] as const;
 export const sdlcVcsProviderSchema = z.enum(SDLC_VCS_PROVIDERS);
 export type SdlcVcsProvider = z.infer<typeof sdlcVcsProviderSchema>;
 
-export const configureSdlcVcsCredentialSchema = z.object({
-  token: z
-    .string()
-    .trim()
-    .min(20)
-    .max(512)
-    .regex(
-      /^github_pat_[A-Za-z0-9_]+$/,
-      "Enter a GitHub fine-grained personal access token",
-    ),
-});
-export type ConfigureSdlcVcsCredentialInput = z.infer<
-  typeof configureSdlcVcsCredentialSchema
+export const SDLC_GITHUB_HOST = "github.com";
+
+const sdlcCredentialNameSchema = z.string().trim().min(1).max(80);
+const sdlcGithubTokenSchema = z
+  .string()
+  .trim()
+  .min(20)
+  .max(512)
+  .regex(
+    /^github_pat_[A-Za-z0-9_]+$/,
+    "Enter a GitHub fine-grained personal access token",
+  );
+const sdlcBitbucketTokenSchema = z
+  .string()
+  .trim()
+  .min(20)
+  .max(512)
+  .regex(/^[A-Za-z0-9+/=_-]+$/, "Enter a Bitbucket personal HTTP access token");
+const sdlcBitbucketHostSchema = z
+  .string()
+  .trim()
+  .toLowerCase()
+  .regex(/^[a-z0-9][a-z0-9.-]*[a-z0-9]$/, "Enter a host name such as bitbucket.example.com")
+  .refine((host) => host !== SDLC_GITHUB_HOST, "Use the GitHub provider for github.com");
+
+export function sdlcTokenSchemaFor(provider: SdlcVcsProvider) {
+  return provider === "GITHUB" ? sdlcGithubTokenSchema : sdlcBitbucketTokenSchema;
+}
+
+export const createSdlcVcsCredentialSchema = z.discriminatedUnion("provider", [
+  z.object({
+    provider: z.literal("GITHUB"),
+    name: sdlcCredentialNameSchema,
+    token: sdlcGithubTokenSchema,
+  }),
+  z.object({
+    provider: z.literal("BITBUCKET_SERVER"),
+    name: sdlcCredentialNameSchema,
+    host: sdlcBitbucketHostSchema,
+    token: sdlcBitbucketTokenSchema,
+  }),
+]);
+export type CreateSdlcVcsCredentialInput = z.infer<
+  typeof createSdlcVcsCredentialSchema
+>;
+
+export const updateSdlcVcsCredentialSchema = z
+  .object({
+    name: sdlcCredentialNameSchema.optional(),
+    token: z.string().trim().min(20).max(512).optional(),
+  })
+  .refine((value) => value.name !== undefined || value.token !== undefined, {
+    message: "Provide a name or a token",
+  });
+export type UpdateSdlcVcsCredentialInput = z.infer<
+  typeof updateSdlcVcsCredentialSchema
 >;
 
 export const checkSdlcRepositoryAccessSchema = z.object({
@@ -438,10 +491,26 @@ export const writeSdlcWikiPageSchema = sdlcWikiScopeSchema.extend({
 });
 export type WriteSdlcWikiPageInput = z.infer<typeof writeSdlcWikiPageSchema>;
 
-const sdlcRunAuthoritySchema = z.object({
-  interactiveGrant: z.string().min(1),
-  conversationId: z.string().min(1),
-});
+/** The Actor pair is current; the grant pair is what the older claw still sends, removed once it is gone. */
+const sdlcRunAuthorityFields = {
+  workspaceId: z.string().min(1).optional(),
+  actorUserId: z.string().min(1).optional(),
+  interactiveGrant: z.string().min(1).optional(),
+  conversationId: z.string().min(1).optional(),
+};
+
+function hasRunAuthority(value: {
+  workspaceId?: string | undefined;
+  actorUserId?: string | undefined;
+  interactiveGrant?: string | undefined;
+  conversationId?: string | undefined;
+}): boolean {
+  return Boolean(
+    (value.workspaceId && value.actorUserId) || (value.interactiveGrant && value.conversationId),
+  );
+}
+
+const SDLC_RUN_AUTHORITY_MESSAGE = "workspaceId and actorUserId are required";
 
 export const createSdlcPullRequestSchema = z
   .object({
@@ -454,8 +523,10 @@ export const createSdlcPullRequestSchema = z
       .string()
       .trim()
       .regex(/^[0-9a-f]{40}$/i),
+    draft: z.boolean().default(true),
+    ...sdlcRunAuthorityFields,
   })
-  .and(sdlcRunAuthoritySchema);
+  .refine(hasRunAuthority, { message: SDLC_RUN_AUTHORITY_MESSAGE });
 export type CreateSdlcPullRequestInput = z.infer<
   typeof createSdlcPullRequestSchema
 >;
@@ -475,16 +546,37 @@ export type ResolveSdlcAgentRepositoryInput = z.infer<
 
 export const bootstrapSdlcRuntimeCredentialSchema = z
   .object({
-    agentSlug: z.literal(SDLC_AGENT_SLUG),
+    agentSlug: z.literal(SDLC_AGENT_SLUG).optional(),
     repoId: z.string().min(1),
-    operation: z.literal("INTERACTIVE"),
+    operation: z.literal("INTERACTIVE").optional(),
     sandboxId: z.string().min(1).max(256),
     sandboxPublicKey: z.string().min(32).max(1024),
+    ...sdlcRunAuthorityFields,
   })
-  .and(sdlcRunAuthoritySchema);
+  .refine(hasRunAuthority, { message: SDLC_RUN_AUTHORITY_MESSAGE });
 export type BootstrapSdlcRuntimeCredentialInput = z.infer<
   typeof bootstrapSdlcRuntimeCredentialSchema
 >;
+
+export interface SdlcSandboxGitCredential {
+  provider: SdlcVcsProvider;
+  host: string;
+  cloneUrl: string;
+  username: string;
+  password: string;
+  accountName: string;
+  accountEmail: string;
+}
+
+export const listSdlcEntityLinksSchema = z.object({
+  channelId: z.string().min(1),
+  entityType: sdlcEntityTypeSchema,
+  entityId: z.string().min(1),
+  relationType: z.string().min(1).optional(),
+  otherType: sdlcEntityTypeSchema.optional(),
+  limit: z.number().int().min(1).max(200).default(100),
+});
+export type ListSdlcEntityLinksInput = z.infer<typeof listSdlcEntityLinksSchema>;
 
 export const sdlcRepoIdsSchema = z.array(z.string().min(1)).max(50).optional();
 
@@ -670,7 +762,8 @@ export const sdlcAgentContextSchema = z.object({
     })
     .optional(),
   execution: z.object({ conversationId: z.string().min(1) }),
-  interactiveGrant: z.string().min(1),
+  // Only the claw deployed before Actor-based access reads this.
+  interactiveGrant: z.string().min(1).optional(),
   generationCommit: nullableNonEmpty.optional(),
 });
 export type SdlcAgentContext = z.infer<typeof sdlcAgentContextSchema>;
