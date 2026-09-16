@@ -147,6 +147,14 @@ const kanbanTicketsPageV3ArgsSchema = kanbanTicketsPageV2ArgsSchema.extend({
 
 type KanbanTicketsPageV3Args = z.infer<typeof kanbanTicketsPageV3ArgsSchema>;
 
+// Table list view paging: kanban's page args minus the column dimension,
+// forward-only, with a real exclusive keyset cursor.
+const tableTicketsPageArgsSchema = kanbanTicketsPageV3ArgsSchema.omit({
+  stageName: true,
+  columnType: true,
+  dir: true,
+});
+
 const prefixedKanbanIdentityValues = (id: string): string[] => [
   id,
   `user:${id}`,
@@ -1202,6 +1210,44 @@ export const queries: AnyQueryRegistry = defineQueries({
       return finalQuery;
     },
   ),
+
+  tableTicketsPage: defineQuery(tableTicketsPageArgsSchema, ({ ctx, args }) => {
+    // Empty stageName = no stage pin; the page spans every stage.
+    let query = applyKanbanTicketPageV3Conditions(zql.tickets, ctx, {
+      ...args,
+      stageName: '',
+    } as KanbanTicketsPageV3Args)
+      .orderBy('createdAt', 'desc')
+      // id tiebreak keeps the (createdAt, id) keyset cursor deterministic on ties.
+      .orderBy('id', 'desc');
+
+    if (args.start) {
+      query = query.start(
+        { createdAt: args.start.createdAt, id: args.start.id },
+        { inclusive: false },
+      );
+    }
+
+    if (args.createdAfter !== undefined) {
+      query = query.where('createdAt', '>=', args.createdAfter);
+    }
+
+    let finalQuery = query
+      .limit(args.limit)
+      .related('assignments', (a: any) => a.related('role'))
+      .related('tagMappings');
+
+    if (args.formEntityValueFieldIds?.length) {
+      finalQuery = finalQuery.related('formEntityValues', (fev: any) =>
+        fev
+          .where('fieldId', 'IN', args.formEntityValueFieldIds ?? [])
+          .related('formField')
+          .related('globalField'),
+      );
+    }
+
+    return finalQuery;
+  }),
 
   workflowsPaginated: defineQuery(
     z.object({
@@ -2449,7 +2495,9 @@ export const queries: AnyQueryRegistry = defineQueries({
   ticketsByIds: defineQuery(
     z.object({ ticketIds: z.array(z.string()) }),
     ({ args: { ticketIds } }) => {
-      return zql.tickets.where((helpers) => helpers.cmp('id', 'IN', ticketIds));
+      return zql.tickets
+        .where((helpers) => helpers.cmp('id', 'IN', ticketIds))
+        .related('tagMappings');
     }
   ),
 

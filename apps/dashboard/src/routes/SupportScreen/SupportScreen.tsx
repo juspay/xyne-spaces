@@ -126,7 +126,7 @@ import {
   toDynamicFieldQueryFilters,
   type DynamicFieldQueryFilter,
 } from '../../utils/board/dynamicFieldFilters';
-import { dynamicColumnKey } from '../../components/Tickets/TicketTable/dynamicFieldColumns';
+import { dynamicColumnKey } from '../../components/Tickets/TicketTable/TicketTableTypes';
 import { useDeskTableColumns, DESK_TABLE_BUILTIN_COLUMNS } from './useDeskTableColumns';
 import type { LabelUnreadFilters } from '../../api/conversationLabelsApi';
 import { tagsConfigApi } from '../../api/tagsConfigApi';
@@ -402,6 +402,8 @@ const clearComposeLocalCache = (userId: string, instanceId: string, channelId: s
     /* ignore */
   }
 };
+
+const SHOW_DESK_CUSTOM_FIELD_COLUMNS = false;
 
 /** Display label for a server compose-draft row in the Drafts list. */
 const composeDraftLabel = (d: ComposeDraftRecord): string => {
@@ -3787,7 +3789,7 @@ const SupportScreen = (): ReactElement => {
                                 </button>
                               );
                             })}
-                            {deskDynamicFields.length > 0 && (
+                            {SHOW_DESK_CUSTOM_FIELD_COLUMNS && deskDynamicFields.length > 0 && (
                               <>
                                 <div className='my-1 border-t border-border' />
                                 <div className='px-4 py-1 text-xs font-medium text-muted-foreground'>
