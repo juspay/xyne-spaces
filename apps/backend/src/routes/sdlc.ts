@@ -1,5 +1,7 @@
 import { Router, type NextFunction, type Request, type Response } from 'express';
+import { z } from 'zod';
 import {
+  AccessType,
   addSdlcChannelRepositoriesSchema,
   attachSdlcRepositorySchema,
   createSdlcChannelSchema,
@@ -7,23 +9,25 @@ import {
   createSdlcLinkSchema,
   configureSdlcVcsCredentialSchema,
   sdlcVcsProviderSchema,
-  startSdlcWikiRunSchema,
-  refreshSdlcWikiRunSchema,
 } from '@xyne/shared';
+import { authorize } from '@/middleware/authorize';
 import { AppError } from '@/middleware/errorHandler';
-import { sdlcQueue } from '@/queues/sdlcQueue';
-import { SdlcHubService, sdlcWiki, type SdlcActor } from '@/sdlc';
+import { logger } from '@/utils/logger';
+import {
+  backfillHubWorkflows,
+  resetHubWorkflows,
+  seedHubWorkflow,
+} from '@/sdlc/seedHubWorkflow';
+import { cleanupLegacySdlc } from '@/sdlc/cleanupLegacy';
+import { SdlcHubService, type SdlcActor } from '@/sdlc';
 import { requireSdlcProjectAccess } from '@/sdlc/sdlcProjectAccess';
 import { sdlcVcs } from '@/sdlc/vcs';
 import { deriveAccessStatus } from '@/sdlc/vcs/accessStatus';
 import { DatabaseClient } from '@/database/client';
-import { SdlcWikiPipelineService } from '@/sdlc/wiki/SdlcWikiPipeline';
-import sdlcCleanupRoutes from '@/sdlc/cleanup/routes';
 
 const router = Router();
 const sdlcHub = new SdlcHubService();
 const prisma = DatabaseClient.getInstance();
-const wikiPipeline = new SdlcWikiPipelineService(prisma, sdlcQueue);
 
 function actorFromRequest(req: Request): SdlcActor {
   const userId = req.user?.id;
@@ -32,6 +36,12 @@ function actorFromRequest(req: Request): SdlcActor {
     throw new AppError('Unauthorized', 401);
   }
   return { userId, workspaceId };
+}
+
+const hubWorkflowScopeSchema = z.object({ channelId: z.string().min(1).optional() });
+
+function channelIdFromBody(req: Request): string | undefined {
+  return hubWorkflowScopeSchema.parse(req.body ?? {}).channelId;
 }
 
 function route(
@@ -55,8 +65,51 @@ router.post(
   '/channels',
   route(async (req, res) => {
     const input = createSdlcChannelSchema.parse(req.body);
-    const channel = await sdlcHub.createChannel(actorFromRequest(req), input);
+    const actor = actorFromRequest(req);
+    const channel = await sdlcHub.createChannel(actor, input);
+    try {
+      await seedHubWorkflow(actor, channel.id);
+    } catch (error) {
+      logger.error(`[SDLC] failed to seed workflow for hub ${channel.id}`, error);
+    }
     res.status(201).json({ success: true, channel });
+  })
+);
+
+router.post(
+  '/admin/backfill-workflows',
+  authorize('SDLC', AccessType.ADMIN),
+  route(async (req, res) => {
+    res.status(200).json({
+      success: true,
+      ...(await backfillHubWorkflows(actorFromRequest(req), channelIdFromBody(req))),
+    });
+  })
+);
+
+router.post(
+  '/admin/reset-workflows',
+  authorize('SDLC', AccessType.ADMIN),
+  route(async (req, res) => {
+    res.status(200).json({
+      success: true,
+      ...(await resetHubWorkflows(actorFromRequest(req), channelIdFromBody(req))),
+    });
+  })
+);
+
+const legacyCleanupSchema = z.object({
+  dryRun: z.boolean().default(true),
+  redis: z.boolean().default(false),
+});
+
+/** Spans every workspace, so it needs the migration admin role. */
+router.post(
+  '/admin/cleanup-legacy',
+  authorize('TICKET-MIGRATION', AccessType.ADMIN),
+  route(async (req, res) => {
+    const input = legacyCleanupSchema.parse(req.body ?? {});
+    res.status(200).json({ success: true, ...(await cleanupLegacySdlc(input)) });
   })
 );
 
@@ -149,8 +202,6 @@ router.get(
         canonicalUrl: true,
         baseBranch: true,
         accessCapabilities: true,
-        sdlcSetupExecutionId: true,
-        setupExecution: { select: { id: true, status: true, context: true, updatedAt: true } },
       },
       orderBy: { name: 'asc' },
     });
@@ -188,14 +239,6 @@ router.post(
   })
 );
 
-router.post(
-  '/repositories/:repoId/setup',
-  route(async (req, res) => {
-    const execution = await sdlcHub.setupRepository(actorFromRequest(req), req.params.repoId);
-    res.status(202).json({ success: true, execution });
-  })
-);
-
 router.get(
   '/repositories/context',
   route(async (req, res) => {
@@ -222,111 +265,6 @@ router.get(
   })
 );
 
-router.get(
-  '/repositories/:repoId/wiki',
-  route(async (req, res) => {
-    const pages = await sdlcWiki.listPages(actorFromRequest(req), req.params.repoId);
-    res.status(200).json({ success: true, pages });
-  })
-);
-
-router.get(
-  '/repositories/:repoId/wiki/run',
-  route(async (req, res) => {
-    const run = await wikiPipeline.getStatus(actorFromRequest(req), req.params.repoId);
-    res.status(200).json({ success: true, run });
-  })
-);
-
-router.get(
-  '/repositories/:repoId/setup-execution',
-  route(async (req, res) => {
-    const execution = await sdlcHub.getRepositorySetupExecution(
-      actorFromRequest(req),
-      req.params.repoId
-    );
-    res.status(200).json({ success: true, execution });
-  })
-);
-
-router.post(
-  '/repositories/:repoId/wiki/generate',
-  route(async (req, res) => {
-    const input = startSdlcWikiRunSchema.parse(req.body ?? {});
-    const run = await wikiPipeline.start(actorFromRequest(req), req.params.repoId, input);
-    res.status(202).json({ success: true, run });
-  })
-);
-
-router.post(
-  '/repositories/:repoId/wiki/refresh',
-  route(async (req, res) => {
-    const input = refreshSdlcWikiRunSchema.parse(req.body ?? {});
-    const run = await wikiPipeline.refresh(actorFromRequest(req), req.params.repoId, input);
-    res.status(202).json({ success: true, run });
-  })
-);
-
-router.post(
-  '/repositories/:repoId/wiki/runs/:executionId/retry',
-  route(async (req, res) => {
-    const run = await wikiPipeline.retry(
-      actorFromRequest(req),
-      req.params.repoId,
-      req.params.executionId
-    );
-    res.status(202).json({ success: true, run });
-  })
-);
-
-router.post(
-  '/repositories/:repoId/wiki/runs/:executionId/cancel',
-  route(async (req, res) => {
-    const run = await wikiPipeline.cancel(
-      actorFromRequest(req),
-      req.params.repoId,
-      req.params.executionId
-    );
-    res.status(200).json({ success: true, run });
-  })
-);
-
-router.post(
-  '/repositories/:repoId/setup/retry',
-  route(async (req, res) => {
-    const execution = await sdlcHub.retrySetup(actorFromRequest(req), req.params.repoId);
-    res.status(202).json({ success: true, execution });
-  })
-);
-
-router.post(
-  '/repositories/:repoId/setup/refresh',
-  route(async (req, res) => {
-    const execution = await sdlcHub.refreshSetup(actorFromRequest(req), req.params.repoId);
-    res.status(202).json({ success: true, execution });
-  })
-);
-
-router.post(
-  '/repositories/:repoId/setup/cancel',
-  route(async (req, res) => {
-    const execution = await sdlcHub.cancelSetup(actorFromRequest(req), req.params.repoId);
-    res.status(200).json({ success: true, execution });
-  })
-);
-
-router.get(
-  '/repositories/:repoId/executions/:executionId/debug',
-  route(async (req, res) => {
-    const data = await sdlcHub.getExecutionDebug(
-      actorFromRequest(req),
-      req.params.repoId,
-      req.params.executionId
-    );
-    res.status(200).json({ success: true, data });
-  })
-);
-
 router.post(
   '/repositories/:repoId/links',
   route(async (req, res) => {
@@ -350,8 +288,6 @@ router.delete(
   })
 );
 
-// One-off SDLC data migrations. Delete with src/sdlc/cleanup/ once every
-// environment has run them.
-router.use('/cleanup', sdlcCleanupRoutes);
+// router.use('/cleanup', sdlcCleanupRoutes);
 
 export default router;

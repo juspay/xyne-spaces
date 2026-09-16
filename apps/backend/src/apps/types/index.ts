@@ -408,6 +408,7 @@ export interface UserResponse {
     statusEmoji: string | null;
     statusContent: string | null;
     statusExpiryAt: Date | null;
+    activityStatus: string | null;
 }
 
 /**

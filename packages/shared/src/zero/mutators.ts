@@ -114,7 +114,7 @@ import { isDeskChannelType, deskTypeForChannelType } from '../utils/channel.js';
 import { DEFAULT_ROLE_NAME_TO_ENUM } from '../utils/roleFrameworkUtils.js';
 import { SUMMARY_PROMPT_MAX_LENGTH } from '../templates/callSummary.js';
 import { z } from 'zod';
-import { isBaselineCanvasType, sdlcTrackStatusSchema } from '../sdlc.js';
+import { SDLC_HUB_KNOWLEDGE_FOLDER, sdlcTrackStatusSchema } from '../sdlc.js';
 import type { CallParticipantMetadata } from '../types/call.js';
 import {
   parseBoardEtaManagement,
@@ -5955,10 +5955,14 @@ export const mutators = defineMutators({
         });
         const isMoveOperation =
           folderId !== undefined || projectId !== undefined || channelId !== undefined;
-        const sdlcArtifact = await tx.run(zql.sdlc_artifacts.where('artifactId', id).one());
-        const isSdlcBaseline = isBaselineCanvasType(sdlcArtifact?.artifactType);
+        const currentChannel = currentChannelId
+          ? await tx.run(zql.channels.where('id', currentChannelId).one())
+          : null;
+        const isHubKnowledge =
+          currentFolder?.name === SDLC_HUB_KNOWLEDGE_FOLDER
+          && currentChannel?.type === ChannelType.SDLC;
 
-        if (!canEdit && !(isChannelAdmin && (isMoveOperation || isSdlcBaseline))) {
+        if (!canEdit && !(isChannelAdmin && (isMoveOperation || isHubKnowledge))) {
           throw new Error('You do not have permission to edit this canvas');
         }
         const {
@@ -10101,6 +10105,7 @@ export const mutators = defineMutators({
         autoDraftAgentSlug: z.string().optional().nullable(),
         metricsEnabled: z.boolean().optional(),
         frtStageNames: z.string().optional().nullable(),
+        metricsGuestVisibility: z.string().optional().nullable(),
         appWebhookDeliveryEnabled: z.boolean().optional(),
         deskReportEnabled: z.boolean().optional(),
         deskReportAgentSlug: z.string().optional().nullable(),
@@ -10121,6 +10126,7 @@ export const mutators = defineMutators({
           autoDraftAgentSlug,
           metricsEnabled,
           frtStageNames,
+          metricsGuestVisibility,
           appWebhookDeliveryEnabled,
           deskReportEnabled,
           deskReportAgentSlug,
@@ -10143,6 +10149,7 @@ export const mutators = defineMutators({
             ...(autoDraftAgentSlug !== undefined ? { autoDraftAgentSlug } : {}),
             ...(metricsEnabled !== undefined ? { metricsEnabled } : {}),
             ...(frtStageNames !== undefined ? { frtStageNames } : {}),
+            ...(metricsGuestVisibility !== undefined ? { metricsGuestVisibility } : {}),
             ...(appWebhookDeliveryEnabled !== undefined ? { appWebhookDeliveryEnabled } : {}),
             ...(deskReportEnabled !== undefined ? { deskReportEnabled } : {}),
             ...(deskReportAgentSlug !== undefined ? { deskReportAgentSlug } : {}),
@@ -10172,6 +10179,7 @@ export const mutators = defineMutators({
             priorityClassificationThreshold: 0.5,
             metricsEnabled: metricsEnabled ?? false,
             frtStageNames: frtStageNames ?? null,
+            metricsGuestVisibility: metricsGuestVisibility ?? null,
             appWebhookDeliveryEnabled: appWebhookDeliveryEnabled ?? true,
             deskReportEnabled: deskReportEnabled ?? false,
             deskReportAgentSlug: deskReportAgentSlug ?? null,

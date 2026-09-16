@@ -67,6 +67,8 @@ interface TicketTableProps {
   extraColumns?: ColDef<Ticket>[];
   selectedIds?: ReadonlySet<string>;
   onSelectionChange?: (tickets: Ticket[]) => void;
+  /** boardId -> board name, for the optional Board column. */
+  boardNamesById?: Map<string, string>;
 }
 
 // Index header renderer component
@@ -194,6 +196,7 @@ export const TicketTable: React.FC<TicketTableProps> = ({
   extraColumns,
   selectedIds,
   onSelectionChange,
+  boardNamesById,
 }) => {
   const zero = useZero();
   // Assignment dropdowns must not offer deactivated users — the server rejects them.
@@ -617,6 +620,62 @@ export const TicketTable: React.FC<TicketTableProps> = ({
       },
 
       {
+        key: 'createdBy',
+        headerName: 'Created by',
+        field: 'createdBy',
+        minWidth: 200,
+        cellRenderer: CreatedByCellRenderer,
+      },
+
+      {
+        key: 'board',
+        headerName: 'Board',
+        field: 'boardId',
+        minWidth: 160,
+        valueGetter: (params: ValueGetterParams<Ticket>) => {
+          const id = params.data?.boardId;
+          return (id && boardNamesById?.get(id)) || '';
+        },
+        cellRenderer: (params: ICellRendererParams<Ticket>) => (
+          <div className='flex items-center h-full'>
+            <TruncatedTooltip content={String(params.value || '—')}>
+              <span className='text-sm text-muted-foreground truncate'>{params.value || '—'}</span>
+            </TruncatedTooltip>
+          </div>
+        ),
+      },
+
+      {
+        key: 'channel',
+        headerName: 'Channel',
+        field: 'channelId',
+        minWidth: 160,
+        valueGetter: (params: ValueGetterParams<Ticket>) => {
+          const id = params.data?.channelId;
+          return (id && channelsById.get(id)?.name) || '';
+        },
+        cellRenderer: (params: ICellRendererParams<Ticket>) => (
+          <div className='flex items-center h-full'>
+            <TruncatedTooltip content={String(params.value || '—')}>
+              <span className='text-sm text-muted-foreground truncate'>{params.value || '—'}</span>
+            </TruncatedTooltip>
+          </div>
+        ),
+      },
+
+      {
+        key: 'type',
+        headerName: 'Type',
+        field: 'ticketType',
+        minWidth: 140,
+        cellRenderer: (params: ICellRendererParams<Ticket>) => (
+          <div className='flex items-center h-full'>
+            <span className='text-sm text-muted-foreground truncate'>{params.value || '—'}</span>
+          </div>
+        ),
+      },
+
+      {
         key: 'tags',
         headerName: 'Labels',
         editable: true,
@@ -712,6 +771,7 @@ export const TicketTable: React.FC<TicketTableProps> = ({
     onTitleClick,
     extraColumns,
     channelsById,
+    boardNamesById,
   ]);
 
   const handleBulkUpdate = useCallback(
@@ -809,6 +869,28 @@ export const TicketTable: React.FC<TicketTableProps> = ({
         </div>
       </div>
     </>
+  );
+};
+
+const CreatedByCellRenderer = (params: ICellRendererParams<Ticket>) => {
+  const creator = useUser(params.data?.createdBy || '');
+  if (!params.data) return null;
+  if (!creator) {
+    return <span className='text-muted-foreground'>—</span>;
+  }
+  return (
+    <div className='flex items-center gap-3 h-full'>
+      <Tooltip content={getUserDisplayName(creator)}>
+        <Avatar
+          userId={creator.id}
+          className='rounded-full size-6 flex items-center justify-center'
+          showActiveStatus={false}
+        />
+      </Tooltip>
+      <span className='text-muted-foreground truncate font-medium'>
+        {getUserDisplayName(creator)}
+      </span>
+    </div>
   );
 };
 

@@ -125,7 +125,7 @@ import {
   parseSlashCommandArtifactMessage,
   withSlashCommandArtifactClosed,
 } from '@xyne/shared';
-import { isBaselineCanvasType, sdlcTrackStatusSchema } from '@xyne/shared';
+import { SDLC_HUB_KNOWLEDGE_FOLDER, sdlcTrackStatusSchema } from '@xyne/shared';
 import {
   evaluateEta,
   buildEtaActivityIntents,
@@ -9971,12 +9971,16 @@ export function createMutators(
               (participant.role === CanvasRole.EDITOR || participant.role === CanvasRole.OWNER)) ||
             guestSharedRole === CanvasRole.EDITOR ||
             guestSharedRole === CanvasRole.OWNER;
-          const sdlcArtifact = await tx.run(
-            zql.sdlc_artifacts.where('artifactId', params.id).one(),
-          );
-          const isSdlcBaseline = isBaselineCanvasType(sdlcArtifact?.artifactType);
+          const canvasFolder = canvas.folderId
+            ? await tx.run(zql.canvas_folders.where('id', canvas.folderId).one())
+            : null;
+          const knowledgeChannel =
+            canvasFolder?.name === SDLC_HUB_KNOWLEDGE_FOLDER && canvasFolder.channelId
+              ? await tx.run(zql.channels.where('id', canvasFolder.channelId).one())
+              : null;
+          const isHubKnowledge = knowledgeChannel?.type === ChannelType.SDLC;
 
-          if (!canEdit && !(isChannelAdmin && (isMoveOperation || isSdlcBaseline))) {
+          if (!canEdit && !(isChannelAdmin && (isMoveOperation || isHubKnowledge))) {
             throw new Error('You do not have permission to edit this canvas');
           }
 
@@ -16153,6 +16157,7 @@ export function createMutators(
           autoDraftAgentSlug: z.string().optional().nullable(),
           metricsEnabled: z.boolean().optional(),
           frtStageNames: z.string().optional().nullable(),
+          metricsGuestVisibility: z.string().optional().nullable(),
           appWebhookDeliveryEnabled: z.boolean().optional(),
           deskReportEnabled: z.boolean().optional(),
           deskReportAgentSlug: z.string().optional().nullable(),
@@ -16172,6 +16177,7 @@ export function createMutators(
             autoDraftAgentSlug,
             metricsEnabled,
             frtStageNames,
+            metricsGuestVisibility,
             appWebhookDeliveryEnabled,
             deskReportEnabled,
             deskReportAgentSlug,
@@ -16194,6 +16200,7 @@ export function createMutators(
               ...(autoDraftAgentSlug !== undefined ? { autoDraftAgentSlug } : {}),
               ...(metricsEnabled !== undefined ? { metricsEnabled } : {}),
               ...(frtStageNames !== undefined ? { frtStageNames } : {}),
+              ...(metricsGuestVisibility !== undefined ? { metricsGuestVisibility } : {}),
               ...(appWebhookDeliveryEnabled !== undefined ? { appWebhookDeliveryEnabled } : {}),
               ...(deskReportEnabled !== undefined ? { deskReportEnabled } : {}),
               ...(deskReportAgentSlug !== undefined ? { deskReportAgentSlug } : {}),
@@ -16224,6 +16231,7 @@ export function createMutators(
               priorityClassificationThreshold: 0.5,
               metricsEnabled: metricsEnabled ?? false,
               frtStageNames: frtStageNames ?? null,
+              metricsGuestVisibility: metricsGuestVisibility ?? null,
               appWebhookDeliveryEnabled: appWebhookDeliveryEnabled ?? true,
               deskReportEnabled: deskReportEnabled ?? false,
               deskReportAgentSlug: deskReportAgentSlug ?? null,

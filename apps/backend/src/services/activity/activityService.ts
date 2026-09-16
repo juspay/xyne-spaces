@@ -506,6 +506,7 @@ export class ActivityService {
         data: {
           actorId: actorId,
           isRead: false,
+          updatedAt: new Date(), // intentional: re-surface in the feed
           ...(isThreadActivity !== undefined ? { isThreadActivity } : {}),
           ...(conversationSeenCutoffAt ? { conversationSeenCutoffAt } : {}),
           ...owned,
@@ -585,21 +586,23 @@ export class ActivityService {
   }
 
 
-  async updateReactionActivityActorIdOnlyV2(params: {       //using only in case of reaction deletion where updateAt is not to be updated
+  /** Re-points the reaction activity at the remaining reactor without re-surfacing it in the feed. */
+  async updateReactionActivityActorIdOnlyV2(params: {
     messageId: string;
     messageAuthorId: string;
     actorId: string;
   }): Promise<void> {
     const { messageId, messageAuthorId, actorId } = params;
 
-    await this.prisma.$executeRaw`
-      UPDATE "activities"
-      SET "actorId" = ${actorId}
-      WHERE "userId" = ${messageAuthorId}
-        AND "messageId" = ${messageId}
-        AND "actorAction" = 'added_v2'
-        AND "actionSource" = 'message'
-    `;
+    await this.prisma.activity.updateMany({
+      where: {
+        userId: messageAuthorId,
+        messageId,
+        actorAction: 'added_v2',
+        actionSource: 'message',
+      },
+      data: { actorId },
+    });
   }
 
 
@@ -652,6 +655,7 @@ export class ActivityService {
             isRead: false,
             messageId: latestReplyMessageId,
             actionSourceId: latestReplyMessageId,
+            updatedAt: new Date(), // intentional: re-surface in the feed
             ...(conversationSeenCutoffAt ? { conversationSeenCutoffAt } : {}),
             ...owned,
           },

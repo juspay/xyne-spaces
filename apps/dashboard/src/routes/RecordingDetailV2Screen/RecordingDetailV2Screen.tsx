@@ -1,5 +1,5 @@
 /**
-  The Xyne Scribe Details Screen 
+  The Xyne Scribe Details Screen
  */
 
 import { type ReactElement, useState, useEffect, useCallback, useMemo, useRef } from 'react';
@@ -47,6 +47,7 @@ import {
   Hashtag,
   SidebarRightClose,
   Share02,
+  ArrowLeft,
 } from '@xyne/icons';
 import { Button } from '../../components/ui/Button/Button';
 import { Dialog } from '../../components/ui/Dialog';
@@ -121,6 +122,9 @@ interface RecordingNavState {
   hasTranscript?: boolean;
 }
 
+// Where the embedded copy goes back to. The router shim prefixes the workspace id.
+const ACTIVITY_LIST_PATH = '/chat/activity';
+
 const AUDIO_POLL_INTERVAL_MS = 10_000;
 const AUDIO_POLL_MAX_ATTEMPTS = 30;
 // Audio is stitched shortly after a call ends. If a recording ended longer ago than
@@ -157,7 +161,18 @@ function isSameRecordingSnapshot(a: RecordingDetail, b: RecordingDetail): boolea
   }
 }
 
-export default function RecordingDetailV2Screen(): ReactElement {
+interface RecordingDetailV2ScreenProps {
+  /**
+   * Rendered inside the Activity panel's outlet (`/chat/activity/recording/:id`)
+   * rather than as its own page. The activity screen already supplies the app
+   * navigator and a list to go back to, so this copy drops both.
+   */
+  embedded?: boolean;
+}
+
+export default function RecordingDetailV2Screen({
+  embedded = false,
+}: RecordingDetailV2ScreenProps): ReactElement {
   const { isMobile } = usePlatform();
   const { recordingId } = useParams<{ recordingId: string }>();
   const navigate = useNavigate();
@@ -388,7 +403,9 @@ export default function RecordingDetailV2Screen(): ReactElement {
   // j/k keyboard navigation between recordings
   const recordingIds = navState?.recordingIds;
   const labelSuggestions = navState?.labelSuggestions ?? EMPTY_LABEL_SUGGESTIONS;
-  const backTo = navState?.from ?? '/recordings';
+  // Embedded, the only list behind this panel is the activity feed — the
+  // recordings list would be a detour the user never came through.
+  const backTo = embedded ? ACTIVITY_LIST_PATH : (navState?.from ?? '/recordings');
   const currentIndex = useMemo(
     () => (recordingId ? (recordingIds?.indexOf(recordingId) ?? -1) : -1),
     [recordingId, recordingIds],
@@ -653,9 +670,7 @@ export default function RecordingDetailV2Screen(): ReactElement {
       const data = await recordingService.getRecordingDetail(id);
       loadedRecordingIdRef.current = id;
       setRecording(prev =>
-        prev && data.durationMs === null && prev.durationMs !== null
-          ? { ...data, durationMs: prev.durationMs }
-          : data,
+        prev ? { ...prev, ...data, durationMs: data.durationMs ?? prev.durationMs } : data,
       );
     } catch (err) {
       logRecordingError('RecordingDetailV2Screen.loadRecording', err);
@@ -1063,7 +1078,7 @@ export default function RecordingDetailV2Screen(): ReactElement {
     >
       {/* Outside the scroller below, so it stays pinned. z-30 clears the sticky
           header's z-20 at widths where the centred column reaches the left edge. */}
-      {!isMobile && (
+      {!isMobile && !embedded && (
         <div className='absolute left-0 top-0 z-30 hidden h-[52px] w-fit md:block'>
           <AppNavigator />
         </div>
@@ -1083,30 +1098,54 @@ export default function RecordingDetailV2Screen(): ReactElement {
         <div className='mx-auto flex min-h-full w-full max-w-[860px] flex-col px-4 py-6'>
           {/* The only pinned row — the rest of the page scrolls under it. */}
           <div className='sticky top-0 z-20 -mx-4 -mt-6 flex items-center justify-between gap-3 bg-background px-4 pb-3 pt-6'>
-            <nav aria-label='Breadcrumb' className='min-w-0'>
-              <ol className='flex items-center gap-1.5 text-sm'>
-                <li>
-                  <button
-                    type='button'
-                    onClick={() => void navigate(backTo)}
-                    className='flex items-center gap-1.5 text-muted-foreground transition-colors hover:text-foreground duration-300'
-                    data-track-category='RecordingDetailV2'
-                    data-track-name='breadcrumb_recordings'
-                  >
-                    Recordings
-                  </button>
-                </li>
-                <li aria-hidden='true' className='text-muted-foreground'>
-                  /
-                </li>
-                {/* Plain text here — the breadcrumb is a navigation label, not a status. */}
-                <li className='truncate text-foreground'>
-                  {isGeneratingTitle ? 'Generating title…' : breadcrumbTitle}
-                </li>
-              </ol>
-            </nav>
+            {/* Mobile has no activity list beside this panel and no app navigator,
+                so the embedded copy would otherwise be a dead end. `replace` keeps
+                the feed from stacking a recording entry to bounce back into, the
+                way ThreadPannel's close does. */}
+            {embedded && isMobile && (
+              <Button
+                type='button'
+                variant='ghost'
+                size='iconSm'
+                onClick={() => void navigate(backTo, { replace: true })}
+                className='size-8 shrink-0 rounded-lg text-muted-foreground hover:text-foreground'
+                aria-label='Back to activity'
+                data-track-category='RecordingDetailV2'
+                data-track-name='back_to_activity'
+              >
+                <ArrowLeft className='size-4' aria-hidden='true' />
+              </Button>
+            )}
+            {/* Embedded, the activity list is the way back and the recordings list
+                was never open — a "Recordings /" crumb would point at a page the
+                user has not been to. */}
+            {!embedded && (
+              <nav aria-label='Breadcrumb' className='min-w-0'>
+                <ol className='flex items-center gap-1.5 text-sm'>
+                  <li>
+                    <button
+                      type='button'
+                      onClick={() => void navigate(backTo)}
+                      className='flex items-center gap-1.5 text-muted-foreground transition-colors hover:text-foreground duration-300'
+                      data-track-category='RecordingDetailV2'
+                      data-track-name='breadcrumb_recordings'
+                    >
+                      Recordings
+                    </button>
+                  </li>
+                  <li aria-hidden='true' className='text-muted-foreground'>
+                    /
+                  </li>
+                  {/* Plain text here — the breadcrumb is a navigation label, not a status. */}
+                  <li className='truncate text-foreground'>
+                    {isGeneratingTitle ? 'Generating title…' : breadcrumbTitle}
+                  </li>
+                </ol>
+              </nav>
+            )}
 
-            <div className='flex shrink-0 items-center gap-1'>
+            {/* ml-auto keeps the actions right-aligned when the breadcrumb is gone. */}
+            <div className='ml-auto flex shrink-0 items-center gap-1'>
               {canShare && (
                 <Tooltip content='Share' side='bottom'>
                   <Button

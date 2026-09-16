@@ -96,7 +96,9 @@ export const ActivityActorPicker = ({
           <span className='flex size-[30px] shrink-0 items-center justify-center rounded-full border border-dashed border-foreground/30'>
             <UserUser02 size={14} className='text-muted-foreground' />
           </span>
-          <span className='min-w-0 flex-1 truncate text-left'>{anyoneLabel}</span>
+          <span className='min-w-0 flex-1 truncate text-left'>
+            {selectedUserId === null ? anyoneLabel : 'Clear filter'}
+          </span>
           {selectedUserId === null && (
             <CheckTickSingle size={14} className='shrink-0 text-primary' />
           )}

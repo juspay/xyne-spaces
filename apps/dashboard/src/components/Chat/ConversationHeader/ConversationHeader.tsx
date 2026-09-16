@@ -306,6 +306,7 @@ const ConversationHeader = ({
                   statusEmoji={dmUser?.statusEmoji}
                   statusContent={dmUser?.statusContent}
                   statusExpiryAt={dmUser?.statusExpiryAt}
+                  activityStatus={dmUser?.activityStatus}
                   size='md'
                   showOnHover={true}
                 />
