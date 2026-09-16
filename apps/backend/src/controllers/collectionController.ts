@@ -470,8 +470,11 @@ uploadFiles = async (req: Request, res: Response): Promise<void> => {
         // knowing the id as the access credential, matching "anyone with the link
         // can view" — grants VIEWER only, so edit-only actions still 403 right
         // after this via the caller's own role check.
+        // No log line here: it interpolated the caller-supplied collectionId into
+        // the message (CodeQL js/log-injection), and the grant is already recorded
+        // durably — grantViewerAccessViaLink upserts a collection_permissions row
+        // carrying collectionId, userId, workspaceId, role and createdAt.
         await this.collectionRepository.grantViewerAccessViaLink(collectionId, userId, workspaceId);
-        logger.info(`[COLLECTION-ACCESS] Auto-granted VIEWER to user ${userId} on collection ${collectionId} via direct link access`);
         return { role: CollectionRole.VIEWER, collection };
     }
 
