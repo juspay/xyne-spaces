@@ -20,6 +20,13 @@
  *
  * The source PDF lives in the same bucket outside the staging prefix — read it
  * with readSourceBuffer().
+ *
+ * RETENTION — needs a bucket lifecycle rule (infra, not this repo): delete
+ * objects under docling-staging/ after ~7 days. Staged objects hold
+ * document-derived content, and while the happy path (writer) and the terminal
+ * failure path both call cleanupStage, cleanup is best-effort and warn-only
+ * with no retry, so orphans survive a cleanup that fails outright or a file
+ * recovered by the sync fallback. The rule bounds how long those linger.
  */
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
