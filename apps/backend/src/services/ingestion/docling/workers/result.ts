@@ -31,6 +31,7 @@ import {
   createBlockingRedisConnection,
 } from '../scheduler/permits'
 import { resultKey, writeJson } from '../scheduler/storage'
+import { isOwnSchedulerJobId } from '../scheduler/jobId'
 import { processingResultFromDoclingResponse, type DoclingResponse } from './resultMapping'
 import { runSyncFallbackForFailedFile } from '../../processors/syncFallback'
 
@@ -65,8 +66,19 @@ const failSchedulerFile = async (fileId: string, message: string) => {
 const handleResultEvent = async (event: DoclingResultEvent) => {
   const jobId = event.jobId
   if (!jobId) return
+  // The results stream is shared with every other environment on this Redis, so
+  // events for their jobs land here too. Drop those before touching the DB —
+  // they are expected traffic, not an error. (Each environment needs its own
+  // DOCLING_SCHEDULER_RESULT_GROUP, or one steals and acks the other's events.)
+  if (!isOwnSchedulerJobId(jobId)) return
   const part = await getDoclingPartByJobId(jobId)
-  if (!part) return
+  if (!part) {
+    logger.warn('[DOCLING_SCHEDULER][result] no part for job id — dropping event', {
+      jobId,
+      fileId: event.fileId,
+    })
+    return
+  }
   const t1 = part.submittedAt ? part.submittedAt.getTime() : null
   const t2 = Date.now()
   const ocrMs = t1 !== null ? t2 - t1 : null

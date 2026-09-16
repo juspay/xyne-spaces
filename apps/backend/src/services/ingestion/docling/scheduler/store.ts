@@ -20,6 +20,7 @@ import { Prisma } from '@prisma/client';
 import { IngestionStatus } from '@xyne/shared';
 import { maybeNotifyCollectionIngestionComplete } from '@/services/collectionIngestionNotifier';
 import { cleanupStage } from './storage';
+import { jobIdEnvSegment } from './jobId';
 import {
   DOCLING_FILE_STATUS,
   DOCLING_PART_STATUS,
@@ -851,7 +852,7 @@ export const claimDoclingPartsForSubmitBatch = async (
       UPDATE non_zero.docling_async_parts p
       SET status = ${DOCLING_PART_STATUS.Submitting},
           attempt_count = p.attempt_count + 1,
-          current_job_id = 'docling:' || p.file_id || ':part:' || p.part_index || ':attempt:' || ${attemptToken} || '-' || selected.selected_rank::text,
+          current_job_id = 'docling:' || ${jobIdEnvSegment()} || p.file_id || ':part:' || p.part_index || ':attempt:' || ${attemptToken} || '-' || selected.selected_rank::text,
           lease_owner = ${input.workerId},
           lease_until = NOW() + (${input.leaseMs}::int * interval '1 millisecond'),
           submit_permit_id = selected_permits.permit_id,

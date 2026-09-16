@@ -63,6 +63,7 @@ import {
   partKey,
   isMissingObjectError,
 } from '../scheduler/storage';
+import { isOwnSchedulerJobId } from '../scheduler/jobId';
 import { stagePdfParts } from '../scheduler/pdfSplitter';
 import { submitDoclingAsyncJob } from '../runtime/client';
 
@@ -1107,9 +1108,6 @@ const reconcileOcrSubmitPermits = async (): Promise<number> => {
   return orphans.length;
 };
 
-const isSchedulerDoclingJobId = (jobId: string) =>
-  /^docling:[^:]+:part:\d+:attempt:[^:]+$/.test(jobId);
-
 const reconcileWrapperGlobalActiveKeys = async (): Promise<number> => {
   if (!wrapperGlobalActiveKey) return 0;
   const { redisService } = await import('@/services/redisService');
@@ -1120,11 +1118,14 @@ const reconcileWrapperGlobalActiveKeys = async (): Promise<number> => {
   const jobIds = await client.zrange(wrapperGlobalActiveKey, 0, permitReconcileBatch - 1);
   if (jobIds.length === 0) return 0;
 
-  const schedulerJobIds = jobIds.filter(isSchedulerDoclingJobId);
-  if (schedulerJobIds.length === 0) return 0;
+  // Only ids this environment minted (plus untagged legacy ones). The set is
+  // shared with every other environment pointed at this wrapper, and "not live
+  // in my database" is exactly what another environment's live job looks like.
+  const ownJobIds = jobIds.filter(isOwnSchedulerJobId);
+  if (ownJobIds.length === 0) return 0;
 
-  const liveJobIds = await listLiveDoclingCurrentJobIds(schedulerJobIds);
-  const staleJobIds = schedulerJobIds.filter((id) => !liveJobIds.has(id));
+  const liveJobIds = await listLiveDoclingCurrentJobIds(ownJobIds);
+  const staleJobIds = ownJobIds.filter((id) => !liveJobIds.has(id));
   if (staleJobIds.length === 0) return 0;
 
   await client.zrem(wrapperGlobalActiveKey, ...staleJobIds);

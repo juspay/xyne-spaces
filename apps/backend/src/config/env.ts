@@ -565,7 +565,18 @@ const envSchema = Joi.object({
   // distinct value per deployment environment (prod vs pre-prod) if they share a Redis
   // instance, or the two environments' semaphores will share capacity accounting.
   DOCLING_PERMIT_KEY_PREFIX: Joi.string().default('docling:scheduler:permit'),
-  // Redis results stream + consumer group (wrapper publishes to docling:results)
+  // Owner tag stamped into every OCR job id this deployment mints. MUST be set
+  // to a distinct value per environment (prod vs pre-prod) when they share a
+  // Redis / OCR wrapper, or each environment's reaper will treat the other's
+  // in-flight jobs as stale and delete them from the wrapper's global active
+  // set. Empty (the default) means untagged: the pre-isolation format, owned by
+  // whichever environment finds it. See scheduler/jobId.ts.
+  DOCLING_ENV_TAG: Joi.string().allow('').default(''),
+  // Redis results stream + consumer group (wrapper publishes to docling:results).
+  // The STREAM is a shared wire protocol with the wrapper, but the consumer GROUP
+  // is ours: Redis fans every event out to every group, so giving each environment
+  // its own group name is what stops pre-prod consuming (and acking) a prod result
+  // that prod then never sees. Set DOCLING_SCHEDULER_RESULT_GROUP per environment.
   DOCLING_RESULTS_STREAM: Joi.string().default('docling:results'),
   DOCLING_RESULT_KEY_PREFIX: Joi.string().default('docling:result'),
   DOCLING_SCHEDULER_RESULT_GROUP: Joi.string().default('xyne-spaces-scheduler'),
@@ -1265,6 +1276,7 @@ export const config = {
     submitPermits: envVars.DOCLING_ASYNC_SUBMIT_PERMITS as number,
     submitPermitLeaseTtlMs: envVars.DOCLING_ASYNC_SUBMIT_PERMIT_LEASE_TTL_MS as number,
     permitKeyPrefix: envVars.DOCLING_PERMIT_KEY_PREFIX as string,
+    envTag: envVars.DOCLING_ENV_TAG as string,
     resultsStream: envVars.DOCLING_RESULTS_STREAM as string,
     resultKeyPrefix: envVars.DOCLING_RESULT_KEY_PREFIX as string,
     resultGroup: envVars.DOCLING_SCHEDULER_RESULT_GROUP as string,
