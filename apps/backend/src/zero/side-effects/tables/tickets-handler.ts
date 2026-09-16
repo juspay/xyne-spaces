@@ -300,6 +300,26 @@ export class TicketsSideEffectHandler extends BaseSideEffectHandler {
       }
     }
 
+    // On a newly linked Mobius release id, backfill the feed from history
+    // (fire-and-forget, idempotent).
+    const prevMobiusReleaseId = (prev as unknown as Record<string, unknown>).mobiusReleaseId;
+    if (
+      typeof args.mobiusReleaseId === 'string' &&
+      args.mobiusReleaseId.length > 0 &&
+      args.mobiusReleaseId !== prevMobiusReleaseId
+    ) {
+      const releaseId = args.mobiusReleaseId;
+      const workspaceId = ticket.workspaceId;
+      // Lazy import avoids a circular-import TDZ during boot.
+      void import('@/services/mobiusWebhookService')
+        .then(({ mobiusWebhookService }) =>
+          mobiusWebhookService.backfillFromHistory(ticketId, releaseId, workspaceId),
+        )
+        .catch((error) =>
+          logger.error('[TicketsSideEffectHandler] Mobius backfill failed', { ticketId, error }),
+        );
+    }
+
     // Fetch all role assignments (manager, team lead, dev, qa, pr reviewer, etc.)
     // and board form field users of type USER
     const extraActors = await fetchTicketActors(ticketId);

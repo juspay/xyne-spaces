@@ -153,6 +153,7 @@ model Ticket {
   aiSubCategory        String?           // Sub-category from AI classification
   aiPriority           String?           // Priority detected by AI (LOW, MEDIUM, HIGH, CRITICAL)
   emailReplyEnabled    Boolean           @default(true) // Whether email replies are enabled for this ticket
+  mobiusReleaseId      String?           // Mobius release id linked to this ticket
 
   // Relations
   createdByUser      User                   @relation("TicketCreatedBy", fields: [createdBy], references: [id])
@@ -203,6 +204,7 @@ model Ticket {
   @@index([workspaceId, createdBy, statusV2, isArchived, createdAt(sort: Desc), id])
   @@index([xyneId])
   @@unique([workspaceId, xyneId])
+  @@unique([workspaceId, mobiusReleaseId])
   @@map("tickets")
   @@schema("public")
 }

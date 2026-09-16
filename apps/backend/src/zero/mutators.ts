@@ -5900,6 +5900,7 @@ export function createMutators(
           metadata: z.any().optional(),
           isArchived: z.boolean().optional(),
           kanbanPosition: z.string().nullable().optional(),
+          mobiusReleaseId: z.string().nullable().optional(),
           updatedAt: z.number(),
           // Optional optimistic-concurrency guard + audit reason for a manual `eta` edit.
         }),
@@ -5965,6 +5966,23 @@ export function createMutators(
           const now = Date.now();
           if (params.eta !== undefined && params.eta !== null && params.eta < now) {
             throw new Error("ETA cannot be set to a past date");
+          }
+
+          // Normalize (empty → null) and enforce one release per ticket.
+          if (params.mobiusReleaseId !== undefined) {
+            const normalized = params.mobiusReleaseId ? params.mobiusReleaseId.trim() : null;
+            params.mobiusReleaseId = normalized;
+            if (normalized && normalized !== ticket.mobiusReleaseId) {
+              const existing = await tx.run(
+                zql.tickets
+                  .where("workspaceId", ticket.workspaceId)
+                  .where("mobiusReleaseId", normalized)
+                  .one()
+              );
+              if (existing && existing.id !== ticket.id) {
+                throw new Error(`Mobius release ${normalized} is already linked to ticket ${existing.xyneId}`);
+              }
+            }
           }
 
           if (params.isArchived === true && !ticket.isArchived) {
@@ -6042,7 +6060,7 @@ export function createMutators(
           const updateData: any = { updatedAt: params.updatedAt, updatedBy: authData.sub };
           let latestTicketMetadata: unknown = ticket.metadata;
           const activities: any[] = [];
-          const fields = ['title', 'description', 'statusV2', 'priority', 'stageName', 'assignedTo', 'userGroupId', 'eta', 'boardId', 'metadata', 'isArchived', 'kanbanPosition', 'ticketType'] as const;
+          const fields = ['title', 'description', 'statusV2', 'priority', 'stageName', 'assignedTo', 'userGroupId', 'eta', 'boardId', 'metadata', 'isArchived', 'kanbanPosition', 'ticketType', 'mobiusReleaseId'] as const;
           const oldAssignedTo = ticket.assignedTo;
           const oldBoardId = ticket.boardId;
 
@@ -6304,7 +6322,8 @@ export function createMutators(
           for (const field of fields) {
             if (params[field] !== undefined && params[field] !== ticket[field]) {
               updateData[field] = params[field];
-              if (field === 'kanbanPosition') continue;
+              // No field-change activity: mobiusReleaseId surfaces via MOBIUS_RELEASE_UPDATE.
+              if (field === 'kanbanPosition' || field === 'mobiusReleaseId') continue;
               let activityType = field.toUpperCase();
               if (field === 'stageName') activityType = 'STATUS';
               if (field === 'statusV2') activityType = 'STATUS';

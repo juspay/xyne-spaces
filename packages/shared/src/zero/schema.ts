@@ -199,6 +199,7 @@ export const ticketTable = table('tickets')
     aiPriority: string().optional(),
     firstRespondedAt: number().optional(),
     emailReplyEnabled: boolean(),
+    mobiusReleaseId: string().optional(),
   })
   .primaryKey('id');
 

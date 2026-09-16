@@ -1055,6 +1055,12 @@ export class TicketRepository {
     });
   }
 
+  async getTicketByMobiusReleaseId(mobiusReleaseId: string, workspaceId: string) {
+    return await prisma.ticket.findUnique({
+      where: { workspaceId_mobiusReleaseId: { workspaceId, mobiusReleaseId } }
+    });
+  }
+
   async getTicketHistory(ticketId: string, limit = 100) {
     return await prisma.ticketActivity.findMany({
       where: { ticketId },

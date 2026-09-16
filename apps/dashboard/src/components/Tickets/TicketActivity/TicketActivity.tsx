@@ -1,5 +1,5 @@
 import { ReactElement, ReactNode, useMemo, useState } from 'react';
-import { Archive } from 'lucide-react';
+import { Archive, Rocket } from 'lucide-react';
 import { SwapArrowVertical as ArrowUpDown, KanbanBoard as SquareKanban } from '@xyne/icons';
 import {
   Activity,
@@ -73,6 +73,13 @@ type ActivityValue = Partial<
       rating?: string;
       score?: number | null;
       isAutomation?: boolean;
+      // Mobius release-update activity fields
+      eventName?: string;
+      status?: string;
+      staggerPercent?: number;
+      product?: string;
+      version?: string;
+      releaseId?: string;
       isAiClassification?: boolean;
     }
 >;
@@ -582,6 +589,18 @@ export const getActivityDescription = (
       };
     }
 
+    case ActivityType.MOBIUS_RELEASE_UPDATE:
+      return {
+        description: 'Mobius release',
+        details: (
+          <>
+            <span className='font-semibold'>{value?.eventName || 'update'}</span>
+            {value?.status ? ` · ${value.status}` : ''}
+            {typeof value?.staggerPercent === 'number' ? ` · ${value.staggerPercent}%` : ''}
+          </>
+        ),
+      };
+
     case ActivityType.BOARD: {
       const oldBoard = boards?.find(b => b.id === value?.oldValue);
       const newBoard = boards?.find(b => b.id === value?.newValue);
@@ -765,6 +784,8 @@ export const getActivityIcon = (activity: TicketActivityType): ReactElement => {
     case ActivityType.SUBTICKET_LINKED:
     case ActivityType.SUBTICKET_UNLINKED:
       return <FileText size={12} className='text-blue-600' />;
+    case ActivityType.MOBIUS_RELEASE_UPDATE:
+      return <Rocket size={12} className='text-blue-600' />;
     case ActivityType.BOARD:
       return <SquareKanban size={12} className='text-purple-600' />;
     case ActivityType.IS_ARCHIVED:

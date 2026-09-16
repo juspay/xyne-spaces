@@ -615,6 +615,8 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
   const stageEtaInputRef = useRef<HTMLInputElement>(null);
   const [editingETA, setEditingETA] = useState(false);
   const [etaValue, setEtaValue] = useState('');
+  const [editingMobiusReleaseId, setEditingMobiusReleaseId] = useState(false);
+  const [mobiusReleaseIdValue, setMobiusReleaseIdValue] = useState('');
   const etaInputRef = useRef<HTMLInputElement>(null);
   const [showFullDescription, setShowFullDescription] = useState(false);
   const [needsReadMore, setNeedsReadMore] = useState(false);
@@ -2261,6 +2263,22 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
       },
       'Failed to update team',
     );
+  };
+
+  const handleSaveMobiusReleaseId = (): void => {
+    const next = mobiusReleaseIdValue.trim();
+    const current = ticket.mobiusReleaseId ?? '';
+    if (next !== current) {
+      void applyTicketUpdate(
+        {
+          id: ticket.id,
+          mobiusReleaseId: next, // empty string clears the link (normalized to null)
+          updatedAt: Date.now(),
+        },
+        'Failed to update Mobius release ID',
+      );
+    }
+    setEditingMobiusReleaseId(false);
   };
 
   const handleStageChange = (stageName: string): void => {
@@ -3997,6 +4015,64 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
             <TicketKeyValuePair
               ticketKey='Channel'
               value={<p>{channel ? `${channel.name}` : 'XyneSpace'}</p>}
+            />
+
+            {/* Mobius Release ID */}
+            <TicketKeyValuePair
+              ticketKey='Mobius Release ID'
+              value={
+                editingMobiusReleaseId ? (
+                  <input
+                    autoFocus
+                    type='text'
+                    value={mobiusReleaseIdValue}
+                    placeholder='Paste Mobius release id'
+                    onChange={e => setMobiusReleaseIdValue(e.target.value)}
+                    onBlur={handleSaveMobiusReleaseId}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter') handleSaveMobiusReleaseId();
+                      if (e.key === 'Escape') {
+                        setMobiusReleaseIdValue(ticket.mobiusReleaseId ?? '');
+                        setEditingMobiusReleaseId(false);
+                      }
+                    }}
+                    className='text-sm text-foreground bg-background border border-input rounded px-2 py-1 outline-none focus:border-border w-full max-w-[280px]'
+                    data-testid='ticket-detail-mobius-release-id-input'
+                    data-track-category='Tickets'
+                    data-track-name='EditMobiusReleaseId'
+                  />
+                ) : (
+                  <div
+                    role='button'
+                    tabIndex={0}
+                    data-testid='ticket-detail-mobius-release-id-display'
+                    data-track-category='Tickets'
+                    data-track-name='LinkMobiusRelease'
+                    className='inline-flex items-center gap-1.5 text-sm cursor-pointer hover:bg-muted px-2 py-1 -mx-2 rounded-md border border-transparent hover:border-border transition-colors'
+                    onClick={() => {
+                      setMobiusReleaseIdValue(ticket.mobiusReleaseId ?? '');
+                      setEditingMobiusReleaseId(true);
+                    }}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        setMobiusReleaseIdValue(ticket.mobiusReleaseId ?? '');
+                        setEditingMobiusReleaseId(true);
+                      }
+                    }}
+                  >
+                    <span
+                      className={
+                        ticket.mobiusReleaseId
+                          ? 'text-foreground font-mono break-all'
+                          : 'text-muted-foreground'
+                      }
+                    >
+                      {ticket.mobiusReleaseId || 'Link Mobius release'}
+                    </span>
+                  </div>
+                )
+              }
             />
 
             {/* ETA */}
