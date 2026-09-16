@@ -23,8 +23,8 @@ import { ParticipantInfo_Kind } from '@livekit/protocol';
 import { emitCallEnded, emitCallStarted } from '@/automations/triggers/call.trigger';
 import { noteTakerWebhookController } from '@/controllers/noteTakerWebhookController';
 import { buildCallInviteUrl } from '@/utils/urlUtils';
-import { validateOwnerInChannel } from '@/sdlc/entityLinkService';
-import type { EntityLinkOwner } from '@xyne/shared/sdlc';
+import { validateOwnerInChannel, resolveItemTrackId } from '@/sdlc/entityLinkService';
+import { SDLC_TRACK_FLAT_RELATION, type EntityLinkOwner } from '@xyne/shared/sdlc';
 
 /** The owners a call may be filed against; mirrors sdlcCallLinkSchema. */
 const SDLC_CALL_OWNER_TYPES: readonly string[] = [
@@ -574,6 +574,38 @@ class LiveKitWebhookController {
                 ],
                 skipDuplicates: true,
               });
+              // A conversation filed against an item is also filed against the
+              // item's track, the way a message-started one is through
+              // entityLinkContext.trackRollUp. Without this edge the call's
+              // conversation exists but never appears in the track's list.
+              if (
+                sdlcLink.ownerType === 'FOLDER' ||
+                sdlcLink.ownerType === 'ATTACHMENT' ||
+                sdlcLink.ownerType === 'LINK'
+              ) {
+                const rollUpTrackId = await resolveItemTrackId(
+                  this.db,
+                  sdlcLink.ownerType,
+                  sdlcLink.ownerId
+                );
+                if (rollUpTrackId) {
+                  await this.db.sdlcEntityLink.createMany({
+                    data: [
+                      {
+                        workspaceId: linkWorkspaceId,
+                        channelId,
+                        sourceType: 'TRACK',
+                        sourceId: rollUpTrackId,
+                        targetType: 'CONVERSATION',
+                        targetId: conversationId,
+                        relationType: SDLC_TRACK_FLAT_RELATION,
+                        createdBy,
+                      },
+                    ],
+                    skipDuplicates: true,
+                  });
+                }
+              }
               if (existingConversationId) {
                 await activityService.fillSdlcOwner(conversationId, channelId);
               }
