@@ -2,10 +2,15 @@ import Redis, { type RedisOptions } from 'ioredis';
 import { redisService } from '@/services/redisService';
 import { logger } from '@/utils/logger';
 import { RedisStreamStore, compareStreamId } from './redisStore';
-import type { CompactedRow } from './streamState';
+import type { CompactedRow, StreamDiff } from './streamState';
 import type { AclGate } from './aclGate';
+import { allPkFields } from './clientSchema';
+import { seedRowLevel, routeDelta, projectDeltaForUser, type RowLevelMeta } from './rowLevelRouting';
 import { obsEmit } from './obs';
 import { SerialQueue } from './serialQueue';
+
+/** PK fields per table, for keying rows/deletes in the row-level owner map. Static (schema-derived). */
+const PK = allPkFields();
 
 /** Extract a small summary of a fan-out payload for observability. */
 function summarize(payload: unknown): Record<string, unknown> {
@@ -62,9 +67,44 @@ interface ClientSub {
  *   - a GRANT delta → re-evaluates the ACL gate for clients on that channel (live
  *     admit/revoke). Admission = `gate.evaluate` against the grant snapshots.
  */
+/**
+ * A row-level subscriber — one user on a workspace instance. No gate/grants: the ACL is reproduced by
+ * routing each row to `row[routeColumn]`, so a client sees only its own rows. Delivery is per-user
+ * (payloads differ per user) → NO socket.io room broadcast, unlike the gate path.
+ */
+interface RowLevelClient {
+  id: string;
+  socket: SyncSocket;
+  userId: string;
+  workspaceId: string;
+  dataInstanceKey: string;
+  /** Client's last applied op-stream offset — resume (puts-only) instead of a full snapshot. */
+  sinceOffset?: string;
+  /** Snapshot/resume delivered — only then does the client receive live per-user deltas. */
+  hydrated: boolean;
+}
+
+/** Live per-instance row-level state: the query shape + the `rowKey → ownerUserId` map (R-2). */
+interface RowLevelInstance {
+  meta: RowLevelMeta;
+  /** rowKey → ownerUserId, maintained at every put/del; rebuilt from the snapshot on (re)seed. */
+  owner: Map<string, string>;
+  /** Has the owner map been seeded from a snapshot yet? Reset on a `cleared` boundary. */
+  seeded: boolean;
+}
+
 export class Fanout {
-  readonly #store = new RedisStreamStore();
+  readonly #store: RedisStreamStore;
   readonly #dataSubs = new Map<string, Set<ClientSub>>();
+  /** instanceKey → its row-level state (present iff the instance is row-level, not gate). */
+  readonly #rowLevel = new Map<string, RowLevelInstance>();
+  /** row-level instanceKey → its clients. */
+  readonly #rowLevelSubs = new Map<string, Set<RowLevelClient>>();
+  /** row-level instanceKey → userId → that user's clients (O(1) per-user delta targeting). */
+  readonly #rowLevelByUser = new Map<string, Map<string, Set<RowLevelClient>>>();
+  /** row-level instanceKey → per-user hydration buckets at a stream head (mass-reconnect memo, bounded
+   *  per-instance: one entry, dropped when the instance empties — the P5 snapshot-memo rider). */
+  readonly #rowLevelBuckets = new Map<string, { head: string; buckets: Map<string, CompactedRow[]> }>();
   /** dataInstanceKey → userId → that user's ClientSubs on the instance (O(1) per-user targeting). */
   readonly #byUser = new Map<string, Map<string, Set<ClientSub>>>();
   readonly #grantToData = new Map<string, Set<string>>();
@@ -93,8 +133,18 @@ export class Fanout {
    *  wired) → per-client fallback below. */
   #broadcast: SyncBroadcast | null = null;
 
+  /** `store` is injectable for tests (a fake stream store); production uses the real Redis-backed one. */
+  constructor(store: RedisStreamStore = new RedisStreamStore()) {
+    this.#store = store;
+  }
+
   setBroadcast(fn: SyncBroadcast): void {
     this.#broadcast = fn;
+  }
+
+  /** Test seam: await all in-flight per-instance dispatch/hydrate jobs (they run on the serial queue). */
+  async drainDispatch(): Promise<void> {
+    await this.#dispatchQueue.drain();
   }
 
   start(): void {
@@ -135,7 +185,49 @@ export class Fanout {
     this.#enqueueRegate(client.dataInstanceKey, () => this.#regate(client));
   }
 
+  /**
+   * Register a row-level subscriber: one user on a workspace instance. No gate/grants — the client is
+   * admitted by construction (routing == ACL) and hydrated with ONLY its own rows. `meta` is the query
+   * shape (rootTable/routeColumn/childLinks) the R2 gateway derives; the FIRST client establishes the
+   * instance's live owner-map state.
+   */
+  async addRowLevelClient(sub: {
+    id: string;
+    socket: SyncSocket;
+    userId: string;
+    workspaceId: string;
+    dataInstanceKey: string;
+    sinceOffset?: string;
+    meta: RowLevelMeta;
+  }): Promise<void> {
+    const client: RowLevelClient = {
+      id: sub.id,
+      socket: sub.socket,
+      userId: sub.userId,
+      workspaceId: sub.workspaceId,
+      dataInstanceKey: sub.dataInstanceKey,
+      sinceOffset: sub.sinceOffset,
+      hydrated: false,
+    };
+    if (!this.#rowLevel.has(sub.dataInstanceKey)) {
+      this.#rowLevel.set(sub.dataInstanceKey, { meta: sub.meta, owner: new Map(), seeded: false });
+    }
+    this.#setAdd(this.#rowLevelSubs, sub.dataInstanceKey, client);
+    this.#rowLevelByUserAdd(client);
+    await this.#ensureCursorHead(sub.dataInstanceKey);
+    // Serialize the initial hydrate onto the instance's stream queue (same key as #dispatchRowLevel), so
+    // it can't race a concurrent dispatch mutating/seeding the owner map — the row-level analog of the
+    // gate path enqueuing #regate. Hydrate now if materialized; else stay deferred (the dispatch loop
+    // hydrates the moment a non-cleared delta lands — same cold-instance handling as the gate path).
+    this.#dispatchQueue.enqueue(streamKey(sub.dataInstanceKey), () => this.#tryHydrateRowLevel(client));
+  }
+
   removeClient(clientId: string, dataInstanceKey: string): void {
+    // Row-level instances have their own client set + owner-map lifecycle.
+    if (this.#rowLevel.has(dataInstanceKey)) {
+      this.#removeRowLevelClient(clientId, dataInstanceKey);
+      return;
+    }
     const subs = this.#dataSubs.get(dataInstanceKey);
     if (!subs) return;
     let departed: ClientSub | undefined;
@@ -192,6 +284,48 @@ export class Fanout {
     set.delete(client);
     if (set.size === 0) byU!.delete(client.userId);
     if (byU!.size === 0) this.#byUser.delete(client.dataInstanceKey);
+  }
+
+  #rowLevelByUserAdd(client: RowLevelClient): void {
+    let byU = this.#rowLevelByUser.get(client.dataInstanceKey);
+    if (!byU) this.#rowLevelByUser.set(client.dataInstanceKey, (byU = new Map()));
+    this.#setAdd(byU, client.userId, client);
+  }
+
+  #rowLevelByUserDelete(client: RowLevelClient): void {
+    const byU = this.#rowLevelByUser.get(client.dataInstanceKey);
+    const set = byU?.get(client.userId);
+    if (!set) return;
+    set.delete(client);
+    if (set.size === 0) byU!.delete(client.userId);
+    if (byU!.size === 0) this.#rowLevelByUser.delete(client.dataInstanceKey);
+  }
+
+  #removeRowLevelClient(clientId: string, instanceKey: string): void {
+    const subs = this.#rowLevelSubs.get(instanceKey);
+    if (!subs) return;
+    for (const s of subs)
+      if (s.id === clientId) {
+        subs.delete(s);
+        this.#rowLevelByUserDelete(s);
+      }
+    if (subs.size === 0) {
+      // Last client gone → drop the instance's live state and stop tailing its stream.
+      this.#rowLevelSubs.delete(instanceKey);
+      this.#rowLevel.delete(instanceKey);
+      this.#rowLevelBuckets.delete(instanceKey);
+      this.#cursors.delete(streamKey(instanceKey));
+    }
+  }
+
+  /** Per-client emission for row-level (no room broadcast — payloads differ per user). Suppresses a
+   *  stray emit to a client that unsubscribed during an await window (mirrors the gate-path #emit). */
+  #emitRowLevel(client: RowLevelClient, event: string, payload: unknown): void {
+    if (!this.#rowLevelSubs.get(client.dataInstanceKey)?.has(client)) return;
+    if (client.socket.connected) {
+      client.socket.emit(event, payload);
+      obsEmit('fanout', { event, socketId: client.id, userId: client.userId, ...summarize(payload) });
+    }
   }
 
   #setAdd<T>(map: Map<string, Set<T>>, key: string, value: T): void {
@@ -392,6 +526,13 @@ export class Fanout {
     const version = vIdx >= 0 ? fields[vIdx + 1] : undefined;
     const instanceKey = instanceOfStream(key);
 
+    // Row-level instances take a wholly separate path: per-user demux (routeColumn), no gate, no room
+    // broadcast (payloads differ per user). Serialized on the same per-stream queue as the gate path.
+    if (this.#rowLevel.has(instanceKey)) {
+      await this.#dispatchRowLevel(instanceKey, id, diff, version);
+      return;
+    }
+
     const dataSubs = this.#dataSubs.get(instanceKey);
     if (dataSubs) {
       const delta = { instanceKey, upserts: diff?.upserts ?? [], deletes: diff?.deletes ?? [], offset: id, version };
@@ -485,6 +626,162 @@ export class Fanout {
         });
       }
     }
+  }
+
+  // ── Row-level path ────────────────────────────────────────────────────────────────────────────
+
+  /** Seed the live owner map from the instance snapshot on first use / after a reset. Idempotent; any
+   *  overlap with deltas re-read past the seed head is an idempotent re-apply (put=set, del=forget). */
+  async #ensureSeededRowLevel(instanceKey: string): Promise<void> {
+    const inst = this.#rowLevel.get(instanceKey);
+    if (!inst || inst.seeded) return;
+    const rows = await this.#store.snapshot(instanceKey);
+    inst.owner = seedRowLevel(rows, inst.meta, PK).ownerMap;
+    inst.seeded = true;
+  }
+
+  async #dispatchRowLevel(
+    instanceKey: string,
+    id: string,
+    diff: { upserts?: unknown[]; deletes?: unknown[]; cleared?: boolean } | undefined,
+    version: string | undefined,
+  ): Promise<void> {
+    const inst = this.#rowLevel.get(instanceKey);
+    const subs = this.#rowLevelSubs.get(instanceKey);
+    if (!inst || !subs) return;
+
+    // A `cleared` reset: the instance re-materializes from scratch. Drop the owner map + bucket memo and
+    // mark everyone unhydrated, then re-hydrate whoever the (possibly re-materialized) instance can serve
+    // now; a still-cold instance defers to the next non-cleared delta (same as the initial cold path).
+    if (diff?.cleared) {
+      inst.owner = new Map();
+      inst.seeded = false;
+      this.#rowLevelBuckets.delete(instanceKey);
+      for (const c of subs) c.hydrated = false;
+      for (const c of [...subs]) await this.#tryHydrateRowLevel(c);
+      return;
+    }
+
+    await this.#ensureSeededRowLevel(instanceKey);
+    const live = this.#rowLevel.get(instanceKey);
+    if (!live) return; // torn down during the await
+    const streamDiff: StreamDiff = {
+      upserts: (diff?.upserts ?? []) as StreamDiff['upserts'],
+      deletes: (diff?.deletes ?? []) as string[],
+      cleared: false,
+    };
+    const { perUser, unroutablePuts, unroutableDels } = routeDelta(streamDiff, live.owner, live.meta, PK);
+
+    // Deliver each owner's slice to that owner's HYDRATED clients (a deferred client's snapshot below
+    // already includes this delta, so it must not also receive it — no double-delivery).
+    for (const [userId, ud] of perUser) {
+      if (ud.upserts.length === 0 && ud.deletes.length === 0) continue;
+      const userClients = this.#rowLevelByUser.get(instanceKey)?.get(userId);
+      if (!userClients) continue;
+      for (const c of userClients) {
+        if (c.hydrated) {
+          this.#emitRowLevel(c, 'sync:delta', { instanceKey, upserts: ud.upserts, deletes: ud.deletes, offset: id, version });
+        }
+      }
+    }
+
+    // Hydrate deferred clients (admitted, not yet hydrated) to the CURRENT snapshot (which includes this
+    // entry) — AFTER the live delivery above.
+    for (const c of [...subs]) if (!c.hydrated) await this.#hydrateRowLevel(c);
+
+    if (unroutablePuts > 0 || unroutableDels > 0) {
+      obsEmit('sync-rowlevel', { event: 'unroutable', instanceKey, unroutablePuts, unroutableDels });
+    }
+    obsEmit('stream-diff', {
+      instanceKey,
+      upserts: streamDiff.upserts.length,
+      deletes: streamDiff.deletes.length,
+      subscribers: subs.size,
+    });
+  }
+
+  /** Send the per-user snapshot/resume IF the instance has materialized; else stay deferred (the
+   *  dispatch loop hydrates on the next non-cleared delta). Mirrors the gate #tryHydrate. */
+  async #tryHydrateRowLevel(client: RowLevelClient): Promise<void> {
+    if (await this.#store.isHydrated(client.dataInstanceKey)) await this.#hydrateRowLevel(client);
+  }
+
+  /**
+   * Bring a row-level client current with ONLY its own rows. Resume (puts-only + snapshot-on-unroutable-
+   * del) if it carries a retained offset; otherwise a per-user snapshot slice via the head-keyed bucket
+   * memo (so a mass reconnect on one workspace instance filters the snapshot once, not per client).
+   */
+  async #hydrateRowLevel(client: RowLevelClient): Promise<void> {
+    // Idempotent: the initial enqueued hydrate and a concurrent dispatch's deferred-hydrate loop (both
+    // on this instance's serial queue) can each target the same client — hydrate exactly once, else a
+    // second snapshot re-emits. A `cleared` resets `hydrated=false` first, so re-hydration still runs.
+    if (client.hydrated) return;
+    const instanceKey = client.dataInstanceKey;
+    const inst = this.#rowLevel.get(instanceKey);
+    if (!inst) return;
+
+    if (client.sinceOffset && (await this.#tryResumeRowLevel(client, inst))) return;
+
+    const { id: head, version } = await this.#store.headWithVersion(instanceKey);
+    const memo = this.#rowLevelBuckets.get(instanceKey);
+    let buckets: Map<string, CompactedRow[]>;
+    if (memo && memo.head === head) {
+      buckets = memo.buckets;
+    } else {
+      const rows = await this.#store.snapshot(instanceKey);
+      const seeded = seedRowLevel(rows, inst.meta, PK);
+      buckets = seeded.buckets;
+      this.#rowLevelBuckets.set(instanceKey, { head, buckets });
+      // First materialization (or post-clear): adopt this snapshot as the live owner map.
+      if (!inst.seeded) {
+        inst.owner = seeded.ownerMap;
+        inst.seeded = true;
+      }
+    }
+    client.hydrated = true;
+    this.#emitRowLevel(client, 'sync:snapshot', {
+      instanceKey,
+      rows: buckets.get(client.userId) ?? [],
+      offset: head,
+      version,
+    });
+  }
+
+  /**
+   * Resume a row-level client from its offset: replay the missed range, projected to its own rows
+   * (read-only against the live owner map). Falls back to a snapshot (returns false) on a `cleared` in
+   * range or ANY unroutable op — the R-2 rule that keeps a replayed delete of the client's own row from
+   * being silently dropped. Emits synchronously after the async read so live deltas can't interleave.
+   */
+  async #tryResumeRowLevel(client: RowLevelClient, inst: RowLevelInstance): Promise<boolean> {
+    const instanceKey = client.dataInstanceKey;
+    const firstId = await this.#store.firstId(instanceKey);
+    const retained = firstId !== null && compareStreamId(firstId, client.sinceOffset as string) <= 0;
+    if (!retained) return false;
+    const diffs = await this.#store.readSince(instanceKey, client.sinceOffset as string);
+    if (diffs.some((d) => d.diff.cleared)) return false; // reset in range → can't resume
+    await this.#ensureSeededRowLevel(instanceKey);
+    // Project every diff to this user FIRST; if any is unroutable, snapshot instead (all-or-nothing so
+    // we never emit a partial resume then fall back).
+    const projected: Array<{ id: string; version?: string; upserts: unknown[]; deletes: string[] }> = [];
+    for (const { id, version, diff } of diffs) {
+      const slice = projectDeltaForUser(diff, inst.owner, inst.meta, PK, client.userId);
+      if (slice === null) return false;
+      projected.push({ id, version, upserts: slice.upserts, deletes: slice.deletes });
+    }
+    client.hydrated = true;
+    for (const p of projected) {
+      if (p.upserts.length === 0 && p.deletes.length === 0) continue;
+      this.#emitRowLevel(client, 'sync:delta', {
+        instanceKey,
+        upserts: p.upserts,
+        deletes: p.deletes,
+        offset: p.id,
+        version: p.version,
+      });
+    }
+    obsEmit('fanout', { event: 'sync:resume', socketId: client.id, instanceKey, deltas: projected.length });
+    return true;
   }
 }
 
