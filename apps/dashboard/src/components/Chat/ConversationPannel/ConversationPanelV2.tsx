@@ -90,6 +90,7 @@ const ConversationPanelV2 = ({
   hideComposer = false,
   skipMarkAsRead = false,
   suppressInputAutoFocus = false,
+  listLoadingFallback,
   conversationIds,
   onOpenThread,
   useLocalTabState = false,
@@ -123,6 +124,12 @@ const ConversationPanelV2 = ({
   // Streams mounts six of these at once and the user picked none of them, so
   // there is nothing here for the keyboard to claim.
   suppressInputAutoFocus?: boolean;
+  /**
+   * Placeholder for the message list's first load, passed straight through to
+   * `ChatListV4`. For hosts that already painted their own placeholder before
+   * this panel mounted — see `loadingFallback` there.
+   */
+  listLoadingFallback?: React.ReactNode;
   // When true (e.g. rendered in the search-results pane, which owns its own `?tab=`
   // for the doc-type filter), keep the active tab in local state instead of the URL —
   // otherwise a foreign `tab=all` matches no conversation tab and blanks the body.
@@ -294,6 +301,9 @@ const ConversationPanelV2 = ({
                 </div>
               ) : (
                 <ChatListV4
+                  {...(listLoadingFallback !== undefined && {
+                    loadingFallback: listLoadingFallback,
+                  })}
                   {...(urlConversationId && { linkedConversationId: urlConversationId })}
                   {...(urlCreatedAt && { linkedItemCreatedAt: { createdAt: urlCreatedAt } })}
                   {...(stateLinkedCutoffCreatedAt && {

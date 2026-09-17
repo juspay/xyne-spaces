@@ -8,7 +8,6 @@ import {
   useMemo,
   useState,
 } from 'react';
-import { Skeleton } from '../../../ui/Skeleton';
 import {
   ArrowRightUp,
   FocusTarget,
@@ -28,6 +27,7 @@ import { isUnread } from '../../hooks/useColumnActivity';
 import type { StreamsActions } from '../StreamsActions/StreamsActions';
 import { DEV_DEFAULTS } from '../StreamsDev/StreamsDev';
 import { surfaceFor } from '../Surfaces/Surfaces';
+import { ColumnSkeleton } from './ColumnSkeleton';
 import { hasDragItem, readDragItem, type StreamItem } from '../StreamsDnd/StreamsDnd';
 import { cn } from '../../../../utils/classNames';
 import { prefersReducedMotion } from '../Streams/Streams.utils';
@@ -86,31 +86,6 @@ const RING_OUT_MS = 130;
  * delay. It exists to cost nothing on the frame a column arrives, which is the
  * one frame that cannot afford anything.
  */
-const SKELETON_ROWS = [
-  { avatar: true, lines: ['w-1/3', 'w-11/12', 'w-2/3'] },
-  { avatar: true, lines: ['w-1/4', 'w-5/6'] },
-  { avatar: true, lines: ['w-2/5', 'w-10/12', 'w-1/2'] },
-  { avatar: true, lines: ['w-1/3', 'w-3/4'] },
-] as const;
-
-// Instant, for the same reason the surface is: a placeholder that fades in
-// leaves the column blank for the frames it takes to arrive, which is the thing
-// it exists to prevent.
-const ColumnSkeleton = (): ReactElement => (
-  <div className='flex h-full flex-col gap-5 px-3 pt-4' aria-hidden>
-    {SKELETON_ROWS.map((row, index) => (
-      <div key={index} className='flex gap-2'>
-        {row.avatar && <Skeleton className='size-7 shrink-0 rounded-full opacity-60' />}
-        <div className='flex min-w-0 flex-1 flex-col gap-1.5'>
-          {row.lines.map((width, line) => (
-            <Skeleton key={line} className={cn('h-3 opacity-60', width)} />
-          ))}
-        </div>
-      </div>
-    ))}
-  </div>
-);
-
 export interface StreamColumnProps {
   column: Column;
   width: number;

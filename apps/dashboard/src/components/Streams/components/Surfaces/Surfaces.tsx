@@ -23,6 +23,7 @@ import { useCachedQuery } from '../../../../hooks/useCachedQuery';
 import { queries } from '../../../../zero/queries';
 import type { StreamItem } from '../StreamsDnd/StreamsDnd';
 import { SURFACE_MIN_WIDTHS } from '../Streams/Streams.types';
+import { ColumnSkeleton } from '../StreamColumn/ColumnSkeleton';
 import type { ColumnSeed, ColumnSource, SurfaceKind } from '../Streams/Streams.types';
 
 /**
@@ -155,6 +156,12 @@ const ChannelBody = ({ source }: BodyProps): ReactElement => {
           // sideways by whatever the viewport was clipping off that column, with
           // no gesture behind it. See `suppressInputAutoFocus`.
           suppressInputAutoFocus
+          // The column already painted this exact skeleton before the panel
+          // mounted. Without it the panel covers the skeleton with its own
+          // centred spinner and then cuts to content, so the column shows three
+          // loading states where it meant to show one — measured at a 246ms hold
+          // followed by a single-frame cut, which is what reads as a blink.
+          listLoadingFallback={<ColumnSkeleton />}
         />
       </div>
     </div>
