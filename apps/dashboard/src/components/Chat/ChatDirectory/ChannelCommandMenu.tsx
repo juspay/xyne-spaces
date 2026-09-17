@@ -2570,25 +2570,19 @@ const ChannelCommandMenu = ({
       if (hasNavigatedRef.current) return;
       const items = commandRef.current?.querySelectorAll('[cmdk-item]:not([aria-disabled="true"])');
       if (items && items.length > 0) {
-        // Once there's a query or a filter, the user has expressed a search rather than a
-        // jump-to, so Enter should open the full results — that row becomes the resting
-        // target. With an empty box it stays on the first real result, where Enter is a
-        // quick-switch. The screen palette keeps first-row either way.
+        // The resting highlight always lands on the first real result, in both palettes, so
+        // Enter opens that result rather than leaving for the full results page. The pinned
+        // "Show detailed results for" row stays clickable and arrow-reachable, but it is never
+        // the default target — it only takes the highlight when it is the only row (zero results).
         const rows = Array.from(items);
         const showResultsIndex = rows.findIndex(
           item => item.getAttribute('data-show-results-item') === 'true',
         );
-        const hasSearchIntent = searchText.trim().length > 0 || selectedMentions.length > 0;
-
-        const firstReal = isScreenPalette
-          ? -1
-          : rows.findIndex(item => item.getAttribute('data-show-results-item') !== 'true');
+        const firstReal = rows.findIndex(
+          item => item.getAttribute('data-show-results-item') !== 'true',
+        );
         const selectedIndex =
-          !isScreenPalette && hasSearchIntent && showResultsIndex !== -1
-            ? showResultsIndex
-            : firstReal === -1
-              ? 0
-              : firstReal;
+          firstReal !== -1 ? firstReal : showResultsIndex !== -1 ? showResultsIndex : 0;
         items.forEach((item, i) => {
           item.setAttribute('aria-selected', i === selectedIndex ? 'true' : 'false');
         });
@@ -2607,8 +2601,8 @@ const ChannelCommandMenu = ({
     backendResultOrder,
     mentionSearchType,
     commandActive,
-    // Adding/removing a chip flips the resting Enter target between the first result and
-    // the "Show results for" row, so the auto-select has to re-run.
+    // A chip can be the only search input (no free text), and it changes which rows render,
+    // so the auto-select has to re-run to put the highlight back on the first result.
     selectedMentions.length,
     // `commandText` is a dep (not read in the body) so the first-row auto-select
     // re-fires as the `/` command list / user picker narrows while typing.
