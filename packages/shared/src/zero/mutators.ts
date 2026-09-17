@@ -437,10 +437,26 @@ async function assertCanvasThreadManageAccess(
   await assertCanvasCommentEditAccess(tx, thread.canvasId, userId);
 }
 
+/**
+ * Ticket.conversation is a required app-level relation (relationMode="prisma"). Zero writes skip
+ * Prisma Client's Restrict emulation, so every conversation delete checks this explicitly —
+ * otherwise the ticket is left pointing at a missing conversation.
+ */
+async function conversationHasTicket(
+  tx: Transaction<Schema>,
+  conversationId: string,
+): Promise<boolean> {
+  const ticket = await tx.run(zql.tickets.where('conversationId', conversationId).one());
+  return !!ticket;
+}
+
 async function deleteConversationWithParticipants(
   tx: Transaction<Schema>,
   conversationId: string,
 ): Promise<void> {
+  // A ticket thread must outlive its messages (see conversationHasTicket).
+  if (await conversationHasTicket(tx, conversationId)) return;
+
   const participants = await tx.run(
     zql.conversation_participants.where('conversationId', conversationId),
   );
@@ -2929,7 +2945,9 @@ export const mutators = defineMutators({
 
         const isInitialMessage = conversation.initialMessageId === messageId;
         const hasReplies = otherMessages.length > 0;
-        const shouldSoftDelete = isInitialMessage && hasReplies;
+        // A ticket thread can't lose its conversation: tombstone the root instead.
+        const hasTicket = await conversationHasTicket(tx, conversation.conversationId);
+        const shouldSoftDelete = isInitialMessage && (hasReplies || hasTicket);
 
         // Clean up MENTIONED participants within Zero transaction
         const mentions = extractAllMentions(message.content);
@@ -3064,7 +3082,8 @@ export const mutators = defineMutators({
             otherMessages[0].messageId === conversation.initialMessageId &&
             otherMessages[0].isDeleted === true;
 
-          const shouldDeleteConversation = otherMessages.length === 0 || isInitialMessageDeleted;
+          const shouldDeleteConversation =
+            !hasTicket && (otherMessages.length === 0 || isInitialMessageDeleted);
 
           if (shouldDeleteConversation) {
             // Delete ghost root FIRST, before the conversation (mirrors server-side fix).
@@ -10526,11 +10545,12 @@ export const mutators = defineMutators({
         );
         if (existing) {
           const existingAt = existing.lastReadEmailAt;
-          if (typeof existingAt !== 'number' || existingAt < lastReadEmailAt) {
+          if (typeof existingAt !== 'number' || existingAt < lastReadEmailAt || existing.hasNewEmail) {
             await tx.mutate.email_reads.update({
               id: existing.id,
               lastReadEmailId,
               lastReadEmailAt,
+              hasNewEmail: false,
               updatedAt,
             });
           }
@@ -10542,6 +10562,7 @@ export const mutators = defineMutators({
             userId: ctx.userID,
             lastReadEmailId,
             lastReadEmailAt,
+            hasNewEmail: false,
             createdAt: updatedAt,
             updatedAt,
           });
@@ -10592,7 +10613,8 @@ export const mutators = defineMutators({
             if (ex) {
               if (
                 typeof ex.lastReadEmailAt === 'number' &&
-                ex.lastReadEmailAt >= lastReadEmailAt
+                ex.lastReadEmailAt >= lastReadEmailAt &&
+                !ex.hasNewEmail
               ) {
                 return undefined;
               }
@@ -10600,6 +10622,7 @@ export const mutators = defineMutators({
                 id: ex.id,
                 lastReadEmailAt,
                 lastReadEmailId,
+                hasNewEmail: false,
                 updatedAt: timestamp,
               });
             }
@@ -10610,6 +10633,7 @@ export const mutators = defineMutators({
               userId: ctx.userID,
               lastReadEmailAt,
               lastReadEmailId,
+              hasNewEmail: false,
               createdAt: timestamp,
               updatedAt: timestamp,
             });
