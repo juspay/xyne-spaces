@@ -105,6 +105,7 @@ import { renderMarkdownToHtml } from "../lib/result-html.js";
 import { sendStoredExternalResultCallback, isInternalCallbackOrigin, isAllowedExternalCallbackUrl, type ExternalResultCallbackConfig } from "../surfaces/external-api/delivery.js";
 import { encryptSurfaceSecret } from "../lib/surface-resolver.js";
 import { deliverSlackResult, type SlackDeliveryTarget } from "../surfaces/slack/delivery.js";
+import { deliverChannelResult } from "../surfaces/messaging/delivery.js";
 import { designShareUrl, upsertDesignShare } from "./design-shares.js";
 import {
   getActivePlanCard,
@@ -4101,6 +4102,38 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     }).catch((err) => {
       clog.warn(`[webhook/result] Slack delivery failed for session ${sessionId}: ${errMsg(err)}`);
     });
+    return;
+  }
+
+  // Messaging-channel runs (WhatsApp, Telegram, …): same finalisation, then
+  // the reply is queued to the account's outbox for the pod that owns it.
+  if (ctx?.channelDelivery) {
+    const channelTarget = ctx.channelDelivery;
+    const channelUserId = ctx.targetUserId ?? ctx.mentionedUserId ?? "";
+    const channelPendingActions = (payload as { pendingActions?: Array<Record<string, unknown>> }).pendingActions;
+    await deleteSession(sessionId);
+    await deliverChannelResult({
+      target: channelTarget,
+      status: payload.status ?? "failed",
+      result: resultWithCitations,
+      ...(payload.attachments?.length ? { attachments: payload.attachments } : {}),
+    }).catch((err) => {
+      clog.warn(`[webhook/result] channel delivery failed for session ${sessionId}: ${errMsg(err)}`);
+    });
+    // A gated write needs a human even when the human is on WhatsApp. Queued
+    // AFTER the reply so the card lands under the text that explains it.
+    if (channelPendingActions?.length && channelUserId) {
+      const { enqueueApprovalCards } = await import("../surfaces/messaging/approvals.js");
+      await enqueueApprovalCards({
+        target: channelTarget,
+        userId: channelUserId,
+        pendingActions: channelPendingActions,
+        ...(ctx.conversationId ? { conversationId: ctx.conversationId } : {}),
+        ...(ctx.agentSlug ? { agentSlug: ctx.agentSlug } : {}),
+      }).catch((err) => {
+        clog.warn(`[webhook/result] channel approval cards failed for session ${sessionId}: ${errMsg(err)}`);
+      });
+    }
     return;
   }
 

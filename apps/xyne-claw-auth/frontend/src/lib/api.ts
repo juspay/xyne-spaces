@@ -1620,7 +1620,6 @@ export async function connectLinkedInRapidApi(
   );
 }
 
-
 export async function createAgentApp(slug: string): Promise<void> {
   const userToken = getGoogleToken();
   await request<{ success: boolean }>(
@@ -4395,7 +4394,6 @@ export interface DashboardAgentMeta {
   _count: { tools: number; skills: number; shares: number };
 }
 
-
 export interface SkillUsageRow {
   skillId: string;
   skillSlug: string;
@@ -4584,7 +4582,6 @@ export async function getProjectInsights(
   );
   return data.data;
 }
-
 
 // ── Doctor Bitbucket Stats (admin) ───────────────────────────────────
 // Live count of PRs / commits authored by the bot identity that powers
@@ -5480,7 +5477,6 @@ export async function deleteDigitalTwinMemory(userId: string, hindsightMemoryId:
     );
   }
 }
-
 
 export async function getDigitalTwinStats(
   userId: string,
@@ -7093,4 +7089,195 @@ export async function resyncChannelEntityTypes(
     `${AUTH_API_URL}/api/v1/entity-extraction/channels/${channelId}/resync-types`,
     { method: "POST", headers: { "x-user-id": userId } },
   );
+}
+
+// ── Messaging channels (WhatsApp, Telegram, …) — surfaces/messaging admin API ──
+
+export type MessagingChannelKey = "whatsapp" | "whatsapp-cloud" | "telegram";
+export type ChannelConnState = "pending_login" | "connected" | "disconnected" | "logged_out";
+export type ChannelDmPolicy = "linked" | "disabled";
+export type ChannelGroupPolicy = "allowlist" | "open" | "disabled";
+
+export interface ChannelAccountView {
+  id: string;
+  accountKey: string;
+  channel: MessagingChannelKey;
+  orgId: string;
+  label: string;
+  desiredState: "running" | "stopped";
+  connState: ChannelConnState;
+  selfId?: string;
+  displayId?: string;
+  lastConnectedAt?: string;
+  lastDisconnect?: { code?: number; reason?: string; at: string };
+  dmPolicy: ChannelDmPolicy;
+  groupPolicy: ChannelGroupPolicy;
+  groupAllowlist: string[];
+  groupAllowFrom: string[];
+  requireMention: boolean;
+  groupHistoryLimit: number;
+  ackReaction?: string;
+  rateLimitPerMinute: number;
+  channelConfig: Record<string, unknown> | null;
+  agent: { slug: string; name: string } | null;
+  login: { kind: "qr" | "token" | "oauth" };
+  /** "org": one shared business number. "user": this is one person's own
+   *  number and only they (or an admin) can see or manage it. */
+  scope: "org" | "user";
+  ownerUserId: string | null;
+  loginFields: Array<{ key: string; label: string; type: "text" | "password"; placeholder?: string; hint?: string }>;
+  transport: "connection" | "webhook";
+  /** Webhook channels only: where the provider must POST. */
+  webhookUrl?: string;
+  webhookPath?: string;
+  capabilities: { groups: boolean; media: boolean; typing: boolean; reactions: boolean; maxTextChars: number };
+  leaseHolder: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ChannelAccountPolicyPatch {
+  label?: string;
+  agentSlug?: string;
+  dmPolicy?: ChannelDmPolicy;
+  groupPolicy?: ChannelGroupPolicy;
+  groupAllowlist?: string[];
+  groupAllowFrom?: string[];
+  requireMention?: boolean;
+  groupHistoryLimit?: number;
+  ackReaction?: string;
+  rateLimitPerMinute?: number;
+  channel?: Record<string, unknown>;
+}
+
+export interface ChannelLoginArtifact {
+  connState: ChannelConnState;
+  desiredState: "running" | "stopped";
+  login: { kind: "qr" | "token" | "oauth" };
+  artifact: string | null;
+  /** Data URL of the rendered QR (login.kind === "qr"). */
+  qr: string | null;
+}
+
+function channelBase(channel: MessagingChannelKey): string {
+  return `${AUTH_API_URL}/api/v1/surfaces/${channel}`;
+}
+
+export async function listChannelAccounts(channel: MessagingChannelKey, orgId: string): Promise<ChannelAccountView[]> {
+  const data = await request<{ success: boolean; accounts: ChannelAccountView[] }>(
+    `${channelBase(channel)}/accounts?orgId=${encodeURIComponent(orgId)}`,
+  );
+  return data.accounts;
+}
+
+export async function createChannelAccount(
+  channel: MessagingChannelKey,
+  input: { orgId: string; label: string; agentSlug: string; channel?: Record<string, unknown> },
+): Promise<ChannelAccountView> {
+  const data = await request<{ success: boolean; account: ChannelAccountView }>(`${channelBase(channel)}/accounts`, {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+  return data.account;
+}
+
+export async function updateChannelAccount(
+  channel: MessagingChannelKey,
+  accountId: string,
+  patch: ChannelAccountPolicyPatch,
+): Promise<ChannelAccountView> {
+  const data = await request<{ success: boolean; account: ChannelAccountView }>(
+    `${channelBase(channel)}/accounts/${encodeURIComponent(accountId)}`,
+    { method: "PATCH", body: JSON.stringify(patch) },
+  );
+  return data.account;
+}
+
+export async function deleteChannelAccount(channel: MessagingChannelKey, accountId: string): Promise<void> {
+  await request<{ success: boolean }>(`${channelBase(channel)}/accounts/${encodeURIComponent(accountId)}`, {
+    method: "DELETE",
+  });
+}
+
+export async function loginChannelAccount(
+  channel: MessagingChannelKey,
+  accountId: string,
+  input: { token?: string; secrets?: Record<string, string> } = {},
+): Promise<void> {
+  await request<{ success: boolean }>(`${channelBase(channel)}/accounts/${encodeURIComponent(accountId)}/login`, {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export async function logoutChannelAccount(channel: MessagingChannelKey, accountId: string): Promise<void> {
+  await request<{ success: boolean }>(`${channelBase(channel)}/accounts/${encodeURIComponent(accountId)}/logout`, {
+    method: "POST",
+    body: "{}",
+  });
+}
+
+export async function getChannelLoginArtifact(
+  channel: MessagingChannelKey,
+  accountId: string,
+): Promise<ChannelLoginArtifact> {
+  return request<ChannelLoginArtifact & { success: boolean }>(
+    `${channelBase(channel)}/accounts/${encodeURIComponent(accountId)}/login-artifact`,
+  );
+}
+
+// ── my numbers (self-service linking) ──
+
+export interface LinkableChannelAccount {
+  id: string;
+  label: string;
+  number: string | null;
+  connected: boolean;
+}
+
+export interface LinkedChannelNumber {
+  senderId: string;
+  accountLabel: string | null;
+  accountId: string | null;
+  linkedAt: string;
+  lastSeenAt: string | null;
+}
+
+export interface ChannelNumberLink {
+  senderId: string;
+  accountId: string;
+  accountLabel: string;
+  /** The number to message, once the account knows its own. */
+  sendTo: string | null;
+  linkedAt: string;
+}
+
+export async function listLinkableChannelAccounts(channel: MessagingChannelKey): Promise<LinkableChannelAccount[]> {
+  const data = await request<{ success: boolean; accounts: LinkableChannelAccount[] }>(
+    `${channelBase(channel)}/my-numbers/accounts`,
+  );
+  return data.accounts;
+}
+
+export async function listMyChannelNumbers(channel: MessagingChannelKey): Promise<LinkedChannelNumber[]> {
+  const data = await request<{ success: boolean; numbers: LinkedChannelNumber[] }>(`${channelBase(channel)}/my-numbers`);
+  return data.numbers;
+}
+
+export async function linkChannelNumber(
+  channel: MessagingChannelKey,
+  phone: string,
+  accountId?: string,
+): Promise<ChannelNumberLink> {
+  const data = await request<{ success: boolean; linked: ChannelNumberLink }>(`${channelBase(channel)}/my-numbers`, {
+    method: "POST",
+    body: JSON.stringify(accountId ? { phone, accountId } : { phone }),
+  });
+  return data.linked;
+}
+
+export async function unlinkMyChannelNumber(channel: MessagingChannelKey, senderId: string): Promise<void> {
+  await request<{ success: boolean }>(`${channelBase(channel)}/my-numbers/${encodeURIComponent(senderId)}`, {
+    method: "DELETE",
+  });
 }
