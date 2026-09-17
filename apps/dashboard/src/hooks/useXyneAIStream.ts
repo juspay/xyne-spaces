@@ -13,6 +13,18 @@ import type { WorkflowContext } from '../machines/xyneAIMachine';
 import { xyneAIStreamManager, type StreamState } from '../services/XyneAI';
 import { buildXyneAIStreamThreadId } from '../utils/xyneAIStreamThreadId';
 import { resolveStreamAgentSlug } from '../utils/xyneAIAgentSlug';
+import { globalClickTracker } from '../services/Analytics/globalClickTracker';
+import {
+  aiRunTrackingMetadata,
+  type XyneAiSendTrigger,
+  type XyneAiSurface,
+} from '../services/Analytics/xyneAiTracking';
+import {
+  trackWebSearchQuery,
+  trackDeepResearchQuery,
+  trackCanvasModeQuery,
+  trackAttachmentsAdded,
+} from '../services/otel/xyneAIMetrics';
 
 /**
  * Per-submit overrides for the stream options. When provided, each field takes
@@ -54,6 +66,9 @@ export interface StreamOverrides {
    *  optimistic user message so it matches the persisted pills after reload.
    *  Falls back to `attachedContext` when absent. Never sent to the backend. */
   displayAttachedContext?: AttachedContextItem[];
+  /** What caused this send, for the SEND_MESSAGE event. Regenerate and edit are
+   *  derived from their flags; pass 'auto_send' / 'suggestion' from those paths. */
+  trigger?: XyneAiSendTrigger;
 }
 
 interface UseXyneAIStreamParams {
@@ -102,6 +117,10 @@ interface UseXyneAIStreamParams {
   suppressCompletionToast?: boolean;
   setDebugEvents?: React.Dispatch<React.SetStateAction<DebugEventRecord[]>>;
   setDebugArtifactsReadyVersion?: React.Dispatch<React.SetStateAction<number>>;
+  /** Which UI hosts this conversation — dimension on SEND_MESSAGE. */
+  surface?: XyneAiSurface;
+  /** xyneAIMachine contextType at submit time (panel only). */
+  contextType?: string | null;
 }
 
 /**
@@ -168,6 +187,8 @@ export const useXyneAIStream = ({
   modelProvider,
   thinkingLevel,
   suppressCompletionToast,
+  surface,
+  contextType,
   setDebugEvents,
   setDebugArtifactsReadyVersion,
 }: UseXyneAIStreamParams) => {
@@ -452,6 +473,58 @@ export const useXyneAIStream = ({
         ? [...currentMessages, userMessage, botMessage]
         : [...currentMessages, botMessage];
 
+      // SEND_MESSAGE for every send the button cannot see: this is the one
+      // function every submit passes through (Enter, regenerate, edit,
+      // auto-sent initialQuery, suggestion chips) on both the panel and the
+      // /ai page. Fires before the request so a failed run still counts as an
+      // ask; the run's outcome is RESPONSE_* from the stream manager.
+      // A button send is already a click row under the button's own name
+      // (SEND_MESSAGE on the page, SUBMIT_MESSAGE in the panel) with the run
+      // dims baked into its metadata, so it is not repeated here.
+      const trigger: XyneAiSendTrigger = isRegenerate
+        ? 'regenerate'
+        : isEditUserMessage
+          ? 'edit'
+          : (ov?.trigger ?? 'submit');
+      if (trigger !== 'button') {
+        globalClickTracker.trackManualEvent('XyneAI', 'SEND_MESSAGE', undefined, {
+          ...aiRunTrackingMetadata({
+            surface,
+            contextType,
+            agentSlug,
+            model: eModel,
+            modelProvider: eModelProvider,
+            thinkingLevel: eThinkingLevel,
+            webSearchEnabled: eWebSearchEnabled,
+            deepResearchEnabled: eDeepResearchEnabled,
+            createCanvasEnabled: eCreateCanvasEnabled,
+            instant: eInstant,
+            attachmentsCount: attachments.length,
+            channelCount: eChannelIds.length,
+            fileCount: eFileIds.length,
+            folderCount: eFolderIds.length,
+            collectionCount: eCollectionIds.length,
+            canvasCount: eCanvasIds?.length ?? 0,
+            ticketCount: eTicketIds?.length ?? 0,
+            callCount: eCallIds?.length ?? 0,
+            hasSelectionContext: !!selectionContexts?.length,
+            hasResearchContext: !!eResearchContext,
+            hasWorkflowContext: !!workflowContext,
+            queryLength: query.length,
+            isRegenerate: !!isRegenerate,
+            isEdit: !!isEditUserMessage,
+            conversationId,
+          }),
+          turnIndex: currentMessages.filter(m => m.type === 'user').length,
+          trigger,
+        });
+      }
+      // OpenTelemetry counters ride the same choke point so the /ai page counts too.
+      if (eWebSearchEnabled) trackWebSearchQuery();
+      if (eDeepResearchEnabled) trackDeepResearchQuery();
+      if (eCreateCanvasEnabled) trackCanvasModeQuery();
+      if (attachments.length > 0) trackAttachmentsAdded(attachments.length);
+
       // Start stream via the global stream manager
       // The stream manager will notify subscribers which will update messages with the streaming content
       const streamId = await xyneAIStreamManager.startStream(
@@ -528,6 +601,8 @@ export const useXyneAIStream = ({
       modelProvider,
       thinkingLevel,
       suppressCompletionToast,
+      surface,
+      contextType,
     ],
   );
 

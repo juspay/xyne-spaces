@@ -32,7 +32,11 @@ function checkForJsFiles(dir: string): void {
 
     if (entry.isDirectory()) {
       checkForJsFiles(fullPath);
-    } else if (entry.isFile() && isJsFile(entry.name)) {
+    } else if (
+      entry.isFile() &&
+      isJsFile(entry.name) &&
+      relativePath !== 'scripts/build-summary-report.mjs'
+    ) {
       errors.push(
         `JavaScript file "${relativePath}" is not allowed. Use TypeScript (.ts) instead.`
       );

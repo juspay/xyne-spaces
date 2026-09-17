@@ -139,6 +139,7 @@ export const TicketFiltersDropdown = ({
   groupBy,
   hasActiveView,
   workspaceView = false,
+  startSlot,
   leadingControl,
   trailingControl,
 }: TicketFiltersProps & {
@@ -146,13 +147,14 @@ export const TicketFiltersDropdown = ({
   onSearchChange?: (searchTerm: string) => void;
   isExactSearch?: boolean;
   onExactSearchChange?: (exact: boolean) => void;
+  startSlot?: ReactElement | null | undefined;
   leadingControl?: ReactElement;
   trailingControl?: ReactElement | undefined;
 }): ReactElement => {
   const [boardOpen, setBoardOpen] = useState(false);
   const [hasBoardDropdownOpened, setHasBoardDropdownOpened] = useState(false);
 
-  // When availableBoards is provided (my-tickets/user-tickets/group-tickets), we already know
+  // When availableBoards is provided (my-tickets), we already know
   // exactly which board IDs the user has tickets in.
   const isMyTicketsMode = availableBoards !== undefined;
 
@@ -312,6 +314,11 @@ export const TicketFiltersDropdown = ({
         : [];
 
       fields.forEach(field => {
+        // The filter submenu has no UI for these field types — keep them out of
+        // the menu instead of dead-ending on "Unsupported field type".
+        if (field.fieldType === FormFieldType.TICKET || field.fieldType === FormFieldType.DOC) {
+          return;
+        }
         // Use field ID as key to ensure uniqueness
         if (!fieldsMap.has(field.id)) {
           fieldsMap.set(field.id, { field });
@@ -734,6 +741,7 @@ export const TicketFiltersDropdown = ({
     <div className={`relative flex  flex-col w-full ${className}`}>
       <div className='flex flex-col gap-3 w-full'>
         <div className='flex flex-wrap items-center gap-2 sm:gap-3'>
+          {startSlot}
           {!workspaceView && (
             <Popover.Root
               open={boardOpen}

@@ -1080,21 +1080,15 @@ export class CallController {
           queueCallVespaFeed(call.id, { source: CallVespaFeedSource.CallControllerJoinCallClearRemovedByHost });
         }
 
-        // Who belongs to a call: the host, anyone invited, and the members of the
-        // channel it is happening in — a channel call is offered to the channel, so
-        // membership is the invitation. Matches assertCanViewCallRecordings. Anyone
-        // else holds a link they were never given access by, and is turned away.
+        // The call link is the invitation: anyone in the call's workspace who holds
+        // it may join, invited or not. The workspace check above is the boundary;
+        // people outside the workspace go through the lobby and are admitted by the
+        // host. The webhook creates the participant row on join, which is what makes
+        // a link joiner part of the call's audience (see isCallAudience) afterwards.
         if (!participant && call.createdByUserId !== user.id) {
-          const isChannelMember = call.channelId
-            ? await repositories.channelParticipants.isParticipant(call.channelId, user.id)
-            : false;
-          if (!isChannelMember) {
-            logger.warn(
-              `[CallController] join denied, no invitation or channel membership | callId=${callId}, userId=${user.id}`,
-            );
-            res.status(403).json({ success: false, error: 'You do not have access to this call' });
-            return;
-          }
+          logger.info(
+            `[CallController] link join without invitation | callId=${callId}, userId=${user.id}`,
+          );
         }
       }
 
@@ -2713,6 +2707,53 @@ export class CallController {
     const call = await repositories.calls.findByExternalId(callId);
     return !!call && callShareService.canViewRecordings(call, userId);
   }
+
+  /**
+   * GET /api/calls/:callId/recordings
+   * The call's recording sessions, newest first, minus soft-deleted ones. Same
+   * audience as the recording itself. `startedAt`/`endedAt` are wall-clock, which is
+   * what lets the call timeline draw when recording was running.
+   */
+  listCallRecordings = async (req: Request, res: Response): Promise<void> => {
+    const userId = req.user?.id;
+    const { callId } = req.params;
+
+    if (!userId) {
+      res.status(401).json({ success: false, error: 'Unauthorized' });
+      return;
+    }
+
+    try {
+      const call = await repositories.calls.findByExternalId(callId);
+      if (!call) {
+        res.status(404).json({ success: false, error: 'Call not found' });
+        return;
+      }
+      if (!(await this.assertCanViewCallRecordings(callId, userId))) {
+        res.status(403).json({ success: false, error: 'Access denied' });
+        return;
+      }
+
+      const recordings = await repositories.callRecordings.listByCallId(call.id);
+      res.json({
+        success: true,
+        recordings: recordings.map((recording) => ({
+          id: recording.id,
+          name: recording.name,
+          recordingType: recording.recordingType,
+          status: recording.status,
+          startedAt: recording.startedAt,
+          endedAt: recording.endedAt,
+          durationMs: recording.endedAt
+            ? new Date(recording.endedAt).getTime() - new Date(recording.startedAt).getTime()
+            : null,
+        })),
+      });
+    } catch (error) {
+      logger.error(`[CallController] listCallRecordings failed | callId=${callId}, error=`, error);
+      res.status(500).json({ success: false, error: 'Failed to list recordings' });
+    }
+  };
 
   /**
    * POST /api/calls/:callId/recording/start

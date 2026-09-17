@@ -1,7 +1,8 @@
 import { Request, Response } from 'express';
-import { AccessType, AuthProvider, OrgRole, WorkspaceRole } from '@xyne/shared';
+import { AccessType, AuthProvider, OrgRole, ProjectType, WorkspaceRole } from '@xyne/shared';
 import { randomBytes } from 'crypto';
 import { logger } from '@/utils/logger';
+import { getEncryptionProvider } from '@/services/encryption';
 import { config } from '@/config/env';
 import { UserService } from '@/services/userService';
 import { UserSessionService } from '@/services/userSessionService';
@@ -301,6 +302,22 @@ export class TestAuthController {
         }
       }
 
+      // Ensure the per-workspace "DM" project exists (normally created during org
+      // onboarding); without it POST /api/users/me/dms 500s for pre-existing test workspaces.
+      // createMany+skipDuplicates is a single INSERT ... ON CONFLICT DO NOTHING, so concurrent
+      // test logins can't race each other into a P2002 (upsert is not atomic here).
+      await db.project.createMany({
+        data: {
+          name: 'Direct Messages',
+          code: 'DM',
+          description: 'DM project (test-auth)',
+          workspaceId: workspace.id,
+          type: ProjectType.DM,
+          createdBy: user.id,
+        },
+        skipDuplicates: true,
+      });
+
       const effectiveIsNewUser = setAsNewUser ?? isNewUser;
       logger.info(
         `[${requestId}] Org ${organization.orgId}, workspace ${workspace.id}, user ${user.id} (dbIsNew: ${isNewUser}, effectiveIsNew: ${effectiveIsNewUser})`
@@ -460,6 +477,13 @@ export class TestAuthController {
           ...cookieOptions,
           maxAge: sessionCookieMaxAge,
         });
+
+        // Session cookie the auth middleware and session-scoped routes require
+        // (real login controllers set it too); without it session-gated routes 401.
+        res.cookie('user_session_id', sessionId, {
+          ...cookieOptions,
+          maxAge: config.session.expiryDays * 24 * 60 * 60 * 1000,
+        });
       }
 
       if (effectiveIsNewUser) {
@@ -504,6 +528,19 @@ export class TestAuthController {
 
     try {
       logger.info(`[${requestId}] Test logout initiated`);
+
+      // Mirror the real logout: revoke the global session + its encryption key and clear the
+      // cookie, otherwise the browser keeps a valid user_session_id and re-login sees stale data.
+      const sessionId = req.cookies?.user_session_id;
+      if (sessionId) {
+        await this.userSessionService.revokeSession(sessionId).catch((err: unknown) =>
+          logger.warn(`[${requestId}] Session revoke failed: ${err instanceof Error ? err.message : String(err)}`)
+        );
+        await getEncryptionProvider().revokeSessionKey(sessionId).catch((err: unknown) =>
+          logger.warn(`[${requestId}] Session key revoke failed: ${err instanceof Error ? err.message : String(err)}`)
+        );
+      }
+      res.clearCookie('user_session_id', { path: '/' });
 
       // Clear all workspace-scoped token cookies
       for (const cookieName of Object.keys(req.cookies || {})) {

@@ -524,6 +524,7 @@ export const userTable = table("users")
     notificationsPausedUntil: number().optional(),
     assignmentUnavailableUntil: number().optional(),
     calendarVisibility: string(),
+    activityStatus: string().optional(),
   })
   .primaryKey("id");
 
@@ -1350,9 +1351,11 @@ export const emailChannelPreferenceTable = table("email_channel_preferences")
     autoDraftAgentSlug: string().optional(),
     deskType: string(),
     dlEmail: string().optional(),
+    dlAliases: string().optional(),
     workspaceId: string(),
     metricsEnabled: boolean().optional(),
     frtStageNames: string().optional(),
+    metricsGuestVisibility: string().optional(),
     appWebhookDeliveryEnabled: boolean(),
     deskReportEnabled: boolean().optional(),
     deskReportAgentSlug: string().optional(),
@@ -2003,6 +2006,7 @@ export const repoTable = table("repos")
     channelId: string().optional(),
     sdlcSetupExecutionId: string().optional(),
     accessCapabilities: json().optional(),
+    vcsCredentialId: string().optional(),
   })
   .primaryKey("id");
 

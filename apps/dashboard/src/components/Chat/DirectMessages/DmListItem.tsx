@@ -24,6 +24,7 @@ import { sanitizeHtmlString, htmlToPlainText } from '../../../utils/sanitizer';
 import { getFlowJsonPreviewText } from '../../../utils/flowPreview';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
 import { getSlashCommandArtifactPreviewText } from '@xyne/shared';
+import { channelTrackingMetadata } from '../../../services/Analytics/channelTracking';
 
 interface DmListItemProps {
   channel: Channel;
@@ -163,8 +164,12 @@ export const DmListItem = ({
   };
 
   const handleClick = (): void => {
-    // Navigate to /chat/dm/:channelId for both mobile and desktop
-    void navigate(`/chat/dm/${channel.id}?fromDM=true`);
+    // Navigate to /chat/dm/:channelId for both mobile and desktop. `trackSource`
+    // rides the navigation so CHANNEL_VIEWED can say where the open came from —
+    // the arrival fires for deep links and history too, which no click can cover.
+    void navigate(`/chat/dm/${channel.id}?fromDM=true`, {
+      state: { trackSource: 'sidebar_dm' },
+    });
   };
 
   const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
@@ -184,7 +189,11 @@ export const DmListItem = ({
         aria-label={`Open conversation with ${displayName}`}
         data-track-category='DM_LIST'
         data-track-name='OpenDMConversation'
-        data-track-metadata={JSON.stringify({ channelId: channel.id, displayName })}
+        data-track-label='Open DM conversation'
+        data-track-metadata={JSON.stringify({
+          ...channelTrackingMetadata(channel),
+          source: 'sidebar_dm',
+        })}
       >
         <DMItemAvatar
           userId={avatarUserId || null}
@@ -203,6 +212,7 @@ export const DmListItem = ({
                   statusEmoji={targetUser?.statusEmoji}
                   statusContent={targetUser?.statusContent}
                   statusExpiryAt={targetUser?.statusExpiryAt}
+                  activityStatus={targetUser?.activityStatus}
                   size='sm'
                   className='text-[14px]'
                 />
@@ -288,7 +298,12 @@ export const DmListItem = ({
       aria-label={`Open conversation with ${displayName}`}
       data-track-category='DM'
       data-track-name='OPEN_DM_CONVERSATION'
-      data-track-metadata={JSON.stringify({ channelId: channel.id, channelName: channel.name })}
+      data-track-label='Open DM conversation'
+      data-track-metadata={JSON.stringify({
+        ...channelTrackingMetadata(channel),
+        source: 'sidebar_dm',
+        isUnread,
+      })}
     >
       <div className='relative flex-shrink-0'>
         {isGroupDMChannel(channel.scopeType) ? (
@@ -317,6 +332,7 @@ export const DmListItem = ({
                 statusEmoji={targetUser?.statusEmoji}
                 statusContent={targetUser?.statusContent}
                 statusExpiryAt={targetUser?.statusExpiryAt}
+                activityStatus={targetUser?.activityStatus}
                 size='sm'
                 className='flex-shrink-0 text-[14px]'
               />

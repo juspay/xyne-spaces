@@ -311,6 +311,7 @@ const MobileChatDirectory = ({
                     }}
                     data-track-category='MOBILE_CHAT_DIRECTORY'
                     data-track-name='ADD_DM_MOBILE'
+                    data-track-metadata={JSON.stringify({ source: 'mobile_directory' })}
                   >
                     <PlusDefault size={20} />
                   </button>

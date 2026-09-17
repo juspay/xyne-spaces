@@ -131,7 +131,7 @@ export function AIOnboardingProvider({ children }: AIOnboardingProviderProps): R
 
   const startOnboarding = useCallback((source: 'auto' | 'manual', startFreshChat = true) => {
     dispatch({ type: 'START_ONBOARDING', source });
-    xyneAIActor.send({ type: 'OPEN', startFreshChat });
+    xyneAIActor.send({ type: 'OPEN', trackSource: 'onboarding', startFreshChat });
   }, []);
 
   const completeOnboarding = useCallback(() => {

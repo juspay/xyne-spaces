@@ -91,6 +91,7 @@ import {
   TicketStageRequestStatus,
   TicketStatus,
   TicketStatusV2,
+  UserActivityStatus,
   UserPresenceStatus,
   UserResponsibility,
   UserStatus,
@@ -549,6 +550,7 @@ export const userTable = table('users')
     /** Assignment availability promoted from user_presence for query performance (dual-written) */
     assignmentUnavailableUntil: number().optional(),
     calendarVisibility: enumeration<CalendarVisibility>(),
+    activityStatus: enumeration<UserActivityStatus>().optional(),
   })
   .primaryKey('id');
 
@@ -1657,10 +1659,12 @@ export const emailChannelPreferenceTable = table('email_channel_preferences')
     autoDraftMode: enumeration<AutoDraftMode>().optional(),
     deskType: enumeration<DeskType>(),
     dlEmail: string().optional(),
+    dlAliases: string().optional(),
     workspaceId: string(),
     autoDraftAgentSlug: string().optional(),
     metricsEnabled: boolean().optional(),
     frtStageNames: string().optional(),
+    metricsGuestVisibility: string().optional(),
     appWebhookDeliveryEnabled: boolean().optional(),
     deskReportEnabled: boolean().optional(),
     deskReportAgentSlug: string().optional(),
@@ -3391,6 +3395,11 @@ export const sdlcEntityLinkTableRelationships = relationships(sdlcEntityLinkTabl
     destField: ['id'],
     destSchema: channelTable,
   }),
+  workflow: one({
+    sourceField: ['targetId'],
+    destField: ['id'],
+    destSchema: workflowTable,
+  }),
 }));
 
 export const sdlcArtifactTableRelationships = relationships(sdlcArtifactTable, ({ one }) => ({
@@ -3438,6 +3447,14 @@ export const attachementTableRelationShips = relationships(messageAttachmentTabl
     sourceField: ["conversationId"],
     destField: ["conversationId"],
     destSchema: conversationTable
+  }),
+  // entityId is polymorphic, so this resolves only for the rows whose owning
+  // feature puts a channel there — SDLC hub files, which have no conversation to
+  // be authorised through. Same shape as sdlcEntityLinks.repo.
+  hubChannel: one({
+    sourceField: ["entityId"],
+    destField: ["id"],
+    destSchema: channelTable
   })
 }))
 
@@ -4610,6 +4627,12 @@ export const savedUserConfigurationTableRelationships = relationships(
       sourceField: ['id'],
       destField: ['viewId'],
       destSchema: viewAccessTable,
+    }),
+    // Used only for DESK_TICKET configs where contextId holds a channelId.
+    contextChannel: one({
+      sourceField: ['contextId'],
+      destField: ['id'],
+      destSchema: channelTable,
     }),
   }),
 );
