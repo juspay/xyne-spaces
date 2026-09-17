@@ -34,7 +34,8 @@ export const ProjectCard = ({
         : initialDetailTab
           ? { tab: initialDetailTab }
           : undefined;
-    void navigate(`/listProjects/${project.id}`, state ? { state } : undefined);
+    const suffix = state?.from === 'releaseManager' ? '?from=releaseManager' : '';
+    void navigate(`/listProjects/${project.id}${suffix}`, state ? { state } : undefined);
   };
 
   const handleEditClick = (e?: React.MouseEvent<HTMLButtonElement>): void => {

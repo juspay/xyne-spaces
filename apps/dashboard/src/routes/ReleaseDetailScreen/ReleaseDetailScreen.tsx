@@ -705,7 +705,7 @@ const ReleaseDetailScreen = (): ReactElement => {
         <div className='max-w-none'>
           <button
             onClick={() =>
-              void navigate(`/listProjects/${projectId}`, {
+              void navigate(`/listProjects/${projectId}?from=releaseManager`, {
                 // 'releases' = the Releases list in release-manager mode ('release' is Repositories).
                 state: { tab: 'releases', from: 'releaseManager' },
               })

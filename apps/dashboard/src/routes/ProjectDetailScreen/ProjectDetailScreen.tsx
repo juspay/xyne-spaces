@@ -90,8 +90,10 @@ const ProjectDetailScreen = (): ReactElement => {
   const navState = location.state as { tab?: TabValue; from?: string } | null;
   const initialTab = navState?.tab ?? 'boards';
   // Entry point gates the tab set: Release Manager shows release-repo config,
-  // List Projects shows the SDLC repositories view.
-  const fromReleaseManager = navState?.from === 'releaseManager';
+  // List Projects shows the SDLC repositories view. Read from the URL as well as
+  // nav state so a copied / shared Release Manager link keeps the RM view.
+  const fromReleaseManager =
+    navState?.from === 'releaseManager' || searchParams.get('from') === 'releaseManager';
   // Gate Create Release like the backend: admin/owner role, or a RELEASE-MANAGER WRITE grant.
   const canCreateRelease = useCanManageRelease();
   const backTo = fromReleaseManager
