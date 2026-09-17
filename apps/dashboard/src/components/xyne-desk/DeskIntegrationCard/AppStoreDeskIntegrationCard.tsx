@@ -1,5 +1,9 @@
 import { ReactElement, useState } from 'react';
-import { IOS_BUNDLE_ID_PATTERN, SOCIAL_MEDIA_SOURCE_TYPE } from '@xyne/shared';
+import {
+  APP_STORE_KEY_ID_PATTERN,
+  IOS_BUNDLE_ID_PATTERN,
+  SOCIAL_MEDIA_SOURCE_TYPE,
+} from '@xyne/shared';
 import { KeyRound, Plug, Plus, Trash2, Unplug } from 'lucide-react';
 import { toast } from 'sonner';
 import {
@@ -62,7 +66,8 @@ export const AppStoreDeskIntegrationCard = ({
     normalizedBundleIds.length > 0 &&
     normalizedBundleIds.every(bundleId => IOS_BUNDLE_ID_PATTERN.test(bundleId)) &&
     new Set(normalizedBundleIds).size === normalizedBundleIds.length;
-  const canRotateKey = keyId.trim().length > 0 && privateKey.includes('BEGIN PRIVATE KEY');
+  const keyIdIsValid = APP_STORE_KEY_ID_PATTERN.test(keyId.trim());
+  const canRotateKey = keyIdIsValid && privateKey.includes('BEGIN PRIVATE KEY');
 
   const handleDisconnect = async (): Promise<void> => {
     try {
@@ -105,6 +110,13 @@ export const AppStoreDeskIntegrationCard = ({
     }
   };
 
+  // The key lives in component state, not the dialog's, so closing must drop it.
+  const closeRotateKey = (): void => {
+    setShowRotateKey(false);
+    setKeyId('');
+    setPrivateKey('');
+  };
+
   const handleRotateKey = async (): Promise<void> => {
     setIsBusy(true);
     try {
@@ -113,9 +125,7 @@ export const AppStoreDeskIntegrationCard = ({
         privateKey: privateKey.trim(),
       });
       clearChannelConnectedEmailCache(channelId);
-      setShowRotateKey(false);
-      setKeyId('');
-      setPrivateKey('');
+      closeRotateKey();
       toast.success('App Store Connect key replaced.');
     } catch (error) {
       toast.error(apiErrorMessage(error, 'Failed to replace the key.'));
@@ -274,9 +284,12 @@ export const AppStoreDeskIntegrationCard = ({
 
       <Dialog
         open={showRotateKey}
-        onOpenChange={setShowRotateKey}
+        onOpenChange={open => {
+          setShowRotateKey(open);
+          if (!open) closeRotateKey();
+        }}
         title='Replace App Store Connect key'
-        description='Paste a new key. It is verified against every app on this desk before it is stored.'
+        description='Paste a new Individual key. It is verified against every app on this desk before it is stored.'
       >
         <div className='flex flex-col gap-3'>
           <Input
@@ -284,7 +297,11 @@ export const AppStoreDeskIntegrationCard = ({
             onChange={event => setKeyId(event.target.value.trim().toUpperCase())}
             placeholder='Key ID'
             autoComplete='off'
+            aria-invalid={Boolean(keyId) && !keyIdIsValid}
           />
+          {Boolean(keyId) && !keyIdIsValid && (
+            <p className='text-xs text-destructive'>Enter the Key ID from App Store Connect.</p>
+          )}
           <textarea
             value={privateKey}
             onChange={event => setPrivateKey(event.target.value)}
@@ -296,7 +313,7 @@ export const AppStoreDeskIntegrationCard = ({
             className='w-full rounded-md border border-border bg-background px-3 py-2 font-mono text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring'
           />
           <div className='flex justify-end gap-2'>
-            <Button type='button' variant='outline' onClick={() => setShowRotateKey(false)}>
+            <Button type='button' variant='outline' onClick={closeRotateKey}>
               Cancel
             </Button>
             <Button

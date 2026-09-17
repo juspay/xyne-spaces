@@ -10,6 +10,7 @@ import {
   APP_STORE_PUBLICATION_LAG_MARGIN_MS,
 } from './constants';
 import { listExhaustedExternalIds, recordIngestOutcome } from './syncState';
+import { APP_STORE_DEVELOPER_RESPONSE_SUFFIX } from './transformer';
 
 const TAG = '[AppStoreReviewsFlow]';
 
@@ -39,7 +40,9 @@ export class AppStoreReviewsFlow extends BaseFlow {
   ): Promise<unknown[]> {
     if (!source) throw new Error('App Store source is required');
 
-    const cutoff = options?.ignoreSyncCursor ? null : this.computeCutoff(source);
+    // Still floored: a null cutoff disables the stop-paging short-circuit and drags in all history.
+    const floor = this.connectFloor(source);
+    const cutoff = options?.ignoreSyncCursor ? floor : this.computeCutoff(source);
     const result = await appStoreClient.listReviews(
       source,
       cutoff,
@@ -50,7 +53,9 @@ export class AppStoreReviewsFlow extends BaseFlow {
     // advance past it, instead of the whole window being re-fetched every 5 minutes forever.
     const exhausted = await listExhaustedExternalIds(source.id);
     const ingestable = result.reviews.filter(
-      (review) => !exhausted.has(`${source.id}:${review.reviewId}`),
+      (review) =>
+        !exhausted.has(`${source.id}:${review.reviewId}`) &&
+        !exhausted.has(`${source.id}:${review.reviewId}${APP_STORE_DEVELOPER_RESPONSE_SUFFIX}`),
     );
     if (ingestable.length < result.reviews.length) {
       logger.warn(`${TAG} Skipping reviews that exceeded the ingest attempt limit`, {
@@ -62,7 +67,11 @@ export class AppStoreReviewsFlow extends BaseFlow {
     this.runOutcomes.set(source.id, {
       truncated: result.truncated,
       oldestFetchedAt: result.oldestFetchedAt,
-      attemptedExternalIds: ingestable.map((review) => `${source.id}:${review.reviewId}`),
+      // Both ids a review can produce; one never attempted can never have its failures counted.
+      attemptedExternalIds: ingestable.flatMap((review) => [
+        `${source.id}:${review.reviewId}`,
+        `${source.id}:${review.reviewId}${APP_STORE_DEVELOPER_RESPONSE_SUFFIX}`,
+      ]),
     });
 
     if (result.truncated) {
@@ -75,8 +84,10 @@ export class AppStoreReviewsFlow extends BaseFlow {
       });
     }
 
-    if (!cutoff) return ingestable;
-    return this.dropAlreadySeenStragglers(source, ingestable, cutoff);
+    // Paging overshoots by up to a page, and the straggler pass keeps unstored below-cutoff
+    // reviews as late arrivals — on a first sync that would ingest the app's back catalogue.
+    const inScope = ingestable.filter((review) => review.occurredAt >= floor);
+    return this.dropAlreadySeenStragglers(source, inScope, cutoff);
   }
 
   /**
@@ -89,8 +100,17 @@ export class AppStoreReviewsFlow extends BaseFlow {
     const base = Number.isFinite(cursor)
       ? cursor - APP_STORE_PUBLICATION_LAG_MARGIN_MS
       : Date.now() - APP_STORE_INITIAL_LOOKBACK_MS;
-    const floor = source.createdAt.getTime() - APP_STORE_PUBLICATION_LAG_MARGIN_MS;
-    return new Date(Math.max(base, floor));
+    return new Date(Math.max(base, this.connectFloor(source).getTime()));
+  }
+
+  /** Nothing older than this was ever in scope for the desk, however the sync was triggered. */
+  private connectFloor(source: ExternalSource): Date {
+    const metadata = source.externalMetadata as { connectedAt?: unknown } | null;
+    const connectedAt =
+      typeof metadata?.connectedAt === 'string' ? Date.parse(metadata.connectedAt) : Number.NaN;
+    // createdAt is only a fallback for rows written before connectedAt was stamped.
+    const base = Number.isFinite(connectedAt) ? connectedAt : source.createdAt.getTime();
+    return new Date(base - APP_STORE_PUBLICATION_LAG_MARGIN_MS);
   }
 
   /**

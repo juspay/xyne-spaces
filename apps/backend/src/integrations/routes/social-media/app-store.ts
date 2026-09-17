@@ -6,8 +6,10 @@ import {
   ChannelVisibility,
   DeskType,
   EmailMergeMode,
+  APP_STORE_KEY_ID_PATTERN,
   IOS_BUNDLE_ID_PATTERN,
 } from '@xyne/shared';
+import { Prisma } from '@prisma/client';
 import { z } from 'zod';
 import { authV2Middleware } from '@/middleware/authV2Middleware';
 import { db } from '@/database/client';
@@ -27,10 +29,7 @@ const TAG = '[AppStoreRoutes]';
 const router = express.Router();
 
 const credentialsSchema = z.object({
-  keyId: z
-    .string()
-    .trim()
-    .regex(/^[A-Z0-9]{10,20}$/),
+  keyId: z.string().trim().regex(APP_STORE_KEY_ID_PATTERN),
   privateKey: z.string().trim().min(1),
 });
 
@@ -91,9 +90,11 @@ async function resolveApplications(
         resolved = await appStoreClient.resolveApp(credentials, bundleId);
       } catch (error) {
         if (error instanceof AppStoreApiError && error.status === 401) {
+          // 403, never 401: the dashboard logs the user out on any 401.
           throw new AppStoreConnectError(
-            401,
-            'Invalid App Store Connect credentials. Check the Key ID and .p8 key.',
+            403,
+            'App Store Connect rejected this key. This desk needs an Individual key ' +
+              '(Users and Access > Integrations > App Store Connect API); Team keys are not supported.',
           );
         }
         throw error;
@@ -170,9 +171,9 @@ function handleRouteError(res: Response, error: unknown, fallback: string): void
     return;
   }
   if (error instanceof AppStoreApiError) {
-    res.status(error.status >= 400 && error.status < 500 ? error.status : 502).json({
-      error: error.detail,
-    });
+    // Apple's 401 is remapped, or the dashboard logs the user out over a bad key.
+    const status = error.status === 401 ? 403 : error.status;
+    res.status(status >= 400 && status < 500 ? status : 502).json({ error: error.detail });
     return;
   }
   logger.error(`${TAG} ${fallback}`, { error });
@@ -189,15 +190,22 @@ router.post(
       const userId = req.user!.id;
       const input = connectSchema.parse(req.body);
 
-      const [project, board, duplicateName] = await Promise.all([
+      const [project, board, group, duplicateName] = await Promise.all([
         db.project.findFirst({
           where: { id: input.projectId, workspaceId },
           select: { id: true },
         }),
         db.board.findFirst({
-          where: { id: input.boardId, projectId: input.projectId },
+          where: { id: input.boardId, projectId: input.projectId, workspaceId },
           select: { id: true },
         }),
+        // No FK backs this, so an unchecked id is stored happily and tickets never auto-assign.
+        input.assigneeUserGroupId
+          ? db.userGroup.findFirst({
+              where: { id: input.assigneeUserGroupId, workspaceId, isActive: true },
+              select: { id: true },
+            })
+          : null,
         db.channel.findFirst({
           where: { name: input.channelName, workspaceId },
           select: { id: true },
@@ -205,6 +213,9 @@ router.post(
       ]);
       if (!project) throw new AppStoreConnectError(404, 'Project not found');
       if (!board) throw new AppStoreConnectError(404, 'Board not found in this project');
+      if (input.assigneeUserGroupId && !group) {
+        throw new AppStoreConnectError(404, 'Assignee group not found');
+      }
       if (duplicateName) throw new AppStoreConnectError(409, 'A channel with that name exists');
 
       const credentials: AppStoreCredentials = {
@@ -316,17 +327,27 @@ router.post(
         select: { credentials: true, boardId: true, ownerUserId: true },
       });
       if (!existing) throw new AppStoreConnectError(404, 'App Store desk not found');
+      if (!existing.credentials) {
+        throw new AppStoreConnectError(
+          400,
+          'The App Store Connect key was deleted when this desk was disconnected. ' +
+            'Use "Replace key" to paste a new one first.',
+        );
+      }
 
       const credentials = appStoreClient.decryptCredentials(existing.credentials);
       const applications = await resolveApplications(credentials, input.applications);
-      const result = await reactivateOrCreateSources(db, {
-        workspaceId,
-        channelId: req.params.channelId,
-        boardId: existing.boardId ?? '',
-        ownerUserId: existing.ownerUserId ?? req.user!.id,
-        encryptedCredentials: existing.credentials,
-        applications,
-      });
+      // Atomic like connect: a 409 on the Nth app must not leave the first N-1 committed.
+      const result = await db.$transaction((tx) =>
+        reactivateOrCreateSources(tx, {
+          workspaceId,
+          channelId: req.params.channelId,
+          boardId: existing.boardId ?? '',
+          ownerUserId: existing.ownerUserId ?? req.user!.id,
+          encryptedCredentials: existing.credentials,
+          applications,
+        }),
+      );
 
       res.json({ added: result.created + result.reactivated, ...result });
     } catch (error) {
@@ -345,6 +366,38 @@ async function setAppConnection(req: Request, res: Response, isActive: boolean):
     if (!(await authorizeSocialMediaManager(req.params.channelId, req.user!.id, workspaceId, res)))
       return;
 
+    let reactivation: { reconnectedAt: string; externalMetadata: Prisma.InputJsonValue } | null =
+      null;
+    if (isActive) {
+      const source = await db.externalSource.findFirst({
+        where: {
+          id: req.params.sourceId,
+          channelId: req.params.channelId,
+          workspaceId,
+          sourceType: ExternalSourcePlatform.APP_STORE,
+        },
+        select: { credentials: true, externalMetadata: true },
+      });
+      if (!source) throw new AppStoreConnectError(404, 'App Store app not found');
+      // Disconnect destroys the .p8, so reactivating without one can never sync.
+      if (!source.credentials) {
+        throw new AppStoreConnectError(
+          409,
+          'The App Store Connect key was deleted when this desk was disconnected. ' +
+            'Use "Replace key" to paste a new one before reconnecting apps.',
+        );
+      }
+      const reconnectedAt = new Date().toISOString();
+      const existingMetadata =
+        source.externalMetadata && typeof source.externalMetadata === 'object'
+          ? (source.externalMetadata as Prisma.JsonObject)
+          : {};
+      reactivation = {
+        reconnectedAt,
+        externalMetadata: { ...existingMetadata, connectedAt: reconnectedAt },
+      };
+    }
+
     const result = await db.externalSource.updateMany({
       where: {
         id: req.params.sourceId,
@@ -353,7 +406,13 @@ async function setAppConnection(req: Request, res: Response, isActive: boolean):
         sourceType: ExternalSourcePlatform.APP_STORE,
       },
       // Re-enabling after dormancy must not replay the whole gap as "new" reviews.
-      data: isActive ? { isActive, lastSyncCursor: new Date().toISOString() } : { isActive },
+      data: reactivation
+        ? {
+            isActive,
+            lastSyncCursor: reactivation.reconnectedAt,
+            externalMetadata: reactivation.externalMetadata,
+          }
+        : { isActive },
     });
     if (result.count === 0) throw new AppStoreConnectError(404, 'App Store app not found');
 

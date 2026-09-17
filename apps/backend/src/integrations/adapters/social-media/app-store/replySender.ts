@@ -6,8 +6,10 @@ import {
 import type { InteractionReplyContext } from '@/integrations/core/baseInteractionReplySender';
 import type { NormalizedData } from '@/integrations/core/types';
 import { db } from '@/database/client';
-import { EmailType } from '@xyne/shared';
+import { withWorkspaceScope } from '@/database/tenant/context';
+import { EmailType, FormFieldType } from '@xyne/shared';
 import { appStoreClient } from './client';
+import { APP_STORE_RESPONSE_STATE_FIELD } from './constants';
 import { markResponsePending } from './syncState';
 import { APP_STORE_DEVELOPER_RESPONSE_SUFFIX } from './transformer';
 
@@ -35,6 +37,14 @@ export class AppStoreReviewsReplySender extends BaseInteractionReplySender {
       externalThreadId: context.externalThreadId,
       author: { name: context.authorName },
       content: context.body,
+      // Nothing else writes this for a review outside the poll window.
+      ticketCustomFields: [
+        {
+          fieldName: APP_STORE_RESPONSE_STATE_FIELD,
+          fieldType: FormFieldType.STRING,
+          value: state,
+        },
+      ],
       emailData: {
         subject: `Developer response to ${context.subject}`,
         from: context.authorName,
@@ -68,10 +78,18 @@ export class AppStoreReviewsReplySender extends BaseInteractionReplySender {
     );
     if (!existing) return;
 
-    const ours = await db.externalMessage.findFirst({
-      where: { externalSourceId: context.source.id, externalId },
-      select: { id: true },
-    });
+    // sentByUserId is the discriminator: the poll never sets it, a Xyne reply always does.
+    // withWorkspaceScope keeps it source-scoped; the Email ACL would narrow it to visible channels.
+    const ours = await withWorkspaceScope(async () =>
+      db.email.findFirst({
+        where: {
+          externalMessageId: externalId,
+          workspaceId: context.source.workspaceId,
+          sentByUserId: { not: null },
+        },
+        select: { id: true },
+      }),
+    );
     if (ours) return;
 
     throw new InteractionReplyValidationError(
