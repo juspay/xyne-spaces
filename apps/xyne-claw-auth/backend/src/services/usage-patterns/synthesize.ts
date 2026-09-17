@@ -426,3 +426,95 @@ export function synthesizeUsagePatternsBestEffort(orgId: string, agentSlug: stri
     log.warn(`[usage-patterns] synthesis failed for ${agentSlug}: ${errMsg(e)}`),
   );
 }
+
+export type UsagePatternJob =
+  | { status: "running"; startedAt: string }
+  | { status: "busy"; running: number }
+  | { status: "done"; startedAt: string; finishedAt: string; outcome: SynthesisOutcome }
+  | { status: "error"; startedAt: string; finishedAt: string; error: string };
+
+/**
+ * How many passes may be in flight at once.
+ *
+ * Answering the request immediately means the caller no longer paces the work:
+ * a loop over the roster could start one LLM call per agent with nothing in
+ * between. This is the backpressure that awaiting the result used to provide by
+ * accident. Callers are told to come back rather than queued, because a queue
+ * of hundreds of synthesis passes is the same problem one step later.
+ */
+const MAX_CONCURRENT = positiveInt("USAGE_PATTERNS_MAX_CONCURRENT", 2);
+
+/**
+ * In-flight and recently finished passes, keyed by org and slug.
+ *
+ * Process local, which is the honest scope: it is a progress hint, not a
+ * record. Behind more than one replica a poll can land on a pod that never ran
+ * the job and will correctly report nothing, so callers that need certainty
+ * read the stored file instead. Entries are dropped after RETENTION_MS so a
+ * long-lived process does not accumulate one per agent forever.
+ */
+const jobs = new Map<string, UsagePatternJob>();
+const RETENTION_MS = 30 * 60 * 1000;
+
+function jobKey(orgId: string, agentSlug: string): string {
+  return `${orgId}:${agentSlug}`;
+}
+
+function sweepJobs(): void {
+  const cutoff = Date.now() - RETENTION_MS;
+  for (const [key, job] of jobs) {
+    // "busy" is an answer to a caller, never stored, so only the two terminal
+    // states can age out here.
+    if ((job.status === "done" || job.status === "error") && Date.parse(job.finishedAt) < cutoff) {
+      jobs.delete(key);
+    }
+  }
+}
+
+export function usagePatternJob(orgId: string, agentSlug: string): UsagePatternJob | null {
+  return jobs.get(jobKey(orgId, agentSlug)) ?? null;
+}
+
+/**
+ * Start a pass and return immediately.
+ *
+ * Synthesis calls an LLM and routinely runs tens of seconds, which is longer
+ * than the ingress will hold a connection open, so awaiting it in the request
+ * produced a 504 while the work carried on invisibly. The caller now gets an
+ * acknowledgement and reads the result from the stored file.
+ *
+ * A pass already running for the same agent is returned as is rather than
+ * started twice: a retry after a timeout would otherwise stack a second LLM
+ * call onto the first and both would write the same file.
+ */
+export function startUsagePatternSynthesis(
+  orgId: string,
+  agentSlug: string,
+  window: UsageWindow,
+  /** The pass to run. Injectable so the bookkeeping can be tested without an
+   *  LLM; production never passes it. */
+  run: (orgId: string, agentSlug: string, window: UsageWindow) => Promise<SynthesisOutcome> = synthesizeUsagePatterns,
+): UsagePatternJob {
+  sweepJobs();
+  const key = jobKey(orgId, agentSlug);
+  const running = jobs.get(key);
+  if (running?.status === "running") return running;
+
+  const inFlight = [...jobs.values()].filter((j) => j.status === "running").length;
+  if (inFlight >= MAX_CONCURRENT) return { status: "busy", running: inFlight };
+
+  const startedAt = new Date().toISOString();
+  const job: UsagePatternJob = { status: "running", startedAt };
+  jobs.set(key, job);
+
+  void run(orgId, agentSlug, window)
+    .then((outcome) => {
+      jobs.set(key, { status: "done", startedAt, finishedAt: new Date().toISOString(), outcome });
+    })
+    .catch((e) => {
+      log.warn(`[usage-patterns] synthesis failed for ${agentSlug}: ${errMsg(e)}`);
+      jobs.set(key, { status: "error", startedAt, finishedAt: new Date().toISOString(), error: errMsg(e) });
+    });
+
+  return job;
+}

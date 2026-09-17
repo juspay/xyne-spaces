@@ -29,9 +29,12 @@ export {
   writeUsagePatternFile,
   synthesizeUsagePatterns,
   synthesizeUsagePatternsBestEffort,
+  startUsagePatternSynthesis,
+  usagePatternJob,
   FILE_NAME,
   UPDATED_BY,
 } from "./synthesize.js";
+export type { UsagePatternJob } from "./synthesize.js";
 export type {
   DistilledPattern,
   PatternKind,
