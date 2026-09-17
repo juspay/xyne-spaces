@@ -53,6 +53,7 @@ import { recoveryService } from './workflows/services/recovery-service'
 import { aiProvisioningWorker } from '@/workers/aiProvisioningWorker';
 import { socialMediaSyncWorker } from '@/workers/socialMediaSyncWorker';
 import { workflowsWorker } from '@/workers/workflowsWorker';
+import { heicRenditionQueue } from '@/queues/heicRenditionQueue';
 config()
 
 process.on('unhandledRejection', reason => {
@@ -239,6 +240,12 @@ class WorkerService {
         logger.info('Starting recording stitch worker...');
         const { stitchWorker } = await import('@/workers/stitchWorker');
         stitchWorker.start();
+      }
+
+      if (appConfig.enableHeicRenditionWorker) {
+        logger.info('Starting HEIC rendition worker...');
+        await heicRenditionQueue.initialize();
+        heicRenditionQueue.startProcessing();
       }
 
       if (appConfig.enableScheduledMessageWorker) {
@@ -503,6 +510,10 @@ class WorkerService {
       if (appConfig.enableWorkflowStepGcsSync) {
         logger.info('Closing workflow step GCS sync queue...');
         await workflowStepGcsSyncQueue.close();
+      }
+
+      if (appConfig.enableHeicRenditionWorker) {
+        await heicRenditionQueue.shutdown();
       }
 
       if (appConfig.enableConversationIngestionWorker) {
