@@ -69,7 +69,7 @@ import {
   type TicketStatusV2,
 } from '@xyne/shared';
 import type { ResolvedDisplayFormField } from '../../../utils/board/resolveDisplayFormFields';
-import { Dialog } from '../../ui/Dialog/Dialog';
+import { DeskInsightsShell } from '../DeskInsights/DeskInsightsPanel';
 import { cn } from '../../../utils/classNames';
 import { getStageStatusMeta } from '../../../utils/board/stageStatusIcon';
 import { useAggregateDeskMetrics } from '../../../hooks/useDeskMetrics';
@@ -102,6 +102,8 @@ export interface DeskMetricsDashboardProps {
   onTicketClick: (ticket: DeskMetricsTicketRow) => void;
   /** Which surface opened the dashboard — DESK_METRICS_VIEWED `source`. */
   trackSource?: 'toolbar' | 'settings_tab';
+  /** Render inline inside the Insights panel instead of its own dialog. */
+  embedded?: boolean;
 }
 
 /** Shows a checklist of tags for a category, derived from already-fetched breakdown data. */
@@ -995,6 +997,7 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
   availableStages = [],
   onTicketClick,
   trackSource = 'toolbar',
+  embedded,
 }) => {
   const { user } = useAuth();
   const isGuest = user?.role === WorkspaceRole.GUEST;
@@ -1533,7 +1536,8 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
   );
 
   return (
-    <Dialog
+    <DeskInsightsShell
+      embedded={embedded}
       open={open}
       onOpenChange={handleOpenChange}
       title='Desk Metrics'
@@ -3018,6 +3022,6 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
           </div>
         </div>
       )}
-    </Dialog>
+    </DeskInsightsShell>
   );
 };
