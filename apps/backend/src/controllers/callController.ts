@@ -1080,21 +1080,15 @@ export class CallController {
           queueCallVespaFeed(call.id, { source: CallVespaFeedSource.CallControllerJoinCallClearRemovedByHost });
         }
 
-        // Who belongs to a call: the host, anyone invited, and the members of the
-        // channel it is happening in — a channel call is offered to the channel, so
-        // membership is the invitation. Matches assertCanViewCallRecordings. Anyone
-        // else holds a link they were never given access by, and is turned away.
+        // The call link is the invitation: anyone in the call's workspace who holds
+        // it may join, invited or not. The workspace check above is the boundary;
+        // people outside the workspace go through the lobby and are admitted by the
+        // host. The webhook creates the participant row on join, which is what makes
+        // a link joiner part of the call's audience (see isCallAudience) afterwards.
         if (!participant && call.createdByUserId !== user.id) {
-          const isChannelMember = call.channelId
-            ? await repositories.channelParticipants.isParticipant(call.channelId, user.id)
-            : false;
-          if (!isChannelMember) {
-            logger.warn(
-              `[CallController] join denied, no invitation or channel membership | callId=${callId}, userId=${user.id}`,
-            );
-            res.status(403).json({ success: false, error: 'You do not have access to this call' });
-            return;
-          }
+          logger.info(
+            `[CallController] link join without invitation | callId=${callId}, userId=${user.id}`,
+          );
         }
       }
 
