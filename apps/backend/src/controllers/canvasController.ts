@@ -858,15 +858,6 @@ export class CanvasController {
       });
       const canvasChannelId = canvasRecord?.channelId;
 
-      // Fetch channel name if canvas is linked to a channel
-      const channel = canvasChannelId
-        ? await db.channel.findUnique({
-            where: { id: canvasChannelId },
-            select: { name: true },
-          })
-        : null;
-      const channelName = channel?.name;
-
       // Resolve mentioned users
       const mentionedUsers: { userId: string; mentionSource: 'direct' | 'group' }[] = [];
 
@@ -962,7 +953,6 @@ export class CanvasController {
           userId,
           senderName,
           req.user?.workspaceId ?? '',
-          channelName,
           blockId,
           commentThreadId,
           canvasChannelId ?? undefined,
