@@ -100,7 +100,6 @@ import subTicketRoutes from '@/routes/subTickets';
 import boardConfigCopyRoutes from '@/routes/boardConfigCopy';
 import recordingPointerBackfillRoutes from '@/routes/recordingPointerBackfill';
 import sdlcRepoCredentialBackfillRoutes from '@/routes/sdlcRepoCredentialBackfill';
-import emailReadFlagBackfillRoutes from '@/routes/emailReadFlagBackfill';
 import searchMetricsRoutes from '@/routes/searchMetrics';
 import knowledgeRoutes from '@/routes/knowledge';
 import vespaSearchRoutes from '@/routes/vespaSearch';
@@ -447,8 +446,6 @@ export class App {
     // '-backfill' path suffix also puts it behind backfillMountGuard above.
     this.app.use('/api/admin/recording-pointer-backfill', recordingPointerBackfillRoutes);
     this.app.use('/api/admin/sdlc-repo-credential-backfill', sdlcRepoCredentialBackfillRoutes);
-    // Same shape: sets email_reads.hasNewEmail across every workspace under runAsSystem.
-    this.app.use('/api/admin/email-read-flag-backfill', emailReadFlagBackfillRoutes);
     // Same shape: the one-off SDLC multi-repo data migration spans every workspace,
     // so it opens its own runAsSystem scope rather than taking workspaceScopedRoute.
 
