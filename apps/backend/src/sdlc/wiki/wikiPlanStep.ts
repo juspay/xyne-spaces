@@ -73,11 +73,12 @@ interface WrittenCommit {
 async function wikiHistory(
   workflowId: string
 ): Promise<{ written: Map<string, WrittenCommit[]>; hubSeenAt: Date | null }> {
+  const executions = await db.workflowExecution.findMany({ where: { workflowId }, select: { id: true } });
   const rows = await db.workflowStep.findMany({
     where: {
+      workflowExecutionId: { in: executions.map((execution) => execution.id) },
       status: 'COMPLETED',
       data: { contains: SDLC_AGENT_STEP_TYPE },
-      workflowExecution: { workflowId },
     },
     orderBy: { updatedAt: 'asc' },
     select: { data: true, stepName: true, updatedAt: true },
