@@ -1,6 +1,6 @@
 <div align="center">
 
-# Xyne Spaces
+# [Xyne Spaces](https://xyne.ai)
 
 **The org OS — your organization's context layer, with collaborative apps built
 around it. Real-time, permission-aware and built for agents.**
