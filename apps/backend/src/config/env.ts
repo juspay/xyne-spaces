@@ -463,6 +463,12 @@ const envSchema = Joi.object({
   // Stringified JSON mapping external webhook hosts to in-cluster pod base URLs.
   // e.g. {"claw.example.com":"http://claw-auth.svc.cluster.local:3003"}
   INTERNAL_APP_HOST_MAP: Joi.string().allow('').default(''),
+  // Comma-separated host suffixes refused for outbound external fetches (e.g. link
+  // preview). Include the leading dot, e.g. ".internal.example.net,.svc.cluster.local".
+  SSRF_BLOCKED_HOST_SUFFIXES: Joi.string().allow('').default(''),
+  // Optional forward-proxy for the link-preview outbound fetch. When set, the preview
+  // fetch is routed through it instead of connecting directly. Empty = direct (default).
+  LINK_PREVIEW_EGRESS_PROXY_URL: Joi.string().allow('').default(''),
   ENC_S2S_KEY: Joi.string().allow(''),
   ENCRYPTION_SERVICE_URL: Joi.string().uri().default('http://localhost:3012'),
   ENCRYPTION_REQUEST_TIMEOUT_MS: Joi.number().integer().min(1).default(5000),
@@ -1132,6 +1138,17 @@ export const config = {
   internalS2sKey: envVars.INTERNAL_S2S_KEY as string,
   apps: {
     internalHostMap: parseInternalAppHostMap(envVars.INTERNAL_APP_HOST_MAP as string),
+  },
+  ssrf: {
+    // Host suffixes refused for outbound external fetches.
+    blockedHostSuffixes: (envVars.SSRF_BLOCKED_HOST_SUFFIXES as string)
+      .split(',')
+      .map((s) => s.trim().toLowerCase())
+      .filter(Boolean),
+  },
+  linkPreview: {
+    // Optional forward-proxy for the link-preview fetch.
+    egressProxyUrl: (envVars.LINK_PREVIEW_EGRESS_PROXY_URL as string).trim(),
   },
   askAI: {
     version: envVars.ASK_AI_VERSION as 'v1' | 'v2',

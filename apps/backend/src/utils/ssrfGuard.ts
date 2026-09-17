@@ -111,6 +111,16 @@ function isMetadataHostname(host: string): boolean {
   );
 }
 
+// Additional host names refused for external fetches, from operator config:
+// SSRF_BLOCKED_HOST_SUFFIXES (host suffixes) and the INTERNAL_APP_HOST_MAP keys.
+function isConfiguredInternalHostname(lower: string): boolean {
+  for (const suffix of config.ssrf.blockedHostSuffixes) {
+    if (lower === suffix || lower.endsWith(suffix)) return true;
+  }
+  if (Object.prototype.hasOwnProperty.call(config.apps.internalHostMap, lower)) return true;
+  return false;
+}
+
 function isBlockedHostname(host: string): boolean {
   const lower = host.toLowerCase().trim();
   if (lower === 'localhost') return true;
@@ -118,6 +128,7 @@ function isBlockedHostname(host: string): boolean {
   if (lower.endsWith('.local')) return true;
   if (lower === 'metadata.google.internal') return true;
   if (lower === 'instance-data') return true;
+  if (isConfiguredInternalHostname(lower)) return true;
   return false;
 }
 
