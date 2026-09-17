@@ -9,6 +9,7 @@ import { useDebugSettings } from './useDebugSettings';
 import { useEnterSendsMessage } from './useEnterSendsMessage';
 import { useDefaultFormattingToolbarOpen } from './useDefaultFormattingToolbarOpen';
 import { useShowThreadTags } from './useShowThreadTags';
+import { useStreamsVisibility } from './useStreamsVisibility';
 import { useSummaryModelPreference } from './useSummaryModelPreference';
 import { useSearchMode } from './useSearchMode';
 import { useThreadBroadcastMentions } from './useThreadBroadcastMentions';
@@ -51,6 +52,7 @@ export function usePreferencesState(enabled: boolean) {
   const { defaultFormattingToolbarOpen, setDefaultFormattingToolbarOpen } =
     useDefaultFormattingToolbarOpen();
   const { showThreadTags, setShowThreadTags } = useShowThreadTags();
+  const { showStreams, setShowStreams } = useStreamsVisibility();
   const { summaryModelPreference, setSummaryModelPreference } = useSummaryModelPreference();
   const { searchMode } = useSearchMode();
   const { showClawDashboard, setShowClawDashboard } = useClawDashboardVisibility();
@@ -150,6 +152,8 @@ export function usePreferencesState(enabled: boolean) {
     defaultFormattingToolbarOpen,
     setDefaultFormattingToolbarOpen,
     showThreadTags,
+    showStreams,
+    setShowStreams,
     setShowThreadTags,
     summaryModelPreference,
     setSummaryModelPreference,
