@@ -2,7 +2,7 @@ import { isAgentOwnedRun } from "../lib/agent-owned-runs.js";
 import { screenUploadFiles } from "../lib/upload-screening.js";
 import { Router, type Request, type RequestHandler, type Response } from "express";
 import { errMsg } from "../lib/errors.js";
-import { SDLC_AGENT_SLUG, isAgentInvocableBy } from "xyne-claw-shared";
+import { isAgentInvocableBy } from "xyne-claw-shared";
 import { randomUUID } from "node:crypto";
 import multer from "multer";
 import { existsSync, readdirSync } from "node:fs";
@@ -873,10 +873,6 @@ router.get("/:slug/context/search", async (req: Request<{ slug: string }>, res: 
       res.status(400).json({ success: false, error: "type must be one of all|channel|ticket|canvas|call|repository" });
       return;
     }
-    if (rawType === "repository" && req.params.slug !== SDLC_AGENT_SLUG) {
-      res.status(400).json({ success: false, error: "Repository context is only available for the SDLC Assistant" });
-      return;
-    }
 
     const q = typeof req.query["q"] === "string" ? req.query["q"].trim() : "";
     const rawLimit = Number(req.query["limit"]);
@@ -1166,9 +1162,7 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
     }
     const conversationId = existingConvId ?? `chat-${randomUUID()}`;
 
-    const sdlcResolution = slug === "sdlc-agent"
-      ? await resolveSdlcRepositoryForUser(userId, researchContext, conversationId)
-      : { ok: true as const, repository: undefined };
+    const sdlcResolution = await resolveSdlcRepositoryForUser(userId, researchContext, conversationId);
     if (!sdlcResolution.ok) {
       res.status(sdlcResolution.status).json({ success: false, error: sdlcResolution.error });
       return;

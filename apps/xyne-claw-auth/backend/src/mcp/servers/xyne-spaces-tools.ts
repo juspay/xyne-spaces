@@ -5573,7 +5573,7 @@ const spacesSdlcListRepositories: ToolDef = {
     "Resolve a Spaces channel to the SDLC repositories it covers. An SDLC Hub is a channel and repositories are its members. "
     + "The conversation's channelId is supplied by the platform, so call this with no arguments to learn which repositories "
     + "this hub works on. Returns repoId, channelId, name, clone url, and base branch per repository — pass the repoId and "
-    + "channelId together to every hub-scoped SDLC tool. An empty result means this channel is not an SDLC hub. "
+    + "channelId together to every hub-scoped SDLC tool. An empty result means this hub has no repositories yet, or the channel is not an SDLC hub. "
     + "Use it to orient yourself or to offer the user a choice; never use it to override a repository already pinned by trusted run context.",
   inputSchema: {
     type: "object",
@@ -5726,43 +5726,89 @@ const spacesSdlcReadArtifact: ToolDef = {
   async appHandler(args, ctx) { return callSdlcArtifactHistory("/current/read", args, ctx); },
 };
 
+// ── spaces-sdlc-list-entity-links ─────────────────────────────────
+const spacesSdlcListEntityLinks: ToolDef = {
+  name: SDLC_TOOL_NAMES.listEntityLinks,
+  description:
+    "List everything linked to one thing in an SDLC Hub, one hop in both directions: the tickets, artifacts, " +
+    "tracks, conversations, calls, pull requests and repositories related to it. Each link names the other end " +
+    "(type, id, display name) and the relation. Call it again on a result to follow a link further.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      channelId: { type: "string", minLength: 1, description: SDLC_CHANNEL_ID_HINT },
+      entityType: {
+        type: "string",
+        enum: ["CANVAS", "TICKET", "CHANNEL", "CONVERSATION", "MESSAGE", "EMAIL", "CALL", "RECORDING", "ATTACHMENT", "PULL_REQUEST", "REPOSITORY", "WORKFLOW_EXECUTION", "WORKFLOW", "TRACK", "FOLDER"],
+      },
+      entityId: { type: "string", minLength: 1 },
+      relationType: { type: "string", description: "Optional: only links of this relation, e.g. TICKET, CONTEXT, DISCUSSION." },
+      otherType: { type: "string", description: "Optional: only links whose other end is this entity type." },
+      limit: { type: "integer", minimum: 1, maximum: 200, default: 100 },
+    },
+    required: ["channelId", "entityType", "entityId"],
+  },
+  async handler(args, ctx) {
+    return callSdlcEntityLinks(args, ctx);
+  },
+  async appHandler(args, ctx) {
+    return callSdlcEntityLinks(args, ctx);
+  },
+};
+
+async function callSdlcEntityLinks(args: Record<string, unknown>, ctx: HandlerContext): Promise<ToolResult> {
+  try {
+    const data = await spacesFetch("/api/sdlc/claw/entity-links/list", {
+      method: "POST",
+      headers: { "x-xyne-acting-user-id": ctx.userId },
+      body: JSON.stringify(args),
+    }, sdlcSpacesAuth());
+    return ok(JSON.stringify(data));
+  } catch (e) {
+    return err(`SDLC entity links error: ${errMsg(e)}`);
+  }
+}
+
 // ── spaces-sdlc-create-pull-request ───────────────────────────────
 const spacesSdlcCreatePullRequest: ToolDef = {
   name: SDLC_TOOL_NAMES.createPullRequest,
   description:
-    "Create a draft pull request after a convention-derived safe feature branch has been pushed. " +
-    "The Spaces backend resolves its trusted interactive authorization and verifies repository, " +
-    "remote commit, exact head/base, and draft state. Never use generic GitHub credentials for SDLC work.",
+    "Open a pull request on GitHub or Bitbucket after a safe feature branch has been pushed. " +
+    "The Spaces backend checks the run's user can reach the repository, verifies the pushed commit and " +
+    "head/base, and opens it with the repository's own credential. draft defaults to true; Bitbucket " +
+    "servers without draft support open a normal pull request with no reviewers. " +
+    "Never use generic GitHub or Bitbucket credentials for SDLC work.",
   inputSchema: {
     type: "object",
     properties: {
-      interactiveGrant: { type: "string" },
-      conversationId: { type: "string" },
-      repoId: { type: "string" },
+      workspaceId: { type: "string" },
+      actorUserId: { type: "string" },
+      repoId: { type: "string", description: "SDLC repository id from spaces-sdlc-list-repositories." },
       title: { type: "string", minLength: 1, maxLength: 256 },
       body: { type: "string", maxLength: 65_536 },
       head: { type: "string", minLength: 1, maxLength: 255 },
       base: { type: "string", minLength: 1, maxLength: 255 },
       commitHash: { type: "string", pattern: "^[0-9a-fA-F]{40}$" },
+      draft: { type: "boolean", default: true },
     },
     required: ["repoId", "title", "head", "base", "commitHash"],
   },
-  handler: withToolErrors("Create SDLC pull request error", async (args) => {
+  handler: withToolErrors("Create SDLC pull request error", async (args, ctx) => {
       const s2sKey = process.env["INTERNAL_S2S_KEY"] ?? process.env["XYNE_CLAW_S2S_KEY"] ?? "";
       if (!s2sKey) return err("Internal S2S key is unavailable for SDLC pull request creation.");
       const data = (await spacesFetch(
         "/api/internal/sdlc/vcs/pull-requests",
-        { method: "POST", body: JSON.stringify(args) },
+        { method: "POST", headers: { "x-xyne-acting-user-id": ctx.userId }, body: JSON.stringify(args) },
         { s2sKey },
       )) as {
         pullRequest?: { url?: string; number?: number; draft?: boolean; head?: string; base?: string };
       };
-      if (!data.pullRequest?.url || data.pullRequest.draft !== true) {
-        return err("Spaces returned an invalid draft pull request result.");
+      if (!data.pullRequest?.url) {
+        return err("Spaces returned an invalid pull request result.");
       }
       return ok(
         [
-          "Draft pull request created and verified.",
+          `${data.pullRequest.draft ? "Draft pull request" : "Pull request"} created and verified.`,
           `URL: ${data.pullRequest.url}`,
           `Number: ${data.pullRequest.number ?? "unknown"}`,
           `Head: ${data.pullRequest.head ?? "unknown"}`,
@@ -5770,8 +5816,8 @@ const spacesSdlcCreatePullRequest: ToolDef = {
         ].join("\n"),
       );
     }),
-  async appHandler(args) {
-    return spacesSdlcCreatePullRequest.handler(args, { userId: "sdlc", authMode: "app" });
+  async appHandler(args, ctx) {
+    return spacesSdlcCreatePullRequest.handler(args, ctx);
   },
 };
 
@@ -8975,6 +9021,7 @@ export const tools: ToolDef[] = [
   spacesSdlcListArtifactTypes,
   spacesSdlcMutateArtifact,
   spacesSdlcCreatePullRequest,
+  spacesSdlcListEntityLinks,
   spacesSdlcListArtifactVersions,
   spacesSdlcReadArtifactVersion,
 ];

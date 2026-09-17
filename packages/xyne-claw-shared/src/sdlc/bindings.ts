@@ -8,10 +8,8 @@ function record(value: unknown): Record<string, unknown> | undefined {
     : undefined;
 }
 
-export function trustedSdlcToolBindings(
-  sdlcContext: unknown,
-  runChannelId?: string,
-): TrustedMcpToolBindings | undefined {
+/** Hub and Actor come only from backend context; a run without it gets no bindings. */
+export function trustedSdlcToolBindings(sdlcContext: unknown): TrustedMcpToolBindings | undefined {
   const context = record(sdlcContext);
   const repository = record(context?.["repository"]);
   const rawRepoId = repository?.["id"];
@@ -19,22 +17,13 @@ export function trustedSdlcToolBindings(
   const repoBinding = repoId ? { repoId } : {};
   const contextChannelId = context?.["channelId"];
   const channelId =
-    typeof contextChannelId === "string" && contextChannelId
-      ? contextChannelId
-      : runChannelId;
+    typeof contextChannelId === "string" && contextChannelId ? contextChannelId : undefined;
   const channelBinding = channelId ? { channelId } : {};
 
-  if (typeof context?.["operation"] !== "string") {
-    return channelId
-      ? { [SDLC_TOOL_NAMES.listRepositories]: { channelId } }
-      : undefined;
-  }
+  if (typeof context?.["operation"] !== "string") return undefined;
 
-  const execution = record(context["execution"]);
   const workspaceId = context["workspaceId"];
   const actorUserId = context["actorUserId"];
-  const interactiveGrant = context["interactiveGrant"];
-  const conversationId = execution?.["conversationId"];
   const generationCommit = context["generationCommit"];
   const hasRepositoryIdentity =
     typeof workspaceId === "string" && typeof actorUserId === "string";
@@ -59,14 +48,9 @@ export function trustedSdlcToolBindings(
       };
       continue;
     }
-    // Single-repository tools, createPullRequest included: a hub run gets none.
-    if (
-      repoId &&
-      capability.trustedBinding === "interactive" &&
-      typeof interactiveGrant === "string" &&
-      typeof conversationId === "string"
-    ) {
-      bindings[capability.name] = { interactiveGrant, conversationId, repoId };
+    // The repository is the LLM's choice; the backend checks the Actor can reach it.
+    if (capability.trustedBinding === "actor" && hasRepositoryIdentity) {
+      bindings[capability.name] = { workspaceId, actorUserId };
     }
   }
 
