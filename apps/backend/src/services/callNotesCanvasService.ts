@@ -1,10 +1,11 @@
 import type { Call, Prisma } from '@prisma/client';
 import { v4 as uuidv4 } from 'uuid';
 import { CanvasRole } from '@xyne/shared';
-import { DatabaseClient, db } from '@/database/client';
+import { db } from '@/database/client';
 import { repositories } from '@/database/repositories';
 import { canvasAuthService } from '@/services/canvasAuthService';
 import { convertBlockNoteToMarkdown } from '@/services/canvasService';
+import { acquireLock, releaseLock } from '@/utils/distributedLock';
 import { readFromYSweet } from '@/utils/ysweetUtils.js';
 import { logger } from '@/utils/logger';
 
@@ -46,31 +47,36 @@ class CallNotesCanvasService {
     // Serialize get-or-create so participants opening Notes at the same time share one canvas.
     const lockKey = `call-notes-canvas:${call.recurringSeriesId ?? call.id}`;
 
-    const canvasId = await DatabaseClient.getInstance().$transaction(async (tx) => {
-      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${lockKey}))`;
+    const lock = await acquireLock(lockKey, { ttlSeconds: 30, waitTimeoutMs: 10_000, retryDelayMs: 100 });
+    if (!lock) throw new Error(`Timed out waiting for notes canvas lock: ${lockKey}`);
 
+    let canvasId: string;
+    try {
       const metadata = await this.loadOwnerMetadata(call);
       const existing = metadata[NOTES_CANVAS_KEY];
-      if (typeof existing === 'string' && existing) return existing;
-
-      const newCanvasId = uuidv4();
-      await canvasAuthService.createCanvasForUser(newCanvasId, userId, {
-        title: call.title ? `Notes: ${call.title}` : 'Call Notes',
-        metadata: {
-          source: 'call_notes',
-          callId: call.externalId,
-          ...(call.recurringSeriesId && { recurringSeriesId: call.recurringSeriesId }),
-        },
-      });
-
-      const nextMetadata = { ...metadata, [NOTES_CANVAS_KEY]: newCanvasId };
-      if (call.recurringSeriesId) {
-        await repositories.recurringCallSeries.update(call.recurringSeriesId, { metadata: nextMetadata });
+      if (typeof existing === 'string' && existing) {
+        canvasId = existing;
       } else {
-        await repositories.calls.update(call.id, { metadata: nextMetadata });
+        canvasId = uuidv4();
+        await canvasAuthService.createCanvasForUser(canvasId, userId, {
+          title: call.title ? `Notes: ${call.title}` : 'Call Notes',
+          metadata: {
+            source: 'call_notes',
+            callId: call.externalId,
+            ...(call.recurringSeriesId && { recurringSeriesId: call.recurringSeriesId }),
+          },
+        });
+
+        const nextMetadata = { ...metadata, [NOTES_CANVAS_KEY]: canvasId };
+        if (call.recurringSeriesId) {
+          await repositories.recurringCallSeries.update(call.recurringSeriesId, { metadata: nextMetadata });
+        } else {
+          await repositories.calls.update(call.id, { metadata: nextMetadata });
+        }
       }
-      return newCanvasId;
-    });
+    } finally {
+      await releaseLock(lock);
+    }
 
     // Channel members edit through the channel share; invitees outside the channel get a direct share.
     await db.canvasParticipant.createMany({
