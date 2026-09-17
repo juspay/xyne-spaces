@@ -4016,7 +4016,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   }, [layoutView]);
 
   const { toggleStar: toggleViewStar } = useViewStar();
-  const [projectsList] = useCachedQuery(queries.getAllProjectsList(), {
+  const [headerProject] = useCachedQuery(queries.projectById({ projectId: projectIdParam ?? '' }), {
     enabled: viewMode === 'project' && !!projectIdParam && !channelId,
   });
   const headerTitle = isWorkspaceView
@@ -4027,9 +4027,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
         ? 'Tickets'
         : viewMode === 'board'
           ? (selectedBoardDetail?.name ?? 'Board')
-          : ((projectsList as readonly { id: string; name: string }[] | undefined)?.find(
-              project => project.id === projectIdParam,
-            )?.name ?? 'Tickets');
+          : ((headerProject as { name: string } | undefined)?.name ?? 'Tickets');
   const headerTicketCount = useMemo(
     () =>
       processedGroups.reduce(

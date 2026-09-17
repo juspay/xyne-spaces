@@ -105,59 +105,65 @@ export const CustomiseViewPopover = (props: CustomiseViewPopoverProps): ReactEle
     const q = columnQuery.trim().toLowerCase();
     return q ? props.columns.filter(c => c.label.toLowerCase().includes(q)) : props.columns;
   }, [props.columns, columnQuery]);
-  const shownCount = props.columns.filter(c => props.visibleColumns.has(c.key)).length;
+  const shownCount = useMemo(
+    () => props.columns.filter(c => props.visibleColumns.has(c.key)).length,
+    [props.columns, props.visibleColumns],
+  );
   const columnsLabel = props.layoutView === 'table' ? 'Columns' : 'Card fields';
 
   const groupLabel = groupByLabel(props.groupBy, props.groupingOptions);
   const groupChoices = groupByChoices(props.groupingOptions);
   const activeGroupKey = optionKey(props.groupBy);
 
-  const layouts: { id: HeaderLayoutView; label: string; thumb: ReactElement }[] = [
-    {
-      id: 'table',
-      label: 'List',
-      thumb: (
-        <span className='flex flex-col gap-[3px]'>
-          <span className='h-[5px] rounded-[3px] bg-muted-foreground/40' />
-          <span className='h-[5px] rounded-[3px] bg-muted' />
-          <span className='h-[5px] rounded-[3px] bg-muted' />
-          <span className='h-[5px] rounded-[3px] bg-muted' />
-        </span>
-      ),
-    },
-    {
-      id: 'kanban',
-      label: 'Board',
-      thumb: (
-        <span className='flex items-start gap-[3px]'>
-          <span className='h-[23px] flex-1 rounded-[3px] bg-muted' />
-          <span className='h-4 flex-1 rounded-[3px] bg-muted' />
-          <span className='h-[11px] flex-1 rounded-[3px] bg-muted' />
-        </span>
-      ),
-    },
-    ...(props.showCalendarLayout
-      ? [
-          {
-            id: 'calendar' as const,
-            label: 'Calendar',
-            thumb: (
-              <span className='grid grid-cols-4 gap-[3px]'>
-                {Array.from({ length: 8 }).map((_, i) => (
-                  <span
-                    key={i}
-                    className={cn(
-                      'h-[10px] rounded-[3px]',
-                      i === 5 ? 'bg-muted-foreground/40' : 'bg-muted',
-                    )}
-                  />
-                ))}
-              </span>
-            ),
-          },
-        ]
-      : []),
-  ];
+  const layouts: { id: HeaderLayoutView; label: string; thumb: ReactElement }[] = useMemo(
+    () => [
+      {
+        id: 'table',
+        label: 'List',
+        thumb: (
+          <span className='flex flex-col gap-[3px]'>
+            <span className='h-[5px] rounded-[3px] bg-muted-foreground/40' />
+            <span className='h-[5px] rounded-[3px] bg-muted' />
+            <span className='h-[5px] rounded-[3px] bg-muted' />
+            <span className='h-[5px] rounded-[3px] bg-muted' />
+          </span>
+        ),
+      },
+      {
+        id: 'kanban',
+        label: 'Board',
+        thumb: (
+          <span className='flex items-start gap-[3px]'>
+            <span className='h-[23px] flex-1 rounded-[3px] bg-muted' />
+            <span className='h-4 flex-1 rounded-[3px] bg-muted' />
+            <span className='h-[11px] flex-1 rounded-[3px] bg-muted' />
+          </span>
+        ),
+      },
+      ...(props.showCalendarLayout
+        ? [
+            {
+              id: 'calendar' as const,
+              label: 'Calendar',
+              thumb: (
+                <span className='grid grid-cols-4 gap-[3px]'>
+                  {Array.from({ length: 8 }).map((_, i) => (
+                    <span
+                      key={i}
+                      className={cn(
+                        'h-[10px] rounded-[3px]',
+                        i === 5 ? 'bg-muted-foreground/40' : 'bg-muted',
+                      )}
+                    />
+                  ))}
+                </span>
+              ),
+            },
+          ]
+        : []),
+    ],
+    [props.showCalendarLayout],
+  );
 
   return (
     <PopoverPrimitive.Root

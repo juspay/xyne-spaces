@@ -9,7 +9,7 @@ import {
   UserDefault,
   UserTwo,
 } from '@xyne/icons';
-import { FormFieldType, parseFieldOptionValues } from '@xyne/shared';
+import { FormFieldType } from '@xyne/shared';
 import type { FormFields } from '@xyne/shared';
 import { ASSIGNEE_INVERT_MARKER, UNASSIGNED_FILTER_VALUE } from '../../../zero/queries';
 import {
@@ -138,15 +138,13 @@ const dynamicValue = (
       value: raw[0] === 'true' ? 'Yes' : raw[0] === 'false' ? 'No' : (raw[0] ?? 'any'),
     };
   }
-  const options = parseFieldOptionValues(field.fieldEnum);
-  const labels = raw.map(v => options.find(o => o === v) ?? v);
   const operator =
     field.fieldType === FormFieldType.MULTI_SELECT
       ? 'has any of'
-      : labels.length > 1
+      : raw.length > 1
         ? 'is any of'
         : 'is';
-  return { operator, value: summarize(labels, 'values') };
+  return { operator, value: summarize(raw, 'values') };
 };
 
 export const getFilterFields = (
