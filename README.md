@@ -399,3 +399,5 @@ before it is written. Participation is governed by our
 ## License
 
 Licensed under the [Apache License 2.0](LICENSE).
+
+<!-- PR card smoke test: safe to close. -->
