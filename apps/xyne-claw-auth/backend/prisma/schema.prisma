@@ -1516,6 +1516,12 @@ enum AgentAuditEvent {
   AGENT_DEMOTED
   AGENT_SHARED
   AGENT_UNSHARED
+  /// Ownership of an agent moved from one user to another (immediate, no
+  /// acceptance step). The new owner inherits the agent's stored provider
+  /// credentials and MCP connections (both keyed by agentId), so this event is
+  /// the only durable trace of who handed what to whom — keep actor, previous
+  /// owner and new owner in the metadata.
+  AGENT_OWNERSHIP_TRANSFERRED
   ROLE_GRANTED
   ROLE_REVOKED
   AGENT_CREATED
