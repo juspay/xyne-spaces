@@ -80,13 +80,13 @@ const DeactivatedDmArchiveBanner = (): ReactElement => {
   );
 };
 
-// Channel Tickets tab. A channel with no board mappings (e.g. a native channel
-// created without a project — projects are decoupled from channels) has no boards
-// to show tickets on, so render a graceful empty state instead of the Kanban board.
+// Channel Tickets tab. Boards are sourced from the channel's PROJECT. A projectless
+// channel (projectId '' — projects are decoupled from channels) has no project to
+// source boards from, so render a graceful empty state (no board view, no ticket
+// creation) instead of the Kanban board.
 const ChannelTicketsTab = ({ channelId }: { channelId: string }): ReactElement => {
-  const [channelBoards, boardsDetails] = useCachedQuery(queries.boardsByChannel({ channelId }));
-  const boardsSynced = boardsDetails.type === 'complete';
-  if (boardsSynced && (channelBoards?.length ?? 0) === 0) {
+  const channel = useChannel(channelId);
+  if (channel && !channel.projectId) {
     return (
       <div className='flex h-full flex-col items-center justify-center gap-1 p-8 text-center'>
         <p className='text-sm font-medium text-foreground'>
