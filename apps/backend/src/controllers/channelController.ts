@@ -16,6 +16,7 @@ import { UserGroupRepository } from '../database/repositories/userGroups';
 import { ProjectRepository } from '../database/repositories/projectRepository';
 import { Prisma, type User } from '@prisma/client';
 import { v4 as uuidv4 } from 'uuid';
+import { dlAddressesFor } from '@/services/dlResolver';
 import {
   createForwardedMessageXml,
   parseForwardedMessageXml,
@@ -924,11 +925,12 @@ export class ChannelController {
             res.status(409).json({ error: 'Shared mailbox is disconnected' });
             return;
           }
-          const alreadyClaimed = await db.emailChannelPreference.findUnique({
-            where: { workspaceId_dlEmail: { workspaceId, dlEmail } },
-            select: { channelId: true },
+          const claimants = await db.emailChannelPreference.findMany({
+            where: { workspaceId, OR: [{ dlEmail: { not: null } }, { NOT: { dlAliases: null } }] },
+            select: { dlEmail: true, dlAliases: true },
           });
-          if (alreadyClaimed) {
+          const target = dlEmail.trim().toLowerCase();
+          if (claimants.some(pref => dlAddressesFor(pref).includes(target))) {
             res.status(409).json({ error: 'A desk already exists for this DL' });
             return;
           }
