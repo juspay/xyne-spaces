@@ -2,7 +2,6 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { format } from 'date-fns';
 import { toast } from 'sonner';
-import { ArrowUpRight, CalendarClock } from 'lucide-react';
 import type { QueryResultType } from '@rocicorp/zero';
 import { CallStatus } from '@xyne/shared';
 import { queries } from '../../../zero/queries';
@@ -48,44 +47,67 @@ const toPillState = (status: string | null | undefined): PillState => {
   }
 };
 
-/**
- * Status reads through colour, on the same tokens the ticket and board surfaces use:
- * Upcoming is the blue --status-scheduled, Active green, Cancelled red, and Ended
- * falls back to muted grey. Keys track `calls.status`; labels are the product's
- * vocabulary for them.
- */
-const STATE_STYLES: Record<PillState, { chip: string; glyph: string; label: string }> = {
-  SCHEDULED: {
-    chip: 'bg-status-scheduled/10 text-status-scheduled',
-    glyph: 'bg-status-scheduled/10 text-status-scheduled',
-    label: 'Upcoming',
-  },
-  ACTIVE: {
-    chip: 'bg-status-success/15 text-status-success',
-    glyph: 'bg-status-success/15 text-status-success',
-    label: 'Active',
-  },
-  ENDED: {
-    chip: 'bg-muted text-muted-foreground',
-    glyph: 'bg-muted text-muted-foreground',
-    label: 'Ended',
-  },
-  CANCELLED: {
-    chip: 'bg-status-failure/10 text-status-failure',
-    glyph: 'bg-muted text-muted-foreground',
-    label: 'Cancelled',
-  },
+const STATUS_LABEL: Record<PillState, string> = {
+  SCHEDULED: 'Upcoming',
+  ACTIVE: 'Active',
+  ENDED: 'Ended',
+  CANCELLED: 'Cancelled',
 };
 
-/** EntitySharePill's shell, so an in-message call card matches the shared-entity cards. */
-const CARD_CLASSES =
-  'relative flex w-full max-w-xl flex-col gap-1.5 rounded-lg border border-border bg-card px-3 py-2.5 shadow-sm';
+/**
+ * Glyph geometry is verbatim from the design system (Calendar 1.6@20, Phone 1.9@24,
+ * XCircle 1.8@20) — never redrawn.
+ */
+const CalendarGlyph = (): React.JSX.Element => (
+  <svg
+    width={19}
+    height={19}
+    viewBox='0 0 20 20'
+    fill='none'
+    stroke='currentColor'
+    strokeWidth={1.6}
+    strokeLinecap='round'
+    strokeLinejoin='round'
+    aria-hidden='true'
+  >
+    <rect x='3.5' y='4.5' width='13' height='12' rx='2' />
+    <path d='M3.5 8h13' />
+    <path d='M7 3.5v3M13 3.5v3' />
+  </svg>
+);
 
-const GLYPH_CLASSES = 'flex size-5 shrink-0 items-center justify-center rounded-md';
+const PhoneGlyph = (): React.JSX.Element => (
+  <svg
+    width={19}
+    height={19}
+    viewBox='0 0 24 24'
+    fill='none'
+    stroke='currentColor'
+    strokeWidth={1.9}
+    strokeLinecap='round'
+    strokeLinejoin='round'
+    aria-hidden='true'
+  >
+    <path d='M22 16.92v3a2 2 0 0 1-2.18 2 19.8 19.8 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.12 4.18 2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.91.34 1.85.57 2.81.7A2 2 0 0 1 22 16.92Z' />
+  </svg>
+);
 
-/** Deliberately small: the Join button is the card's primary action, not the status. */
-const CHIP_CLASSES =
-  'shrink-0 rounded-full px-1.5 py-px text-[9px] font-medium uppercase tracking-wide leading-[14px]';
+const CancelGlyph = (): React.JSX.Element => (
+  <svg
+    width={19}
+    height={19}
+    viewBox='0 0 20 20'
+    fill='none'
+    stroke='currentColor'
+    strokeWidth={1.8}
+    strokeLinecap='round'
+    strokeLinejoin='round'
+    aria-hidden='true'
+  >
+    <circle cx='10' cy='10' r='7' />
+    <path d='M7.6 7.6 12.4 12.4M12.4 7.6 7.6 12.4' />
+  </svg>
+);
 
 /**
  * Viewer-local, matching what the same call reads as on the user's own Calls screen
@@ -137,19 +159,20 @@ export function ScheduledCallPill({
   if (isRetired) {
     const movedToName = channels.find(c => c.id === metadata?.movedTo)?.name;
     return (
-      <div className={cn(CARD_CLASSES, 'opacity-60')} aria-disabled='true'>
-        <div className='flex items-center gap-2.5'>
-          <span className={cn(GLYPH_CLASSES, 'bg-muted text-muted-foreground')} aria-hidden='true'>
-            <CalendarClock size={14} strokeWidth={2.5} />
+      <div className='xs-cc-scope'>
+        <div className='xs-cc xs-cc--flat' aria-disabled='true'>
+          <span className='xs-cc__glyph xs-cc__glyph--faint'>
+            <CancelGlyph />
           </span>
-          <span className='min-w-0 flex-1 truncate text-sm font-medium text-muted-foreground line-through'>
-            {metadata?.movedCallTitle ?? 'Scheduled call'}
-          </span>
-          <span className={cn(CHIP_CLASSES, 'bg-muted text-muted-foreground')}>Moved</span>
+          <div className='xs-cc__body'>
+            <span className='xs-cc__title xs-cc__title--muted'>
+              {metadata?.movedCallTitle ?? 'Scheduled call'}
+            </span>
+            <span className='xs-cc__meta xs-cc__meta--faint'>
+              {movedToName ? `Moved to #${movedToName}` : 'Moved to another channel'}
+            </span>
+          </div>
         </div>
-        <p className='pl-[30px] text-xs text-muted-foreground'>
-          {movedToName ? `Moved to #${movedToName}` : 'Moved to another channel'}
-        </p>
       </div>
     );
   }
@@ -157,23 +180,42 @@ export function ScheduledCallPill({
   // Outside the subscription window, or not visible to this viewer.
   if (!call) {
     return (
-      <div className={cn(CARD_CLASSES, 'opacity-60')}>
-        <div className='flex items-center gap-2.5'>
-          <span className={cn(GLYPH_CLASSES, 'bg-muted text-muted-foreground')} aria-hidden='true'>
-            <CalendarClock size={14} strokeWidth={2.5} />
+      <div className='xs-cc-scope'>
+        <div className='xs-cc xs-cc--flat'>
+          <span className='xs-cc__glyph xs-cc__glyph--faint'>
+            <CalendarGlyph />
           </span>
-          <span className='min-w-0 flex-1 truncate text-sm text-muted-foreground'>
-            Scheduled call
-          </span>
+          <span className='xs-cc__title xs-cc__title--muted'>Scheduled call</span>
         </div>
       </div>
     );
   }
 
   const state = toPillState(call.status);
-  const styles = STATE_STYLES[state];
-  const isJoinable = state === 'SCHEDULED' || state === 'ACTIVE';
+  const isActive = state === 'ACTIVE';
+  const isSettled = state === 'ENDED' || state === 'CANCELLED';
+  const isJoinable = state === 'SCHEDULED' || isActive;
+  // A cancelled call has nothing to join, so its action becomes Reschedule and hands
+  // the viewer to the Calls screen to rebook — the design system's own `cancelled`
+  // action. Ended keeps an inert Join; there is nothing to rejoin.
+  const isReschedule = state === 'CANCELLED';
+  // Ended calls open their summary page instead, per the design system's own `ended`
+  // action. Always available: the viewer can read this call row — that is what renders
+  // the card — so the detail screen's own ACL will let them in.
+  const isOpenSummary = state === 'ENDED';
   const when = formatWhen(call.startsAt, call.endsAt);
+  const channelName = channels.find(c => c.id === call.channelId)?.name;
+
+  // CallHistoryScreen keys ?callId= on the internal id, not externalId.
+  const openInCalls = (): void => {
+    void navigate(`/calls?callId=${call.id}`);
+  };
+
+  // The call's summary page (CallDetailScreen), keyed on the internal id like every
+  // other summary entry point (RecordingSummaryActivity, CallShareBubble).
+  const openSummary = (): void => {
+    void navigate(`/calls/${call.id}/detail`);
+  };
 
   const handleJoin = (): void => {
     // The organizer always has a participant row (createCallWithParticipants appends
@@ -195,70 +237,69 @@ export function ScheduledCallPill({
   };
 
   return (
-    <div className={cn(CARD_CLASSES, state === 'CANCELLED' && 'opacity-75')}>
-      {/* Join sits vertically centred against the whole two-line block rather than on
-          the time row, so it lines up with the card's midpoint — the same placement
-          CallMessageOverlay gives the live call's Join. */}
-      <div className='flex items-center gap-3 pr-5'>
-        <span className={cn(GLYPH_CLASSES, styles.glyph)} aria-hidden='true'>
-          <CalendarClock size={14} strokeWidth={2.5} />
-        </span>
+    <div className='xs-cc-scope flex w-full max-w-[560px] flex-col gap-2'>
+      {/* Sits where a ticket-creation message's line sits — above its card. The
+          author is already named in the message header, so it is not repeated. */}
+      <p className='text-[13.5px] leading-[1.55] text-muted-foreground'>
+        scheduled a call{channelName ? ` in #${channelName}` : ''}
+      </p>
 
-        <div className='flex min-w-0 flex-1 flex-col gap-0.5'>
-          <div className='flex min-w-0 items-center gap-1.5'>
-            <span
-              className={cn(
-                'min-w-0 truncate text-sm font-medium text-foreground',
-                state === 'CANCELLED' && 'text-muted-foreground line-through',
-              )}
-            >
-              {call.title ?? 'Scheduled Call'}
-            </span>
-            <span className={cn(CHIP_CLASSES, styles.chip)}>{styles.label}</span>
-          </div>
+      <div className={cn('xs-cc', isActive && 'xs-cc--active', isSettled && 'xs-cc--flat')}>
+        {isActive ? (
+          <span className='xs-cc__dot' aria-hidden='true' />
+        ) : (
+          <span
+            className={cn(
+              'xs-cc__glyph',
+              state === 'ENDED' && 'xs-cc__glyph--ended',
+              state === 'CANCELLED' && 'xs-cc__glyph--faint',
+            )}
+          >
+            {state === 'ENDED' ? <PhoneGlyph /> : null}
+            {state === 'CANCELLED' ? <CancelGlyph /> : null}
+            {state === 'SCHEDULED' ? <CalendarGlyph /> : null}
+          </span>
+        )}
 
-          {when && <span className='truncate text-xs text-muted-foreground'>{when}</span>}
+        <div className='xs-cc__body'>
+          <span
+            className={cn(
+              'xs-cc__title',
+              state === 'ENDED' && 'xs-cc__title--dim',
+              state === 'CANCELLED' && 'xs-cc__title--muted',
+            )}
+          >
+            {call.title ?? 'Scheduled Call'}
+          </span>
+
+          <span className={cn('xs-cc__meta', state === 'CANCELLED' && 'xs-cc__meta--faint')}>
+            <span className={cn(isActive && 'xs-cc__status--call')}>{STATUS_LABEL[state]} ·</span>
+            {when && (
+              <span className={cn(state === 'CANCELLED' && 'xs-cc__meta--struck')}>{when}</span>
+            )}
+          </span>
         </div>
 
         <button
           type='button'
-          onClick={handleJoin}
-          disabled={!isJoinable}
-          className={cn(
-            'shrink-0 rounded-md border px-4 py-1.5 text-sm font-semibold transition-colors disabled:cursor-default',
-            !isJoinable && 'border-border bg-muted text-muted-foreground',
-            state === 'ACTIVE' &&
-              'border-status-success/30 bg-status-success/10 text-status-success hover:bg-status-success/20',
-            state === 'SCHEDULED' &&
-              'border-status-scheduled/25 bg-status-scheduled/10 text-status-scheduled hover:bg-status-scheduled/20',
-          )}
+          onClick={isReschedule ? openInCalls : isOpenSummary ? openSummary : handleJoin}
+          disabled={!isJoinable && !isReschedule && !isOpenSummary}
+          className={cn('xs-cc__btn', isActive ? 'xs-cc__btn--call' : 'xs-cc__btn--secondary')}
           data-track-category='CALLS'
-          data-track-name='JOIN_CALL_FROM_CHANNEL_PILL'
+          data-track-name={
+            isReschedule
+              ? 'RESCHEDULE_CALL_FROM_CHANNEL_PILL'
+              : isOpenSummary
+                ? 'OPEN_CALL_SUMMARY_FROM_CHANNEL_PILL'
+                : 'JOIN_CALL_FROM_CHANNEL_PILL'
+          }
           data-track-metadata={JSON.stringify({ callId, callStatus: call.status })}
         >
-          Join
+          {isReschedule ? 'Reschedule' : isOpenSummary ? 'Open summary' : 'Join'}
         </button>
       </div>
 
-      {/* Corner affordance, deliberately quiet — Join is the card's primary action. */}
-      <button
-        type='button'
-        onClick={() => {
-          // CallHistoryScreen keys ?callId= on the internal id, not externalId.
-          void navigate(`/calls?callId=${call.id}`);
-        }}
-        aria-label={`Open ${call.title ?? 'call'} in Calls`}
-        title='Open in Calls'
-        className='absolute right-2 top-2 rounded text-muted-foreground/60 transition-colors hover:text-foreground'
-        data-track-category='CALLS'
-        data-track-name='OPEN_SCHEDULED_CALL_FROM_PILL'
-      >
-        <ArrowUpRight size={13} strokeWidth={1.75} aria-hidden='true' />
-      </button>
-
-      {showJoinError && (
-        <p className='pl-[30px] text-xs text-status-failure'>{NOT_A_PARTICIPANT_MESSAGE}</p>
-      )}
+      {showJoinError && <p className='text-xs text-status-failure'>{NOT_A_PARTICIPANT_MESSAGE}</p>}
     </div>
   );
 }

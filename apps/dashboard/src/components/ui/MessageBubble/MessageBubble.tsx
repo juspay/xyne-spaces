@@ -39,7 +39,7 @@ import ChatLock from '../../icons/ChatLock';
 import { useDebugSettings } from '../../../hooks/useDebugSettings';
 import { PinnedIcon } from '../../../assets/icons/PinnedIcon';
 import { usePlatform } from '../../../hooks/usePlatform';
-import { Bookmark, CalendarClock, ChevronDown, ChevronRight, Hash, Trash2 } from 'lucide-react';
+import { Bookmark, ChevronDown, ChevronRight, Hash, Trash2 } from 'lucide-react';
 import { MobileMessageMyBubble } from './MobileMessageMyBubble';
 import { Button } from '../Button/Button';
 import EmojiPicker, { EmojiStyle, Theme as EmojiTheme } from 'emoji-picker-react';
@@ -887,10 +887,6 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                 width={32}
                 height={32}
               />
-            ) : showAvatar && isScheduledCallPill ? (
-              <div className='w-8 h-8 rounded-md flex items-center justify-center bg-muted-foreground/10'>
-                <CalendarClock className='w-4 h-4 text-muted-foreground' />
-              </div>
             ) : showAvatar && isCallMessage && !isForwardedMessage ? (
               <div
                 className={`w-8 h-8 rounded-md flex items-center justify-center ${isActiveCall ? 'bg-stage-completed' : 'bg-muted-foreground/10'}`}

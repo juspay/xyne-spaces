@@ -73,6 +73,7 @@ export class ScheduleCallController {
       recurringSeriesId: string | null;
       metadata: Prisma.JsonValue | null;
       title: string | null;
+      createdByUserId: string;
     };
     newChannelId: string;
   }): Promise<void> {
@@ -90,6 +91,8 @@ export class ScheduleCallController {
     if (metadata?.channelPillInThread) return;
 
     const workspaceId = await repositories.channels.getWorkspaceId(newChannelId);
+    const organizer = await repositories.users.findById(call.createdByUserId);
+    const organizerName = organizer?.displayName || organizer?.name || 'Someone';
 
     const { conversationId } = await DatabaseClient.getInstance().$transaction(async (tx) => {
       if (metadata?.channelPillMessageId) {
@@ -106,6 +109,8 @@ export class ScheduleCallController {
         callExternalId: call.externalId,
         channelId: newChannelId,
         workspaceId,
+        senderId: call.createdByUserId,
+        senderName: organizerName,
       });
     });
 
@@ -516,6 +521,8 @@ export class ScheduleCallController {
             callExternalId: externalId,
             channelId: finalChannelId!,
             workspaceId,
+            senderId: userId,
+            senderName: req.user?.displayName || req.user?.name || 'Someone',
             ...(conversationId && { threadConversationId: conversationId }),
           });
           // Only the channel-root case needs the eager preview sync: a thread pill is not
