@@ -17,7 +17,7 @@ const OBS_URL = import.meta.env['VITE_SYNC_OBS_URL'] as string | undefined;
 /** Dev-only: shadow-diff — display Zero, observe sync, log divergences. */
 const SHADOW = import.meta.env['VITE_SYNC_SHADOW'] === 'true';
 
-export function startSyncEngineClient(getLastMutationID?: () => number): void {
+export function startSyncEngineClient(): void {
   if (!ENABLED) return;
   if (OBS_URL) configureObs(OBS_URL);
   if (SHADOW) configureShadow(true);
@@ -41,5 +41,5 @@ export function startSyncEngineClient(getLastMutationID?: () => number): void {
     },
   };
 
-  initSyncEngine(transport, idbSyncStore, { getLastMutationID });
+  initSyncEngine(transport, idbSyncStore);
 }

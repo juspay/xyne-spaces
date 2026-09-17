@@ -15,7 +15,8 @@
     "resolveJsonModule": true,
     "baseUrl": ".",
     "paths": {
-      "#zql/*": ["./node_modules/@rocicorp/zero/out/zql/src/*"]
+      "#zql/*": ["./node_modules/@rocicorp/zero/out/zql/src/*"],
+      "#zero-client/*": ["./node_modules/@rocicorp/zero/out/zero-client/src/*"]
     },
     "isolatedModules": true,
     "sourceMap": true,

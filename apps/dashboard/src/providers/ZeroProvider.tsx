@@ -25,14 +25,11 @@ const ZeroProvider: React.FC<ZeroProviderProps> = ({ children }): ReactElement |
   const prevWorkspaceIdRef = useRef<string | undefined>(undefined);
 
   const [zero, setZero] = useState<Zero | null>(null);
-  // Latest Zero instance, for the sync engine's LMID watermark accessor (a stable getter,
-  // since the engine initializes once but the Zero instance is created/replaced later).
-  const zeroRef = useRef<Zero | null>(null);
-  zeroRef.current = zero;
-
-  // Initialize the shared-base sync engine client once (no-op unless enabled).
+  // Initialize the shared-base sync engine client once (no-op unless enabled). Optimistic-overlay
+  // retirement is driven by each mutation's server result (the sync engine hooks Zero's MutationTracker
+  // in initSyncEngine), NOT Zero's lastMutationID() — that is the optimistic local counter.
   useEffect(() => {
-    startSyncEngineClient(() => zeroRef.current?.lastMutationID() ?? 0);
+    startSyncEngineClient();
   }, []);
 
   useEffect(() => {

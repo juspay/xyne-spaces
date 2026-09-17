@@ -123,22 +123,37 @@ export class IvmHost {
   /** refKey → mutationIDs whose overlay touches it (reverse index for fold + re-derive). */
   readonly #overlayByPK = new Map<string, Set<number>>();
   /**
-   * Reads Zero's durable last-mutation-ID watermark. An overlay is CONFIRMED once
-   * `#lmid() >= mutationID` (server-persisted, reconnect-durable, covers success AND reject —
-   * both advance the watermark). We retire a confirmed overlay when the fan-out shows its
-   * effect (flicker-free — the confirmed row is already the base), with a low-frequency sweep
-   * as the fallback for the reject / effect-out-of-window case. Injected via `attachLmid`
-   * (the Zero instance lives in the app, not this package); absent in tests / pre-init.
+   * SERVER-confirmed last-mutation-ID watermark. An overlay is CONFIRMED once
+   * `#confirmedLmid >= mutationID`. Advanced ONLY by `noteMutationSettled` — fed by Zero's authoritative
+   * per-mutation server result (see confirmedMutations.ts / MutationTracker hook), NOT Zero's
+   * `lastMutationID()`, which is the OPTIMISTIC local counter (it advances the instant the client applies
+   * a mutation, before any server round-trip). Using the optimistic value retired overlays before the
+   * server confirmed them → a slow/out-of-window write flickered out. We retire a confirmed overlay when
+   * the fan-out shows its effect (flicker-free — the confirmed row is already the base), with a
+   * low-frequency sweep as the fallback for the effect-out-of-window case; a reject reverts immediately.
    */
-  #lmid?: () => number;
+  #confirmedLmid = 0;
   #sweepTimer?: ReturnType<typeof setInterval>;
 
-  /** Wire the LMID watermark source + start the periodic confirmed-overlay sweep (fallback). */
-  attachLmid(getLastMutationID: () => number, sweepMs = 2500): void {
-    this.#lmid = getLastMutationID;
+  /** Start the periodic confirmed-overlay sweep (the fallback for effects that never echo through a
+   *  subscribed instance). Confirmation itself is driven by `noteMutationSettled`, not a poll. */
+  startReconcileSweep(sweepMs = 2500): void {
     if (this.#sweepTimer !== undefined) clearInterval(this.#sweepTimer);
     this.#sweepTimer = setInterval(() => this.reconcileConfirmed(), sweepMs);
     (this.#sweepTimer as { unref?: () => void }).unref?.();
+  }
+
+  /**
+   * Record a mutation's SERVER result (from Zero's per-mutation serverPromise, which resolves only once
+   * zero-cache has processed the mutation — success OR application error). `ok === false` (reject) ⇒
+   * revert the optimistic overlay NOW (the server row will never carry it). Either way advance the
+   * confirmed watermark so the echo path can retire a successful overlay once the fan-out delivers the
+   * server row (flicker-free). Success does NOT retire here — that would drop the overlay before the
+   * confirmed fan-out row lands (flicker); the echo path / sweep handle it.
+   */
+  noteMutationSettled(mutationID: number, ok: boolean): void {
+    if (!ok) this.dropOptimistic(mutationID);
+    if (mutationID > this.#confirmedLmid) this.#confirmedLmid = mutationID;
   }
 
   /** The (lazily created) MemorySource for a table, built from the shared schema. */
@@ -352,21 +367,23 @@ export class IvmHost {
     this.flushAll();
   }
 
-  /** Retire every confirmed overlay (`#lmid() >= mutationID`). The periodic fallback that
-   *  catches rejects and effects that never echo through a subscribed instance. */
+  /** Retire every confirmed overlay (`#confirmedLmid >= mutationID`). The periodic fallback that
+   *  catches effects that never echo through a subscribed instance (rejects revert eagerly in
+   *  noteMutationSettled). No-op until a mutation is server-confirmed (watermark starts at 0). */
   reconcileConfirmed(): void {
-    if (!this.#lmid) return;
-    const lmid = this.#lmid();
+    const lmid = this.#confirmedLmid;
+    if (lmid === 0) return;
     const done: number[] = [];
     for (const mutationID of this.#ledger.keys()) if (mutationID <= lmid) done.push(mutationID);
     for (const mutationID of done) this.dropOptimistic(mutationID);
   }
 
   /** Retire confirmed overlays whose effect the fan-out just delivered on `refKeys` — the
-   *  flicker-free path (the confirmed row is already applied, so the drop is a visual no-op). */
+   *  flicker-free path (the confirmed row is already applied, so the drop is a visual no-op). Gated
+   *  on the SERVER-confirmed watermark so a pending overlay on the same row is never dropped early. */
   #retireEchoed(refKeys: Iterable<string>): void {
-    if (!this.#lmid) return;
-    const lmid = this.#lmid();
+    const lmid = this.#confirmedLmid;
+    if (lmid === 0) return;
     const done = new Set<number>();
     for (const refKey of refKeys) {
       for (const mutationID of this.#overlayByPK.get(refKey) ?? []) {

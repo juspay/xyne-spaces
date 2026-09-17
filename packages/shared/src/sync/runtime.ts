@@ -11,6 +11,10 @@
 import { IvmHost } from './ivmHost.js';
 import { SyncClient, type SyncTransport } from './syncClient.js';
 import { noopSyncStore, type SyncStore } from './store.js';
+import { hookMutationTrackerPrototype } from './confirmedMutations.js';
+// Deep-import Zero's compiled internal (same mechanism as ivmHost's `#zql/*`, resolved by the app
+// bundler): the MutationTracker is the only place that correlates a mutation's server result to its id.
+import { MutationTracker } from '#zero-client/client/mutation-tracker.js';
 
 let host: IvmHost | null = null;
 let client: SyncClient | null = null;
@@ -18,18 +22,25 @@ let ready = false;
 const readyListeners = new Set<() => void>();
 
 /**
- * Initialize the client sync engine with the app's socket transport. Idempotent.
- * `getLastMutationID` (Zero's durable LMID watermark) drives optimistic-overlay retirement:
- * an overlay is confirmed once the watermark passes its mutationID. Omit before Zero exists.
+ * Initialize the client sync engine with the app's socket transport. Idempotent. Optimistic-overlay
+ * retirement is driven by SERVER confirmation, not Zero's optimistic `lastMutationID()`: we hook Zero's
+ * MutationTracker (installConfirmedMutationHook) to feed each mutation's server result into the host,
+ * and a periodic sweep (started here) is the fallback for effects that never echo through a subscribed
+ * instance.
  */
 export function initSyncEngine(
   transport: SyncTransport,
   store: SyncStore = noopSyncStore,
-  opts?: { getLastMutationID?: () => number },
 ): void {
   if (client) return;
   host = new IvmHost();
-  if (opts?.getLastMutationID) host.attachLmid(opts.getLastMutationID);
+  host.startReconcileSweep();
+  // Route Zero's authoritative per-mutation server result into the host (drives overlay retirement).
+  try {
+    hookMutationTrackerPrototype((MutationTracker as unknown as { prototype: unknown }).prototype, host);
+  } catch {
+    /* internal shape changed — overlays still retire via the fan-out echo path */
+  }
   client = new SyncClient(host, transport, store);
   // NOTE: don't call client.start() here — this runs from a mount effect that can fire
   // before the socket exists, and the dashboard transport's `on` no-ops on a null socket.
