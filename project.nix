@@ -389,6 +389,18 @@ in
     containers = { };
   };
 
+  # Export the exact runtime configuration for the isolated CI smoke check.
+  packages.nix-services-config = pkgs.writeText "xyne-services.json"
+    (builtins.toJSON config.process-compose."xyne-space-services".settings);
+
+  packages.nix-smoke-test = pkgs.writeShellApplication {
+    name = "nix-smoke-test";
+    runtimeInputs = [ pkgs.python3 pkgs.process-compose pkgs.nodejs pkgs.pnpm pkgs.openssl ];
+    text = ''
+      python ${./nix/scripts/smoke-test.py} ${config.packages.nix-services-config} "$@"
+    '';
+  };
+
   # Custom apps/commands
   apps = {
     # Comprehensive cleanup command
