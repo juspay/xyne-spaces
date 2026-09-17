@@ -1,0 +1,54 @@
+name: oss-hygiene
+
+# Blocks internal-infrastructure references and credential-shaped strings from
+# entering this repository.
+#
+# - pull_request / merge_group: scans ADDED lines of the change (blocks NEW
+#   leaks; the pre-existing backlog is being removed by the scrub PRs).
+# - push to main: scans new commits (including direct pushes).
+# - workflow_dispatch: full-tree audit against the allowlist. Expected to be
+#   red until the open scrub PRs merge; the goal is an empty allowlist.
+#
+# Semantics live in scripts/oss-hygiene-sweep.sh; residual exceptions in
+# scripts/oss-hygiene-allowlist.txt.
+
+on:
+  pull_request:
+  merge_group:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  sweep:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: OSS hygiene sweep (added lines)
+        if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
+        run: scripts/oss-hygiene-sweep.sh --base origin/main
+
+      - name: OSS hygiene sweep (new commits on main)
+        if: github.event_name == 'push'
+        run: |
+          BEFORE="${{ github.event.before }}"
+          if [ -z "$BEFORE" ] \
+            || [ "$BEFORE" = "0000000000000000000000000000000000000000" ] \
+            || ! git cat-file -e "$BEFORE" 2>/dev/null; then
+            BEFORE="HEAD~1"
+          fi
+          scripts/oss-hygiene-sweep.sh --base "$BEFORE"
+
+      - name: OSS hygiene sweep (full audit)
+        if: github.event_name == 'workflow_dispatch'
+        run: scripts/oss-hygiene-sweep.sh --full
