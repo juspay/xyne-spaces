@@ -70,9 +70,9 @@ describe('SDLC sandbox repository context', () => {
         sdlcRepositoryUrl: 'https://github.com/github-samples/pets-workshop.git',
         sdlcRepositoryBaseBranch: 'main',
         sdlcRepositoryWrite: 'true',
-        sdlcRuntimeCredentialOperation: 'PUSH',
-        sdlcExecutionId: 'execution-1',
-        sdlcSessionId: 'session-1',
+        sdlcRuntimeCredentialOperation: 'INTERACTIVE',
+        sdlcInteractiveGrant: 'grant-1',
+        sdlcConversationId: 'conversation-1',
       }),
     );
 

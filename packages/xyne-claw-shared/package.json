@@ -20,6 +20,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.28.0",
+    "@xyne/icons": "workspace:*",
     "@xyne/kata-sdk": "workspace:*",
     "marked": "^18.0.4",
     "mermaid": "^11.4.0",

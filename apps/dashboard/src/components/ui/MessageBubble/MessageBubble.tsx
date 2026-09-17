@@ -609,6 +609,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   const isMentionUserAddition = metadata?.messageSubtype === 'user_not_in_channel';
   const isTicketNudge = metadata?.messageSubtype === 'ticket_nudge';
   const isPrivateSystemNotice = isMentionUserAddition || isTicketNudge;
+  const isEphemeralNotice = metadata?.['__xyneEphemeral'] === true;
   // Detect any message with markdown content format (call_summary, call_prd, etc.)
   const isMarkdownContent = metadata?.['contentFormat'] === 'markdown';
   const hasSuggestedTickets = metadata?.['hasSuggestedTickets'] === true;
@@ -825,6 +826,16 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
           svgBgColor='hsl(var(--muted))'
           icon='visibility'
           text='Only Visible to you'
+          backgroundColor='bg-muted'
+          textColor='text-foreground'
+        />
+      )}
+
+      {isEphemeralNotice && !isPrivateSystemNotice && (
+        <MessageHeader
+          svgBgColor='hsl(var(--muted))'
+          icon='visibility'
+          text='Only visible to you · disappears on reload'
           backgroundColor='bg-muted'
           textColor='text-foreground'
         />
@@ -1106,6 +1117,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                       statusEmoji={sender?.statusEmoji}
                       statusContent={sender?.statusContent}
                       statusExpiryAt={sender?.statusExpiryAt}
+                      activityStatus={sender?.activityStatus}
                       size='sm'
                       showOnHover={true}
                     />
@@ -1132,6 +1144,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                       statusEmoji={sender?.statusEmoji}
                       statusContent={sender?.statusContent}
                       statusExpiryAt={sender?.statusExpiryAt}
+                      activityStatus={sender?.activityStatus}
                       size='sm'
                       showOnHover={true}
                     />
@@ -1887,6 +1900,11 @@ export const ReactionView = ({
                 }}
                 data-track-category='MESSAGE'
                 data-track-name='TOGGLE_REACTION'
+                data-track-metadata={JSON.stringify({
+                  messageId,
+                  emojiName: reaction.emojiName,
+                  hadReacted: reaction.userHasReacted,
+                })}
                 onTouchStart={e => {
                   if (isMobile) {
                     e.stopPropagation();
@@ -1949,6 +1967,10 @@ export const ReactionView = ({
                 onClick={e => e.stopPropagation()}
                 data-track-category='MESSAGE'
                 data-track-name='OPEN_EMOJI_PICKER'
+                data-track-metadata={JSON.stringify({
+                  messageId,
+                  source: 'message_bubble',
+                })}
               >
                 <span className='text-sm font-medium'>+</span>
               </button>
