@@ -1,3 +1,10 @@
+## [1.336.1](https://github.com/juspay/xyne-spaces/compare/v1.336.0...v1.336.1) (2026-09-17)
+
+
+### Bug Fixes
+
+* thread panel crash on non-ticket threads + quarantine flaky admin-navigation suite ([#1937](https://github.com/juspay/xyne-spaces/issues/1937)) ([b1fe283](https://github.com/juspay/xyne-spaces/commit/b1fe283cd1c55724218da6770eb065c236846029))
+
 ## [1.336.0](https://github.com/juspay/xyne-spaces/compare/v1.335.0...v1.336.0) (2026-09-17)
 
 
