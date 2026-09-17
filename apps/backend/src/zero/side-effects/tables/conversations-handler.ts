@@ -12,7 +12,7 @@ export class ConversationsSideEffectHandler extends BaseSideEffectHandler {
 
     const conversation = await db.conversation.findUnique({
       where: { conversationId },
-      select: { channelId: true, createdBy: true }
+      select: { channelId: true, createdBy: true, createdAt: true }
     });
 
     if (!conversation) {
@@ -35,6 +35,15 @@ export class ConversationsSideEffectHandler extends BaseSideEffectHandler {
     if (channelParticipantsRaw.length === 0 || !isDMChannel) {
       return;
     }
+
+    // handleUnreadCount skips recompute when lastActivityAt <= lastViewedAt, but ordinary
+    // messages never bump channel_stats.lastActivityAt — only channel creation, membership
+    // changes and calls do. Bump it to the conversation's createdAt so recompute runs and
+    // unreadCount doesn't freeze at 0 for every channel the user has already viewed.
+    await db.channelStats.update({
+      where: { channelId: conversation.channelId },
+      data: { lastActivityAt: conversation.createdAt }
+    });
 
     await handleUnreadCount(
       conversation.channelId,
