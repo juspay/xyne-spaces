@@ -3,7 +3,6 @@ import type {
   CreateSdlcClawArtifactInput,
   CreateSdlcLinkInput,
   CreateSdlcTrackInput,
-  UpdateSdlcBaselineDraftInput,
 } from '@xyne/shared';
 import type { SdlcAgentContext } from './SdlcAgentContextService';
 
@@ -39,14 +38,8 @@ export interface SdlcRepositoryRunContext {
   agentContext?: SdlcAgentContext;
 }
 
-export interface SdlcSetupExecution {
-  executionId: string;
-  status: string;
-}
-
 export interface SdlcArtifact {
   canvasId?: string;
-  kind?: 'BASELINE';
   viewAccessId?: string;
   url?: string;
   /** Update parked as suggestions for human review — the canvas is unchanged. */
@@ -65,10 +58,6 @@ export interface SdlcLink {
 
 export interface SdlcHub {
   createRepository(actor: SdlcActor, input: AttachSdlcRepositoryInput): Promise<SdlcRepository>;
-  setupRepository(actor: SdlcActor, repoId: string): Promise<SdlcSetupExecution>;
-  refreshSetup(actor: SdlcActor, repoId: string): Promise<SdlcSetupExecution>;
-  retrySetup(actor: SdlcActor, repoId: string): Promise<SdlcSetupExecution>;
-  cancelSetup(actor: SdlcActor, repoId: string): Promise<SdlcSetupExecution>;
   listRepositoryRunContexts(
     actor: SdlcActor,
     query?: string,
@@ -84,10 +73,6 @@ export interface SdlcHub {
   createArtifactFromClaw(
     actor: SdlcActor,
     input: CreateSdlcClawArtifactInput
-  ): Promise<SdlcArtifact>;
-  updateBaselineDraftFromClaw(
-    actor: SdlcActor,
-    input: UpdateSdlcBaselineDraftInput
   ): Promise<SdlcArtifact>;
   listTracks(actor: SdlcActor, channelId: string): Promise<unknown>;
   createTrack(actor: SdlcActor, input: CreateSdlcTrackInput): Promise<unknown>;

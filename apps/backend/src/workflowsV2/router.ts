@@ -1,8 +1,10 @@
 import express, { type Request, type Response, type Router } from 'express';
 import { createWorkflowRouter, type RouteAccess, type RouteRequest } from '@xyne/workflow-sdk';
+import { db } from '@/database/client';
 import { logger } from '@/utils/logger';
 import { webhookLimiter } from '@/middleware/rateLimiters';
 import { uploadConfig } from '@/middleware/upload';
+import { SDLC_AUTHOR_METADATA_KEY, sdlcAuthorOf } from './agents/sdlc-dispatch';
 import { workflowRuntime } from './runtime';
 import type { XyneCtx } from './types';
 
@@ -37,6 +39,37 @@ const ctxFromRequest = (req: Request): XyneCtx => {
  * create to stamp ownership and is not persisted.
  */
 const ATTRIBUTE_INJECTED_ROUTES = new Set(['POST /workflows', 'POST /folders', 'POST /credentials']);
+
+const isPlainObject = (value: unknown): value is Record<string, unknown> =>
+  Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+
+/** SDLC steps act as this author, so only the server sets it: whoever last changed the steps. */
+const guardSdlcAuthor = async (key: string, request: RouteRequest, ctx: XyneCtx): Promise<void> => {
+  const body = request.body;
+  if (!isPlainObject(body)) return;
+
+  if (key === 'POST /workflows' || key === 'PUT /workflows/:id') {
+    const sent = body['metadata'];
+    const metadata = isPlainObject(sent) ? { ...sent } : {};
+    delete metadata[SDLC_AUTHOR_METADATA_KEY];
+    if (body['config']) metadata[SDLC_AUTHOR_METADATA_KEY] = ctx.userId;
+    if (sent !== undefined || body['config']) body['metadata'] = metadata;
+    return;
+  }
+
+  if (key === 'POST /executions/:execId/rerun' && body['configOverrides']) {
+    const execution = await db.workflowExecution.findFirst({
+      where: { id: request.params['execId'] ?? '', workspaceId: ctx.workspaceId },
+      select: { workflow: { select: { metadata: true } } },
+    });
+    const author = sdlcAuthorOf(execution?.workflow.metadata);
+    if (author && author !== ctx.userId) {
+      throw Object.assign(new Error('Only the workflow author can rerun it with changed steps'), {
+        statusCode: 403,
+      });
+    }
+  }
+};
 
 const buildRouteRequest = (req: Request, rawBodyRoute: boolean): RouteRequest => {
   const body: unknown = req.body;
@@ -212,6 +245,7 @@ const mount = (
             body['attributes'] = { workspaceId: ctx.workspaceId, createdByUserId: ctx.userId };
             (routeRequest as { body: unknown }).body = body;
           }
+          if (ctx) await guardSdlcAuthor(key, routeRequest, ctx);
 
           const response = await route.handler(routeRequest, ctx);
           const name = typeof req.query['name'] === 'string' ? req.query['name'] : 'download';

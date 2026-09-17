@@ -43,6 +43,8 @@ export interface CanvasEditorProps {
   canvasCreatedBy?: string | undefined;
   /** Effective role of current user on this canvas */
   currentUserRole?: CanvasRole | null;
+  /** Scrolls with the document, above its first block. */
+  header?: React.ReactNode;
 }
 
 export interface CollaborativeCanvasEditorRef {

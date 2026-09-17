@@ -317,109 +317,26 @@ register("xyne-spaces", "spaces-edit-canvas", async (params) => {
 });
 
 register("xyne-spaces", SDLC_TOOL_NAMES.mutateArtifact, async (params) => {
-  const artifactType = String(params["artifactType"] ?? "");
   const action = String(params["action"] ?? "");
+  if (params["artifactType"] === "WIKI") return null;
   const folderId = String(params["folderId"] ?? "").trim();
   if (folderId && action === "create") {
-    if (!String(params["repoId"] ?? "").trim()) return "repoId is required";
-    for (const key of ["title", "markdown", "trackId"]) {
+    for (const key of ["title", "markdown"]) {
       if (!String(params[key] ?? "").trim()) return `${key} is required for create`;
     }
     return null;
   }
-  if (!artifactType && action === "update") {
-    if (!String(params["repoId"] ?? "").trim()) return "repoId is required";
+  if (action === "update") {
     for (const key of ["canvasId", "markdown"]) {
       if (!String(params[key] ?? "").trim()) return `${key} is required for update`;
     }
     return null;
   }
-  if (!["WIKI", "BASELINE"].includes(artifactType)) {
-    return "artifactType must be WIKI or BASELINE (artifact creates use folderId; updates use canvasId)";
-  }
-  if (!String(params["repoId"] ?? "").trim()) return "repoId is required";
-  if (artifactType === "BASELINE") {
-    if (!["begin", "upsert_section", "finalize"].includes(action)) {
-      return "BASELINE action must be begin, upsert_section, or finalize";
-    }
-    for (const key of ["baselineKind", "setupExecutionId", "workflowExecutionId", "title"]) {
-      if (!String(params[key] ?? "").trim()) return `${key} is required`;
-    }
-    if (action === "upsert_section") {
-      for (const key of ["sectionKey", "sectionTitle", "markdown"]) {
-        if (!String(params[key] ?? "").trim()) return `${key} is required for upsert_section`;
-      }
-    }
-    return null;
-  }
-  for (const key of ["executionId", "sessionId", "commitSha"]) {
-    if (!String(params[key] ?? "").trim()) return `${key} is required for WIKI`;
-  }
-  if (!/^(?:[0-9a-f]{9,40}|ROOT_BOOTSTRAP)$/i.test(String(params["commitSha"] ?? ""))) {
-    return "commitSha must be an assigned commit ref (minimum 9 characters) or ROOT_BOOTSTRAP";
-  }
-  if (!["create", "update", "replace_section", "insert_section", "remove_section", "move", "archive", "restore"].includes(action)) {
-    return "unsupported WIKI action";
-  }
-  const path = String(params["path"] ?? "").trim();
-  if (!path) return "path is required for WIKI";
-  if (!/^(?!.*(?:^|\/)\.\.(?:\/|$))(?!.*\/\/)[^/\\]+(?:\/[^/\\]+)*\.md$/i.test(path)) {
-    return "path must be a normalized relative Markdown path";
-  }
-  const requireString = (key: string): string | null =>
-    String(params[key] ?? "").trim() ? null : `${key} is required for ${action}`;
-  const requireSourcePaths = (allowEmpty = false): string | null => {
-    const value = params["sourcePaths"];
-    if (!Array.isArray(value) || (!allowEmpty && value.length === 0)) {
-      return `sourcePaths is required for ${action}`;
-    }
-    if (value.length > 500 || value.some(item => typeof item !== "string" || !item.trim() || item.length > 1024)) {
-      return "sourcePaths must contain at most 500 non-empty repository-relative paths";
-    }
-    return null;
-  };
-  if (action === "move") {
-    for (const key of ["destinationPath", "expectedContentHash"]) {
-      if (!String(params[key] ?? "").trim()) return `${key} is required for move`;
-    }
-    if (!/^(?!.*(?:^|\/)\.\.(?:\/|$))(?!.*\/\/)[^/\\]+(?:\/[^/\\]+)*\.md$/i.test(String(params["destinationPath"]))) {
-      return "destinationPath must be a normalized relative Markdown path";
-    }
-    return null;
-  }
-  const requiredStringsByAction: Record<string, string[]> = {
-    create: ["title", "markdown"],
-    update: ["expectedContentHash", "title", "markdown"],
-    restore: ["expectedContentHash", "title", "markdown"],
-    archive: ["expectedContentHash"],
-    replace_section: ["expectedContentHash", "heading", "markdown"],
-    insert_section: ["expectedContentHash", "heading", "markdown"],
-    remove_section: ["expectedContentHash", "heading"],
-  };
-  for (const key of requiredStringsByAction[action] ?? []) {
-    const error = requireString(key);
-    if (error) return error;
-  }
-  const sourcePathsError = requireSourcePaths(action === "archive");
-  if (sourcePathsError) return sourcePathsError;
-  const references = params["sourceReferences"];
-  if (references !== undefined) {
-    if (!Array.isArray(references) || references.length > 500) {
-      return "sourceReferences must be an array with at most 500 entries";
-    }
-    for (const reference of references) {
-      if (!reference || typeof reference !== "object" || Array.isArray(reference)) {
-        return "sourceReferences entries must be objects";
-      }
-      const item = reference as Record<string, unknown>;
-      if (!String(item["path"] ?? "").trim()) return "sourceReferences.path is required";
-    }
-  }
-  return null;
+  return "artifact creates use folderId; updates use canvasId";
 });
 
 register("xyne-spaces", SDLC_TOOL_NAMES.createPullRequest, async (params) => {
-  for (const key of ["executionId", "sessionId", "repoId", "title", "head", "base", "commitHash"]) {
+  for (const key of ["interactiveGrant", "conversationId", "repoId", "title", "head", "base", "commitHash"]) {
     if (!String(params[key] ?? "").trim()) return `${key} is required`;
   }
   if (!/^[0-9a-f]{40}$/i.test(String(params["commitHash"]))) {
@@ -434,50 +351,13 @@ register("xyne-spaces", SDLC_TOOL_NAMES.createPullRequest, async (params) => {
 });
 
 for (const tool of [
-  SDLC_TOOL_NAMES.beginWikiCheckpoint,
-  SDLC_TOOL_NAMES.verifyWikiSources,
-  SDLC_TOOL_NAMES.finalizeWikiCommit,
-]) {
-  register("xyne-spaces", tool, async (params) => {
-    for (const key of ["executionId", "sessionId", "repoId"]) {
-      if (!String(params[key] ?? "").trim()) return `${key} is required`;
-    }
-    if (
-      tool === SDLC_TOOL_NAMES.beginWikiCheckpoint ||
-      tool === SDLC_TOOL_NAMES.verifyWikiSources ||
-      tool === SDLC_TOOL_NAMES.finalizeWikiCommit
-    ) {
-      if (!/^(?:[0-9a-f]{9,40}|ROOT_BOOTSTRAP)$/i.test(String(params["commitSha"] ?? ""))) {
-        return "commitSha must be an assigned commit ref (minimum 9 characters) or ROOT_BOOTSTRAP";
-      }
-    }
-    if (tool === SDLC_TOOL_NAMES.verifyWikiSources) {
-      if (!Array.isArray(params["paths"]) || params["paths"].length === 0) return "paths is required";
-      if (params["paths"].length > 500) return "paths must contain at most 500 entries";
-      if (params["paths"].some(path => typeof path !== "string" || !path.trim() || path.length > 1024)) {
-        return "paths must contain non-empty repository-relative paths";
-      }
-    }
-    if (tool === SDLC_TOOL_NAMES.finalizeWikiCommit) {
-      const summary = String(params["summary"] ?? "").trim();
-      if (!summary) return "summary is required";
-      if (summary.length > 4_000) return "summary must be at most 4000 characters";
-      if (!['changes', 'noop'].includes(String(params["outcome"] ?? ''))) {
-        return "outcome must be changes or noop";
-      }
-    }
-    return null;
-  });
-}
-
-for (const tool of [
   SDLC_TOOL_NAMES.listArtifacts,
   SDLC_TOOL_NAMES.readArtifact,
   SDLC_TOOL_NAMES.listArtifactVersions,
   SDLC_TOOL_NAMES.readArtifactVersion,
 ]) {
   register("xyne-spaces", tool, async (params) => {
-    for (const key of ["workspaceId", "actorUserId"]) {
+    for (const key of ["repoId", "workspaceId", "actorUserId"]) {
       if (!String(params[key] ?? "").trim()) return `${key} is required`;
     }
     if (!String(params["channelId"] ?? "").trim() && !String(params["repoId"] ?? "").trim()) {
@@ -489,19 +369,10 @@ for (const tool of [
       return "selector is required";
     }
     const selected = selector as Record<string, unknown>;
-    if (selected["type"] === "WIKI_PAGE") {
-      const path = String(selected["path"] ?? "").trim();
-      if (!path) return "selector.path is required";
-      if (!/^(?!.*(?:^|\/)\.\.(?:\/|$))(?!.*\/\/)[^/\\]+(?:\/[^/\\]+)*\.md$/i.test(path)) {
-        return "selector.path must be a normalized relative Markdown path";
-      }
-    } else if (selected["type"] === "SDLC_CANVAS") {
-      const canvasId = String(selected["canvasId"] ?? "").trim();
-      if (!canvasId) return "selector.canvasId is required";
-      if (canvasId.length > 256) return "selector.canvasId must be at most 256 characters";
-    } else {
-      return "selector.type must be WIKI_PAGE or SDLC_CANVAS";
-    }
+    if (selected["type"] !== "SDLC_CANVAS") return "selector.type must be SDLC_CANVAS";
+    const canvasId = String(selected["canvasId"] ?? "").trim();
+    if (!canvasId) return "selector.canvasId is required";
+    if (canvasId.length > 256) return "selector.canvasId must be at most 256 characters";
     if (tool === SDLC_TOOL_NAMES.readArtifactVersion && !String(params["versionId"] ?? "").trim()) {
       return "versionId is required";
     }

@@ -7,6 +7,7 @@ import {
 import { useDebouncedValue } from './useDebouncedValue';
 import { queries } from '../zero/queries';
 import { useCachedQuery } from './useCachedQuery';
+import { globalClickTracker } from '../services/Analytics/globalClickTracker';
 
 export interface UseDuplicateTicketCheckOptions {
   title: string;
@@ -77,6 +78,7 @@ export const useDuplicateTicketCheck = (
 
   // UX / control-flow helpers
   const suppressNextDebouncedKeyRef = useRef<string | null>(null);
+  const shownWarningKeyRef = useRef<string | null>(null);
   const wasValidRef = useRef(false);
   const lastKeyRef = useRef<string | null>(null);
 
@@ -172,6 +174,17 @@ export const useDuplicateTicketCheck = (
         if (requestSeq === requestSeqRef.current) {
           cacheRef.current.set(input.cacheKey, result);
           setDuplicateCheck(result);
+          // Impression: candidates were put in front of the user. Once per
+          // distinct input so a re-render or a cache hit doesn't recount it.
+          const candidateCount = result.candidates?.length ?? 0;
+          if (candidateCount > 0 && shownWarningKeyRef.current !== input.cacheKey) {
+            shownWarningKeyRef.current = input.cacheKey;
+            globalClickTracker.trackManualEvent('Tickets', 'DUPLICATE_WARNING_SHOWN', undefined, {
+              candidateCount,
+              projectId,
+              ...(boardId && { boardId }),
+            });
+          }
         }
       } catch (err) {
         if (requestSeq === requestSeqRef.current && !isAbortError(err)) {
@@ -186,7 +199,7 @@ export const useDuplicateTicketCheck = (
         if (abortRef.current === controller) abortRef.current = null;
       }
     },
-    [abortInFlight, isOpen, projectId, resetDuplicateState],
+    [abortInFlight, isOpen, projectId, boardId, resetDuplicateState],
   );
 
   const triggerDuplicateCheck = useCallback(() => {

@@ -5,6 +5,8 @@ import { Dialog } from '../../ui/Dialog/Dialog';
 import { cn } from '../../../utils/classNames';
 import { apiInstance, BASE_URL } from '../../../services/clients/apiClient';
 import { showDownloadCompleteToast } from '../../../utils/downloadToast';
+import { globalClickTracker } from '../../../services/Analytics/globalClickTracker';
+import { errorKindOf } from '../DeskSettings/deskSettingsTracking';
 
 export interface DeskReportPanelProps {
   open: boolean;
@@ -84,27 +86,50 @@ export const DeskReportPanel: React.FC<DeskReportPanelProps> = ({
 
   const handleGenerateNow = useCallback(async () => {
     setSubmitting(true);
+    const startedAt = Date.now();
+    // Outcome of the GenerateNow click. The report itself is built in the
+    // background; this records that the request was accepted (or refused).
+    const reportDims = {
+      channelId,
+      ...(report?.rangeDays !== undefined && { rangeDays: report.rangeDays }),
+      ...(report?.agentSlug && { agentSlug: report.agentSlug }),
+    };
     try {
       const res = await apiInstance.post<{ success: boolean; error?: string }>(
         `/desk-report/${encodeURIComponent(channelId)}/generate`,
       );
       if (res.data.success) {
+        globalClickTracker.trackManualEvent('DeskReport', 'DESK_REPORT_GENERATED', undefined, {
+          ...reportDims,
+          latencyMs: Date.now() - startedAt,
+        });
         toast.success('Generating desk report…', {
           description:
             'This can take a few minutes — the current report stays visible until it’s ready.',
         });
       } else {
+        globalClickTracker.trackManualEvent(
+          'DeskReport',
+          'DESK_REPORT_GENERATE_FAILED',
+          undefined,
+          { ...reportDims, latencyMs: Date.now() - startedAt, errorKind: 'refused' },
+        );
         // e.g. already generating — a no-op to know about, not an error to retry.
         toast.info(res.data.error ?? 'Could not start desk report generation');
       }
       // Silent: keep the previous report visible, no loading state.
       await fetchLatest({ silent: true });
-    } catch {
+    } catch (err) {
+      globalClickTracker.trackManualEvent('DeskReport', 'DESK_REPORT_GENERATE_FAILED', undefined, {
+        ...reportDims,
+        latencyMs: Date.now() - startedAt,
+        errorKind: errorKindOf(err),
+      });
       toast.error('Failed to start desk report generation');
     } finally {
       setSubmitting(false);
     }
-  }, [channelId, fetchLatest]);
+  }, [channelId, fetchLatest, report?.rangeDays, report?.agentSlug]);
 
   const handleDownload = useCallback(async () => {
     if (!report?.url) return;
@@ -185,6 +210,11 @@ export const DeskReportPanel: React.FC<DeskReportPanelProps> = ({
                   className='flex items-center gap-1.5 rounded-[8px] border border-border px-3 py-1.5 text-sm text-foreground hover:bg-accent disabled:opacity-60'
                   data-track-category='DeskReport'
                   data-track-name='DownloadReport'
+                  data-track-metadata={JSON.stringify({
+                    channelId,
+                    rangeDays: report?.rangeDays ?? null,
+                    reportStatus: report?.status ?? null,
+                  })}
                 >
                   <Download size={14} />
                   {downloading ? 'Downloading…' : 'Download'}

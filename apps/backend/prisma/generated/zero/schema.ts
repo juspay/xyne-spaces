@@ -524,6 +524,7 @@ export const userTable = table("users")
     notificationsPausedUntil: number().optional(),
     assignmentUnavailableUntil: number().optional(),
     calendarVisibility: string(),
+    activityStatus: string().optional(),
   })
   .primaryKey("id");
 
