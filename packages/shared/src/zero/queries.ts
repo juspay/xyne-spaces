@@ -77,6 +77,7 @@ const kanbanTicketPageFiltersSchema = z.object({
   created: z.boolean().optional(),
   stages: z.array(z.string()).optional(),
   ticketTypes: z.array(z.string()).optional(),
+  merchantIds: z.array(z.string()).optional(),
   sourceChannels: z.array(z.string()).optional(),
 });
 
@@ -425,6 +426,10 @@ const applyKanbanTicketPageConditions = (
 
   if (filters?.ticketTypes?.length) {
     query = query.where('ticketType', 'IN', filters.ticketTypes);
+  }
+
+  if (filters?.merchantIds?.length) {
+    query = query.where('merchantId', 'IN', filters.merchantIds);
   }
 
   if (filters?.sourceChannels?.length) {

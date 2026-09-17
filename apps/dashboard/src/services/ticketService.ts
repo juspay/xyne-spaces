@@ -61,6 +61,7 @@ export interface KanbanCountsFilters {
   created?: boolean;
   stages?: string[];
   ticketTypes?: string[];
+  merchantIds?: string[];
   dynamicFields?: Record<string, string[] | { start?: number; end?: number }>;
 }
 

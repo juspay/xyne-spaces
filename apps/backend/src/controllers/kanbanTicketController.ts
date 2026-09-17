@@ -35,6 +35,7 @@ const kanbanCountsBodySchema = z.object({
       created: z.boolean().optional(),
       stages: z.array(z.string()).optional(),
       ticketTypes: z.array(z.string()).optional(),
+      merchantIds: z.array(z.string()).optional(),
       dynamicFields: z
         .record(
           z.union([

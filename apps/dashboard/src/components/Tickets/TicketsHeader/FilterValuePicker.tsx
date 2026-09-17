@@ -11,6 +11,7 @@ import {
   SourceChannelsSubmenu,
   StagesSubmenu,
   TagsSubmenu,
+  MerchantIdSubmenu,
   TicketTypeSubmenu,
   UserGroupSubmenu,
   UserSubmenu,
@@ -196,6 +197,13 @@ export const FilterValuePicker = ({
         <TicketTypePicker
           selected={filters.ticketTypes || []}
           onChange={types => setKey('ticketTypes', types)}
+        />
+      );
+    case 'merchantIds':
+      return (
+        <MerchantIdSubmenu
+          selectedMerchantIds={filters.merchantIds || []}
+          onChange={(merchantIds: string[]) => setKey('merchantIds', merchantIds)}
         />
       );
     case 'sourceChannels':
