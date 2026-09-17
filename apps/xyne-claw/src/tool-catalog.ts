@@ -34,6 +34,15 @@ export interface ToolCatalogEntry {
    * ≠ "read" — see `classifyToolRisk`.
    */
   isWrite?: boolean;
+  /**
+   * The MCP server this tool came from, when one did.
+   *
+   * Distinct from `catalog`: a subagent-wrapped server is catalogued under the
+   * WRAPPER's name ("spaces"), while this stays the server's own type
+   * ("xyne-spaces"). Loading or listing "everything from one MCP" needs the
+   * second, and no other field carries it.
+   */
+  mcpServer?: string;
 }
 
 export interface ToolCatalogItem {
@@ -131,7 +140,13 @@ export function catalogNameForSource(source: string): string {
   return idx >= 0 ? source.slice(idx + 1) : source;
 }
 
-function addUnique(items: ToolCatalogItem[], seen: Set<string>, tool: ToolDefinition, source: string): void {
+function addUnique(
+  items: ToolCatalogItem[],
+  seen: Set<string>,
+  tool: ToolDefinition,
+  source: string,
+  mcpServer?: string,
+): void {
   if (duplicatesMetaTool(tool.name) || seen.has(tool.name)) return;
   seen.add(tool.name);
   items.push({
@@ -142,6 +157,7 @@ function addUnique(items: ToolCatalogItem[], seen: Set<string>, tool: ToolDefini
       source,
       catalog: catalogNameForSource(source),
       ...(isCustomWriteTool(tool) ? { isWrite: true } : {}),
+      ...(mcpServer ? { mcpServer } : {}),
     },
   });
 }
@@ -209,7 +225,7 @@ export function buildToolCatalog(params: {
       const writeSet = new Set(group.writeTools.map(String));
       for (const tool of group.tools) {
         if (writeSet.has(extractRuntimeToolName(tool.name))) continue;
-        addUnique(items, seen, tool, `subagent:${def.name}`);
+        addUnique(items, seen, tool, `subagent:${def.name}`, group.serverType);
       }
     }
 
@@ -218,7 +234,7 @@ export function buildToolCatalog(params: {
         const matched = params.customTools.filter((tool) => customToolSource(tool) === def.serverType);
         for (const tool of matched) {
           if (isCustomWriteTool(tool)) continue;
-          addUnique(items, seen, tool, `subagent:${def.name}`);
+          addUnique(items, seen, tool, `subagent:${def.name}`, def.serverType);
         }
       }
     }
@@ -253,7 +269,7 @@ export function buildToolCatalog(params: {
       const writeSet = new Set(group.writeTools.map(String));
       for (const tool of group.tools) {
         if (writeSet.has(extractRuntimeToolName(tool.name))) continue;
-        addUnique(items, seen, tool, `server:${group.serverType}`);
+        addUnique(items, seen, tool, `server:${group.serverType}`, group.serverType);
       }
     }
 
@@ -453,6 +469,44 @@ function renderDeployment(matches: DeploymentToolMatch[], note: string): string 
   return [`Deployment catalog — ${matches.length} match${matches.length === 1 ? "" : "es"}.`, ...lines, "", note].join("\n");
 }
 
+/** One MCP server this run is connected to, as search-tools reports it. */
+export interface McpServerSummary {
+  serverType: string;
+  serverName: string;
+  /** Tools the server exposes in this run, before any catalog filtering. */
+  tools: number;
+  /** Set when a subagent wrapper owns the server; its tools are reached through
+   *  that wrapper rather than loaded individually. */
+  wrappedBy?: string;
+}
+
+/**
+ * The connected MCP servers, independent of what got catalogued.
+ *
+ * Built from the groups rather than from catalog entries on purpose: a server
+ * whose tools are all behind a subagent wrapper, or all writes, contributes no
+ * catalog entries at all, and answering "which MCPs am I connected to" with
+ * silence about it would be wrong.
+ */
+export function describeMcpServers(groups: McpToolGroup[]): McpServerSummary[] {
+  const byType = new Map<string, McpServerSummary>();
+  for (const group of groups) {
+    const existing = byType.get(group.serverType);
+    if (existing) {
+      existing.tools += group.tools.length;
+      continue;
+    }
+    const wrapper = group.sourceSubagent?.name ?? findSubagentDefinitionForServer(group.serverType)?.name;
+    byType.set(group.serverType, {
+      serverType: group.serverType,
+      serverName: group.serverName,
+      tools: group.tools.length,
+      ...(wrapper ? { wrappedBy: wrapper } : {}),
+    });
+  }
+  return [...byType.values()].sort((a, b) => a.serverType.localeCompare(b.serverType));
+}
+
 export function buildFastModeMetaTools(options: {
   catalog: ToolCatalogEntry[];
   controller: FastToolRuntimeController;
@@ -469,6 +523,8 @@ export function buildFastModeMetaTools(options: {
   /** True when this agent may load tools it was never granted. Decides only
    *  what the deployment-scope answer tells the model to do next. */
   openPalette?: boolean;
+  /** Connected MCP servers, for `scope:"mcp"`. Empty when none are wired. */
+  mcpServers?: McpServerSummary[];
 }): ToolDefinition[] {
   const catalog = [...options.catalog].sort((a, b) => a.name.localeCompare(b.name));
   const emptyCatalogMessage = [
@@ -480,6 +536,17 @@ export function buildFastModeMetaTools(options: {
   const byName = new Map(catalog.map((entry) => [entry.name, entry]));
 
   const catalogNames = [...new Set(catalog.map((entry) => entry.catalog))].sort();
+  const mcpServers = options.mcpServers ?? [];
+  // Every server the run is connected to, plus any the catalog names on its own,
+  // so the enum still guides the model when `mcpServers` was not supplied.
+  const mcpServerTypes = [
+    ...new Set([
+      ...mcpServers.map((server) => server.serverType),
+      ...catalog.flatMap((entry) => (entry.mcpServer ? [entry.mcpServer] : [])),
+    ]),
+  ].sort();
+  const entriesForMcp = (serverType: string): ToolCatalogEntry[] =>
+    catalog.filter((entry) => entry.mcpServer === serverType);
   /** Resolve the optional `catalog` filter, or return an error string. */
   const scopeTo = (raw: unknown): { entries: ToolCatalogEntry[] } | { error: string } => {
     const name = typeof raw === "string" ? raw.trim() : "";
@@ -498,6 +565,7 @@ export function buildFastModeMetaTools(options: {
         "Find a tool. Covers two different questions, and `scope` picks which one.\n" +
         `scope="agent" (the default) looks at the tools THIS run can use. Everything it returns is loadable right now — pass the exact names to load-tools and they are callable on your next turn. Catalogs: ${catalogNames.join(", ") || "(none)"}.\n` +
         'scope="claw" looks at every tool the deployment has, including ones this agent was never given. Use it to find out what exists at all — planning work, configuring another agent, or checking whether a capability is even available here. Results are not necessarily loadable; the answer says which.\n' +
+        'scope="mcp" answers "which MCP servers am I connected to". On its own it lists them with their tool counts; add `mcp` to list one server\'s tools. Use it when the ask names a system ("anything from Heisenberg?") rather than a task.\n' +
         "Omit `query` to browse the whole scope. Pass `query` to narrow it, and describe what you are trying to DO rather than guessing a tool name — \"post a message to a channel\", \"fill in a pdf form\". Agent scope matches on words, so keywords work; claw scope is a semantic search, so a full phrase works better than a single noun.\n" +
         "`catalog` narrows the agent scope to one catalog; `integration` narrows the claw scope to one product (google, sandbox, github). `maxRisk` is a ceiling, not an exact match: \"read\" excludes everything that writes, \"write\" still excludes destructive. Use it when you only need to look something up.\n" +
         "Call it before guessing a tool name. A wrong name costs a failed call; a search costs one cheap round trip.",
@@ -511,9 +579,9 @@ export function buildFastModeMetaTools(options: {
           },
           scope: {
             type: "string",
-            enum: ["agent", "claw"],
+            enum: ["agent", "claw", "mcp"],
             description:
-              '"agent" (default) = tools this run can load. "claw" = every tool the deployment has, whether or not this agent holds it.',
+              '"agent" (default) = tools this run can load. "claw" = every tool the deployment has, whether or not this agent holds it. "mcp" = the connected MCP servers themselves.',
           },
           catalog: {
             type: "string",
@@ -523,6 +591,12 @@ export function buildFastModeMetaTools(options: {
           integration: {
             type: "string",
             description: 'Claw scope only. Restrict to one integration, e.g. "google" or "sandbox".',
+          },
+          mcp: {
+            type: "string",
+            ...(mcpServerTypes.length > 0 ? { enum: mcpServerTypes } : {}),
+            description:
+              'One MCP server, by its server type. In "mcp" scope it lists that server\'s tools; in "agent" scope it restricts results to that server. Not the same as `catalog`: a wrapped server is catalogued under its subagent name.',
           },
           maxRisk: {
             type: "string",
@@ -535,11 +609,50 @@ export function buildFastModeMetaTools(options: {
       async execute(_toolCallId: string, params: unknown) {
         const input = (params ?? {}) as {
           query?: unknown; scope?: unknown; catalog?: unknown; integration?: unknown;
-          maxRisk?: unknown; limit?: unknown;
+          maxRisk?: unknown; limit?: unknown; mcp?: unknown;
         };
         const query = typeof input.query === "string" ? input.query.trim() : "";
         const limit = Math.min(Math.max(Number(input.limit) || DEFAULT_SEARCH_LIMIT, 1), MAX_SEARCH_LIMIT);
         const maxRisk = typeof input.maxRisk === "string" ? input.maxRisk : undefined;
+        const mcp = typeof input.mcp === "string" ? input.mcp.trim() : "";
+
+        if (input.scope === "mcp") {
+          if (mcp) {
+            const known = mcpServers.find((server) => server.serverType === mcp);
+            const entries = entriesForMcp(mcp);
+            if (!known && entries.length === 0) {
+              return text(
+                `No MCP server "${mcp}" in this run. Connected: ${mcpServerTypes.join(", ") || "(none)"}.`,
+              );
+            }
+            if (entries.length === 0) {
+              // Connected, but nothing individually loadable: every tool sits
+              // behind a wrapper or is a write the catalog never takes.
+              return text(
+                `${mcp} is connected${known?.wrappedBy ? ` and handled by the "${known.wrappedBy}" tool` : ""}, ` +
+                `but none of its ${known?.tools ?? 0} tool(s) are individually loadable here` +
+                `${known?.wrappedBy ? `. Call "${known.wrappedBy}" instead.` : "."}`,
+              );
+            }
+            return text(
+              `${mcp} — ${entries.length} loadable tool(s). load-tools({ mcp: "${mcp}" }) takes all of them.\n\n` +
+              renderGrouped(entries.slice(0, limit), "") +
+              (entries.length > limit ? `\n\n…and ${entries.length - limit} more; raise \`limit\` to see them.` : ""),
+            );
+          }
+          if (mcpServers.length === 0) {
+            return text("No MCP servers are connected in this run.");
+          }
+          const lines = mcpServers.map((server) => {
+            const loadable = entriesForMcp(server.serverType).length;
+            const wrapped = server.wrappedBy ? `, reached through "${server.wrappedBy}"` : "";
+            return `  - ${server.serverType} (${server.serverName}): ${server.tools} tool(s)${wrapped}, ${loadable} individually loadable`;
+          });
+          return text(
+            `${mcpServers.length} connected MCP server(s):\n${lines.join("\n")}\n\n` +
+            'Add `mcp` to list one server\'s tools, or call load-tools({ mcp: "<server>" }) to take them all.',
+          );
+        }
 
         if (input.scope === "claw") {
           if (!options.searchDeployment) {
@@ -582,9 +695,13 @@ export function buildFastModeMetaTools(options: {
         if (scoped.entries.length === 0) {
           return text(`The tool catalog is empty. ${emptyCatalogMessage}`);
         }
+        if (mcp && !mcpServerTypes.includes(mcp)) {
+          return text(`No MCP server "${mcp}" in this run. Connected: ${mcpServerTypes.join(", ") || "(none)"}.`);
+        }
+        const byServer = mcp ? scoped.entries.filter((e) => e.mcpServer === mcp) : scoped.entries;
 
         const allowed = maxRisk ? new Set(riskAtOrBelow(maxRisk as "read" | "write" | "destructive")) : null;
-        const risked = allowed ? scoped.entries.filter((e) => allowed.has(entryRisk(e))) : scoped.entries;
+        const risked = allowed ? byServer.filter((e) => allowed.has(entryRisk(e))) : byServer;
         const matched = query ? matchScoped(risked, query) : risked;
         if (matched.length === 0) {
           return text(
@@ -606,7 +723,7 @@ export function buildFastModeMetaTools(options: {
       label: "Load Tools",
       description:
         "Activate tools so you can call them directly. Their full schemas arrive on your NEXT turn, so batch everything you need into one call rather than loading one at a time.\n" +
-        "Pass `names` for specific tools — one name or many, exactly as search-tools spelled them. Pass `catalog` to take a whole catalog at once, which is worth doing for small ones instead of searching first. Passing both loads the union.\n" +
+        "Pass `names` for specific tools — one name or many, exactly as search-tools spelled them. Pass `catalog` to take a whole catalog at once, which is worth doing for small ones instead of searching first. Pass `mcp` to take everything one MCP server exposes here. Any combination loads the union.\n" +
         "The loaded set only grows: nothing you load is taken away later in this session, so there is no need to re-load a tool you already have. " +
         `Only tools in this agent's catalog can be loaded; if a name comes back "unknown", search-tools with scope="agent" will show what is actually here. Catalogs: ${catalogNames.join(", ") || "(none)"}.`,
       parameters: Type.Unsafe({
@@ -623,6 +740,12 @@ export function buildFastModeMetaTools(options: {
             ...(catalogNames.length > 0 ? { enum: catalogNames } : {}),
             description: "Optional. Load every tool in this catalog. Combine with `names` to also load tools from elsewhere.",
           },
+          mcp: {
+            type: "string",
+            ...(mcpServerTypes.length > 0 ? { enum: mcpServerTypes } : {}),
+            description:
+              'Optional. Load every loadable tool from one MCP server, by server type. Use search-tools with scope="mcp" to see which are connected.',
+          },
         },
       }),
       async execute(_toolCallId: string, params: unknown) {
@@ -632,10 +755,27 @@ export function buildFastModeMetaTools(options: {
         if (!options.controller?.loadTools) {
           return { content: [{ type: "text" as const, text: "Error: tool loader is not initialized." }], details: {} };
         }
-        const input = params as { names?: unknown; catalog?: unknown } | undefined;
+        const input = params as { names?: unknown; catalog?: unknown; mcp?: unknown } | undefined;
         const scoped = scopeTo(input?.catalog);
         if ("error" in scoped) {
           return { content: [{ type: "text" as const, text: scoped.error }], details: {} };
+        }
+        const wantMcp = typeof input?.mcp === "string" ? input.mcp.trim() : "";
+        if (wantMcp && !mcpServerTypes.includes(wantMcp)) {
+          return {
+            content: [{ type: "text" as const, text: `No MCP server "${wantMcp}" in this run. Connected: ${mcpServerTypes.join(", ") || "(none)"}.` }],
+            details: {},
+          };
+        }
+        const fromMcp = wantMcp ? entriesForMcp(wantMcp).map((entry) => entry.name) : [];
+        if (wantMcp && fromMcp.length === 0) {
+          const known = mcpServers.find((server) => server.serverType === wantMcp);
+          return {
+            content: [{ type: "text" as const, text:
+              `${wantMcp} is connected but exposes nothing individually loadable here` +
+              `${known?.wrappedBy ? `. Call "${known.wrappedBy}" instead.` : "."}` }],
+            details: {},
+          };
         }
         // A `catalog` argument expands to its member names, so the controller
         // keeps its single names-based contract and the budget/append-only
@@ -647,10 +787,10 @@ export function buildFastModeMetaTools(options: {
         const explicit = Array.isArray(rawNames)
           ? rawNames.map((n) => String(n).trim()).filter(Boolean)
           : [];
-        const names = [...new Set([...explicit, ...fromCatalog])];
+        const names = [...new Set([...explicit, ...fromCatalog, ...fromMcp])];
         if (names.length === 0) {
           return {
-            content: [{ type: "text" as const, text: "Error: provide `names`, a `catalog`, or both." }],
+            content: [{ type: "text" as const, text: "Error: provide `names`, a `catalog`, an `mcp`, or any combination." }],
             details: {},
           };
         }

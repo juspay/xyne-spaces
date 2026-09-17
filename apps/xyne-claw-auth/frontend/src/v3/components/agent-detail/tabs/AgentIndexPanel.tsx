@@ -13,6 +13,8 @@ import {
   searchAgentIndex,
   syncAgentIndex,
   triggerUsagePatternSynthesis,
+  getUsagePatternJob,
+  type UsagePatternJob,
   type AgentIndexDocument,
   type AgentIndexKind,
   type AgentIndexMatch,
@@ -47,6 +49,15 @@ const TONE_TEXT: Record<Tone, string> = {
   error: "text-xyne-error-fg",
 };
 
+/** A synthesis pass is an LLM call; give it room but never spin forever. */
+/** Server-shaped numbers, rendered safely. A missing field used to take the
+ *  whole panel down with "cannot read properties of undefined". */
+function count(value: number | undefined | null): string {
+  return typeof value === "number" && Number.isFinite(value) ? value.toLocaleString() : "0";
+}
+
+const SYNTHESIS_WAIT_MS = 180_000;
+const SYNTHESIS_POLL_MS = 3_000;
 const DAY_MS = 86_400_000;
 const RANGE_PRESETS = [7, 30, 90];
 const DEFAULT_RANGE_DAYS = 30;
@@ -217,18 +228,43 @@ export function AgentIndexPanel({ agentSlug }: Props) {
     setRangeEnd(toDayInput(Date.now()));
   }
 
+  /** Polls until the pass reaches a terminal state. Gives up quietly rather
+   *  than spinning forever: the file below is refreshed either way, and a poll
+   *  that lands on another replica correctly sees no job at all. */
+  async function waitForSynthesis(slug: string): Promise<UsagePatternJob | null> {
+    const deadline = Date.now() + SYNTHESIS_WAIT_MS;
+    while (Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, SYNTHESIS_POLL_MS));
+      const job = await getUsagePatternJob(slug).catch(() => null);
+      if (job === null || job.status === "done" || job.status === "error") return job;
+    }
+    return null;
+  }
+
   async function generatePatterns(): Promise<void> {
     if (generating) return;
     setGenerating(true);
     setGenError("");
     setOutcome(null);
     try {
-      const result = await triggerUsagePatternSynthesis(
+      const started = await triggerUsagePatternSynthesis(
         agentSlug,
         dayToIso(rangeStart, false),
         dayToIso(rangeEnd, true),
       );
-      setOutcome(result);
+      if (started.job.status === "busy") {
+        setGenError(`${started.job.running} other syntheses are running. Try again in a moment.`);
+        return;
+      }
+      // The pass runs on the server; the response only says it began. Poll for
+      // the result rather than holding the request open, which is what used to
+      // time out at the gateway.
+      const finished = await waitForSynthesis(agentSlug);
+      if (finished?.status === "error") {
+        setGenError(finished.error);
+      } else if (finished?.status === "done") {
+        setOutcome({ ...finished.outcome, window: started.window });
+      }
       await Promise.all([loadPatterns(() => false), load(() => false)]);
     } catch (err) {
       setGenError(errorText(err, "Usage pattern synthesis failed."));
@@ -339,7 +375,7 @@ export function AgentIndexPanel({ agentSlug }: Props) {
           </div>
           <div>
             <dt className="text-xyne-fg-tertiary">Indexed characters</dt>
-            <dd className="font-mono text-xyne-fg-primary">{status.chars.toLocaleString()}</dd>
+            <dd className="font-mono text-xyne-fg-primary">{count(status.chars)}</dd>
           </div>
         </dl>
 
@@ -373,7 +409,7 @@ export function AgentIndexPanel({ agentSlug }: Props) {
                     />
                     <Badge as="span" size="sm" label={doc.kind} />
                     <span className="font-mono text-[11px] text-xyne-fg-tertiary">
-                      {doc.chars.toLocaleString()} chars
+                      {count(doc.chars)} chars
                     </span>
                     {doc.chunks > 1 && (
                       <span
@@ -425,7 +461,7 @@ export function AgentIndexPanel({ agentSlug }: Props) {
                 {patternFile.updatedBy ?? "unknown"} · {formatTime(patternFile.updatedAt)}
               </span>
               <span className="ml-auto font-mono text-[11px] text-xyne-fg-tertiary">
-                {patternFile.chars.toLocaleString()} chars
+                {count(patternFile.chars)} chars
               </span>
               {isAdmin && draft === null && (
                 <Button size="sm" variant="secondary" onClick={() => setDraft(patternFile.content)}>
@@ -549,16 +585,16 @@ export function AgentIndexPanel({ agentSlug }: Props) {
                   Nothing was written, and that is a normal outcome.{" "}
                   {outcome.skipped ?? "The window did not hold enough distinct runs from enough distinct people."} A
                   pattern has to show up repeatedly, across several users, before it is worth routing on — one run is
-                  an incident. Analysed {outcome.runCount.toLocaleString()} run
-                  {outcome.runCount === 1 ? "" : "s"} from {outcome.distinctUsers.toLocaleString()} user
+                  an incident. Analysed {count(outcome.runCount)} run
+                  {outcome.runCount === 1 ? "" : "s"} from {count(outcome.distinctUsers)} user
                   {outcome.distinctUsers === 1 ? "" : "s"}. Widen the window and try again.
                 </div>
               ) : (
                 <div className="mt-2 rounded-lg border border-xyne-success-border bg-xyne-success-bg p-2.5 text-[12px] leading-relaxed text-xyne-success-fg">
-                  Wrote {outcome.patternsWritten.toLocaleString()} pattern
-                  {outcome.patternsWritten === 1 ? "" : "s"} ({outcome.chars.toLocaleString()} chars) from{" "}
-                  {outcome.runCount.toLocaleString()} run{outcome.runCount === 1 ? "" : "s"} across{" "}
-                  {outcome.distinctUsers.toLocaleString()} user{outcome.distinctUsers === 1 ? "" : "s"}.
+                  Wrote {count(outcome.patternsWritten)} pattern
+                  {outcome.patternsWritten === 1 ? "" : "s"} ({count(outcome.chars)} chars) from{" "}
+                  {count(outcome.runCount)} run{outcome.runCount === 1 ? "" : "s"} across{" "}
+                  {count(outcome.distinctUsers)} user{outcome.distinctUsers === 1 ? "" : "s"}.
                 </div>
               )
             )}
