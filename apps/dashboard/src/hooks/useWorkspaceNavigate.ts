@@ -8,6 +8,7 @@ import type { NavigateFunction, NavigateOptions, To } from 'react-router-dom-act
  */
 const WORKSPACE_EXEMPT_PREFIXES = [
   '/auth',
+  '/onboarding',
   '/invite',
   '/launch',
   '/newWindow',

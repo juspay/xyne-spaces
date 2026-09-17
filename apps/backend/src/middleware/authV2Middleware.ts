@@ -52,8 +52,8 @@ class AuthV2Middleware {
       return headerSessionId;
     }
 
-    // Backward compat: user_session_id cookie (for old dashboard versions)
-    return req.cookies?.user_session_id;
+    // Spaces login sets user_session_id; local/test auth also sets xyne_session.
+    return req.cookies?.user_session_id ?? req.cookies?.xyne_session;
   }
 
   /**

@@ -1,3 +1,5 @@
+import { isLocalDevAuthBootstrapPath } from './publicLoginPaths';
+
 // Covers xyne-spaces:, xyne-spaces-dev:, xyne-spaces-sandbox:
 const isElectronBundled = window.location.protocol.startsWith('xyne-spaces');
 
@@ -6,8 +8,20 @@ export const isLocalhost = hostname === 'localhost' || hostname === '127.0.0.1';
 export const isSandboxLocal = hostname.endsWith('.localhost');
 export const isTestEnv =
   import.meta.env.MODE === 'test' || hostname === 'dashboard' || isSandboxLocal;
+
+// Local Vite on localhost mints a session for app routes (not /auth or /onboarding).
+// Set VITE_ENABLE_DEV_AUTH=false to disable that bootstrap entirely.
 export const isLocalDevAuthEnabled =
-  import.meta.env.DEV && isLocalhost && import.meta.env['VITE_ENABLE_DEV_AUTH'] === 'true';
+  import.meta.env.DEV && isLocalhost && import.meta.env.VITE_ENABLE_DEV_AUTH !== 'false';
+
+export const LOCAL_DEV_AUTH_EMAIL = import.meta.env.VITE_DEV_AUTH_EMAIL?.trim() || 'admin@xyne.ai';
+export const LOCAL_DEV_AUTH_PASSWORD = import.meta.env.VITE_DEV_AUTH_PASSWORD || 'xynelocal@123';
+
+export function shouldBootstrapLocalDevAuth(
+  pathname: string = typeof window !== 'undefined' ? window.location.pathname : '',
+): boolean {
+  return isLocalDevAuthBootstrapPath(pathname, isLocalDevAuthEnabled);
+}
 
 export const isSandBox = hostname.includes('sandbox');
 export const isProd = !isLocalhost && !isSandBox && !isSandboxLocal;

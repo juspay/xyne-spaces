@@ -87,6 +87,23 @@ export class TestAuthController {
     };
   }
 
+  private buildDevAdminUser(adminEmail: string): TestUserData {
+    const emailUser = adminEmail.split('@')[0] ?? '';
+    const name =
+      emailUser
+        .split(/[.\-_]/)
+        .map((part: string) => part.charAt(0).toUpperCase() + part.slice(1))
+        .join(' ') || 'Local Admin';
+
+    return {
+      googleId: `dev-admin-${adminEmail.replace(/[^a-zA-Z0-9]/g, '-')}`,
+      email: adminEmail,
+      name,
+      picture: `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=random`,
+      role: 'admin',
+    };
+  }
+
   testLogin = async (req: Request, res: Response): Promise<void> => {
     const requestId = `TEST_LOGIN_${Date.now()}`;
 
@@ -103,16 +120,16 @@ export class TestAuthController {
       }
 
       const setAsNewUser = TestAuthController.parseBooleanFlag(
-        req.query.setAsNewUser ?? req.body.setAsNewUser
+        req.query.setAsNewUser ?? req.body?.setAsNewUser
       );
       const email =
         typeof req.query.email === 'string'
           ? req.query.email
-          : typeof req.body.email === 'string'
+          : typeof req.body?.email === 'string'
             ? req.body.email
             : null;
-      const isAdminFlag = req.body.isAdmin === true || req.query.isAdmin === 'true';
-      let useFixedUser = req.query.fixed === 'true' || req.body.fixed === true;
+      const isAdminFlag = req.body?.isAdmin === true || req.query.isAdmin === 'true';
+      let useFixedUser = req.query.fixed === 'true' || req.body?.fixed === true;
 
       if (config.isSandboxTestMode) {
         useFixedUser = true;
@@ -125,19 +142,7 @@ export class TestAuthController {
       let testUserData: TestUserData;
 
       if (enableDevAuth && process.env.DEFAULT_ADMIN_EMAIL) {
-        const adminEmail = process.env.DEFAULT_ADMIN_EMAIL;
-        const emailUser = adminEmail.split('@')[0];
-        const name = emailUser
-          .split(/[.\-_]/)
-          .map((part: string) => part.charAt(0).toUpperCase() + part.slice(1))
-          .join(' ');
-        testUserData = {
-          googleId: `dev-admin-${adminEmail.replace(/[^a-zA-Z0-9]/g, '-')}`,
-          email: adminEmail,
-          name: name || 'Sandbox Admin',
-          picture: 'https://ui-avatars.com/api/?name=Sandbox+Admin&background=random',
-          role: 'admin',
-        };
+        testUserData = this.buildDevAdminUser(process.env.DEFAULT_ADMIN_EMAIL);
       } else if (email) {
         // Gauge automation path: derive role + index from a regex-matched email.
         const selectedTestUser = TestAuthController.getTestUserByEmail(email);
@@ -151,6 +156,8 @@ export class TestAuthController {
         }
 
         testUserData = selectedTestUser;
+      } else if (enableDevAuth) {
+        testUserData = this.buildDevAdminUser('admin@xyne.ai');
       } else if (useFixedUser) {
         // Fixed test user (sandbox / explicit ?fixed=true).
         testUserData = this.buildFixedTestUser();
@@ -169,7 +176,7 @@ export class TestAuthController {
       // In local development, prefer the configured admin's existing workspace.
       // This keeps dev-auth usable with restored databases where the real organization
       // already exists and creating a second "Test Org" for the same domain is invalid.
-      if (enableDevAuth && process.env.DEFAULT_ADMIN_EMAIL) {
+      if (enableDevAuth) {
         const existingDevUser = await db.user.findFirst({
           where: {
             email: testUserData.email,
@@ -442,9 +449,16 @@ export class TestAuthController {
       });
 
       if (sessionId) {
+        const sessionCookieMaxAge = config.session.expiryDays * 24 * 60 * 60 * 1000;
+        // Encryption, token refresh, and authV2 all read user_session_id.
+        // xyne_session is kept for claw-auth and older local clients.
+        res.cookie('user_session_id', sessionId, {
+          ...cookieOptions,
+          maxAge: sessionCookieMaxAge,
+        });
         res.cookie('xyne_session', sessionId, {
           ...cookieOptions,
-          maxAge: config.session.expiryDays * 24 * 60 * 60 * 1000,
+          maxAge: sessionCookieMaxAge,
         });
       }
 
@@ -498,6 +512,7 @@ export class TestAuthController {
         }
       }
       res.clearCookie('xyne_last_workspace', { path: '/' });
+      res.clearCookie('user_session_id', { path: '/' });
       res.clearCookie('xyne_session', { path: '/' });
       res.clearCookie('is_new_user', { path: '/' });
 

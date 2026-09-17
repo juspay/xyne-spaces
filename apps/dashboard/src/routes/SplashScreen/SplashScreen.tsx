@@ -4,12 +4,18 @@ import { ReactElement } from 'react';
 import { Event } from '../../utils/logger';
 import { useLoadingAnimationLog } from '../../hooks/useLoadingAnimationLog';
 import { usePlatform } from '../../hooks/usePlatform';
+import { isPublicLoginPath } from '../../publicLoginPaths';
 
 const SplashScreen = (): ReactElement => {
   const { isLoading, isAuthenticated, signInWithGoogle, state } = useAuth();
   const { isElectron } = usePlatform();
+  const location = useLocation();
+  const isPublicLogin = isPublicLoginPath(location.pathname);
 
-  if (isLoading) {
+  // Public routes must paint immediately. Chrome typically has a stored session, so
+  // SplashScreen would otherwise hide /onboarding (design prototype) and /auth
+  // behind "Getting Xyne Spaces ready..." until session validate finishes.
+  if (isLoading && !isPublicLogin) {
     const isElectronAuthLoading = isElectron && !isAuthenticated && state === 'authenticating';
     return (
       <SplashLoadingScreen

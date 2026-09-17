@@ -41,7 +41,10 @@ export async function decryptRequestBodyMiddleware(
       return next();
     }
 
-    const sessionId = req.cookies?.user_session_id ?? (req.headers['x-session-id'] as string | undefined);
+    const sessionId =
+      req.cookies?.user_session_id ??
+      req.cookies?.xyne_session ??
+      (req.headers['x-session-id'] as string | undefined);
 
     if (!sessionId) {
       logger.warn('[decryptionMiddleware] encrypted fields present but session ID missing', {
@@ -94,7 +97,10 @@ export function encryptResponseBodyMiddleware(
   const originalJson = res.json.bind(res);
 
   res.json = ((body?: unknown): Response => {
-    const sessionId = req.cookies?.user_session_id ?? (req.headers['x-session-id'] as string | undefined);
+    const sessionId =
+      req.cookies?.user_session_id ??
+      req.cookies?.xyne_session ??
+      (req.headers['x-session-id'] as string | undefined);
     if (!sessionId || !body || typeof body !== 'object') {
       return originalJson(body);
     }

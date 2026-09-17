@@ -11,6 +11,9 @@ interface ImportMetaEnv {
   readonly VITE_ZERO_SERVER: string;
   readonly VITE_ENABLE_ANALYTICS: string;
   readonly VITE_ENABLE_WORKFLOW_EDITOR: string;
+  readonly VITE_ENABLE_DEV_AUTH?: string;
+  readonly VITE_DEV_AUTH_EMAIL?: string;
+  readonly VITE_DEV_AUTH_PASSWORD?: string;
   readonly VITE_API_BASE_URL: string;
   readonly VITE_GOOGLE_CLIENT_ID: string;
   readonly VITE_GENIUS_API_KEY: string;

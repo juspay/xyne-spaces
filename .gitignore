@@ -229,6 +229,7 @@ skills-lock.json
 
 # Playwright MCP server scratch logs
 .playwright-mcp/
+.playwright-cli/
 
 # Security scan artifacts: downloaded scanner binaries + generated reports
 .securitybin/

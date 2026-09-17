@@ -11,6 +11,7 @@ import {
   wizardOpeningTap,
   tap4FooterAction,
   tryFirstLandingPath,
+  ONBOARDING_TAP_COPY,
 } from './onboardingFlow.ts';
 
 describe('plug-and-play onboarding flow', () => {
@@ -116,5 +117,10 @@ describe('plug-and-play onboarding flow', () => {
     assert.equal(tryFirstLandingPath('abc', 'try_support'), '/abc/support');
     assert.equal(tryFirstLandingPath('abc', 'try_search'), '/abc/search');
     assert.equal(tryFirstLandingPath('abc', 'try_ai'), '/abc/ai');
+  });
+
+  it('keeps wizard copy on four taps', () => {
+    assert.equal(ONBOARDING_TAP_COPY[1].title, 'What do you do here?');
+    assert.equal(ONBOARDING_TAP_COPY[4].title, 'See Spaces with the tools you already live in.');
   });
 });

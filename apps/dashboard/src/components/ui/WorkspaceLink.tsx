@@ -4,6 +4,7 @@ import { ReactElement } from 'react';
 
 const WORKSPACE_EXEMPT_PREFIXES = [
   '/auth',
+  '/onboarding',
   '/invite',
   '/launch',
   '/newWindow',

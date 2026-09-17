@@ -12,6 +12,7 @@ import { useActivityTracker } from '../hooks/useActivityTracker';
 import HomeScreen from './HomeScreen';
 import SlackMigration from '../pages/SlackMigration';
 import AuthScreen from './AuthScreen/AuthScreen';
+import OnboardingPrototype from './OnboardingScreen/OnboardingPrototype';
 import CommunityWorkspaceSelectionRoute from './AuthScreen/CommunityWorkspaceSelectionRoute';
 import WorkspaceSelectionScreen from './WorkspaceSelectionScreen';
 import OnboardingScreen from './OnboardingScreen/OnboardingScreen';
@@ -1129,6 +1130,14 @@ export const router = createBrowserRouter(
       errorElement: <RouterErrorFallback />,
       children: [
         {
+          path: '/onboarding',
+          element: <OnboardingPrototype />,
+        },
+        {
+          path: '/auth',
+          element: <AuthScreen />,
+        },
+        {
           path: '/',
           element: <ProtectedRoute />,
           children: [
@@ -2124,10 +2133,6 @@ export const router = createBrowserRouter(
         {
           path: '/community',
           element: <CommunityWorkspaceSelectionRoute />,
-        },
-        {
-          path: '/auth',
-          element: <AuthScreen />,
         },
         {
           path: '/workspaces',

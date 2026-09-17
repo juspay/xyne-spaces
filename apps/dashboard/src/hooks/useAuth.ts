@@ -321,6 +321,7 @@ export const useAuth = (): UseAuthReturn => {
       state.matches('checkingSession') ||
       state.matches('processingOAuthCallback') ||
       state.matches('validatingSession') ||
+      state.matches('testAuthenticating') ||
       state.matches('loggingOut') ||
       state.matches('authenticating') ||
       state.matches('loggingInToWorkspace') ||

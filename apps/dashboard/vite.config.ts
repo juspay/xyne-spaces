@@ -12,7 +12,7 @@ const require = createRequire(import.meta.url);
 const ortDistDir = path.dirname(
   require.resolve('onnxruntime-web', {
     paths: [path.dirname(require.resolve('@huggingface/transformers'))],
-  })
+  }),
 );
 
 export default defineConfig(({ command, mode }) => {
@@ -113,15 +113,15 @@ export default defineConfig(({ command, mode }) => {
             dest: 'pdfjs/wasm',
           },
           {
-          src: [
-            `${ortDistDir}/ort-wasm-simd-threaded.asyncify.wasm`,
-            `${ortDistDir}/ort-wasm-simd-threaded.asyncify.mjs`,
-            `${ortDistDir}/ort-wasm-simd-threaded.wasm`,
-            `${ortDistDir}/ort-wasm-simd-threaded.mjs`,
-          ],
-          dest: 'onnx',
-        },
-      ],
+            src: [
+              `${ortDistDir}/ort-wasm-simd-threaded.asyncify.wasm`,
+              `${ortDistDir}/ort-wasm-simd-threaded.asyncify.mjs`,
+              `${ortDistDir}/ort-wasm-simd-threaded.wasm`,
+              `${ortDistDir}/ort-wasm-simd-threaded.mjs`,
+            ],
+            dest: 'onnx',
+          },
+        ],
       }),
     ],
     build: {
@@ -144,16 +144,16 @@ export default defineConfig(({ command, mode }) => {
           changeOrigin: true,
           secure: false,
         },
+        '/api': {
+          target: env.VITE_API_BASE_URL || 'http://localhost:3001',
+          changeOrigin: true,
+          secure: false,
+          ws: true,
+        },
         // The SDLC server is served through this one, so it must not self-proxy.
         ...(isSdlcSurface ? {} : sdlcEdgeProxy),
         ...(env.VITE_ENVIRONMENT === 'test'
           ? {
-              '/api': {
-                target: env.VITE_API_BASE_URL,
-                changeOrigin: true,
-                secure: false,
-                ws: true,
-              },
               '/zero': {
                 target: env.VITE_ZERO_SERVER || 'http://localhost:4848',
                 changeOrigin: true,

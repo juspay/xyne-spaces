@@ -4,7 +4,15 @@ import axios from 'axios';
 import { v4 as uuidv4 } from 'uuid';
 import { reactNativeBridge } from '../utils/reactNativeBridge';
 import { posthogService } from '../services/Analytics/posthogService';
-import { API_BASE_URL, isSdlcSurface, isTestEnv } from '../config';
+import {
+  API_BASE_URL,
+  isLocalDevAuthEnabled,
+  isSdlcSurface,
+  isTestEnv,
+  LOCAL_DEV_AUTH_EMAIL,
+  LOCAL_DEV_AUTH_PASSWORD,
+  shouldBootstrapLocalDevAuth as canBootstrapLocalDevAuth,
+} from '../config';
 import { logger } from '../utils/logger';
 import {
   CommunityJoinResultStatus,
@@ -154,6 +162,8 @@ const clearOnboardingCookie = (): void => {
   Cookies.remove('is_new_user');
 };
 
+const LOCAL_BACKEND_UNREACHABLE = 'LOCAL_BACKEND_UNREACHABLE';
+
 export const getLastActiveWorkspaceId = (email: string): string | null => {
   return localStorage.getItem(`lastActiveWorkspaceId_${email}`);
 };
@@ -273,6 +283,10 @@ export const authMachine = createMachine(
           {
             target: 'validatingSession',
             guard: 'hasStoredSession',
+          },
+          {
+            target: 'testAuthenticating',
+            guard: 'shouldBootstrapLocalDevAuth',
           },
           {
             target: 'unauthenticated',
@@ -735,14 +749,25 @@ export const authMachine = createMachine(
               }),
             },
           ],
-          onError: {
-            target: 'unauthenticated',
-            actions: [
-              'clearSessionCookies',
-              { type: 'notifySignOut', params: { reason: 'Token validation failed' } },
-              assign(() => createClearedContext()),
-            ],
-          },
+          onError: [
+            {
+              target: 'testAuthenticating',
+              guard: 'shouldBootstrapLocalDevAuth',
+              actions: [
+                'clearSessionCookies',
+                { type: 'notifySignOut', params: { reason: 'Token validation failed' } },
+                assign(() => createClearedContext()),
+              ],
+            },
+            {
+              target: 'unauthenticated',
+              actions: [
+                'clearSessionCookies',
+                { type: 'notifySignOut', params: { reason: 'Token validation failed' } },
+                assign(() => createClearedContext()),
+              ],
+            },
+          ],
         },
       },
       authenticated: {
@@ -796,7 +821,7 @@ export const authMachine = createMachine(
         on: {
           GOOGLE_SIGNIN: [
             {
-              guard: 'isTestEnvironment',
+              guard: 'shouldUseTestLogin',
               target: 'testAuthenticating',
             },
             {
@@ -1148,7 +1173,8 @@ export const authMachine = createMachine(
         const userId = localStorage.getItem('user_id');
         return !!userId;
       },
-      isTestEnvironment: () => isTestEnv,
+      shouldUseTestLogin: () => isTestEnv || isLocalDevAuthEnabled,
+      shouldBootstrapLocalDevAuth: () => canBootstrapLocalDevAuth(),
       hasUserInOutput: ({ event }) => {
         const e = event as { output?: OAuthCallbackOutput };
         return !!e.output?.user?.id;
@@ -1224,8 +1250,13 @@ export const authMachine = createMachine(
           typeof enrichedEvent.message === 'string'
             ? enrichedEvent.message
             : enrichedEvent.error?.message;
-        context.error = fallbackMessage || 'Authentication failed';
         context.user = null;
+        // Backend down: keep the email form, don't flash a red "Test login failed".
+        if (fallbackMessage === LOCAL_BACKEND_UNREACHABLE) {
+          context.error = null;
+          return;
+        }
+        context.error = fallbackMessage || 'Authentication failed';
       },
       initiateGoogleSignIn: () => {
         try {
@@ -1673,40 +1704,105 @@ export const authMachine = createMachine(
         }
       }),
       performTestLogin: fromPromise(async () => {
-        try {
-          const urlParams = new URLSearchParams(window.location.search);
-          const email = urlParams.get('email');
-          const setAsNewUser = urlParams.get('setAsNewUser');
-          const loginParams = new URLSearchParams();
+        const urlParams = new URLSearchParams(window.location.search);
+        const email = urlParams.get('email');
+        const setAsNewUser = urlParams.get('setAsNewUser');
 
+        const jsonHeaders = {
+          withCredentials: true as const,
+          headers: {
+            // eslint-disable-next-line @typescript-eslint/naming-convention
+            'Content-Type': 'application/json',
+          },
+        };
+
+        const loginViaTestEndpoint = async (): Promise<{ user: User; isNewUser: boolean }> => {
+          const loginParams = new URLSearchParams();
           if (email) {
             loginParams.set('email', email);
           }
-
           if (setAsNewUser === 'true' || setAsNewUser === 'false') {
             loginParams.set('setAsNewUser', setAsNewUser);
           }
-
           const queryString = loginParams.toString();
-
           const response = await axios.post(
             `${API_BASE_URL}/test/auth/login${queryString ? `?${queryString}` : ''}`,
             {},
-            {
-              withCredentials: true,
-              headers: {
-                // eslint-disable-next-line @typescript-eslint/naming-convention
-                'Content-Type': 'application/json',
-              },
-            },
+            jsonHeaders,
           );
-
           const data = response.data as { success: boolean; user: User & { isNewUser: boolean } };
           if (data.success && data.user) {
             return { user: data.user, isNewUser: data.user.isNewUser };
           }
           throw new Error('Test login failed: No user data');
-        } catch {
+        };
+
+        const loginAsSeededAdmin = async (): Promise<{ user: User; isNewUser: boolean }> => {
+          const loginResponse = await axios.post(
+            `${API_BASE_URL}/v2/auth/email/login`,
+            { email: LOCAL_DEV_AUTH_EMAIL, password: LOCAL_DEV_AUTH_PASSWORD },
+            jsonHeaders,
+          );
+          const loginData = loginResponse.data as {
+            success: boolean;
+            user?: User;
+            autoLoginWorkspace?: string;
+            workspaces?: Workspace[];
+          };
+          if (!loginData.success) {
+            throw new Error('Local email login failed');
+          }
+          if (loginData.user?.id) {
+            return { user: loginData.user, isNewUser: false };
+          }
+          const workspaceId = loginData.autoLoginWorkspace || loginData.workspaces?.[0]?.id;
+          if (!workspaceId) {
+            throw new Error('Local login succeeded but no workspace was returned');
+          }
+          const workspaceResponse = await axios.post(
+            `${API_BASE_URL}/auth/login-workspace`,
+            { workspaceId },
+            jsonHeaders,
+          );
+          const workspaceData = workspaceResponse.data as { user?: User; isNewUser?: boolean };
+          if (!workspaceData.user) {
+            throw new Error('Local workspace login failed');
+          }
+          return { user: workspaceData.user, isNewUser: workspaceData.isNewUser ?? false };
+        };
+
+        try {
+          if (isLocalDevAuthEnabled && !isTestEnv) {
+            try {
+              return await loginViaTestEndpoint();
+            } catch (error) {
+              if (
+                axios.isAxiosError(error) &&
+                (error.response?.status === 403 || error.response?.status === 404)
+              ) {
+                return await loginAsSeededAdmin();
+              }
+              throw error;
+            }
+          }
+
+          return await loginViaTestEndpoint();
+        } catch (error) {
+          if (axios.isAxiosError(error) && !error.response) {
+            logger.warn('Local login skipped: backend is not reachable on port 3001');
+            throw new Error(LOCAL_BACKEND_UNREACHABLE);
+          }
+          if (axios.isAxiosError(error)) {
+            const errorData = error.response?.data as { error?: string; message?: string };
+            throw new Error(
+              errorData?.message ||
+                errorData?.error ||
+                `Local login failed (${error.response?.status ?? 'unknown'})`,
+            );
+          }
+          if (error instanceof Error) {
+            throw error;
+          }
           throw new Error('Test login failed');
         }
       }),

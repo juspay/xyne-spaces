@@ -21,6 +21,7 @@ import {
   ONBOARDING_TRY_FIRST,
   PLUG_AND_PLAY_ONBOARDING_TYPE,
   PROTOTYPE_CONNECTORS,
+  ONBOARDING_TAP_COPY,
   parseOnboardingPayload,
   wizardOpeningTap,
   tap4FooterAction,
@@ -32,25 +33,6 @@ import {
   type OnboardingTryFirst,
   type PrototypeConnectKey,
 } from './onboardingFlow';
-
-const TAP_COPY: Record<OnboardingTap, { title: string; subtitle: string }> = {
-  1: {
-    title: 'What do you do here?',
-    subtitle: "We'll remember this. It doesn't change where you land.",
-  },
-  2: {
-    title: 'What space are you in?',
-    subtitle: 'Stored only. Your landing still follows what you want to try first.',
-  },
-  3: {
-    title: 'What do you want to try first?',
-    subtitle: "We'll take you there after you connect — or skip — your tools.",
-  },
-  4: {
-    title: 'See Spaces with the tools you already live in.',
-    subtitle: 'Connect one, several, or skip. You can use Spaces either way.',
-  },
-};
 
 const OnboardingScreen = (): ReactElement | null => {
   const navigate = useNavigate();
@@ -257,10 +239,10 @@ const OnboardingScreen = (): ReactElement | null => {
         )}
 
         <h1 className='text-2xl font-semibold leading-tight text-foreground sm:text-3xl'>
-          {TAP_COPY[tap].title}
+          {ONBOARDING_TAP_COPY[tap].title}
         </h1>
         <p className='mt-2 text-sm leading-6 text-muted-foreground sm:text-base'>
-          {TAP_COPY[tap].subtitle}
+          {ONBOARDING_TAP_COPY[tap].subtitle}
         </p>
 
         {error && (

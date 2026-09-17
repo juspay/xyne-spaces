@@ -8,7 +8,8 @@ const router = Router();
 const prisma = DatabaseClient.getInstance();
 
 router.get('/public-key', async (req: Request, res: Response) => {
-  const sessionId = req.authenticatedSessionId ?? req.cookies?.user_session_id;
+  const sessionId =
+    req.authenticatedSessionId ?? req.cookies?.user_session_id ?? req.cookies?.xyne_session;
   if (!req.user || !sessionId) {
     res.status(401).json({ error: 'Unauthorized' });
     return;
@@ -23,7 +24,8 @@ router.get('/public-key', async (req: Request, res: Response) => {
 });
 
 router.post('/register-client-key', async (req: Request, res: Response) => {
-  const sessionId = req.authenticatedSessionId ?? req.cookies?.user_session_id;
+  const sessionId =
+    req.authenticatedSessionId ?? req.cookies?.user_session_id ?? req.cookies?.xyne_session;
   if (!req.user || !sessionId) {
     res.status(401).json({ error: 'Unauthorized' });
     return;

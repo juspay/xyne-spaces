@@ -39,6 +39,25 @@ export type OnboardingTryFirst = (typeof ONBOARDING_TRY_FIRST)[number]['key'];
 export type PrototypeConnectKey = (typeof PROTOTYPE_CONNECTORS)[number]['key'];
 export type OnboardingTap = 1 | 2 | 3 | 4;
 
+export const ONBOARDING_TAP_COPY: Record<OnboardingTap, { title: string; subtitle: string }> = {
+  1: {
+    title: 'What do you do here?',
+    subtitle: "We'll remember this. It doesn't change where you land.",
+  },
+  2: {
+    title: 'What space are you in?',
+    subtitle: 'Stored only. Your landing still follows what you want to try first.',
+  },
+  3: {
+    title: 'What do you want to try first?',
+    subtitle: "We'll take you there after you connect — or skip — your tools.",
+  },
+  4: {
+    title: 'See Spaces with the tools you already live in.',
+    subtitle: 'Connect one, several, or skip. You can use Spaces either way.',
+  },
+};
+
 export const TRY_FIRST_ROUTES: Record<OnboardingTryFirst, string> = {
   try_recap: '/chat/dir/recap',
   try_chat: '/chat/dir',

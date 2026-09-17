@@ -15,6 +15,13 @@ import { reactNativeBridge } from '../../utils/reactNativeBridge';
 import { usePlatform } from '../../hooks/usePlatform';
 import { PENDING_WORKSPACE_ID_KEY, PENDING_WORKSPACE_NAME_KEY } from '../../machines/authMachine';
 import { WorkspaceType } from '@xyne/shared';
+import {
+  OnboardingLoginLayout,
+  OnboardingSpacesMark,
+  onboardingContinueButtonClassName,
+  onboardingEmailInputClassName,
+  onboardingOauthButtonClassName,
+} from '../OnboardingScreen/OnboardingLoginLayout';
 
 interface CommunityWorkspaceListItem {
   id: string;
@@ -26,20 +33,8 @@ interface CommunityWorkspaceOrganization {
 }
 
 /**
- * AuthScreen - Mobile-Responsive Login Page with Modern Design
- *
- * Features:
- * - Fully responsive design following industry standards
- * - Mobile (< 1024px): Full-width login form with centered logo
- * - Desktop (>= 1024px): Two equal-width sections (50/50 split)
- * - Left section (desktop only): Branding, tagline, and features
- * - Right section: Login form with Google OAuth
- * - Background image with gradient overlay and fixed attachment
- * - Touch-friendly targets (min 44px height)
- * - Optimized text sizing for all screen sizes
- * - Uses Juspay Blend Design System
- * - Modern, minimalist design with Xyne branding
- * - Smooth transitions and hover states
+ * Production login at /auth. Shares the Figma split layout with the /onboarding
+ * design prototype, but every control here talks to the real auth machine.
  */
 const AuthScreen = (): ReactElement | null => {
   const {
@@ -64,6 +59,8 @@ const AuthScreen = (): ReactElement | null => {
     resendVerificationCode,
     communityJoinRequest,
     enterpriseJoinTarget,
+    isNewUser,
+    state,
   } = useAuth();
   const navigate = useNavigate();
   const { data: providers } = useOAuthProviders();
@@ -72,7 +69,7 @@ const AuthScreen = (): ReactElement | null => {
   const [orgName, setOrgName] = useState('');
   const [workspaceName, setWorkspaceName] = useState('');
   const [showCreateOrgForm, setShowCreateOrgForm] = useState(false);
-  const [showEmailForm, setShowEmailForm] = useState(false);
+  const [showPasswordField, setShowPasswordField] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [pendingCommunityWorkspaceName, setPendingCommunityWorkspaceName] = useState<string | null>(
@@ -224,6 +221,7 @@ const AuthScreen = (): ReactElement | null => {
   }, [isAuthenticated]);
 
   const location = useLocation();
+
   useEffect(() => {
     if (!reactNativeBridge.isAvailable()) {
       return;
@@ -261,7 +259,6 @@ const AuthScreen = (): ReactElement | null => {
     }
 
     setShowForgotPassword(false);
-    setShowEmailForm(true);
   }, [error]);
 
   const handleGoogleSignIn = (): void => {
@@ -358,6 +355,15 @@ const AuthScreen = (): ReactElement | null => {
       searchParams.get('invitationId')?.trim() ||
       undefined;
     await signInWithEmail(email.trim(), password, invitationId);
+  };
+
+  const handleFigmaEmailContinue = (e: React.FormEvent): void => {
+    e.preventDefault();
+    if (!showPasswordField) {
+      setShowPasswordField(true);
+      return;
+    }
+    void handleEmailSubmit(e);
   };
 
   const handleFpRequestCode = async (e: React.FormEvent): Promise<void> => {
@@ -546,7 +552,11 @@ const AuthScreen = (): ReactElement | null => {
   };
 
   if (isAuthenticated) {
-    const dest = user?.workspaceId ? `/${user.workspaceId}` : '/';
+    const dest = user?.workspaceId
+      ? isNewUser
+        ? `/${user.workspaceId}/onboarding`
+        : `/${user.workspaceId}`
+      : '/';
     return <Navigate to={dest} replace={true}></Navigate>;
   }
 
@@ -571,12 +581,15 @@ const AuthScreen = (): ReactElement | null => {
     return null;
   }
 
+  const isSessionResolving = state === 'checkingSession' || state === 'validatingSession';
+  const isSigningIn = isLoading && !isSessionResolving;
+
   const googleSignInButton = (
     <div className='relative rounded-md overflow-hidden max-w-[280px]'>
       <button
         className="w-full gap-3 text-base h-9 font-medium inline-flex items-center justify-center whitespace-nowrap transition-all disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 shrink-0 [&_svg]:shrink-0 outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive cursor-pointer border bg-background shadow-xs hover:bg-accent hover:text-accent-foreground dark:bg-input/30 dark:border-input dark:hover:bg-input/50 rounded-md px-6 has-[>svg]:px-4"
         onClick={handleGoogleSignIn}
-        disabled={isLoading}
+        disabled={isSigningIn}
         data-track-category='Auth'
         data-track-name='GoogleSignIn'
       >
@@ -591,798 +604,742 @@ const AuthScreen = (): ReactElement | null => {
 
   return (
     <ThemeProvider>
-      <div className='h-[100dvh] w-full overflow-y-auto bg-background'>
+      <OnboardingLoginLayout>
         <div
-          className='min-h-full w-full grid grid-rows-[1fr_auto]'
+          className='flex w-full max-w-[400px] flex-col items-center'
           role='main'
           aria-label='Login form'
         >
-          <div className='flex flex-col items-center justify-center p-4 sm:p-6 md:p-8 lg:p-12 py-8 sm:py-10 md:py-12'>
-            <div className='w-full max-w-xl flex flex-col gap-8 backdrop-blur-xl'>
-              {/* Welcome Header */}
-              {isEnrollmentFlow ? (
-                <div className='w-full'>
-                  <ElectronEnrollmentSteps
-                    currentStep={2}
-                    enrollmentComponent={googleSignInButton}
-                  />
-                </div>
-              ) : (
-                <div className='text-center flex flex-col justify-center items-center gap-1.5 sm:gap-2 md:gap-3'>
-                  <div className='mb-8'>
-                    <img src='/svgs/xyne.svg' alt='Xyne Logo' />
+          <div className='flex w-full flex-col items-center gap-16'>
+            {/* Welcome Header */}
+            {isEnrollmentFlow ? (
+              <div className='w-full'>
+                <ElectronEnrollmentSteps currentStep={2} enrollmentComponent={googleSignInButton} />
+              </div>
+            ) : (
+              <div className='flex flex-col items-center gap-4 text-center'>
+                <OnboardingSpacesMark />
+                {pendingCommunityWorkspaceName ? (
+                  <div className='max-w-full rounded-lg border border-blue-100 bg-blue-50 px-4 py-2'>
+                    <p className='max-w-[420px] whitespace-normal break-words text-sm font-semibold leading-snug text-blue-950'>
+                      You will be joining {pendingCommunityWorkspaceName} Community
+                    </p>
                   </div>
-                  <h2 className='text-lg lg:text-xl font-medium md:font-semibold text-foreground'>
-                    Log in to Xyne Spaces
-                  </h2>
-                  {pendingCommunityWorkspaceName ? (
-                    <div className='mt-2 max-w-full rounded-lg border border-blue-100 bg-blue-50 px-4 py-2'>
-                      <p className='max-w-[420px] whitespace-normal break-words text-sm font-semibold leading-snug text-blue-950'>
-                        You will be joining {pendingCommunityWorkspaceName} Community
-                      </p>
-                    </div>
-                  ) : null}
-                  <p className='text-xs sm:text-sm md:text-sm text-muted-foreground pb-4'>
-                    {isLoading
-                      ? 'Signing you in...'
-                      : 'Communicate, collaborate & 10x your daily productivity'}
-                  </p>
+                ) : null}
+                <p className='text-[15px] font-medium leading-[1.2] tracking-[-0.6px] text-[#232229]'>
+                  {isSigningIn
+                    ? 'Signing you in...'
+                    : 'A unified workspace for (humans + agents) to collab'}
+                </p>
+              </div>
+            )}
+
+            {/* Error Message */}
+            {error &&
+              !(
+                isCreatingOrg &&
+                (isOrganizationDomainConflictError || isPublicEmailDomainError)
+              ) && (
+                <div
+                  className='p-3 sm:p-4 bg-red-50 border border-red-200 rounded-lg max-h-24 overflow-y-auto'
+                  role='alert'
+                  aria-live='assertive'
+                >
+                  <p className='text-sm sm:text-base text-red-600 break-words'>{error}</p>
                 </div>
               )}
 
-              {/* Error Message */}
-              {error &&
-                !(
-                  isCreatingOrg &&
-                  (isOrganizationDomainConflictError || isPublicEmailDomainError)
-                ) && (
-                  <div
-                    className='p-3 sm:p-4 bg-red-50 border border-red-200 rounded-lg max-h-24 overflow-y-auto'
-                    role='alert'
-                    aria-live='assertive'
-                  >
-                    <p className='text-sm sm:text-base text-red-600 break-words'>{error}</p>
+            {/* Workspace Selection */}
+            {isSelectingWorkspace && (
+              <div className='flex flex-col gap-6'>
+                <div className='text-center'>
+                  <h3 className='text-lg font-semibold text-foreground'>Select Workspace</h3>
+                  <p className='text-sm text-muted-foreground mt-1'>
+                    Choose a workspace to continue
+                  </p>
+                </div>
+
+                <div className='flex flex-col gap-3 max-h-64 overflow-y-auto'>
+                  {workspaces.map(workspace => (
+                    <button
+                      key={workspace.id}
+                      onClick={() => handleSelectWorkspace(workspace.id)}
+                      className='flex items-center gap-3 p-4 border border-border rounded-lg hover:border-blue-500 hover:bg-accent transition-all text-left'
+                      data-track-category='Auth'
+                      data-track-name='SelectWorkspace'
+                      data-track-metadata={JSON.stringify({ workspaceId: workspace.id })}
+                    >
+                      <div className='w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center'>
+                        <Building2 className='w-5 h-5 text-blue-600' />
+                      </div>
+                      <div className='flex-1'>
+                        <p className='font-medium text-foreground'>{workspace.name}</p>
+                        <p className='text-xs text-muted-foreground capitalize'>{workspace.role}</p>
+                      </div>
+                      <ArrowRight className='w-5 h-5 text-slate-400' />
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* User was removed from all workspaces - cannot create org */}
+            {isCreatingOrg && userExistsButRemoved && (
+              <div className='flex flex-col gap-4'>
+                <div className='p-4 bg-amber-50 border border-amber-200 rounded-lg text-center'>
+                  <h3 className='text-base font-semibold text-amber-800 mb-2'>
+                    No Workspace Access
+                  </h3>
+                  <p className='text-sm text-amber-700'>
+                    Your account exists but you don&apos;t have access to any workspaces.
+                  </p>
+                  <p className='text-sm text-amber-700 mt-2'>
+                    Please check with your <span className='font-medium'>Organization Admin</span>{' '}
+                    to get access to a workspace.
+                  </p>
+                </div>
+
+                <button
+                  type='button'
+                  onClick={handleTryDifferentAccount}
+                  className='text-sm text-muted-foreground hover:text-foreground text-center cursor-pointer'
+                  data-track-category='Auth'
+                  data-track-name='TryDifferentAccount'
+                >
+                  Try with a different account
+                </button>
+              </div>
+            )}
+
+            {isCreatingOrg && isOrganizationDomainConflictError && (
+              <div className='flex flex-col gap-4'>
+                <div className='p-4 bg-amber-50 border border-amber-200 rounded-lg text-center'>
+                  <h3 className='text-base font-semibold text-amber-800 mb-2'>
+                    Organization Already Exists
+                  </h3>
+                  <p className='text-sm text-amber-700'>{error}</p>
+                </div>
+
+                {enterpriseJoinRequestMessage ? (
+                  <div className='rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-center text-sm text-emerald-700'>
+                    {enterpriseJoinRequestMessage}
+                  </div>
+                ) : null}
+
+                {enterpriseJoinRequestError ? (
+                  <div className='rounded-lg border border-red-200 bg-red-50 p-3 text-center text-sm text-red-700'>
+                    {enterpriseJoinRequestError}
+                  </div>
+                ) : null}
+
+                {enterpriseJoinTarget?.workspaces?.length ? (
+                  <div className='flex flex-col gap-2'>
+                    <p className='text-sm font-medium text-foreground'>
+                      Request access to a workspace in {enterpriseJoinTarget.orgName}:
+                    </p>
+                    <div className='flex flex-col gap-2 max-h-48 overflow-y-auto'>
+                      {enterpriseJoinTarget.workspaces.map(ws => (
+                        <div
+                          key={ws.id}
+                          className='flex items-center justify-between gap-3 p-3 border border-border rounded-lg'
+                        >
+                          <div className='flex items-center gap-2'>
+                            <Building2 className='w-4 h-4 text-muted-foreground' />
+                            <span className='text-sm font-medium text-foreground'>{ws.name}</span>
+                          </div>
+                          <button
+                            type='button'
+                            onClick={() => {
+                              void handleRequestEnterpriseJoin(ws.id, ws.name);
+                            }}
+                            disabled={
+                              isRequestingEnterpriseJoin || Boolean(enterpriseJoinRequestMessage)
+                            }
+                            className='text-xs font-medium px-3 py-1.5 rounded-md bg-black text-white hover:bg-neutral-800 disabled:opacity-50 disabled:cursor-not-allowed'
+                            data-track-category='Auth'
+                            data-track-name='RequestEnterpriseWorkspaceAccess'
+                            data-track-metadata={JSON.stringify({ workspaceId: ws.id })}
+                          >
+                            {isRequestingEnterpriseJoin ? '...' : 'Request to join'}
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+
+                <div className='border-t border-border pt-4'>
+                  <p className='text-sm font-medium text-foreground mb-2'>
+                    Or create a new workspace in{' '}
+                    {enterpriseJoinTarget?.orgName ?? 'your organization'}:
+                  </p>
+                  {createEnterpriseWorkspaceError ? (
+                    <div className='mb-2 rounded-lg border border-red-200 bg-red-50 p-2 text-center text-xs text-red-700'>
+                      {createEnterpriseWorkspaceError}
+                    </div>
+                  ) : null}
+                  <div className='flex gap-2'>
+                    <input
+                      type='text'
+                      value={newEnterpriseWorkspaceName}
+                      onChange={e => setNewEnterpriseWorkspaceName(e.target.value)}
+                      placeholder='Workspace name'
+                      className='flex-1 px-3 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-background text-foreground text-sm'
+                      data-track-category='Auth'
+                      data-track-name='NewEnterpriseWorkspaceNameInput'
+                    />
+                    <button
+                      type='button'
+                      onClick={() => {
+                        void handleCreateEnterpriseWorkspace();
+                      }}
+                      disabled={isCreatingEnterpriseWorkspace || !newEnterpriseWorkspaceName.trim()}
+                      className='px-4 py-2 bg-black text-white text-sm font-medium rounded-lg hover:bg-neutral-800 disabled:opacity-50 disabled:cursor-not-allowed'
+                      data-track-category='Auth'
+                      data-track-name='CreateEnterpriseWorkspace'
+                    >
+                      {isCreatingEnterpriseWorkspace ? 'Creating...' : 'Create'}
+                    </button>
+                  </div>
+                </div>
+
+                <button
+                  type='button'
+                  onClick={handleTryDifferentAccount}
+                  className='text-sm text-muted-foreground hover:text-foreground text-center cursor-pointer'
+                  data-track-category='Auth'
+                  data-track-name='TryDifferentAccount'
+                >
+                  Try with a different account
+                </button>
+              </div>
+            )}
+
+            {/* Public Email Domain Blocked */}
+            {isCreatingOrg && isPublicEmailDomainError && (
+              <div className='flex flex-col gap-4'>
+                <div className='p-4 bg-red-50 border border-red-200 rounded-lg text-center'>
+                  <h3 className='text-base font-semibold text-red-800 mb-2'>
+                    Workspace Unavailable
+                  </h3>
+                  <p className='text-sm text-red-700'>{error}</p>
+                </div>
+
+                <button
+                  type='button'
+                  onClick={handleTryDifferentAccount}
+                  className='text-sm text-muted-foreground hover:text-foreground text-center cursor-pointer'
+                  data-track-category='Auth'
+                  data-track-name='TryDifferentAccount'
+                >
+                  Try with a work email
+                </button>
+              </div>
+            )}
+
+            {/* Create Organization Form - only for new users */}
+            {((isCreatingOrg &&
+              !userExistsButRemoved &&
+              !isOrganizationDomainConflictError &&
+              !isPublicEmailDomainError) ||
+              showCreateOrgForm) && (
+              <form onSubmit={handleCreateOrg} className='flex flex-col gap-4'>
+                <div className='text-center'>
+                  <h3 className='text-lg font-semibold text-foreground'>Create Organization</h3>
+                  <p className='text-sm text-muted-foreground mt-1'>Set up your new workspace</p>
+                </div>
+
+                {/* Duplicate Name Error Alert */}
+                {isOrganizationNameTakenError && (
+                  <div className='p-3 bg-amber-50 border border-amber-200 rounded-lg'>
+                    <p className='text-sm text-amber-700'>
+                      <span className='font-medium'>Organization name taken.</span> Please choose a
+                      different name.
+                    </p>
                   </div>
                 )}
 
-              {/* Workspace Selection */}
-              {isSelectingWorkspace && (
-                <div className='flex flex-col gap-6'>
-                  <div className='text-center'>
-                    <h3 className='text-lg font-semibold text-foreground'>Select Workspace</h3>
-                    <p className='text-sm text-muted-foreground mt-1'>
-                      Choose a workspace to continue
-                    </p>
+                <div className='flex flex-col gap-3'>
+                  <div>
+                    <label
+                      htmlFor='orgName'
+                      className='text-sm font-medium text-foreground mb-1 block'
+                    >
+                      Organization Name
+                    </label>
+                    <input
+                      id='orgName'
+                      type='text'
+                      value={orgName}
+                      ref={orgNameInputRef}
+                      onChange={e => {
+                        setOrgName(e.target.value);
+                        if (isOrganizationNameTakenError) {
+                          clearError();
+                        }
+                      }}
+                      placeholder='Juspay Inc'
+                      className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 bg-background text-foreground ${
+                        isOrganizationNameTakenError
+                          ? 'border-amber-400 focus:ring-amber-500'
+                          : 'border-border focus:ring-blue-500'
+                      }`}
+                      required
+                      data-track-category='Auth'
+                      data-track-name='OrgNameInput'
+                    />
+                    {isOrganizationNameTakenError && (
+                      <p className='text-xs text-amber-600 mt-1'>
+                        Try adding your team name or a unique identifier
+                      </p>
+                    )}
                   </div>
 
-                  <div className='flex flex-col gap-3 max-h-64 overflow-y-auto'>
-                    {workspaces.map(workspace => (
-                      <button
-                        key={workspace.id}
-                        onClick={() => handleSelectWorkspace(workspace.id)}
-                        className='flex items-center gap-3 p-4 border border-border rounded-lg hover:border-blue-500 hover:bg-accent transition-all text-left'
-                        data-track-category='Auth'
-                        data-track-name='SelectWorkspace'
-                        data-track-metadata={JSON.stringify({ workspaceId: workspace.id })}
-                      >
-                        <div className='w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center'>
-                          <Building2 className='w-5 h-5 text-blue-600' />
-                        </div>
-                        <div className='flex-1'>
-                          <p className='font-medium text-foreground'>{workspace.name}</p>
-                          <p className='text-xs text-muted-foreground capitalize'>
-                            {workspace.role}
-                          </p>
-                        </div>
-                        <ArrowRight className='w-5 h-5 text-slate-400' />
-                      </button>
-                    ))}
+                  <div>
+                    <label
+                      htmlFor='workspaceName'
+                      className='text-sm font-medium text-foreground mb-1 block'
+                    >
+                      Workspace Name
+                    </label>
+                    <input
+                      id='workspaceName'
+                      type='text'
+                      value={workspaceName}
+                      onChange={e => setWorkspaceName(e.target.value)}
+                      placeholder='Engineering'
+                      className='w-full px-3 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-background text-foreground'
+                      required
+                      data-track-category='Auth'
+                      data-track-name='WorkspaceNameInput'
+                    />
                   </div>
                 </div>
-              )}
 
-              {/* User was removed from all workspaces - cannot create org */}
-              {isCreatingOrg && userExistsButRemoved && (
-                <div className='flex flex-col gap-4'>
-                  <div className='p-4 bg-amber-50 border border-amber-200 rounded-lg text-center'>
-                    <h3 className='text-base font-semibold text-amber-800 mb-2'>
-                      No Workspace Access
-                    </h3>
-                    <p className='text-sm text-amber-700'>
-                      Your account exists but you don&apos;t have access to any workspaces.
-                    </p>
-                    <p className='text-sm text-amber-700 mt-2'>
-                      Please check with your <span className='font-medium'>Organization Admin</span>{' '}
-                      to get access to a workspace.
-                    </p>
-                  </div>
+                <button
+                  type='submit'
+                  disabled={isLoading || !orgName.trim() || !workspaceName.trim()}
+                  className='w-full py-2.5 bg-black text-white font-medium rounded-lg hover:bg-neutral-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors'
+                  data-track-category='Auth'
+                  data-track-name='CreateOrganization'
+                >
+                  {isLoading ? 'Creating...' : 'Create Organization'}
+                </button>
 
+                {workspaces.length > 0 && (
                   <button
                     type='button'
-                    onClick={handleTryDifferentAccount}
-                    className='text-sm text-muted-foreground hover:text-foreground text-center cursor-pointer'
+                    onClick={() => setShowCreateOrgForm(false)}
+                    className='text-sm text-muted-foreground hover:text-foreground'
                     data-track-category='Auth'
-                    data-track-name='TryDifferentAccount'
+                    data-track-name='BackToWorkspaceSelection'
                   >
-                    Try with a different account
+                    Back to workspace selection
                   </button>
-                </div>
-              )}
+                )}
+              </form>
+            )}
 
-              {isCreatingOrg && isOrganizationDomainConflictError && (
-                <div className='flex flex-col gap-4'>
-                  <div className='p-4 bg-amber-50 border border-amber-200 rounded-lg text-center'>
-                    <h3 className='text-base font-semibold text-amber-800 mb-2'>
-                      Organization Already Exists
-                    </h3>
-                    <p className='text-sm text-amber-700'>{error}</p>
-                  </div>
-
-                  {enterpriseJoinRequestMessage ? (
-                    <div className='rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-center text-sm text-emerald-700'>
-                      {enterpriseJoinRequestMessage}
-                    </div>
-                  ) : null}
-
-                  {enterpriseJoinRequestError ? (
-                    <div className='rounded-lg border border-red-200 bg-red-50 p-3 text-center text-sm text-red-700'>
-                      {enterpriseJoinRequestError}
-                    </div>
-                  ) : null}
-
-                  {enterpriseJoinTarget?.workspaces?.length ? (
-                    <div className='flex flex-col gap-2'>
-                      <p className='text-sm font-medium text-foreground'>
-                        Request access to a workspace in {enterpriseJoinTarget.orgName}:
-                      </p>
-                      <div className='flex flex-col gap-2 max-h-48 overflow-y-auto'>
-                        {enterpriseJoinTarget.workspaces.map(ws => (
-                          <div
-                            key={ws.id}
-                            className='flex items-center justify-between gap-3 p-3 border border-border rounded-lg'
+            {/* Login Section */}
+            {!isSigningIn && !isSelectingWorkspace && !isCreatingOrg && !showCreateOrgForm
+              ? !isEnrollmentFlow && (
+                  <div className='flex w-full max-w-[350px] flex-col items-center gap-9'>
+                    {!showRegisterForm && !showForgotPassword && (
+                      <>
+                        <div className='flex w-full flex-col gap-[15px]'>
+                          <button
+                            type='button'
+                            disabled={isSigningIn}
+                            onClick={handleGoogleSignIn}
+                            className={onboardingOauthButtonClassName}
+                            data-track-category='Auth'
+                            data-track-name='GoogleSignIn'
                           >
-                            <div className='flex items-center gap-2'>
-                              <Building2 className='w-4 h-4 text-muted-foreground' />
-                              <span className='text-sm font-medium text-foreground'>{ws.name}</span>
-                            </div>
+                            <GoogleLogo className='h-5 w-5 shrink-0' />
+                            Continue with Google
+                          </button>
+                          {(!providers || providers.microsoft) && (
+                            <button
+                              type='button'
+                              disabled={isSigningIn}
+                              onClick={handleMicrosoftSignIn}
+                              className={onboardingOauthButtonClassName}
+                              data-track-category='Auth'
+                              data-track-name='MicrosoftSignIn'
+                            >
+                              <MicrosoftLogo className='h-5 w-5 shrink-0' />
+                              Continue with Microsoft
+                            </button>
+                          )}
+                        </div>
+                        <p className='w-full text-center text-[15px] font-[450] leading-[1.5] tracking-[-0.1px] text-[rgba(35,34,41,0.4)]'>
+                          or
+                        </p>
+                      </>
+                    )}
+
+                    {showRegisterForm ? (
+                      /* Registration Flow */
+                      <div className='w-full max-w-[280px] md:max-w-[320px] flex flex-col gap-3'>
+                        {regStep === 'register' && (
+                          <form
+                            onSubmit={e => {
+                              void handleRegisterSubmit(e);
+                            }}
+                            className='flex flex-col gap-3'
+                          >
+                            <p className='text-sm font-medium text-foreground'>
+                              {pendingCommunityWorkspaceName
+                                ? `Join ${pendingCommunityWorkspaceName}`
+                                : 'Create Account'}
+                            </p>
+                            <p className='text-xs text-muted-foreground'>
+                              Register with your email to join the community.
+                            </p>
+                            <input
+                              type='text'
+                              value={regName}
+                              onChange={e => {
+                                const v = e.target.value;
+                                setRegName(v);
+                                setRegNameError(validateRegName(v));
+                              }}
+                              placeholder='Full name'
+                              required
+                              className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 bg-background text-foreground text-sm ${
+                                regNameError
+                                  ? 'border-red-500 focus:ring-red-500'
+                                  : 'border-border focus:ring-blue-500'
+                              }`}
+                              data-track-category='Auth'
+                              data-track-name='RegisterNameInput'
+                            />
+                            {regNameError && <p className='text-xs text-red-600'>{regNameError}</p>}
+                            <input
+                              type='email'
+                              value={regEmail}
+                              onChange={e => {
+                                const v = e.target.value;
+                                setRegEmail(v);
+                                setRegEmailError(validateRegEmail(v));
+                              }}
+                              placeholder='Email address'
+                              required
+                              className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 bg-background text-foreground text-sm ${
+                                regEmailError
+                                  ? 'border-red-500 focus:ring-red-500'
+                                  : 'border-border focus:ring-blue-500'
+                              }`}
+                              data-track-category='Auth'
+                              data-track-name='RegisterEmailInput'
+                            />
+                            {regEmailError && (
+                              <p className='text-xs text-red-600'>{regEmailError}</p>
+                            )}
+                            <input
+                              type='password'
+                              value={regPassword}
+                              onChange={e => {
+                                const v = e.target.value;
+                                setRegPassword(v);
+                                setRegPasswordError(validateRegPassword(v));
+                                if (regConfirmPassword)
+                                  setRegConfirmPasswordError(
+                                    validateRegConfirmPassword(regConfirmPassword),
+                                  );
+                              }}
+                              placeholder='Password (min 8 chars, 1 uppercase, 1 number, 1 special)'
+                              required
+                              className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 bg-background text-foreground text-sm ${
+                                regPasswordError
+                                  ? 'border-red-500 focus:ring-red-500'
+                                  : 'border-border focus:ring-blue-500'
+                              }`}
+                              data-track-category='Auth'
+                              data-track-name='RegisterPasswordInput'
+                            />
+                            {regPasswordError && (
+                              <p className='text-xs text-red-600'>{regPasswordError}</p>
+                            )}
+                            <input
+                              type='password'
+                              value={regConfirmPassword}
+                              onChange={e => {
+                                const v = e.target.value;
+                                setRegConfirmPassword(v);
+                                setRegConfirmPasswordError(validateRegConfirmPassword(v));
+                              }}
+                              placeholder='Confirm password'
+                              required
+                              className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 bg-background text-foreground text-sm ${
+                                regConfirmPasswordError
+                                  ? 'border-red-500 focus:ring-red-500'
+                                  : 'border-border focus:ring-blue-500'
+                              }`}
+                              data-track-category='Auth'
+                              data-track-name='RegisterConfirmPasswordInput'
+                            />
+                            {regConfirmPasswordError && (
+                              <p className='text-xs text-red-600'>{regConfirmPasswordError}</p>
+                            )}
+                            {regError && <p className='text-xs text-red-600'>{regError}</p>}
+                            <button
+                              type='submit'
+                              disabled={regLoading}
+                              className='w-full py-2.5 bg-black text-white font-medium rounded-lg hover:bg-neutral-800 disabled:opacity-50 text-sm'
+                              data-track-category='Auth'
+                              data-track-name='RegisterSubmit'
+                            >
+                              {regLoading ? 'Sending...' : 'Send Verification Code'}
+                            </button>
+                          </form>
+                        )}
+
+                        {regStep === 'verify' && (
+                          <form
+                            onSubmit={e => {
+                              void handleRegVerify(e);
+                            }}
+                            className='flex flex-col gap-3'
+                          >
+                            <p className='text-sm font-medium text-foreground'>Verify Your Email</p>
+                            <p className='text-xs text-muted-foreground'>
+                              We sent a 6-digit code to {regEmail}
+                            </p>
+                            <input
+                              type='text'
+                              value={regCode}
+                              onChange={e =>
+                                setRegCode(e.target.value.replace(/\D/g, '').slice(0, 6))
+                              }
+                              placeholder='6-digit code'
+                              maxLength={6}
+                              pattern='[0-9]{6}'
+                              inputMode='numeric'
+                              required
+                              className='w-full px-3 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-background text-foreground text-sm tracking-widest text-center'
+                              data-track-category='Auth'
+                              data-track-name='RegisterVerifyCodeInput'
+                            />
+                            {regError && <p className='text-xs text-red-600'>{regError}</p>}
+                            {regMessage && <p className='text-xs text-green-600'>{regMessage}</p>}
+                            <button
+                              type='submit'
+                              disabled={regLoading}
+                              className='w-full py-2.5 bg-black text-white font-medium rounded-lg hover:bg-neutral-800 disabled:opacity-50 text-sm'
+                              data-track-category='Auth'
+                              data-track-name='RegisterVerifySubmit'
+                            >
+                              {regLoading ? 'Verifying...' : 'Verify & Continue'}
+                            </button>
                             <button
                               type='button'
                               onClick={() => {
-                                void handleRequestEnterpriseJoin(ws.id, ws.name);
+                                void handleRegResendCode();
                               }}
-                              disabled={
-                                isRequestingEnterpriseJoin || Boolean(enterpriseJoinRequestMessage)
-                              }
-                              className='text-xs font-medium px-3 py-1.5 rounded-md bg-black text-white hover:bg-neutral-800 disabled:opacity-50 disabled:cursor-not-allowed'
+                              disabled={regLoading}
+                              className='text-xs text-muted-foreground hover:text-foreground text-center'
                               data-track-category='Auth'
-                              data-track-name='RequestEnterpriseWorkspaceAccess'
-                              data-track-metadata={JSON.stringify({ workspaceId: ws.id })}
+                              data-track-name='RegisterResendCode'
                             >
-                              {isRequestingEnterpriseJoin ? '...' : 'Request to join'}
+                              Resend code
                             </button>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  ) : null}
+                          </form>
+                        )}
 
-                  <div className='border-t border-border pt-4'>
-                    <p className='text-sm font-medium text-foreground mb-2'>
-                      Or create a new workspace in{' '}
-                      {enterpriseJoinTarget?.orgName ?? 'your organization'}:
-                    </p>
-                    {createEnterpriseWorkspaceError ? (
-                      <div className='mb-2 rounded-lg border border-red-200 bg-red-50 p-2 text-center text-xs text-red-700'>
-                        {createEnterpriseWorkspaceError}
-                      </div>
-                    ) : null}
-                    <div className='flex gap-2'>
-                      <input
-                        type='text'
-                        value={newEnterpriseWorkspaceName}
-                        onChange={e => setNewEnterpriseWorkspaceName(e.target.value)}
-                        placeholder='Workspace name'
-                        className='flex-1 px-3 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-background text-foreground text-sm'
-                        data-track-category='Auth'
-                        data-track-name='NewEnterpriseWorkspaceNameInput'
-                      />
-                      <button
-                        type='button'
-                        onClick={() => {
-                          void handleCreateEnterpriseWorkspace();
-                        }}
-                        disabled={
-                          isCreatingEnterpriseWorkspace || !newEnterpriseWorkspaceName.trim()
-                        }
-                        className='px-4 py-2 bg-black text-white text-sm font-medium rounded-lg hover:bg-neutral-800 disabled:opacity-50 disabled:cursor-not-allowed'
-                        data-track-category='Auth'
-                        data-track-name='CreateEnterpriseWorkspace'
-                      >
-                        {isCreatingEnterpriseWorkspace ? 'Creating...' : 'Create'}
-                      </button>
-                    </div>
-                  </div>
-
-                  <button
-                    type='button'
-                    onClick={handleTryDifferentAccount}
-                    className='text-sm text-muted-foreground hover:text-foreground text-center cursor-pointer'
-                    data-track-category='Auth'
-                    data-track-name='TryDifferentAccount'
-                  >
-                    Try with a different account
-                  </button>
-                </div>
-              )}
-
-              {/* Public Email Domain Blocked */}
-              {isCreatingOrg && isPublicEmailDomainError && (
-                <div className='flex flex-col gap-4'>
-                  <div className='p-4 bg-red-50 border border-red-200 rounded-lg text-center'>
-                    <h3 className='text-base font-semibold text-red-800 mb-2'>
-                      Workspace Unavailable
-                    </h3>
-                    <p className='text-sm text-red-700'>{error}</p>
-                  </div>
-
-                  <button
-                    type='button'
-                    onClick={handleTryDifferentAccount}
-                    className='text-sm text-muted-foreground hover:text-foreground text-center cursor-pointer'
-                    data-track-category='Auth'
-                    data-track-name='TryDifferentAccount'
-                  >
-                    Try with a work email
-                  </button>
-                </div>
-              )}
-
-              {/* Create Organization Form - only for new users */}
-              {((isCreatingOrg &&
-                !userExistsButRemoved &&
-                !isOrganizationDomainConflictError &&
-                !isPublicEmailDomainError) ||
-                showCreateOrgForm) && (
-                <form onSubmit={handleCreateOrg} className='flex flex-col gap-4'>
-                  <div className='text-center'>
-                    <h3 className='text-lg font-semibold text-foreground'>Create Organization</h3>
-                    <p className='text-sm text-muted-foreground mt-1'>Set up your new workspace</p>
-                  </div>
-
-                  {/* Duplicate Name Error Alert */}
-                  {isOrganizationNameTakenError && (
-                    <div className='p-3 bg-amber-50 border border-amber-200 rounded-lg'>
-                      <p className='text-sm text-amber-700'>
-                        <span className='font-medium'>Organization name taken.</span> Please choose
-                        a different name.
-                      </p>
-                    </div>
-                  )}
-
-                  <div className='flex flex-col gap-3'>
-                    <div>
-                      <label
-                        htmlFor='orgName'
-                        className='text-sm font-medium text-foreground mb-1 block'
-                      >
-                        Organization Name
-                      </label>
-                      <input
-                        id='orgName'
-                        type='text'
-                        value={orgName}
-                        ref={orgNameInputRef}
-                        onChange={e => {
-                          setOrgName(e.target.value);
-                          if (isOrganizationNameTakenError) {
-                            clearError();
-                          }
-                        }}
-                        placeholder='Juspay Inc'
-                        className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 bg-background text-foreground ${
-                          isOrganizationNameTakenError
-                            ? 'border-amber-400 focus:ring-amber-500'
-                            : 'border-border focus:ring-blue-500'
-                        }`}
-                        required
-                        data-track-category='Auth'
-                        data-track-name='OrgNameInput'
-                      />
-                      {isOrganizationNameTakenError && (
-                        <p className='text-xs text-amber-600 mt-1'>
-                          Try adding your team name or a unique identifier
-                        </p>
-                      )}
-                    </div>
-
-                    <div>
-                      <label
-                        htmlFor='workspaceName'
-                        className='text-sm font-medium text-foreground mb-1 block'
-                      >
-                        Workspace Name
-                      </label>
-                      <input
-                        id='workspaceName'
-                        type='text'
-                        value={workspaceName}
-                        onChange={e => setWorkspaceName(e.target.value)}
-                        placeholder='Engineering'
-                        className='w-full px-3 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-background text-foreground'
-                        required
-                        data-track-category='Auth'
-                        data-track-name='WorkspaceNameInput'
-                      />
-                    </div>
-                  </div>
-
-                  <button
-                    type='submit'
-                    disabled={isLoading || !orgName.trim() || !workspaceName.trim()}
-                    className='w-full py-2.5 bg-black text-white font-medium rounded-lg hover:bg-neutral-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors'
-                    data-track-category='Auth'
-                    data-track-name='CreateOrganization'
-                  >
-                    {isLoading ? 'Creating...' : 'Create Organization'}
-                  </button>
-
-                  {workspaces.length > 0 && (
-                    <button
-                      type='button'
-                      onClick={() => setShowCreateOrgForm(false)}
-                      className='text-sm text-muted-foreground hover:text-foreground'
-                      data-track-category='Auth'
-                      data-track-name='BackToWorkspaceSelection'
-                    >
-                      Back to workspace selection
-                    </button>
-                  )}
-                </form>
-              )}
-
-              {/* Login Section */}
-              {!isLoading && !isSelectingWorkspace && !isCreatingOrg && !showCreateOrgForm
-                ? !isEnrollmentFlow && (
-                    <div className='flex flex-col gap-3 items-center'>
-                      {/* Google Sign In Button */}
-                      <div className='w-full max-w-[280px] md:max-w-[320px]'>
                         <button
-                          disabled={isLoading}
-                          onClick={handleGoogleSignIn}
-                          className='appearance-none outline-none font-inherit cursor-pointer opacity-100 flex items-center justify-center gap-4 px-4 py-[9px] w-full relative bg-[#2F2F2F] text-white border border-white/10 rounded-[10px] overflow-hidden h-12'
+                          type='button'
+                          onClick={() => {
+                            clearError();
+                            resetRegistrationState();
+                          }}
+                          className='text-xs text-muted-foreground hover:text-foreground text-center'
                           data-track-category='Auth'
-                          data-track-name='GoogleSignIn'
+                          data-track-name='BackToSignIn'
                         >
-                          <span
-                            data-button-left-slot='true'
-                            className='flex items-center justify-center'
-                          >
-                            <GoogleLogo />
-                          </span>
-                          <span className='text-sm font-semibold text-center text-white'>
-                            Sign in with Google
-                          </span>
+                          Back to sign in
                         </button>
                       </div>
-                      {/* Microsoft Sign In Button */}
-                      {providers?.microsoft && (
-                        <div className='w-full max-w-[280px] md:max-w-[320px]'>
-                          <button
-                            disabled={isLoading}
-                            onClick={handleMicrosoftSignIn}
-                            className='appearance-none outline-none font-inherit cursor-pointer opacity-100 flex items-center justify-center gap-4 px-4 py-[9px] w-full relative bg-[#2F2F2F] text-white border border-white/10 rounded-[10px] overflow-hidden h-12'
-                            data-track-category='Auth'
-                            data-track-name='MicrosoftSignIn'
-                          >
-                            <span
-                              data-button-left-slot='true'
-                              className='flex items-center justify-center'
-                            >
-                              <MicrosoftLogo />
-                            </span>
-                            <span className='text-sm font-semibold text-center text-white'>
-                              Sign in with Microsoft
-                            </span>
-                          </button>
-                        </div>
-                      )}
-
-                      {/* Divider */}
-                      <div className='w-full max-w-[280px] md:max-w-[320px] flex items-center gap-3 my-1'>
-                        <div className='flex-1 h-px bg-border' />
-                        <span className='text-xs text-muted-foreground'>or</span>
-                        <div className='flex-1 h-px bg-border' />
-                      </div>
-
-                      {/* Email Sign In / Sign Up Toggle */}
-                      {!showEmailForm && !showRegisterForm ? (
-                        <div className='w-full max-w-[280px] md:max-w-[320px] flex flex-col gap-3'>
-                          <button
-                            onClick={() => {
-                              clearError();
-                              setShowEmailForm(true);
+                    ) : showForgotPassword ? (
+                      <div className='w-full max-w-[280px] md:max-w-[320px] flex flex-col gap-3'>
+                        {fpStep === 'email' && (
+                          <form
+                            onSubmit={e => {
+                              void handleFpRequestCode(e);
                             }}
-                            className='appearance-none outline-none font-inherit cursor-pointer opacity-100 flex items-center justify-center gap-4 px-4 py-[9px] w-full relative bg-[#2F2F2F] text-white border border-white/10 rounded-[10px] overflow-hidden h-12'
-                            data-track-category='Auth'
-                            data-track-name='EmailSignInToggle'
+                            className='flex flex-col gap-3'
                           >
-                            <span className='text-sm font-semibold text-center text-white'>
-                              Sign in with Email
-                            </span>
-                          </button>
-                          <button
-                            onClick={() => {
-                              clearError();
-                              setShowEmailForm(true);
-                              setShowRegisterForm(true);
+                            <p className='text-sm font-medium text-foreground'>Reset Password</p>
+                            <p className='text-xs text-muted-foreground'>
+                              Enter your email to receive a reset code.
+                            </p>
+                            <input
+                              type='email'
+                              value={fpEmail}
+                              onChange={e => setFpEmail(e.target.value)}
+                              placeholder='Email address'
+                              required
+                              className='w-full px-3 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-background text-foreground text-sm'
+                              data-track-category='Auth'
+                              data-track-name='ForgotPasswordEmailInput'
+                            />
+                            {fpError && <p className='text-xs text-red-600'>{fpError}</p>}
+                            {fpMessage && <p className='text-xs text-green-600'>{fpMessage}</p>}
+                            <button
+                              type='submit'
+                              disabled={fpLoading}
+                              className='w-full py-2.5 bg-black text-white font-medium rounded-lg hover:bg-neutral-800 disabled:opacity-50 text-sm'
+                              data-track-category='Auth'
+                              data-track-name='SendResetCode'
+                            >
+                              {fpLoading ? 'Sending...' : 'Send Code'}
+                            </button>
+                          </form>
+                        )}
+
+                        {fpStep === 'code' && (
+                          <form
+                            onSubmit={e => {
+                              void handleFpResetPassword(e);
                             }}
-                            className='text-xs text-muted-foreground hover:text-foreground text-center'
-                            data-track-category='Auth'
-                            data-track-name='EmailRegisterToggle'
+                            className='flex flex-col gap-3'
                           >
-                            Don&apos;t have an account? Sign up
-                          </button>
-                        </div>
-                      ) : showRegisterForm ? (
-                        /* Registration Flow */
-                        <div className='w-full max-w-[280px] md:max-w-[320px] flex flex-col gap-3'>
-                          {regStep === 'register' && (
-                            <form
-                              onSubmit={e => {
-                                void handleRegisterSubmit(e);
-                              }}
-                              className='flex flex-col gap-3'
+                            <p className='text-sm font-medium text-foreground'>Enter Code</p>
+                            <p className='text-xs text-muted-foreground'>
+                              We sent a 6-digit code to {fpEmail}
+                            </p>
+                            <input
+                              type='text'
+                              value={fpCode}
+                              onChange={e =>
+                                setFpCode(e.target.value.replace(/\D/g, '').slice(0, 6))
+                              }
+                              placeholder='6-digit code'
+                              maxLength={6}
+                              pattern='[0-9]{6}'
+                              inputMode='numeric'
+                              required
+                              className='w-full px-3 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-background text-foreground text-sm tracking-widest text-center'
+                              data-track-category='Auth'
+                              data-track-name='ResetCodeInput'
+                            />
+                            <input
+                              type='password'
+                              value={fpNewPassword}
+                              onChange={e => setFpNewPassword(e.target.value)}
+                              placeholder='New password (min 8 chars)'
+                              required
+                              className='w-full px-3 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-background text-foreground text-sm'
+                              data-track-category='Auth'
+                              data-track-name='ResetNewPasswordInput'
+                            />
+                            <input
+                              type='password'
+                              value={fpConfirmPassword}
+                              onChange={e => setFpConfirmPassword(e.target.value)}
+                              placeholder='Confirm new password'
+                              required
+                              className='w-full px-3 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-background text-foreground text-sm'
+                              data-track-category='Auth'
+                              data-track-name='ResetConfirmPasswordInput'
+                            />
+                            {fpError && <p className='text-xs text-red-600'>{fpError}</p>}
+                            <button
+                              type='submit'
+                              disabled={fpLoading}
+                              className='w-full py-2.5 bg-black text-white font-medium rounded-lg hover:bg-neutral-800 disabled:opacity-50 text-sm'
+                              data-track-category='Auth'
+                              data-track-name='ResetPassword'
                             >
-                              <p className='text-sm font-medium text-foreground'>
-                                {pendingCommunityWorkspaceName
-                                  ? `Join ${pendingCommunityWorkspaceName}`
-                                  : 'Create Account'}
-                              </p>
-                              <p className='text-xs text-muted-foreground'>
-                                Register with your email to join the community.
-                              </p>
-                              <input
-                                type='text'
-                                value={regName}
-                                onChange={e => {
-                                  const v = e.target.value;
-                                  setRegName(v);
-                                  setRegNameError(validateRegName(v));
-                                }}
-                                placeholder='Full name'
-                                required
-                                className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 bg-background text-foreground text-sm ${
-                                  regNameError
-                                    ? 'border-red-500 focus:ring-red-500'
-                                    : 'border-border focus:ring-blue-500'
-                                }`}
-                                data-track-category='Auth'
-                                data-track-name='RegisterNameInput'
-                              />
-                              {regNameError && (
-                                <p className='text-xs text-red-600'>{regNameError}</p>
-                              )}
-                              <input
-                                type='email'
-                                value={regEmail}
-                                onChange={e => {
-                                  const v = e.target.value;
-                                  setRegEmail(v);
-                                  setRegEmailError(validateRegEmail(v));
-                                }}
-                                placeholder='Email address'
-                                required
-                                className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 bg-background text-foreground text-sm ${
-                                  regEmailError
-                                    ? 'border-red-500 focus:ring-red-500'
-                                    : 'border-border focus:ring-blue-500'
-                                }`}
-                                data-track-category='Auth'
-                                data-track-name='RegisterEmailInput'
-                              />
-                              {regEmailError && (
-                                <p className='text-xs text-red-600'>{regEmailError}</p>
-                              )}
-                              <input
-                                type='password'
-                                value={regPassword}
-                                onChange={e => {
-                                  const v = e.target.value;
-                                  setRegPassword(v);
-                                  setRegPasswordError(validateRegPassword(v));
-                                  if (regConfirmPassword)
-                                    setRegConfirmPasswordError(
-                                      validateRegConfirmPassword(regConfirmPassword),
-                                    );
-                                }}
-                                placeholder='Password (min 8 chars, 1 uppercase, 1 number, 1 special)'
-                                required
-                                className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 bg-background text-foreground text-sm ${
-                                  regPasswordError
-                                    ? 'border-red-500 focus:ring-red-500'
-                                    : 'border-border focus:ring-blue-500'
-                                }`}
-                                data-track-category='Auth'
-                                data-track-name='RegisterPasswordInput'
-                              />
-                              {regPasswordError && (
-                                <p className='text-xs text-red-600'>{regPasswordError}</p>
-                              )}
-                              <input
-                                type='password'
-                                value={regConfirmPassword}
-                                onChange={e => {
-                                  const v = e.target.value;
-                                  setRegConfirmPassword(v);
-                                  setRegConfirmPasswordError(validateRegConfirmPassword(v));
-                                }}
-                                placeholder='Confirm password'
-                                required
-                                className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 bg-background text-foreground text-sm ${
-                                  regConfirmPasswordError
-                                    ? 'border-red-500 focus:ring-red-500'
-                                    : 'border-border focus:ring-blue-500'
-                                }`}
-                                data-track-category='Auth'
-                                data-track-name='RegisterConfirmPasswordInput'
-                              />
-                              {regConfirmPasswordError && (
-                                <p className='text-xs text-red-600'>{regConfirmPasswordError}</p>
-                              )}
-                              {regError && <p className='text-xs text-red-600'>{regError}</p>}
-                              <button
-                                type='submit'
-                                disabled={regLoading}
-                                className='w-full py-2.5 bg-black text-white font-medium rounded-lg hover:bg-neutral-800 disabled:opacity-50 text-sm'
-                                data-track-category='Auth'
-                                data-track-name='RegisterSubmit'
-                              >
-                                {regLoading ? 'Sending...' : 'Send Verification Code'}
-                              </button>
-                            </form>
-                          )}
+                              {fpLoading ? 'Resetting...' : 'Reset Password'}
+                            </button>
+                          </form>
+                        )}
 
-                          {regStep === 'verify' && (
-                            <form
-                              onSubmit={e => {
-                                void handleRegVerify(e);
-                              }}
-                              className='flex flex-col gap-3'
-                            >
-                              <p className='text-sm font-medium text-foreground'>
-                                Verify Your Email
-                              </p>
-                              <p className='text-xs text-muted-foreground'>
-                                We sent a 6-digit code to {regEmail}
-                              </p>
-                              <input
-                                type='text'
-                                value={regCode}
-                                onChange={e =>
-                                  setRegCode(e.target.value.replace(/\D/g, '').slice(0, 6))
-                                }
-                                placeholder='6-digit code'
-                                maxLength={6}
-                                pattern='[0-9]{6}'
-                                inputMode='numeric'
-                                required
-                                className='w-full px-3 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-background text-foreground text-sm tracking-widest text-center'
-                                data-track-category='Auth'
-                                data-track-name='RegisterVerifyCodeInput'
-                              />
-                              {regError && <p className='text-xs text-red-600'>{regError}</p>}
-                              {regMessage && <p className='text-xs text-green-600'>{regMessage}</p>}
-                              <button
-                                type='submit'
-                                disabled={regLoading}
-                                className='w-full py-2.5 bg-black text-white font-medium rounded-lg hover:bg-neutral-800 disabled:opacity-50 text-sm'
-                                data-track-category='Auth'
-                                data-track-name='RegisterVerifySubmit'
-                              >
-                                {regLoading ? 'Verifying...' : 'Verify & Continue'}
-                              </button>
-                              <button
-                                type='button'
-                                onClick={() => {
-                                  void handleRegResendCode();
-                                }}
-                                disabled={regLoading}
-                                className='text-xs text-muted-foreground hover:text-foreground text-center'
-                                data-track-category='Auth'
-                                data-track-name='RegisterResendCode'
-                              >
-                                Resend code
-                              </button>
-                            </form>
-                          )}
+                        {fpStep === 'success' && (
+                          <div className='flex flex-col gap-3 text-center'>
+                            <p className='text-sm font-medium text-green-600'>
+                              Password reset successful!
+                            </p>
+                            <p className='text-xs text-muted-foreground'>
+                              You can now sign in with your new password.
+                            </p>
+                          </div>
+                        )}
 
-                          <button
-                            type='button'
-                            onClick={() => {
-                              clearError();
-                              resetRegistrationState();
-                            }}
-                            className='text-xs text-muted-foreground hover:text-foreground text-center'
-                            data-track-category='Auth'
-                            data-track-name='BackToSignIn'
-                          >
-                            Back to sign in
-                          </button>
-                        </div>
-                      ) : showForgotPassword ? (
-                        <div className='w-full max-w-[280px] md:max-w-[320px] flex flex-col gap-3'>
-                          {fpStep === 'email' && (
-                            <form
-                              onSubmit={e => {
-                                void handleFpRequestCode(e);
-                              }}
-                              className='flex flex-col gap-3'
-                            >
-                              <p className='text-sm font-medium text-foreground'>Reset Password</p>
-                              <p className='text-xs text-muted-foreground'>
-                                Enter your email to receive a reset code.
-                              </p>
-                              <input
-                                type='email'
-                                value={fpEmail}
-                                onChange={e => setFpEmail(e.target.value)}
-                                placeholder='Email address'
-                                required
-                                className='w-full px-3 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-background text-foreground text-sm'
-                                data-track-category='Auth'
-                                data-track-name='ForgotPasswordEmailInput'
-                              />
-                              {fpError && <p className='text-xs text-red-600'>{fpError}</p>}
-                              {fpMessage && <p className='text-xs text-green-600'>{fpMessage}</p>}
-                              <button
-                                type='submit'
-                                disabled={fpLoading}
-                                className='w-full py-2.5 bg-black text-white font-medium rounded-lg hover:bg-neutral-800 disabled:opacity-50 text-sm'
-                                data-track-category='Auth'
-                                data-track-name='SendResetCode'
-                              >
-                                {fpLoading ? 'Sending...' : 'Send Code'}
-                              </button>
-                            </form>
-                          )}
-
-                          {fpStep === 'code' && (
-                            <form
-                              onSubmit={e => {
-                                void handleFpResetPassword(e);
-                              }}
-                              className='flex flex-col gap-3'
-                            >
-                              <p className='text-sm font-medium text-foreground'>Enter Code</p>
-                              <p className='text-xs text-muted-foreground'>
-                                We sent a 6-digit code to {fpEmail}
-                              </p>
-                              <input
-                                type='text'
-                                value={fpCode}
-                                onChange={e =>
-                                  setFpCode(e.target.value.replace(/\D/g, '').slice(0, 6))
-                                }
-                                placeholder='6-digit code'
-                                maxLength={6}
-                                pattern='[0-9]{6}'
-                                inputMode='numeric'
-                                required
-                                className='w-full px-3 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-background text-foreground text-sm tracking-widest text-center'
-                                data-track-category='Auth'
-                                data-track-name='ResetCodeInput'
-                              />
-                              <input
-                                type='password'
-                                value={fpNewPassword}
-                                onChange={e => setFpNewPassword(e.target.value)}
-                                placeholder='New password (min 8 chars)'
-                                required
-                                className='w-full px-3 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-background text-foreground text-sm'
-                                data-track-category='Auth'
-                                data-track-name='ResetNewPasswordInput'
-                              />
-                              <input
-                                type='password'
-                                value={fpConfirmPassword}
-                                onChange={e => setFpConfirmPassword(e.target.value)}
-                                placeholder='Confirm new password'
-                                required
-                                className='w-full px-3 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-background text-foreground text-sm'
-                                data-track-category='Auth'
-                                data-track-name='ResetConfirmPasswordInput'
-                              />
-                              {fpError && <p className='text-xs text-red-600'>{fpError}</p>}
-                              <button
-                                type='submit'
-                                disabled={fpLoading}
-                                className='w-full py-2.5 bg-black text-white font-medium rounded-lg hover:bg-neutral-800 disabled:opacity-50 text-sm'
-                                data-track-category='Auth'
-                                data-track-name='ResetPassword'
-                              >
-                                {fpLoading ? 'Resetting...' : 'Reset Password'}
-                              </button>
-                            </form>
-                          )}
-
-                          {fpStep === 'success' && (
-                            <div className='flex flex-col gap-3 text-center'>
-                              <p className='text-sm font-medium text-green-600'>
-                                Password reset successful!
-                              </p>
-                              <p className='text-xs text-muted-foreground'>
-                                You can now sign in with your new password.
-                              </p>
-                            </div>
-                          )}
-
-                          <button
-                            type='button'
-                            onClick={() => {
-                              setShowForgotPassword(false);
-                              setFpStep('email');
-                              setFpEmail('');
-                              setFpCode('');
-                              setFpNewPassword('');
-                              setFpConfirmPassword('');
-                              setFpError('');
-                              setFpMessage('');
-                            }}
-                            className='text-xs text-muted-foreground hover:text-foreground text-center'
-                            data-track-category='Auth'
-                            data-track-name='BackToSignIn'
-                          >
-                            Back to sign in
-                          </button>
-                        </div>
-                      ) : (
-                        <form
-                          onSubmit={(e): void => {
-                            void handleEmailSubmit(e);
+                        <button
+                          type='button'
+                          onClick={() => {
+                            setShowForgotPassword(false);
+                            setFpStep('email');
+                            setFpEmail('');
+                            setFpCode('');
+                            setFpNewPassword('');
+                            setFpConfirmPassword('');
+                            setFpError('');
+                            setFpMessage('');
                           }}
-                          className='w-full max-w-[280px] md:max-w-[320px] flex flex-col gap-3'
+                          className='text-xs text-muted-foreground hover:text-foreground text-center'
+                          data-track-category='Auth'
+                          data-track-name='BackToSignIn'
                         >
-                          <input
-                            type='email'
-                            value={email}
-                            onChange={e => setEmail(e.target.value)}
-                            placeholder='Email address'
-                            required
-                            className='w-full px-3 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-background text-foreground text-sm'
-                            data-track-category='Auth'
-                            data-track-name='EmailInput'
-                          />
-                          <input
-                            type='password'
-                            value={password}
-                            onChange={e => setPassword(e.target.value)}
-                            placeholder='Password'
-                            required
-                            className='w-full px-3 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-background text-foreground text-sm'
-                            data-track-category='Auth'
-                            data-track-name='PasswordInput'
-                          />
-                          <button
-                            type='button'
-                            onClick={() => {
-                              clearError();
-                              setShowForgotPassword(true);
-                            }}
-                            className='text-xs text-muted-foreground hover:text-foreground text-right self-end'
-                            data-track-category='Auth'
-                            data-track-name='ForgotPassword'
-                          >
-                            Forgot password?
-                          </button>
-                          <button
-                            type='submit'
-                            disabled={isLoading}
-                            className='w-full py-2.5 bg-black text-white font-medium rounded-lg hover:bg-neutral-800 disabled:opacity-50 text-sm'
-                            data-track-category='Auth'
-                            data-track-name='EmailSignInSubmit'
-                          >
-                            {isLoading ? 'Please wait...' : 'Sign In'}
-                          </button>
+                          Back to sign in
+                        </button>
+                      </div>
+                    ) : (
+                      <form
+                        onSubmit={(e): void => {
+                          handleFigmaEmailContinue(e);
+                        }}
+                        className='flex w-full flex-col items-center gap-4'
+                      >
+                        <input
+                          type='email'
+                          value={email}
+                          onChange={e => setEmail(e.target.value)}
+                          placeholder='Email address'
+                          required
+                          className={onboardingEmailInputClassName}
+                          data-track-category='Auth'
+                          data-track-name='EmailInput'
+                        />
+                        {showPasswordField ? (
+                          <>
+                            <input
+                              type='password'
+                              value={password}
+                              onChange={e => setPassword(e.target.value)}
+                              placeholder='Password'
+                              required
+                              className={onboardingEmailInputClassName}
+                              data-track-category='Auth'
+                              data-track-name='PasswordInput'
+                            />
+                            <button
+                              type='button'
+                              onClick={() => {
+                                clearError();
+                                setShowForgotPassword(true);
+                              }}
+                              className='self-end text-[15px] font-[450] tracking-[-0.1px] text-[rgba(35,34,41,0.4)] hover:text-[#232229]'
+                              data-track-category='Auth'
+                              data-track-name='ForgotPassword'
+                            >
+                              Forgot password?
+                            </button>
+                          </>
+                        ) : null}
+                        <button
+                          type='submit'
+                          disabled={isSigningIn}
+                          className={onboardingContinueButtonClassName}
+                          data-track-category='Auth'
+                          data-track-name='EmailSignInSubmit'
+                        >
+                          {isSigningIn ? 'Please wait...' : 'Continue'}
+                        </button>
+                        <p className='text-[15px] font-[450] leading-[1.5] tracking-[-0.1px] text-[#232229]'>
+                          Don&apos;t have an account?{' '}
                           <button
                             type='button'
                             onClick={() => {
@@ -1390,53 +1347,44 @@ const AuthScreen = (): ReactElement | null => {
                               setShowRegisterForm(true);
                               setShowForgotPassword(false);
                             }}
-                            className='text-xs text-muted-foreground hover:text-foreground text-center'
+                            className='text-[#fd6b6b] hover:text-[#ff4f4f]'
                             data-track-category='Auth'
                             data-track-name='SwitchToRegister'
                           >
-                            Don&apos;t have an account? Sign up
+                            Sign-up
                           </button>
-                        </form>
-                      )}
-                    </div>
-                  )
-                : /* Loading State */
-                  (isLoading || isLoggingInToWorkspace) && (
-                    <div
-                      className='flex flex-col items-center justify-center py-10 sm:py-12 md:py-16 space-y-5 sm:space-y-6'
-                      role='status'
-                      aria-live='polite'
-                    >
-                      <div className='relative' aria-hidden='true'>
-                        <Loader2
-                          className='h-12 w-12 sm:h-14 sm:w-14 animate-spin text-blue-600'
-                          aria-hidden='true'
-                        />
-                        <div className='absolute inset-0 rounded-full bg-blue-600/20 animate-ping'></div>
-                      </div>
-                      <div className='text-center space-y-2'>
-                        <p className='text-lg sm:text-xl font-semibold text-foreground'>
-                          {isLoggingInToWorkspace
-                            ? 'Logging into workspace...'
-                            : 'Signing you in...'}
                         </p>
-                        <p className='text-sm sm:text-base text-muted-foreground'>
-                          Please wait while we authenticate your account
-                        </p>
-                      </div>
+                      </form>
+                    )}
+                  </div>
+                )
+              : /* Loading State */
+                (isSigningIn || isLoggingInToWorkspace) && (
+                  <div
+                    className='flex flex-col items-center justify-center py-10 sm:py-12 md:py-16 space-y-5 sm:space-y-6'
+                    role='status'
+                    aria-live='polite'
+                  >
+                    <div className='relative' aria-hidden='true'>
+                      <Loader2
+                        className='h-12 w-12 sm:h-14 sm:w-14 animate-spin text-blue-600'
+                        aria-hidden='true'
+                      />
+                      <div className='absolute inset-0 rounded-full bg-blue-600/20 animate-ping'></div>
                     </div>
-                  )}
-            </div>
-          </div>
-
-          {/* Copyright */}
-          <div className='py-4 text-center'>
-            <p className='text-xs sm:text-sm text-muted-foreground'>
-              &copy; {new Date().getFullYear()} Xyne Spaces. All rights reserved.
-            </p>
+                    <div className='text-center space-y-2'>
+                      <p className='text-lg sm:text-xl font-semibold text-foreground'>
+                        {isLoggingInToWorkspace ? 'Logging into workspace...' : 'Signing you in...'}
+                      </p>
+                      <p className='text-sm sm:text-base text-muted-foreground'>
+                        Please wait while we authenticate your account
+                      </p>
+                    </div>
+                  </div>
+                )}
           </div>
         </div>
-      </div>
+      </OnboardingLoginLayout>
     </ThemeProvider>
   );
 };
