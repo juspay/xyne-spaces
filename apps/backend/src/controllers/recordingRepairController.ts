@@ -4,12 +4,18 @@ import { validate as isUuid } from 'uuid';
 import { repositories } from '@/database/repositories';
 import { noteTakerTranscriptService } from '@/services/noteTakerTranscriptService';
 import { recordingRepairStorageService } from '@/services/recordingRepairStorageService';
+import { acquireLock, releaseLock, renewLock, type LockHandle } from '@/utils/distributedLock';
 import { logger } from '@/utils/logger';
 
 // A whole-call recording.webm streamed through the backend. Long calls are large,
 // so the body is piped straight to storage (never buffered); this bound only
 // rejects absurd Content-Lengths up front.
 const MAX_AUDIO_BYTES = 2 * 1024 * 1024 * 1024;
+
+// One redo per call at a time: a repeated finalize (client retry, double click on
+// the manual trigger) must not pay for a second whole-file STT pass.
+const REDO_LOCK_TTL_SECONDS = 120;
+const REDO_LOCK_RENEW_MS = 40_000;
 
 class RecordingRepairController {
   private async getOwnedHeadlessCall(req: Request, callId: string) {
@@ -31,12 +37,41 @@ class RecordingRepairController {
     });
   }
 
+  private getMetadata(call: { metadata: unknown }): Record<string, unknown> {
+    return call.metadata && typeof call.metadata === 'object' && !Array.isArray(call.metadata)
+      ? (call.metadata as Record<string, unknown>)
+      : {};
+  }
+
   private isRedone(call: { metadata: unknown }): boolean {
-    const metadata =
-      call.metadata && typeof call.metadata === 'object' && !Array.isArray(call.metadata)
-        ? (call.metadata as Record<string, unknown>)
-        : {};
-    return typeof metadata.localRedoneAt === 'number';
+    return typeof this.getMetadata(call).localRedoneAt === 'number';
+  }
+
+  private redoError(call: { metadata: unknown }): string | null {
+    const error = this.getMetadata(call).localRedoError;
+    return typeof error === 'string' ? error : null;
+  }
+
+  private async runRedo(
+    call: Parameters<typeof noteTakerTranscriptService.redoTranscriptFromLocalAudio>[0],
+    captureId: string,
+    lock: LockHandle
+  ): Promise<void> {
+    const callId = call.externalId;
+    const renewal = setInterval(() => {
+      void renewLock(lock, REDO_LOCK_TTL_SECONDS).catch(() => undefined);
+    }, REDO_LOCK_RENEW_MS);
+    try {
+      await noteTakerTranscriptService.redoTranscriptFromLocalAudio(call, captureId);
+    } catch (error) {
+      logger.error('[RecordingRepairController] Redo failed', { callId, captureId, error });
+      await noteTakerTranscriptService
+        .setRedoError(callId, 'Re-transcription failed')
+        .catch(() => undefined);
+    } finally {
+      clearInterval(renewal);
+      await releaseLock(lock).catch(() => undefined);
+    }
   }
 
   // Stream the whole capture (one recording.webm) through the backend to GCS. The
@@ -98,11 +133,23 @@ class RecordingRepairController {
         return;
       }
 
+      const lock = await acquireLock(`lock:recording-redo:${callId}`, {
+        ttlSeconds: REDO_LOCK_TTL_SECONDS,
+      });
+      if (!lock) {
+        // A redo for this call is already running; the client just keeps polling.
+        res.json({ success: true, done: false });
+        return;
+      }
+      const reason = typeof req.body?.reason === 'string' ? req.body.reason : 'automatic';
+      logger.info(`[${callId}] recording_redo_started`, { captureId, reason });
+      // Clear the previous attempt's failure before responding so the client's first
+      // poll cannot read a stale one.
+      await noteTakerTranscriptService.setRedoError(callId, null).catch(() => undefined);
+
       // Fire-and-forget: the redo can take minutes (whole-file STT + summary), far
       // longer than an HTTP request should be held open. The client polls getStatus.
-      void noteTakerTranscriptService.redoTranscriptFromLocalAudio(call, captureId).catch((error) => {
-        logger.error('[RecordingRepairController] Redo failed', { callId, captureId, error });
-      });
+      void this.runRedo(call, captureId, lock);
       res.json({ success: true, done: false });
     } catch (error) {
       logger.error('[RecordingRepairController] Finalize failed', { callId, captureId, error });
@@ -122,7 +169,9 @@ class RecordingRepairController {
     }
     const authorized = await this.getOwnedHeadlessCall(req, callId);
     if (authorized.error) return this.sendAuthError(res, authorized.error);
-    res.json({ success: true, capture: { done: this.isRedone(authorized.call) } });
+    const done = this.isRedone(authorized.call);
+    const error = done ? null : this.redoError(authorized.call);
+    res.json({ success: true, capture: { done, failed: error !== null, error } });
   };
 }
 

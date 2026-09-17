@@ -340,8 +340,25 @@ class NoteTakerTranscriptService {
   /** Completion signal (no Redis): the client polls this off the recording detail. */
   private async markRedoComplete(call: Call): Promise<void> {
     const current = (await repositories.calls.findByExternalId(call.externalId)) ?? call;
+    const metadata: Record<string, unknown> = {
+      ...this.getMetadata(current),
+      localRedoneAt: Date.now(),
+    };
+    delete metadata.localRedoError;
+    await repositories.calls.update(current.id, { metadata });
+  }
+
+  /**
+   * Failure signal for the polling client: a redo that threw would otherwise read as
+   * "still running" forever. `null` clears it at the start of a new attempt.
+   */
+  async setRedoError(callExternalId: string, error: string | null): Promise<void> {
+    const current = await repositories.calls.findByExternalId(callExternalId);
+    if (!current) return;
+    const { localRedoError: previous, ...metadata } = this.getMetadata(current);
+    if (error === null && previous === undefined) return;
     await repositories.calls.update(current.id, {
-      metadata: { ...this.getMetadata(current), localRedoneAt: Date.now() },
+      metadata: error === null ? metadata : { ...metadata, localRedoError: error },
     });
   }
 

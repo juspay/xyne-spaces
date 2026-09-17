@@ -53,6 +53,7 @@ import {
 } from '@xyne/icons';
 import { Button } from '../../components/ui/Button/Button';
 import { Dialog } from '../../components/ui/Dialog';
+import { LocalRecordingRedoAction } from '../../components/Recording/LocalRecordingRedoAction';
 import { Popover } from '../../components/ui/Popover';
 import { cn, Tooltip } from '../../components/ui/Tooltip';
 import {
@@ -1564,6 +1565,17 @@ export default function RecordingDetailV2Screen({
                   onReadTranscript={transcriptText ? openTranscriptPanel : undefined}
                 />
               )}
+              <LocalRecordingRedoAction
+                callId={recording.externalId}
+                isOwner={isOwner}
+                isLive={isLive}
+                alreadyRedone={
+                  typeof (recordingRow?.metadata as Record<string, unknown> | null | undefined)?.[
+                    'localRedoneAt'
+                  ] === 'number'
+                }
+                trackCategory='RecordingDetailV2'
+              />
               {/* Owner-only: the docs live in the owner's Drive, so these links are
                   dead ends for anyone the recording was merely shared with. */}
               {isOwner ? <RecordingGoogleDocsList documents={recording.googleDocs ?? []} /> : null}

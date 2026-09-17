@@ -20,7 +20,11 @@ class BackendProxyUploader implements RecordingRepairUploader {
 
     const audio = await input.readRange(0, totalBytes);
     await recordingService.uploadRecordingRepairAudio(callId, captureId, audio);
-    await recordingService.finalizeRecordingRepair(callId, captureId);
+    await recordingService.finalizeRecordingRepair(
+      callId,
+      captureId,
+      manifest.redoRequestedByUser ? 'user_requested' : undefined,
+    );
   }
 }
 

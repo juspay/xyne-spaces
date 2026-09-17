@@ -210,8 +210,8 @@ export class DirectoryArchiveStore implements RecordingArchiveStore {
     return open;
   }
 
-  async listPendingCaptures(): Promise<StoredArchiveCapture[]> {
-    const appDir = await this.resolveAppDir(false);
+  async listPendingCaptures(options?: { prompt?: boolean }): Promise<StoredArchiveCapture[]> {
+    const appDir = await this.resolveAppDir(options?.prompt ?? false);
     if (!appDir) return [];
     const captures: StoredArchiveCapture[] = [];
     for await (const [, handle] of directoryEntries(appDir)) {

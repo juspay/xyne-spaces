@@ -5,7 +5,12 @@
 
 import { apiInstance } from '../clients/apiClient';
 import { AxiosResponse } from 'axios';
-import type { DefaultOutlet, GrantableEntityUserAccess, RecordingStatus } from '@xyne/shared';
+import type {
+  DefaultOutlet,
+  GrantableEntityUserAccess,
+  RecordingRepairReason,
+  RecordingStatus,
+} from '@xyne/shared';
 import { CallType, CallVisibility, RecordingType } from '@xyne/shared';
 import { getSummaryModelPreference } from '../../hooks/useSummaryModelPreference';
 
@@ -227,16 +232,14 @@ export interface RecordingDetail extends Recording {
   linkedTicketMessageId?: string | null;
 }
 
-export type RecordingRepairReason =
-  | 'browser_offline'
-  | 'livekit_disconnected'
-  | 'reconnect_timeout'
-  | 'agent_left'
-  | 'stt_failed';
+export type { RecordingRepairReason };
 
 export interface RecordingRepairStatus {
   /** True once the server-side whole-file redo has overwritten the transcript. */
   done: boolean;
+  /** True when the last redo attempt failed; a retry is allowed. */
+  failed?: boolean;
+  error?: string | null;
 }
 
 export const RECORDING_REPAIR_MERGED_EVENT = 'xyne-recording-repair-merged';
@@ -613,8 +616,15 @@ class RecordingService {
   }
 
   /** Trigger the server-side whole-file redo for a capture that hit an outage. */
-  async finalizeRecordingRepair(callId: string, captureId: string): Promise<void> {
-    await apiInstance.post(`/calls/${callId}/recording-repairs/${captureId}/finalize`, {});
+  async finalizeRecordingRepair(
+    callId: string,
+    captureId: string,
+    reason?: RecordingRepairReason,
+  ): Promise<void> {
+    await apiInstance.post(
+      `/calls/${callId}/recording-repairs/${captureId}/finalize`,
+      reason ? { reason } : {},
+    );
   }
 
   async getRecordingRepairStatus(

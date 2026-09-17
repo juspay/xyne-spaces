@@ -15,7 +15,8 @@ export type RecordingRepairReason =
   | 'livekit_disconnected'
   | 'reconnect_timeout'
   | 'agent_left'
-  | 'stt_failed';
+  | 'stt_failed'
+  | 'user_requested';
 
 export const RECORDING_REPAIR_REASONS: readonly RecordingRepairReason[] = [
   'browser_offline',
@@ -23,6 +24,7 @@ export const RECORDING_REPAIR_REASONS: readonly RecordingRepairReason[] = [
   'reconnect_timeout',
   'agent_left',
   'stt_failed',
+  'user_requested',
 ];
 
 export function isRecordingRepairReason(value: unknown): value is RecordingRepairReason {
@@ -54,6 +56,11 @@ export interface RecordingCaptureManifest {
   offlineAtStart: boolean;
   /** Sticky: set once any outage signal fires during the call. Triggers the redo. */
   hadOutage: boolean;
+  /**
+   * Sticky: the owner asked for a redo from the recording detail screen after the
+   * call. Persisted so an interrupted upload is retried by crash recovery.
+   */
+  redoRequestedByUser?: boolean;
   /** Total durably-recorded bytes of recording.webm (the whole-file upload length). */
   byteLength: number;
   /** True once recording has stopped (MediaRecorder finished). */
@@ -62,5 +69,5 @@ export interface RecordingCaptureManifest {
 
 /** Whether this capture needs a server-side whole-file redo. */
 export function captureNeedsRedo(manifest: RecordingCaptureManifest): boolean {
-  return manifest.hadOutage || manifest.offlineAtStart;
+  return manifest.hadOutage || manifest.offlineAtStart || manifest.redoRequestedByUser === true;
 }

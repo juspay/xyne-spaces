@@ -7,9 +7,17 @@ import {
   type RecordingRepairReason,
 } from './recordingService';
 import { selectRecordingArchiveStore, createManifest, recordingDirName } from './archive';
-import type { OpenArchiveCapture, RecordingArchiveStore } from './archive/types';
+import type {
+  OpenArchiveCapture,
+  RecordingArchiveStore,
+  StoredArchiveCapture,
+} from './archive/types';
 import { getRecordingRepairUploader } from './archive/uploader';
-import { isCaptureSettled, markCaptureSettled } from './archive/settledCaptures';
+import {
+  isCaptureSettled,
+  markCaptureSettled,
+  unmarkCaptureSettled,
+} from './archive/settledCaptures';
 
 // Offline-first note-taker recorder. One long-lived MediaRecorder records the WHOLE
 // call into a single continuous recording.webm on the user's disk (Electron native FS
@@ -44,6 +52,18 @@ interface ActiveCapture {
   stopping: boolean;
 }
 
+export type ManualRedoErrorCode = 'no_local_recording' | 'upload_failed' | 'redo_failed';
+
+export class ManualRedoError extends Error {
+  readonly code: ManualRedoErrorCode;
+
+  constructor(code: ManualRedoErrorCode, message: string) {
+    super(message);
+    this.name = 'ManualRedoError';
+    this.code = code;
+  }
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
@@ -61,6 +81,7 @@ class OfflineRecordingService {
   private startingCallId: string | null = null;
   private recoveryPromise: Promise<void> | null = null;
   private statusPolls = new Map<string, Promise<void>>();
+  private manualRedos = new Map<string, Promise<void>>();
   private warnedPersistenceDenied = false;
   private warnedLowStorage = false;
   private lastStorageCheckAt = 0;
@@ -248,6 +269,83 @@ class OfflineRecordingService {
     await capture.open.close().catch(() => undefined);
   }
 
+  /**
+   * The local capture for a finished call, if this device holds one. A call that
+   * crashed and restarted can leave several; the server redo takes one file, so
+   * the longest wins. `prompt` re-requests folder permission (user gesture only).
+   */
+  async findLocalCapture(
+    callId: string,
+    options?: { prompt?: boolean },
+  ): Promise<StoredArchiveCapture | null> {
+    const store = selectRecordingArchiveStore();
+    if (!store) return null;
+    const captures = await store.listPendingCaptures(options);
+    let best: StoredArchiveCapture | null = null;
+    for (const stored of captures) {
+      if (stored.manifest.callId !== callId) continue;
+      if (stored.captureId === this.capture?.captureId) continue;
+      if (stored.manifest.byteLength <= 0) continue;
+      if (!best || stored.manifest.byteLength > best.manifest.byteLength) best = stored;
+    }
+    return best;
+  }
+
+  /**
+   * Owner-requested redo from the recording detail screen: upload the local
+   * recording.webm and re-transcribe it server-side, for the outages no automatic
+   * signal caught. `onUploaded` fires once the file is up and the redo is running.
+   * Resolves when the redo lands; rejects with a ManualRedoError otherwise.
+   */
+  requestManualRedo(callId: string, onUploaded?: () => void): Promise<void> {
+    const existing = this.manualRedos.get(callId);
+    if (existing) return existing;
+    const run = this.runManualRedo(callId, onUploaded).finally(() => {
+      if (this.manualRedos.get(callId) === run) this.manualRedos.delete(callId);
+    });
+    this.manualRedos.set(callId, run);
+    return run;
+  }
+
+  private async runManualRedo(callId: string, onUploaded?: () => void): Promise<void> {
+    const store = selectRecordingArchiveStore();
+    const stored = await this.findLocalCapture(callId, { prompt: true });
+    const uploader = getRecordingRepairUploader();
+    if (!store || !stored) {
+      throw new ManualRedoError(
+        'no_local_recording',
+        'No local recording for this call was found on this device',
+      );
+    }
+    if (!uploader) throw new ManualRedoError('upload_failed', 'Recording upload is unavailable');
+
+    // Persist the request first: if the upload is interrupted, recovery retries it.
+    const manifest: RecordingCaptureManifest = {
+      ...stored.manifest,
+      completed: true,
+      endedAt: stored.manifest.endedAt ?? Date.now(),
+      redoRequestedByUser: true,
+    };
+    await stored.writeManifest(manifest).catch(() => undefined);
+    unmarkCaptureSettled(stored.captureId);
+
+    try {
+      await uploader.uploadCapture({
+        callId,
+        captureId: stored.captureId,
+        manifest,
+        readRange: (offset, length) => stored.readRange(offset, length),
+      });
+    } catch {
+      throw new ManualRedoError('upload_failed', 'The local recording could not be uploaded');
+    }
+    onUploaded?.();
+    await this.pollUntilSettled(store, callId, stored.captureId);
+    if (!isCaptureSettled(stored.captureId)) {
+      throw new ManualRedoError('redo_failed', 'Re-transcription did not complete');
+    }
+  }
+
   private replaceTrack(capture: ActiveCapture, track: MediaStreamTrack): void {
     if (capture.trackId === track.id) return;
     try {
@@ -398,8 +496,13 @@ class OfflineRecordingService {
     void this.pollUntilSettled(store, callId, captureId);
   }
 
-  private pollUntilSettled(store: RecordingArchiveStore, callId: string, captureId: string): void {
-    if (this.statusPolls.has(captureId)) return;
+  private pollUntilSettled(
+    store: RecordingArchiveStore,
+    callId: string,
+    captureId: string,
+  ): Promise<void> {
+    const running = this.statusPolls.get(captureId);
+    if (running) return running;
     const poll = (async (): Promise<void> => {
       let delay = POLL_INTERVAL_MS;
       while (navigator.onLine) {
@@ -418,6 +521,9 @@ class OfflineRecordingService {
           if (store.kind === 'opfs') await store.deleteCapture(captureId).catch(() => undefined);
           return;
         }
+        // The server gave up on this attempt. Leave the capture unsettled so the
+        // next init/online (or a manual retry) uploads and redoes it again.
+        if (status.failed) return;
         await sleep(delay);
         delay = Math.min(POLL_MAX_MS, Math.round(delay * 1.5));
       }
@@ -425,6 +531,7 @@ class OfflineRecordingService {
       if (this.statusPolls.get(captureId) === poll) this.statusPolls.delete(captureId);
     });
     this.statusPolls.set(captureId, poll);
+    return poll;
   }
 }
 

@@ -78,8 +78,12 @@ export interface RecordingArchiveStore {
    * handle is reused on later launches without re-prompting).
    */
   createCapture(meta: RecordingCaptureCreate): Promise<OpenArchiveCapture>;
-  /** Incomplete or not-yet-uploaded captures found on disk (crash/restart recovery). */
-  listPendingCaptures(): Promise<StoredArchiveCapture[]>;
+  /**
+   * Every capture found on disk (crash/restart recovery, and the post-call manual
+   * redo). `prompt` may re-request folder permission and MUST only be set from a
+   * user gesture; without it a lapsed permission just yields an empty list.
+   */
+  listPendingCaptures(options?: { prompt?: boolean }): Promise<StoredArchiveCapture[]>;
   deleteCapture(captureId: string): Promise<void>;
   /** Best-effort free space at the destination; null when unknowable. */
   freeSpace(): Promise<{ availableBytes: number | null }>;

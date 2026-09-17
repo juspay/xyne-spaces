@@ -29,3 +29,12 @@ export function markCaptureSettled(captureId: string): void {
     // Best effort; a missed marker only risks a redundant status re-check.
   }
 }
+
+/** A user-requested redo must get past the settled check that skips a kept capture. */
+export function unmarkCaptureSettled(captureId: string): void {
+  try {
+    localStorage.setItem(KEY, JSON.stringify(read().filter(id => id !== captureId)));
+  } catch {
+    // Best effort; the manual redo uploads directly and does not depend on this.
+  }
+}
