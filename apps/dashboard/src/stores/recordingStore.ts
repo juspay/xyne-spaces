@@ -4,25 +4,15 @@
  */
 
 import { createStore } from '@xstate/store';
-import {
-  Room,
-  RoomConnectOptions,
-  RoomEvent,
-  DataPacket_Kind,
-  type RemoteParticipant,
-} from 'livekit-client';
+import { Room, RoomConnectOptions, RoomEvent, DataPacket_Kind } from 'livekit-client';
 import { recordingService } from '../services/Recording/recordingService';
 import { getLocalVideoState, setLocalVideoMuted } from '../utils/recordingMedia';
 import { toast } from 'sonner';
 import { logger, Event } from '../utils/logger';
 import { formatDuration, normalizeTimestamp } from '../utils/dateUtils';
 import { calculateRecordingElapsedMs } from '../utils/recordingUtils';
-import {
-  AGENT_LEFT_CONFIRM_DELAY_MS,
-  isTranscriptionAgentIdentity,
-  shouldConfirmTranscriptionAgentLeft,
-} from '../utils/livekitAgent';
 import { playAudio, AUDIO_PATHS } from '../utils/audioPlayer';
+import type { RecordingRepairReason } from '../services/Recording/recordingService';
 
 let transcriptUnsubscribe: (() => void) | null = null;
 let transcriptIdCounter = 0;
@@ -111,6 +101,9 @@ export interface RecordingState {
   agentLeft: boolean;
   isCameraEnabled: boolean;
   isScreenShareEnabled: boolean;
+  fallbackProtection: 'initializing' | 'ready' | 'unavailable';
+  fallbackReasons: RecordingRepairReason[];
+  repairPending: boolean;
 }
 
 const initialContext: RecordingState = {
@@ -141,6 +134,9 @@ const initialContext: RecordingState = {
   agentLeft: false,
   isCameraEnabled: false,
   isScreenShareEnabled: false,
+  fallbackProtection: 'initializing',
+  fallbackReasons: [],
+  repairPending: false,
 };
 
 const ACTIVE_STATUSES: ReadonlySet<RecordingStatus> = new Set(['recording', 'paused', 'stopping']);
@@ -297,42 +293,21 @@ export const recordingStore = createStore({
 
       // Set up transcript subscription directly in the store
       // This ensures only ONE listener regardless of how many components use the hook
-      let agentLeftTimer: ReturnType<typeof setTimeout> | null = null;
-
-      const clearAgentLeftTimer = (): void => {
-        if (agentLeftTimer) {
-          clearTimeout(agentLeftTimer);
-          agentLeftTimer = null;
-        }
-      };
-
-      const handleParticipantDisconnected = (participant: RemoteParticipant): void => {
-        if (!isTranscriptionAgentIdentity(participant.identity)) return;
-
-        clearAgentLeftTimer();
-        agentLeftTimer = setTimeout(() => {
-          agentLeftTimer = null;
-          const current = recordingStore.getSnapshot().context;
-          const isActive = current.status === 'recording' || current.status === 'paused';
-
-          if (current.room === room && isActive && shouldConfirmTranscriptionAgentLeft(room)) {
-            recordingStore.send({ type: 'agentLeftUnexpectedly' });
-          }
-        }, AGENT_LEFT_CONFIRM_DELAY_MS);
-      };
-
-      const handleParticipantConnected = (participant: RemoteParticipant): void => {
-        if (isTranscriptionAgentIdentity(participant.identity)) {
-          clearAgentLeftTimer();
-        }
-      };
-
       const handleRoomDisconnected = (): void => {
         if (intentionallyDisconnectedRooms.delete(room)) return;
         if (pageUnloading) return;
 
         const current = recordingStore.getSnapshot().context;
         if (current.room !== room || !ACTIVE_STATUSES.has(current.status)) return;
+        // The offline recorder keeps capturing the whole call to disk and the
+        // fallback coordinator uploads it for a whole-file redo on stop, so a lost
+        // session is not a lost recording — let the user keep going.
+        if (current.fallbackProtection === 'ready') {
+          logger.warn(Event.RECORDING_ERROR, {
+            error: 'Recording session disconnected; continuing with local protection',
+          });
+          return;
+        }
 
         const message =
           'Recording stopped because its session was disconnected and could not be saved.';
@@ -407,18 +382,13 @@ export const recordingStore = createStore({
       };
 
       room.on(RoomEvent.DataReceived, handleDataReceived);
-      room.on(RoomEvent.ParticipantDisconnected, handleParticipantDisconnected);
-      room.on(RoomEvent.ParticipantConnected, handleParticipantConnected);
       room.on(RoomEvent.Disconnected, handleRoomDisconnected);
       room.on(RoomEvent.RoomMetadataChanged, handleRoomMetadataChanged);
       room.on(RoomEvent.LocalTrackPublished, handleLocalTracksChanged);
       room.on(RoomEvent.LocalTrackUnpublished, handleLocalTracksChanged);
 
       transcriptUnsubscribe = (): void => {
-        clearAgentLeftTimer();
         room.off(RoomEvent.DataReceived, handleDataReceived);
-        room.off(RoomEvent.ParticipantDisconnected, handleParticipantDisconnected);
-        room.off(RoomEvent.ParticipantConnected, handleParticipantConnected);
         room.off(RoomEvent.Disconnected, handleRoomDisconnected);
         room.off(RoomEvent.RoomMetadataChanged, handleRoomMetadataChanged);
         room.off(RoomEvent.LocalTrackPublished, handleLocalTracksChanged);
@@ -441,6 +411,9 @@ export const recordingStore = createStore({
         error: null,
         activeLayout: defaultLayout,
         agentLeft: false,
+        fallbackProtection: context.fallbackProtection,
+        fallbackReasons: [],
+        repairPending: context.repairPending,
       };
     },
 
@@ -553,6 +526,9 @@ export const recordingStore = createStore({
         agentLeft: false,
         isCameraEnabled: false,
         isScreenShareEnabled: false,
+        fallbackProtection: context.fallbackProtection,
+        fallbackReasons: [],
+        repairPending: context.repairPending,
       };
     },
 
@@ -588,6 +564,9 @@ export const recordingStore = createStore({
         agentLeft: false,
         isCameraEnabled: false,
         isScreenShareEnabled: false,
+        fallbackProtection: context.fallbackProtection,
+        fallbackReasons: [],
+        repairPending: context.repairPending,
       };
     },
 
@@ -624,6 +603,9 @@ export const recordingStore = createStore({
         agentLeft: false,
         isCameraEnabled: false,
         isScreenShareEnabled: false,
+        fallbackProtection: context.fallbackProtection,
+        fallbackReasons: [],
+        repairPending: context.repairPending,
       };
     },
 
@@ -647,25 +629,25 @@ export const recordingStore = createStore({
       markedMoments: [...context.markedMoments, event.moment],
     }),
 
-    /**
-     * The transcription agent unexpectedly left mid-recording. Flag it only while
-     * a recording is genuinely in progress — if we're already stopping / idle, the
-     * agent is just following the room down on a user-initiated stop.
-     *
-     * `agentLeft` is a one-shot signal: the UI (RecordingsScreen / RecordingOverlay)
-     * reacts by auto-ending the recording, and stopRecording clears the flag. There
-     * is deliberately no "continue" path — a note-taker with no transcription is
-     * pointless, so the recording is always ended.
-     */
-    agentLeftUnexpectedly: (context): RecordingState => {
-      if (context.status !== 'recording' && context.status !== 'paused') {
-        return context;
-      }
-      return {
-        ...context,
-        agentLeft: true,
-      };
-    },
+    setFallbackReason: (
+      context,
+      event: { reason: RecordingRepairReason; active: boolean },
+    ): RecordingState => ({
+      ...context,
+      fallbackReasons: event.active
+        ? [...new Set([...context.fallbackReasons, event.reason])].sort()
+        : context.fallbackReasons.filter(reason => reason !== event.reason),
+    }),
+
+    setFallbackProtection: (
+      context,
+      event: { availability: RecordingState['fallbackProtection'] },
+    ): RecordingState => ({ ...context, fallbackProtection: event.availability }),
+
+    setRepairPending: (context, event: { pending: boolean }): RecordingState => ({
+      ...context,
+      repairPending: event.pending,
+    }),
 
     setNotesCanvas: (context, event: { canvasId: string; title?: string }): RecordingState => ({
       ...context,

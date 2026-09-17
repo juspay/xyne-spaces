@@ -4,6 +4,7 @@ export { defineQuery } from './zero/acl';
 export { encryptedFieldsConfig, type EncryptedTableConfig } from './zero/encrypted-fields';
 export { EncryptedFieldQueryError, validateQueryWhereClause, type Condition, type QueryAST } from './zero/client-transaction-wrapper';
 export * from './ai';
+export * from './recording';
 export * from './dashboard';
 export * from './types/activity';
 export * from './forwardedMessage';

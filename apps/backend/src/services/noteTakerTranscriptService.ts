@@ -5,7 +5,7 @@ import { noteTakerCallRepository } from '@/database/repositories/noteTakerCallRe
 import { logger } from '@/utils/logger';
 import { vespaQueue } from '@/queues/vespaQueue';
 import { fileSchema, SubApp } from '@/vespa/src/types';
-import { acquireLock, releaseLock } from '@/utils/distributedLock';
+import { acquireLock, releaseLock, renewLock, type LockHandle } from '@/utils/distributedLock';
 import { transcriptService, type TranscriptEntry } from '@/services/transcriptService';
 import type { SummaryModelType } from '@/services/callLlmRetry';
 import { callDocumentService, numberTranscriptSegments, type CitationContext } from '@/services/callDocumentService';
@@ -16,6 +16,7 @@ import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-
 import { tagRepository } from '@/database/repositories/tagRepository';
 import { callLabelService } from '@/services/callLabelService';
 import {
+  RecordingType,
   TagMethod,
   EntityUserAccess,
   NotificationType,
@@ -29,10 +30,62 @@ import {
   mergeRecordingSummaryMarkedItems,
   type RecordingSummaryMarkedItem,
 } from '@/services/recordingSummaryMarkedItems';
+import { recordingRepairStorageService } from '@/services/recordingRepairStorageService';
+import { voiceInputService } from '@/services/voiceInputService';
+import { isStandaloneWebm } from '@/utils/webm';
 
 // Activity.actorAction for "the AI summary for this recording is ready".
 // Rendered by the dashboard's RecordingSummaryActivity.
 const RECORDING_SUMMARY_READY_ACTION = 'recording_summary_ready';
+const TRANSCRIPT_LOCK_TTL_SECONDS = 60;
+
+interface RenewableTranscriptLock {
+  assertOwned(): Promise<void>;
+  release(): Promise<void>;
+}
+
+async function acquireTranscriptLock(
+  callId: string,
+  purpose = 'processing'
+): Promise<RenewableTranscriptLock | null> {
+  const handle: LockHandle | null = await acquireLock(
+    `lock:note-taker-transcript-${purpose}:${callId}`,
+    {
+      ttlSeconds: TRANSCRIPT_LOCK_TTL_SECONDS,
+      waitTimeoutMs: 30_000,
+      retryDelayMs: 300,
+      failOpen: false,
+    }
+  );
+  if (!handle) return null;
+
+  let lost = false;
+  let renewal: Promise<boolean> | null = null;
+  const renew = async (): Promise<boolean> => {
+    if (lost) return false;
+    if (renewal) return renewal;
+    renewal = renewLock(handle, TRANSCRIPT_LOCK_TTL_SECONDS)
+      .then((owned) => {
+        if (!owned) lost = true;
+        return owned;
+      })
+      .finally(() => {
+        renewal = null;
+      });
+    return renewal;
+  };
+  const timer = setInterval(() => void renew(), 20_000);
+
+  return {
+    async assertOwned(): Promise<void> {
+      if (lost || !(await renew())) throw new Error('Canonical transcript lock was lost');
+    },
+    async release(): Promise<void> {
+      clearInterval(timer);
+      await releaseLock(handle);
+    },
+  };
+}
 
 interface DetailedSummaryCanvasResult {
   canvasId: string;
@@ -71,18 +124,18 @@ interface DetailedSummaryCanvasResult {
  * processTranscript — a second run with no new entries is a cheap no-op.
  */
 class NoteTakerTranscriptService {
-  async processTranscript(call: Call, hasTranscript: boolean): Promise<void> {
+  async processTranscript(
+    call: Call,
+    hasTranscript: boolean,
+    options?: { force?: boolean; preferRawEntries?: boolean }
+  ): Promise<void> {
     const callId = call.externalId;
 
     // Serialize processing per call — the room_finished reconcile fallback can
     // race the agent's transcript-ready webhook (itself fired twice). Wait for
     // the lock rather than skip, so a later/larger transcript still reprocesses.
-    const lockHandle = await acquireLock(`lock:note-taker-transcript-processing:${callId}`, {
-      ttlSeconds: 180,
-      waitTimeoutMs: 30_000,
-      retryDelayMs: 300,
-    });
-    if (!lockHandle) {
+    const transcriptLock = await acquireTranscriptLock(callId);
+    if (!transcriptLock) {
       logger.warn(`[${callId}] note_taker_process_lock_timeout`, {
         reason: 'another worker held the processing lock beyond the wait window',
       });
@@ -90,18 +143,20 @@ class NoteTakerTranscriptService {
     }
 
     try {
-      if (!hasTranscript) {
-        logger.warn('transcript_processing_skipped', {
-          call_id: callId,
-          reason: 'agent_reported_no_transcript',
-          path: 'note_taker',
-        });
-        return;
-      }
-
-      const rawContent = await transcriptService.retrieveTranscript(callId);
+      await transcriptLock.assertOwned();
+      // hasTranscript=false only means the agent's FINAL in-memory flush was empty
+      // (e.g. an outage made its cleanup time out before flushing) — NOT that GCS is
+      // empty. Incremental uploads during the call may already hold real entries, so
+      // GCS is the source of truth. Read it regardless; only a genuinely empty/missing
+      // GCS transcript is skipped. retrieveTranscriptAllowEmpty tolerates a missing file
+      // (the false case), while the true case keeps throwing on an unexpectedly-absent one.
+      const rawContent = hasTranscript
+        ? await transcriptService.retrieveTranscript(callId)
+        : await transcriptService.retrieveTranscriptAllowEmpty(callId);
       if (!rawContent) {
-        logger.warn(`[${callId}] note_taker_process_skipped`, { reason: 'no_gcs_transcript' });
+        logger.warn(`[${callId}] note_taker_process_skipped`, {
+          reason: hasTranscript ? 'no_gcs_transcript' : 'agent_reported_no_transcript',
+        });
         return;
       }
       const entries = transcriptService.parseTranscriptEntries(rawContent);
@@ -110,8 +165,10 @@ class NoteTakerTranscriptService {
         return;
       }
 
+      // A whole-file redo overwrites the JSONL and must always reprocess, even when
+      // the redone transcript has fewer entries than the pre-outage partial.
       const storedEntryCount = this.getStoredEntryCount(call);
-      if (entries.length <= storedEntryCount) {
+      if (!options?.force && entries.length <= storedEntryCount) {
         logger.info(`[${callId}] note_taker_process_skipped`, {
           reason: 'already_processed',
           current_entry_count: entries.length,
@@ -120,6 +177,7 @@ class NoteTakerTranscriptService {
         return;
       }
 
+      await transcriptLock.assertOwned();
       try {
         await this.attachTranscript(call, entries);
       } catch (transcriptError) {
@@ -133,7 +191,13 @@ class NoteTakerTranscriptService {
         // in memory and may still succeed even if the storage upload above failed.
       }
 
-      const formattedTranscript = await this.getFormattedTranscript(callId, entries);
+      await transcriptLock.assertOwned();
+
+      const formattedTranscript = await this.getFormattedTranscript(
+        callId,
+        entries,
+        options?.preferRawEntries ?? false
+      );
       if (!formattedTranscript) return;
 
       // The recording creator's model preference (fast/thinking) drives which
@@ -167,6 +231,7 @@ class NoteTakerTranscriptService {
         detailedSummaryPromise,
         saveLabelsPromise,
       ]);
+      await transcriptLock.assertOwned();
       await this.finalizeCallUpdates(call, {
         metadata: {
           transcriptEntryCount: entries.length,
@@ -181,6 +246,7 @@ class NoteTakerTranscriptService {
       if (detailedSummary) {
         await this.notifySummaryReady(call);
       }
+      await transcriptLock.assertOwned();
       await this.queueVespaIndexing(call);
 
       // Thread-linked recording: already auto-shared to the thread's channel
@@ -192,8 +258,91 @@ class NoteTakerTranscriptService {
       // earlier share already succeeded.
       await this.shareThreadRecordingIfLinked(call);
     } finally {
-      await releaseLock(lockHandle);
+      await transcriptLock.release();
     }
+  }
+
+  /**
+   * Whole-file redo: the offline recorder uploaded the full recording.webm because
+   * the call hit an outage. Re-transcribe the ENTIRE file, OVERWRITE the canonical
+   * GCS transcript, reprocess summary/artifacts, and register the local audio as the
+   * call's served recording (replacing egress for this call). Idempotent — safe to
+   * re-run on a client retry. Runs off the finalize request; the client polls
+   * getStatus (Call.metadata.localRedoneAt) and settles once it lands.
+   */
+  async redoTranscriptFromLocalAudio(call: Call, captureId: string): Promise<void> {
+    const callId = call.externalId;
+    const audio = await recordingRepairStorageService.readAudio(callId, captureId);
+    if (!isStandaloneWebm(audio)) {
+      throw new Error('Uploaded recording has no WebM header');
+    }
+
+    const result = await voiceInputService.transcribeRecordingRepair({
+      buffer: audio,
+      size: audio.length,
+      mimetype: 'audio/webm',
+      originalname: `${captureId}.webm`,
+    } as Express.Multer.File);
+
+    // Segment times are measured from the start of the whole recording; anchor them
+    // to the call's wall-clock start so transcript timestamps stay monotonic.
+    const startWallSeconds = (call.startedAt?.getTime() ?? Date.now()) / 1000;
+    const entries: TranscriptEntry[] = [];
+    if (result.speechDetected) {
+      const segments =
+        result.segments.length > 0
+          ? result.segments
+          : [{ startSeconds: 0, endSeconds: result.audioDurationSeconds, text: result.text }];
+      for (const segment of segments) {
+        const text = segment.text.trim();
+        if (!text) continue;
+        entries.push({
+          user: 'Recording',
+          text,
+          timestamp: startWallSeconds + segment.startSeconds,
+          participant_identity: '',
+        });
+      }
+    }
+
+    // Only overwrite when the redo actually produced speech — a silent/failed decode
+    // must never wipe a good pre-outage live transcript.
+    if (entries.length > 0) {
+      await transcriptService.persistRawTranscript(callId, entries);
+      const fresh = (await repositories.calls.findByExternalId(callId)) ?? call;
+      await this.processTranscript(fresh, true, { force: true, preferRawEntries: true });
+    } else {
+      logger.info(`[${callId}] recording_redo_no_speech`, { captureId });
+    }
+
+    await this.registerLocalRecordingAudio(call, captureId);
+    await this.markRedoComplete(call);
+  }
+
+  /** Register the uploaded recording.webm as the call's served recording (audio/webm). */
+  private async registerLocalRecordingAudio(call: Call, captureId: string): Promise<void> {
+    if (!call.workspaceId) {
+      logger.warn(`[${call.externalId}] recording_redo_register_skipped`, {
+        reason: 'no_workspace',
+      });
+      return;
+    }
+    await repositories.callRecordings.registerUploadedRecording({
+      callId: call.id,
+      workspaceId: call.workspaceId,
+      recordingType: RecordingType.AUDIO_ONLY,
+      storagePath: recordingRepairStorageService.audioPath(call.externalId, captureId),
+      startedBy: call.createdByUserId,
+      startedAt: call.startedAt ?? new Date(),
+    });
+  }
+
+  /** Completion signal (no Redis): the client polls this off the recording detail. */
+  private async markRedoComplete(call: Call): Promise<void> {
+    const current = (await repositories.calls.findByExternalId(call.externalId)) ?? call;
+    await repositories.calls.update(current.id, {
+      metadata: { ...this.getMetadata(current), localRedoneAt: Date.now() },
+    });
   }
 
   /**
@@ -444,12 +593,14 @@ class NoteTakerTranscriptService {
   }
 
   private getStoredEntryCount(call: Call): number {
-    const metadata =
-      call.metadata && typeof call.metadata === 'object' && !Array.isArray(call.metadata)
-        ? (call.metadata as Record<string, unknown>)
-        : null;
-    const stored = metadata?.transcriptEntryCount;
+    const stored = this.getMetadata(call).transcriptEntryCount;
     return typeof stored === 'number' ? stored : -1;
+  }
+
+  private getMetadata(call: Call): Record<string, unknown> {
+    return call.metadata && typeof call.metadata === 'object' && !Array.isArray(call.metadata)
+      ? (call.metadata as Record<string, unknown>)
+      : {};
   }
 
   /**
@@ -622,8 +773,16 @@ class NoteTakerTranscriptService {
    * available, falling back to the already-parsed plain entries. Returns null
    * (having already logged why) when there's nothing usable to summarize.
    */
-  private async getFormattedTranscript(callId: string, plainEntries: TranscriptEntry[]): Promise<string | null> {
-    const speakerIdentificationEnabled = await transcriptService.isSpeakerIdentificationEnabled();
+  private async getFormattedTranscript(
+    callId: string,
+    plainEntries: TranscriptEntry[],
+    preferRawEntries = false
+  ): Promise<string | null> {
+    // A whole-file redo re-transcribes as a single "Recording" speaker and OVERWRITES
+    // only the raw transcript; the identified transcript is the live agent's partial and
+    // is now stale. Skip it so redo artifacts come from the new full transcript.
+    const speakerIdentificationEnabled =
+      !preferRawEntries && (await transcriptService.isSpeakerIdentificationEnabled());
 
     if (speakerIdentificationEnabled) {
       const identifiedContent = await transcriptService.getIdentifiedTranscriptContent(callId);

@@ -11,6 +11,8 @@ import json
 import os
 import tempfile
 import traceback
+import wave
+import secrets
 from typing import Optional, Tuple
 
 import aiohttp
@@ -19,6 +21,9 @@ from google.auth import load_credentials_from_dict, load_credentials_from_file
 from google.auth.transport.requests import Request as GoogleAuthRequest
 from openai import AzureOpenAI
 from google.oauth2 import service_account
+from livekit import rtc
+from livekit.agents import vad as agents_vad
+from livekit.plugins import silero
 
 from config import Config, get_logger
 from infra import get_user_registry
@@ -28,6 +33,7 @@ logger = get_logger(__name__)
 _azure_client: Optional[AzureOpenAI] = None
 _azure_client_key: Optional[Tuple[str, str, str]] = None
 _azure_model_name: Optional[str] = None
+_repair_vad = None
 
 
 def _get_azure_client_and_model() -> Tuple[AzureOpenAI, str]:
@@ -75,6 +81,152 @@ def _first_language(language: str, fallback: str) -> str:
     if ',' in value:
         return value.split(',')[0].strip() or 'en-US'
     return value
+
+
+def _get_repair_vad(cfg: Config):
+    """Load one process-wide Silero model; each request gets its own stream."""
+    global _repair_vad
+    if _repair_vad is None:
+        _repair_vad = silero.VAD.load(
+            activation_threshold=cfg.vad_activation_threshold,
+            min_speech_duration=max(0.3, cfg.vad_min_speech_duration),
+            min_silence_duration=cfg.vad_min_silence_duration,
+            sample_rate=16000,
+        )
+    return _repair_vad
+
+
+async def _trim_to_repair_wav(
+    input_path: str,
+    output_path: str,
+    start_offset_ms: float,
+    end_offset_ms: float,
+) -> None:
+    """Decode a sub-range (one detected speech segment) to mono PCM for batch STT."""
+    process = await asyncio.create_subprocess_exec(
+        'ffmpeg',
+        '-y',
+        '-v',
+        'error',
+        '-i',
+        input_path,
+        '-ss',
+        f'{start_offset_ms / 1000:.3f}',
+        '-t',
+        f'{(end_offset_ms - start_offset_ms) / 1000:.3f}',
+        '-ac',
+        '1',
+        '-ar',
+        '16000',
+        '-c:a',
+        'pcm_s16le',
+        output_path,
+        stdout=asyncio.subprocess.DEVNULL,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    _, stderr = await process.communicate()
+    if process.returncode != 0:
+        detail = stderr.decode('utf-8', errors='replace').strip()[-1000:]
+        raise ValueError(f'Unable to decode recording repair audio: {detail}')
+
+
+async def _decode_to_repair_wav(input_path: str, output_path: str) -> None:
+    """Decode the whole recording to mono PCM for VAD and batch STT (no trimming)."""
+    process = await asyncio.create_subprocess_exec(
+        'ffmpeg',
+        '-y',
+        '-v',
+        'error',
+        '-i',
+        input_path,
+        '-ac',
+        '1',
+        '-ar',
+        '16000',
+        '-c:a',
+        'pcm_s16le',
+        output_path,
+        stdout=asyncio.subprocess.DEVNULL,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    _, stderr = await process.communicate()
+    if process.returncode != 0:
+        detail = stderr.decode('utf-8', errors='replace').strip()[-1000:]
+        raise ValueError(f'Unable to decode recording repair audio: {detail}')
+
+
+async def _detect_repair_speech(path: str, cfg: Config):
+    """Return coalesced speech segments, total voiced seconds, and audio duration."""
+    with wave.open(path, 'rb') as wav_file:
+        if wav_file.getnchannels() != 1 or wav_file.getsampwidth() != 2:
+            raise ValueError('Recording repair audio must decode to mono 16-bit PCM')
+        sample_rate = wav_file.getframerate()
+        pcm = wav_file.readframes(wav_file.getnframes())
+
+    if sample_rate != 16000 or not pcm:
+        return [], 0.0, 0.0
+
+    vad_model = await asyncio.to_thread(_get_repair_vad, cfg)
+    vad_stream = vad_model.stream()
+    samples_per_frame = sample_rate // 50  # 20 ms
+    bytes_per_frame = samples_per_frame * 2
+    for offset in range(0, len(pcm), bytes_per_frame):
+        data = pcm[offset:offset + bytes_per_frame]
+        if not data:
+            continue
+        vad_stream.push_frame(rtc.AudioFrame(
+            data=data,
+            sample_rate=sample_rate,
+            num_channels=1,
+            samples_per_channel=len(data) // 2,
+        ))
+    vad_stream.end_input()
+
+    raw_segments = []
+    try:
+        async for event in vad_stream:
+            if event.type == agents_vad.VADEventType.END_OF_SPEECH:
+                frame_duration = sum(
+                    frame.samples_per_channel / frame.sample_rate
+                    for frame in (event.frames or [])
+                    if frame.sample_rate > 0
+                )
+                reported_speech_duration = float(event.speech_duration or 0.0)
+                # LiveKit's speech_duration excludes the trailing silence and is
+                # the authoritative VAD interval. Frames are only a compatibility
+                # fallback for implementations that do not report that field.
+                speech_duration = max(
+                    0.0,
+                    reported_speech_duration
+                    if reported_speech_duration > 0.0
+                    else frame_duration,
+                )
+                event_time = float(
+                    getattr(event, 'timestamp', event.samples_index / sample_rate)
+                )
+                speech_end = max(
+                    0.0,
+                    event_time - float(event.silence_duration or 0.0),
+                )
+                speech_start = max(0.0, speech_end - speech_duration)
+                if speech_end > speech_start:
+                    raw_segments.append((speech_start, speech_end))
+    finally:
+        await vad_stream.aclose()
+
+    audio_duration = len(pcm) / 2 / sample_rate
+    padded = [
+        (max(0.0, start - 0.2), min(audio_duration, end + 0.2))
+        for start, end in raw_segments
+    ]
+    segments = []
+    for start, end in padded:
+        if segments and start - segments[-1][1] <= 0.5:
+            segments[-1] = (segments[-1][0], max(segments[-1][1], end))
+        else:
+            segments.append((start, end))
+    speech_seconds = sum(end - start for start, end in raw_segments)
+    return segments, speech_seconds, audio_duration
 
 
 def _transcribe_file_with_azure(path: str, model: str, language: Optional[str]):
@@ -596,6 +748,157 @@ async def transcribe_stream_ws(request):
             transcription_task.cancel()
 
     return ws
+
+
+async def _transcribe_repair_path(path: str, cfg: Config, language: str):
+    """Batch transcription core for VAD-admitted recording repair audio."""
+    selected_provider = (cfg.voice_input_stt_model or cfg.stt_model or 'azure').lower()
+    registry = get_user_registry(cfg.backend_url, cfg.transcription_agent_api_key)
+    extra_hints = await registry.get_names()
+
+    if selected_provider == 'google':
+        text, resolved_language, model_name = await _transcribe_with_google(
+            path, cfg, language, extra_hints,
+        )
+    elif selected_provider == 'deepgram':
+        text, resolved_language, model_name = await _transcribe_with_deepgram(
+            path, cfg, language, extra_hints,
+        )
+    else:
+        _, model_name = _get_azure_client_and_model()
+        azure_language = _first_language(language, 'en') if language else None
+        transcript = await asyncio.to_thread(
+            _transcribe_file_with_azure,
+            path,
+            model_name,
+            azure_language,
+        )
+        text = (getattr(transcript, 'text', '') or '').strip()
+        resolved_language = azure_language or 'en'
+        selected_provider = 'azure'
+
+    return text, resolved_language, selected_provider, model_name
+
+
+async def transcribe_recording_repair(request):
+    """
+    POST /transcribe-recording-repair
+
+    Decodes the uploaded recording (the client has already stitched it down to the
+    outage audio), applies local Silero VAD, and calls the configured STT provider
+    only when speech exists.
+    """
+    import time as _time
+    request_start = _time.monotonic()
+    input_path = None
+    repair_path = None
+    segment_paths = []
+    try:
+        cfg = Config.load()
+        expected_key = cfg.transcription_agent_api_key or ''
+        provided_key = request.headers.get('x-transcription-agent-key', '')
+        if expected_key and not secrets.compare_digest(provided_key, expected_key):
+            return web.json_response({'error': 'Unauthorized'}, status=401)
+
+        reader = await request.multipart()
+        language = ''
+
+        while True:
+            field = await reader.next()
+            if field is None:
+                break
+            if field.name == 'audio':
+                suffix = _infer_suffix(field.filename, field.headers.get('Content-Type', ''))
+                with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+                    input_path = tmp.name
+                    while True:
+                        chunk = await field.read_chunk(65536)
+                        if not chunk:
+                            break
+                        tmp.write(chunk)
+            elif field.name == 'language':
+                language = (await field.text()).strip()
+
+        if not input_path or os.path.getsize(input_path) == 0:
+            return web.json_response({'error': "Expected non-empty multipart field 'audio'"}, status=400)
+
+        with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as repair_file:
+            repair_path = repair_file.name
+
+        # The client has already stitched the recording down to the outage audio, so
+        # decode the entire file with no trimming.
+        await _decode_to_repair_wav(input_path, repair_path)
+
+        speech_segments, speech_duration_s, audio_duration_s = await _detect_repair_speech(
+            repair_path, cfg,
+        )
+        if not speech_segments:
+            total_ms = (_time.monotonic() - request_start) * 1000
+            logger.info(
+                f'[recording_repair] VAD skipped STT | audio={audio_duration_s:.3f}s'
+                f' | total={total_ms:.0f}ms'
+            )
+            return web.json_response({
+                'text': '',
+                'speech_detected': False,
+                'speech_duration_s': speech_duration_s,
+                'audio_duration_s': audio_duration_s,
+            })
+
+        transcribed_segments = []
+        resolved_language = ''
+        provider = ''
+        model_name = ''
+        for segment_start, segment_end in speech_segments:
+            with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as segment_file:
+                segment_path = segment_file.name
+                segment_paths.append(segment_path)
+            await _trim_to_repair_wav(
+                repair_path,
+                segment_path,
+                segment_start * 1000,
+                segment_end * 1000,
+            )
+            segment_text, resolved_language, provider, model_name = await _transcribe_repair_path(
+                segment_path, cfg, language,
+            )
+            segment_text = segment_text.strip()
+            if segment_text:
+                transcribed_segments.append({
+                    'start_s': segment_start,
+                    'end_s': segment_end,
+                    'text': segment_text,
+                })
+        text = ' '.join(segment['text'] for segment in transcribed_segments).strip()
+        total_ms = (_time.monotonic() - request_start) * 1000
+        logger.info(
+            f'[recording_repair] Done | provider={provider} | model={model_name}'
+            f' | audio={audio_duration_s:.3f}s | speech={speech_duration_s:.3f}s'
+            f' | chars={len(text)} | total={total_ms:.0f}ms'
+        )
+        return web.json_response({
+            'text': text,
+            'language': resolved_language,
+            'provider': provider,
+            'model': model_name,
+            'speech_detected': True,
+            'speech_duration_s': speech_duration_s,
+            'audio_duration_s': audio_duration_s,
+            'segments': transcribed_segments,
+        })
+    except ValueError as error:
+        logger.error(f'[recording_repair] Validation error: {error}')
+        return web.json_response({'error': str(error)}, status=400)
+    except Exception as error:
+        logger.error(
+            f'[recording_repair] Unexpected error: {type(error).__name__}: {error}\n'
+            f'{traceback.format_exc()}'
+        )
+        return web.json_response({'error': f'{type(error).__name__}: {error}'}, status=500)
+    finally:
+        for path in (input_path, repair_path, *segment_paths):
+            if path and os.path.exists(path):
+                os.unlink(path)
 
 
 async def transcribe_audio(request):

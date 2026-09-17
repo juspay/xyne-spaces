@@ -17,7 +17,36 @@ export interface ErrorReportRecordingInfo {
   elapsedSeconds?: number;
 }
 
+/**
+ * Native filesystem surface for the offline-first note-taker recorder. Bytes cross
+ * IPC as ArrayBuffers; the manifest crosses as a JSON string. The renderer holds
+ * only captureIds — the main process owns the user-selected root path. Implemented
+ * in electron/src/services/recording-fs.ts.
+ */
+export interface RecordingFsApi {
+  /** Open a native directory picker and remember the chosen root. */
+  pickDirectory: () => Promise<{ granted: boolean }>;
+  /** Whether a recording root directory is already configured (no prompt). */
+  hasDirectory: () => Promise<boolean>;
+  /** The configured recording root path (null when none is set), for display. */
+  getDirectory: () => Promise<{ path: string | null }>;
+  /** Create the capture folder + empty recording.webm under the root. */
+  createCapture: (captureId: string, dirName?: string) => Promise<void>;
+  /** Durably append one fragment to recording.webm; returns its byte range. */
+  appendFragment: (
+    captureId: string,
+    bytes: ArrayBuffer,
+  ) => Promise<{ byteOffset: number; byteLength: number }>;
+  writeManifest: (captureId: string, manifestJson: string) => Promise<void>;
+  readRange: (captureId: string, byteOffset: number, byteLength: number) => Promise<ArrayBuffer>;
+  finalize: (captureId: string) => Promise<void>;
+  listPending: () => Promise<Array<{ captureId: string; manifestJson: string }>>;
+  deleteCapture: (captureId: string) => Promise<void>;
+  freeSpace: () => Promise<{ availableBytes: number | null }>;
+}
+
 export interface ElectronAPI {
+  recordingFs?: RecordingFsApi;
   openExternal: (url: string) => void;
   getWebviewPreloadPath?: () => string;
   // Only exposed by the webview preload (`electron/src/webview-preload.js`),

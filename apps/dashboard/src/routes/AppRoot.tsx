@@ -134,6 +134,7 @@ import RecordingDetailRoute from './RecordingDetailRoute/RecordingDetailRoute';
 import { RecordingOverlay } from '../components/Recording/RecordingOverlay/RecordingOverlay';
 import { RecordingCameraBubble } from '../components/Recording/RecordingCameraBubble/RecordingCameraBubble';
 import { ScreenPickerHost } from '../components/ScreenPicker/ScreenPickerHost';
+import { RecordingFallbackCoordinator } from '../components/Recording/RecordingFallbackCoordinator';
 import { useRecordingVersion } from '../hooks/useRecordingVersion';
 import { stopRecordingForTeardown } from '../hooks/useRecordingStore';
 import { isElectronApp } from '../utils/electronApp';
@@ -955,6 +956,7 @@ const AppRoot = (): ReactElement => {
                               <IncomingCallDevHarness />
                             )}
                           <GlobalCallOverlay />
+                          <RecordingFallbackCoordinator />
                           {recordingVersion === 'v2' ? (
                             <NoteTakerOverlayHost />
                           ) : (

@@ -9,6 +9,11 @@ import { useZero } from './useZero';
 export type RecordingEntry = QueryResultType<typeof queries.userRecordings>[number];
 
 const FETCH_LIMIT = 20;
+const refreshListeners = new Set<() => void>();
+
+export function refreshRecordings(): void {
+  for (const listener of refreshListeners) listener();
+}
 
 type RecordingCursor = { id: string; startedAt: number } | null;
 
@@ -93,6 +98,28 @@ export function usePaginatedRecordings(): UsePaginatedRecordingsReturn {
       zero.run(queries.userRecordings({ limit: FETCH_LIMIT, start }), { type: 'complete' }),
     [zero],
   );
+
+  const refresh = useCallback((): void => {
+    void fetchPage(null)
+      .then(page => {
+        queryCacheActor.send({
+          type: 'HYDRATE_RECORDINGS',
+          data: {
+            recordings: (page ?? []) as RecordingEntry[],
+            hasMore: (page?.length ?? 0) === FETCH_LIMIT,
+          },
+        });
+        setWindowCursor(null);
+      })
+      .catch(() => undefined);
+  }, [fetchPage]);
+
+  useEffect(() => {
+    refreshListeners.add(refresh);
+    return (): void => {
+      refreshListeners.delete(refresh);
+    };
+  }, [refresh]);
 
   // ── loadMoreRecordings (forward — older recordings) ────────────────────────
   const loadMoreRecordings = useCallback(() => {

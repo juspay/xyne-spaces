@@ -7,7 +7,12 @@ import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import axios from 'axios';
 import AppNavigator from '../../components/AppNavigator/AppNavigator';
 import { usePlatform } from '../../hooks/usePlatform';
-import { recordingService, RecordingDetail } from '../../services/Recording/recordingService';
+import {
+  RECORDING_REPAIR_MERGED_EVENT,
+  recordingService,
+  RecordingDetail,
+  type RecordingRepairMergedEventDetail,
+} from '../../services/Recording/recordingService';
 import { useShortcut } from '../../shortcuts';
 import {
   ArrowLeft,
@@ -207,6 +212,15 @@ export default function RecordingDetailScreen(): ReactElement {
     if (recordingId) {
       void loadRecording(recordingId);
     }
+  }, [recordingId]);
+
+  useEffect(() => {
+    const handleMerged = (event: Event): void => {
+      const detail = (event as CustomEvent<RecordingRepairMergedEventDetail>).detail;
+      if (recordingId && detail?.callId === recordingId) void loadRecording(recordingId);
+    };
+    window.addEventListener(RECORDING_REPAIR_MERGED_EVENT, handleMerged);
+    return (): void => window.removeEventListener(RECORDING_REPAIR_MERGED_EVENT, handleMerged);
   }, [recordingId]);
 
   const loadRecording = async (id: string): Promise<void> => {

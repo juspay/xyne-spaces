@@ -22,6 +22,8 @@ export interface AcquireLockOptions {
   waitTimeoutMs?: number;
   /** Poll interval while waiting for a held lock. Default 300ms. */
   retryDelayMs?: number;
+  /** Proceed without a lock when Redis is unavailable. Default true for legacy callers. */
+  failOpen?: boolean;
 }
 
 // Release only if we still own the key (guards against deleting a lock that already
@@ -33,21 +35,27 @@ else
   return 0
 end`;
 
+const RENEW_LUA = `
+if redis.call('get', KEYS[1]) == ARGV[1] then
+  return redis.call('expire', KEYS[1], ARGV[2])
+else
+  return 0
+end`;
+
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 /**
  * Acquire a distributed lock. Returns a {@link LockHandle} on success, or `null`
  * if the lock stayed held by another owner for the entire wait window.
  *
- * Fails OPEN: if Redis itself errors, a handle is returned so the caller proceeds
- * *unlocked* rather than blocking all work when Redis is unavailable — a rare
- * duplicate is preferable to dropping processing entirely.
+ * Legacy callers fail open by default if Redis errors. Integrity-sensitive
+ * callers must pass `failOpen: false`, which propagates the Redis failure.
  */
 export async function acquireLock(
   key: string,
   opts: AcquireLockOptions = {}
 ): Promise<LockHandle | null> {
-  const { ttlSeconds = 180, waitTimeoutMs = 0, retryDelayMs = 300 } = opts;
+  const { ttlSeconds = 180, waitTimeoutMs = 0, retryDelayMs = 300, failOpen = true } = opts;
   const token = randomUUID();
   const deadline = Date.now() + waitTimeoutMs;
 
@@ -60,11 +68,28 @@ export async function acquireLock(
         key,
         error: err instanceof Error ? err.message : String(err),
       });
-      return { key, token }; // proceed unlocked
+      if (failOpen) return { key, token }; // proceed unlocked for legacy best-effort callers
+      throw err;
     }
 
     if (Date.now() >= deadline) return null;
     await sleep(Math.min(retryDelayMs, Math.max(0, deadline - Date.now())));
+  }
+}
+
+/** Renew a lock only while this handle still owns it. */
+export async function renewLock(handle: LockHandle, ttlSeconds: number): Promise<boolean> {
+  try {
+    const renewed = await redisService
+      .getClient()
+      .eval(RENEW_LUA, 1, handle.key, handle.token, String(ttlSeconds));
+    return Number(renewed) === 1;
+  } catch (err) {
+    logger.warn('[distributedLock] renew_error', {
+      key: handle.key,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return false;
   }
 }
 

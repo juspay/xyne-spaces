@@ -227,6 +227,25 @@ export interface RecordingDetail extends Recording {
   linkedTicketMessageId?: string | null;
 }
 
+export type RecordingRepairReason =
+  | 'browser_offline'
+  | 'livekit_disconnected'
+  | 'reconnect_timeout'
+  | 'agent_left'
+  | 'stt_failed';
+
+export interface RecordingRepairStatus {
+  /** True once the server-side whole-file redo has overwritten the transcript. */
+  done: boolean;
+}
+
+export const RECORDING_REPAIR_MERGED_EVENT = 'xyne-recording-repair-merged';
+
+export interface RecordingRepairMergedEventDetail {
+  callId: string;
+  captureId: string;
+}
+
 /** A single in-call recording session (call_recordings row), as the list endpoint returns it. */
 export interface CallRecordingSession {
   id: string;
@@ -584,6 +603,28 @@ class RecordingService {
    */
   async deleteRecording(callId: string): Promise<void> {
     await apiInstance.delete(`/calls/recordings/${callId}`);
+  }
+
+  /** Stream the whole capture (one recording.webm) through the backend to GCS. */
+  async uploadRecordingRepairAudio(callId: string, captureId: string, body: Blob): Promise<void> {
+    await apiInstance.post(`/calls/${callId}/recording-repairs/${captureId}/audio`, body, {
+      headers: { 'Content-Type': 'application/octet-stream' },
+    });
+  }
+
+  /** Trigger the server-side whole-file redo for a capture that hit an outage. */
+  async finalizeRecordingRepair(callId: string, captureId: string): Promise<void> {
+    await apiInstance.post(`/calls/${callId}/recording-repairs/${captureId}/finalize`, {});
+  }
+
+  async getRecordingRepairStatus(
+    callId: string,
+    captureId: string,
+  ): Promise<RecordingRepairStatus> {
+    const response: AxiosResponse<{ capture: RecordingRepairStatus }> = await apiInstance.get(
+      `/calls/${callId}/recording-repairs/${captureId}`,
+    );
+    return response.data.capture;
   }
 
   /**

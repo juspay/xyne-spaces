@@ -22,6 +22,7 @@ import {
   EyeOff,
   ChevronDown,
   Check,
+  FolderOpen,
 } from 'lucide-react';
 import { ResolutionQualityHd, Spinner } from '@xyne/icons';
 import {
@@ -77,6 +78,10 @@ import { useToolbarItems } from '../../../hooks/useToolbarItems';
 import type { PreferenceSection, PreferencesProps, NavItem } from '.';
 import { disconnectCalendar } from '../../../services/clients/calendarApi';
 import { toast } from 'sonner';
+import {
+  selectRecordingArchiveStore,
+  type RecordingLocationInfo,
+} from '../../../services/Recording/archive';
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 const NAV_ITEMS: NavItem[] = [
@@ -677,6 +682,104 @@ const CallsSection: FC<{ state: PreferencesState }> = ({ state }) => {
   );
 };
 
+// Where the offline-first note-taker recorder saves the full-call recording.webm on
+// this device. Picking a folder here (a user gesture that also grants write access)
+// means a later call starts recording instantly — no mid-call picker, so the first
+// seconds are never lost.
+const RecordingLocationCard: FC = () => {
+  const store = useMemo(() => selectRecordingArchiveStore(), []);
+  const [location, setLocation] = useState<RecordingLocationInfo | null>(null);
+  const [choosing, setChoosing] = useState(false);
+
+  useEffect(() => {
+    if (!store) return;
+    let cancelled = false;
+    store
+      .describeLocation()
+      .then(info => {
+        if (!cancelled) setLocation(info);
+      })
+      .catch(() => undefined);
+    return (): void => {
+      cancelled = true;
+    };
+  }, [store]);
+
+  if (!store) return null;
+
+  const handleChoose = async (): Promise<void> => {
+    setChoosing(true);
+    try {
+      const info = await store.chooseLocation();
+      setLocation(info);
+      if (info.configured && info.label) {
+        toast.success('Recording folder saved', {
+          description: 'New note-taker calls will record here from the very first second.',
+        });
+      }
+    } catch {
+      toast.warning('Could not update the recording folder');
+    } finally {
+      setChoosing(false);
+    }
+  };
+
+  const selectable = location?.selectable ?? false;
+  const configured = location?.configured ?? false;
+
+  return (
+    <div className='p-3 rounded-lg border border-border bg-muted/30 space-y-3'>
+      <div className='flex items-start gap-3'>
+        <div className='flex items-center justify-center w-9 h-9 rounded-md bg-muted border border-border shrink-0'>
+          <FolderOpen className='size-4 text-muted-foreground' />
+        </div>
+        <div className='min-w-0'>
+          <p className='text-sm font-medium text-foreground'>Recording location</p>
+          <p className='text-xs text-muted-foreground mt-0.5'>
+            Where note-taker call audio is saved on this device. Choose a folder ahead of a call so
+            recording starts instantly and never loses the first few seconds.
+          </p>
+        </div>
+      </div>
+
+      {selectable ? (
+        <>
+          <div className='flex items-center gap-2 rounded-md border border-border bg-background px-2.5 py-1.5'>
+            <span className='text-xs text-muted-foreground shrink-0'>Folder</span>
+            <span
+              className='text-xs font-medium text-foreground truncate'
+              title={location?.label ?? undefined}
+            >
+              {configured && location?.label ? location.label : 'No folder chosen yet'}
+            </span>
+          </div>
+          <div className='flex items-center justify-between gap-3'>
+            <p className='text-[11px] text-muted-foreground'>
+              Recordings are saved in an “Xyne Recordings” subfolder.
+            </p>
+            <button
+              type='button'
+              onClick={() => void handleChoose()}
+              disabled={choosing}
+              className='text-xs px-3 py-1.5 rounded-md bg-muted border border-border text-foreground hover:bg-border transition-colors disabled:opacity-60 shrink-0'
+              data-track-category='PREFERENCES'
+              data-track-name='ChooseRecordingFolder'
+            >
+              {choosing ? 'Opening…' : configured ? 'Change' : 'Choose folder'}
+            </button>
+          </div>
+        </>
+      ) : (
+        <p className='text-xs text-muted-foreground'>
+          Recordings are saved in this browser&apos;s private storage, which the browser manages
+          automatically. Open the app in a supported browser or the desktop app to pick your own
+          folder.
+        </p>
+      )}
+    </div>
+  );
+};
+
 const RecordingsSection: FC<{ state: PreferencesState }> = ({ state }) => (
   <div className='space-y-6'>
     <SectionHeader
@@ -701,6 +804,8 @@ const RecordingsSection: FC<{ state: PreferencesState }> = ({ state }) => (
         onCheckedChange={checked => state.setRecordingVersion(checked ? 'v2' : 'v1')}
       />
     </div>
+
+    <RecordingLocationCard />
 
     <div className='p-3 rounded-lg border border-border bg-muted/30 space-y-3'>
       <div>

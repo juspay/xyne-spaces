@@ -19,6 +19,7 @@ ENV HOME=/app \
 RUN apt-get update && apt-get install -y \
     gcc \
     curl \
+    ffmpeg \
     libglib2.0-0 \
     libgstreamer1.0-0 \
     gstreamer1.0-plugins-base \

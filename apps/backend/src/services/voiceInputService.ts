@@ -9,13 +9,88 @@ interface PythonTranscriptionResponse {
   duration_s?: number;
 }
 
+interface RecordingRepairTranscriptionResponse extends PythonTranscriptionResponse {
+  speech_detected: boolean;
+  speech_duration_s: number;
+  audio_duration_s: number;
+  segments?: Array<{ start_s: number; end_s: number; text: string }>;
+}
+
 export class VoiceInputService {
+  async transcribeRecordingRepair(
+    file: Express.Multer.File
+  ): Promise<{
+    text: string;
+    language?: string;
+    speechDetected: boolean;
+    speechDurationSeconds: number;
+    audioDurationSeconds: number;
+    segments: Array<{ startSeconds: number; endSeconds: number; text: string }>;
+  }> {
+    const pythonAgentUrl = config.pythonAgentUrl;
+    if (!pythonAgentUrl) throw new Error('PYTHON_AGENT_URL is not configured');
+
+    const form = new FormData();
+    form.append('audio', file.buffer, {
+      filename: file.originalname,
+      contentType: file.mimetype,
+    });
+    // The client already stitched the recording down to the outage audio, so the
+    // agent decodes + VAD/STT the entire uploaded file.
+
+    const startedAt = Date.now();
+    try {
+      const response = await axios.post<RecordingRepairTranscriptionResponse>(
+        `${pythonAgentUrl}/transcribe-recording-repair`,
+        form,
+        // The repair worker owns retries and keeps its database lease alive while
+        // this internal request runs. Do not abort an in-flight provider request
+        // locally and accidentally bill the same interval twice.
+        {
+          headers: {
+            ...form.getHeaders(),
+            ...(config.transcriptionAgentApiKey
+              ? { 'x-transcription-agent-key': config.transcriptionAgentApiKey }
+              : {}),
+          },
+          timeout: 0,
+        }
+      );
+      logger.info('[VoiceInputService] Recording repair VAD/STT completed', {
+        elapsedMs: Date.now() - startedAt,
+        sizeBytes: file.size,
+        speechDetected: response.data.speech_detected,
+        speechDurationSeconds: response.data.speech_duration_s,
+        audioDurationSeconds: response.data.audio_duration_s,
+        chars: response.data.text?.length ?? 0,
+      });
+      return {
+        text: response.data.text ?? '',
+        language: response.data.language,
+        speechDetected: response.data.speech_detected,
+        speechDurationSeconds: response.data.speech_duration_s,
+        audioDurationSeconds: response.data.audio_duration_s,
+        segments: (response.data.segments ?? []).map((segment) => ({
+          startSeconds: segment.start_s,
+          endSeconds: segment.end_s,
+          text: segment.text,
+        })),
+      };
+    } catch (error) {
+      if (axios.isAxiosError(error)) {
+        const body = error.response?.data as { error?: string } | undefined;
+        throw new Error(`Recording repair transcription error: ${body?.error || error.message}`);
+      }
+      throw error;
+    }
+  }
+
   async transcribeAudio(
     file: Express.Multer.File,
     options?: {
       language?: string;
       hints?: string[];
-    },
+    }
   ): Promise<PythonTranscriptionResponse> {
     const pythonAgentUrl = config.pythonAgentUrl;
     if (!pythonAgentUrl) {
@@ -39,7 +114,7 @@ export class VoiceInputService {
     logger.info(
       `[VoiceInputService] Forwarding to Python agent | url=${pythonAgentUrl}/transcribe-audio` +
         ` | size=${(file.size / 1024).toFixed(1)}KB | mime=${file.mimetype}` +
-        ` | language=${options?.language ?? '(default)'} | hints=${options?.hints?.length ?? 0}`,
+        ` | language=${options?.language ?? '(default)'} | hints=${options?.hints?.length ?? 0}`
     );
     const _t0 = Date.now();
 
@@ -50,14 +125,14 @@ export class VoiceInputService {
         {
           headers: form.getHeaders(),
           timeout: 60_000,
-        },
+        }
       );
 
       const elapsed = Date.now() - _t0;
       logger.info(
         `[VoiceInputService] Python agent responded | status=${response.status}` +
           ` | elapsed=${elapsed}ms | chars=${response.data.text?.length ?? 0}` +
-          ` | language=${response.data.language ?? 'unknown'}`,
+          ` | language=${response.data.language ?? 'unknown'}`
       );
       return response.data;
     } catch (error) {
@@ -74,7 +149,7 @@ export class VoiceInputService {
 
         const message = body?.error || error.message;
         logger.error(
-          `[VoiceInputService] Python transcription failed | status=${status ?? 'unknown'} | error=${message}`,
+          `[VoiceInputService] Python transcription failed | status=${status ?? 'unknown'} | error=${message}`
         );
         throw new Error(`Transcription service error: ${message}`);
       }

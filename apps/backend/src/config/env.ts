@@ -158,6 +158,7 @@ const envSchema = Joi.object({
   LITELLM_MANAGEMENT_ADMIN_KEY: Joi.string().allow('').default(''),
   LITELLM_CHANGED_BY: Joi.string().default('external-system:xyne-spaces-external'),
   ORG_DEFAULT_MODELS: Joi.string().allow('').default('kimi-latest,private-large'),
+  ENABLE_RECORDING_REPAIR_WORKER: Joi.boolean().default(true),
   BACKEND_URL: Joi.string().default('http://localhost:3001'),
   SLACK_BOT_TOKEN: Joi.string().allow('').default(''),
   SLACK_FRONTEND_URL: Joi.string().allow('').default('http://localhost:5173'),
@@ -813,6 +814,7 @@ export const config = {
   tagGenerationConcurrency: envVars.TAG_GENERATION_CONCURRENCY as number,
   tagGenerationLlmTimeoutMs: envVars.TAG_GENERATION_LLM_TIMEOUT_MS as number,
   enableStitchWorker: envVars.ENABLE_STITCH_WORKER,
+  enableRecordingRepairWorker: envVars.ENABLE_RECORDING_REPAIR_WORKER,
   enableAiProvisioningWorker: envVars.ENABLE_AI_PROVISIONING_WORKER,
   aiProvisioning: {
     xyneClawAuthInternalUrl: envVars.XYNE_CLAW_AUTH_INTERNAL_URL as string,

@@ -72,7 +72,7 @@ export function RecordingOverlay(): React.ReactElement | null {
   const pauseStartedAt = useRecordingStore(ctx => ctx.pauseStartedAt);
   const accumulatedPausedMs = useRecordingStore(ctx => ctx.accumulatedPausedMs);
   const externalId = useRecordingStore(ctx => ctx.externalId);
-  const agentLeft = useRecordingStore(ctx => ctx.agentLeft);
+  const fallbackReasons = useRecordingStore(ctx => ctx.fallbackReasons);
   const room = useRecordingStore(ctx => ctx.room);
 
   // Subscribe to transcript stream so transcripts are captured even when overlay is visible
@@ -101,8 +101,6 @@ export function RecordingOverlay(): React.ReactElement | null {
   // Title modal state — same pattern as RecordingsScreen
   const [showTitleModal, setShowTitleModal] = useState(false);
   const [savingTitle, setSavingTitle] = useState(false);
-  // True when the title modal opened because the agent dropped (auto-end).
-  const [endedByAgentDrop, setEndedByAgentDrop] = useState(false);
   const [showTranscript, setShowTranscript] = useState(true);
   const lastExternalIdRef = useRef<string | null>(null);
   const transcriptScrollRef = useRef<HTMLDivElement>(null);
@@ -121,19 +119,6 @@ export function RecordingOverlay(): React.ReactElement | null {
     }
   }, [transcripts, showTranscript]);
 
-  // Agent dropped mid-recording → auto-end and show the save-title modal with a
-  // notice. Gated to when the overlay owns the UI (RecordingsScreen handles the
-  // /recordings route itself), so the recording is ended exactly once.
-  useEffect(() => {
-    if (!isOnRecordingsPage && agentLeft && (status === 'recording' || status === 'paused')) {
-      lastExternalIdRef.current = externalId;
-      setEndedByAgentDrop(true);
-      sendRecordingEvent({ type: 'stopRecording' }); // clears agentLeft in the store
-      setShowTitleModal(true);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [agentLeft, status, isOnRecordingsPage]);
-
   const handleStop = (): void => {
     // Capture externalId before stopRecording resets the store
     lastExternalIdRef.current = externalId;
@@ -148,7 +133,6 @@ export function RecordingOverlay(): React.ReactElement | null {
         await recordingService.updateRecordingTitle(lastExternalIdRef.current, title);
       }
       setShowTitleModal(false);
-      setEndedByAgentDrop(false);
       sendRecordingEvent({ type: 'clearTranscripts' });
       toast.success('Recording saved', { description: title });
     } catch {
@@ -174,7 +158,7 @@ export function RecordingOverlay(): React.ReactElement | null {
         defaultTitle={generateRecordingTitle(startTime)}
         onSave={handleSaveTitle}
         isSaving={savingTitle}
-        endedByAgentDrop={endedByAgentDrop}
+        endedByAgentDrop={false}
       />
       <div
         ref={containerRef}
@@ -256,7 +240,13 @@ export function RecordingOverlay(): React.ReactElement | null {
 
               <div className='min-w-0'>
                 <div className='font-semibold text-sm text-foreground leading-tight'>
-                  {isStarting ? 'Starting...' : isPaused ? 'Paused' : 'Recording'}
+                  {isStarting
+                    ? 'Starting...'
+                    : isPaused
+                      ? 'Paused'
+                      : fallbackReasons.length > 0
+                        ? 'Recording locally'
+                        : 'Recording'}
                 </div>
                 <div className='text-xs text-muted-foreground tabular-nums'>
                   {isStarting ? 'Connecting...' : formatRecordingDuration(elapsedTime)}

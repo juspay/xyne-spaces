@@ -8,6 +8,7 @@ import { uploadSingle } from '@/middleware/upload';
 import { summaryTemplateController } from '@/controllers/summaryTemplateController';
 import { recordingSharingController } from '@/controllers/recordingSharingController';
 import { recordingGoogleDocController } from '@/controllers/recordingGoogleDocController';
+import { recordingRepairController } from '@/controllers/recordingRepairController';
 
 const router = Router();
 
@@ -57,6 +58,21 @@ router.delete('/summary-templates/:templateId', summaryTemplateController.delete
 router.get('/pulse-orgs', callController.getPulseOrgs);
 
 router.post('/summary-prompt/edit', callController.editSummaryPrompt);
+
+// Whole-capture audio is streamed straight to storage — no body parser here, so
+// the controller pipes the raw request into GCS without buffering it in memory.
+router.post(
+  '/:callId/recording-repairs/:captureId/audio',
+  recordingRepairController.uploadAudio,
+);
+router.post(
+  '/:callId/recording-repairs/:captureId/finalize',
+  recordingRepairController.finalize,
+);
+router.get(
+  '/:callId/recording-repairs/:captureId',
+  recordingRepairController.getStatus,
+);
 
 router.post('/chat/:externalId/messages', requireInternalCallParticipant, callChatController.sendMessage);
 router.get('/chat/:externalId/messages', requireInternalCallParticipant, callChatController.getMessages);

@@ -57,6 +57,34 @@ interface ElectronAuthData {
 }
 
 const electronAPI = {
+  // Offline-first recorder native filesystem bridge (RecordingFsApi).
+  recordingFs: {
+    pickDirectory: (): Promise<{ granted: boolean }> =>
+      ipcRenderer.invoke('recording-fs:pick-directory'),
+    hasDirectory: (): Promise<boolean> => ipcRenderer.invoke('recording-fs:has-directory'),
+    getDirectory: (): Promise<{ path: string | null }> =>
+      ipcRenderer.invoke('recording-fs:get-directory'),
+    createCapture: (captureId: string, dirName?: string): Promise<void> =>
+      ipcRenderer.invoke('recording-fs:create-capture', { captureId, dirName }),
+    appendFragment: (
+      captureId: string,
+      bytes: ArrayBuffer,
+    ): Promise<{ byteOffset: number; byteLength: number }> =>
+      ipcRenderer.invoke('recording-fs:append', { captureId, bytes }),
+    writeManifest: (captureId: string, manifestJson: string): Promise<void> =>
+      ipcRenderer.invoke('recording-fs:write-manifest', { captureId, manifestJson }),
+    readRange: (captureId: string, byteOffset: number, byteLength: number): Promise<ArrayBuffer> =>
+      ipcRenderer.invoke('recording-fs:read-range', { captureId, byteOffset, byteLength }),
+    finalize: (captureId: string): Promise<void> =>
+      ipcRenderer.invoke('recording-fs:finalize', { captureId }),
+    listPending: (): Promise<Array<{ captureId: string; manifestJson: string }>> =>
+      ipcRenderer.invoke('recording-fs:list-pending'),
+    deleteCapture: (captureId: string): Promise<void> =>
+      ipcRenderer.invoke('recording-fs:delete-capture', { captureId }),
+    freeSpace: (): Promise<{ availableBytes: number | null }> =>
+      ipcRenderer.invoke('recording-fs:free-space'),
+  },
+
   openExternal: (url: string) => {
     ipcRenderer.send('open-external', url);
   },

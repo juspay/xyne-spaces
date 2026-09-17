@@ -96,6 +96,42 @@ export class CallRecordingRepository {
     });
   }
 
+  /**
+   * Register an already-uploaded file (the offline recorder's whole-call
+   * recording.webm, re-transcribed server-side) as an UPLOADED recording so
+   * findLatestUploadedByCallId serves it instead of the egress MP4. Idempotent by
+   * storagePath: a re-run of the redo (client retry) does not insert a duplicate.
+   * endedAt is set to now so this row sorts ahead of the egress row for the call.
+   */
+  async registerUploadedRecording(input: {
+    callId: string; // internal calls.id (FK), NOT the externalId
+    workspaceId: string;
+    recordingType: RecordingType;
+    storagePath: string;
+    startedBy: string;
+    startedAt: Date;
+  }): Promise<void> {
+    const existing = await this.db.callRecording.findFirst({
+      where: { storagePath: input.storagePath },
+      select: { id: true },
+    });
+    if (existing) return;
+    const now = new Date();
+    await this.db.callRecording.create({
+      data: {
+        callId: input.callId,
+        workspaceId: input.workspaceId,
+        recordingType: input.recordingType,
+        status: RecordingStatus.RECORDING_UPLOADED,
+        startedBy: input.startedBy,
+        storagePath: input.storagePath,
+        startedAt: input.startedAt,
+        createdAt: now,
+        endedAt: now,
+      },
+    });
+  }
+
   /** Of the given calls, which have at least one UPLOADED recording. Bulk hasRecording lookup. */
   async callIdsWithRecording(callIds: string[]): Promise<Set<string>> {
     if (callIds.length === 0) return new Set();
