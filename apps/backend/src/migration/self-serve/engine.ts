@@ -31,7 +31,9 @@ import type { SlackMessage } from '@/migration/slack/utils/extractConversation';
 import { postMessage } from '@/migration/slack/utils/postMessage';
 import { getBotConfigByWorkspaceId } from '@/migration/slack/slackMigrationBotConfig';
 import { runWithSlackOfflineReference, type SlackOfflineReference } from '@/integrations/adapters/slack-webhook-tickets/utils/slackOfflineReference';
-import { fetchChannelExtras, ingestChannelExtras, type ChannelExtras } from '@/migration/slack/channelExtras';
+import { listChannelFiles } from '@/migration/slack/channelFiles';
+import { fetchChannelLinks, ingestChannelLinks, type ChannelLink } from '@/migration/slack/channelLinks';
+import { fetchChannelCanvases, ingestChannelCanvases, type ChannelCanvas } from '@/migration/slack/channelCanvases';
 import { encryptStream, decryptStream, encryptBuffer, decryptBuffer } from './migrationCrypto';
 import { getMigrationRuntimeConfig, MIGRATION_DEFAULTS } from './migrationRuntimeConfig';
 import { ChannelInput, MigrationJob, MigrationType } from './types';
@@ -89,7 +91,8 @@ const paths = {
   conversationRefresh: (p: string, id: string, runTs: number) => `${p}/conversations/${id}.r${runTs}.jsonl`,
   conversationsDir: (p: string) => `${p}/conversations/`,
   cursors: (p: string) => `${p}/cursors.json`,
-  extras: (p: string, id: string) => `${p}/extras/${id}.json`,
+  links: (p: string, id: string) => `${p}/links/${id}.json`,
+  canvases: (p: string, id: string) => `${p}/canvases/${id}.json`,
   pins: (p: string, id: string) => `${p}/pins/${id}.json`,
   usergroups: (p: string) => `${p}/usergroups.json`,
   channels: (p: string) => `${p}/channels.json`,
@@ -689,17 +692,25 @@ export class SlackMigrationEngine {
         : await ingestConversationSlack(ingestInput);
       await channelRepo.recalculateLastActivityFromMessages(channelId);
 
-      // Bookmarks / shared links / canvases collected for this conversation → Xyne Link/Canvas (idempotent, non-fatal).
-      const extras = await this.readConversationExtras(job.gcsPrefix, conv.id);
-      if (extras && (extras.links.length || extras.canvases.length)) {
+      // Collected links + canvases → Xyne Link/Canvas (idempotent, non-fatal).
+      const [links, canvases] = await Promise.all([
+        this.readConversationLinks(job.gcsPrefix, conv.id),
+        this.readConversationCanvases(job.gcsPrefix, conv.id),
+      ]);
+      if (links.length || canvases.length) {
         const fallbackUserId = dmOwnerId ?? (job.ownerSlackId ? await resolve(job.ownerSlackId) : undefined);
         if (fallbackUserId) {
-          const r = await ingestChannelExtras(extras, {
+          const target = {
             xyneChannelId: channelId, workspaceId: job.workspaceId,
-            resolveUser: (sid) => (sid ? resolve(sid) : Promise.resolve(undefined)),
+            resolveUser: (sid?: string) => (sid ? resolve(sid) : Promise.resolve(undefined)),
             fallbackUserId,
-          }).catch((e) => { logger.warn('[SlackMigration] extras ingest failed', { convId: conv.id, error: e instanceof Error ? e.message : String(e) }); return null; });
-          if (r) logger.info('[SlackMigration] extras ingested', { convId: conv.id, links: r.links, canvases: r.canvases });
+          };
+          try {
+            const [l, c] = await Promise.all([ingestChannelLinks(links, target), ingestChannelCanvases(canvases, target)]);
+            logger.info('[SlackMigration] resources ingested', { convId: conv.id, links: l, canvases: c });
+          } catch (e) {
+            logger.warn('[SlackMigration] resources ingest failed', { convId: conv.id, error: e instanceof Error ? e.message : String(e) });
+          }
         }
       }
 
@@ -756,15 +767,23 @@ export class SlackMigrationEngine {
     return this.writeJson(paths.cursors(gcsPrefix), cursors);
   }
 
-  /** Collect a conversation's bookmarks/links/canvases from Slack → GCS, so they survive the approve→ingest gap. Fail-soft. */
-  async collectConversationExtras(token: string, convId: string, gcsPrefix: string): Promise<void> {
+  /** Collect a conversation's links + canvases from Slack → GCS (one files.list, shared), so they survive approve→ingest. Fail-soft. */
+  async collectConversationResources(token: string, convId: string, gcsPrefix: string): Promise<void> {
     const cfg = await getMigrationRuntimeConfig();
-    const extras = await fetchChannelExtras(slackClient(token, cfg.requestTimeoutMs), token, convId);
-    if (extras.links.length || extras.canvases.length) await this.writeJson(paths.extras(gcsPrefix, convId), extras);
+    const client = slackClient(token, cfg.requestTimeoutMs);
+    const files = await listChannelFiles(client, convId);
+    const links = await fetchChannelLinks(client, convId, files);
+    const canvases = await fetchChannelCanvases(token, files);
+    if (links.length) await this.writeJson(paths.links(gcsPrefix, convId), links);
+    if (canvases.length) await this.writeJson(paths.canvases(gcsPrefix, convId), canvases);
   }
 
-  private readConversationExtras(gcsPrefix: string, convId: string): Promise<ChannelExtras | null> {
-    return this.readJson<ChannelExtras>(paths.extras(gcsPrefix, convId)).catch(() => null);
+  private readConversationLinks(gcsPrefix: string, convId: string): Promise<ChannelLink[]> {
+    return this.readJson<ChannelLink[]>(paths.links(gcsPrefix, convId)).catch(() => []);
+  }
+
+  private readConversationCanvases(gcsPrefix: string, convId: string): Promise<ChannelCanvas[]> {
+    return this.readJson<ChannelCanvas[]>(paths.canvases(gcsPrefix, convId)).catch(() => []);
   }
 
   writeManifest(gcsPrefix: string, conversations: CollectedConversation[]): Promise<void> {

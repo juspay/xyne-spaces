@@ -171,7 +171,7 @@ export class MigrationWorkers {
         continue;
       }
       await this.store.addCollected(job.id, conv.id, isChannel ? 0 : result.messages); // channel count already live via setChannelProgress
-      await this.engine.collectConversationExtras(token, conv.id, job.gcsPrefix).catch(() => undefined); // bookmarks/links/canvases
+      await this.engine.collectConversationResources(token, conv.id, job.gcsPrefix).catch(() => undefined); // bookmarks/links/canvases
       if (result.newestTs > 0) cursors[conv.id] = result.newestTs; // remember the newest ts so refresh only fetches the delta
       collected += 1;
       messages += result.messages;
@@ -248,7 +248,7 @@ export class MigrationWorkers {
         continue;
       }
       if (result.newestTs > 0) cursors[conv.id] = Math.max(cursors[conv.id] ?? 0, result.newestTs);
-      await this.engine.collectConversationExtras(token, conv.id, job.gcsPrefix).catch(() => undefined); // re-collect bookmarks/links/canvases
+      await this.engine.collectConversationResources(token, conv.id, job.gcsPrefix).catch(() => undefined); // re-collect bookmarks/links/canvases
       newMessages += result.messages;
       if (result.messages > 0) refreshedConvs += 1;
       if (isNew) { newConvs += 1; await this.store.addCollected(job.id, conv.id, isChannel ? 0 : result.messages); }

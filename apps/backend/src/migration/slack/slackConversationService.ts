@@ -20,7 +20,9 @@ import { WebClient } from '@slack/web-api';
 import { config } from '../../config/env';
 import { getBotConfigByWorkspaceId } from './slackMigrationBotConfig';
 import { buildSlackMigrationSourceName } from './slackMigrationSource';
-import { fetchChannelExtras, ingestChannelExtras } from './channelExtras';
+import { listChannelFiles } from './channelFiles';
+import { fetchChannelLinks, ingestChannelLinks } from './channelLinks';
+import { fetchChannelCanvases, ingestChannelCanvases } from './channelCanvases';
 import { vespaBackfillQueue } from '@/queues/vespaQueue';
 import { channelSchema } from '@/vespa/src/types';
 import { db } from '@/database/client';
@@ -1077,25 +1079,28 @@ export async function runMigration(input: MigrationInput): Promise<MigrationResu
 
       // Bookmarks / shared links / canvases — not covered by the message pipeline. Idempotent, non-fatal.
       try {
-        const extrasChannel = await new ChannelRepository().findById(input.xyneSpaceChannelId);
+        const resourceChannel = await new ChannelRepository().findById(input.xyneSpaceChannelId);
         const slackToXyne = new Map(resolvedUsers.usersToBeAdded.map((u) => [u.slackUserId, u.xyneUserId]));
         const fallbackUserId = (resolvedUsers.channelCreatorSlackId && slackToXyne.get(resolvedUsers.channelCreatorSlackId))
           || resolvedUsers.usersToBeAdded[0]?.xyneUserId;
-        if (extrasChannel?.workspaceId && fallbackUserId && input.channelId) {
+        if (resourceChannel?.workspaceId && fallbackUserId && input.channelId) {
           const client = new WebClient(wsConfig.slackBotToken);
-          const extras = await fetchChannelExtras(client, wsConfig.slackBotToken, input.channelId);
-          if (extras.links.length || extras.canvases.length) {
-            const r = await ingestChannelExtras(extras, {
-              xyneChannelId: input.xyneSpaceChannelId,
-              workspaceId: extrasChannel.workspaceId,
-              resolveUser: (sid) => Promise.resolve(sid ? slackToXyne.get(sid) : undefined),
-              fallbackUserId,
-            });
-            logger.info('[Migration] channel extras synced', { channelId: input.xyneSpaceChannelId, links: r.links, canvases: r.canvases });
-          }
+          const files = await listChannelFiles(client, input.channelId);
+          const [links, canvases] = await Promise.all([
+            fetchChannelLinks(client, input.channelId, files),
+            fetchChannelCanvases(wsConfig.slackBotToken, files),
+          ]);
+          const target = {
+            xyneChannelId: input.xyneSpaceChannelId,
+            workspaceId: resourceChannel.workspaceId,
+            resolveUser: (sid?: string) => Promise.resolve(sid ? slackToXyne.get(sid) : undefined),
+            fallbackUserId,
+          };
+          const [l, c] = await Promise.all([ingestChannelLinks(links, target), ingestChannelCanvases(canvases, target)]);
+          logger.info('[Migration] channel resources synced', { channelId: input.xyneSpaceChannelId, links: l, canvases: c });
         }
       } catch (error) {
-        logger.warn('[Migration] channel extras sync failed (non-fatal)', {
+        logger.warn('[Migration] channel resources sync failed (non-fatal)', {
           channelId: input.xyneSpaceChannelId, error: error instanceof Error ? error.message : String(error),
         });
       }
