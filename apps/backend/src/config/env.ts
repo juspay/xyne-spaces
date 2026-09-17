@@ -105,7 +105,6 @@ const envSchema = Joi.object({
   ENABLE_STAGE_ETA_DEADLINE_WORKER: Joi.boolean().default(false),
   ENABLE_ETA_DEADLINE_WORKER: Joi.boolean().default(false),
   ENABLE_AUTOMATION_WORKER: Joi.boolean().default(false),
-  AUTOMATION_CONCURRENCY_OVERRIDE: Joi.boolean().default(false),
   AUTOMATION_WORKER_CONCURRENCY: Joi.number().integer().min(1).max(10).default(1),
   ENABLE_DELAYED_MESSAGE_WORKER: Joi.boolean().default(false),
   ENABLE_EMAIL_FETCH_WORKER: Joi.boolean().default(false),
@@ -1020,9 +1019,7 @@ export const config = {
   workerSchedulerEnabled: envVars.ENABLE_WORKER_SCHEDULER,
 
   automations: {
-    workerConcurrency: envVars.AUTOMATION_CONCURRENCY_OVERRIDE
-      ? (envVars.AUTOMATION_WORKER_CONCURRENCY as number)
-      : 1,
+    workerConcurrency: envVars.AUTOMATION_WORKER_CONCURRENCY as number,
   },
 
   workflows: {
