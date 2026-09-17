@@ -29,7 +29,7 @@ export const ConnectedAppsSection: React.FC<ConnectedAppsSectionProps> = ({
     appName: string | null;
   } | null>(null);
 
-  const { data: connectedApps, isLoading, isError } = useChannelApps(channelId);
+  const { data: connectedApps, isLoading, isError } = useChannelApps(channelId, canManage);
 
   const { data: eligibleApps, isLoading: isLoadingEligibleApps } = useQuery({
     queryKey: ['app-desk-eligible-apps'],
@@ -82,6 +82,11 @@ export const ConnectedAppsSection: React.FC<ConnectedAppsSectionProps> = ({
     () => new Set((connectedApps ?? []).filter(a => a.isActive).map(a => a.installedAppId)),
     [connectedApps],
   );
+
+  // Backend restricts the apps endpoint to managers, and non-managers have no
+  // actions here, so hide the section entirely.
+  if (!canManage) return null;
+
   const connectableApps = (eligibleApps ?? []).filter(
     a => !activeConnectedIds.has(a.installedAppId),
   );

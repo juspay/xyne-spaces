@@ -8,7 +8,7 @@ import { detectMentionTrigger, detectChannelTrigger, createVirtualAnchor } from 
 import { mentionPluginKey, channelMentionPluginKey } from '../TipTapExtensions';
 import { BasePopoverSelector, type BaseSelectorPluginState } from './BasePopoverSelector';
 import { useUser } from '../../../hooks/useUsers';
-import { isStatusExpired } from '../../../utils/statusUtils';
+import { resolveUserStatus } from '../../../utils/statusUtils';
 import { renderEmoji } from '../../../utils/customEmojiUtils';
 
 /**
@@ -17,9 +17,9 @@ import { renderEmoji } from '../../../utils/customEmojiUtils';
  */
 const UserAvatarItem: React.FC<{ item: MentionResult }> = ({ item }) => {
   const user = useUser(item.id);
-  const hasValidStatus =
-    user?.statusEmoji && (!user.statusExpiryAt || !isStatusExpired(user.statusExpiryAt));
-  const statusText = hasValidStatus && user?.statusContent ? user.statusContent : undefined;
+  const status = resolveUserStatus(user);
+  const hasValidStatus = status.hasStatus;
+  const statusText = status.content ?? undefined;
   const isDeactivated = user?.status === UserStatus.INACTIVE || item.isDeactivated;
 
   return (
@@ -33,7 +33,7 @@ const UserAvatarItem: React.FC<{ item: MentionResult }> = ({ item }) => {
             {item.name}
           </span>
           {hasValidStatus && !isDeactivated && (
-            <span className='inline-flex flex-shrink-0'>{renderEmoji(user.statusEmoji || '')}</span>
+            <span className='inline-flex flex-shrink-0'>{renderEmoji(status.emoji)}</span>
           )}
           {statusText && !isDeactivated && (
             <span className='text-sm text-muted-foreground whitespace-nowrap overflow-hidden text-ellipsis'>

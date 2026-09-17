@@ -5,6 +5,7 @@ import { useZero } from '../../../hooks/useZero';
 import { mutators } from '../../../zero/mutators';
 import { getPriorityIcon } from '../TicketCard/TicketCard.utils';
 import { surfaceMutationError } from '../../../utils/zeroMutationToast';
+import { trackTicketOutcome } from '../../../services/Analytics/ticketTracking';
 import { cn } from '../../../utils/classNames';
 
 interface PriorityPickerProps {
@@ -39,7 +40,19 @@ export function PriorityPicker({
           mutators.ticket.update({ id: ticketId, priority: next, updatedAt: Date.now() }),
         ),
         'Failed to update priority',
-      );
+      ).then(ok => {
+        if (ok) {
+          trackTicketOutcome(
+            'TICKET_PRIORITY_CHANGED',
+            { id: ticketId },
+            {
+              surface: 'list_inline',
+              to: next,
+              previous: current,
+            },
+          );
+        }
+      });
     }
     setOpen(false);
   };

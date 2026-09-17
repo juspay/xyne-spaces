@@ -488,6 +488,7 @@ model WorkflowExecution {
   workflowExecutionLock   WorkflowExecutionLock?
   externalStepResponses   ExternalStepResponse[]
   pullRequests            PullRequests[]
+  /// @deprecated -> back-relation of the legacy repos.sdlcSetupExecutionId
   sdlcRepo                Repo?                  @relation("RepoSetupExecution")
 
   @@index([workflowId])
@@ -629,7 +630,8 @@ model WorkflowCredential {
   workspaceId String // denormalized tenant key (stamped on insert)
   id          String @id @default(cuid())
   name        String
-  credType    String // bearer | basic | custom_header | oauth2_client_credentials
+  credType    String // the connector's credential type, e.g. BUILTIN_BEARER
+  authType    String // stored value shape: bearer | basic | custom_header | oauth2_client_credentials | secret
   data        String // ENCRYPTED JSON — auth values
   status      String // ACTIVE | REVOKED — set explicitly, see WorkflowFolder
   createdAt   DateTime
@@ -866,6 +868,7 @@ model User {
   notificationsPausedUntil DateTime? // @see user_presence.notificationsPausedUntil
   assignmentUnavailableUntil DateTime? // @see user_presence.assignmentUnavailableUntil
   calendarVisibility String             @default("PUBLIC")
+  activityStatus String?
 
   // Relations
   workspace                 Workspace             @relation(fields: [workspaceId], references: [id])
@@ -914,6 +917,7 @@ model User {
   @@index([providerUserId])
 
   @@index([workspaceId, id])
+  @@index([activityStatus])
   @@map("users")
   @@schema("public")
 }
@@ -1885,6 +1889,10 @@ model ChannelStats {
   channel          Channel               @relation(fields: [channelId], references: [id])
 
   @@index([channelId])
+  // Recency-ordered pagination (dmChannelsLatestMessagesPaginated and friends):
+  // lets ORDER BY lastActivityAt DESC walk the index so take(N) bounds the scan
+  // instead of a full-table temp-sort on every hydration.
+  @@index([workspaceId, lastActivityAt(sort: Desc), channelId(sort: Desc)])
   @@map("channel_stats")
   @@schema("public")
 }
@@ -2281,6 +2289,7 @@ model EmailChannelPreference {
   workspaceId            String
   metricsEnabled         Boolean? // Gates the desk metrics dashboard
   frtStageNames          String?  // JSON-serialised string[] of stage names whose first entry stops the FRT clock
+  metricsGuestVisibility String?  // JSON DeskMetricsResponse.guestVisibility: what guests see on the metrics dashboard
   appWebhookDeliveryEnabled Boolean @default(true) // APP desks only: off means replies are stored without ever calling the app webhook
   deskReportEnabled      Boolean? @default(false) // Gates the scheduled desk-report cron + sidebar panel
   deskReportAgentSlug    String?
@@ -2373,6 +2382,9 @@ model Message {
   @@index([msgType, createdAt])
 
   @@index([conversationId, createdAt, messageId])
+  // Zero's related-messages source fill runs `WHERE conversationId = ? ORDER BY
+  // messageId` — without this, every thread fetch pays a temp B-tree sort.
+  @@index([conversationId, messageId])
   @@map("messages")
   @@schema("public")
 }
@@ -3247,7 +3259,10 @@ model Link {
   createdAt   DateTime       @default(now())
   updatedAt   DateTime       @updatedAt
 
-  @@unique([createdBy, url, channelId]) // No duplicate URLs per user per channel
+  // Deliberately not unique: the same reference is filed in several SDLC folders
+  // as a matter of course. Channel link lists still refuse duplicates, enforced in
+  // the createLink mutator rather than by the database.
+  @@index([createdBy, url, channelId])
   @@index([channelId, visibility]) // Fast lookup of channel links by visibility
   @@index([channelId, createdBy]) // Fast lookup of user's links in channel
   @@map("links")
@@ -3308,12 +3323,14 @@ model Repo {
   projectId            String?
   /// @deprecated -> membership is the CHANNEL -> REPOSITORY edge in sdlc_entity_links; never written since multi-repo
   channelId            String?
+  /// @deprecated -> written only by the removed SDLC worker
   sdlcSetupExecutionId String? @unique
   accessCapabilities   Json?
 
   project         Project?           @relation(fields: [projectId], references: [id], onDelete: Cascade)
   /// @deprecated -> navigation for the legacy channelId; SetNull so deleting a channel keeps the repository
   channel         Channel?           @relation("RepoSdlcChannel", fields: [channelId], references: [id], onDelete: SetNull)
+  /// @deprecated -> navigation for the legacy sdlcSetupExecutionId
   setupExecution  WorkflowExecution? @relation("RepoSetupExecution", fields: [sdlcSetupExecutionId], references: [id], onDelete: SetNull)
   /// @deprecated -> back-relation of the legacy sdlc_entity_links.repoId
   sdlcEntityLinks SdlcEntityLink[]

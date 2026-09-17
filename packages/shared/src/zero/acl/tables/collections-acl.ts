@@ -34,8 +34,10 @@ export class CollectionsACL extends BaseQueryACL<'collections'> {
           // permission row keyed by channelId instead of userGroupId.
           // Mirrors canvas-participants-acl.ts's own channel check.
           exists('permissions', (p) =>
+            // Pin the join direction — see tickets-acl.ts for the full rationale.
             p.whereExists('channel', (ch) =>
               ch.whereExists('participants', (cp) => cp.where('userId', this.ctx.userID)),
+              { flip: false },
             ),
           ),
         )
