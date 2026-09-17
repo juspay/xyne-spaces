@@ -13,7 +13,7 @@ bundle and the main backend build and behave exactly as they did before.
 ## Shape
 
 ```
-                       one origin: app.spaces.xyne.juspay.net
+                       one origin: app.spaces.example.com
                                       │
         ┌─────────────────────────────┼──────────────────────────────┐
         │      edge (prod: GKE Ingress · sandbox: GCLB → NEGs)         │
@@ -51,7 +51,7 @@ lane to a subdomain, or switch routing to a cookie, without revisiting all three
 
 Every SDLC service answers on its prefix directly, so the edge only has to
 *match and forward*. In production that is a hard requirement, not a preference:
-the GCE-class Ingress fronting `spaces.xyne.juspay.net` has no rewrite capability
+the GCE-class Ingress fronting `spaces.example.com` has no rewrite capability
 at all, which is exactly why `/api/` and `/zero/` reach their services unrewritten
 today.
 
@@ -69,7 +69,7 @@ The two clusters differ, so check which one you are targeting.
 
 ### Production — a GKE Ingress with plain prefix rules
 
-`xyne-ing` in `xyne-apps` fronts `spaces.xyne.juspay.net`. It is a GCE-class
+`xyne-ing` in `xyne-apps` fronts `spaces.example.com`. It is a GCE-class
 Ingress (pre-shared cert, `k8s1-…` NEG backends) and every existing rule is a
 plain `Prefix` → Service with **no rewrite annotation**:
 

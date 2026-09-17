@@ -1,5 +1,8 @@
 # VictoriaMetrics Scrape Configuration
 # Built-in scraper (replaces vmagent)
+#
+# Targets default to a local VictoriaMetrics pair. If your dev environment
+# scrapes a shared remote metrics host instead, point the targets below at it.
 
 global:
   scrape_interval: 15s
@@ -11,7 +14,7 @@ scrape_configs:
     params:
       consumer: ['vespa']
     static_configs:
-      - targets: ['10.0.0.27:8080', '10.0.0.27:8081']
+      - targets: ['localhost:8080', 'localhost:8081']
         labels:
           env: 'development'
           service: 'vespa'
