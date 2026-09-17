@@ -176,7 +176,7 @@ memoryRouter.post("/agent-file", requireAuth, async (req, res) => {
       const current = await getAgentFile(agentSlug, userId, name);
       finalContent = current?.content ? `${current.content.trimEnd()}\n\n${content.trim()}` : content.trim();
     }
-    const file = await upsertAgentFile({ agentSlug, userId, name, content: finalContent, updatedBy: "agent" });
+    const file = await upsertAgentFile({ agentSlug, owner: userId, name, content: finalContent, updatedBy: "agent" });
     res.json({
       success: true,
       data: { file: { name: file.name, chars: file.content.length, maxChars: MAX_FILE_CHARS } },

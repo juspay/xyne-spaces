@@ -100,13 +100,18 @@ model User {
 /// agent mid-chat. userId NULL = shared across all users of that agent.
 model AgentMemoryFile {
   id           String   @id @default(cuid())
+  /// Tenant that owns this file. Inherited from `userId` for per-user files and
+  /// stated outright for shared ones: agent slugs are only unique inside an org
+  /// (see Agent.@@unique([orgId, slug])), so without this two tenants' agents
+  /// named alike share one row and each overwrites the other.
+  orgId        String
   /// Which agent these files belong to (agent slug, e.g. "digital-twin").
   agentSlug    String
   /// Owner user for per-user agents (the twin). NULL = shared across all users
   /// of this agent (regular agent knowledge files).
   userId       String?
   user         User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
-  /// Stable name / key, unique per (agent, user). Ends in `.md` by convention.
+  /// Stable name / key, unique per (org, agent, user). Ends in `.md` by convention.
   name         String
   /// Verbatim document content (≤ 20k chars, enforced in the app layer).
   content      String   @default("")
@@ -122,7 +127,7 @@ model AgentMemoryFile {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  @@unique([agentSlug, userId, name])
+  @@unique([orgId, agentSlug, userId, name])
   @@index([agentSlug, userId, loadInPrompt])
   @@map("agent_memory_files")
 }
