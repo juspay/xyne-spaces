@@ -32,6 +32,7 @@ import {
 import {
   ActivityClassification,
   AttachmentEntityType,
+  CallOrigin,
   CallStatus,
   CanvasVisibility,
   ChannelRole,
@@ -2469,6 +2470,40 @@ export const queries = defineQueries({
         .where('channelId', channelId)
         .where('status', CallStatus.ACTIVE)
         .orderBy('startedAt', 'desc')
+        .related('participants');
+    },
+  ),
+
+  /**
+   * Calls backing the read-only scheduled-call pills in one channel.
+   *
+   * The pill message is only an anchor: everything the card renders — title, organizer,
+   * times, status — is read from here. That is what lets a cancel or a time/title edit
+   * re-render the card with no write to the message, which matters because
+   * `mutators.calls.cancel` never reaches the backend.
+   *
+   * Bounded, because pills persist in scroll-back forever. A card whose call falls
+   * outside the window renders a muted fallback rather than holding an unbounded
+   * subscription open. Origins are filtered to the two Xyne-native ones — external
+   * calendar events never get a pill, and `xyneManaged` ones carry a real channelId,
+   * so filtering on "has a channel" would leak them.
+   */
+  scheduledCallPillCalls: defineQuery(
+    z.object({ channelId: z.string(), limit: z.number() }),
+    ({ args: { channelId, limit } }) => {
+      return zql.calls
+        .where('channelId', channelId)
+        .where('callType', '!=', CallType.HEADLESS)
+        .where('isRecurring', false)
+        .where(helpers =>
+          helpers.or(
+            helpers.cmp('callOrigin', CallOrigin.CHANNEL),
+            helpers.cmp('callOrigin', CallOrigin.CONVERSATION),
+          ),
+        )
+        .orderBy('startsAt', 'desc')
+        .limit(limit)
+        .related('createdByUser')
         .related('participants');
     },
   ),
