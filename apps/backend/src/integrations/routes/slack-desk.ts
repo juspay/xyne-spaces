@@ -8,16 +8,22 @@
  */
 
 import express, { Request, Response } from 'express';
-import { ChannelType } from '@xyne/shared';
+import { isDeskChannelType } from '@xyne/shared';
 import { WORKSPACE_LEVEL } from '@/integrations/core/sourceScope';
 import { authV2Middleware } from '@/middleware/authV2Middleware';
 import { db } from '@/database/client';
 import { WebClient } from '@slack/web-api';
 import { logger } from '@/utils/logger';
 import { slackDeskService } from '@/services/slackDeskService';
-import { DESK_SOURCE_PREFIXES, extractSlackChannelId } from '@/integrations/core/deskSources';
-import { decrypt } from '@/services/encryptionService';
+import {
+  DESK_SOURCE_PREFIXES,
+  buildSlackDeskSourceName,
+  extractSlackChannelId,
+} from '@/integrations/core/deskSources';
+import { decrypt, encrypt } from '@/services/encryptionService';
 import { redisService } from '@/services/redisService';
+import { validateZod } from '@/middleware/validation';
+import { z } from 'zod';
 
 const TAG = '[SlackDesk]';
 const router = express.Router();
@@ -170,8 +176,8 @@ router.post(
         return;
       }
 
-      if (channel.type !== ChannelType.SLACK) {
-        res.status(400).json({ error: 'Channel is not a Slack desk' });
+      if (!isDeskChannelType(channel.type)) {
+        res.status(400).json({ error: 'Channel is not a desk' });
         return;
       }
 
@@ -190,7 +196,7 @@ router.post(
 
       // Deactivate ExternalSource
       const source = await db.externalSource.findFirst({
-        where: { channelId, isActive: true },
+        where: { channelId, isActive: true, sourceType: 'slack-desk' },
         select: { id: true },
       });
 
@@ -296,6 +302,139 @@ router.get(
     } catch (error) {
       logger.error(`${TAG} Error fetching Slack users`, { error });
       res.status(500).json({ error: 'Failed to fetch Slack users' });
+    }
+  }
+);
+
+/** Desk-owner gate, same rule as `/:channelId/disconnect`, but with a workspace check. */
+async function authorizeSlackDeskManager(
+  channelId: string,
+  userId: string,
+  workspaceId: string,
+  res: Response,
+): Promise<string | null> {
+  const channel = await db.channel.findUnique({
+    where: { id: channelId },
+    select: { name: true, createdBy: true, type: true, workspaceId: true },
+  });
+  // 404 on workspace mismatch too — don't leak cross-workspace channel existence.
+  if (!channel || channel.workspaceId !== workspaceId) {
+    res.status(404).json({ error: 'Channel not found' });
+    return null;
+  }
+  if (!isDeskChannelType(channel.type)) {
+    res.status(400).json({ error: 'Channel is not a desk' });
+    return null;
+  }
+  if (channel.createdBy !== userId) {
+    const pref = await db.emailChannelPreference.findUnique({
+      where: { channelId },
+      select: { ownerUserId: true },
+    });
+    if (pref?.ownerUserId !== userId) {
+      res.status(403).json({ error: 'Only the desk owner can manage this integration' });
+      return null;
+    }
+  }
+  return channel.name;
+}
+
+/** GET — active bindings only; the /channels picker re-offers disconnected ones. */
+router.get(
+  '/channels/:channelId/slack',
+  authV2Middleware.authenticate,
+  async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { channelId } = req.params;
+      if (!(await authorizeSlackDeskManager(channelId, req.user!.id, req.user!.workspaceId!, res)))
+        return;
+
+      const sources = await db.externalSource.findMany({
+        where: { channelId, sourceType: 'slack-desk', isActive: true },
+        select: { id: true, name: true },
+      });
+      res.json({
+        slackChannels: sources.map(s => ({
+          sourceId: s.id,
+          slackChannelId: extractSlackChannelId(s.name),
+        })),
+      });
+    } catch (error) {
+      logger.error(`${TAG} Error listing desk Slack bindings`, { error });
+      res.status(500).json({ error: 'Failed to list Slack channels for this desk' });
+    }
+  }
+);
+
+/** POST — credentials are copied from the workspace-level source, as channel creation does. */
+router.post(
+  '/channels/:channelId/slack',
+  authV2Middleware.authenticate,
+  validateZod(z.object({ slackChannelId: z.string().trim().min(1) })),
+  async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { channelId } = req.params;
+      const { slackChannelId } = req.body as { slackChannelId: string };
+      const workspaceId = req.user!.workspaceId!;
+
+      const deskName = await authorizeSlackDeskManager(channelId, req.user!.id, workspaceId, res);
+      if (!deskName) return;
+
+      const workspaceSource = await db.externalSource.findFirst({
+        where: { workspaceId, ...WORKSPACE_LEVEL, sourceType: 'slack', isActive: true },
+      });
+      if (!workspaceSource) {
+        res.status(503).json({ error: 'Slack is not connected for this workspace. Please connect Slack first.' });
+        return;
+      }
+      const creds = JSON.parse(decrypt(workspaceSource.credentials)) as {
+        signingSecret?: string;
+        botOauthToken?: string;
+      };
+      const credentials = encrypt(JSON.stringify({
+        signingSecret: creds.signingSecret,
+        botOauthToken: creds.botOauthToken,
+      }));
+
+      // One binding per desk (sendSlackReply stays unambiguous) and one desk per Slack
+      // channel (ingest resolves by name); repointing either would orphan other tickets.
+      const name = buildSlackDeskSourceName(slackChannelId);
+      const clash = await db.externalSource.findFirst({
+        where: {
+          workspaceId,
+          sourceType: 'slack-desk',
+          isActive: true,
+          OR: [{ channelId, NOT: { name } }, { name, NOT: { channelId } }],
+        },
+        select: { name: true },
+      });
+      if (clash) {
+        res.status(409).json({
+          error: clash.name === name
+            ? 'This Slack channel is already connected to another desk'
+            : 'This desk already has a Slack channel connected',
+        });
+        return;
+      }
+
+      const source = await db.externalSource.upsert({
+        where: { name },
+        update: { isActive: true, credentials, channelId, displayName: deskName },
+        create: {
+          name,
+          sourceType: 'slack-desk',
+          displayName: deskName,
+          channelId,
+          credentials,
+          isActive: true,
+          workspaceId,
+        },
+      });
+
+      res.status(201).json({ slackChannel: { sourceId: source.id, slackChannelId } });
+    } catch (error) {
+      logger.error(`${TAG} Error connecting Slack channel to desk`, { error });
+      res.status(500).json({ error: 'Failed to connect Slack channel' });
     }
   }
 );
