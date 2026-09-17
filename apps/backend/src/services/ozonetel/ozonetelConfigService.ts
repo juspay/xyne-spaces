@@ -18,6 +18,7 @@ export interface OzonetelTicketRules {
   createTicketOnProgressive?: boolean;
   createTicketOnPredictive?: boolean;
   ticketSubjectTemplate?: string;
+  customerPhoneFieldName?: string;
 }
 
 export interface OzonetelConfig {
@@ -54,6 +55,7 @@ function normalizeTicketRules(
   if (!input) return undefined;
 
   const defaultChannelId = input.defaultChannelId?.trim() || undefined;
+  const customerPhoneFieldName = input.customerPhoneFieldName?.trim() || undefined;
   const campaignRouting = Object.fromEntries(
     Object.entries(input.campaignRouting ?? {})
       .map(([campaignName, channelId]) => [campaignName.trim(), channelId.trim()])
@@ -63,11 +65,15 @@ function normalizeTicketRules(
   const normalized: OzonetelTicketRules = {
     ...input,
     ...(defaultChannelId ? { defaultChannelId } : {}),
+    ...(customerPhoneFieldName ? { customerPhoneFieldName } : {}),
     ...(Object.keys(campaignRouting).length > 0 ? { campaignRouting } : {}),
   };
 
   if (!defaultChannelId) {
     delete normalized.defaultChannelId;
+  }
+  if (!customerPhoneFieldName) {
+    delete normalized.customerPhoneFieldName;
   }
   if (Object.keys(campaignRouting).length === 0) {
     delete normalized.campaignRouting;
