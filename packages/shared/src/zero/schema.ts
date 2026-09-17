@@ -1659,6 +1659,7 @@ export const emailChannelPreferenceTable = table('email_channel_preferences')
     autoDraftMode: enumeration<AutoDraftMode>().optional(),
     deskType: enumeration<DeskType>(),
     dlEmail: string().optional(),
+    dlAliases: string().optional(),
     workspaceId: string(),
     autoDraftAgentSlug: string().optional(),
     metricsEnabled: boolean().optional(),

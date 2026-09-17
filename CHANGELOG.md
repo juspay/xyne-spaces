@@ -1,3 +1,38 @@
+## [1.336.1](https://github.com/juspay/xyne-spaces/compare/v1.336.0...v1.336.1) (2026-09-17)
+
+
+### Bug Fixes
+
+* thread panel crash on non-ticket threads + quarantine flaky admin-navigation suite ([#1937](https://github.com/juspay/xyne-spaces/issues/1937)) ([b1fe283](https://github.com/juspay/xyne-spaces/commit/b1fe283cd1c55724218da6770eb065c236846029))
+
+## [1.336.0](https://github.com/juspay/xyne-spaces/compare/v1.335.0...v1.336.0) (2026-09-17)
+
+
+### Features
+
+* dl aliases support ([#1896](https://github.com/juspay/xyne-spaces/issues/1896)) ([87412a3](https://github.com/juspay/xyne-spaces/commit/87412a3dfeb446480385f901064af059f42c3883))
+
+## [1.335.0](https://github.com/juspay/xyne-spaces/compare/v1.334.1...v1.335.0) (2026-09-17)
+
+
+### Features
+
+* inline view rename and star toggle ([#1961](https://github.com/juspay/xyne-spaces/issues/1961)) ([8a3bb86](https://github.com/juspay/xyne-spaces/commit/8a3bb867049346251095902151b93a0074f83733))
+
+## [1.334.1](https://github.com/juspay/xyne-spaces/compare/v1.334.0...v1.334.1) (2026-09-17)
+
+
+### Bug Fixes
+
+* dispatch desk report via scoped claw agent lookup ([#1901](https://github.com/juspay/xyne-spaces/issues/1901)) ([c121138](https://github.com/juspay/xyne-spaces/commit/c121138044a6fe61dd6486cfa6eabf992baf0015))
+
+## [1.334.0](https://github.com/juspay/xyne-spaces/compare/v1.333.1...v1.334.0) (2026-09-17)
+
+
+### Features
+
+* timeline view for calls ([#1349](https://github.com/juspay/xyne-spaces/issues/1349)) ([3c7754f](https://github.com/juspay/xyne-spaces/commit/3c7754fc70a688aa396e88c1f6f6c43327996864))
+
 ## [1.333.1](https://github.com/juspay/xyne-spaces/compare/v1.333.0...v1.333.1) (2026-09-17)
 
 

@@ -32,6 +32,7 @@ import {
   BarchartDefault as BarChart3,
   BookmarkDefault as Bookmark,
   Share02 as Share2,
+  Star,
   GitBranch,
   PencilEdit as Pencil,
   CheckTickCircle as CheckCircle2,
@@ -206,6 +207,7 @@ import {
 import { v4 as uuidv4 } from 'uuid';
 import AcOnSlow from '../../assets/icons/AcOnSlowIcon';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
+import { useViewStar } from '../../hooks/useViewStar';
 import { useUsers } from '../../hooks/useUsers';
 import { useUserGroups } from '../../hooks/useUserGroup';
 import { stateMachineActor } from '../../machines/stateMachine';
@@ -348,6 +350,7 @@ interface BoardKanbanScreenProps {
   initialColumns?: string[];
   /** Version of the saved view (config updatedAt) — bumps when the owner updates it. */
   initialViewVersion?: number;
+  isStarred?: boolean;
 }
 
 type GroupByType = 'none' | 'assignee' | 'status' | 'priority' | FormFieldGroup;
@@ -451,6 +454,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   initialGroupBy,
   initialColumns,
   initialViewVersion,
+  isStarred,
   hasSharedSeed,
 }) => {
   const { projectId: projectIdParam, boardId } = useParams<{
@@ -1245,6 +1249,8 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     setGroupBy(initialGroupBy ? parseGroupBy(initialGroupBy) : 'none');
     setVisibleColumns(prev => mergeSavedColumns(prev, initialColumns ?? DEFAULT_VISIBLE_COLUMNS));
   }, [viewDraftKey, initialFilters, initialGroupBy, initialColumns, setFilters, setGroupBy]);
+
+  const { toggleStar } = useViewStar();
 
   const [isShareViewDialogOpen, setIsShareViewDialogOpen] = useState(false);
 
@@ -4052,7 +4058,29 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
         {(effectiveProjectId || viewMode === 'my-tickets' || isWorkspaceView) && (
           <div className='flex-1 min-w-0'>
             <TicketFiltersDropdown
-              startSlot={projectsScreenContext?.leftHeaderSlot}
+              startSlot={
+                <>
+                  {projectsScreenContext?.leftHeaderSlot}
+                  {viewId && isStarred !== undefined && (
+                    <Button
+                      variant='outline'
+                      size='iconSm'
+                      onClick={() => toggleStar({ id: viewId, isStarred })}
+                      className='rounded-[10px] border-border hover:bg-muted'
+                      aria-label={isStarred ? 'Unstar view' : 'Star view'}
+                      data-track-category='Projects'
+                      data-track-name='StarView'
+                    >
+                      <Star
+                        className={cn(
+                          'size-3 text-muted-foreground',
+                          isStarred && 'fill-current text-status-pending',
+                        )}
+                      />
+                    </Button>
+                  )}
+                </>
+              }
               filters={filters}
               onFiltersChange={setFilters}
               projectId={

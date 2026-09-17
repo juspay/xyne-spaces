@@ -2286,6 +2286,7 @@ model EmailChannelPreference {
   autoDraftAgentSlug     String?
   deskType               String   @default("EMAIL")
   dlEmail                String?
+  dlAliases              String?  // JSON-serialised string[] of extra addresses that route into this desk
   workspaceId            String
   metricsEnabled         Boolean? // Gates the desk metrics dashboard
   frtStageNames          String?  // JSON-serialised string[] of stage names whose first entry stops the FRT clock

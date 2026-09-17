@@ -78,7 +78,8 @@ router.get('/:callId/download-transcript', callController.downloadTranscript);
 // Download recording endpoint (streams the call's latest recording — legacy/headless player)
 router.get('/:callId/download-recording', callController.downloadRecording);
 
-// In-call recordings (call_recordings table) — per-recording download, rename, delete
+// In-call recordings (call_recordings table) — list, per-recording download, rename, delete
+router.get('/:callId/recordings', callController.listCallRecordings);
 router.get('/:callId/recordings/:recordingId/download', callController.downloadCallRecording);
 router.patch('/:callId/recordings/:recordingId', callController.renameCallRecording);
 router.delete('/:callId/recordings/:recordingId', callController.deleteCallRecording);

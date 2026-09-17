@@ -974,15 +974,7 @@ const MetricsTicketTable = ({
   );
 };
 
-const KpiCard = ({
-  label,
-  value,
-  sub,
-}: {
-  label: string;
-  value: string;
-  sub?: string;
-}): ReactElement => (
+const KpiCard = ({ label, value }: { label: string; value: string }): ReactElement => (
   <div className='flex flex-col gap-1 rounded-[12px] border border-desk-border bg-background p-4 dark:border-border'>
     <div className='text-[10px] font-medium uppercase tracking-[0.16em] text-muted-foreground'>
       {label}
@@ -990,7 +982,6 @@ const KpiCard = ({
     <div className='font-mono text-2xl font-semibold leading-none tabular-nums text-foreground'>
       {value}
     </div>
-    {sub && <div className='text-xs text-muted-foreground'>{sub}</div>}
   </div>
 );
 
@@ -1482,7 +1473,6 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
     return Math.floor(pointCount / 6);
   }, [trendData.length]);
 
-  const csatTotal = (data?.csat.good ?? 0) + (data?.csat.bad ?? 0);
   const isEmpty = !!data && data.tickets.length === 0 && data.counts.stageCounts.length === 0;
 
   const handleDownload = useCallback(() => {
@@ -2496,30 +2486,10 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                 ) : (
                   <>
                     <div className='grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5'>
-                      <KpiCard
-                        label='Agents'
-                        value={String(agentTotals.count)}
-                        sub='with activity'
-                      />
-                      <KpiCard
-                        label='Total Tickets'
-                        value={String(data.counts.openedInRange)}
-                        sub='created in range'
-                      />
-                      <KpiCard
-                        label='Tickets Resolved'
-                        value={String(agentTotals.resolved)}
-                        {...(agentTotals.assigned > 0
-                          ? {
-                              sub: `${Math.round((agentTotals.resolved / agentTotals.assigned) * 100)}% of assigned`,
-                            }
-                          : {})}
-                      />
-                      <KpiCard
-                        label='Tickets Reopened'
-                        value={String(agentTotals.reopened)}
-                        sub='distinct tickets'
-                      />
+                      <KpiCard label='Agents' value={String(agentTotals.count)} />
+                      <KpiCard label='Total Tickets' value={String(data.counts.openedInRange)} />
+                      <KpiCard label='Tickets Resolved' value={String(agentTotals.resolved)} />
+                      <KpiCard label='Tickets Reopened' value={String(agentTotals.reopened)} />
                       <KpiCard label='Replies Sent' value={String(agentTotals.replies)} />
                     </div>
 
@@ -2586,36 +2556,22 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                 {/* KPI row — FRT / RT / CSAT / Email Replies */}
                 <div className='grid grid-cols-2 gap-3 md:grid-cols-4'>
                   {isGuest && canSee('kpi:ticketsCreated') && (
-                    <KpiCard
-                      label='Tickets Created'
-                      value={String(data.counts.openedInRange)}
-                      sub='created in range'
-                    />
+                    <KpiCard label='Tickets Created' value={String(data.counts.openedInRange)} />
                   )}
                   {canSee('kpi:avgFirstResponse') && (
                     <KpiCard
                       label='Avg First Response'
                       value={formatDuration(data.frt.avgSeconds)}
-                      sub={`${data.frt.respondedTickets} responded`}
                     />
                   )}
                   {canSee('kpi:avgResolution') && (
-                    <KpiCard
-                      label='Avg Resolution'
-                      value={formatDuration(data.rt.avgSeconds)}
-                      sub={`${data.rt.resolvedTickets} resolved`}
-                    />
+                    <KpiCard label='Avg Resolution' value={formatDuration(data.rt.avgSeconds)} />
                   )}
                   {canSee('kpi:csat') && (
                     <KpiCard
                       label='CSAT'
                       value={
                         data.csat.avgScore !== null ? `${data.csat.avgScore.toFixed(1)}/5` : '—'
-                      }
-                      sub={
-                        csatTotal > 0
-                          ? `${data.csat.good} good · ${data.csat.bad} bad`
-                          : 'No responses'
                       }
                     />
                   )}
