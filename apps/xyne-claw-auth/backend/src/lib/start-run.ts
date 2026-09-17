@@ -3,7 +3,6 @@ import { prisma } from "../db.js";
 import { CONFIG } from "../config.js";
 import { decrypt } from "../crypto.js";
 import { errMsg } from "./errors.js";
-import { loadSdlcHubKnowledge } from "./sdlc-repository-context.js";
 import { spacesAppFetch } from "./spaces-api.js";
 import {
   chatMessageRepository,
@@ -20,7 +19,7 @@ import {
 } from "../services/agentChatContextService.js";
 import { storeForSession as storeAttachedContextForSession } from "../mcp/attached-context-injector.js";
 import { storeRunScalars } from "../mcp/run-scalars.js";
-import { parseSdlcAgentRunContext } from "../mcp/sdlc-agent-run-context.js";
+import { parseSdlcAgentRunContext } from "../mcp/sdlc-baseline-run-context.js";
 import type { SpacesAuthContext } from "../mcp/servers/xyne-spaces-client.js";
 import { resolveCustomSubagentsForRun } from "./subagent-resolver.js";
 import {
@@ -887,14 +886,6 @@ export async function prepareRun(
       mergedContext = mergedContext
         ? `${resolvedAttachedContext.promptPrefix}\n\n${mergedContext}`
         : resolvedAttachedContext.promptPrefix;
-    }
-    if (agentSlug === SDLC_AGENT_SLUG && effectiveChannelId) {
-      try {
-        const hubKnowledge = await loadSdlcHubKnowledge(effectiveChannelId, resolved.userId);
-        if (hubKnowledge) mergedContext = mergedContext ? `${hubKnowledge}\n\n${mergedContext}` : hubKnowledge;
-      } catch (err) {
-        log.warn("[run] failed to load SDLC Hub Knowledge:", errMsg(err));
-      }
     }
 
     // Inject live agent catalog for the Claw concierge agent so the LLM

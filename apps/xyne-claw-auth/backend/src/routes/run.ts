@@ -18,6 +18,7 @@ import {
 } from "../services/agentChatContextService.js";
 import { storeForSession as storeAttachedContextForSession } from "../mcp/attached-context-injector.js";
 import { storeRunScalars } from "../mcp/run-scalars.js";
+import { parseSdlcAgentRunContext } from "../mcp/sdlc-baseline-run-context.js";
 import type { SpacesAuthContext } from "../mcp/servers/xyne-spaces-client.js";
 import { resolveCustomSubagentsForRun } from "../lib/subagent-resolver.js";
 import {

@@ -21,7 +21,7 @@ export function sdlcAgentDesiredState(): SdlcAgentDesiredState {
   const profile = sdlcAgentToolProfile(xyneSpacesTools.map((tool) => tool.name));
   return {
     name: "SDLC Assistant",
-    description: "Repository-grounded Wiki, Hub Knowledge, PRDs, Tech Docs, and implementation workflows.",
+    description: "Repository-grounded baselines, PRDs, Tech Docs, and implementation workflows.",
     systemPrompt: SDLC_AGENT_PROMPT,
     scope: "global",
     color: "#2563eb",
