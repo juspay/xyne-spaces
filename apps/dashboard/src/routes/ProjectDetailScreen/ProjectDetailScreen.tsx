@@ -1,11 +1,6 @@
 import { ReactElement, useState, useEffect, useMemo } from 'react';
 import { useParams, useNavigate, useLocation, useSearchParams } from 'react-router-dom';
-import {
-  BoardType,
-  deserializeFlowPlan,
-  type FlowPlan,
-  type VCSProviderType,
-} from '@xyne/shared';
+import { BoardType, deserializeFlowPlan, type FlowPlan, type VCSProviderType } from '@xyne/shared';
 import { useCanManageRelease } from '../../hooks/usePermissions';
 import {
   ArrowLeft,
