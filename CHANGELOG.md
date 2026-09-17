@@ -1,3 +1,10 @@
+## [1.333.1](https://github.com/juspay/xyne-spaces/compare/v1.333.0...v1.333.1) (2026-09-17)
+
+
+### Bug Fixes
+
+* remove canvas title icon picker from main ([#1954](https://github.com/juspay/xyne-spaces/issues/1954)) ([44dcb8a](https://github.com/juspay/xyne-spaces/commit/44dcb8a12843535ed3315dab4445b517593dc077))
+
 ## [1.333.0](https://github.com/juspay/xyne-spaces/compare/v1.332.2...v1.333.0) (2026-09-17)
 
 
