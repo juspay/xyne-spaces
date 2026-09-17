@@ -145,6 +145,10 @@ class RunController {
       sampler = startMainThreadSampler(duration);
 
       const completed = await this.observe(measured, windowStartedAt, duration);
+      // Read before anything else unwinds: this is a live state, and every
+      // millisecond spent stopping probes is a millisecond a stalled query
+      // could have quietly completed in.
+      const outstandingQueries = diagnosticsStore.outstandingZeroQueries();
       probes.eventLoop = lagProbe.stop();
       probes.mainThread = await sampler.stop();
       diagnosticsStore.endRunWindow();
@@ -160,7 +164,7 @@ class RunController {
         error: null,
       });
 
-      const report = this.analyse(measured, probes, startedAt);
+      const report = this.analyse(measured, probes, startedAt, outstandingQueries);
       const reports = saveReport(report);
       this.setState({ report, reports });
       this.publish({
@@ -244,8 +248,13 @@ class RunController {
     });
   }
 
-  private analyse(runWindow: RunWindow, probes: ProbeResults, startedAt: number): RunReport {
-    const summary = runWindow.summarize();
+  private analyse(
+    runWindow: RunWindow,
+    probes: ProbeResults,
+    startedAt: number,
+    outstandingQueries: { name: string; waitingMs: number }[],
+  ): RunReport {
+    const summary = { ...runWindow.summarize(), outstandingQueries };
     const snapshot = diagnosticsStore.getSnapshot();
     const context = buildCheckContext({
       window: summary,

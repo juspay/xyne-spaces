@@ -36,6 +36,10 @@ const PENDING_GROWTH_WARN_PER_MIN = 5;
 const RTT_WARN_MS = 150;
 const RTT_BAD_MS = 400;
 
+/** A screen waiting this long on data is one a person has noticed. */
+const OUTSTANDING_WARN_MS = 3_000;
+const OUTSTANDING_BAD_MS = 10_000;
+
 function worstNamed(rows: ZeroOpStat[]): ZeroOpStat | undefined {
   return rows.find(row => row.count > 0);
 }
@@ -112,14 +116,99 @@ export const zeroConnection: Check = context => {
   };
 };
 
+/**
+ * The check for a screen that never finishes loading.
+ *
+ * Every other measurement of Zero here is derived from queries that completed,
+ * which means a request stuck for a minute contributes nothing until it ends —
+ * and produces a report saying data loading was never measured. That is the
+ * precise moment someone opens this panel, so the absence of a completion has
+ * to be a finding in its own right rather than a gap in the data.
+ */
+export const stalledQueries: Check = context => {
+  const outstanding = context.window.outstandingQueries;
+  const worst = outstanding[0];
+
+  if (!worst) {
+    return {
+      id: 'stalled-queries',
+      title: 'Requests still waiting',
+      category: 'sync',
+      status: 'pass',
+      confidence: 'high',
+      confidenceReason: 'Read directly at the moment the run ended.',
+      summary: 'Nothing was left waiting on the server when the run ended.',
+      measurements: [measurement('Still waiting', '0')],
+      evidence: [],
+      remediation: '',
+      actionable: false,
+    };
+  }
+
+  const status = gradeLower(worst.waitingMs, OUTSTANDING_WARN_MS, OUTSTANDING_BAD_MS);
+  const blockedShare = context.window.durationMs
+    ? (context.window.blockedMs / context.window.durationMs) * 100
+    : 0;
+  // Whether this device was busy decides who the wait belongs to. A responsive
+  // app with a request outstanding for half a minute is not a slow app — it is
+  // an app waiting, and saying so spares the user chasing their own machine.
+  const deviceWasIdle = blockedShare < 10;
+
+  return {
+    id: 'stalled-queries',
+    title: 'Requests still waiting',
+    category: 'sync',
+    status,
+    confidence: 'high',
+    confidenceReason: 'Read directly at the moment the run ended, not sampled.',
+    summary:
+      status === 'pass'
+        ? `${outstanding.length} request(s) were still in progress, none of them for long.`
+        : `${worst.name} has been waiting ${(worst.waitingMs / 1000).toFixed(1)}s for the server and has not come back.`,
+    measurements: [
+      measurement(
+        'Longest wait',
+        `${(worst.waitingMs / 1000).toFixed(1)}s`,
+        `warn ≥ ${OUTSTANDING_WARN_MS / 1000}s, fail ≥ ${OUTSTANDING_BAD_MS / 1000}s`,
+      ),
+      measurement('Query', worst.name),
+      measurement('Still waiting', String(outstanding.length)),
+    ],
+    evidence: [
+      ...outstanding
+        .slice(0, 5)
+        .map(row => `${row.name} — waiting ${(row.waitingMs / 1000).toFixed(1)}s`),
+      ...(status !== 'pass' && deviceWasIdle
+        ? [
+            'This device was responsive throughout, so the delay is the server not answering rather than anything running here',
+          ]
+        : []),
+      ...(status !== 'pass' && context.window.disconnects > 0
+        ? [
+            `The live connection dropped ${context.window.disconnects} time(s) during the run, which forces every query to be re-established from scratch`,
+          ]
+        : []),
+      'A screen closed before its data arrived can also leave a request here',
+    ],
+    remediation:
+      status === 'pass'
+        ? ''
+        : `Report the query named above. One query failing to return blocks the others behind it, so a single slow one can leave a whole screen loading.`,
+    actionable: true,
+  };
+};
+
 export const zeroQueryLatency: Check = context => {
   const durations = context.window.zeroQueryDurations;
   if (durations.length === 0) {
+    const outstanding = context.window.outstandingQueries.length;
     return skipped(
       'zero-query-latency',
       'Data loading',
       'sync',
-      'No data was requested during the run. Open a screen while the run is active to measure this.',
+      outstanding > 0
+        ? `No query completed during the run, though ${outstanding} were outstanding — see "Requests still waiting".`
+        : 'No data was requested during the run. Open a screen while the run is active to measure this.',
     );
   }
 
@@ -170,11 +259,17 @@ export const zeroSaveLatency: Check = context => {
   const errors = context.window.zeroMutations.reduce((sum, row) => sum + row.errors, 0);
 
   if (durations.length === 0 && errors === 0) {
+    // Same blind spot as queries: this is fed by acknowledgements, so a write
+    // that never gets one looks identical to no write at all. The pending count
+    // is what distinguishes them.
+    const peakPending = maxOf(values(samplesOf(context, 'zeroPendingMutations'))) ?? 0;
     return skipped(
       'zero-save-latency',
       'Saving changes',
       'sync',
-      'Nothing was saved during the run. Send a message or edit something while the run is active to measure this.',
+      peakPending > 0
+        ? `No change was confirmed during the run, though up to ${peakPending.toFixed(0)} were waiting — see "Unsent changes".`
+        : 'Nothing was saved during the run. Send a message or edit something while the run is active to measure this.',
     );
   }
 
@@ -360,6 +455,7 @@ export const networkQuality: Check = context => {
 };
 
 export const SYNC_CHECKS: Check[] = [
+  stalledQueries,
   zeroConnection,
   zeroQueryLatency,
   zeroSaveLatency,

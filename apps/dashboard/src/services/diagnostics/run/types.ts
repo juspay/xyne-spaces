@@ -92,6 +92,12 @@ export interface WindowSummary {
   hiddenDisconnects: number;
   processes: ProcessWindowStat[];
   processSampleCount: number;
+  /**
+   * Queries asked for but still unanswered when the window closed, oldest wait
+   * first. Captured as state at close rather than accumulated as events, since
+   * a request that never returns emits nothing to accumulate.
+   */
+  outstandingQueries: { name: string; waitingMs: number }[];
   interactions: number;
   /** True when the tab was hidden at any point, which invalidates frame-rate data. */
   wasHidden: boolean;

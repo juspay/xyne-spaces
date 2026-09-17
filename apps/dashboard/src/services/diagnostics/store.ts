@@ -36,6 +36,14 @@ const CHURN_WINDOW_MS = 60 * 60 * 1000;
 const MIN_CHURN_OBSERVATION_MS = 2 * 60 * 1000;
 const MAX_ZERO_OP_ROWS = 200;
 
+/**
+ * A query still in flight after this is almost certainly an unmounted screen
+ * whose completion never arrived, rather than a live wait. `useQuery` logs a
+ * start but nothing on unmount, so without a ceiling the in-flight registry
+ * would accumulate ghosts and eventually report them as stalls.
+ */
+const OUTSTANDING_QUERY_CEILING_MS = 10 * 60 * 1000;
+
 const HISTORY_BUCKET_MS = 60_000;
 const HISTORY_RETENTION_MS = 24 * 60 * 60 * 1000;
 
@@ -123,6 +131,20 @@ export class DiagnosticsStore {
   private readonly scripts = new Map<string, ScriptAccumulator>();
   private readonly api = new Map<string, ApiAccumulator>();
   private readonly zeroQueries = new Map<string, ZeroOpAccumulator>();
+  /**
+   * Queries that have been asked for but have not reported completion, by name.
+   *
+   * This is the only signal that can see a request which never returns. Every
+   * other Zero measurement here is derived from completions, so a query stuck
+   * for a minute contributes nothing at all until it finishes — which is the
+   * exact window in which someone opens a diagnostics panel to ask why the
+   * screen is still spinning.
+   *
+   * Keyed by name and holding the latest start: `useQuery` re-logs a start when
+   * its arguments change, and the earlier wait is superseded rather than
+   * additional.
+   */
+  private readonly zeroQueriesInFlight = new Map<string, number>();
   private readonly zeroMutations = new Map<string, ZeroOpAccumulator>();
   private readonly connectionEvents = new RingBuffer<ZeroConnectionEvent>(
     CONNECTION_EVENT_CAPACITY,
@@ -345,13 +367,20 @@ export class DiagnosticsStore {
    * instrumentation with. Feeds both the overall p95 tile and the per-query
    * table that highlights which specific query is slow.
    */
+  /** A query was asked for. Paired with completion or failure below. */
+  noteZeroQueryStarted(name: string, at: number = Date.now()): void {
+    this.zeroQueriesInFlight.set(name, at);
+  }
+
   recordZeroQuery(name: string, durationMs: number): void {
+    this.zeroQueriesInFlight.delete(name);
     this.pushZeroOpEvent('query', name, durationMs, false);
     this.recordZeroOp(this.zeroQueries, name, durationMs);
     this.recordLatencySample('zeroQueryP95', durationMs);
   }
 
   recordZeroQueryError(name: string): void {
+    this.zeroQueriesInFlight.delete(name);
     this.pushZeroOpEvent('query', name, null, true);
     this.bumpZeroOpError(this.zeroQueries, name);
   }
@@ -538,6 +567,7 @@ export class DiagnosticsStore {
     this.scripts.clear();
     this.api.clear();
     this.zeroQueries.clear();
+    this.zeroQueriesInFlight.clear();
     this.zeroMutations.clear();
     this.connectionEvents.clear();
     this.connectionCurrent = 'unknown';
@@ -570,6 +600,24 @@ export class DiagnosticsStore {
 
   hasActiveRunWindow(): boolean {
     return this.runWindow !== null;
+  }
+
+  /**
+   * Queries asked for but not yet returned, oldest wait first. Read at a point
+   * in time rather than accumulated, because "still waiting" is a state, not an
+   * event.
+   */
+  outstandingZeroQueries(now: number = Date.now()): { name: string; waitingMs: number }[] {
+    const rows: { name: string; waitingMs: number }[] = [];
+    for (const [name, startedAt] of this.zeroQueriesInFlight) {
+      const waitingMs = now - startedAt;
+      if (waitingMs > OUTSTANDING_QUERY_CEILING_MS) {
+        this.zeroQueriesInFlight.delete(name);
+        continue;
+      }
+      rows.push({ name, waitingMs });
+    }
+    return rows.sort((a, b) => b.waitingMs - a.waitingMs);
   }
 
   private pushZeroOpEvent(

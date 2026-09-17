@@ -15,6 +15,7 @@ import { diagnosticsStore } from './store';
 
 const UNKNOWN = 'unknown';
 
+const ZERO_QUERY_CALLED = 'zero_query_called';
 const ZERO_QUERY_COMPLETE = 'zero_query_complete';
 const ZERO_QUERY_FAILED = 'zero_query_failed';
 const ZERO_RUN_COMPLETE = 'zero_run_complete';
@@ -39,6 +40,13 @@ export function recordZeroLogForDiagnostics(
 ): void {
   try {
     switch (event) {
+      case ZERO_QUERY_CALLED: {
+        // Start of a wait. Without this the store only ever learns about
+        // queries that finished, and a request that never returns — the thing
+        // a user is staring at a spinner over — leaves no trace at all.
+        diagnosticsStore.noteZeroQueryStarted(asString(payload?.['query'], UNKNOWN));
+        break;
+      }
       case ZERO_QUERY_COMPLETE:
       case ZERO_RUN_COMPLETE: {
         const duration = asDuration(payload);
