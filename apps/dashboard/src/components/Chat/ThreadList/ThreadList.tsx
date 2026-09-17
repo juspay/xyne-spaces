@@ -19,6 +19,7 @@ import { AttachmentRef } from '../../../machines/attachmentViewerMachine';
 import { useThreadReadTracking } from '../../../hooks/useThreadReadTracking';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { getInitialMessageFromConversation } from '../../../utils/conversationMessageHelpers';
+import { useVirtualizer } from '@tanstack/react-virtual';
 
 type ThreadListProps = {
   channelId: string;
@@ -231,21 +232,6 @@ const ThreadList = ({
     setIsScrolling(false);
   }, [conversationId, location.key, location.hash, activityNavigationNonce, matchedMessageId]);
 
-  useThreadListInitialScroll({
-    scrollContainerRef,
-    conversationId,
-    location,
-    threadMessages,
-    enableCollapsing,
-    firstUnreadIndex,
-    savedScrollPosition,
-    initialScrollOffset,
-    isMessagesLoaded,
-    isTrackingHydrated,
-    hasAppliedInitialScrollRef,
-    setIsNearBottom,
-    matchedMessageId: matchedMessageId ?? null,
-  });
   const isThreadsRoute =
     location.pathname.includes('/chat/threads') || location.pathname.includes('/chat/dir/threads');
 
@@ -316,6 +302,75 @@ const ThreadList = ({
       (m, i) => i > 0 && new Date(m.createdAt).getTime() > lastReadAt,
     );
   }, [visibleMessages, conversationParticipant?.lastReadAt, user?.id]);
+
+  // ── Virtualized reply list (default path) ──────────────────────────────────
+  // Mirrors ChatListV4: a TanStack virtualizer windowed over `visibleMessages`.
+  // Only the default (non-ticket) render path consumes it. Dynamic measurement
+  // (`measureElement`) makes `estimateSize` a seed only; `anchorTo: 'end'` +
+  // `followOnAppend` keep the list pinned to the newest reply the way the old
+  // scrollHeight math did. `paddingEnd` reserves the activity-bar gap, so the
+  // scroll element's scrollHeight still equals getTotalSize() and every existing
+  // scrollTop/scrollHeight computation below keeps working unchanged.
+  const virtualizer = useVirtualizer({
+    count: visibleMessages.length,
+    getScrollElement: () => scrollContainerRef.current,
+    estimateSize: useCallback(() => 96, []),
+    getItemKey: useCallback(
+      (index: number) => visibleMessages[index]?.messageId ?? index,
+      [visibleMessages],
+    ),
+    overscan: 8,
+    paddingEnd: ACTIVITY_BAR_PADDING,
+    anchorTo: 'end',
+    followOnAppend: 'auto',
+    scrollEndThreshold: 100,
+    directDomUpdates: true,
+    useFlushSync: false,
+  });
+
+  // Keep the viewport pinned to the newest reply while the last few rows measure
+  // (initial load / new appends) and honour upward scrolls, matching ChatListV4.
+  virtualizer.shouldAdjustScrollPositionOnItemSizeChange = (item, _delta, instance): boolean => {
+    const nearBottom = virtualizer.isAtEnd(80);
+    const isLastFew = item.index >= instance.options.count - 5;
+    return (nearBottom && isLastFew) || virtualizer.scrollDirection === 'backward';
+  };
+
+  const virtualItems = virtualizer.getVirtualItems();
+
+  // Merge the virtualizer's size-managing container ref with scrollContentRef so
+  // the existing overflow ResizeObserver keeps observing the growing element.
+  const setVirtualContainerRef = useCallback(
+    (node: HTMLDivElement | null) => {
+      scrollContentRef.current = node;
+      virtualizer.containerRef(node);
+    },
+    [virtualizer],
+  );
+
+  // Resolve a messageId to its index in the rendered list for index-based scroll.
+  const getIndexByMessageId = useCallback(
+    (messageId: string): number => visibleMessages.findIndex(m => m.messageId === messageId),
+    [visibleMessages],
+  );
+
+  useThreadListInitialScroll({
+    scrollContainerRef,
+    conversationId,
+    location,
+    threadMessages,
+    enableCollapsing,
+    firstUnreadIndex,
+    savedScrollPosition,
+    initialScrollOffset,
+    isMessagesLoaded,
+    isTrackingHydrated,
+    hasAppliedInitialScrollRef,
+    setIsNearBottom,
+    matchedMessageId: matchedMessageId ?? null,
+    virtualizer,
+    getIndexByMessageId,
+  });
 
   /**
    * 2️⃣ Auto-scroll on new messages
@@ -587,10 +642,21 @@ const ThreadList = ({
         data-component='ThreadList'
         ref={scrollContainerRef}
         className='h-full overflow-auto no-scrollbar pt-4'
-        style={{ paddingBottom: ACTIVITY_BAR_PADDING }}
+        style={{ overflowAnchor: 'none' }}
       >
-        <div ref={scrollContentRef}>
-          {visibleMessages.map((threadMessage, index) => {
+        <div
+          ref={setVirtualContainerRef}
+          style={{
+            height: `${virtualizer.getTotalSize()}px`,
+            position: 'relative',
+            width: '100%',
+          }}
+        >
+          {virtualItems.map(virtualItem => {
+            const index = virtualItem.index;
+            const threadMessage = visibleMessages[index];
+            if (!threadMessage) return null;
+
             const showAvatar =
               enableCollapsing ||
               index < 2 ||
@@ -606,7 +672,12 @@ const ThreadList = ({
             const shouldShowCollapseButton = index === 0 && hiddenCount > 0;
 
             return (
-              <div key={threadMessage.messageId}>
+              <div
+                key={virtualItem.key}
+                data-index={index}
+                ref={virtualizer.measureElement}
+                style={{ position: 'absolute', top: 0, left: 0, width: '100%' }}
+              >
                 {index === firstUnreadReplyIndex && (
                   <div className='relative py-3'>
                     <div className='absolute left-0 right-0 top-1/2 h-px bg-destructive z-0'></div>
@@ -671,21 +742,23 @@ const ThreadList = ({
               </div>
             );
           })}
-          {isExpanded && isThreadsRoute && (
-            <div className='flex items-center my-1.5 px-2 gap-2'>
-              <button
-                onClick={() => setIsExpanded(false)}
-                className='flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-accent rounded-md transition-colors group'
-                data-track-category='THREAD_PANEL'
-                data-track-name='COLLAPSE_THREAD'
-              >
-                <ChevronUp className='w-3.5 h-3.5 text-muted-foreground group-hover:text-foreground' />
-                <span>Collapse thread</span>
-              </button>
-              <div className='flex-1 bg-border h-[1px]'></div>
-            </div>
-          )}
         </div>
+        {/* Collapse control lives outside the sized virtual container (threads route,
+            expanded state only) so it never participates in item measurement. */}
+        {isExpanded && isThreadsRoute && (
+          <div className='flex items-center my-1.5 px-2 gap-2'>
+            <button
+              onClick={() => setIsExpanded(false)}
+              className='flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-accent rounded-md transition-colors group'
+              data-track-category='THREAD_PANEL'
+              data-track-name='COLLAPSE_THREAD'
+            >
+              <ChevronUp className='w-3.5 h-3.5 text-muted-foreground group-hover:text-foreground' />
+              <span>Collapse thread</span>
+            </button>
+            <div className='flex-1 bg-border h-[1px]'></div>
+          </div>
+        )}
       </div>
       {showFab && (
         <button
