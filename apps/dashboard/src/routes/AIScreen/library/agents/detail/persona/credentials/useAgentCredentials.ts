@@ -6,6 +6,7 @@ import {
   type SetAgentCredentialPayload,
 } from './agentCredentialsService';
 import type { CredentialScope } from './credentialScope';
+import { credentialHealthKey } from './useCredentialHealth';
 
 /** Keyed by scope kind + id so agent and user caches never collide. */
 export const agentCredentialsKey = (
@@ -29,7 +30,8 @@ export function useAgentCredentials(
 }
 
 export interface AgentCredentialMutations {
-  save: (payload: SetAgentCredentialPayload) => Promise<void>;
+  /** Resolves to the failure message, or null when the credential was saved. */
+  save: (payload: SetAgentCredentialPayload) => Promise<string | null>;
   remove: (provider: string) => Promise<void>;
   saving: boolean;
   removing: boolean;
@@ -41,15 +43,15 @@ export function useAgentCredentialMutations(
   const queryClient = useQueryClient();
   const invalidate = (): void => {
     void queryClient.invalidateQueries({ queryKey: agentCredentialsKey(scope) });
+    void queryClient.invalidateQueries({ queryKey: credentialHealthKey(scope) });
   };
 
   const saveMutation = useMutation({
     mutationFn: (payload: SetAgentCredentialPayload) => (scope as CredentialScope).set(payload),
     onSuccess: () => {
       invalidate();
-      toast.success('Credential saved');
+      toast.success('Credential verified and saved');
     },
-    onError: (err: Error) => toast.error(clawErrorText(err, 'Could not save this credential')),
   });
 
   const removeMutation = useMutation({
@@ -63,7 +65,12 @@ export function useAgentCredentialMutations(
 
   return {
     save: async payload => {
-      await saveMutation.mutateAsync(payload).catch(() => undefined);
+      try {
+        await saveMutation.mutateAsync(payload);
+        return null;
+      } catch (err) {
+        return clawErrorText(err, 'Could not save this credential');
+      }
     },
     remove: async provider => {
       await removeMutation.mutateAsync(provider).catch(() => undefined);

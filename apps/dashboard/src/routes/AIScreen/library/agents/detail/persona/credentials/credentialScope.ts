@@ -6,6 +6,7 @@ import {
   setAgentProviderCredential,
   startAgentCopilotLogin,
   startAgentOauth,
+  verifyAgentProviderCredential,
   type AgentCopilotDeviceCode,
   type AgentOauthFlow,
   type AgentProviderCredentialStatus,
@@ -21,6 +22,8 @@ import {
   startClaudeOauth,
   startCodexOauth,
   upsertProviderCredential,
+  verifyProviderCredentialForUser,
+  type CredentialHealth,
 } from '@/services/claw/clawSettingsService';
 
 export type OauthCredentialProvider = 'codex' | 'claude';
@@ -39,6 +42,8 @@ export interface CredentialScope {
   ) => Promise<unknown>;
   startCopilot: () => Promise<AgentCopilotDeviceCode>;
   pollCopilot: () => Promise<{ status: string }>;
+  /** Asks the provider whether the stored key still works. */
+  verify: (provider: string) => Promise<CredentialHealth>;
 }
 
 export function agentCredentialScope(slug: string): CredentialScope {
@@ -52,6 +57,7 @@ export function agentCredentialScope(slug: string): CredentialScope {
     exchangeOauth: (provider, input) => exchangeAgentOauth(slug, provider, input),
     startCopilot: () => startAgentCopilotLogin(slug),
     pollCopilot: () => pollAgentCopilotLogin(slug),
+    verify: provider => verifyAgentProviderCredential(slug, provider),
   };
 }
 
@@ -88,5 +94,6 @@ export function userCredentialScope(userId: string): CredentialScope {
       };
     },
     pollCopilot: () => pollCopilotGitHubLogin(userId),
+    verify: provider => verifyProviderCredentialForUser(userId, provider),
   };
 }

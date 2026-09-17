@@ -4,7 +4,7 @@ import { MultipleCrossCancelDefault, PencilEditLine, PlusDefault } from '@xyne/i
 import { Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/Button/index';
 import { Skeleton } from '@/components/ui/Skeleton';
-import { Pill } from '../../../../shared/primitives/Pill';
+import { Pill, type PillTone } from '../../../../shared/primitives/Pill';
 import { V2Dialog } from '../../../../shared/primitives/V2Dialog';
 import type { AgentProviderCredentialStatus } from './agentCredentialsService';
 import { CredentialFormFields } from './CredentialFormFields';
@@ -24,6 +24,8 @@ import {
   useAgentCredentialMutations,
   useAgentCredentials,
 } from './useAgentCredentials';
+import { credentialHealthKey, useCredentialHealth } from './useCredentialHealth';
+import type { CredentialHealth } from '@/services/claw/clawSettingsService';
 
 const ICON_BUTTON =
   'flex size-7 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-40';
@@ -41,6 +43,22 @@ interface AgentKeysDialogProps {
 }
 
 const label = (provider: string): string => CREDENTIAL_PROVIDER_LABELS[provider] ?? provider;
+
+const HEALTH_PILL = new Map<string, { tone: PillTone; label: string }>([
+  ['ok', { tone: 'success', label: 'Connected' }],
+  ['invalid', { tone: 'danger', label: 'Invalid key' }],
+  ['model-unavailable', { tone: 'warning', label: 'Model unavailable' }],
+  ['missing', { tone: 'neutral', label: 'No key' }],
+  ['unknown', { tone: 'neutral', label: 'Unverified' }],
+]);
+
+function healthPill(health: CredentialHealth | undefined, checking: boolean): ReactElement {
+  if (checking) {
+    return <Pill tone='neutral'>Checking…</Pill>;
+  }
+  const pill = HEALTH_PILL.get(health?.status ?? 'unknown');
+  return <Pill tone={pill?.tone ?? 'neutral'}>{pill?.label ?? 'Unverified'}</Pill>;
+}
 
 function summarise(entry: AgentProviderCredentialStatus): string {
   if (entry.sharedCredentialName) return `Shared — ${entry.sharedCredentialName}`;
@@ -62,6 +80,7 @@ export function AgentKeysDialog({
 
   const [form, setForm] = useState<CredentialForm | null>(null);
   const [editingProvider, setEditingProvider] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   // Opened from a card that already named a provider: land straight on its
   // form instead of the list, so the user does not pick it twice.
@@ -77,6 +96,11 @@ export function AgentKeysDialog({
 
   const configured = (credentials ?? []).filter(entry => entry.configured);
   const configuredKeys = new Set(configured.map(entry => entry.provider));
+  const health = useCredentialHealth(
+    scope,
+    configured.map(entry => entry.provider),
+    open && form === null,
+  );
   const available = CREDENTIAL_PROVIDERS.filter(provider => !configuredKeys.has(provider));
 
   // Opened for one named provider, so there is no list behind the form —
@@ -84,6 +108,7 @@ export function AgentKeysDialog({
   const singleProvider = Boolean(initialProvider);
 
   const reset = (): void => {
+    setSaveError(null);
     if (singleProvider) {
       onOpenChange(false);
       return;
@@ -102,7 +127,8 @@ export function AgentKeysDialog({
 
   const submit = async (): Promise<void> => {
     if (!form || !canSubmit) return;
-    await save({
+    setSaveError(null);
+    const failure = await save({
       provider: form.provider,
       ...(form.apiKey.trim() ? { apiKey: form.apiKey.trim() } : {}),
       ...(form.model.trim() ? { model: form.model.trim() } : {}),
@@ -112,6 +138,10 @@ export function AgentKeysDialog({
         ? { reasoningEffort: form.reasoningEffort === '' ? null : form.reasoningEffort }
         : {}),
     });
+    if (failure) {
+      setSaveError(failure);
+      return;
+    }
     reset();
   };
 
@@ -205,10 +235,13 @@ export function AgentKeysDialog({
                       {label(entry.provider)}
                     </span>
                     <span className='truncate text-xs font-normal leading-4 tracking-[-0.24px] text-muted-foreground'>
-                      {summarise(entry)}
+                      {health.byProvider.get(entry.provider)?.message ?? summarise(entry)}
                     </span>
                   </div>
-                  <Pill tone='success'>Configured</Pill>
+                  {healthPill(
+                    health.byProvider.get(entry.provider),
+                    health.checking.has(entry.provider),
+                  )}
                   {canManage && (
                     <>
                       <button
@@ -274,6 +307,10 @@ export function AgentKeysDialog({
         </section>
       )}
 
+      {form !== null && saveError && (
+        <p className='text-sm font-normal leading-5 text-status-failure'>{saveError}</p>
+      )}
+
       {form !== null && (
         <section className='flex w-full flex-col gap-3'>
           <CredentialFormFields
@@ -283,6 +320,7 @@ export function AgentKeysDialog({
             scope={scope}
             onOauthConnected={() => {
               void queryClient.invalidateQueries({ queryKey: agentCredentialsKey(scope) });
+              void queryClient.invalidateQueries({ queryKey: credentialHealthKey(scope) });
               if (singleProvider) {
                 onOpenChange(false);
                 return;

@@ -12,6 +12,7 @@ import {
 import { AgentKeysDialog } from './AgentKeysDialog';
 import { agentCredentialScope } from './credentialScope';
 import { useAgentCredentials } from './useAgentCredentials';
+import { useCredentialHealth } from './useCredentialHealth';
 
 interface CredentialsCardProps {
   slug: string;
@@ -24,7 +25,16 @@ export function CredentialsCard({ slug, canRead, canManage }: CredentialsCardPro
   const scope = useMemo(() => agentCredentialScope(slug), [slug]);
   const { data: credentials } = useAgentCredentials(scope, canRead);
 
-  const configured = (credentials ?? []).filter(entry => entry.configured).length;
+  const configuredEntries = (credentials ?? []).filter(entry => entry.configured);
+  const configured = configuredEntries.length;
+  const health = useCredentialHealth(
+    scope,
+    configuredEntries.map(entry => entry.provider),
+    canRead,
+  );
+  const broken = configuredEntries.filter(
+    entry => health.byProvider.get(entry.provider)?.status === 'invalid',
+  ).length;
 
   return (
     <DetailSection
@@ -56,7 +66,11 @@ export function CredentialsCard({ slug, canRead, canManage }: CredentialsCardPro
               data-track-name='Agent detail v2: open agent keys'
               className='flex h-9 shrink-0 items-center gap-2 rounded-[10px] border border-border bg-card px-3 text-sm font-normal leading-5 text-foreground transition-colors hover:bg-muted'
             >
-              {configured > 0 ? `${configured} configured` : 'Configure'}
+              {broken > 0
+                ? `${broken} need${broken === 1 ? 's' : ''} attention`
+                : configured > 0
+                  ? `${configured} configured`
+                  : 'Configure'}
               <ChevronBigDown className='size-4 shrink-0 text-muted-foreground' aria-hidden />
             </button>
           ) : (
