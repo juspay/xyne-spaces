@@ -242,11 +242,11 @@ class WorkerService {
         stitchWorker.start();
       }
 
-      if (appConfig.enableHeicRenditionWorker) {
-        logger.info('Starting HEIC rendition worker...');
-        await heicRenditionQueue.initialize();
-        heicRenditionQueue.startProcessing();
-      }
+      // HEIC → WebP renditions. Always consumed here: the decode runs on a
+      // worker_threads pool
+      logger.info('Starting HEIC rendition worker...');
+      await heicRenditionQueue.initialize();
+      heicRenditionQueue.startProcessing();
 
       if (appConfig.enableScheduledMessageWorker) {
         logger.info('Initializing notification service for scheduled message worker...');
@@ -512,9 +512,7 @@ class WorkerService {
         await workflowStepGcsSyncQueue.close();
       }
 
-      if (appConfig.enableHeicRenditionWorker) {
-        await heicRenditionQueue.shutdown();
-      }
+      await heicRenditionQueue.shutdown();
 
       if (appConfig.enableConversationIngestionWorker) {
         await conversationIngestionWorker.shutdown();

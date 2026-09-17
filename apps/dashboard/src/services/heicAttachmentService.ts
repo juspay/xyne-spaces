@@ -48,6 +48,30 @@ export function heicWebpDownloadUrl(source: string): string {
   return `${base}${separator}format=webp`;
 }
 
+const WEB_RENDERABLE_IMAGE_TYPES: ReadonlySet<string> = new Set([
+  'image/jpeg',
+  'image/pjpeg',
+  'image/jpg',
+  'image/png',
+  'image/apng',
+  'image/gif',
+  'image/webp',
+  'image/avif',
+  'image/bmp',
+  'image/x-ms-bmp',
+  'image/x-icon',
+  'image/vnd.microsoft.icon',
+  'image/svg+xml',
+]);
+
+/**
+ * Whether an image blob's MIME type can render in a browser <img>.
+ */
+export function isWebRenderableImageType(mimeType: string): boolean {
+  const type = ((mimeType || '').split(';')[0] ?? '').trim().toLowerCase();
+  return WEB_RENDERABLE_IMAGE_TYPES.has(type);
+}
+
 /**
  * Convert a local HEIC file to a browser-renderable WebP blob entirely
  * client-side. Used for the sender's draft chips so the preview appears
