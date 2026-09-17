@@ -320,11 +320,6 @@ interface KbContentsPanelProps {
    *  ignored. */
   rootCollections?: KbContentsRootCollection[] | undefined;
   onNavigateCollection?: ((collectionId: string) => void) | undefined;
-  /** Controlled by the parent (KbContentsShell) rather than owned locally, so
-   *  the same query can also reach the main pane (e.g. the root collections
-   *  table) via KbContentsSearchProvider — see useKbContentsSearch.tsx. */
-  searchQuery: string;
-  onSearchQueryChange: (value: string) => void;
 }
 
 export const KbContentsPanel: React.FC<KbContentsPanelProps> = ({
@@ -342,11 +337,10 @@ export const KbContentsPanel: React.FC<KbContentsPanelProps> = ({
   onToggleCollapsed,
   rootCollections,
   onNavigateCollection,
-  searchQuery,
-  onSearchQueryChange,
 }) => {
   const outline = useMemo(() => buildOutline(rootChildrenIds, nodes), [rootChildrenIds, nodes]);
 
+  const [searchQuery, setSearchQuery] = useState('');
   const normalizedQuery = searchQuery.trim().toLowerCase();
   const isSearchActive = normalizedQuery.length > 0;
 
@@ -490,7 +484,7 @@ export const KbContentsPanel: React.FC<KbContentsPanelProps> = ({
           <Input
             type='text'
             value={searchQuery}
-            onChange={e => onSearchQueryChange(e.target.value)}
+            onChange={e => setSearchQuery(e.target.value)}
             placeholder='Search by name'
             className='h-9 pl-9'
             aria-label='Search files and folders by name'
