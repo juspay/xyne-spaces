@@ -116,7 +116,7 @@ import {
 import { useSelectedAgent } from '../../hooks/useSelectedAgent';
 import KanbanBoardScreen from '../KanbanBoardScreen/KanbanBoardScreen';
 import { buildSdlcArtifactCreationPrompt } from './artifactCreationPrompt';
-import { SdlcWikiSection, SdlcWikiSidebarTree } from './SdlcWikiSection';
+import { SdlcWikiSection } from './SdlcWikiSection';
 import { type SdlcWikiPage, type WikiCanvas, wikiScopePages, wikiScopes } from './sdlcWikiTree';
 import SdlcWorkflowsSection from './SdlcWorkflowsSection';
 import { SdlcActivityPreview } from './SdlcActivityPreview';
@@ -308,7 +308,6 @@ export default function SdlcScreen(): ReactElement {
       selectedRepo && channel ? { ...selectedRepo, channel, channelId: channel.id } : undefined,
     [selectedRepo, channel],
   );
-  const repoId = repo?.id;
   const zero = useZero();
   const [busy, setBusy] = useState<string | null>(null);
   const [artifactDialog, setArtifactDialog] = useState<{ id: string; name: string } | null>(null);
@@ -690,21 +689,7 @@ export default function SdlcScreen(): ReactElement {
       knowledgeFolderId ? canvases.filter(canvas => canvas.folderId === knowledgeFolderId) : [],
     [canvases, knowledgeFolderId],
   );
-  const knowledgeSidebarPages = useMemo<SdlcWikiPage[]>(
-    () =>
-      knowledgeDocs.map(canvas => {
-        const title = canvas.title;
-        return {
-          canvasId: canvas.id,
-          title,
-          folderPath: '',
-          updatedAt: new Date(canvas.lastEditedAt ?? canvas.updatedAt).toISOString(),
-          archived: false,
-        };
-      }),
-    [knowledgeDocs],
-  );
-  const folders = useMemo(() => (repo ? (repo.channel?.canvasFolders ?? []) : []), [repo]);
+  const folders = useMemo(() => channel?.canvasFolders ?? [], [channel]);
   const typeFolders = useMemo(
     () =>
       folders
@@ -824,9 +809,8 @@ export default function SdlcScreen(): ReactElement {
   }, [links, tracks]);
 
   useEffect(() => {
-    const repoLoaded = !!repo;
     const query = relatedSearchQuery.trim();
-    if (!artifactTrack || !repoLoaded || query.length < 2) {
+    if (!artifactTrack || !channel || query.length < 2) {
       setRelatedSearchResults([]);
       setRelatedSearching(false);
       return undefined;
@@ -854,7 +838,7 @@ export default function SdlcScreen(): ReactElement {
       controller.abort();
       clearTimeout(timer);
     };
-  }, [relatedSearchQuery, artifactTrack, repo, trackByCanvasId]);
+  }, [relatedSearchQuery, artifactTrack, channel, trackByCanvasId]);
   const trackConversationIds = useMemo(
     () =>
       selectedTrackId
@@ -1177,7 +1161,7 @@ export default function SdlcScreen(): ReactElement {
   const writeReady =
     capabilityReady('PUSH_BRANCH', ['PROVEN', 'INFERRED']) &&
     capabilityReady('CREATE_PULL_REQUEST', ['PROVEN', 'INFERRED']);
-  const showAccessWarning = !readReady || !writeReady;
+  const showAccessWarning = Boolean(repo) && (!readReady || !writeReady);
   const accessWarning = readReady
     ? {
         title: 'GitHub access needed to ship code',
@@ -1257,7 +1241,7 @@ export default function SdlcScreen(): ReactElement {
     openWindowForCanvas(section, canvasId, canvasSearch(canvasId, withDiscussion));
 
   const openCanvas = (canvasId: string, options?: OpenCanvasOptions): void => {
-    if (!repoId) return;
+    if (!channelId) return;
 
     const withDiscussion = Boolean(options?.withDiscussion);
     if (shouldOpenInNewWindow(options?.event) && openCanvasInWindow(canvasId, withDiscussion)) {
@@ -1301,8 +1285,7 @@ export default function SdlcScreen(): ReactElement {
   };
 
   const panelScopeActions = (place: 'header' | 'panel'): ReactNode => {
-    if (!repo?.channelId) return null;
-    const channelRepo = repo;
+    if (!channel) return null;
     const callLink: SdlcCallLink | undefined = entityLinkScope
       ? { ownerType: entityLinkScope.sourceType, ownerId: entityLinkScope.sourceId }
       : undefined;
@@ -1321,16 +1304,14 @@ export default function SdlcScreen(): ReactElement {
           <Users className='size-4' />
         </Button>
         <CallTriggerModal
-          channelId={channelRepo.channelId}
-          {...(channelRepo.channel?.scopeType && { scopeType: channelRepo.channel.scopeType })}
-          channelName={channelRepo.name}
-          participantCount={channelRepo.channel?.channelStats?.participantCount ?? 0}
-          callDisplayName={channelRepo.name}
+          channelId={channel.id}
+          {...(channel.scopeType && { scopeType: channel.scopeType })}
+          channelName={channel.name}
+          participantCount={channel.channelStats?.participantCount ?? 0}
+          callDisplayName={channel.name}
           trackSource={place === 'panel' ? 'sdlc_conversation_header' : 'sdlc_repo_header'}
           isMember={Boolean(
-            channelRepo.channel?.participants?.some(
-              participant => participant.userId === auth.userID,
-            ),
+            channel.participants?.some(participant => participant.userId === auth.userID),
           )}
           {...(callLink ? { sdlcLink: callLink } : {})}
         />
@@ -1456,7 +1437,7 @@ export default function SdlcScreen(): ReactElement {
   };
 
   const openWikiPage = (page: SdlcWikiPage): void => {
-    if (!repoId) return;
+    if (!channelId) return;
     setRelatedSourceId(null);
     const search = new URLSearchParams({ canvas: page.canvasId });
     if (wikiScope) search.set('wiki', wikiScope.folderId);
@@ -1464,7 +1445,7 @@ export default function SdlcScreen(): ReactElement {
   };
 
   const closeCanvas = (): void => {
-    if (!repoId) return;
+    if (!channelId) return;
     const typeFolder =
       selectedCanvasTypeFolder ?? (section === 'artifacts' ? activeTypeFolder : null);
     if (typeFolder) {
@@ -1622,7 +1603,7 @@ export default function SdlcScreen(): ReactElement {
 
   const openSdlcAssistant = useCallback(
     (threadInfo?: ThreadInfo): void => {
-      if (!repo) return;
+      if (!channel) return;
       // Ask AI renders inside the SDLC lane itself (the framed bundle's own
       // XyneAISidebar), so Ask AI changes ship with this lane and never need a
       // parent redeploy.
@@ -1632,51 +1613,50 @@ export default function SdlcScreen(): ReactElement {
         actorOpen: assistantState.matches('open'),
         selectedAgentSlug,
         actorChannelId: assistantState.context.channelId,
-        repositoryChannelId: repo.channelId,
+        repositoryChannelId: channel.id,
         actorRepositoryId:
           actorResearchContext?.type === 'repository' ? actorResearchContext.id : null,
-        repositoryId: repo.id,
+        repositoryId: repo?.id ?? null,
       });
       setSelectedAgentSlug('sdlc-agent');
       xyneAIActor.send({
         type: 'OPEN',
         contextType: 'chat',
-        contextId: repo.channelId,
-        channelId: repo.channelId,
+        contextId: channel.id,
+        channelId: channel.id,
         startFreshChat,
         ...(assistantCanvas && { canvasInfo: assistantCanvas }),
         ...(threadInfo && { threadInfo }),
-        researchContext: { type: 'repository', id: repo.id, name: repo.name },
+        ...(repo && { researchContext: { type: 'repository', id: repo.id, name: repo.name } }),
       });
     },
-    [assistantCanvas, repo, selectedAgentSlug, setSelectedAgentSlug],
+    [assistantCanvas, channel, repo, selectedAgentSlug, setSelectedAgentSlug],
   );
 
   const askSdlcAssistant = useCallback(
     (query: string, canvas?: { canvasId: string; title: string }, forceFreshChat = false): void => {
-      if (!repo) return;
+      if (!channel) return;
       const assistantState = xyneAIActor.getSnapshot();
       const pinnedContext = assistantState.context.researchContext;
       const needsFreshChat =
         forceFreshChat ||
         !assistantState.matches('open') ||
         selectedAgentSlug !== 'sdlc-agent' ||
-        assistantState.context.channelId !== repo.channelId ||
-        pinnedContext?.type !== 'repository' ||
-        pinnedContext.id !== repo.id;
+        assistantState.context.channelId !== channel.id ||
+        (pinnedContext?.type === 'repository' ? pinnedContext.id : null) !== (repo?.id ?? null);
       setSelectedAgentSlug('sdlc-agent');
       xyneAIActor.send({
         type: 'OPEN',
         contextType: 'chat',
-        contextId: repo.channelId,
-        channelId: repo.channelId,
+        contextId: channel.id,
+        channelId: channel.id,
         startFreshChat: needsFreshChat,
         ...(canvas && { canvasInfo: canvas }),
-        researchContext: { type: 'repository', id: repo.id, name: repo.name },
+        ...(repo && { researchContext: { type: 'repository', id: repo.id, name: repo.name } }),
         initialQuery: query,
       });
     },
-    [repo, selectedAgentSlug, setSelectedAgentSlug],
+    [channel, repo, selectedAgentSlug, setSelectedAgentSlug],
   );
 
   const renderWorkflowControls = (label: string, workflow: HubWorkflow): ReactElement => {
@@ -1737,13 +1717,13 @@ export default function SdlcScreen(): ReactElement {
     // Legacy ?chat=ai deep link: the assistant is the global sidebar now, not
     // a panel tab. Open it once and strip the param — keeping the param made
     // this effect re-open the sidebar every time the user closed it.
-    if (!repo) return;
+    if (!channel) return;
     openSdlcAssistant();
     const next = new URLSearchParams(location.search);
     next.delete('chat');
     const search = next.toString();
     void navigate(`${location.pathname}${search ? `?${search}` : ''}`, { replace: true });
-  }, [location.pathname, location.search, navigate, openSdlcAssistant, repo, sdlcChatTab]);
+  }, [channel, location.pathname, location.search, navigate, openSdlcAssistant, sdlcChatTab]);
 
   const clearArtifactDialogFields = (input?: {
     track?: { id: string; name: string } | null;
@@ -1790,13 +1770,13 @@ export default function SdlcScreen(): ReactElement {
       .map(canvas => ({ canvasId: canvas.id, title: canvas.title }));
 
   const createArtifact = (): void => {
-    if (!repoId || !repo || !artifactDialog || !artifactTitle.trim() || !artifactTrack) return;
+    if (!channel || !artifactDialog || !artifactTitle.trim() || !artifactTrack) return;
     const related = relatedArtifactsForPayload();
     const query = buildSdlcArtifactCreationPrompt({
       typeLabel: artifactDialog.name,
       folderId: artifactDialog.id,
       title: artifactTitle.trim(),
-      repositoryName: repo.name,
+      ...(repo && { repositoryName: repo.name }),
       ...(artifactAiPrompt.trim() && { direction: artifactAiPrompt.trim() }),
       ...(related.length > 0 && { relatedArtifacts: related }),
       track: artifactTrack,
@@ -1806,10 +1786,9 @@ export default function SdlcScreen(): ReactElement {
   };
 
   const createTicketForArtifact = (canvas: { id: string; title: string }): void => {
-    if (!repo) return;
     askSdlcAssistant(
-      `Create an implementation ticket for the artifact "${canvas.title}" in repository "${repo.name}". ` +
-        `Call spaces-create-ticket with sdlcRepoId ${repo.id} and sourceCanvasId ${canvas.id} so the ticket is linked to this artifact. ` +
+      `Create an implementation ticket for the artifact "${canvas.title}"${repo ? ` in repository "${repo.name}"` : ''}. ` +
+        `Call spaces-create-ticket with ${repo ? `sdlcRepoId ${repo.id} and ` : ''}sourceCanvasId ${canvas.id} so the ticket is linked to this artifact. ` +
         `Read the artifact first and derive the ticket title and description from it; ask me only if something essential is missing.`,
       { canvasId: canvas.id, title: canvas.title },
       true,
@@ -1817,13 +1796,13 @@ export default function SdlcScreen(): ReactElement {
   };
 
   const createBlankArtifact = async (): Promise<void> => {
-    if (!repo || !channel || !artifactDialog || !artifactTitle.trim() || !artifactTrack) return;
+    if (!channel || !artifactDialog || !artifactTitle.trim() || !artifactTrack) return;
     const folder = artifactDialog;
     const title = artifactTitle.trim();
     const response = await apiInstance.post<{ artifact: { canvasId: string } }>(
       '/sdlc/claw/artifacts',
       {
-        repoId: repo.id,
+        ...(repo && { repoId: repo.id }),
         channelId: channel.id,
         folderId: folder.id,
         title,
@@ -1854,10 +1833,10 @@ export default function SdlcScreen(): ReactElement {
   };
 
   const createArtifactType = async (): Promise<void> => {
-    if (!repo || !channel || !typeName.trim()) return;
+    if (!channel || !typeName.trim()) return;
     const response = await apiInstance.post<{ artifactType: { id: string; name: string } }>(
       '/sdlc/claw/artifact-types',
-      { repoId: repo.id, channelId: channel.id, name: typeName.trim() },
+      { channelId: channel.id, name: typeName.trim() },
     );
     const created = response.data.artifactType;
     setTypeDialogOpen(false);
@@ -1866,9 +1845,9 @@ export default function SdlcScreen(): ReactElement {
   };
 
   const renameArtifactType = async (folderId: string, name: string): Promise<void> => {
-    if (!repo || !name.trim()) return;
+    if (!channel || !name.trim()) return;
     await apiInstance.patch(`/sdlc/claw/artifact-types/${folderId}`, {
-      repoId: repo.id,
+      channelId: channel.id,
       name: name.trim(),
     });
     setRenameTypeId(null);
@@ -1876,7 +1855,7 @@ export default function SdlcScreen(): ReactElement {
   };
 
   const linkPickedContext = (selections: ContextSelections): void => {
-    if (!repoId || !relatedSourceId) return;
+    if (!channelId || !relatedSourceId) return;
     const targets = [
       ...selections.channels.map(item => ({ type: 'CHANNEL', id: item.id })),
       ...selections.tickets.map(item => ({ type: 'TICKET', id: item.id })),
@@ -1893,7 +1872,7 @@ export default function SdlcScreen(): ReactElement {
       async () => {
         await Promise.all(
           targets.map(target =>
-            apiInstance.post(`/sdlc/repositories/${repoId}/links`, {
+            apiInstance.post('/sdlc/claw/links', {
               channelId,
               sourceType: 'CANVAS',
               sourceId: relatedSourceId,
@@ -1965,26 +1944,13 @@ export default function SdlcScreen(): ReactElement {
     );
   }
 
-  if (!repo) {
-    return (
-      <div className='h-full grid place-items-center p-8 text-center text-muted-foreground'>
-        <div>
-          <p className='text-sm'>This hub has no repositories.</p>
-          <p className='mt-1 text-xs'>
-            A hub always keeps at least one, so this should not happen.
-          </p>
-        </div>
-      </div>
-    );
-  }
-
   const runTrackMutation = async (mutation: ReturnType<typeof zero.mutate>): Promise<void> => {
     const response = await mutation.server;
     if (response.type === 'error') throw new Error(response.error.message);
   };
 
   const createTrackAction = async (): Promise<void> => {
-    if (!repo || !channel) return;
+    if (!channel) return;
     const id = uuidv4();
     await runTrackMutation(
       zero.mutate(
@@ -2001,9 +1967,7 @@ export default function SdlcScreen(): ReactElement {
     setTrackDialog(false);
     setTrackName('');
     setTrackDescription('');
-    if (repoId) {
-      navigateWithinSdlc(`/sdlc/${channelId}/tracks`, `?track=${encodeURIComponent(id)}`);
-    }
+    navigateWithinSdlc(`/sdlc/${channelId}/tracks`, `?track=${encodeURIComponent(id)}`);
   };
 
   const activeTrackOptions = tracks
@@ -3096,7 +3060,7 @@ export default function SdlcScreen(): ReactElement {
     );
   };
   const openTrack = (trackId: string | null): void => {
-    if (!repoId) return;
+    if (!channelId) return;
     navigateWithinSdlc(
       `/sdlc/${channelId}/tracks`,
       trackId ? `?track=${encodeURIComponent(trackId)}` : '',
@@ -3108,7 +3072,10 @@ export default function SdlcScreen(): ReactElement {
     return (
       <div key={item.id} className='mb-0.5'>
         <button
-          onClick={() => navigateWithinSdlc(`/sdlc/${channelId}/${item.id}`)}
+          onClick={event => {
+            navigateWithinSdlc(`/sdlc/${channelId}/${item.id}`);
+            event.currentTarget.blur();
+          }}
           {...(section === item.id && { 'aria-current': 'page' as const })}
           className={cn(
             'flex h-[32px] w-full items-center gap-2.5 rounded-[6px] px-2 text-[13px] text-sidebar-foreground transition-colors',
@@ -3116,7 +3083,7 @@ export default function SdlcScreen(): ReactElement {
           )}
           data-track-category='SdlcHub'
           data-track-name='SectionChanged'
-          data-track-metadata={JSON.stringify({ section: item.id, repoId: repo.id })}
+          data-track-metadata={JSON.stringify({ section: item.id, channelId: channel.id })}
         >
           <Icon size={15} className='shrink-0 text-sidebar-foreground/70' />
           <span className='flex-1 truncate text-left'>{item.label}</span>
@@ -3400,7 +3367,7 @@ export default function SdlcScreen(): ReactElement {
                             data-track-name='SectionChanged'
                             data-track-metadata={JSON.stringify({
                               type: folder.id,
-                              repoId: repo.id,
+                              channelId: channel.id,
                             })}
                           >
                             <Folder size={15} className='shrink-0 text-sidebar-foreground/70' />
@@ -3442,16 +3409,6 @@ export default function SdlcScreen(): ReactElement {
               <Panel id='sdlc-sidebar-slack' minSize='0px' defaultSize='100%' />
             </ResizableGroup>
           ) : null}
-          {section === 'knowledge' && selectedCanvas && (
-            <div className='min-h-0 flex-1 border-t border-sidebar-border-muted'>
-              <SdlcWikiSidebarTree
-                pages={knowledgeSidebarPages}
-                selectedCanvasId={selectedCanvasId}
-                variant='hub-knowledge'
-                onOpen={page => openCanvas(page.canvasId)}
-              />
-            </div>
-          )}
         </div>
         {!railCollapsed && (
           <div
@@ -3668,7 +3625,6 @@ export default function SdlcScreen(): ReactElement {
                     key={selectedCanvasId}
                     canvasId={selectedCanvasId}
                     showAskAiAction={false}
-                    showPageTitle={false}
                   />
                 </div>
               ) : section === 'workflows' ? (
@@ -3679,7 +3635,7 @@ export default function SdlcScreen(): ReactElement {
                 <div className='min-h-0 flex-1 overflow-auto bg-background p-7'>
                   {section === 'overview' && (
                     <section>
-                      <h1 className='mb-5 text-2xl font-semibold tracking-tight'>{repo.name}</h1>
+                      <h1 className='mb-5 text-2xl font-semibold tracking-tight'>{channel.name}</h1>
                       {showAccessWarning && (
                         <div className='mb-4 flex items-start gap-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-foreground'>
                           <CircleAlert className='mt-0.5 size-4 shrink-0 text-amber-500' />
@@ -3717,9 +3673,7 @@ export default function SdlcScreen(): ReactElement {
                           icon={CircleDot}
                         />
                       </div>
-                      {repo.channelId ? (
-                        <SdlcActivityPreview key={repo.channelId} channelId={repo.channelId} />
-                      ) : null}
+                      <SdlcActivityPreview key={channel.id} channelId={channel.id} />
                     </section>
                   )}
 
@@ -3831,9 +3785,9 @@ export default function SdlcScreen(): ReactElement {
                     ) : (
                       <EmptyCard text='Select an artifact type from the sidebar.' />
                     ))}
-                  {section === 'tickets' && repo.channelId && (
+                  {section === 'tickets' && (
                     <div className='relative h-[calc(100vh-8rem)] min-h-[36rem]'>
-                      <KanbanBoardScreen channelId={repo.channelId} />
+                      <KanbanBoardScreen channelId={channel.id} />
                     </div>
                   )}
                 </div>
@@ -3848,12 +3802,12 @@ export default function SdlcScreen(): ReactElement {
               </Separator>
               <Panel id={SDLC_CHAT_PANEL_ID} defaultSize='38%' minSize='360px' maxSize='55%'>
                 <EntityLinkContext.Provider value={entityLinkScope}>
-                  {activeFolderDiscussion && repo.channelId ? (
+                  {activeFolderDiscussion ? (
                     <SdlcChatPanel
                       key={`item-${activeFolderDiscussion.type}-${activeFolderDiscussion.id}`}
-                      channelId={repo.channelId}
+                      channelId={channel.id}
                       discussion={{
-                        repoId: repo.id,
+                        ...(repo && { repoId: repo.id }),
                         ownerType: activeFolderDiscussion.type,
                         ownerId: activeFolderDiscussion.id,
                       }}
@@ -3874,12 +3828,12 @@ export default function SdlcScreen(): ReactElement {
                           : {}),
                       }}
                     />
-                  ) : discussionOwner && discussionSurface && repo.channelId ? (
+                  ) : discussionOwner && discussionSurface ? (
                     <SdlcChatPanel
                       key={`discussion-${discussionOwner.canvasId}`}
-                      channelId={repo.channelId}
+                      channelId={channel.id}
                       discussion={{
-                        repoId: repo.id,
+                        ...(repo && { repoId: repo.id }),
                         ownerType: 'CANVAS',
                         ownerId: discussionOwner.canvasId,
                         surfaceType: discussionSurface.type,
@@ -3893,12 +3847,12 @@ export default function SdlcScreen(): ReactElement {
                       listActions={panelScopeActions('panel')}
                       title={discussionOwner.title}
                     />
-                  ) : section === 'tracks' && selectedTrack && repo.channelId ? (
+                  ) : section === 'tracks' && selectedTrack ? (
                     <SdlcChatPanel
                       key={`track-${selectedTrack.id}`}
-                      channelId={repo.channelId}
+                      channelId={channel.id}
                       discussion={{
-                        repoId: repo.id,
+                        ...(repo && { repoId: repo.id }),
                         ownerType: 'TRACK',
                         ownerId: selectedTrack.id,
                       }}
@@ -3919,13 +3873,13 @@ export default function SdlcScreen(): ReactElement {
         </ResizableGroup>
       </div>
 
-      {repo.channelId && createTicketOpen ? (
+      {createTicketOpen ? (
         <EntityLinkContext.Provider value={entityLinkScope}>
           <CreateTicketModal
             isOpen={createTicketOpen}
             onClose={() => setCreateTicketOpen(false)}
-            channelId={repo.channelId}
-            projectId={repo.project?.id ?? ''}
+            channelId={channel.id}
+            projectId={channel.projectId ?? repo?.project?.id ?? ''}
             onTicketCreated={() => setCreateTicketOpen(false)}
           />
         </EntityLinkContext.Provider>
@@ -4006,7 +3960,7 @@ export default function SdlcScreen(): ReactElement {
                 Create an artifact
               </span>
               <span className='text-[12.5px] text-muted-foreground'>
-                {repo.name} · {typeFolders.length} types
+                {channel.name} · {typeFolders.length} types
               </span>
             </div>
             <button
@@ -4106,7 +4060,18 @@ export default function SdlcScreen(): ReactElement {
         open={hubDialog !== null}
         onOpenChange={open => setHubDialog(open ? hubDialog : null)}
         {...(hubDialog === 'manage'
-          ? { hub: { channelId: channel.id, repoIds: channelRepos.map(item => item.id) } }
+          ? {
+              hub: {
+                channelId: channel.id,
+                repoIds: channelRepos.map(item => item.id),
+                repositories: channelRepos.map(item => ({
+                  id: item.id,
+                  name: item.name,
+                  url: item.canonicalUrl || item.url,
+                  projectId: item.projectId ?? null,
+                })),
+              },
+            }
           : {})}
         onSaved={savedChannelId => {
           if (savedChannelId !== channelId) void navigate(`/sdlc/${savedChannelId}/overview`);
@@ -4598,7 +4563,6 @@ export default function SdlcScreen(): ReactElement {
                 key={readerCanvasId}
                 canvasId={readerCanvasId}
                 showAskAiAction={false}
-                showPageTitle={false}
               />
             </div>
           </div>
@@ -4636,7 +4600,7 @@ export default function SdlcScreen(): ReactElement {
                 void call(
                   'link',
                   async () => {
-                    await apiInstance.post(`/sdlc/repositories/${repo.id}/links`, {
+                    await apiInstance.post('/sdlc/claw/links', {
                       channelId,
                       sourceType: 'CANVAS',
                       sourceId: relatedSourceId,
@@ -4710,7 +4674,7 @@ export default function SdlcScreen(): ReactElement {
         className='max-w-2xl'
       >
         <Info
-          channel={repo.channel as unknown as VisibleChannel}
+          channel={channel as unknown as VisibleChannel}
           defaultTab='members'
           onClose={() => setMembersDialog(false)}
         />

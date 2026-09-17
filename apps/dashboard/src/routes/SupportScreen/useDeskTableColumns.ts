@@ -7,7 +7,7 @@ export const DESK_TABLE_BUILTIN_COLUMNS = [
   { key: 'dueDate', label: 'Due date' },
   { key: 'status', label: 'Status Category' },
   { key: 'priority', label: 'Priority' },
-  { key: 'stage', label: 'Stage' },
+  { key: 'stage', label: 'Board' },
   { key: 'tags', label: 'Labels' },
 ] as const;
 

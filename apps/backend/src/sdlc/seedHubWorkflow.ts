@@ -15,7 +15,7 @@ import { ensureHubKnowledgeFolder, ensureHubWikiFolder, ensureRepositoryWikiFold
 import { HUB_KNOWLEDGE_DEFINITIONS } from './hubKnowledgeDefinitions';
 import { repoIdsForChannel } from './sdlcChannelMembership';
 import type { SdlcActor } from './types';
-import { buildWikiWorkflowConfig } from './wiki/wikiWorkflowConfig';
+import { WIKI_TRIGGER, buildWikiWorkflowConfig } from './wiki/wikiWorkflowConfig';
 
 function sdlcRootFolderId(workspaceId: string): string {
   return `sdlc-${workspaceId}`;
@@ -198,27 +198,50 @@ async function createHubWorkflow(actor: SdlcActor, hub: Hub, workflow: HubWorkfl
 
 export interface SeedHubWorkflowResult {
   status: 'seeded' | 'reset' | 'skipped';
+  wikiTriggerUpdated?: boolean;
 }
 
 /** Call after createChannel commits: createWorkflow cannot join a Prisma transaction. */
 export async function seedHubWorkflow(
   actor: SdlcActor,
   channelId: string,
+  dryRun = false,
 ): Promise<SeedHubWorkflowResult> {
-  const hub = await prepareHub(actor, channelId);
+  const hub = dryRun ? null : await prepareHub(actor, channelId);
   let seeded = false;
   for (const workflow of HUB_WORKFLOWS) {
     if (await findHubWorkflowLink(channelId, workflow.relation)) continue;
-    await createHubWorkflow(actor, hub, workflow);
+    if (hub) await createHubWorkflow(actor, hub, workflow);
     seeded = true;
   }
-  return { status: seeded ? 'seeded' : 'skipped' };
+  const wikiTriggerUpdated = await syncWikiTrigger(channelId, dryRun);
+  return { status: seeded ? 'seeded' : 'skipped', wikiTriggerUpdated };
+}
+
+/** Backfill moves existing Wiki workflows to the text start commits, keeping builder edits to steps. */
+async function syncWikiTrigger(channelId: string, dryRun: boolean): Promise<boolean> {
+  const link = await findHubWorkflowLink(channelId, SDLC_WIKI_WORKFLOW_RELATION);
+  const workflow = link
+    ? await db.workflow.findUnique({ where: { id: link.targetId }, select: { id: true, context: true } })
+    : null;
+  if (!workflow?.context) return false;
+  const config = JSON.parse(workflow.context) as WorkflowConfig;
+  if (JSON.stringify(config.trigger) === JSON.stringify(WIKI_TRIGGER)) return false;
+  if (!dryRun) {
+    await db.workflow.update({
+      where: { id: workflow.id },
+      data: { context: JSON.stringify({ ...config, trigger: WIKI_TRIGGER }) },
+    });
+  }
+  return true;
 }
 
 export async function resetHubWorkflow(
   actor: SdlcActor,
   channelId: string,
+  dryRun = false,
 ): Promise<SeedHubWorkflowResult> {
+  if (dryRun) return { status: 'reset' };
   const hub = await prepareHub(actor, channelId);
   for (const workflow of HUB_WORKFLOWS) {
     const link = await findHubWorkflowLink(channelId, workflow.relation);
@@ -252,16 +275,23 @@ export async function resetHubWorkflow(
 }
 
 export interface BackfillResult {
+  dryRun: boolean;
   seeded: number;
   reset: number;
   skipped: number;
+  wikiTriggersUpdated: number;
   failed: Array<{ channelId: string; error: string }>;
+}
+
+export interface HubWorkflowScope {
+  channelId?: string | undefined;
+  dryRun: boolean;
 }
 
 async function walkHubs(
   actor: SdlcActor,
-  channelId: string | undefined,
-  apply: (actor: SdlcActor, channelId: string) => Promise<SeedHubWorkflowResult>,
+  { channelId, dryRun }: HubWorkflowScope,
+  apply: (actor: SdlcActor, channelId: string, dryRun: boolean) => Promise<SeedHubWorkflowResult>,
 ): Promise<BackfillResult> {
   const hubs = await db.channel.findMany({
     where: {
@@ -272,11 +302,12 @@ async function walkHubs(
     select: { id: true },
   });
 
-  const result: BackfillResult = { seeded: 0, reset: 0, skipped: 0, failed: [] };
+  const result: BackfillResult = { dryRun, seeded: 0, reset: 0, skipped: 0, wikiTriggersUpdated: 0, failed: [] };
   for (const hub of hubs) {
     try {
-      const outcome = await apply(actor, hub.id);
+      const outcome = await apply(actor, hub.id, dryRun);
       result[outcome.status] += 1;
+      if (outcome.wikiTriggerUpdated) result.wikiTriggersUpdated += 1;
     } catch (error) {
       result.failed.push({
         channelId: hub.id,
@@ -289,14 +320,14 @@ async function walkHubs(
 
 export async function backfillHubWorkflows(
   actor: SdlcActor,
-  channelId?: string,
+  scope: HubWorkflowScope,
 ): Promise<BackfillResult> {
-  return walkHubs(actor, channelId, seedHubWorkflow);
+  return walkHubs(actor, scope, seedHubWorkflow);
 }
 
 export async function resetHubWorkflows(
   actor: SdlcActor,
-  channelId?: string,
+  scope: HubWorkflowScope,
 ): Promise<BackfillResult> {
-  return walkHubs(actor, channelId, resetHubWorkflow);
+  return walkHubs(actor, scope, resetHubWorkflow);
 }

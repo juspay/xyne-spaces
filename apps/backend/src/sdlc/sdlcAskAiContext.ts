@@ -41,8 +41,8 @@ interface SdlcAskAiContextInput {
 
 export function buildSdlcAskAiContext(input: SdlcAskAiContextInput): string {
   const repositoryAccessInstruction =
-    'SDLC repository setup is uniformly write-capable; call sandbox-repo-setup with write:true when live code is required. Capability does not authorize mutation. For questions, PRDs, Tech Docs, reviews, and other non-implementation requests, inspect only: do not modify files, run builds or services, create commits, push, or create pull requests. Mutate the repository only when the user explicitly requests implementation work.';
-  const implementationInstruction = `For an explicit implementation request, follow the approved repository conventions, create a safe non-default branch, and make only the requested changes. ${buildSdlcWorkDeliveryInstruction()} After remote push succeeds, call spaces-sdlc-create-pull-request exactly once. The backend must create and verify a draft pull request; never use a generic GitHub tool. ${buildSdlcTicketLifecycleInstruction()}`;
+    'SDLC repository access is uniformly write-capable; when live code is required, call sandbox-create, then sdlc-repository-access with the repository id, and clone with the exact cloneUrl it returns. Capability does not authorize mutation. For questions, PRDs, Tech Docs, reviews, and other non-implementation requests, inspect only: do not modify files, run builds or services, create commits, push, or create pull requests. Mutate the repository only when the user explicitly requests implementation work.';
+  const implementationInstruction = `For an explicit implementation request, follow the approved repository conventions, create a safe non-default branch, and make only the requested changes. ${buildSdlcWorkDeliveryInstruction()} After remote push succeeds, call spaces-sdlc-create-pull-request exactly once. The backend creates and verifies the pull request, as a draft unless every check passed and the change is ready for review; never use a generic GitHub or Bitbucket tool. ${buildSdlcTicketLifecycleInstruction()}`;
   const selectedArtifactInstruction = input.selectedArtifact
     ? [
         '# Selected SDLC artifact',
@@ -65,7 +65,7 @@ export function buildSdlcAskAiContext(input: SdlcAskAiContextInput): string {
     '3. If those canvases fully and consistently support the requested answer or artifact, use them directly without opening a repository sandbox.',
     '4. If evidence is missing, incomplete, ambiguous, stale, or inconsistent, inspect the pinned repository using the uniform write-capable sandbox while obeying the non-mutation rule above. Current code is authoritative when it conflicts with Wiki or other canvases.',
     '5. If search returns no relevant canvas, say that explicitly and continue with repository inspection.',
-    '6. Call sandbox-repo-setup at most once with write:true. If setup times out or fails, do not create another sandbox, clone through a raw provider URL, or repeatedly retry setup. Use complete and consistent Wiki or Hub Knowledge evidence when it is sufficient.',
+    '6. Call sdlc-repository-access at most once per repository. If it times out or fails, do not create another sandbox, clone through any other URL, or repeatedly retry. Use complete and consistent Wiki or Hub Knowledge evidence when it is sufficient.',
     '7. If that evidence is insufficient, report that live code is unavailable and stop instead of guessing. Include the useful Wiki findings, the exact paths, symbols, or implementation questions you intended to inspect in code, and which claims remain unverified.',
     'Do not answer a substantive repository question without this preflight. Do not guess when repository knowledge is insufficient.',
     'Wiki pages may be outdated. Use them for orientation, then check the live code before stating how something works; when the Wiki and the code disagree, the code wins.',

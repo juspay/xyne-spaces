@@ -163,7 +163,7 @@ import {
   extractGroupableFormFields,
   ticketsHaveSameBoardSnapshot,
 } from './KanbanBoardScreen.utils';
-import { TicketTable } from '../../components/Tickets/TicketTable/TicketTable';
+import { TableGroupSection } from './TableGroupSection';
 import {
   buildTicketExportPayload,
   ticketPayloadToCsv,
@@ -508,6 +508,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   const [localTickets, setLocalTickets] = useState<Ticket[] | null>([]);
   const [kanbanTicketsByColumn, setKanbanTicketsByColumn] = useState<Record<string, Ticket[]>>({});
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
+  const [tableScrollElement, setTableScrollElement] = useState<HTMLDivElement | null>(null);
   const [isCustomizeOpen, setIsCustomizeOpen] = useState(false);
   const [flowSelection, setFlowSelection] = useState<FlowNodeSelection | null>(null);
   const [collapsedFlowGroups, setCollapsedFlowGroups] = useState<Set<string>>(new Set());
@@ -558,8 +559,8 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   // toggle still governs card sub-status without affecting the table.
   // Forcing the column does not strand a dead control: `filteredAvailableColumns`
   // drops 'stage' from the Customize panel in table view, so there is no visible
-  // toggle contradicting it. Note the table's Stage cell is editable (it routes
-  // through `routeStageChange`), matching the Support desk table.
+  // toggle contradicting it. Note the list rows render the board capsule under
+  // this key (stage itself shows in the row's hover card).
   const tableVisibleColumns = useMemo(
     () => new Set([...visibleColumns, 'stage']),
     [visibleColumns],
@@ -696,11 +697,11 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   const [state, send] = useMachine(ticketFiltersMachine);
   const requestedLayoutView = searchParams.get('layout');
   const layoutView: LayoutView =
-    requestedLayoutView === 'table' ||
+    requestedLayoutView === 'kanban' ||
     requestedLayoutView === 'calendar' ||
     requestedLayoutView === 'flow'
       ? requestedLayoutView
-      : 'kanban';
+      : 'table';
   const isKanbanLayout = layoutView === 'kanban';
   const showTicketReport = searchParams.get('ticketReport') === '1';
   // Flow view: the open run lives in the URL so browser back returns to the
@@ -729,7 +730,9 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     () => parseGroupBy(state.context.groupBy),
     [state.context.groupBy],
   );
-  const shouldUseLegacyTicketsQuery = !isKanbanLayout;
+  // Only calendar and flow still need the legacy full fetch.
+  const shouldUseLegacyTicketsQuery = layoutView === 'calendar' || layoutView === 'flow';
+  const isTableLayout = layoutView === 'table';
   const [selectedViewId, setSelectedViewId] = useState<string | null>(null);
   const activeViewKey = `active-view-${state.context.storageKey}`;
   const hasRestoredActiveView = useRef<string | null>(null);
@@ -1349,7 +1352,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
       setSearchParams(
         prev => {
           const next = new URLSearchParams(prev);
-          next.set('layout', 'kanban');
+          next.set('layout', 'table');
           next.delete('run');
           return next;
         },
@@ -1775,7 +1778,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     queries.ticketsQueryV2(ticketsQueryParams),
     {
       enabled:
-        !isKanbanLayout &&
+        shouldUseLegacyTicketsQuery &&
         ((viewMode === 'board' && !!boardId) ||
           (viewMode === 'project' && !!effectiveProjectId) ||
           // A workspace view has no channel or project to key on; `workspaceViewReady`
@@ -1928,6 +1931,9 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   useEffect(() => {
     // Early return if not in my-tickets view
     if (!isMyTicketsView) return;
+    // Table mode never loads the full set — a partial board list must not
+    // clear a user's saved board filter.
+    if (isTableLayout) return;
 
     // Early return if no filters or boards
     if (!filters.boards || filters.boards.length === 0) return;
@@ -1950,7 +1956,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
         boards: validBoards,
       });
     }
-  }, [isMyTicketsView, filters.boards, availableBoards, setFilters]);
+  }, [isMyTicketsView, isTableLayout, filters.boards, availableBoards, setFilters]);
 
   // Determine project IDs for tag search
   // For my-tickets and workspace views, we may have multiple projects
@@ -3634,7 +3640,9 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   const hasSearchTerm = searchTerm.trim().length > 0;
   // Also require deferredFilters to have caught up before enabling queries
   const canUseKanbanColumnPagination = isKanbanLayout && workspaceViewReady && deferredFiltersReady;
-  const shouldFetchKanbanCounts = canUseKanbanColumnPagination && !hasSearchTerm;
+  const canUseTablePagination = isTableLayout && workspaceViewReady && deferredFiltersReady;
+  const shouldFetchKanbanCounts =
+    (canUseKanbanColumnPagination || canUseTablePagination) && !hasSearchTerm;
   const kanbanCounts = useKanbanCounts({
     ...ticketsQueryParams,
     columnType: shouldUseStatusColumns ? 'status' : 'stage',
@@ -3646,6 +3654,8 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   });
   const lastKnownKanbanGroupsRef = useRef<{
     groups: typeof kanbanCounts.groups;
+    /** groupBy that produced these groups — never serve across dimensions. */
+    groupByKey: string;
   } | null>(null);
   const lastKnownKanbanGroupsQueryKeyRef = useRef<string | null>(null);
   const lastKnownKanbanTicketsRef = useRef<{
@@ -3655,7 +3665,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   const lastKnownKanbanTicketsQueryKeyRef = useRef<string | null>(null);
 
   useEffect(() => {
-    if (!isKanbanLayout) return;
+    if (!isKanbanLayout && !isTableLayout) return;
     if (hasSearchTerm) return;
 
     // Don't reset lastKnownKanbanGroupsRef to null when query key changes.
@@ -3671,8 +3681,16 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     }
     lastKnownKanbanGroupsRef.current = {
       groups: kanbanCounts.groups,
+      groupByKey: JSON.stringify(groupBy ?? 'none'),
     };
-  }, [hasSearchTerm, isKanbanLayout, kanbanCounts.groups, kanbanColumnQueryKey]);
+  }, [
+    hasSearchTerm,
+    isKanbanLayout,
+    isTableLayout,
+    kanbanCounts.groups,
+    kanbanColumnQueryKey,
+    groupBy,
+  ]);
 
   useEffect(() => {
     if (!isKanbanLayout) return;
@@ -3691,11 +3709,13 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
 
   const hasMatchingLastKnownKanbanGroups =
     lastKnownKanbanGroupsQueryKeyRef.current === kanbanColumnQueryKey &&
+    lastKnownKanbanGroupsRef.current?.groupByKey === JSON.stringify(groupBy ?? 'none') &&
     (lastKnownKanbanGroupsRef.current?.groups.length ?? 0) > 0;
 
-  const isTicketsSyncing = isKanbanLayout
-    ? !hasSearchTerm && kanbanCounts.isLoading
-    : ticketsDetails.type !== 'complete';
+  const isTicketsSyncing =
+    isKanbanLayout || isTableLayout
+      ? !hasSearchTerm && kanbanCounts.isLoading
+      : ticketsDetails.type !== 'complete';
 
   const kanbanTicketsForGrouping = useMemo(() => {
     if (localTickets && localTickets.length > 0) return localTickets;
@@ -3733,26 +3753,27 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   const processedGroups = useMemo(() => {
     const groupedRows = groupTickets(kanbanTicketsForGrouping, groupBy);
     const localEntries = Object.entries(groupedRows);
-    const serverGroups = isKanbanLayout
-      ? hasSearchTerm
-        ? groupBy === 'status'
-          ? getStatusColumns().map(column => ({
-              groupKey: column.id,
-              displayName: column.name,
-              totalCount: 0,
-              stages: {},
-              statuses: {},
-            }))
+    const serverGroups =
+      isKanbanLayout || isTableLayout
+        ? hasSearchTerm
+          ? groupBy === 'status'
+            ? getStatusColumns().map(column => ({
+                groupKey: column.id,
+                displayName: column.name,
+                totalCount: 0,
+                stages: {},
+                statuses: {},
+              }))
+            : hasMatchingLastKnownKanbanGroups
+              ? (lastKnownKanbanGroupsRef.current?.groups ?? [])
+              : kanbanCounts.groups
           : hasMatchingLastKnownKanbanGroups
             ? (lastKnownKanbanGroupsRef.current?.groups ?? [])
             : kanbanCounts.groups
-        : hasMatchingLastKnownKanbanGroups
-          ? (lastKnownKanbanGroupsRef.current?.groups ?? [])
-          : kanbanCounts.groups
-      : [];
+        : [];
     const serverGroupKeys = new Set(serverGroups.map(group => group.groupKey));
 
-    const entries =
+    const baseEntries =
       serverGroups.length > 0
         ? [
             ...serverGroups.map(
@@ -3762,8 +3783,17 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
           ]
         : localEntries;
 
+    // Table layout with a search term active from first render has neither
+    // counts (disabled during search) nor loaded rows to derive groups from —
+    // fall back to one ungrouped section so the search actually runs.
+    const entries =
+      isTableLayout && baseEntries.length === 0 && (hasSearchTerm || groupBy === 'none')
+        ? ([['All Tickets', []] as const] as typeof baseEntries)
+        : baseEntries;
+
     const mapped = entries.map(([groupName, groupTickets]) => {
-      const serverCountGroup = isKanbanLayout ? kanbanCounts.groupsByKey.get(groupName) : undefined;
+      const serverCountGroup =
+        isKanbanLayout || isTableLayout ? kanbanCounts.groupsByKey.get(groupName) : undefined;
       const countsUsable =
         shouldFetchKanbanCounts && !kanbanCounts.isLoading && !kanbanCounts.error;
       const serverColumnCounts = !countsUsable
@@ -3874,10 +3904,9 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     hasMatchingLastKnownKanbanGroups,
   ]);
 
-  // The table renders one AG-Grid per group and suppresses AG-Grid's own no-rows
-  // overlay, so with no tickets it used to show a bare header strip (groupBy 'none')
-  // or nothing at all (any other groupBy). Say why the table is empty instead.
-  const isTableEmpty = processedGroups.every(group => group.allTickets.length === 0);
+  const isTableEmpty = isTableLayout
+    ? processedGroups.length === 0
+    : processedGroups.every(group => group.allTickets.length === 0);
   const tableGroups = isTableEmpty ? [] : processedGroups;
 
   const hasScrolledToExpandedGroup = useRef(false);
@@ -5468,7 +5497,10 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
           </div>
         </div>
       ) : layoutView === 'table' ? (
-        <div className='flex-1 overflow-y-auto p-4 space-y-4 bg-background pb-14'>
+        <div
+          ref={setTableScrollElement}
+          className='flex-1 overflow-y-auto p-4 space-y-4 bg-background pb-14'
+        >
           {isTableEmpty && (
             <div className='rounded-lg border border-border bg-muted p-4 text-sm text-muted-foreground'>
               {isTicketsSyncing ? 'Loading tickets…' : 'No tickets match the current filters.'}
@@ -5526,16 +5558,32 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                 )}
 
                 {(isExpanded || !showGroupHeader) && (
-                  <div>
-                    <TicketTable
-                      tickets={group.allTickets}
-                      ticketTags={tagsByTicketId}
-                      availableTags={availableTags || []}
-                      visibleColumns={tableVisibleColumns}
-                      isComfortView={isComfortView}
-                      boardNamesById={boardNamesById}
-                    />
-                  </div>
+                  <TableGroupSection
+                    args={{
+                      ...ticketsQueryParams,
+                      searchTerm,
+                      filters: deferredFilters,
+                      formEntityValueFieldIds: fevFieldIds,
+                      dynamicFieldVespaTokens,
+                      dynamicFieldDateRanges,
+                      zeroOnlyDynamicFieldIds,
+                      showOverdueOnly,
+                      // The synthetic 'All Tickets' fallback (search with no
+                      // derivable groups) spans every group.
+                      groupBy: group.key === 'All Tickets' ? 'none' : groupBy,
+                      ...(groupBy !== 'none' && group.key !== 'All Tickets'
+                        ? { groupKey: group.key }
+                        : {}),
+                    }}
+                    enabled={canUseTablePagination}
+                    pageSize={groupBy === 'none' ? 50 : 20}
+                    totalCount={group.count}
+                    internalScroll={groupBy !== 'none'}
+                    scrollElement={tableScrollElement}
+                    visibleColumns={tableVisibleColumns}
+                    isComfortView={isComfortView}
+                    availableTags={availableTags || []}
+                  />
                 )}
               </div>
             );
