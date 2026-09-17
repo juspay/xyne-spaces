@@ -1,7 +1,6 @@
 import { SDLC_AGENT_SLUG } from '@xyne/shared';
 import type { AgentRunInput } from '@xyne/workflow-sdk/agents/host';
 import type { StepExecutionContext } from '@xyne/workflow-sdk';
-import { config } from '@/config/env';
 import { db } from '@/database/client';
 import { logger } from '@/utils/logger';
 import { runS2SClawAgent } from '@/services/clawAgentService';
