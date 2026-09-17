@@ -1,3 +1,10 @@
+## [1.332.2-release-20260917.2](https://github.com/juspay/xyne-spaces/compare/v1.332.2-release-20260917.1...v1.332.2-release-20260917.2) (2026-09-17)
+
+
+### Bug Fixes
+
+* google unauthorized client refresh ([#1799](https://github.com/juspay/xyne-spaces/issues/1799)) ([#1957](https://github.com/juspay/xyne-spaces/issues/1957)) ([c1f8c72](https://github.com/juspay/xyne-spaces/commit/c1f8c722cdfdc866b2e1eb5d26b85fcc1df1514c))
+
 ## [1.332.2-release-20260917.1](https://github.com/juspay/xyne-spaces/compare/v1.332.1...v1.332.2-release-20260917.1) (2026-09-17)
 
 
