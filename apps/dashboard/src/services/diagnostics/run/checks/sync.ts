@@ -256,7 +256,19 @@ export const stalledQueries: Check = context => {
     };
   }
 
-  const status = gradeLower(worst.waitingMs, OUTSTANDING_WARN_MS, OUTSTANDING_BAD_MS);
+  // An unanswered request only means a stall if the server has also gone quiet.
+  // `useQuery` logs when a query is asked for but nothing when its component
+  // unmounts, so a screen closed before its data arrived leaves an entry that
+  // never clears — and in a chat app the short-lived per-message queries do
+  // that constantly. If the server answered anything else while this one was
+  // "waiting", the entry is stale bookkeeping, not a stall, and saying
+  // otherwise sends someone hunting a query that was never slow.
+  const serverSilentMs = context.window.liveness?.silentForMs ?? 0;
+  const serverIsAnswering = serverSilentMs < OUTSTANDING_WARN_MS;
+
+  const status = serverIsAnswering
+    ? 'pass'
+    : gradeLower(worst.waitingMs, OUTSTANDING_WARN_MS, OUTSTANDING_BAD_MS);
   const blockedShare = context.window.durationMs
     ? (context.window.blockedMs / context.window.durationMs) * 100
     : 0;
@@ -270,10 +282,16 @@ export const stalledQueries: Check = context => {
     title: 'Requests still waiting',
     category: 'sync',
     status,
-    confidence: 'high',
-    confidenceReason: 'Read directly at the moment the run ended, not sampled.',
-    summary:
-      status === 'pass'
+    // The reading is exact; the inference behind it is not. Without an unmount
+    // signal this cannot tell a genuine wait from an abandoned one, and stating
+    // otherwise is how a report earns a reputation for crying wolf.
+    confidence: serverIsAnswering ? 'low' : 'medium',
+    confidenceReason: serverIsAnswering
+      ? `The server answered something ${(serverSilentMs / 1000).toFixed(1)}s ago, so it is serving this client normally.`
+      : 'Read at the moment the run ended. Corroborated by the server having gone quiet, but the client cannot tell an abandoned request from a waiting one.',
+    summary: serverIsAnswering
+      ? `${outstanding.length} request(s) look unanswered, but the server is responding — most likely a screen closed before its data arrived.`
+      : status === 'pass'
         ? `${outstanding.length} request(s) were still in progress, none of them for long.`
         : `${worst.name} has been waiting ${(worst.waitingMs / 1000).toFixed(1)}s for the server and has not come back.`,
     measurements: [
@@ -289,6 +307,12 @@ export const stalledQueries: Check = context => {
       ...outstanding
         .slice(0, 5)
         .map(row => `${row.name} — waiting ${(row.waitingMs / 1000).toFixed(1)}s`),
+      ...(serverIsAnswering
+        ? [
+            `The server last answered this client ${(serverSilentMs / 1000).toFixed(1)}s ago, so it is not stalled`,
+            'A request is only recorded as finished when its screen is still open to receive it; one that closed first stays listed here forever',
+          ]
+        : []),
       ...(status !== 'pass' && deviceWasIdle
         ? [
             'This device was responsive throughout, so the delay is the server not answering rather than anything running here',
@@ -310,7 +334,7 @@ export const stalledQueries: Check = context => {
       status === 'pass'
         ? ''
         : `Report the queries named above with the time of this run. One query failing to return blocks the others behind it, so a single slow one can leave a whole screen loading.`,
-    actionable: true,
+    actionable: status !== 'pass',
   };
 };
 
