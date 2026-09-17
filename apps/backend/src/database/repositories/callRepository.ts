@@ -23,11 +23,13 @@ const MIN_CALL_DURATION_FOR_AI_SECONDS = 30;
 
 /**
  * Body text for the scheduled-call pill. The rendered card reads everything it shows
- * from the live `calls` row, so this string only ever surfaces as the channel-list
- * preview (`conversation.initial_message_md`) and in plain-text fallbacks. Kept static
- * so editing a call's title or time still requires no write to the message.
+ * from the live `calls` row, so this string only surfaces as the channel-list preview
+ * (`conversation.initial_message_md`) and in plain-text fallbacks — the card itself
+ * renders a live description. Carries no title or time, so editing the call still
+ * requires no write to the message.
  */
-const SCHEDULED_CALL_PILL_CONTENT = 'Scheduled a call';
+const scheduledCallPillContent = (senderName: string): string =>
+  `${senderName} scheduled a call`;
 
 function parseRecordingParticipantIds(stored: string | null): string[] {
   if (!stored) return [];
@@ -1615,13 +1617,21 @@ export class CallRepository {
       channelId: string;
       workspaceId: string;
       /**
+       * The organizer. The pill is attributed to them rather than to `system`, the
+       * way a ticket-creation message is, so the channel shows who booked the call.
+       */
+      senderId: string;
+      /** Organizer's display name, for the stored preview text. */
+      senderName: string;
+      /**
        * Set when the call was scheduled from a thread (`callOrigin: CONVERSATION`).
        * The pill lives inside that thread; no new conversation is created.
        */
       threadConversationId?: string | undefined;
     },
   ): Promise<{ messageId: string; conversationId: string }> {
-    const { callId, callExternalId, channelId, workspaceId, threadConversationId } = params;
+    const { callId, callExternalId, channelId, workspaceId, senderId, senderName, threadConversationId } =
+      params;
     const messageId = uuidv4();
     const conversationId = threadConversationId ?? uuidv4();
 
@@ -1634,7 +1644,7 @@ export class CallRepository {
           conversationId,
           channelId,
           workspaceId,
-          createdBy: 'system',
+          createdBy: senderId,
           initialMessageId: messageId,
         },
       });
@@ -1645,8 +1655,8 @@ export class CallRepository {
         messageId,
         conversationId,
         workspaceId,
-        senderId: 'system',
-        content: SCHEDULED_CALL_PILL_CONTENT,
+        senderId,
+        content: scheduledCallPillContent(senderName),
         msgType: MessageType.SYSTEM,
         showInChannel: false,
         metadata: {
