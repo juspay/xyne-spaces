@@ -1978,6 +1978,7 @@ export const queries = defineQueries({
   ticketByIdV2: defineQuery(z.object({ ticketId: z.string() }), ({ args: { ticketId } }) => {
     return zql.tickets
       .where('id', ticketId)
+      .related('ticketDescription')
       .related('project')
       .related('tagMappings')
       .related('assignments', a => a.related('role'))
@@ -1992,6 +1993,7 @@ export const queries = defineQueries({
   ticketDetailsByIdV2: defineQuery(z.object({ ticketId: z.string() }), ({ args: { ticketId } }) => {
     return zql.tickets
       .where('id', ticketId)
+      .related('ticketDescription')
       .related('project')
       .related('tagMappings')
       .related('assignments', a => a.related('role'))
@@ -2008,6 +2010,7 @@ export const queries = defineQueries({
     return zql.tickets
       .where('xyneId', xyneId)
       .where('workspaceId', workspaceId)
+      .related('ticketDescription')
       .related('project')
       .related('tagMappings')
       .related('referencesOut', ref => ref.related('targetTicket'))
