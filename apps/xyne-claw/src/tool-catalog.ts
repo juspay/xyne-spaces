@@ -1,6 +1,8 @@
 import { Type } from "@sinclair/typebox";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import {
+  classifyToolRisk,
+  riskAtOrBelow,
   SUBAGENT_DEFINITIONS,
   findSubagentDefinitionForServer,
   isPresentationToolSource,
@@ -21,17 +23,48 @@ export interface ToolCatalogEntry {
   source: string;
   /**
    * The catalog this tool belongs to — the user-facing grouping that
-   * `list-tools`/`load-tools` filter on, and that the system-prompt index
+   * `search-tools`/`load-tools` filter on, and that the system-prompt index
    * lists. Derived from `source` at build time so the two can diverge without
    * breaking the config filter above.
    */
   catalog: string;
+  /**
+   * What the tool definition declared about mutating, so `search-tools`'
+   * risk ceiling can use it instead of re-guessing from the name. Undefined
+   * ≠ "read" — see `classifyToolRisk`.
+   */
+  isWrite?: boolean;
 }
 
 export interface ToolCatalogItem {
   entry: ToolCatalogEntry;
   tool: ToolDefinition;
 }
+
+/** One tool from the deployment-wide catalog, as claw-auth returns it. */
+export interface DeploymentToolMatch {
+  slug: string;
+  name: string;
+  integration: string;
+  description: string;
+  risk: "read" | "write" | "destructive";
+  params: Array<{ name: string; type: string; required: boolean; description: string }>;
+  grantedToAgents?: number;
+}
+
+/**
+ * Searches every tool the deployment has, not just this run's.
+ *
+ * Injected, not imported: the catalog module is pure, but the lookup needs
+ * the run's authenticated session. Absent (subagents, tests, a claw-auth
+ * outage), `scope:"claw"` degrades to a clear message instead of erroring.
+ */
+export type DeploymentToolSearch = (params: {
+  query: string;
+  integration?: string;
+  maxRisk?: string;
+  limit: number;
+}) => Promise<DeploymentToolMatch[]>;
 
 export interface FastToolRuntimeController {
   getActiveToolSet?: () => string[];
@@ -44,7 +77,24 @@ export interface FastToolRuntimeController {
   }>;
 }
 
-const META_TOOL_NAMES = new Set(["load-tools", "list-tools"]);
+const META_TOOL_NAMES = new Set(["load-tools", "search-tools"]);
+
+/**
+ * True when a catalogued tool is really a meta-tool under claw-auth's naming.
+ *
+ * The claw-auth System Tool `search_tools` answers exactly what `search-tools
+ * scope:"claw"` does, and the UI title-cases both to the same untagged
+ * "Search Tools" label — offering both makes a run trace unreadable, so the
+ * System Tool is excluded whenever the meta-tools are present.
+ */
+export function duplicatesMetaTool(name: string): boolean {
+  // Strip only the `Built-in__` prefix before comparing (the System Tool
+  // arrives as `Built-in__search_tools`) — a third-party server's own
+  // `search_tools` is not a duplicate.
+  const runtime = extractRuntimeToolName(name);
+  if (runtime !== name && !name.startsWith("Built-in__")) return false;
+  return META_TOOL_NAMES.has(runtime.toLowerCase().replace(/_/g, "-"));
+}
 
 function extractRuntimeToolName(name: string): string {
   const idx = name.lastIndexOf("__");
@@ -82,7 +132,7 @@ export function catalogNameForSource(source: string): string {
 }
 
 function addUnique(items: ToolCatalogItem[], seen: Set<string>, tool: ToolDefinition, source: string): void {
-  if (META_TOOL_NAMES.has(tool.name) || seen.has(tool.name)) return;
+  if (duplicatesMetaTool(tool.name) || seen.has(tool.name)) return;
   seen.add(tool.name);
   items.push({
     tool,
@@ -91,6 +141,7 @@ function addUnique(items: ToolCatalogItem[], seen: Set<string>, tool: ToolDefini
       oneLineDescription: oneLineDescription(tool),
       source,
       catalog: catalogNameForSource(source),
+      ...(isCustomWriteTool(tool) ? { isWrite: true } : {}),
     },
   });
 }
@@ -137,6 +188,15 @@ export function buildToolCatalog(params: {
    * Presentation tools are catalogued either way: they're wrapped by nothing.
    */
   includeSubagentTools?: boolean;
+  /**
+   * Catalogues def-less servers' tools and in-process custom tools that no
+   * subagent wraps. Set when the open palette is on, so these become
+   * loadable instead of eager — a def-less server's tools otherwise go
+   * straight to `directTools` (subagent-tools.ts) with full schemas in every
+   * prompt. Granted tools are unaffected: `routes/run.ts` filters
+   * always-active names back out of the catalog.
+   */
+  catalogUnwrapped?: boolean;
 }): ToolCatalogItem[] {
   const items: ToolCatalogItem[] = [];
   const seen = new Set<string>();
@@ -181,6 +241,30 @@ export function buildToolCatalog(params: {
   for (const tool of params.customTools ?? []) {
     if (isPresentationToolSource(customToolSource(tool))) {
       addUnique(items, seen, tool, PRESENTATION_CATALOG_SOURCE);
+    }
+  }
+
+  if (params.catalogUnwrapped) {
+    // Def-less servers, under the same `server:<type>` pseudo-source
+    // tool-resolution.ts already uses for them.
+    for (const group of params.groups) {
+      if (group.sourceSubagent) continue;
+      if (findSubagentDefinitionForServer(group.serverType)) continue;
+      const writeSet = new Set(group.writeTools.map(String));
+      for (const tool of group.tools) {
+        if (writeSet.has(extractRuntimeToolName(tool.name))) continue;
+        addUnique(items, seen, tool, `server:${group.serverType}`);
+      }
+    }
+
+    // In-process custom tools with no MCP server behind them. Writes stay eager:
+    // a write tool is something an admin picked deliberately, and the palette
+    // refuses writes at "read" anyway.
+    for (const tool of params.customTools ?? []) {
+      const source = customToolSource(tool);
+      if (!source || isPresentationToolSource(source)) continue;
+      if (isCustomWriteTool(tool)) continue;
+      addUnique(items, seen, tool, source);
     }
   }
 
@@ -238,17 +322,153 @@ export function buildFastModeDirectTools(params: {
   return { directTools, remainingCustomTools };
 }
 
+const DEFAULT_SEARCH_LIMIT = 10;
+const MAX_SEARCH_LIMIT = 50;
+
+/** The one result shape a meta-tool returns. */
+function text(body: string): { content: Array<{ type: "text"; text: string }>; details: Record<string, never> } {
+  return { content: [{ type: "text" as const, text: body }], details: {} };
+}
+
+/**
+ * Risk for a catalog entry, using the same classifier as the index and the
+ * Toolbox badge. The entry's `isWrite` is believed when present; otherwise the
+ * name decides, leaning write.
+ */
+function entryRisk(entry: ToolCatalogEntry): ReturnType<typeof classifyToolRisk> {
+  return classifyToolRisk(entry.name, entry.isWrite);
+}
+
+/** Ranked hit from the agent-scope matcher. */
+interface ScopedHit {
+  entry: ToolCatalogEntry;
+  hits: number;
+}
+
+/**
+ * Token overlap over name, catalog, source and one-liner, ranked by hit
+ * count — OR not AND, so a multi-word query still matches tools that contain
+ * only some of the words. Tokens under MIN_TOKEN are dropped: matching is by
+ * substring, so a 1-2 letter token is contained in nearly every description
+ * and would swamp the ranking. Lexical, not semantic: this is the agent's own
+ * (small, already-prompted) palette — `scope:"claw"` is the vector search for
+ * the deployment-wide catalog the model hasn't seen.
+ */
+const MIN_TOKEN = 3;
+
+function matchScoped(entries: ToolCatalogEntry[], query: string): ToolCatalogEntry[] {
+  const tokens = query.toLowerCase().split(/[^a-z0-9]+/).filter((t) => t.length >= MIN_TOKEN);
+  if (tokens.length === 0) return entries;
+  return entries
+    .map((entry): ScopedHit => {
+      const haystack = `${entry.name} ${entry.catalog} ${entry.source} ${entry.oneLineDescription}`.toLowerCase();
+      return { entry, hits: tokens.reduce((n, token) => (haystack.includes(token) ? n + 1 : n), 0) };
+    })
+    .filter((s) => s.hits > 0)
+    .sort((a, b) => b.hits - a.hits || a.entry.name.localeCompare(b.entry.name))
+    .map((s) => s.entry);
+}
+
+/**
+ * Resolves a name the model typed to the name the catalog actually holds.
+ *
+ * Agent-scope search quotes server-decorated runtime names (e.g.
+ * `Xyne_Spaces__spaces-my-items`); deployment scope quotes the bare `tools`
+ * table name and can't know this run's prefixes. Tried in descending
+ * confidence; an ambiguous suffix match is reported rather than guessed —
+ * two servers can share a bare tool name, and loading the wrong one silently
+ * is worse than asking for the qualified name.
+ */
+function resolveCatalogName(
+  requested: string,
+  byName: Map<string, ToolCatalogEntry>,
+  catalog: ToolCatalogEntry[],
+): { name: string } | { ambiguous: string[] } | null {
+  if (byName.has(requested)) return { name: requested };
+
+  const norm = (v: string): string => v.toLowerCase().replace(/_/g, "-");
+  const wanted = norm(requested);
+
+  const matches = catalog.filter((entry) => {
+    const name = entry.name;
+    return (
+      norm(name) === wanted ||
+      name.endsWith(`__${requested}`) ||
+      norm(name).endsWith(`--${wanted}`) ||
+      norm(extractRuntimeToolName(name)) === wanted
+    );
+  });
+
+  if (matches.length === 1) return { name: matches[0]!.name };
+  if (matches.length > 1) return { ambiguous: matches.map((m) => m.name) };
+  return null;
+}
+
+/**
+ * Explains an unresolved name using what this run actually holds, so
+ * "unknown" reads as a diagnosis (wrong name vs. genuinely not in this run)
+ * rather than a dead end. Not reached for an empty catalog — `execute`
+ * returns `emptyCatalogMessage` before resolving anything.
+ */
+function unknownExplanation(unknown: string[], catalog: ToolCatalogEntry[]): string {
+  const head = `Unknown: ${unknown.join(", ")}.`;
+  const byCatalog = [...new Set(catalog.map((e) => e.catalog))].sort();
+  const sample = catalog.slice(0, 8).map((e) => e.name);
+  return `${head} This run holds ${catalog.length} loadable tool(s) across ${byCatalog.join(", ")} — ` +
+    `for example: ${sample.join(", ")}${catalog.length > sample.length ? ", …" : ""}. ` +
+    'Call search-tools with scope="agent" to search them. A tool the deployment has but this run does ' +
+    "not means its integration has no credentials here, and no palette setting changes that.";
+}
+
+/** Groups entries under their catalog headings, the browse view. */
+function renderGrouped(entries: ToolCatalogEntry[], header: string): string {
+  const grouped = new Map<string, ToolCatalogEntry[]>();
+  for (const entry of entries) {
+    const list = grouped.get(entry.catalog) ?? [];
+    list.push(entry);
+    grouped.set(entry.catalog, list);
+  }
+  const sections = [...grouped.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([name, group]) => {
+      const sorted = group.slice().sort((a, b) => a.name.localeCompare(b.name));
+      return [
+        `## ${name} (${sorted.length})`,
+        ...sorted.map((e) => `  - ${e.name} [${entryRisk(e)}]: ${e.oneLineDescription}`),
+      ].join("\n");
+    });
+  return [header, ...sections].join("\n\n");
+}
+
+function renderDeployment(matches: DeploymentToolMatch[], note: string): string {
+  if (matches.length === 0) {
+    return "No tools in this deployment match that. Try fewer constraints, or describe the task differently.";
+  }
+  const lines = matches.map((m) => {
+    const required = m.params.filter((p) => p.required).map((p) => p.name);
+    const params = required.length ? ` — needs ${required.join(", ")}` : "";
+    const granted = typeof m.grantedToAgents === "number" ? `, granted to ${m.grantedToAgents} agent(s)` : "";
+    return `  - ${m.name} [${m.integration}, ${m.risk}${granted}]${params}\n      ${m.description.replace(/\s+/g, " ").slice(0, 200)}`;
+  });
+  return [`Deployment catalog — ${matches.length} match${matches.length === 1 ? "" : "es"}.`, ...lines, "", note].join("\n");
+}
+
 export function buildFastModeMetaTools(options: {
   catalog: ToolCatalogEntry[];
   controller: FastToolRuntimeController;
   /**
-   * Extra detail appended to the empty-catalog answer of list-tools/load-tools,
+   * Extra detail appended to the empty-catalog answer of search-tools/load-tools,
    * e.g. which configured subagents resolved to zero tools. The runtime loader
    * is only wired when the catalog has entries (see agent.ts), so without this
    * an empty catalog answered load-tools with the internal-sounding
    * "tool loader is not initialized".
    */
   emptyCatalogNote?: string;
+  /** Backs `scope:"claw"`. Absent → that scope answers with why. */
+  searchDeployment?: DeploymentToolSearch;
+  /** True when this agent may load tools it was never granted. Decides only
+   *  what the deployment-scope answer tells the model to do next. */
+  openPalette?: boolean;
 }): ToolDefinition[] {
   const catalog = [...options.catalog].sort((a, b) => a.name.localeCompare(b.name));
   const emptyCatalogMessage = [
@@ -272,62 +492,123 @@ export function buildFastModeMetaTools(options: {
 
   return [
     {
-      name: "list-tools",
-      label: "List Tools",
+      name: "search-tools",
+      label: "Search Tools",
       description:
-        "List the full tool catalog: every loadable tool, grouped by catalog, each with a one-line description. " +
-        "Read the list, pick the exact names you need, then call load-tools to activate them. " +
-        `Pass \`catalog\` to list one catalog only; omit it to list all. Catalogs: ${catalogNames.join(", ") || "(none)"}.`,
+        "Find a tool. Covers two different questions, and `scope` picks which one.\n" +
+        `scope="agent" (the default) looks at the tools THIS run can use. Everything it returns is loadable right now — pass the exact names to load-tools and they are callable on your next turn. Catalogs: ${catalogNames.join(", ") || "(none)"}.\n` +
+        'scope="claw" looks at every tool the deployment has, including ones this agent was never given. Use it to find out what exists at all — planning work, configuring another agent, or checking whether a capability is even available here. Results are not necessarily loadable; the answer says which.\n' +
+        "Omit `query` to browse the whole scope. Pass `query` to narrow it, and describe what you are trying to DO rather than guessing a tool name — \"post a message to a channel\", \"fill in a pdf form\". Agent scope matches on words, so keywords work; claw scope is a semantic search, so a full phrase works better than a single noun.\n" +
+        "`catalog` narrows the agent scope to one catalog; `integration` narrows the claw scope to one product (google, sandbox, github). `maxRisk` is a ceiling, not an exact match: \"read\" excludes everything that writes, \"write\" still excludes destructive. Use it when you only need to look something up.\n" +
+        "Call it before guessing a tool name. A wrong name costs a failed call; a search costs one cheap round trip.",
       parameters: Type.Unsafe({
         type: "object",
         additionalProperties: false,
         properties: {
+          query: {
+            type: "string",
+            description: "What you are trying to do, in plain words. Omit to list everything in scope.",
+          },
+          scope: {
+            type: "string",
+            enum: ["agent", "claw"],
+            description:
+              '"agent" (default) = tools this run can load. "claw" = every tool the deployment has, whether or not this agent holds it.',
+          },
           catalog: {
             type: "string",
             ...(catalogNames.length > 0 ? { enum: catalogNames } : {}),
-            description: "Optional. Restrict the listing to one catalog. Omit to list every catalog.",
+            description: "Agent scope only. Restrict to one catalog.",
           },
+          integration: {
+            type: "string",
+            description: 'Claw scope only. Restrict to one integration, e.g. "google" or "sandbox".',
+          },
+          maxRisk: {
+            type: "string",
+            enum: ["read", "write", "destructive"],
+            description: "Ceiling on how dangerous a returned tool may be. Omit for no ceiling.",
+          },
+          limit: { type: "number", description: "Maximum results. Default 10, max 50." },
         },
       }),
       async execute(_toolCallId: string, params: unknown) {
-        const input = params as { catalog?: unknown } | undefined;
-        const scoped = scopeTo(input?.catalog);
-        if ("error" in scoped) {
-          return { content: [{ type: "text" as const, text: scoped.error }], details: {} };
+        const input = (params ?? {}) as {
+          query?: unknown; scope?: unknown; catalog?: unknown; integration?: unknown;
+          maxRisk?: unknown; limit?: unknown;
+        };
+        const query = typeof input.query === "string" ? input.query.trim() : "";
+        const limit = Math.min(Math.max(Number(input.limit) || DEFAULT_SEARCH_LIMIT, 1), MAX_SEARCH_LIMIT);
+        const maxRisk = typeof input.maxRisk === "string" ? input.maxRisk : undefined;
+
+        if (input.scope === "claw") {
+          if (!options.searchDeployment) {
+            return text(
+              "The deployment-wide catalog is not reachable from this run. " +
+              'Use scope="agent" to search the tools already available here.',
+            );
+          }
+          const matches = await options.searchDeployment({
+            query,
+            limit,
+            ...(typeof input.integration === "string" && input.integration.trim()
+              ? { integration: input.integration.trim() }
+              : {}),
+            ...(maxRisk ? { maxRisk } : {}),
+          }).catch((err: unknown) => (err instanceof Error ? err.message : String(err)));
+          if (typeof matches === "string") {
+            // Surface the real error (404 vs 403 vs timeout) rather than a
+            // generic "could not reach" message.
+            return text(
+              `Could not reach the deployment catalog: ${matches.slice(0, 200)}. ` +
+              'scope="agent" still works and covers everything this run can load.',
+            );
+          }
+          // Telling a restricted agent to load-tools one of these yields
+          // "unknown", which reads as a broken tool, not a permission
+          // boundary — hence the distinct wording below. openPalette only
+          // waives the grant requirement; it can't conjure credentials, so a
+          // tool whose integration was never connected still isn't loadable.
+          return text(renderDeployment(matches, options.openPalette
+            ? "This agent has an open palette, so try load-tools with the exact name. "
+              + 'A name that comes back "unknown" is not in this run at all — its integration has no '
+              + "credentials here, and no palette setting changes that."
+            : "These are NOT loadable in this run: this agent only loads what it was granted. "
+              + 'Re-run with scope="agent" to see what is, or ask an admin to grant one of the above.'));
         }
-        const pool = scoped.entries;
-        if (pool.length === 0) {
-          return {
-            content: [{ type: "text" as const, text: `The tool catalog is empty. ${emptyCatalogMessage}` }],
-            details: {},
-          };
+
+        const scoped = scopeTo(input.catalog);
+        if ("error" in scoped) return text(scoped.error);
+        if (scoped.entries.length === 0) {
+          return text(`The tool catalog is empty. ${emptyCatalogMessage}`);
         }
-        const grouped = new Map<string, ToolCatalogEntry[]>();
-        for (const entry of pool) {
-          const list = grouped.get(entry.catalog) ?? [];
-          list.push(entry);
-          grouped.set(entry.catalog, list);
+
+        const allowed = maxRisk ? new Set(riskAtOrBelow(maxRisk as "read" | "write" | "destructive")) : null;
+        const risked = allowed ? scoped.entries.filter((e) => allowed.has(entryRisk(e))) : scoped.entries;
+        const matched = query ? matchScoped(risked, query) : risked;
+        if (matched.length === 0) {
+          return text(
+            `No tool in this agent's catalog matches ${JSON.stringify(query)}. ` +
+            `${risked.length} tool(s) are available here — call search-tools with no query to browse them, ` +
+            'or scope="claw" to check whether the deployment has one this agent was not given.',
+          );
         }
-        const sections = [...grouped.entries()]
-          .sort(([a], [b]) => a.localeCompare(b))
-          .map(([name, entries]) => {
-            const sorted = entries.slice().sort((a, b) => a.name.localeCompare(b.name));
-            const lines = sorted.map((entry) => `  - ${entry.name}: ${entry.oneLineDescription}`);
-            return [`## ${name} (${sorted.length})`, ...lines].join("\n");
-          });
+
+        const shown = matched.slice(0, limit);
         const header =
-          `Tool catalog — ${pool.length} tool${pool.length === 1 ? "" : "s"} across ${grouped.size} catalog${grouped.size === 1 ? "" : "s"}. ` +
-          `Pick the names you need and call load-tools({ names: [...] }), or load-tools({ catalog: \"<name>\" }) for a whole catalog.`;
-        return { content: [{ type: "text" as const, text: [header, ...sections].join("\n\n") }], details: {} };
+          `${shown.length} of ${matched.length} matching tool(s)${query ? ` for ${JSON.stringify(query)}` : ""}. ` +
+          'Pick the names you need and call load-tools({ names: [...] }), or load-tools({ catalog: "<name>" }) for a whole catalog.';
+        return text(renderGrouped(shown, header));
       },
     },
     {
       name: "load-tools",
       label: "Load Tools",
       description:
-        "Load full schemas for catalogued tools so you can call them directly on the next turn. Batch everything you need in one call. " +
-        "Pass `names` for specific tools, or `catalog` to load a whole catalog at once (handy for small ones — no search needed first); " +
-        `passing both loads the union. The loaded set is append-only for this session. Catalogs: ${catalogNames.join(", ") || "(none)"}.`,
+        "Activate tools so you can call them directly. Their full schemas arrive on your NEXT turn, so batch everything you need into one call rather than loading one at a time.\n" +
+        "Pass `names` for specific tools — one name or many, exactly as search-tools spelled them. Pass `catalog` to take a whole catalog at once, which is worth doing for small ones instead of searching first. Passing both loads the union.\n" +
+        "The loaded set only grows: nothing you load is taken away later in this session, so there is no need to re-load a tool you already have. " +
+        `Only tools in this agent's catalog can be loaded; if a name comes back "unknown", search-tools with scope="agent" will show what is actually here. Catalogs: ${catalogNames.join(", ") || "(none)"}.`,
       parameters: Type.Unsafe({
         type: "object",
         additionalProperties: false,
@@ -335,7 +616,7 @@ export function buildFastModeMetaTools(options: {
           names: {
             type: "array",
             items: { type: "string" },
-            description: "Exact tool names from list-tools or the catalog index.",
+            description: "Exact tool names, as search-tools or the catalog index spelled them.",
           },
           catalog: {
             type: "string",
@@ -373,14 +654,26 @@ export function buildFastModeMetaTools(options: {
             details: {},
           };
         }
-        const unknown = names.filter((name) => !byName.has(name));
-        const result = await options.controller.loadTools(names);
+        const resolved: string[] = [];
+        const unknown: string[] = [];
+        const ambiguous: string[] = [];
+        for (const requested of names) {
+          const hit = resolveCatalogName(requested, byName, catalog);
+          if (hit === null) unknown.push(requested);
+          else if ("ambiguous" in hit) ambiguous.push(`${requested} (could be ${hit.ambiguous.join(" or ")})`);
+          else resolved.push(hit.name);
+        }
+
+        // Call even with nothing resolved: it's the only source of the real
+        // active-set/budget numbers — skipping it would fake "0/0".
+        const result = await options.controller.loadTools(resolved);
+
+        const allUnknown = [...unknown, ...result.unknown.filter((name) => !unknown.includes(name))];
         const parts = [
           result.loaded.length > 0 ? `Loaded: ${result.loaded.join(", ")}` : "",
           result.alreadyLoaded.length > 0 ? `Already loaded: ${result.alreadyLoaded.join(", ")}` : "",
-          [...unknown, ...result.unknown.filter((name) => !unknown.includes(name))].length > 0
-            ? `Unknown: ${[...unknown, ...result.unknown.filter((name) => !unknown.includes(name))].join(", ")}`
-            : "",
+          ambiguous.length > 0 ? `Ambiguous, name the server too: ${ambiguous.join("; ")}` : "",
+          allUnknown.length > 0 ? unknownExplanation(allUnknown, catalog) : "",
           `Active tools: ${result.activeToolSet.length}/${result.maxActiveTools}`,
           "Loaded tools are available starting with the next assistant turn.",
         ].filter(Boolean);
@@ -392,7 +685,7 @@ export function buildFastModeMetaTools(options: {
 
 /**
  * Above this many entries a catalog is listed by name only and the model is
- * pointed at `list-tools`. At or below it, every tool is listed inline with
+ * pointed at `search-tools`. At or below it, every tool is listed inline with
  * its one-liner — for a 3-4 tool catalog that costs almost nothing and saves
  * the model a search round trip before it can act.
  */
@@ -430,7 +723,7 @@ export function renderToolCatalogForPrompt(
       const sorted = entries.slice().sort((a, b) => a.name.localeCompare(b.name));
       const header = `- **${name}** (${sorted.length} tool${sorted.length === 1 ? "" : "s"})`;
       if (sorted.length > INLINE_LISTING_MAX) {
-        return [`${header} — call list-tools with this catalog to see its tools.`];
+        return [`${header} — call search-tools with this catalog to see its tools.`];
       }
       return [header, ...sorted.map((entry) => `    - ${entry.name}: ${entry.oneLineDescription}`)];
     });
@@ -440,7 +733,7 @@ export function renderToolCatalogForPrompt(
     opts?.subagentDelegationDisabled
       ? "Subagent delegation is disabled. The tools below are NOT loaded yet — use `load-tools` to pull in the ones you need, then call them yourself."
       : "The tools below are NOT loaded yet — their full schemas arrive only when you ask for them.",
-    "Call `list-tools` to see every tool (grouped by catalog, with one-line descriptions), then `load-tools` to activate the ones you need; both take an optional `catalog` filter, and `load-tools` accepts a whole `catalog` at once. Loaded tools are callable from your next turn, so batch everything you need in one call.",
+    "Call `search-tools` to find one — no arguments lists everything here, a `query` narrows it, and `scope=\"claw\"` looks beyond this agent at every tool the deployment has. Then `load-tools` activates the ones you need. Loaded tools are callable from your next turn, so batch everything into one call.",
     ...sections,
   ].join("\n");
 }

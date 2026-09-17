@@ -52,15 +52,43 @@ export const getAgentConfigTool: ToolDefinition = {
   execute: AUTH_EXECUTED_STUB,
 };
 
-export const listAvailableToolsTool: ToolDefinition = {
-  slug: "list_available_tools",
-  name: "list_available_tools",
+export const searchToolsTool: ToolDefinition = {
+  slug: "search_tools",
+  name: "search_tools",
   description:
-    "List the full catalog of tools, subagents and integrations that COULD be added to an agent — " +
-    "including each integration's read/write tools, risk level and how many agents already use it " +
-    "(usageCount). Compare against an agent's current config to recommend additions. Read-only.",
+    "Find tools in this organization's catalog — every tool any agent here could be given, " +
+    "with the exact slugs you need to write into an agent's config.\n" +
+    "Omit `query` to browse the catalog. Pass `query` to search it semantically: describe what the " +
+    'agent needs to DO ("post a message to a channel", "read a pdf form") rather than guessing a ' +
+    "tool name, because matching is on meaning, not on keywords.\n" +
+    "`integration` narrows to one product (google, sandbox, github). `maxRisk` is a ceiling, not an " +
+    'exact match: "read" excludes everything that writes, "write" still excludes destructive. Use it ' +
+    "when recommending tools for an agent that should not mutate anything.\n" +
+    "Every result carries its slug, integration, risk, required parameters, and how many agents in " +
+    "this org already hold it — which is the fastest signal for whether a tool is the conventional " +
+    "choice here. Subagents and the integration list come back alongside, since an agent's config " +
+    "grants those by name too. Read-only.",
   source: "custom:agent-introspect",
-  inputSchema: { type: "object", properties: {}, required: [] },
+  inputSchema: {
+    type: "object",
+    properties: {
+      query: {
+        type: "string",
+        description: "What the agent needs to do, in plain words. Omit to browse the catalog.",
+      },
+      integration: {
+        type: "string",
+        description: 'Restrict to one integration, e.g. "google" or "sandbox".',
+      },
+      maxRisk: {
+        type: "string",
+        enum: ["read", "write", "destructive"],
+        description: "Ceiling on how dangerous a returned tool may be. Omit for no ceiling.",
+      },
+      limit: { type: "number", description: "Maximum tools to return. Default 15, max 50." },
+    },
+    required: [],
+  },
   execute: AUTH_EXECUTED_STUB,
 };
 
@@ -151,7 +179,7 @@ export const findAgentsTool: ToolDefinition = {
 export const AGENT_INTROSPECT_TOOL_DEFS: ToolDefinition[] = [
   listAgentsTool,
   getAgentConfigTool,
-  listAvailableToolsTool,
+  searchToolsTool,
   getAgentRunsTool,
   findAgentsTool,
 ];

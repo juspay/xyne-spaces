@@ -63,6 +63,7 @@ import { runsRouter } from "../routes/runs.js";
 import { metricsRouter } from "../routes/metrics.js";
 import { memoryRouter } from "../routes/memory.js";
 import { agentIndexRouter } from "../routes/agent-index.js";
+import { toolIndexRouter } from "../routes/tool-index.js";
 import { digitalTwinRouter } from "../routes/digital-twin.js";
 import { controlCenterRouter } from "../routes/control-center.js";
 import { evalsRouter } from "../routes/evals/index.js";
@@ -277,6 +278,7 @@ function mountWorkspace(app: Express): void {
   // The per-request memoization in require-auth.ts makes the second layer free.
   app.use(`${BASE}/memory`, requireAuth, requireNoAccessToken, memoryRouter);
   app.use(`${BASE}/agent-index`, requireAuth, requireNoAccessToken, agentIndexRouter);
+  app.use(`${BASE}/tool-index`, requireAuth, requireNoAccessToken, toolIndexRouter);
   app.use(`${BASE}/digital-twin`, requireUserAuth, digitalTwinRouter);
   app.use(`${BASE}/control-center`, requireAuth, requireNoAccessToken, controlCenterRouter);
   app.use(`${BASE}/research-agent`, requireAuth, requireNoAccessToken, researchAgentRouter);
