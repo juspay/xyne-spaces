@@ -64,6 +64,7 @@ import {
   deriveEtaManagementView,
   parseTicketEtaManagement,
   parseBoardEtaManagement,
+  resolveTicketDescription,
 } from '@xyne/shared';
 import { useNavigate, Link, useLocation, useNavigationType } from 'react-router-dom';
 import { usePlatform } from '../../../hooks/usePlatform';
@@ -1867,7 +1868,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
   }, [ticket, editingTitle]);
   useEffect(() => {
     if (ticket && !editingDescription) {
-      setDescriptionValue(ticket.description);
+      setDescriptionValue(resolveTicketDescription(ticket));
     }
   }, [ticket, editingDescription]);
   // Initialize stage ETA edit value when current stage changes
@@ -2038,7 +2039,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
   useEffect(() => {
     if (!ticket || !editingDescription) return;
     const next = descriptionValue.trim();
-    if (next === ticket.description) return;
+    if (next === resolveTicketDescription(ticket)) return;
     const ticketId = ticket.id;
     const timeoutId = setTimeout(() => {
       void applyTicketUpdate(
@@ -2363,7 +2364,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
   };
 
   const handleSaveDescription = (): void => {
-    if (descriptionValue !== ticket.description) {
+    if (descriptionValue !== resolveTicketDescription(ticket)) {
       void applyTicketUpdate(
         {
           id: ticket.id,
@@ -3711,7 +3712,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                 onBlur={handleSaveDescription}
                 onKeyDown={e => {
                   if (e.key === 'Escape') {
-                    setDescriptionValue(ticket.description);
+                    setDescriptionValue(resolveTicketDescription(ticket));
                     setEditingDescription(false);
                   }
                 }}
@@ -3736,7 +3737,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
               data-track-category='Tickets'
               data-track-name='StartEditDescription'
             >
-              {!ticket.description ? (
+              {!resolveTicketDescription(ticket) ? (
                 <p className='text-sm text-muted-foreground italic'>Add description</p>
               ) : (
                 <>
@@ -3747,7 +3748,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                       !showFullDescription && 'overflow-hidden line-clamp-3 sm:line-clamp-3',
                     )}
                   >
-                    <RenderMessageWithHTML message={ticket.description} />
+                    <RenderMessageWithHTML message={resolveTicketDescription(ticket)} />
                   </p>
                   {!showFullDescription && needsReadMore && (
                     <button
