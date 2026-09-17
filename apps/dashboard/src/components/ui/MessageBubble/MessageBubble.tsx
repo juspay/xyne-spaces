@@ -39,7 +39,7 @@ import ChatLock from '../../icons/ChatLock';
 import { useDebugSettings } from '../../../hooks/useDebugSettings';
 import { PinnedIcon } from '../../../assets/icons/PinnedIcon';
 import { usePlatform } from '../../../hooks/usePlatform';
-import { Bookmark, ChevronDown, ChevronRight, Hash, Trash2 } from 'lucide-react';
+import { Bookmark, CalendarClock, ChevronDown, ChevronRight, Hash, Trash2 } from 'lucide-react';
 import { MobileMessageMyBubble } from './MobileMessageMyBubble';
 import { Button } from '../Button/Button';
 import EmojiPicker, { EmojiStyle, Theme as EmojiTheme } from 'emoji-picker-react';
@@ -59,6 +59,7 @@ import { isSlashCommandArtifactMessage } from '../../Chat/SlashCommandArtifacts'
 import type { ToolInvocation } from '../../Chat/XyneAISidebar/utils/XyneAITypes';
 import { ExpandableMessage } from '../../Chat/ExpandableMessage/ExpandableMessage';
 import { MessageMetadata } from './MessageBubble.utils';
+import { ScheduledCallPill } from './ScheduledCallPill';
 import { MarkdownMessageRenderer } from './MarkdownMessageRenderer';
 import { SharedTranscriptCard } from '../../Chat/ShareAgentConversationModal/SharedTranscriptCard';
 import { NonParticipantActions } from './NonParticipantActions';
@@ -570,6 +571,9 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
     !isWorkflowMessage;
   const ticketAttachments = isTicketCardMessage ? (conversation?.ticket?.attachments ?? []) : [];
   const isCallMessage = metadata?.isCallMessage === true;
+  // Read-only scheduled-call card. Kept off isCallMessage on purpose: that flag opts a
+  // SYSTEM message into reply/forward/Ask-AI/subscribe in ChatBubble, and the pill is inert.
+  const isScheduledCallPill = metadata?.['isScheduledCallPill'] === true;
   const isActiveCall = useIsCallActive(metadata?.callId);
   // Anchor message for a headless recording started from a thread (see
   // RecordingBubble) — deliberately independent of isCallMessage so it never
@@ -883,6 +887,10 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                 width={32}
                 height={32}
               />
+            ) : showAvatar && isScheduledCallPill ? (
+              <div className='w-8 h-8 rounded-md flex items-center justify-center bg-muted-foreground/10'>
+                <CalendarClock className='w-4 h-4 text-muted-foreground' />
+              </div>
             ) : showAvatar && isCallMessage && !isForwardedMessage ? (
               <div
                 className={`w-8 h-8 rounded-md flex items-center justify-center ${isActiveCall ? 'bg-stage-completed' : 'bg-muted-foreground/10'}`}
@@ -1224,7 +1232,13 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
             )}
 
           {/* ================== MESSAGE CONTENT ================== */}
-          {isCallShareMessage && !isForwardedMessage && !message.isDeleted ? (
+          {isScheduledCallPill && metadata?.callId && channelId && !message.isDeleted ? (
+            <ScheduledCallPill
+              message={{ messageId: message.messageId, metadata }}
+              callId={metadata.callId}
+              channelId={channelId}
+            />
+          ) : isCallShareMessage && !isForwardedMessage && !message.isDeleted ? (
             <CallShareBubble message={{ content: message.content, metadata }} />
           ) : isRecordingMessage &&
             metadata?.callId &&
