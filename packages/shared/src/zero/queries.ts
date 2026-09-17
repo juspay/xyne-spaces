@@ -3777,6 +3777,7 @@ export const queries = defineQueries({
                   ),
                 ),
               )
+              .related('initialMessage')
               .orderBy('createdAt', 'desc')
               .limit(1),
           ),

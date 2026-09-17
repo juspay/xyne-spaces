@@ -4383,6 +4383,7 @@ dmChannelsLatestMessagesPaginated: defineQuery(
                 ),
               ),
             )
+            .related('initialMessage')
             .orderBy('createdAt', 'desc')
             .limit(1),
         ),
