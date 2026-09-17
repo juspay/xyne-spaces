@@ -1,3 +1,10 @@
+## [1.332.2](https://github.com/juspay/xyne-spaces/compare/v1.332.1...v1.332.2) (2026-09-17)
+
+
+### Bug Fixes
+
+* Implement Xyne AI and ticket tracking events ([#1865](https://github.com/juspay/xyne-spaces/issues/1865)) ([727621b](https://github.com/juspay/xyne-spaces/commit/727621b9cfdabb3638e76f898f58bd80eca6ad1a))
+
 ## [1.332.1](https://github.com/juspay/xyne-spaces/compare/v1.332.0...v1.332.1) (2026-09-16)
 
 
