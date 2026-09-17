@@ -57,3 +57,31 @@ export const BELL_COUNT_RULES = {
     mentionActorActions: DM_SHELF_MENTION_ACTOR_ACTIONS,
   },
 } as const;
+
+/**
+ * The window event fired after read mutations so the poll-fed badges (dock,
+ * workspace switcher) refresh immediately instead of waiting up to the poll
+ * interval. Dispatched by the Zero client wrapper after these mutators
+ * complete — one chokepoint, so no call site can miss it.
+ */
+export const UNREAD_REFETCH_EVENT_NAME = 'unread:refetch';
+
+/**
+ * Zero mutators (dot-separated registry names) whose success changes unread
+ * counts — each triggers {@link UNREAD_REFETCH_EVENT_NAME}.
+ */
+export const UNREAD_COUNT_MUTATORS = [
+  'channel.markChannelAsViewed',
+  'channel.markChannelUnreadFrom',
+  'channel.closeDm',
+  'channel.reopenDm',
+  'activities.markAsRead',
+  'activities.markAsReadByFilter',
+  'activities.markMissedCallsAsRead',
+] as const;
+
+/** Fire the unread refetch event (no-op outside a DOM environment). */
+export const emitUnreadRefetch = (): void => {
+  if (typeof window === 'undefined') return;
+  window.dispatchEvent(new CustomEvent(UNREAD_REFETCH_EVENT_NAME));
+};

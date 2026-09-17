@@ -9,6 +9,7 @@ import React, {
 } from 'react';
 import axios from 'axios';
 import { API_BASE_URL, isSdlcSurface } from '../config';
+import { UNREAD_REFETCH_EVENT_NAME } from '@xyne/shared';
 import { useIsInPanelWebview } from './useIsInPanelWebview';
 import { logger, Event as LogEvent } from '../utils/logger';
 
@@ -17,13 +18,6 @@ import { logger, Event as LogEvent } from '../utils/logger';
  * hook only feeds the workspace switcher and the dock badge.
  */
 const POLL_INTERVAL_MS = 30_000;
-
-/**
- * Fired (window.dispatchEvent) after read mutations so the poll refreshes
- * immediately — the dock then reflects reads within the same interaction
- * instead of waiting up to POLL_INTERVAL_MS.
- */
-export const UNREAD_REFETCH_EVENT = 'unread:refetch';
 
 interface WorkspaceCountItem {
   workspaceId: string;
@@ -112,12 +106,12 @@ export const WorkspaceUnreadCountsProvider: React.FC<{ children: React.ReactNode
     document.addEventListener('visibilitychange', refreshWhenVisible);
 
     const onRefetchEvent = (): void => void fetchCounts();
-    window.addEventListener(UNREAD_REFETCH_EVENT, onRefetchEvent);
+    window.addEventListener(UNREAD_REFETCH_EVENT_NAME, onRefetchEvent);
 
     return () => {
       clearInterval(interval);
       document.removeEventListener('visibilitychange', refreshWhenVisible);
-      window.removeEventListener(UNREAD_REFETCH_EVENT, onRefetchEvent);
+      window.removeEventListener(UNREAD_REFETCH_EVENT_NAME, onRefetchEvent);
     };
   }, [fetchCounts, shouldPoll]);
 
@@ -144,12 +138,4 @@ export const useWorkspaceUnreadCounts = (): WorkspaceUnreadCounts => {
     return emptyCounts;
   }
   return context;
-};
-
-/**
- * Fire the {@link UNREAD_REFETCH_EVENT} window event — call after read
- * mutations to refresh the poll-fed badges (dock, switcher) immediately.
- */
-export const emitUnreadRefetch = (): void => {
-  window.dispatchEvent(new CustomEvent(UNREAD_REFETCH_EVENT));
 };
