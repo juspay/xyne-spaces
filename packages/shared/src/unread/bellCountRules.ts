@@ -1,0 +1,59 @@
+/**
+ * Unread badge count rules — the single source of truth for what counts as a
+ * "bell-shelf" unread activity and what the "dm shelf" subtracts.
+ *
+ * Imported by BOTH the dashboard hooks (Zero-synced rail badges) and the
+ * backend endpoint (polled dock/switcher counts), each adapting the rules to
+ * its own query builder. Parity tests assert both adapters return the same
+ * set on golden fixtures — see the unread badge unification plan (§3.1).
+ *
+ * Invariant: workspace count = dmCount + bellCount + callCount. Every event
+ * lands in exactly one shelf; the dock renders the sum over all workspaces.
+ */
+
+/** Actor actions never counted in the bell shelf. */
+export const BELL_EXCLUDED_ACTOR_ACTIONS = ['added_v2', 'removed'] as const;
+
+/** Calls shelf owns missed calls — the bell excludes them. */
+export const BELL_EXCLUDED_CALL_ACTOR_ACTION = 'missed_call';
+
+/**
+ * Classifications excluded from the bell count. ERROR and PENDING are counted:
+ * an LLM failure must not lose potentially important counts.
+ */
+export const BELL_EXCLUDED_CLASSIFICATIONS = ['SKIP'] as const;
+
+/**
+ * Legacy `direct_message` activity rows are dm-shelf content — fully excluded
+ * from the bell count.
+ */
+export const BELL_EXCLUDED_LEGACY_DIRECT_MESSAGES = true;
+
+/** Unread activities in closed/archived channels do not count in any shelf. */
+export const BELL_EXCLUDE_CLOSED_CHANNELS = true;
+
+/** Channel scopes whose unreads belong to the dm shelf. */
+export const DM_SHELF_CHANNEL_SCOPES = ['DM', 'GROUP_DM'] as const;
+
+/**
+ * GROUP_DM unread top-level mention activities belong to the bell shelf
+ * ("mention wins the bucket"), so the dm shelf subtracts them per channel.
+ */
+export const DM_SHELF_SUBTRACT_UNREAD_TOP_LEVEL_MENTIONS = true;
+
+/** Actor actions of unread top-level mention rows the dm shelf subtracts. */
+export const DM_SHELF_MENTION_ACTOR_ACTIONS = ['mentioned_user', 'group_mention'] as const;
+
+/** Bell count rules, assembled (see the individual constants above). */
+export const BELL_COUNT_RULES = {
+  excludedActorActions: BELL_EXCLUDED_ACTOR_ACTIONS,
+  excludedCalls: { actionSource: 'call', actorAction: BELL_EXCLUDED_CALL_ACTOR_ACTION },
+  excludedClassifications: BELL_EXCLUDED_CLASSIFICATIONS,
+  excludedLegacyDirectMessages: BELL_EXCLUDED_LEGACY_DIRECT_MESSAGES,
+  excludeClosedChannels: BELL_EXCLUDE_CLOSED_CHANNELS,
+  dmShelf: {
+    channelScopes: DM_SHELF_CHANNEL_SCOPES,
+    subtractUnreadTopLevelMentions: DM_SHELF_SUBTRACT_UNREAD_TOP_LEVEL_MENTIONS,
+    mentionActorActions: DM_SHELF_MENTION_ACTOR_ACTIONS,
+  },
+} as const;
