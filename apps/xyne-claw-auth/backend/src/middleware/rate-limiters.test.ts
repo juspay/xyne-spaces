@@ -31,9 +31,10 @@ vi.mock("../logger.js", () => ({
 let server: Server;
 let baseUrl: string;
 
-async function startApp(max: number): Promise<void> {
+async function startApp(max: number, preAuth?: express.RequestHandler): Promise<void> {
   const { createRequesterLimiter } = await import("./rate-limiters.js");
   const app = express();
+  if (preAuth) app.use(preAuth);
   app.use(createRequesterLimiter({ windowMs: 60_000, max }));
   app.get("/ping", (_req, res) => {
     res.json({ ok: true });
@@ -83,8 +84,18 @@ describe("createRequesterLimiter", () => {
     expect(statuses).toEqual([200, 200, 429, 429]);
   });
 
-  it("keys separately per user id so one user cannot exhaust another", async () => {
-    await startApp(2);
+  it("keys separately per verified user id so one user cannot exhaust another", async () => {
+    // Simulate an auth middleware that has VERIFIED the caller's identity:
+    // requireAuth/optionalAuth only mark requests whose x-user-id they set
+    // from a trusted source (verified cookie / CLI token / S2S key).
+    const { markVerifiedUser } = await import("./require-auth.js");
+    const verifiedAuth: express.RequestHandler = (req, _res, next) => {
+      const header = req.headers["x-user-id"];
+      const userId = Array.isArray(header) ? header[0] : header;
+      if (userId && userId.trim()) markVerifiedUser(req, userId.trim());
+      next();
+    };
+    await startApp(2, verifiedAuth);
     for (let i = 0; i < 3; i += 1) {
       await fetch(`${baseUrl}/ping`, { headers: { "x-user-id": "user-a" } });
     }
@@ -92,6 +103,17 @@ describe("createRequesterLimiter", () => {
     expect(other.status).toBe(200);
     const exhausted = await fetch(`${baseUrl}/ping`, { headers: { "x-user-id": "user-a" } });
     expect(exhausted.status).toBe(429);
+  });
+
+  it("does not key unverified x-user-id headers — rotation cannot mint buckets", async () => {
+    // No auth middleware ran, so the header is client-controlled and must be
+    // ignored: both callers share the IP bucket.
+    await startApp(2);
+    for (let i = 0; i < 3; i += 1) {
+      await fetch(`${baseUrl}/ping`, { headers: { "x-user-id": "spoof-a" } });
+    }
+    const rotated = await fetch(`${baseUrl}/ping`, { headers: { "x-user-id": "spoof-b" } });
+    expect(rotated.status).toBe(429);
   });
 
   it("emits standard RateLimit headers and no legacy X-RateLimit headers", async () => {
