@@ -14,11 +14,12 @@ import type { RowLevelMeta } from './rowLevelRouting';
  */
 let Fanout: (typeof import('./fanout'))['Fanout'] | undefined;
 let RedisStreamStore: (typeof import('./redisStore'))['RedisStreamStore'] | undefined;
+let disconnectSyncStore: (typeof import('./redisStore'))['disconnectSyncStore'] | undefined;
 let redisService: (typeof import('@/services/redisService'))['redisService'] | undefined;
 let reason = '';
 try {
   ({ Fanout } = await import('./fanout.js'));
-  ({ RedisStreamStore } = await import('./redisStore.js'));
+  ({ RedisStreamStore, disconnectSyncStore } = await import('./redisStore.js'));
   ({ redisService } = await import('@/services/redisService'));
   await redisService.getClient().ping();
 } catch (e) {
@@ -26,7 +27,12 @@ try {
 }
 const skip = Fanout && RedisStreamStore && redisService ? false : reason || 'unavailable';
 
-after(() => redisService?.getClient().disconnect());
+// Close BOTH the health-check client AND the store's dedicated syncClient() connection, else the open
+// sockets keep the event loop alive and `node --test` wedges (never exits) — a CI hang, not a failure.
+after(() => {
+  redisService?.getClient().disconnect();
+  disconnectSyncStore?.();
+});
 
 const META: RowLevelMeta = {
   rootTable: 'draft_messages',
