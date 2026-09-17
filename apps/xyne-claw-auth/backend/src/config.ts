@@ -24,6 +24,15 @@ registerDecryptionFallback(dataEncryptionKey, rootEncryptionKey);
 
 export const CONFIG = {
   port: Number(process.env["AUTH_SERVICE_PORT"] ?? 3003),
+  /**
+   * Reverse proxies in front of this process, for `trust proxy`.
+   *
+   * Defaults to 1 for the single load balancer every deployed environment sits
+   * behind. Harmless locally, where no X-Forwarded-For arrives and `req.ip`
+   * stays the socket address. Raise it if another hop is added, and never set
+   * it higher than the real count or clients can forge the header.
+   */
+  trustedProxyHops: Number(process.env["TRUSTED_PROXY_HOPS"] ?? 1),
   selfUrl: process.env["AUTH_SERVICE_URL"] ?? `http://localhost:${process.env["AUTH_SERVICE_PORT"] ?? 3003}`,
   // Cluster-internal URL used for service-to-service callbacks (claw → claw-auth)
   // and self-dispatch (claw-auth → its own /run). Setting this to the in-cluster
