@@ -3,6 +3,7 @@ import { logger } from '@/utils/logger';
 import { ActivityEventPayload } from '@xyne/shared';
 import { triggerNudgesFromActivity } from '@/services/nudges/nudgeTriggerService';
 import { sudoQueryService } from '@/services/hyperAnalytics/sudoQueryService';
+import { posthogNodeService } from '@/services/hyperAnalytics/posthogNodeService';
 import { resolveModule } from '@/services/hyperAnalytics/moduleRoutes';
 import { canonicalizeTrackingCategory } from '@/services/trackingCategoryAliases';
 
@@ -15,46 +16,74 @@ class ActivityTrackingService {
     this.repository = new ActivityEventRepository();
   }
 
-  private emitToSudoQuery(payload: ActivityEventPayload): void {
-    try {
-      const resolved = resolveModule(payload.url);
-      // Named individually rather than spreading context_metadata: that object
-      // can hold free text (INPUT_CHANGE events carry only value length, never
-      // the typed content).
-      const meta = payload.context_metadata ?? {};
+  /**
+   * The flat property set every analytics sink receives for one activity event.
+   * Named individually rather than spreading context_metadata: that object can
+   * hold free text (INPUT_CHANGE events carry only value length, never the
+   * typed content). `event_label` is deliberately absent: it falls back to the
+   * element's inner text, which can be a message body or ticket title.
+   */
+  private buildAnalyticsProps(payload: ActivityEventPayload): Record<string, string | number | boolean> {
+    const resolved = resolveModule(payload.url);
+    const meta = payload.context_metadata ?? {};
+    // The Grafana dashboard's section rule, kept byte-for-byte so PostHog buckets rows the same way:
+    //   coalesce('/' || nullif(split_part(split_part(url,'?',1),'/',3),''), '/app')
+    // Fields are 1-based like split_part; a leading '/' makes the first field empty.
+    //   /ws/chat/dir/abc -> /chat ; /ws -> /app ; backend -> /app (route_root '')
+    const parts = (payload.url.split('?')[0] ?? '').split('/');
+    const section = parts[2] ? `/${parts[2]}` : '/app';
+    const routeRoot = parts[1] ?? '';
 
+    return {
+      action: `${payload.event_category}/${payload.event_name}`,
+      category: payload.event_category,
+      name: payload.event_name,
+      trigger: payload.trigger_type,
+      platform: payload.platform,
+      url: payload.url,
+      section,
+      route_root: routeRoot,
+      // One id per page load on the client; Grafana's "visits" count these.
+      client_session_id: payload.session_id,
+      ...(resolved && { module: resolved.module, workspaceId: resolved.workspaceId }),
+      // Carries the channel for DB_MUTATION events, whose url is 'backend'.
+      // Click events get it from the url instead and rarely set this key.
+      ...(typeof meta.channelId === 'string' && { channelId: meta.channelId }),
+      // Channel usage dimensions from the dashboard's channelTrackingMetadata
+      // (CHANNEL_VIEWED, SEND_MESSAGE, ADD/REMOVE_REACTION, join/leave). The
+      // name is denormalized so reports survive renames; DM rows carry none.
+      ...(typeof meta.channelName === 'string' && { channelName: meta.channelName }),
+      ...(typeof meta.isDM === 'boolean' && { isDM: meta.isDM }),
+      ...(typeof meta.scopeType === 'string' && { scopeType: meta.scopeType }),
+      ...(typeof meta.isThreadReply === 'boolean' && { isThreadReply: meta.isThreadReply }),
+      ...(typeof meta.emojiName === 'string' && { emojiName: meta.emojiName }),
+      ...(typeof meta.path === 'string' && { path: meta.path }),
+      // Target URL on ELECTRON_NAVIGATE events.
+      ...(typeof meta.to === 'string' && { to: meta.to }),
+      ...(typeof meta.label === 'string' && { label: meta.label }),
+      ...(typeof meta.tabValue === 'string' && { tabValue: meta.tabValue }),
+      ...(typeof meta.tab === 'string' && { tab: meta.tab }),
+      ...(Array.isArray(meta.fields) && {
+        fields: meta.fields.filter(f => typeof f === 'string').join(','),
+      }),
+    };
+  }
+
+  private emitToAnalyticsSinks(payload: ActivityEventPayload): void {
+    const props = this.buildAnalyticsProps(payload);
+    try {
       sudoQueryService.identify({ id: payload.user_id });
-      sudoQueryService.track('ui_action', {
-        action: `${payload.event_category}/${payload.event_name}`,
-        category: payload.event_category,
-        name: payload.event_name,
-        trigger: payload.trigger_type,
-        platform: payload.platform,
-        url: payload.url,
-        ...(resolved && { module: resolved.module, workspaceId: resolved.workspaceId }),
-        // Carries the channel for DB_MUTATION events, whose url is 'backend'.
-        // Click events get it from the url instead and rarely set this key.
-        ...(typeof meta.channelId === 'string' && { channelId: meta.channelId }),
-        // Channel usage dimensions from the dashboard's channelTrackingMetadata
-        // (CHANNEL_VIEWED, SEND_MESSAGE, ADD/REMOVE_REACTION, join/leave). The
-        // name is denormalized so reports survive renames; DM rows carry none.
-        ...(typeof meta.channelName === 'string' && { channelName: meta.channelName }),
-        ...(typeof meta.scopeType === 'string' && { scopeType: meta.scopeType }),
-        ...(typeof meta.isThreadReply === 'boolean' && { isThreadReply: meta.isThreadReply }),
-        ...(typeof meta.emojiName === 'string' && { emojiName: meta.emojiName }),
-        ...(typeof meta.path === 'string' && { path: meta.path }),
-        // Target URL on ELECTRON_NAVIGATE events.
-        ...(typeof meta.to === 'string' && { to: meta.to }),
-        ...(typeof meta.label === 'string' && { label: meta.label }),
-        ...(typeof meta.tabValue === 'string' && { tabValue: meta.tabValue }),
-        ...(typeof meta.tab === 'string' && { tab: meta.tab }),
-        ...(Array.isArray(meta.fields) && {
-          fields: meta.fields.filter(f => typeof f === 'string').join(','),
-        }),
-      });
+      sudoQueryService.track('ui_action', props);
     } catch (err) {
       logger.debug('[ActionMetrics] sudoQuery track failed (non-blocking)', { error: err });
     }
+    // distinct_id is the app user id, the same key Grafana groups by ("userId").
+    posthogNodeService.capture({
+      distinctId: payload.user_id,
+      event: 'ui_action',
+      properties: props,
+      timestamp: new Date(payload.timestamp),
+    });
   }
 
   async saveActivityEvent(rawPayload: ActivityEventPayload): Promise<void> {
@@ -67,7 +96,7 @@ class ActivityTrackingService {
 
     // Emitted before the write so a database failure cannot suppress the
     // metric — the two sinks are independent.
-    this.emitToSudoQuery(payload);
+    this.emitToAnalyticsSinks(payload);
 
     try {
       const createInput: CreateActivityEventInput = {
