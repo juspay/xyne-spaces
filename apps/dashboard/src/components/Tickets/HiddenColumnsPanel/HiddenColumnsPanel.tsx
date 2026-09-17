@@ -11,6 +11,26 @@ import {
 import { cn } from '../../../utils/classNames';
 import type { HiddenColumnsPanelProps } from './HiddenColumnsPanel.types';
 
+const PANEL_OPEN_KEY = 'xyne:kanban-hidden-columns-open';
+const PANEL_OPEN_CHANGE_EVENT = 'xyne:kanban-hidden-columns-open-change';
+
+const readPanelOpen = (): boolean => {
+  try {
+    return localStorage.getItem(PANEL_OPEN_KEY) === 'true';
+  } catch {
+    return false;
+  }
+};
+
+const writePanelOpen = (open: boolean): void => {
+  try {
+    localStorage.setItem(PANEL_OPEN_KEY, String(open));
+  } catch {
+    return;
+  }
+  window.dispatchEvent(new Event(PANEL_OPEN_CHANGE_EVENT));
+};
+
 const HiddenColumnRow: React.FC<{
   stage: Stage;
   count: number;
@@ -59,13 +79,23 @@ export const HiddenColumnsPanel: React.FC<HiddenColumnsPanelProps> = ({
   getCount,
   onUnhide,
 }) => {
-  const [isOpen, setIsOpen] = React.useState(false);
+  const [isOpen, setIsOpen] = React.useState(readPanelOpen);
+
+  React.useEffect(() => {
+    const syncOpen = (): void => setIsOpen(readPanelOpen());
+    window.addEventListener(PANEL_OPEN_CHANGE_EVENT, syncOpen);
+    return (): void => window.removeEventListener(PANEL_OPEN_CHANGE_EVENT, syncOpen);
+  }, []);
 
   return (
     <div className={cn('flex shrink-0 flex-col', isOpen ? 'w-72' : 'w-auto')}>
       <button
         type='button'
-        onClick={() => setIsOpen(open => !open)}
+        onClick={() => {
+          const next = !isOpen;
+          setIsOpen(next);
+          writePanelOpen(next);
+        }}
         aria-expanded={isOpen}
         className='flex w-full items-center gap-2 px-4 pt-3 pb-1 text-left'
         data-track-category='Tickets'
