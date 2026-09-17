@@ -46,10 +46,12 @@ export class ChannelRecapsACL extends BaseQueryACL<'channel_recaps'> {
       or(
         and(
           cmp('userId', 'IS', null),
+          // Pin the join direction — see tickets-acl.ts for the full rationale.
           exists('channel', (ch) =>
             ch
               .where('workspaceId', '=', this.ctx.workspaceId)
-              .where(channelAccessWhere(this.ctx))
+              .where(channelAccessWhere(this.ctx)),
+            { flip: false },
           )
         ),
         cmp('userId', '=', this.ctx.userID)

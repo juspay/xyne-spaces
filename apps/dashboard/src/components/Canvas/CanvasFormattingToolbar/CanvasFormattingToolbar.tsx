@@ -125,6 +125,7 @@ export function CanvasToolbarAttachedActions({
 
     xyneAIActor.send({
       type: 'OPEN',
+      trackSource: 'canvas_toolbar',
       canvasInfo: {
         canvasId,
         ...(canvasTitle && { title: canvasTitle }),

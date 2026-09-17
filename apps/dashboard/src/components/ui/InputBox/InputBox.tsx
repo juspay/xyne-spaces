@@ -107,6 +107,20 @@ const getFileExtension = (name: string): string => {
 import { preloadEmojiData } from '../../../utils/emojiLookup';
 import { globalClickTracker } from '../../../services/Analytics/globalClickTracker';
 import { channelTrackingMetadata } from '../../../services/Analytics/channelTracking';
+
+/**
+ * Which affordance sent the message. Every send path funnels through one
+ * function, so without this the activity row cannot distinguish Enter from the
+ * Send button from the mobile editor.
+ */
+type SendTrigger =
+  | 'keyboard_enter'
+  | 'keyboard_mod_enter'
+  | 'keyboard_shift_enter'
+  | 'send_button'
+  | 'send_menu'
+  | 'mobile_editor'
+  | 'unknown';
 import { useChannel } from '../../../hooks/useChannels';
 
 const lowlight = createLowlight(all);
@@ -840,11 +854,13 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
               event.preventDefault();
               // Keyboard sends are invisible to autocapture (click/change/submit
               // only); emit it explicitly so keyboard vs button sends are visible.
+              // This branch serves BOTH Cmd/Ctrl+Enter and Shift+Enter, so the
+              // trigger has to mirror the keyCombo rather than assume mod.
               posthogService.capture('message_send', {
                 trigger: 'keyboard',
                 keyCombo: event.metaKey ? 'mod_enter' : 'shift_enter',
               });
-              void handleSend();
+              void handleSend(event.metaKey ? 'keyboard_mod_enter' : 'keyboard_shift_enter');
               return true;
             }
             event.preventDefault();
@@ -1004,7 +1020,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
               trigger: 'keyboard',
               keyCombo: 'enter',
             });
-            void handleSend();
+            void handleSend('keyboard_enter');
             return true;
           }
 
@@ -1288,122 +1304,134 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
       [onScheduleSend, hasSendableContent, editor, allAttachments],
     );
 
-    const handleSend = useCallback(async () => {
-      if (!editor || isSending) return;
-      if (sendDisabled) {
-        // The button is disabled, but Enter still lands here — say why rather than
-        // swallowing the keystroke. Disabled buttons emit no pointer events, so the
-        // tooltip carrying the same reason never opens.
-        if (sendDisabledReason) toast.warning(sendDisabledReason);
-        return;
-      }
-
-      // If a voice stream is active, finalize it for send first: this strips any
-      // unfinalized interim text and aborts the stream (discarding in-flight results)
-      // BEFORE we read the editor, so only committed text is sent and nothing leaks
-      // into the next message. No-op when no stream is active.
-      voiceInputRef.current?.abortForSend();
-
-      // The voice "shimmer" highlight is a transient editor-only decoration that
-      // auto-clears after ~1.4s; strip it across the doc so a quick send can't bake
-      // the orange highlight (a <span class="voice-shimmer">) into the sent message.
-      if (editor.schema.marks['voiceShimmer']) {
-        editor
-          .chain()
-          .setTextSelection({ from: 0, to: editor.state.doc.content.size })
-          .unsetMark('voiceShimmer')
-          .run();
-      }
-
-      // Flush pending debounced content update before sending so that
-      // onContentChange consumers (e.g. ComposeDmPanel form state) receive
-      // the latest content before handleSubmit reads from the form.
-      if (debouncedUpdateTimer.current) {
-        clearTimeout(debouncedUpdateTimer.current);
-        debouncedUpdateTimer.current = null;
-        const htmlContent = sanitizeHtmlContent(editor.getHTML());
-        lastAppliedValueRef.current = htmlContent;
-        onContentChange?.(htmlContent, editor.getText());
-      }
-
-      const plainText = editor.getText().trim();
-      const htmlContent = editor.getHTML();
-
-      if (!hasSendableContent) return;
-
-      // Detect if the entire content is a slash command (e.g. "/sell" or "/sell AAPL").
-      // If so, dispatch it to the app instead of sending it as a chat message.
-      const commandMatch = plainText.match(/^\/([\w-]+)(?:\s+(.*))?$/);
-      if (commandMatch && onCommandSelect) {
-        const cmdName = commandMatch[1] ?? '';
-        // Resolve mention spans from the HTML content so @user → <userid:xyneId>
-        // and @group → <groupid:xyneId> instead of bare display names.
-        const cmdText = resolveCommandTextFromHtml(htmlContent, cmdName);
-        const matchedCmd = commandItems.find(c => c.name.toLowerCase() === cmdName.toLowerCase());
-        if (matchedCmd && matchedCmd.kind !== 'slash-command-artifact') {
-          editor.commands.setContent('');
-          setContent('');
-          editor.commands.focus();
-          void onCommandSelect(matchedCmd, cmdText);
+    // `trigger` says which affordance sent the message. Every path funnels through
+    // this one function, which is what makes SEND_MESSAGE complete — but it also
+    // means the event cannot tell Enter from the button unless the caller says so.
+    const handleSend = useCallback(
+      async (trigger: SendTrigger = 'unknown') => {
+        if (!editor || isSending) return;
+        if (sendDisabled) {
+          // The button is disabled, but Enter still lands here — say why rather than
+          // swallowing the keystroke. Disabled buttons emit no pointer events, so the
+          // tooltip carrying the same reason never opens.
+          if (sendDisabledReason) toast.warning(sendDisabledReason);
           return;
         }
-      }
 
-      setIsSending(true);
-      try {
-        // Filter to only send actual File objects
-        // UploadedFile metadata-only attachments are already stored and referenced by ID
-        const filesToSend = allAttachments
-          .map(a => a.file)
-          .filter((f): f is File => f instanceof File);
+        // If a voice stream is active, finalize it for send first: this strips any
+        // unfinalized interim text and aborts the stream (discarding in-flight results)
+        // BEFORE we read the editor, so only committed text is sent and nothing leaks
+        // into the next message. No-op when no stream is active.
+        voiceInputRef.current?.abortForSend();
 
-        // Insert canvas link into editor if attached
-        if (attachedCanvas) {
-          const canvasLink = `${shareableOrigin}/chat/canvas/${attachedCanvas.id}`;
-          // Insert as plain link - platform will unfurl to show preview
-          editor?.commands.insertContent(` ${canvasLink}`);
+        // The voice "shimmer" highlight is a transient editor-only decoration that
+        // auto-clears after ~1.4s; strip it across the doc so a quick send can't bake
+        // the orange highlight (a <span class="voice-shimmer">) into the sent message.
+        if (editor.schema.marks['voiceShimmer']) {
+          editor
+            .chain()
+            .setTextSelection({ from: 0, to: editor.state.doc.content.size })
+            .unsetMark('voiceShimmer')
+            .run();
         }
 
-        // Get fresh content after inserting link
-        const finalHtmlContent = editor?.getHTML() || htmlContent;
-        const finalPlainText = editor?.getText().trim() || plainText;
-
-        await onSendMessage(finalPlainText, finalHtmlContent, filesToSend);
-
-        // Tracked here, not on the Send button: Enter, the button, the mobile
-        // editor and shortcuts all land in this function, and only a send that
-        // succeeded should count.
-        globalClickTracker.trackManualEvent('CHAT_INPUT', 'SEND_MESSAGE', undefined, {
-          ...channelTrackingMetadata(trackedChannel),
-          ...(conversationId !== null && { conversationId }),
-          isThreadReply: conversationId !== null,
-          hasAttachments: filesToSend.length > 0,
-        });
-
-        editor.commands.setContent('');
-        setContent('');
-        setAttachedCanvas(null);
-        if (disableDraftUpload) {
-          setAttachmentsMap(new Map());
+        // Flush pending debounced content update before sending so that
+        // onContentChange consumers (e.g. ComposeDmPanel form state) receive
+        // the latest content before handleSubmit reads from the form.
+        if (debouncedUpdateTimer.current) {
+          clearTimeout(debouncedUpdateTimer.current);
+          debouncedUpdateTimer.current = null;
+          const htmlContent = sanitizeHtmlContent(editor.getHTML());
+          lastAppliedValueRef.current = htmlContent;
+          onContentChange?.(htmlContent, editor.getText());
         }
-        editor.commands.focus();
-      } finally {
-        setIsSending(false);
-      }
-    }, [
-      editor,
-      allAttachments,
-      onSendMessage,
-      isSending,
-      attachedCanvas,
-      hasSendableContent,
-      sendDisabled,
-      sendDisabledReason,
-      commandItems,
-      onCommandSelect,
-      disableDraftUpload,
-      trackedChannel,
-    ]);
+
+        const plainText = editor.getText().trim();
+        const htmlContent = editor.getHTML();
+
+        if (!hasSendableContent) return;
+
+        // Detect if the entire content is a slash command (e.g. "/sell" or "/sell AAPL").
+        // If so, dispatch it to the app instead of sending it as a chat message.
+        const commandMatch = plainText.match(/^\/([\w-]+)(?:\s+(.*))?$/);
+        if (commandMatch && onCommandSelect) {
+          const cmdName = commandMatch[1] ?? '';
+          // Resolve mention spans from the HTML content so @user → <userid:xyneId>
+          // and @group → <groupid:xyneId> instead of bare display names.
+          const cmdText = resolveCommandTextFromHtml(htmlContent, cmdName);
+          const matchedCmd = commandItems.find(c => c.name.toLowerCase() === cmdName.toLowerCase());
+          if (matchedCmd && matchedCmd.kind !== 'slash-command-artifact') {
+            editor.commands.setContent('');
+            setContent('');
+            editor.commands.focus();
+            void onCommandSelect(matchedCmd, cmdText);
+            return;
+          }
+        }
+
+        setIsSending(true);
+        try {
+          // Filter to only send actual File objects
+          // UploadedFile metadata-only attachments are already stored and referenced by ID
+          const filesToSend = allAttachments
+            .map(a => a.file)
+            .filter((f): f is File => f instanceof File);
+
+          // Insert canvas link into editor if attached
+          if (attachedCanvas) {
+            const canvasLink = `${shareableOrigin}/chat/canvas/${attachedCanvas.id}`;
+            // Insert as plain link - platform will unfurl to show preview
+            editor?.commands.insertContent(` ${canvasLink}`);
+          }
+
+          // Get fresh content after inserting link
+          const finalHtmlContent = editor?.getHTML() || htmlContent;
+          const finalPlainText = editor?.getText().trim() || plainText;
+
+          await onSendMessage(finalPlainText, finalHtmlContent, filesToSend);
+
+          // Tracked here, not on the Send button: Enter, the button, the mobile
+          // editor and shortcuts all land in this function, and only a send that
+          // succeeded should count.
+          globalClickTracker.trackManualEvent('CHAT_INPUT', 'SEND_MESSAGE', undefined, {
+            ...channelTrackingMetadata(trackedChannel),
+            ...(conversationId !== null && { conversationId }),
+            isThreadReply: conversationId !== null,
+            hasAttachments: filesToSend.length > 0,
+            trigger,
+            attachmentCount: filesToSend.length,
+            hasCanvasAttached: attachedCanvas !== null,
+            // Length only — never the message body. contextMetadata is unmasked.
+            charLength: finalPlainText.length,
+            mentionCount: (finalHtmlContent.match(/data-mention-id=/g) ?? []).length,
+          });
+
+          editor.commands.setContent('');
+          setContent('');
+          setAttachedCanvas(null);
+          if (disableDraftUpload) {
+            setAttachmentsMap(new Map());
+          }
+          editor.commands.focus();
+        } finally {
+          setIsSending(false);
+        }
+      },
+      [
+        editor,
+        allAttachments,
+        onSendMessage,
+        isSending,
+        attachedCanvas,
+        hasSendableContent,
+        sendDisabled,
+        sendDisabledReason,
+        commandItems,
+        onCommandSelect,
+        disableDraftUpload,
+        trackedChannel,
+      ],
+    );
 
     // Canvas attachment handlers
     const handleCanvasSelect = useCallback((canvas: Canvas) => {
@@ -1723,7 +1751,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                 disabled={disabled}
                 emojiSizeClass={emojiSizeClass}
                 onAttachClick={handleAttachClick}
-                onSend={() => void handleSend()}
+                onSend={() => void handleSend('mobile_editor')}
                 placeholder={placeholder}
                 showMentions={features.mentions}
                 showFormattingToolbar={showMobileFormattingToolbar}
@@ -2137,7 +2165,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                           >
                             <button
                               type='button'
-                              onClick={() => void handleSend()}
+                              onClick={() => void handleSend('send_button')}
                               disabled={
                                 disabled || sendDisabled || isSending || !hasSendableContent
                               }
@@ -2224,7 +2252,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                           >
                             <button
                               type='button'
-                              onClick={() => void handleSend()}
+                              onClick={() => void handleSend('send_button')}
                               disabled={disabled || isSending || !hasSendableContent}
                               className={`p-2 flex items-center justify-center transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary focus-visible:outline-offset-2 ${
                                 hasSendableContent
@@ -2292,7 +2320,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                               ) : (
                                 <DropdownMenuItem
                                   onClick={() => {
-                                    void handleSend();
+                                    void handleSend('send_menu');
                                     setIsSendMenuOpen(false);
                                   }}
                                   data-track-category='CHAT_INPUT'
@@ -2324,7 +2352,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                         >
                           <button
                             type='button'
-                            onClick={() => void handleSend()}
+                            onClick={() => void handleSend('send_button')}
                             disabled={disabled || sendDisabled || isSending || !hasSendableContent}
                             className={`${compact ? 'flex size-8 items-center justify-center rounded-full p-0' : 'rounded-md p-2'} transition-all duration-200 ease-in-out focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary focus-visible:outline-offset-2 ${
                               hasSendableContent && !disabled && !sendDisabled

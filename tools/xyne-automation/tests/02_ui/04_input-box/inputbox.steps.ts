@@ -69,6 +69,9 @@ export default class InputBoxSteps {
   @Step('clicking link toolbar button')
   public async clickLinkToolbarButton(): Promise<void> {
     const page = testContext.activePage;
+    // Clicking an existing link in the editor already opens this popover, and it can
+    // sit over the toolbar button (layout-dependent) — the goal is "popover open".
+    if (await page.locator("[data-testid='composer-link-popover']").isVisible()) return;
     await this.ensureFormattingToolbarVisible();
     await page.locator('button[aria-label="Insert link"]').first().click();
   }
@@ -629,7 +632,9 @@ export default class InputBoxSteps {
   @Step('clicking update link button')
   public async clickUpdateLinkButton(): Promise<void> {
     const page = testContext.activePage;
-    await page.locator('button:has-text("Update")').first().click();
+    // Button label toggles "Update"/"Apply" by selection state; both share this
+    // track-name and the same handler, so target it directly.
+    await page.locator("[data-track-name='APPLY_LINK']").first().click();
   }
 
   @Step('clicking remove link button')

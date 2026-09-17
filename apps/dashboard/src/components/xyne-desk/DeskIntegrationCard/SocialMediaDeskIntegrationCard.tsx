@@ -173,6 +173,7 @@ export const SocialMediaDeskIntegrationCard = ({
           'You can reconnect this source later.',
         ]}
         trackCategory='social-media-desk-integration'
+        provider='google_play'
       />
 
       <div className='flex flex-col gap-2'>

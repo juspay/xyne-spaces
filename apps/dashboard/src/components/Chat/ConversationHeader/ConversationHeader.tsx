@@ -44,10 +44,12 @@ import { useRouteContext } from '../../../hooks/useRouteContext';
 import { standaloneNavigate, APP_DRAG_STYLE, APP_NO_DRAG_STYLE } from '../../../utils/electronApp';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { XyneAIStar } from '../../icons/xyne-ai';
-import { trackAskAIOpened } from '../../../services/otel/xyneAIMetrics';
 import { invokeShortcut } from '../../../shortcuts';
+import { CalendarEvent } from '@xyne/icons';
+import { xyneCalendarActor } from '../../../machines/xyneCalendarMachine';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { queries } from '../../../zero/queries';
+import { isAIOnboardingActive } from '../../../contexts/AIOnboardingContext';
 import { useCallAutoJoin } from '../../../hooks/useCallAutoJoin';
 import { renderEmoji } from '../../../utils/customEmojiUtils';
 import {
@@ -306,6 +308,7 @@ const ConversationHeader = ({
                   statusEmoji={dmUser?.statusEmoji}
                   statusContent={dmUser?.statusContent}
                   statusExpiryAt={dmUser?.statusExpiryAt}
+                  activityStatus={dmUser?.activityStatus}
                   size='md'
                   showOnHover={true}
                 />
@@ -360,6 +363,24 @@ const ConversationHeader = ({
               </Button>
             </Tooltip>
           )}
+          <Tooltip content='Check Your Calendar' side='bottom'>
+            <Button
+              variant='ghost'
+              size='sm'
+              onClick={() => {
+                if (isAIOnboardingActive()) return;
+                xyneCalendarActor.send({
+                  type: xyneCalendarActor.getSnapshot().matches('open') ? 'CLOSE' : 'OPEN',
+                });
+              }}
+              className={cn('h-7 w-7 rounded-lg', actionIconClass)}
+              aria-label='Toggle Calendar sidebar'
+              data-track-category='CHANNELS'
+              data-track-name='TOGGLE_CALENDAR_SIDEBAR'
+            >
+              <CalendarEvent size={16} />
+            </Button>
+          </Tooltip>
           <Tooltip
             content={showOnboardingTooltip ? 'Ask AI lives here! Click anytime.' : 'Ask AI'}
             {...(showOnboardingTooltip ? { open: true } : {})}
@@ -369,11 +390,10 @@ const ConversationHeader = ({
               variant='ghost'
               size='sm'
               onClick={() => {
-                // Track Ask AI opened event via OTel metrics
-                trackAskAIOpened(channel.scopeType);
-
-                // Trigger xstate machine to open XyneAI
-                xyneAIActor.send({ type: 'OPEN', channelId });
+                // Trigger xstate machine to open XyneAI. The otel
+                // ask_ai_opened counter fires from the sidebar's open effect
+                // so every entry point counts, not just this one.
+                xyneAIActor.send({ type: 'OPEN', channelId, trackSource: 'channel_header' });
               }}
               className='h-7 w-7 rounded-lg'
               data-track-category='CHANNELS'

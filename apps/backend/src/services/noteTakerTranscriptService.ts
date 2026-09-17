@@ -335,9 +335,12 @@ class NoteTakerTranscriptService {
         select: { id: true },
       });
       if (existing) {
-        // `updatedAt` is @updatedAt, so this also re-sorts the row to the top
-        // of the feed (which orders by updatedAt desc).
-        await db.activity.update({ where: { id: existing.id }, data: { isRead: false } });
+        // Bump `updatedAt` deliberately: the feed orders by updatedAt desc, so this
+        // re-sorts the row to the top rather than stacking a second entry.
+        await db.activity.update({
+          where: { id: existing.id },
+          data: { isRead: false, updatedAt: new Date() },
+        });
         return;
       }
 

@@ -11,6 +11,16 @@ export interface UserPreferences {
     string,
     Array<{ type: 'TRACK' | 'FOLDER'; id: string; name: string }>
   >;
+  /** Which tabs a folder page has open, per folder. The active one lives in the
+   *  URL instead, so a shared link opens the item you meant rather than a copy
+   *  of someone else's working set. */
+  sdlcFolderTabs: Record<
+    string,
+    Array<{ kind: 'CANVAS' | 'LINK' | 'ATTACHMENT' | 'BROWSER'; id: string }>
+  >;
+  sdlcFolderTreeExpanded: Record<string, boolean>;
+  /** The folder page's explorer, folded away to give the page its full width. */
+  sdlcExplorerCollapsed: boolean;
   sdlcSidebarSectionsCollapsed: Record<string, boolean>;
   sdlcSidebarSectionHeights: Record<string, number>;
   sdlcShowClosedTracks: boolean;
@@ -22,9 +32,10 @@ export const DEFAULT_USER_PREFERENCES: UserPreferences = {
   sdlcFinderColumnWidths: {},
   sdlcFinderGroupBy: 'none',
   sdlcFinderPathByTrack: {},
-  sdlcSidebarSectionsCollapsed: Object.fromEntries(
-    ['sdlc-sidebar-artifacts', 'sdlc-sidebar-repositories'].map(id => [id, true]),
-  ),
+  sdlcFolderTabs: {},
+  sdlcFolderTreeExpanded: {},
+  sdlcExplorerCollapsed: false,
+  sdlcSidebarSectionsCollapsed: { 'sdlc-sidebar-artifacts': true },
   sdlcSidebarSectionHeights: {},
   sdlcShowClosedTracks: false,
 };

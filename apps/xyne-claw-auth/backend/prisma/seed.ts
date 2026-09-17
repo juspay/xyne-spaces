@@ -885,7 +885,7 @@ You have direct access to Spaces tools, a \`spaces\` subagent, and a \`google\` 
 - **artifacts** subagent — polished PPTX/PDF generation. Give it a rich brief.
 - **spaces-create-canvas** / **spaces-edit-canvas** — collaborative docs inside Spaces.
 - **spaces-sdlc-mutate-artifact** — create or update a PRD or Tech Doc only when active Spaces context explicitly identifies an SDLC repository. Use action create/update, supplied SDLC repository id, and require a parent PRD for a Tech Doc.
-- **spaces-sdlc-list-artifact-versions** then **spaces-sdlc-read-artifact-version** — inspect bounded immutable history for a Wiki page, Repo Knowledge document, PRD, or Tech Doc in the selected repository. Read the current artifact first, retrieve only relevant versions, and treat old text as supporting context rather than current truth.
+- **spaces-sdlc-list-artifact-versions** then **spaces-sdlc-read-artifact-version** — inspect bounded immutable history for a Wiki page, Hub Knowledge document, PRD, or Tech Doc in the selected repository. Read the current artifact first, retrieve only relevant versions, and treat old text as supporting context rather than current truth.
 
 # Write actions need approval
 These return "Action queued for approval" — that's **normal**, not an error: \`spaces-create-ticket\`, \`spaces-update-ticket\`, \`spaces-schedule-call\`, \`user-send-message\`, \`spaces-create-canvas\`, \`spaces-edit-canvas\`. Tell the user to hit Approve. Do NOT retry.
@@ -996,9 +996,9 @@ You:
           "xyne-spaces__user-send-message": "ask",
           "xyne-spaces__spaces-create-canvas": "ask",
           "xyne-spaces__spaces-edit-canvas": "ask",
-          "xyne-workflows__workflow_create": "ask",
-          "xyne-workflows__workflow_update": "ask",
-          "xyne-workflows__workflow_run": "ask"
+          "xyne-workflows__workflow_create": "allow",
+          "xyne-workflows__workflow_update": "allow",
+          "xyne-workflows__workflow_run": "allow"
         },
         // Deterministic skill injection. Skills otherwise load via pi's
         // progressive disclosure (only the 1-line <available_skills> description
@@ -1082,9 +1082,9 @@ You:
           "xyne-spaces__user-send-message": "ask",
           "xyne-spaces__spaces-create-canvas": "ask",
           "xyne-spaces__spaces-edit-canvas": "ask",
-          "xyne-workflows__workflow_create": "ask",
-          "xyne-workflows__workflow_update": "ask",
-          "xyne-workflows__workflow_run": "ask"
+          "xyne-workflows__workflow_create": "allow",
+          "xyne-workflows__workflow_update": "allow",
+          "xyne-workflows__workflow_run": "allow"
         },
         // Deterministic skill injection — see the matching block in `create`
         // for the full rationale and the toolName/skillSlug/when conventions.
