@@ -44,6 +44,7 @@ export function useAgentCredentialMutations(
   const invalidate = (): void => {
     void queryClient.invalidateQueries({ queryKey: agentCredentialsKey(scope) });
     void queryClient.invalidateQueries({ queryKey: credentialHealthKey(scope) });
+    void queryClient.invalidateQueries({ queryKey: ['claw-provider-models'] });
   };
 
   const saveMutation = useMutation({

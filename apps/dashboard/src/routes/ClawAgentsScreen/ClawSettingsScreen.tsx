@@ -1430,6 +1430,7 @@ const ClawSettingsScreen = (): ReactElement => {
     await queryClient.invalidateQueries({
       queryKey: credentialHealthKey(userCredentialScope(userId)),
     });
+    await queryClient.invalidateQueries({ queryKey: ['claw-provider-models'] });
   };
 
   return (

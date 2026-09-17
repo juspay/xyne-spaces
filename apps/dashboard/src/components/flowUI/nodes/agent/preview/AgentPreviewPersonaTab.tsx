@@ -1,4 +1,4 @@
-import { useState, type ReactElement } from 'react';
+import { useMemo, useState, type ReactElement } from 'react';
 import { PencilEditLine } from '@xyne/icons';
 import {
   Select,
@@ -17,17 +17,25 @@ import {
 } from '../../../../../routes/AIScreen/library/shared/primitives/DetailPrimitives';
 import { ProseBox } from '../../../../../routes/AIScreen/library/shared/primitives/ProseBox';
 import { ProviderOrderDialog } from '../../../../../routes/AIScreen/library/agents/detail/persona/model/ProviderOrderDialog';
+import { AgentKeysDialog } from '../../../../../routes/AIScreen/library/agents/detail/persona/credentials/AgentKeysDialog';
+import { userCredentialScope } from '../../../../../routes/AIScreen/library/agents/detail/persona/credentials/credentialScope';
+import { useCredentialHealth } from '../../../../../routes/AIScreen/library/agents/detail/persona/credentials/useCredentialHealth';
 import { useFlow } from '../../../FlowContext';
 import type { AgentPreviewEditableProps } from './AgentPreviewTabs.types';
 import { connectedProviderCount, providerLine } from './AgentPreviewTabs.utils';
-import { useDraftModelOptions } from './useDraftModelOptions';
+import {
+  defaultModelLabel,
+  needsProviderKey,
+  providerDisplayName,
+  useDraftModelOptions,
+} from './useDraftModelOptions';
 
-const PLATFORM_DEFAULT = 'Platform default';
 const PLATFORM_DEFAULT_VALUE = '__platform_default__';
 
 export function AgentPreviewPersonaTab({ agent, editor }: AgentPreviewEditableProps): ReactElement {
   const { data } = useFlow();
   const [orderOpen, setOrderOpen] = useState(false);
+  const [connectOpen, setConnectOpen] = useState(false);
   const editable = editor?.editable ?? false;
 
   const posterSlug = typeof data['agentSlug'] === 'string' ? data['agentSlug'] : '';
@@ -44,9 +52,22 @@ export function AgentPreviewPersonaTab({ agent, editor }: AgentPreviewEditablePr
     enabled: editable,
   });
 
+  const primaryProvider = providerOrder[0];
+  const connectScope = useMemo(() => userCredentialScope(cardUserId), [cardUserId]);
+  const providerHealth = useCredentialHealth(
+    connectScope,
+    needsProviderKey(primaryProvider) ? [primaryProvider] : [],
+    cardUserId.length > 0,
+  );
+  const providerStatus = primaryProvider
+    ? providerHealth.byProvider.get(primaryProvider)?.status
+    : undefined;
+  const providerNotReady = providerStatus === 'missing' || providerStatus === 'invalid';
+
+  const fallbackLabel = defaultModelLabel(providerOrder[0]);
   const modelValue = modelId || PLATFORM_DEFAULT_VALUE;
   const modelOptions = [
-    { value: PLATFORM_DEFAULT_VALUE, label: PLATFORM_DEFAULT },
+    { value: PLATFORM_DEFAULT_VALUE, label: fallbackLabel },
     ...models.options,
     ...(modelId && !models.options.some(option => option.value === modelId)
       ? [{ value: modelId, label: modelId }]
@@ -93,7 +114,7 @@ export function AgentPreviewPersonaTab({ agent, editor }: AgentPreviewEditablePr
                 </SelectContent>
               </Select>
             ) : (
-              <DetailValue>{modelId || PLATFORM_DEFAULT}</DetailValue>
+              <DetailValue>{modelId || fallbackLabel}</DetailValue>
             )}
           </DetailRow>
 
@@ -122,7 +143,26 @@ export function AgentPreviewPersonaTab({ agent, editor }: AgentPreviewEditablePr
             </DetailRow>
           )}
         </DetailCard>
-        {editable && models.hint && (
+        {providerNotReady && primaryProvider && (
+          <div className='flex flex-wrap items-center gap-2 px-1'>
+            <p className='text-xs leading-4 text-muted-foreground'>
+              {providerStatus === 'invalid'
+                ? `Your ${providerDisplayName(primaryProvider)} key was rejected, so this agent falls back to the platform default.`
+                : `${providerDisplayName(primaryProvider)} isn't connected, so this agent falls back to the platform default.`}
+            </p>
+            <button
+              type='button'
+              onClick={(): void => setConnectOpen(true)}
+              data-track-category='AGENT_ARTIFACT'
+              data-track-name='CONNECT_DRAFT_PROVIDER'
+              className='text-xs font-medium leading-4 text-blue-500 underline underline-offset-2 hover:text-blue-600 dark:text-blue-400'
+            >
+              {providerStatus === 'invalid' ? 'Reconnect' : 'Connect'}{' '}
+              {providerDisplayName(primaryProvider)}
+            </button>
+          </div>
+        )}
+        {!providerNotReady && editable && models.hint && (
           <p className='px-1 text-xs leading-4 text-muted-foreground'>{models.hint}</p>
         )}
       </DetailSection>
@@ -136,6 +176,16 @@ export function AgentPreviewPersonaTab({ agent, editor }: AgentPreviewEditablePr
           </DetailCard>
         )}
       </DetailSection>
+
+      {connectOpen && primaryProvider && (
+        <AgentKeysDialog
+          open
+          onOpenChange={(next: boolean): void => setConnectOpen(next)}
+          scope={connectScope}
+          canManage
+          initialProvider={primaryProvider}
+        />
+      )}
 
       {editor && (
         <ProviderOrderDialog

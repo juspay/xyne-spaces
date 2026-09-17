@@ -321,6 +321,7 @@ export function AgentKeysDialog({
             onOauthConnected={() => {
               void queryClient.invalidateQueries({ queryKey: agentCredentialsKey(scope) });
               void queryClient.invalidateQueries({ queryKey: credentialHealthKey(scope) });
+              void queryClient.invalidateQueries({ queryKey: ['claw-provider-models'] });
               if (singleProvider) {
                 onOpenChange(false);
                 return;

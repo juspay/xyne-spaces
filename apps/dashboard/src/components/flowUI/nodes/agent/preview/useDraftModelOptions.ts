@@ -18,6 +18,21 @@ export interface DraftModelOptions {
   hint: string | null;
 }
 
+export function providerDisplayName(provider: string): string {
+  return PROVIDER_DISPLAY[provider] ?? provider;
+}
+
+export function needsProviderKey(provider: string | undefined): provider is string {
+  return Boolean(provider) && provider !== 'spaces';
+}
+
+export function defaultModelLabel(provider: string | undefined): string {
+  if (!provider || provider === 'spaces') {
+    return 'Platform default';
+  }
+  return `${providerDisplayName(provider)} default`;
+}
+
 const PROVIDER_CATALOGS = new Set(['claude', 'codex', 'copilot']);
 
 async function listForProvider(provider: string, userId: string): Promise<DraftModelOption[]> {
@@ -72,13 +87,12 @@ export function useDraftModelOptions({
     };
   }
 
-  const label = PROVIDER_DISPLAY[scoped] ?? scoped;
+  const label = providerDisplayName(scoped);
+  const asked = scopedModels.isFetched;
+  const cameBackEmpty = asked && (scopedModels.isError || (scopedModels.data?.length ?? 0) === 0);
   return {
     options: scopedModels.data ?? [],
     loading: scopedModels.isLoading,
-    hint:
-      !scopedModels.isLoading && (scopedModels.isError || (scopedModels.data?.length ?? 0) === 0)
-        ? `Connect ${label} in Settings to choose one of its models.`
-        : null,
+    hint: cameBackEmpty ? `Connect ${label} in Settings to choose one of its models.` : null,
   };
 }
