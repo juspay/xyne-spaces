@@ -87,6 +87,7 @@ import { GlobalCallOverlay } from '../components/Call/CallOverlay/GlobalCallOver
 import { MobileCallHeader } from '../components/Call/MobileCallHeader/MobileCallHeader';
 import { NotificationHandler } from '../components/NotificationHandler/NotificationHandler';
 import { ElectronBadgeSync } from '../components/ElectronBadgeSync/ElectronBadgeSync';
+import { WorkspaceUnreadCountsProvider } from '../hooks/useWorkspaceUnreadCounts';
 import {
   ElectronUpdateNudge,
   ELECTRON_UPDATE_NUDGE_ENABLED,
@@ -687,6 +688,7 @@ const AppRoot = (): ReactElement => {
 
   return (
     <InstrumentationProvider value={dashboardInstrumentation}>
+      <WorkspaceUnreadCountsProvider>
       <EncryptionBootstrapProvider>
         <EncryptionInit />
         <ZeroProvider>
@@ -1079,6 +1081,7 @@ const AppRoot = (): ReactElement => {
           </ZeroFallbackProvider>
         </ZeroProvider>
       </EncryptionBootstrapProvider>
+      </WorkspaceUnreadCountsProvider>
     </InstrumentationProvider>
   );
 };
