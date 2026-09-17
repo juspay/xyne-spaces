@@ -1525,15 +1525,15 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
 
       {/* SubTicket Modal for ticket threads */}
       {conversation && context === 'thread' && isTicketThread && isSubTicketModalOpen && (
-          <SubTicketModal
-            isOpen
-            onClose={() => setIsSubTicketModalOpen(false)}
-            ticketId={threadTicketId}
-            conversationId={conversation.conversationId}
-            sourceMessageId={message.messageId}
-            trackSource='chat_message'
-          />
-        )}
+        <SubTicketModal
+          isOpen
+          onClose={() => setIsSubTicketModalOpen(false)}
+          ticketId={threadTicketId}
+          conversationId={conversation.conversationId}
+          sourceMessageId={message.messageId}
+          trackSource='chat_message'
+        />
+      )}
 
       {isReminderOptionsOpen && (
         <Dialog
