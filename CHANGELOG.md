@@ -1,3 +1,15 @@
+## [1.333.0](https://github.com/juspay/xyne-spaces/compare/v1.332.2...v1.333.0) (2026-09-17)
+
+
+### Features
+
+* Calls tab new version ([#1674](https://github.com/juspay/xyne-spaces/issues/1674)) ([56de704](https://github.com/juspay/xyne-spaces/commit/56de7041b69067f8a306290e044277e7f82014a8))
+
+
+### Bug Fixes
+
+* google unauthorized client refresh ([#1799](https://github.com/juspay/xyne-spaces/issues/1799)) ([705bc6e](https://github.com/juspay/xyne-spaces/commit/705bc6ecd35c83508de46d13c0e00514dd604b32))
+
 ## [1.332.2](https://github.com/juspay/xyne-spaces/compare/v1.332.1...v1.332.2) (2026-09-17)
 
 
