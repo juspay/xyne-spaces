@@ -105,6 +105,11 @@ export const ActivityItem = memo(function ActivityItem({
     case 'ticket_pr_declined':
     case 'ticket_pr_reviewer_assigned':
     case 'ticket_qa_assigned':
+    case 'ticket_release_started':
+    case 'ticket_release_completed':
+    case 'ticket_release_cancelled':
+    case 'ticket_release_paused':
+    case 'ticket_release_planning':
       return <TicketUpdateActivity activity={activity} isExpanded={isExpanded} />;
 
     case 'scheduled_call':
