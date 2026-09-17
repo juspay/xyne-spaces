@@ -473,8 +473,9 @@ export class TicketController {
     const board = item.boardId ? await this.boardRepository.findBoardById(item.boardId) : null;
     const creationText = `Ticket created in ${board?.name || 'Unknown Board'}: ${item.title}`;
 
+    let ticket: Ticket;
     try {
-      const ticket = await this.createTicketWithConversation({
+      ticket = await this.createTicketWithConversation({
         title: item.title,
         description: item.description ?? '',
         createdBy,
@@ -493,12 +494,21 @@ export class TicketController {
         messageSubtype: 'bulk_ticket',
         creationMessageId: initialMessageId,
       });
-      await messageMetadataService.syncInitialMessageMd(conversation.conversationId);
-      return ticket;
     } catch (error) {
       await this.discardBulkConversation(conversation.conversationId);
       throw error;
     }
+    try {
+      await messageMetadataService.syncInitialMessageMd(conversation.conversationId);
+    } catch (error) {
+      logger.error('[Bulk Ticket] Failed to sync initial message md for a created ticket', {
+        ticketId: ticket.id,
+        conversationId: conversation.conversationId,
+        error,
+      });
+    }
+
+    return ticket;
   }
 
   /**
