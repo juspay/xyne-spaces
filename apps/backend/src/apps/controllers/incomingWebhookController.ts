@@ -12,6 +12,7 @@ import { SlackBlockKitParser } from '@/integrations/adapters/slack-webhook-ticke
 import { resolveSlackMessageParts } from '@/integrations/adapters/slack-webhook-tickets/utils/slackUtils';
 import { MessageType, AppIncomingWebhookAction, AppIncomingWebhookType } from '@xyne/shared';
 import { config } from '@/config/env';
+import { encodeHtmlAttr } from '@/utils/contentUtils';
 import { assertWebhookUrlSafe, safeWebhookFetch, SsrfBlockedError } from '@/utils/ssrfGuard';
 import {
   buildSentinelRawFallbackMessage,
@@ -433,7 +434,7 @@ class IncomingWebhookController {
       return null;
     }
 
-    const escapedJSON = JSON.stringify(result.data).replace(/"/g, '&quot;');
+    const escapedJSON = encodeHtmlAttr(JSON.stringify(result.data));
     return `<div data-flow-json="${escapedJSON}">Flow JSON</div>`;
   }
 
