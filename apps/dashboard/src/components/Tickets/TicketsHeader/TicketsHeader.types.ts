@@ -78,7 +78,6 @@ export interface TicketsHeaderProps {
   onSearchChange: (value: string) => void;
   isExactSearch: boolean;
   onExactSearchChange: (exact: boolean) => void;
-  onAskAI: () => void;
   share?: { viewId: string; viewName: string } | null;
   onCreateTicket?: (() => void) | null;
   createTicketMetadata?: string;

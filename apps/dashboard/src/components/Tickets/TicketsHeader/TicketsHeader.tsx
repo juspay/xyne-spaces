@@ -10,7 +10,6 @@ import {
 } from '@xyne/icons';
 import { cn } from '../../../utils/classNames';
 import { TURN_OFF_EXACT_SEARCH, TURN_ON_EXACT_SEARCH } from '../../../utils/exactSearch';
-import { XyneAIStar } from '../../icons/xyne-ai';
 import Button from '../../ui/Button';
 import { Popover } from '../../ui/Popover/Popover';
 import { Tooltip } from '../../ui/Tooltip';
@@ -51,7 +50,6 @@ export const TicketsHeader = (props: TicketsHeaderProps): ReactElement => {
     onSearchChange,
     isExactSearch,
     onExactSearchChange,
-    onAskAI,
     share,
     onCreateTicket,
     createTicketMetadata,
@@ -279,18 +277,6 @@ export const TicketsHeader = (props: TicketsHeaderProps): ReactElement => {
             showGroupBy={!showGroupPill}
           />
           <span className='mx-0.5 h-[18px] w-px shrink-0 bg-border' />
-          <Tooltip content='Ask AI about this view' side='bottom'>
-            <button
-              type='button'
-              onClick={onAskAI}
-              aria-label='Ask AI'
-              className='flex size-[30px] shrink-0 items-center justify-center rounded-lg text-orange-500 transition-colors hover:bg-muted'
-              data-track-category='Tickets'
-              data-track-name='ask_ai_kanban_header'
-            >
-              <XyneAIStar />
-            </button>
-          </Tooltip>
           {share && <ShareViewPopover viewId={share.viewId} viewName={share.viewName} />}
           {onCreateTicket && (
             <button

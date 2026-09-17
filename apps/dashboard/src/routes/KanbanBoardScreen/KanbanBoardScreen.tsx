@@ -4051,18 +4051,6 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     },
     [setSearchParams],
   );
-  const handleHeaderAskAI = useCallback((): void => {
-    // Same path as the flow board: the app-level docked Ask AI sidebar.
-    // threadInfo cleared explicitly — the machine keeps the previous value
-    // when the key is absent.
-    xyneAIActor.send({
-      type: 'OPEN',
-      trackSource: 'kanban_board',
-      ...(channelId && { channelId }),
-      threadInfo: null,
-      startFreshChat: true,
-    });
-  }, [channelId]);
   const handleHeaderCreateTicket = useCallback((): void => {
     setCreateTicketSeed(null);
     setCreateTicketSource('kanban_header');
@@ -4209,7 +4197,6 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
         onSearchChange={setSearchTerm}
         isExactSearch={isExactSearch}
         onExactSearchChange={setIsExactSearch}
-        onAskAI={handleHeaderAskAI}
         share={isWorkspaceView && ownsSavedView ? { viewId, viewName: savedViewName } : null}
         onCreateTicket={
           canCreateTicket &&
