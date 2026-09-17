@@ -208,8 +208,9 @@ export class RunWindow {
         .map(toProcessStat)
         .sort((a, b) => b.avgCpuPercent - a.avgCpuPercent),
       processSampleCount,
-      // Filled by the runner, which is what can read the store at close time.
+      // Both filled by the runner, which is what can read the store at close.
       outstandingQueries: [],
+      liveness: null,
       interactions,
       wasHidden: this.hidden,
     };

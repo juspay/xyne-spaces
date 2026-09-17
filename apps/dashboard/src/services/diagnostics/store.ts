@@ -157,6 +157,19 @@ export class DiagnosticsStore {
   private connectionOfflineMs = 0;
   private connectionStateSince = 0;
 
+  /**
+   * When the server last demonstrated it was serving this client: a query
+   * completed, a mutation was acknowledged, or the backlog drained.
+   *
+   * This is the only client-visible proxy for "is the view-syncer actually
+   * working on my behalf". The server re-hydrates a client group's whole query
+   * set from its CVR on reconnect, including queries no component is watching,
+   * and the client is told nothing about that — so a long silence while
+   * connected is the only trace such work leaves here.
+   */
+  private lastServerSignalAt = Date.now();
+  private lastPendingMutations = 0;
+
   private lastLongTaskEndedAt = 0;
   private lastInteractionAt = Date.now();
   private navigationStartedAt: number | null = null;
@@ -373,6 +386,7 @@ export class DiagnosticsStore {
   }
 
   recordZeroQuery(name: string, durationMs: number): void {
+    this.lastServerSignalAt = Date.now();
     this.zeroQueriesInFlight.delete(name);
     this.pushZeroOpEvent('query', name, durationMs, false);
     this.recordZeroOp(this.zeroQueries, name, durationMs);
@@ -387,6 +401,7 @@ export class DiagnosticsStore {
 
   /** A mutation that the server has acknowledged (or rejected). */
   recordZeroMutation(name: string, durationMs: number): void {
+    this.lastServerSignalAt = Date.now();
     this.pushZeroOpEvent('mutation', name, durationMs, false);
     this.recordZeroOp(this.zeroMutations, name, durationMs);
     this.recordLatencySample('zeroMutationP95', durationMs);
@@ -398,6 +413,10 @@ export class DiagnosticsStore {
   }
 
   setPendingMutations(count: number): void {
+    // A backlog going down means the server acknowledged something, which is a
+    // liveness signal even when nothing else reported in.
+    if (count < this.lastPendingMutations) this.lastServerSignalAt = Date.now();
+    this.lastPendingMutations = count;
     this.record('zeroPendingMutations', count);
   }
 
@@ -575,6 +594,8 @@ export class DiagnosticsStore {
     this.connectionObservingSince = null;
     this.connectionOfflineMs = 0;
     this.connectionStateSince = 0;
+    this.lastServerSignalAt = Date.now();
+    this.lastPendingMutations = 0;
     this.cpu = EMPTY_CPU;
     this.electron = null;
     this.historyFrom = null;
@@ -607,6 +628,28 @@ export class DiagnosticsStore {
    * in time rather than accumulated, because "still waiting" is a state, not an
    * event.
    */
+  /**
+   * How long since the server last did anything observable for this client, and
+   * how long the current connection has been up. Read as state, since the thing
+   * being described is an absence of events.
+   */
+  serverLiveness(now: number = Date.now()): {
+    connection: ZeroConnectionName;
+    silentForMs: number;
+    connectedForMs: number | null;
+    pendingMutations: number;
+  } {
+    return {
+      connection: this.connectionCurrent,
+      silentForMs: Math.max(0, now - this.lastServerSignalAt),
+      connectedForMs:
+        this.connectionCurrent === 'connected' && this.connectionStateSince > 0
+          ? Math.max(0, now - this.connectionStateSince)
+          : null,
+      pendingMutations: this.lastPendingMutations,
+    };
+  }
+
   outstandingZeroQueries(now: number = Date.now()): { name: string; waitingMs: number }[] {
     const rows: { name: string; waitingMs: number }[] = [];
     for (const [name, startedAt] of this.zeroQueriesInFlight) {

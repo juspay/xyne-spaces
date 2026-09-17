@@ -40,9 +40,120 @@ const RTT_BAD_MS = 400;
 const OUTSTANDING_WARN_MS = 3_000;
 const OUTSTANDING_BAD_MS = 10_000;
 
+/** Connected, with work outstanding, and nothing arriving for this long. */
+const SILENCE_WARN_MS = 8_000;
+const SILENCE_BAD_MS = 20_000;
+
 function worstNamed(rows: ZeroOpStat[]): ZeroOpStat | undefined {
   return rows.find(row => row.count > 0);
 }
+
+/**
+ * Connected, with work outstanding, and nothing coming back.
+ *
+ * This is the only client-visible trace of the server rebuilding a client
+ * group's query set. On reconnect the view-syncer re-hydrates every query in
+ * the CVR — including ones no screen is watching and the client never re-asked
+ * for — and processes that group's pipelines one at a time. A single expensive
+ * query in there stalls all of them, and the client is told nothing: it sees a
+ * healthy socket and no data.
+ *
+ * So the silence is the evidence. It cannot name the query responsible — that
+ * lives in the CVR, which the client cannot read — but it distinguishes "the
+ * server is not answering me" from every local cause, which is the fork a user
+ * cannot otherwise get past.
+ */
+export const serverSilence: Check = context => {
+  const liveness = context.window.liveness;
+  if (!liveness) {
+    return skipped(
+      'server-silence',
+      'Server responsiveness',
+      'sync',
+      'Connection state was not readable for this run.',
+    );
+  }
+
+  if (liveness.connection !== 'connected') {
+    return skipped(
+      'server-silence',
+      'Server responsiveness',
+      'sync',
+      `The connection was "${liveness.connection}" when the run ended, so silence is expected — see "Live connection".`,
+    );
+  }
+
+  // An idle app with nothing outstanding is quiet because there is nothing to
+  // send, which is health rather than a fault. Only silence with work waiting
+  // behind it means anything.
+  const outstanding = context.window.outstandingQueries.length;
+  const workWaiting = outstanding > 0 || liveness.pendingMutations > 0;
+  if (!workWaiting) {
+    return {
+      id: 'server-silence',
+      title: 'Server responsiveness',
+      category: 'sync',
+      status: 'pass',
+      confidence: 'high',
+      confidenceReason: 'Read directly at the moment the run ended.',
+      summary: 'Connected, with nothing left waiting on the server.',
+      measurements: [
+        measurement('Last heard from server', `${(liveness.silentForMs / 1000).toFixed(1)}s ago`),
+        measurement('Waiting on server', '0'),
+      ],
+      evidence: ['Quiet with nothing outstanding is the app idle, not the server stalling'],
+      remediation: '',
+      actionable: false,
+    };
+  }
+
+  const status = gradeLower(liveness.silentForMs, SILENCE_WARN_MS, SILENCE_BAD_MS);
+  const reconnected = context.window.connectionEvents.some(event => event.name === 'connected');
+
+  return {
+    id: 'server-silence',
+    title: 'Server responsiveness',
+    category: 'sync',
+    status,
+    confidence: 'high',
+    confidenceReason: 'Read directly at the moment the run ended, not sampled.',
+    summary:
+      status === 'pass'
+        ? 'The server is answering normally.'
+        : `The connection is up, but the server has sent nothing for ${(liveness.silentForMs / 1000).toFixed(1)}s while ${outstanding} request(s) and ${liveness.pendingMutations} change(s) wait.`,
+    measurements: [
+      measurement(
+        'Silent for',
+        `${(liveness.silentForMs / 1000).toFixed(1)}s`,
+        `warn ≥ ${SILENCE_WARN_MS / 1000}s, fail ≥ ${SILENCE_BAD_MS / 1000}s`,
+      ),
+      measurement(
+        'Connected for',
+        liveness.connectedForMs === null ? '—' : `${(liveness.connectedForMs / 1000).toFixed(1)}s`,
+      ),
+      measurement('Requests waiting', String(outstanding)),
+      measurement('Changes waiting', String(liveness.pendingMutations)),
+    ],
+    evidence: [
+      'The socket is healthy and the device is not the bottleneck — the server simply is not sending anything back',
+      ...(reconnected && status !== 'pass'
+        ? [
+            'The connection was re-established during this run. After a reconnect the server rebuilds every subscription this client had, including ones no screen is showing, and works through them one at a time — so one expensive rebuild delays all of them',
+          ]
+        : []),
+      ...(status !== 'pass'
+        ? [
+            'Which subscription is responsible is not visible from this device; it is held in server-side state the client cannot read',
+          ]
+        : []),
+    ],
+    remediation:
+      status === 'pass'
+        ? ''
+        : 'Report the time of this run. The server logs can name the query being rebuilt, which this device cannot see. Reloading or switching screens will not help — the work is queued on the server, and re-opening the screen queues behind it again.',
+    actionable: true,
+  };
+};
 
 export const zeroConnection: Check = context => {
   const { connectionEvents, disconnects, hiddenDisconnects, durationMs } = context.window;
@@ -189,11 +300,16 @@ export const stalledQueries: Check = context => {
           ]
         : []),
       'A screen closed before its data arrived can also leave a request here',
+      ...(status !== 'pass'
+        ? [
+            'This lists what this device asked for and is still waiting on. A reconnect also makes the server rebuild subscriptions the client never re-asked for, and those are not visible here — so the query actually holding things up may not be in this list',
+          ]
+        : []),
     ],
     remediation:
       status === 'pass'
         ? ''
-        : `Report the query named above. One query failing to return blocks the others behind it, so a single slow one can leave a whole screen loading.`,
+        : `Report the queries named above with the time of this run. One query failing to return blocks the others behind it, so a single slow one can leave a whole screen loading.`,
     actionable: true,
   };
 };
@@ -455,6 +571,7 @@ export const networkQuality: Check = context => {
 };
 
 export const SYNC_CHECKS: Check[] = [
+  serverSilence,
   stalledQueries,
   zeroConnection,
   zeroQueryLatency,

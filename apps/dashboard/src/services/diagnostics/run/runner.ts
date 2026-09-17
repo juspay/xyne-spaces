@@ -9,7 +9,13 @@ import { startEventLoopLagProbe, type EventLoopLagProbe } from './probes/eventLo
 import { startMainThreadSampler, type MainThreadSampler } from './probes/sampler';
 import { runStorageProbe } from './probes/storage';
 import { RunWindow } from './window';
-import { ENGINE_VERSION, type ProbeResults, type RunProgress, type RunReport } from './types';
+import {
+  ENGINE_VERSION,
+  type ProbeResults,
+  type RunProgress,
+  type RunReport,
+  type WindowSummary,
+} from './types';
 
 /**
  * Orchestrates one diagnostic run.
@@ -149,6 +155,7 @@ class RunController {
       // millisecond spent stopping probes is a millisecond a stalled query
       // could have quietly completed in.
       const outstandingQueries = diagnosticsStore.outstandingZeroQueries();
+      const liveness = diagnosticsStore.serverLiveness();
       probes.eventLoop = lagProbe.stop();
       probes.mainThread = await sampler.stop();
       diagnosticsStore.endRunWindow();
@@ -164,7 +171,7 @@ class RunController {
         error: null,
       });
 
-      const report = this.analyse(measured, probes, startedAt, outstandingQueries);
+      const report = this.analyse(measured, probes, startedAt, outstandingQueries, liveness);
       const reports = saveReport(report);
       this.setState({ report, reports });
       this.publish({
@@ -253,8 +260,9 @@ class RunController {
     probes: ProbeResults,
     startedAt: number,
     outstandingQueries: { name: string; waitingMs: number }[],
+    liveness: WindowSummary['liveness'],
   ): RunReport {
-    const summary = { ...runWindow.summarize(), outstandingQueries };
+    const summary = { ...runWindow.summarize(), outstandingQueries, liveness };
     const snapshot = diagnosticsStore.getSnapshot();
     const context = buildCheckContext({
       window: summary,

@@ -98,6 +98,17 @@ export interface WindowSummary {
    * a request that never returns emits nothing to accumulate.
    */
   outstandingQueries: { name: string; waitingMs: number }[];
+  /**
+   * The connection's state at close, and how long the server had gone without
+   * doing anything observable for this client. Captured as state rather than
+   * events, because what is being described is an absence of them.
+   */
+  liveness: {
+    connection: string;
+    silentForMs: number;
+    connectedForMs: number | null;
+    pendingMutations: number;
+  } | null;
   interactions: number;
   /** True when the tab was hidden at any point, which invalidates frame-rate data. */
   wasHidden: boolean;
