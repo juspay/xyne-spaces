@@ -59,7 +59,7 @@ const convertPlainTextMentionsToSpans = (htmlContent: string, users: MentionResu
   const patternParts = allCleanNames.map(name => name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
   // Require a boundary before '@' (start-of-string, whitespace, ZWSP, '(', a tag
   // close '>', or an &nbsp; entity — TipTap serializes leading/repeated spaces as
-  // &nbsp;) so an '@' embedded in an email/word — e.g. "user@Juspay.in" — is never
+  // &nbsp;) so an '@' embedded in an email/word — e.g. "user@example.com" — is never
   // treated as a mention. Mirrors the composer's mention trigger regex.
   const pattern = new RegExp(
     `(^|[\\s\\u200B(>]|&nbsp;)@(${patternParts.join('|')})(?=[\\s,.!?;:)\\]\\}<]|$)`,

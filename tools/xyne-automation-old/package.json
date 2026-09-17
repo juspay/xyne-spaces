@@ -32,7 +32,7 @@
     "validate": "(pnpm run format:check || (pnpm run format && exit 1)) && pnpm run lint"
   },
   "keywords": [],
-  "author": "Ameer Noufil <ameer.noufil@juspay.com>",
+  "author": "Ameer Noufil",
   "license": "Apache-2.0",
   "type": "commonjs",
   "devDependencies": {

@@ -24,6 +24,23 @@ const TEST_CMD = `if grep -q '"claw:test"' package.json; then npm run claw:test;
 // error, not silently skip the start.
 const BACKEND_TEST_CMD = `(cd /workspace/xyne-spaces/shared && npm run build) ; ${TEST_CMD}`;
 
+/**
+ * Base host for internal-only git remotes (the SDLC sandbox repos below clone
+ * from the internal Bitbucket). The open-source tree ships a neutral
+ * placeholder; internal deployments restore the real host by setting
+ * XYNE_INTERNAL_GIT_HOST to their internal git host. Read at call time so
+ * tests and per-process overrides work — REPO_CONFIGS entries capture the
+ * value at module load, and deploy-time env is set before the process starts.
+ */
+export function internalGitBaseUrl(): string {
+  return process.env.XYNE_INTERNAL_GIT_HOST ?? "ssh.bitbucket.example.internal";
+}
+
+/** Build an ssh git URL on the internal git host (see internalGitBaseUrl). */
+export function internalGitUrl(path: string): string {
+  return `ssh://git@${internalGitBaseUrl()}/${path}`;
+}
+
 export const REPO_CONFIGS: Record<string, RepoSetupConfig> = {
   
   // Lightweight browser sandbox with NO repository. Pin a browser-only agent
@@ -150,7 +167,7 @@ export const REPO_CONFIGS: Record<string, RepoSetupConfig> = {
       "No services auto-start; agent runs `rails s` (torana → :3000), " +
       "`npm run dev` (ashfall → :3001 / :5173 Vite), or `nix run ./#<x>` " +
       "(pluto) on demand.",
-    repoUrl: "ssh://git@ssh.bitbucket.juspay.net/lp/torana.git",
+    repoUrl: internalGitUrl("lp/torana.git"),
     defaultBranch: "master",
     cloneDepth: 1,
     workDir: "/workspace/torana",
@@ -159,8 +176,8 @@ export const REPO_CONFIGS: Record<string, RepoSetupConfig> = {
     idleTimeoutMs: 60 * 60 * 1000,
     readyTimeoutMs: 10 * 60 * 1000,
     auxRepos: [
-      { name: "pluto",   url: "ssh://git@ssh.bitbucket.juspay.net/lp/pluto.git",   defaultBranch: "master",  workDir: "/workspace/pluto" },
-      { name: "ashfall", url: "ssh://git@ssh.bitbucket.juspay.net/lp/ashfall.git", defaultBranch: "develop", workDir: "/workspace/ashfall" },
+      { name: "pluto",   url: internalGitUrl("lp/pluto.git"),   defaultBranch: "master",  workDir: "/workspace/pluto" },
+      { name: "ashfall", url: internalGitUrl("lp/ashfall.git"), defaultBranch: "develop", workDir: "/workspace/ashfall" },
     ],
     steps: [],
     ports: {
@@ -187,7 +204,7 @@ export const REPO_CONFIGS: Record<string, RepoSetupConfig> = {
       "  - cd clms-retail    && yarn start:sandbox\n" +
       "(npm install / yarn install / yarn re:build are already baked; " +
       "re-run only if package.json or .res files change.)",
-    repoUrl: "ssh://git@ssh.bitbucket.juspay.net/ax/lamf-dashboard.git",
+    repoUrl: internalGitUrl("ax/lamf-dashboard.git"),
     defaultBranch: "master",
     cloneDepth: 1,
     workDir: "/workspace/lamf-dashboard",
@@ -199,8 +216,8 @@ export const REPO_CONFIGS: Record<string, RepoSetupConfig> = {
     // is master, clms-corp is main, clms-retail is master. Override per-claim
     // via auxBranches if needed.
     auxRepos: [
-      { name: "clms-corp",   url: "ssh://git@ssh.bitbucket.juspay.net/ax/clms-corp.git",   defaultBranch: "main",   workDir: "/workspace/clms-corp" },
-      { name: "clms-retail", url: "ssh://git@ssh.bitbucket.juspay.net/ax/clms-retail.git", defaultBranch: "master", workDir: "/workspace/clms-retail" },
+      { name: "clms-corp",   url: internalGitUrl("ax/clms-corp.git"),   defaultBranch: "main",   workDir: "/workspace/clms-corp" },
+      { name: "clms-retail", url: internalGitUrl("ax/clms-retail.git"), defaultBranch: "master", workDir: "/workspace/clms-retail" },
     ],
     steps: [],
     ports: {
