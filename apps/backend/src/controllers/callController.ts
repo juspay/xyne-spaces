@@ -1375,7 +1375,12 @@ export class CallController {
         return;
       }
 
-      const canView = await callShareService.canView(call, userId, req.user!.workspaceId);
+      const canView = await callShareService.hasAtLeast(
+        call,
+        userId,
+        req.user!.workspaceId,
+        'view',
+      );
       if (!canView) {
         res.status(403).json({ success: false, error: 'Access denied' });
         return;
@@ -1582,7 +1587,7 @@ export class CallController {
         return;
       }
 
-      if (call.createdByUserId !== userId) {
+      if (!(await callShareService.hasAtLeast(call, userId, req.user!.workspaceId, 'edit'))) {
         res.status(403).json({ success: false, error: 'Access denied' });
         return;
       }
@@ -1634,8 +1639,8 @@ export class CallController {
         return;
       }
 
-      // Verify ownership
-      if (call.createdByUserId !== userId) {
+      // Editing a recording's title, labels or template is an editor action.
+      if (!(await callShareService.hasAtLeast(call, userId, req.user!.workspaceId, 'edit'))) {
         res.status(403).json({ success: false, error: 'Access denied' });
         return;
       }
@@ -1784,7 +1789,7 @@ export class CallController {
       }
 
       const canRegenerate = isRecording(call)
-        ? call.createdByUserId === userId
+        ? await callShareService.hasAtLeast(call, userId, req.user!.workspaceId, 'edit')
         : await callShareService.isCallAudience(call, userId);
       if (!canRegenerate) {
         res.status(403).json({ success: false, error: 'Access denied' });
@@ -1838,7 +1843,7 @@ export class CallController {
         return;
       }
 
-      if (call.createdByUserId !== userId) {
+      if (!(await callShareService.hasAtLeast(call, userId, req.user!.workspaceId, 'edit'))) {
         res.status(403).json({ success: false, error: 'Access denied' });
         return;
       }
@@ -2027,7 +2032,7 @@ export class CallController {
       }
       if (
         call.callType === CallType.HEADLESS &&
-        !(await callShareService.canView(call, userId, req.user!.workspaceId))
+        !(await callShareService.hasAtLeast(call, userId, req.user!.workspaceId, 'view'))
       ) {
         res.status(403).json({ success: false, error: 'Access denied' });
         return;
@@ -2131,7 +2136,7 @@ export class CallController {
       }
       if (
         call.callType === CallType.HEADLESS &&
-        !(await callShareService.canView(call, userId, req.user!.workspaceId))
+        !(await callShareService.hasAtLeast(call, userId, req.user!.workspaceId, 'view'))
       ) {
         res.status(403).json({ success: false, error: 'Access denied' });
         return;

@@ -7,7 +7,8 @@ import { useUser } from '../../hooks/useUsers';
 import { getUserDisplayName } from '../../utils/userDisplayName';
 
 /**
- * Share and access-revocation activities for a recording or a regular call.
+ * Share, access-change, and access-revocation activities for a recording or a
+ * regular call.
  */
 export const RecordingSharedActivity = ({
   activity,
@@ -23,6 +24,7 @@ export const RecordingSharedActivity = ({
   if (!activity.callId || !call) return null;
 
   const isRevoked = activity.actorAction === 'recording_access_revoked';
+  const isChanged = activity.actorAction === 'recording_access_changed';
   const isRecording = call.callType === CallType.HEADLESS;
   const subject = isRecording ? 'recording' : 'call';
   const targetPath = isRecording ? `/recordings/${call.externalId}` : `/calls/${call.id}/detail`;
@@ -37,7 +39,11 @@ export const RecordingSharedActivity = ({
       badgeColorClass='bg-muted'
       description={
         <span className='text-muted-foreground text-sm'>
-          {isRevoked ? `removed your access to a ${subject}` : `shared a ${subject} with you`}
+          {isRevoked
+            ? `removed your access to a ${subject}`
+            : isChanged
+              ? `changed your access to a ${subject}`
+              : `shared a ${subject} with you`}
         </span>
       }
       targetPath={targetPath}

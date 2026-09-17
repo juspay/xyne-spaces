@@ -16,7 +16,9 @@ import {
 } from '../../hooks/usePaginatedOatsRecordings';
 import { recordingService } from '../../services/Recording/recordingService';
 import { logRecordingError } from '../../utils/recordingUtils';
+import { getApiErrorMessage } from '../../utils/apiError';
 import { RecordingShareModal } from '../RecordingDetailV2Screen/components/RecordingShareModal';
+import { useLeaveRecording } from '../../hooks/useLeaveRecording';
 import { usePlatform } from '../../hooks/usePlatform';
 import { getRecordingDefaultLayout } from '../../hooks/useRecordingDefaultLayout';
 import { sendRecordingEvent, useRecordingStore } from '../../hooks/useRecordingStore';
@@ -78,6 +80,7 @@ const RecordingsV2Screen = (): ReactElement => {
     refreshRecordings,
   } = usePaginatedOatsRecordings(activeListTab, selectedCreatorId);
   const currentUser = useSelf();
+  const { requestLeave, ConfirmDialog } = useLeaveRecording();
   const users = useUsers();
   const usersById = useMemo(() => new Map(users.map(user => [user.id, user])), [users]);
   const recordingStatus = useRecordingStore(context => context.status);
@@ -259,6 +262,26 @@ const RecordingsV2Screen = (): ReactElement => {
   const handleRequestDeleteRecording = useCallback((recording: RecordingsV2PillRecording): void => {
     setDeleteRecording(recording);
   }, []);
+
+  // Leaving revokes your own grant. Access that arrives through a group or
+  // channel has no grant of your own to drop, so the menu offers no Leave there.
+  const handleLeaveRecording = useCallback(
+    async (recording: RecordingsV2PillRecording): Promise<void> => {
+      await requestLeave(async target => {
+        try {
+          await recordingService.revokeRecordingAccess(recording.externalId, [target]);
+          refreshOatsRecordings();
+          toast.success('You left the recording');
+        } catch (err) {
+          logRecordingError('RecordingsV2Screen.leaveRecording', err);
+          toast.error('Failed to leave recording', {
+            description: getApiErrorMessage(err, 'Unable to remove your access'),
+          });
+        }
+      });
+    },
+    [requestLeave],
+  );
 
   const handleConfirmDeleteRecording = useCallback(async (): Promise<void> => {
     if (!deleteRecording) return;
@@ -599,9 +622,9 @@ const RecordingsV2Screen = (): ReactElement => {
                           row.item.labels.filter(label => !isResolved(label)).length
                         }
                         resolveLabel={resolveLabel}
-                        currentUserId={currentUser?.id}
                         onOpen={handleOpenRecording}
                         onShare={handleShareRecording}
+                        onLeave={recording => void handleLeaveRecording(recording)}
                         onDelete={handleRequestDeleteRecording}
                       />
                     </div>
@@ -651,6 +674,7 @@ const RecordingsV2Screen = (): ReactElement => {
         onOpenChange={open => !open && setDeleteRecording(null)}
         onConfirm={() => void handleConfirmDeleteRecording()}
       />
+      <ConfirmDialog />
     </div>
   );
 };
