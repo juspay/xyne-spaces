@@ -506,8 +506,17 @@ const ProjectDetailScreen = (): ReactElement => {
                         ? 'Repositories'
                         : 'Releases'}
                 </h2>
-                {/* Create Board intentionally removed (per request) — boards are
-                    created via Release Manager repo config; per-board Edit stays. */}
+                {activeTab === 'boards' && !fromReleaseManager && (
+                  <Button
+                    variant='default'
+                    onClick={() => setShowBoardTypeChooser(true)}
+                    data-track-category='ProjectDetail'
+                    data-track-name='CreateBoard'
+                    data-track-metadata={JSON.stringify({ projectId })}
+                  >
+                    Create Board
+                  </Button>
+                )}
                 {fromReleaseManager && activeTab === 'release' && (
                   <Button
                     variant='default'
