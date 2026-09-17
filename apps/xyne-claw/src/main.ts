@@ -8,6 +8,7 @@ import { runRouter, getActiveRunCount, getActiveSessionIds, cancelActiveRunsForD
 import { curatorRouter } from "./routes/curator.js";
 import { userMemoryRouter } from "./routes/user-memory.js";
 import { failureCuratorRouter } from "./routes/failure-curator.js";
+import { usagePatternCuratorRouter } from "./routes/usage-pattern-curator.js";
 import { goalJudgeRouter } from "./routes/goal-judge.js";
 import { debugRouter } from "./routes/debug.js";
 import { evalJudgeRouter } from "./routes/eval-judge.js";
@@ -60,6 +61,7 @@ app.use(runRouter);
 app.use(curatorRouter);
 app.use(userMemoryRouter);
 app.use(failureCuratorRouter);
+app.use(usagePatternCuratorRouter);
 app.use(goalJudgeRouter);
 app.use(debugRouter);
 app.use(evalJudgeRouter);
