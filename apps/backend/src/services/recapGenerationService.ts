@@ -11,7 +11,10 @@ import {
 } from '../agents/summariser';
 import { AgentsConfig } from '../agents/config';
 import { calculateUnreadCount } from '../utils/recapUtils';
-import { ChannelScopeType, RecapEntityType } from '@xyne/shared';
+import { ChannelScopeType, RecapEntityType, parseInitialMessageMd } from '@xyne/shared';
+
+// Headings are one line above a group of bullets; longer than this and the card wraps badly.
+const RECAP_TITLE_MAX_LENGTH = 80;
 
 interface RecapSummary {
   points: Array<{
@@ -27,6 +30,9 @@ interface RecapSummary {
     channelId?: string;
   }>;
   messageCount: number;
+  // conversationId -> thread heading, resolved once here so the dashboard never has to
+  // query the (hot) conversations table to label a recap point.
+  threadTitles?: Record<string, string>;
 }
 
 /**
@@ -423,6 +429,52 @@ export class RecapGenerationService {
   }
 
   /**
+   * Build the conversationId -> heading map for a summary's cited threads.
+   *
+   * A thread has no title of its own, so the heading is its opening message, trimmed.
+   * Resolved once per channel per day here instead of per panel-open in the dashboard.
+   *
+   * Threads whose initial message is restricted (visibleTo set) or deleted are skipped:
+   * a base recap is shared by everyone in the channel, so its heading must not carry
+   * text that only one user is allowed to see.
+   */
+  private async resolveThreadTitles(summary: RecapSummary): Promise<Record<string, string>> {
+    const conversationIds = [
+      ...new Set(summary.points.map((p) => p.conversationId).filter((id): id is string => !!id)),
+    ];
+    if (conversationIds.length === 0) {
+      return {};
+    }
+
+    const titles: Record<string, string> = {};
+    try {
+      const conversations = await db.conversation.findMany({
+        where: { conversationId: { in: conversationIds } },
+        select: { conversationId: true, initial_message_md: true },
+      });
+
+      for (const conversation of conversations) {
+        const initial = parseInitialMessageMd(conversation.initial_message_md);
+        if (!initial || initial.isDeleted || initial.visibleTo) continue;
+
+        const text = stripHtml(initial.content ?? '');
+        if (!text) continue;
+
+        titles[conversation.conversationId] =
+          text.length <= RECAP_TITLE_MAX_LENGTH
+            ? text
+            : `${text.slice(0, RECAP_TITLE_MAX_LENGTH).trimEnd()}\u2026`;
+      }
+    } catch (error) {
+      // A missing heading degrades to an untitled group; it must not fail generation.
+      logger.error('Failed to resolve recap thread titles:', error);
+      return {};
+    }
+
+    return titles;
+  }
+
+  /**
    * Persist recap to database
    */
   private async persistRecap(
@@ -431,7 +483,10 @@ export class RecapGenerationService {
     summary: RecapSummary,
     userId: string | null = null
   ): Promise<void> {
-    const summaryData = JSON.stringify(summary);
+    const threadTitles = await this.resolveThreadTitles(summary);
+    const summaryData = JSON.stringify(
+      Object.keys(threadTitles).length > 0 ? { ...summary, threadTitles } : summary
+    );
 
     // Normalize date to midnight UTC to ensure consistent storage
     // Get the date string in IST timezone
