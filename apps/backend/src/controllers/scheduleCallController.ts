@@ -20,6 +20,7 @@ import {
 import { CallVespaFeedSource, queueCallVespaFeed } from '@/services/callVespaQueue';
 import { queueCallCalendarPush, queueCallCalendarPushMany } from '@/queues/callCalendarPushQueue';
 import { buildCallInviteUrl } from '@/utils/urlUtils';
+import { messageMetadataService } from '@/services/messageMetadataService';
 
 // Number of milliseconds to buffer recurring call instances ahead of time (60 days)
 const INSTANCE_BUFFER_DAYS = 60 * 24 * 60 * 60 * 1000;
@@ -34,6 +35,88 @@ function defaultCallInvitation(timezone?: string | null): CallInvitationParams['
 }
 
 export class ScheduleCallController {
+  /**
+   * Whether a call gets a read-only "upcoming call" pill in its channel.
+   *
+   * Recurring series are excluded: instances are materialized 60 days ahead and
+   * replenished forever, so a series would drip a fresh card into the channel for
+   * every occurrence. External calendar events are excluded because they are not ours
+   * to surface — and the test has to be on `callOrigin`, not on whether a channelId is
+   * set, because `xyneManaged` events carry a real one (googleCalendarCallStore:156).
+   */
+  private shouldPostScheduledCallPill(call: {
+    callOrigin: string;
+    callType: string;
+    isRecurring: boolean;
+    recurringSeriesId: string | null;
+  }): boolean {
+    if (call.isRecurring || call.recurringSeriesId) return false;
+    if (call.callType === CallType.HEADLESS) return false;
+    return call.callOrigin === CallOrigin.CHANNEL || call.callOrigin === CallOrigin.CONVERSATION;
+  }
+
+  /**
+   * An edit moved the call to another channel: kill the old pill and post a fresh one
+   * in the destination.
+   *
+   * The old card is stamped dead rather than updated in place, because "moved" is the
+   * one state the UI cannot derive — moving the call back would make `call.channelId`
+   * match the old pill's channel again and revive it.
+   */
+  private async moveScheduledCallPill(params: {
+    call: {
+      id: string;
+      externalId: string;
+      callOrigin: string;
+      callType: string;
+      isRecurring: boolean;
+      recurringSeriesId: string | null;
+      metadata: Prisma.JsonValue | null;
+      title: string | null;
+      createdByUserId: string;
+    };
+    newChannelId: string;
+  }): Promise<void> {
+    const { call, newChannelId } = params;
+    if (!this.shouldPostScheduledCallPill(call)) return;
+
+    const metadata = call.metadata as
+      | { channelPillMessageId?: string; channelPillInThread?: boolean }
+      | null;
+
+    // A thread-scheduled call's pill lives inside its thread, which does not travel with
+    // the call's channel. Leave it where it is. Keyed on the pill's own placement flag,
+    // not on metadata.conversationId — activateScheduledCall stamps that too, so a call
+    // that went live and bounced back to SCHEDULED would otherwise look thread-scheduled.
+    if (metadata?.channelPillInThread) return;
+
+    const workspaceId = await repositories.channels.getWorkspaceId(newChannelId);
+    const organizer = await repositories.users.findById(call.createdByUserId);
+    const organizerName = organizer?.displayName || organizer?.name || 'Someone';
+
+    const { conversationId } = await DatabaseClient.getInstance().$transaction(async (tx) => {
+      if (metadata?.channelPillMessageId) {
+        await repositories.calls.retireScheduledCallPill(tx, {
+          messageId: metadata.channelPillMessageId,
+          callExternalId: call.externalId,
+          movedToChannelId: newChannelId,
+          callTitle: call.title,
+        });
+      }
+
+      return repositories.calls.createScheduledCallPill(tx, {
+        callId: call.id,
+        callExternalId: call.externalId,
+        channelId: newChannelId,
+        workspaceId,
+        senderId: call.createdByUserId,
+        senderName: organizerName,
+      });
+    });
+
+    await messageMetadataService.syncInitialMessageMd(conversationId);
+  }
+
   private sendExternalInvitationInBackground(params: {
     invitationParams: CallInvitationParams;
     delivery?: ExternalInvitationDelivery;
@@ -399,6 +482,14 @@ export class ScheduleCallController {
       }
 
       const db = DatabaseClient.getInstance();
+      const resolvedCallOrigin = conversationId ? CallOrigin.CONVERSATION : CallOrigin.CHANNEL;
+      const postPill = this.shouldPostScheduledCallPill({
+        callOrigin: resolvedCallOrigin,
+        callType: CallType.AUDIO,
+        isRecurring: false,
+        recurringSeriesId: null,
+      });
+      let pillConversationId: string | undefined;
 
       const { participantUserIds } = await db.$transaction(async (tx) => {
         const result = await repositories.calls.createCallWithParticipants({
@@ -408,7 +499,7 @@ export class ScheduleCallController {
           createdByUserId: userId,
           channelId: finalChannelId!,
           callType: CallType.AUDIO,
-          callOrigin: conversationId ? CallOrigin.CONVERSATION : CallOrigin.CHANNEL,
+          callOrigin: resolvedCallOrigin,
           roomLink,
           timezone: 'UTC',
           isRecurring: false,
@@ -420,8 +511,38 @@ export class ScheduleCallController {
           ...(normalizedExternalInvitees.length && { externalInvitees: normalizedExternalInvitees }),
         }, tx);
 
+        // Read-only "upcoming call" card in the channel this call was scheduled in.
+        // Written in the same transaction as the call, so a channel can never end up
+        // showing a pill for a call that was never created.
+        if (postPill) {
+          const workspaceId = await repositories.channels.getWorkspaceId(finalChannelId!);
+          const pill = await repositories.calls.createScheduledCallPill(tx, {
+            callId,
+            callExternalId: externalId,
+            channelId: finalChannelId!,
+            workspaceId,
+            senderId: userId,
+            senderName: req.user?.displayName || req.user?.name || 'Someone',
+            ...(conversationId && { threadConversationId: conversationId }),
+          });
+          // Only the channel-root case needs the eager preview sync: a thread pill is not
+          // its conversation's initialMessage, so it never backs the channel-list preview.
+          if (!conversationId) pillConversationId = pill.conversationId;
+        }
+
         return result;
       });
+
+      // Eagerly, so initial_message_md is populated before the response returns — the
+      // deferred setImmediate sync is too late for a client that renders the channel
+      // straight after scheduling (same reasoning as activateScheduledCall).
+      if (pillConversationId) {
+        try {
+          await messageMetadataService.syncInitialMessageMd(pillConversationId);
+        } catch (error) {
+          logger.error(`Failed to sync initial_message_md for call pill ${callId}:`, error);
+        }
+      }
 
       if (hasExternals) {
         this.sendExternalInvitationInBackground({
@@ -675,6 +796,15 @@ export class ScheduleCallController {
       });
 
       logger.info(`[updateScheduledCall] repo update complete | callId=${call.id} resolvedChannelId=${resolvedChannelId}`);
+
+      // The call changed channels: retire the old pill as "moved" and post a fresh one.
+      if (channelChanged && resolvedChannelId) {
+        try {
+          await this.moveScheduledCallPill({ call, newChannelId: resolvedChannelId });
+        } catch (error) {
+          logger.error(`Failed to move scheduled call pill for call ${call.id}:`, error);
+        }
+      }
 
       queueCallCalendarPush(call.id, 'updateScheduledCall');
 

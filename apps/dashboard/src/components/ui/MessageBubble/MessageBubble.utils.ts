@@ -15,6 +15,16 @@ export interface MessageMetadata {
   executionTime?: string;
   workflowStatus?: 'NEW' | 'RUNNING' | 'SUCCESS' | 'FAILED' | 'PENDING';
   isCallMessage?: boolean;
+  /**
+   * Read-only "upcoming call" card in a channel. Deliberately NOT isCallMessage: that
+   * flag opts a SYSTEM message into ~8 affordances in ChatBubble (reply, forward, Ask
+   * AI, subscribe…), and the pill is inert.
+   */
+  isScheduledCallPill?: boolean;
+  /** Stamped once when the call moved channels — the card is then permanently dead. */
+  retired?: boolean;
+  movedTo?: string;
+  movedCallTitle?: string;
   operation?: string;
   callId?: string;
   recordingId?: string;

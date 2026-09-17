@@ -21,6 +21,16 @@ export type { Call, CallParticipant };
 // Shorter channel calls skip post-call AI outputs (see getPostCallAiSkipReason).
 const MIN_CALL_DURATION_FOR_AI_SECONDS = 30;
 
+/**
+ * Body text for the scheduled-call pill. The rendered card reads everything it shows
+ * from the live `calls` row, so this string only surfaces as the channel-list preview
+ * (`conversation.initial_message_md`) and in plain-text fallbacks — the card itself
+ * renders a live description. Carries no title or time, so editing the call still
+ * requires no write to the message.
+ */
+const scheduledCallPillContent = (senderName: string): string =>
+  `${senderName} scheduled a call`;
+
 function parseRecordingParticipantIds(stored: string | null): string[] {
   if (!stored) return [];
   try {
@@ -63,6 +73,14 @@ export interface CallMetadata {
   conversationId?: string;
   artifactMessageId?: string;
   googleCalendarPush?: GoogleCalendarPushState;
+  /**
+   * Message that carries this call's read-only "upcoming call" pill in its channel.
+   * Deliberately separate from `systemMessageId`, which belongs to the activation
+   * state machine in `activateScheduledCall` — see createScheduledCallPill.
+   */
+  channelPillMessageId?: string;
+  /** True when that pill lives inside a thread rather than at the channel root. */
+  channelPillInThread?: boolean;
 }
 
 const getArtifactMessageId = (metadata: Prisma.JsonValue | null): string | undefined =>
@@ -1571,6 +1589,138 @@ export class CallRepository {
       await messageMetadataService.syncInitialMessageMd(activatedCallMeta.conversationId);
     }
     queueCallVespaFeed(callParam.id, { source: CallVespaFeedSource.CallRepositoryActivateScheduledCall });
+  }
+
+  /**
+   * Post the read-only "upcoming call" pill into the channel a call was scheduled in.
+   *
+   * The message is only an anchor. It carries no status of its own, so cancelling or
+   * editing the call needs no write here — the card re-renders from the live `calls`
+   * row. That matters because `mutators.calls.cancel` never reaches the backend, so
+   * there would otherwise be no server moment in which to rewrite the message.
+   *
+   * Deliberately a plain Prisma write rather than a Zero mutator, matching the existing
+   * call system message: scheduling must not mark the channel unread for every member on
+   * top of the CALL_SCHEDULED notification participants already receive. zero-cache still
+   * replicates the row, so the pill appears for open clients immediately.
+   *
+   * Never writes `metadata.systemMessageId` — that key belongs to `activateScheduledCall`,
+   * and stamping it here would make the call look already-activated, so the live
+   * "X started a call" message would never post.
+   */
+  async createScheduledCallPill(
+    tx: Prisma.TransactionClient,
+    params: {
+      callId: string;          // internal Call.id
+      callExternalId: string;  // public id the card resolves the call by
+      channelId: string;
+      workspaceId: string;
+      /**
+       * The organizer. The pill is attributed to them rather than to `system`, the
+       * way a ticket-creation message is, so the channel shows who booked the call.
+       */
+      senderId: string;
+      /** Organizer's display name, for the stored preview text. */
+      senderName: string;
+      /**
+       * Set when the call was scheduled from a thread (`callOrigin: CONVERSATION`).
+       * The pill lives inside that thread; no new conversation is created.
+       */
+      threadConversationId?: string | undefined;
+    },
+  ): Promise<{ messageId: string; conversationId: string }> {
+    const { callId, callExternalId, channelId, workspaceId, senderId, senderName, threadConversationId } =
+      params;
+    const messageId = uuidv4();
+    const conversationId = threadConversationId ?? uuidv4();
+
+    if (!threadConversationId) {
+      // Channel-scoped call: its own conversation, so the pill is that conversation's
+      // initialMessage and renders as a channel entry (channelConversationsPaginated
+      // reads conversations + initialMessage and does not filter on showInChannel).
+      await tx.conversation.create({
+        data: {
+          conversationId,
+          channelId,
+          workspaceId,
+          createdBy: senderId,
+          initialMessageId: messageId,
+        },
+      });
+    }
+
+    await tx.message.create({
+      data: {
+        messageId,
+        conversationId,
+        workspaceId,
+        senderId,
+        content: scheduledCallPillContent(senderName),
+        msgType: MessageType.SYSTEM,
+        showInChannel: false,
+        metadata: {
+          isScheduledCallPill: true,
+          callId: callExternalId,
+          operation: 'call_scheduled',
+        },
+      },
+    });
+
+    // Re-read inside the transaction and merge, so calendar-derived fields and the
+    // activation state machine's own keys survive the stamp.
+    const current = await tx.call.findUnique({
+      where: { id: callId },
+      select: { metadata: true },
+    });
+
+    await tx.call.update({
+      where: { id: callId },
+      data: {
+        metadata: {
+          ...((current?.metadata as Prisma.InputJsonObject) ?? {}),
+          channelPillMessageId: messageId,
+          // Recorded explicitly rather than inferred from `conversationId`: that key is
+          // also stamped by activateScheduledCall, so a call that went live and bounced
+          // back to SCHEDULED would otherwise look thread-scheduled.
+          channelPillInThread: !!threadConversationId,
+        },
+      },
+    });
+
+    return { messageId, conversationId };
+  }
+
+  /**
+   * Permanently retire a pill whose call has moved to another channel.
+   *
+   * "Moved" is the one state that is not derivable: moving the call back would make
+   * `call.channelId` match this pill's channel again and revive it. Stamping the
+   * message once makes it a dead card — the UI never updates it again, and a move
+   * back posts a brand-new pill instead.
+   */
+  async retireScheduledCallPill(
+    tx: Prisma.TransactionClient,
+    params: {
+      messageId: string;
+      callExternalId: string;
+      movedToChannelId: string;
+      /** Snapshotted so the dead card still names the call it used to point at. */
+      callTitle?: string | null;
+    },
+  ): Promise<void> {
+    await tx.message.update({
+      where: { messageId: params.messageId },
+      data: {
+        metadata: {
+          isScheduledCallPill: true,
+          callId: params.callExternalId,
+          operation: 'call_scheduled',
+          retired: true,
+          movedTo: params.movedToChannelId,
+          ...(params.callTitle ? { movedCallTitle: params.callTitle } : {}),
+        },
+      },
+    });
   }
 
   /**

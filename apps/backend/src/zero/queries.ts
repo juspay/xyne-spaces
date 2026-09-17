@@ -22,6 +22,7 @@ import { z } from 'zod';
 import {
   CanvasVisibility,
   ChannelVisibility,
+  CallOrigin,
   CallStatus,
   ChannelScopeType,
   ConversationParticipation,
@@ -2866,6 +2867,38 @@ export const queries: AnyQueryRegistry = defineQueries({
         .orderBy('startedAt', 'desc')
         .related('participants');
     }
+  ),
+
+  /**
+   * Calls backing the read-only scheduled-call pills in one channel.
+   *
+   * Must stay in sync with the copy in packages/shared/src/zero/queries.ts — zero-cache
+   * resolves named queries against THIS registry (ZERO_QUERY_URL → /api/zero/query), so
+   * a query defined only in shared silently returns whatever the client already happens
+   * to hold locally, which differs per user.
+   *
+   * The pill message is only an anchor: everything the card renders — title, organizer,
+   * times, status — is read from here, which is what lets a cancel or a title/time edit
+   * re-render the card with no write to the message.
+   */
+  scheduledCallPillCalls: defineQuery(
+    z.object({ channelId: z.string(), limit: z.number() }),
+    ({ args: { channelId, limit } }) => {
+      return zql.calls
+        .where('channelId', channelId)
+        .where('callType', '!=', CallType.HEADLESS)
+        .where('isRecurring', false)
+        .where(helpers =>
+          helpers.or(
+            helpers.cmp('callOrigin', CallOrigin.CHANNEL),
+            helpers.cmp('callOrigin', CallOrigin.CONVERSATION),
+          ),
+        )
+        .orderBy('startsAt', 'desc')
+        .limit(limit)
+        .related('createdByUser')
+        .related('participants');
+    },
   ),
 
   userScheduledCalls: defineQuery(() => {
