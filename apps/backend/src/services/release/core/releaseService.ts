@@ -53,8 +53,8 @@ export interface ApplicationMatchSummaryRow {
 export interface ReleaseResult {
 	results: CommitAnalysisResult[];
 	affectedApplications: AffectedApplicationInfo[];
-	migrationLinks: Array<{ filePath: string; diffUrl: string }>;
-	envChanges: Array<{ fileName: string; filePath: string; newValue: string; commitId?: string }>;
+	migrationLinks: Array<{ filePath: string; diffUrl: string; applicationId?: string }>;
+	envChanges: Array<{ fileName: string; filePath: string; newValue: string; commitId?: string; applicationId?: string }>;
 	/** Empty when commit range has no file changes; otherwise one row per app. */
 	appMatchSummary: ApplicationMatchSummaryRow[];
 }

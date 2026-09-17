@@ -570,7 +570,9 @@ export class BitbucketService {
         `Found ${commitIds.length} commit(s) between ${sinceCommitId} and ${untilCommitId}${branch ? ` on branch ${branch}` : ''} in ${projectKey}/${repositorySlug}`
       );
 
-      return [...commitIds, sinceCommitId];
+      // Exclude the deployed (since) commit — it is already shipped. Stash's
+      // `since` is exclusive, so commitIds already omits it.
+      return commitIds;
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
       logger.error(

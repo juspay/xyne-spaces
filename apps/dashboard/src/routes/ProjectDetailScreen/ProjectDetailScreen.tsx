@@ -1,6 +1,7 @@
 import { ReactElement, useState, useEffect, useMemo } from 'react';
 import { useParams, useNavigate, useLocation, useSearchParams } from 'react-router-dom';
 import { BoardType, deserializeFlowPlan, type FlowPlan, type VCSProviderType } from '@xyne/shared';
+import { formatDateNumeric } from '../../utils/dateUtils';
 import { useCanManageRelease } from '../../hooks/usePermissions';
 import {
   ArrowLeft,
@@ -178,6 +179,33 @@ const ProjectDetailScreen = (): ReactElement => {
   const applicationBoardIds = useMemo(
     () => new Set(applicationByBoardId.keys()),
     [applicationByBoardId],
+  );
+
+  // The Boards tab is entry-point-scoped:
+  //  • Release Manager  → only release boards (main release + per-app boards)
+  //  • List Projects    → only non-release boards (Standard / Flow / etc.)
+  // A board is "release" if its type is RELEASE or it's an application board.
+  const visibleBoards = useMemo(() => {
+    const list = boards ?? [];
+    return list.filter(board => {
+      const isReleaseBoard =
+        board.boardType === BoardType.RELEASE || applicationBoardIds.has(board.id);
+      return fromReleaseManager ? isReleaseBoard : !isReleaseBoard;
+    });
+  }, [boards, fromReleaseManager, applicationBoardIds]);
+
+  // Only Release Manager needs the app-board nesting maps. Passing them under
+  // List Projects would render phantom release groups for filtered-out boards.
+  const visibleApplicationByBoardId = useMemo(
+    () =>
+      fromReleaseManager
+        ? applicationByBoardId
+        : new Map<string, (typeof applicationList)[number]>(),
+    [fromReleaseManager, applicationByBoardId],
+  );
+  const visibleApplicationBoardIds = useMemo(
+    () => (fromReleaseManager ? applicationBoardIds : new Set<string>()),
+    [fromReleaseManager, applicationBoardIds],
   );
   const boardNamesById = useMemo(
     () => Object.fromEntries((boards ?? []).map(board => [board.id, board.name])),
@@ -425,7 +453,7 @@ const ProjectDetailScreen = (): ReactElement => {
                   <p className='text-muted-foreground mb-4'>{project.description}</p>
                 )}
                 <div className='text-sm text-muted-foreground'>
-                  Created: {new Date(project.createdAt).toLocaleDateString()}
+                  Created: {formatDateNumeric(project.createdAt)}
                 </div>
               </div>
               <div className='flex gap-2'>
@@ -478,17 +506,8 @@ const ProjectDetailScreen = (): ReactElement => {
                         ? 'Repositories'
                         : 'Releases'}
                 </h2>
-                {activeTab === 'boards' && (
-                  <Button
-                    variant='default'
-                    onClick={() => setShowBoardTypeChooser(true)}
-                    data-track-category='ProjectDetail'
-                    data-track-name='CreateBoard'
-                    data-track-metadata={JSON.stringify({ projectId })}
-                  >
-                    Create Board
-                  </Button>
-                )}
+                {/* Create Board intentionally removed (per request) — boards are
+                    created via Release Manager repo config; per-board Edit stays. */}
                 {fromReleaseManager && activeTab === 'release' && (
                   <Button
                     variant='default'
@@ -523,13 +542,14 @@ const ProjectDetailScreen = (): ReactElement => {
               {/* Boards Tab Content */}
               <Tabs.Content value='boards' className='outline-none'>
                 <BoardsTable
-                  boards={boards}
+                  boards={visibleBoards}
+                  showTypeColumn={!fromReleaseManager}
                   loading={boardsDetails.type !== 'complete' && (boards?.length ?? 0) === 0}
                   onEdit={handleEditBoard}
                   onClone={board => setCloningFlowBoard(board)}
                   onCopyConfig={board => setCopyConfigTargetBoard(board)}
-                  applicationBoardIds={applicationBoardIds}
-                  applicationByBoardId={applicationByBoardId}
+                  applicationBoardIds={visibleApplicationBoardIds}
+                  applicationByBoardId={visibleApplicationByBoardId}
                   {...(fromReleaseManager ? { onWorkflowFields: setEditingBoard } : {})}
                   {...(workspaceId && projectId
                     ? {

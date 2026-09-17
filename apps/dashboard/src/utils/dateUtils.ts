@@ -356,6 +356,14 @@ export const formatDate = (date: Date | number): string => {
 };
 
 /**
+ * Format date as DD/MM/YYYY, e.g. '08/09/2026'. Locale-independent (does not
+ * depend on the machine locale the way `toLocaleDateString()` does).
+ */
+export const formatDateNumeric = (date: Date | number): string => {
+  return format(new Date(date), 'dd/MM/yyyy');
+};
+
+/**
  * Format date for date pill separators (Slack-style)
  * - "Today" for today's date
  * - "Yesterday" for yesterday's date
