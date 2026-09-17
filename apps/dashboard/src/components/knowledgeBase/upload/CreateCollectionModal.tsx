@@ -218,10 +218,7 @@ const CreateCollectionModal = ({
             >
               Public
             </Radio>
-            <Radio
-              value='private'
-              subtext='Invite only — sharing the link also grants viewer access'
-            >
+            <Radio value='private' subtext='Invite only'>
               Private
             </Radio>
           </RadioGroup>

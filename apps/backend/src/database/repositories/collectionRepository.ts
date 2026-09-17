@@ -169,37 +169,6 @@ export class CollectionRepository {
     }
 
     /**
-     * Lazily grant VIEWER on a root collection the caller has no access to.
-     * Only called once resolveCollectionAccess has already returned null for
-     * this user (owner/group/channel/public all missed) — reaching this point
-     * means the caller supplied a specific collectionId (from a URL/link
-     * someone sent them), not a listing enumeration, so knowing the id is
-     * treated as the access credential, same as "anyone with the link" in
-     * Google Drive. Grants VIEWER only — write actions stay gated behind a
-     * real EDITOR/OWNER row via the normal share flow.
-     *
-     * Races two concurrent requests (e.g. download + chunk fired together)
-     * into one row via the (collectionId, userId) unique constraint instead
-     * of erroring on the second insert.
-     */
-    async grantViewerAccessViaLink(collectionId: string, userId: string, workspaceId: string): Promise<void> {
-        const now = new Date();
-        await this.db.collectionPermission.upsert({
-            where: { collectionId_userId: { collectionId, userId } },
-            update: {},
-            create: {
-                id: uuidv4(),
-                workspaceId,
-                collectionId,
-                userId,
-                role: CollectionRole.VIEWER,
-                createdAt: now,
-                updatedAt: now,
-            },
-        });
-    }
-
-    /**
      * Create a sub-folder inside an existing Collection (root or sub-folder).
      * scopeType + scopeId are inherited from the parent collection.
      */

@@ -1046,8 +1046,7 @@ export const ShareCollectionModal = ({
                           )}
                         </div>
                         <p className='text-xs text-muted-foreground'>
-                          Only invited users can access — sending someone the link directly grants
-                          them viewer access too.
+                          Only invited users can access.
                         </p>
                       </div>
                     </DropdownMenuItem>
@@ -1058,7 +1057,7 @@ export const ShareCollectionModal = ({
                     ? channelId
                       ? 'Anyone in the channel can view this collection. Editing still requires an explicit Editor invite.'
                       : 'Anyone in the workspace can view this collection. Editing still requires an explicit Editor invite.'
-                    : 'Only people you invite below can access this collection — sending someone the link directly grants them viewer access too.'}
+                    : 'Only people you invite below can access this collection.'}
                 </p>
               </div>
             </div>
