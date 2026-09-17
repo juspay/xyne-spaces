@@ -1,32 +1,18 @@
 import type { Request, Response } from 'express';
 import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
-import { assertChannelMembership } from '@/utils/channelMembership';
-import { AttachmentEntityType, AttachmentUploadStatus, ChannelRole } from '@xyne/shared';
+import { assertChannelMembership, isDeskOwnerOrChannelAdmin } from '@/utils/channelMembership';
+import { AttachmentEntityType, AttachmentUploadStatus } from '@xyne/shared';
 import { deskReportGenerationService, STUCK_PENDING_HOURS } from '@/services/deskReportGenerationService';
 import { storageService } from '@/services/storage/index';
 import { normalizeStoragePath } from '@xyne/storage';
 import { config } from '@/config/env';
-import { ChannelParticipantRepository } from '@/database/repositories/channelParticipantRepository';
-
-const channelParticipantRepo = new ChannelParticipantRepository();
 
 /** Maps the DB's uppercase enum to the lowercase status shape the frontend expects. */
 function toClientStatus(uploadStatus: string | null): 'pending' | 'completed' | 'failed' {
   if (uploadStatus === AttachmentUploadStatus.COMPLETED) return 'completed';
   if (uploadStatus === AttachmentUploadStatus.FAILED) return 'failed';
   return 'pending';
-}
-
-async function canManageDeskReport(
-  channelId: string,
-  userId: string | undefined,
-  ownerUserId: string | null | undefined,
-): Promise<boolean> {
-  if (!userId) return false;
-  if (ownerUserId && ownerUserId === userId) return true;
-  const participant = await channelParticipantRepo.findParticipant(channelId, userId);
-  return participant?.role === ChannelRole.ADMIN;
 }
 
 export class DeskReportPanelController {
@@ -50,7 +36,13 @@ export class DeskReportPanelController {
       const ownerUserId = (
         await db.emailChannelPreference.findUnique({ where: { channelId }, select: { ownerUserId: true } })
       )?.ownerUserId;
-      const canGenerate = await canManageDeskReport(channelId, req.user?.id, ownerUserId);
+      const canGenerate = await isDeskOwnerOrChannelAdmin(channelId, req.user?.id, ownerUserId);
+      // Report contents are restricted to the same owner/admin set that can
+      // generate them — members get nothing, not even the latest status.
+      if (!canGenerate) {
+        res.status(403).json({ success: false, error: 'Only the desk owner or a channel admin can view reports for this desk' });
+        return;
+      }
 
       // Query the latest completed report and the newest row directly via
       // uploadStatus — no fixed-window scan to push a completed report out of view.
@@ -150,6 +142,16 @@ export class DeskReportPanelController {
     }
 
     try {
+      // Same gate as getLatest — only the desk owner or a channel admin may
+      // read (or download) the report itself.
+      const ownerUserId = (
+        await db.emailChannelPreference.findUnique({ where: { channelId }, select: { ownerUserId: true } })
+      )?.ownerUserId;
+      if (!(await isDeskOwnerOrChannelAdmin(channelId, req.user?.id, ownerUserId))) {
+        res.status(403).send('Only the desk owner or a channel admin can view reports for this desk');
+        return;
+      }
+
       // Must match getLatest — serve the latest COMPLETED row directly via
       // uploadStatus, not just the newest, since a regeneration may still be
       // pending.
@@ -234,7 +236,7 @@ export class DeskReportPanelController {
         },
       });
 
-      if (!(await canManageDeskReport(channelId, req.user?.id, pref?.ownerUserId))) {
+      if (!(await isDeskOwnerOrChannelAdmin(channelId, req.user?.id, pref?.ownerUserId))) {
         res
           .status(403)
           .json({ success: false, error: 'Only the desk owner or a channel admin can generate a report for this desk' });

@@ -35,6 +35,11 @@ export type SlashCommand =
   | { kind: "queueClear" }
   // `/help` — list the available slash commands.
   | { kind: "help" }
+  | { kind: "status" }
+  // `/debug` — attach one HTML file with the latest run's execution trace.
+  // `/debug all` — every checkpointed session in the thread, newest first,
+  // each expandable, so an issue can be traced across runs.
+  | { kind: "debug"; scope?: "latest" | "all" }
   // `/fast` / `/fast off` — thread-scoped fast-mode toggle. Start-anchored only.
   | { kind: "fastMode"; enabled: boolean }
   | { kind: "fastModeUsage" };
@@ -88,6 +93,15 @@ function parseFromSlash(trimmed: string): SlashCommand | null {
   if (lower === "/help") {
     return { kind: "help" };
   }
+  if (lower === "/status") {
+    return { kind: "status" };
+  }
+  if (lower === "/debug") {
+    return { kind: "debug" };
+  }
+  if (lower === "/debug all" || lower === "/debug sessions") {
+    return { kind: "debug", scope: "all" };
+  }
   if (lower === "/fast" || lower === "/fast on") {
     return { kind: "fastMode", enabled: true };
   }
@@ -97,8 +111,8 @@ function parseFromSlash(trimmed: string): SlashCommand | null {
   if (lower.startsWith("/fast ")) {
     const rest = trimmed.slice("/fast ".length).trim();
     // Obvious on/off typos get the usage hint; anything else is
-    // "/fast <task>" — enable fast mode AND run the task in one message
-    // (mirrors `/upgrade [task]`). Handled by the webhook's FAST_RE block,
+    // "/fast <task>" — enable fast mode AND run the task in one message.
+    // Handled by the webhook's FAST_RE block,
     // so fall through as a normal message here.
     if (/^o(n+|f+)$/i.test(rest)) {
       return { kind: "fastModeUsage" };

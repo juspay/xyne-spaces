@@ -38,9 +38,9 @@ const MANIFEST_END = "REACT_ARTIFACT_END";
 /** Bumped when the on-disk artifact payload shape changes. */
 const ARTIFACT_VERSION = 1;
 
-const MAX_FILES = 20;
-const MAX_FILE_BYTES = 64 * 1024;
-const MAX_TOTAL_BYTES = 256 * 1024;
+const MAX_FILES = 50;
+const MAX_FILE_BYTES = 256 * 1024;
+const MAX_TOTAL_BYTES = 2 * 1024 * 1024;
 /** The summary is the only part the model re-reads; keep it well under the 32KB inline cap. */
 const MAX_SUMMARY_CHARS = 1000;
 const MAX_TITLE_CHARS = 120;
@@ -287,7 +287,7 @@ function parseDependencies(raw: unknown): Record<string, string> {
     fail("`dependencies` must be an object mapping package name to version.");
   }
 
-  const deps: Record<string, string> = {};
+  const deps = new Map<string, string>();
   for (const [name, version] of Object.entries(raw as Record<string, unknown>)) {
     if (!NPM_PACKAGE_NAME_RE.test(name)) {
       fail(`"${name}" is not a valid npm package name.`);
@@ -300,9 +300,9 @@ function parseDependencies(raw: unknown): Record<string, string> {
     }
     const v = asString(version).trim();
     if (!v) fail(`Dependency "${name}" needs a version (use "latest" if unsure).`);
-    deps[name] = v;
+    deps.set(name, v);
   }
-  return deps;
+  return Object.fromEntries(deps);
 }
 
 const REQUIREMENT_NAME_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;

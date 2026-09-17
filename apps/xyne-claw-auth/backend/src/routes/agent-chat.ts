@@ -1,7 +1,8 @@
 import { isAgentOwnedRun } from "../lib/agent-owned-runs.js";
+import { screenUploadFiles } from "../lib/upload-screening.js";
 import { Router, type Request, type RequestHandler, type Response } from "express";
 import { errMsg } from "../lib/errors.js";
-import { isAgentInvocableBy } from "xyne-claw-shared";
+import { SDLC_AGENT_SLUG, isAgentInvocableBy } from "xyne-claw-shared";
 import { randomUUID } from "node:crypto";
 import multer from "multer";
 import { existsSync, readdirSync } from "node:fs";
@@ -39,6 +40,10 @@ import { resolveSdlcRepositoryForUser } from "../lib/sdlc-repository-context.js"
 import { attachArtifactToSessionApp } from "../lib/artifact-app-session.js";
 import { createLogger } from "../logger.js";
 const log = createLogger("agent-chat");
+
+function sanitizeForLog(value: unknown): string {
+  return String(value).replace(/[\r\n]+/g, " ");
+}
 
 function withoutFollowUpRecorderInvocations(value: unknown[]): unknown[] {
   return value.filter((item) => {
@@ -669,6 +674,18 @@ router.post(
         return;
       }
 
+      // Deny-by-default content screening: reject native executables / the EICAR
+      // test file (by magic bytes, regardless of filename) and executable
+      // extensions / MIME types, so an attachment can't be a malware carrier.
+      const rejected = screenUploadFiles([...files, ...(thumbnails ?? [])]);
+      if (rejected) {
+        res.status(400).json({
+          success: false,
+          error: `File "${rejected.filename}" was rejected: ${rejected.reason}`,
+        });
+        return;
+      }
+
       let fileMetadata: Array<{ hasThumbnail?: boolean; width?: number; height?: number }> = [];
       const rawMeta = (req.body as { fileMetadata?: string }).fileMetadata;
       if (rawMeta) {
@@ -856,7 +873,7 @@ router.get("/:slug/context/search", async (req: Request<{ slug: string }>, res: 
       res.status(400).json({ success: false, error: "type must be one of all|channel|ticket|canvas|call|repository" });
       return;
     }
-    if (rawType === "repository" && req.params.slug !== "sdlc-agent") {
+    if (rawType === "repository" && req.params.slug !== SDLC_AGENT_SLUG) {
       res.status(400).json({ success: false, error: "Repository context is only available for the SDLC Assistant" });
       return;
     }
@@ -3153,12 +3170,12 @@ router.post("/:slug/chat/approve-action", async (req: Request<{ slug: string }>,
     });
 
     if (!result.ok) {
-      log.error(`[agent-chat] approve-action failed: ${action.tool} — ${result.error}`);
+      log.error(`[agent-chat] approve-action failed: ${sanitizeForLog(action.tool)} — ${sanitizeForLog(result.error)}`);
       res.status(400).json({ success: false, error: result.error ?? "Execution failed" });
       return;
     }
 
-    log.info(`[agent-chat] approve-action ok: ${action.tool} → ${result.content.slice(0, 100)}`);
+    log.info(`[agent-chat] approve-action ok: ${sanitizeForLog(action.tool)} → ${sanitizeForLog(result.content).slice(0, 100)}`);
     res.json({ success: true, data: { content: result.content } });
   } catch (err) {
     log.error("[agent-chat] approve-action error:", err);

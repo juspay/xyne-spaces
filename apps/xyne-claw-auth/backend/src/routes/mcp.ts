@@ -12,7 +12,7 @@ import { hasConnectorDefinition, resolveConnectorDefinition } from "../mcp/conne
 import { BITBUCKET_CUSTOM_TOOLS, handleUploadPrScreenshot, handleGetPrComments, handleGetPrTemplate, handleListPullRequests, buildUpstreamBitbucketCitation } from "../mcp/adapters/bitbucket.js";
 import { GITHUB_CUSTOM_TOOLS, handleUploadPrAttachment } from "../mcp/adapters/github.js";
 import { GRAFANA_CUSTOM_TOOLS, handleGrafanaQueryLogs, handleGrafanaListMetrics, handleGrafanaQueryMetrics, handleGrafanaQueryDatabase, buildUpstreamGrafanaCitation, prefixChunk } from "../mcp/adapters/grafana.js";
-import { SDLC_TOOL_NAMES, type Citation } from "xyne-claw-shared";
+import { type Citation } from "xyne-claw-shared";
 import { SLACK_CUSTOM_TOOLS, handleSlackFindChannel } from "../mcp/adapters/slack.js";
 import { POSTMAN_CUSTOM_TOOLS, handleRunMonitor } from "../mcp/adapters/postman.js";
 import {
@@ -34,6 +34,10 @@ import {
   type EffectiveCredentials,
 } from "../lib/credentials-loader.js";
 import { getWorkspaceIdForUser } from "../lib/spaces-db.js";
+import {
+  loadSubagentMcpListingEntries,
+  type SubagentMcpListingEntry,
+} from "../lib/subagent-mcp-listing.js";
 import { requireSessionToken } from "../middleware/require-session-token.js";
 import { requireStrictS2S } from "../middleware/require-auth.js";
 import { validateWriteAction } from "../mcp/validators.js";
@@ -42,7 +46,6 @@ import {
   injectDefaults as injectAttachedContextDefaults,
 } from "../mcp/attached-context-injector.js";
 import { loadRunScalars } from "../mcp/run-scalars.js";
-import { injectSdlcBaselineRunContext } from "../mcp/sdlc-baseline-run-context.js";
 import { KB_TOOLS, KB_TOOL_NAMES, type KbToolName } from "../mcp/kb-tools.js";
 import {
   handleKbListResources,
@@ -76,6 +79,10 @@ import {
 } from "./mcp-agent-tools.js";
 
 const log = createLogger("mcp");
+
+function sanitizeForLog(value: unknown): string {
+  return String(value).replace(/[\r\n]+/g, " ");
+}
 
 const DEFAULT_GATEWAY_TENANT = process.env.ALLOWED_TENANTS?.split(",")
   .map((tenant) => tenant.trim())
@@ -806,6 +813,11 @@ async function loadEffectiveCredentialsWithSpacesFallback(
   agentSlug?: string,
   agentOrgId?: string,
   sessionId?: string,
+  // SubagentDefinition.id forwarded from the /mcp/call body when the tool
+  // call originates from a subagent's nested run. Threaded into the resolver
+  // so a SubagentMcpConnection can pin (and, when non-overridable, force) the
+  // credential identity above the agent/user/global cascade.
+  subagentId?: string,
 ): Promise<EffectiveCredentials | null> {
   // A Slack-surface run must use the bot installed in the workspace that
   // dispatched it. Do this before user/agent/global credential resolution so
@@ -815,7 +827,7 @@ async function loadEffectiveCredentialsWithSpacesFallback(
     if (surface) return surface;
   }
 
-  const effective = await loadEffectiveCredentials(userId, serverType, agentSlug, undefined, agentOrgId);
+  const effective = await loadEffectiveCredentials(userId, serverType, agentSlug, undefined, agentOrgId, subagentId);
   if (effective) return effective;
 
   if (serverType === "xyne-spaces") {
@@ -1068,6 +1080,30 @@ router.get("/:sessionId/mcp/tools", async (req: Request<{ sessionId: string }>, 
 
     log.info(`[mcp/tools] final entries=${entries.map((e) => `${e.serverType}:${e.type}`).join(",")}`);
 
+    // Servers whose ONLY credentials live on one of the agent's custom
+    // subagents. Without this the group never reaches the run, the subagent
+    // resolves to 0 tools and gets skipped. Existing user/agent/global sources
+    // win — the call-time pin in credentials-loader already routes the
+    // subagent's own calls to its own identity.
+    let subagentListingEntries: SubagentMcpListingEntry[] = [];
+    if (sessionAgentTools) {
+      try {
+        subagentListingEntries = await loadSubagentMcpListingEntries({
+          orgId: sessionAgentOrgId,
+          subagentNames: sessionAgentTools.toolsConfig?.subagents ?? [],
+          existingServerTypes: new Set(entries.map((e) => e.serverType)),
+        });
+      } catch (err) {
+        log.error(`[mcp/tools] subagent connection listing failed for agent=${sessionAgentTools.slug}:`, err);
+      }
+      if (subagentListingEntries.length > 0) {
+        log.info(
+          `[mcp/tools] subagent-sourced servers agent=${sessionAgentTools.slug} ` +
+          `${subagentListingEntries.map((e) => `${e.serverType}<-${e.subagentName}`).join(",")}`,
+        );
+      }
+    }
+
     // Fallback: if no xyne-spaces connection exists, try using the agent's app token.
     // Skipped under the automation app-mode swap — that path must NOT re-list the
     // user xyne-spaces server (with app creds) that the swap just removed.
@@ -1135,6 +1171,32 @@ router.get("/:sessionId/mcp/tools", async (req: Request<{ sessionId: string }>, 
     // Add app token fallback result if available
     if (appTokenToolsResult) {
       data.push(appTokenToolsResult);
+    }
+
+    if (subagentListingEntries.length > 0) {
+      const subagentResults = await Promise.allSettled(
+        subagentListingEntries.map(async (entry) => {
+          if (!(await hasConnectorDefinition(entry.serverType))) return null;
+          const serverTools = await listToolsForUser(
+            userId,
+            entry.serverType,
+            entry.serverName,
+            entry.credentials,
+            agentSlug,
+          );
+          return {
+            ...serverTools,
+            sourceSubagent: { id: entry.subagentDefinitionId, name: entry.subagentName },
+          } satisfies McpServerTools;
+        }),
+      );
+      for (const result of subagentResults) {
+        if (result.status === "rejected") {
+          log.error("[mcp/tools] subagent-sourced server failed to list tools:", result.reason);
+          continue;
+        }
+        if (result.value) data.push(result.value);
+      }
     }
 
     // Add gateway tools selected in the agent config as extra MCP groups.
@@ -1347,12 +1409,15 @@ router.post("/:sessionId/mcp/call", async (req: Request<{ sessionId: string }>, 
     const strictAgentToolsConfig = isStrictAgentToolsEnabled()
       ? await withSurfaceDefaultToolsConfig(sessionAgentTools?.toolsConfig, req.params.sessionId, spacesAppId)
       : undefined;
-    const { serverType, tool, params, permission, backendId } = req.body as {
+    const { serverType, tool, params, permission, backendId, subagentId } = req.body as {
       serverType?: string;
       tool?: string;
       params?: Record<string, unknown>;
       permission?: string;
       backendId?: string;
+      // Set by xyne-claw when the invoking tool belongs to a subagent's
+      // palette. Selects a SubagentMcpConnection identity in the resolver.
+      subagentId?: string;
     };
 
     if (!serverType || typeof serverType !== "string") {
@@ -1657,6 +1722,7 @@ router.post("/:sessionId/mcp/call", async (req: Request<{ sessionId: string }>, 
       agentSlug,
       sessionAgentOrgId,
       req.params.sessionId,
+      subagentId,
     );
     if (!effective) {
       res
@@ -1705,17 +1771,6 @@ router.post("/:sessionId/mcp/call", async (req: Request<{ sessionId: string }>, 
     // attached, this is a no-op fast path.
     const attachedItems = await loadAttachedContextForSession(req.params.sessionId);
     let effectiveParams = injectAttachedContextDefaults(serverType, tool, params ?? {}, attachedItems);
-
-    // Baseline identity is trusted run state, not model memory. Compaction can
-    // remove the original task, so force-inject persisted values on every call.
-    if (
-      serverType === "xyne-spaces" &&
-      tool === SDLC_TOOL_NAMES.mutateArtifact &&
-      effectiveParams["artifactType"] === "BASELINE"
-    ) {
-      const run = await agentRunRepository.findBySessionId(req.params.sessionId).catch(() => null);
-      effectiveParams = injectSdlcBaselineRunContext(effectiveParams, run?.metadata);
-    }
 
     // xyne-dashboard: force-set the run's dashboard scalars (stored in /run,
     // see mcp/run-scalars.ts). Authoritative — overwrites anything the model
@@ -2080,15 +2135,15 @@ router.post("/:sessionId/mcp/call", async (req: Request<{ sessionId: string }>, 
     // so the error is attributable to a server/tool in the structured log.
     const body = req.body as { serverType?: string; tool?: string };
     const httpStatus = Number(/status code (\d{3})/.exec(msg)?.[1]) || undefined;
-    log.error(`[mcp/call] error: ${msg}`, {
+    log.error(`[mcp/call] error: ${sanitizeForLog(msg)}`, {
       event: "mcp_call",
       userId: req.session?.userId,
-      server: body.serverType,
-      tool: body.tool,
+      server: sanitizeForLog(body.serverType),
+      tool: sanitizeForLog(body.tool),
       status: "error",
       durationMs: Date.now() - startedAt,
       httpStatus,
-      errorMessage: msg,
+      errorMessage: sanitizeForLog(msg),
     });
     res
       .status(500)
@@ -2109,6 +2164,7 @@ router.post("/:sessionId/actions/sign", async (req: Request<{ sessionId: string 
         params?: Record<string, unknown>;
         userId?: string;
         signature?: string;
+        subagentId?: string;
       };
       // Initial-signing shape (2026-07-15): claw's custom-tool write wrapper
       // (custom-tools.ts signWriteAction) sends the bare action — it CANNOT
@@ -2122,11 +2178,15 @@ router.post("/:sessionId/actions/sign", async (req: Request<{ sessionId: string 
       serverType?: string;
       tool?: string;
       params?: Record<string, unknown>;
+      subagentId?: string;
     };
 
     let serverType: string | undefined;
     let tool: string | undefined;
     let actionParams: Record<string, unknown>;
+    // Preserve the subagent-pinned credential identity across the write-approval
+    // replay: use whichever shape carried it (undefined = normal cascade).
+    const subagentId = body.subagentId ?? body.pendingAction?.subagentId;
 
     if (body.pendingAction && typeof body.pendingAction === "object") {
       // Re-sign shape: verify the existing signature before re-issuing.
@@ -2260,6 +2320,7 @@ router.post("/:sessionId/actions/sign", async (req: Request<{ sessionId: string 
         agentSlug,
         sessionAgentOrgId,
         req.params.sessionId,
+        subagentId,
       );
       const credentials = effective?.credentials;
       if (!credentials) {

@@ -9,6 +9,8 @@
 * clicking on "[data-testid='start-call-button']"
 * waiting up to "60" seconds for "[data-testid='call-window']" to appear
 * verifying "[data-testid='participant-count']" is visible
+* clicking on "[data-testid='end-call-button']"
+* waiting for "[data-testid='call-window']" to disappear
 
 ## User joins ongoing call from DM
 * Using browser

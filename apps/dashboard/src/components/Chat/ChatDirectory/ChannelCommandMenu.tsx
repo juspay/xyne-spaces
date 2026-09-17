@@ -230,7 +230,8 @@ export const ChannelCommandItem = ({
     ? (parseDMParticipantIds(channel).find(id => id !== currentUserID) ?? '')
     : '';
   const targetUser = useUser(otherUserId);
-  const hasStatus = targetUser && (targetUser.statusEmoji || targetUser.statusContent);
+  const hasStatus =
+    targetUser && (targetUser.activityStatus || targetUser.statusEmoji || targetUser.statusContent);
 
   return (
     <Command.Item
@@ -256,6 +257,7 @@ export const ChannelCommandItem = ({
             statusEmoji={targetUser.statusEmoji}
             statusContent={targetUser.statusContent}
             statusExpiryAt={targetUser.statusExpiryAt}
+            activityStatus={targetUser.activityStatus}
             size='sm'
           />
         )}
@@ -3984,7 +3986,12 @@ const ChannelCommandMenu = ({
               aria-label={search.trim() || searchText.trim() ? 'Clear search' : 'Search'}
               data-track-category='CHANNEL_SEARCH'
               data-track-name={search.trim() || searchText.trim() ? 'ClearSearch' : 'OpenSearch'}
-              data-track-metadata={JSON.stringify({ searchQuery: searchText })}
+              data-track-metadata={JSON.stringify({
+                // Length, never the query itself — contextMetadata is stored
+                // verbatim and is not covered by the session-replay masking.
+                queryLength: searchText.trim().length,
+                hasQuery: searchText.trim().length > 0,
+              })}
             >
               {search.trim() || searchText.trim() ? (
                 <X className='w-4 h-4' />

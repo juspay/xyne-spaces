@@ -147,7 +147,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   channelId,
   projectId,
   channelScopeType,
-  replies,
+  replies: repliesProp,
   showAvatar,
   conversation,
   draft,
@@ -270,6 +270,26 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
 
   const metadata = message?.metadata as Record<string, unknown> | null;
 
+  // An ephemeral card has no thread to open. A channel-level one carries a
+  // conversationId synthesized at post time that names no row in the database, so
+  // the thread view would come up empty and any reply would be rejected by the
+  // messages ACL ("conversation or channel does not exist"); a thread-posted one
+  // is already inside its thread. Either way the affordance is wrong, so drop it.
+  //
+  // Dropped here rather than at each call site because `replies.onOpenThread` is
+  // the single gate for every entry point — hover toolbar, mobile long-press, the
+  // reply-count strip and the bubble action all read it — so removing it once
+  // closes all of them and cannot be missed when another is added.
+  //
+  // Matches Slack, where a channel-level ephemeral message has no thread
+  // affordance at all.
+  const replies = ((): typeof repliesProp => {
+    if (!repliesProp || metadata?.['__xyneEphemeral'] !== true) return repliesProp;
+    const withoutThread = { ...repliesProp };
+    delete withoutThread.onOpenThread;
+    return withoutThread;
+  })();
+
   // Shared recording and call anchors both use entity-specific actions.
   const isSharedEntityMessage =
     metadata?.['isRecordingMessage'] === true || metadata?.['isCallShareMessage'] === true;
@@ -385,6 +405,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
     // This shows the thread header but doesn't load old conversation
     xyneAIActor.send({
       type: 'OPEN',
+      trackSource: 'message_bubble',
       channelId,
       threadInfo,
       startFreshChat: true,
@@ -1169,7 +1190,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
       data-hover-key={hoverToolbarKey}
       className={cn(
         isMobile && 'no-select-mobile',
-        'group/bubble relative transition-all duration-200 ease-in-out',
+        'group/bubble relative transition-colors duration-200 ease-in-out',
         // Row highlight driven by the shared MessageHoverToolbar, which stamps
         // `data-hovered` on the [data-message-id] root. Applied at the root so
         // every sub-layout (message, link/canvas previews, reply layout) is
@@ -1521,6 +1542,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
             ticketId={threadTicketId}
             conversationId={conversation.conversationId}
             sourceMessageId={message.messageId}
+            trackSource='chat_message'
           />
         )}
 

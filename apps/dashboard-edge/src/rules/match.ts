@@ -13,8 +13,9 @@ export interface RequestView {
 
 export interface Resolution {
   rule: Rule;
+  lane: string;
+  version?: string;
   bundle: string;
-  version: string;
   fingerprint?: string;
   object: string;
   cache: CacheMode;
@@ -157,11 +158,14 @@ export async function resolve(
     }
     const resolution: Resolution = {
       rule,
+      lane: expandBundle(rule.lane, captures),
       bundle,
-      version: rule.version,
       object,
       cache: rule.cache,
     };
+    if (rule.version !== undefined) {
+      resolution.version = rule.version;
+    }
     if (fingerprint !== undefined) {
       resolution.fingerprint = fingerprint;
     }
@@ -174,18 +178,16 @@ export async function resolve(
 }
 
 /**
- * Cache key version: the rule version, the origin fingerprint of the bundle's
- * index.html (so an in-place re-upload invalidates by itself) and, for ttl
- * mode, a time bucket so entries roll over on a timer.
+ * Cache key version: the origin fingerprint of the bundle's index.html, so an
+ * in-place re-upload invalidates by itself, plus a time bucket in ttl mode so
+ * entries roll over on a timer. The bundle path (lane, or lane/version) is the
+ * other half of the key, so a lane move or a pin change invalidates too.
  */
 export function keyVersion(
   res: Resolution,
   nowSeconds: number = Math.floor(Date.now() / 1000),
 ): string {
-  let v = res.version;
-  if (res.fingerprint !== undefined) {
-    v += `-${res.fingerprint}`;
-  }
+  let v = res.fingerprint ?? 'none';
   if (res.cache === 'ttl' && res.ttl !== undefined) {
     v += `.${Math.floor(nowSeconds / res.ttl)}`;
   }

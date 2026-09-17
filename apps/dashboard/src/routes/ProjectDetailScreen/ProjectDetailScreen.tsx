@@ -1,15 +1,13 @@
 import { ReactElement, useState, useEffect, useMemo } from 'react';
 import { useParams, useNavigate, useLocation, useSearchParams } from 'react-router-dom';
 import {
-  AccessType,
   BoardType,
   deserializeFlowPlan,
   inferRepositoryNameFromUrl,
   type FlowPlan,
   type VCSProviderType,
 } from '@xyne/shared';
-import { useAuth } from '../../hooks/useAuth';
-import { usePermissions } from '../../hooks/usePermissions';
+import { useCanManageRelease } from '../../hooks/usePermissions';
 import {
   ArrowLeft,
   ChevronRight,
@@ -100,18 +98,7 @@ const ProjectDetailScreen = (): ReactElement => {
   // List Projects shows the SDLC repositories view.
   const fromReleaseManager = navState?.from === 'releaseManager';
   // Gate Create Release like the backend: admin/owner role, or a RELEASE-MANAGER WRITE grant.
-  const { user } = useAuth();
-  const permissions = usePermissions();
-  const canCreateRelease =
-    user?.role === 'ADMIN' ||
-    user?.role === 'OWNER' ||
-    user?.orgRole === 'ADMIN' ||
-    user?.orgRole === 'OWNER' ||
-    permissions.some(
-      p =>
-        p.resourceName === 'RELEASE-MANAGER' &&
-        (p.accessType === AccessType.WRITE || p.accessType === AccessType.ADMIN),
-    );
+  const canCreateRelease = useCanManageRelease();
   const backTo = fromReleaseManager
     ? { path: '/releaseManager', label: 'Back to Release Manager' }
     : { path: '/listProjects', label: 'Back to Projects' };
@@ -780,6 +767,7 @@ const ProjectDetailScreen = (): ReactElement => {
           projectId={projectId}
           initialTicketKind='release'
           releaseOnly
+          trackSource='project_detail'
           releaseChannelIds={releaseChannelIds}
           onClose={() => setCreatingRelease(false)}
           onTicketCreated={() => setCreatingRelease(false)}
@@ -1133,8 +1121,7 @@ const ProjectDetailScreen = (): ReactElement => {
         >
           <h2 className='text-lg font-semibold'>Add Repository</h2>
           <p className='mt-1 text-sm text-muted-foreground'>
-            Creates the hub, then runs a non-mutating access check. Baseline generation starts only
-            after you click Next.
+            Creates the hub, then runs a non-mutating access check.
           </p>
           <label htmlFor='sdlc-repository-url' className='mt-5 block text-sm font-medium'>
             Repository URL

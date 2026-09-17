@@ -965,6 +965,13 @@ export function SummaryTemplatesModal({
                           )}
                           data-track-category='SummaryTemplates'
                           data-track-name='SelectTemplate'
+                          data-track-metadata={JSON.stringify({
+                            templateId: template.id,
+                            previousTemplateId: draft?.id ?? null,
+                            sectionCount: Array.isArray(template.sections)
+                              ? template.sections.length
+                              : null,
+                          })}
                         >
                           <span className='flex size-7 shrink-0 items-center justify-center rounded-lg border border-border bg-background text-sm font-semibold shadow-sm'>
                             {getTemplateIcon(template.name)}
@@ -1327,6 +1334,13 @@ export function SummaryTemplatesModal({
                               className='ml-auto'
                               data-track-category='SummaryTemplates'
                               data-track-name='ToggleMandatorySection'
+                              data-track-metadata={JSON.stringify({
+                                // Without sectionKey the event cannot say WHICH
+                                // mandatory section was switched off.
+                                sectionKey: section.key,
+                                enabled: !isSectionEnabled,
+                                templateId: draft?.id ?? null,
+                              })}
                             />
                           )}
                         </div>

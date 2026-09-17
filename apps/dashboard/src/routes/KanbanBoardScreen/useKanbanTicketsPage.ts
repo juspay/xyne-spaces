@@ -22,7 +22,7 @@ export type KanbanTicketsPageRow = Ticket & {
   formEntityValues?: Array<FormEntityValues & { formField?: unknown }>;
 };
 
-export type KanbanViewMode = 'project' | 'board' | 'my-tickets' | 'user-tickets' | 'group-tickets';
+export type KanbanViewMode = 'project' | 'board' | 'my-tickets';
 
 export type KanbanPageGroupBy =
   | 'none'
@@ -41,8 +41,6 @@ export type KanbanTicketsPageBaseArgs = FlowStepVisibilityOptions & {
   channelId?: string;
   projectId?: string;
   boardId?: string;
-  userId?: string;
-  groupId?: string;
   searchTerm?: string;
   groupBy?: KanbanPageGroupBy;
   groupKey?: string;
@@ -79,6 +77,17 @@ type UseKanbanTicketsPageOptions = KanbanTicketsPageBaseArgs & {
   stageName: string;
   enabled?: boolean;
   pageSize?: number;
+  /**
+   * This column's server-side total from the counts API, which applies the same filters
+   * but NOT the sliding `createdAfter` window. Used only to tell an empty page caused by
+   * a too-narrow window from a column that is genuinely empty — never to render.
+   *
+   * `undefined` means the count is unusable: still loading, or describing a different set
+   * than the page (a Vespa-narrowed search, or a dynamic-field filter the counts API does
+   * not model). The ladder falls back to probing in that case, so correctness never
+   * depends on the count being present or accurate.
+   */
+  expectedCount?: number;
 };
 
 type UseKanbanTicketsPageResult = {
@@ -268,8 +277,6 @@ export const buildKanbanTicketsPageArgs = (
       viewMode: options.viewMode,
       projectId: options.projectId,
       boardId: options.boardId,
-      userId: options.userId,
-      groupId: options.groupId,
       excludeFlowSteps: options.excludeFlowSteps,
       columnType: options.columnType,
       stageName: options.stageName,
@@ -298,95 +305,46 @@ export const buildKanbanTicketsPageArgs = (
 const normalizeIdentity = (value: string | null | undefined): string =>
   (value ?? '').replace(/^user:/, '');
 
-const matchesIdentityFilter = (
-  value: string | null | undefined,
-  filterValues: string[] | undefined,
-): boolean => {
-  if (!filterValues?.length) return true;
-  const normalizedValue = normalizeIdentity(value);
-  if (!normalizedValue) return false;
-  return filterValues.some(filterValue => normalizeIdentity(filterValue) === normalizedValue);
-};
+/** The filter values this search actually pushed down into the Vespa query. */
+interface VespaPushdownFilters {
+  boardId: string | undefined;
+  priority: string | undefined;
+  assignee: string | undefined;
+  createdBy: string | undefined;
+  userGroup: string | undefined;
+  tags: string | undefined;
+  stage: string | undefined;
+}
 
-// Assignee-specific: understands the "unassigned" sentinel and invert marker.
-const matchesAssigneeFilter = (
-  value: string | null | undefined,
-  filterValues: string[] | undefined,
-): boolean => {
-  if (!filterValues?.length) return true;
-  const { inverted, includeUnassigned, ids } = parseAssigneeFilter(filterValues);
-  if (!ids.length && !includeUnassigned) return true;
-  const normalizedValue = normalizeIdentity(value);
-  const matches = normalizedValue
-    ? ids.some(id => normalizeIdentity(id) === normalizedValue)
-    : includeUnassigned;
-  return inverted ? !matches : matches;
-};
-
-const getTicketTagNames = (ticket: KanbanTicketsPageRow): Set<string> => {
-  return new Set(
-    (ticket.tagMappings ?? []).map(m => m.tagName).filter((name): name is string => Boolean(name)),
-  );
-};
-
-const getLocalVespaFilterRejectReasons = (
-  ticket: KanbanTicketsPageRow,
+// True when some active filter could NOT be expressed in the Vespa query, so its rows
+// would come back unfiltered on that dimension.
+//
+// Rows returned by Vespa are now rendered exactly as received, with no client-side
+// re-filtering. Re-checking a filter here meant reading fields the `lean` document summary
+// does not carry — userGroupId and ticketType arrive undefined — so every row failed the
+// check and correct hits were silently dropped. Rather than re-filter against data we do
+// not have, anything Vespa could not apply falls back to the Zero page, which queries the
+// database and can filter on every column.
+const hasFiltersVespaCannotApply = (
   filters: TicketFilters | undefined,
-): string[] => {
-  const reasons: string[] = [];
-
-  if (filters?.priority?.length && !filters.priority.includes(ticket.priority)) {
-    reasons.push('priority');
-  }
-  if (filters?.boards?.length && !filters.boards.includes(ticket.boardId)) {
-    reasons.push('boards');
-  }
-  if (filters?.sourceChannels?.length && !filters.sourceChannels.includes(ticket.channelId)) {
-    reasons.push('sourceChannels');
-  }
-  if (!matchesAssigneeFilter(ticket.assignedTo, filters?.assignee)) {
-    reasons.push('assignee');
-  }
-  if (!matchesIdentityFilter(ticket.createdBy, filters?.createdBy)) {
-    reasons.push('createdBy');
-  }
-  if (filters?.userGroups?.length && !filters.userGroups.includes(ticket.userGroupId)) {
-    reasons.push('userGroups');
-  }
-  if (filters?.tags?.length) {
-    const ticketTagNames = getTicketTagNames(ticket);
-    if (!filters.tags.some(tag => ticketTagNames.has(tag))) {
-      reasons.push('tags');
-    }
-  }
-  if (filters?.stages?.length && !filters.stages.includes(ticket.stageName)) {
-    reasons.push('stages');
-  }
-  if (filters?.ticketTypes?.length && !filters.ticketTypes.includes(ticket.ticketType ?? '')) {
-    reasons.push('ticketTypes');
-  }
-
-  return reasons;
-};
-
-const applyLocalVespaFilters = (
-  rows: Ticket[] | null,
-  filters: TicketFilters | undefined,
-): KanbanTicketsPageRow[] | null => {
-  if (rows === null) return null;
-
-  const keptRows: KanbanTicketsPageRow[] = [];
-
-  (rows as KanbanTicketsPageRow[]).forEach(ticket => {
-    const rejectReasons = getLocalVespaFilterRejectReasons(ticket, filters);
-    if (rejectReasons.length > 0) {
-      return;
-    }
-
-    keptRows.push(ticket);
-  });
-
-  return keptRows;
+  pushdown: VespaPushdownFilters,
+): boolean => {
+  // Never sent to Vespa by this hook — only the Zero page can honour them.
+  // (ticketTypes is absent on purpose: it is not indexed in Vespa either, but the Zero
+  // overlay in overlaidDirectVespaPage applies it on top of the search results instead.)
+  if (filters?.sourceChannels?.length) return true;
+  // Sent only in representable cases (single board, non-inverted assignee, ...); when the
+  // pushdown value is undefined the filter is active but absent from the query.
+  if (filters?.boards?.length && !pushdown.boardId) return true;
+  if (filters?.priority?.length && !pushdown.priority) return true;
+  if (filters?.assignee?.length && !pushdown.assignee) return true;
+  if (filters?.createdBy?.length && !pushdown.createdBy) return true;
+  if (filters?.userGroups?.length && !pushdown.userGroup) return true;
+  if (filters?.tags?.length && !pushdown.tags) return true;
+  // Undefined here means the column stage and the stage filter do not intersect, so no
+  // single `stage` value can express the constraint.
+  if (filters?.stages?.length && !pushdown.stage) return true;
+  return false;
 };
 
 export const useKanbanTicketsPage = (
@@ -405,6 +363,7 @@ export const useKanbanTicketsPage = (
   // Mirrors ticketsState so the page merge can be computed in the effect body rather
   // than inside a setState updater (updaters must stay pure — StrictMode calls them twice).
   const ticketsStateRef = useRef<TicketsState>({ queryKey: '', tickets: [] });
+  const expectedCountRef = useRef<number | undefined>(undefined);
   const [nextCursor, setNextCursor] = useState<KanbanCursor | null>(null);
   const [hasMore, setHasMore] = useState(true);
   const isLoadingMoreRef = useRef(false);
@@ -433,16 +392,6 @@ export const useKanbanTicketsPage = (
   const effectiveVespaBoardId =
     options.boardId ??
     (options.filters?.boards?.length === 1 ? options.filters.boards[0] : undefined);
-  const shouldUseDirectVespaRows =
-    requiresVespaTicketIds &&
-    !hasZeroOnlyFilters(
-      options.filters,
-      options.zeroOnlyDynamicFieldIds,
-      options.dynamicFieldDateRanges,
-    ) &&
-    canRepresentGroupInVespa(options.groupBy, options.groupKey) &&
-    !options.showOverdueOnly;
-
   // Convert filter arrays to comma-separated strings for Vespa (only if non-empty)
   const vespaPriority =
     options.filters?.priority && options.filters.priority.length > 0
@@ -468,6 +417,11 @@ export const useKanbanTicketsPage = (
   const vespaTags =
     options.filters?.tags && options.filters.tags.length > 0
       ? options.filters.tags.join(',')
+      : undefined;
+
+  const vespaUserGroup =
+    options.filters?.userGroups && options.filters.userGroups.length > 0
+      ? options.filters.userGroups.join(',')
       : undefined;
 
   // Send bare IDs - the backend expands to all identity forms for Vespa matching.
@@ -508,6 +462,45 @@ export const useKanbanTicketsPage = (
     typeof options.groupBy === 'object' && options.groupBy?.type === 'formField';
   const skipColumnFiltersForSearch = hasSearchTerm && !isFormFieldGroupBy;
 
+  // Stage filter, pushed into the YQL the same way userGroup/tags are (the backend binds
+  // each value as `stage contains @stage_N`, OR-ed together).
+  //
+  // A stage column pins its own stage, and the user's filter narrows which stages are
+  // shown, so the real constraint is the intersection of the two. An empty intersection
+  // means the column can hold nothing — that is not expressible as a `stage` value, so
+  // vespaStage stays undefined and hasFiltersVespaCannotApply routes it to the Zero page
+  // rather than sending no stage constraint at all (which would show every stage).
+  const selectedStages = options.filters?.stages ?? [];
+  const pinnedColumnStage =
+    !skipColumnFiltersForSearch && options.columnType === 'stage' ? options.stageName : undefined;
+  const effectiveStages = pinnedColumnStage
+    ? selectedStages.length === 0 || selectedStages.includes(pinnedColumnStage)
+      ? [pinnedColumnStage]
+      : []
+    : selectedStages;
+  const vespaStage = effectiveStages.length > 0 ? effectiveStages.join(',') : undefined;
+
+  // Declared after every pushdown value above, since it requires that each active filter
+  // made it into the Vespa query — direct-Vespa rows are rendered without re-filtering.
+  const shouldUseDirectVespaRows =
+    requiresVespaTicketIds &&
+    !hasZeroOnlyFilters(
+      options.filters,
+      options.zeroOnlyDynamicFieldIds,
+      options.dynamicFieldDateRanges,
+    ) &&
+    !hasFiltersVespaCannotApply(options.filters, {
+      boardId: effectiveVespaBoardId,
+      priority: vespaPriority,
+      assignee: vespaAssignee,
+      createdBy: vespaCreatedBy,
+      userGroup: vespaUserGroup,
+      tags: vespaTags,
+      stage: vespaStage,
+    }) &&
+    canRepresentGroupInVespa(options.groupBy, options.groupKey) &&
+    !options.showOverdueOnly;
+
   // Create a search key that changes when the group context changes
   // This forces the search to re-trigger when switching views
   // When searching without column filters, use a shared key so all columns share one search call
@@ -524,6 +517,8 @@ export const useKanbanTicketsPage = (
         assignee: vespaAssignee ?? '',
         tags: vespaTags ?? '',
         createdBy: vespaCreatedBy ?? '',
+        userGroup: vespaUserGroup ?? '',
+        stage: vespaStage ?? '',
         boards: options.filters?.boards ?? [],
         stages: options.filters?.stages ?? [],
         ticketTypes: options.filters?.ticketTypes ?? [],
@@ -555,26 +550,15 @@ export const useKanbanTicketsPage = (
     ...(!skipColumnFiltersForSearch && options.columnType === 'status'
       ? { status: options.stageName }
       : {}),
-    ...(!skipColumnFiltersForSearch && options.columnType === 'stage'
-      ? { stage: options.stageName }
-      : {}),
+    // Column stage intersected with the user's stage filter (see vespaStage above).
+    ...(vespaStage ? { stage: vespaStage } : {}),
     ...(vespaPriority ? { priority: vespaPriority } : {}),
     ...(vespaAssignee ? { assignee: vespaAssignee } : {}),
     ...(vespaTags ? { tags: vespaTags } : {}),
     ...(vespaCreatedBy ? { createdBy: vespaCreatedBy } : {}),
+    ...(vespaUserGroup ? { userGroup: vespaUserGroup } : {}),
     // Skip group filters when searching (will segregate in frontend)
     ...(!skipColumnFiltersForSearch ? vespaGroupFilter : {}),
-  });
-  const localFilterKey = JSON.stringify({
-    priority: options.filters?.priority ?? [],
-    boards: options.filters?.boards ?? [],
-    assignee: options.filters?.assignee ?? [],
-    userGroups: options.filters?.userGroups ?? [],
-    createdBy: options.filters?.createdBy ?? [],
-    tags: options.filters?.tags ?? [],
-    stages: options.filters?.stages ?? [],
-    ticketTypes: options.filters?.ticketTypes ?? [],
-    sourceChannels: options.filters?.sourceChannels ?? [],
   });
   const directVespaPage = useMemo(() => {
     if (!shouldUseDirectVespaRows) return null;
@@ -592,9 +576,10 @@ export const useKanbanTicketsPage = (
       results = results.filter(ticket => ticket.channelId === options.channelId);
     }
 
-    // Apply local filters (priority, boards, assignee, etc.)
-    const filtered = applyLocalVespaFilters(results, options.filters);
-    if (!filtered) return null;
+    // Render what Vespa returned. Every active filter was pushed down into the query
+    // (shouldUseDirectVespaRows routes the rest to the Zero page), so re-filtering here
+    // would only risk dropping correct rows on fields the lean summary omits.
+    const filtered = results as KanbanTicketsPageRow[];
 
     // When searching without column filters, segregate by stage/status in frontend
     if (skipColumnFiltersForSearch) {
@@ -635,7 +620,6 @@ export const useKanbanTicketsPage = (
 
     return filtered;
   }, [
-    localFilterKey,
     options.channelId,
     options.columnType,
     options.stageName,
@@ -670,6 +654,7 @@ export const useKanbanTicketsPage = (
   const fetchCursor = fetchCursorState?.queryKey === queryKey ? fetchCursorState.cursor : null;
   const tickets = ticketsState.queryKey === queryKey ? ticketsState.tickets : [];
   ticketsStateRef.current = ticketsState;
+  expectedCountRef.current = options.expectedCount;
 
   if (windowAnchorRef.current?.queryKey !== queryKey) {
     windowAnchorRef.current = {
@@ -719,8 +704,18 @@ export const useKanbanTicketsPage = (
   }, [liveDirectRows]);
   const overlaidDirectVespaPage = useMemo(() => {
     if (!shouldUseDirectVespaRows || directVespaPage === null) return directVespaPage;
-    if (liveDirectRowsById.size === 0) return directVespaPage;
-    return directVespaPage.map(ticket => {
+    if (directVespaPage.length === 0) return directVespaPage;
+
+    // ticketType is not indexed into Vespa, so it cannot be pushed down like the other
+    // filters. It is applied here instead, against the live Zero row rather than the Vespa
+    // payload — the same overlay that already corrects stage/status. Until those rows
+    // arrive there is nothing to match on, so report loading rather than briefly rendering
+    // the unfiltered Vespa set.
+    const ticketTypes = options.filters?.ticketTypes ?? [];
+    const filterByTicketType = ticketTypes.length > 0;
+    if (liveDirectRowsById.size === 0) return filterByTicketType ? null : directVespaPage;
+
+    const overlaid = directVespaPage.map(ticket => {
       const live = liveDirectRowsById.get(ticket.id);
       if (!live) return ticket;
       return {
@@ -730,13 +725,23 @@ export const useKanbanTicketsPage = (
         boardId: live.boardId,
         priority: live.priority,
         assignedTo: live.assignedTo,
+        ticketType: live.ticketType,
       };
     });
-  }, [shouldUseDirectVespaRows, directVespaPage, liveDirectRowsById]);
+
+    if (!filterByTicketType) return overlaid;
+    // A row with no live counterpart has no type to test, so it cannot satisfy the filter.
+    return overlaid.filter(
+      ticket => liveDirectRowsById.has(ticket.id) && ticketTypes.includes(ticket.ticketType ?? ''),
+    );
+  }, [shouldUseDirectVespaRows, directVespaPage, liveDirectRowsById, options.filters?.ticketTypes]);
 
   const effectivePage = shouldUseDirectVespaRows ? overlaidDirectVespaPage : page;
+  // Keyed off the page actually rendered, not directVespaPage: the overlay also returns
+  // null while it waits for the Zero rows the ticketType filter is evaluated against, and
+  // reporting 'complete' there would render an empty board instead of a loading state.
   const effectivePageDetailsType = shouldUseDirectVespaRows
-    ? directVespaPage === null
+    ? effectivePage === null
       ? 'unknown'
       : 'complete'
     : pageDetails.type;
@@ -780,6 +785,26 @@ export const useKanbanTicketsPage = (
       }
     }
     if (rawPageRows.length === 0) {
+      // An empty page inside a bounded window does NOT mean the column is empty — its rows
+      // may simply all be older than the current rung. Concluding here is what left a
+      // column rendering nothing under a header count of N: the widening below is only
+      // reached by a page with at least one row, so a column whose entire matching set
+      // predates the 30d rung never climbed off it.
+      //
+      // The counts API applies the same filters without the window, so it separates the
+      // two cases for free: a positive count over an empty page is always a window that is
+      // too narrow. When it says zero the column really is empty and stops on this first
+      // probe, instead of climbing every rung to prove it.
+      //
+      // An absent count (loading, or a set the counts API does not model) falls back to
+      // climbing. The ladder is bounded and monotonic, so a count that over-reports costs
+      // a few no-op probes and never loops.
+      const expectedCount = expectedCountRef.current;
+      const countAllowsMoreRows = expectedCount === undefined || expectedCount > 0;
+      if (countAllowsMoreRows && !shouldUseDirectVespaRows && windowStep < WINDOW_STEPS_MS.length) {
+        setWindowStep(step => step + 1);
+        return;
+      }
       if (fetchCursor === null) {
         setTicketsState(prev =>
           prev.queryKey === queryKey && prev.tickets.length === 0
@@ -849,6 +874,21 @@ export const useKanbanTicketsPage = (
     shouldUseDirectVespaRows,
     preserveRelevanceOrder,
   ]);
+
+  const previousExpectedCountRef = useRef<number | undefined>(undefined);
+  useEffect(() => {
+    const previous = previousExpectedCountRef.current;
+    const next = options.expectedCount;
+    previousExpectedCountRef.current = next;
+
+    if (next === undefined || next <= 0) return;
+    if (previous !== undefined && previous > 0) return; // not a 0 -> positive transition
+    if (shouldUseDirectVespaRows) return;
+    // Anything still paging, or already holding rows, does not need re-entry.
+    if (hasMore || ticketsStateRef.current.tickets.length > 0) return;
+
+    setWindowStep(step => (step < WINDOW_STEPS_MS.length ? step + 1 : step));
+  }, [options.expectedCount, shouldUseDirectVespaRows, hasMore]);
 
   const loadMore = useCallback(() => {
     if (isLoadingMoreRef.current || !hasMore || !nextCursor) return;

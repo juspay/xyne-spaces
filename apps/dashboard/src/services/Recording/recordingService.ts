@@ -5,8 +5,8 @@
 
 import { apiInstance } from '../clients/apiClient';
 import { AxiosResponse } from 'axios';
-import type { DefaultOutlet, GrantableEntityUserAccess, RecordingType } from '@xyne/shared';
-import { CallType, CallVisibility } from '@xyne/shared';
+import type { DefaultOutlet, GrantableEntityUserAccess, RecordingStatus } from '@xyne/shared';
+import { CallType, CallVisibility, RecordingType } from '@xyne/shared';
 import { getSummaryModelPreference } from '../../hooks/useSummaryModelPreference';
 
 export interface RecordingSession {
@@ -219,29 +219,29 @@ export interface RecordingDetail extends Recording {
   /** Google Docs exported from this recording, newest first. Absent on legacy responses. */
   googleDocs?: RecordingGoogleDocLink[];
   hasRecording?: boolean;
+  /** Null until a recording has been uploaded. */
+  recordingType?: RecordingType | null;
+  /** Streamable attachment for the recording; null for recordings uploaded before streaming. */
+  attachmentId?: string | null;
   linkedTicketId?: string | null;
   linkedTicketMessageId?: string | null;
 }
 
-/** A single in-call recording session (call_recordings row). */
-export interface CallRecording {
+/** A single in-call recording session (call_recordings row), as the list endpoint returns it. */
+export interface CallRecordingSession {
   id: string;
   name: string | null;
   recordingType: RecordingType;
-  status:
-    | 'RECORDING_ACTIVE'
-    | 'RECORDING_STOPPED'
-    | 'RECORDING_UPLOADED'
-    | 'RECORDING_FAILED'
-    | 'RECORDING_UPLOAD_FAILED'
-    | 'RECORDING_EXPIRED'
-    | 'RECORDING_DELETED';
-  startedBy: string | null;
+  status: RecordingStatus;
+  /** ISO wall-clock. The call timeline measures its band from this. */
   startedAt: string;
+  /**
+   * ISO wall-clock, null while the session is unfinished. On an uploaded recording
+   * this is when stitching finished, not when the user pressed stop — the band it
+   * draws runs slightly long.
+   */
   endedAt: string | null;
   durationMs: number | null;
-  messageId: string | null;
-  downloadUrl: string | null;
 }
 
 export interface StartRecordingResponse {
@@ -300,6 +300,7 @@ class RecordingService {
       {
         isHeadless: true,
         callType: CallType.AUDIO,
+        recordingType: RecordingType.AUDIO_SCREEN,
         sttModel: params?.sttModel || 'google',
         // Ferry the browser-local summary tier onto the recording so the
         // headless call-end auto-generation can honour a 'thinking' default;
@@ -626,6 +627,15 @@ class RecordingService {
       ...(opts?.recordingId ? { recordingId: opts.recordingId } : {}),
       ...(opts?.name ? { name: opts.name } : {}),
     });
+  }
+
+  /** A call's recording sessions, newest first, minus soft-deleted ones. */
+  async listCallRecordings(callId: string, signal?: AbortSignal): Promise<CallRecordingSession[]> {
+    const response: AxiosResponse<{ recordings?: CallRecordingSession[] }> = await apiInstance.get(
+      `/calls/${callId}/recordings`,
+      { ...(signal ? { signal } : {}) },
+    );
+    return response.data.recordings ?? [];
   }
 
   /** Rename a recording (starter-only). */

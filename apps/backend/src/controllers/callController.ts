@@ -26,7 +26,7 @@ import { scheduledCallNotificationService } from '@/services/scheduledCallNotifi
 import { normalizeStoragePath } from '@xyne/storage';
 import { sdlcCallLinkSchema, type SdlcCallLink } from '@xyne/shared';
 import { callRecordingService } from '@/services/callRecordingService';
-import { isRecording } from '@/utils/callTypeUtils';
+import { isRecording, isRecordingType } from '@/utils/callTypeUtils';
 import { config } from '@/config/env';
 import { callDocumentService, numberTranscriptSegments, buildParticipantMap } from '@/services/callDocumentService';
 import {
@@ -415,6 +415,7 @@ export class CallController {
         artifactMessageId,
         sdlcLink,
         summaryModelPreference,
+        recordingType,
       } = req.body;
       // Recording summary LLM tier the client carried from its localStorage;
       // stamped onto the detailed summary canvas so headless call-end
@@ -441,6 +442,10 @@ export class CallController {
       if (isHeadless) {
         if (!['AUDIO', 'VIDEO'].includes(callType)) {
           res.status(400).json({ success: false, error: 'Invalid call type' });
+          return;
+        }
+        if (recordingType !== undefined && !isRecordingType(recordingType)) {
+          res.status(400).json({ success: false, error: `Invalid recordingType. Must be one of: ${Object.values(RecordingType).join(', ')}` });
           return;
         }
 
@@ -519,6 +524,7 @@ export class CallController {
           workspaceId: req.user!.workspaceId,
           notesCanvasId,
           detailedSummaryCanvasId,
+          ...(recordingType && { recordingType }),
           ...(channelId && conversationId ? { channelId, conversationId } : {}),
           ...(headlessAgentName && { agentName: headlessAgentName }),
         });
@@ -1550,6 +1556,8 @@ export class CallController {
               : null,
           citationSegments,
           hasRecording: !!uploadedRecording,
+          recordingType: uploadedRecording?.recordingType ?? null,
+          attachmentId: uploadedRecording?.attachmentId ?? null,
         },
       });
     } catch (error) {
@@ -2703,22 +2711,55 @@ export class CallController {
    */
   private async assertCanViewCallRecordings(callId: string, userId: string): Promise<boolean> {
     const call = await repositories.calls.findByExternalId(callId);
-    if (!call) return false;
-    if (call.createdByUserId === userId) return true;
-    if (
-      call.callType === CallType.HEADLESS &&
-      call.workspaceId &&
-      (await callShareService.canView(call, userId, call.workspaceId))
-    ) {
-      return true;
-    }
-    const participant = await repositories.calls.findParticipant(call.id, userId);
-    if (participant) return true;
-    if (call.channelId) {
-      return repositories.channelParticipants.isParticipant(call.channelId, userId);
-    }
-    return false;
+    return !!call && callShareService.canViewRecordings(call, userId);
   }
+
+  /**
+   * GET /api/calls/:callId/recordings
+   * The call's recording sessions, newest first, minus soft-deleted ones. Same
+   * audience as the recording itself. `startedAt`/`endedAt` are wall-clock, which is
+   * what lets the call timeline draw when recording was running.
+   */
+  listCallRecordings = async (req: Request, res: Response): Promise<void> => {
+    const userId = req.user?.id;
+    const { callId } = req.params;
+
+    if (!userId) {
+      res.status(401).json({ success: false, error: 'Unauthorized' });
+      return;
+    }
+
+    try {
+      const call = await repositories.calls.findByExternalId(callId);
+      if (!call) {
+        res.status(404).json({ success: false, error: 'Call not found' });
+        return;
+      }
+      if (!(await this.assertCanViewCallRecordings(callId, userId))) {
+        res.status(403).json({ success: false, error: 'Access denied' });
+        return;
+      }
+
+      const recordings = await repositories.callRecordings.listByCallId(call.id);
+      res.json({
+        success: true,
+        recordings: recordings.map((recording) => ({
+          id: recording.id,
+          name: recording.name,
+          recordingType: recording.recordingType,
+          status: recording.status,
+          startedAt: recording.startedAt,
+          endedAt: recording.endedAt,
+          durationMs: recording.endedAt
+            ? new Date(recording.endedAt).getTime() - new Date(recording.startedAt).getTime()
+            : null,
+        })),
+      });
+    } catch (error) {
+      logger.error(`[CallController] listCallRecordings failed | callId=${callId}, error=`, error);
+      res.status(500).json({ success: false, error: 'Failed to list recordings' });
+    }
+  };
 
   /**
    * POST /api/calls/:callId/recording/start
@@ -2737,7 +2778,7 @@ export class CallController {
       return;
     }
 
-    if (!Object.values(RecordingType).includes(recordingType)) {
+    if (!isRecordingType(recordingType)) {
       res.status(400).json({ success: false, error: `Invalid recordingType. Must be one of: ${Object.values(RecordingType).join(', ')}` });
       return;
     }
@@ -3072,6 +3113,10 @@ export class CallController {
     });
 
     await repositories.entityAccess.deleteForResource(ShareableEntityType.NOTE_TAKER, call.id);
+
+    // Recording attachments aren't linked to the call, so remove them before it cascades away.
+    const recordings = await repositories.callRecordings.listByCallId(call.id);
+    await repositories.messageAttachments.deleteByRecordingIds(recordings.map(recording => recording.id));
 
     // Delete the call record
     await repositories.calls.delete(call.id);

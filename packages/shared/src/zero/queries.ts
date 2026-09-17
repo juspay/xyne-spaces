@@ -12,6 +12,7 @@ import {
   LookupType,
   ProjectType,
   SavedConfigContextType,
+  SavedConfigVisibility,
   ShareableEntityType,
   SummaryTemplateVisibility,
 } from './schema.js';
@@ -24,6 +25,9 @@ import {
   SDLC_TREE_TARGET_TYPES,
   SDLC_TRACK_FLAT_RELATION,
   SDLC_TRACK_MEMBERSHIP_RELATION,
+  SDLC_WORKFLOW_RELATION,
+  SDLC_WIKI_WORKFLOW_RELATION,
+  SDLC_HUB_ITEM_RELATION,
 } from '../sdlc';
 import {
   ActivityClassification,
@@ -2022,13 +2026,12 @@ export const queries = defineQueries({
    * Automations live on the `workflows` table with `workflowType='Automations'`.
    * The four queries below are the Zero-backed reads the dashboard uses in
    * place of the legacy `/api/automations/*` GETs. Live-sync means the list
-   * + builder + run history all auto-update as the worker mutates the rows
-   * (status flips DRAFT→ACTIVE, new `workflow_executions` rows appear as
-   * runs fire, etc.).
+   * + builder auto-update as the worker mutates the rows (status flips
+   * DRAFT→ACTIVE, etc.). Run history lives in `workflow.workflow_executions`,
+   * which Zero does not replicate, so it is read over REST.
    *
    * Workspace scoping: every read takes `workspaceId` and filters at the query
-   * level. Execution rows have no `workspaceId` of their own — they're scoped
-   * via the parent workflow (`workflow.workspaceId`).
+   * level.
    */
   automationsList: defineQuery(
     z.object({ workspaceId: z.string() }),
@@ -2058,7 +2061,6 @@ export const queries = defineQueries({
     ({ args: { ticketId } }) => {
       return zql.workflows
         .where('ticketId', ticketId)
-        .related('workflowExecutions', executionQuery => executionQuery.orderBy('createdAt', 'asc'))
         .orderBy('createdAt', 'asc');
     },
   ),
@@ -4030,7 +4032,7 @@ export const queries = defineQueries({
       .related('sdlcEntityLinks', link =>
         link
           .where('relationType', SDLC_MEMBERSHIP_RELATION)
-          .related('repo', repo => repo.related('project').related('setupExecution')),
+          .related('repo', repo => repo.related('project')),
       )
       .one(),
   ),
@@ -4061,6 +4063,39 @@ export const queries = defineQueries({
         .where(helpers => helpers.cmp('targetType', 'IN', [...SDLC_TREE_TARGET_TYPES]))
         .orderBy('createdAt', 'asc'),
   ),
+  getSdlcHubWorkflow: defineQuery(
+    z.object({ channelId: z.string() }),
+    ({ args: { channelId } }) =>
+      zql.sdlc_entity_links
+        .where('channelId', channelId)
+        .where('sourceType', 'CHANNEL')
+        .where('targetType', 'WORKFLOW')
+        .where('relationType', SDLC_WORKFLOW_RELATION)
+        .related('workflow')
+        .one(),
+  ),
+  getSdlcWikiWorkflow: defineQuery(
+    z.object({ channelId: z.string() }),
+    ({ args: { channelId } }) =>
+      zql.sdlc_entity_links
+        .where('channelId', channelId)
+        .where('sourceType', 'CHANNEL')
+        .where('targetType', 'WORKFLOW')
+        .where('relationType', SDLC_WIKI_WORKFLOW_RELATION)
+        .related('workflow')
+        .one(),
+  ),
+  /** Every Wiki and Hub Knowledge placement edge in a hub; the tree is built from these. */
+  getSdlcHubItems: defineQuery(z.object({ channelId: z.string() }), ({ args: { channelId } }) =>
+    zql.sdlc_entity_links
+      .where('channelId', channelId)
+      .where('relationType', SDLC_HUB_ITEM_RELATION),
+  ),
+  getSdlcHubFolders: defineQuery(z.object({ channelId: z.string() }), ({ args: { channelId } }) =>
+    zql.sdlc_folders.whereExists('sdlcEntityLinks', link =>
+      link.where('channelId', channelId).where('relationType', SDLC_HUB_ITEM_RELATION),
+    ),
+  ),
   /** A hub's tracks. Tracks carry no scope column; the CHANNEL -> TRACK edge places them. */
   /**
    * Every folder in a hub, in one subscription. Folders carry no scope column,
@@ -4074,6 +4109,32 @@ export const queries = defineQueries({
       zql.sdlc_folders.whereExists('sdlcEntityLinks', link =>
         link.where('channelId', channelId).where('relationType', SDLC_TRACK_FLAT_RELATION),
       ),
+  ),
+  getSdlcHubLinks: defineQuery(
+    z.object({ channelId: z.string() }),
+    // Same visibility rule channelLinks applies: LinksACL checks workspace and
+    // channel membership but deliberately not visibility, so a query that asks
+    // for every link in the hub would sync other members' PERSONAL ones.
+    ({ ctx, args: { channelId } }) =>
+      zql.links.where('channelId', channelId).where(helpers =>
+        helpers.or(
+          helpers.cmp('visibility', LinkVisibility.DEFAULT),
+          helpers.and(
+            helpers.cmp('visibility', LinkVisibility.PERSONAL),
+            helpers.cmp('createdBy', ctx.userID),
+          ),
+          helpers.and(
+            helpers.cmp('visibility', LinkVisibility.PERSONAL),
+            helpers.exists('sharedWith', sw => sw.where('userId', ctx.userID)),
+          ),
+        ),
+      ),
+  ),
+  getSdlcHubFiles: defineQuery(z.object({ channelId: z.string() }), ({ args: { channelId } }) =>
+    zql.message_attachments
+      .where('entityType', AttachmentEntityType.SDLC_HUB)
+      .where('entityId', channelId)
+      .where('isDeleted', false),
   ),
   getSdlcTracks: defineQuery(z.object({ channelId: z.string() }), ({ args: { channelId } }) =>
     zql.sdlc_tracks
@@ -4089,7 +4150,6 @@ export const queries = defineQueries({
       .where('id', repoId)
       .where('projectId', 'IS NOT', null)
       .related('project')
-      .related('setupExecution')
       .one(),
   ),
   /**
@@ -4433,6 +4493,18 @@ export const queries = defineQueries({
     },
   ),
 
+  // Reverse of applicationReleaseTicketsByReleaseId: the release(s) a dev ticket
+  // belongs to (one row per release × per-app SubTicket; callers dedupe by
+  // releaseId). Keep in sync with the backend copy.
+  applicationReleaseTicketsByDevTicketId: defineQuery(
+    z.object({ ticketId: z.string().min(1) }),
+    ({ args: { ticketId } }) => {
+      return zql.application_release_tickets
+        .where('ticketId', ticketId)
+        .orderBy('createdAt', 'desc');
+    },
+  ),
+
   // Audit log of everything that happened on a release ticket — commit analysis
   // runs, SubTicket provisioning, env/migration captures, ART-write failures,
   // canvas publishes. Powers the Timeline tab on the Release Detail screen.
@@ -4749,12 +4821,34 @@ export const queries = defineQueries({
       .orderBy('createdAt', 'desc');
   }),
 
-  savedConfigsByUser: defineQuery(z.object({ userId: z.string() }), ({ args: { userId } }) => {
+  savedConfigsByUser: defineQuery(z.object({ userId: z.string() }), ({ ctx, args: { userId } }) => {
     return zql.saved_user_configurations
       .where('userId', userId)
+      .where('contextType', SavedConfigContextType.BOARD)
       .related('values')
+      .related('viewAccess', va => va.where('sharedBy', '=', ctx.userID))
       .orderBy('createdAt', 'desc');
   }),
+
+  savedDeskTicketConfigsByChannel: defineQuery(
+    z.object({ channelId: z.string() }),
+    ({ args: { channelId }, ctx }) => {
+      return zql.saved_user_configurations
+        .where('contextType', SavedConfigContextType.DESK_TICKET)
+        .where('contextId', channelId)
+        .where(({ cmp, or }) =>
+          or(cmp('userId', '=', ctx.userID), cmp('visibility', '=', SavedConfigVisibility.PUBLIC)),
+        )
+        // Only expose results to users who are members of the channel.
+        // This prevents non-members from reading public views (and their filter data)
+        // by guessing or obtaining a channelId they don't have access to.
+        .whereExists('contextChannel', ch =>
+          ch.whereExists('participants', p => p.where('userId', ctx.userID)),
+        )
+        .related('values')
+        .orderBy('createdAt', 'desc');
+    },
+  ),
 
   savedConfigsSharedWithUser: defineQuery(
     z.object({ userId: z.string() }),

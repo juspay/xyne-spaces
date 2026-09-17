@@ -20,6 +20,7 @@ interface UseVespaTicketSearchParams {
   assignee?: string;
   tags?: string;
   createdBy?: string;
+  userGroup?: string;
   dynamicFieldValues?: string[];
   dynamicFieldDateRanges?: Record<string, { start?: number; end?: number }>;
   enabled?: boolean;
@@ -191,6 +192,7 @@ export const useVespaTicketSearch = ({
   assignee,
   tags,
   createdBy,
+  userGroup,
   dynamicFieldValues = EMPTY_DYNAMIC_FIELD_VALUES,
   dynamicFieldDateRanges = {},
   enabled = true,
@@ -263,6 +265,7 @@ export const useVespaTicketSearch = ({
       if (assignee) vespaFilters.assignee = assignee;
       if (tags) vespaFilters.tags = tags;
       if (createdBy) vespaFilters.from = createdBy;
+      if (userGroup) vespaFilters.userGroup = userGroup;
       if (normalizedDynamicFieldValues.length > 0) {
         vespaFilters.dynamicFieldValues = normalizedDynamicFieldValues;
         // Only set filterOnly when true - when false, omit it so backend uses default behavior
@@ -365,6 +368,7 @@ export const useVespaTicketSearch = ({
       assignee,
       tags,
       createdBy,
+      userGroup,
       normalizedDynamicFieldValues,
       normalizedDynamicFieldDateRanges,
       safeLimit,
@@ -394,6 +398,7 @@ export const useVespaTicketSearch = ({
     if (assignee) vespaFilters.assignee = assignee;
     if (tags) vespaFilters.tags = tags;
     if (createdBy) vespaFilters.from = createdBy;
+    if (userGroup) vespaFilters.userGroup = userGroup;
     if (normalizedDynamicFieldValues.length > 0) {
       vespaFilters.dynamicFieldValues = normalizedDynamicFieldValues;
     }
@@ -414,6 +419,7 @@ export const useVespaTicketSearch = ({
     assignee,
     tags,
     createdBy,
+    userGroup,
     normalizedDynamicFieldValues,
     normalizedDynamicFieldDateRanges,
   ]);

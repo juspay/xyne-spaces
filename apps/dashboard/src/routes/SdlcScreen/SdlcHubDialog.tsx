@@ -1,10 +1,9 @@
 import { useEffect, useMemo, useState, type ReactElement } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { FolderKanban, GitBranch, Lock, Plus } from 'lucide-react';
+import { FolderKanban, GitBranch, Lock, Plus, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '../../components/ui/Button';
 import { Dialog } from '../../components/ui/Dialog/Dialog';
-import { EntityMultiSelector } from '../../components/ui/EntitySelector/EntityMultiSelector';
 import { EntitySelector } from '../../components/ui/EntitySelector/EntitySelector';
 import type { SelectorOption } from '../../components/ui/EntitySelector/EntitySelector.types';
 import Input from '../../components/ui/Input';
@@ -118,6 +117,14 @@ export function SdlcHubDialog({
       })),
     [options],
   );
+  const selectedOptions = useMemo(
+    () => repoIds.flatMap(id => repositoryOptions.find(option => option.value === id) ?? []),
+    [repoIds, repositoryOptions],
+  );
+  const addableOptions = useMemo(
+    () => repositoryOptions.filter(option => !repoIds.includes(option.value)),
+    [repoIds, repositoryOptions],
+  );
   const submit = async (): Promise<void> => {
     setBusy(true);
     try {
@@ -168,7 +175,7 @@ export function SdlcHubDialog({
         <h2 className='text-lg font-semibold tracking-tight'>{title}</h2>
         <p className='mt-1.5 text-sm leading-6 text-muted-foreground'>
           {editing
-            ? 'Repositories this hub covers. A hub always keeps at least one.'
+            ? 'Repositories this hub covers. Keep at least one.'
             : 'A private workspace covering one or more repositories. It never appears in Chat.'}
         </p>
 
@@ -215,24 +222,58 @@ export function SdlcHubDialog({
 
           <div>
             <p className='mb-2 text-sm font-medium'>Repositories</p>
-            <EntityMultiSelector
-              options={repositoryOptions}
-              selectedValues={repoIds}
-              onMultiSelect={setRepoIds}
-              showSearch
+            {selectedOptions.length > 0 && (
+              <ul className='mb-2 divide-y overflow-hidden rounded-lg border'>
+                {selectedOptions.map(option => (
+                  <li key={option.value} className='flex items-center gap-3 py-2 pl-3 pr-1.5'>
+                    {option.icon}
+                    <span className='min-w-0 flex-1'>
+                      <span className='block truncate text-sm font-medium'>{option.label}</span>
+                      {option.subtitle && (
+                        <span className='block truncate text-xs text-muted-foreground'>
+                          {option.subtitle}
+                        </span>
+                      )}
+                    </span>
+                    {option.badge && (
+                      <span className='shrink-0 rounded-full bg-amber-500/10 px-2 py-0.5 text-[11px] font-medium text-amber-700 dark:text-amber-300'>
+                        {option.badge}
+                      </span>
+                    )}
+                    <Button
+                      type='button'
+                      variant='ghost'
+                      size='iconSm'
+                      aria-label={`Remove ${option.label}`}
+                      onClick={() => setRepoIds(ids => ids.filter(id => id !== option.value))}
+                      data-track-category='SdlcHub'
+                      data-track-name='HubRepositoryRemoved'
+                    >
+                      <X />
+                    </Button>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <EntitySelector
+              options={addableOptions}
+              selectedValue={null}
+              onSelect={value => {
+                if (value) setRepoIds(ids => [...ids, value]);
+              }}
               isLoading={repositoriesLoading}
               placeholder={
                 !activeProjectId
                   ? 'Choose a project first'
                   : repositoryOptions.length === 0
                     ? 'This project has no repositories'
-                    : 'Select repositories'
+                    : addableOptions.length === 0
+                      ? 'Every repository is added'
+                      : 'Add a repository'
               }
               searchPlaceholder='Search repositories...'
               width='100%'
               matchTriggerWidth
-              collapseSelectedAfter={2}
-              collapsedLabel='repositories'
             />
             {repoIds.length === 0 && (
               <p className='mt-2 text-xs text-muted-foreground'>Pick at least one repository.</p>
@@ -257,7 +298,7 @@ export function SdlcHubDialog({
             data-track-category='SdlcHub'
             data-track-name={editing ? 'HubRepositoriesSaved' : 'HubCreated'}
           >
-            <Plus />
+            {!editing && <Plus />}
             {editing ? 'Save' : 'Create hub'}
           </Button>
         </div>

@@ -52,6 +52,7 @@ import { StatusIndicator } from '../../ui/StatusIndicator';
 import { standaloneNavigate } from '../../../utils/electronApp';
 import { SupportChannelBadge } from '../SupportChannelBadge';
 import { useChannelHasSlashCommandArtifactSideEffect } from '../SlashCommandArtifactSideEffects';
+import { channelTrackingMetadata } from '../../../services/Analytics/channelTracking';
 
 interface ChannelItemV2Props {
   channel: VisibleChannel;
@@ -160,7 +161,14 @@ const ChannelItemV2 = memo(
     const handleChannelClick = (e: React.MouseEvent<HTMLAnchorElement>): void => {
       e.preventDefault();
       e.stopPropagation();
-      standaloneNavigate(navigate, `/chat/dir/${channel.id}`, { event: e });
+      // `state` must ride THIS call, not the <Link>: preventDefault above means
+      // the Link's own navigation (and its state) never runs. standaloneNavigate
+      // spreads everything but `event` into navigate(), so state reaches
+      // location.state and CHANNEL_VIEWED can attribute the open.
+      standaloneNavigate(navigate, `/chat/dir/${channel.id}`, {
+        event: e,
+        state: { trackSource: isDM ? 'sidebar_dm' : 'sidebar_channel' },
+      });
     };
 
     const draftTooltipContent = (
@@ -180,10 +188,11 @@ const ChannelItemV2 = memo(
         onClick={handleChannelClick}
         data-track-category='CHAT_SIDEBAR'
         data-track-name='OPEN_CHANNEL'
+        data-track-label='Open channel'
         data-track-metadata={JSON.stringify({
-          channelId: channel.id,
-          channelName: displayName,
+          ...channelTrackingMetadata(channel),
           isDM,
+          source: isDM ? 'sidebar_dm' : 'sidebar_channel',
         })}
       >
         <div
@@ -211,6 +220,7 @@ const ChannelItemV2 = memo(
                 statusEmoji={dmUser?.statusEmoji}
                 statusContent={dmUser?.statusContent}
                 statusExpiryAt={dmUser?.statusExpiryAt}
+                activityStatus={dmUser?.activityStatus}
                 size='sm'
                 showOnHover={true}
               />
@@ -322,9 +332,9 @@ const ChannelItemV2 = memo(
               data-ph-capture-attribute-track-id='close_dm_channel'
               data-track-category='CHAT_SIDEBAR'
               data-track-name='CLOSE_DM_CHANNEL'
+              data-track-label='Close DM channel'
               data-track-metadata={JSON.stringify({
-                channelId: channel.id,
-                channelName: displayName,
+                ...channelTrackingMetadata(channel),
               })}
             >
               <MultipleCrossCancelDefault size={14} className='shrink-0' />

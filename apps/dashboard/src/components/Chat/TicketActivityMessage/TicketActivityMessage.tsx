@@ -4,7 +4,7 @@ import { Tooltip } from '../../ui/Tooltip/Tooltip';
 import { TicketStatusIcon } from '../../../assets/icons';
 import { TicketPriorityIcon } from '../../../assets/icons';
 import SmallUserAvatar from '../../UserAvatar/SmallUserAvatar';
-import { Calendar, Tag, Archive, Mail } from 'lucide-react';
+import { Calendar, Tag, Archive, Mail, FileText } from 'lucide-react';
 import { RenderMessageWithHTML } from '../RenderMessageWithHTML/RenderMessageWithHTML';
 import { MessageWithOptionalNudgeCounts } from '../../ui/MessageBubble/MessageBubble.types';
 import { StageMoveFormBlock } from './StageMoveFormBlock';
@@ -84,6 +84,8 @@ export const TicketActivityMessage: React.FC<TicketActivityMessageProps> = ({
         return <Calendar size={12} />;
       case 'IS_ARCHIVED':
         return <Archive size={12} className='text-amber-600' />;
+      case 'RELEASE_SYNC':
+        return <FileText size={12} className='text-blue-600' />;
       default:
         return <SmallUserAvatar userId={message.senderId} />;
     }

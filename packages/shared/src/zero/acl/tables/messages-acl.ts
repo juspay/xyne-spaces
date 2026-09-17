@@ -51,10 +51,13 @@ export class MessagesACL extends BaseQueryACL<'messages'> {
       return withVisibleTo.whereExists('conversation', (c) =>
         c
           .where('conversationId', conversationId)
+          // Pin the join direction — see tickets-acl.ts for the full rationale.
+          // The parent is a single conversation, so the semi-join is one PK probe.
           .whereExists('channel', (ch) =>
             ch
               .where('workspaceId', '=', this.ctx.workspaceId)
-              .where(channelAccessWhere(this.ctx))
+              .where(channelAccessWhere(this.ctx)),
+            { flip: false },
           ),
         SCALAR
       );
