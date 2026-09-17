@@ -98,6 +98,7 @@ import {
   duplicatesMetaTool,
   type DeploymentToolSearch,
   buildToolCatalog,
+  describeMcpServers,
   renderToolCatalogForPrompt,
   type FastToolRuntimeController,
   type ToolCatalogItem,
@@ -3188,6 +3189,7 @@ export async function processTask(
               }
             : {}),
           openPalette: openPaletteEnabled,
+          mcpServers: describeMcpServers(allGroups),
           ...(fastCatalogItems.length === 0 && (customSubagents?.length ?? 0) > 0
             ? {
                 emptyCatalogNote:

@@ -226,12 +226,16 @@ agentIndexRouter.get("/agents/:slug/usage-patterns", async (req: Request<{ slug:
   const orgId = requireOrg(req, res);
   if (!orgId) return;
   try {
-    // `job` carries the outcome of a pass started on THIS process, including
-    // the skips that write no file at all (too few runs, human-edited). Null
-    // when nothing ran here, which is also what a poll sees when it lands on a
-    // different replica, so treat the file as the answer and the job as a hint.
-    const [file, job] = [await getUsagePatternFile(orgId, req.params.slug), usagePatternJob(orgId, req.params.slug)];
-    res.json({ success: true, data: { ...file, job } });
+    // `data` stays exactly the file or null. Merging the job into it turned the
+    // "no file yet" answer from null into a truthy object, and every caller that
+    // branches on `data` then read fields that were not there.
+    //
+    // `job` rides alongside as a sibling: it carries the outcome of a pass
+    // started on THIS process, including the skips that write no file at all
+    // (too few runs, human-edited). Null when nothing ran here, which is also
+    // what a poll sees when it lands on a different replica.
+    const file = await getUsagePatternFile(orgId, req.params.slug);
+    res.json({ success: true, data: file, job: usagePatternJob(orgId, req.params.slug) });
   } catch (err) {
     fail(res, err, `usage-patterns file ${req.params.slug}`);
   }
