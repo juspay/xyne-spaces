@@ -14,7 +14,7 @@ import { useCachedQuery } from '../../../../hooks/useCachedQuery';
 import { queries } from '../../../../zero/queries';
 import { useActiveUserSearch, useUser, useUsers } from '../../../../hooks/useUsers';
 import { useUserGroups } from '../../../../hooks/useUserGroup';
-import { useAllChannels, useChannel } from '../../../../hooks/useChannels';
+import { searchChannels, useAllChannels, useChannel } from '../../../../hooks/useChannels';
 import UserAvatar, { AvatarShape, AvatarSize } from '../../../UserAvatar/UserAvatar';
 import { EntitySelector } from '../../../ui/EntitySelector/EntitySelector';
 import { EntityMultiSelector } from '../../../ui/EntitySelector/EntityMultiSelector';
@@ -279,22 +279,29 @@ function ChannelField({
   boardIds,
 }: FieldProps & { projectIds: string[]; boardIds: string[] }): React.ReactElement {
   const [search, setSearch] = useState('');
-  const channels = useAllChannels();
+  const allChannels = useAllChannels();
   const selectedChannel = useChannel(value ?? '');
   const scopeProjectIds = useChannelProjectScope(projectIds, boardIds);
+  // Scope before capping, so the cap never crowds out in-scope channels.
+  const channels = useMemo(
+    () =>
+      searchChannels(
+        scopeProjectIds.length > 0
+          ? allChannels.filter(c => scopeProjectIds.includes(c.projectId))
+          : allChannels,
+        search,
+        15,
+      ),
+    [allChannels, scopeProjectIds, search],
+  );
 
   const baseOptions: SelectorOption[] = useMemo(() => {
-    if (!channels) return [];
-    const lower = search.trim().toLowerCase();
-    return channels
-      .filter(c => (scopeProjectIds.length > 0 ? scopeProjectIds.includes(c.projectId) : true))
-      .filter(c => (lower ? (c.name ?? '').toLowerCase().includes(lower) : true))
-      .map(c => ({
-        value: c.id,
-        label: c.name || '(unnamed channel)',
-        icon: channelIcon(c.type),
-      }));
-  }, [channels, search, scopeProjectIds]);
+    return channels.map(c => ({
+      value: c.id,
+      label: c.name || '(unnamed channel)',
+      icon: channelIcon(c.type),
+    }));
+  }, [channels]);
 
   const options = useMemo(() => {
     if (!value || !selectedChannel) return baseOptions;
