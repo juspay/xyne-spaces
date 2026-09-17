@@ -14,7 +14,73 @@ import type { HotFrame, MainThreadAttribution } from './types';
 /** Rows below this contribute nothing a reader can act on. */
 const MIN_REPORTED_MS = 1;
 const MAX_ROWS = 25;
-const MAX_HOT_PATH = 12;
+/**
+ * Generous, because runs of framework frames are collapsed before this applies.
+ * The first version capped at 12 and React's scheduler-to-reconciler chain is
+ * itself twelve frames deep, so the path ended one step before the app code it
+ * existed to find.
+ */
+const MAX_HOT_PATH = 40;
+
+/**
+ * Vite serves app sources from `/src/` and pre-bundles dependencies into
+ * `.vite/deps/chunk-*.js`, which separates them cleanly in development. A
+ * production bundle mixes both into one chunk, so the name list below carries
+ * the classification there instead.
+ */
+const FRAMEWORK_RESOURCE =
+  /node_modules|\.vite\/deps|\/chunk-[A-Za-z0-9_-]+\.js|react[-_]|scheduler/i;
+const APP_RESOURCE = /\/src\//;
+
+/**
+ * React's own frames, by name. Needed because a minified production bundle
+ * puts React and the app in the same file, leaving the resource URL useless.
+ * Deliberately a list of exact internals rather than a loose pattern — a false
+ * "framework" label hides real app code from the table that matters most.
+ */
+const FRAMEWORK_FRAMES = new Set([
+  'performWorkUntilDeadline',
+  'performWorkOnRootViaSchedulerTask',
+  'performWorkOnRoot',
+  'performSyncWorkOnRoot',
+  'performUnitOfWork',
+  'beginWork',
+  'completeWork',
+  'completeUnitOfWork',
+  'commitRoot',
+  'commitRootWhenReady',
+  'commitRootImpl',
+  'commitMutationEffects',
+  'commitMutationEffectsOnFiber',
+  'commitLayoutEffects',
+  'commitPassiveMountEffects',
+  'commitPassiveUnmountEffects',
+  'commitDeletionEffectsOnFiber',
+  'flushSpawnedWork',
+  'flushSyncWorkAcrossRoots_impl',
+  'flushPassiveEffects',
+  'renderRootSync',
+  'renderRootConcurrent',
+  'workLoopSync',
+  'workLoopConcurrent',
+  'renderWithHooks',
+  'runWithFiberInDEV',
+  'updateFunctionComponent',
+  'reconcileChildFibers',
+  'reconcileChildren',
+  'jsxDEV',
+  'jsxWithValidation',
+  'react_stack_bottom_frame',
+]);
+
+function classifyOrigin(name: string, resource: string): 'app' | 'framework' | 'unknown' {
+  if (FRAMEWORK_FRAMES.has(name)) return 'framework';
+  if (resource) {
+    if (APP_RESOURCE.test(resource)) return 'app';
+    if (FRAMEWORK_RESOURCE.test(resource)) return 'framework';
+  }
+  return 'unknown';
+}
 
 /**
  * React's own convention is the only signal available for telling a component
@@ -79,12 +145,33 @@ export function summariseTrace(
 
   const selfSamples = new Float64Array(frameCount);
   const totalSamples = new Float64Array(frameCount);
+  /**
+   * Time charged to the deepest app frame on each stack. The thread is almost
+   * never inside app code at the instant it is sampled — it is inside React,
+   * doing what the app asked — so self time alone can never say which component
+   * is expensive. This rolls the framework's work up to whoever caused it.
+   */
+  const attributedSamples = new Float64Array(frameCount);
   // Generation marker: which sample last counted this frame, so a recursive
   // function is counted once per sample without allocating a Set each time.
   const seenInSample = new Int32Array(frameCount).fill(-1);
 
+  // Origin per canonical frame, resolved once.
+  const origins: ('app' | 'framework' | 'unknown')[] = Array.from(
+    { length: frameCount },
+    () => 'unknown' as const,
+  );
+  for (let i = 0; i < frameCount; i++) {
+    const frame = trace.frames[i];
+    if (!frame) continue;
+    const resource =
+      frame.resourceId === undefined ? '' : (trace.resources[frame.resourceId] ?? '');
+    origins[i] = classifyOrigin(frame.name, resource);
+  }
+
   const leafSamples = new Map<number, number>();
   let busySamples = 0;
+  let frameworkOnlySamples = 0;
 
   for (let index = 0; index < trace.samples.length; index++) {
     const sample = trace.samples[index];
@@ -101,17 +188,25 @@ export function summariseTrace(
 
     let cursor: number | undefined = sample.stackId;
     let guard = 0;
+    let deepestApp = -1;
     while (cursor !== undefined && guard < 1024) {
       guard += 1;
       const stack: { frameId: number; parentId?: number } | undefined = trace.stacks[cursor];
       if (!stack) break;
       const id = canonical[stack.frameId];
-      if (id !== undefined && seenInSample[id] !== index) {
-        seenInSample[id] = index;
-        totalSamples[id] = (totalSamples[id] ?? 0) + 1;
+      if (id !== undefined) {
+        if (seenInSample[id] !== index) {
+          seenInSample[id] = index;
+          totalSamples[id] = (totalSamples[id] ?? 0) + 1;
+        }
+        // Leaf-to-root walk, so the first app frame seen is the deepest one.
+        if (deepestApp === -1 && origins[id] === 'app') deepestApp = id;
       }
       cursor = stack.parentId;
     }
+
+    if (deepestApp === -1) frameworkOnlySamples += 1;
+    else attributedSamples[deepestApp] = (attributedSamples[deepestApp] ?? 0) + 1;
   }
 
   const busyMs = busySamples * interval;
@@ -128,6 +223,7 @@ export function summariseTrace(
     frames.push({
       name: frame.name || '(anonymous)',
       kind: classify(frame.name),
+      origin: origins[i] ?? 'unknown',
       resource: shortenResource(
         frame.resourceId === undefined ? undefined : trace.resources[frame.resourceId],
       ),
@@ -141,6 +237,28 @@ export function summariseTrace(
   }
 
   const bySelf = [...frames].sort((a, b) => b.selfMs - a.selfMs).slice(0, MAX_ROWS);
+
+  // Charged time replaces self time for the app view: a component whose own
+  // code is trivial but whose render costs 300ms of reconciliation is the thing
+  // worth reporting, and its self time would be nearly zero.
+  const appFrames: HotFrame[] = [];
+  for (let i = 0; i < frameCount; i++) {
+    if (canonical[i] !== i || origins[i] !== 'app') continue;
+    const charged = (attributedSamples[i] ?? 0) * interval;
+    if (charged < MIN_REPORTED_MS) continue;
+    const frame = frames.find(
+      candidate =>
+        candidate.name === (trace.frames[i]?.name || '(anonymous)') &&
+        candidate.line === (trace.frames[i]?.line ?? null),
+    );
+    if (!frame) continue;
+    appFrames.push({
+      ...frame,
+      selfMs: charged,
+      selfSharePercent: busyMs > 0 ? (charged / busyMs) * 100 : 0,
+    });
+  }
+  appFrames.sort((a, b) => b.selfMs - a.selfMs);
   const components = frames
     .filter(frame => frame.kind === 'component')
     .sort((a, b) => b.totalMs - a.totalMs)
@@ -155,10 +273,14 @@ export function summariseTrace(
     busyMs,
     durationMs,
     frames: bySelf,
+    appFrames: appFrames.slice(0, MAX_ROWS),
+    frameworkOnlyMs: frameworkOnlySamples * interval,
     components,
-    hotPath: buildHotPath(trace, leafSamples, interval),
-    // Set by the caller, which is what knows whether the buffer filled.
+    hotPath: buildHotPath(trace, leafSamples, interval, origins, canonical),
+    // Both set by the caller, which knows the build mode and whether the
+    // sample buffer filled.
     truncated: false,
+    devBuild: false,
   };
 }
 
@@ -172,7 +294,9 @@ function buildHotPath(
   trace: ProfilerTrace,
   leafSamples: Map<number, number>,
   interval: number,
-): { name: string; totalMs: number }[] {
+  origins: ('app' | 'framework' | 'unknown')[],
+  canonical: Int32Array,
+): { name: string; totalMs: number; collapsed?: number }[] {
   if (leafSamples.size === 0) return [];
 
   // Samples anywhere beneath each stack node, by propagating leaf counts up.
@@ -205,16 +329,33 @@ function buildHotPath(
       return (subtree.get(candidate) ?? 0) > (subtree.get(best) ?? 0) ? candidate : best;
     }, undefined);
 
-  const path: { name: string; totalMs: number }[] = [];
+  const path: { name: string; totalMs: number; collapsed?: number }[] = [];
   let cursor = heaviest(roots);
-  while (cursor !== undefined && path.length < MAX_HOT_PATH) {
+  let steps = 0;
+
+  while (cursor !== undefined && steps < MAX_HOT_PATH) {
+    steps += 1;
     const stack = trace.stacks[cursor];
     if (!stack) break;
+
+    const canonicalId = canonical[stack.frameId];
+    const origin = canonicalId === undefined ? 'unknown' : (origins[canonicalId] ?? 'unknown');
     const frame = trace.frames[stack.frameId];
-    path.push({
-      name: frame?.name || '(anonymous)',
-      totalMs: (subtree.get(cursor) ?? 0) * interval,
-    });
+    const totalMs = (subtree.get(cursor) ?? 0) * interval;
+
+    // Consecutive framework frames become one entry. React's scheduler and
+    // reconciler are a dozen frames on their own, and listing each pushes the
+    // app's own code past any sane display limit.
+    const previous = path[path.length - 1];
+    if (origin === 'framework' && previous?.collapsed !== undefined) {
+      previous.collapsed += 1;
+      previous.totalMs = totalMs;
+    } else if (origin === 'framework') {
+      path.push({ name: frame?.name || '(anonymous)', totalMs, collapsed: 1 });
+    } else {
+      path.push({ name: frame?.name || '(anonymous)', totalMs });
+    }
+
     cursor = heaviest(children.get(cursor) ?? []);
   }
 

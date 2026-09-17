@@ -31,41 +31,104 @@ export function HotFrameTable({
 
   if (attribution.frames.length === 0) return null;
 
+  const hasAppFrames = attribution.appFrames.length > 0;
+
   return (
     <section className='mt-6'>
       <h3 className='text-xs font-semibold uppercase tracking-wide text-neutral-500 dark:text-neutral-400'>
         Where the time went
       </h3>
       <p className='mt-0.5 text-xs text-neutral-500 dark:text-neutral-400'>
-        Sampled {attribution.busySamples} times every {attribution.sampleIntervalMs}ms. &ldquo;Own
-        time&rdquo; is the thread inside that function&rsquo;s own code; &ldquo;with calls&rdquo;
-        includes everything it invoked.
+        Sampled {attribution.busySamples} times every {attribution.sampleIntervalMs}ms.
+        {hasAppFrames
+          ? ' Each sample is charged to the deepest function of yours on the stack, so React’s work counts against whichever component caused it.'
+          : ' No application frames were identifiable, so these are raw stack leaves.'}
       </p>
 
-      {attribution.hotPath.length > 1 ? (
-        <p className='mt-2 overflow-x-auto whitespace-nowrap rounded-md border border-border px-2.5 py-1.5 font-mono text-[11px] text-neutral-600 dark:text-neutral-300'>
-          {attribution.hotPath.map(step => step.name).join(' → ')}
+      {attribution.devBuild ? (
+        <p className='mt-2 rounded-md border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-xs text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-300'>
+          This is a development build. React does far more work per render here than in the build
+          users run, so treat the proportions as indicative and the absolute numbers as too high.
         </p>
       ) : null}
 
-      <div className='mt-2 overflow-x-auto'>
+      {attribution.hotPath.length > 1 ? (
+        <p className='mt-2 overflow-x-auto whitespace-nowrap rounded-md border border-border px-2.5 py-1.5 font-mono text-[11px] text-neutral-600 dark:text-neutral-300'>
+          {attribution.hotPath
+            .map(step =>
+              step.collapsed && step.collapsed > 1
+                ? `${step.name} +${step.collapsed - 1} framework`
+                : step.name,
+            )
+            .join(' → ')}
+        </p>
+      ) : null}
+
+      {hasAppFrames ? (
+        <FrameTable
+          title='Your code'
+          valueLabel='Charged'
+          frames={attribution.appFrames.slice(0, 12)}
+        />
+      ) : null}
+
+      <FrameTable
+        title={hasAppFrames ? 'All frames, including the framework' : 'All frames'}
+        valueLabel='Own time'
+        frames={attribution.frames.slice(0, 12)}
+        muted={hasAppFrames}
+      />
+
+      {attribution.frameworkOnlyMs > 0 && hasAppFrames ? (
+        <p className='mt-1.5 text-[11px] text-neutral-500 dark:text-neutral-400'>
+          {attribution.frameworkOnlyMs.toFixed(0)} ms could not be charged to any of your functions
+          — framework work with nothing of yours beneath it.
+        </p>
+      ) : null}
+    </section>
+  );
+}
+
+function FrameTable({
+  title,
+  valueLabel,
+  frames,
+  muted = false,
+}: {
+  title: string;
+  valueLabel: string;
+  frames: HotFrame[];
+  muted?: boolean;
+}): ReactElement | null {
+  if (frames.length === 0) return null;
+  return (
+    <div className={muted ? 'mt-4 opacity-70' : 'mt-3'}>
+      <h4 className='text-[11px] font-semibold uppercase tracking-wide text-neutral-500 dark:text-neutral-400'>
+        {title}
+      </h4>
+      <div className='mt-1 overflow-x-auto'>
         <table className='w-full text-xs'>
           <thead>
             <tr className='text-left text-[11px] uppercase tracking-wide text-neutral-500 dark:text-neutral-400'>
               <th className='py-1 pr-3 font-medium'>Function</th>
-              <th className='py-1 pr-3 text-right font-medium'>Own time</th>
+              <th className='py-1 pr-3 text-right font-medium'>{valueLabel}</th>
               <th className='py-1 pr-3 text-right font-medium'>With calls</th>
               <th className='py-1 font-medium'>Source</th>
             </tr>
           </thead>
           <tbody>
-            {attribution.frames.slice(0, 12).map(frame => (
+            {frames.map(frame => (
               <tr key={rowKey(frame)} className='border-t border-border/60'>
                 <td className='py-1 pr-3'>
                   <span className='font-medium'>{frame.name}</span>
                   {frame.kind === 'component' || frame.kind === 'hook' ? (
                     <span className='ml-1.5 rounded bg-neutral-100 px-1 py-0.5 text-[10px] text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300'>
                       {frame.kind}
+                    </span>
+                  ) : null}
+                  {frame.origin === 'framework' ? (
+                    <span className='ml-1.5 text-[10px] text-neutral-400 dark:text-neutral-500'>
+                      framework
                     </span>
                   ) : null}
                 </td>
@@ -87,7 +150,7 @@ export function HotFrameTable({
           </tbody>
         </table>
       </div>
-    </section>
+    </div>
   );
 }
 

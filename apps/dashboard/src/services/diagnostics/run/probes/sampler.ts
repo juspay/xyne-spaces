@@ -73,9 +73,12 @@ function unsupported(reason: string): MainThreadAttribution {
     busyMs: 0,
     durationMs: 0,
     frames: [],
+    appFrames: [],
+    frameworkOnlyMs: 0,
     components: [],
     hotPath: [],
     truncated: false,
+    devBuild: import.meta.env.DEV,
   };
 }
 
@@ -158,7 +161,9 @@ export function startMainThreadSampler(expectedDurationMs: number): MainThreadSa
     try {
       const trace = await active.stop();
       const summary = summariseTrace(trace, active.sampleInterval, performance.now() - startedAt);
-      return { ...summary, truncated };
+      // React's development build does far more work per render, so a dev
+      // profile describes the dev experience rather than what users see.
+      return { ...summary, truncated, devBuild: import.meta.env.DEV };
     } catch (error) {
       return unsupported(
         error instanceof Error ? error.message : 'The profiler could not be read.',

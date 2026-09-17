@@ -169,6 +169,13 @@ export interface StorageProbeResult {
 export interface HotFrame {
   name: string;
   /**
+   * Whether the frame is the app's own code or the framework underneath it.
+   * A profile of a React app is overwhelmingly React's own frames; without this
+   * split every report reads as "the scheduler is slow", which is true and
+   * useless.
+   */
+  origin: 'app' | 'framework' | 'unknown';
+  /**
    * Derived from React's naming convention — capitalised is a component, `use`
    * is a hook. React's internals ship pre-minified so nothing around the frame
    * can corroborate it, which makes this a labelling hint and never something a
@@ -196,16 +203,40 @@ export interface MainThreadAttribution {
   durationMs: number;
   /** Ranked by self time — the functions the thread was actually inside. */
   frames: HotFrame[];
+  /**
+   * The app's own functions, ranked by the time charged to them.
+   *
+   * Each sample is charged to the deepest application frame on its stack, so
+   * React's reconciler and commit work counts against whichever component
+   * caused it. This is the table that answers "what in *my* code is expensive",
+   * which the raw self-time ranking cannot: the thread is almost never inside
+   * app code at the instant it is sampled, it is inside the framework the app
+   * asked to do something.
+   */
+  appFrames: HotFrame[];
+  /** Samples whose stack contained no identifiable app frame. */
+  frameworkOnlyMs: number;
   /** Ranked by total time, components only. */
   components: HotFrame[];
-  /** The heaviest root-to-leaf call path, which shows how the app got there. */
-  hotPath: { name: string; totalMs: number }[];
+  /**
+   * The heaviest root-to-leaf call path. Runs of consecutive framework frames
+   * are collapsed into a single entry, because a dozen unbroken reconciler
+   * frames push the app's own code off the end of the list — which is exactly
+   * what made the first version of this unreadable.
+   */
+  hotPath: { name: string; totalMs: number; collapsed?: number }[];
   /**
    * True when sampling stopped before the window did because its buffer filled.
    * The numbers still describe real execution, but only of the period actually
    * sampled — which `durationMs` reports.
    */
   truncated: boolean;
+  /**
+   * True when measured against a development build. React's dev build does
+   * substantially more work per render, so the numbers describe the dev
+   * experience and must not be read as what users see.
+   */
+  devBuild: boolean;
 }
 
 export interface ProbeResults {

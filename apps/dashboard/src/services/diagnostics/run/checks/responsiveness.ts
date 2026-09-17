@@ -412,7 +412,11 @@ export const mainThreadAttribution: Check = context => {
     );
   }
 
-  const top = attribution.frames[0];
+  // The app's own code leads. A ranking by raw self time on a React app is a
+  // ranking of React's internals, which is true and useless — the thread is
+  // almost never inside app code at the instant it is sampled.
+  const top = attribution.appFrames[0] ?? attribution.frames[0];
+  const attributedToApp = attribution.appFrames.length > 0;
   if (!top || attribution.busyMs <= 0) {
     return {
       id: 'main-thread-attribution',
@@ -453,6 +457,9 @@ export const mainThreadAttribution: Check = context => {
 
   const { confidence, reason } = seriesConfidence(context, attribution.busySamples, 50, 200);
   const component = attribution.components[0];
+  const devNote = attribution.devBuild
+    ? ' Measured against a development build, which does substantially more work per render than the one users run.'
+    : '';
   // A truncated sample still describes real execution, but only of the stretch
   // it covered — so it must not be read as a picture of the whole run.
   const truncationNote = attribution.truncated
@@ -468,9 +475,9 @@ export const mainThreadAttribution: Check = context => {
     category: 'responsiveness',
     status,
     confidence: attribution.truncated && confidence === 'high' ? 'medium' : confidence,
-    confidenceReason: `${reason} Sampled every ${attribution.sampleIntervalMs}ms.${truncationNote}`,
+    confidenceReason: `${reason} Sampled every ${attribution.sampleIntervalMs}ms.${truncationNote}${devNote}`,
     summary: dominant
-      ? `${top.name} used ${ms(top.selfMs)} of main-thread time — ${percent(top.selfSharePercent)} of everything the thread did.`
+      ? `${top.name} accounts for ${ms(top.selfMs)} of main-thread time — ${percent(top.selfSharePercent)} of everything the thread did.`
       : `No single function dominated; ${top.name} was the largest at ${percent(top.selfSharePercent)}.`,
     measurements: [
       measurement('Busiest function', top.name, describeKind(top.kind)),
@@ -493,12 +500,24 @@ export const mainThreadAttribution: Check = context => {
       measurement('Thread busy', percent(busySharePercent)),
     ],
     evidence: [
-      ...attribution.frames
-        .slice(0, 4)
+      ...(attributedToApp
+        ? [
+            'Each sample is charged to the deepest function of yours on the stack, so React\u2019s render and commit work counts against whichever component caused it',
+          ]
+        : [
+            'No application frames were identifiable in the samples, so these are raw stack leaves — mostly framework internals',
+          ]),
+      ...(attributedToApp ? attribution.appFrames : attribution.frames)
+        .slice(0, 5)
         .map(
           frame =>
-            `${frame.name} — ${ms(frame.selfMs)} own time, ${ms(frame.totalMs)} including calls${frame.resource ? ` (${frame.resource}${frame.line === null ? '' : `:${frame.line}`})` : ''}`,
+            `${frame.name} — ${ms(frame.selfMs)}${attributedToApp ? ' charged' : ' own time'}, ${ms(frame.totalMs)} including calls${frame.resource ? ` (${frame.resource}${frame.line === null ? '' : `:${frame.line}`})` : ''}`,
         ),
+      ...(attribution.frameworkOnlyMs > 0
+        ? [
+            `${ms(attribution.frameworkOnlyMs)} could not be charged to any app frame — framework work with nothing of yours beneath it`,
+          ]
+        : []),
       ...(attribution.hotPath.length > 1
         ? [`Heaviest call path: ${attribution.hotPath.map(step => step.name).join(' → ')}`]
         : []),
