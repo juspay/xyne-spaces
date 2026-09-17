@@ -2,6 +2,7 @@ import { storageService } from './storage/index.js';
 import { logger } from '../utils/logger';
 import { decodeUploadFilename } from '../utils/filename';
 import { isHeicBuffer } from '@xyne/shared';
+import { heicRenditionQueue } from '../queues/heicRenditionQueue';
 
 export interface UploadedFileResult {
   originalName: string;
@@ -94,6 +95,10 @@ export async function uploadFiles(
 
       if (!filePath) {
         throw new Error(`Storage path missing after upload for ${file.originalname}`);
+      }
+
+      if (effectiveMimeType === 'image/heic') {
+        void heicRenditionQueue.enqueueRenditions({ storagePath: filePath });
       }
 
       // Handle thumbnail for video and document files (frontend-generated)
