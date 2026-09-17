@@ -4,7 +4,6 @@ import {
   MessageAttachmentRepository,
   CreateMessageAttachmentInput,
 } from '../database/repositories/messageAttachmentRepository';
-import { ConversationRepository } from '../database/repositories/conversationRepository';
 import { ChannelParticipantRepository } from '../database/repositories/channelParticipantRepository';
 import { storageService, getStorageService } from '../services/storage/index';
 import { normalizeStoragePath } from '@xyne/storage';
@@ -18,7 +17,7 @@ import {
   SDLC_TRACK_FLAT_RELATION,
   SDLC_TRACK_MEMBERSHIP_RELATION,
 } from '@xyne/shared/sdlc';
-import { canvasAuthService } from '../services/canvasAuthService';
+import { assertAttachmentAccess as assertAttachmentAccessShared, type AttachmentAccessResult } from '../services/attachmentAccessService';
 import { uploadFiles } from '../services/fileUploadService';
 import { config } from '../config/env';
 import { vespaQueue } from '@/queues/vespaQueue';
@@ -26,8 +25,6 @@ import { fileSchema, SubApp } from '@/vespa/src/types';
 import { DatabaseClient } from '../database/client';
 import { NAMESPACE } from '@/vespa/vespaConfig';
 import { isSupportedMimeType } from '@/services/fileProcessor';
-import { repositories } from '@/database/repositories';
-import { callShareService } from '@/services/callShareService';
 
 const db = DatabaseClient.getInstance();
 
@@ -56,12 +53,10 @@ const setAttachmentCacheHeaders = (res: Response, attachment: MessageAttachment)
 
 export class AttachmentController {
   private messageAttachmentRepository: MessageAttachmentRepository;
-  private conversationRepository: ConversationRepository;
   private channelParticipantRepository: ChannelParticipantRepository;
 
   constructor() {
     this.messageAttachmentRepository = new MessageAttachmentRepository();
-    this.conversationRepository = new ConversationRepository();
     this.channelParticipantRepository = new ChannelParticipantRepository();
   }
 
@@ -122,226 +117,16 @@ export class AttachmentController {
   }
 
   /**
-   * Authorization for attachment reads (download / thumbnail).
-   *
-   * Layered and safe for every AttachmentEntityType:
-   *  1. Tenant isolation — the attachment must belong to the caller's workspace.
-   *  2. DRAFT / DELAYED_MESSAGE — only the creator may read it.
-   *  3. Chat attachments (those carrying a conversationId) — the caller must be
-   *     a participant of the owning channel. Mirrors streamAttachment.
-   *  4. RECORDING — the caller must be able to view the call's recordings.
-   * Non-chat types without a conversation (TICKET, EMAIL, FORM_ENTITY_VALUE,
-   * IMPACT, …) are bounded by the workspace check only, preserving existing
-   * in-workspace access.
+   * Authorization for attachment reads (download / thumbnail). Delegates to the
+   * shared attachment-access service so every attachment route enforces identical
+   * checks.
    */
-  private async assertAttachmentAccess(
+  private assertAttachmentAccess(
     attachment: MessageAttachment,
     userId: string,
     workspaceId?: string,
-  ): Promise<{ ok: true } | { ok: false; status: number; body: Record<string, string> }> {
-    // 1) Workspace isolation — never serve another workspace's file.
-    //    Require a workspace context; an absent one is rejected rather than
-    //    allowed through.
-    if (!workspaceId || attachment.workspaceId !== workspaceId) {
-      logger.warn(
-        `Cross-workspace attachment access blocked: user ${userId} (ws ${workspaceId ?? 'none'}) -> attachment ${attachment.id} (ws ${attachment.workspaceId})`,
-      );
-      return { ok: false, status: 404, body: { error: 'Attachment not found' } };
-    }
-
-    // 2) Draft / scheduled message attachments — creator only.
-    if (
-      attachment.entityType === AttachmentEntityType.DRAFT ||
-      attachment.entityType === AttachmentEntityType.DELAYED_MESSAGE
-    ) {
-      if (attachment.createdBy !== userId) {
-        logger.warn(
-          `Unauthorized draft attachment access: user ${userId} -> ${attachment.id} (creator ${attachment.createdBy})`,
-        );
-        return {
-          ok: false,
-          status: 403,
-          body: { error: 'Forbidden', message: 'You do not have permission to access this attachment' },
-        };
-      }
-      return { ok: true };
-    }
-
-    // 2.5) Canvas attachments carry a synthetic conversationId (`canvas_<id>`)
-    //      and are not backed by a real conversation row. Authorize via canvas
-    //      view access (mirrors CanvasController's edit-access check on upload)
-    //      rather than channel participation.
-    if (attachment.entityType === AttachmentEntityType.CANVAS) {
-      try {
-        await canvasAuthService.requireViewAccess(attachment.entityId, userId);
-        return { ok: true };
-      } catch (error) {
-        logger.warn(
-          `Unauthorized canvas attachment access: user ${userId} -> ${attachment.id} (canvas ${attachment.entityId}): ${error instanceof Error ? error.message : 'denied'}`,
-        );
-        return {
-          ok: false,
-          status: 403,
-          body: { error: 'Forbidden', message: 'You do not have permission to access this attachment' },
-        };
-      }
-    }
-
-    // 2.55) SDLC hub files have no conversation to authorize through: they are
-    //       filed into a folder, and their entityId is the hub itself. Seeing the
-    //       hub is what earns seeing the file, on the same terms as a private
-    //       channel's ticket documents above.
-    if (attachment.entityType === AttachmentEntityType.SDLC_HUB) {
-      const channel = await db.channel.findUnique({
-        where: { id: attachment.entityId },
-        select: { visibility: true, workspaceId: true },
-      });
-      if (!channel || channel.workspaceId !== workspaceId) {
-        return { ok: false, status: 404, body: { error: 'Attachment not found' } };
-      }
-      if (channel.visibility !== ChannelVisibility.PUBLIC) {
-        const isParticipant = await this.channelParticipantRepository.isParticipant(
-          attachment.entityId,
-          userId,
-        );
-        if (!isParticipant) {
-          logger.warn(
-            `Unauthorized SDLC hub attachment access: user ${userId} -> ${attachment.id} (hub ${attachment.entityId})`,
-          );
-          return {
-            ok: false,
-            status: 403,
-            body: { error: 'Forbidden', message: 'You do not have permission to access this attachment' },
-          };
-        }
-      }
-      return { ok: true };
-    }
-
-    // 2.6) Note-taker recordings — same rule as the recording download endpoints.
-    if (attachment.entityType === AttachmentEntityType.RECORDING) {
-      const recording = await repositories.callRecordings.findById(attachment.entityId);
-      const call = recording ? await repositories.calls.findById(recording.callId) : null;
-      if (!call || call.workspaceId !== workspaceId) {
-        return { ok: false, status: 404, body: { error: 'Attachment not found' } };
-      }
-      if (!(await callShareService.canViewRecordings(call, userId))) {
-        logger.warn(
-          `Unauthorized recording attachment access: user ${userId} -> ${attachment.id} (call ${call.id})`,
-        );
-        return {
-          ok: false,
-          status: 403,
-          body: { error: 'Forbidden', message: 'You do not have permission to access this attachment' },
-        };
-      }
-      return { ok: true };
-    }
-
-    // 3) Conversation-backed (chat/DM/transcript) attachments — must participate.
-    if (attachment.conversationId) {
-      const conversation = await this.conversationRepository.findById(attachment.conversationId);
-      if (!conversation) {
-        logger.warn(
-          `Attachment access denied: conversation ${attachment.conversationId} not found for attachment ${attachment.id} (user ${userId})`,
-        );
-        return { ok: false, status: 404, body: { error: 'Attachment not found' } };
-      }
-
-      const isParticipant = await this.channelParticipantRepository.isParticipant(
-        conversation.channelId,
-        userId,
-      );
-      if (!isParticipant) {
-        logger.warn(
-          `Unauthorized attachment access: user ${userId} -> ${attachment.id} in channel ${conversation.channelId}`,
-        );
-        return {
-          ok: false,
-          status: 403,
-          body: { error: 'Forbidden', message: 'You do not have permission to access this attachment' },
-        };
-      }
-    }
-
-    // 4) Impact / stage-form DOC attachments (conversationId is null) — resolve the
-    //    owning ticket's channel and require the same access the ticket needs: a PUBLIC
-    //    channel is readable by any workspace member, a PRIVATE channel only by its
-    //    participants. Without this, any workspace member could download a private
-    //    channel ticket's impact/form documents by guessing the attachment id.
-    if (
-      attachment.entityType === AttachmentEntityType.IMPACT ||
-      attachment.entityType === AttachmentEntityType.FORM_ENTITY_VALUE
-    ) {
-      const ticketId = await this.resolveTicketIdForAttachmentEntity(
-        attachment.entityType,
-        attachment.entityId,
-      );
-      // Not ticket-scoped (e.g. a USER-scoped form value) — no channel to gate on;
-      // keep the workspace-bounded behavior rather than over-block a legitimate read.
-      if (ticketId) {
-        const ticket = await db.ticket.findUnique({
-          where: { id: ticketId },
-          select: { channelId: true, workspaceId: true },
-        });
-        if (!ticket || ticket.workspaceId !== workspaceId) {
-          return { ok: false, status: 404, body: { error: 'Attachment not found' } };
-        }
-        const channel = await db.channel.findUnique({
-          where: { id: ticket.channelId },
-          select: { visibility: true },
-        });
-        if (!channel) {
-          return { ok: false, status: 404, body: { error: 'Attachment not found' } };
-        }
-        if (channel.visibility !== ChannelVisibility.PUBLIC) {
-          const isParticipant = await this.channelParticipantRepository.isParticipant(
-            ticket.channelId,
-            userId,
-          );
-          if (!isParticipant) {
-            logger.warn(
-              `Unauthorized ${attachment.entityType} attachment access: user ${userId} -> ${attachment.id} (private channel ${ticket.channelId})`,
-            );
-            return {
-              ok: false,
-              status: 403,
-              body: { error: 'Forbidden', message: 'You do not have permission to access this attachment' },
-            };
-          }
-        }
-      }
-    }
-
-    return { ok: true };
-  }
-
-  /**
-   * Resolve the ticket that owns an IMPACT or FORM_ENTITY_VALUE attachment so its
-   * download can be gated by the ticket's channel access. Returns null when the
-   * entity is not ticket-scoped (e.g. a non-TICKET form entity), in which case the
-   * caller keeps the workspace-bounded default.
-   */
-  private async resolveTicketIdForAttachmentEntity(
-    entityType: AttachmentEntityType,
-    entityId: string,
-  ): Promise<string | null> {
-    if (entityType === AttachmentEntityType.IMPACT) {
-      const impact = await db.impact.findUnique({
-        where: { id: entityId },
-        select: { ticketId: true },
-      });
-      return impact?.ticketId ?? null;
-    }
-    // FORM_ENTITY_VALUE — only ticket-scoped values map to a channel.
-    const formValue = await db.formEntityValues.findUnique({
-      where: { id: entityId },
-      select: { entityId: true, entityType: true },
-    });
-    if (formValue && formValue.entityType === 'TICKET') {
-      return formValue.entityId;
-    }
-    return null;
+  ): Promise<AttachmentAccessResult> {
+    return assertAttachmentAccessShared(attachment, userId, workspaceId);
   }
 
   /**
