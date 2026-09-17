@@ -10,6 +10,7 @@ import { storageService, getStorageService } from '../services/storage/index';
 import { normalizeStoragePath } from '@xyne/storage';
 import { logger } from '../utils/logger';
 import { setSafeDownloadHeaders } from '../utils/safeAttachmentDownload';
+import { convertHeicToWebp, isHeicMimetype, toWebpFilename } from '../utils/heicToWebp';
 import { MessageAttachment } from '@prisma/client';
 import { AttachmentEntityType, ChannelVisibility } from '@xyne/shared';
 import {
@@ -384,6 +385,31 @@ export class AttachmentController {
       logger.info(`Streaming attachment ${attachmentId} from path: ${filePath}`);
 
       const buffer = await service.getFileBuffer(filePath);
+
+      // Preview opt-in: HEIC is not browser-renderable and is normally served
+      // as an opaque download. `?format=webp` transcodes it losslessly to WebP
+      // so chat previews and the attachment viewer can render it inline.
+      // Manual downloads (no format param) always get the original bytes.
+      if (req.query.format === 'webp' && isHeicMimetype(attachment.mimetype)) {
+        try {
+          const webpBuffer = await convertHeicToWebp(buffer);
+          res.setHeader('Content-Length', webpBuffer.length);
+          setSafeDownloadHeaders(res, {
+            mimetype: 'image/webp',
+            filename: toWebpFilename(attachment.originalFilename),
+          });
+          setAttachmentCacheHeaders(res, attachment);
+          res.send(webpBuffer);
+          return;
+        } catch (conversionError) {
+          // Undecodable/corrupt HEIC — serve the original bytes with the
+          // standard safe headers below rather than failing the preview.
+          logger.warn(
+            `HEIC to WebP conversion failed for attachment ${attachmentId}, serving original`,
+            conversionError,
+          );
+        }
+      }
 
       // Set response headers (safe disposition/type to prevent stored XSS)
       res.setHeader('Content-Length', buffer.length);

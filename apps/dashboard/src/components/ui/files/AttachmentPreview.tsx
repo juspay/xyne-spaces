@@ -94,7 +94,7 @@ export const AttachmentPreview: React.FC<AttachmentPreviewProps> = ({
       // Fetch image blob from server
       const fetchImage = async (): Promise<void> => {
         try {
-          const blob = await createPreviewUrl(fileId);
+          const blob = await createPreviewUrl(fileId, { mimeType: getMimeType(file) });
           const url = URL.createObjectURL(blob);
           previewCacheRef.current.set(fileId, url);
           setImagePreviewUrl(url);
