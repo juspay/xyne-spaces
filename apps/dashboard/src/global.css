@@ -2924,7 +2924,7 @@ html .bn-code-block-source-popup-ok-button:hover {
    Colours use theme tokens so the light and midnight themes both work
    automatically.
    ============================================================ */
-:where(.canvas-surface, .canvas-editor-title-column) {
+:where(.canvas-surface) {
   --canvas-content-width: 600px;
   /* Matches BlockNote's default .bn-editor padding-inline — the drag-handle / "+" gutter. */
   --canvas-gutter: 54px;
@@ -2934,25 +2934,6 @@ html .bn-code-block-source-popup-ok-button:hover {
      Clamped so a short viewport keeps a usable amount and a tall one does not
      open a chasm. */
   --canvas-bottom-space: clamp(96px, 25vh, 280px);
-  --canvas-block-content-offset: 14px;
-}
-
-.canvas-editor-title-column {
-  box-sizing: border-box;
-  width: 100%;
-  max-width: var(--canvas-content-width);
-  margin-inline: auto;
-  padding-left: var(--canvas-block-content-offset);
-  padding-right: 0;
-}
-
-.canvas-editor-title-column {
-  box-sizing: border-box;
-  width: 100%;
-  max-width: var(--canvas-content-width);
-  margin-inline: auto;
-  padding-left: var(--canvas-block-content-offset);
-  padding-right: 0;
 }
 
 /* Starts on the first block's left edge and follows the width handles. */
