@@ -70,7 +70,10 @@ async function isGoogleRefreshTokenRevoked(
         });
         return true;
       }
-      if (WRONG_CLIENT.includes(code)) continue; // not this client's token — try next
+      if (WRONG_CLIENT.includes(code)){
+        logger.info(`[Refresh-Validate] Wrong client: ${creds.label}, ${code}`);
+        continue; // not this client's token — try next
+      } 
       logger.error(`[Refresh-Validate] Unexpected Google error (${code}) via ${creds.label} client`, {
         userId: user.id,
         googleError: code,
