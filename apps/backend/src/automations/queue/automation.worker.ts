@@ -18,6 +18,10 @@ import { getAutomationPauseState } from '@/database/repositories/workflowExecuti
 import { computeScheduleRunAt } from '../types/automation-config';
 import { triggerRegistry } from '../triggers/trigger-registry';
 import type { TriggerType } from '../types/trigger-types';
+import {
+  recordAutomationRunMetric,
+  registerAutomationQueueMetrics,
+} from '@/services/otel/automationMetrics';
 
 const EXECUTION_FETCH_MAX_RETRIES = 3;
 const EXECUTION_FETCH_RETRY_BASE_DELAY_MS = 200;
@@ -42,6 +46,9 @@ class AutomationWorker {
       return this.processJob(job);
     });
 
+    registerAutomationQueueMetrics('automations', () =>
+      automationQueue.getQueue().getJobCounts(),
+    );
     this.isInitialized = true;
     logger.info('[AUTOMATION-WORKER] Started');
   }
@@ -119,11 +126,14 @@ class AutomationWorker {
       logger.warn(`[AUTOMATION-WORKER] workflow ${execution.workflowId} missing — dropping`);
       return;
     }
+    const config = parseAutomationConfig(workflow.context);
+
     if (workflow.status !== AutomationStatus.ACTIVE && !mayDrainInFlight(workflow)) {
       await db.workflowExecution.update({
         where: { id: executionId },
         data: { status: AutomationRunStatus.CANCELLED },
       });
+      recordAutomationRunMetric('cancelled', config.trigger.type);
       logger.info(
         `[AUTOMATION-WORKER] workflow ${workflow.id} is ${workflow.status} (no longer live) — execution=${executionId} CANCELLED`,
       );
@@ -137,13 +147,12 @@ class AutomationWorker {
         where: { id: executionId },
         data: { status: AutomationRunStatus.CANCELLED },
       });
+      recordAutomationRunMetric('cancelled', config.trigger.type);
       logger.info(
         `[AUTOMATION-WORKER] cycle detected — workflow ${workflow.id} already in chain [${upstreamChain.join(' → ')}], execution=${executionId} CANCELLED`,
       );
       return;
     }
-
-    const config = parseAutomationConfig(workflow.context);
 
     const triggerType = config.trigger.type as TriggerType;
     const triggerImpl = triggerRegistry.has(triggerType)
@@ -167,6 +176,7 @@ class AutomationWorker {
           where: { id: executionId },
           data: { status: AutomationRunStatus.SKIPPED },
         });
+        recordAutomationRunMetric('skipped', config.trigger.type);
         logger.info(
           `[AUTOMATION-WORKER] filter mismatched at intake — execution=${executionId} automation=${workflow.id}, skipping`,
         );
@@ -175,7 +185,12 @@ class AutomationWorker {
     }
 
     if (config.schedule && config.schedule.type === 'SCHEDULED') {
-      const handled = await this.tryDefer(executionId, config.schedule, hydratedTriggerData);
+      const handled = await this.tryDefer(
+        executionId,
+        config.schedule,
+        hydratedTriggerData,
+        config.trigger.type,
+      );
       if (handled) return;
     }
 
@@ -215,6 +230,7 @@ class AutomationWorker {
     executionId: string,
     schedule: Extract<ReturnType<typeof parseAutomationConfig>['schedule'], { type: 'SCHEDULED' }>,
     triggerData: Record<string, unknown>,
+    triggerType: string,
   ): Promise<boolean> {
     const runAt = computeScheduleRunAt(schedule, triggerData);
     if (runAt === null) {
@@ -236,6 +252,7 @@ class AutomationWorker {
       where: { id: executionId },
       data: { status: AutomationRunStatus.SCHEDULED },
     });
+    recordAutomationRunMetric('scheduled', triggerType);
     await automationScheduleQueue.enqueueScheduled({ executionId }, delayMs);
     logger.info(
       `[AUTOMATION-WORKER] execution=${executionId} SCHEDULED runAt=${new Date(runAt).toISOString()} delayMs=${delayMs}`,
