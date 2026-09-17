@@ -7204,12 +7204,23 @@ export interface UsagePatternSynthesis {
   window: { start: string; end: string };
 }
 
+/** Synthesis runs longer than a gateway will hold a connection, so the POST
+ *  starts a pass and returns immediately. Poll {@link getUsagePatternJob}. */
+export type UsagePatternJob =
+  | { status: "running"; startedAt: string }
+  | { status: "busy"; running: number }
+  | { status: "done"; startedAt: string; finishedAt: string; outcome: Omit<UsagePatternSynthesis, "window"> }
+  | { status: "error"; startedAt: string; finishedAt: string; error: string };
+
 export async function triggerUsagePatternSynthesis(
   slug: string,
   start?: string,
   end?: string,
-): Promise<UsagePatternSynthesis> {
-  const data = await request<{ success: boolean; data: UsagePatternSynthesis }>(
+): Promise<{ job: UsagePatternJob; window: { start: string; end: string } }> {
+  const data = await request<{
+    success: boolean;
+    data: { job: UsagePatternJob; window: { start: string; end: string } };
+  }>(
     `${AUTH_API_URL}/api/v1/agent-index/agents/${encodeURIComponent(slug)}/usage-patterns`,
     { method: "POST", body: JSON.stringify({ start, end }) },
   );
@@ -7221,6 +7232,15 @@ export async function getUsagePatternFile(slug: string): Promise<UsagePatternFil
     `${AUTH_API_URL}/api/v1/agent-index/agents/${encodeURIComponent(slug)}/usage-patterns`,
   );
   return data.data;
+}
+
+/** Progress of a pass started on the server this request lands on. Null when
+ *  nothing ran there, which includes a poll reaching a different replica. */
+export async function getUsagePatternJob(slug: string): Promise<UsagePatternJob | null> {
+  const data = await request<{ success: boolean; job: UsagePatternJob | null }>(
+    `${AUTH_API_URL}/api/v1/agent-index/agents/${encodeURIComponent(slug)}/usage-patterns`,
+  );
+  return data.job ?? null;
 }
 
 /** Hand-edit the shared usage-pattern file. Marks it human-written, which stops
