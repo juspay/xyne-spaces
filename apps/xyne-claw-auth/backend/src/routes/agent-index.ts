@@ -11,7 +11,7 @@ import {
   rebuildOrgIndex,
   syncAgentToIndex,
 } from "../services/agent-index/index.js";
-import { getUsagePatternFile, synthesizeUsagePatterns, writeUsagePatternFile } from "../services/usage-patterns/index.js";
+import { getUsagePatternFile, startUsagePatternSynthesis, usagePatternJob, writeUsagePatternFile } from "../services/usage-patterns/index.js";
 
 const log = createLogger("agent-index-routes");
 
@@ -170,10 +170,23 @@ agentIndexRouter.post("/agents/:slug/usage-patterns", async (req: Request<{ slug
       res.status(404).json({ success: false, error: "Agent not found" });
       return;
     }
-    const outcome = await synthesizeUsagePatterns(orgId, req.params.slug, window);
-    res.json({
+    // Accepted, not completed. Distilling calls an LLM and regularly takes
+    // longer than the ingress will hold the connection, so awaiting it here
+    // returned 504 to the browser while the pass carried on writing the file.
+    // Poll the GET below for the result.
+    const job = startUsagePatternSynthesis(orgId, req.params.slug, window);
+    if (job.status === "busy") {
+      // 429 with Retry-After rather than a queue: a caller walking the roster
+      // should slow down, not pile up synthesis passes behind itself.
+      res.set("Retry-After", "30").status(429).json({
+        success: false,
+        error: `${job.running} synthesis passes already running; retry shortly`,
+      });
+      return;
+    }
+    res.status(job.status === "running" ? 202 : 200).json({
       success: true,
-      data: { ...outcome, window: { start: window.start.toISOString(), end: window.end.toISOString() } },
+      data: { job, window: { start: window.start.toISOString(), end: window.end.toISOString() } },
     });
   } catch (err) {
     fail(res, err, `usage-patterns ${req.params.slug}`);
@@ -213,7 +226,12 @@ agentIndexRouter.get("/agents/:slug/usage-patterns", async (req: Request<{ slug:
   const orgId = requireOrg(req, res);
   if (!orgId) return;
   try {
-    res.json({ success: true, data: await getUsagePatternFile(orgId, req.params.slug) });
+    // `job` carries the outcome of a pass started on THIS process, including
+    // the skips that write no file at all (too few runs, human-edited). Null
+    // when nothing ran here, which is also what a poll sees when it lands on a
+    // different replica, so treat the file as the answer and the job as a hint.
+    const [file, job] = [await getUsagePatternFile(orgId, req.params.slug), usagePatternJob(orgId, req.params.slug)];
+    res.json({ success: true, data: { ...file, job } });
   } catch (err) {
     fail(res, err, `usage-patterns file ${req.params.slug}`);
   }
