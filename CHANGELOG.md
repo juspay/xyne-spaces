@@ -1,3 +1,10 @@
+## [1.335.0](https://github.com/juspay/xyne-spaces/compare/v1.334.1...v1.335.0) (2026-09-17)
+
+
+### Features
+
+* inline view rename and star toggle ([#1961](https://github.com/juspay/xyne-spaces/issues/1961)) ([8a3bb86](https://github.com/juspay/xyne-spaces/commit/8a3bb867049346251095902151b93a0074f83733))
+
 ## [1.334.1](https://github.com/juspay/xyne-spaces/compare/v1.334.0...v1.334.1) (2026-09-17)
 
 
