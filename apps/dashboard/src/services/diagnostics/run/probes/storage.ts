@@ -53,13 +53,14 @@ function withTimeout<T>(promise: Promise<T>, label: string): Promise<T> {
 function openProbeDb(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     const request = indexedDB.open(DB_NAME, 1);
-    request.onupgradeneeded = () => {
+    request.onupgradeneeded = (): void => {
       const db = request.result;
       if (!db.objectStoreNames.contains(STORE_NAME)) db.createObjectStore(STORE_NAME);
     };
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error ?? new Error('Could not open probe database'));
-    request.onblocked = () => reject(new Error('Probe database is blocked'));
+    request.onsuccess = (): void => resolve(request.result);
+    request.onerror = (): void =>
+      reject(request.error ?? new Error('Could not open probe database'));
+    request.onblocked = (): void => reject(new Error('Probe database is blocked'));
   });
 }
 
@@ -73,9 +74,9 @@ function runTransaction(
     // Timing the transaction's completion, not the request's: the write is not
     // durable until the transaction commits, and the commit is where a slow
     // disk actually shows up.
-    tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error ?? new Error('Probe transaction failed'));
-    tx.onabort = () => reject(tx.error ?? new Error('Probe transaction aborted'));
+    tx.oncomplete = (): void => resolve();
+    tx.onerror = (): void => reject(tx.error ?? new Error('Probe transaction failed'));
+    tx.onabort = (): void => reject(tx.error ?? new Error('Probe transaction aborted'));
     work(tx.objectStore(STORE_NAME));
   });
 }
@@ -84,8 +85,8 @@ function readAll(db: IDBDatabase): Promise<number> {
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE_NAME, 'readonly');
     const request = tx.objectStore(STORE_NAME).getAll();
-    request.onsuccess = () => resolve(request.result.length);
-    request.onerror = () => reject(request.error ?? new Error('Probe read failed'));
+    request.onsuccess = (): void => resolve(request.result.length);
+    request.onerror = (): void => reject(request.error ?? new Error('Probe read failed'));
   });
 }
 
@@ -94,9 +95,9 @@ function deleteProbeDb(): Promise<void> {
     const request = indexedDB.deleteDatabase(DB_NAME);
     // Cleanup failure is not a diagnostic result — the database is small and
     // will be reused by the next run either way.
-    request.onsuccess = () => resolve();
-    request.onerror = () => resolve();
-    request.onblocked = () => resolve();
+    request.onsuccess = (): void => resolve();
+    request.onerror = (): void => resolve();
+    request.onblocked = (): void => resolve();
   });
 }
 
