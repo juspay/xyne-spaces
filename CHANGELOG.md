@@ -1,3 +1,16 @@
+## [1.323.0-release-20260916.8](https://github.com/juspay/xyne-spaces/compare/v1.323.0-release-20260916.7...v1.323.0-release-20260916.8) (2026-09-17)
+
+
+### Features
+
+* SDLC folders open as pages, with links, files and an embedded browser ([#1930](https://github.com/juspay/xyne-spaces/issues/1930)) ([12c785b](https://github.com/juspay/xyne-spaces/commit/12c785bfda6ca41e090f8249bc81db7d8b8da461))
+
+
+### Bug Fixes
+
+* embedded-browser popups in popped-out windows, and pasted media in canvas ([#1939](https://github.com/juspay/xyne-spaces/issues/1939)) ([c13acc0](https://github.com/juspay/xyne-spaces/commit/c13acc00beac5269c671cdc3331d8a2036296fa0)), closes [#1930](https://github.com/juspay/xyne-spaces/issues/1930)
+* remove canvas title icon picker release ([#1958](https://github.com/juspay/xyne-spaces/issues/1958)) ([d9d1fc7](https://github.com/juspay/xyne-spaces/commit/d9d1fc7f654e38fb537a2571fb7dbc852da9600d))
+
 ## [1.323.0-release-20260916.8](https://github.com/juspay/xyne-spaces/compare/v1.323.0-release-20260916.7...v1.323.0-release-20260916.8) (2026-09-16)
 
 
