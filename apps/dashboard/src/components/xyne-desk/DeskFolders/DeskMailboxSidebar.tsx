@@ -11,7 +11,13 @@ const FOLDERS: { key: MailboxFolder; label: string; icon: LucideIcon }[] = [
   { key: 'spam', label: 'Spam', icon: Ban },
 ];
 
+const BASIC_FOLDERS: { key: MailboxFolder; label: string; icon: LucideIcon }[] = [
+  { key: 'all', label: 'All items', icon: Mails },
+];
+
 interface DeskMailboxSidebarProps {
+  /** 'email' shows the full mailbox set; 'basic' shows only All items. */
+  variant?: 'email' | 'basic';
   activeFolder: MailboxFolder | null;
   onSelectFolder: (folder: MailboxFolder, label: string) => void;
 }
@@ -20,15 +26,19 @@ interface DeskMailboxSidebarProps {
  * Gmail-style mailbox folders for the desk sidebar (Inbox · All Mail · Starred ·
  * Spam). Per-user per-desk: each agent sees their own filing of the shared
  * mail. The folders are fixed (not user-created), unlike the Labels section.
+ * Non-email desks (Slack / App / Call / Social) use variant='basic' for a
+ * single All items entry.
  */
 export const DeskMailboxSidebar = ({
+  variant = 'email',
   activeFolder,
   onSelectFolder,
 }: DeskMailboxSidebarProps): ReactElement => {
+  const folders = variant === 'basic' ? BASIC_FOLDERS : FOLDERS;
   return (
     <div>
       <div>
-        {FOLDERS.map(({ key, label, icon: Icon }) => {
+        {folders.map(({ key, label, icon: Icon }) => {
           const active = activeFolder === key;
           return (
             <button

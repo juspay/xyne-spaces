@@ -339,18 +339,27 @@ export function CallHistorySearchPanel({
         </Popover.Root>
         {!isV2 && (
           <div className='flex items-center gap-3 shrink-0'>
-            <label
-              htmlFor='channel-calls-toggle'
-              className='hidden md:block text-sm text-muted-foreground whitespace-nowrap cursor-pointer select-none'
+            <Tooltip
+              content='Show calls from your channels where you were not a direct participant'
+              side='bottom'
             >
-              Include all channel calls
-            </label>
+              <label
+                htmlFor='channel-calls-toggle'
+                className='hidden md:flex items-center gap-1 text-sm text-muted-foreground whitespace-nowrap cursor-pointer select-none'
+              >
+                See thread calls
+                <Info className='size-3.5' />
+              </label>
+            </Tooltip>
             <Switch
               id='channel-calls-toggle'
               checked={showChannelCalls ?? false}
               onCheckedChange={setShowChannelCalls ?? (() => {})}
             />
-            <Tooltip content='Include all channel calls' side='bottom'>
+            <Tooltip
+              content='Show calls from your channels where you were not a direct participant'
+              side='bottom'
+            >
               <button className='md:hidden text-muted-foreground flex items-center'>
                 <Info className='size-4' />
               </button>
