@@ -1351,6 +1351,7 @@ export const emailChannelPreferenceTable = table("email_channel_preferences")
     autoDraftAgentSlug: string().optional(),
     deskType: string(),
     dlEmail: string().optional(),
+    dlAliases: string().optional(),
     workspaceId: string(),
     metricsEnabled: boolean().optional(),
     frtStageNames: string().optional(),
@@ -2005,6 +2006,7 @@ export const repoTable = table("repos")
     channelId: string().optional(),
     sdlcSetupExecutionId: string().optional(),
     accessCapabilities: json().optional(),
+    vcsCredentialId: string().optional(),
   })
   .primaryKey("id");
 

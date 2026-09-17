@@ -2286,6 +2286,7 @@ model EmailChannelPreference {
   autoDraftAgentSlug     String?
   deskType               String   @default("EMAIL")
   dlEmail                String?
+  dlAliases              String?  // JSON-serialised string[] of extra addresses that route into this desk
   workspaceId            String
   metricsEnabled         Boolean? // Gates the desk metrics dashboard
   frtStageNames          String?  // JSON-serialised string[] of stage names whose first entry stops the FRT clock
@@ -3326,6 +3327,8 @@ model Repo {
   /// @deprecated -> written only by the removed SDLC worker
   sdlcSetupExecutionId String? @unique
   accessCapabilities   Json?
+  /// Repository Credential (workflow.external_sources.id) this repository uses. No FK: cross-schema.
+  vcsCredentialId      String?
 
   project         Project?           @relation(fields: [projectId], references: [id], onDelete: Cascade)
   /// @deprecated -> navigation for the legacy channelId; SetNull so deleting a channel keeps the repository
@@ -3344,6 +3347,7 @@ model Repo {
   @@index([name])
   @@index([projectId])
   @@index([workspaceId, projectId])
+  @@index([vcsCredentialId])
   @@map("repos")
   @@schema("public")
 }

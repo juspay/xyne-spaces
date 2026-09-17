@@ -4439,18 +4439,6 @@ export const mutators = defineMutators({
         ctx,
         args: { subTicketId, timestamp, mappingId, title, description, ticketId, conversationId },
       }) => {
-        const parentTicket = await tx.run(zql.tickets.where('id', ticketId).one());
-        const parentBoard = parentTicket
-          ? await tx.run(zql.boards.where('id', parentTicket.boardId).one())
-          : null;
-        if (parentBoard?.boardType !== BoardType.FLOW) {
-          const parentAsSubTicket = await tx.run(
-            zql.sub_tickets.where('mappedTicketId', ticketId).one(),
-          );
-          if (parentAsSubTicket) {
-            throw new Error('Cannot create a sub-ticket under a sub-ticket');
-          }
-        }
         // Create the subticket
         await tx.mutate.sub_tickets.insert({
           id: subTicketId,
@@ -10231,6 +10219,7 @@ export const mutators = defineMutators({
         ownerUserId: z.string().optional(),
         assigneeUserGroupId: z.string().optional().nullable(),
         sendAsEmail: z.string().optional().nullable(),
+        dlAliases: z.string().optional().nullable(),
         defaultCc: z.string().optional().nullable(),
         emailMergeMode: z.nativeEnum(EmailMergeMode).optional(),
         twoStepSendEnabled: z.boolean().optional(),
@@ -10252,6 +10241,7 @@ export const mutators = defineMutators({
           ownerUserId,
           assigneeUserGroupId,
           sendAsEmail,
+          dlAliases,
           defaultCc,
           emailMergeMode,
           twoStepSendEnabled,
@@ -10275,6 +10265,7 @@ export const mutators = defineMutators({
             ...(ownerUserId !== undefined ? { ownerUserId } : {}),
             ...(assigneeUserGroupId !== undefined ? { assigneeUserGroupId } : {}),
             ...(sendAsEmail !== undefined ? { sendAsEmail } : {}),
+            ...(dlAliases !== undefined ? { dlAliases } : {}),
             ...(defaultCc !== undefined ? { defaultCc } : {}),
             ...(emailMergeMode !== undefined ? { emailMergeMode } : {}),
             ...(twoStepSendEnabled !== undefined ? { twoStepSendEnabled } : {}),
@@ -10297,6 +10288,7 @@ export const mutators = defineMutators({
             assigneeUserGroupId: assigneeUserGroupId ?? null,
             boardId: null,
             sendAsEmail: sendAsEmail ?? null,
+            dlAliases: dlAliases ?? null,
             classificationEnabled: false,
             classificationPrompt: null,
             categoryField: null,
@@ -11345,7 +11337,7 @@ export const mutators = defineMutators({
           ...(name !== undefined && { name }),
           ...(visibility !== undefined && { visibility }),
           ...(isStarred !== undefined && { isStarred }),
-          updatedAt: timestamp,
+          ...(values !== undefined && { updatedAt: timestamp }),
         });
 
         if (values) {
