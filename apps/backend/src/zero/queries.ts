@@ -5152,7 +5152,7 @@ dmChannelsLatestMessagesPaginated: defineQuery(
   // Reverse of applicationReleaseTicketsByReleaseId: the release(s) a dev ticket
   // belongs to. Keep in sync with the shared copy.
   applicationReleaseTicketsByDevTicketId: defineQuery(
-    z.object({ ticketId: z.string().min(1) }),
+    z.object({ ticketId: z.string() }),
     ({ args: { ticketId } }) => {
       return zql.application_release_tickets
         .where('ticketId', ticketId)

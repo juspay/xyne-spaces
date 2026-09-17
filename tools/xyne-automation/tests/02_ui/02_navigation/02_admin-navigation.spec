@@ -1,5 +1,8 @@
 # Admin Navigation UI Test
+tags: quarantine
 > Verify admin-only navigation menu items load correct pages
+
+Quarantined (XYNE-63195): admin sidebar navigation is flaky in CI — e.g. `[aria-controls='projects-section']` intermittently never becomes visible after "navigating via sidebar to tickets" (30s timeout, fails on retry too). Re-enable once the sidebar load timing is fixed.
 
 ## Admin navigates to User Management page
 * Using browser
