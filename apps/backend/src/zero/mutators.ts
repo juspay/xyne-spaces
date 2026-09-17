@@ -126,6 +126,7 @@ import {
   withSlashCommandArtifactClosed,
 } from '@xyne/shared';
 import { SDLC_HUB_KNOWLEDGE_FOLDER, sdlcTrackStatusSchema } from '@xyne/shared';
+import { sanitizeProjectCode, isValidProjectCode } from '@xyne/shared';
 import {
   evaluateEta,
   buildEtaActivityIntents,
@@ -7464,8 +7465,8 @@ export function createMutators(
     },
     project: {
       update: defineMutator(
-        z.object({ projectId: z.string(), name: z.string().optional(), description: z.string().optional(), timestamp: z.number() }),
-        async ({ tx, args: { projectId, name, description, timestamp } }) => {
+        z.object({ projectId: z.string(), name: z.string().optional(), description: z.string().optional(), code: z.string().optional(), timestamp: z.number() }),
+        async ({ tx, args: { projectId, name, description, code, timestamp } }) => {
           // Validate project exists
           const project = await tx.run(zql.projects.where('id', projectId).one());
           if (!project) {
@@ -7480,11 +7481,32 @@ export function createMutators(
             }
           }
 
+          let sanitizedCode: string | undefined;
+          if (code !== undefined) {
+            sanitizedCode = sanitizeProjectCode(code);
+            if (sanitizedCode !== project.code) {
+              if (!isValidProjectCode(sanitizedCode)) {
+                throw new Error(
+                  'Project code must be at least 2 uppercase letters/numbers (e.g., EU, PR, X2)',
+                );
+              }
+              const existingByCode = await tx.run(
+                zql.projects.where('code', sanitizedCode).one(),
+              );
+              if (existingByCode && existingByCode.id !== projectId) {
+                throw new Error(
+                  `Project code '${sanitizedCode}' is already in use by '${existingByCode.name}'`,
+                );
+              }
+            }
+          }
+
           // Update project
           await tx.mutate.projects.update({
             id: projectId,
             ...(name !== undefined && { name }),
             ...(description !== undefined && { description }),
+            ...(sanitizedCode !== undefined && { code: sanitizedCode }),
             updatedBy: authData.sub,
             updatedAt: timestamp,
           });

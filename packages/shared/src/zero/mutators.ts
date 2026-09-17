@@ -88,6 +88,7 @@ import {
   rethrowCanvasFolderNameConflict,
 } from '../utils/canvasFolderNameConflict.js';
 import { resolveCanvasHierarchy } from '../utils/canvasHierarchy.js';
+import { sanitizeProjectCode, isValidProjectCode } from '../utils/project.js';
 import {
   SDLC_MEMBERSHIP_RELATION,
   SDLC_CONTAINMENT_RELATION,
@@ -4524,9 +4525,10 @@ export const mutators = defineMutators({
         projectId: z.string(),
         name: z.string().optional(),
         description: z.string().optional(),
+        code: z.string().optional(),
         timestamp: z.number(),
       }),
-      async ({ tx, ctx, args: { projectId, name, description, timestamp } }) => {
+      async ({ tx, ctx, args: { projectId, name, description, code, timestamp } }) => {
         // Validate project exists
         const project = await tx.run(zql.projects.where('id', projectId).one());
         if (!project) {
@@ -4541,11 +4543,32 @@ export const mutators = defineMutators({
           }
         }
 
+        let sanitizedCode: string | undefined;
+        if (code !== undefined) {
+          sanitizedCode = sanitizeProjectCode(code);
+          if (sanitizedCode !== project.code) {
+            if (!isValidProjectCode(sanitizedCode)) {
+              throw new Error(
+                'Project code must be at least 2 uppercase letters/numbers (e.g., EU, PR, X2)',
+              );
+            }
+            const existingByCode = await tx.run(
+              zql.projects.where('code', sanitizedCode).one(),
+            );
+            if (existingByCode && existingByCode.id !== projectId) {
+              throw new Error(
+                `Project code '${sanitizedCode}' is already in use by '${existingByCode.name}'`,
+              );
+            }
+          }
+        }
+
         // Update project
         await tx.mutate.projects.update({
           id: projectId,
           ...(name !== undefined && { name }),
           ...(description !== undefined && { description }),
+          ...(sanitizedCode !== undefined && { code: sanitizedCode }),
           updatedBy: ctx.userID,
           updatedAt: timestamp,
         });

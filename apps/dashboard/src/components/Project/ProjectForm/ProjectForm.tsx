@@ -8,6 +8,7 @@ import { usePlatform } from '../../../hooks/usePlatform';
 interface Project {
   id: string;
   name: string;
+  code: string;
   description: string | null;
 }
 
@@ -27,7 +28,7 @@ export const ProjectForm = ({
   const isEdit = !!project;
   const [name, setName] = useState(project?.name || '');
   const [description, setDescription] = useState(project?.description || '');
-  const [code, setCode] = useState('');
+  const [code, setCode] = useState(project?.code || '');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const { isMobile } = usePlatform();
@@ -38,9 +39,9 @@ export const ProjectForm = ({
       return;
     }
 
-    // Validate project code for new projects (required)
+    // Validate project code (required on create, editable on update)
     const sanitizedCode = sanitizeProjectCode(code);
-    if (!isEdit && !isValidProjectCode(sanitizedCode)) {
+    if (!isValidProjectCode(sanitizedCode)) {
       setError('Project code must be at least 2 uppercase letters/numbers (e.g., EU, PR, X2)');
       return;
     }
@@ -52,13 +53,16 @@ export const ProjectForm = ({
 
         if (isEdit) {
           // Edit mode - only send changed fields
-          const updateData: { name?: string; description?: string } = {};
+          const updateData: { name?: string; description?: string; code?: string } = {};
           if (name.trim() !== project.name) {
             updateData.name = name.trim();
           }
           const trimmedDescription = description.trim();
           if (trimmedDescription !== (project.description || '')) {
             updateData.description = trimmedDescription;
+          }
+          if (sanitizedCode !== project.code) {
+            updateData.code = sanitizedCode;
           }
           await onSubmit(updateData);
         } else {
@@ -99,7 +103,7 @@ export const ProjectForm = ({
         </h2>
         <p className='text-sm text-muted-foreground'>
           {isEdit
-            ? 'Update the name and description for this project.'
+            ? 'Update the name, code, and description for this project.'
             : 'Name your project and pick a code for its ticket IDs.'}
         </p>
       </div>
@@ -126,26 +130,31 @@ export const ProjectForm = ({
         />
       </div>
 
-      {!isEdit && (
-        <div className='flex flex-col gap-1.5'>
-          <label htmlFor='project-code' className='text-sm font-medium text-foreground'>
-            Project code
-          </label>
-          <Input
-            id='project-code'
-            className='[[data-theme=midnight]_&]:bg-input/30'
-            value={code}
-            onChange={e => setCode(sanitizeProjectCode(e.target.value))}
-            placeholder='e.g., EUL, PROJ, PRO1, XY2'
-            required
-            disabled={isLoading}
-            data-testid='project-code-input'
-          />
+      <div className='flex flex-col gap-1.5'>
+        <label htmlFor='project-code' className='text-sm font-medium text-foreground'>
+          Project code
+        </label>
+        <Input
+          id='project-code'
+          className='[[data-theme=midnight]_&]:bg-input/30'
+          value={code}
+          onChange={e => setCode(sanitizeProjectCode(e.target.value))}
+          placeholder='e.g., EUL, PROJ, PRO1, XY2'
+          required
+          disabled={isLoading}
+          data-testid='project-code-input'
+        />
+        {isEdit ? (
+          <p className='text-xs text-muted-foreground'>
+            Only new tickets will use {code || 'CODE'}-… Existing tickets keep their current IDs,
+            and numbering continues (it does not reset to 0001).
+          </p>
+        ) : (
           <p className='text-xs text-muted-foreground'>
             Tickets will be: {code || 'CODE'}-0001, {code || 'CODE'}-0002...
           </p>
-        </div>
-      )}
+        )}
+      </div>
 
       <div className='flex flex-col gap-1.5'>
         <label htmlFor='project-description' className='text-sm font-medium text-foreground'>
