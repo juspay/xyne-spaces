@@ -7344,19 +7344,8 @@ export function createMutators(
           subTicketXyneId: z.string().optional(),
         }),
         async ({ tx, args: { subTicketId, mappingId, timestamp, title, description, ticketId, conversationId, subTicketXyneId } }) => {
-          const parentAsSubTicket = await tx.run(
-            zql.sub_tickets.where('mappedTicketId', ticketId).one(),
-          );
           // Parent ticket is also needed below to denormalize channelId onto the activity.
           const parentTicket = await tx.run(zql.tickets.where('id', ticketId).one());
-          if (parentAsSubTicket) {
-            const parentBoard = parentTicket
-              ? await tx.run(zql.boards.where('id', parentTicket.boardId).one())
-              : null;
-            if (parentBoard?.boardType !== BoardType.FLOW) {
-              throw new Error('Cannot create a sub-ticket under a sub-ticket');
-            }
-          }
           // Create the subticket
           await tx.mutate.sub_tickets.insert({
             id: subTicketId,
@@ -11469,6 +11458,10 @@ export function createMutators(
           const repo = await tx.run(zql.repos.where('id', id).one());
           if (!repo) {
             throw new Error('Repository not found');
+          }
+          // An SDLC repository's credential link and access checks belong to its URL.
+          if (url !== undefined && url !== repo.url && repo.projectId) {
+            throw new Error('Register the new link as a repository instead of changing this one');
           }
 
           await tx.mutate.repos.update({

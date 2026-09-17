@@ -27,7 +27,7 @@ This run covers one commit window:
 When Before is empty, nothing is documented up to End yet: write the Wiki for the code as of End.
 
 How to work:
-1. Set up the repository with sandbox-repo-setup. Its clone is shallow, so fetch what you read, for example \`git fetch --depth=<Commits + 1> origin <End>\`, then \`git log --first-parent <Before>..<End>\` and \`git diff <Before> <End>\`. Never read commits after End.
+1. Call sandbox-create, then sdlc-repository-access with repoId {{${WINDOW}.repoId}}, and clone with the exact cloneUrl it returns. Fetch only what you read, for example \`git clone --filter=blob:none <cloneUrl>\`, then \`git log --first-parent <Before>..<End>\` and \`git diff <Before> <End>\`. Never read commits after End.
 2. List the Repository Wiki and read the pages the change touches.
 3. Change only the pages whose concepts changed: create a page for a genuinely new concept, move a page that was renamed, archive a page whose whole topic is gone. A window that adds no lasting knowledge (formatting, lockfiles, tests only, routine dependency bumps) needs no writes.
 
@@ -39,7 +39,7 @@ const REPOSITORY_CORRECTOR_TASK = `Check the Repository Wiki pages the Generator
 
 Changed pages: {{steps.generate.output.response.changedPages}}
 
-For each page, read it and compare its claims, paths, symbols, tables and diagrams with the code at that commit: set up the repository with sandbox-repo-setup and fetch and check out that commit. Fix what the code does not support: wrong or stale facts, broken paths, diagrams that contradict the code, content an edit dropped, and topics duplicated across pages. Do not rewrite for style. When the list is empty, change nothing.
+For each page, read it and compare its claims, paths, symbols, tables and diagrams with the code at that commit: call sandbox-create, then sdlc-repository-access with repoId {{${WINDOW}.repoId}}, clone with the exact cloneUrl it returns, and check out that commit. Fix what the code does not support: wrong or stale facts, broken paths, diagrams that contradict the code, content an edit dropped, and topics duplicated across pages. Do not rewrite for style. When the list is empty, change nothing.
 
 ${WIKI_TOOLS}
 
@@ -51,7 +51,7 @@ Repositories whose Wiki changed since the Hub Wiki last caught up: {{steps.plan.
 
 How to work:
 1. List the Hub Wiki, and read the Repository Wiki pages of the repositories that changed. They are up to date and are your main source.
-2. When a cross-repository contract has to be confirmed in code, set up that repository with sandbox-repo-setup. A run can set up one repository.
+2. When a cross-repository contract has to be confirmed in code, call sandbox-create, then sdlc-repository-access with that repository's id, and clone with the exact cloneUrl it returns.
 3. Create, update, move or archive Hub Wiki pages. Keep one relationship or contract per page.
 
 ${WIKI_TOOLS}
@@ -62,7 +62,7 @@ const HUB_CORRECTOR_TASK = `Check the Hub Wiki pages the Hub Wiki Generator just
 
 Changed pages: {{steps.hub_generate.output.response.changedPages}}
 
-For each page, compare every cross-repository claim with the Repository Wikis of the repositories involved, and with code when a claim is still in doubt (one repository per run through sandbox-repo-setup). Fix what they do not support. Do not rewrite for style. When the list is empty, change nothing.
+For each page, compare every cross-repository claim with the Repository Wikis of the repositories involved, and with code when a claim is still in doubt (through sandbox-create and sdlc-repository-access). Fix what they do not support. Do not rewrite for style. When the list is empty, change nothing.
 
 ${WIKI_TOOLS}
 
@@ -93,6 +93,22 @@ function agentStep(id: string, title: string, config: Record<string, unknown>, t
   } as WorkflowStepConfig;
 }
 
+export const WIKI_TRIGGER: WorkflowConfig['trigger'] = {
+  type: 'MANUAL',
+  config: {
+    inputSchema: {
+      type: 'object',
+      properties: {
+        overrides: {
+          type: 'string',
+          title: 'Start commits',
+          description: 'One per line: repository id, commit. Starts that repository from this commit instead of where it last ended.',
+        },
+      },
+    },
+  },
+};
+
 export function buildWikiWorkflowConfig(channelId: string): WorkflowConfig {
   const window = {
     channelId,
@@ -100,22 +116,7 @@ export function buildWikiWorkflowConfig(channelId: string): WorkflowConfig {
     generationCommit: `{{${WINDOW}.afterSha}}`,
   };
   return {
-    trigger: {
-      type: 'MANUAL',
-      config: {
-        inputSchema: {
-          type: 'object',
-          properties: {
-            overrides: {
-              type: 'array',
-              title: 'Start commits',
-              description: 'repository@commit, e.g. payments@1a2b3c4. Starts that repository from this commit instead of where it last ended.',
-              items: { type: 'string' },
-            },
-          },
-        },
-      },
-    },
+    trigger: WIKI_TRIGGER,
     steps: [
       {
         id: 'plan',

@@ -336,7 +336,7 @@ register("xyne-spaces", SDLC_TOOL_NAMES.mutateArtifact, async (params) => {
 });
 
 register("xyne-spaces", SDLC_TOOL_NAMES.createPullRequest, async (params) => {
-  for (const key of ["interactiveGrant", "conversationId", "repoId", "title", "head", "base", "commitHash"]) {
+  for (const key of ["workspaceId", "actorUserId", "repoId", "title", "head", "base", "commitHash"]) {
     if (!String(params[key] ?? "").trim()) return `${key} is required`;
   }
   if (!/^[0-9a-f]{40}$/i.test(String(params["commitHash"]))) {
