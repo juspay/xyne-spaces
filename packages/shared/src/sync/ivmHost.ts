@@ -144,8 +144,9 @@ export class IvmHost {
   }
 
   /**
-   * Record a mutation's SERVER result (from Zero's per-mutation serverPromise, which resolves only once
-   * zero-cache has processed the mutation — success OR application error). `ok === false` (reject) ⇒
+   * Record a mutation's SERVER result (from Zero's per-mutation serverPromise, which settles only once
+   * zero-cache has processed the mutation — resolve = success, reject = app/protocol error). `ok === false`
+   * (server rejected the mutation) ⇒
    * revert the optimistic overlay NOW (the server row will never carry it). Either way advance the
    * confirmed watermark so the echo path can retire a successful overlay once the fan-out delivers the
    * server row (flicker-free). Success does NOT retire here — that would drop the overlay before the

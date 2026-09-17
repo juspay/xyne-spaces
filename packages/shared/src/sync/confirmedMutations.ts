@@ -12,8 +12,9 @@ import type { IvmHost } from './ivmHost.js';
  * how `.server` resolves). There is no PUBLIC accessor for the confirmed watermark, so `runtime.ts`
  * deep-imports the compiled internal (the same mechanism ivmHost uses for `#zql/*`) and passes its
  * prototype here. We wrap its two PUBLIC methods:
- *   - `trackMutation()` → `{ ephemeralID, serverPromise }`  (serverPromise resolves ONLY once zero-cache
- *      has processed the mutation — success OR application error);
+ *   - `trackMutation()` → `{ ephemeralID, serverPromise }`  (serverPromise settles ONLY once zero-cache
+ *      has processed the mutation: it RESOLVES on success and REJECTS on app/protocol error — Zero's
+ *      MutationTracker `#settleMutation` calls `resolver.reject(...)` for errors);
  *   - `mutationIDAssigned(ephemeralID, mutationID)`          (the id for that ephemeralID).
  * Pairing them yields the exact `(mutationID, serverResult)` with no correlation guessing, no ordering
  * assumptions, and no reliance on `mr.mutator.fn` (which `zero.mutate(mr)` never invokes — it dispatches
@@ -61,6 +62,8 @@ export function hookMutationTrackerPrototype(proto: any, host: IvmHost): void {
       const serverPromise = m?.get(ephemeralID);
       if (serverPromise && typeof mutationID === 'number') {
         m!.delete(ephemeralID);
+        // RESOLVE = server-confirmed (retire); REJECT = app/protocol error (revert). The `!== 'error'`
+        // is defensive belt-and-braces — real Zero only ever resolves with success details here.
         serverPromise.then(
           (details: any) => host.noteMutationSettled(mutationID, details?.type !== 'error'),
           () => host.noteMutationSettled(mutationID, false),
