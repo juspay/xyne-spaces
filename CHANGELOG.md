@@ -1,3 +1,10 @@
+## [1.336.0](https://github.com/juspay/xyne-spaces/compare/v1.335.0...v1.336.0) (2026-09-17)
+
+
+### Features
+
+* dl aliases support ([#1896](https://github.com/juspay/xyne-spaces/issues/1896)) ([87412a3](https://github.com/juspay/xyne-spaces/commit/87412a3dfeb446480385f901064af059f42c3883))
+
 ## [1.335.0](https://github.com/juspay/xyne-spaces/compare/v1.334.1...v1.335.0) (2026-09-17)
 
 
