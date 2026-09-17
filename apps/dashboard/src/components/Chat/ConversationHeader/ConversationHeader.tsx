@@ -44,7 +44,6 @@ import { useRouteContext } from '../../../hooks/useRouteContext';
 import { standaloneNavigate, APP_DRAG_STYLE, APP_NO_DRAG_STYLE } from '../../../utils/electronApp';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { XyneAIStar } from '../../icons/xyne-ai';
-import { trackAskAIOpened } from '../../../services/otel/xyneAIMetrics';
 import { invokeShortcut } from '../../../shortcuts';
 import { CalendarEvent } from '@xyne/icons';
 import { xyneCalendarActor } from '../../../machines/xyneCalendarMachine';
@@ -391,11 +390,10 @@ const ConversationHeader = ({
               variant='ghost'
               size='sm'
               onClick={() => {
-                // Track Ask AI opened event via OTel metrics
-                trackAskAIOpened(channel.scopeType);
-
-                // Trigger xstate machine to open XyneAI
-                xyneAIActor.send({ type: 'OPEN', channelId });
+                // Trigger xstate machine to open XyneAI. The otel
+                // ask_ai_opened counter fires from the sidebar's open effect
+                // so every entry point counts, not just this one.
+                xyneAIActor.send({ type: 'OPEN', channelId, trackSource: 'channel_header' });
               }}
               className='h-7 w-7 rounded-lg'
               data-track-category='CHANNELS'

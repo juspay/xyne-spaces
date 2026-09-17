@@ -90,7 +90,7 @@ export const PostedInLink: React.FC<PostedInLinkProps> = ({
       const path = xyneId
         ? `/support/${originalChannelId}/${xyneId}`
         : `/support/${originalChannelId}`;
-      void navigate(path);
+      void navigate(path, { state: { trackSource: 'chat_link' } });
       return;
     }
 

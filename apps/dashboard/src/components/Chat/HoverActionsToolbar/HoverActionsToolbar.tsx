@@ -289,7 +289,11 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
             data-testid='hover-action-create-ticket'
             data-track-category='HOVER_ACTIONS_TOOLBAR'
             data-track-name='CREATE_TICKET_FROM_MESSAGE'
-            data-track-metadata={actionTrackMetadata}
+            data-track-metadata={JSON.stringify({
+              messageId,
+              ...(conversationId !== undefined && { conversationId }),
+              source: 'chat_message',
+            })}
           >
             <Ticket className='w-4 h-4' />
           </Button>

@@ -1205,6 +1205,7 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
     // Open XyneAI with canvas context
     xyneAIActor.send({
       type: 'OPEN',
+      trackSource: 'canvas_screen',
       canvasInfo,
     });
   };

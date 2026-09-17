@@ -1226,6 +1226,7 @@ export const ThreadMessages = ({
               }
               xyneAIActor.send({
                 type: 'OPEN',
+                trackSource: 'thread_panel',
                 channelId: derivedChannelId,
                 threadInfo,
               });
@@ -1482,6 +1483,7 @@ export const ThreadMessages = ({
                       }
                       xyneAIActor.send({
                         type: 'OPEN',
+                        trackSource: 'thread_panel',
                         channelId: derivedChannelId,
                         threadInfo,
                       });

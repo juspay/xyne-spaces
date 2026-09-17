@@ -1,4 +1,9 @@
 import { logger, Event as LogEvent } from '../../../utils/logger';
+import {
+  isAiOriginatedSource,
+  trackTicketCreateFailed,
+  trackTicketCreateSucceeded,
+} from '../../../services/Analytics/ticketTracking';
 import { useCallback, useContext } from 'react';
 import { SelectMenuAlignment, SingleSelect } from '@juspay/blend-design-system';
 import { useForm } from '@tanstack/react-form';
@@ -132,6 +137,8 @@ interface CreateTicketModalProps {
   entityLinkContext?: EntityLinkScope | undefined;
   isFromSubTicket?: boolean;
   isFromAI?: boolean;
+  /** Which surface opened the form — rides on CREATE_TICKET_SUCCEEDED / FAILED. */
+  trackSource?: string;
   allowChannelSelection?: boolean;
   useLocalAttachments?: boolean;
   focusDescriptionOnOpen?: boolean;
@@ -229,6 +236,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
   releaseChannelIds,
   isFromSubTicket = false,
   isFromAI = false,
+  trackSource = 'unknown',
   allowChannelSelection = false,
   useLocalAttachments = false,
   focusDescriptionOnOpen = false,
@@ -255,6 +263,11 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
   } = useDraftAttachments();
 
   const [searchParams, setSearchParams] = useSearchParams();
+  // For msSinceOpened on the create outcome — time-to-create per source.
+  const openedAtRef = useRef<number>(Date.now());
+  useEffect(() => {
+    if (isOpen) openedAtRef.current = Date.now();
+  }, [isOpen]);
   const searchParamsRef = useRef(searchParams);
   searchParamsRef.current = searchParams;
   const setSearchParamsRef = useRef(setSearchParams);
@@ -1240,6 +1253,51 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
     return true;
   }, [form.state.isValid, form.state.isDirty, submitGateMessage, dynamicFieldErrors]);
 
+  // CREATE_TICKET_SUCCEEDED: the "it exists now" row. SUBMIT_CREATE_TICKET_MODAL is
+  // the click; this fires only after POST /tickets returned an id, with the shape
+  // of what was created and the surface that opened the form. Counts and
+  // booleans only — the title and description never leave through tracking.
+  const trackCreateSucceeded = (
+    formData: CreateTicketFormData,
+    created: TicketResponse | undefined,
+    effectiveChannelId: string | undefined,
+  ): void => {
+    if (!created?.id) return;
+    const dynamicFieldsFilledCount = Object.values(formData.dynamicFields ?? {}).filter(value =>
+      Array.isArray(value) ? value.length > 0 : !!value?.trim(),
+    ).length;
+    trackTicketCreateSucceeded(
+      {
+        id: created.id,
+        xyneId: created.xyneId ?? null,
+        ticketType: formData.ticketType ?? null,
+        priority: formData.priority,
+        statusV2: formData.status,
+        boardId: formData.boardId || null,
+        projectId: selectedBoard?.projectId ?? projectId ?? null,
+        channelId: effectiveChannelId ?? null,
+      },
+      {
+        source: trackSource,
+        aiOriginated: isAiOriginatedSource(trackSource) || isFromAI,
+        fromSourceMessage: !!sourceMessageId,
+        fromSourceConversation: !!sourceConversation,
+        prefilledFromShareLink: enableUrlSync && hasCreateTicketFlag(searchParamsRef.current),
+        isSubTicket: !!parentTicketId,
+        isRelease: formData.workflowType === 'release' || releaseOnly,
+        hasAssignee: formData.assignee?.type === 'assigneeTo',
+        hasUserGroup: formData.assignee?.type === 'userGroup',
+        hasDueDate: !!formData.eta,
+        attachmentsCount: formData.files?.length ?? 0,
+        subTicketsCount: normalizeSubTicketDrafts(subTickets).length,
+        tagsCount: formData.tags?.length ?? 0,
+        dynamicFieldsFilledCount,
+        standalone,
+        msSinceOpened: Date.now() - openedAtRef.current,
+      },
+    );
+  };
+
   const handleCreateTicket = async (formData: CreateTicketFormData) => {
     if (!user) return;
     try {
@@ -1496,6 +1554,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
         response = await apiInstance.post<TicketResponse>('/tickets', formDataPayload);
         createdTicketResponse = response.data;
         processTicketCreationResponse(response, formData.workflowType, effectiveChannelId);
+        trackCreateSucceeded(formData, response.data, effectiveChannelId);
       } else {
         // No files, use JSON
         response = await apiInstance.post<TicketResponse>('/tickets', {
@@ -1531,6 +1590,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
 
         createdTicketResponse = response.data;
         processTicketCreationResponse(response, formData.workflowType, effectiveChannelId);
+        trackCreateSucceeded(formData, response.data, effectiveChannelId);
       }
       const subticketsToCreate = normalizeSubTicketDrafts(subTickets);
       if (createdTicketResponse?.id && subticketsToCreate.length > 0) {
@@ -1570,6 +1630,10 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
       toast.error('Ticket Creation Failed', {
         description:
           error instanceof Error ? error.message : 'Failed to create ticket. Please try again.',
+      });
+      trackTicketCreateFailed(error, {
+        source: trackSource,
+        msSinceOpened: Date.now() - openedAtRef.current,
       });
     }
   };
@@ -1653,6 +1717,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
       parentTicketId,
       isFromSubTicket,
       isFromAI,
+      trackSource,
       subTickets: subTickets.length > 0 ? subTickets : undefined,
       excludedChatAttachmentIds:
         excludedChatAttachmentIds.size > 0 ? Array.from(excludedChatAttachmentIds) : undefined,
@@ -2068,6 +2133,12 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
               }
               data-track-category='Tickets'
               data-track-name='ShareCreateTicketModal'
+              data-track-metadata={JSON.stringify({
+                source: trackSource,
+                channelId,
+                ...(projectId && { projectId }),
+                hasShareableContent,
+              })}
             >
               <LinkIcon strokeWidth={2.33} className='size-3.5' />
             </Button>

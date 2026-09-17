@@ -180,6 +180,7 @@ export const DeskLabelsSidebar = ({
                   className='flex items-center gap-3 flex-1 min-w-0 px-3 h-full text-left'
                   data-track-category='Support'
                   data-track-name='SelectSidebarLabel'
+                  data-track-metadata={JSON.stringify({ to: label.id })}
                 >
                   <span className='size-4 flex items-center justify-center shrink-0'>
                     <Tag size={14} style={{ color }} fill={color} />
