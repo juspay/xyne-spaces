@@ -466,6 +466,12 @@ export const useXyneAIStream = ({
           ? 'edit'
           : (ov?.trigger ?? 'submit');
       if (trigger !== 'button') {
+        // Files/folders/collections ride in combinedAttachedContext (no
+        // separate id arrays) — count by type for the tracking metadata.
+        const eFileCount = combinedAttachedContext?.filter(i => i.type === 'file').length ?? 0;
+        const eFolderCount = combinedAttachedContext?.filter(i => i.type === 'folder').length ?? 0;
+        const eCollectionCount =
+          combinedAttachedContext?.filter(i => i.type === 'collection').length ?? 0;
         globalClickTracker.trackManualEvent('XyneAI', 'SEND_MESSAGE', undefined, {
           ...aiRunTrackingMetadata({
             surface,
@@ -480,9 +486,9 @@ export const useXyneAIStream = ({
             instant: eInstant,
             attachmentsCount: attachments.length,
             channelCount: eChannelIds.length,
-            fileCount: eFileIds.length,
-            folderCount: eFolderIds.length,
-            collectionCount: eCollectionIds.length,
+            fileCount: eFileCount,
+            folderCount: eFolderCount,
+            collectionCount: eCollectionCount,
             canvasCount: eCanvasIds?.length ?? 0,
             ticketCount: eTicketIds?.length ?? 0,
             callCount: eCallIds?.length ?? 0,
