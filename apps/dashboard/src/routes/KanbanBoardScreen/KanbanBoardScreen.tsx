@@ -533,10 +533,8 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   const [flowGroupBacklogPendingId, setFlowGroupBacklogPendingId] = useState<string | null>(null);
   const collapseInitRunRef = useRef<string | null>(null);
   // When mounted from the project route (AppRoot.tsx → :projectId / :projectId/:boardId),
-  // no channelId prop is passed. The Create Ticket button at the bottom of this file
-  // gates on `channel`, so without a fallback the button stays hidden on that route.
-  // Fall back to the first non-archived channel of the project so the modal has a
-  // channel to write into.
+  // no channelId prop is passed. Fall back to the first non-archived channel of the
+  // project so the Create Ticket modal has a channel to write into.
   const projectChannels = useChannelsByProjectId(channelId ? undefined : projectIdParam);
   const fallbackChannelId = projectChannels.find(c => !c.isArchived)?.id ?? '';
   const channel = useChannel(channelId || fallbackChannelId);
@@ -916,6 +914,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   const workspaceViewReady =
     isMachineInitialized &&
     (!isWorkspaceView || (hasSeededWorkspaceView && (filters.boards?.length ?? 0) > 0));
+  const isWorkspaceViewWithoutBoards = isWorkspaceView && (filters.boards?.length ?? 0) === 0;
   const showSubStatus = state.context.showSubStatus;
 
   const setShowOverdueOnly = useCallback(
@@ -1230,18 +1229,26 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   const handleConfirmSaveWorkspaceView = useCallback((): void => {
     const name = workspaceViewNameDraft.trim();
     if (!name) return;
+    if ((filters.boards?.length ?? 0) === 0) {
+      toast.error('Select at least one board to save this view');
+      return;
+    }
     setIsSavePopoverOpen(false);
     setWorkspaceViewNameDraft('');
     void persistWorkspaceView(name);
-  }, [workspaceViewNameDraft, persistWorkspaceView]);
+  }, [workspaceViewNameDraft, persistWorkspaceView, filters.boards]);
 
   const savedViewName = initialName?.trim() ?? '';
   const canSaveInPlace = !!viewId && !!savedViewName;
 
   const handleSaveExistingView = useCallback((): void => {
     if (!savedViewName) return;
+    if ((filters.boards?.length ?? 0) === 0) {
+      toast.error('Select at least one board to save this view');
+      return;
+    }
     void persistWorkspaceView(savedViewName);
-  }, [savedViewName, persistWorkspaceView]);
+  }, [savedViewName, persistWorkspaceView, filters.boards]);
 
   const handleResetWorkspaceView = useCallback((): void => {
     clearViewDraft(viewDraftKey);
@@ -4162,6 +4169,12 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                       <ViewBoardPicker
                         selectedBoardIds={filters.boards ?? []}
                         onChange={boardIds => setFilters({ ...filters, boards: boardIds })}
+                        {...(isWorkspaceViewWithoutBoards
+                          ? {
+                              className:
+                                'border-orange-500 text-orange-600 hover:bg-orange-50 hover:text-orange-700',
+                            }
+                          : {})}
                       />
                     ),
                   }
@@ -4184,8 +4197,6 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                       variant='ghost'
                       size='sm'
                       onClick={handleResetWorkspaceView}
-                      className='rounded-[10px]'
-                      aria-label='Discard unsaved changes'
                       data-track-category='Projects'
                       data-track-name='ResetView'
                     >
@@ -4210,7 +4221,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                   <Button
                     size='sm'
                     onClick={handleSaveExistingView}
-                    disabled={!workspaceViewReady || isSavingWorkspaceView || !isViewDirty}
+                    disabled={isSavingWorkspaceView || !isViewDirty}
                     className='rounded-[10px]'
                     data-track-category='Projects'
                     data-track-name='SaveView'
@@ -4227,7 +4238,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                     trigger={
                       <Button
                         size='sm'
-                        disabled={!workspaceViewReady || isSavingWorkspaceView}
+                        disabled={!hasSeededWorkspaceView || isSavingWorkspaceView}
                         className='rounded-[10px]'
                         data-track-category='Projects'
                         data-track-name='SaveView'
@@ -5576,7 +5587,13 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
         <div className='flex-1 overflow-y-auto p-4 space-y-4 bg-background pb-14'>
           {isTableEmpty && (
             <div className='rounded-lg border border-border bg-muted p-4 text-sm text-muted-foreground'>
-              {isTicketsSyncing ? 'Loading tickets…' : 'No tickets match the current filters.'}
+              {/* Board-less workspace views disable the tickets query, so
+                  isTicketsSyncing never clears — check that case first. */}
+              {isWorkspaceViewWithoutBoards
+                ? 'Select at least one board to build your view.'
+                : isTicketsSyncing
+                  ? 'Loading tickets…'
+                  : 'No tickets match the current filters.'}
             </div>
           )}
           {tableGroups.map(group => {
@@ -5842,7 +5859,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
       )}
 
       {/* Create Ticket Modal */}
-      {effectiveProjectId && channel && isCreateModalOpen && (
+      {effectiveProjectId && channel && !channel.isArchived && isCreateModalOpen && (
         <CreateTicketModal
           isOpen={isCreateModalOpen}
           enableUrlSync
@@ -5864,8 +5881,9 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
         />
       )}
 
-      {/* Create Ticket Modal — my-tickets and saved views (no channel context, user picks channel + board) */}
-      {(isMyTicketsView || isWorkspaceView) && !channel && isCreateModalOpen && (
+      {/* Create Ticket Modal — no usable channel context (my-tickets, workspace views,
+          archived channel); the user picks channel + board */}
+      {(!channel || channel.isArchived || !effectiveProjectId) && isCreateModalOpen && (
         <CreateTicketModal
           isOpen={isCreateModalOpen}
           onClose={() => {
