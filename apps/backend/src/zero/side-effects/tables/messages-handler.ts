@@ -1,5 +1,6 @@
 import { v4 as uuidv4 } from 'uuid';
 import { BaseSideEffectHandler } from '../base-handler';
+import { isSelfMention, buildMentionActivityRecipients } from './selfMention';
 import type { SideEffectJobConfig, MessagePreviousValue } from '../types';
 import { db } from '@/database/client';
 import { withWorkspaceScope } from '@/database/tenant/context';
@@ -576,12 +577,11 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
       }))
 
     // Self-tag: tagging yourself records an activity so the message is findable
-    // under "Your mentions", but it is deliberately kept OUT of validMentionedUsers
-    // so it never produces a push/email notification or an app (USER_MENTIONED) event
-    // for your own message.
-    const isSelfMention = mentionedUsers.some(
-      u => u.mentionSource === 'direct' && u.userId === senderId && channelParticipantIds.has(senderId)
-    );
+    // under "Your mentions", but the sender is deliberately kept OUT of
+    // validMentionedUsers (and therefore out of notificationUserIds and the
+    // USER_MENTIONED app event), so you are never notified about your own
+    // message. The split is unit-tested in ./selfMention.test.ts.
+    const selfMention = isSelfMention(mentionedUsers, senderId, channelParticipantIds);
 
     const mentionedAppUsersIds = validMentionedUsers.filter(u => appUserIds.includes(u.userId)).map(u => u.userId);
 
@@ -659,11 +659,14 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
       ),
     ];
 
-    if (validMentionedUsers.length > 0 || isSelfMention) {
+    const activityRecipients = buildMentionActivityRecipients(
+      validMentionedUsers,
+      senderId,
+      selfMention
+    );
+
+    if (activityRecipients.length > 0) {
       const isThreadActivity = conversation.initialMessageId !== messageId;
-      const activityRecipients = isSelfMention
-        ? [...validMentionedUsers, { userId: senderId, mentionSource: 'direct' as const }]
-        : validMentionedUsers;
       const activities = activityRecipients.map(user => ({
         id: uuidv4(),
         userId: user.userId,

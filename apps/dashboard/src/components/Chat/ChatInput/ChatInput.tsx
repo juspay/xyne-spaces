@@ -337,6 +337,9 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
       searchMentions,
     } = useMentionSearch(channelId, threadParticipantIds, conversationId, {
       includeSpecialMentions: !conversationId || allowThreadBroadcastMentions,
+      // Self-tag: the chat composer is the only surface that offers you as a
+      // mention candidate, so you can flag a message for yourself.
+      excludeSelf: false,
     });
     const channel = useChannel(channelId);
     const isSupportChannel = channel?.type === ChannelType.SUPPORT;
