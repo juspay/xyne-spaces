@@ -15476,7 +15476,7 @@ export function createMutators(
             ...(name !== undefined && { name }),
             ...(visibility !== undefined && { visibility }),
             ...(isStarred !== undefined && { isStarred }),
-            updatedAt: timestamp,
+            ...(values !== undefined && { updatedAt: timestamp }),
           });
 
           // Full replace of values if provided
