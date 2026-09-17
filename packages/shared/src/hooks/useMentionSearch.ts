@@ -153,7 +153,9 @@ export const useMentionSearch = (
   threadParticipantIds?: ReadonlySet<string>,
   options: UseMentionSearchOptions = {},
 ): UseMentionSearchResult => {
-  const { includeSpecialMentions = true, excludeSelf = true } = options;
+  // Self-tag: you are a valid mention candidate everywhere. Callers can still
+  // opt out with excludeSelf: true (e.g. surfaces where tagging yourself is meaningless).
+  const { includeSpecialMentions = true, excludeSelf = false } = options;
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
   // Gates the Vespa membership fetch — fires only after the picker has been
@@ -277,9 +279,8 @@ export const useMentionSearch = (
         : membersLoaded
           ? allWorkspaceUsers.filter((u) => memberIds.has(u.id))
           : allWorkspaceUsers.filter((u) => dmRankAffinity.has(u.id));
-    // Keep yourself only in a self-DM (or when the caller opted out of this
-    // chat-specific default, e.g. the automation composer); otherwise you're
-    // never a mention candidate.
+    // Self-tag: you are shown as "<name> (you)" in the picker unless the caller
+    // explicitly passes excludeSelf. Self-DM always keeps you regardless.
     return src.filter((u) =>
       isSelfDm || !excludeSelf ? true : u.id !== currentUserId,
     );
