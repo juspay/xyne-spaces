@@ -14,6 +14,7 @@ export interface OzonetelTicketRules {
   createTicketOnProgressive?: boolean;
   createTicketOnPredictive?: boolean;
   ticketSubjectTemplate?: string;
+  customerPhoneFieldName?: string;
 }
 
 export interface OzonetelConfigView {
@@ -34,6 +35,7 @@ export interface OzonetelConfigView {
 export interface OzonetelToolbarView {
   configured: boolean;
   toolbarUrl: string | null;
+  customerPhoneFieldName: string | null;
 }
 
 export interface SaveOzonetelConfigInput {
@@ -67,6 +69,15 @@ export async function getOzonetelConfig(channelId?: string): Promise<OzonetelCon
 
 export async function getOzonetelToolbar(): Promise<OzonetelToolbarView> {
   const res = await apiInstance.get<OzonetelToolbarView>('/integrations/ozonetel/toolbar');
+  return res.data;
+}
+
+export async function linkOzonetelCall(input: {
+  ticketId: string;
+  monitorUcid: string;
+  ucid?: string;
+}): Promise<{ ok: boolean }> {
+  const res = await apiInstance.post<{ ok: boolean }>('/integrations/ozonetel/link-call', input);
   return res.data;
 }
 

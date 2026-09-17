@@ -263,6 +263,17 @@ class RedisService {
     await this.redis.set(`user:wsctx:${userId}`, JSON.stringify(ctx), 'EX', 3600);
   }
 
+  // 24h so the post-call webhook still finds it after long calls.
+  async setOzonetelCallTicket(workspaceId: string, callId: string, ticketId: string): Promise<void> {
+    if (!this.redis) throw new Error('Redis not initialized');
+    await this.redis.set(`ozonetel:call-ticket:${workspaceId}:${callId}`, ticketId, 'EX', 86400);
+  }
+
+  async getOzonetelCallTicket(workspaceId: string, callId: string): Promise<string | null> {
+    if (!this.redis) throw new Error('Redis not initialized');
+    return this.redis.get(`ozonetel:call-ticket:${workspaceId}:${callId}`);
+  }
+
   // Session subscription management
   async subscribeToSession(sessionId: string, socketId: string): Promise<void> {
     if (!this.redis) throw new Error('Redis not initialized');
