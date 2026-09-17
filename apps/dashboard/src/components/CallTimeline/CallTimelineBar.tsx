@@ -133,7 +133,7 @@ export function CallTimelineBar({
   return (
     <div className={cn('rounded-2xl border border-border bg-card px-5 py-4', className)}>
       {mode === 'video' && (
-        <div className='relative mx-auto mb-4 aspect-video w-full max-w-2xl overflow-hidden rounded-xl bg-black'>
+        <div className='relative -mx-2 -mt-1 mb-3 aspect-video overflow-hidden rounded-xl bg-black'>
           {/* Sits behind the picture, so a stretch nobody screen-recorded reads as
               blank rather than as the last frame left standing. */}
           <span className='absolute inset-0 grid place-items-center px-4 text-center text-xs text-white/50'>
