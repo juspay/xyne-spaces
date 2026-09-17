@@ -1,3 +1,10 @@
+## [1.334.1](https://github.com/juspay/xyne-spaces/compare/v1.334.0...v1.334.1) (2026-09-17)
+
+
+### Bug Fixes
+
+* dispatch desk report via scoped claw agent lookup ([#1901](https://github.com/juspay/xyne-spaces/issues/1901)) ([c121138](https://github.com/juspay/xyne-spaces/commit/c121138044a6fe61dd6486cfa6eabf992baf0015))
+
 ## [1.334.0](https://github.com/juspay/xyne-spaces/compare/v1.333.1...v1.334.0) (2026-09-17)
 
 
