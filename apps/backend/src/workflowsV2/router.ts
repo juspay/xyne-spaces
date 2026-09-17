@@ -1,19 +1,3 @@
-/**
- * Express adapter for the `@xyne/workflow-sdk` HTTP surface.
- *
- * `createWorkflowRouter` returns plain `RouteDefinition[]` — `{ method, path, handler }`
- * with no framework coupling. This file is the glue: Express request → `RouteRequest`,
- * `RouteResponse` → Express response, in both directions, including SSE, binary and
- * redirects.
- *
- * Which router a route lands on is decided HERE rather than by the SDK's own
- * `authenticated` flag:
- *  - `workflowsAppRouter` — the app-token trigger route, mounted under `/api/apps/workflows`
- *    behind `authenticateApp`.
- *  - `workflowsRouter` — everything else, mounted behind the session.
- *
- * Nothing is exposed anonymously. See {@link APP_AUTH_ROUTES}.
- */
 import express, { type Request, type Response, type Router } from 'express';
 import { createWorkflowRouter, type RouteAccess, type RouteRequest } from '@xyne/workflow-sdk';
 import { db } from '@/database/client';
@@ -22,21 +6,19 @@ import { webhookLimiter } from '@/middleware/rateLimiters';
 import { uploadConfig } from '@/middleware/upload';
 import { ShareableEntityType } from '@xyne/shared';
 import { appResourceAccessService } from '@/services/appResourceAccessService';
+import { SDLC_AUTHOR_METADATA_KEY, sdlcAuthorOf } from './agents/sdlc-dispatch';
 import { persistence, workflowRuntime } from './runtime';
 import { attrsOf } from './utils';
 import type { XyneCtx } from './types';
 
 /**
- * Route key → the path param naming the workflow it acts on. The only routes behind app
- * auth rather than the session: anything the SDK marks `authenticated: false` and absent
- * here is mounted behind the session anyway, so a new SDK public route fails closed.
- * Re-check on an SDK bump.
+ * Route key → the path param naming the workflow it acts on. The only `provider` routes
+ * mounted behind app auth; a new SDK `provider` route absent here and from
+ * {@link PUBLIC_ALLOWED_ROUTES} is not mounted at all. Re-check on an SDK bump.
  */
 const APP_AUTH_ROUTES = new Map<string, string>([
   ['POST /v2/workflows/:workflowId/trigger/v2', 'workflowId'],
 ]);
-
-const routeKey = (method: string, path: string): string => `${method} ${path}`;
 
 /**
  * The SDK is generic over the caller's ctx and never inspects it. Ours comes from the
@@ -59,6 +41,37 @@ const ctxFromRequest = (req: Request): XyneCtx => {
  * create to stamp ownership and is not persisted.
  */
 const ATTRIBUTE_INJECTED_ROUTES = new Set(['POST /workflows', 'POST /folders', 'POST /credentials']);
+
+const isPlainObject = (value: unknown): value is Record<string, unknown> =>
+  Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+
+/** SDLC steps act as this author, so only the server sets it: whoever last changed the steps. */
+const guardSdlcAuthor = async (key: string, request: RouteRequest, ctx: XyneCtx): Promise<void> => {
+  const body = request.body;
+  if (!isPlainObject(body)) return;
+
+  if (key === 'POST /workflows' || key === 'PUT /workflows/:id') {
+    const sent = body['metadata'];
+    const metadata = isPlainObject(sent) ? { ...sent } : {};
+    delete metadata[SDLC_AUTHOR_METADATA_KEY];
+    if (body['config']) metadata[SDLC_AUTHOR_METADATA_KEY] = ctx.userId;
+    if (sent !== undefined || body['config']) body['metadata'] = metadata;
+    return;
+  }
+
+  if (key === 'POST /executions/:execId/rerun' && body['configOverrides']) {
+    const execution = await db.workflowExecution.findFirst({
+      where: { id: request.params['execId'] ?? '', workspaceId: ctx.workspaceId },
+      select: { workflow: { select: { metadata: true } } },
+    });
+    const author = sdlcAuthorOf(execution?.workflow.metadata);
+    if (author && author !== ctx.userId) {
+      throw Object.assign(new Error('Only the workflow author can rerun it with changed steps'), {
+        statusCode: 403,
+      });
+    }
+  }
+};
 
 /**
  * The authorization the SDK skips: the handler discards its `auth` and calls
@@ -107,7 +120,7 @@ const assertTriggerableWorkflow = async (
   }
 };
 
-const buildRouteRequest = (req: Request): RouteRequest => {
+const buildRouteRequest = (req: Request, rawBodyRoute: boolean): RouteRequest => {
   const body: unknown = req.body;
 
   // Ported from xyne-search, where `{"$ne":"test"}` arrived as a name and crashed the UI on
@@ -233,35 +246,53 @@ const CLAW_ALLOWED_ROUTES = new Set([
   'GET /analytics/top-errors',
 ]);
 
-export const workflowRouteDefinitions = (): ReturnType<typeof createWorkflowRouter<XyneCtx>> =>
-  createWorkflowRouter<XyneCtx>(workflowRuntime, {
-    // Never reached: every route is mounted behind Express middleware that establishes the
-    // principal, so the SDK is never asked to authenticate one itself.
+const needsSession = (access: RouteAccess): boolean => {
+  switch (access) {
+    case 'session':
+      return true;
+    case 'provider':
+      return false;
+  }
+};
+
+type MountAuth = 'session' | 'app' | 'none';
+
+const mount = (
+  router: Router,
+  auth: MountAuth,
+  allow?: ReadonlySet<string>,
+  guards: readonly express.RequestHandler[] = [],
+): void => {
+  const routes = createWorkflowRouter<XyneCtx>(workflowRuntime, {
     authenticate: () => {
       throw Object.assign(new Error('Unauthorized'), { statusCode: 401 });
     },
   });
 
-const mount = (router: Router, appAuth: boolean, allow?: ReadonlySet<string>): void => {
-  for (const route of workflowRouteDefinitions()) {
-    const key = routeKey(route.method, route.path);
+  for (const route of routes) {
+    const method = route.method.toLowerCase() as 'get' | 'post' | 'put' | 'delete';
+    const key = `${route.method} ${route.path}`;
     const workflowIdParam = APP_AUTH_ROUTES.get(key);
-    if (Boolean(workflowIdParam) !== appAuth) continue;
+
+    if (needsSession(route.access) !== (auth === 'session')) continue;
+    if (auth !== 'session' && Boolean(workflowIdParam) !== (auth === 'app')) continue;
     if (allow && !allow.has(key)) continue;
 
-    const method = route.method.toLowerCase() as 'get' | 'post' | 'put' | 'delete';
-
-    const middleware = route.multipart ? [uploadConfig.any()] : [];
+    const middleware: express.RequestHandler[] = route.multipart
+      ? [uploadConfig.any()]
+      : route.rawBody
+        ? [express.raw({ type: () => true, limit: '10mb' })]
+        : [express.json({ limit: '10mb' })];
 
     router[method](route.path, ...guards, ...middleware, (req: Request, res: Response) => {
       void (async () => {
         try {
-          const ctx = ctxFromRequest(req);
-          if (workflowIdParam) await assertTriggerableWorkflow(req, ctx, workflowIdParam);
+          const ctx = auth === 'none' ? null : ctxFromRequest(req);
+          if (ctx && workflowIdParam) await assertTriggerableWorkflow(req, ctx, workflowIdParam);
 
-          const routeRequest = buildRouteRequest(req);
+          const routeRequest = buildRouteRequest(req, route.rawBody === true);
 
-          if (ATTRIBUTE_INJECTED_ROUTES.has(key)) {
+          if (ctx && ATTRIBUTE_INJECTED_ROUTES.has(key)) {
             const body = (routeRequest.body ?? {}) as Record<string, unknown>;
             body['attributes'] = { workspaceId: ctx.workspaceId, createdByUserId: ctx.userId };
             (routeRequest as { body: unknown }).body = body;
@@ -284,12 +315,14 @@ const mount = (router: Router, appAuth: boolean, allow?: ReadonlySet<string>): v
   }
 };
 
-/** Registers only {@link APP_AUTH_ROUTES}; the caller must authenticate the app first. */
-export const workflowsAppRouter: Router = express.Router();
-mount(workflowsAppRouter, true);
-
 export const workflowsRouter: Router = express.Router();
-mount(workflowsRouter, false);
+mount(workflowsRouter, 'session');
 
+export const workflowsPublicRouter: Router = express.Router();
+mount(workflowsPublicRouter, 'none', PUBLIC_ALLOWED_ROUTES, [webhookLimiter]);
 export const workflowsClawRouter: Router = express.Router();
-mount(workflowsClawRouter, false, CLAW_ALLOWED_ROUTES);
+mount(workflowsClawRouter, 'session', CLAW_ALLOWED_ROUTES);
+
+/** Registers only {@link APP_AUTH_ROUTES}; mounted under `/api/apps/workflows` behind `authenticateApp`. */
+export const workflowsAppRouter: Router = express.Router();
+mount(workflowsAppRouter, 'app');

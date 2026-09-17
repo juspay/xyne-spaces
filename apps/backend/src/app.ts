@@ -47,7 +47,7 @@ import userAssignmentStateRoutes from '@/routes/userAssignmentState';
 import { UserManagementController } from '@/controllers/userManagementController';
 import { registerAllWorkflows } from '@/workflows';
 import workflowRoutes from '@/routes/workflows';
-import { workflowsClawRouter, workflowsRouter } from '@/workflowsV2/router';
+import { workflowsClawRouter, workflowsPublicRouter, workflowsRouter } from '@/workflowsV2/router';
 import { configSyncService } from '@/services/configSyncService';
 import { websocketService } from '@/services/websocketService';
 import { redisService } from '@/services/redisService';
@@ -375,7 +375,8 @@ export class App {
 
     this.app.use('/api/automation-webhooks', webhookLimiter, automationWebhookRoutes);
 
-    // Claw MCP route (user + app auth) — must be before /api/query
+
+    // Claw MCP route (user + app auth)
     this.app.use('/api/query/claw', authenticateUserOrApp, pythonQueryRoutes);
 
     // Commit analysis routes (auth and ACL required)
