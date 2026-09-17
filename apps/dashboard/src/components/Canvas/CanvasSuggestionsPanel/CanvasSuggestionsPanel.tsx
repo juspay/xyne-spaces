@@ -24,6 +24,7 @@ import { cn } from '../../../utils/classNames';
 import {
   useCanvasSuggestionAccept,
   type SuggestionEditorHandle,
+  type SuggestionOutcome,
 } from '../useCanvasSuggestionAccept';
 
 interface SuggestionRow {
@@ -90,7 +91,7 @@ export const CanvasSuggestionsPanel = ({
 
   // Fires one mutator with busy-state + error toast handling.
   const run = useCallback(
-    async (key: string, mutation: unknown, failure: string) => {
+    async (key: string, mutation: unknown, failure: string): Promise<boolean> => {
       setBusy(key);
       try {
         const result = z.mutate(mutation as never);
@@ -98,16 +99,35 @@ export const CanvasSuggestionsPanel = ({
           result as { server: Promise<{ type: string; error?: { message?: string } }> }
         ).server;
         if (server.type === 'error') throw new Error(server.error?.message || failure);
+        return true;
       } catch (error) {
         toast.error(failure, {
           description: error instanceof Error ? error.message : undefined,
         });
+        return false;
       } finally {
         setBusy(null);
       }
     },
     [z],
   );
+
+  /** resolveAll carries at most 500 ids per list; a whole-document proposal can
+   *  hold thousands. The document is applied once, in the browser — these calls
+   *  only record statuses, so they split cleanly. */
+  const OUTCOME_CHUNK = 500;
+
+  const outcomeChunks = (outcome: SuggestionOutcome): SuggestionOutcome[] => {
+    const total = Math.max(outcome.applied.length, outcome.stale.length);
+    if (total <= OUTCOME_CHUNK) return [outcome];
+    const chunks: SuggestionOutcome[] = [];
+    for (let at = 0; at < total; at += OUTCOME_CHUNK) {
+      const applied = outcome.applied.slice(at, at + OUTCOME_CHUNK);
+      const stale = outcome.stale.slice(at, at + OUTCOME_CHUNK);
+      if (applied.length || stale.length) chunks.push({ applied, stale });
+    }
+    return chunks;
+  };
 
   const clientApply = useCanvasSuggestionAccept(canvasId, editorRef, editorContainerRef);
 
@@ -258,16 +278,23 @@ export const CanvasSuggestionsPanel = ({
               onClick={() => {
                 void (async (): Promise<void> => {
                   const outcome = await tryClientApply(pending);
-                  await run(
-                    'accept-all',
-                    mutators.canvasSuggestion.resolveAll({
-                      canvasId,
-                      accept: true,
-                      timestamp: Date.now(),
-                      ...(outcome ? { outcome } : {}),
-                    }),
-                    'Failed to accept changes',
-                  );
+                  // No outcome: the legacy server apply, one call, unchanged.
+                  const batches = outcome ? outcomeChunks(outcome) : [null];
+                  for (const batch of batches) {
+                    const ok = await run(
+                      'accept-all',
+                      mutators.canvasSuggestion.resolveAll({
+                        canvasId,
+                        accept: true,
+                        timestamp: Date.now(),
+                        ...(batch ? { outcome: batch } : {}),
+                      }),
+                      'Failed to accept changes',
+                    );
+                    // Stop at the first failure: the rest stay PENDING and a
+                    // second accept re-runs them (re-applying a row is a no-op).
+                    if (!ok) break;
+                  }
                 })();
               }}
               data-track-category='CANVAS'

@@ -23,7 +23,6 @@ import { saveReadReceipt, getReadReceipt } from '@/services/canvas/readReceipt.j
 import { createSuggestionBatch } from '@/services/canvas/suggestions.js';
 import {
   convertMarkdownToBlockNote,
-  convertBlockNoteToMarkdown,
   getCanvasUrl,
   getCanvasById,
 } from '../services/canvasService.js';
@@ -1058,12 +1057,11 @@ export class CanvasController {
         return;
       }
 
-      const markdown = blocks.length > 0 ? await convertBlockNoteToMarkdown(blocks) : '';
-
+      // Only an empty document reaches here — the labelled reply returned above.
       res.status(200).json({
         id: canvas.id,
         title: canvas.title,
-        markdown,
+        markdown: '',
         url: getCanvasUrl(canvas.id, req.user?.workspaceId),
       });
     } catch (error) {

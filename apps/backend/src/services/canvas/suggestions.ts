@@ -190,11 +190,15 @@ export async function applySuggestionChanges(
       const renderer = await createBlockRenderer(current);
       const preIds = topLevelIds(current);
 
-      // Every placement row of the involved batches — accepted ones included —
-      // so placements land behind siblings that precede them in the reply.
+      // Every LIVE placement row of the involved batches — accepted ones
+      // included — so placements land behind siblings that precede them in the reply.
       const batchIds = [...new Set(rows.map(r => r.batchId))];
       const siblings = await prisma.canvasSuggestionChange.findMany({
-        where: { batchId: { in: batchIds }, op: { in: ['insert', 'move'] } },
+        where: {
+          batchId: { in: batchIds },
+          op: { in: ['insert', 'move'] },
+          status: { in: ['PENDING', 'ACCEPTED'] },
+        },
         select: { id: true, op: true, blockId: true, orderIndex: true },
       });
       const siblingOrder = suggestionSiblingOrder(current, siblings);

@@ -3167,7 +3167,6 @@ export const queries = defineQueries({
     },
   ),
 
-  /** Unresolved suggestion changes for a canvas; the panel groups them by batchId and shows batches with a pending row. */
   /** Placement rows (insert/move) of a canvas, ACCEPTED included — the client-side
    *  siblingOrder source for ordered placement. Never rendered as cards. */
   canvasSuggestionPlacementOrder: defineQuery(
@@ -3183,6 +3182,7 @@ export const queries = defineQueries({
     },
   ),
 
+  /** Unresolved suggestion changes for a canvas; the panel groups them by batchId and shows batches with a pending row. */
   canvasSuggestionChanges: defineQuery(
     z.object({ canvasId: z.string() }),
     ({ ctx, args: { canvasId } }) => {
