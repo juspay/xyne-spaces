@@ -14,6 +14,7 @@ import type { WorkspaceJoinPolicy as WorkspaceJoinPolicyValue, WorkspaceType as 
 
 import '../types/express';
 import { config } from '@/config/env';
+import { isRefreshAllowed } from '@/services/sessionRefreshValidator';
 import { DatabaseClient } from '@/database/client';
 import { runAsSystem } from '@/database/tenant/context';
 import { getEncryptionProvider } from '@/services/encryption';
@@ -736,8 +737,24 @@ export class AuthV2Controller {
 
       logger.info(`[${requestId}] Session found for user: ${session.user.email}`);
 
-      if (session.status !== 'ACTIVE' || new Date() > session.refreshTokenExpiry) {
-        logger.warn(`[${requestId}] Session expired or inactive`);
+      // ENABLE_PROVIDER_REVOCATION_CHECK gates the refresh-validity decision.
+      // Disabled → the original inline check (session status + expiry only) runs
+      // verbatim, calling nothing new. Enabled → the shared isRefreshAllowed
+      // decision (status/expiry/leftAt + Google/Microsoft revocation +
+      // deactivation cleanup), same as the v1/v2 auth middlewares — so this
+      // JWT-minting endpoint (used by Zero clients after a 401) can't re-issue a
+      // token for a revoked user.
+      if (!config.enableProviderRevocationCheck) {
+        if (session.status !== 'ACTIVE' || new Date() > session.refreshTokenExpiry) {
+          logger.warn(`[${requestId}] Session expired or inactive`);
+          res.status(401).json({
+            error: 'Session expired',
+            message: 'Please re-authenticate',
+          });
+          return;
+        }
+      } else if (!(await isRefreshAllowed(session))) {
+        logger.warn(`[${requestId}] Session refresh not allowed (invalid or revoked)`);
         res.status(401).json({
           error: 'Session expired',
           message: 'Please re-authenticate',
