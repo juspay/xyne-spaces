@@ -11,7 +11,7 @@ import * as Popover from '@radix-ui/react-popover';
 import { useActiveUserSearch, useSelf } from '../../../hooks/useUsers';
 import { getUserDisplayName, isUserDeactivated } from '../../../utils/userDisplayName';
 import { renderEmoji } from '../../../utils/customEmojiUtils';
-import { isStatusExpired } from '../../../utils/statusUtils';
+import { resolveUserStatus } from '../../../utils/statusUtils';
 
 interface SearchUserProps {
   excludeUserIds?: string[];
@@ -308,10 +308,11 @@ export const SearchUser: React.FC<SearchUserProps> = ({
                         >
                           {getUserDisplayName(user)}
                           {selfUser && user.id === selfUser.id && <span>(you)</span>}
-                          {user.statusEmoji &&
-                            (!user.statusExpiryAt || !isStatusExpired(user.statusExpiryAt)) && (
-                              <span className='inline-flex'>{renderEmoji(user.statusEmoji)}</span>
-                            )}
+                          {resolveUserStatus(user).hasStatus && (
+                            <span className='inline-flex'>
+                              {renderEmoji(resolveUserStatus(user).emoji)}
+                            </span>
+                          )}
                         </span>
                         {isUserDeactivated(user) && (
                           <span className='inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-muted text-muted-foreground shrink-0'>

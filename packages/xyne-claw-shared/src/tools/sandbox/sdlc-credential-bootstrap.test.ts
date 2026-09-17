@@ -11,9 +11,9 @@ import {
 
 const binding = {
   agentSlug: 'sdlc-agent' as const,
-  operation: 'PUSH' as const,
-  executionId: 'execution-1',
-  sessionId: 'session-1',
+  operation: 'INTERACTIVE' as const,
+  interactiveGrant: 'grant-1',
+  conversationId: 'conversation-1',
   repoId: 'repo-1',
 };
 

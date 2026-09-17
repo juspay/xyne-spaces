@@ -57,10 +57,12 @@ describe("tool surface", () => {
     expect(mod.WORKFLOW_TOOL_NAMES).toHaveLength(mod.tools.length);
   });
 
-  it("gates exactly the tools that mutate or execute", async () => {
+  it("records exactly the tools that mutate or execute", async () => {
     const mod = await import("./xyne-workflows-tools.js");
-    // Reads must NOT be gated — an approval card on every lookup would train users to
-    // click through them, which is how a real write slips past.
+    // The adapter does not gate on this today (see its `writeTools`), but the list
+    // is what gating would use, so it has to stay honest about which tools mutate.
+    // Reads must never appear here — an approval card on every lookup would train
+    // users to click through them, which is how a real write slips past.
     expect([...mod.WORKFLOW_WRITE_TOOL_NAMES].sort()).toEqual(
       ["workflow_create", "workflow_run", "workflow_update"],
     );

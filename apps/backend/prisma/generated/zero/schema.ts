@@ -524,6 +524,7 @@ export const userTable = table("users")
     notificationsPausedUntil: number().optional(),
     assignmentUnavailableUntil: number().optional(),
     calendarVisibility: string(),
+    activityStatus: string().optional(),
   })
   .primaryKey("id");
 
@@ -1353,6 +1354,7 @@ export const emailChannelPreferenceTable = table("email_channel_preferences")
     workspaceId: string(),
     metricsEnabled: boolean().optional(),
     frtStageNames: string().optional(),
+    metricsGuestVisibility: string().optional(),
     appWebhookDeliveryEnabled: boolean(),
     deskReportEnabled: boolean().optional(),
     deskReportAgentSlug: string().optional(),
@@ -1764,6 +1766,7 @@ export const callRecordingTable = table("call_recordings")
     storagePath: string().optional(),
     segmentPrefix: string().optional(),
     messageId: string().optional(),
+    attachmentId: string().optional(),
     startedAt: number(),
     endedAt: number().optional(),
     createdAt: number(),

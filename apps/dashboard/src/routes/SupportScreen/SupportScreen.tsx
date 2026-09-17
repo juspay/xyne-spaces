@@ -9,6 +9,7 @@ import {
   AutoDraftStatus,
   MailboxState,
   WorkspaceRole,
+  SavedConfigVisibility,
 } from '@xyne/shared';
 import React, { ReactElement, useMemo, useState, useEffect, useCallback, useRef } from 'react';
 import { toast } from 'sonner';
@@ -199,6 +200,9 @@ import { DeskMetricsDashboard } from '../../components/xyne-desk/DeskMetrics';
 import { TopicsExplorer } from '../../components/xyne-desk/TopicsExplorer';
 import { AutoLabelWizard } from '../../components/xyne-desk/AutoLabelWizard/AutoLabelWizard';
 import { DeskReportPanel } from '../../components/xyne-desk/DeskReport';
+import { DeskSavedViewsControls } from '../../components/xyne-desk/DeskSavedViewsControls';
+import { useDeskTicketSavedViews } from '../../hooks/useDeskTicketSavedViews';
+import { valuesToFilters } from '../../utils/savedViewSerialization';
 import {
   useChannelIntegrationInfo,
   clearChannelConnectedEmailCache,
@@ -877,6 +881,74 @@ const SupportScreen = (): ReactElement => {
   const hasMoreFiltersActive = moreFiltersActiveCount > 0;
   const hasAnyFilterActive =
     hasAssigneeFilter || hasPriorityFilter || hasStagesFilter || hasMoreFiltersActive;
+
+  // Desk ticket saved views
+  const ticketViewsChannelId =
+    selectedChannelId && selectedChannelId !== ALL_CHANNELS_ID ? selectedChannelId : '';
+  const activeTicketViewId = filtersState.context.activeViewId;
+  const setActiveTicketViewId = useCallback(
+    (id: string | null) => {
+      sendFilters({ type: 'SET_ACTIVE_VIEW_ID', activeViewId: id });
+    },
+    [sendFilters],
+  );
+  const {
+    savedViews: deskSavedViews,
+    savedViewsLoaded,
+    saveView: saveDeskView,
+    updateView: updateDeskView,
+    deleteView: deleteDeskView,
+    applySavedView: applyDeskSavedView,
+  } = useDeskTicketSavedViews(ticketViewsChannelId, setFilters);
+
+  // Self-heal: clear a stale activeViewId that no longer exists in the list.
+  // Guard on savedViewsLoaded so we don't clear before the query returns data.
+  useEffect(() => {
+    if (
+      savedViewsLoaded &&
+      activeTicketViewId &&
+      !deskSavedViews.find(v => v.id === activeTicketViewId)
+    ) {
+      setActiveTicketViewId(null);
+    }
+  }, [savedViewsLoaded, activeTicketViewId, deskSavedViews, setActiveTicketViewId]);
+
+  const handleSaveDeskView = async (
+    name: string,
+    visibility: SavedConfigVisibility,
+  ): Promise<string | undefined> => {
+    return saveDeskView(name, filters, visibility);
+  };
+
+  const handleUpdateDeskView = async (viewId: string): Promise<void> => {
+    await updateDeskView(viewId, filters);
+  };
+
+  const isDeskViewDirty = useMemo(() => {
+    if (!activeTicketViewId) return false;
+    const activeView = deskSavedViews.find(v => v.id === activeTicketViewId);
+    if (!activeView?.values) return false;
+    const viewFilters = valuesToFilters(activeView.values);
+    const sortDeep = (v: unknown): unknown => {
+      if (Array.isArray(v)) {
+        const mapped = v.map(sortDeep);
+        if (mapped.every(item => typeof item !== 'object' || item === null)) {
+          return [...mapped].sort();
+        }
+        return mapped;
+      }
+      if (v !== null && typeof v === 'object') {
+        const rec = v as Record<string, unknown>;
+        return Object.fromEntries(
+          Object.keys(rec)
+            .sort()
+            .map(k => [k, sortDeep(rec[k])]),
+        );
+      }
+      return v;
+    };
+    return JSON.stringify(sortDeep(filters)) !== JSON.stringify(sortDeep(viewFilters));
+  }, [activeTicketViewId, deskSavedViews, filters]);
 
   const {
     rowRef: filterRowRef,
@@ -1588,18 +1660,40 @@ const SupportScreen = (): ReactElement => {
   // Mailbox folders are email-only, so other desk types get no folder filter on their list.
   const selectedChannelHasMailboxFolders =
     sortedEmailChannels.find(c => c.id === selectedChannelId)?.type === ChannelType.EMAIL;
+  // Desk insight panels (metrics, report, topics) are restricted to the desk owner
+  // and channel admins, matching canManage in useDeskSettingsForm.
+  // myChannelParticipations only returns this user's ADMIN participations.
+  const [myAdminParticipations] = useCachedQuery(queries.myChannelParticipations({}));
+  const isChannelAdmin = (myAdminParticipations ?? []).some(
+    p => p.channelId === preferenceChannelId,
+  );
+  const isTicketViewsChannelAdmin = (myAdminParticipations ?? []).some(
+    p => p.channelId === ticketViewsChannelId,
+  );
+  const isDeskOwner = !!userID && channelPreference?.ownerUserId === userID;
+  const canManageDeskInsights = isDeskOwner || isChannelAdmin;
+  const myAdminChannelIds = useMemo(
+    () => new Set((myAdminParticipations ?? []).map(p => p.channelId)),
+    [myAdminParticipations],
+  );
   // Topics Explorer rolls up one desk at a time, behind the same preference as metrics.
   const canExploreTopics =
+    canManageDeskInsights &&
     isSelectedChannelJoined &&
     selectedChannelId !== ALL_CHANNELS_ID &&
     !!channelPreference?.metricsEnabled;
 
+  // Only desks the caller manages belong in the comparison picker: the
+  // aggregate route skips anything else as 'forbidden', which read as silently
+  // missing data. Ownership of OTHER desks isn't readable client-side (the ACL
+  // has no all-preferences query), but desk creators are enrolled as channel
+  // ADMIN participants, so the admin set covers the owner case in practice.
   const metricsSelectableDesks = useMemo(
     () =>
       sortedEmailChannels
-        .filter(c => joinedChannelIds.has(c.id))
+        .filter(c => joinedChannelIds.has(c.id) && myAdminChannelIds.has(c.id))
         .map(c => ({ id: c.id, name: c.name?.trim() || 'Untitled desk' })),
-    [sortedEmailChannels, joinedChannelIds],
+    [sortedEmailChannels, joinedChannelIds, myAdminChannelIds],
   );
   // A selected channelId that doesn't appear in useEmailChannels() means the
   // channel either doesn't exist or is a private channel the user isn't in —
@@ -2862,36 +2956,39 @@ const SupportScreen = (): ReactElement => {
                           </button>
                         </Tooltip>
                       )}
-                      {isSelectedChannelJoined && metricsEnabled && (
-                        <Tooltip content='Desk metrics' side='bottom'>
-                          <button
-                            onClick={() => {
-                              const base = selectedChannelId
-                                ? `${supportBase}/${selectedChannelId}`
-                                : supportBase;
-                              if (isMetricsOpen) {
-                                void navigate(base, { replace: true });
-                              } else {
-                                void navigate(`${base}?metrics=open`);
-                              }
-                            }}
-                            className={cn(
-                              'p-1.5 rounded transition-colors',
-                              isMetricsOpen
-                                ? 'bg-muted text-foreground'
-                                : 'text-muted-foreground hover:text-foreground hover:bg-accent',
-                            )}
-                            data-track-category='Support'
-                            data-track-name='OpenDeskMetrics'
-                            data-track-metadata={JSON.stringify({ channelId: selectedChannelId })}
-                          >
-                            <BarChart3 size={16} />
-                          </button>
-                        </Tooltip>
-                      )}
+                      {isSelectedChannelJoined &&
+                        metricsEnabled &&
+                        (canManageDeskInsights || isGuest) && (
+                          <Tooltip content='Desk metrics' side='bottom'>
+                            <button
+                              onClick={() => {
+                                const base = selectedChannelId
+                                  ? `${supportBase}/${selectedChannelId}`
+                                  : supportBase;
+                                if (isMetricsOpen) {
+                                  void navigate(base, { replace: true });
+                                } else {
+                                  void navigate(`${base}?metrics=open`);
+                                }
+                              }}
+                              className={cn(
+                                'p-1.5 rounded transition-colors',
+                                isMetricsOpen
+                                  ? 'bg-muted text-foreground'
+                                  : 'text-muted-foreground hover:text-foreground hover:bg-accent',
+                              )}
+                              data-track-category='Support'
+                              data-track-name='OpenDeskMetrics'
+                              data-track-metadata={JSON.stringify({ channelId: selectedChannelId })}
+                            >
+                              <BarChart3 size={16} />
+                            </button>
+                          </Tooltip>
+                        )}
                       {isSelectedChannelJoined &&
                         selectedChannelId !== ALL_CHANNELS_ID &&
-                        channelPreference?.deskReportEnabled && (
+                        channelPreference?.deskReportEnabled &&
+                        canManageDeskInsights && (
                           <Tooltip content='Desk report' side='bottom'>
                             <button
                               onClick={() => {
@@ -3341,18 +3438,29 @@ const SupportScreen = (): ReactElement => {
                             )}
                           </Popover.Root>
 
-                          {hasAnyFilterActive && (
+                          {(isDeskViewDirty || (!activeTicketViewId && hasAnyFilterActive)) && (
                             <Button
                               variant='outline'
                               size='sm'
                               className='rounded-[10px] border-border hover:bg-muted text-muted-foreground'
-                              onClick={() => setFilters({})}
+                              onClick={() => {
+                                const activeView = deskSavedViews.find(
+                                  v => v.id === activeTicketViewId,
+                                );
+                                if (activeView) {
+                                  applyDeskSavedView(activeView);
+                                } else {
+                                  setFilters({});
+                                }
+                              }}
                               data-track-category='Support'
                               data-track-name='CLEAR_SUPPORT_FILTERS'
                             >
                               <div className='flex items-center gap-1.5'>
                                 <X className='w-3 h-3' />
-                                <span className='font-medium'>Clear</span>
+                                <span className='font-medium'>
+                                  {activeTicketViewId ? 'Reset view' : 'Clear'}
+                                </span>
                               </div>
                             </Button>
                           )}
@@ -3457,6 +3565,23 @@ const SupportScreen = (): ReactElement => {
                         </Popover.Root>
                       )}
                       <div ref={actionsRestRef} className='flex items-center gap-2'>
+                        {/* Desk saved views — only shown when a specific channel is selected */}
+                        {ticketViewsChannelId && (
+                          <DeskSavedViewsControls
+                            savedViews={deskSavedViews}
+                            activeViewId={activeTicketViewId}
+                            onActiveViewChange={setActiveTicketViewId}
+                            currentUserId={userID}
+                            isChannelAdmin={isTicketViewsChannelAdmin}
+                            onApply={view => applyDeskSavedView(view)}
+                            onSave={handleSaveDeskView}
+                            onUpdate={handleUpdateDeskView}
+                            onDelete={deleteDeskView}
+                            currentFilters={filters}
+                            dynamicFieldDefs={deskDynamicFields}
+                            trackCategory='Support'
+                          />
+                        )}
                         {/* View Toggle */}
                         <div className='flex items-center border border-border rounded-lg overflow-hidden'>
                           <button
@@ -3641,40 +3766,46 @@ const SupportScreen = (): ReactElement => {
                   userID={userID}
                 />
               )}
-              {isMetricsOpen && selectedChannelId && selectedChannelId !== ALL_CHANNELS_ID && (
-                <DeskMetricsDashboard
-                  open
-                  onClose={() => {
-                    const base = selectedChannelId
-                      ? `${supportBase}/${selectedChannelId}`
-                      : supportBase;
-                    void navigate(base, { replace: true });
-                  }}
-                  channelId={selectedChannelId}
-                  channelName={selectedChannelName ?? undefined}
-                  availableDesks={metricsSelectableDesks}
-                  customFieldDefinitions={deskDynamicFields}
-                  availableStages={availableStages}
-                  onTicketClick={ticket => {
-                    void navigate(`${supportBase}/${ticket.channelId}/${ticket.xyneId}`, {
-                      state: { ticketId: ticket.ticketId, shouldNavigateBack: true },
-                    });
-                  }}
-                />
-              )}
-              {isReportOpen && selectedChannelId && selectedChannelId !== ALL_CHANNELS_ID && (
-                <DeskReportPanel
-                  open
-                  onClose={() => {
-                    const base = selectedChannelId
-                      ? `${supportBase}/${selectedChannelId}`
-                      : supportBase;
-                    void navigate(base, { replace: true });
-                  }}
-                  channelId={selectedChannelId}
-                  channelName={selectedChannelName ?? undefined}
-                />
-              )}
+              {isMetricsOpen &&
+                selectedChannelId &&
+                selectedChannelId !== ALL_CHANNELS_ID &&
+                (canManageDeskInsights || isGuest) && (
+                  <DeskMetricsDashboard
+                    open
+                    onClose={() => {
+                      const base = selectedChannelId
+                        ? `${supportBase}/${selectedChannelId}`
+                        : supportBase;
+                      void navigate(base, { replace: true });
+                    }}
+                    channelId={selectedChannelId}
+                    channelName={selectedChannelName ?? undefined}
+                    availableDesks={metricsSelectableDesks}
+                    customFieldDefinitions={deskDynamicFields}
+                    availableStages={availableStages}
+                    onTicketClick={ticket => {
+                      void navigate(`${supportBase}/${ticket.channelId}/${ticket.xyneId}`, {
+                        state: { ticketId: ticket.ticketId, shouldNavigateBack: true },
+                      });
+                    }}
+                  />
+                )}
+              {isReportOpen &&
+                selectedChannelId &&
+                selectedChannelId !== ALL_CHANNELS_ID &&
+                canManageDeskInsights && (
+                  <DeskReportPanel
+                    open
+                    onClose={() => {
+                      const base = selectedChannelId
+                        ? `${supportBase}/${selectedChannelId}`
+                        : supportBase;
+                      void navigate(base, { replace: true });
+                    }}
+                    channelId={selectedChannelId}
+                    channelName={selectedChannelName ?? undefined}
+                  />
+                )}
               {isTopicsOpen && selectedChannelId && canExploreTopics && (
                 <TopicsExplorer
                   open
@@ -4520,7 +4651,7 @@ export const SupportTicketDetail = ({
       if (!channelId) return [];
       const { conversationIdWhitelist: _ciw, ...restTicketFilter } = ticketFilter;
       return (await zero.run(
-        queries.supportTicketsPageV3({
+        queries.supportTicketsPageV4({
           channelId,
           isMember,
           ...restTicketFilter,
@@ -4571,7 +4702,7 @@ export const SupportTicketDetail = ({
     try {
       const { conversationIdWhitelist: _ciw, ...restTicketFilter } = ticketFilter;
       const result = (await zero.run(
-        queries.supportTicketsPageV3({
+        queries.supportTicketsPageV4({
           channelId,
           isMember,
           ...restTicketFilter,

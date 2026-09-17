@@ -99,8 +99,8 @@ services:
       - "7881:7881"
       - "7882:7882/udp"
     environment:
-      - LIVEKIT_API_KEY=devkey
-      - LIVEKIT_API_SECRET=devsecret
+      - LIVEKIT_API_KEY=localdevkey
+      - LIVEKIT_API_SECRET=localdevsecret
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:7880/"]
       interval: 5s
@@ -141,8 +141,8 @@ services:
     shm_size: '512mb'
     environment:
       - LIVEKIT_URL=ws://xyne-sandbox-livekit:7880
-      - LIVEKIT_API_KEY=devkey
-      - LIVEKIT_API_SECRET=devsecret
+      - LIVEKIT_API_KEY=localdevkey
+      - LIVEKIT_API_SECRET=localdevsecret
       - REDIS_URL=redis://xyne-sandbox-redis:6379
       - REDIS_HOST=xyne-sandbox-redis
       - REDIS_PORT=6379

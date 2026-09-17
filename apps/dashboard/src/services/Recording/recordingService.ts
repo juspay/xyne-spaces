@@ -5,8 +5,8 @@
 
 import { apiInstance } from '../clients/apiClient';
 import { AxiosResponse } from 'axios';
-import type { DefaultOutlet, GrantableEntityUserAccess, RecordingType } from '@xyne/shared';
-import { CallType, CallVisibility } from '@xyne/shared';
+import type { DefaultOutlet, GrantableEntityUserAccess } from '@xyne/shared';
+import { CallType, CallVisibility, RecordingType } from '@xyne/shared';
 import { getSummaryModelPreference } from '../../hooks/useSummaryModelPreference';
 
 export interface RecordingSession {
@@ -219,6 +219,10 @@ export interface RecordingDetail extends Recording {
   /** Google Docs exported from this recording, newest first. Absent on legacy responses. */
   googleDocs?: RecordingGoogleDocLink[];
   hasRecording?: boolean;
+  /** Null until a recording has been uploaded. */
+  recordingType?: RecordingType | null;
+  /** Streamable attachment for the recording; null for recordings uploaded before streaming. */
+  attachmentId?: string | null;
   linkedTicketId?: string | null;
   linkedTicketMessageId?: string | null;
 }
@@ -300,6 +304,7 @@ class RecordingService {
       {
         isHeadless: true,
         callType: CallType.AUDIO,
+        recordingType: RecordingType.AUDIO_SCREEN,
         sttModel: params?.sttModel || 'google',
         // Ferry the browser-local summary tier onto the recording so the
         // headless call-end auto-generation can honour a 'thinking' default;

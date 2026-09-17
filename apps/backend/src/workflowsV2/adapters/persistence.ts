@@ -9,7 +9,7 @@
  *
  * Storage map:
  *   workflows        -> public.workflows              (config in `context`, NOT `configuration`)
- *   executions       -> public.workflow_executions
+ *   executions       -> workflow.workflow_executions
  *   execution_states -> workflow.workflow_execution_states
  *   step_records     -> workflow.workflow_steps       (node-paths in `stepName`)
  *   folders          -> workflow.workflow_folders
@@ -39,7 +39,6 @@ import type {
   ResolvedCredential,
   ResourceAttributes,
   StepRecord,
-  WebhookRecord,
   WorkflowCallbackRecord,
   WorkflowContext,
   WorkflowRecord,
@@ -574,7 +573,8 @@ export class PrismaPersistenceAdapter implements PersistenceAdapter<XyneFilter> 
       data: {
         workspaceId,
         name: input.name,
-        credType: input.authType,
+        credType: input.credType,
+        authType: input.authType,
         data: encrypt(JSON.stringify(values)),
         status: CREDENTIAL_ACTIVE,
         createdAt: now,
@@ -593,10 +593,10 @@ export class PrismaPersistenceAdapter implements PersistenceAdapter<XyneFilter> 
     const workspaceId = requireWorkspaceId(attributes, 'replaceCredentialValues');
     const existing = await db.workflowCredential.findUnique({
       where: { workspaceId_name: { workspaceId, name } },
-      select: { credType: true },
+      select: { authType: true },
     });
     if (!existing) return null;
-    const validated = validateCredentialValues(existing.credType as CredentialAuthType, values);
+    const validated = validateCredentialValues(existing.authType as CredentialAuthType, values);
     const row = await db.workflowCredential.update({
       where: { workspaceId_name: { workspaceId, name } },
       data: {
@@ -652,13 +652,13 @@ export class PrismaPersistenceAdapter implements PersistenceAdapter<XyneFilter> 
 
     const row = await db.workflowCredential.findUnique({
       where: { workspaceId_name: { workspaceId, name } },
-      select: { name: true, credType: true, status: true, data: true },
+      select: { name: true, credType: true, authType: true, status: true, data: true },
     });
     if (!row || row.status !== CREDENTIAL_ACTIVE) return null;
 
     const values = JSON.parse(decrypt(row.data)) as unknown;
-    const auth = validateCredentialAuth(row.credType as CredentialAuthType, values);
-    return { name: row.name, status: row.status as CredentialStatus, ...auth };
+    const auth = validateCredentialAuth(row.authType as CredentialAuthType, values);
+    return { name: row.name, credType: row.credType, status: row.status as CredentialStatus, ...auth };
   }
   // ═════════════════════════════════════════════════════════════════════════════
   // NOT BACKED BY DESIGN — no table exists, and none is planned for the first cut.
@@ -699,8 +699,8 @@ export class PrismaPersistenceAdapter implements PersistenceAdapter<XyneFilter> 
    *
    * THROWS ON PURPOSE, rather than returning undefined. Only two things use static
    * data: `CronTrigger.poll()` — which `DefaultCronTrigger` does not implement, so
-   * cron never reaches here — and the DEDUP step, which `StepRegistry` auto-registers
-   * in its constructor with no way to exclude it. DEDUP therefore appears in the step
+   * cron never reaches here — and the DEDUP step, which the SDK's builtin connector
+   * registers with no way to exclude it. DEDUP therefore appears in the step
    * picker whether or not we back it. A silent no-op would give authors a DEDUP step
    * that runs and never deduplicates; failing loudly is the lesser harm.
    */
@@ -716,36 +716,6 @@ export class PrismaPersistenceAdapter implements PersistenceAdapter<XyneFilter> 
   /** DEFERRED — see {@link getStaticData}. */
   async deleteStaticData(_workflowId: string, _key: string): Promise<void> {
     return notBacked('deleteStaticData', 'the DEDUP step is not supported in this deployment');
-  }
-
-  /**
-   * UNUSED BY DESIGN — webhooks table not created, and unreachable.
-   *
-   * `storeWebhookPath` is called only under `if (trigger instanceof WebhookTrigger)`.
-   * We register `DefaultWebhookV2Trigger`, which extends `ManualTrigger`, and the v2
-   * public trigger route resolves a workflow by id in the path rather than by a stored
-   * secret. Nothing can reach this unless the classic `DefaultWebhookTrigger` is
-   * registered — at which point this table becomes required.
-   */
-  async storeWebhookPath(_workflowId: string, _path: string, _secret: string): Promise<void> {
-    return notBacked(
-      'storeWebhookPath',
-      'only the v2 webhook trigger is registered, which needs no stored path',
-    );
-  }
-
-  /** UNUSED — see {@link storeWebhookPath}. */
-  async removeWebhookPath(_workflowId: string): Promise<void> {
-    return Promise.resolve();
-  }
-
-  /**
-   * UNUSED — see {@link storeWebhookPath}. Returns null rather than throwing: this is
-   * the inbound lookup for the legacy `/webhooks/:id/:secret` route, and null makes it
-   * a clean 404, which is the correct answer when no workflow can carry that trigger.
-   */
-  async getWebhookByPath(_path: string): Promise<WebhookRecord | null> {
-    return Promise.resolve(null);
   }
 
   /**

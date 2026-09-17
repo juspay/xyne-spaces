@@ -9,6 +9,7 @@ import { recurringCallService } from '@/services/recurringCallService';
 import { callSideEffectService } from '@/services/callSideEffectService';
 import { noteTakerTranscriptService } from '@/services/noteTakerTranscriptService';
 import { logDetailedSummaryFailed } from '@/services/detailedSummaryFailureLog';
+import { userActivityStatusService } from '@/services/userActivityStatusService';
 
 const POLL_INTERVAL_MS = 10 * 60 * 1000; // 10 minutes
 
@@ -21,6 +22,11 @@ const POLL_INTERVAL_MS = 10 * 60 * 1000; // 10 minutes
 const SUMMARY_PENDING_STALE_MS = 60 * 60 * 1000; // 1 hour
 const SUMMARY_SWEEP_BATCH_SIZE = 50;
 
+const ACTIVE_CALL_BATCH_SIZE = 100;
+const STALE_SCHEDULED_BATCH_SIZE = 100;
+const STRANDED_PARTICIPANT_BATCH_SIZE = 100;
+const IN_CALL_SWEEP_BATCH_SIZE = 500;
+
 /**
  * Call Validation Worker
  *
@@ -32,6 +38,7 @@ const SUMMARY_SWEEP_BATCH_SIZE = 50;
  * Also sweeps HEADLESS recordings whose detailed summary has been stuck in
  * 'pending' for over an hour, marking them 'failed' so the recording screen
  * offers "Try again" instead of shimmering forever.
+
  *
  * This replaces the frontend-triggered validateRooms endpoint to avoid
  * unnecessary API calls triggered by participant updates.
@@ -94,6 +101,8 @@ export class CallValidationWorker {
         this.validateLiveActiveCalls(),
         this.cleanupStaleScheduledCalls(),
         this.failStalePendingSummaries(),
+        this.clearStaleInCallUsers(),
+        this.markStrandedParticipantsAsLeft(),
       ]);
 
       logger.info('[CallValidationWorker] Validation cycle completed');
@@ -106,7 +115,7 @@ export class CallValidationWorker {
 
   private async validateLiveActiveCalls(): Promise<void> {
     try {
-      const activeCalls = await repositories.calls.findAllActiveCalls(10);
+      const activeCalls = await repositories.calls.findAllActiveCalls(ACTIVE_CALL_BATCH_SIZE);
 
       if (activeCalls.length === 0) {
         logger.debug('[CallValidationWorker] No active calls to validate');
@@ -141,7 +150,7 @@ export class CallValidationWorker {
    */
   private async cleanupStaleScheduledCalls(): Promise<void> {
     try {
-      const staleCalls = await repositories.calls.findStaleScheduledCalls(10, [
+      const staleCalls = await repositories.calls.findStaleScheduledCalls(STALE_SCHEDULED_BATCH_SIZE, [
         CallOrigin.GOOGLE_CALENDAR,
         CallOrigin.MICROSOFT_CALENDAR,
       ]);
@@ -255,6 +264,61 @@ export class CallValidationWorker {
       );
     } catch (error) {
       logger.error(`[CallValidationWorker] Failed to sweep stale pending summary ${externalId}:`, error);
+    }
+  }
+
+  /**
+   * Clear activityStatus = IN_CALL for users who are no longer in any active call.
+   */
+  private async clearStaleInCallUsers(): Promise<void> {
+    try {
+      const cleared = await userActivityStatusService.reconcileInCallUsers(IN_CALL_SWEEP_BATCH_SIZE);
+
+      if (cleared > 0) {
+        logger.info(`[CallValidationWorker] Cleared stale IN_CALL activity status for ${cleared} user(s)`);
+      } else {
+        logger.debug('[CallValidationWorker] No stale IN_CALL users found');
+      }
+    } catch (error) {
+      logger.error('[CallValidationWorker] Error clearing stale IN_CALL users:', error);
+    }
+  }
+
+  /**
+   * Mark ACCEPTED participants of calls that are no longer live as LEFT.
+   */
+  private async markStrandedParticipantsAsLeft(): Promise<void> {
+    try {
+      const calls = await repositories.calls.findCallsWithStrandedParticipants(
+        STRANDED_PARTICIPANT_BATCH_SIZE,
+      );
+
+      if (calls.length === 0) {
+        logger.debug('[CallValidationWorker] No stranded ACCEPTED participants found');
+        return;
+      }
+
+      let repaired = 0;
+
+      for (const call of calls) {
+        try {
+          repaired += await repositories.calls.markStrandedParticipantsAsLeft(
+            call.id,
+            call.endedAt ?? new Date(),
+          );
+        } catch (error) {
+          logger.error(
+            `[CallValidationWorker] Failed to repair stranded participants for call ${call.id}:`,
+            error,
+          );
+        }
+      }
+
+      logger.info(
+        `[CallValidationWorker] Marked ${repaired} stranded participant(s) as LEFT across ${calls.length} non-live call(s)`,
+      );
+    } catch (error) {
+      logger.error('[CallValidationWorker] Error repairing stranded participants:', error);
     }
   }
 
