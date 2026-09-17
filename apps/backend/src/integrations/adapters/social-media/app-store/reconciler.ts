@@ -7,13 +7,13 @@ import {
   APP_STORE_MAX_RECONCILE_PER_RUN,
   APP_STORE_RESPONSE_PUBLISH_SLA_MS,
   APP_STORE_RESPONSE_STATE_FIELD,
+  APP_STORE_RESPONSE_STATE_STALE,
 } from './constants';
 import { clearPendingResponse, listPendingResponses } from './syncState';
 
 const TAG = '[AppStoreReconciler]';
 
-/** Written to the ticket field once Apple has blown through its own 24h publication SLA. */
-export const APP_STORE_RESPONSE_STATE_STALE = 'PENDING_PUBLISH (over 24h)';
+export { APP_STORE_RESPONSE_STATE_STALE };
 
 /**
  * Pass B — pending-reply reconciliation.

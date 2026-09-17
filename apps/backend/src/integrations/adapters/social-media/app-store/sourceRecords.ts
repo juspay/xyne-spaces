@@ -27,7 +27,8 @@ export function buildAppStoreSourceRecords(params: {
     displayName: application.displayName,
     channelId: params.channelId,
     externalIdentifier: application.appId,
-    externalMetadata: { bundleId: application.bundleId },
+    // connectedAt, not createdAt: reactivation reuses the row, so createdAt can be years stale.
+    externalMetadata: { bundleId: application.bundleId, connectedAt },
     workspaceId: params.workspaceId,
     boardId: params.boardId,
     ownerUserId: params.ownerUserId,

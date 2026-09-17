@@ -1,6 +1,7 @@
 import React, { useState, useEffect, ReactElement, useMemo } from 'react';
 import {
   ANDROID_PACKAGE_NAME_PATTERN,
+  APP_STORE_KEY_ID_PATTERN,
   IOS_BUNDLE_ID_PATTERN,
   normalizeChannelName,
 } from '@xyne/shared';
@@ -152,9 +153,6 @@ interface AppStoreApplicationRow {
 function createAppStoreApplication(): AppStoreApplicationRow {
   return { id: crypto.randomUUID(), bundleId: '' };
 }
-
-// Team key ids are 10 chars, individual key ids are longer.
-const APP_STORE_KEY_ID_PATTERN = /^[A-Z0-9]{10,20}$/;
 
 // Apple never shows the .p8 again after download, so the only check we can make is shape.
 function isAppStorePrivateKey(value: string): boolean {
@@ -1019,7 +1017,8 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
                   className='w-full rounded-md border border-border bg-background px-3 py-2 font-mono text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring'
                 />
                 <p className='text-xs text-muted-foreground'>
-                  Paste the whole file. App Store Connect only lets you download it once.
+                  Use an Individual key from Users and Access &gt; Integrations. Paste the whole
+                  file — App Store Connect only lets you download it once.
                 </p>
               </div>
 

@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import jwt from 'jsonwebtoken';
 import type { ExternalSource } from '@prisma/client';
 import { decrypt } from '@/services/encryptionService';
@@ -57,6 +58,15 @@ export class AppStoreApiError extends Error {
 interface CachedToken {
   token: string;
   expiresAtMs: number;
+  /** The key this token was signed with; a rotation elsewhere changes it, not the id. */
+  credentialsFingerprint: string;
+}
+
+function fingerprint(credentials: AppStoreCredentials): string {
+  return crypto
+    .createHash('sha256')
+    .update(`${credentials.keyId}:${credentials.privateKey}`)
+    .digest('hex');
 }
 
 interface AppleResource {
@@ -100,25 +110,45 @@ export class AppStoreClient {
   /** Individual-key JWT: Apple requires `sub: "user"` and no issuer id. */
   mintToken(credentials: AppStoreCredentials, cacheKey?: string): string {
     const nowSeconds = Math.floor(Date.now() / 1000);
+    // Fingerprinted: forgetToken only reaches the API process, but the worker signs in another.
+    const credentialsFingerprint = fingerprint(credentials);
     if (cacheKey) {
       const cached = this.tokenCache.get(cacheKey);
-      if (cached && cached.expiresAtMs > Date.now()) return cached.token;
+      if (
+        cached &&
+        cached.expiresAtMs > Date.now() &&
+        cached.credentialsFingerprint === credentialsFingerprint
+      ) {
+        return cached.token;
+      }
     }
 
-    const token = jwt.sign(
-      {
-        sub: 'user',
-        iat: nowSeconds,
-        exp: nowSeconds + APP_STORE_TOKEN_TTL_SECONDS,
-        aud: APP_STORE_JWT_AUDIENCE,
-      },
-      credentials.privateKey,
-      { algorithm: 'ES256', keyid: credentials.keyId },
-    );
+    let token: string;
+    try {
+      token = jwt.sign(
+        {
+          sub: 'user',
+          iat: nowSeconds,
+          exp: nowSeconds + APP_STORE_TOKEN_TTL_SECONDS,
+          aud: APP_STORE_JWT_AUDIENCE,
+        },
+        credentials.privateKey,
+        { algorithm: 'ES256', keyid: credentials.keyId },
+      );
+    } catch (error) {
+      // jsonwebtoken rethrows a bare Error, so there is no type to narrow on.
+      logger.warn(`${TAG} Could not sign a token with the stored private key`, { error });
+      throw new AppStoreApiError(
+        400,
+        'The .p8 private key could not be used. Paste the whole file, including the BEGIN and ' +
+          'END lines — it must be the ES256 key downloaded from App Store Connect.',
+      );
+    }
 
     if (cacheKey) {
       this.tokenCache.set(cacheKey, {
         token,
+        credentialsFingerprint,
         expiresAtMs:
           Date.now() + (APP_STORE_TOKEN_TTL_SECONDS - APP_STORE_TOKEN_REFRESH_MARGIN_SECONDS) * 1000,
       });
