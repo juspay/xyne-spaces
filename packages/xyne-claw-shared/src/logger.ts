@@ -1,6 +1,7 @@
 import winston from "winston";
 import { AsyncLocalStorage } from "node:async_hooks";
 import crypto from "node:crypto";
+import { shredRecordInPlace } from "@xyne/logger";
 
 /**
  * Structured JSON logger shared across the claw backend services
@@ -78,44 +79,18 @@ const captureSplat = winston.format((info) => {
   return info;
 });
 
-const SECRET_PATTERNS: Array<[RegExp, string]> = [
-  [/(\bapi[_-]?key\b["'\s]*[:=]\s*["']?)([A-Za-z0-9_\-]{12,})/gi, "$1<redacted>"],
-  [/\bsk-[A-Za-z0-9]{16,}\b/g, "sk-<redacted>"],
-  [/(\b[Bb]earer\s+)[A-Za-z0-9._\-]{16,}/g, "$1<redacted>"],
-];
-
-function redactString(s: string): string {
-  let out = s;
-  for (const [re, rep] of SECRET_PATTERNS) out = out.replace(re, rep);
-  return out;
-}
-
-function redactValue(v: unknown): unknown {
-  if (typeof v === "string") return redactString(v);
-  if (Array.isArray(v)) return v.map(redactValue);
-  if (v && typeof v === "object") {
-    const out: Record<string, unknown> = {};
-    for (const [k, val] of Object.entries(v as Record<string, unknown>)) out[k] = redactValue(val);
-    return out;
-  }
-  return v;
-}
-
-const redactSecrets = winston.format((info) => {
-  if (typeof info.message === "string") info.message = redactString(info.message);
-  for (const key of Object.keys(info)) {
-    if (key === "message" || key === "level" || key === "timestamp") continue;
-    (info as Record<string, unknown>)[key] = redactValue((info as Record<string, unknown>)[key]);
-  }
-  return info;
-});
+// Secret-value redaction on every sink, via the shared @xyne/logger shredder
+// (replaces the old hand-rolled redactSecrets — same contract, wider coverage).
+const shredSecrets = winston.format(
+  (info) => shredRecordInPlace(info as unknown as Record<string, unknown>) as unknown as winston.Logform.TransformableInfo,
+);
 
 const productionFormat = winston.format.combine(
   winston.format.timestamp({ format: "YYYY-MM-DD HH:mm:ss" }),
   winston.format.errors({ stack: true }),
   captureSplat(),
   injectContext(),
-  redactSecrets(),
+  shredSecrets(),
   winston.format.printf(({ timestamp, level, message, ...meta }) =>
     JSON.stringify({ timestamp, level, message, ...meta }),
   ),
@@ -127,7 +102,7 @@ const devFormat = winston.format.combine(
   winston.format.errors({ stack: true }),
   captureSplat(),
   injectContext(),
-  redactSecrets(),
+  shredSecrets(),
   winston.format.printf(({ timestamp, level, message, component, service, ...meta }) => {
     const ctx = component || service;
     const prefix = ctx ? `[${ctx}] ` : "";
