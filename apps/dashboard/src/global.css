@@ -2952,14 +2952,6 @@ html .bn-code-block-source-popup-ok-button:hover {
   position: relative;
 }
 
-.canvas-editor-title-icon-gutter {
-  display: flex;
-  position: absolute;
-  right: calc(100% + 12px);
-  align-items: center;
-  justify-content: flex-end;
-}
-
 .canvas-editor-title-label-row {
   padding-left: 0;
 }

@@ -3,8 +3,6 @@ import Input from '../ui/Input';
 import { cn } from '../../utils/classNames';
 import type { Canvas } from './Canvas.types';
 import { CanvasLabelManager } from './CanvasLabelManager';
-import { SectionEmojiPicker } from '../Chat/SectionEmojiPicker';
-import { Plus } from 'lucide-react';
 
 const UNTITLED_CANVAS_TITLE = 'Untitled Canvas';
 
@@ -17,8 +15,6 @@ interface CanvasEditorHeaderProps {
   onTitleChange: (title: string) => void;
   onTitleSave: () => void;
   onTitleAutoFocused?: () => void;
-  titleIcon?: string | null;
-  onTitleIconChange?: (icon: string) => void;
 }
 
 export const CanvasEditorHeader = ({
@@ -30,8 +26,6 @@ export const CanvasEditorHeader = ({
   onTitleChange,
   onTitleSave,
   onTitleAutoFocused,
-  titleIcon,
-  onTitleIconChange,
 }: CanvasEditorHeaderProps): ReactElement => {
   const titleInputRef = useRef<HTMLInputElement | null>(null);
   const displayTitle = title === UNTITLED_CANVAS_TITLE ? '' : title;
@@ -69,26 +63,6 @@ export const CanvasEditorHeader = ({
       onContextMenu={event => event.stopPropagation()}
     >
       <div className='canvas-editor-title-row'>
-        <div className='canvas-editor-title-icon-gutter'>
-          {onTitleIconChange && (
-            <SectionEmojiPicker
-              value={titleIcon ?? null}
-              disabled={!canEdit}
-              onChange={onTitleIconChange}
-              trackCategory='CANVAS'
-              trackName='OPEN_CANVAS_TITLE_ICON_PICKER'
-              ariaLabel={titleIcon ? 'Change canvas icon' : 'Add canvas icon'}
-              triggerClassName={cn(
-                'size-10',
-                !titleIcon &&
-                  'rounded-lg border border-dashed border-muted-foreground/30 hover:border-muted-foreground/50',
-              )}
-              iconClassName='text-2xl md:text-[28px]'
-              fallbackIcon={<Plus className='size-4' />}
-              allowCustomEmojis={false}
-            />
-          )}
-        </div>
         <h1 className='m-0 min-w-0 flex-1' data-testid='canvas-page-title-heading'>
           <Input
             ref={titleInputRef}
