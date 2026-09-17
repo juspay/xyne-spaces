@@ -104,8 +104,6 @@ import {
   useCanvasVersionSave,
 } from '../../../utils/canvasVersioning';
 import { useCanvasArchiveToggle } from '../useCanvasArchiveToggle';
-import { CanvasEditorHeader } from '../CanvasEditorHeader';
-import { CanvasLabelManager } from '../CanvasLabelManager';
 import { useScope } from '../../../shortcuts';
 
 interface LocationState {
@@ -255,8 +253,6 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
   const latestHtmlRef = useRef<string>('');
   const hasPendingCollaborativeTimestampRef = useRef(false);
   const titleRef = useRef(currentTitle);
-  const titleAutoFocusCanvasIdRef = useRef<string | null>(null);
-  const titleAutoFocusConsumedCanvasIdRef = useRef<string | null>(null);
   const selectedCanvasRef = useRef(selectedCanvas);
   const isCreatingRef = useRef(isCreating);
   const isSavingRef = useRef(isSaving);
@@ -288,18 +284,6 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
   const handleCanvasTitleChange = useCallback((newTitle: string): void => {
     setCurrentTitle(newTitle);
     titleRef.current = newTitle;
-  }, []);
-
-  const queueTitleAutoFocus = useCallback((targetCanvasId: string): void => {
-    if (titleAutoFocusConsumedCanvasIdRef.current === targetCanvasId) return;
-    titleAutoFocusCanvasIdRef.current = targetCanvasId;
-  }, []);
-
-  const handleTitleAutoFocused = useCallback((): void => {
-    if (titleAutoFocusCanvasIdRef.current) {
-      titleAutoFocusConsumedCanvasIdRef.current = titleAutoFocusCanvasIdRef.current;
-    }
-    titleAutoFocusCanvasIdRef.current = null;
   }, []);
 
   useEffect(() => {
@@ -359,9 +343,6 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
 
     if (shouldUseState) {
       const isNewCanvas = initializedCanvasIdRef.current !== canvasFromState.id;
-      if (state?.focusTitle) {
-        queueTitleAutoFocus(canvasFromState.id);
-      }
       if (navStateLoggedIdRef.current !== canvasFromState.id) {
         navStateLoggedIdRef.current = canvasFromState.id;
         logger.info(Event.CANVAS_LOAD_FROM_STATE, {
@@ -443,10 +424,6 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
         ...(accessLevel ? { accessLevel } : {}),
       };
 
-      if (state?.focusTitle && canvas.id === canvasId) {
-        queueTitleAutoFocus(canvas.id);
-      }
-
       setSelectedCanvas(previous =>
         isSameSelectedCanvasState(previous, canvas) ? previous : canvas,
       );
@@ -496,7 +473,6 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
     currentUserChannelIds,
     adminChannelIds,
     queryClient,
-    queueTitleAutoFocus,
     lastCanvasId,
     setLastCanvasId,
   ]);
@@ -588,7 +564,6 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
             accessLevel: CanvasRole.OWNER,
           };
 
-          queueTitleAutoFocus(newCanvasId);
           setSelectedCanvas(newCanvas);
           setCurrentTitle(title);
           titleRef.current = title;
@@ -643,7 +618,6 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
     user?.id,
     baseRoute,
     isOnChatCanvasPage,
-    queueTitleAutoFocus,
   ]);
 
   const handleCreateCanvas = (): void => {
@@ -1150,12 +1124,6 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
         minute: '2-digit',
       })
     : null;
-  const shouldFocusCanvasTitleOnMount = Boolean(
-    selectedCanvas?.id &&
-    titleAutoFocusCanvasIdRef.current === selectedCanvas.id &&
-    !previewVersion,
-  );
-
   // Handle Ask AI - Open XyneAI with canvas context using canvas id
   const handleAskAI = (): void => {
     const canvasIdForAI = selectedCanvas?.id;
@@ -1278,30 +1246,6 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
 
     return rows;
   }, [allUsers, selectedCanvas, user?.id, user?.name, visibleChannels]);
-
-  const canvasTitleHeader = !selectedCanvas?.id ? null : showPageTitle ? (
-    <div className='canvas-editor-title-column pb-8 pt-2 md:pt-4'>
-      <CanvasEditorHeader
-        canvas={selectedCanvas}
-        workspaceId={user?.workspaceId}
-        canEdit={canEdit && !previewVersion}
-        title={currentTitle}
-        focusTitleOnMount={shouldFocusCanvasTitleOnMount}
-        onTitleChange={handleCanvasTitleChange}
-        onTitleSave={handleTitleSave}
-        onTitleAutoFocused={handleTitleAutoFocused}
-      />
-    </div>
-  ) : (
-    <div className='canvas-block-row group/canvas-editor-title'>
-      <CanvasLabelManager
-        canvas={selectedCanvas}
-        workspaceId={user?.workspaceId}
-        canEdit={canEdit && !previewVersion}
-        revealTriggerOnParentHover
-      />
-    </div>
-  );
 
   // Shared metrics for the header's 28px icon buttons.
   const headerIconButtonClass =
@@ -1783,7 +1727,6 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
                     canvasParticipants={canvasParticipants}
                     canvasCreatedBy={selectedCanvas?.createdBy}
                     currentUserRole={selectedCanvas?.accessLevel ?? null}
-                    header={canvasTitleHeader}
                   />
                 ) : selectedCanvas?.id &&
                   selectedCanvas.isCollaborative &&
@@ -1806,11 +1749,10 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
                     initialBlockIdToFocus={blockIdFromUrl}
                     initialCommentThreadId={commentThreadIdFromUrl}
                     onOpenCommentCountChange={setOpenCommentCount}
-                    autoFocus={!skipAutoFocus && !shouldFocusCanvasTitleOnMount}
+                    autoFocus={!skipAutoFocus}
                     canvasParticipants={canvasParticipants}
                     canvasCreatedBy={selectedCanvas.createdBy}
                     currentUserRole={selectedCanvas.accessLevel ?? null}
-                    header={canvasTitleHeader}
                   />
                 ) : (
                   <CanvasEditor
@@ -1829,11 +1771,10 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
                     initialBlockIdToFocus={blockIdFromUrl}
                     initialCommentThreadId={commentThreadIdFromUrl}
                     onOpenCommentCountChange={setOpenCommentCount}
-                    autoFocus={!skipAutoFocus && !shouldFocusCanvasTitleOnMount}
+                    autoFocus={!skipAutoFocus}
                     canvasParticipants={canvasParticipants}
                     canvasCreatedBy={selectedCanvas?.createdBy}
                     currentUserRole={selectedCanvas?.accessLevel ?? null}
-                    header={canvasTitleHeader}
                   />
                 )}
               </div>
