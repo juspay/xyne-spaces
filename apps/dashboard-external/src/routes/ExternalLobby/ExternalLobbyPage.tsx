@@ -66,18 +66,76 @@ type LobbyAction =
 
 const initialState: LobbyState = { stage: 'LOADING' };
 
-function getInternalCallUrl(externalId: string, workspaceId: string): string {
+function getDashboardBaseUrl(): string {
   const configuredBaseUrl = import.meta.env['VITE_INTERNAL_DASHBOARD_BASE_URL'] as
     | string
     | undefined;
-  const dashboardBaseUrl =
+  return (
     configuredBaseUrl?.trim() ||
-    (import.meta.env.DEV ? 'http://localhost:5173' : window.location.origin);
+    (import.meta.env.DEV ? 'http://localhost:5173' : window.location.origin)
+  );
+}
 
-  return new URL(
-    `/${encodeURIComponent(workspaceId)}/call/${encodeURIComponent(externalId)}`,
-    dashboardBaseUrl,
-  ).toString();
+/**
+ * Reached when a call URL is typed into the in-app browser panel, which main's
+ * interception does not cover — /launch there would ask the app to open itself.
+ * Inlined rather than imported: .dependency-cruiser.cjs allows this app only
+ * four direct dashboard imports.
+ */
+function isRunningInDesktopApp(): boolean {
+  if (typeof window === 'undefined') return false;
+  if ((window as { electronAPI?: unknown }).electronAPI) return true;
+  return navigator.userAgent.toLowerCase().includes('electron');
+}
+
+/**
+ * Spaces joins its own call links in-app (dashboard App.tsx) and leaves only
+ * modifier-clicks to the browser, so a referrer from Spaces means the member
+ * asked for a tab, not for the desktop app.
+ */
+function cameFromSpaces(dashboardBaseUrl: string): boolean {
+  if (!document.referrer) return false;
+  try {
+    const referrerOrigin = new URL(document.referrer).origin;
+    return (
+      referrerOrigin === new URL(dashboardBaseUrl, window.location.origin).origin ||
+      referrerOrigin === window.location.origin
+    );
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Mirrors the backend's SLACK_FRONTEND_URL: production serves /launch from the
+ * standalone page, not the dashboard route of the same name.
+ */
+function getLaunchBaseUrl(): string {
+  const configured = import.meta.env['VITE_LAUNCH_BASE_URL'] as string | undefined;
+  return configured?.trim() || getDashboardBaseUrl();
+}
+
+/**
+ * A call has one invite URL for teammates and guests alike, so members land in
+ * the guest lobby and are sent back into Spaces from here. Opened from outside
+ * Spaces that goes via /launch, which offers the desktop app and the browser
+ * rather than guessing which one they have: `web` names the browser target,
+ * `autoOpen=0` stops it deep-linking before the choice is shown.
+ */
+function getInternalCallUrl(externalId: string, workspaceId: string): string {
+  const dashboardBaseUrl = getDashboardBaseUrl();
+  const callPath = `/${encodeURIComponent(workspaceId)}/call/${encodeURIComponent(externalId)}`;
+  const directUrl = new URL(callPath, dashboardBaseUrl).toString();
+
+  if (isRunningInDesktopApp() || cameFromSpaces(dashboardBaseUrl)) {
+    return directUrl;
+  }
+
+  const launchUrl = new URL('/launch', getLaunchBaseUrl());
+  launchUrl.searchParams.set('path', callPath);
+  launchUrl.searchParams.set('web', new URL(dashboardBaseUrl, window.location.origin).origin);
+  launchUrl.searchParams.set('autoOpen', '0');
+  return launchUrl.toString();
 }
 
 function lobbyReducer(state: LobbyState, action: LobbyAction): LobbyState {

@@ -99,23 +99,80 @@
         .hidden {
             display: none;
         }
+
+        .link-muted {
+            display: inline-block;
+            margin-top: 10px;
+            color: #86868b;
+            font-size: 13px;
+            text-decoration: underline;
+            cursor: pointer;
+        }
+
+        .link-muted:hover {
+            color: #1d1d1f;
+        }
     </style>
     <script>
+        // ?web= names the dashboard "Open in browser" opens. Matched by shape so
+        // no environment is listed here, but still matched: an unchecked origin
+        // from the query string would make this an open redirect.
+        var WEB_HOST_SUFFIX = ".xyne.juspay.net";
+
+        // URLSearchParams decodes once already, so a bare '%' reaching this second
+        // pass throws and takes the whole launch down with it.
+        function safeDecode(value) {
+            try {
+                return decodeURIComponent(value);
+            } catch (e) {
+                return value;
+            }
+        }
+
+        function isLocalHost(hostname) {
+            return hostname === 'localhost' || hostname === '127.0.0.1';
+        }
+
+        // "" when unnamed or not ours, which hides the link rather than guessing —
+        // links predating ?web= keep their old behaviour that way.
+        function resolveWebOrigin(urlParams) {
+            var requested = urlParams.get('web');
+            if (!requested) return "";
+            try {
+                var url = new URL(requested);
+                var host = url.hostname;
+                var isOurs = host === WEB_HOST_SUFFIX.slice(1) || host.endsWith(WEB_HOST_SUFFIX);
+                if (isOurs && url.protocol === 'https:') return url.origin;
+                if (isLocalHost(host)) return url.origin;
+                return "";
+            } catch (e) {
+                return "";
+            }
+        }
+
         window.onload = function () {
-            let deepLink = "xyne-spaces://";
             // Logic to handle both new Path-based and old Query-based links
             const urlParams = new URLSearchParams(window.location.search);
             const legacyPath = urlParams.get('path');
+            let appPath = "";
             if (legacyPath) {
-                deepLink += decodeURIComponent(legacyPath);
+                appPath = safeDecode(legacyPath);
             } else {
                 const path = window.location.pathname;
                 if (path && path !== "/" && path !== "/index.html") {
-                    const cleanPath = path.startsWith('/') ? path.substring(1) : path;
-                    deepLink += cleanPath;
+                    appPath = path;
                 }
             }
-            window.location.href = deepLink;
+            appPath = appPath.replace(/^\/+/, "");
+
+            let deepLink = "xyne-spaces://" + appPath;
+
+            // Launching on load is what a notification wants, but it defeats a page
+            // meant to offer a choice, so call invites pass autoOpen=0.
+            const autoOpen = urlParams.get('autoOpen') !== '0';
+            if (autoOpen) {
+                window.location.href = deepLink;
+            }
             // Platform Detection & UI Update
             const userAgent = navigator.userAgent || navigator.vendor || window.opera;
             const isAndroid = /android/i.test(userAgent);
@@ -124,7 +181,25 @@
             const openBtn = document.getElementById('open-app-btn');
             const downloadBtn = document.getElementById('download-btn');
             const infoBox = document.getElementById('info-box');
+            const openWebBtn = document.getElementById('open-web-btn');
             if (openBtn) openBtn.href = deepLink;
+
+            // A browser cannot be asked whether the desktop app is installed, so
+            // offer both rather than guess.
+            const webOrigin = resolveWebOrigin(urlParams);
+            if (openWebBtn && appPath && webOrigin) {
+                openWebBtn.href = webOrigin + "/" + appPath;
+                openWebBtn.classList.remove('hidden');
+            }
+
+            if (!autoOpen) {
+                const subtitle = document.getElementById('subtitle');
+                if (subtitle) subtitle.textContent = 'Choose how you want to open this.';
+                // Nothing was launched, so the "if nothing happens" nudge would be
+                // describing an attempt that never took place.
+                const autoHint = document.getElementById('auto-hint');
+                if (autoHint) autoHint.classList.add('hidden');
+            }
             if (isMobile) {
                 if (downloadBtn) {
                     downloadBtn.classList.remove('hidden');
@@ -155,7 +230,7 @@
         <img src="xyne.svg" alt="Xyne Spaces" class="logo" />
 
         <h1>Xyne Spaces</h1>
-        <p>Opening content in the app...</p>
+        <p id="subtitle">Opening content in the app...</p>
 
         <!-- Primary Action: Open App -->
         <a href="#" id="open-app-btn" class="button button-primary">Open Application</a>
@@ -168,7 +243,8 @@
     </div>
 
     <div class="footer">
-        If nothing happens, click "Open Application" above.
+        <div id="auto-hint">If nothing happens, click "Open Application" above.</div>
+        <a href="#" id="open-web-btn" class="link-muted hidden">Open in browser</a>
     </div>
 </body>
 
