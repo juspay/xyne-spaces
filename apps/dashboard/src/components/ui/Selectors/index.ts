@@ -9,6 +9,8 @@ export { createSelectorPlugin } from './BaseSelectorPlugin';
 export type { BaseSelectorPluginConfig } from './BaseSelectorPlugin';
 
 export { MentionSelector } from './MentionSelector';
+export { FileReferenceSelector } from './FileReferenceSelector';
+export type { FileReferenceItem, FileReferenceSelectorProps } from './FileReferenceSelector';
 export { CommandSelector } from './CommandSelector';
 export { EmojiSelector } from './EmojiSelector';
 
@@ -21,6 +23,7 @@ export {
   detectChannelTrigger,
   detectEmojiTrigger,
   detectRecipientTrigger,
+  detectFileReferenceTrigger,
   getAbsolutePosition,
   getTextBeforeCursor,
   createVirtualAnchor,

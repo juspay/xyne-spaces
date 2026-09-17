@@ -36,6 +36,8 @@ export interface InputBoxProps {
   channelItems?: import('../Selectors/Selectors.types').ChannelResult[];
   onChannelSearch?: (query: string) => void;
   onChannelSelect?: (channel: import('../Selectors/Selectors.types').ChannelResult) => void;
+  /** Files from the current thread that can be tagged via the `~` reference picker. */
+  fileReferenceItems?: import('../Selectors/FileReferenceSelector').FileReferenceItem[];
   commandItems?: import('../Selectors/Selectors.types').CommandItem[];
   onCommandSelect?: (
     command: import('../Selectors/Selectors.types').CommandItem,

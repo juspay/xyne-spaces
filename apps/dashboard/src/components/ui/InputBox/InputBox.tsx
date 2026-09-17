@@ -46,6 +46,7 @@ import { EditorToolbar } from '../EditorToolbar';
 import { EmojiPickerButton } from '../EditorToolbar';
 import { LinkPopover } from '../EditorToolbar';
 import { MentionSelector } from '../Selectors';
+import { FileReferenceSelector } from '../Selectors';
 import { CommandSelector } from '../Selectors';
 import { EmojiSelector } from '../Selectors';
 import { AttachmentPreview } from '../files';
@@ -57,6 +58,7 @@ import { MentionExtension, mentionPluginKey } from '../TipTapExtensions';
 import { CommandsExtension, commandPluginKey } from '../TipTapExtensions';
 import { EmojiSelectorExtension, emojiSelectorPluginKey } from '../TipTapExtensions';
 import { ChannelMentionExtension, channelMentionPluginKey } from '../TipTapExtensions';
+import { FileReferenceExtension } from '../TipTapExtensions';
 import { TableExtensions } from '../TipTapExtensions';
 import { FormattingShortcutsExtension } from '../TipTapExtensions';
 import { ColonEmojiExtension } from '../TipTapExtensions/ColonEmojiExtension';
@@ -245,6 +247,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
       channelItems = [],
       onChannelSearch,
       onChannelSelect,
+      fileReferenceItems = [],
       commandItems = [],
       onCommandSelect,
       isLoadingCommands = false,
@@ -743,6 +746,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
           preserveThreadRoute,
         }),
         ChannelMentionExtension,
+        FileReferenceExtension,
         CommandsExtension,
         EmojiSelectorExtension,
         VoiceShimmerMark,
@@ -1623,6 +1627,10 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
           {...(onChannelSearch && { onMentionSearch: onChannelSearch })}
           {...(onChannelSelect && { onMentionSelect: handleChannelSelect })}
         />
+
+        {features.mentions && (
+          <FileReferenceSelector editor={editor} fileItems={fileReferenceItems} />
+        )}
 
         {features.emojiPicker && (
           <EmojiSelector editor={editor} customEmojis={customEmojis ?? []} />
