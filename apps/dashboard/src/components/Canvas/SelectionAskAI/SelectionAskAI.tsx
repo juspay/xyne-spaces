@@ -115,6 +115,7 @@ export const SelectionAskAI = ({
     // Open XyneAI with canvas context and selection info
     xyneAIActor.send({
       type: 'OPEN',
+      trackSource: 'canvas_selection',
       canvasInfo: {
         canvasId,
         ...(canvasTitle ? { title: canvasTitle } : {}),

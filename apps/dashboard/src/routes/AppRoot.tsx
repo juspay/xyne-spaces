@@ -127,7 +127,7 @@ import { RouterErrorFallback } from '../components/ErrorBoundary';
 import NotFoundScreen from './NotFoundScreen/NotFoundScreen';
 import ChatRedirect from '../components/Chat/ChatRedirect/ChatRedirect';
 import DirectoryRedirect from '../components/Chat/DirectoryRedirect/DirectoryRedirect';
-import CallHistoryScreen from './CallHistoryScreen/CallHistoryScreen';
+import CallsRoute from './CallsRoute/CallsRoute';
 import CallDetailScreen from './CallDetailScreen/CallDetailScreen';
 import RecordingsRoute from './RecordingsRoute/RecordingsRoute';
 import RecordingDetailRoute from './RecordingDetailRoute/RecordingDetailRoute';
@@ -454,7 +454,11 @@ const AppRoot = (): ReactElement => {
         void navigate(`${base}/${encodeURIComponent(sessionId)}`);
         return;
       }
-      xyneAIActor.send({ type: 'OPEN', focusSessionId: sessionId });
+      xyneAIActor.send({
+        type: 'OPEN',
+        trackSource: 'completion_toast',
+        focusSessionId: sessionId,
+      });
     });
     return () => xyneAIStreamManager.setCompletionToastNavigator(null);
   }, [navigate, routeWorkspaceId]);
@@ -1716,7 +1720,7 @@ export const router = createBrowserRouter(
                   path: 'calls',
                   element: (
                     <ToolbarProtectedRoute path='/calls'>
-                      <CallHistoryScreen />
+                      <CallsRoute />
                     </ToolbarProtectedRoute>
                   ),
                   children: [

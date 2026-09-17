@@ -1,3 +1,4 @@
+import type { XyneAiSendTrigger } from '../../services/Analytics/xyneAiTracking';
 import { logger, Event as LogEvent } from '../../utils/logger';
 import {
   useContext,
@@ -47,6 +48,7 @@ import { AIComposer, type AIComposerAttachment, type AIComposerHandle } from './
 import { ReadonlyContextPills } from './ReadonlyContextPills';
 import { type ComposerContext, toStreamOverrides } from './composerContext';
 import { fetchV2ConversationMessages } from '../../services/XyneAI/XyneAISessionsV2Service';
+import { lengthBucket } from '../../services/Analytics/trackSource';
 import { xyneAIStreamManager } from '../../services/XyneAI/XyneAIStreamManager';
 import { BASE_URL } from '../../services/clients/apiClient';
 import { BrailleLoader, AnimatedLabel, useStableLabel } from './ReasoningLoader';
@@ -113,6 +115,9 @@ interface AIChatThreadProps {
   /** Context/toggles chosen on the landing composer — applied to the first
    *  auto-submitted turn and used to seed the chat composer. */
   initialExtras?: ComposerContext | undefined;
+  /** Which affordance sent `initialQuery` on the landing composer. Absent means
+   *  a true auto-send (an entry point set the query without a composer). */
+  initialTrigger?: XyneAiSendTrigger | undefined;
   onSetMobileSidebarOpen?: ((open: boolean) => void) | undefined;
   /** Desktop sidebar toggle for the header; state drives which icon shows. */
   onToggleSidebar?: (() => void) | undefined;
@@ -729,8 +734,11 @@ function ChatMessageBubble({
   onBranchNavigate,
   isV2,
   onRatingChange,
+  trackContext,
 }: {
   message: Message;
+  /** Run dimensions merged into every act-on-answer click (joins to the run). */
+  trackContext?: Record<string, unknown> | undefined;
   onCopy?: () => void;
   onFeedback?: (messageId: string, feedbackType: 'LIKE' | 'DISLIKE') => void;
   feedbackValue?: FeedbackValue;
@@ -1263,7 +1271,7 @@ function ChatMessageBubble({
           onFollowUpSuggestionClick &&
           message.followUpSuggestions?.length ? (
             <div className='mt-1 flex flex-wrap gap-2' data-testid='ask-ai-follow-ups'>
-              {message.followUpSuggestions.map(suggestion => (
+              {message.followUpSuggestions.map((suggestion, suggestionIndex) => (
                 <button
                   key={suggestion}
                   type='button'
@@ -1271,7 +1279,12 @@ function ChatMessageBubble({
                   className='rounded-full border border-border bg-card px-3 py-1.5 text-left text-xs font-medium leading-5 text-muted-foreground transition-colors hover:bg-accent'
                   data-track-category='AskAI'
                   data-track-name='FollowUpSuggestion'
-                  data-track-metadata={JSON.stringify({ suggestion })}
+                  data-track-metadata={JSON.stringify({
+                    ...trackContext,
+                    messageId: message.id,
+                    index: suggestionIndex,
+                    lengthBucket: lengthBucket(suggestion.length),
+                  })}
                 >
                   {suggestion}
                 </button>
@@ -1302,6 +1315,7 @@ function ChatMessageBubble({
                 className='inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground'
                 data-track-category='XyneAI'
                 data-track-name='COPY_MESSAGE'
+                data-track-metadata={JSON.stringify({ ...trackContext, messageId: message.id })}
               >
                 <Copy className='h-3.5 w-3.5' aria-hidden strokeWidth={1.75} />
               </button>
@@ -1313,6 +1327,7 @@ function ChatMessageBubble({
                   feedback={message.feedback}
                   comment={message.ratingComment}
                   onChange={(fb, c): void => onRatingChange?.(message.id, fb, c)}
+                  trackMetadata={trackContext}
                 />
               ) : (
                 <>
@@ -1326,6 +1341,7 @@ function ChatMessageBubble({
                     )}
                     data-track-category='XyneAI'
                     data-track-name='LIKE_MESSAGE'
+                    data-track-metadata={JSON.stringify({ ...trackContext, messageId: message.id })}
                   >
                     <ThumbsUp
                       className='h-3.5 w-3.5'
@@ -1345,6 +1361,7 @@ function ChatMessageBubble({
                     )}
                     data-track-category='XyneAI'
                     data-track-name='DISLIKE_MESSAGE'
+                    data-track-metadata={JSON.stringify({ ...trackContext, messageId: message.id })}
                   >
                     <ThumbsDown
                       className='h-3.5 w-3.5'
@@ -1367,6 +1384,7 @@ function ChatMessageBubble({
                   className='inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground'
                   data-track-category='XyneAI'
                   data-track-name='REGENERATE_MESSAGE'
+                  data-track-metadata={JSON.stringify({ ...trackContext, messageId: message.id })}
                 >
                   <RefreshCw className='h-3.5 w-3.5' aria-hidden strokeWidth={1.75} />
                 </button>
@@ -1397,6 +1415,7 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
     initialQuery,
     initialAttachments,
     initialExtras,
+    initialTrigger,
     onSetMobileSidebarOpen,
     onToggleSidebar,
     sidebarCollapsed,
@@ -1577,7 +1596,18 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
     setDebugArtifactsReadyVersion,
     isV2,
     agentSlug: effectiveAgentSlug,
+    surface: 'page',
   });
+
+  // Dimensions every act-on-answer click carries (see ChatMessageBubble).
+  const messageTrackContext = useMemo(
+    () => ({
+      surface: 'page',
+      ...(conversationId && { conversationId }),
+      agentSlug: effectiveAgentSlug ?? 'ask-ai',
+    }),
+    [conversationId, effectiveAgentSlug],
+  );
 
   // ── Branching: resolve the visible path from the full message tree ────────────
   // Mirrors XyneAISidebar. `messages` is the full tree (siblings share a
@@ -1889,13 +1919,25 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
         undefined,
         undefined,
         undefined,
-        initialExtras ? toStreamOverrides(initialExtras) : undefined,
+        {
+          ...(initialExtras ? toStreamOverrides(initialExtras) : {}),
+          // The landing composer's button / Enter is the real trigger; a button
+          // send already has its own click row and must not also emit here.
+          trigger: initialTrigger ?? 'auto_send',
+        },
       );
       // After the call, so "consumed" means "actually submitted" and the
       // attachments above are read before the parent drops them.
       onInitialQueryConsumed?.();
     }
-  }, [initialQuery, initialAttachments, initialExtras, submitQuery, onInitialQueryConsumed]);
+  }, [
+    initialQuery,
+    initialAttachments,
+    initialExtras,
+    initialTrigger,
+    submitQuery,
+    onInitialQueryConsumed,
+  ]);
 
   // Notify parent when conversationId changes (draft -> real session)
   useEffect(() => {
@@ -2056,6 +2098,7 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
       text: string,
       attachments?: AIComposerAttachment[],
       context?: ComposerContext,
+      trigger?: XyneAiSendTrigger,
     ): Promise<void> => {
       const hasAttachments = (attachments?.length ?? 0) > 0;
       if (!text.trim() && !hasAttachments) return;
@@ -2103,7 +2146,9 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
         undefined,
         undefined,
         undefined,
-        context ? toStreamOverrides(context) : undefined,
+        context || trigger
+          ? { ...(context ? toStreamOverrides(context) : {}), ...(trigger && { trigger }) }
+          : undefined,
       );
     },
     [submitQuery, isLegacyConversation, displayMessages, messages],
@@ -2340,6 +2385,7 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
                     // section's transitions).
                     <Fragment key={message.stableKey ?? message.id}>
                       <ChatMessageBubble
+                        trackContext={messageTrackContext}
                         message={message}
                         onCopy={() => {
                           void navigator.clipboard.writeText(
@@ -2435,8 +2481,8 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
             <AIComposer
               ref={composerRef}
               autoFocus
-              onSubmit={(text, attachments, context): void => {
-                void handleSubmit(text, attachments, context);
+              onSubmit={(text, attachments, context, trigger): void => {
+                void handleSubmit(text, attachments, context, trigger);
               }}
               onAgentChange={onAgentChange}
               showAgentSelector={isV2}

@@ -6,6 +6,7 @@ import { TicketSuggestion, TicketCreatedInfo } from '../../../utils/markdownTick
 import { useChannel } from '../../../hooks/useChannels';
 import { conversationService } from '../../../services/Chat/conversationService';
 import { toast } from 'sonner';
+import { globalClickTracker } from '../../../services/Analytics/globalClickTracker';
 
 interface TicketSuggestionsProps {
   suggestions: TicketSuggestion[];
@@ -33,6 +34,20 @@ export const TicketSuggestions: React.FC<TicketSuggestionsProps> = ({
 
   const currentChannel = useChannel(channelId || '');
   const navigate = useNavigate();
+
+  // Impression: the AI put suggestions in front of the user. Once per message
+  // so re-renders from WebSocket updates don't recount it.
+  const shownForMessageRef = React.useRef<string | null>(null);
+  React.useEffect(() => {
+    if (suggestions.length === 0 || shownForMessageRef.current === messageId) return;
+    shownForMessageRef.current = messageId;
+    globalClickTracker.trackManualEvent('MESSAGE', 'TICKET_SUGGESTIONS_SHOWN', undefined, {
+      messageId,
+      channelId,
+      suggestionCount: suggestions.length,
+      alreadyCreatedCount: ticketsCreated.length,
+    });
+  }, [suggestions.length, messageId, channelId, ticketsCreated.length]);
 
   // Memoized lookup for O(1) access
   const suggestionMap = useMemo(
@@ -108,6 +123,7 @@ export const TicketSuggestions: React.FC<TicketSuggestionsProps> = ({
   const handleNavigateToTicket = (created: TicketCreatedInfo) => {
     void navigate(
       `/chat/dir/${channelId}/${created.conversationId}/${created.ticketId}?selectedTab=details`,
+      { state: { trackSource: 'chat_message' } },
     );
   };
 
@@ -187,6 +203,7 @@ export const TicketSuggestions: React.FC<TicketSuggestionsProps> = ({
           }}
           channelId={channelId}
           projectId={currentChannel.projectId ?? ''}
+          trackSource='ai_suggestion'
           initialTitle={activeSuggestion!.title}
           initialDescription={activeSuggestion!.description}
           initialAssignee={

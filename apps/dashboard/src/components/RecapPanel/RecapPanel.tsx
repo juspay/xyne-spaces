@@ -1,4 +1,4 @@
-import { ReactElement, useState, useEffect, useCallback, useMemo } from 'react';
+import { ReactElement, useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import DOMPurify from 'dompurify';
 import { Link, useNavigate, useParams, Outlet } from 'react-router-dom';
 import {
@@ -25,6 +25,7 @@ import { usePlatform } from '../../hooks/usePlatform';
 import { xyneAIActor, type ThreadInfo } from '../../machines/xyneAIMachine';
 import { XyneAIStar } from '../icons/xyne-ai';
 import { Tooltip } from '../ui/Tooltip';
+import { globalClickTracker } from '../../services/Analytics/globalClickTracker';
 
 // Random greetings for the recap header
 const RECAP_GREETINGS = [
@@ -57,7 +58,8 @@ const RecapPanel = (): ReactElement => {
   const showThreadPanel = !!params.channelId;
 
   // Use the cached recap data hook
-  const { recapData, subscriptions, isLoadingSubscriptions, isFirstTime } = useRecapData();
+  const { recapData, subscriptions, isLoadingSubscriptions, isFirstTime, unreadCount } =
+    useRecapData();
 
   // Active tab: channel or project
 
@@ -113,6 +115,30 @@ const RecapPanel = (): ReactElement => {
 
   // Determine if we're in historical view based on selectedDate, not just data presence
   const isHistoricalView = selectedDate !== null;
+
+  // Impression: a recap with cards is on screen. The clicks below (open channel,
+  // citation, ask AI, mark read) have no denominator without this. Latched per
+  // date + kind so re-renders and read/unread toggles don't refire; a different
+  // date picked from the calendar is a new impression. No card content rides.
+  const recapViewedKeyRef = useRef<string | null>(null);
+  useEffect(() => {
+    const data = isHistoricalView ? historicalRecapData : recapData;
+    if (!data || data.cards.length === 0) return;
+    const customRecapCount = data.cards.filter(card => card.hasCustomRecap).length;
+    const recapType = customRecapCount > 0 ? 'custom' : 'base';
+    const key = `${data.date}:${recapType}`;
+    if (recapViewedKeyRef.current === key) return;
+    recapViewedKeyRef.current = key;
+    globalClickTracker.trackManualEvent('RECAP_PANEL', 'RECAP_VIEWED', undefined, {
+      recapType,
+      customRecapCount,
+      channelCount: data.cards.length,
+      date: data.date,
+      isToday: !isHistoricalView,
+      unreadCount: isHistoricalView ? 0 : unreadCount,
+      totalMessages: data.meta.totalMessages,
+    });
+  }, [isHistoricalView, historicalRecapData, recapData, unreadCount]);
 
   // Split cards into unread and read sections (moved up to be used in handleMarkAllAsRead)
   const { unreadCards, readCards } = useMemo(() => {
@@ -350,6 +376,7 @@ const RecapPanel = (): ReactElement => {
         channelId: card.channelId,
         threadInfo,
         startFreshChat: true,
+        trackSource: 'recap_panel',
       });
     },
     [buildAskAIThreadInfo],

@@ -1,3 +1,36 @@
+## [1.334.0](https://github.com/juspay/xyne-spaces/compare/v1.333.1...v1.334.0) (2026-09-17)
+
+
+### Features
+
+* timeline view for calls ([#1349](https://github.com/juspay/xyne-spaces/issues/1349)) ([3c7754f](https://github.com/juspay/xyne-spaces/commit/3c7754fc70a688aa396e88c1f6f6c43327996864))
+
+## [1.333.1](https://github.com/juspay/xyne-spaces/compare/v1.333.0...v1.333.1) (2026-09-17)
+
+
+### Bug Fixes
+
+* remove canvas title icon picker from main ([#1954](https://github.com/juspay/xyne-spaces/issues/1954)) ([44dcb8a](https://github.com/juspay/xyne-spaces/commit/44dcb8a12843535ed3315dab4445b517593dc077))
+
+## [1.333.0](https://github.com/juspay/xyne-spaces/compare/v1.332.2...v1.333.0) (2026-09-17)
+
+
+### Features
+
+* Calls tab new version ([#1674](https://github.com/juspay/xyne-spaces/issues/1674)) ([56de704](https://github.com/juspay/xyne-spaces/commit/56de7041b69067f8a306290e044277e7f82014a8))
+
+
+### Bug Fixes
+
+* google unauthorized client refresh ([#1799](https://github.com/juspay/xyne-spaces/issues/1799)) ([705bc6e](https://github.com/juspay/xyne-spaces/commit/705bc6ecd35c83508de46d13c0e00514dd604b32))
+
+## [1.332.2](https://github.com/juspay/xyne-spaces/compare/v1.332.1...v1.332.2) (2026-09-17)
+
+
+### Bug Fixes
+
+* Implement Xyne AI and ticket tracking events ([#1865](https://github.com/juspay/xyne-spaces/issues/1865)) ([727621b](https://github.com/juspay/xyne-spaces/commit/727621b9cfdabb3638e76f898f58bd80eca6ad1a))
+
 ## [1.332.1](https://github.com/juspay/xyne-spaces/compare/v1.332.0...v1.332.1) (2026-09-16)
 
 
