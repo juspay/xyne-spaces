@@ -7,6 +7,8 @@
  * client owns a given token. This module is the single source of that mapping.
  */
 
+import { logger } from '../utils/logger';
+
 export type GoogleClientKey = 'web' | 'new' | 'mobile';
 
 export interface GoogleClientCreds {
@@ -24,6 +26,24 @@ export const GOOGLE_CLIENTS: Record<GoogleClientKey, () => GoogleClientCreds> = 
 };
 
 const ALL_KEYS: GoogleClientKey[] = ['web', 'new', 'mobile'];
+
+/**
+ * Surface an implicit fail-open at boot: if zero Google clients are configured,
+ * Google refresh-token verification silently passes (no creds → no revocation
+ * signal), so a misconfigured deployment would never detect a revoked Google
+ * user. The old authV2Middleware constructor threw on missing creds; this warns
+ * instead (throwing would take down non-Google deployments that legitimately run
+ * without them).
+ */
+export function warnIfNoGoogleClientsConfigured(): void {
+  const configured = ALL_KEYS.filter((key) => GOOGLE_CLIENTS[key]().id);
+  if (configured.length === 0) {
+    logger.warn(
+      '[GoogleOAuth] No Google OAuth clients configured (GOOGLE_CLIENT_ID / _NEW / MOBILE all empty) — ' +
+        'Google refresh-token verification will fail open (never detect a revoked Google user).'
+    );
+  }
+}
 
 export function isGoogleClientKey(value: unknown): value is GoogleClientKey {
   return value === 'web' || value === 'new' || value === 'mobile';

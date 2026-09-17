@@ -53,16 +53,23 @@ class MtlsCertificateService {
       );
 
       if (!response.ok) {
-        // 404 = user has never enrolled a device; nothing to revoke.
-        if (response.status === 404) {
-          logger.info('[MTLS] No mTLS user for deactivated user; nothing to revoke');
-          return true;
-        }
         logger.error('[MTLS] Certificate revoke-all failed', { status: response.status });
         return false;
       }
 
-      const body = (await response.json()) as { total?: number; revoked?: number; failed?: number };
+      const body = (await response.json()) as {
+        error?: string;
+        total?: number;
+        revoked?: number;
+        failed?: number;
+      };
+
+      // User not found now comes back as 200 with an error body (the mTLS
+      if (body.error) {
+        logger.info('[MTLS] No mTLS user for deactivated user; nothing to revoke');
+        return true;
+      }
+
       const allRevoked = (body.failed ?? 0) === 0;
       logger.info('[MTLS] Certificate revocation completed for deactivated user', {
         total: body.total,

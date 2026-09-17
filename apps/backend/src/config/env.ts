@@ -482,6 +482,12 @@ const envSchema = Joi.object({
   // that owns a refresh token, mean the token is permanently revoked.
   GOOGLE_AUTH_PERMANENT_ERRORS: Joi.string().default('invalid_grant,invalid_token'),
   GOOGLE_AUTH_CLIENT_ERRORS: Joi.string().default('unauthorized_client,invalid_client'),
+  // Master switch for the session-refresh provider-revocation check (Google /
+  // Microsoft verification + account-deactivation cleanup). When false, refresh
+  // falls back to the legacy behaviour: session status + expiry only, no
+  // provider call and no deactivation. Kill switch if provider verification
+  // misbehaves in production.
+  ENABLE_PROVIDER_REVOCATION_CHECK: Joi.boolean().default(true),
   // Email fetch
   EMAIL_FETCH_BATCH_SIZE: Joi.number().integer().default(10),
   EMAIL_FETCH_BATCH_DELAY_MS: Joi.number().integer().default(5000),
@@ -1161,6 +1167,8 @@ export const config = {
     .split(',')
     .map((code: string) => code.trim())
     .filter(Boolean),
+  // Kill switch for provider-revocation verification during session refresh.
+  enableProviderRevocationCheck: envVars.ENABLE_PROVIDER_REVOCATION_CHECK as boolean,
   apps: {
     internalHostMap: parseInternalAppHostMap(envVars.INTERNAL_APP_HOST_MAP as string),
   },

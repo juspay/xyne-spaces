@@ -13,6 +13,10 @@ import {
 
 const userSessionService = new UserSessionService();
 
+// Timeout for Microsoft Graph / token calls so a hanging endpoint cannot stall
+// the refresh hot path indefinitely.
+const MS_REQUEST_TIMEOUT_MS = 10_000;
+
 // The session shape both middlewares load via userSessionService.getSessionById
 // (UserSession joined with its user + orgMember).
 type LoadedSession = NonNullable<Awaited<ReturnType<UserSessionService['getSessionById']>>>;
@@ -70,7 +74,7 @@ async function isGoogleRefreshTokenRevoked(
       logger.error(`[Refresh-Validate] Unexpected Google error (${code}) via ${creds.label} client`, {
         userId: user.id,
         googleError: code,
-        client: creds.id
+        client: creds.id,
       });
       sawTransient = true; // network / 5xx — inconclusive
     }
@@ -82,8 +86,10 @@ async function isGoogleRefreshTokenRevoked(
 
 /**
  * Verify a Microsoft user is still valid in Azure AD via Microsoft Graph, with a
- * token refresh on 401. Returns true only when Azure AD definitively rejects the
- * user (disabled/deleted). Transient/network errors return false.
+ * token refresh on 401. Returns true ONLY on a definitive rejection (disabled /
+ * deleted). Transient failures — Graph 429/5xx, a failed token refresh that is
+ * itself 429/5xx, network errors, timeouts — return false (inconclusive), so a
+ * Microsoft outage never mass-deactivates healthy users.
  */
 async function isMicrosoftUserRevoked(session: LoadedSession): Promise<boolean> {
   if (!session.accessToken) {
@@ -95,6 +101,7 @@ async function isMicrosoftUserRevoked(session: LoadedSession): Promise<boolean> 
     const graphResponse = await axios.get('https://graph.microsoft.com/v1.0/me', {
       headers: { Authorization: `Bearer ${session.accessToken}` },
       validateStatus: () => true, // Don't throw on non-2xx
+      timeout: MS_REQUEST_TIMEOUT_MS,
     });
 
     if (graphResponse.status === 200) {
@@ -117,6 +124,7 @@ async function isMicrosoftUserRevoked(session: LoadedSession): Promise<boolean> 
         {
           headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
           validateStatus: () => true,
+          timeout: MS_REQUEST_TIMEOUT_MS,
         },
       );
 
@@ -127,13 +135,26 @@ async function isMicrosoftUserRevoked(session: LoadedSession): Promise<boolean> 
         return false;
       }
 
-      logger.warn('[Refresh-Validate] Microsoft token refresh failed; user may be disabled in Azure AD');
+      // 400/401 from the token endpoint = the refresh token itself is rejected
+      // (revoked/expired/user disabled) — definitive. 429/5xx = transient.
+      if (tokenResponse.status === 400 || tokenResponse.status === 401) {
+        logger.warn(`[Refresh-Validate] Microsoft token refresh rejected (${tokenResponse.status}); user disabled/revoked in Azure AD`);
+        return true;
+      }
+
+      logger.warn(`[Refresh-Validate] Microsoft token refresh transient failure (${tokenResponse.status}); allowing session`);
+      return false;
+    }
+
+    // 403/404 = user disabled/deleted in Azure AD (definitive). 429/5xx and any
+    // other status = transient/inconclusive — allow the session.
+    if (graphResponse.status === 403 || graphResponse.status === 404) {
+      logger.warn(`[Refresh-Validate] Microsoft Graph returned ${graphResponse.status}; user disabled/deleted in Azure AD`);
       return true;
     }
 
-    // 403 or other — user likely disabled/deleted in Azure AD.
-    logger.warn(`[Refresh-Validate] Microsoft Graph returned ${graphResponse.status}; user may be disabled in Azure AD`);
-    return true;
+    logger.warn(`[Refresh-Validate] Microsoft Graph transient status ${graphResponse.status}; allowing session`);
+    return false;
   } catch (err) {
     logger.warn(`[Refresh-Validate] Microsoft Graph verification transient error: ${err instanceof Error ? err.message : String(err)}`);
     return false;
@@ -200,10 +221,13 @@ export async function isRefreshAllowed(session: LoadedSession | null): Promise<b
   });
 
   if (verdict.deactivate && session?.user) {
-    await accountDeactivationService.handleDeactivatedUser({
-      userId: session.user.id,
-      email: session.user.email,
-    });
+    const { id: userId, email } = session.user;
+    void accountDeactivationService
+      .handleDeactivatedUser({ userId, email })
+      .catch((err) => logger.error('[Refresh-Validate] Deactivation cleanup failed', {
+        userId,
+        error: err instanceof Error ? err.message : String(err),
+      }));
   }
   return false;
 }

@@ -1,10 +1,13 @@
 import { Request, Response, NextFunction } from 'express';
+import { OAuth2Client, gaxios } from 'google-auth-library';
+import axios from 'axios';
 import { jwtService } from '../services/jwtService';
 import { logger as baseLogger } from '../utils/logger';
 import '../types/express';
 import { UserSessionService } from '../services/userSessionService';
 import { config } from '@/config/env';
 import { db } from '@/database/client';
+import { AuthProvider } from '@xyne/shared';
 import { isRefreshAllowed } from '../services/sessionRefreshValidator';
 
 const logger = baseLogger.child({ module: 'AuthV2Middleware' });
@@ -75,10 +78,145 @@ class AuthV2Middleware {
         return false;
       }
 
-      // Shared validity + provider-revocation check (status, expiry, leftAt,
-      // Google/Microsoft revocation, and deactivation cleanup). Same decision
-      // used by v1 authMiddleware so both stay in sync.
-      if (!(await isRefreshAllowed(session))) {
+      // ENABLE_PROVIDER_REVOCATION_CHECK gates the refresh-validity decision.
+      // Disabled → the original inline check (status/expiry, leftAt, and the
+      // old single-client Google + Microsoft provider verification) runs
+      // verbatim, calling nothing new. Enabled → the shared isRefreshAllowed
+      // decision (owning-client Google check, hardened Microsoft check, and
+      // account-deactivation cleanup), same as v1 authMiddleware.
+      if (!config.enableProviderRevocationCheck) {
+        // Check expiry and status
+        const now = new Date();
+        const isActive = session.status === 'ACTIVE';
+        const isExpired = now >= session.refreshTokenExpiry;
+
+        if (!isActive || isExpired) {
+          logger.warn(`[AUTH] [Auto-Refresh] Session invalid: Status=${session.status}, Expired=${isExpired} (Expiry: ${session.refreshTokenExpiry})`, {
+            userId: session.user.id,
+            email: session.user.email,
+            sessionStatus: session.status,
+            refreshTokenExpiry: session.refreshTokenExpiry.toISOString(),
+          });
+          return false;
+        }
+
+        // Check if user has been removed from the organization entirely
+        if (session.user.orgMember?.leftAt) {
+          logger.warn(`[AUTH] [Auto-Refresh] User ${session.user.email} has left organization (leftAt=${session.user.orgMember.leftAt.toISOString()}). Session rejected.`, {
+            userId: session.user.id,
+            email: session.user.email,
+            orgMemberLeftAt: session.user.orgMember.leftAt.toISOString(),
+          });
+          return false;
+        }
+
+        if (session.user.leftAt) {
+          logger.warn(`[AUTH] [Auto-Refresh] Workspace user ${session.user.email} has left workspace ${session.user.workspaceId} (leftAt=${session.user.leftAt.toISOString()}). Session rejected.`, {
+            userId: session.user.id,
+            email: session.user.email,
+            workspaceId: session.user.workspaceId,
+            userLeftAt: session.user.leftAt.toISOString(),
+          });
+          return false;
+        }
+
+        // --- Provider Verification Step ---
+        // Only verify with Google if the user authenticated via Google
+        if (session.user.authProvider === AuthProvider.GOOGLE && session.refreshToken) {
+          try {
+            // Verify if the user is still valid in Google by checking their refresh token
+            const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID, process.env.GOOGLE_CLIENT_SECRET);
+            googleClient.setCredentials({ refresh_token: session.refreshToken });
+
+            // Attempt to get a new access token.
+            // If the user has been deleted or suspended in Google, this should throw.
+            await googleClient.getAccessToken();
+
+            logger.info(`[AUTH] [Auto-Refresh] Google verification successful for user ${session.user.email}`, {
+                        userId: session.user.id,
+                        email: session.user.email,
+                      });
+          } catch (err) {
+            const googleError = err as gaxios.GaxiosError;
+            // Check if it's a user-related error vs system error
+            const isInvalidGrant = googleError.response?.data?.error === 'invalid_grant';
+
+            if (isInvalidGrant) {
+              logger.warn(`[AUTH] [Auto-Refresh] User token revoked for ${session.user.email}`, {
+                userId: session.user.id,
+                email: session.user.email,
+              });
+              return false;
+            } else {
+              // For system errors, allow the refresh but log the issue
+              logger.warn(`[AUTH] [Auto-Refresh] Google verification FAILED (Transient): Allowing session. User: ${session.user.email}. Error: ${googleError}`, {
+                userId: session.user.id,
+                email: session.user.email,
+                error: googleError.message,
+              });
+            }
+            // Proceed with local session if it's just a network/transient error
+          }
+        } else if (session.user.authProvider === AuthProvider.MICROSOFT) {
+          // Verify if the user is still valid in Azure AD via Microsoft Graph API
+          if (session.accessToken) {
+            try {
+              const graphResponse = await axios.get('https://graph.microsoft.com/v1.0/me', {
+                headers: { Authorization: `Bearer ${session.accessToken}` },
+                validateStatus: () => true, // Don't throw on non-2xx
+              });
+
+              if (graphResponse.status === 200) {
+                logger.info(`[Auto-Refresh] Microsoft Graph verification successful for user ${session.user.email}`);
+              } else if (graphResponse.status === 401) {
+                // Access token expired — try refreshing via Microsoft token endpoint
+                const tenantId = process.env.MICROSOFT_TENANT_ID || 'common';
+                const tokenResponse = await axios.post(
+                  `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`,
+                  new URLSearchParams({
+                    client_id: process.env.MICROSOFT_CLIENT_ID!,
+                    client_secret: process.env.MICROSOFT_CLIENT_SECRET!,
+                    grant_type: 'refresh_token',
+                    refresh_token: session.refreshToken,
+                    scope: 'openid email profile User.Read',
+                  }),
+                  {
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    validateStatus: () => true,
+                  }
+                );
+
+                if (tokenResponse.status === 200) {
+                  const tokenData = tokenResponse.data as { access_token: string };
+                  await this.userSessionService.updateSession(session.id, {
+                    accessToken: tokenData.access_token,
+                  });
+                  logger.info(`[Auto-Refresh] Microsoft token refreshed for user ${session.user.email}`);
+                } else {
+                  logger.warn(`[Auto-Refresh] Microsoft token refresh failed for ${session.user.email}. User may be disabled in Azure AD.`);
+                  return false;
+                }
+              } else {
+                // 403 or other error — user likely disabled/deleted in Azure AD
+                logger.warn(`[Auto-Refresh] Microsoft Graph returned ${graphResponse.status} for ${session.user.email}. User may be disabled in Azure AD.`);
+                return false;
+              }
+            } catch (err) {
+              // Network/transient error — allow session to continue
+              logger.warn(`[Auto-Refresh] Microsoft Graph verification failed (transient) for ${session.user.email}: ${err instanceof Error ? err.message : String(err)}`);
+            }
+          } else {
+            logger.info(`[Auto-Refresh] No access token for Microsoft user ${session.user.email}. Skipping Graph check.`);
+          }
+        } else if (session.user.authProvider === AuthProvider.EMAIL) {
+          // Email auth: we issued the refresh token ourselves
+          // No external provider to verify against
+          logger.info(`[Auto-Refresh] Email auth session for ${session.user.email} — skipping provider check`);
+        } else if (!session.refreshToken) {
+           logger.info(`[Auto-Refresh] No refresh token in session for user ${session.user.email}. Skipping provider check.`);
+        }
+        // --------------------------------
+      } else if (!(await isRefreshAllowed(session))) {
         return false;
       }
 

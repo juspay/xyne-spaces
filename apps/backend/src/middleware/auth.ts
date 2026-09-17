@@ -592,10 +592,32 @@ export class AuthMiddleware {
         return { success: false, error: 'Invalid session' };
       }
 
-      // Shared validity + provider-revocation check (status, expiry, leftAt,
-      // Google/Microsoft revocation, and deactivation cleanup). Same decision
-      // used by v2 authV2Middleware so both stay in sync.
-      if (!(await isRefreshAllowed(session))) {
+      // ENABLE_PROVIDER_REVOCATION_CHECK gates the refresh-validity decision.
+      // Disabled → v1's original inline check (session status + expiry only)
+      // runs verbatim, calling nothing new. Enabled → the shared isRefreshAllowed
+      // decision (status/expiry/leftAt + provider revocation + deactivation
+      // cleanup), same as v2 authV2Middleware.
+      if (!config.enableProviderRevocationCheck) {
+        // Check if session is still active and not expired
+        const now = new Date();
+        const isSessionExpired = now > session.refreshTokenExpiry;
+        logger.info(`[AUTH] refreshTokenBySession validating session state`, {
+          userId: session.user.id,
+          sessionStatus: session.status,
+          refreshTokenExpiry: session.refreshTokenExpiry.toISOString(),
+          isSessionExpired,
+        });
+
+        if (session.status !== 'ACTIVE' || isSessionExpired) {
+          logger.warn(`[AUTH] refreshTokenBySession failed: session inactive or expired`, {
+            userId: session.user.id,
+            sessionStatus: session.status,
+            refreshTokenExpiry: session.refreshTokenExpiry.toISOString(),
+            now: now.toISOString(),
+          });
+          return { success: false, error: 'Session expired' };
+        }
+      } else if (!(await isRefreshAllowed(session))) {
         return { success: false, error: 'Session invalid or revoked' };
       }
 
