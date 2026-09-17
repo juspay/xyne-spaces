@@ -14,7 +14,7 @@ import { useCachedQuery } from '../../../../hooks/useCachedQuery';
 import { queries } from '../../../../zero/queries';
 import { useActiveUserSearch, useUser, useUsers } from '../../../../hooks/useUsers';
 import { useUserGroups } from '../../../../hooks/useUserGroup';
-import { useAllChannels, useChannel } from '../../../../hooks/useChannels';
+import { useAllChannels, useChannel, useChannelSearch } from '../../../../hooks/useChannels';
 import UserAvatar, { AvatarShape, AvatarSize } from '../../../UserAvatar/UserAvatar';
 import { EntitySelector } from '../../../ui/EntitySelector/EntitySelector';
 import { EntityMultiSelector } from '../../../ui/EntitySelector/EntityMultiSelector';
@@ -245,20 +245,17 @@ function channelIcon(type: string | null | undefined): React.ReactElement {
 
 function ChannelField({ value, onChange, placeholder }: FieldProps): React.ReactElement {
   const [search, setSearch] = useState('');
-  const channels = useAllChannels();
+  const channels = useChannelSearch(search, 15);
   const selectedChannel = useChannel(value ?? '');
 
   const baseOptions: SelectorOption[] = useMemo(() => {
     if (!channels) return [];
-    const lower = search.trim().toLowerCase();
-    return channels
-      .filter(c => (lower ? (c.name ?? '').toLowerCase().includes(lower) : true))
-      .map(c => ({
-        value: c.id,
-        label: c.name || '(unnamed channel)',
-        icon: channelIcon(c.type),
-      }));
-  }, [channels, search]);
+    return channels.map(c => ({
+      value: c.id,
+      label: c.name || '(unnamed channel)',
+      icon: channelIcon(c.type),
+    }));
+  }, [channels]);
 
   const options = useMemo(() => {
     if (!value || !selectedChannel) return baseOptions;
