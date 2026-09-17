@@ -20,7 +20,6 @@ import {
 import { getValidClaudeBearer } from "./claude-oauth-refresh.js";
 import { getValidCodexBearer } from "./codex-oauth-refresh.js";
 import { errMsg } from "./errors.js";
-import { isLocalHarnessProvider } from "xyne-claw-shared";
 import { createLogger } from "../logger.js";
 
 const defaultLog = createLogger("provider-resolution");
@@ -44,7 +43,6 @@ export interface ProviderResolution {
   subagentProviderMode: SubagentProviderMode;
   userDeferredToAgent: boolean;
   personalProvider?: string | undefined;
-  rawPersonalProvider?: string | undefined;
   agentLevelProvider?: string | undefined;
   agentProviderOrder: string[];
   mentionSpeed: ModelSpeed;
@@ -62,8 +60,7 @@ export async function resolveProvidersForDispatch(
     ? await userAgentConfigRepository.findByUserAndAgent(targetUserId, agent.orgId, agent.slug).catch(() => null)
     : null;
   const rawPersonalProvider = userAgentConfig?.provider;
-  const selectedPersonalProvider = rawPersonalProvider && rawPersonalProvider !== "spaces" ? rawPersonalProvider : undefined;
-  const personalProvider = isLocalHarnessProvider(selectedPersonalProvider) ? undefined : selectedPersonalProvider;
+  const personalProvider = rawPersonalProvider && rawPersonalProvider !== "spaces" ? rawPersonalProvider : undefined;
   const userDeferredToAgent = rawPersonalProvider === "spaces";
 
   const mentionSpeed = agentDefaultSpeed(agentRow?.config);
@@ -147,7 +144,6 @@ export async function resolveProvidersForDispatch(
     subagentProviderMode,
     userDeferredToAgent,
     personalProvider,
-    rawPersonalProvider,
     agentLevelProvider,
     agentProviderOrder,
     mentionSpeed,

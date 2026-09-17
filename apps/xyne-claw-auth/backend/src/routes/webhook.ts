@@ -38,7 +38,6 @@ import { resolveUserSpacesAuth } from "../surfaces/spaces/user-auth.js";
 import { IMMEDIATE_TASK_COMMAND_RE, RECORD_SKILL_COMMAND_RE, isVideoAttachment, videoFileExtension, SDLC_AGENT_SLUG } from "xyne-claw-shared";
 import { resolveAgentProviderConfigs } from "../lib/agent-provider-config.js";
 import { resolveProvidersForDispatch } from "../lib/provider-resolution.js";
-import { dispatchLocalHarnessRun, pinnedModelForProvider, resolveLocalHarnessTarget } from "../lib/local-harness.js";
 import { expandSpacesMentions, resolveUnboundMentions } from "../lib/mention-transform.js";
 import { type RunDispatchResult } from "../lib/dispatch-run.js";
 import { startRun } from "../lib/start-run.js";
@@ -143,6 +142,7 @@ import {
   prScreenId,
   isTwinDelivery,
   isUiWidget,
+  SDLC_REQUIRED_TOOLS,
 } from "xyne-claw-shared";
 import { scheduleProviderRetry } from "../queue/provider-retry-worker.js";
 import type { TwinDelivery, UiWidget, PrProvider, PrStatus } from "xyne-claw-shared";
@@ -1706,7 +1706,6 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       providerConfigs,
       subagentProviders,
       subagentProviderMode,
-      rawPersonalProvider,
     } = await resolveProvidersForDispatch({
       targetUserId,
       agent,
@@ -1962,7 +1961,6 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       agentId: agent.id,
       agentOrgId: agent.orgId,
       agentSlug: agent.slug,
-      agentName: agent.name,
       responseMode: eventType === "USER_MENTIONED" ? "approval" as const : "conversation" as const,
       appToken: agent.appToken,
       spacesAppId: agent.spacesAppId,
@@ -2022,81 +2020,32 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       }
     }
 
-    // Local-harness routing: only mention-driven runs are eligible. If the user
-    // has an online authenticated local device for a preferred provider, the run
-    // is dispatched there; otherwise we fall through to the server run below.
-    const localHarnessEligible = eventType === "USER_MENTIONED" || eventType === "APP_MENTIONED";
-    const rawAgentOrder = (agentRow?.config as Record<string, unknown> | null)?.["providerOrder"];
-    const localTarget = localHarnessEligible
-      ? await resolveLocalHarnessTarget({
-          userId: targetUserId,
-          orgId: agent.orgId,
-          providerOrder: Array.isArray(rawAgentOrder)
-            ? rawAgentOrder.filter((p): p is string => typeof p === "string")
-            : [],
-          personalProvider: rawPersonalProvider,
-        }).catch((err: unknown) => {
-          log.warn("Local-harness resolution failed — using server run", {
-            error: err instanceof Error ? err.message : String(err),
-          });
-          return undefined;
-        })
-      : undefined;
-
     let body: RunDispatchResult;
-    if (localTarget) {
-      let dispatched: Awaited<ReturnType<typeof dispatchLocalHarnessRun>>;
-      try {
-        dispatched = await dispatchLocalHarnessRun({
-          target: localTarget,
-          userId: targetUserId,
-          orgId: agent.orgId,
-          conversationId: payload.conversationId,
-          agentSlug: runAgentSlug,
-          agentName: agentRow?.name ?? agent.slug,
-          systemPrompt: agentRow?.systemPrompt ?? "",
-          model: pinnedModelForProvider(agentRow?.config, localTarget.provider),
-          task,
-          context: dispatchContext || null,
-          progressUrl: `${CONFIG.internalUrl}/claw/api/v1/webhook/progress`,
-          callbackUrl: `${CONFIG.internalUrl}/claw/api/v1/webhook/result`,
-          serverFallbackBody: dispatchPayload as unknown as Record<string, unknown>,
-        });
-      } catch (err) {
-        if (globalTwinSlotToken !== null) void releaseTwinSlot(globalTwinSlotToken);
-        if (twinConvSlotToken !== null && payload.conversationId) {
-          await drainNextQueued(payload.conversationId, runAgentSlug, twinConvSlotToken, twinUserScope).catch(() => {});
-        }
-        throw err;
+    try {
+      const started = await startRun(
+        {
+          body: dispatchPayload as unknown as Record<string, unknown>,
+          isInternalRun: true,
+          isInternalS2SCaller: true,
+          wantsSse: false,
+        },
+        {},
+      );
+      body = started.ok
+        ? {
+            success: true,
+            sessionId: started.sessionId,
+            status: 200,
+            ...(started.queued ? { queued: true } : {}),
+            ...(typeof started.queuePosition === "number" ? { queuePosition: started.queuePosition } : {}),
+          }
+        : { success: false, error: started.error, status: started.status };
+    } catch (err) {
+      if (globalTwinSlotToken !== null) void releaseTwinSlot(globalTwinSlotToken);
+      if (twinConvSlotToken !== null && payload.conversationId) {
+        await drainNextQueued(payload.conversationId, runAgentSlug, twinConvSlotToken, twinUserScope).catch(() => {});
       }
-      body = { success: true, sessionId: dispatched.sessionId, status: 200 };
-    } else {
-      try {
-        const started = await startRun(
-          {
-            body: dispatchPayload as unknown as Record<string, unknown>,
-            isInternalRun: true,
-            isInternalS2SCaller: true,
-            wantsSse: false,
-          },
-          {},
-        );
-        body = started.ok
-          ? {
-              success: true,
-              sessionId: started.sessionId,
-              status: 200,
-              ...(started.queued ? { queued: true } : {}),
-              ...(typeof started.queuePosition === "number" ? { queuePosition: started.queuePosition } : {}),
-            }
-          : { success: false, error: started.error, status: started.status };
-      } catch (err) {
-        if (globalTwinSlotToken !== null) void releaseTwinSlot(globalTwinSlotToken);
-        if (twinConvSlotToken !== null && payload.conversationId) {
-          await drainNextQueued(payload.conversationId, runAgentSlug, twinConvSlotToken, twinUserScope).catch(() => {});
-        }
-        throw err;
-      }
+      throw err;
     }
 
     if (globalTwinSlotToken !== null) {
@@ -2127,7 +2076,6 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
               conversationId: payload.conversationId,
               channelId: payload.channelId,
               agentSlug: agent.slug,
-              agentName: agent.name,
               userId: agent.spacesAppUserId,
               toolLabel: initialProgressLabel,
               status: "working",
@@ -2557,7 +2505,6 @@ async function redispatchQueuedMessage(msg: QueuedMessage): Promise<void> {
       conversationId: msg.conversationId,
       channelId: msg.channelId,
       agentSlug: msg.agentSlug,
-      agentName: queuedContext.agentName,
       spacesAppUserId: agentRow.spacesAppUserId ?? "",
       appToken,
       toolLabel: "Picked up your new message — continuing from the summary above…",
@@ -2672,6 +2619,15 @@ export async function handleAutomationWebhook(
     workspaceId?: string | null;
     allowWriteInReadOnlyJob?: boolean;
     executionProfile?: "sdlc";
+    sdlcOperation?: "baseline" | "work" | "wiki";
+    sdlcWikiRole?:
+      | "BOOTSTRAP_SURVEY"
+      | "BOOTSTRAP_PAGE"
+      | "BOOTSTRAP_EDITOR"
+      | "BOOTSTRAP"
+      | "GENERATOR"
+      | "ARCHITECTURE_VALIDATOR"
+      | "CORRECTOR";
     sdlcContext?: Record<string, unknown>;
   };
 
@@ -2890,7 +2846,6 @@ export async function handleAutomationWebhook(
       agentId: agent.id,
       agentOrgId: agent.orgId,
       agentSlug: agent.slug,
-      agentName: agent.name,
       responseMode: "conversation",
       appToken,
       spacesAppId: agent.spacesAppId!,
@@ -2940,6 +2895,99 @@ export async function handleAutomationWebhook(
     s2sKeyMatches(req.headers["x-s2s-key"]);
   const baseAgentConfig = (agent.config as Record<string, unknown> | null) ?? {};
   const baseTools = (baseAgentConfig["tools"] as Record<string, unknown> | undefined) ?? {};
+  const wikiValidator =
+    payload.sdlcWikiRole === "BOOTSTRAP_EDITOR" ||
+    payload.sdlcWikiRole === "ARCHITECTURE_VALIDATOR";
+  const wikiSurvey = payload.sdlcWikiRole === "BOOTSTRAP_SURVEY";
+  const wikiPageWriter = payload.sdlcWikiRole === "BOOTSTRAP_PAGE";
+  const sdlcOutputFormat =
+    payload.sdlcOperation === "wiki" && wikiSurvey
+      ? {
+          type: "json",
+          schema: {
+            type: "object",
+            properties: {
+              repositorySummary: { type: "string" },
+              pages: {
+                type: "array",
+                items: {
+                  type: "object",
+                  properties: {
+                    path: { type: "string" },
+                    purpose: { type: "string" },
+                    concepts: { type: "array", items: { type: "string" } },
+                    priority: { type: "string", enum: ["HIGH", "MEDIUM", "LOW"] },
+                    archetype: {
+                      type: "string",
+                      enum: ["overview", "subsystem", "flow", "data-model", "interface", "operations", "decision"],
+                    },
+                    sourceAreas: { type: "array", items: { type: "string" } },
+                    relatedPages: { type: "array", items: { type: "string" } },
+                    tableCandidates: { type: "array", items: { type: "string" } },
+                    diagramCandidates: { type: "array", items: { type: "string" } },
+                  },
+                  required: ["path", "purpose", "concepts", "priority", "archetype", "sourceAreas", "relatedPages", "tableCandidates", "diagramCandidates"],
+                },
+              },
+            },
+            required: ["repositorySummary", "pages"],
+          },
+          requireToolsBeforeSubmit: [...SDLC_REQUIRED_TOOLS.wikiSurvey],
+        }
+      : payload.sdlcOperation === "wiki" && wikiValidator
+        ? {
+            type: "json",
+            schema: {
+              type: "object",
+              properties: {
+                complete: { type: "boolean" },
+                missingTopics: { type: "array", items: { type: "string" } },
+                issues: { type: "array", items: { type: "string" } },
+                suggestions: { type: "array", items: { type: "string" } },
+              },
+              required: ["complete", "missingTopics", "issues", "suggestions"],
+            },
+          }
+        : payload.sdlcOperation === "wiki"
+          ? {
+              type: "json",
+              schema: {
+                type: "object",
+                properties: { completed: { type: "boolean" } },
+                required: ["completed"],
+              },
+          requireToolsBeforeSubmit: wikiPageWriter
+            ? [...SDLC_REQUIRED_TOOLS.wikiPage]
+            : [...SDLC_REQUIRED_TOOLS.wikiFinalize],
+            }
+    : payload.sdlcOperation === "work"
+      ? {
+          type: "json",
+          schema: {
+            type: "object",
+            properties: {
+              summary: { type: "string" },
+              branchName: { type: "string" },
+              commitHash: { type: "string" },
+              pullRequestUrl: { type: "string" },
+            },
+            required: ["summary", "branchName", "commitHash", "pullRequestUrl"],
+          },
+          requireToolsBeforeSubmit: [...SDLC_REQUIRED_TOOLS.work],
+        }
+      : {
+          type: "json",
+          schema: {
+            type: "object",
+            properties: {
+              created: { type: "boolean" },
+              canvasId: { type: "string" },
+              artifactKind: { type: "string" },
+            },
+            required: ["created", "canvasId", "artifactKind"],
+          },
+          requireToolsBeforeSubmit: [...SDLC_REQUIRED_TOOLS.baseline],
+        };
   const forwardedAgentConfig: Record<string, unknown> | undefined =
     agent.config || payload.allowWriteInReadOnlyJob || sdlcProfile
       ? {
@@ -2957,6 +3005,7 @@ export async function handleAutomationWebhook(
                   ...((baseAgentConfig["toolPermissions"] as Record<string, unknown> | undefined) ?? {}),
                   ...SDLC_AGENT_TOOL_PROFILE.toolPermissions,
                 },
+                outputFormat: sdlcOutputFormat,
                 sdlcContext: payload.sdlcContext,
               }
             : {}),
@@ -3131,7 +3180,6 @@ export async function handleAutomationWebhook(
       conversationId: payload.conversationId ?? "",
       task: task!,
       agentSlug: agent.slug,
-      agentName: agent.name,
       responseMode: "conversation",
       appToken: decryptStoredField(agent.spacesAppToken!),
       spacesAppId: agent.spacesAppId!,
@@ -3526,15 +3574,6 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     pendingGoalSuggestion?: { condition: string; rationale: string };
     provider?: string;
     model?: string;
-    localHarness?: {
-      provider: string;
-      harnessName: string;
-      label: string;
-      ownerName: string;
-      deviceName?: string;
-    };
-    localHarnessUnreachable?: boolean;
-    localHarnessProvider?: string;
     fastMode?: boolean;
     // Conversation identity claw ships on every callback (see
     // xyne-claw/src/routes/run.ts:1040-1046). Used by the conv-keyed
@@ -4283,12 +4322,9 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
       ctx.responseMode === "conversation"
     ) {
       const isQuota = /\b429\b|quota|rate.?limit|exceeded|out of credit/i.test(rawErr);
-      const harnessLabel = payload.localHarnessProvider === "codex-cli" ? "Codex CLI" : "Claude Code";
-      const notice = payload.localHarnessUnreachable
-        ? `⚠️ I couldn't reach **${harnessLabel}** on your machine, and running this on Xyne's servers instead didn't start either. Open the Xyne desktop app (or turn off the local harness for this agent) and try again.`
-        : isQuota
-          ? "⚠️ I couldn't respond — the provider configured for this agent is out of quota / rate-limited right now. Please retry shortly, or switch the agent's provider in its settings."
-          : "⚠️ I couldn't complete this request due to an internal error. Please try again.";
+      const notice = isQuota
+        ? "⚠️ I couldn't respond — the provider configured for this agent is out of quota / rate-limited right now. Please retry shortly, or switch the agent's provider in its settings."
+        : "⚠️ I couldn't complete this request due to an internal error. Please try again.";
       await postAgentMessage(
         { spacesAppUserId: ctx.spacesAppUserId, appToken: ctx.appToken },
         {
@@ -4434,7 +4470,6 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
       conversationId: ctx.conversationId,
       channelId: ctx.channelId,
       agentSlug: ctx.agentSlug,
-      agentName: ctx.agentName,
       userId: ctx.spacesAppUserId,
       status: "done",
     }, ctx.appToken).catch((err) =>
@@ -4763,7 +4798,6 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
             conversationId: ctx.conversationId,
             channelId: ctx.channelId,
             agentSlug: ctx.agentSlug,
-            agentName: ctx.agentName,
             spacesAppUserId: ctx.spacesAppUserId,
             appToken: ctx.appToken,
             toolLabel: "Starting the plan…",
@@ -5488,12 +5522,8 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     // buildThreadCitationMeta). Used by the copilot/pendingResponses posts
     // below, which deliver the answer via a different path than the normal
     // conversation branch (convMetadata) and would otherwise ship no citations.
-    const runOriginMeta: Record<string, unknown> = payload.localHarness
-      ? { clawRunOrigin: { kind: "local-harness", ...payload.localHarness } }
-      : {};
-
     const buildPostMetadata = (text: string): Record<string, unknown> => {
-      const meta: Record<string, unknown> = { contentFormat: "markdown", ...runOriginMeta };
+      const meta: Record<string, unknown> = { contentFormat: "markdown" };
       const tc = buildThreadCitationMeta(citationInvocations, text);
       if (tc) {
         meta["clawCitations"] = tc.clawCitations;
@@ -5859,7 +5889,6 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
       );
       const convMetadata = {
         contentFormat: "markdown",
-        ...runOriginMeta,
         ...(threadCitationMeta
           ? {
               clawCitations: threadCitationMeta.clawCitations,
@@ -7095,7 +7124,6 @@ router.post("/progress", requireStrictS2S, async (req: Request, res: Response) =
         conversationId: ctx.conversationId,
         channelId: ctx.channelId,
         agentSlug: ctx.agentSlug,
-        agentName: ctx.agentName,
         userId: ctx.spacesAppUserId,
         toolLabel,
         status: "working",
