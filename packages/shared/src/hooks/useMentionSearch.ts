@@ -153,9 +153,7 @@ export const useMentionSearch = (
   threadParticipantIds?: ReadonlySet<string>,
   options: UseMentionSearchOptions = {},
 ): UseMentionSearchResult => {
-  // Self is excluded by default — self-tag is opt-in per surface. The chat
-  // composer (ChatInput) passes excludeSelf: false; every other consumer keeps
-  // the historical "self only in a self-DM" behaviour untouched.
+  // Self-tag is opt-in per surface: only the chat composer passes excludeSelf: false.
   const { includeSpecialMentions = true, excludeSelf = true } = options;
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
@@ -280,8 +278,7 @@ export const useMentionSearch = (
         : membersLoaded
           ? allWorkspaceUsers.filter((u) => memberIds.has(u.id))
           : allWorkspaceUsers.filter((u) => dmRankAffinity.has(u.id));
-    // Self-tag: callers that opt in with excludeSelf: false see themselves as
-    // "<name> (you)" in the picker. Self-DM always keeps you regardless.
+    // Self-DM always keeps you; elsewhere only when the caller opts in.
     return src.filter((u) =>
       isSelfDm || !excludeSelf ? true : u.id !== currentUserId,
     );

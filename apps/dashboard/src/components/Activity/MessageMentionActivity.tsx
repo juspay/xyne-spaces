@@ -25,7 +25,6 @@ export const MessageMentionActivity = ({
 
   const isThreadReply = message.conversation?.initialMessageId !== message.messageId;
 
-  // Self-tag: you mentioned yourself, so "<name> mentioned you in" reads wrong.
   const isSelfMention = activity.actorId === activity.userId;
 
   const targetPath = `${baseRoute}/${message.conversation?.channelId}${isThreadReply ? `/${message.conversation?.conversationId}` : ''}#origin=${message.conversation?.conversationId}${isThreadReply ? `&messageId=${message.messageId}` : ''}`;

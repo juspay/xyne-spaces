@@ -576,11 +576,8 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
         mentionSource: u.mentionSource
       }))
 
-    // Self-tag: tagging yourself records an activity so the message is findable
-    // under "Your mentions", but the sender is deliberately kept OUT of
-    // validMentionedUsers (and therefore out of notificationUserIds and the
-    // USER_MENTIONED app event), so you are never notified about your own
-    // message. The split is unit-tested in ./selfMention.test.ts.
+    // Self-tag: the sender stays out of validMentionedUsers (and so out of
+    // notifications and the USER_MENTIONED event); it only gets an activity.
     const selfMention = isSelfMention(mentionedUsers, senderId, channelParticipantIds);
 
     const mentionedAppUsersIds = validMentionedUsers.filter(u => appUserIds.includes(u.userId)).map(u => u.userId);
