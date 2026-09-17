@@ -1721,6 +1721,17 @@ const StreamsScreen = (): ReactElement => {
     withPartner(drag?.columnId);
     add(drag?.partnerId);
     withPartner(columns[stream.focus]?.id);
+    // Ask AI columns hold state that exists nowhere else. An unsent question
+    // lives in component memory and in no store, so unmounting one loses it
+    // with no way back — and `startFreshChat` clears the panel again on the
+    // remount, so even a sent conversation does not return. Every other surface
+    // rebuilds from a source that outlives it: a channel re-queries Zero, a
+    // canvas reconnects to y-sweet and its text comes back. This kind has no
+    // such source, so it is held instead.
+    //
+    // Measured before the fix: a draft typed into an Ask AI column at index 0
+    // of fifteen was gone after scrolling to the far end and back.
+    for (const column of columns) if (column.source.kind === 'agent') add(column.id);
     return keep;
   }, [drag, columns, stream.focus, scrollingIndexOf]);
 

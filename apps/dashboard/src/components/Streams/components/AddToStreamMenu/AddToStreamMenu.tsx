@@ -15,6 +15,7 @@ import { Tooltip } from '../../../ui/Tooltip/Tooltip';
 import { cn } from '../../../../utils/classNames';
 import type { ColumnSource } from '../Streams/Streams.types';
 import { useAddToStream, type StreamTarget } from '../../hooks/useAddToStream';
+import { useStreamsVisibility } from '../../../../hooks/useStreamsVisibility';
 
 /**
  * The stream list, mounted only once the menu is open.
@@ -94,17 +95,31 @@ const StreamChoices = ({
  * is wrong more often than it is right — you are usually filing this *somewhere
  * else*, or you would already be looking at it.
  */
-export const AddToStreamMenuItem = ({ source }: { source: ColumnSource }): ReactElement => (
-  <DropdownMenuSub>
-    <DropdownMenuSubTrigger className='gap-2'>
-      <LayoutGridTwoVertical size={16} />
-      Add to Stream
-    </DropdownMenuSubTrigger>
-    <DropdownMenuSubContent className='min-w-[180px]'>
-      <StreamChoices source={source} />
-    </DropdownMenuSubContent>
-  </DropdownMenuSub>
-);
+/**
+ * Every entry point into Streams is gated on the same flag the screen is.
+ *
+ * Gating the route alone was not enough: these items live in menus owned by
+ * Chat, Canvas and Tickets, so with Streams off they offered a whole feature to
+ * people who had not opted into it and had nowhere for it to open. The flag
+ * means "Streams does not exist for this person", and a menu item is part of
+ * existing. Every call site sits beside other items, so returning null here
+ * never leaves an empty menu.
+ */
+export const AddToStreamMenuItem = ({ source }: { source: ColumnSource }): ReactElement | null => {
+  const { showStreams } = useStreamsVisibility();
+  if (!showStreams) return null;
+  return (
+    <DropdownMenuSub>
+      <DropdownMenuSubTrigger className='gap-2'>
+        <LayoutGridTwoVertical size={16} />
+        Add to Stream
+      </DropdownMenuSubTrigger>
+      <DropdownMenuSubContent className='min-w-[180px]'>
+        <StreamChoices source={source} />
+      </DropdownMenuSubContent>
+    </DropdownMenuSub>
+  );
+};
 
 /**
  * "Add to Stream" as a control of its own.
@@ -119,6 +134,7 @@ export const AddToStreamButton = ({
   source: ColumnSource;
   className?: string;
 }): ReactElement | null => {
+  const { showStreams } = useStreamsVisibility();
   const [open, setOpen] = useState(false);
   const { has } = useAddToStream();
   // Checked once on mount and then latched, rather than read on every render:
@@ -130,6 +146,7 @@ export const AddToStreamButton = ({
   // disabled control, it is one that should not be on screen — and inside a
   // Streams ticket column this button would be offering to add the column you
   // are reading it in.
+  if (!showStreams) return null;
   if (added) return null;
 
   return (
@@ -179,10 +196,13 @@ export const AddToStreamBaseUiMenuItem = ({
 }: {
   source: ColumnSource;
   onChosen?: () => void;
-}): ReactElement => {
+}): ReactElement | null => {
+  const { showStreams } = useStreamsVisibility();
   const { streams, choose } = useStreamChoices(source, onChosen);
   const itemClass =
     'flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm text-foreground outline-none data-[highlighted]:bg-accent';
+
+  if (!showStreams) return null;
 
   return (
     <Menu.SubmenuRoot>

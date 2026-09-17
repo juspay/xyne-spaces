@@ -148,6 +148,13 @@ const ChannelBody = ({ source }: BodyProps): ReactElement => {
           // Streams marks read itself instead, when focus leaves a column. See
           // `markChannelRead` in StreamsScreen.
           skipMarkAsRead
+          // Six composers mount at once here and the user chose none of them.
+          // Left on, each one's autofocus runs ProseMirror's `scrollRectIntoView`
+          // as its channel resolves, which writes `scrollLeft` on the strip to
+          // reveal a caret the reader is not looking at — the stream slides
+          // sideways by whatever the viewport was clipping off that column, with
+          // no gesture behind it. See `suppressInputAutoFocus`.
+          suppressInputAutoFocus
         />
       </div>
     </div>
@@ -211,6 +218,10 @@ const AgentBody = ({ source, columnId, seed, actions }: BodyProps): ReactElement
       // column they fill the panel and read as the point of it, rather than as a
       // hint. The heading alone is enough here.
       hideEmptyStateSuggestions
+      // Ask AI focuses its composer on mount, retried across ten frames. In a
+      // column that reveals the caret by scrolling the strip, and six of these
+      // mount at once in a stream nobody opened to type in.
+      suppressInputAutoFocus
       // No header at all. Hiding only its title still left a second bar under
       // the column's own — same height, same close, one row down. A column has
       // one header, and the column owns it.
@@ -319,6 +330,10 @@ const ThreadBody = ({ source }: BodyProps): ReactElement => {
       // menu (thread tags, add context, copy link). All of them are one click
       // away through the column's own "open in full page".
       hideHeader
+      // Same reason as the channel surface: a mounting composer's autofocus
+      // scrolls every ancestor to reveal its caret, and here that ancestor is
+      // the strip. `ThreadMessages` already takes this; nothing new is needed.
+      skipInputAutoFocus
     />
   );
 };

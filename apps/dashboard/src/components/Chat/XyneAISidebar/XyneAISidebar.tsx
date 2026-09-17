@@ -163,6 +163,18 @@ interface XyneAISidebarProps {
   // title and a close, where this one is a second bar under the first however
   // little it contains.
   hideHeader?: boolean;
+  /**
+   * Never take the keyboard on mount.
+   *
+   * The effect below focuses the composer as soon as the editor exists. A
+   * programmatic focus makes the browser reveal the caret by scrolling every
+   * scrollable ancestor — harmless in a sidebar that owns the screen, and not
+   * harmless in a Streams column, where the ancestor is the horizontal strip and
+   * the reveal drags the whole stream sideways by whatever the viewport was
+   * clipping off that column. Several of these mount at once and the reader
+   * asked none of them for a composer.
+   */
+  suppressInputAutoFocus?: boolean;
   /** Analytics `source` for XYNE_AI_OPENED when this instance is embedded
    *  directly (not opened through xyneAIActor OPEN, which carries its own). */
   trackSource?: string;
@@ -203,6 +215,7 @@ const XyneAISidebar = ({
   onFinalResponse,
   hideEmptyStateSuggestions = false,
   hideHeader = false,
+  suppressInputAutoFocus = false,
   trackSource: trackSourceProp,
 }: XyneAISidebarProps): ReactElement => {
   const isFullscreen = variant === 'fullscreen';
@@ -494,7 +507,7 @@ const XyneAISidebar = ({
   // Find the ProseMirror editor element and focus it once it exists.
   // Retry via rAF because editor mount timing can vary across renders/routes.
   useEffect(() => {
-    if (isMobile) return;
+    if (isMobile || suppressInputAutoFocus) return;
     let rafId: number | null = null;
     let attempts = 0;
 
@@ -518,7 +531,7 @@ const XyneAISidebar = ({
         cancelAnimationFrame(rafId);
       }
     };
-  }, [dragAndDropAreaRef, isMobile]);
+  }, [dragAndDropAreaRef, isMobile, suppressInputAutoFocus]);
 
   // Update activeThreadInfo when threadInfo prop changes
   const prevThreadConversationIdRef = useRef(threadInfo?.conversationId);
