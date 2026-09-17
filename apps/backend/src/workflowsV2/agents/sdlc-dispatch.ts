@@ -79,7 +79,6 @@ export async function dispatchSdlcAgent(input: {
     channelId: input.channelId,
     conversationId: sessionId,
     callbackUrl: buildCallbackUrl(ctx.runtime.executionId, ctx.runtime.stepName, attempt),
-    callbackSecret: config.xyneClaw.s2sKey,
     executionProfile: 'sdlc',
     sdlcContext: agentContext as unknown as Record<string, unknown>,
     allowWriteInReadOnlyJob: true,
