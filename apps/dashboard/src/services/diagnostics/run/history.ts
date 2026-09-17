@@ -1,4 +1,4 @@
-import type { RunReport } from './types';
+import { ENGINE_VERSION, type RunReport } from './types';
 
 /**
  * Keeps the last few runs so the panel opens on the previous result rather than
@@ -32,7 +32,10 @@ export function loadReports(): RunReport[] {
     if (!raw) return [];
     const parsed: unknown = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
-    return parsed.filter(isReport);
+    // A stored report from another engine version is discarded rather than
+    // migrated: it describes measurements taken against different checks, so
+    // showing it beside current ones would compare two different rulers.
+    return parsed.filter(isReport).filter(report => report.engineVersion === ENGINE_VERSION);
   } catch {
     return [];
   }
@@ -66,6 +69,7 @@ function isReport(value: unknown): value is RunReport {
   return (
     typeof candidate.id === 'string' &&
     typeof candidate.startedAt === 'number' &&
+    typeof candidate.engineVersion === 'number' &&
     Array.isArray(candidate.checks)
   );
 }

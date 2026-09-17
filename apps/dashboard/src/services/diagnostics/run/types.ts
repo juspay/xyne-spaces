@@ -321,4 +321,10 @@ export interface RunReport {
   interactedDuringRun: boolean;
 }
 
-export const ENGINE_VERSION = 1;
+/**
+ * Bumped whenever the report's *shape* changes, not just its thresholds.
+ * Reports are persisted across sessions, so a stored report from an older
+ * engine can reach a newer panel; without this gate the panel renders a
+ * half-populated object and crashes on the fields that did not exist yet.
+ */
+export const ENGINE_VERSION = 2;

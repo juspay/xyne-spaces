@@ -29,9 +29,16 @@ export function HotFrameTable({
     );
   }
 
-  if (attribution.frames.length === 0) return null;
+  // Read defensively. Reports are persisted and a stored one can outlive the
+  // shape it was written against; the version gate in `history.ts` is the real
+  // guard, but a diagnostics panel that throws while explaining a problem is
+  // the worst possible failure, so nothing here assumes a field exists.
+  const frames = attribution.frames ?? [];
+  const appFrames = attribution.appFrames ?? [];
+  const hotPath = attribution.hotPath ?? [];
+  if (frames.length === 0) return null;
 
-  const hasAppFrames = attribution.appFrames.length > 0;
+  const hasAppFrames = appFrames.length > 0;
 
   return (
     <section className='mt-6'>
@@ -52,9 +59,9 @@ export function HotFrameTable({
         </p>
       ) : null}
 
-      {attribution.hotPath.length > 1 ? (
+      {hotPath.length > 1 ? (
         <p className='mt-2 overflow-x-auto whitespace-nowrap rounded-md border border-border px-2.5 py-1.5 font-mono text-[11px] text-neutral-600 dark:text-neutral-300'>
-          {attribution.hotPath
+          {hotPath
             .map(step =>
               step.collapsed && step.collapsed > 1
                 ? `${step.name} +${step.collapsed - 1} framework`
@@ -65,24 +72,20 @@ export function HotFrameTable({
       ) : null}
 
       {hasAppFrames ? (
-        <FrameTable
-          title='Your code'
-          valueLabel='Charged'
-          frames={attribution.appFrames.slice(0, 12)}
-        />
+        <FrameTable title='Your code' valueLabel='Charged' frames={appFrames.slice(0, 12)} />
       ) : null}
 
       <FrameTable
         title={hasAppFrames ? 'All frames, including the framework' : 'All frames'}
         valueLabel='Own time'
-        frames={attribution.frames.slice(0, 12)}
+        frames={frames.slice(0, 12)}
         muted={hasAppFrames}
       />
 
-      {attribution.frameworkOnlyMs > 0 && hasAppFrames ? (
+      {(attribution.frameworkOnlyMs ?? 0) > 0 && hasAppFrames ? (
         <p className='mt-1.5 text-[11px] text-neutral-500 dark:text-neutral-400'>
-          {attribution.frameworkOnlyMs.toFixed(0)} ms could not be charged to any of your functions
-          — framework work with nothing of yours beneath it.
+          {(attribution.frameworkOnlyMs ?? 0).toFixed(0)} ms could not be charged to any of your
+          functions — framework work with nothing of yours beneath it.
         </p>
       ) : null}
     </section>

@@ -1,6 +1,8 @@
 import { type ReactElement } from 'react';
 import { DiagnosticsPanel } from './DiagnosticsPanel';
+import { DiagnosticsErrorBoundary } from './DiagnosticsErrorBoundary';
 import { useRequestPerformanceHelp } from '../../services/diagnostics/requestHelp';
+import { runController } from '../../services/diagnostics/run';
 
 interface DockedDiagnosticsPanelProps {
   onClose: () => void;
@@ -17,5 +19,9 @@ interface DockedDiagnosticsPanelProps {
  */
 export function DockedDiagnosticsPanel({ onClose }: DockedDiagnosticsPanelProps): ReactElement {
   const requestHelp = useRequestPerformanceHelp();
-  return <DiagnosticsPanel onClose={onClose} onRequestHelp={requestHelp} />;
+  return (
+    <DiagnosticsErrorBoundary onReset={() => runController.clearHistory()}>
+      <DiagnosticsPanel onClose={onClose} onRequestHelp={requestHelp} />
+    </DiagnosticsErrorBoundary>
+  );
 }

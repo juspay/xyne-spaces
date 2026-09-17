@@ -1,6 +1,8 @@
 import { useCallback, useEffect, type ReactElement } from 'react';
 import { createPortal } from 'react-dom';
 import { DiagnosticsPanel } from './DiagnosticsPanel';
+import { DiagnosticsErrorBoundary } from './DiagnosticsErrorBoundary';
+import { runController } from '../../services/diagnostics/run';
 import { useShortcutById } from '../../shortcuts/hooks';
 import { usePlatform } from '../../hooks/usePlatform';
 import { useIsInPanelWebview } from '../../hooks/useIsInPanelWebview';
@@ -51,7 +53,9 @@ export function DiagnosticsHost(): ReactElement | null {
       aria-modal='true'
       aria-label='Performance diagnostics'
     >
-      <DiagnosticsPanel onClose={close} />
+      <DiagnosticsErrorBoundary onReset={() => runController.clearHistory()}>
+        <DiagnosticsPanel onClose={close} />
+      </DiagnosticsErrorBoundary>
     </div>,
     document.body,
   );

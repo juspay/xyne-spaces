@@ -415,8 +415,10 @@ export const mainThreadAttribution: Check = context => {
   // The app's own code leads. A ranking by raw self time on a React app is a
   // ranking of React's internals, which is true and useless — the thread is
   // almost never inside app code at the instant it is sampled.
-  const top = attribution.appFrames[0] ?? attribution.frames[0];
-  const attributedToApp = attribution.appFrames.length > 0;
+  const appFrames = attribution.appFrames ?? [];
+  const rawFrames = attribution.frames ?? [];
+  const top = appFrames[0] ?? rawFrames[0];
+  const attributedToApp = appFrames.length > 0;
   if (!top || attribution.busyMs <= 0) {
     return {
       id: 'main-thread-attribution',
@@ -456,7 +458,7 @@ export const mainThreadAttribution: Check = context => {
         : 'pass';
 
   const { confidence, reason } = seriesConfidence(context, attribution.busySamples, 50, 200);
-  const component = attribution.components[0];
+  const component = (attribution.components ?? [])[0];
   const devNote = attribution.devBuild
     ? ' Measured against a development build, which does substantially more work per render than the one users run.'
     : '';
@@ -507,15 +509,15 @@ export const mainThreadAttribution: Check = context => {
         : [
             'No application frames were identifiable in the samples, so these are raw stack leaves — mostly framework internals',
           ]),
-      ...(attributedToApp ? attribution.appFrames : attribution.frames)
+      ...(attributedToApp ? appFrames : rawFrames)
         .slice(0, 5)
         .map(
           frame =>
             `${frame.name} — ${ms(frame.selfMs)}${attributedToApp ? ' charged' : ' own time'}, ${ms(frame.totalMs)} including calls${frame.resource ? ` (${frame.resource}${frame.line === null ? '' : `:${frame.line}`})` : ''}`,
         ),
-      ...(attribution.frameworkOnlyMs > 0
+      ...((attribution.frameworkOnlyMs ?? 0) > 0
         ? [
-            `${ms(attribution.frameworkOnlyMs)} could not be charged to any app frame — framework work with nothing of yours beneath it`,
+            `${ms(attribution.frameworkOnlyMs ?? 0)} could not be charged to any app frame — framework work with nothing of yours beneath it`,
           ]
         : []),
       ...(attribution.hotPath.length > 1
