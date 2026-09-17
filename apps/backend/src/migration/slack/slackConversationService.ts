@@ -20,6 +20,7 @@ import { WebClient } from '@slack/web-api';
 import { config } from '../../config/env';
 import { getBotConfigByWorkspaceId } from './slackMigrationBotConfig';
 import { buildSlackMigrationSourceName } from './slackMigrationSource';
+import { fetchChannelExtras, ingestChannelExtras } from './channelExtras';
 import { vespaBackfillQueue } from '@/queues/vespaQueue';
 import { channelSchema } from '@/vespa/src/types';
 import { db } from '@/database/client';
@@ -1073,6 +1074,31 @@ export async function runMigration(input: MigrationInput): Promise<MigrationResu
         resolvedUsers.usersToBeAdded,
         resolvedUsers.channelCreatorSlackId,
       );
+
+      // Bookmarks / shared links / canvases — not covered by the message pipeline. Idempotent, non-fatal.
+      try {
+        const extrasChannel = await new ChannelRepository().findById(input.xyneSpaceChannelId);
+        const slackToXyne = new Map(resolvedUsers.usersToBeAdded.map((u) => [u.slackUserId, u.xyneUserId]));
+        const fallbackUserId = (resolvedUsers.channelCreatorSlackId && slackToXyne.get(resolvedUsers.channelCreatorSlackId))
+          || resolvedUsers.usersToBeAdded[0]?.xyneUserId;
+        if (extrasChannel?.workspaceId && fallbackUserId && input.channelId) {
+          const client = new WebClient(wsConfig.slackBotToken);
+          const extras = await fetchChannelExtras(client, wsConfig.slackBotToken, input.channelId);
+          if (extras.links.length || extras.canvases.length) {
+            const r = await ingestChannelExtras(extras, {
+              xyneChannelId: input.xyneSpaceChannelId,
+              workspaceId: extrasChannel.workspaceId,
+              resolveUser: (sid) => Promise.resolve(sid ? slackToXyne.get(sid) : undefined),
+              fallbackUserId,
+            });
+            logger.info('[Migration] channel extras synced', { channelId: input.xyneSpaceChannelId, links: r.links, canvases: r.canvases });
+          }
+        }
+      } catch (error) {
+        logger.warn('[Migration] channel extras sync failed (non-fatal)', {
+          channelId: input.xyneSpaceChannelId, error: error instanceof Error ? error.message : String(error),
+        });
+      }
     }
 
     // Post final summary to log channel (threaded)

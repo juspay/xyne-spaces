@@ -31,6 +31,7 @@ import type { SlackMessage } from '@/migration/slack/utils/extractConversation';
 import { postMessage } from '@/migration/slack/utils/postMessage';
 import { getBotConfigByWorkspaceId } from '@/migration/slack/slackMigrationBotConfig';
 import { runWithSlackOfflineReference, type SlackOfflineReference } from '@/integrations/adapters/slack-webhook-tickets/utils/slackOfflineReference';
+import { fetchChannelExtras, ingestChannelExtras, type ChannelExtras } from '@/migration/slack/channelExtras';
 import { encryptStream, decryptStream, encryptBuffer, decryptBuffer } from './migrationCrypto';
 import { getMigrationRuntimeConfig, MIGRATION_DEFAULTS } from './migrationRuntimeConfig';
 import { ChannelInput, MigrationJob, MigrationType } from './types';
@@ -88,9 +89,11 @@ const paths = {
   conversationRefresh: (p: string, id: string, runTs: number) => `${p}/conversations/${id}.r${runTs}.jsonl`,
   conversationsDir: (p: string) => `${p}/conversations/`,
   cursors: (p: string) => `${p}/cursors.json`,
+  extras: (p: string, id: string) => `${p}/extras/${id}.json`,
   pins: (p: string, id: string) => `${p}/pins/${id}.json`,
   usergroups: (p: string) => `${p}/usergroups.json`,
   channels: (p: string) => `${p}/channels.json`,
+  filesDir: (p: string) => `${p}/files/`,
   file: (p: string, fileId: string) => `${p}/files/${fileId}`,
   publicChannelsCache: (root: string, teamId: string) => `${root}/_public-channels/${teamId}.json`,
 };
@@ -149,6 +152,8 @@ export class SlackMigrationEngine {
   private readonly manifestCache = new Map<string, { at: number; convs: CollectedConversation[] }>();
   private static readonly WORKER_CACHE_TTL_MS = 30 * 60 * 1000;
   private readonly lockRedis = createRedisClient('slack-migration-ingest-lock');
+  // Storage-keys already uploaded per job (listed once) so a resume skips re-fetching them from Slack.
+  private readonly uploadedFiles = new Map<string, Promise<Set<string>>>();
 
   // Serialize writes per target channel so two jobs ingesting the same group DM don't race past dedup. TTL avoids
   // deadlock on a crashed holder; refreshed while held so a long ingest keeps it.
@@ -481,9 +486,23 @@ export class SlackMigrationEngine {
   }
 
   /** Stream one Slack-hosted file straight to storage (never buffered); returns its storage path. */
+  private uploadedFileSet(gcsPrefix: string): Promise<Set<string>> {
+    let set = this.uploadedFiles.get(gcsPrefix);
+    if (!set) {
+      set = this.storage.listFiles(paths.filesDir(gcsPrefix))
+        .then((files) => new Set(files.map((f) => f.name)))
+        .catch(() => new Set<string>());
+      this.uploadedFiles.set(gcsPrefix, set);
+    }
+    return set;
+  }
+
   private async streamFileToGcs(token: string, file: { id: string; url_private: string; url_private_download?: string; mimetype?: string }, gcsPrefix: string): Promise<string | undefined> {
     const cfg = await getMigrationRuntimeConfig();
     const dest = paths.file(gcsPrefix, file.id);
+    // Skip re-downloading a file already streamed on an earlier run (resume idempotency).
+    const uploaded = await this.uploadedFileSet(gcsPrefix);
+    if (uploaded.has(dest)) return this.storage.buildStorageUri(dest);
     const url = file.url_private_download || file.url_private;
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), cfg.fileTimeoutMs);
@@ -512,6 +531,7 @@ export class SlackMigrationEngine {
       });
       const ms = Date.now() - startedAt;
       if (ms >= 5000) logger.warn('[SlackMigration] slow attachment download', { id: file.id, ms });
+      uploaded.add(dest);
       // Full gs://bucket/key URI so ingestion reads the migration bucket, not the default attachment storage.
       return this.storage.buildStorageUri(dest);
     } catch (e) {
@@ -668,6 +688,21 @@ export class SlackMigrationEngine {
         ? await bulkIngestConversationSlack(ingestInput)
         : await ingestConversationSlack(ingestInput);
       await channelRepo.recalculateLastActivityFromMessages(channelId);
+
+      // Bookmarks / shared links / canvases collected for this conversation → Xyne Link/Canvas (idempotent, non-fatal).
+      const extras = await this.readConversationExtras(job.gcsPrefix, conv.id);
+      if (extras && (extras.links.length || extras.canvases.length)) {
+        const fallbackUserId = dmOwnerId ?? (job.ownerSlackId ? await resolve(job.ownerSlackId) : undefined);
+        if (fallbackUserId) {
+          const r = await ingestChannelExtras(extras, {
+            xyneChannelId: channelId, workspaceId: job.workspaceId,
+            resolveUser: (sid) => (sid ? resolve(sid) : Promise.resolve(undefined)),
+            fallbackUserId,
+          }).catch((e) => { logger.warn('[SlackMigration] extras ingest failed', { convId: conv.id, error: e instanceof Error ? e.message : String(e) }); return null; });
+          if (r) logger.info('[SlackMigration] extras ingested', { convId: conv.id, links: r.links, canvases: r.canvases });
+        }
+      }
+
       return { ingested: messages.length, failed: ingestResult.errorDetails?.length ?? 0 };
       });
     });
@@ -719,6 +754,17 @@ export class SlackMigrationEngine {
   }
   writeCursors(gcsPrefix: string, cursors: Record<string, number>): Promise<void> {
     return this.writeJson(paths.cursors(gcsPrefix), cursors);
+  }
+
+  /** Collect a conversation's bookmarks/links/canvases from Slack → GCS, so they survive the approve→ingest gap. Fail-soft. */
+  async collectConversationExtras(token: string, convId: string, gcsPrefix: string): Promise<void> {
+    const cfg = await getMigrationRuntimeConfig();
+    const extras = await fetchChannelExtras(slackClient(token, cfg.requestTimeoutMs), token, convId);
+    if (extras.links.length || extras.canvases.length) await this.writeJson(paths.extras(gcsPrefix, convId), extras);
+  }
+
+  private readConversationExtras(gcsPrefix: string, convId: string): Promise<ChannelExtras | null> {
+    return this.readJson<ChannelExtras>(paths.extras(gcsPrefix, convId)).catch(() => null);
   }
 
   writeManifest(gcsPrefix: string, conversations: CollectedConversation[]): Promise<void> {
