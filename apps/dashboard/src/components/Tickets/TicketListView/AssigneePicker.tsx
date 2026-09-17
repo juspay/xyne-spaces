@@ -11,6 +11,7 @@ import { cn } from '../../../utils/classNames';
 import { useChannelAssignGate } from '../../../hooks/useChannelAssignGate';
 import { channelMembersFirst, currentUserFirst } from '../../../utils/channelMembersFirst';
 import { surfaceMutationError } from '../../../utils/zeroMutationToast';
+import { trackTicketOutcome } from '../../../services/Analytics/ticketTracking';
 
 interface AssigneePickerProps {
   ticketId: string;
@@ -58,7 +59,19 @@ export function AssigneePicker({
         mutators.ticket.update({ id: ticketId, assignedTo: userId, updatedAt: Date.now() }),
       ),
       'Failed to update assignee',
-    );
+    ).then(ok => {
+      if (ok) {
+        trackTicketOutcome(
+          'TICKET_ASSIGNED',
+          { id: ticketId },
+          {
+            surface: 'list_inline',
+            unassigned: !userId,
+            selfAssigned: !!userId && userId === selfId,
+          },
+        );
+      }
+    });
     setOpen(false);
     setSearch('');
   };

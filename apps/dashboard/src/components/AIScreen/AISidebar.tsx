@@ -256,6 +256,10 @@ function SessionHistory({
                     className='flex w-full items-center gap-2 px-4 py-2 text-left text-sm text-destructive hover:bg-accent'
                     data-track-category='XyneAI'
                     data-track-name='DELETE_SESSION'
+                    data-track-metadata={JSON.stringify({
+                      surface: 'page',
+                      conversationId: session.sessionId,
+                    })}
                   >
                     <DeleteDustbin01 size={14} className='shrink-0' aria-hidden />
                     <span>Delete</span>
@@ -315,6 +319,10 @@ function SessionHistory({
                 onClick={() => void confirmDelete()}
                 data-track-category='XyneAI'
                 data-track-name='CONFIRM_DELETE_SESSION'
+                data-track-metadata={JSON.stringify({
+                  surface: 'page',
+                  conversationId: pendingDeleteId,
+                })}
               >
                 Delete
               </Button>

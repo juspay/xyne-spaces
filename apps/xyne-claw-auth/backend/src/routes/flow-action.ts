@@ -64,6 +64,10 @@ function sanitizeForLog(value: unknown): string {
   return String(value).replace(/[\r\n]+/g, " ");
 }
 
+function sanitizeForLog(value: unknown): string {
+  return String(value).replace(/[\r\n]+/g, " ");
+}
+
 const router = Router();
 const DEFAULT_GATEWAY_TENANT = process.env.ALLOWED_TENANTS
   ?.split(",")
@@ -309,7 +313,6 @@ async function findAgentForFlow(agentSlug: string | undefined, spacesAppId?: str
   id: string;
   orgId: string;
   slug: string;
-  name: string;
   spacesAppToken: string | null;
   spacesAppUserId: string | null;
   spacesAppId: string | null;
@@ -2434,7 +2437,6 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
               conversationId: planConversationId,
               channelId: planChannelId,
               agentSlug: planAgentSlug,
-              agentName: agent.name,
               spacesAppUserId: agent.spacesAppUserId ?? undefined,
               appToken,
               toolLabel: "Starting the plan…",
