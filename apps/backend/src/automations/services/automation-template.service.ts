@@ -28,7 +28,7 @@ const TEMPLATE_TYPES = {
 export const AutomationTemplateAttachmentSchema = z.object({
   attachmentId: z.string().min(1),
   originalFilename: z.string().min(1),
-  mimetype: z.enum(['text/plain', 'text/markdown', 'text/html']),
+  mimetype: z.string().min(1),
   size: z.number().int().nonnegative().max(AUTOMATION_TEMPLATE_MAX_FILE_BYTES),
   templatePaths: z.array(z.string().min(1)),
 });
@@ -47,7 +47,13 @@ export class AutomationTemplateInputError extends Error {
 
 interface StoredTemplate {
   descriptor: AutomationTemplateAttachment;
-  content: string;
+  /**
+   * Null for a file sent byte-for-byte. Only the TEMPLATE_TYPES extensions are
+   * templated — a .csv or .json holding {{context...}} is delivered with the
+   * braces intact, which is why the builder names the three that are rendered.
+   */
+  content: string | null;
+  buffer: Buffer;
 }
 
 export interface PreparedAutomationTemplateFile {
@@ -124,10 +130,6 @@ export async function storeAutomationTemplates(params: {
     const prepared = await Promise.all(
       files.map(async (file) => {
         const extension = extensionOf(file.originalname);
-        if (!extension)
-          throw new AutomationTemplateInputError(
-            `${file.originalname}: only .txt, .md, and .html are allowed`
-          );
         if (!file.path) throw new Error(`${file.originalname}: uploaded storage path is missing`);
         const buffer = await storageService.getFileBuffer(normalizeStoragePath(file.path));
         if (buffer.byteLength > AUTOMATION_TEMPLATE_MAX_FILE_BYTES) {
@@ -136,13 +138,15 @@ export async function storeAutomationTemplates(params: {
             413
           );
         }
-        const content = decodeUtf8(buffer, file.originalname);
+        // Anything outside TEMPLATE_TYPES is attached byte-for-byte, so it is
+        // never decoded and never scanned for variables.
+        const content = extension ? decodeUtf8(buffer, file.originalname) : null;
         return {
           originalFilename: file.originalname,
-          mimetype: TEMPLATE_TYPES[extension],
+          mimetype: extension ? TEMPLATE_TYPES[extension] : file.mimetype,
           size: buffer.byteLength,
           storagePath: normalizeStoragePath(file.path),
-          templatePaths: extractTemplatePaths(content),
+          templatePaths: content === null ? [] : extractTemplatePaths(content),
         };
       })
     );
@@ -203,7 +207,7 @@ export async function readAutomationTemplate(params: {
     throw new Error(`Automation template ${descriptor.attachmentId} was not found`);
   }
   const extension = extensionOf(record.originalFilename);
-  if (!extension || TEMPLATE_TYPES[extension] !== record.mimetype) {
+  if (extension && TEMPLATE_TYPES[extension] !== record.mimetype) {
     throw new Error(`Automation template ${descriptor.attachmentId} has an invalid file type`);
   }
   const storagePath = normalizeStoragePath(record.url);
@@ -211,8 +215,8 @@ export async function readAutomationTemplate(params: {
   if (buffer.byteLength > AUTOMATION_TEMPLATE_MAX_FILE_BYTES) {
     throw new Error(`${record.originalFilename}: maximum file size is 10MB`);
   }
-  const content = decodeUtf8(buffer, record.originalFilename);
-  const actualPaths = extractTemplatePaths(content);
+  const content = extension ? decodeUtf8(buffer, record.originalFilename) : null;
+  const actualPaths = content === null ? [] : extractTemplatePaths(content);
   if (!samePaths(actualPaths, descriptor.templatePaths)) {
     throw new Error(
       `${record.originalFilename}: template variables changed; reopen and save the file`
@@ -222,11 +226,12 @@ export async function readAutomationTemplate(params: {
     descriptor: {
       attachmentId: record.id,
       originalFilename: record.originalFilename,
-      mimetype: TEMPLATE_TYPES[extension],
+      mimetype: record.mimetype,
       size: buffer.byteLength,
       templatePaths: actualPaths,
     },
     content,
+    buffer,
   };
 }
 
@@ -259,8 +264,11 @@ export async function prepareRenderedAutomationFiles(params: {
     )
   );
   const rendered = stored.map((file) => {
-    const content = renderAutomationTemplate(file.content, context);
-    const buffer = Buffer.from(content, 'utf8');
+    // A file attached as-is has no variables to resolve; its bytes are the payload.
+    const buffer =
+      file.content === null
+        ? file.buffer
+        : Buffer.from(renderAutomationTemplate(file.content, context), 'utf8');
     if (buffer.byteLength > AUTOMATION_TEMPLATE_MAX_FILE_BYTES) {
       throw new Error(`${file.descriptor.originalFilename}: rendered file exceeds 10MB`);
     }

@@ -120,6 +120,10 @@ export const EmailReceivedOutputSchema = TicketContextSchema.partial().extend({
     externalMessageId: z.string(),
     createdAt: z.coerce.date(),
     hasAttachments: z.boolean(),
+    // Enough for a later step to fetch each file and forward it.
+    attachments: z
+      .object({ id: z.string(), filename: z.string(), mimetype: z.string(), size: z.number() })
+      .array(),
   }),
   requester: z.object({
     email: z.string(),

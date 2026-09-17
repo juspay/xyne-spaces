@@ -323,6 +323,19 @@ export class ConfigValidator {
         issues,
       );
 
+      // Both recipient fields are optional on their own, so only a cross-field
+      // check can refuse a step that names nobody — or two people.
+      if (step.type === 'SEND_EMAIL_TO_USER') {
+        const cfg = step.config as { userId?: unknown; toEmail?: unknown };
+        if (!cfg.userId === !cfg.toEmail) {
+          issues.push({
+            path: `${stepPath}.config`,
+            code: ValidationIssueCode.SHAPE,
+            message: 'Set exactly one of userId or toEmail',
+          });
+        }
+      }
+
       if (step.type === 'SEND_MESSAGE') {
         const attachments = (step.config as { attachments?: unknown }).attachments;
         if (Array.isArray(attachments)) {
