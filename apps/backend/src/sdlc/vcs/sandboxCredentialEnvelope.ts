@@ -1,4 +1,4 @@
-import { SDLC_AGENT_SLUG } from '@xyne/shared';
+import { SDLC_AGENT_SLUG, type SdlcSandboxGitCredential } from '@xyne/shared';
 import {
   createCipheriv,
   createPublicKey,
@@ -10,14 +10,16 @@ import {
 } from 'crypto';
 
 export interface SandboxCredentialBinding {
-  agentSlug: typeof SDLC_AGENT_SLUG;
   workspaceId: string;
   repoId: string;
-  operation: string;
-  conversationId: string;
+  actorUserId: string;
   sandboxId: string;
   credentialRevision: number;
   expiresAt: string;
+  // Read only by the claw deployed before Actor-based access, which rejects envelopes without them.
+  agentSlug?: typeof SDLC_AGENT_SLUG;
+  operation?: string;
+  conversationId?: string;
 }
 
 export interface SandboxCredentialEnvelope {
@@ -43,7 +45,7 @@ export function parseSandboxPublicKey(encoded: string): KeyObject {
 }
 
 export function encryptSandboxCredentialEnvelope(
-  authentication: { username: string; password: string },
+  authentication: SdlcSandboxGitCredential,
   binding: SandboxCredentialBinding,
   sandboxPublicKey: KeyObject,
 ): SandboxCredentialEnvelope {

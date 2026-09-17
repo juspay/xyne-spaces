@@ -356,7 +356,7 @@ export async function loadMcpToolsForUser(
         description:
           (acceptsFiles ? baseDescription + FILE_INPUT_HINT : baseDescription) +
           (trustedBindings
-            ? " Trusted SDLC identity is bound by the server; do not supply repository, execution, workspace, or actor identity fields."
+            ? ` Trusted SDLC fields (${Object.keys(trustedBindings).join(", ")}) are bound by the server; do not supply them.`
             : ""),
         parameters: Type.Unsafe(schemaWithTrustedMcpBindings(mcpTool.inputSchema, trustedBindings)),
         async execute(_toolCallId, params) {
