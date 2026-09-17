@@ -112,6 +112,7 @@ import {
 } from '../../utils/board/dynamicFieldFilters';
 import { dynamicColumnKey } from '../../components/Tickets/TicketTable/dynamicFieldColumns';
 import { useDeskTableColumns, DESK_TABLE_BUILTIN_COLUMNS } from './useDeskTableColumns';
+import type { LabelUnreadFilters } from '../../api/conversationLabelsApi';
 import { tagsConfigApi } from '../../api/tagsConfigApi';
 import { classificationApi } from '../../api/classificationApi';
 import {
@@ -777,6 +778,21 @@ const SupportScreen = (): ReactElement => {
     }),
     [filters, userID, dynamicFieldEntries, tagFilterConversationIds, selectedLabel?.id],
   );
+
+  // Mode-B label counts drop the label scoping from the shared filter surface.
+  const labelUnreadFilters = useMemo<LabelUnreadFilters>(() => {
+    const {
+      conversationIdWhitelist,
+      conversationLabelId: _conversationLabelId,
+      ...restTicketFilter
+    } = ticketFilter;
+    return {
+      ...restTicketFilter,
+      ...(conversationIdWhitelist !== undefined
+        ? { conversationIds: conversationIdWhitelist }
+        : {}),
+    };
+  }, [ticketFilter]);
 
   const availablePriorities = useMemo(() => Object.values(TicketPriority), []);
 
@@ -2469,10 +2485,12 @@ const SupportScreen = (): ReactElement => {
                   className: 'bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:text-blue-200',
                 };
     const isJoined = joinedChannelIds.has(c.id);
-    // Labels apply to email and app desks; mailbox folders (Inbox / Starred / Spam /
-    // Drafts / Sent) stay email-only. Both share this one expandable subtree.
+    // Labels apply to email and app desks; mailbox folders come in two forms — the
+    // full email set and a single "All items" entry for app desk channel
+    // type. Folders and labels share this one expandable subtree.
     const hasMailboxFolders = c.type === ChannelType.EMAIL;
-    const canExpandDesk = isJoined && (hasMailboxFolders || c.type === ChannelType.APP);
+    const hasBasicFolders = !hasMailboxFolders && c.type === ChannelType.APP;
+    const canExpandDesk = isJoined && (hasMailboxFolders || hasBasicFolders);
     const isExpanded = canExpandDesk && expandedDeskIds.has(c.id);
     const isActive = selectedChannelId === c.id;
     const status = statusByChannelId.get(c.id);
@@ -2582,12 +2600,25 @@ const SupportScreen = (): ReactElement => {
                 />
               </>
             )}
+            {hasBasicFolders && (
+              <DeskMailboxSidebar
+                variant='basic'
+                // The basic subtree is a single "All items" row — the effective folder
+                // for any non-email desk — so it highlights exactly when the channel
+                // is selected in list mode with no label selected.
+                activeFolder={
+                  selectedChannelId === c.id && viewMode === 'list' && !selectedLabel ? 'all' : null
+                }
+                onSelectFolder={(folder, label) => openMailbox(c.id, folder, label)}
+              />
+            )}
             <DeskLabelsSidebar
               channelId={c.id}
               isMember={isJoined}
               activeLabelId={selectedChannelId === c.id && selectedLabel ? selectedLabel.id : null}
               onSelectLabel={(labelId, labelName) => openLabel(c.id, labelId, labelName)}
               onDeletedLabel={handleDeletedLabel}
+              labelUnreadFilters={labelUnreadFilters}
             />
           </div>
         )}
