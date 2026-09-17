@@ -12,6 +12,16 @@ type WorkflowAppProps = Parameters<typeof WorkflowApp>[0];
  */
 type WorkflowSearch = NonNullable<Parameters<WorkflowAppProps['onNavigate']>[1]>;
 
+export const workflowScopeFromPath = (
+  path: string,
+): { workflowId?: string; executionId?: string } => {
+  const [segment, id] = path.split('/');
+  if (!id) return {};
+  if (segment === 'w') return { workflowId: id };
+  if (segment === 'runs') return { executionId: id };
+  return {};
+};
+
 export interface WorkflowRouting {
   /** Sub-path below the /workflows mount — '', 'w/<id>', 'runs/<id>', 'folder/<id>'… */
   path: string;
