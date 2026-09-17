@@ -735,6 +735,8 @@ export const agentCapabilitySchema = z
     iconKey: z.string().optional(),
     /** serverType whose account/credentials this capability needs, when unconnected. */
     requiresConnection: z.string().optional(),
+    parentId: z.string().optional(),
+    parentLabel: z.string().optional(),
   })
   .strict();
 
@@ -781,6 +783,16 @@ export const agentDetailRowSchema = z
   .object({
     label: z.string().min(1),
     value: z.string(),
+  })
+  .strict();
+
+export const agentToolSelectionSchema = z
+  .object({
+    subagents: z.array(z.string()).optional(),
+    direct: z.array(z.string()).optional(),
+    gateway: z.array(z.string()).optional(),
+    custom: z.array(z.string()).optional(),
+    callableAgents: z.array(z.string()).optional(),
   })
   .strict();
 
@@ -835,6 +847,7 @@ export const agentPropsSchema = z.discriminatedUnion('variant', [
       variant: z.literal('draft'),
       phase: agentDraftPhaseSchema,
       agent: agentIdentitySchema,
+      toolSelection: agentToolSelectionSchema.optional(),
       // Seeds state.values[node.id] — the capability ids kept by the user. The
       // live selection then lives in flow state (the plan card's pattern), so
       // `capabilities` stays byte-identical across variants.
@@ -870,6 +883,7 @@ export type AgentKnowledgeSource = z.infer<typeof agentKnowledgeSourceSchema>;
 export type AgentKnowledge = z.infer<typeof agentKnowledgeSchema>;
 export type AgentMemory = z.infer<typeof agentMemorySchema>;
 export type AgentProviderStatus = z.infer<typeof agentProviderStatusSchema>;
+export type AgentToolSelection = z.infer<typeof agentToolSelectionSchema>;
 export type AgentIdentity = z.infer<typeof agentIdentitySchema>;
 export type AgentProps = z.infer<typeof agentPropsSchema>;
 export type AgentVariant = AgentProps['variant'];

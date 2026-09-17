@@ -96,7 +96,7 @@ const CapabilityChip: React.FC<{
  *  is the same edit, because both write the same flow-state key. */
 export interface AgentCapabilityInteraction {
   selected: Set<string>;
-  onToggle: (id: string) => void;
+  onToggle: (ids: string[]) => void;
   disabled?: boolean;
 }
 
@@ -179,7 +179,7 @@ const CapabilityGroup: React.FC<{
       key={capability.id}
       capability={capability}
       selected={interactive ? interactive.selected.has(capability.id) : true}
-      {...(interactive ? { onToggle: (): void => interactive.onToggle(capability.id) } : {})}
+      {...(interactive ? { onToggle: (): void => interactive.onToggle([capability.id]) } : {})}
       {...(interactive?.disabled ? { disabled: true } : {})}
     />
   );

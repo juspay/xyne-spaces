@@ -1,5 +1,6 @@
 import { test, expect } from "vitest";
 import {
+  normalizeProviderOrder,
   providerTypesFromText,
   providersUserAskedFor,
   unsupportedProvidersFromText,
@@ -53,4 +54,29 @@ test("a question about an agent's config is not a request to connect", () => {
 
 test("an unsupported name does not turn into a roster", () => {
   expect(wantsProviderRoster("i want to connect the gemini model")).toBe(false);
+});
+
+test("provider names users actually say are normalized to supported keys", () => {
+  expect(normalizeProviderOrder(["anthropic"])).toEqual({ providers: ["claude"], unknown: [] });
+  expect(normalizeProviderOrder(["openai"])).toEqual({ providers: ["codex"], unknown: [] });
+  expect(normalizeProviderOrder(["ChatGPT"])).toEqual({ providers: ["codex"], unknown: [] });
+  expect(normalizeProviderOrder(["claude"])).toEqual({ providers: ["claude"], unknown: [] });
+});
+
+test("order is kept and duplicates collapse", () => {
+  expect(normalizeProviderOrder(["anthropic", "openai", "claude"])).toEqual({
+    providers: ["claude", "codex"],
+    unknown: [],
+  });
+});
+
+test("providers Xyne does not offer are reported, never silently kept", () => {
+  expect(normalizeProviderOrder(["gemini", "anthropic"])).toEqual({
+    providers: ["claude"],
+    unknown: ["gemini"],
+  });
+  expect(normalizeProviderOrder(["totally-made-up"])).toEqual({
+    providers: [],
+    unknown: ["totally-made-up"],
+  });
 });

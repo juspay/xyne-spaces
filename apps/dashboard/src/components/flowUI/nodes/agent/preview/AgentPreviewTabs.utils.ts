@@ -1,5 +1,6 @@
 import type { AgentIdentity } from '@xyne/shared';
 import type { DetailListItem } from '../../../../../routes/AIScreen/library/shared/primitives/DetailListCard';
+import { humanizeToolName } from '../../../../../routes/AIScreen/library/shared/pickers/mcp/mcpCatalog';
 
 type Capability = NonNullable<AgentIdentity['capabilities']>[number];
 
@@ -46,17 +47,66 @@ export function capabilityGroup(capability: Capability): ToolGroup {
   return capability.group ?? (capability.kind === 'subagent' ? 'subagent' : 'builtin');
 }
 
-export function toolItemsForGroup(capabilities: Capability[], group: ToolGroup): DetailListItem[] {
-  return capabilities
-    .filter(capability => capabilityGroup(capability) === group)
-    .map(capability => ({
-      key: capability.id,
-      name: capability.label,
-      description:
-        capability.description ??
-        (capability.requiresConnection ? `Needs ${capability.requiresConnection} connected` : ''),
+export interface ToolListItem extends DetailListItem {
+  ids: string[];
+}
+
+function capabilityDescription(capability: Capability): string {
+  if (capability.description) {
+    return capability.description;
+  }
+  return capability.requiresConnection ? `Needs ${capability.requiresConnection} connected` : '';
+}
+
+function toolCountLabel(count: number): string {
+  return `${count} ${count === 1 ? 'tool' : 'tools'}`;
+}
+
+export function toolItemsForGroup(capabilities: Capability[], group: ToolGroup): ToolListItem[] {
+  const items: ToolListItem[] = [];
+  const grouped = new Map<string, { item: ToolListItem; labels: string[] }>();
+
+  for (const capability of capabilities) {
+    if (capabilityGroup(capability) !== group) {
+      continue;
+    }
+
+    const parentId = capability.parentId;
+    if (!parentId) {
+      items.push({
+        key: capability.id,
+        ids: [capability.id],
+        name: capability.label,
+        description: capabilityDescription(capability),
+        iconType: capability.iconKey ?? '',
+      });
+      continue;
+    }
+
+    const entry = grouped.get(parentId);
+    if (entry) {
+      entry.item.ids.push(capability.id);
+      entry.labels.push(humanizeToolName(capability.label));
+      continue;
+    }
+
+    const item: ToolListItem = {
+      key: parentId,
+      ids: [capability.id],
+      name: capability.parentLabel ?? parentId,
+      description: '',
       iconType: capability.iconKey ?? '',
-    }));
+    };
+    grouped.set(parentId, { item, labels: [humanizeToolName(capability.label)] });
+    items.push(item);
+  }
+
+  for (const { item, labels } of grouped.values()) {
+    item.description = labels.join(', ');
+    item.meta = toolCountLabel(item.ids.length);
+  }
+
+  return items;
 }
 
 export function skillItems(agent: AgentIdentity): DetailListItem[] {

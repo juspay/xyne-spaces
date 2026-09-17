@@ -31,6 +31,12 @@ import {
   resolveAgentCapabilities,
   toolIdsFromConfig,
   unknownToolsNote,
+  draftNote,
+  expandMcpRequests,
+  listCallableAgentOptions,
+  toConfigTools,
+  unknownMcpsNote,
+  unknownProvidersNote,
   resolveDraftExtras,
   type DraftAgentSpec,
 } from "../lib/agent-card.js";
@@ -4888,6 +4894,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
           toolIdsFromConfig(row.config),
           catalog,
           ctx.senderId,
+          await listCallableAgentOptions(ctx.agentOrgId, ctx.senderId, row.slug),
         );
         const ownerCredit = await agentOwnerCredit(row.ownerUserId);
         const flow = withSpacesAppId(
@@ -5296,7 +5303,17 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
       // Resolve the requested tools against THIS org's catalog. Unmatched
       // tokens are reported on the card and never persisted.
       const catalog = await buildAvailableToolsCatalog(undefined, orgId);
-      const resolved = await resolveAgentCapabilities(spec.tools ?? [], catalog, requesterId);
+      const callableOptions = await listCallableAgentOptions(orgId, requesterId, spec.slug);
+      const expandedMcps = expandMcpRequests(spec.mcps, catalog);
+      if (expandedMcps.unknown.length > 0) {
+        log.info(`[agent-card] draft ${spec.slug}: unmatched MCPs [${expandedMcps.unknown.join(", ")}]`);
+      }
+      const resolved = await resolveAgentCapabilities(
+        [...(spec.tools ?? []), ...expandedMcps.tokens],
+        catalog,
+        requesterId,
+        callableOptions,
+      );
       const note = unknownToolsNote(resolved.unknown);
       if (resolved.unknown.length > 0) {
         log.info(`[agent-card] draft ${spec.slug}: unmatched tools [${resolved.unknown.join(", ")}]`);
@@ -5341,6 +5358,11 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
       }
 
       const draftExtras = await resolveDraftExtras(spec, orgId, requesterId);
+      const cardNote = draftNote(
+        note,
+        unknownMcpsNote(expandedMcps.unknown),
+        unknownProvidersNote(draftExtras.unknownProviders ?? []),
+      );
       const identity = identityFromDraftSpec(spec, resolved, ctx.agentSlug, draftExtras);
       const flow = withSpacesAppId(
         buildAgentCardFlow(
@@ -5348,7 +5370,8 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
             variant: "draft",
             phase: "pending",
             agent: identity,
-            ...(note ? { note } : {}),
+            toolSelection: toConfigTools(resolved),
+            ...(cardNote ? { note: cardNote } : {}),
           },
           {
             requestId: outcome.request.id,

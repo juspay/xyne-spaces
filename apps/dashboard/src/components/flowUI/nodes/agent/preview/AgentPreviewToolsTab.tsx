@@ -3,10 +3,14 @@ import { DetailSection } from '../../../../../routes/AIScreen/library/shared/pri
 import { DetailListCard } from '../../../../../routes/AIScreen/library/shared/primitives/DetailListCard';
 import type { AgentPreviewToolsProps } from './AgentPreviewTabs.types';
 import { TOOL_SECTIONS, toolItemsForGroup } from './AgentPreviewTabs.utils';
+import { AgentPreviewToolsEditor } from './AgentPreviewToolsEditor';
 
-export function AgentPreviewToolsTab({ agent, interactive }: AgentPreviewToolsProps): ReactElement {
+export function AgentPreviewToolsTab({ agent, editor }: AgentPreviewToolsProps): ReactElement {
+  if (editor?.editable) {
+    return <AgentPreviewToolsEditor agent={agent} editor={editor} />;
+  }
+
   const capabilities = agent.capabilities ?? [];
-  const canEdit = Boolean(interactive) && !interactive?.disabled;
 
   return (
     <div className='flex flex-col gap-6'>
@@ -16,9 +20,9 @@ export function AgentPreviewToolsTab({ agent, interactive }: AgentPreviewToolsPr
             items={toolItemsForGroup(capabilities, section.group)}
             loading={false}
             emptyLabel={section.empty}
-            canEdit={canEdit}
+            canEdit={false}
             removeLabel={item => `Remove ${item.name}`}
-            onRemove={item => interactive?.onToggle(item.key)}
+            onRemove={() => undefined}
           />
         </DetailSection>
       ))}

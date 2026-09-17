@@ -9,7 +9,7 @@ import {
   type AgentPreviewTabsProps,
 } from './AgentPreviewTabs.types';
 
-export function AgentPreviewTabs({ agent, interactive }: AgentPreviewTabsProps): ReactElement {
+export function AgentPreviewTabs({ agent, editor }: AgentPreviewTabsProps): ReactElement {
   const [tab, setTab] = useState<AgentPreviewTab>('persona');
 
   return (
@@ -35,8 +35,8 @@ export function AgentPreviewTabs({ agent, interactive }: AgentPreviewTabsProps):
         ))}
       </div>
 
-      {tab === 'persona' && <AgentPreviewPersonaTab agent={agent} />}
-      {tab === 'tools' && <AgentPreviewToolsTab agent={agent} interactive={interactive} />}
+      {tab === 'persona' && <AgentPreviewPersonaTab agent={agent} editor={editor} />}
+      {tab === 'tools' && <AgentPreviewToolsTab agent={agent} editor={editor} />}
       {tab === 'knowledge' && <AgentPreviewKnowledgeTab agent={agent} />}
     </div>
   );

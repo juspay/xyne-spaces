@@ -100,6 +100,35 @@ export function stripAddressedAgentMention(text: string, agentSlug?: string): st
     .trim();
 }
 
+export function normalizeProviderName(raw: string): SupportedProvider | null {
+  const token = raw.trim().toLowerCase();
+  if (!token) return null;
+  const exact = SUPPORTED_PROVIDERS.find((provider) => provider === token);
+  if (exact) return exact;
+  for (const hint of PROVIDER_HINTS) {
+    if (hint.keywords.some((keyword) => keyword === token)) return hint.provider;
+  }
+  return null;
+}
+
+export function normalizeProviderOrder(raw: readonly string[]): {
+  providers: SupportedProvider[];
+  unknown: string[];
+} {
+  const providers: SupportedProvider[] = [];
+  const unknown: string[] = [];
+  for (const entry of raw) {
+    const match = normalizeProviderName(entry);
+    if (!match) {
+      const trimmed = entry.trim();
+      if (trimmed && !unknown.includes(trimmed)) unknown.push(trimmed);
+      continue;
+    }
+    if (!providers.includes(match)) providers.push(match);
+  }
+  return { providers, unknown };
+}
+
 /** Providers the text names, in the order they first appear. */
 export function providerTypesFromText(text: string): SupportedProvider[] {
   if (!text.trim()) return [];

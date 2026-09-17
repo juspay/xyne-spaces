@@ -8,6 +8,7 @@ import { AuditLine, CardShell, Mention, StatusChip } from '../cardPrimitives';
 import Avatar from '../../../ui/Avatar/Avatar';
 import { AgentPreview, InsideAgentPreviewContext } from './AgentPreview';
 import { ChatWithAgentButton } from './ChatWithAgentButton';
+import { useDraftAgentEditor } from './useDraftAgentEditor';
 
 /**
  * The `agent` artifact's DRAFT variant — an agent an agent proposed, awaiting
@@ -43,14 +44,7 @@ export const DraftAgentCard: React.FC<{ node: FlowComponent; props: AgentDraftPr
 
   const capabilities = props.agent.capabilities ?? [];
   const decided = props.phase !== 'pending';
-
-  // Seed once from props, then flow-state owns it (the plan card's pattern) —
-  // props stay the server's view, state stays the user's edits.
-  const stored = state.values[node.id];
-  const seeded = Array.isArray(stored);
-  const selected = new Set<string>(
-    seeded ? (stored as string[]) : (props.selected ?? capabilities.map(c => c.id)),
-  );
+  const editor = useDraftAgentEditor(props, node.id);
 
   useEffect(() => {
     if (state.values[node.id] === undefined) {
@@ -60,19 +54,6 @@ export const DraftAgentCard: React.FC<{ node: FlowComponent; props: AgentDraftPr
   }, [node.id]);
 
   const locked = state.submitting || decided || pending !== null;
-
-  const toggle = (id: string): void => {
-    if (locked) {
-      return;
-    }
-    const next = new Set(selected);
-    if (next.has(id)) {
-      next.delete(id);
-    } else {
-      next.add(id);
-    }
-    updateFieldValue(node.id, Array.from(next));
-  };
 
   const submit = async (actionId: 'agent-draft-approve' | 'agent-draft-decline'): Promise<void> => {
     if (locked) {
@@ -127,8 +108,6 @@ export const DraftAgentCard: React.FC<{ node: FlowComponent; props: AgentDraftPr
   );
 
   const approveLabel = pending === 'approve' ? 'Creating…' : 'Create Agent';
-
-  const interactive = decided ? undefined : { selected, onToggle: toggle, disabled: locked };
 
   // Footer button shapes from the frame: text-only for the secondary actions, a
   // bordered surface for the primary one.
@@ -271,7 +250,7 @@ export const DraftAgentCard: React.FC<{ node: FlowComponent; props: AgentDraftPr
         open={expanded}
         onOpenChange={setExpanded}
         agent={props.agent}
-        interactive={interactive}
+        editor={editor}
         note={props.note}
         statePill={statePill}
         conversationId={conversationId ?? undefined}

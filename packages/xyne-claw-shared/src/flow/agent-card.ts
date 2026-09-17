@@ -36,6 +36,8 @@ import { FlowBuilder, type FlowComponent, type FlowDefinition } from './builder.
  *  without updating both consumers. */
 export const AGENT_COMPONENT_ID = 'agent';
 
+export const AGENT_EDITS_STATE_KEY = 'agent-edits';
+
 /** Display cap for the system prompt carried on the card. The card copy is for
  *  the expanded view only — the FULL prompt lives in the AgentRequest row and is
  *  what actually gets created, so truncating here is purely cosmetic. */
@@ -55,6 +57,8 @@ export interface AgentCapability {
   iconKey?: string;
   /** serverType whose account/credentials this capability needs, when unconnected. */
   requiresConnection?: string;
+  parentId?: string;
+  parentLabel?: string;
 }
 
 export interface AgentDetailRow {
@@ -123,11 +127,20 @@ export interface AgentIdentity {
 
 export type AgentDraftPhase = 'pending' | 'created' | 'rejected';
 
+export interface AgentToolSelection {
+  subagents?: string[];
+  direct?: string[];
+  gateway?: string[];
+  custom?: string[];
+  callableAgents?: string[];
+}
+
 export type AgentCardProps =
   | {
       variant: 'draft';
       phase: AgentDraftPhase;
       agent: AgentIdentity;
+      toolSelection?: AgentToolSelection;
       /** Seeds state.values[AGENT_COMPONENT_ID] — capability ids kept by the user. */
       selected?: string[];
       note?: string;
@@ -225,6 +238,8 @@ export function agentIdentity(input: {
       ...(c.description ? { description: c.description } : {}),
       ...(c.iconKey ? { iconKey: c.iconKey } : {}),
       ...(c.requiresConnection ? { requiresConnection: c.requiresConnection } : {}),
+      ...(c.parentId ? { parentId: c.parentId } : {}),
+      ...(c.parentLabel ? { parentLabel: c.parentLabel } : {}),
     }));
   if (capabilities.length > 0) identity.capabilities = capabilities;
 
@@ -286,6 +301,9 @@ export function buildAgentCardFlow(props: AgentCardProps, data: AgentCardData): 
           variant: 'draft',
           phase: props.phase,
           agent: props.agent,
+          ...(props.toolSelection && Object.keys(props.toolSelection).length > 0
+            ? { toolSelection: props.toolSelection }
+            : {}),
           // Default the selection to EVERY capability: an unchecked chip means
           // "the user removed it", so an absent seed must not read as "user
           // deselected everything".

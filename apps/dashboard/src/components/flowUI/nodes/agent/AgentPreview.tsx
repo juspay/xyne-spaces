@@ -5,7 +5,8 @@ import { MultipleCrossCancelDefault } from '@xyne/icons';
 import type { AgentIdentity } from '@xyne/shared';
 import { PreviewSplitDialog, PreviewThreadPanel } from '../../../ui/PreviewSplitDialog';
 import { usePlatform } from '../../../../hooks/usePlatform';
-import { AgentConnectLinks, type AgentCapabilityInteraction } from './AgentIdentityBlock';
+import { AgentConnectLinks } from './AgentIdentityBlock';
+import type { DraftAgentEditor } from './useDraftAgentEditor';
 import { AgentPreviewTabs } from './preview/AgentPreviewTabs';
 
 /**
@@ -38,8 +39,8 @@ interface AgentPreviewProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   agent: AgentIdentity;
-  /** Present ⇒ capability chips are toggles here too. */
-  interactive?: AgentCapabilityInteraction | undefined;
+  /** Present ⇒ the tools/model/provider sections are editable. */
+  editor?: DraftAgentEditor | undefined;
   note?: string | undefined;
   /** State pill shown beside the name (the card's own "Draft"/"Created" chip). */
   statePill?: React.ReactNode;
@@ -74,12 +75,12 @@ const PanelHeader: React.FC<{ label: string; onClose?: (() => void) | undefined 
 
 const DetailPanel: React.FC<{
   agent: AgentIdentity;
-  interactive?: AgentCapabilityInteraction | undefined;
+  editor?: DraftAgentEditor | undefined;
   note?: string | undefined;
   statePill?: React.ReactNode;
   footer?: React.ReactNode;
   onClose?: () => void;
-}> = ({ agent, interactive, note, statePill, footer, onClose }) => {
+}> = ({ agent, editor, note, statePill, footer, onClose }) => {
   const details = agent.details ?? [];
 
   return (
@@ -120,7 +121,7 @@ const DetailPanel: React.FC<{
           <AgentConnectLinks agent={agent} />
           {note && <p className='text-xs leading-[1.4] text-muted-foreground'>{note}</p>}
 
-          <AgentPreviewTabs agent={agent} interactive={interactive} />
+          <AgentPreviewTabs agent={agent} editor={editor} />
         </div>
       </div>
       {footer && (
@@ -136,7 +137,7 @@ export const AgentPreview: React.FC<AgentPreviewProps> = ({
   open,
   onOpenChange,
   agent,
-  interactive,
+  editor,
   note,
   statePill,
   conversationId,
@@ -156,7 +157,7 @@ export const AgentPreview: React.FC<AgentPreviewProps> = ({
       </Dialog.Description>
       <DetailPanel
         agent={agent}
-        interactive={interactive}
+        editor={editor}
         note={note}
         statePill={statePill}
         footer={footer}
