@@ -46,6 +46,8 @@ export interface SessionContext {
   agentId?: string;
   agentOrgId?: string | null;
   agentSlug?: string | undefined;
+  /** Display name shown in Spaces transient progress surfaces. */
+  agentName?: string | undefined;
   responseMode: "conversation" | "approval";
   /**
    * Suppress the thread reply for this run entirely.

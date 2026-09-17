@@ -31,6 +31,7 @@
     "@sinclair/typebox": "^0.34.49",
     "@slack/web-api": "8.0.0",
     "@types/pdfkit": "^0.17.6",
+    "@xyne/icons": "workspace:*",
     "@xyne/shared": "workspace:*",
     "@xyne/storage": "workspace:*",
     "bullmq": "^5.72.0",

@@ -85,6 +85,7 @@ export const SDLC_ENTITY_TYPES = [
   "WORKFLOW",
   "TRACK",
   "FOLDER",
+  "LINK",
 ] as const;
 
 export const sdlcEntityTypeSchema = z.enum(SDLC_ENTITY_TYPES);
@@ -162,7 +163,12 @@ export function sdlcHubWikiFolderId(channelId: string): string {
  * but belong to their own section, so the tree filters rather than assuming
  * everything a track holds is a tree node.
  */
-export const SDLC_TREE_TARGET_TYPES = ["FOLDER", "CANVAS"] as const;
+export const SDLC_TREE_TARGET_TYPES = [
+  "FOLDER",
+  "CANVAS",
+  "ATTACHMENT",
+  "LINK",
+] as const;
 
 /**
  * A TRACK -> item edge kept alongside the containment edge, so "everything in
@@ -224,7 +230,13 @@ export type SdlcRelationType = z.infer<typeof sdlcRelationTypeSchema>;
 export const sdlcDiscussionSchema = z
   .object({
     repoId: z.string().min(1),
-    ownerType: z.enum(["CANVAS", "TRACK", "FOLDER"]),
+    ownerType: z.enum([
+      "CANVAS",
+      "TRACK",
+      "FOLDER",
+      "ATTACHMENT",
+      "LINK",
+    ]),
     ownerId: z.string().min(1),
     surfaceType: z.enum(["CANVAS", "TICKET", "PULL_REQUEST"]).optional(),
     surfaceId: z.string().min(1).optional(),
@@ -244,7 +256,13 @@ export const sdlcDiscussionSchema = z
 export type SdlcDiscussion = z.infer<typeof sdlcDiscussionSchema>;
 
 export const entityLinkContextSchema = z.object({
-  sourceType: z.enum(["CANVAS", "TRACK", "FOLDER"]),
+  sourceType: z.enum([
+    "CANVAS",
+    "TRACK",
+    "FOLDER",
+    "ATTACHMENT",
+    "LINK",
+  ]),
   sourceId: z.string().min(1),
   linkId: z.string().min(1),
   /**
@@ -274,7 +292,13 @@ export const sdlcTrackStatusSchema = z.enum(SDLC_TRACK_STATUSES);
  * OWNER -> CALL [CALL] and OWNER -> CONVERSATION [DISCUSSION] links.
  */
 export const sdlcCallLinkSchema = z.object({
-  ownerType: z.enum(["CANVAS", "TRACK"]),
+  ownerType: z.enum([
+    "CANVAS",
+    "TRACK",
+    "FOLDER",
+    "LINK",
+    "ATTACHMENT",
+  ]),
   ownerId: z.string().min(1),
 });
 export type SdlcCallLink = z.infer<typeof sdlcCallLinkSchema>;
@@ -650,3 +674,89 @@ export const sdlcAgentContextSchema = z.object({
   generationCommit: nullableNonEmpty.optional(),
 });
 export type SdlcAgentContext = z.infer<typeof sdlcAgentContextSchema>;
+
+/**
+ * What a hub file is allowed to be. Documents, media and the office formats
+ * people actually file into a track — not archives or executables, which are
+ * payloads rather than things anyone reads in place.
+ *
+ * The extension is the primary gate and the mime type only confirms it: a
+ * browser hands us `application/octet-stream` (or nothing at all) for .md and
+ * for the office formats often enough that trusting the mime type alone would
+ * reject files the user can plainly see are documents.
+ */
+export const SDLC_UPLOAD_EXTENSIONS = [
+  // documents
+  "pdf",
+  "md",
+  "markdown",
+  "txt",
+  "rtf",
+  "doc",
+  "docx",
+  "odt",
+  "html",
+  "htm",
+  // spreadsheets
+  "csv",
+  "tsv",
+  "xls",
+  "xlsx",
+  "xlsm",
+  "ods",
+  // presentations
+  "ppt",
+  "pptx",
+  "odp",
+  // images
+  "png",
+  "jpg",
+  "jpeg",
+  "gif",
+  "webp",
+  "avif",
+  "bmp",
+  "tif",
+  "tiff",
+  "heic",
+  "heif",
+  // video
+  "mp4",
+  "mov",
+  "webm",
+  "m4v",
+  "avi",
+  "mkv",
+] as const;
+
+/** `accept` for a file input, so the picker offers only what will be taken. */
+export const SDLC_UPLOAD_ACCEPT = SDLC_UPLOAD_EXTENSIONS.map(
+  (extension) => `.${extension}`,
+).join(",");
+
+/**
+ * Active-content formats (html, and svg were it listed) are safe to accept only
+ * because the attachment stream refuses to serve them inline — see
+ * SAFE_INLINE_MIME_TYPES in safeAttachmentDownload.ts, which forces a download
+ * and never echoes a client-supplied Content-Type. Opening one saves the file
+ * rather than rendering it in our origin.
+ */
+export function isAllowedSdlcUpload(
+  filename: string,
+  mimetype: string,
+): boolean {
+  const extension = filename.includes(".")
+    ? (filename.split(".").pop() ?? "").trim().toLowerCase()
+    : "";
+  if (!extension) return false;
+  if (!(SDLC_UPLOAD_EXTENSIONS as readonly string[]).includes(extension)) {
+    return false;
+  }
+  // The extension carries the decision, but an explicit archive or executable
+  // mime type overrides it: that pairing is a rename, not a document.
+  const mime = mimetype.split(";")[0]?.trim().toLowerCase() ?? "";
+  if (/zip|x-tar|gzip|x-7z|x-rar|x-msdownload|x-executable|x-mach-binary/.test(mime)) {
+    return false;
+  }
+  return true;
+}

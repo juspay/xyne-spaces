@@ -1,4 +1,4 @@
-import React, { ReactElement, useMemo, useState, useCallback, useEffect } from 'react';
+import React, { ReactElement, useMemo, useState, useCallback, useEffect, useRef } from 'react';
 import { useAuth } from '../../../hooks/useAuth';
 import {
   CHART_VIEW_LABELS,
@@ -41,7 +41,8 @@ import {
 } from '../../Tickets/TicketFilters/Submenus';
 import { classificationApi } from '../../../api/classificationApi';
 import { getIconForFieldType } from '../../Tickets/TicketFilters/fieldTypeIcons';
-import { DeskMetricsDateRangePicker } from './DeskMetricsDateRangePicker';
+import { DeskMetricsDateRangePicker, matchPreset } from './DeskMetricsDateRangePicker';
+import { globalClickTracker } from '../../../services/Analytics/globalClickTracker';
 import {
   Bar,
   BarChart,
@@ -99,6 +100,8 @@ export interface DeskMetricsDashboardProps {
   customFieldDefinitions?: readonly ResolvedDisplayFormField[];
   availableStages?: readonly DeskMetricsStageOption[];
   onTicketClick: (ticket: DeskMetricsTicketRow) => void;
+  /** Which surface opened the dashboard — DESK_METRICS_VIEWED `source`. */
+  trackSource?: 'toolbar' | 'settings_tab';
 }
 
 /** Shows a checklist of tags for a category, derived from already-fetched breakdown data. */
@@ -451,11 +454,14 @@ const MetricsAgentTable = ({
   onDownload,
   onAgentClick,
   canDownload,
+  trackMetadata,
 }: {
   agents: DeskMetricsAgentRow[];
   onDownload: () => void;
   onAgentClick: (assigneeId: string | null) => void;
   canDownload: boolean;
+  /** JSON dimensions (desk count, range) for the export click. */
+  trackMetadata?: string;
 }): ReactElement => {
   const [sortKey, setSortKey] = useState<AgentSortKey>('assigned');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
@@ -521,6 +527,7 @@ const MetricsAgentTable = ({
             )}
             data-track-category='DeskMetrics'
             data-track-name='DownloadAgentCsv'
+            data-track-metadata={trackMetadata}
           >
             <Download size={12} />
             CSV
@@ -701,12 +708,15 @@ const MetricsTicketTable = ({
   onTicketClick,
   onAssigneeClick,
   canSee,
+  trackMetadata,
 }: {
   tickets: DeskMetricsTicketRow[];
   onDownload: () => void;
   onTicketClick: (ticket: DeskMetricsTicketRow) => void;
   onAssigneeClick: (assigneeId: string) => void;
   canSee: (key: string) => boolean;
+  /** JSON dimensions (desk count, range) for the export click. */
+  trackMetadata?: string;
 }): ReactElement => {
   const [page, setPage] = useState(0);
   const totalPages = Math.ceil(tickets.length / PAGE_SIZE);
@@ -732,6 +742,7 @@ const MetricsTicketTable = ({
             )}
             data-track-category='DeskMetrics'
             data-track-name='DownloadCsv'
+            data-track-metadata={trackMetadata}
           >
             <Download size={12} />
             CSV
@@ -983,6 +994,7 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
   customFieldDefinitions = [],
   availableStages = [],
   onTicketClick,
+  trackSource = 'toolbar',
 }) => {
   const { user } = useAuth();
   const isGuest = user?.role === WorkspaceRole.GUEST;
@@ -1248,6 +1260,76 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
   const chartView = chartViewOptions.includes(persistedChartView)
     ? persistedChartView
     : (chartViewOptions[0] ?? 'priority');
+
+  // DESK_METRICS_VIEWED: the dashboard has 42 tracked clicks and no impression,
+  // so nothing said how often it is opened or over what range. One event per
+  // desk-set + range once the aggregate query has data; filter changes inside
+  // the same range are their own clicks and do not refire this.
+  const rangeDays = Math.max(1, Math.round((rangeEndMs - rangeStartMs) / DAY_MS));
+  const activeFilterKeys = useMemo(
+    () =>
+      [
+        selectedAssigneeIds.length > 0 && 'assignee',
+        selectedStageNames.length > 0 && 'stage',
+        selectedPriorities.length > 0 && 'priority',
+        selectedUserGroupIds.length > 0 && 'userGroup',
+        selectedTagValues.length > 0 && 'tags',
+        selectedAiCategories.length > 0 && 'aiCategory',
+        Object.keys(selectedCustomFieldValues).length > 0 && 'customField',
+      ].filter((k): k is string => typeof k === 'string'),
+    [
+      selectedAssigneeIds,
+      selectedStageNames,
+      selectedPriorities,
+      selectedUserGroupIds,
+      selectedTagValues,
+      selectedAiCategories,
+      selectedCustomFieldValues,
+    ],
+  );
+  const metricsViewedKeyRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!open || !data) return;
+    const key = `${[...selectedDeskIds].sort().join(',')}:${timeRangeParam}`;
+    if (metricsViewedKeyRef.current === key) return;
+    metricsViewedKeyRef.current = key;
+    globalClickTracker.trackManualEvent('DeskMetrics', 'DESK_METRICS_VIEWED', undefined, {
+      channelId,
+      deskCount: selectedDeskIds.length,
+      rangeDays,
+      rangePreset: matchPreset(dateRange) ?? 'custom',
+      activeFilterKeys,
+      chartView,
+      isGuest,
+      source: trackSource,
+    });
+  }, [
+    open,
+    data,
+    selectedDeskIds,
+    timeRangeParam,
+    channelId,
+    rangeDays,
+    dateRange,
+    activeFilterKeys,
+    chartView,
+    isGuest,
+    trackSource,
+  ]);
+  useEffect(() => {
+    if (!open) metricsViewedKeyRef.current = null;
+  }, [open]);
+  // Dimensions every filter / chart / export click in this dashboard carries.
+  const metricsClickMetadata = useMemo(
+    () =>
+      JSON.stringify({
+        channelId,
+        deskCount: selectedDeskIds.length,
+        rangeDays,
+        chart: chartView,
+      }),
+    [channelId, selectedDeskIds.length, rangeDays, chartView],
+  );
   const chartViewLabel = (view: ChartView): string =>
     (CHART_VIEW_LABELS as Record<string, string>)[view] ?? view.slice(view.indexOf(':') + 1);
   const isBreakdownView = !['priority', 'trend', 'assignee', 'tags'].includes(chartView);
@@ -1734,6 +1816,7 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                         )}
                         data-track-category='DeskMetrics'
                         data-track-name='OpenCustomFieldFilters'
+                        data-track-metadata={metricsClickMetadata}
                       >
                         <ListFilter size={13} className='shrink-0' />
                         <span className='font-medium'>More Filters</span>
@@ -1778,6 +1861,7 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                                 )}
                                 data-track-category='DeskMetrics'
                                 data-track-name='OpenPriorityFilterSubmenu'
+                                data-track-metadata={metricsClickMetadata}
                               >
                                 <div className='flex min-w-0 items-center gap-3'>
                                   <BarChart4 size={16} className='shrink-0' />
@@ -1826,6 +1910,7 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                                 )}
                                 data-track-category='DeskMetrics'
                                 data-track-name='OpenUserGroupFilterSubmenu'
+                                data-track-metadata={metricsClickMetadata}
                               >
                                 <div className='flex min-w-0 items-center gap-3'>
                                   <Users size={16} className='shrink-0' />
@@ -1875,6 +1960,7 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                                 )}
                                 data-track-category='DeskMetrics'
                                 data-track-name='OpenTagCategorySubmenu'
+                                data-track-metadata={metricsClickMetadata}
                               >
                                 <div className='flex min-w-0 items-center gap-3'>
                                   <Tag size={16} className='shrink-0' />
@@ -1967,6 +2053,7 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                                   )}
                                   data-track-category='DeskMetrics'
                                   data-track-name='OpenTagsSubmenu'
+                                  data-track-metadata={metricsClickMetadata}
                                 >
                                   <div className='flex min-w-0 items-center gap-3'>
                                     <Tag size={16} className='shrink-0' />
@@ -2020,6 +2107,7 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                                   )}
                                   data-track-category='DeskMetrics'
                                   data-track-name='OpenStageFilterSubmenu'
+                                  data-track-metadata={metricsClickMetadata}
                                 >
                                   <div className='flex min-w-0 items-center gap-3'>
                                     <Circle size={16} className='shrink-0' />
@@ -2070,6 +2158,7 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                                   )}
                                   data-track-category='DeskMetrics'
                                   data-track-name='OpenAICategoryFilterSubmenu'
+                                  data-track-metadata={metricsClickMetadata}
                                 >
                                   <div className='flex min-w-0 items-center gap-3'>
                                     <Sparkles size={16} className='shrink-0' />
@@ -2136,7 +2225,12 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                                       )}
                                       data-track-category='DeskMetrics'
                                       data-track-name='OpenCustomFieldFilterSubmenu'
-                                      data-track-metadata={JSON.stringify({ fieldName: key })}
+                                      data-track-metadata={JSON.stringify({
+                                        channelId,
+                                        deskCount: selectedDeskIds.length,
+                                        rangeDays,
+                                        fieldName: key,
+                                      })}
                                     >
                                       <div className='flex min-w-0 items-center gap-3'>
                                         <FieldIcon className='h-4 w-4 shrink-0' />
@@ -2452,6 +2546,7 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                       onDownload={handleDownloadAgents}
                       onAgentClick={handleAgentClick}
                       canDownload={canSee('csvDownload')}
+                      trackMetadata={metricsClickMetadata}
                     />
                   </>
                 )}
@@ -2566,6 +2661,7 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                             title='Expand'
                             data-track-category='DeskMetrics'
                             data-track-name='ExpandChart'
+                            data-track-metadata={metricsClickMetadata}
                             className='flex h-7 w-7 items-center justify-center rounded-[6px] text-muted-foreground hover:bg-accent hover:text-foreground'
                           >
                             <Maximize2 size={13} />
@@ -2740,6 +2836,7 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                         onTicketClick={onTicketClick}
                         onAssigneeClick={handleAssigneeClick}
                         canSee={canSee}
+                        trackMetadata={metricsClickMetadata}
                       />
                     )}
                   </>

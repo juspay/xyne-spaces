@@ -120,6 +120,7 @@ export enum AttachmentEntityType {
   WORKFLOW_STEPS = 'WORKFLOW_STEPS',
   DESK_REPORT = 'DESK_REPORT',
   RECORDING = 'RECORDING',
+  SDLC_HUB = 'SDLC_HUB',
 }
 
 // @ts-ignore TS1294
@@ -987,6 +988,7 @@ export enum ProjectType {
 // @ts-ignore TS1294
 export enum SavedConfigContextType {
   BOARD = 'BOARD',
+  DESK_TICKET = 'DESK_TICKET',
 }
 
 // @ts-ignore TS1294

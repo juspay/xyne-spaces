@@ -405,6 +405,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
     // This shows the thread header but doesn't load old conversation
     xyneAIActor.send({
       type: 'OPEN',
+      trackSource: 'message_bubble',
       channelId,
       threadInfo,
       startFreshChat: true,
@@ -1541,6 +1542,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
             ticketId={threadTicketId}
             conversationId={conversation.conversationId}
             sourceMessageId={message.messageId}
+            trackSource='chat_message'
           />
         )}
 

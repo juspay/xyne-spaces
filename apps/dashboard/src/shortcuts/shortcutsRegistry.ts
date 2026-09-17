@@ -20,6 +20,7 @@ export const KNOWN_SHORTCUT_SCOPES = [
   'sdlc-sidebar',
   'sdlc-finder',
   'sdlc-tickets',
+  'sdlc-explorer',
 ] as const;
 
 export type KnownShortcutScope = (typeof KNOWN_SHORTCUT_SCOPES)[number];

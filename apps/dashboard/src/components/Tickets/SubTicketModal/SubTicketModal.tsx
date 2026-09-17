@@ -14,6 +14,8 @@ interface SubTicketModalProps {
   conversationId: string;
   sourceMessageId?: string;
   onSuccess?: () => void;
+  /** Which surface opened the sub-ticket form; defaults to the modal itself. */
+  trackSource?: string;
 }
 
 type InitialAssignee = { type: 'assigneeTo' | 'userGroup'; value: string } | null;
@@ -25,6 +27,7 @@ export const SubTicketModal = ({
   conversationId,
   sourceMessageId,
   onSuccess,
+  trackSource = 'sub_ticket_modal',
 }: SubTicketModalProps): ReactElement | null => {
   const zero = useZero();
 
@@ -62,6 +65,7 @@ export const SubTicketModal = ({
       initialPriority={ticket.priority}
       initialTags={initialTags}
       isFromSubTicket={true}
+      trackSource={trackSource}
       {...(sourceMessageId && { sourceMessageId })}
       parentTicketId={ticketId}
       onTicketCreated={createdTicket => {

@@ -478,7 +478,7 @@ const AppSidebar = (): ReactElement => {
                       {showOngoingCallDot && (
                         <span
                           aria-hidden='true'
-                          className='absolute -top-1 -right-1 size-[9px] rounded-full bg-status-success border border-[color-mix(in_srgb,var(--status-success)_45%,transparent)] animate-live-pulse motion-reduce:animate-none'
+                          className='absolute top-1 right-1 size-[7px] rounded-full bg-status-success border border-[color-mix(in_srgb,var(--status-success)_45%,transparent)] animate-live-pulse motion-reduce:animate-none'
                         />
                       )}
                     </Link>

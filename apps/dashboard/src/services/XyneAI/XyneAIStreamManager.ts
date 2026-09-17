@@ -8,6 +8,8 @@ import { logger, Event as LogEvent } from '../../utils/logger';
 import { apiInstance, BASE_URL } from '../clients/apiClient';
 import { consumeConversationLiveStream } from './liveConversationStream';
 import { trackCitationsGenerated } from '../otel/xyneAIMetrics';
+import { globalClickTracker } from '../Analytics/globalClickTracker';
+import { lengthBucket } from '../Analytics/trackSource';
 import { parsePartialSummarizerJSON } from '../../utils/partialJsonParser';
 import {
   parseStreamingContent,
@@ -69,6 +71,12 @@ export interface StreamState {
   debugArtifactsReadyVersion: number;
   followUpsPending?: boolean;
   startedAt: number;
+  /** When the first content delta arrived — time-to-first-token for RESPONSE_* events. */
+  firstTokenAt?: number;
+  /** Model pin sent with the request, for RESPONSE_* event dimensions. */
+  model?: string;
+  /** Guards the analytics terminal event so one run reports exactly one outcome. */
+  runOutcomeReported?: boolean;
   version?: 'v1' | 'v2';
   agentSlug?: string;
   showInSidebar: boolean;
@@ -618,6 +626,7 @@ class XyneAIStreamManager {
       data['content'] &&
       typeof data['content'] === 'string'
     ) {
+      if (!streamState.firstTokenAt) streamState.firstTokenAt = Date.now();
       const pending = this.pendingDeltaMap.get(streamId) ?? '';
       this.pendingDeltaMap.set(streamId, pending + data['content']);
       this.scheduleDeltaFlush(streamId);
@@ -990,7 +999,7 @@ class XyneAIStreamManager {
         this.activeStreams.delete(threadId);
         this.abortControllers.delete(existingStream.streamId);
       } else {
-        this.abortStream(existingStream.streamId);
+        this.abortStream(existingStream.streamId, 'replaced');
       }
     }
 
@@ -1000,7 +1009,7 @@ class XyneAIStreamManager {
         .sort((a, b) => a.startedAt - b.startedAt);
       while (streamingSidebar.length >= XyneAIStreamManager.MAX_CONCURRENT_SIDEBAR_STREAMS) {
         const oldest = streamingSidebar.shift();
-        if (oldest) this.abortStream(oldest.streamId);
+        if (oldest) this.abortStream(oldest.streamId, 'replaced');
       }
     }
 
@@ -1027,6 +1036,7 @@ class XyneAIStreamManager {
       startedOnAIPage: this.isOnAIPage,
       ...(request.version && { version: request.version }),
       ...(request.agentSlug && { agentSlug: request.agentSlug }),
+      ...(request.model && { model: request.model }),
       ...(request.suppressCompletionToast && { suppressCompletionToast: true }),
     };
 
@@ -1413,6 +1423,10 @@ class XyneAIStreamManager {
 
         // Mark stream as errored so completeStream doesn't overwrite it
         currentState.status = 'error';
+        this.reportRunOutcome(currentState, 'RESPONSE_FAILED', {
+          errorKind: errorInfo.code,
+          ...(httpStatus !== undefined && { httpStatus }),
+        });
 
         updateMessages(prev =>
           prev.map(msg =>
@@ -1760,6 +1774,56 @@ class XyneAIStreamManager {
   }
 
   /**
+   * One analytics outcome per run (`XyneAI/RESPONSE_COMPLETED | _FAILED |
+   * _CANCELLED`). Lives here because this is the only place every surface's
+   * stream terminates — the panel, the /ai page and embedded instances all
+   * drive the same manager. Carries counts, ids and durations only; never the
+   * answer text. Live viewers (`live-` streams re-attached after navigation)
+   * are skipped: the driving tab already reported that run.
+   */
+  private reportRunOutcome(
+    state: StreamState,
+    name: 'RESPONSE_COMPLETED' | 'RESPONSE_FAILED' | 'RESPONSE_CANCELLED',
+    extra: Record<string, unknown>,
+  ): void {
+    if (state.runOutcomeReported) return;
+    if (state.streamId.startsWith('live-')) return;
+    state.runOutcomeReported = true;
+
+    const now = Date.now();
+    const lastBot = [...state.messages].reverse().find(m => m.type === 'bot');
+    const invocations = lastBot?.toolInvocations ?? [];
+    const responseText =
+      (lastBot?.content && lastBot.content.length > 0
+        ? lastBot.content
+        : typeof lastBot?.streamingContent === 'string'
+          ? lastBot.streamingContent
+          : '') ?? '';
+    const citationsCount =
+      Object.keys(lastBot?.parsedContent?.citations ?? {}).length +
+      invocations.reduce((n, inv) => n + (inv.citations?.length ?? 0), 0);
+    const sessionId =
+      state.sessionId && !state.sessionId.startsWith('draft-') ? state.sessionId : null;
+
+    globalClickTracker.trackManualEvent('XyneAI', name, undefined, {
+      surface: state.startedOnAIPage ? 'page' : 'panel',
+      agentSlug: state.agentSlug ?? 'ask-ai',
+      ...(state.model && { model: state.model }),
+      ...(sessionId && { conversationId: sessionId }),
+      ...(lastBot?.id && !lastBot.id.startsWith('bot-') && { messageId: lastBot.id }),
+      latencyMs: now - state.startedAt,
+      ...(state.firstTokenAt && { timeToFirstTokenMs: state.firstTokenAt - state.startedAt }),
+      toolInvocationsCount: invocations.length,
+      toolErrorsCount: invocations.filter(inv => inv.status === 'error' || inv.isError).length,
+      citationsCount,
+      hadReasoning: !!lastBot?.reasoning,
+      responseLengthBucket: lengthBucket(responseText.length),
+      producedArtifact: invocations.some(inv => /canvas|artifact/i.test(inv.toolName)),
+      ...extra,
+    });
+  }
+
+  /**
    * Mark stream as completed
    */
   private completeStream(streamId: string, threadId: string, finalResponse: string): void {
@@ -1792,6 +1856,9 @@ class XyneAIStreamManager {
       return { ...m, isStreaming: false, content: finalContent };
     });
     this.notifySubscribers({ ...currentState });
+    this.reportRunOutcome(currentState, 'RESPONSE_COMPLETED', {
+      followUpsPending: currentState.followUpsPending === true,
+    });
 
     // Persist completion
     void xyneAIStreamStorage.completeStream(streamId, finalResponse);
@@ -2386,6 +2453,7 @@ class XyneAIStreamManager {
     currentState.error = error;
 
     const errorInfo = getAskAIErrorInfo(error);
+    this.reportRunOutcome(currentState, 'RESPONSE_FAILED', { errorKind: errorInfo.code });
 
     // Update messages to show error
     currentState.messages = currentState.messages.map(msg => {
@@ -2420,7 +2488,7 @@ class XyneAIStreamManager {
    * `state.sessionId` — because the backend looks up agent_runs by claw's
    * run UUID, which lives on traceId; sessionId here is the conversation id.
    */
-  public abortStream(streamId: string): void {
+  public abortStream(streamId: string, reason: 'user' | 'replaced' = 'user'): void {
     // Snapshot the cancel key before we mutate state below. The state lookup
     // below may not happen if the stream is no longer in activeStreams (e.g.
     // late retry), but we still want to fire the backend cancel.
@@ -2459,7 +2527,20 @@ class XyneAIStreamManager {
     // Find and update the stream state
     for (const [threadId, state] of this.activeStreams.entries()) {
       if (state.streamId === streamId) {
+        const wasStreaming = state.status === 'streaming';
         state.status = 'aborted';
+        if (wasStreaming) {
+          this.reportRunOutcome(state, 'RESPONSE_CANCELLED', {
+            reason,
+            hadPartialContent: state.messages.some(
+              m =>
+                m.type === 'bot' &&
+                m.isStreaming &&
+                ((m.content && m.content.length > 0) ||
+                  (typeof m.streamingContent === 'string' && m.streamingContent.length > 0)),
+            ),
+          });
+        }
 
         // Preserve whatever was streamed so far — tool rows + partial assistant
         // text. The backend persists the same content to chat_messages with

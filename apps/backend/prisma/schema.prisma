@@ -1889,6 +1889,10 @@ model ChannelStats {
   channel          Channel               @relation(fields: [channelId], references: [id])
 
   @@index([channelId])
+  // Recency-ordered pagination (dmChannelsLatestMessagesPaginated and friends):
+  // lets ORDER BY lastActivityAt DESC walk the index so take(N) bounds the scan
+  // instead of a full-table temp-sort on every hydration.
+  @@index([workspaceId, lastActivityAt(sort: Desc), channelId(sort: Desc)])
   @@map("channel_stats")
   @@schema("public")
 }
@@ -2378,6 +2382,9 @@ model Message {
   @@index([msgType, createdAt])
 
   @@index([conversationId, createdAt, messageId])
+  // Zero's related-messages source fill runs `WHERE conversationId = ? ORDER BY
+  // messageId` — without this, every thread fetch pays a temp B-tree sort.
+  @@index([conversationId, messageId])
   @@map("messages")
   @@schema("public")
 }
@@ -3252,7 +3259,10 @@ model Link {
   createdAt   DateTime       @default(now())
   updatedAt   DateTime       @updatedAt
 
-  @@unique([createdBy, url, channelId]) // No duplicate URLs per user per channel
+  // Deliberately not unique: the same reference is filed in several SDLC folders
+  // as a matter of course. Channel link lists still refuse duplicates, enforced in
+  // the createLink mutator rather than by the database.
+  @@index([createdBy, url, channelId])
   @@index([channelId, visibility]) // Fast lookup of channel links by visibility
   @@index([channelId, createdBy]) // Fast lookup of user's links in channel
   @@map("links")

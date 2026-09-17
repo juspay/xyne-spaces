@@ -42,6 +42,7 @@ import {
   ActivityClassification, LinkVisibility,
   NudgeState,
   SavedConfigContextType,
+  SavedConfigVisibility,
   Status,
   ProjectType,
   TicketPriority,
@@ -4700,6 +4701,34 @@ dmChannelsLatestMessagesPaginated: defineQuery(
         link.where('channelId', channelId).where('relationType', SDLC_TRACK_FLAT_RELATION),
       ),
   ),
+  getSdlcHubLinks: defineQuery(
+    z.object({ channelId: z.string() }),
+    // Same visibility rule channelLinks applies: LinksACL checks workspace and
+    // channel membership but deliberately not visibility, so a query that asks
+    // for every link in the hub would sync other members' PERSONAL ones.
+    ({ ctx, args: { channelId } }) =>
+      zql.links.where("channelId", channelId).where(({ or, cmp, and, exists }) =>
+        or(
+          cmp("visibility", "=", LinkVisibility.DEFAULT),
+          and(
+            cmp("visibility", "=", LinkVisibility.PERSONAL),
+            cmp("createdBy", "=", ctx.userID)
+          ),
+          and(
+            cmp("visibility", "=", LinkVisibility.PERSONAL),
+            exists("sharedWith", (sw) => sw.where("userId", "=", ctx.userID))
+          )
+        )
+      ),
+  ),
+  getSdlcHubFiles: defineQuery(
+    z.object({ channelId: z.string() }),
+    ({ args: { channelId } }) =>
+      zql.message_attachments
+        .where("entityType", AttachmentEntityType.SDLC_HUB)
+        .where("entityId", channelId)
+        .where("isDeleted", false),
+  ),
   getSdlcTracks: defineQuery(z.object({ channelId: z.string() }), ({ args: { channelId } }) =>
     zql.sdlc_tracks
       .whereExists('sdlcEntityLinks', link =>
@@ -5069,6 +5098,17 @@ dmChannelsLatestMessagesPaginated: defineQuery(
       }
 
       return limit !== undefined ? query.limit(limit) : query;
+    },
+  ),
+
+  // Reverse of applicationReleaseTicketsByReleaseId: the release(s) a dev ticket
+  // belongs to. Keep in sync with the shared copy.
+  applicationReleaseTicketsByDevTicketId: defineQuery(
+    z.object({ ticketId: z.string().min(1) }),
+    ({ args: { ticketId } }) => {
+      return zql.application_release_tickets
+        .where('ticketId', ticketId)
+        .orderBy('createdAt', 'desc');
     },
   ),
 
@@ -5625,10 +5665,31 @@ dmChannelsLatestMessagesPaginated: defineQuery(
   savedConfigsByUser: defineQuery(z.object({ userId: z.string() }), ({ ctx, args: { userId } }) => {
     return zql.saved_user_configurations
       .where('userId', userId)
+      .where('contextType', SavedConfigContextType.BOARD)
       .related('values')
       .related('viewAccess', va => va.where('sharedBy', '=', ctx.userID))
       .orderBy('createdAt', 'desc');
   }),
+
+  savedDeskTicketConfigsByChannel: defineQuery(
+    z.object({ channelId: z.string() }),
+    ({ args: { channelId }, ctx }) => {
+      return zql.saved_user_configurations
+        .where('contextType', SavedConfigContextType.DESK_TICKET)
+        .where('contextId', channelId)
+        .where(({ cmp, or }) =>
+          or(cmp('userId', '=', ctx.userID), cmp('visibility', '=', SavedConfigVisibility.PUBLIC)),
+        )
+        // Only expose results to users who are members of the channel.
+        // This prevents non-members from reading public views (and their filter data)
+        // by guessing or obtaining a channelId they don't have access to.
+        .whereExists('contextChannel', ch =>
+          ch.whereExists('participants', p => p.where('userId', ctx.userID)),
+        )
+        .related('values')
+        .orderBy('createdAt', 'desc');
+    },
+  ),
 
   savedConfigsSharedWithUser: defineQuery(
     z.object({ userId: z.string() }),

@@ -70,6 +70,7 @@ import {
   parseTicketMd,
 } from '@xyne/shared';
 import { RCAPanelView } from '../Tickets/RCAPanelView';
+import { ReleasePanelView } from '../Tickets/ReleasePanelView';
 import Tooltip from '../ui/Tooltip';
 import { ShortcutTooltip } from '../ui/ShortcutTooltip';
 import { useScope } from '../../shortcuts';
@@ -84,6 +85,7 @@ import {
   APP_NO_DRAG_STYLE,
 } from '../../utils/electronApp';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
+import { useReleaseForDevTicket } from '../../hooks/useReleaseForDevTicket';
 import { useZero } from '../../hooks/useZero';
 import { logger, Event } from '../../utils/logger';
 import { XyneAIStar } from '../icons/xyne-ai';
@@ -108,7 +110,7 @@ import { sendRecordingEvent, useRecordingStore } from '../../hooks/useRecordingS
 import { getRecordingDefaultLayout } from '../../hooks/useRecordingDefaultLayout';
 import { ConversationTabContext } from './ConversationTabContext';
 
-type TabType = 'thread' | 'details' | 'files' | 'rca' | 'subtickets';
+type TabType = 'thread' | 'details' | 'files' | 'rca' | 'subtickets' | 'release';
 type UnderTicketTabType = 'replies' | 'rca';
 
 interface ThreadMessagesProps {
@@ -143,7 +145,6 @@ interface ThreadMessagesProps {
   defaultTab?: TabType;
   headerActionsContainer?: HTMLElement | null;
   tabbedView?: boolean;
-  overflowActionsOnly?: boolean;
 }
 
 export const ThreadMessages = ({
@@ -168,7 +169,6 @@ export const ThreadMessages = ({
   onUserClick,
   defaultTab,
   headerActionsContainer,
-  overflowActionsOnly = false,
   tabbedView = false,
 }: ThreadMessagesProps = {}): ReactElement => {
   const {
@@ -210,7 +210,7 @@ export const ThreadMessages = ({
 
   const [searchParams, setSearchParams] = useSearchParams();
   const selectedTabParam = searchParams.get('selectedTab');
-  const validTabs: TabType[] = ['thread', 'details', 'files', 'rca'];
+  const validTabs: TabType[] = ['thread', 'details', 'files', 'rca', 'release'];
   const selectedTab: TabType =
     defaultTab ??
     (validTabs.includes(selectedTabParam as TabType) ? (selectedTabParam as TabType) : 'thread');
@@ -794,6 +794,9 @@ export const ThreadMessages = ({
   // Build tabs array - exclude Details tab when ticketId is present
   const isFixTicket = ticket?.ticketType === BaseTicketType.Fix;
 
+  // A dev ticket picked up by a release has ART rows; that gates the Release tab.
+  const { isReleaseDevTicket } = useReleaseForDevTicket(derivedTicketId);
+
   // Support URL-driven tab selection for the compact side panel mode as well.
   useEffect(() => {
     if (!underTicketView) return;
@@ -812,12 +815,15 @@ export const ThreadMessages = ({
   const showSubTicketsTab = isDeskChannelType(channel?.type);
   // The panel is reused across threads, so this tab can vanish while still selected.
   // A tab can be selected and then vanish, because the panel is reused across
-  // threads: subtickets when the channel type changes, and details/rca when the
-  // next thread has no ticket. Both leave the strip with nothing selected and an
-  // empty body, so they fall back to the one tab every thread has.
-  const ticketOnlyTab = activeTab === 'details' || activeTab === 'rca';
+  // threads: subtickets when the channel type changes, release when the next
+  // ticket isn't in a release, and details/rca when the next thread has no
+  // ticket. All leave the strip with nothing selected and an empty body, so they
+  // fall back to the one tab every thread has.
+  const ticketOnlyTab = activeTab === 'details' || activeTab === 'rca' || activeTab === 'release';
   const currentTab =
-    (!showSubTicketsTab && activeTab === 'subtickets') || (!derivedTicketId && ticketOnlyTab)
+    (!showSubTicketsTab && activeTab === 'subtickets') ||
+    (!isReleaseDevTicket && activeTab === 'release') ||
+    (!derivedTicketId && ticketOnlyTab)
       ? 'thread'
       : activeTab;
 
@@ -837,11 +843,14 @@ export const ThreadMessages = ({
       ...(isFixTicket
         ? [{ value: 'rca' as const, label: 'RCA', icon: <ClipboardCheckIcon size={14} /> }]
         : []),
+      ...(isReleaseDevTicket
+        ? [{ value: 'release' as const, label: 'Release', icon: <TicketToken size={14} /> }]
+        : []),
     ];
 
     // Filter out Details tab when ticketId doesn't exist
     return !derivedTicketId ? allTabs.filter(tab => tab.value !== 'details') : allTabs;
-  }, [files.length, ticketId, derivedTicketId, isFixTicket, showSubTicketsTab]);
+  }, [files.length, ticketId, derivedTicketId, isFixTicket, showSubTicketsTab, isReleaseDevTicket]);
 
   const handleCreateTicket = (): void => {
     setIsCreateTicketModalOpen(true);
@@ -1205,7 +1214,7 @@ export const ThreadMessages = ({
   const simpleViewHeaderActions = (
     <div className='flex items-center gap-1 shrink-0' style={APP_NO_DRAG_STYLE}>
       {/* Ask AI */}
-      {!overflowActionsOnly && !isStandaloneWindow() && (
+      {!isStandaloneWindow() && (
         <Tooltip content='Ask AI Conversation'>
           <Button
             size='sm'
@@ -1217,6 +1226,7 @@ export const ThreadMessages = ({
               }
               xyneAIActor.send({
                 type: 'OPEN',
+                trackSource: 'thread_panel',
                 channelId: derivedChannelId,
                 threadInfo,
               });
@@ -1231,7 +1241,7 @@ export const ThreadMessages = ({
       )}
 
       {/* Initiate Call Button */}
-      {!overflowActionsOnly && derivedConversationId && !channel?.isArchived && (
+      {derivedConversationId && !channel?.isArchived && (
         <ThreadCallButton
           onStartCall={handleInitiateCall}
           onScheduleCall={() => setIsScheduleCallModalOpen(true)}
@@ -1246,7 +1256,7 @@ export const ThreadMessages = ({
       )}
 
       {/* Start Recording (Take Notes) Button */}
-      {!overflowActionsOnly && derivedConversationId && !channel?.isArchived && (
+      {derivedConversationId && !channel?.isArchived && (
         <ThreadRecordingButton
           onStartRecording={handleStartRecordingFromThread}
           hasActiveRecording={recordingStatus !== 'idle' && recordingStatus !== 'error'}
@@ -1258,6 +1268,26 @@ export const ThreadMessages = ({
           }}
         />
       )}
+
+      {headerActionsContainer &&
+        channel?.projectId &&
+        !hasTicketInMessages &&
+        !channel?.isArchived && (
+          <Tooltip content='Create ticket'>
+            <Button
+              size='sm'
+              variant='ghost'
+              onClick={handleCreateTicket}
+              className='h-7 w-7 rounded-lg'
+              aria-label='Create ticket'
+              data-testid='thread-create-ticket-header-button'
+              data-track-category='THREAD_PANEL'
+              data-track-name='CREATE_TICKET_FROM_THREAD_HEADER'
+            >
+              <TicketToken size={16} />
+            </Button>
+          </Tooltip>
+        )}
 
       {/* Overflow menu */}
       <DropdownMenu>
@@ -1340,22 +1370,25 @@ export const ThreadMessages = ({
               <span className='flex-1'>Open in new window</span>
             </DropdownMenuItem>
           )}
-          {channel?.projectId && !hasTicketInMessages && !channel?.isArchived && (
-            <DropdownMenuItem
-              className='gap-2'
-              onClick={handleCreateTicket}
-              data-testid='thread-create-ticket-button'
-              data-track-category='THREAD_PANEL'
-              data-track-name='CREATE_TICKET_FROM_THREAD'
-              data-track-metadata={JSON.stringify({
-                channelId: channel?.id,
-                projectId: channel?.projectId,
-              })}
-            >
-              <TicketToken size={16} className='shrink-0' />
-              <span className='flex-1'>Create ticket</span>
-            </DropdownMenuItem>
-          )}
+          {!headerActionsContainer &&
+            channel?.projectId &&
+            !hasTicketInMessages &&
+            !channel?.isArchived && (
+              <DropdownMenuItem
+                className='gap-2'
+                onClick={handleCreateTicket}
+                data-testid='thread-create-ticket-button'
+                data-track-category='THREAD_PANEL'
+                data-track-name='CREATE_TICKET_FROM_THREAD'
+                data-track-metadata={JSON.stringify({
+                  channelId: channel?.id,
+                  projectId: channel?.projectId,
+                })}
+              >
+                <TicketToken size={16} className='shrink-0' />
+                <span className='flex-1'>Create ticket</span>
+              </DropdownMenuItem>
+            )}
         </DropdownMenuContent>
       </DropdownMenu>
 
@@ -1450,6 +1483,7 @@ export const ThreadMessages = ({
                       }
                       xyneAIActor.send({
                         type: 'OPEN',
+                        trackSource: 'thread_panel',
                         channelId: derivedChannelId,
                         threadInfo,
                       });
@@ -1774,6 +1808,16 @@ export const ThreadMessages = ({
                 className='flex-1 overflow-hidden bg-background data-[state=inactive]:hidden'
               >
                 <RCAPanelView ticketId={derivedTicketId} />
+              </Tabs.Content>
+            )}
+
+            {/* Release Tab Content */}
+            {isReleaseDevTicket && (
+              <Tabs.Content
+                value='release'
+                className='flex-1 overflow-hidden bg-background data-[state=inactive]:hidden'
+              >
+                <ReleasePanelView ticketId={derivedTicketId} />
               </Tabs.Content>
             )}
 
