@@ -27,10 +27,15 @@ export async function advanceLastEmailAt(
 
   // Workspace scope: the email_reads ACL limits writes to the caller's own row, but a
   // new email makes the ticket unread for every member who had read it.
-  await withWorkspaceScope(() =>
-    client.emailRead.updateMany({
-      where: { ticket: ticketWhere, lastReadEmailAt: { lt: lastEmailAt }, hasNewEmail: false },
+  await withWorkspaceScope(async () => {
+    await client.emailRead.updateMany({
+      // hasNewEmail is nullable (no DB default): flag both computed-false and NULL rows.
+      where: {
+        ticket: ticketWhere,
+        lastReadEmailAt: { lt: lastEmailAt },
+        OR: [{ hasNewEmail: false }, { hasNewEmail: null }],
+      },
       data: { hasNewEmail: true },
-    }),
-  );
+    });
+  });
 }

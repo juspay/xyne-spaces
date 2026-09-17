@@ -74,25 +74,52 @@ function buildDeskFilterWhere(filters: LabelUnreadFilters): Prisma.TicketWhereIn
     clauses.push({ createdAt: { lte: new Date(filters.createdAtEnd) } });
   }
 
-  // Mirrors applySupportDynamicFieldFilters (src/zero/queries.ts): each entry is its
-  // own EXISTS (AND across entries); an entry's values are OR'd; an entry with no
-  // values matches on field presence alone. Json `equals` compares against the
-  // JSON-encoded value ("x" / 5 / true), which is how actualFieldValue is stored.
-  for (const fieldFilter of filters.dynamicFieldFilters ?? []) {
-    clauses.push({
-      formEntityValues: {
-        some: {
+  return clauses;
+}
+
+/** Stays well under Postgres' 32767 bind-parameter limit for `entityId IN (...)`. */
+const DYNAMIC_FIELD_ID_CHUNK = 10_000;
+
+/**
+ * Mirrors applySupportDynamicFieldFilters (src/zero/queries.ts): each entry must match
+ * (AND across entries); an entry's values are OR'd; an entry with no values matches on
+ * field presence alone. Json `equals` compares against the JSON-encoded value
+ * ("x" / 5 / true), which is how actualFieldValue is stored.
+ *
+ * form_entity_values has no Prisma relation to tickets (entityId is polymorphic), so this
+ * can't be a relation filter. Instead of loading every workspace ticket that carries the
+ * field value, it narrows an already-scoped candidate set (the caller's unread tickets
+ * under one label) through the (entityId, entityType) index — the lookups are bounded by
+ * that set, not by how common the value is across the workspace.
+ */
+async function narrowByDynamicFields(
+  auth: AuthScope,
+  candidateTicketIds: string[],
+  dynamicFieldFilters: NonNullable<LabelUnreadFilters['dynamicFieldFilters']>,
+): Promise<string[]> {
+  let remaining = candidateTicketIds;
+  for (const fieldFilter of dynamicFieldFilters) {
+    if (remaining.length === 0) break;
+    const matched = new Set<string>();
+    for (let offset = 0; offset < remaining.length; offset += DYNAMIC_FIELD_ID_CHUNK) {
+      const rows = await db.formEntityValues.findMany({
+        where: {
+          workspaceId: auth.workspaceId,
           entityType: 'TICKET',
+          entityId: { in: remaining.slice(offset, offset + DYNAMIC_FIELD_ID_CHUNK) },
           fieldId: fieldFilter.fieldId,
           ...(fieldFilter.values?.length
             ? { OR: fieldFilter.values.map(value => ({ actualFieldValue: { equals: value } })) }
             : {}),
         },
-      },
-    });
+        distinct: ['entityId'],
+        select: { entityId: true },
+      });
+      for (const row of rows) matched.add(row.entityId);
+    }
+    remaining = remaining.filter(id => matched.has(id));
   }
-
-  return clauses;
+  return remaining;
 }
 
 /** Private labels: only mappings the caller applied, in this desk. */
@@ -129,52 +156,57 @@ function unreadForUserWhere(userId: string): Prisma.TicketWhereInput {
 }
 
 /**
- * Tickets counted for one label. `isArchived = false` aligns with the desk list
- * base constraint (supportTicketsPageV3/V4) so badges equal what the list shows.
- * Tenant/channel ACL is applied on top by the Prisma ACL extension.
+ * Unread tickets in the desk. `isArchived = false` aligns with the desk list base
+ * constraint (supportTicketsPageV3/V4) so badges equal what the list shows.
  */
-function unreadLabeledTicketWhere(
+function unreadTicketWhere(
   auth: AuthScope,
   channelId: string,
-  labelId: string,
-  filters?: LabelUnreadFilters,
+  filterClauses: Prisma.TicketWhereInput[] = [],
 ): Prisma.TicketWhereInput {
   return {
     channelId,
     workspaceId: auth.workspaceId,
     isArchived: false,
-    conversation: { labelMappings: { some: labelMappingScope(auth, channelId, labelId) } },
-    AND: [unreadForUserWhere(auth.userId), ...(filters ? buildDeskFilterWhere(filters) : [])],
+    AND: [unreadForUserWhere(auth.userId), ...filterClauses],
   };
 }
 
 /**
- * Mode A: unread count per label for a channel. Labels with zero unread are
- * omitted from the map. One COUNT per label the caller owns in this desk (a
- * handful per agent), each evaluated entirely in Postgres.
+ * Mode A: unread count per label for a channel, in one grouped query (same shape as
+ * kanbanCountsService.getKanbanCounts). Labels with zero unread are omitted.
+ *
+ * A label isn't a ticket column, so the groupBy runs on the mappings: one row per
+ * (conversation, label), kept when that conversation's ticket is unread. That counts
+ * conversations, which equals tickets because a desk conversation carries one ticket.
+ *
+ * The caller's label ids come from the catalog first (its (channelId, createdBy, name)
+ * unique index) so the grouped scan reaches mappings through their labelId index
+ * rather than scanning by channel.
  */
 export async function getLabelUnreadCounts(
   auth: AuthScope,
   channelId: string,
 ): Promise<Record<string, number>> {
-  const labels = await db.conversationLabelMapping.findMany({
-    where: labelMappingScope(auth, channelId),
-    distinct: ['labelId'],
-    select: { labelId: true },
+  const labels = await db.conversationLabel.findMany({
+    where: { channelId, workspaceId: auth.workspaceId, createdBy: auth.userId },
+    select: { id: true },
+  });
+  if (labels.length === 0) return {};
+
+  const rows = await db.conversationLabelMapping.groupBy({
+    by: ['labelId'],
+    where: {
+      ...labelMappingScope(auth, channelId),
+      labelId: { in: labels.map(label => label.id) },
+      conversation: { tickets: { some: unreadTicketWhere(auth, channelId) } },
+    },
+    _count: { _all: true },
   });
 
-  const entries = await Promise.all(
-    labels.map(async ({ labelId }) => {
-      const count = await db.ticket.count({
-        where: unreadLabeledTicketWhere(auth, channelId, labelId),
-      });
-      return [labelId, count] as const;
-    }),
-  );
-
   const counts: Record<string, number> = {};
-  for (const [labelId, count] of entries) {
-    if (count > 0) counts[labelId] = count;
+  for (const row of rows) {
+    if (row._count._all > 0) counts[row.labelId] = row._count._all;
   }
   return counts;
 }
@@ -189,7 +221,22 @@ export async function getLabelUnreadCount(
   labelId: string,
   filters?: LabelUnreadFilters,
 ): Promise<number> {
-  return db.ticket.count({
-    where: unreadLabeledTicketWhere(auth, channelId, labelId, filters),
-  });
+  const where: Prisma.TicketWhereInput = {
+    ...unreadTicketWhere(auth, channelId, filters ? buildDeskFilterWhere(filters) : []),
+    conversation: { labelMappings: { some: labelMappingScope(auth, channelId, labelId) } },
+  };
+
+  if (!filters?.dynamicFieldFilters?.length) {
+    return db.ticket.count({ where });
+  }
+
+  // Dynamic fields: resolve the scoped candidates first, then narrow them (see
+  // narrowByDynamicFields).
+  const candidates = await db.ticket.findMany({ where, select: { id: true } });
+  const matched = await narrowByDynamicFields(
+    auth,
+    candidates.map(ticket => ticket.id),
+    filters.dynamicFieldFilters,
+  );
+  return matched.length;
 }

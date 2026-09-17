@@ -124,6 +124,8 @@ export class TicketsSideEffectHandler extends BaseSideEffectHandler {
           id: fullTicket.id,
           workspaceId: fullTicket.workspaceId,
           boardId: fullTicket.boardId,
+          // Without this the client's sourceChannels filter sees '' and drops the update
+          // (useKanbanCounts.ts:258) — a silently wrong count rather than a visible failure.
           channelId: fullTicket.channelId,
           projectId: fullTicket.projectId,
           stageName: fullTicket.stageName,

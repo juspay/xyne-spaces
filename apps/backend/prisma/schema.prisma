@@ -176,7 +176,6 @@ model Ticket {
   // onDelete: deleting a conversation that has a ticket throws P2014 (Restrict).
   conversation       Conversation           @relation("TicketConversation", fields: [conversationId], references: [conversationId])
   emailReads         EmailRead[]
-  formEntityValues   FormEntityValues[]
 
   @@index([status])
   @@index([assignedTo, status])
@@ -2170,7 +2169,7 @@ model EmailRead {
   // Denormalized unread signal: true once tickets.lastEmailAt moves past lastReadEmailAt.
   // Set by advanceLastEmailAt (src/database/ticketLastEmailAt.ts) whenever lastEmailAt
   // changes; cleared by the emailRead.markAsRead / bulkMarkAsRead Zero mutators.
-  hasNewEmail     Boolean  @default(false)
+  hasNewEmail     Boolean?
   createdAt       DateTime
   updatedAt       DateTime @updatedAt
 
@@ -2224,7 +2223,6 @@ model ConversationLabelMapping {
   // The unique's conversationId prefix also serves the per-thread chips read.
   @@unique([conversationId, labelId]) // A label can only be applied once per conversation
   @@index([labelId]) // label-panel read, label→mappings correlation, deleteLabel cascade
-  @@index([channelId, workspaceId]) // per-channel label unread-count scans
   @@map("conversation_label_mappings")
   @@schema("public")
 }
@@ -3611,11 +3609,6 @@ model FormEntityValues {
   actualFieldValue Json?   // Value stored as Json for structured data (parse based on fieldType)
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
-
-  // App-level relation (relationMode="prisma", no DB FK) for entityType = 'TICKET' rows only.
-  // entityId is polymorphic, so ALWAYS pair `ticket`/`formEntityValues` queries with
-  // entityType: 'TICKET'. Restrict: delete ticket values before the ticket.
-  ticket          Ticket   @relation(fields: [entityId], references: [id])
 
   @@index([entityId, entityType])
   @@index([fieldId])

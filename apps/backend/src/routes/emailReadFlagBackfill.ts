@@ -9,8 +9,8 @@ const adminAuth = authorize('TICKET-MIGRATION', AccessType.ADMIN);
 
 /**
  * @route GET /api/admin/email-read-flag-backfill/status
- * @desc Read-only counts: `pending` (unflagged email_reads rows whose ticket has
- *       newer email — the real work outstanding), `unflagged` and `flagged`.
+ * @desc Read-only counts: `pending` (email_reads rows whose hasNewEmail is still
+ *       NULL — the work outstanding, 0 when done), `hasNewEmail` and `noNewEmail`.
  * @access TICKET-MIGRATION Admin only
  */
 router.get(
@@ -22,11 +22,12 @@ router.get(
 
 /**
  * @route POST /api/admin/email-read-flag-backfill/run
- * @desc Set email_reads.hasNewEmail where lastReadEmailAt < tickets.lastEmailAt,
- *       in batches, pausing between them.
+ * @desc Compute email_reads.hasNewEmail for rows still NULL: true where
+ *       lastReadEmailAt < tickets.lastEmailAt, false otherwise. In batches, pausing
+ *       between them.
  *       Body: { batchSize?: 500, delayMs?: 1000, maxBatches?: 50, dryRun?: false,
  *               cursor?: string }
- *       Returns per-batch { batch, scanned, updated }, the totals, `done` and
+ *       Returns per-batch { batch, scanned, setTrue, setFalse }, the totals, `done` and
  *       `nextCursor`. Pass `nextCursor` back as `cursor` to continue where the
  *       previous request stopped. Idempotent — safe to re-run; run it after the
  *       new backend is live.

@@ -4,22 +4,23 @@ import { runAsSystem } from '@/database/tenant/context';
 import { logger } from '@/utils/logger';
 
 /**
- * One-off backfill: set email_reads.hasNewEmail for rows that predate the column.
+ * One-off backfill: compute email_reads.hasNewEmail for rows that predate the column.
  *
- * The migration adds hasNewEmail with DEFAULT false, but a read row is really
- * "has new email" when its lastReadEmailAt is older than the ticket's current
- * lastEmailAt. Going forward advanceLastEmailAt keeps the flag in step; this walks
- * the existing rows once and sets it where that comparison already holds.
+ * The migration adds hasNewEmail as a nullable column with no default, so every
+ * existing row starts NULL ("not computed"). A read row really has new email when its
+ * lastReadEmailAt is older than the ticket's current lastEmailAt. This walks the NULL
+ * rows and writes true or false accordingly; going forward advanceLastEmailAt and the
+ * markAsRead / bulkMarkAsRead mutators always write it explicitly.
  *
- * Run it AFTER the new backend is live: rows that go stale while old code is still
- * serving are not flagged by anything else. Re-running is safe and cheap.
+ * Run it AFTER the new backend is live: rows that went stale while old code was still
+ * serving are only caught here. Re-running is safe and cheap.
  *
- * Only ever sets the flag to true. Clearing is the read path's job (markAsRead), and
- * a backfill clearing a flag from a stale snapshot could race a new email arriving.
- * Each write is guarded on the lastReadEmailAt it was computed from, so a row the
- * user re-read mid-run is left alone.
+ * Each page is written with two UPDATEs (the true rows, the false rows), both guarded on
+ * `hasNewEmail: null`: live code always writes a non-null value, so a row it touched
+ * mid-run (a new email flagged it, or the user re-read it) is left alone rather than
+ * overwritten from a stale snapshot.
  *
- * Idempotent: rows already flagged are skipped by the candidate query.
+ * Idempotent: only NULL rows are candidates, and each row leaves that set once written.
  *
  * Runs inside runAsSystem(): `db` is the ACL-wrapped client and email_reads writes are
  * limited to the caller's own rows in a request context. This repair spans every
@@ -45,7 +46,8 @@ type BackfillOptions = {
 type BatchResult = {
   batch: number;
   scanned: number;
-  updated: number;
+  setTrue: number;
+  setFalse: number;
 };
 
 type CandidateRead = {
@@ -84,24 +86,24 @@ export class EmailReadFlagBackfillController {
   }
 
   /**
-   * Next page of unflagged read rows after `cursor`, and which of them are stale.
-   * The lastReadEmailAt < lastEmailAt comparison spans two tables, so the ticket
-   * timestamps are fetched per page and compared here.
+   * Next page of not-yet-computed (NULL) read rows after `cursor`, split by whether
+   * the ticket has newer email. The lastReadEmailAt < lastEmailAt comparison spans two
+   * tables, so the ticket timestamps are fetched per page and compared here.
    */
   private static async scanPage(
     batchSize: number,
     cursor: string | null,
-  ): Promise<{ page: CandidateRead[]; stale: CandidateRead[] }> {
+  ): Promise<{ page: CandidateRead[]; stale: CandidateRead[]; caughtUp: CandidateRead[] }> {
     // `id: { gt: … }` rather than Prisma's `cursor`: this backfill removes rows from
-    // the candidate set (hasNewEmail: false) as it goes, and a cursor row that no
+    // the candidate set (hasNewEmail: null) as it goes, and a cursor row that no
     // longer matches the where-clause would end the run early.
     const page = await db.emailRead.findMany({
-      where: { hasNewEmail: false, ...(cursor ? { id: { gt: cursor } } : {}) },
+      where: { hasNewEmail: null, ...(cursor ? { id: { gt: cursor } } : {}) },
       select: { id: true, ticketId: true, lastReadEmailAt: true },
       orderBy: { id: 'asc' },
       take: batchSize,
     });
-    if (page.length === 0) return { page, stale: [] };
+    if (page.length === 0) return { page, stale: [], caughtUp: [] };
 
     const tickets = await db.ticket.findMany({
       where: { id: { in: [...new Set(page.map(read => read.ticketId))] } },
@@ -109,20 +111,31 @@ export class EmailReadFlagBackfillController {
     });
     const lastEmailAtByTicket = new Map(tickets.map(ticket => [ticket.id, ticket.lastEmailAt]));
 
-    const stale = page.filter(read => {
+    const stale: CandidateRead[] = [];
+    const caughtUp: CandidateRead[] = [];
+    for (const read of page) {
       const lastEmailAt = lastEmailAtByTicket.get(read.ticketId);
-      return lastEmailAt !== undefined && read.lastReadEmailAt < lastEmailAt;
-    });
-    return { page, stale };
+      // A read row whose ticket is gone has nothing to be unread against.
+      if (lastEmailAt !== undefined && read.lastReadEmailAt < lastEmailAt) stale.push(read);
+      else caughtUp.push(read);
+    }
+    return { page, stale, caughtUp };
   }
 
-  /** Guarded on the snapshot's lastReadEmailAt so a re-read since the scan wins. */
-  private static async flag(read: CandidateRead): Promise<boolean> {
+  /**
+   * One UPDATE for a whole group of rows. The `hasNewEmail: null` guard is what keeps live
+   * writes safe: markAsRead / bulkMarkAsRead always write false and advanceLastEmailAt
+   * always writes true, so any row they touched since the scan is no longer NULL and is
+   * skipped here. (markAsRead's no-op path writes nothing, but then lastReadEmailAt is
+   * unchanged too, so the value computed from the scan still holds.)
+   */
+  private static async writeMany(reads: CandidateRead[], hasNewEmail: boolean): Promise<number> {
+    if (reads.length === 0) return 0;
     const result = await db.emailRead.updateMany({
-      where: { id: read.id, hasNewEmail: false, lastReadEmailAt: read.lastReadEmailAt },
-      data: { hasNewEmail: true },
+      where: { id: { in: reads.map(read => read.id) }, hasNewEmail: null },
+      data: { hasNewEmail },
     });
-    return result.count > 0;
+    return result.count;
   }
 
   /**
@@ -141,12 +154,13 @@ export class EmailReadFlagBackfillController {
     try {
       const result = await runAsSystem(async () => {
         const batches: BatchResult[] = [];
-        let totalUpdated = 0;
+        let totalSetTrue = 0;
+        let totalSetFalse = 0;
         let cursor = options.cursor;
         let done = false;
 
         for (let batchNumber = 1; batchNumber <= options.maxBatches; batchNumber += 1) {
-          const { page, stale } = await EmailReadFlagBackfillController.scanPage(
+          const { page, stale, caughtUp } = await EmailReadFlagBackfillController.scanPage(
             options.batchSize,
             cursor,
           );
@@ -156,20 +170,23 @@ export class EmailReadFlagBackfillController {
           }
           cursor = page[page.length - 1]!.id;
 
-          let updated = 0;
+          let setTrue = 0;
+          let setFalse = 0;
           if (options.dryRun) {
-            updated = stale.length;
+            setTrue = stale.length;
+            setFalse = caughtUp.length;
           } else {
-            for (const read of stale) {
-              if (await EmailReadFlagBackfillController.flag(read)) updated += 1;
-            }
+            setTrue = await EmailReadFlagBackfillController.writeMany(stale, true);
+            setFalse = await EmailReadFlagBackfillController.writeMany(caughtUp, false);
           }
 
-          totalUpdated += updated;
-          batches.push({ batch: batchNumber, scanned: page.length, updated });
+          totalSetTrue += setTrue;
+          totalSetFalse += setFalse;
+          batches.push({ batch: batchNumber, scanned: page.length, setTrue, setFalse });
           logger.info(`${TAG} batch #${batchNumber}`, {
             scanned: page.length,
-            updated,
+            setTrue,
+            setFalse,
             dryRun: options.dryRun,
           });
 
@@ -185,7 +202,8 @@ export class EmailReadFlagBackfillController {
         }
 
         logger.info(`${TAG} finished`, {
-          totalUpdated,
+          totalSetTrue,
+          totalSetFalse,
           batches: batches.length,
           done,
           durationMs: Date.now() - startedAt,
@@ -194,7 +212,8 @@ export class EmailReadFlagBackfillController {
         return {
           success: true as const,
           dryRun: options.dryRun,
-          totalUpdated,
+          totalSetTrue,
+          totalSetFalse,
           batches,
           done,
           // Pass this back as `cursor` on the next request to continue.
@@ -213,29 +232,18 @@ export class EmailReadFlagBackfillController {
 
   /**
    * GET /api/admin/email-read-flag-backfill/status
-   * `pending` is the work outstanding (unflagged rows whose ticket has newer email);
-   * `flagged` is rows already set. Scans every unflagged row, so it is as slow as a
-   * dry run.
+   * `pending` is rows still NULL (the work outstanding — 0 when the backfill is done);
+   * `hasNewEmail` / `noNewEmail` are rows already computed.
    */
   static status = async (_req: Request, res: Response): Promise<void> => {
     try {
       const result = await runAsSystem(async () => {
-        let pending = 0;
-        let unflagged = 0;
-        let cursor: string | null = null;
-        for (;;) {
-          const { page, stale } = await EmailReadFlagBackfillController.scanPage(
-            MAX_BATCH_SIZE,
-            cursor,
-          );
-          if (page.length === 0) break;
-          unflagged += page.length;
-          pending += stale.length;
-          cursor = page[page.length - 1]!.id;
-          if (page.length < MAX_BATCH_SIZE) break;
-        }
-        const flagged = await db.emailRead.count({ where: { hasNewEmail: true } });
-        return { success: true as const, pending, unflagged, flagged };
+        const [pending, hasNewEmail, noNewEmail] = await Promise.all([
+          db.emailRead.count({ where: { hasNewEmail: null } }),
+          db.emailRead.count({ where: { hasNewEmail: true } }),
+          db.emailRead.count({ where: { hasNewEmail: false } }),
+        ]);
+        return { success: true as const, pending, hasNewEmail, noNewEmail };
       });
       res.json(result);
     } catch (error) {

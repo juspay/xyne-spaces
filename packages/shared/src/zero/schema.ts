@@ -1635,7 +1635,8 @@ export const emailReadTable = table('email_reads') // Prisma model: EmailRead
     lastReadEmailId: string(),
     lastReadEmailAt: number(),
     // True once tickets.lastEmailAt moves past lastReadEmailAt (see Prisma EmailRead.hasNewEmail).
-    hasNewEmail: boolean(),
+    // Nullable with no DB default; mutators always write it explicitly.
+    hasNewEmail: boolean().optional(),
     createdAt: number(),
     updatedAt: number(),
   })

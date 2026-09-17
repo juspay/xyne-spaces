@@ -590,10 +590,26 @@ async function addMentionedConversationParticipants(
   }
 }
 
+/**
+ * Ticket.conversation is a required app-level relation (relationMode="prisma"). Zero writes skip
+ * Prisma Client's Restrict emulation, so every conversation delete checks this explicitly —
+ * otherwise the ticket is left pointing at a missing conversation.
+ */
+async function conversationHasTicket(
+  tx: Transaction<Schema>,
+  conversationId: string,
+): Promise<boolean> {
+  const ticket = await tx.run(zql.tickets.where('conversationId', conversationId).one());
+  return !!ticket;
+}
+
 async function deleteConversationWithParticipants(
   tx: Transaction<Schema>,
   conversationId: string,
 ): Promise<void> {
+  // A ticket thread must outlive its messages (see conversationHasTicket).
+  if (await conversationHasTicket(tx, conversationId)) return;
+
   const participants = await tx.run(
     zql.conversation_participants.where('conversationId', conversationId),
   );
@@ -4357,7 +4373,9 @@ export function createMutators(
 
           const isInitialMessage = conversation.initialMessageId === messageId;
           const hasReplies = otherMessages.length > 0;
-          const shouldSoftDelete = isInitialMessage && hasReplies;
+          // A ticket thread can't lose its conversation: tombstone the root instead.
+          const hasTicket = await conversationHasTicket(tx, conversation.conversationId);
+          const shouldSoftDelete = isInitialMessage && (hasReplies || hasTicket);
 
           // Clean up MENTIONED participants within Zero transaction
           const mentions = extractAllMentions(message.content);
@@ -4475,7 +4493,8 @@ export function createMutators(
               otherMessages[0].messageId === conversation.initialMessageId &&
               otherMessages[0].isDeleted === true;
 
-            const shouldDeleteConversation = otherMessages.length === 0 || isInitialMessageDeleted;
+            const shouldDeleteConversation =
+              !hasTicket && (otherMessages.length === 0 || isInitialMessageDeleted);
 
             if (shouldDeleteConversation) {
               // Delete ghost root FIRST, before the conversation.

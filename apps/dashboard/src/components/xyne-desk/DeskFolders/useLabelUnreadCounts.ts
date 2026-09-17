@@ -17,6 +17,18 @@ import { websocketService } from '../../../services/clients/socketClient';
 
 const STALE_TIME = 10 * 60 * 1000;
 const INVALIDATE_DEBOUNCE_MS = 500;
+/**
+ * Every socket in a desk room gets the same event at the same instant. A random spread on
+ * top of the debounce keeps N open sidebars from hitting the grouped count query in one
+ * burst.
+ */
+const INVALIDATE_JITTER_MS = 1_500;
+/**
+ * Freshness comes from the socket room (and a refetch on reconnect), not polling. This
+ * is only a slow safety net for a missed event; the server coalesces publishes per
+ * channel, so a tight interval would just add a query per sidebar per desk.
+ */
+const FALLBACK_REFETCH_INTERVAL_MS = 10 * 60 * 1000;
 
 type LabelUnreadCountsUpdateEvent = {
   channelId: string;
@@ -100,7 +112,8 @@ export const useLabelUnreadCounts = (channelId: string, enabled = true) => {
     queryFn: () => fetchConversationLabelUnreadCounts(channelId),
     enabled: isEnabled,
     staleTime: STALE_TIME,
-    refetchInterval: 60_000,
+    refetchInterval: FALLBACK_REFETCH_INTERVAL_MS,
+    refetchIntervalInBackground: false,
   });
 
   useEffect(() => {
@@ -108,24 +121,32 @@ export const useLabelUnreadCounts = (channelId: string, enabled = true) => {
 
     let cancelled = false;
     let invalidateTimer: ReturnType<typeof setTimeout> | null = null;
+    const scheduleInvalidate = (): void => {
+      if (invalidateTimer) clearTimeout(invalidateTimer);
+      invalidateTimer = setTimeout(
+        () => {
+          invalidateTimer = null;
+          if (cancelled) return;
+          // Prefix match covers both this hook's key and the filtered-count keys.
+          void queryClient.invalidateQueries({
+            queryKey: ['conversation-label-unread-counts', channelId],
+          });
+        },
+        INVALIDATE_DEBOUNCE_MS + Math.random() * INVALIDATE_JITTER_MS,
+      );
+    };
     const handleCountsUpdate = (event: LabelUnreadCountsUpdateEvent): void => {
       if (cancelled) return;
       if (event.channelId !== channelId) return;
 
       // Coalesce bursts (bulk mark-unread, ingest) into a single refetch.
-      if (invalidateTimer) clearTimeout(invalidateTimer);
-      invalidateTimer = setTimeout(() => {
-        invalidateTimer = null;
-        if (cancelled) return;
-        // Prefix match covers both this hook's key and the filtered-count keys.
-        void queryClient.invalidateQueries({
-          queryKey: ['conversation-label-unread-counts', channelId],
-        });
-      }, INVALIDATE_DEBOUNCE_MS);
+      scheduleInvalidate();
     };
     const handleSocketConnect = (): void => {
       if (cancelled) return;
       websocketService.emit('subscribe_to_label_unread_counts', { room });
+      // Events published while disconnected were missed — with no short poll, catch up once.
+      scheduleInvalidate();
     };
 
     const subscribe = async (): Promise<void> => {
@@ -188,6 +209,7 @@ export const useFilteredLabelUnreadCount = ({
     },
     enabled: !!channelId && !!labelId && enabled,
     staleTime: STALE_TIME,
-    refetchInterval: 60_000,
+    refetchInterval: FALLBACK_REFETCH_INTERVAL_MS,
+    refetchIntervalInBackground: false,
   });
 };
