@@ -6,15 +6,10 @@ import {
   CheckCircle2,
   ChevronRight,
   Code2,
-  Copy,
-  Github,
   KeyRound,
-  Loader2,
   Plane,
-  Plug,
   Settings,
   Sparkles,
-  Trash2,
 } from 'lucide-react';
 import { cn } from '@/utils/classNames';
 import { Button } from '@/components/ui/Button';
@@ -34,25 +29,15 @@ import { clawSettingsKey, useClawSettings } from '@/hooks/useClawSettings';
 import {
   deleteProviderCredential,
   deleteSubagentRouting,
-  exchangeClaudeOauth,
-  exchangeCodexOauth,
-  initiateCopilotGitHubLogin,
   listClaudeModelsForUser,
   listCodexModelsForUser,
-  listCopilotModelsForUser,
   listProviderCredentials,
-  pollCopilotGitHubLogin,
-  startClaudeOauth,
-  startCodexOauth,
-  type ClaudeOauthFlow,
   upsertProviderCredential,
   upsertSubagentRouting,
 } from '@/services/claw/clawSettingsService';
 import type {
   AuthType,
   ClaudeModelInfo,
-  CodexOauthStart,
-  GitHubDeviceCode,
   ProviderCredential,
   ProviderId,
   ProviderModelOption,
@@ -62,11 +47,6 @@ import LocalHarnessSection from './LocalHarnessSection';
 
 const PROVIDER_META: Record<ProviderId, { name: string; description: string; icon: typeof Plane }> =
   {
-    copilot: {
-      name: 'GitHub Copilot',
-      description: 'Code suggestions and autocomplete',
-      icon: Plane,
-    },
     claude: {
       name: 'Anthropic Claude',
       description: 'Reasoning and coding assistance',
@@ -89,7 +69,7 @@ const PROVIDER_META: Record<ProviderId, { name: string; description: string; ico
     },
   };
 
-const PROVIDERS: ProviderId[] = ['copilot', 'claude', 'codex', 'openrouter', 'litellm'];
+const PROVIDERS: ProviderId[] = ['claude', 'codex', 'openrouter', 'litellm'];
 
 /* eslint-disable @typescript-eslint/naming-convention */
 const DEFAULT_MODEL_BY_PROVIDER: Partial<Record<ProviderId, string>> = {
@@ -311,249 +291,14 @@ const ProviderConfigDialog = ({
           <h2 className='text-base font-semibold text-foreground'>{meta.name}</h2>
           <p className='text-sm text-muted-foreground'>{meta.description}</p>
         </div>
-        {provider === 'copilot' ? (
-          <CopilotConfigForm userId={userId} onMutate={onMutate} onClose={onClose} />
-        ) : (
-          <GenericProviderConfigForm
-            provider={provider}
-            userId={userId}
-            onMutate={onMutate}
-            onClose={onClose}
-          />
-        )}
+        <GenericProviderConfigForm
+          provider={provider}
+          userId={userId}
+          onMutate={onMutate}
+          onClose={onClose}
+        />
       </div>
     </Dialog>
-  );
-};
-
-const CopilotConfigForm = ({
-  userId,
-  onMutate,
-  onClose,
-}: {
-  userId: string;
-  onMutate: () => Promise<void>;
-  onClose: () => void;
-}): ReactElement => {
-  const [device, setDevice] = useState<GitHubDeviceCode | null>(null);
-  const [polling, setPolling] = useState(false);
-  const [starting, setStarting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [models, setModels] = useState<ProviderModelOption[] | null>(null);
-  const [modelsError, setModelsError] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
-  const [hasKey, setHasKey] = useState(false);
-  const [currentModel, setCurrentModel] = useState('');
-
-  useEffect(() => {
-    let cancelled = false;
-    listProviderCredentialsForDialog(userId, 'copilot')
-      .then(credential => {
-        if (cancelled) return;
-        setHasKey(credential?.hasApiKey ?? false);
-        setCurrentModel(credential?.model ?? '');
-      })
-      .catch(() => undefined);
-    return (): void => {
-      cancelled = true;
-    };
-  }, [userId]);
-
-  useEffect(() => {
-    if (!hasKey) return undefined;
-    let cancelled = false;
-    setModelsError(null);
-    listCopilotModelsForUser(userId)
-      .then(rows => {
-        if (!cancelled) setModels(rows);
-      })
-      .catch(err => {
-        if (!cancelled) setModelsError(errMsg(err, 'Failed to load models'));
-      });
-    return (): void => {
-      cancelled = true;
-    };
-  }, [hasKey, userId]);
-
-  useEffect(() => {
-    if (!polling || !device) return undefined;
-    let cancelled = false;
-
-    const run = async (): Promise<void> => {
-      while (!cancelled) {
-        await new Promise(resolve => setTimeout(resolve, (device.interval + 1) * 1000));
-        if (cancelled) break;
-        try {
-          const result = await pollCopilotGitHubLogin(userId);
-          if (result.status === 'approved') {
-            setPolling(false);
-            setDevice(null);
-            await onMutate();
-            toast.success('GitHub Copilot connected');
-            onClose();
-            break;
-          }
-          if (result.status === 'slow_down') {
-            await new Promise(resolve => setTimeout(resolve, 5000));
-          }
-        } catch (err) {
-          if (!cancelled) {
-            setError(errMsg(err, 'Polling failed'));
-            setPolling(false);
-          }
-          break;
-        }
-      }
-    };
-
-    void run();
-    return (): void => {
-      cancelled = true;
-    };
-  }, [polling, device, userId, onMutate, onClose]);
-
-  const startLogin = async (): Promise<void> => {
-    setStarting(true);
-    setError(null);
-    try {
-      const nextDevice = await initiateCopilotGitHubLogin(userId);
-      setDevice(nextDevice);
-      setPolling(true);
-      window.open(nextDevice.verificationUri, '_blank', 'noopener,noreferrer');
-    } catch (err) {
-      setError(errMsg(err, 'Failed to start GitHub login'));
-    } finally {
-      setStarting(false);
-    }
-  };
-
-  const handleModelChange = async (model: string): Promise<void> => {
-    setSaving(true);
-    try {
-      await upsertProviderCredential(userId, 'copilot', { model });
-      setCurrentModel(model);
-      await onMutate();
-      toast.success('Copilot model saved');
-    } catch (err) {
-      toast.error(errMsg(err, 'Failed to save model'));
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleDisconnect = async (): Promise<void> => {
-    setSaving(true);
-    try {
-      await deleteProviderCredential(userId, 'copilot');
-      await onMutate();
-      toast.success('GitHub Copilot disconnected');
-      onClose();
-    } catch (err) {
-      toast.error(errMsg(err, 'Disconnect failed'));
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <div className='flex flex-col gap-4'>
-      {!hasKey && !device && (
-        <div className='flex flex-col gap-3'>
-          <p className='text-sm text-muted-foreground'>
-            Connect your GitHub account to use Copilot-powered code suggestions across all agents.
-          </p>
-          <Button
-            onClick={() => void startLogin()}
-            data-track-category='claw-settings'
-            data-track-name='START_GITHUB_LOGIN'
-            disabled={starting}
-          >
-            {starting ? <Loader2 className='size-4 animate-spin' /> : <Plug className='size-4' />}
-            {starting ? 'Starting...' : 'Log in with GitHub'}
-          </Button>
-        </div>
-      )}
-
-      {hasKey && (
-        <div className='flex flex-col gap-4'>
-          <div className='flex items-center gap-2 text-sm text-emerald-600'>
-            <CheckCircle2 className='size-4' />
-            <span>Connected via GitHub</span>
-          </div>
-
-          {models && models.length > 0 && (
-            <LabeledSelect
-              label='Model'
-              value={currentModel}
-              options={models.map(model => ({ value: model.id, label: model.name }))}
-              disabled={saving}
-              onValueChange={handleModelChange}
-            />
-          )}
-          {modelsError && <p className='text-xs text-amber-600'>{modelsError}</p>}
-
-          <div className='flex gap-2'>
-            <Button
-              variant='secondary'
-              onClick={() => void startLogin()}
-              data-track-category='claw-settings'
-              data-track-name='RESTART_GITHUB_LOGIN'
-              disabled={starting || saving}
-            >
-              <Github className='size-4' />
-              Reconnect
-            </Button>
-            <Button
-              variant='destructive'
-              onClick={() => void handleDisconnect()}
-              data-track-category='claw-settings'
-              data-track-name='DISCONNECT_GITHUB'
-              disabled={saving}
-            >
-              <Trash2 className='size-4' />
-              Disconnect
-            </Button>
-          </div>
-        </div>
-      )}
-
-      {device && (
-        <div className='flex flex-col gap-3 rounded-xl border border-border bg-muted/40 p-4'>
-          <p className='text-sm text-muted-foreground'>Enter this code on GitHub to authorize:</p>
-          <div className='flex items-center gap-2'>
-            <code className='rounded-md border border-border bg-background px-3 py-2 font-mono text-lg tracking-widest text-foreground'>
-              {device.userCode}
-            </code>
-            <Button
-              size='iconSm'
-              variant='ghost'
-              aria-label='Copy GitHub authorization code'
-              onClick={() => void navigator.clipboard.writeText(device.userCode)}
-              data-track-category='claw-settings'
-              data-track-name='COPY_GITHUB_DEVICE_CODE'
-            >
-              <Copy className='size-4' />
-            </Button>
-          </div>
-          <a
-            href={device.verificationUri}
-            target='_blank'
-            rel='noreferrer'
-            className='text-sm font-medium text-[color:var(--mention-color)] underline underline-offset-2'
-          >
-            {device.verificationUri}
-          </a>
-          {polling && (
-            <div className='flex items-center gap-2 text-xs text-muted-foreground'>
-              <Loader2 className='size-3.5 animate-spin' />
-              Waiting for authorization...
-            </div>
-          )}
-        </div>
-      )}
-
-      {error && <p className='text-sm text-destructive'>{error}</p>}
-    </div>
   );
 };
 
@@ -563,7 +308,7 @@ const GenericProviderConfigForm = ({
   onMutate,
   onClose,
 }: {
-  provider: Exclude<ProviderId, 'copilot'>;
+  provider: ProviderId;
   userId: string;
   onMutate: () => Promise<void>;
   onClose: () => void;
@@ -571,14 +316,10 @@ const GenericProviderConfigForm = ({
   const isClaude = provider === 'claude';
   const isCodex = provider === 'codex';
   const isLitellm = provider === 'litellm';
-  // Only these two have an OAuth flow and a fetchable model catalogue; the rest
-  // are plain API-key providers. LiteLLM additionally has no reasoning knob —
-  // the same rules credentialForm.ts encodes for the agent-level form.
-  const hasOauthOption = isClaude || isCodex;
   const hasModelCatalog = isClaude || isCodex;
   const [existing, setExisting] = useState<ProviderCredential | undefined>();
   const [apiKey, setApiKey] = useState('');
-  const [authType, setAuthType] = useState<AuthType>('api_key');
+  const authType: AuthType = 'api_key';
   const [model, setModel] = useState('');
   const [baseUrl, setBaseUrl] = useState('');
   const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffort>(DEFAULT_REASONING);
@@ -587,16 +328,6 @@ const GenericProviderConfigForm = ({
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [codexFlow, setCodexFlow] = useState<CodexOauthStart | null>(null);
-  const [codexCode, setCodexCode] = useState('');
-  const [codexBusy, setCodexBusy] = useState(false);
-  const [claudeFlow, setClaudeFlow] = useState<ClaudeOauthFlow | null>(null);
-  const [claudeCode, setClaudeCode] = useState('');
-  const [claudeBusy, setClaudeBusy] = useState(false);
-  // Bumped after a sign-in lands, so the models effect re-runs against the
-  // credential that now exists. `hasKey` comes from the parent's snapshot and
-  // does not update until it refetches, which is too late for this dialog.
-  const [credentialNonce, setCredentialNonce] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -606,7 +337,6 @@ const GenericProviderConfigForm = ({
         setExisting(credential);
         setModel(credential?.model ?? DEFAULT_MODEL_BY_PROVIDER[provider] ?? '');
         setBaseUrl(credential?.baseUrl ?? DEFAULT_BASE_URL_BY_PROVIDER[provider] ?? '');
-        setAuthType(credential?.authType === 'oauth_token' ? 'oauth_token' : 'api_key');
         if (
           credential?.reasoningEffort === 'low' ||
           credential?.reasoningEffort === 'medium' ||
@@ -622,11 +352,10 @@ const GenericProviderConfigForm = ({
   }, [provider, userId]);
 
   const hasKey = existing?.hasApiKey ?? false;
-  const isOauth = authType === 'oauth_token';
 
   useEffect(() => {
     if (!hasModelCatalog) return undefined;
-    if (!hasKey && credentialNonce === 0) return undefined;
+    if (!hasKey) return undefined;
     let cancelled = false;
     setModelsError(null);
     const fetcher = isClaude ? listClaudeModelsForUser : listCodexModelsForUser;
@@ -643,11 +372,11 @@ const GenericProviderConfigForm = ({
     return (): void => {
       cancelled = true;
     };
-  }, [hasKey, userId, isClaude, hasModelCatalog, credentialNonce]);
+  }, [hasKey, userId, isClaude, hasModelCatalog]);
 
   const handleSave = async (): Promise<void> => {
     if (!apiKey && !hasKey) {
-      setError(isOauth && isClaude ? 'OAuth token is required' : 'API key is required');
+      setError('API key is required');
       return;
     }
     setSaving(true);
@@ -688,70 +417,6 @@ const GenericProviderConfigForm = ({
     }
   };
 
-  const startCodexOAuth = async (): Promise<void> => {
-    setCodexBusy(true);
-    setError(null);
-    try {
-      const flow = await startCodexOauth(userId);
-      setCodexFlow(flow);
-      window.open(flow.url, '_blank', 'noopener,noreferrer');
-    } catch (err) {
-      setError(errMsg(err, 'Failed to start sign-in'));
-    } finally {
-      setCodexBusy(false);
-    }
-  };
-
-  const startClaudeOAuth = async (): Promise<void> => {
-    setClaudeBusy(true);
-    setError(null);
-    try {
-      const flow = await startClaudeOauth(userId);
-      setClaudeFlow(flow);
-      window.open(flow.url, '_blank', 'noopener,noreferrer');
-    } catch (err) {
-      setError(errMsg(err, 'Failed to start sign-in'));
-    } finally {
-      setClaudeBusy(false);
-    }
-  };
-
-  const completeClaudeOAuth = async (): Promise<void> => {
-    if (!claudeFlow) return;
-    setClaudeBusy(true);
-    setError(null);
-    try {
-      await exchangeClaudeOauth(userId, { code: claudeCode.trim(), state: claudeFlow.state });
-      setClaudeFlow(null);
-      setClaudeCode('');
-      await onMutate();
-      // Stay open: the credential exists now, so the model list becomes
-      // fetchable and the user still has to pick one before saving.
-      setCredentialNonce(nonce => nonce + 1);
-      toast.success('Anthropic Claude connected — pick a model');
-    } catch (err) {
-      setError(errMsg(err, 'Sign-in failed'));
-    } finally {
-      setClaudeBusy(false);
-    }
-  };
-
-  const completeCodexOAuth = async (): Promise<void> => {
-    if (!codexFlow) return;
-    setCodexBusy(true);
-    setError(null);
-    try {
-      await exchangeCodexOauth(userId, { code: codexCode.trim(), state: codexFlow.state });
-      await onMutate();
-      toast.success('OpenAI connected');
-      onClose();
-    } catch (err) {
-      setError(errMsg(err, 'Sign-in failed'));
-    } finally {
-      setCodexBusy(false);
-    }
-  };
-
   return (
     <div className='flex flex-col gap-4'>
       {hasKey && (
@@ -761,164 +426,14 @@ const GenericProviderConfigForm = ({
         </div>
       )}
 
-      {hasOauthOption && (
-        <div>
-          <span className='mb-1.5 block text-xs font-medium text-muted-foreground'>
-            Auth method
-          </span>
-          <div className='grid grid-cols-2 gap-2'>
-            <AuthMethodOption
-              label='API Key'
-              sublabel={isClaude ? 'Usage-based, Console key' : 'Usage-based, Platform key'}
-              selected={authType === 'api_key'}
-              onSelect={() => setAuthType('api_key')}
-            />
-            <AuthMethodOption
-              label={isClaude ? 'OAuth Token' : 'ChatGPT OAuth Token'}
-              sublabel={isClaude ? 'Pro/Max subscription' : 'ChatGPT Plus/Pro subscription'}
-              selected={authType === 'oauth_token'}
-              onSelect={() => setAuthType('oauth_token')}
-            />
-          </div>
-
-          {isOauth && isClaude && (
-            <div className='mt-2 flex flex-col gap-2 rounded-lg border border-[var(--claw-ai-border)] bg-[var(--claw-ai-surface)] px-3 py-2.5 text-xs text-[var(--claw-ai-fg)]'>
-              {!claudeFlow ? (
-                <>
-                  <p>
-                    Sign in with your Claude account. This captures a refreshable token, so it
-                    won&apos;t silently expire like a pasted one.
-                  </p>
-                  <Button size='sm' onClick={() => void startClaudeOAuth()} disabled={claudeBusy}>
-                    {claudeBusy ? (
-                      <Loader2 className='size-4 animate-spin' />
-                    ) : (
-                      <KeyRound className='size-4' />
-                    )}
-                    {claudeBusy ? 'Opening...' : 'Sign in with Claude'}
-                  </Button>
-                  <p className='text-muted-foreground'>
-                    Or run <code className='rounded bg-background px-1'>claude setup-token</code>{' '}
-                    and paste the token below.
-                  </p>
-                </>
-              ) : (
-                <>
-                  <p>
-                    Paste the code Anthropic shows you below.{' '}
-                    <a
-                      href={claudeFlow.url}
-                      target='_blank'
-                      rel='noopener noreferrer'
-                      className='underline underline-offset-2'
-                    >
-                      Re-open tab
-                    </a>
-                  </p>
-                  <Input
-                    value={claudeCode}
-                    onChange={event => setClaudeCode(event.target.value)}
-                    placeholder='Paste code or callback URL'
-                  />
-                  <div className='flex gap-2'>
-                    <Button
-                      size='sm'
-                      onClick={() => void completeClaudeOAuth()}
-                      disabled={claudeBusy || !claudeCode.trim()}
-                    >
-                      {claudeBusy ? 'Verifying...' : 'Complete sign-in'}
-                    </Button>
-                    <Button
-                      size='sm'
-                      variant='ghost'
-                      onClick={() => {
-                        setClaudeFlow(null);
-                        setClaudeCode('');
-                      }}
-                    >
-                      Cancel
-                    </Button>
-                  </div>
-                </>
-              )}
-            </div>
-          )}
-
-          {isOauth && isCodex && (
-            <div className='mt-2 flex flex-col gap-2 rounded-lg border border-[var(--claw-ai-border)] bg-[var(--claw-ai-surface)] px-3 py-2.5 text-xs text-[var(--claw-ai-fg)]'>
-              {!codexFlow ? (
-                <Button
-                  size='sm'
-                  onClick={() => void startCodexOAuth()}
-                  data-track-category='claw-settings'
-                  data-track-name='START_CODEX_OAUTH'
-                  disabled={codexBusy}
-                >
-                  {codexBusy ? (
-                    <Loader2 className='size-4 animate-spin' />
-                  ) : (
-                    <KeyRound className='size-4' />
-                  )}
-                  {codexBusy ? 'Opening...' : 'Sign in with ChatGPT'}
-                </Button>
-              ) : (
-                <>
-                  <p>
-                    Paste the code from the OpenAI page below.{' '}
-                    <a
-                      href={codexFlow.url}
-                      target='_blank'
-                      rel='noopener noreferrer'
-                      className='underline underline-offset-2'
-                    >
-                      Re-open tab
-                    </a>
-                  </p>
-                  <Input
-                    value={codexCode}
-                    onChange={event => setCodexCode(event.target.value)}
-                    placeholder='Paste code or callback URL'
-                  />
-                  <div className='flex gap-2'>
-                    <Button
-                      size='sm'
-                      onClick={() => void completeCodexOAuth()}
-                      data-track-category='claw-settings'
-                      data-track-name='COMPLETE_CODEX_OAUTH'
-                      disabled={codexBusy || !codexCode.trim()}
-                    >
-                      {codexBusy ? 'Verifying...' : 'Complete sign-in'}
-                    </Button>
-                    <Button
-                      size='sm'
-                      variant='ghost'
-                      onClick={() => {
-                        setCodexFlow(null);
-                        setCodexCode('');
-                      }}
-                      data-track-category='claw-settings'
-                      data-track-name='CANCEL_CODEX_OAUTH'
-                    >
-                      Cancel
-                    </Button>
-                  </div>
-                </>
-              )}
-            </div>
-          )}
-        </div>
-      )}
-
-      {(!isOauth || isClaude) && (
-        <LabeledInput
-          type='password'
-          label={isOauth && isClaude ? 'OAuth Token' : 'API Key'}
-          value={apiKey}
-          onChange={setApiKey}
-          placeholder={hasKey ? '••••••••' : 'sk-...'}
-          hint={hasKey ? 'Leave blank to keep current' : undefined}
-        />
-      )}
+      <LabeledInput
+        type='password'
+        label='API Key'
+        value={apiKey}
+        onChange={setApiKey}
+        placeholder={hasKey ? '••••••••' : 'sk-...'}
+        hint={hasKey ? 'Leave blank to keep current' : undefined}
+      />
 
       <div>
         <span className='mb-1.5 block text-xs font-medium text-muted-foreground'>Model</span>
@@ -1006,34 +521,6 @@ const GenericProviderConfigForm = ({
     </div>
   );
 };
-
-const AuthMethodOption = ({
-  label,
-  sublabel,
-  selected,
-  onSelect,
-}: {
-  label: string;
-  sublabel: string;
-  selected: boolean;
-  onSelect: () => void;
-}): ReactElement => (
-  <button
-    type='button'
-    onClick={onSelect}
-    data-track-category='claw-settings'
-    data-track-name={`SelectAuthMethod-${label}`}
-    className={cn(
-      'flex min-h-16 flex-col gap-0.5 rounded-lg border px-3 py-2.5 text-left transition-colors',
-      selected
-        ? 'border-[var(--claw-ai-border)] bg-[var(--claw-ai-surface)] text-[var(--claw-ai-fg)]'
-        : 'border-border bg-background text-foreground hover:bg-muted',
-    )}
-  >
-    <span className='text-sm font-medium'>{label}</span>
-    <span className='text-xs text-muted-foreground'>{sublabel}</span>
-  </button>
-);
 
 const AgentAssignmentSection = ({
   subagents,

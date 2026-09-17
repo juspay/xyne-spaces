@@ -1,4 +1,4 @@
-export type ProviderId = 'copilot' | 'claude' | 'codex' | 'openrouter' | 'litellm';
+export type ProviderId = 'claude' | 'codex' | 'openrouter' | 'litellm';
 
 export type AuthType = 'api_key' | 'oauth_token';
 
@@ -26,13 +26,6 @@ export interface SubagentRouting {
   provider: string;
 }
 
-export interface GitHubDeviceCode {
-  userCode: string;
-  verificationUri: string;
-  expiresIn: number;
-  interval: number;
-}
-
 export interface ClaudeModelInfo {
   id: string;
   displayName: string;
@@ -41,10 +34,4 @@ export interface ClaudeModelInfo {
 export interface ProviderModelOption {
   id: string;
   name: string;
-}
-
-export interface CodexOauthStart {
-  url: string;
-  state: string;
-  expiresIn: number;
 }

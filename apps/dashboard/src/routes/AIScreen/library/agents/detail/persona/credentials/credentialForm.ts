@@ -3,7 +3,6 @@ import type { AgentProviderCredentialStatus } from './agentCredentialsService';
 export const CREDENTIAL_PROVIDERS = [
   'codex',
   'claude',
-  'copilot',
   'openrouter',
   'litellm',
 ] as const;
@@ -62,12 +61,9 @@ export function formFromCredential(entry: AgentProviderCredentialStatus): Creden
   };
 }
 
-/** Only these two have agent-scoped OAuth routes in claw-auth. Offering the
- *  choice anywhere else is a dead end — there is no flow behind it. */
-export const supportsOauth = (provider: string): provider is 'codex' | 'claude' | 'copilot' =>
-  provider === 'codex' || provider === 'claude' || provider === 'copilot';
+export const supportsOauth = (_provider: string): false => false;
 
-export const supportsAuthType = (provider: string): boolean => supportsOauth(provider);
+export const supportsAuthType = (_provider: string): false => false;
 export const supportsReasoning = (provider: string): boolean => provider !== 'litellm';
 
 export const baseUrlPlaceholder = (provider: string): string =>
