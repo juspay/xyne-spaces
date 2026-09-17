@@ -467,6 +467,21 @@ const envSchema = Joi.object({
   ENC_S2S_KEY: Joi.string().allow(''),
   ENCRYPTION_SERVICE_URL: Joi.string().uri().default('http://localhost:3012'),
   ENCRYPTION_REQUEST_TIMEOUT_MS: Joi.number().integer().min(1).default(5000),
+  // Shared s2s secret sent as X-Internal-Service-Secret to internal services.
+  INTERNAL_SERVICE_SECRET: Joi.string().allow('').default(''),
+  // mTLS certificate service (s2s). Empty url disables cert revocation.
+  MTLS_SERVICE_URL: Joi.string().uri().allow('').default(''),
+  MTLS_SERVICE_REQUEST_TIMEOUT_MS: Joi.number().integer().min(1).default(5000),
+  // Comma-separated Google OAuth error codes that, when returned by the client
+  // that owns a refresh token, mean the token is permanently revoked.
+  GOOGLE_AUTH_PERMANENT_ERRORS: Joi.string().default('invalid_grant,invalid_token'),
+  GOOGLE_AUTH_CLIENT_ERRORS: Joi.string().default('unauthorized_client,invalid_client'),
+  // Master switch for the session-refresh provider-revocation check (Google /
+  // Microsoft verification + account-deactivation cleanup). When false, refresh
+  // falls back to the legacy behaviour: session status + expiry only, no
+  // provider call and no deactivation. Kill switch if provider verification
+  // misbehaves in production.
+  ENABLE_PROVIDER_REVOCATION_CHECK: Joi.boolean().default(true),
   // Email fetch
   EMAIL_FETCH_BATCH_SIZE: Joi.number().integer().default(10),
   EMAIL_FETCH_BATCH_DELAY_MS: Joi.number().integer().default(5000),
@@ -1132,6 +1147,24 @@ export const config = {
     callbackUrl: (envVars.XYNE_CLAW_CALLBACK_URL || envVars.BACKEND_URL) as string,
   },
   internalS2sKey: envVars.INTERNAL_S2S_KEY as string,
+  internalServiceSecret: envVars.INTERNAL_SERVICE_SECRET as string,
+  mtlsService: {
+    url: envVars.MTLS_SERVICE_URL as string,
+    // Reuses the shared internal-service secret (X-Internal-Service-Secret).
+    s2sSecret: envVars.INTERNAL_SERVICE_SECRET as string,
+    requestTimeoutMs: envVars.MTLS_SERVICE_REQUEST_TIMEOUT_MS as number,
+  },
+  // Google OAuth error codes from the owning client that mean permanent revocation.
+  googleAuthPermanentErrors: (envVars.GOOGLE_AUTH_PERMANENT_ERRORS as string)
+    .split(',')
+    .map((code: string) => code.trim())
+    .filter(Boolean),
+  googleAuthClientErrors: (envVars.GOOGLE_AUTH_CLIENT_ERRORS as string)
+    .split(',')
+    .map((code: string) => code.trim())
+    .filter(Boolean),
+  // Kill switch for provider-revocation verification during session refresh.
+  enableProviderRevocationCheck: envVars.ENABLE_PROVIDER_REVOCATION_CHECK as boolean,
   apps: {
     internalHostMap: parseInternalAppHostMap(envVars.INTERNAL_APP_HOST_MAP as string),
   },
