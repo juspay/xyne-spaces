@@ -72,6 +72,12 @@ interface CanvasSideEffectContext {
 }
 
 import { executeStreamingLlmRequest, type SummaryModelType } from './callLlmRetry';
+import { ensureSummaryCitations } from './callSummaryCitationRepair';
+import {
+  buildCitationRulesBlock,
+  maxSegmentId,
+  parseNumberedSegmentIds,
+} from './callSummaryCitations';
 import { initializeYSweetDoc, syncToYSweet } from '@/utils/ysweetUtils.js';
 
 /**
@@ -437,7 +443,8 @@ CALL SUMMARY:
 {summary}
 `;
 
-const DETAILED_SUMMARY_PROMPT = `You are creating a comprehensive, phase-based meeting summary that captures the natural flow of conversation.
+// Exported so the mock-call-summary harness can exercise the exact prompt.
+export const DETAILED_SUMMARY_PROMPT = `You are creating a comprehensive, phase-based meeting summary that captures the natural flow of conversation.
 **LANGUAGE: Generate this entire summary in English, regardless of the transcript language.**
 
 BRAND NAME CORRECTION:
@@ -493,20 +500,10 @@ MARKDOWN TEMPLATE:
   - \`- [xyne-decision] The team approved the consolidated pipeline [clf-12]\`
   - \`- [xyne-action] @Mayank Bansal will update the backend [clf-18]\`
 
-**CITATIONS (ACCURACY IS CRITICAL):**
-- Each transcript line is prefixed with a segment number in square brackets, e.g. "[12] [03:24] Alice: ...". The number 12 is that line's segment id.
-- After any specific claim, decision, action item, number, date, name, or quote you draw from the transcript, cite the segment(s) it came from INLINE using the exact token [clf-N]. Example: "The team agreed to ship the API redesign in Q4 [clf-12]."
-- A citation is a PROOF POINTER, not decoration. [clf-N] asserts: "the words that make this statement true are inside segment N." The reader clicks it and is taken to that exact moment in the transcript.
-- BEFORE writing [clf-N], find line N in the TRANSCRIPT below and confirm its text actually states what you just wrote. If you cannot point to the specific words in that line, do NOT cite it.
-- Topic proximity is NOT support. A segment that merely discusses the same subject, or sits near the moment you have in mind, does not support the claim. Never cite "roughly where it was discussed".
-- Never estimate, guess, round, shift, or reconstruct a segment number from memory of where something appeared. Read the number off the line itself. If you are not certain of the number, leave the statement uncited.
-- Attribution must match: if the statement says who said, wanted, offered, agreed to, or committed to something, the cited segment must be that person's line, or a line that explicitly states their position.
-- Each token in a group must independently support the statement. Never pad with extra numbers to look thorough — one exact citation beats three approximate ones. At most 3 tokens together, e.g. "...scope was cut [clf-8][clf-9]", most direct evidence first.
-- For a roll-up statement that synthesises several moments (typical of Key Takeaways): cite only the 1-3 segments where that point is most explicitly stated. If no segment states it, RE-WORD the statement so it matches what a segment actually says — never attach an approximate citation just to satisfy the format.
-- An uncited statement is acceptable. A wrongly cited statement is a serious error, because it looks verified and is not.
-- Copy the number EXACTLY. Do NOT invent segment numbers. Do NOT use ranges like [clf-8-11]. Only cite segment numbers that actually appear in the transcript below; if a line has no bracketed number, do not cite it.
-- Write ONLY the bare token [clf-N] — never a link, URL, footnote, or a separate "Citations"/"Sources" section.
-- FINAL CHECK before you output: re-read every [clf-N] you wrote, look the segment up again, and delete or re-word any citation whose segment does not contain the claim it is attached to.
+${buildCitationRulesBlock({
+  markedBulletClause:
+    '- Decision and action bullets MUST carry a citation (see MARKED DECISIONS AND ACTIONS). For those, pick the segment where the decision was actually made or the task actually assigned, and word the bullet to match that segment — do not fall back to a loose citation. An annotated bullet without a valid citation is dropped from the meeting timeline entirely.',
+})}
 
 Only output valid Markdown.
 No extra text.
@@ -514,7 +511,7 @@ No extra text.
 TRANSCRIPT:
 {transcript}
 
-FINAL REMINDER — CITATIONS: every [clf-N] you write must point at a numbered segment above whose text actually states the claim it is attached to. Verify each one against the lines above before you output. Drop or re-word any you cannot verify — an uncited statement is fine, a wrongly cited one is not.
+FINAL REMINDER — CITATIONS: every citation you write must be in the exact form [clf-N], with N between 1 and {maxSegment}, pointing at a numbered segment above whose text actually states the claim it is attached to. A bare [12] is not a citation and renders as broken text. Verify each one against the lines above before you output. Drop or re-word any you cannot verify — an uncited statement is fine, a wrongly cited one is not.
 `;
 
 const EDIT_SUMMARY_PROMPT = `You are an assistant that edits a MARKDOWN SECTION TEMPLATE used to generate call summaries. You will be given the CURRENT TEMPLATE and a USER INSTRUCTION, and you must return the UPDATED TEMPLATE.
@@ -1154,11 +1151,16 @@ MANDATORY OUTPUT CONTRACT:
 - Follow the section structure, formatting, citation, and marked-item requirements in the user prompt.`
       : '';
 
+    // From the sanitized transcript, so a truncated one never advertises segment
+    // ids the model was not actually shown.
+    const highestSegmentId = maxSegmentId(parseNumberedSegmentIds(sanitizedTranscript));
+
     const buildPrompt = () => {
       let prompt = renderPromptTemplate(promptTemplate, {
         fields: sanitizedFields || defaultSummaryFields,
         participants: participantList || '- No participants found',
         transcript: sanitizedTranscript,
+        maxSegment: highestSegmentId > 0 ? String(highestSegmentId) : 'the highest segment number shown',
       });
 
       if (sanitizedCustomPrompt) {
@@ -1183,8 +1185,19 @@ MANDATORY OUTPUT CONTRACT:
       return null;
     }
 
+    // The retry loop above only sees transport failures, so a mis-cited summary
+    // is a "success" to it. Every summary pipeline funnels through here.
+    const normalizedContent = normalizeDetailedSummaryMarkdown(result.content);
+    const { markdown } = await ensureSummaryCitations({
+      markdown: normalizedContent,
+      numberedTranscript: sanitizedTranscript,
+      callId,
+      ...(modelType ? { modelType } : {}),
+      ...(effectiveSystemPrompt ? { systemPrompt: effectiveSystemPrompt } : {}),
+    });
+
     logger.info(`[${callId}] Successfully generated detailed summary`);
-    return result.content;
+    return markdown;
   }
 
   async editSummaryStructureWithAI(

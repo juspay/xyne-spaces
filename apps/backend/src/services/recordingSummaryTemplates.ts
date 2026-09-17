@@ -1,4 +1,5 @@
 import type { MandatorySummarySectionState } from './summaryTemplateSections';
+import { buildCitationRulesBlock } from './callSummaryCitations';
 
 /**
  * Build the recording summary prompt. The Decisions and Action Items sections are
@@ -125,23 +126,13 @@ ${annotationRules.join('\n')}
 `
     : ''
 }
-CITATIONS (ACCURACY IS CRITICAL):
-- Each transcript line is prefixed with its segment number: "[12] [03:24] Alice: ...". The number 12 is that line's segment id.
-- A citation is a PROOF POINTER, not decoration. [clf-N] asserts: "the words that make this statement true are inside segment N." The reader clicks it and is taken to that exact moment in the transcript.
-- BEFORE writing [clf-N], find line N in the TRANSCRIPT below and confirm its text actually states what you just wrote. If you cannot point to the specific words in that line, do NOT cite it.
-- Topic proximity is NOT support. A segment that merely discusses the same subject, or sits near the moment you have in mind, does not support the claim. Never cite "roughly where it was discussed".
-- Never estimate, guess, round, shift, or reconstruct a segment number from memory of where something appeared. Read the number off the line itself. If you are not certain of the number, leave the statement uncited.
-- Attribution must match: if the statement says who said, wanted, offered, agreed to, or committed to something, the cited segment must be that person's line, or a line that explicitly states their position.
-- Each token in a group must independently support the statement. Never pad with extra numbers to look thorough — one exact citation beats three approximate ones. At most 3 tokens together, e.g. "...scope was cut [clf-8][clf-9]", most direct evidence first.
-- For a roll-up statement that synthesises several moments (typical of Key Takeaways): cite only the 1-3 segments where that point is most explicitly stated. If no segment states it, RE-WORD the statement so it matches what a segment actually says — never attach an approximate citation just to satisfy the format.
-- An uncited statement is acceptable. A wrongly cited statement is a serious error, because it looks verified and is not.
-${
+${buildCitationRulesBlock(
   decisions || actionItems
-    ? `- ${annotatedBulletLabel} MUST carry a citation (see ${markedLabel}). For those, pick the segment where ${annotatedBulletMoment}, and word the bullet to match that segment — do not fall back to a loose citation.
-`
-    : ''
-}- Copy N exactly. Never invent segment numbers, never use ranges like [clf-8-11], never cite a line that has no bracketed number. Write only the bare token — no links, URLs, footnotes, or a separate "Citations"/"Sources" section.
-- FINAL CHECK before you output: re-read every [clf-N] you wrote, look the segment up again, and delete or re-word any citation whose segment does not contain the claim it is attached to.
+    ? {
+        markedBulletClause: `- ${annotatedBulletLabel} MUST carry a citation (see ${markedLabel}). For those, pick the segment where ${annotatedBulletMoment}, and word the bullet to match that segment — do not fall back to a loose citation. An annotated bullet without a valid citation is dropped from the meeting timeline entirely.`,
+      }
+    : {},
+)}
 
 Only output valid Markdown (headings, paragraphs, and bullet lists only — no tables).
 No extra text.
@@ -149,7 +140,7 @@ No extra text.
 TRANSCRIPT:
 {transcript}
 
-FINAL REMINDER — CITATIONS: every [clf-N] you write must point at a numbered segment above whose text actually states the claim it is attached to. Verify each one against the lines above before you output. Drop or re-word any you cannot verify — an uncited statement is fine, a wrongly cited one is not.
+FINAL REMINDER — CITATIONS: every citation you write must be in the exact form [clf-N], with N between 1 and {maxSegment}, pointing at a numbered segment above whose text actually states the claim it is attached to. A bare [12] is not a citation and renders as broken text. Verify each one against the lines above before you output. Drop or re-word any you cannot verify — an uncited statement is fine, a wrongly cited one is not.
 `.replace(/\n{3,}/g, '\n\n');
 }
 
