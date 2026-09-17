@@ -1,6 +1,7 @@
 import log from 'electron-log/main';
 import { session, BrowserWindow, app } from 'electron';
-import { config } from '../app/config';
+import { config, FIRST_PARTY_HOST_SUFFIX } from '../app/config';
+import { isFirstPartyHostname } from '../app/firstPartyHosts';
 import { clearAllCookies } from './cookies';
 import path from 'path';
 import { existsSync, mkdirSync } from 'fs';
@@ -185,7 +186,7 @@ function isFirstPartyUrl(rawUrl: string | undefined): boolean {
     const { protocol, hostname } = new URL(rawUrl);
     if (protocol.startsWith('xyne-spaces')) return true;              // bundled UI custom scheme
     if (protocol === 'file:') return true;                            // bundled local HTML
-    if (protocol === 'https:' && (hostname === 'xyne.juspay.net' || hostname.endsWith('.xyne.juspay.net'))) return true;
+    if (protocol === 'https:' && isFirstPartyHostname(hostname, FIRST_PARTY_HOST_SUFFIX)) return true;
     if ((protocol === 'http:' || protocol === 'https:') && (hostname === 'localhost' || hostname === '127.0.0.1')) return true;
     return false;
   } catch {
@@ -246,8 +247,8 @@ function setupMediaPermissionGuard(): void {
 }
 
 function installFrontendCsp(): void {
-  const xyneHosts = 'https://*.xyne.juspay.net';
-  const xyneWs = 'wss://*.xyne.juspay.net';
+  const xyneHosts = FIRST_PARTY_HOST_SUFFIX ? `https://*.${FIRST_PARTY_HOST_SUFFIX}` : '';
+  const xyneWs = FIRST_PARTY_HOST_SUFFIX ? `wss://*.${FIRST_PARTY_HOST_SUFFIX}` : '';
   const googleApis = 'https://apis.google.com https://accounts.google.com';
   const googleFontsCss = 'https://fonts.googleapis.com';
   const googleFontsFiles = 'https://fonts.gstatic.com';

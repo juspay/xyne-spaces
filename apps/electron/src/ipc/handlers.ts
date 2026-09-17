@@ -6,7 +6,8 @@ import { clearAllCookies, clearBrowserTabsData, syncXyneCookiesToBrowserPanel } 
 import { showNotification, NotificationData, showCallNotification, closeCallNotification, CallNotificationData } from '../services/notifications';
 import { getMainWindow, loadApp, toggleWindowCompactMode } from '../window/manager';
 import { setupMTLSIpcHandlers } from './mtls-handlers';
-import { config, ENABLE_LOCAL_HARNESS } from '../app/config';
+import { config, ENABLE_LOCAL_HARNESS, FIRST_PARTY_HOST_SUFFIX } from '../app/config';
+import { isFirstPartyHostname } from '../app/firstPartyHosts';
 import { performHardReload } from '../services/version-checker';
 import { Logger, errorLogger } from '../services/logger/Logger';
 import ElectronEvent from '../services/logger/electron-events';
@@ -227,7 +228,7 @@ export function setupIpcHandlers(): void {
     } catch {
       throw new Error('Invalid sync URL');
     }
-    const isXyne = host === 'xyne.juspay.net' || host.endsWith('.xyne.juspay.net');
+    const isXyne = isFirstPartyHostname(host, FIRST_PARTY_HOST_SUFFIX);
     const isLocal = host === 'localhost' || host === '127.0.0.1';
     if (!isXyne && !isLocal) {
       errorLogger.warn('[sync-cookies] Rejected non-Xyne origin');
