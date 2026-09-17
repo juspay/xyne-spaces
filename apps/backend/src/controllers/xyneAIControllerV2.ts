@@ -62,9 +62,8 @@ const SelectionContextSchema = z
   );
 
 // Attached context item schema - for Add Context feature.
-// `file` items are appended below, resolved from top-level `file_ids`, since
-// that resolution needs a DB round-trip the client can't do itself.
-// `collection`/`folder` items arrive as ordinary entries in this list.
+// `collection`/`folder`/`file` items all arrive as ordinary entries in this
+// list — the dashboard already knows each one's cuid + name client-side.
 const AttachedContextItemSchema = z.object({
   type: z.enum(['channel', 'ticket', 'canvas', 'call', 'activity', 'collection', 'file', 'folder']),
   id: z.string().min(1),
@@ -170,16 +169,6 @@ const XyneAIRequestSchemaV2 = z.object({
   ticket_ids: z.array(z.string().min(1)).optional(),
   callIds: z.array(z.string().min(1)).optional(),
   call_ids: z.array(z.string().min(1)).optional(),
-  // Scoped KB files. Collections and folders are resolved client-side
-  // (the dashboard already knows their cuid + name) and arrive as ordinary
-  // 'collection'/'folder' items inside attached_context. Files are the one
-  // exception: `fileIds` arrives as the stable CollectionItem.fileId UUID
-  // (the dashboard's Vespa identifier) OR, from the KB file viewer's Ask AI
-  // chip, the CollectionItem.id (cuid) directly — we resolve either shape to
-  // the cuid claw-auth's KB tools expect below, which the client can't do
-  // without a server round-trip.
-  fileIds: z.array(z.string().min(1)).optional(),
-  file_ids: z.array(z.string().min(1)).optional(),
   attachedContext: AttachedContextSchema,
   attached_context: AttachedContextSchema,
   displayQuery: z.string().optional(),
@@ -281,8 +270,6 @@ export class XyneAIControllerV2 {
       ticket_ids,
       callIds,
       call_ids,
-      fileIds,
-      file_ids,
       attachedContext,
       attached_context,
       draftMode,
@@ -309,7 +296,6 @@ export class XyneAIControllerV2 {
     const effectiveCanvasIds = canvasIds?.length ? canvasIds : canvas_ids;
     const effectiveTicketIds = ticketIds?.length ? ticketIds : ticket_ids;
     const effectiveCallIds = callIds?.length ? callIds : call_ids;
-    const effectiveFileIds = fileIds?.length ? fileIds : file_ids;
     // Same snake-case fallback rationale for branching params — the worker
     // sends snake_case; HTTP callers may use either.
     const effectiveParentMessageId = parentMessageIdCC || parentMessageIdSC;
@@ -488,56 +474,6 @@ export class XyneAIControllerV2 {
         agentSlug,
       });
 
-      // Resolve scoped KB files → 'file' attached_context items so claw-auth's
-      // existing prompt-prefix mechanism surfaces them in the agent's prompt.
-      // Collections/folders don't need this step — the dashboard already
-      // knows their cuid + name and sends them as ordinary 'collection'/
-      // 'folder' entries in attached_context directly. Files are the
-      // exception: CollectionItem.fileId (UUID) needs resolving to
-      // CollectionItem.id (cuid) — the id the agent's kb-* tools expect as
-      // fileId (see the KB-tools handlers and validateKbGrants in claw-auth)
-      // — which the client can't do without this DB round-trip.
-      const kbAttachedContextItems: Array<{
-        type: 'file';
-        id: string;
-        title: string;
-      }> = [];
-      if (effectiveFileIds && effectiveFileIds.length > 0) {
-        // The dashboard SHOULD send the stable `fileId` UUID here, but not
-        // every picker does: the KB file viewer's own "Ask AI" button
-        // (FileViewerLayout.tsx, KnowledgeBaseV2Screen.tsx) sends
-        // CollectionItem.id (cuid) instead — that data simply isn't exposed
-        // as `fileId` at those call sites today. Rather than chase every
-        // caller, accept either id shape here: a cuid IS already the row id
-        // kb-read-file expects, so matching on `id` OR `fileId` (latest
-        // version only) resolves both conventions in one query.
-        const items = await db.collectionItem.findMany({
-          where: {
-            OR: [{ fileId: { in: effectiveFileIds } }, { id: { in: effectiveFileIds } }],
-            isLatest: true,
-            deletedAt: null,
-          },
-          select: { id: true, name: true },
-        });
-        for (const it of items) {
-          kbAttachedContextItems.push({ type: 'file', id: it.id, title: it.name });
-        }
-      }
-      // A caller could in principle already have a matching 'file' entry in
-      // its own attached_context — kbAttachedContextItems is meant to FILL
-      // GAPS, not duplicate what's already there. Skip any (type, id) pair
-      // the client's own attached_context already covers.
-      const existingContextKeys = new Set(
-        (effectiveAttachedContext ?? []).map((item) => `${item.type}:${item.id}`),
-      );
-      const newKbAttachedContextItems = kbAttachedContextItems.filter(
-        (item) => !existingContextKeys.has(`${item.type}:${item.id}`),
-      );
-      const mergedAttachedContext = [
-        ...(effectiveAttachedContext ?? []),
-        ...newKbAttachedContextItems,
-      ];
-
       try {
         // Build the ClawRunRequest
         const runReq: ClawRunRequest = {
@@ -560,7 +496,7 @@ export class XyneAIControllerV2 {
           callIds: effectiveCallIds,
           ...(effectiveCanvasId && { canvasId: effectiveCanvasId }),
           ...(workflowContext && { workflowContext }),
-          attachedContext: mergedAttachedContext,
+          attachedContext: effectiveAttachedContext ?? [],
           attachments,
           messageAttachmentIds,
           webSearchEnabled,

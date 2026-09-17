@@ -33,10 +33,6 @@ import {
  */
 export interface StreamOverrides {
   channelIds?: string[];
-  /** Scoped KB files. Resolved server-side (UUID-or-cuid → cuid) — see
-   *  xyneAIControllerV2.ts. Collections/folders don't need this: they ride
-   *  as ordinary entries in `attachedContext` instead. */
-  fileIds?: string[];
   webSearchEnabled?: boolean;
   deepResearchEnabled?: boolean;
   createCanvasEnabled?: boolean;
@@ -82,8 +78,6 @@ interface UseXyneAIStreamParams {
   webSearchEnabled?: boolean;
   deepResearchEnabled?: boolean;
   researchContext?: ResearchContext | null;
-  /** See StreamOverrides.fileIds. */
-  fileIds?: string[];
   createCanvasEnabled?: boolean;
   instant?: boolean;
   isV2?: boolean;
@@ -160,7 +154,6 @@ export const useXyneAIStream = ({
   webSearchEnabled = false,
   deepResearchEnabled = false,
   researchContext,
-  fileIds,
   createCanvasEnabled = false,
   instant = false,
   isV2 = false,
@@ -345,7 +338,6 @@ export const useXyneAIStream = ({
       const eResearchContext =
         ov && 'researchContext' in ov ? (ov.researchContext ?? null) : researchContext;
       const eChannelIds = ov?.channelIds ?? channelIds;
-      const eFileIds = ov?.fileIds ?? fileIds ?? [];
       const eTicketIds = ov?.ticketIds ?? ticketIds;
       const eCanvasIds = ov?.canvasIds ?? canvasIds;
       const eCallIds = ov?.callIds ?? callIds;
@@ -520,7 +512,6 @@ export const useXyneAIStream = ({
           query: internalQuery,
           displayQuery: displayContent ?? query,
           channelIds: eChannelIds,
-          fileIds: eFileIds,
           conversationId,
           threadConversationId,
           attachmentIds,
@@ -564,7 +555,6 @@ export const useXyneAIStream = ({
       attachmentIds,
       canvasId,
       workflowContext,
-      fileIds,
       researchContext,
       webSearchEnabled,
       deepResearchEnabled,

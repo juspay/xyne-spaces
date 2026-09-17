@@ -844,8 +844,10 @@ const XyneAISidebar = ({
   }, [browserContext, webSearchAccessible, webSearchEnabled]);
 
   // KB scopes shared by the sent attachedContext and the richer display set
-  // below. Collections/folders carry their cuid + name already, so they ride
-  // directly here — files don't (see fileIds/displayAttachedContext below).
+  // below. Every picker (composer "+" and the KB file viewer's "Ask AI") now
+  // stores CollectionItem.id (cuid) as fileScopes[].id — the id attached_context
+  // 'file' items carry, same as collections/folders — so files ride directly
+  // here too; no server-side id-shape resolution needed for this call site.
   const kbContextSelections = {
     channels: selectedChannels,
     tickets: selectedTickets,
@@ -853,6 +855,7 @@ const XyneAISidebar = ({
     transcripts: selectedTranscripts,
     recordings: selectedRecordings,
     folders: folderScopes,
+    files: fileScopes,
     collections: selectedCollectionIds
       .map(id => collectionsList.find(c => c.id === id))
       .filter((c): c is CollectionSummary => c !== undefined)
@@ -865,10 +868,6 @@ const XyneAISidebar = ({
     contextType: xyneAIActor.getSnapshot().context.contextType,
     channelIds: selectedChannels.map(ch => ch.id),
     activities: selectedActivities,
-    // Sent as bare ids, not attachedContext: the backend resolves the
-    // fileId(UUID)-or-id(cuid) ambiguity server-side (xyneAIControllerV2.ts)
-    // — the client can't tell which shape it has without a DB round-trip.
-    fileIds: fileScopes.map(f => f.id),
     conversationId,
     streamSessionKey: streamThreadKey,
     threadConversationId: activeThreadInfo?.conversationId,
@@ -891,11 +890,10 @@ const XyneAISidebar = ({
     canvasIds: selectedCanvases.map(c => c.id),
     callIds: [...selectedTranscripts.map(t => t.id), ...selectedRecordings.map(r => r.id)],
     attachedContext: toAttachedContext(kbContextSelections),
-    // Richer set for the optimistic message pill only — adds file items
-    // (with their client-known titles) on top of what's actually sent, so
-    // the just-sent message's pills match what reload shows once the
-    // backend resolves and persists the file's attached_context entry.
-    displayAttachedContext: toAttachedContext({ ...kbContextSelections, files: fileScopes }),
+    // Same content as attachedContext now that files ride in kbContextSelections
+    // directly — kept as a separate field for the optimistic message pill so it
+    // matches what reload shows once the backend persists the sent context.
+    displayAttachedContext: toAttachedContext(kbContextSelections),
     agentSlug: effectiveAgentSlug,
     model: selectedModel,
     modelProvider: selectedModel ? (agentModelsData?.pinProvider ?? 'litellm') : null,
