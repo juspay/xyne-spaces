@@ -1,10 +1,12 @@
 import { createHash } from "crypto"
-import decode from "heic-decode"
-import sharp from "sharp"
 import { isPreconditionFailed, normalizeStoragePath } from "@xyne/storage"
 import { isHeicAttachment, toWebpFilename } from "@xyne/shared"
 import { logger } from "@/utils/logger"
 import { storageService } from "@/services/storage"
+import {
+    HeicRenditionThreadError,
+    renderHeicBytes,
+} from "@/services/heicRenditionPool"
 
 export { isHeicAttachment, toWebpFilename }
 
@@ -25,10 +27,13 @@ export { isHeicAttachment, toWebpFilename }
  *
  * The WASM decode is synchronous and takes seconds per photo, so it never runs
  * on the API's request path — it would stall the event loop for the whole
- * decode, freezing everything else the pod is doing. Instead the API enqueues
- * a job (heicRenditionQueue) at upload time, and again on read misses; the
- * dedicated queue worker decodes and caches. Until the rendition exists,
- * reads report PENDING and clients retry briefly.
+ * decode, freezing everything else the pod is doing. For the same reason it
+ * doesn't run on the queue worker's event loop either: the API enqueues a job
+ * (heicRenditionQueue) at upload time and again on read misses, and the
+ * consuming worker hands the bytes to a worker_threads pool
+ * (heicRenditionPool) that decodes + encodes on dedicated threads, keeping
+ * the host process's loop responsive. Until the rendition exists, reads
+ * report PENDING and clients retry briefly.
  *
  * Renditions are cached in GCS keyed on the sha256 of the storage *path*.
  * Attachment bytes are immutable once uploaded, so the path is a stable key —
@@ -39,17 +44,6 @@ export { isHeicAttachment, toWebpFilename }
  */
 
 export type HeicRenditionKind = "full" | "thumb"
-
-// Thumb is only ever a chat-chip / gallery preview; 1024px on the long edge
-// matches what the existing image thumbnail pipeline produces.
-const THUMB_LONG_EDGE = 1024
-
-// A 12MP iPhone photo decodes to ~48MB of RGBA in WASM memory before sharp
-// re-encodes. 50MP (~200MB transient RGBA) is the same order as sharp's own
-// default limitInputPixels and comfortably above any real phone camera output
-// while keeping a maliciously large ispe header from OOM-ing the pod.
-const MAX_PIXELS = 50_000_000
-const WEBP_MAX_SIDE = 16383
 
 const TRANSIENT_FAILURE_TTL_MS = 60_000
 
@@ -155,116 +149,11 @@ async function writeFailureMarker(
     }
 }
 
-interface HeicPixels {
-    width: number
-    height: number
-    /** RGBA pixel data, upright: libheif applies irot/imir during decode. */
-    data: Uint8ClampedArray
-}
-
-/**
- * Decode HEIC bytes to RGBA pixels. Queue-worker only: libheif's WASM decode
- * is synchronous, so it stalls the calling thread for the full decode — on
- * the API's request path that would freeze the pod for seconds per photo.
- *
- * Both container-parse and pixel-decode failures map to NOT_HEIC: the bytes
- * are not something we can decode as HEIC (renamed file, an AVIF in an mif1
- * container whose AV1 track libheif cannot decode, corrupt stream). That is
- * a fall-through condition for callers — serve the original — not a
- * retryable error, because the bytes are immutable.
- */
-async function decodeHeicPixels(buffer: Buffer): Promise<HeicPixels> {
-    let images
-    try {
-        images = await decode.all({ buffer })
-    } catch (err) {
-        throw new HeicRenditionError(
-            `HEIC parse failed: ${err instanceof Error ? err.message : String(err)}`,
-            "NOT_HEIC",
-        )
-    }
-
-    try {
-        const image = images[0]
-        if (!image) {
-            throw new HeicRenditionError("No images found in HEIC container", "NOT_HEIC")
-        }
-        if (image.width * image.height > MAX_PIXELS) {
-            throw new HeicRenditionError(
-                `HEIC too large to convert: ${image.width}x${image.height}`,
-                "TOO_LARGE",
-            )
-        }
-        if (Math.max(image.width, image.height) > WEBP_MAX_SIDE) {
-            throw new HeicRenditionError(
-                `HEIC exceeds WebP's ${WEBP_MAX_SIDE}px side limit: ${image.width}x${image.height}`,
-                "TOO_LARGE",
-            )
-        }
-
-        try {
-            const { data, width, height } = await image.decode()
-            return { width, height, data }
-        } catch (err) {
-            // Brand accepted but items undecodable — same fall-through as a
-            // rejected brand, not a retryable conversion failure.
-            throw new HeicRenditionError(
-                `HEIC pixel decode failed: ${err instanceof Error ? err.message : String(err)}`,
-                "NOT_HEIC",
-            )
-        }
-    } finally {
-        images.dispose()
-    }
-}
-
-async function encodeWebpFromPixels(
-    pixels: HeicPixels,
-    kind: HeicRenditionKind,
-    cacheKey: string,
-): Promise<Buffer> {
-    try {
-        let pipeline = sharp(Buffer.from(pixels.data), {
-            raw: { width: pixels.width, height: pixels.height, channels: 4 },
-            limitInputPixels: MAX_PIXELS,
-        })
-        if (kind === "thumb") {
-            pipeline = pipeline.resize({
-                width: THUMB_LONG_EDGE,
-                height: THUMB_LONG_EDGE,
-                fit: "inside",
-                withoutEnlargement: true,
-            })
-        }
-
-        // Lossy q85, not lossless: lossless WebP of already-lossy HEVC pixels
-        // inflates ~10x for no visible gain, and the original HEIC remains the
-        // fidelity source for downloads. (Parameter changes bump the cache
-        // version segment so stale renditions are never served.)
-        const webp = await pipeline.webp({ quality: 85, effort: 4 }).toBuffer()
-
-        logger.info("[HeicRendition] Converted HEIC to WebP", {
-            cacheKey,
-            kind,
-            width: pixels.width,
-            height: pixels.height,
-            outputBytes: webp.length,
-        })
-
-        return webp
-    } catch (err) {
-        if (err instanceof HeicRenditionError) throw err
-        throw new HeicRenditionError(
-            `HEIC conversion failed: ${err instanceof Error ? err.message : String(err)}`,
-            "CONVERSION_FAILED",
-        )
-    }
-}
-
 /**
  * Generate and cache both renditions (`full` + `thumb`) of the HEIC original
- * at `storagePath`, decoding once. Runs in the queue worker — see
- * decodeHeicPixels for why this must never run on the request path.
+ * at `storagePath`, decoding once. Runs in the queue worker; the CPU-bound
+ * decode and encodes themselves run on heicRenditionPool's worker threads —
+ * see that module for why this must never run on an event loop thread.
  *
  * Deterministic failures become failure markers instead of thrown errors, so
  * the job always completes and the read path falls back to its marker/PENDING
@@ -292,15 +181,20 @@ export async function generateHeicRenditions(
     }
 
     try {
-        const pixels = await decodeHeicPixels(buffer)
-        // Sequential, not Promise.all: halves peak memory (one WebP output at
-        // a time on top of the shared RGBA buffer).
+        const { width, height, renditions } = await renderHeicBytes(buffer)
         for (const kind of kinds) {
-            const webp = await encodeWebpFromPixels(pixels, kind, `${base}/${kind}`)
+            const webp = renditions[kind]
+            logger.info("[HeicRendition] Converted HEIC to WebP", {
+                cacheKey: `${base}/${kind}`,
+                kind,
+                width,
+                height,
+                outputBytes: webp.length,
+            })
             await writeGcsCache(storage, `${base}/${kind}.webp`, webp, `${base}/${kind}`)
         }
     } catch (err) {
-        const code = err instanceof HeicRenditionError ? err.code : "CONVERSION_FAILED"
+        const code = err instanceof HeicRenditionThreadError ? err.code : "CONVERSION_FAILED"
         logger.warn("[HeicRendition] Generation failed; writing failure markers", {
             storagePath,
             code,

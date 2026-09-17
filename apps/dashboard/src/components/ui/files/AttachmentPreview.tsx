@@ -17,6 +17,7 @@ import { generateWebThumbnail, isVideoFile } from '../../../services/thumbnailSe
 import {
   convertHeicFileToPreviewBlob,
   isHeicAttachment,
+  isWebRenderableImageType,
   sniffHeicFile,
 } from '../../../services/heicAttachmentService';
 import { createPreviewUrl } from '../../../services/clients/fileFetchService';
@@ -115,7 +116,25 @@ export const AttachmentPreview: React.FC<AttachmentPreviewProps> = ({
         previewCacheRef.current.set(cacheKey, url);
         setImagePreviewUrl(url);
         return;
-      } catch {
+      } catch (err) {
+        // 404 is permanent, stop retrying and try the original bytes once — a renamed
+        // JPEG renders fine, true HEIC bytes cannot and land on the icon.
+        const status = (err as { response?: { status?: number } })?.response?.status;
+        if (status === 404) {
+          try {
+            const blob = await createPreviewUrl(id);
+            if (isWebRenderableImageType(blob.type)) {
+              const url = URL.createObjectURL(blob);
+              previewCacheRef.current.set(cacheKey, url);
+              setImagePreviewUrl(url);
+            } else {
+              setPreviewError(true);
+            }
+          } catch {
+            setPreviewError(true);
+          }
+          return;
+        }
         if (attempt === 4) {
           setPreviewError(true);
         } else {

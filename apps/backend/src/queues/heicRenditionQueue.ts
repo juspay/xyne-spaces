@@ -4,6 +4,10 @@ import { logger } from '@/utils/logger';
 import { redisService } from '@/services/redisService';
 import { storageService } from '@/services/storage';
 import { generateHeicRenditions } from '@/services/heicRenditionService';
+import {
+  HEIC_RENDITION_THREAD_COUNT,
+  shutdownHeicRenditionPool,
+} from '@/services/heicRenditionPool';
 
 const QUEUE_NAME = 'heic-renditions';
 const JOB_NAME = 'generate-heic-renditions';
@@ -12,22 +16,20 @@ export type HeicRenditionJob = {
   storagePath: string;
 };
 
-// Bounds in-flight jobs, i.e. peak RGBA memory — not parallelism: the libheif
-// WASM decode is synchronous, so concurrent jobs still decode one at a time
-// on this process's single thread. That is acceptable here because this
-// worker is dedicated to this queue; it was not acceptable on the API's
-// request path, which is why generation moved here.
-const WORKER_CONCURRENCY = 2;
+// In-flight jobs are one-to-one with pool threads: the libheif decode is
+// synchronous, but it runs on a dedicated worker_threads pool
+// (heicRenditionPool), not on this process's loop — so this concurrency is
+// true parallelism across threads and bounds peak RGBA at 2 images.
+const WORKER_CONCURRENCY = HEIC_RENDITION_THREAD_COUNT;
 
 /**
  * HEIC → WebP rendition generation for chat attachments.
  *
  * The API enqueues (at upload time, and on read misses as a fallback) and
  * never decodes on the request path: the synchronous WASM decode takes
- * seconds per photo and would stall the API's event loop for its whole
- * duration. Like the stitch worker, the decode blocks THIS process's event
- * loop while it runs — a busy deployment should isolate it on a dedicated
- * node that enables only ENABLE_HEIC_RENDITION_WORKER.
+ * seconds per photo. The consumer hands the decode + encode to a
+ * worker_threads pool (heicRenditionPool), so the decode blocks a dedicated
+ * thread instead of this process's event loop.
  */
 class HeicRenditionQueue {
   private queue: Bull.Queue<HeicRenditionJob> | null = null;
@@ -95,6 +97,7 @@ class HeicRenditionQueue {
     if (!this.queue) return;
     // Let in-flight decodes finish rather than killing them mid-WASM-call.
     await this.queue.close();
+    await shutdownHeicRenditionPool();
     this.queue = null;
     this.isInitialized = false;
     this.processorRegistered = false;
