@@ -66,7 +66,23 @@ const MIN_RUNS = positiveInt("USAGE_PATTERNS_MIN_RUNS", 3);
 const MIN_DISTINCT_USERS = positiveInt("USAGE_PATTERNS_MIN_DISTINCT_USERS", 2);
 
 const CLAW_URL = CONFIG.xyneClawUrl.replace(/\/+$/, "");
-const TIMEOUT_MS = positiveInt("USAGE_PATTERNS_TIMEOUT_MS", 90_000);
+/**
+ * Must stay ABOVE the curator's own timeout on claw
+ * (USAGE_PATTERN_CURATOR_TIMEOUT_MS, 600s), not equal to it.
+ *
+ * They were both 90s, and since this clock starts first — a network hop and
+ * claw's own pre-LLM work earlier — this side always aborted before the curator
+ * could answer. Every agent that cleared the thresholds in production came back
+ * `distill-failed` at exactly 91s, which reads as "the model refused" when it
+ * actually means "we hung up on it". The headroom lets the curator lose its own
+ * race and return `ok:false`, which is a diagnosis rather than a timeout.
+ *
+ * Long because the request is QUEUED, not because the model is slow: the
+ * curator deliberately uses LiteLLM's low-priority automation key. Long is
+ * affordable now too, since nothing holds an HTTP connection open for it --
+ * the POST answers 202 and the worker awaits this in the background.
+ */
+const TIMEOUT_MS = positiveInt("USAGE_PATTERNS_TIMEOUT_MS", 660_000);
 /** The curator route on claw. Overridable so the two services can be rolled
  *  independently if the path ever moves. */
 const DISTILL_PATH = process.env["USAGE_PATTERNS_DISTILL_PATH"] ?? "/internal/usage-pattern-curator/distill";

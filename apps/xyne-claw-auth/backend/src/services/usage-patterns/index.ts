@@ -8,6 +8,10 @@
  *
  * The file is stored as a shared AgentMemoryFile so a human can correct it, and
  * mirrored into the agent index as `kind:usage` so routing can search it.
+ *
+ * Who runs it: a weekly leader-locked cron picks the agents with enough runs
+ * (roster.ts) and enqueues one job each; the bounded worker drains the queue.
+ * The per-agent HTTP route stays for the button in the UI.
  */
 export {
   assembleCorpus,
@@ -35,6 +39,10 @@ export {
   UPDATED_BY,
 } from "./synthesize.js";
 export type { UsagePatternJob } from "./synthesize.js";
+export { activeAgents, allOrgAgents, countDelegations, mergeRoster, rankRoster } from "./roster.js";
+export type { ActiveAgent, ActiveRoster } from "./roster.js";
+export { isWeeklySlotDue, weekBucket } from "./schedule.js";
+export type { WeeklySlot } from "./schedule.js";
 export type {
   DistilledPattern,
   PatternKind,
