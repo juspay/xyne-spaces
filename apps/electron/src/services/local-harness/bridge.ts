@@ -790,13 +790,11 @@ export class LocalHarnessBridge {
         return;
       }
 
-      const stat = await fsp.stat(path);
-      if (stat.size > MAX_SESSION_BYTES) {
-        log.warn(`[LocalHarness] run=${envelope.runId} session file ${stat.size} bytes exceeds archive limit`);
+      const body = await fsp.readFile(path);
+      if (body.byteLength > MAX_SESSION_BYTES) {
+        log.warn(`[LocalHarness] run=${envelope.runId} session file ${body.byteLength} bytes exceeds archive limit`);
         return;
       }
-
-      const body = await fsp.readFile(path);
       const url =
         `${this.baseUrl()}/local-harness-bridge/runs/${encodeURIComponent(envelope.runId)}/session` +
         `?sessionId=${encodeURIComponent(sessionId)}`;

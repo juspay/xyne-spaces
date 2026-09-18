@@ -88,9 +88,9 @@ function textRecord(result: unknown): Record<string, unknown> | null {
   if (!text || text.trim().startsWith("{")) return null;
 
   const record: Record<string, unknown> = {};
-  const title = /^\s*Title:\s*(.+?)\s*$/im.exec(text)?.[1];
+  const title = /^[ \t]*Title:[ \t]*(.*)$/im.exec(text)?.[1]?.trim();
   if (title && title !== "(unknown)") record["title"] = title;
-  const urlLine = /^\s*URL:\s*(https?:\/\/\S+)\s*$/im.exec(text)?.[1] ?? /https?:\/\/[^\s)>\]]+/i.exec(text)?.[0];
+  const urlLine = /^[ \t]*URL:[ \t]*(https?:\/\/\S+)[ \t]*$/im.exec(text)?.[1] ?? /https?:\/\/[^\s)>\]]+/i.exec(text)?.[0];
   if (urlLine) {
     record["url"] = urlLine;
     const canvasId = /\/canvas\/([A-Za-z0-9_-]+)/.exec(urlLine)?.[1];
