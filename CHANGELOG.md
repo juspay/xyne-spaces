@@ -1,3 +1,10 @@
+## [1.342.1](https://github.com/juspay/xyne-spaces/compare/v1.342.0...v1.342.1) (2026-09-18)
+
+
+### Bug Fixes
+
+* API assessment remediations (BOLA attachment access + upload validation) ([#2029](https://github.com/juspay/xyne-spaces/issues/2029)) ([c6cb7bc](https://github.com/juspay/xyne-spaces/commit/c6cb7bc5d3f76981317836546e22697143cbdbe8))
+
 ## [1.342.0](https://github.com/juspay/xyne-spaces/compare/v1.341.0...v1.342.0) (2026-09-18)
 
 
