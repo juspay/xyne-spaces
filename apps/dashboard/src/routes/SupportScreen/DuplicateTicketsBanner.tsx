@@ -71,21 +71,13 @@ const DuplicateTicketsBanner = ({ ticketId }: DuplicateTicketsBannerProps): Reac
     // Outgoing: this ticket was flagged as a duplicate of an earlier one.
     for (const reference of ticket.referencesOut ?? []) {
       if (!DUPLICATE_RELATIONS.has(reference.relationType)) continue;
-      push(
-        reference,
-        reference.targetTicket,
-        formatReferenceLabel(reference.relationType as TicketReferenceRelation),
-      );
+      push(reference, reference.targetTicket, formatReferenceLabel(reference.relationType));
     }
 
     // Incoming: later tickets were flagged as duplicates of this one.
     for (const reference of ticket.referencesIn ?? []) {
       if (!DUPLICATE_RELATIONS.has(reference.relationType)) continue;
-      push(
-        reference,
-        reference.sourceTicket,
-        formatIncomingReferenceLabel(reference.relationType as TicketReferenceRelation),
-      );
+      push(reference, reference.sourceTicket, formatIncomingReferenceLabel(reference.relationType));
     }
 
     return entries;
