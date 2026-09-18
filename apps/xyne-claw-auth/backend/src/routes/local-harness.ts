@@ -482,6 +482,10 @@ bridgeRouter.put(
       return;
     }
     const body = req.body;
+    if (typeof body === "string" || Array.isArray(body)) {
+      res.status(400).json({ success: false, error: "Session body must be raw binary data" });
+      return;
+    }
     if (!Buffer.isBuffer(body) || body.length === 0 || body.length > HARNESS_SESSION_MAX_BYTES) {
       res.status(400).json({ success: false, error: "Session body must be a non-empty payload of at most 32MB" });
       return;
