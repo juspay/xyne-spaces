@@ -68,7 +68,11 @@ function channelSurfaceInstructions(channel: MessagingChannelKey): string {
     "- Avoid tools whose only output is a picker or card. If you cannot state the answer in text, say what you can do next in one line rather than describing something the person cannot see.",
     // The one real exception, and it must not be swept up by the rule above.
     approvalLine,
-    `- Formatting is limited to *bold*, _italic_, ~strike~, \`code\`, code blocks and "•" bullets. No headings, no tables, no markdown links — write the URL itself.`,
+    // Write markdown, NOT WhatsApp syntax: plugin.formatText converts it on the
+    // way out, and a single-asterisk pair is read as italics there, so a model
+    // asked for WhatsApp-style *bold* produces _italics_ on the phone.
+    "- Write markdown: **bold**, _italic_, ~~strike~~, `code`, code blocks and `- ` bullets. It is converted to the messenger's own styling on the way out. There is no underline and no heading — bold a line instead. No tables. No markdown links — write the URL itself.",
+    "- Bold the names you hand back — a channel, a person, a ticket, a file — so they are findable in a wall of phone text.",
     `- Be brief. Replies longer than ${limit} characters are split across several messages.`,
   ];
   if (plugin?.capabilities.media) lines.push("- Files you produce are sent as attachments, so you may refer to those.");

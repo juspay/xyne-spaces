@@ -42,7 +42,10 @@ webhookRouter.get("/webhook/:accountId", async (req: Request, res: Response) => 
     return;
   }
   const account = toChannelAccount(row);
-  const ok = token ? await plugin.verifyChallenge(account, authStateFor(account.id), token).catch(() => false) : false;
+  // The token is the credential being checked, not a decision the caller gets
+  // to make: verifyChallenge compares it to the secret the admin stored, in
+  // constant time, and an absent secret or an empty token both fail there.
+  const ok = await plugin.verifyChallenge(account, authStateFor(account.id), token).catch(() => false);
   if (!ok) {
     log.warn(`[channel-webhook] challenge rejected account=${accountId}`);
     res.status(403).json({ success: false, error: "Verification failed" });

@@ -43,6 +43,16 @@ describe("formatForWhatsApp", () => {
     expect(formatForWhatsApp("[docs](https://example.com)")).toBe("docs (https://example.com)");
   });
 
+  it("converts every form the surface instructions promise the model", () => {
+    // If this drifts, the agent is being told to write a syntax that arrives
+    // as something else — which is how *bold* once reached phones as italics.
+    expect(formatForWhatsApp("**bold**")).toBe("*bold*");
+    expect(formatForWhatsApp("_italic_")).toBe("_italic_");
+    expect(formatForWhatsApp("~~strike~~")).toBe("~strike~");
+    expect(formatForWhatsApp("`code`")).toBe("`code`");
+    expect(formatForWhatsApp("- one")).toBe("• one");
+  });
+
   it("leaves the inside of a code fence alone", () => {
     expect(formatForWhatsApp("```\n**not bold**\n```")).toBe("```\n**not bold**\n```");
   });
