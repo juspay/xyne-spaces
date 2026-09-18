@@ -45,7 +45,10 @@ export const sdlcChatNavigationSearch = (input: {
   });
 
   if (!currentLayout.panelOpen) {
-    destination.set('discussion', '0');
+    // Closed carries — but a destination that asks for the panel outranks it, so
+    // opening a track, folder or artifact still brings its conversations back
+    // after the reader has closed the panel somewhere else.
+    if (!destination.has('discussion')) destination.set('discussion', '0');
     return `?${destination.toString()}`;
   }
 
