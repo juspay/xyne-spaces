@@ -536,10 +536,11 @@ export class GitHubService implements VcsClient {
       }> = [];
 
       const PER_PAGE = 100;
+      const MAX_PAGES = 50; // Safety limit: max 5000 commits
       let page = 1;
 
       // Fetch all pages
-      while (true) {
+      while (page <= MAX_PAGES) {
         const url = `/repos/${owner}/${repo}/pulls/${prNumber}/commits?per_page=${PER_PAGE}&page=${page}`;
         const data = await this.restRequest<typeof commits>(url);
 
@@ -548,6 +549,10 @@ export class GitHubService implements VcsClient {
         // Last page reached
         if (data.length < PER_PAGE) break;
         page++;
+      }
+
+      if (page > MAX_PAGES) {
+        logger.warn(`GitHub: PR #${prNumber} has more than ${MAX_PAGES * PER_PAGE} commits, truncated`);
       }
 
       logger.info(`GitHub: fetched ${commits.length} commit(s) for PR #${prNumber} in ${owner}/${repo}`);
