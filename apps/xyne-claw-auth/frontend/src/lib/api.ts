@@ -2637,6 +2637,33 @@ export async function removeAgentShare(slug: string, requesterId: string, target
 }
 
 /**
+ * Transfer agent ownership to another user. Immediate — there is no acceptance
+ * step — and owner/admin-only, same-org only (enforced server side).
+ *
+ * The agent row itself is kept, so the Spaces app identity, every channel
+ * install and all existing schedules survive the transfer. By default the
+ * outgoing owner is kept on as an EDITOR; without that they would lose sight of
+ * a personal-scope agent entirely, since visibility is derived from ownership
+ * OR a share row.
+ */
+export async function transferAgentOwnership(
+  slug: string,
+  requesterId: string,
+  newOwnerUserId: string,
+  keepPreviousOwnerAsEditor = true,
+): Promise<{ ownerUserId: string; previousOwnerUserId: string | null }> {
+  const data = await request<{ success: boolean; data: { ownerUserId: string; previousOwnerUserId: string | null } }>(
+    `${AUTH_API_URL}/api/v1/agents/${slug}/transfer-ownership`,
+    {
+      method: "POST",
+      headers: { "x-user-id": requesterId, "Content-Type": "application/json" },
+      body: JSON.stringify({ newOwnerUserId, keepPreviousOwnerAsEditor }),
+    },
+  );
+  return data.data;
+}
+
+/**
  * Health-check a single agent-pinned MCP instance. Hits the agent-scoped
  * health route (mirrors checkConnectionHealth for global connections) so the
  * agent MCP tab can show a real reachability status instead of a hardcoded
