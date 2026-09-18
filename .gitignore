@@ -243,6 +243,3 @@ security-reports/
 
 # Build exports (make export-dashboard-bundle)
 out/
-
-# local demo reel assets (never commit)
-demo-reel/
