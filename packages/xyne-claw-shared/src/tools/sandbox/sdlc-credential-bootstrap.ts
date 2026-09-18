@@ -7,6 +7,14 @@ export interface SdlcRepositoryAccessBinding {
   actorUserId: string;
 }
 
+/** How claw reaches claw-auth, which forwards to Spaces under the run's session token. */
+export interface SdlcRepositoryAccessTransport {
+  authUrl: string;
+  s2sKey: string;
+  runSessionId: string;
+  sessionToken: string;
+}
+
 export interface SdlcRepositoryAccessTarget {
   name: string;
   cloneUrl: string;
@@ -35,15 +43,18 @@ const CLEANUP_SCRIPT = `${ROOT}/.sdlc-cleanup.cjs`;
 
 async function requestEnvelope(
   binding: SdlcRepositoryAccessBinding,
+  transport: SdlcRepositoryAccessTransport,
   sandboxId: string,
   sandboxPublicKey: string,
 ): Promise<{ envelope: SdlcCredentialEnvelope | null; repository: SdlcRepositoryAccessTarget }> {
-  const baseUrl = (process.env["SPACES_BACKEND_URL"] ?? process.env["XYNE_SPACES_URL"] ?? "").replace(/\/+$/, "");
-  const s2sKey = process.env["XYNE_CLAW_S2S_KEY"] ?? "";
-  if (!baseUrl || !s2sKey) throw new Error("Spaces URL or S2S key is unavailable for repository access");
-  const response = await fetch(`${baseUrl}/api/internal/sdlc/vcs/runtime-credentials/bootstrap`, {
+  const { authUrl, s2sKey, runSessionId, sessionToken } = transport;
+  if (!authUrl || !s2sKey || !runSessionId || !sessionToken) {
+    throw new Error("Claw auth URL, S2S key or session token is unavailable for repository access");
+  }
+  const url = `${authUrl.replace(/\/+$/, "")}/claw/api/v1/sessions/${encodeURIComponent(runSessionId)}/sdlc/runtime-credentials/bootstrap`;
+  const response = await fetch(url, {
     method: "POST",
-    headers: { "Content-Type": "application/json", "x-s2s-key": s2sKey },
+    headers: { "Content-Type": "application/json", "x-s2s-key": s2sKey, Authorization: `Bearer ${sessionToken}` },
     body: JSON.stringify({ ...binding, sandboxId, sandboxPublicKey }),
     signal: AbortSignal.timeout(20_000),
   });
@@ -149,6 +160,7 @@ for(const f of fs.readdirSync(root)){if(f.startsWith(".sdlc-"))fs.rmSync(root+"/
 export async function installSdlcRepositoryAccess(
   session: Session,
   binding: SdlcRepositoryAccessBinding,
+  transport: SdlcRepositoryAccessTransport,
 ): Promise<{ mode: "credential" | "anonymous"; repository: SdlcRepositoryAccessTarget }> {
   const preflight = await session.commands.run(
     `node -e "const m=Number(process.versions.node.split('.')[0]);if(m<20)process.exit(1)"`,
@@ -164,7 +176,7 @@ export async function installSdlcRepositoryAccess(
 
   let result: Awaited<ReturnType<typeof requestEnvelope>>;
   try {
-    result = await requestEnvelope(binding, session.id, sandboxPublicKey);
+    result = await requestEnvelope(binding, transport, session.id, sandboxPublicKey);
   } catch (error) {
     await session.commands.run(`rm -f ${PRIVATE_KEY}`, 5_000).catch(() => undefined);
     throw error;
