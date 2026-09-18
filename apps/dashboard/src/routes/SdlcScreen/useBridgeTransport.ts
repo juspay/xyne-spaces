@@ -34,12 +34,14 @@ export function useBridgeTransport(enabled: boolean, events: TransportEvents): A
       setReady(false);
       return;
     }
+    console.debug('[annotate/bridge] lane armed, pinging host');
     const onMessage = (event: MessageEvent): void => {
       if (event.origin !== window.location.origin) return;
       const message = parseSdlcFrameMessage(event.data);
       if (!message || message.type !== SDLC_FRAME_MESSAGE.embedEvent) return;
       const payload = message.payload;
 
+      console.debug('[annotate/bridge] lane got event', payload['type']);
       if (payload['type'] === 'ready') {
         setReady(true);
         handlers.current.onReady?.();
