@@ -92,44 +92,63 @@ export const loadPreferenceRow = (channelId: string) =>
     select: { ownerUserId: true, onboardingConfig: true, onboardingAttempts: true },
   });
 
-interface LockedRow {
-  onboardingConfig: unknown;
-  onboardingAttempts: unknown;
+interface StoredRow {
+  onboardingConfig: Prisma.JsonValue;
+  onboardingAttempts: Prisma.JsonValue;
 }
 
-type Change<V, R> = (value: V, row: LockedRow) => { next: V | null; result: R } | null;
+type Change<V, R> = (value: V, row: StoredRow) => { next: V | null; result: R } | null;
+
+/** Attempts of the read-modify-write below before the caller is told the desk is busy. */
+const MAX_WRITE_ATTEMPTS = 5;
+
+/** Matches the column only if it still holds exactly what we read a moment ago. */
+const unchanged = (value: Prisma.JsonValue): Prisma.JsonNullableFilter<'EmailChannelPreference'> =>
+  value === null ? { equals: Prisma.DbNull } : { equals: value as Prisma.InputJsonValue };
 
 /**
- * Read-modify-write one column under a row lock, so a submit, a grade callback and an admin edit
- * never overwrite each other. `change` must not do I/O — the lock is held while it runs; it
- * returns null to skip the write, or `next: null` to answer without writing.
+ * Read-modify-write one column as a compare-and-swap, so a submit, a grade callback and an admin
+ * edit can never overwrite each other: the update only lands if the column still holds what the
+ * read returned, and otherwise `change` is re-applied to the newer value. `change` must therefore
+ * be free of side effects — it can run more than once. It returns null to skip the write entirely,
+ * or `next: null` to answer without writing.
+ *
+ * This is deliberately not a `SELECT … FOR UPDATE`: raw SQL bypasses the tenant ACL and
+ * workspaceId-stamping extensions in `database/tenant/`, so every write here goes through the
+ * query builder instead.
  */
-function locked<V, R>(
+async function locked<V, R>(
   channelId: string,
   workspaceId: string,
   column: 'onboardingConfig' | 'onboardingAttempts',
   parseValue: (raw: unknown) => V,
   change: Change<V, R>
 ): Promise<R | null> {
-  const where = Prisma.sql`WHERE "channelId" = ${channelId} AND "workspaceId" = ${workspaceId}`;
-  return db.$transaction(
-    async (tx) => {
-      const [row] = await tx.$queryRaw<LockedRow[]>`
-        SELECT "onboardingConfig", "onboardingAttempts"
-        FROM "public"."email_channel_preferences" ${where} FOR UPDATE`;
-      if (!row) throw new OnboardingRequestError('Desk settings not found for this channel', 404);
-      const outcome = change(parseValue(row[column]), row);
-      if (!outcome) return null;
-      if (outcome.next !== null) {
-        await tx.$executeRaw`
-          UPDATE "public"."email_channel_preferences"
-          SET ${Prisma.raw(`"${column}"`)} = ${JSON.stringify(outcome.next)}::jsonb ${where}`;
-      }
-      return outcome.result;
-    },
-    // Zero's writes to other columns of this row take the same lock, so allow a longer wait.
-    { maxWait: 10_000, timeout: 20_000 }
-  );
+  for (let attempt = 0; attempt < MAX_WRITE_ATTEMPTS; attempt++) {
+    const row = await db.emailChannelPreference.findFirst({
+      where: { channelId, workspaceId },
+      select: { onboardingConfig: true, onboardingAttempts: true },
+    });
+    if (!row) throw new OnboardingRequestError('Desk settings not found for this channel', 404);
+
+    const outcome = change(parseValue(row[column]), row);
+    if (!outcome) return null;
+    if (outcome.next === null) return outcome.result;
+
+    const written =
+      column === 'onboardingConfig'
+        ? await db.emailChannelPreference.updateMany({
+            where: { channelId, workspaceId, onboardingConfig: unchanged(row.onboardingConfig) },
+            data: { onboardingConfig: outcome.next as Prisma.InputJsonValue },
+          })
+        : await db.emailChannelPreference.updateMany({
+            where: { channelId, workspaceId, onboardingAttempts: unchanged(row.onboardingAttempts) },
+            data: { onboardingAttempts: outcome.next as Prisma.InputJsonValue },
+          });
+    if (written.count > 0) return outcome.result;
+  }
+  // Every attempt lost the race, which on this row means something is hammering the same desk.
+  throw new OnboardingRequestError('The desk was busy. Try again.', 409);
 }
 
 export const updateConfig = <R>(
