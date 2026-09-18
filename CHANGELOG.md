@@ -1,3 +1,11 @@
+## [1.340.1](https://github.com/juspay/xyne-spaces/compare/v1.340.0...v1.340.1) (2026-09-18)
+
+
+### Bug Fixes
+
+* always show Copy link in recording share modal ([#2034](https://github.com/juspay/xyne-spaces/issues/2034)) ([4e52be9](https://github.com/juspay/xyne-spaces/commit/4e52be934704f0509d7537e3135bbe5f7e0871bd))
+* ticket create and update api merchantid addition ([#1999](https://github.com/juspay/xyne-spaces/issues/1999)) ([7e57987](https://github.com/juspay/xyne-spaces/commit/7e579874d9e66b529df8506e812139db9a2053f2))
+
 ## [1.340.0](https://github.com/juspay/xyne-spaces/compare/v1.339.0...v1.340.0) (2026-09-18)
 
 
