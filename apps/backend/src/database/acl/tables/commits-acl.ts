@@ -2,10 +2,7 @@ import { PrismaClient, Prisma } from '@prisma/client';
 import { BaseQueryACL, ACLContext } from '../base-acl';
 
 /**
- * ACL for Commit table - scoped via pull_requests.workspaceId relationship
- *
- * Commits don't have a direct workspaceId field (denormalized away for storage efficiency)
- * but are scoped via the pullRequest FK relationship which has workspaceId.
+ * ACL for Commit table - scoped via denormalized workspaceId
  */
 export class CommitsACL extends BaseQueryACL<
   Prisma.CommitWhereInput,
@@ -16,13 +13,11 @@ export class CommitsACL extends BaseQueryACL<
   }
 
   /**
-   * Filter commits by workspace through the pullRequest relationship
+   * Filter commits by workspace using denormalized workspaceId
    */
   async getWhereClause(): Promise<Prisma.CommitWhereInput> {
     return {
-      pullRequest: {
-        workspaceId: this.ctx.workspaceId,
-      },
+      workspaceId: this.ctx.workspaceId,
     };
   }
 
