@@ -52,6 +52,7 @@ import {
   Plus,
   RefreshCw,
   Search,
+  Settings,
   ShieldCheck,
   Sparkles,
   SquareArrowOutUpRight,
@@ -64,6 +65,7 @@ import { EntitySelector } from '../../components/ui/EntitySelector/EntitySelecto
 import { Tabs } from '../../components/ui/Tabs';
 import NotFoundScreen from '../NotFoundScreen/NotFoundScreen';
 import { SdlcHubDialog } from './SdlcHubDialog';
+import { SdlcHubRepositoriesDialog } from './SdlcHubRepositoriesDialog';
 import {
   SdlcHubPicker,
   persistSdlcSectionHeights,
@@ -3499,6 +3501,40 @@ export default function SdlcScreen(): ReactElement {
                   );
                 })}
               </SdlcSidebarSection>
+              <SdlcSidebarSectionSeparator />
+              <SdlcSidebarSection
+                id='sdlc-sidebar-repositories'
+                title='Repositories'
+                count={channelRepos.length}
+                action={{
+                  label: 'Manage repositories',
+                  trackName: 'HubRepositoriesOpened',
+                  icon: <Settings className='size-3.5' />,
+                  onClick: () => setHubDialog('manage'),
+                }}
+              >
+                {channelRepos.map(repository => (
+                  <a
+                    key={repository.id}
+                    href={repository.canonicalUrl || repository.url}
+                    target='_blank'
+                    rel='noreferrer'
+                    className='mb-0.5 flex h-[32px] w-full items-center gap-2.5 rounded-[6px] px-2 text-[13px] text-sidebar-foreground transition-colors hover:bg-foreground/[0.06]'
+                    title={repository.canonicalUrl || repository.url}
+                    data-track-category='SdlcHub'
+                    data-track-name='HubRepositoryOpened'
+                    data-track-metadata={JSON.stringify({ repoId: repository.id })}
+                  >
+                    <GitBranch size={15} className='shrink-0 text-sidebar-foreground/70' />
+                    <span className='flex-1 truncate text-left'>{repository.name}</span>
+                  </a>
+                ))}
+                {channelRepos.length === 0 && (
+                  <p className='px-2 py-3 text-[12.5px] text-sidebar-foreground/50'>
+                    No repositories yet.
+                  </p>
+                )}
+              </SdlcSidebarSection>
               {/* Slack. Panels have to fill the group, so without something here to
                 take the leftover height the group refuses to collapse the last
                 open section — every section closed is a perfectly reasonable
@@ -4168,26 +4204,21 @@ export default function SdlcScreen(): ReactElement {
       </Dialog>
 
       <SdlcHubDialog
-        projectId={channel.projectId ?? ''}
-        open={hubDialog !== null}
-        onOpenChange={open => setHubDialog(open ? hubDialog : null)}
-        {...(hubDialog === 'manage'
-          ? {
-              hub: {
-                channelId: channel.id,
-                repoIds: channelRepos.map(item => item.id),
-                repositories: channelRepos.map(item => ({
-                  id: item.id,
-                  name: item.name,
-                  url: item.canonicalUrl || item.url,
-                  projectId: item.projectId ?? null,
-                })),
-              },
-            }
-          : {})}
-        onSaved={savedChannelId => {
-          if (savedChannelId !== channelId) void navigate(`/sdlc/${savedChannelId}/overview`);
-        }}
+        projectId={channel.projectId}
+        open={hubDialog === 'create'}
+        onOpenChange={open => setHubDialog(open ? 'create' : null)}
+        onSaved={savedChannelId => void navigate(`/sdlc/${savedChannelId}/overview`)}
+      />
+      <SdlcHubRepositoriesDialog
+        open={hubDialog === 'manage'}
+        onOpenChange={open => setHubDialog(open ? 'manage' : null)}
+        channelId={channel.id}
+        projectId={channel.projectId}
+        repositories={channelRepos.map(item => ({
+          id: item.id,
+          name: item.name,
+          url: item.canonicalUrl || item.url,
+        }))}
       />
 
       <Dialog
