@@ -1,3 +1,10 @@
+## [1.345.3](https://github.com/juspay/xyne-spaces/compare/v1.345.2...v1.345.3) (2026-09-18)
+
+
+### Bug Fixes
+
+* stop Google Calendar from emailing call participants ([#2074](https://github.com/juspay/xyne-spaces/issues/2074)) ([447e54d](https://github.com/juspay/xyne-spaces/commit/447e54d0e87e7128199a00f9657c245bea1b4953))
+
 ## [1.345.2](https://github.com/juspay/xyne-spaces/compare/v1.345.1...v1.345.2) (2026-09-18)
 
 
