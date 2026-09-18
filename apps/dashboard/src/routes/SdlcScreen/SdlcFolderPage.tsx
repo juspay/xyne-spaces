@@ -33,6 +33,8 @@ import {
   subscribeToEmbeddedPage,
 } from './useSdlcFrameBridge';
 import type { SdlcEmbedTab } from './sdlcFrameMessages';
+import { AttachmentPreviewPane } from '../../components/FileViewer/AttachmentPreviewPane';
+import { detectFileType } from '../../components/FileViewer/utils';
 import { fileKind, formatFileSize } from './fileKind';
 import type { SdlcFinderCanvas, SdlcFinderFile, SdlcFinderLink } from './SdlcFinder';
 
@@ -922,17 +924,22 @@ function TabContent(props: {
   if (!file) return <Missing what='file' />;
   const kind = fileKind(file.mimetype, file.name);
 
-  // The attachment stream serves images and PDFs inline and forces everything
-  // else to download, so only those two can be shown in place.
-  if (file.mimetype.startsWith('image/')) {
+  // The same viewers the rest of the app previews attachments with — csv, xlsx,
+  // docx, pptx, markdown and html included — rather than a second, poorer set
+  // living here. They fetch through apiInstance, so the lane's api base applies
+  // and the stream's download headers never come into it.
+  if (detectFileType(file.mimetype, file.name)) {
     return (
-      <div className='flex h-full items-center justify-center overflow-auto bg-foreground/[0.03] p-6'>
-        <img src={file.url} alt={file.name} className='max-h-full max-w-full object-contain' />
+      <div className='flex h-full min-h-0 flex-col'>
+        <AttachmentPreviewPane
+          attachmentId={file.id}
+          fileName={file.name}
+          mimeType={file.mimetype}
+          fileSize={file.size}
+          flush
+        />
       </div>
     );
-  }
-  if (file.mimetype === 'application/pdf') {
-    return <iframe src={file.url} title={file.name} className='size-full border-0' />;
   }
   return (
     <div className='flex h-full flex-col items-center justify-center gap-3 p-8 text-center'>
