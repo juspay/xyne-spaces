@@ -53,6 +53,7 @@ import { recoveryService } from './workflows/services/recovery-service'
 import { aiProvisioningWorker } from '@/workers/aiProvisioningWorker';
 import { socialMediaSyncWorker } from '@/workers/socialMediaSyncWorker';
 import { workflowsWorker } from '@/workers/workflowsWorker';
+import { heicRenditionQueue } from '@/queues/heicRenditionQueue';
 config()
 
 process.on('unhandledRejection', reason => {
@@ -240,6 +241,12 @@ class WorkerService {
         const { stitchWorker } = await import('@/workers/stitchWorker');
         stitchWorker.start();
       }
+
+      // HEIC → WebP renditions. Always consumed here: the decode runs on a
+      // worker_threads pool
+      logger.info('Starting HEIC rendition worker...');
+      await heicRenditionQueue.initialize();
+      heicRenditionQueue.startProcessing();
 
       if (appConfig.enableScheduledMessageWorker) {
         logger.info('Initializing notification service for scheduled message worker...');
@@ -504,6 +511,8 @@ class WorkerService {
         logger.info('Closing workflow step GCS sync queue...');
         await workflowStepGcsSyncQueue.close();
       }
+
+      await heicRenditionQueue.shutdown();
 
       if (appConfig.enableConversationIngestionWorker) {
         await conversationIngestionWorker.shutdown();

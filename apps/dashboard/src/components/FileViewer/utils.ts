@@ -60,7 +60,22 @@ export const FILE_TYPE_CONFIG: Record<string, FileTypeConfig<BaseViewerProps>> =
   },
   image: {
     mimeTypes: ['image/'],
-    extensions: ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.svg'],
+    // .heic/.heif extension fallback: some browsers report HEIC files as
+    // application/octet-stream, and the image/ prefix alone would leave those
+    // unclassified (null) — the HEIC render path (WebP rendition fetch) needs
+    // them classified as images.
+    extensions: [
+      '.jpg',
+      '.jpeg',
+      '.png',
+      '.gif',
+      '.bmp',
+      '.webp',
+      '.svg',
+      '.heic',
+      '.heif',
+      '.hif',
+    ],
     component: ImageViewer,
     wrapperClass: 'h-full w-full',
     displayName: 'Image',
