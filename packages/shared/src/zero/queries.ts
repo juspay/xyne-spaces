@@ -183,6 +183,10 @@ const toActualFieldValueQueryValue = (
 ): string | number | boolean =>
   typeof value === 'string' ? JSON.stringify(value) : value;
 
+const toDeskActualFieldValueQueryValue = (
+  value: string | number | boolean,
+): string | number | boolean => value;
+
 const supportDynamicFieldFiltersSchema = z
   .array(
     z.object({
@@ -207,7 +211,7 @@ const applySupportDynamicFieldFilters = (
         fevQuery = fevQuery.where((helpers: any) =>
           helpers.or(
             ...values.map((value: string | number | boolean) =>
-              helpers.cmp('actualFieldValue', '=', toActualFieldValueQueryValue(value)),
+              helpers.cmp('actualFieldValue', '=', toDeskActualFieldValueQueryValue(value)),
             ),
           ),
         );
