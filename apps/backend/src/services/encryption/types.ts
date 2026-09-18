@@ -1,7 +1,6 @@
-export type EncryptedFieldConfig = {
-  fields: string[];
-  enforceClientEncryption: boolean;
-};
+import type { EncryptedTableConfig } from '@xyne/shared';
+
+export type EncryptedFieldConfig = EncryptedTableConfig;
 
 export type ClientEncryptionConfig = {
   publicKey: string;
@@ -44,6 +43,7 @@ export type ProvisionEntityResult = {
 
 export interface EncryptionProvider {
   getPublicConfig(): Promise<ClientEncryptionConfig>;
+  getEncryptedFieldsConfig(): Promise<Record<string, EncryptedFieldConfig>>;
   registerSessionKey(input: RegisterSessionKeyInput): Promise<RegisterSessionKeyResult>;
   revokeSessionKey(sessionId: string): Promise<void>;
   encryptBatch(items: EncryptBatchItem[]): Promise<string[]>;
