@@ -207,6 +207,13 @@ export const shortcuts = {
     category: 'SDLC',
     preventDefault: true,
   },
+  'sdlc.toggleConversations': {
+    keys: 'mod+shift+d',
+    scope: 'global',
+    description: 'Show or hide conversations',
+    category: 'SDLC',
+    preventDefault: true,
+  },
   'sdlc.focusTickets': {
     keys: 'mod+shift+k',
     scope: 'global',
