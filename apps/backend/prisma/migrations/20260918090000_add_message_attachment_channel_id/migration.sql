@@ -14,8 +14,9 @@
 -- Batch it — the table is ~2.1M rows. Run it as an admin endpoint in xyne-spaces-private,
 -- following POST /migrate/api/admin/email-read-flag-backfill.
 --
--- Readers must tolerate NULL until the backfill completes, so getConversationAttachementsV2
--- keeps its whereExists('conversation') fallback until then.
+-- getConversationAttachementsV2 now filters on channelId directly, so the backfill is a
+-- PREREQUISITE for that reader, not an optimization: rows still NULL will not match it.
+-- Deploy order is backfill-then-reader.
 ALTER TABLE "public"."message_attachments" ADD COLUMN "channelId" TEXT;
 
 -- CreateIndex
