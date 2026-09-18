@@ -2,7 +2,7 @@ import { useSelector } from '@xstate/react';
 import { useMemo } from 'react';
 import { stateMachineActor } from '../machines/stateMachine.js';
 import type { Conversation, VisibleChannel } from '../machines/stateMachine.js';
-import { queryCacheActor } from '../machines/queryCacheMachine.js';
+import { getStorageAdapter, queryCacheActor } from '../machines/queryCacheMachine.js';
 import { searchChannels as _searchChannels, searchChannelsWithScores as _searchChannelsWithScores } from '../utils/search.js';
 import type { Channel, ChannelUserStatus } from '../zero/schema.js';
 import { ChannelScopeType, ChannelVisibility } from '../zero/schema.js';
@@ -289,8 +289,15 @@ export const getChannelConversationsSnapshot = (
   anchorCreatedAt?: number,
   windowSize = 100,
 ): Conversation[] => {
+  // Same actor-then-synchronous-storage order as getChannelSnapshot, so a cold
+  // open reads the persisted window instead of painting empty.
   const cached =
-    queryCacheActor.getSnapshot().context.channelConversations[channelId] || NO_CONVERSATIONS;
+    queryCacheActor.getSnapshot().context.channelConversations[channelId] ??
+    (getStorageAdapter()?.readChannelConversationsSync?.(channelId) as
+      | Conversation[]
+      | null
+      | undefined) ??
+    NO_CONVERSATIONS;
   const sorted = [...cached].sort((a, b) => a.createdAt - b.createdAt);
 
   if (sorted.length <= windowSize) return sorted;

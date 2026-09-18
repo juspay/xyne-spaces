@@ -1,11 +1,11 @@
-import type { Conversation } from '../machines/queryCacheMachine.js';
+import type { Conversation, ThreadConversation } from '../machines/queryCacheMachine.js';
 
 export const compareConversations = (left: Conversation, right: Conversation): number =>
   left.createdAt - right.createdAt || left.conversationId.localeCompare(right.conversationId);
 
 export const dedupeAndSortConversations = (
-  current: Conversation[],
-  incoming: Conversation[],
+  current: readonly Conversation[],
+  incoming: readonly Conversation[],
 ): Conversation[] => {
   const byId = new Map<string, Conversation>();
   for (const conversation of current) byId.set(conversation.conversationId, conversation);
@@ -13,6 +13,80 @@ export const dedupeAndSortConversations = (
     byId.set(conversation.conversationId, conversation);
   }
   return Array.from(byId.values()).sort(compareConversations);
+};
+
+type ThreadMessage = ThreadConversation['messages'][number];
+
+const compareThreadMessages = (
+  rootMessageId: string | undefined,
+  left: ThreadMessage,
+  right: ThreadMessage,
+): number => {
+  if (rootMessageId === left.messageId) return -1;
+  if (rootMessageId === right.messageId) return 1;
+  return left.createdAt - right.createdAt || left.messageId.localeCompare(right.messageId);
+};
+
+/**
+ * Dedupes thread rows by message identity and keeps the thread root first.
+ * The second argument wins a collision, so callers pass pending rows first and
+ * authoritative rows second.
+ */
+const dedupeAndSortThreadMessages = (
+  current: readonly ThreadMessage[],
+  incoming: readonly ThreadMessage[],
+): ThreadMessage[] => {
+  const byMessageId = new Map<string, ThreadMessage>();
+  for (const message of current) byMessageId.set(message.messageId, message);
+  for (const message of incoming) byMessageId.set(message.messageId, message);
+
+  const rootMessageId = incoming[0]?.messageId ?? current[0]?.messageId;
+  return Array.from(byMessageId.values()).sort((left, right) =>
+    compareThreadMessages(rootMessageId, left, right),
+  );
+};
+
+/**
+ * Merges server/live channel rows with optimistic pending rows. A server row
+ * wins by BOTH render identity and initial-message identity — matching only on
+ * `initialMessageId` leaves a pending row rendered beside the server row that
+ * replaced it. Pending state itself is not cleared here, because an optimistic
+ * row can still roll back.
+ */
+export const mergeServerAndPendingConversations = (
+  serverRows: readonly Conversation[],
+  pendingRows: readonly Conversation[],
+): Conversation[] => {
+  const serverConversationIds = new Set(serverRows.map(row => row.conversationId));
+  const serverMessageIds = new Set(
+    serverRows
+      .map(row => row.initialMessageId)
+      .filter((messageId): messageId is string => Boolean(messageId)),
+  );
+  const renderablePendingRows = pendingRows.filter(
+    row =>
+      !serverConversationIds.has(row.conversationId) &&
+      !serverMessageIds.has(row.initialMessageId),
+  );
+
+  return dedupeAndSortConversations(renderablePendingRows, serverRows);
+};
+
+/**
+ * Merges server/live thread messages with pending rows. Message identity is the
+ * only valid thread render key: the conversation id identifies the thread
+ * container, so matching on it would drop an unrelated pending reply.
+ */
+export const mergeServerAndPendingThreadMessages = (
+  serverRows: readonly ThreadMessage[],
+  pendingRows: readonly ThreadMessage[],
+): ThreadMessage[] => {
+  const serverMessageIds = new Set(serverRows.map(message => message.messageId));
+  const renderablePendingRows = pendingRows.filter(
+    message => !serverMessageIds.has(message.messageId),
+  );
+
+  return dedupeAndSortThreadMessages(renderablePendingRows, serverRows);
 };
 
 /** Replaces one live viewport window without disturbing rows outside that window. */
@@ -56,18 +130,21 @@ export const reconcileConversationWindow = (
  *     window sits far above `latest` and eager merging would drag the
  *     bottom of the list onto the tail and hide the anchor context.
  *   - Empty latest: pass fetched through unchanged.
- *   - Empty fetched: post-initial-load only, promote latest to the main list.
+ *   - Empty fetched: promote latest after initial load, or immediately when
+ *     the caller opted into provisional promotion for an unanchored open.
+ *     Anchored opens keep waiting for their authoritative window.
  */
 export const mergeConversationsWithLatest = (
   fetched: Conversation[],
   latest: Conversation[],
   isInitialLoadComplete: boolean,
+  allowProvisionalPromotion = false,
 ): { merged: Conversation[]; latestClear: boolean } => {
   if (latest.length === 0) {
     return { merged: dedupeAndSortConversations(fetched, []), latestClear: false };
   }
   if (fetched.length === 0) {
-    return isInitialLoadComplete
+    return isInitialLoadComplete || allowProvisionalPromotion
       ? { merged: dedupeAndSortConversations(latest, []), latestClear: true }
       : { merged: [], latestClear: false };
   }
