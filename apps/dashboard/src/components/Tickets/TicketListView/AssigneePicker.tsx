@@ -180,7 +180,11 @@ export function AssigneePicker({
     // The dropdown portal's clicks bubble through the React tree to the row —
     // this wrapper keeps a selection from also opening the ticket.
     // eslint-disable-next-line jsx-a11y/no-static-element-interactions, local-rules/require-tracking-on-click -- propagation island; the controls inside carry their own tracking
-    <span className='contents' onClick={e => e.stopPropagation()} onKeyDown={e => e.stopPropagation()}>
+    <span
+      className='contents'
+      onClick={e => e.stopPropagation()}
+      onKeyDown={e => e.stopPropagation()}
+    >
       <EntitySelector
         options={options}
         selectedValue={selectedValue}
