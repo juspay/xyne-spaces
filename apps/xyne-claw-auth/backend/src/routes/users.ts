@@ -148,8 +148,14 @@ function spacesSessionFromRequest(req: Request): { token?: string; sessionId?: s
   const header = req.headers.cookie;
   if (!header) return {};
   const read = (name: string): string | undefined => {
-    const match = new RegExp(`(?:^|;\\s*)${name}=([^;]+)`).exec(header);
-    return match?.[1]?.trim() || undefined;
+    const prefix = `${name}=`;
+    for (const part of header.split(";")) {
+      const cookie = part.trim();
+      if (cookie.startsWith(prefix)) {
+        return cookie.slice(prefix.length).trim() || undefined;
+      }
+    }
+    return undefined;
   };
   const workspace = read("xyne_last_workspace");
   const workspaceToken = workspace ? read(`xyne_ws_${workspace}_token`) : undefined;
