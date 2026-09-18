@@ -834,7 +834,6 @@ model LocalHarnessDevice {
   @@map("local_harness_devices")
 }
 
-// workspace-check:ignore — tenant scope inherited via artifactId -> ConversationArtifact; reads are gated on conversation membership, never on org.
 model ArtifactComment {
   id             String   @id @default(cuid())
   /// Tenant that owns this comment, inherited from the artifact it hangs off.
@@ -855,7 +854,6 @@ model ArtifactComment {
   @@map("artifact_comments")
 }
 
-// workspace-check:ignore — tenant scope inherited via deviceId -> LocalHarnessDevice.orgId (FK, onDelete: Cascade); every read is keyed by that device.
 model SurfaceCall {
   id        String             @id @default(cuid())
   /// Tenant that owns this call, inherited from the run that placed it.
@@ -2887,7 +2885,6 @@ model AgentAwakeningRun {
   @@map("agent_awakening_runs")
 }
 
-// workspace-check:ignore — orgId is advisory: webhook/automation producers legitimately have none. Scope is the conversation (reads require ownership or a message in it).
 model ConversationArtifact {
   id             String  @id @default(cuid())
   conversationId String
