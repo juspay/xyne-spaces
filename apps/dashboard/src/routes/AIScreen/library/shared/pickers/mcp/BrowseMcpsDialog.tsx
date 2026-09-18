@@ -1,4 +1,4 @@
-import { Fragment, useMemo, useState, type ReactElement } from 'react';
+import { Fragment, useEffect, useMemo, useState, type ReactElement } from 'react';
 import { cn } from '@/utils/classNames';
 import { searchByNameThenDescription } from '../../librarySearch';
 import { BROWSE_CARD, BROWSE_CARD_IDLE, BROWSE_CARD_SELECTED } from '../../primitives/browseCard';
@@ -107,6 +107,7 @@ interface BrowseMcpsDialogProps {
   catalog: readonly McpCatalogEntry[];
   connectedServerIds: ReadonlySet<string>;
   orgCoveredServerIds?: ReadonlySet<string>;
+  initialSlug?: string | null;
   loading: boolean;
   isError: boolean;
   onRetry: () => void;
@@ -121,6 +122,7 @@ export function BrowseMcpsDialog({
   catalog,
   connectedServerIds,
   orgCoveredServerIds,
+  initialSlug,
   loading,
   isError,
   onRetry,
@@ -131,6 +133,10 @@ export function BrowseMcpsDialog({
   const [query, setQuery] = useState('');
   const [category, setCategory] = useState<string | null>(null);
   const [openSlug, setOpenSlug] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (open) setOpenSlug(initialSlug ?? null);
+  }, [open, initialSlug]);
 
   const openEntry = catalog.find(entry => entry.slug === openSlug) ?? null;
 
@@ -248,6 +254,7 @@ export function BrowseMcpsDialog({
                 label={entry.label}
                 iconType={entry.iconType}
                 selected
+                onOpen={() => setOpenSlug(entry.slug)}
                 onToggle={() => onSelectionChange(disableEntry(catalog, selection, entry))}
               />
             ))}
