@@ -528,6 +528,10 @@ export class ACLFactory {
       return new BaseQueryACL(ctx, prisma)
     case 'aiProvisioningStatus':
       return new UnscopedACL(ctx, prisma)
+    case 'secretDefinition':
+      return new UnscopedACL(ctx, prisma)
+    case 'secretVersion':
+      return new UnscopedACL(ctx, prisma)
     case 'orgLLMServiceAccountCredential':
       return new OrgLLMServiceAccountCredentialsACL(ctx, prisma)
     case 'guestAccess':

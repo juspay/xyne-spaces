@@ -411,11 +411,13 @@ const envSchema = Joi.object({
   JIRA_EULER_BOT_AUTH_TOKEN: Joi.string().allow('').default(''),
   JIRA_MIGRATION_BOT_EMAIL: Joi.string().allow('').default(''),
   JIRA_MIGRATION_BOT_AUTH_TOKEN: Joi.string().allow('').default(''),
+  ENCRYPTION_KEY: Joi.string().allow('').default(''),
   ZERO_CLIENT_ENCRYPTION_ENABLED: Joi.boolean().default(false),
   API_CLIENT_ENCRYPTION_ENABLED: Joi.boolean().default(false),
   ENABLE_DB_ENCRYPTION: Joi.boolean().default(false),
   ENC_ORG_PROVISION: Joi.boolean().default(false),
   ENC_WORKSPACE_PROVISION: Joi.boolean().default(false),
+  SECRETS_VAULT_CACHE_TTL_MS: Joi.number().integer().min(0).default(5 * 60 * 1000),
   JIRA_MIGRATION_USER_MAP_CSV_LOCATION: Joi.string()
     .allow('')
     .default(''),
@@ -1126,6 +1128,10 @@ export const config = {
     enableDbEncryption: envVars.ENABLE_DB_ENCRYPTION as boolean,
     orgProvisionEnabled: envVars.ENC_ORG_PROVISION as boolean,
     workspaceProvisionEnabled: envVars.ENC_WORKSPACE_PROVISION as boolean,
+  },
+  encryptionKey: envVars.ENCRYPTION_KEY as string,
+  secretsVault: {
+    cacheTtlMs: envVars.SECRETS_VAULT_CACHE_TTL_MS as number,
   },
   enableFileIndexing: envVars.ENABLE_FILE_INDEXING as boolean,
   enableDriveImportWorker: envVars.ENABLE_DRIVE_IMPORT_WORKER as boolean,

@@ -22,4 +22,5 @@ export const PATH_TO_RESOURCE: Record<string, string> = {
   '/organisations': 'ORGANIZATIONS',
   '/team-intelligence': 'TEAM-INTELLIGENCE-DASHBOARD',
   '/workflows': 'WORKFLOWS',
+  '/secrets': 'SECRETS',
 };

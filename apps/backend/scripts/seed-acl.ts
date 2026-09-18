@@ -73,6 +73,10 @@ const ESSENTIAL_RESOURCES = [
     description:
       'Release-config edit access (/api/commits/analyze/*, save release config). Admins/owners have it by role; grant to other users to let them edit without admin privilege.',
   },
+  {
+    name: 'SECRETS',
+    description: 'Secrets vault admin UI (/api/secrets-vault/*, /secrets).',
+  },
 ];
 
 // Default user groups with their permissions

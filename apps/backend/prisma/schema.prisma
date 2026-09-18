@@ -10,7 +10,7 @@ generator client {
 
 generator zero {
   provider      = "prisma-generator-zero"
-  excludeTables = ["WorkspaceJoinRequest", "AiProvisioningStatus", "OrgLLMServiceAccountCredential", "OrganizationDomain", "QuestionnaireResponse", "ExternalSource", "WorkflowFolder", "WorkflowCredential", "AgentConversationShare"]
+  excludeTables = ["WorkspaceJoinRequest", "AiProvisioningStatus", "OrgLLMServiceAccountCredential", "OrganizationDomain", "QuestionnaireResponse", "ExternalSource", "WorkflowFolder", "WorkflowCredential", "AgentConversationShare", "SecretDefinition", "SecretVersion"]
 }
 
 datasource db {
@@ -1629,6 +1629,38 @@ model OrgLLMServiceAccountCredential {
   @@unique([orgId, provider, purpose])
   @@index([orgId, status])
   @@map("org_llm_service_account_credentials")
+  @@schema("non_zero")
+}
+
+model SecretDefinition {
+  id            String   @id @default(cuid())
+  name          String   @unique
+  rotationState String   @default("idle") // idle | claimed — CAS lock for the rotation cron
+  createdBy     String
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  versions SecretVersion[]
+
+  @@map("secret_definitions")
+  @@schema("non_zero")
+}
+
+model SecretVersion {
+  id               String    @id @default(cuid())
+  secretId         String // Emulated (relationMode="prisma"), no DB FK.
+  secretDefinition SecretDefinition @relation(fields: [secretId], references: [id])
+  version          Int // allocated via EntitySequenceService (common DB), not DB autoincrement
+  value            String    @db.Text // encrypted
+  encryptionImpl   String // generic | custom — which impl encrypted this value
+  status           String    @default("pending") // pending | live | retired | revoked | failed
+  createdAt        DateTime  @default(now())
+  verifiedAt       DateTime?
+  retiredAt        DateTime?
+
+  @@unique([secretId, version])
+  @@index([secretId, status])
+  @@map("secret_versions")
   @@schema("non_zero")
 }
 
