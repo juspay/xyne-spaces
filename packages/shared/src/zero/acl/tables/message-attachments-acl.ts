@@ -7,7 +7,6 @@ import type { SelectArgs } from '../core/types';
 import {
   SCALAR,
   channelAccessArgs,
-  channelAccessWhere,
   scalarChannelBody,
 } from '../core/channel-access';
 import { guestChannelAccessWhere, isGuestContext } from '../core/guest-acl-utils';

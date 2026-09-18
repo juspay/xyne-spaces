@@ -3458,6 +3458,11 @@ export const attachementTableRelationShips = relationships(messageAttachmentTabl
     sourceField: ["entityId"],
     destField: ["id"],
     destSchema: channelTable
+  }),
+  canvasComment: one({
+    sourceField: ["entityId"],
+    destField: ["id"],
+    destSchema: canvasCommentTable
   })
 }))
 
@@ -4014,7 +4019,7 @@ export const canvasCommentThreadTableRelationships = relationships(
 
 export const canvasCommentTableRelationships = relationships(
   canvasCommentTable,
-  ({ one }) => ({
+  ({ one, many }) => ({
     thread: one({
       sourceField: ['threadId'],
       destField: ['id'],
@@ -4024,6 +4029,11 @@ export const canvasCommentTableRelationships = relationships(
       sourceField: ['createdBy'],
       destField: ['id'],
       destSchema: userTable,
+    }),
+    attachments: many({
+      sourceField: ['id'],
+      destField: ['entityId'],
+      destSchema: messageAttachmentTable,
     }),
   }),
 );
