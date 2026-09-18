@@ -9,7 +9,8 @@ import { AssignmentTab } from './tabs/AssignmentTab';
 import { AutomationTab } from './tabs/AutomationTab';
 import { AIFeaturesTab } from './tabs/AIFeaturesTab';
 import { MetricsTab } from './tabs/MetricsTab';
-import { Inbox, Route, Zap, Bot, X, BarChart3 } from 'lucide-react';
+import { OnboardingTab } from './tabs/OnboardingTab';
+import { Inbox, Route, Zap, Bot, X, BarChart3, ClipboardCheck } from 'lucide-react';
 
 /** Props for the DeskSettings modal component */
 export interface DeskSettingsProps {
@@ -19,7 +20,7 @@ export interface DeskSettingsProps {
   userID: string | null | undefined;
 }
 
-export type TabId = 'inbox' | 'assignment' | 'automation' | 'Agent' | 'metrics';
+export type TabId = 'inbox' | 'assignment' | 'automation' | 'Agent' | 'metrics' | 'onboarding';
 
 /** Configuration for a single settings tab */
 export interface TabConfig {
@@ -40,6 +41,7 @@ export const DESK_SETTINGS_TABS: { id: TabId; label: string; icon: React.Element
   { id: 'automation', label: 'Automations', icon: Zap },
   { id: 'Agent', label: 'Agent', icon: Bot },
   { id: 'metrics', label: 'Metrics', icon: BarChart3 },
+  { id: 'onboarding', label: 'Onboarding', icon: ClipboardCheck },
 ];
 
 export type AIFeaturesSubTabId =
@@ -96,7 +98,9 @@ export const DeskSettings: React.FC<DeskSettingsProps> = ({ open, onClose, chann
     if (isCall) {
       return DESK_SETTINGS_TABS.filter(tab => ['assignment', 'Agent'].includes(tab.id));
     }
-    return isEmail ? DESK_SETTINGS_TABS : DESK_SETTINGS_TABS.filter(tab => tab.id !== 'automation');
+    return isEmail
+      ? DESK_SETTINGS_TABS
+      : DESK_SETTINGS_TABS.filter(tab => !['automation', 'onboarding'].includes(tab.id));
   }, [isCall, isEmail]);
 
   useEffect(() => {
@@ -211,11 +215,14 @@ export const DeskSettings: React.FC<DeskSettingsProps> = ({ open, onClose, chann
                       />
                     )}
                     {activeTab === 'metrics' && <MetricsTab form={form} />}
+                    {activeTab === 'onboarding' && (
+                      <OnboardingTab channelId={channelId} clawAgents={form.clawAgents} />
+                    )}
                   </div>
                 </div>
               )}
             </div>
-            {isDirty && activeTab !== 'automation' && (
+            {isDirty && activeTab !== 'automation' && activeTab !== 'onboarding' && (
               <div className='shrink-0 border-t border-desk-border px-6 md:px-12 lg:px-[86px] py-[12px] dark:border-border'>
                 <div className='flex items-center justify-end gap-[8px]'>
                   <button
