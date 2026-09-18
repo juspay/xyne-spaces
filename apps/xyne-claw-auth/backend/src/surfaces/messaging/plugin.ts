@@ -211,7 +211,9 @@ export interface AccountStatePatch {
 
 /** What the core hands a connection plugin when it starts an account. */
 export interface AccountRuntimeContext {
-  account: ChannelAccount;
+  /** Live, not a snapshot: re-read it per message so a config change lands
+   *  without waiting for a reconnect. */
+  readonly account: ChannelAccount;
   onInbound(msg: InboundMessage): Promise<void>;
   setState(patch: AccountStatePatch): Promise<void>;
   /** The plugin's transport ended for good (logged out / unrecoverable). The

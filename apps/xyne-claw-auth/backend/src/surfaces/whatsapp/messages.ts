@@ -127,8 +127,6 @@ export interface ToInboundOptions {
   /** Ids of messages this account sent itself (so its own replies in the
    *  self chat are echoes, not new input). */
   sentIds?: ReadonlySet<string>;
-  /** Treat the owner's messages to their own number as input. */
-  selfChat?: boolean;
 }
 
 export function toInbound(msg: WAMessage, self: SelfIdentity, opts: ToInboundOptions = {}): InboundWithMedia | null {
@@ -157,7 +155,9 @@ export function toInbound(msg: WAMessage, self: SelfIdentity, opts: ToInboundOpt
   // Without that split the owner cannot talk to their own agent in a group,
   // because their message looks identical to the agent's own echo.
   const fromOwner = fromMe && !(opts.sentIds?.has(messageId) ?? false);
-  const selfChat = fromOwner && !isGroup && sameUser(remoteJid, self) && opts.selfChat !== false;
+  // A fact about the message, not a setting: whether the account answers here
+  // is the plugin's call (see plugin.ts), and policy still applies either way.
+  const selfChat = fromOwner && !isGroup && sameUser(remoteJid, self);
   const rawSender = selfChat ? self.jid : isGroup ? (key?.participant ?? "") : remoteJid;
   // Newer WhatsApp servers add the phone-number twin of a LID sender on the
   // key; prefer it so allowlists written as phone numbers keep matching.

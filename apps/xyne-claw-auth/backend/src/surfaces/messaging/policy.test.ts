@@ -91,3 +91,4 @@ describe("self chat", () => {
     expect(evaluatePolicy(p, input({ ...self, namedInText: true })).action).toBe("dispatch");
   });
 });
+

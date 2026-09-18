@@ -169,8 +169,12 @@ async function connect(handle: WhatsAppHandle): Promise<void> {
     if (type !== "notify" || !handle.self) return;
     const selfChat = channelConfigOf(ctx).selfChat;
     for (const message of messages) {
-      const inbound = toInbound(message, handle.self, { sentIds: handle.sentIds, selfChat });
+      const inbound = toInbound(message, handle.self, { sentIds: handle.sentIds });
       if (!inbound) continue;
+      // "My own chat: off" means silence, not "fall through to the DM rules" —
+      // otherwise a number that answers other people's DMs would answer the
+      // owner's notes to self as well, which is not what the switch says.
+      if (inbound.selfChat && !selfChat) continue;
       void (async () => {
         if (inbound.media) {
           const attachment = await fetchAttachment(handle, message, inbound.media);

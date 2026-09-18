@@ -39,9 +39,9 @@ describe("toInbound: who sent it", () => {
     expect(msg).toMatchObject({ selfChat: true, fromOwner: true, isGroup: false });
   });
 
-  it("does not flag self chat when the account has it switched off", () => {
-    const msg = toInbound(wa({ remoteJid: self.jid, id: "NOTE", fromMe: true }), self, { selfChat: false });
-    expect(msg?.selfChat).toBeUndefined();
+  it("reports self chat as a fact — whether to answer there is the plugin's call", () => {
+    const msg = toInbound(wa({ remoteJid: self.jid, id: "NOTE", fromMe: true }), self);
+    expect(msg?.selfChat).toBe(true);
   });
 
   it("prefers the phone-number twin of a LID sender, so phone allowlists still match", () => {

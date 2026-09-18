@@ -176,7 +176,13 @@ class AccountManager {
     this.runtimes.set(account.id, runtime);
 
     const ctx: AccountRuntimeContext = {
-      account,
+      // A getter, not the snapshot `account` bound at connect time: a plugin
+      // reads its config on every message (selfChat, markOnline), and the sweep
+      // refreshes runtime.account. Binding the snapshot froze every plugin-side
+      // setting until the socket reconnected.
+      get account() {
+        return runtime.account;
+      },
       onInbound: (msg) =>
         handleInbound({ account: runtime.account, plugin }, msg).catch((err) => {
           log.error(`[channels] inbound failed account=${account.id}: ${errMsg(err)}`);
