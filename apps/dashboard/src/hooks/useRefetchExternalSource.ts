@@ -141,7 +141,9 @@ export const useRefetchExternalSource = (
               );
             } else if (result.processed > 0) {
               // Replies-only run: tickets stayed the same, but threads got updates.
-              toast.success(`Updated ${result.processed} thread${result.processed === 1 ? '' : 's'}`);
+              toast.success(
+                `Updated ${result.processed} thread${result.processed === 1 ? '' : 's'}`,
+              );
             } else if (result.errors.length > 0) {
               toast.error(`Refetch completed with ${result.errors.length} error(s)`);
             } else {
