@@ -34,7 +34,7 @@ const CANVAS_LABEL_SOURCE_TYPE = 'canvas';
 const CANVAS_LABEL_CATEGORY = 'generic';
 
 function sanitizeForLog(value: unknown): string {
-  return String(value ?? '').replace(/[\r\n\u2028\u2029]+/g, '');
+  return String(value ?? '').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 64);
 }
 const MAX_CANVAS_LABEL_BULK_IDS = 200;
 // Shared cap for both add (names) and remove (labelIds): how many labels one
