@@ -126,8 +126,9 @@ import {
   toDynamicFieldQueryFilters,
   type DynamicFieldQueryFilter,
 } from '../../utils/board/dynamicFieldFilters';
-import { dynamicColumnKey } from '../../components/Tickets/TicketTable/dynamicFieldColumns';
+import { dynamicColumnKey } from '../../components/Tickets/TicketTable/TicketTableTypes';
 import { useDeskTableColumns, DESK_TABLE_BUILTIN_COLUMNS } from './useDeskTableColumns';
+import type { LabelUnreadFilters } from '../../api/conversationLabelsApi';
 import { tagsConfigApi } from '../../api/tagsConfigApi';
 import { classificationApi } from '../../api/classificationApi';
 import {
@@ -187,7 +188,6 @@ import { SlackThread, SlackComposer } from '../../components/xyne-desk/SlackThre
 import { SocialMediaReplyComposer } from '../../components/xyne-desk/DeskReplyComposer';
 import { startGooglePlayOAuth } from '../../services/clients/socialMediaDeskApi';
 import { EmailThreadHeader } from '../../components/xyne-desk/EmailBody/EmailThreadHeader';
-import { CloudAgentDock } from '../../components/xyne-desk/CloudAgentDock/CloudAgentDock';
 import { DeskCalendarView } from '../../components/xyne-desk/DeskCalendar/DeskCalendarView';
 import { ConversationLabels } from '../../components/xyne-desk/ConversationLabels/ConversationLabels';
 import { TicketTagsRow } from '../../components/xyne-desk/EmailBody/TagsBadgePopover';
@@ -231,7 +231,7 @@ import { useShareableOrigin } from '../../hooks/useShareableOrigin';
 import { initDeskChannelOAuth } from '../../services/clients/integrationOAuthApi';
 import Dialog from '../../components/ui/Dialog';
 import { MergeTicketsDialog } from '../../components/Tickets/MergeTicketsDialog/MergeTicketsDialog';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { xyneAIActor } from '../../machines/xyneAIMachine';
 import { useSelector } from '@xstate/react';
 import { useSelectedAgent } from '../../hooks/useSelectedAgent';
@@ -255,6 +255,12 @@ import { CallParticipantsSelectionModal } from '../../components/Call/CallPartic
 import { ScheduleCallModal } from '../../components/Call/ScheduleCallModal/ScheduleCallModal';
 import { WorkspaceDeskEmailCard } from '../../components/xyne-desk/WorkspaceDeskEmailCard/WorkspaceDeskEmailCard';
 import { WorkspaceOzonetelCard } from '../../components/xyne-desk/WorkspaceOzonetelCard/WorkspaceOzonetelCard';
+import { CallButton } from '../../components/xyne-desk/CallButton/CallButton';
+import {
+  CloudAgentDock,
+  setCloudAgentOpenTicket,
+} from '../../components/xyne-desk/CloudAgentDock/CloudAgentDock';
+import { getOzonetelToolbar } from '../../services/clients/telephonyApi';
 
 // Unified type for tickets from the supportTicketsFiltered query
 type SupportTicket = QueryResultType<typeof queries.supportTicketsFilteredV4>[number];
@@ -396,6 +402,8 @@ const clearComposeLocalCache = (userId: string, instanceId: string, channelId: s
     /* ignore */
   }
 };
+
+const SHOW_DESK_CUSTOM_FIELD_COLUMNS = false;
 
 /** Display label for a server compose-draft row in the Drafts list. */
 const composeDraftLabel = (d: ComposeDraftRecord): string => {
@@ -830,6 +838,21 @@ const SupportScreen = (): ReactElement => {
     }),
     [filters, userID, dynamicFieldEntries, tagFilterConversationIds, selectedLabel?.id],
   );
+
+  // Mode-B label counts drop the label scoping from the shared filter surface.
+  const labelUnreadFilters = useMemo<LabelUnreadFilters>(() => {
+    const {
+      conversationIdWhitelist,
+      conversationLabelId: _conversationLabelId,
+      ...restTicketFilter
+    } = ticketFilter;
+    return {
+      ...restTicketFilter,
+      ...(conversationIdWhitelist !== undefined
+        ? { conversationIds: conversationIdWhitelist }
+        : {}),
+    };
+  }, [ticketFilter]);
 
   const availablePriorities = useMemo(() => Object.values(TicketPriority), []);
 
@@ -2676,10 +2699,12 @@ const SupportScreen = (): ReactElement => {
                   className: 'bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:text-blue-200',
                 };
     const isJoined = joinedChannelIds.has(c.id);
-    // Labels apply to email and app desks; mailbox folders (Inbox / Starred / Spam /
-    // Drafts / Sent) stay email-only. Both share this one expandable subtree.
+    // Labels apply to email and app desks; mailbox folders come in two forms — the
+    // full email set and a single "All items" entry for app desk channel
+    // type. Folders and labels share this one expandable subtree.
     const hasMailboxFolders = c.type === ChannelType.EMAIL;
-    const canExpandDesk = isJoined && (hasMailboxFolders || c.type === ChannelType.APP);
+    const hasBasicFolders = !hasMailboxFolders && c.type === ChannelType.APP;
+    const canExpandDesk = isJoined && (hasMailboxFolders || hasBasicFolders);
     const isExpanded = canExpandDesk && expandedDeskIds.has(c.id);
     const isActive = selectedChannelId === c.id;
     const status = statusByChannelId.get(c.id);
@@ -2790,12 +2815,25 @@ const SupportScreen = (): ReactElement => {
                 />
               </>
             )}
+            {hasBasicFolders && (
+              <DeskMailboxSidebar
+                variant='basic'
+                // The basic subtree is a single "All items" row — the effective folder
+                // for any non-email desk — so it highlights exactly when the channel
+                // is selected in list mode with no label selected.
+                activeFolder={
+                  selectedChannelId === c.id && viewMode === 'list' && !selectedLabel ? 'all' : null
+                }
+                onSelectFolder={(folder, label) => openMailbox(c.id, folder, label)}
+              />
+            )}
             <DeskLabelsSidebar
               channelId={c.id}
               isMember={isJoined}
               activeLabelId={selectedChannelId === c.id && selectedLabel ? selectedLabel.id : null}
               onSelectLabel={(labelId, labelName) => openLabel(c.id, labelId, labelName)}
               onDeletedLabel={handleDeletedLabel}
+              labelUnreadFilters={labelUnreadFilters}
             />
           </div>
         )}
@@ -3751,7 +3789,7 @@ const SupportScreen = (): ReactElement => {
                                 </button>
                               );
                             })}
-                            {deskDynamicFields.length > 0 && (
+                            {SHOW_DESK_CUSTOM_FIELD_COLUMNS && deskDynamicFields.length > 0 && (
                               <>
                                 <div className='my-1 border-t border-border' />
                                 <div className='px-4 py-1 text-xs font-medium text-muted-foreground'>
@@ -3884,9 +3922,11 @@ const SupportScreen = (): ReactElement => {
                           </button>
                         </div>
                         {/* Keep desk-specific actions and expose the shared Ozonetel toolbar. */}
-                        {isSelectedChannelJoined && selectedChannelFull && (
-                          <CloudAgentDock buttonBehavior='floating' />
-                        )}
+                        {isSelectedChannelJoined &&
+                          selectedChannelFull &&
+                          selectedChannelFull.type !== ChannelType.APP && (
+                            <CloudAgentDock buttonBehavior='floating' />
+                          )}
                         {isSelectedChannelJoined &&
                           selectedChannelId &&
                           !COMPOSE_DISABLED_CHANNEL_TYPES.has(selectedChannelFull?.type) && (
@@ -4650,6 +4690,26 @@ export const SupportTicketDetail = ({
     }),
     { enabled: (!!ticketId || !!ticketIdParam) && !!routeChannelId },
   );
+  const { data: ozonetelToolbar } = useQuery({
+    queryKey: ['workspace-ozonetel-toolbar'],
+    queryFn: getOzonetelToolbar,
+  });
+  const customerPhoneFieldName = ozonetelToolbar?.customerPhoneFieldName?.trim() ?? '';
+  const [ticketFormValues] = useCachedQuery(
+    queries.getFormEntityValuesByEntityId({ entityId: ticket?.id ?? '' }),
+    { enabled: !!ticket?.id && !!customerPhoneFieldName },
+  );
+  // Calls link only when they dialled this number, so other numbers and inbound calls never land here.
+  const customerPhoneNumber = useMemo(() => {
+    if (!customerPhoneFieldName) return '';
+    const row = (ticketFormValues ?? []).find(
+      entry =>
+        (entry.globalField?.fieldName ?? entry.formField?.fieldName) === customerPhoneFieldName,
+    );
+    const value = row?.actualFieldValue ?? row?.fieldValue;
+    return typeof value === 'string' ? value.trim() : '';
+  }, [ticketFormValues, customerPhoneFieldName]);
+
   const detailConversationId = ticket?.conversationId ?? stateConversationId;
   const isAppSourcedTicket = getTicketReplyKind(ticket?.metadata) === 'app';
   const ticketEmailDrafts = useEmailDrafts(detailConversationId, routeChannelId, isMember);
@@ -5234,6 +5294,14 @@ export const SupportTicketDetail = ({
 
   // Get channel info and user status
   const channel = useChannel(channelId);
+
+  const openTicketId = ticket?.id;
+  const channelType = channel?.type;
+  useEffect(() => {
+    if (!openTicketId || !customerPhoneNumber || channelType !== ChannelType.APP) return undefined;
+    setCloudAgentOpenTicket({ ticketId: openTicketId, number: customerPhoneNumber });
+    return (): void => setCloudAgentOpenTicket(null);
+  }, [openTicketId, customerPhoneNumber, channelType]);
   const [mailboxRows] = useCachedQuery(
     queries.myTicketMailboxV2({
       ticketId: mailboxTicketId ?? '',
@@ -5422,6 +5490,7 @@ export const SupportTicketDetail = ({
                       </Tooltip>
                     </div>
                   )}
+                  {ticket && channel?.type === ChannelType.APP && <CallButton />}
                   {/* Status pill */}
                   {ticket && (
                     <div className='border border-border rounded-md overflow-hidden shrink-0'>
@@ -5693,7 +5762,7 @@ export const SupportTicketDetail = ({
                           )}
                         </>
                       )}
-                      {channel && (
+                      {channel && channel.type !== ChannelType.APP && (
                         <DropdownMenuItem
                           onSelect={e => e.preventDefault()}
                           className='p-0 focus:bg-transparent'

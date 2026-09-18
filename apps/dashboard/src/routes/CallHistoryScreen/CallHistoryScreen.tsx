@@ -168,7 +168,7 @@ const CallHistoryScreen = (): ReactElement => {
     closeEditModal,
     showChannelCalls,
     setShowChannelCalls,
-  } = useCallHistory(user?.id);
+  } = useCallHistory(user?.id, { isCalendarView: viewMode === 'calendar' });
 
   const allUsers = useUsers();
   const activeUsers = useActiveUsers();

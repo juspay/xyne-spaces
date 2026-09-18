@@ -1,3 +1,31 @@
+## [1.337.0](https://github.com/juspay/xyne-spaces/compare/v1.336.1...v1.337.0) (2026-09-18)
+
+
+### Features
+
+* add options + schedule support for workflows ([#2002](https://github.com/juspay/xyne-spaces/issues/2002)) ([28dca1b](https://github.com/juspay/xyne-spaces/commit/28dca1bd83fff6d68e51458518ec6227f2ec752d))
+* add priority runs logic in automations ([#1860](https://github.com/juspay/xyne-spaces/issues/1860)) ([b10a438](https://github.com/juspay/xyne-spaces/commit/b10a4388d217c4437ac0689c88335d90ac0562b1))
+* added unread count for labels in desk channel ([#1711](https://github.com/juspay/xyne-spaces/issues/1711)) ([9aa728d](https://github.com/juspay/xyne-spaces/commit/9aa728d30252b54be453b2957d6ec55b5d7ed339))
+* call history screen query optimizations ([#1974](https://github.com/juspay/xyne-spaces/issues/1974)) ([e0fd736](https://github.com/juspay/xyne-spaces/commit/e0fd7364c84ce0d9a3cbb03875c3015337c84f01))
+* make automation worker concurrency configurable via env ([#1851](https://github.com/juspay/xyne-spaces/issues/1851)) ([bbcd415](https://github.com/juspay/xyne-spaces/commit/bbcd415c4d6e1bb540827fdc8d1f0109b5b6cff1))
+* Streams, a spatial deck of Xyne surfaces ([#1313](https://github.com/juspay/xyne-spaces/issues/1313)) ([9d47938](https://github.com/juspay/xyne-spaces/commit/9d4793804103c6b9e590ff80a8f8978f470eacc4)), closes [#22232](https://github.com/juspay/xyne-spaces/issues/22232) [#1A1A1](https://github.com/juspay/xyne-spaces/issues/1A1A1)
+* ticket type form field ([#1703](https://github.com/juspay/xyne-spaces/issues/1703)) ([f835f62](https://github.com/juspay/xyne-spaces/commit/f835f6260d4a00a07dd01a2f1caeda0e64d9a3ee))
+* updated readme ([#1997](https://github.com/juspay/xyne-spaces/issues/1997)) ([8e006d7](https://github.com/juspay/xyne-spaces/commit/8e006d7c7cb21e48f22c9b66b8bcf895fe466bfd))
+* XYNE-62762 SDLC Bitbucket integration, repository access tool and hubs without repositories ([#1941](https://github.com/juspay/xyne-spaces/issues/1941)) ([9f27635](https://github.com/juspay/xyne-spaces/commit/9f27635ed32e31089fd164e17201bf637068b522))
+
+
+### Bug Fixes
+
+* -Fix-internal-call-routing ([#1973](https://github.com/juspay/xyne-spaces/issues/1973)) ([1bbfabd](https://github.com/juspay/xyne-spaces/commit/1bbfabdb041ff312a5803a6d3d2af97cfffd1ae1))
+* call recording on app desk ([#1989](https://github.com/juspay/xyne-spaces/issues/1989)) ([97b3246](https://github.com/juspay/xyne-spaces/commit/97b32461f715afe3aa01a182238e20ed00394ea7))
+* external dashboard fix ([#1975](https://github.com/juspay/xyne-spaces/issues/1975)) ([e0ec9cb](https://github.com/juspay/xyne-spaces/commit/e0ec9cb805576acd1e47a46264d063e22ba3e15b))
+* Fix custom field lookup for custom fields in ticket created trigger ([#1969](https://github.com/juspay/xyne-spaces/issues/1969)) ([670b8ff](https://github.com/juspay/xyne-spaces/commit/670b8ff3cf13e56b12e7250d155acf565c43d9aa))
+* harden link-preview SSRF (host denylist + egress proxy option) ([#1964](https://github.com/juspay/xyne-spaces/issues/1964)) ([e370562](https://github.com/juspay/xyne-spaces/commit/e3705628ae88777e0a8e70af152b46cedce99216))
+* make unified rankprofile pass channelweights and limit the search to limited fields ([#1990](https://github.com/juspay/xyne-spaces/issues/1990)) ([d18baa9](https://github.com/juspay/xyne-spaces/commit/d18baa9925d61887721a0b172fdea77d649576e8))
+* persist hidden columns panel expanded state ([#1963](https://github.com/juspay/xyne-spaces/issues/1963)) ([db3832f](https://github.com/juspay/xyne-spaces/commit/db3832f5a4807a9836741670ab6156a775e511e5))
+* Remove /api/query endpoint ([#1910](https://github.com/juspay/xyne-spaces/issues/1910)) ([ff15ea5](https://github.com/juspay/xyne-spaces/commit/ff15ea560af142268ba53d28173ac5b1861f94b5))
+* repository access release 17 ([#1998](https://github.com/juspay/xyne-spaces/issues/1998)) ([a07589c](https://github.com/juspay/xyne-spaces/commit/a07589cf3da6faea949fcca895dab78231ab5fa9)), closes [#1945](https://github.com/juspay/xyne-spaces/issues/1945)
+
 ## [1.336.1](https://github.com/juspay/xyne-spaces/compare/v1.336.0...v1.336.1) (2026-09-17)
 
 
