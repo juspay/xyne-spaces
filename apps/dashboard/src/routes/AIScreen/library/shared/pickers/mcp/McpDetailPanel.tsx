@@ -132,71 +132,77 @@ export function McpDetailPanel({
       : 'Needs a key before this connector can do anything.';
 
   return (
-    <div className='flex min-h-0 flex-1 flex-col gap-8 overflow-y-auto px-[22px] pb-9 pt-2'>
-      <div className='flex w-full items-start gap-12'>
-        <div className='flex min-w-0 flex-1 items-center gap-2.5'>
-          <McpLogo type={entry.iconType} name={entry.label} size='lg' />
-          <div className='flex min-w-0 flex-col gap-2.5 py-px'>
-            <span className='flex min-w-0 flex-wrap items-center gap-1.5'>
-              <span className='truncate text-sm font-semibold leading-[1.3] tracking-[-0.28px] text-foreground'>
-                {entry.label}
-              </span>
-              <Tooltip content={scopeHint(entry.scope)} side='top'>
-                <span className='flex'>
-                  <Pill tone={entry.scope === 'global' ? 'success' : 'neutral'}>
-                    {scopeLabel(entry.scope)}
-                  </Pill>
+    <div className='flex min-h-0 flex-1 flex-col'>
+      <div className='flex shrink-0 flex-col gap-4 px-[22px] pb-4 pt-2'>
+        <div className='flex w-full items-start gap-12'>
+          <div className='flex min-w-0 flex-1 items-center gap-2.5'>
+            <McpLogo type={entry.iconType} name={entry.label} size='lg' />
+            <div className='flex min-w-0 flex-col gap-2.5 py-px'>
+              <span className='flex min-w-0 flex-wrap items-center gap-1.5'>
+                <span className='truncate text-sm font-semibold leading-[1.3] tracking-[-0.28px] text-foreground'>
+                  {entry.label}
                 </span>
-              </Tooltip>
-              {needsConnection && (
-                <Tooltip content={connectionHint} side='top'>
+                <Tooltip content={scopeHint(entry.scope)} side='top'>
                   <span className='flex'>
-                    <Pill tone={connected || orgCovered ? 'success' : 'warning'}>
-                      {connected ? 'Connected' : orgCovered ? 'Available via org' : 'Not connected'}
+                    <Pill tone={entry.scope === 'global' ? 'success' : 'neutral'}>
+                      {scopeLabel(entry.scope)}
                     </Pill>
                   </span>
                 </Tooltip>
-              )}
-            </span>
-            <span className='truncate text-xs font-semibold leading-4 tracking-[-0.24px] text-muted-foreground'>
-              Built by {author}
-            </span>
+                {needsConnection && (
+                  <Tooltip content={connectionHint} side='top'>
+                    <span className='flex'>
+                      <Pill tone={connected || orgCovered ? 'success' : 'warning'}>
+                        {connected
+                          ? 'Connected'
+                          : orgCovered
+                            ? 'Available via org'
+                            : 'Not connected'}
+                      </Pill>
+                    </span>
+                  </Tooltip>
+                )}
+              </span>
+              <span className='truncate text-xs font-semibold leading-4 tracking-[-0.24px] text-muted-foreground'>
+                Built by {author}
+              </span>
+            </div>
           </div>
+          {needsConnection && !connected && (
+            <button
+              type='button'
+              onClick={() => {
+                connect.reset();
+                setAuthOpen(open => !open);
+              }}
+              title={
+                orgCovered
+                  ? 'Your own key takes precedence over the shared one'
+                  : `Connect ${entry.label}`
+              }
+              data-track-category='Claw Agents'
+              data-track-name='Create agent v2: connect MCP from detail'
+              className={cn(
+                'flex h-7 shrink-0 items-center justify-center rounded-lg px-2 text-sm font-medium leading-[1.2] transition-colors',
+                orgCovered
+                  ? 'border border-border bg-card text-foreground hover:bg-muted'
+                  : 'border border-transparent bg-primary text-primary-foreground hover:bg-primary/90',
+                authOpen && 'opacity-50',
+              )}
+            >
+              {authOpen ? 'Connecting' : orgCovered ? 'Use your own key' : 'Connect'}
+            </button>
+          )}
         </div>
-        {needsConnection && !connected && (
-          <button
-            type='button'
-            onClick={() => {
-              connect.reset();
-              setAuthOpen(open => !open);
-            }}
-            title={
-              orgCovered
-                ? 'Your own key takes precedence over the shared one'
-                : `Connect ${entry.label}`
-            }
-            data-track-category='Claw Agents'
-            data-track-name='Create agent v2: connect MCP from detail'
-            className={cn(
-              'flex h-7 shrink-0 items-center justify-center rounded-lg px-2 text-sm font-medium leading-[1.2] transition-colors',
-              orgCovered
-                ? 'border border-border bg-card text-foreground hover:bg-muted'
-                : 'border border-transparent bg-primary text-primary-foreground hover:bg-primary/90',
-              authOpen && 'opacity-50',
-            )}
-          >
-            {authOpen ? 'Connecting' : orgCovered ? 'Use your own key' : 'Connect'}
-          </button>
+
+        {entry.description && (
+          <p className='w-full text-sm font-normal leading-5 tracking-[-0.28px] text-foreground'>
+            {entry.description}
+          </p>
         )}
       </div>
 
-      {entry.description && (
-        <p className='w-full text-sm font-normal leading-5 tracking-[-0.28px] text-foreground'>
-          {entry.description}
-        </p>
-      )}
-
-      <div className='flex w-full flex-col gap-4'>
+      <div className='flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-[22px] pb-9'>
         {server && authOpen && !connected && (
           <Section>
             <div className='flex w-full flex-col gap-2 py-1'>
@@ -317,15 +323,11 @@ export function McpDetailPanel({
             </p>
           )}
         </section>
-      </div>
 
-      <div className='flex w-full flex-col text-xs leading-4 tracking-[-0.24px] text-muted-foreground'>
-        <span className='font-semibold'>Built by {author}</span>
-        <span>&nbsp;</span>
-        <span>
+        <p className='w-full text-xs leading-4 tracking-[-0.24px] text-muted-foreground'>
           Only connect tools you trust. Connectors are created by third-party developers and may
           change over time.
-        </span>
+        </p>
       </div>
     </div>
   );
