@@ -1,5 +1,6 @@
+import type { XyneAiSendTrigger } from '../../services/Analytics/xyneAiTracking';
 import { type ReactElement, useState, useCallback, useEffect, useMemo, useRef } from 'react';
-import { useNavigate, useParams, useLocation } from 'react-router-dom';
+import { useNavigate, useParams, useLocation, useNavigationType } from 'react-router-dom';
 import { Upload } from 'lucide-react';
 import { AIShell, type WorkspacePanelControls } from '../../components/AIScreen/AIShell';
 import { ArtifactAppPane } from '../../components/AIScreen/ReactArtifact/ArtifactAppPane';
@@ -29,6 +30,8 @@ import {
   type WorkspaceOpenRequest,
 } from '../../components/AIScreen/Workspace';
 import { xyneAIStreamManager } from '../../services/XyneAI/XyneAIStreamManager';
+import { globalClickTracker } from '../../services/Analytics/globalClickTracker';
+import { readTrackSource } from '../../services/Analytics/trackSource';
 import { useV2SessionInvalidator } from '../../hooks/useAskAISessionsV2';
 import { useSelectedAgent } from '../../hooks/useSelectedAgent';
 import { AI_ACTIVE_SESSION_KEY, AI_SHOW_CHAT_VIEW_KEY } from './aiSessionStorage';
@@ -115,6 +118,7 @@ const AIScreen = (): ReactElement => {
     sessionId?: string;
   }>();
   const location = useLocation();
+  const navigationType = useNavigationType();
   /** '' for the landing page — `chat/new` is the literal, not a session id. */
   const sessionFromUrl = routeSessionId && routeSessionId !== 'new' ? routeSessionId : '';
 
@@ -134,6 +138,8 @@ const AIScreen = (): ReactElement => {
     undefined,
   );
   const [initialExtras, setInitialExtras] = useState<ComposerContext | undefined>(undefined);
+  /** Which affordance on the landing composer sent `initialQuery` (analytics only). */
+  const [initialTrigger, setInitialTrigger] = useState<XyneAiSendTrigger | undefined>(undefined);
   const [chatKey, setChatKey] = useState(0);
   const [isDragging, setIsDragging] = useState(false);
   const dropZoneRef = useRef<HTMLDivElement | null>(null);
@@ -207,6 +213,47 @@ const AIScreen = (): ReactElement => {
     xyneAIStreamManager.setOnAIPage(true);
     return () => {
       xyneAIStreamManager.setOnAIPage(false);
+    };
+  }, []);
+
+  // XYNE_AI_OPENED for the full page. Once per mount: switching threads inside
+  // the page is SELECT_CONVERSATION / NEW_CHAT, not a new open. `source` comes
+  // from the navigating surface's `state.trackSource`; back/forward reports
+  // history_pop and a pasted link reports direct (see readTrackSource).
+  // The open is a single moment, so the effect has no reactive inputs: it
+  // reads the arrival attribution off a per-render snapshot ref instead of
+  // depending on it, which would re-report an open on every thread switch.
+  const pageOpenSnapshotRef = useRef({
+    locationState: location.state as unknown,
+    locationKey: location.key,
+    navigationType,
+    sessionFromUrl,
+    effectiveAgentSlug,
+  });
+  pageOpenSnapshotRef.current = {
+    locationState: location.state as unknown,
+    locationKey: location.key,
+    navigationType,
+    sessionFromUrl,
+    effectiveAgentSlug,
+  };
+  useEffect(() => {
+    const snap = pageOpenSnapshotRef.current;
+    const source = readTrackSource(snap.locationState, snap.navigationType, snap.locationKey);
+    const openedAt = Date.now();
+    globalClickTracker.trackManualEvent('XyneAI', 'XYNE_AI_OPENED', undefined, {
+      surface: 'page',
+      source,
+      contextType: 'general',
+      resumedConversation: !!snap.sessionFromUrl,
+      agentSlug: snap.effectiveAgentSlug ?? 'ask-ai',
+    });
+    return () => {
+      globalClickTracker.trackManualEvent('XyneAI', 'XYNE_AI_CLOSED', undefined, {
+        surface: 'page',
+        source,
+        msOpen: Date.now() - openedAt,
+      });
     };
   }, []);
 
@@ -312,12 +359,23 @@ const AIScreen = (): ReactElement => {
   const handleInitialQueryConsumed = useCallback((): void => {
     setInitialQuery('');
     setInitialAttachments(undefined);
+    setInitialTrigger(undefined);
   }, []);
 
+  // `trigger` rides along with the query: the thread's first turn is submitted
+  // by the thread, but it is the landing composer's button or Enter that sent
+  // it. Without this the thread reports `auto_send` and a button send counts
+  // twice (the button's own click row plus the manual SEND_MESSAGE).
   const handleComposerSubmit = useCallback(
-    (text: string, attachments?: AIComposerAttachment[], context?: ComposerContext): void => {
+    (
+      text: string,
+      attachments?: AIComposerAttachment[],
+      context?: ComposerContext,
+      trigger?: XyneAiSendTrigger,
+    ): void => {
       setInitialQuery(text);
       setInitialAttachments(attachments);
+      setInitialTrigger(trigger);
       setInitialExtras(context);
       setActiveSessionId('');
       setChatKey(prev => prev + 1);
@@ -334,6 +392,7 @@ const AIScreen = (): ReactElement => {
   const handleAgentChange = useCallback((_slug: string | null, context: ComposerContext): void => {
     setInitialQuery('');
     setInitialAttachments(undefined);
+    setInitialTrigger(undefined);
     setInitialExtras(context);
     setActiveSessionId('');
     setChatKey(prev => prev + 1);
@@ -578,6 +637,7 @@ const AIScreen = (): ReactElement => {
                 initialQuery={initialQuery}
                 initialAttachments={initialAttachments}
                 initialExtras={initialExtras}
+                initialTrigger={initialTrigger}
                 onSetMobileSidebarOpen={setMobileSidebarOpen}
                 onConversationChange={handleConversationChange}
                 onAppChange={handleAppChange}

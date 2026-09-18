@@ -1,4 +1,4 @@
-import { SDLC_AGENT_SLUG, type SdlcAgentContext } from '@xyne/shared';
+import { ChannelType, SDLC_AGENT_SLUG, type SdlcAgentContext } from '@xyne/shared';
 import type { PrismaClient } from '@prisma/client';
 import { DatabaseClient } from '@/database/client';
 import { AppError } from '@/middleware/errorHandler';
@@ -56,12 +56,17 @@ export class SdlcAgentContextService {
         403
       );
     }
-    const parsed = sdlcVcs.parseRepository('GITHUB', repo.canonicalUrl || repo.url);
+    const parsed = sdlcVcs.parseRepositoryUrl(repo.canonicalUrl || repo.url);
+    // The hub's project: the repository may be registered in another one.
+    const hub = await this.prisma.channel.findFirst({
+      where: { id: membership.channelId, workspaceId: actor.workspaceId },
+      select: { projectId: true },
+    });
     return {
       version: 1,
       operation: 'interactive',
       workspaceId: actor.workspaceId,
-      projectId: repo.projectId,
+      projectId: hub?.projectId ?? repo.projectId,
       channelId: membership.channelId,
       actorUserId: actor.userId,
       repository: {
@@ -85,14 +90,14 @@ export class SdlcAgentContextService {
     };
   }
 
-  /** No repository is pinned: the agent picks one with sandbox-repo-setup when it needs code. */
+  /** No repository is pinned: the agent picks one with sdlc-repository-access when it needs code. */
   async buildForHub(
     actor: SdlcActor,
     channelId: string,
     input: SdlcAgentContextInput
   ): Promise<SdlcAgentContext> {
     const channel = await this.prisma.channel.findFirst({
-      where: { id: channelId, workspaceId: actor.workspaceId },
+      where: { id: channelId, workspaceId: actor.workspaceId, type: ChannelType.SDLC },
       select: {
         projectId: true,
         participants: { where: { userId: actor.userId }, select: { role: true }, take: 1 },
@@ -102,7 +107,6 @@ export class SdlcAgentContextService {
     if (!channel.participants[0]) throw new AppError('You are not a member of this SDLC hub', 403);
 
     const repoIds = await repoIdsForChannel(this.prisma, channelId);
-    if (repoIds.length === 0) throw new AppError('This SDLC hub has no repositories', 409);
 
     return {
       version: 1,

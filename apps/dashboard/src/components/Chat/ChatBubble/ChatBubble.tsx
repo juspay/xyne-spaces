@@ -123,7 +123,6 @@ interface ChatBubbleProps {
   context?: 'channel' | 'thread';
   isFirstInThread?: boolean;
   isTicketThread?: boolean;
-  isFlowStep?: boolean;
   onEmojiPickerOpenChange?: (isOpen: boolean) => void;
   allThreadAttachments?: AttachmentRef[];
   workflowNumber?: number | undefined;
@@ -139,7 +138,6 @@ interface ChatBubbleProps {
   /** Tag being inspected from the thread header; messages carrying it show a chip. */
   inspectedTag?: string | null;
   afterTextContent?: React.ReactNode;
-  isThreadTicketSubTicket?: boolean;
 }
 
 export const ChatBubble: React.FC<ChatBubbleProps> = ({
@@ -156,7 +154,6 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   context = 'channel',
   isFirstInThread = false,
   isTicketThread = false,
-  isFlowStep = false,
   onEmojiPickerOpenChange,
   allThreadAttachments,
   workflowNumber,
@@ -170,7 +167,6 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   highlightMessageId,
   inspectedTag = null,
   afterTextContent,
-  isThreadTicketSubTicket = false,
 }) => {
   const { user } = useAuthContext();
   const { copyImage } = useClipboard();
@@ -315,8 +311,6 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
     return ((initMsg?.metadata as Record<string, unknown>)?.['ticketId'] as string) || '';
   }, [context, isTicketThread, conversation]);
 
-  const canNestSubTicket = !isThreadTicketSubTicket || isFlowStep;
-
   // Mark activities as read when message becomes visible
   // const observerRef = useIntersectionObserver(() => {
   //   void zero.mutate(mutators.activities.markActivitiesSeenByMessageId({
@@ -405,6 +399,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
     // This shows the thread header but doesn't load old conversation
     xyneAIActor.send({
       type: 'OPEN',
+      trackSource: 'message_bubble',
       channelId,
       threadInfo,
       startFreshChat: true,
@@ -1068,7 +1063,6 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
       ...(context === 'thread' &&
         !isMessageDeleted &&
         isTicketThread &&
-        canNestSubTicket &&
         !isFirstInThread &&
         !spawnedTicketMessageIds?.has(message.messageId) && {
           onCreateSubTicket: handleCreateSubTicket,
@@ -1530,19 +1524,16 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
       )}
 
       {/* SubTicket Modal for ticket threads */}
-      {conversation &&
-        context === 'thread' &&
-        isTicketThread &&
-        canNestSubTicket &&
-        isSubTicketModalOpen && (
-          <SubTicketModal
-            isOpen
-            onClose={() => setIsSubTicketModalOpen(false)}
-            ticketId={threadTicketId}
-            conversationId={conversation.conversationId}
-            sourceMessageId={message.messageId}
-          />
-        )}
+      {conversation && context === 'thread' && isTicketThread && isSubTicketModalOpen && (
+        <SubTicketModal
+          isOpen
+          onClose={() => setIsSubTicketModalOpen(false)}
+          ticketId={threadTicketId}
+          conversationId={conversation.conversationId}
+          sourceMessageId={message.messageId}
+          trackSource='chat_message'
+        />
+      )}
 
       {isReminderOptionsOpen && (
         <Dialog

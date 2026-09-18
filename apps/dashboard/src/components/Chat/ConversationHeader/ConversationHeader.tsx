@@ -44,7 +44,6 @@ import { useRouteContext } from '../../../hooks/useRouteContext';
 import { standaloneNavigate, APP_DRAG_STYLE, APP_NO_DRAG_STYLE } from '../../../utils/electronApp';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { XyneAIStar } from '../../icons/xyne-ai';
-import { trackAskAIOpened } from '../../../services/otel/xyneAIMetrics';
 import { invokeShortcut } from '../../../shortcuts';
 import { CalendarEvent } from '@xyne/icons';
 import { xyneCalendarActor } from '../../../machines/xyneCalendarMachine';
@@ -53,6 +52,7 @@ import { queries } from '../../../zero/queries';
 import { isAIOnboardingActive } from '../../../contexts/AIOnboardingContext';
 import { useCallAutoJoin } from '../../../hooks/useCallAutoJoin';
 import { renderEmoji } from '../../../utils/customEmojiUtils';
+import { AddToStreamMenuItem } from '../../Streams/components/AddToStreamMenu/AddToStreamMenu';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -391,11 +391,10 @@ const ConversationHeader = ({
               variant='ghost'
               size='sm'
               onClick={() => {
-                // Track Ask AI opened event via OTel metrics
-                trackAskAIOpened(channel.scopeType);
-
-                // Trigger xstate machine to open XyneAI
-                xyneAIActor.send({ type: 'OPEN', channelId });
+                // Trigger xstate machine to open XyneAI. The otel
+                // ask_ai_opened counter fires from the sidebar's open effect
+                // so every entry point counts, not just this one.
+                xyneAIActor.send({ type: 'OPEN', channelId, trackSource: 'channel_header' });
               }}
               className='h-7 w-7 rounded-lg'
               data-track-category='CHANNELS'
@@ -472,6 +471,7 @@ const ConversationHeader = ({
                   <ExternalLinkSquare size={16} className='shrink-0' />
                   Open all links
                 </DropdownMenuItem>
+                <AddToStreamMenuItem source={{ kind: 'channel', channelId }} />
                 <DropdownMenuSub>
                   <DropdownMenuSubTrigger className='gap-2'>
                     <FolderArrowRight size={16} className='shrink-0' />

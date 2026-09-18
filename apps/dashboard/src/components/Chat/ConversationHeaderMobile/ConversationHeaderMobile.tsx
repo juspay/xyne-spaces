@@ -309,7 +309,11 @@ const ConversationHeaderMobile = ({
         </div>
         <button
           onClick={() => {
-            xyneAIActor.send({ type: 'OPEN', channelId: channel.id });
+            xyneAIActor.send({
+              type: 'OPEN',
+              trackSource: 'channel_header_mobile',
+              channelId: channel.id,
+            });
           }}
           style={{ width: ROOT_SIZE, height: ROOT_SIZE }}
           className={cn(

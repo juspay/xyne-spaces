@@ -100,6 +100,7 @@ import boardRoutes from '@/routes/boards';
 import subTicketRoutes from '@/routes/subTickets';
 import boardConfigCopyRoutes from '@/routes/boardConfigCopy';
 import recordingPointerBackfillRoutes from '@/routes/recordingPointerBackfill';
+import sdlcRepoCredentialBackfillRoutes from '@/routes/sdlcRepoCredentialBackfill';
 import searchMetricsRoutes from '@/routes/searchMetrics';
 import knowledgeRoutes from '@/routes/knowledge';
 import vespaSearchRoutes from '@/routes/vespaSearch';
@@ -375,9 +376,9 @@ export class App {
 
     this.app.use('/api/automation-webhooks', webhookLimiter, automationWebhookRoutes);
 
-    // Claw MCP route (user + app auth) — must be before /api/query
+
+    // Claw MCP route (user + app auth)
     this.app.use('/api/query/claw', authenticateUserOrApp, pythonQueryRoutes);
-    this.app.use('/api/query', authMiddleware.authenticate, pythonQueryRoutes);
 
     // Commit analysis routes (auth and ACL required)
     this.app.use('/api/commits/analyze', authMiddleware.authenticate, commitAnalysisRoutes);
@@ -445,6 +446,7 @@ export class App {
     // this one-off repair links summary canvases across every workspace. The
     // '-backfill' path suffix also puts it behind backfillMountGuard above.
     this.app.use('/api/admin/recording-pointer-backfill', recordingPointerBackfillRoutes);
+    this.app.use('/api/admin/sdlc-repo-credential-backfill', sdlcRepoCredentialBackfillRoutes);
     // Same shape: the one-off SDLC multi-repo data migration spans every workspace,
     // so it opens its own runAsSystem scope rather than taking workspaceScopedRoute.
 

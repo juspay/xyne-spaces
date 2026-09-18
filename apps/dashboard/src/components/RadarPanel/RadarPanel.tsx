@@ -59,6 +59,7 @@ import { getUserDisplayName } from '../../utils/userDisplayName';
 import { Dialog } from '../ui/Dialog/Dialog';
 import Avatar from '../ui/Avatar/Avatar';
 import { Tooltip } from '../ui/Tooltip';
+import { globalClickTracker } from '../../services/Analytics/globalClickTracker';
 
 type RadarTab = 'all' | 'pending' | 'waiting';
 
@@ -264,6 +265,49 @@ const RadarPanel = (): ReactElement => {
     [othersMode],
   );
 
+  // Impression: the feed has loaded and is on screen. Resolve / dismiss / open
+  // clicks below need this as their denominator. Fires once per load() — a
+  // mount, a tab return, or the Refresh control — keyed on the request
+  // sequence so the filter re-renders in between don't refire it.
+  const feedViewedSeqRef = useRef(0);
+  useEffect(() => {
+    if (loading || !radarEnabled) return;
+    if (feedViewedSeqRef.current === requestSeq.current) return;
+    feedViewedSeqRef.current = requestSeq.current;
+    const activeFilterKeys = [
+      ...(pendingMe !== pendingOthers ? ['pending_on'] : []),
+      ...(excludedRequesters.size ? ['requested_by'] : []),
+      ...(pendingUsers.size ? ['pending_users'] : []),
+      ...(teamIds.size ? ['teams'] : []),
+      ...(filterChannels.size ? ['channels'] : []),
+      ...(timeRange !== 'any' ? ['time_range'] : []),
+    ];
+    globalClickTracker.trackManualEvent('RADAR', 'RADAR_FEED_VIEWED', undefined, {
+      itemCount:
+        pending.reduce((n, c) => n + c.items.length, 0) +
+        waiting.reduce((n, c) => n + c.items.length, 0),
+      pendingMeCount: pending.reduce((n, c) => n + c.items.length, 0),
+      pendingOthersCount: waiting.reduce((n, c) => n + c.items.length, 0),
+      cardCount: pending.length + waiting.length,
+      othersMode,
+      activeFilterKeys,
+      teamFilterApplied: teamIds.size > 0,
+    });
+  }, [
+    loading,
+    radarEnabled,
+    pending,
+    waiting,
+    pendingMe,
+    pendingOthers,
+    excludedRequesters,
+    pendingUsers,
+    teamIds,
+    filterChannels,
+    timeRange,
+    othersMode,
+  ]);
+
   useEffect(() => {
     if (!radarEnabled) return;
     void load();
@@ -426,6 +470,19 @@ const RadarPanel = (): ReactElement => {
   const renderItemBody = (card: RadarThreadCard, item: RadarFeedItem, index: number | null) => {
     const itemKey = `item:${item.id}`;
     const dismissKey = `dismiss:${item.id}`;
+    // Same dimensions on open / resolve / dismiss so the three can be compared
+    // per item age and per side of the ledger. Ids only — no title text.
+    const itemTrackMetadata = JSON.stringify({
+      itemId: item.id,
+      channelId: card.channelId,
+      itemAgeHours: Math.max(
+        0,
+        Math.round((Date.now() - new Date(item.createdAt).getTime()) / 3_600_000),
+      ),
+      isPendingMe: !!selfId && item.pendingOn.includes(selfId),
+      isRequestedByMe: !!selfId && item.requestedBy.includes(selfId),
+      itemsOnCard: card.items.length,
+    });
     return (
       <div
         key={item.id}
@@ -435,6 +492,7 @@ const RadarPanel = (): ReactElement => {
           <button
             data-track-category='RADAR'
             data-track-name='OPEN_THREAD_FROM_ITEM'
+            data-track-metadata={itemTrackMetadata}
             className='text-left font-bold text-foreground hover:underline text-[15px]'
             onClick={e => {
               e.stopPropagation();
@@ -469,6 +527,7 @@ const RadarPanel = (): ReactElement => {
               <button
                 data-track-category='RADAR'
                 data-track-name='RESOLVE_ITEM'
+                data-track-metadata={itemTrackMetadata}
                 className='inline-flex items-center gap-1 px-2.5 py-1 rounded-full border border-border text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-accent transition-colors disabled:opacity-50'
                 disabled={busyKey === itemKey}
                 onClick={e => {
@@ -490,6 +549,7 @@ const RadarPanel = (): ReactElement => {
               <button
                 data-track-category='RADAR'
                 data-track-name='DISMISS_ITEM'
+                data-track-metadata={itemTrackMetadata}
                 className='inline-flex items-center gap-1 px-2.5 py-1 rounded-full border border-border text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-accent transition-colors disabled:opacity-50'
                 disabled={busyKey === dismissKey}
                 onClick={e => {

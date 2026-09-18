@@ -105,6 +105,7 @@ const envSchema = Joi.object({
   ENABLE_STAGE_ETA_DEADLINE_WORKER: Joi.boolean().default(false),
   ENABLE_ETA_DEADLINE_WORKER: Joi.boolean().default(false),
   ENABLE_AUTOMATION_WORKER: Joi.boolean().default(false),
+  AUTOMATION_WORKER_CONCURRENCY: Joi.number().integer().min(1).max(10).default(1),
   ENABLE_DELAYED_MESSAGE_WORKER: Joi.boolean().default(false),
   ENABLE_EMAIL_FETCH_WORKER: Joi.boolean().default(false),
   ENABLE_CALENDAR_SYNC_WORKER: Joi.boolean().default(false),
@@ -464,9 +465,30 @@ const envSchema = Joi.object({
   // Stringified JSON mapping external webhook hosts to in-cluster pod base URLs.
   // e.g. {"claw.example.com":"http://claw-auth.svc.cluster.local:3003"}
   INTERNAL_APP_HOST_MAP: Joi.string().allow('').default(''),
+  // Comma-separated host suffixes refused for outbound external fetches (e.g. link
+  // preview). Include the leading dot, e.g. ".internal.example.net,.svc.cluster.local".
+  SSRF_BLOCKED_HOST_SUFFIXES: Joi.string().allow('').default(''),
+  // Optional forward-proxy for the link-preview outbound fetch. When set, the preview
+  // fetch is routed through it instead of connecting directly. Empty = direct (default).
+  LINK_PREVIEW_EGRESS_PROXY_URL: Joi.string().allow('').default(''),
   ENC_S2S_KEY: Joi.string().allow(''),
   ENCRYPTION_SERVICE_URL: Joi.string().uri().default('http://localhost:3012'),
   ENCRYPTION_REQUEST_TIMEOUT_MS: Joi.number().integer().min(1).default(5000),
+  // Shared s2s secret sent as X-Internal-Service-Secret to internal services.
+  INTERNAL_SERVICE_SECRET: Joi.string().allow('').default(''),
+  // mTLS certificate service (s2s). Empty url disables cert revocation.
+  MTLS_SERVICE_URL: Joi.string().uri().allow('').default(''),
+  MTLS_SERVICE_REQUEST_TIMEOUT_MS: Joi.number().integer().min(1).default(5000),
+  // Comma-separated Google OAuth error codes that, when returned by the client
+  // that owns a refresh token, mean the token is permanently revoked.
+  GOOGLE_AUTH_PERMANENT_ERRORS: Joi.string().default('invalid_grant,invalid_token'),
+  GOOGLE_AUTH_CLIENT_ERRORS: Joi.string().default('unauthorized_client,invalid_client'),
+  // Master switch for the session-refresh provider-revocation check (Google /
+  // Microsoft verification + account-deactivation cleanup). When false, refresh
+  // falls back to the legacy behaviour: session status + expiry only, no
+  // provider call and no deactivation. Kill switch if provider verification
+  // misbehaves in production.
+  ENABLE_PROVIDER_REVOCATION_CHECK: Joi.boolean().default(true),
   // Email fetch
   EMAIL_FETCH_BATCH_SIZE: Joi.number().integer().default(10),
   EMAIL_FETCH_BATCH_DELAY_MS: Joi.number().integer().default(5000),
@@ -1002,6 +1024,10 @@ export const config = {
   questionTimeoutMinutes: envVars.QUESTION_TIMEOUT_MINUTES,
   workerSchedulerEnabled: envVars.ENABLE_WORKER_SCHEDULER,
 
+  automations: {
+    workerConcurrency: envVars.AUTOMATION_WORKER_CONCURRENCY as number,
+  },
+
   workflows: {
     workerEnabled: envVars.ENABLE_WORKFLOWS_WORKER as boolean,
     workerConcurrency: envVars.WORKFLOWS_WORKER_CONCURRENCY as number,
@@ -1132,8 +1158,37 @@ export const config = {
     callbackUrl: (envVars.XYNE_CLAW_CALLBACK_URL || envVars.BACKEND_URL) as string,
   },
   internalS2sKey: envVars.INTERNAL_S2S_KEY as string,
+  internalServiceSecret: envVars.INTERNAL_SERVICE_SECRET as string,
+  mtlsService: {
+    url: envVars.MTLS_SERVICE_URL as string,
+    // Reuses the shared internal-service secret (X-Internal-Service-Secret).
+    s2sSecret: envVars.INTERNAL_SERVICE_SECRET as string,
+    requestTimeoutMs: envVars.MTLS_SERVICE_REQUEST_TIMEOUT_MS as number,
+  },
+  // Google OAuth error codes from the owning client that mean permanent revocation.
+  googleAuthPermanentErrors: (envVars.GOOGLE_AUTH_PERMANENT_ERRORS as string)
+    .split(',')
+    .map((code: string) => code.trim())
+    .filter(Boolean),
+  googleAuthClientErrors: (envVars.GOOGLE_AUTH_CLIENT_ERRORS as string)
+    .split(',')
+    .map((code: string) => code.trim())
+    .filter(Boolean),
+  // Kill switch for provider-revocation verification during session refresh.
+  enableProviderRevocationCheck: envVars.ENABLE_PROVIDER_REVOCATION_CHECK as boolean,
   apps: {
     internalHostMap: parseInternalAppHostMap(envVars.INTERNAL_APP_HOST_MAP as string),
+  },
+  ssrf: {
+    // Host suffixes refused for outbound external fetches.
+    blockedHostSuffixes: (envVars.SSRF_BLOCKED_HOST_SUFFIXES as string)
+      .split(',')
+      .map((s) => s.trim().toLowerCase())
+      .filter(Boolean),
+  },
+  linkPreview: {
+    // Optional forward-proxy for the link-preview fetch.
+    egressProxyUrl: (envVars.LINK_PREVIEW_EGRESS_PROXY_URL as string).trim(),
   },
   askAI: {
     version: envVars.ASK_AI_VERSION as 'v1' | 'v2',

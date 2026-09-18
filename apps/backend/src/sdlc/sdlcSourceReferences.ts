@@ -26,7 +26,7 @@ function markdownLabel(value: string): string {
     .trim();
 }
 
-export function githubSdlcSourceUrl(input: {
+export function sdlcSourceUrl(input: {
   repositoryUrl: string;
   reference: SdlcSourceReference;
 }): string {
@@ -38,19 +38,16 @@ export function githubSdlcSourceUrl(input: {
   }
   if (
     repository.protocol !== 'https:' ||
-    repository.hostname !== 'github.com' ||
     repository.port ||
     repository.username ||
     repository.password
   ) {
-    throw new SdlcSourceReferenceError(
-      'SDLC source links currently support GitHub repositories',
-      400
-    );
+    throw new SdlcSourceReferenceError('SDLC repository URL is invalid', 400);
   }
   const repositoryParts = repository.pathname.split('/').filter(Boolean);
-  if (repositoryParts.length !== 2) {
-    throw new SdlcSourceReferenceError('SDLC GitHub repository URL is invalid', 400);
+  const github = repository.hostname === 'github.com';
+  if (github ? repositoryParts.length !== 2 : repositoryParts.length !== 3 || repositoryParts[0] !== 'scm') {
+    throw new SdlcSourceReferenceError('SDLC repository URL is invalid', 400);
   }
   const path = input.reference.path;
   if (!path || path.startsWith('/') || path.includes('\\') || path.split('/').includes('..')) {
@@ -68,8 +65,13 @@ export function githubSdlcSourceUrl(input: {
   if (end !== undefined && (!line || !Number.isInteger(end) || end < line)) {
     throw new SdlcSourceReferenceError('Invalid SDLC source end line', 400);
   }
-  const fragment = line ? `#L${line}${end && end !== line ? `-L${end}` : ''}` : '';
-  return `${repository.origin}${repository.pathname}/blob/${input.reference.commitSha}/${encodedPath}${fragment}`;
+  if (github) {
+    const fragment = line ? `#L${line}${end && end !== line ? `-L${end}` : ''}` : '';
+    return `${repository.origin}${repository.pathname}/blob/${input.reference.commitSha}/${encodedPath}${fragment}`;
+  }
+  const [, projectKey, slug] = repositoryParts as [string, string, string];
+  const fragment = line ? `#${line}${end && end !== line ? `-${end}` : ''}` : '';
+  return `${repository.origin}/projects/${encodeURIComponent(projectKey.toUpperCase())}/repos/${encodeURIComponent(slug)}/browse/${encodedPath}?at=${input.reference.commitSha}${fragment}`;
 }
 
 export function renderSdlcSourceReference(input: {
@@ -80,7 +82,7 @@ export function renderSdlcSourceReference(input: {
     .filter((value): value is string => Boolean(value))
     .map(markdownLabel)
     .join(' — ');
-  return `[${label}](${githubSdlcSourceUrl(input)})`;
+  return `[${label}](${sdlcSourceUrl(input)})`;
 }
 
 export function resolveSdlcSourceReferenceTokens(input: {
@@ -89,7 +91,7 @@ export function resolveSdlcSourceReferenceTokens(input: {
   commitSha: string;
   references: RequestedSdlcSourceReference[];
 }): string {
-  if (/https:\/\/github\.com\/[^\s)]+\/blob\//i.test(input.markdown)) {
+  if (/https:\/\/[^\s)]+\/(?:blob\/|browse\/[^\s)]*\?at=)/i.test(input.markdown)) {
     throw new SdlcSourceReferenceError(
       'Do not submit repository source URLs; use [[source:N]] tokens and sourceReferences',
       400

@@ -300,6 +300,9 @@ export const workflowExecutionStateTable = table("workflow_execution_states")
     currentStepIndex: number(),
     pausePath: string().optional(),
     pauseType: string().optional(),
+    fireAt: number().optional(),
+    origin: string().optional(),
+    endReason: string().optional(),
   })
   .primaryKey("id");
 
@@ -1258,6 +1261,7 @@ export const emailReadTable = table("email_reads")
     userId: string(),
     lastReadEmailId: string(),
     lastReadEmailAt: number(),
+    hasNewEmail: boolean().optional(),
     createdAt: number(),
     updatedAt: number(),
   })
@@ -1351,6 +1355,7 @@ export const emailChannelPreferenceTable = table("email_channel_preferences")
     autoDraftAgentSlug: string().optional(),
     deskType: string(),
     dlEmail: string().optional(),
+    dlAliases: string().optional(),
     workspaceId: string(),
     metricsEnabled: boolean().optional(),
     frtStageNames: string().optional(),
@@ -2005,6 +2010,7 @@ export const repoTable = table("repos")
     channelId: string().optional(),
     sdlcSetupExecutionId: string().optional(),
     accessCapabilities: json().optional(),
+    vcsCredentialId: string().optional(),
   })
   .primaryKey("id");
 
@@ -3219,6 +3225,16 @@ export const ticketTableRelationships = relationships(ticketTable, ({ one, many 
     sourceField: ["id"],
     destField: ["ticketId"],
     destSchema: ticketAssignmentTable,
+  }),
+  conversation: one({
+    sourceField: ["conversationId"],
+    destField: ["conversationId"],
+    destSchema: conversationTable,
+  }),
+  emailReads: many({
+    sourceField: ["id"],
+    destField: ["ticketId"],
+    destSchema: emailReadTable,
   })
 }));
 
@@ -3383,6 +3399,11 @@ export const workflowExecutionTableRelationships = relationships(workflowExecuti
     destField: ["workflowExecutionId"],
     destSchema: workflowExecutionLockTable,
   }),
+  workflowExecutionState: one({
+    sourceField: ["id"],
+    destField: ["workflowExecutionId"],
+    destSchema: workflowExecutionStateTable,
+  }),
   externalStepResponses: many({
     sourceField: ["id"],
     destField: ["workflowExecutionId"],
@@ -3397,6 +3418,14 @@ export const workflowExecutionTableRelationships = relationships(workflowExecuti
     sourceField: ["id"],
     destField: ["sdlcSetupExecutionId"],
     destSchema: repoTable,
+  })
+}));
+
+export const workflowExecutionStateTableRelationships = relationships(workflowExecutionStateTable, ({ one }) => ({
+  workflowExecution: one({
+    sourceField: ["workflowExecutionId"],
+    destField: ["id"],
+    destSchema: workflowExecutionTable,
   })
 }));
 
@@ -4299,6 +4328,21 @@ export const conversationTableRelationships = relationships(conversationTable, (
     sourceField: ["conversationId"],
     destField: ["conversationId"],
     destSchema: messageAttachmentTable,
+  }),
+  tickets: many({
+    sourceField: ["conversationId"],
+    destField: ["conversationId"],
+    destSchema: ticketTable,
+  }),
+  labelMappings: many({
+    sourceField: ["conversationId"],
+    destField: ["conversationId"],
+    destSchema: conversationLabelMappingTable,
+  }),
+  emailDrafts: many({
+    sourceField: ["conversationId"],
+    destField: ["conversationId"],
+    destSchema: emailDraftTable,
   })
 }));
 
@@ -4328,11 +4372,35 @@ export const emailTableRelationships = relationships(emailTable, ({ one }) => ({
   })
 }));
 
+export const emailDraftTableRelationships = relationships(emailDraftTable, ({ one }) => ({
+  conversation: one({
+    sourceField: ["conversationId"],
+    destField: ["conversationId"],
+    destSchema: conversationTable,
+  })
+}));
+
+export const emailReadTableRelationships = relationships(emailReadTable, ({ one }) => ({
+  ticket: one({
+    sourceField: ["ticketId"],
+    destField: ["id"],
+    destSchema: ticketTable,
+  })
+}));
+
 export const conversationLabelTableRelationships = relationships(conversationLabelTable, ({ many }) => ({
   deskAutoLabelRuleReferences: many({
     sourceField: ["id"],
     destField: ["labelId"],
     destSchema: deskAutoLabelRuleReferenceTable,
+  })
+}));
+
+export const conversationLabelMappingTableRelationships = relationships(conversationLabelMappingTable, ({ one }) => ({
+  conversation: one({
+    sourceField: ["conversationId"],
+    destField: ["conversationId"],
+    destSchema: conversationTable,
   })
 }));
 
@@ -5298,6 +5366,7 @@ export const schema = createSchema(
       ticketStageEtaTableRelationships,
       workflowTableRelationships,
       workflowExecutionTableRelationships,
+      workflowExecutionStateTableRelationships,
       workflowExecutionLockTableRelationships,
       workflowStepTableRelationships,
       agentStepTableRelationships,
@@ -5339,7 +5408,10 @@ export const schema = createSchema(
       conversationTableRelationships,
       conversationParticipantTableRelationships,
       emailTableRelationships,
+      emailDraftTableRelationships,
+      emailReadTableRelationships,
       conversationLabelTableRelationships,
+      conversationLabelMappingTableRelationships,
       deskAutoLabelRuleReferenceTableRelationships,
       messageTableRelationships,
       messageAttachmentTableRelationships,

@@ -66,7 +66,7 @@ export const shouldStartFreshSdlcAssistant = (input: {
   actorChannelId: string | null;
   repositoryChannelId: string;
   actorRepositoryId: string | null;
-  repositoryId: string;
+  repositoryId: string | null;
 }): boolean =>
   !input.actorOpen ||
   input.selectedAgentSlug !== 'sdlc-agent' ||

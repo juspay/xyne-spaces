@@ -2,6 +2,7 @@ import { ReactElement, useEffect, useMemo, useRef, useState } from 'react';
 import { SearchDefault as Search, UserPlus, MultipleCrossCancelDefault as X } from '@xyne/icons';
 import { AvatarSize } from '../../UserAvatar/UserAvatar';
 import { Popover } from '../../ui/Popover/Popover';
+import Tooltip from '../../ui/Tooltip';
 import UserAvatar from '../../UserAvatar/UserAvatar';
 import { useActiveUsers, useSelf } from '../../../hooks/useUsers';
 import { useZero } from '../../../hooks/useZero';
@@ -11,6 +12,7 @@ import { cn } from '../../../utils/classNames';
 import { useChannelAssignGate } from '../../../hooks/useChannelAssignGate';
 import { channelMembersFirst, currentUserFirst } from '../../../utils/channelMembersFirst';
 import { surfaceMutationError } from '../../../utils/zeroMutationToast';
+import { trackTicketOutcome } from '../../../services/Analytics/ticketTracking';
 
 interface AssigneePickerProps {
   ticketId: string;
@@ -41,6 +43,12 @@ export function AssigneePicker({
 
   // assignedTo may be stored as `user:<id>` or `group:<id>` — strip for UserAvatar lookup.
   const resolvedAssigneeId = assignedTo?.replace(/^(user:|group:)/, '') || '';
+  const assignedUserRow = resolvedAssigneeId
+    ? users?.find(user => user.id === resolvedAssigneeId)
+    : undefined;
+  const assigneeTooltip = assignedUserRow
+    ? `Assignee: ${getUserDisplayName(assignedUserRow)}`
+    : 'Unassigned';
 
   const filteredUsers = useMemo(() => {
     if (!users) return [];
@@ -58,7 +66,19 @@ export function AssigneePicker({
         mutators.ticket.update({ id: ticketId, assignedTo: userId, updatedAt: Date.now() }),
       ),
       'Failed to update assignee',
-    );
+    ).then(ok => {
+      if (ok) {
+        trackTicketOutcome(
+          'TICKET_ASSIGNED',
+          { id: ticketId },
+          {
+            surface: 'list_inline',
+            unassigned: !userId,
+            selfAssigned: !!userId && userId === selfId,
+          },
+        );
+      }
+    });
     setOpen(false);
     setSearch('');
   };
@@ -110,7 +130,9 @@ export function AssigneePicker({
       data-track-category='Tickets'
       data-track-name='ToggleRowAssignee'
     >
-      {avatar}
+      <Tooltip content={assigneeTooltip}>
+        <span className='flex h-full w-full items-center justify-center'>{avatar}</span>
+      </Tooltip>
     </button>
   );
 
@@ -120,6 +142,7 @@ export function AssigneePicker({
       open={open}
       onOpenChange={setOpen}
       modal
+      onCloseAutoFocus={event => event.preventDefault()}
       align='end'
       sideOffset={4}
       className='p-0 w-64'

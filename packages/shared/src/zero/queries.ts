@@ -139,6 +139,14 @@ const kanbanTicketsPageV3ArgsSchema = kanbanTicketsPageArgsSchema.extend({
 
 type KanbanTicketsPageV3Args = z.infer<typeof kanbanTicketsPageV3ArgsSchema>;
 
+// Table list view paging: kanban's page args minus the column dimension,
+// forward-only, with a real exclusive keyset cursor.
+const tableTicketsPageArgsSchema = kanbanTicketsPageV3ArgsSchema.omit({
+  stageName: true,
+  columnType: true,
+  dir: true,
+});
+
 const prefixedKanbanIdentityValues = (id: string): string[] => [
   id,
   `user:${id}`,
@@ -1096,6 +1104,44 @@ export const queries = defineQueries({
     },
   ),
 
+  tableTicketsPage: defineQuery(tableTicketsPageArgsSchema, ({ ctx, args }) => {
+    // Empty stageName = no stage pin; the page spans every stage.
+    let query = applyKanbanTicketPageV3Conditions(zql.tickets, ctx, {
+      ...args,
+      stageName: '',
+    } as KanbanTicketsPageV3Args)
+      .orderBy('createdAt', 'desc')
+      // id tiebreak keeps the (createdAt, id) keyset cursor deterministic on ties.
+      .orderBy('id', 'desc');
+
+    if (args.start) {
+      query = query.start(
+        { createdAt: args.start.createdAt, id: args.start.id },
+        { inclusive: false },
+      );
+    }
+
+    if (args.createdAfter !== undefined) {
+      query = query.where('createdAt', '>=', args.createdAfter);
+    }
+
+    let finalQuery = query
+      .limit(args.limit)
+      .related('assignments', (a: any) => a.related('role'))
+      .related('tagMappings');
+
+    if (args.formEntityValueFieldIds?.length) {
+      finalQuery = finalQuery.related('formEntityValues', (fev: any) =>
+        fev
+          .where('fieldId', 'IN', args.formEntityValueFieldIds ?? [])
+          .related('formField')
+          .related('globalField'),
+      );
+    }
+
+    return finalQuery;
+  }),
+
   workflowsPaginated: defineQuery(
     z.object({
       limit: z.number(),
@@ -2019,7 +2065,9 @@ export const queries = defineQueries({
   ticketsByIds: defineQuery(
     z.object({ ticketIds: z.array(z.string()) }),
     ({ args: { ticketIds } }) => {
-      return zql.tickets.where(helpers => helpers.cmp('id', 'IN', ticketIds));
+      return zql.tickets
+        .where(helpers => helpers.cmp('id', 'IN', ticketIds))
+        .related('tagMappings');
     },
   ),
   /**
@@ -2332,6 +2380,25 @@ export const queries = defineQueries({
       .orderBy('startsAt', 'asc')
       .related('participants', p => p.where('userId', ctx.userID));
   }),
+
+  /**
+   * Scheduled calls within a time window (normal view optimization).
+   * Used by the upcoming calls list which only shows 2 days.
+   * Pass startsBefore as epoch ms - calls with startsAt < startsBefore are returned.
+   */
+  userUpcomingScheduledCalls: defineQuery(
+    z.object({
+      startsBefore: z.number(),
+    }),
+    ({ ctx, args: { startsBefore } }) => {
+      return zql.calls
+        .where('status', CallStatus.SCHEDULED)
+        .where(helpers => helpers.cmp('startsAt', '<', startsBefore))
+        .orderBy('startsAt', 'asc')
+        .related('participants', p => p.where('userId', ctx.userID));
+    },
+  ),
+
   userCallHistory: defineQuery(
     z.object({
       limit: z.number(),
@@ -2369,6 +2436,40 @@ export const queries = defineQueries({
             CallStatus.CANCELLED,
           ]),
         )
+        .orderBy('startedAt', 'desc')
+        .orderBy('id', 'desc');
+
+      if (start) {
+        query = query.start({ id: start.id, startedAt: start.startedAt }, { inclusive: false });
+      }
+
+      return query
+        .limit(limit)
+        .related('participants', p => p.where('userId', ctx.userID));
+    },
+  ),
+
+  /**
+   * Call history filtered to only calls where user is an explicit participant.
+   * Used when "Include all channel calls" toggle is OFF (default).
+   * More efficient than userCallHistoryV2 as it skips channel-level access calls.
+   */
+  userCallHistoryParticipantOnly: defineQuery(
+    z.object({
+      limit: z.number(),
+      start: z.object({ id: z.string(), startedAt: z.number() }).nullable(),
+    }),
+    ({ ctx, args: { limit, start } }) => {
+      let query = zql.calls
+        .where(helpers => helpers.cmp('callType', 'NOT IN', [CallType.HEADLESS]))
+        .where(helpers =>
+          helpers.cmp('status', 'NOT IN', [
+            CallStatus.ACTIVE,
+            CallStatus.SCHEDULED,
+            CallStatus.CANCELLED,
+          ]),
+        )
+        .whereExists('participants', p => p.where('userId', ctx.userID))
         .orderBy('startedAt', 'desc')
         .orderBy('id', 'desc');
 
@@ -4516,7 +4617,7 @@ export const queries = defineQueries({
   // belongs to (one row per release × per-app SubTicket; callers dedupe by
   // releaseId). Keep in sync with the backend copy.
   applicationReleaseTicketsByDevTicketId: defineQuery(
-    z.object({ ticketId: z.string().min(1) }),
+    z.object({ ticketId: z.string() }),
     ({ args: { ticketId } }) => {
       return zql.application_release_tickets
         .where('ticketId', ticketId)

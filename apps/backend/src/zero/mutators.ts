@@ -160,6 +160,7 @@ import { detectVcsProvider } from '@/utils/repoUrlParser';
 import { getStorageService } from '@/services/storage';
 import { repositories } from '@/database/repositories';
 import { db } from '@/database/client';
+import { parseDlAliases, dlAddressesFor } from '@/services/dlResolver';
 import { vespaQueue } from '@/queues/vespaQueue';
 import { ticketReassignmentQueue } from '@/queues/ticketReassignmentQueue';
 import { userAssignmentStateService } from '@/services/userAssignmentStateService';
@@ -589,10 +590,26 @@ async function addMentionedConversationParticipants(
   }
 }
 
+/**
+ * Ticket.conversation is a required app-level relation (relationMode="prisma"). Zero writes skip
+ * Prisma Client's Restrict emulation, so every conversation delete checks this explicitly —
+ * otherwise the ticket is left pointing at a missing conversation.
+ */
+async function conversationHasTicket(
+  tx: Transaction<Schema>,
+  conversationId: string,
+): Promise<boolean> {
+  const ticket = await tx.run(zql.tickets.where('conversationId', conversationId).one());
+  return !!ticket;
+}
+
 async function deleteConversationWithParticipants(
   tx: Transaction<Schema>,
   conversationId: string,
 ): Promise<void> {
+  // A ticket thread must outlive its messages (see conversationHasTicket).
+  if (await conversationHasTicket(tx, conversationId)) return;
+
   const participants = await tx.run(
     zql.conversation_participants.where('conversationId', conversationId),
   );
@@ -4356,7 +4373,9 @@ export function createMutators(
 
           const isInitialMessage = conversation.initialMessageId === messageId;
           const hasReplies = otherMessages.length > 0;
-          const shouldSoftDelete = isInitialMessage && hasReplies;
+          // A ticket thread can't lose its conversation: tombstone the root instead.
+          const hasTicket = await conversationHasTicket(tx, conversation.conversationId);
+          const shouldSoftDelete = isInitialMessage && (hasReplies || hasTicket);
 
           // Clean up MENTIONED participants within Zero transaction
           const mentions = extractAllMentions(message.content);
@@ -4474,7 +4493,8 @@ export function createMutators(
               otherMessages[0].messageId === conversation.initialMessageId &&
               otherMessages[0].isDeleted === true;
 
-            const shouldDeleteConversation = otherMessages.length === 0 || isInitialMessageDeleted;
+            const shouldDeleteConversation =
+              !hasTicket && (otherMessages.length === 0 || isInitialMessageDeleted);
 
             if (shouldDeleteConversation) {
               // Delete ghost root FIRST, before the conversation.
@@ -7343,19 +7363,8 @@ export function createMutators(
           subTicketXyneId: z.string().optional(),
         }),
         async ({ tx, args: { subTicketId, mappingId, timestamp, title, description, ticketId, conversationId, subTicketXyneId } }) => {
-          const parentAsSubTicket = await tx.run(
-            zql.sub_tickets.where('mappedTicketId', ticketId).one(),
-          );
           // Parent ticket is also needed below to denormalize channelId onto the activity.
           const parentTicket = await tx.run(zql.tickets.where('id', ticketId).one());
-          if (parentAsSubTicket) {
-            const parentBoard = parentTicket
-              ? await tx.run(zql.boards.where('id', parentTicket.boardId).one())
-              : null;
-            if (parentBoard?.boardType !== BoardType.FLOW) {
-              throw new Error('Cannot create a sub-ticket under a sub-ticket');
-            }
-          }
           // Create the subticket
           await tx.mutate.sub_tickets.insert({
             id: subTicketId,
@@ -11469,6 +11478,10 @@ export function createMutators(
           if (!repo) {
             throw new Error('Repository not found');
           }
+          // An SDLC repository's credential link and access checks belong to its URL.
+          if (url !== undefined && url !== repo.url && repo.projectId) {
+            throw new Error('Register the new link as a repository instead of changing this one');
+          }
 
           await tx.mutate.repos.update({
             id,
@@ -13422,11 +13435,12 @@ export function createMutators(
           );
           if (existing) {
             const existingAt = existing.lastReadEmailAt;
-            if (typeof existingAt !== 'number' || existingAt < lastReadEmailAt) {
+            if (typeof existingAt !== 'number' || existingAt < lastReadEmailAt || existing.hasNewEmail) {
               await tx.mutate.email_reads.update({
                 id: existing.id,
                 lastReadEmailId,
                 lastReadEmailAt,
+                hasNewEmail: false,
                 updatedAt,
               });
             }
@@ -13438,6 +13452,7 @@ export function createMutators(
               userId: ctx.userID,
               lastReadEmailId,
               lastReadEmailAt,
+              hasNewEmail: false,
               createdAt: updatedAt,
               updatedAt,
             });
@@ -13488,7 +13503,8 @@ export function createMutators(
               if (ex) {
                 if (
                   typeof ex.lastReadEmailAt === 'number' &&
-                  ex.lastReadEmailAt >= lastReadEmailAt
+                  ex.lastReadEmailAt >= lastReadEmailAt &&
+                  !ex.hasNewEmail
                 ) {
                   return undefined;
                 }
@@ -13496,6 +13512,7 @@ export function createMutators(
                   id: ex.id,
                   lastReadEmailAt,
                   lastReadEmailId,
+                  hasNewEmail: false,
                   updatedAt: timestamp,
                 });
               }
@@ -13506,6 +13523,7 @@ export function createMutators(
                 userId: ctx.userID,
                 lastReadEmailAt,
                 lastReadEmailId,
+                hasNewEmail: false,
                 createdAt: timestamp,
                 updatedAt: timestamp,
               });
@@ -15476,7 +15494,7 @@ export function createMutators(
             ...(name !== undefined && { name }),
             ...(visibility !== undefined && { visibility }),
             ...(isStarred !== undefined && { isStarred }),
-            updatedAt: timestamp,
+            ...(values !== undefined && { updatedAt: timestamp }),
           });
 
           // Full replace of values if provided
@@ -16325,6 +16343,7 @@ export function createMutators(
           ownerUserId: z.string().optional(),
           assigneeUserGroupId: z.string().optional().nullable(),
           sendAsEmail: z.string().optional().nullable(),
+          dlAliases: z.string().optional().nullable(),
           defaultCc: z.string().optional().nullable(),
           emailMergeMode: z.nativeEnum(EmailMergeMode).optional(),
           twoStepSendEnabled: z.boolean().optional(),
@@ -16345,6 +16364,7 @@ export function createMutators(
             ownerUserId,
             assigneeUserGroupId,
             sendAsEmail,
+            dlAliases,
             defaultCc,
             emailMergeMode,
             twoStepSendEnabled,
@@ -16359,6 +16379,26 @@ export function createMutators(
             deskReportRangeDays,
           },
         }) => {
+          // One address routes to one desk; channelController enforces the same
+          // rule in the other direction when a DL desk is created.
+          if (dlAliases) {
+            const claimed = parseDlAliases(dlAliases);
+            if (claimed.length > 0) {
+              const others = await tx.run(
+                zql.email_channel_preferences.where('workspaceId', authData.workspaceId),
+              );
+              const taken = others
+                .filter(other => other.channelId !== channelId)
+                .flatMap(other => dlAddressesFor(other))
+                .find(address => claimed.includes(address));
+              if (taken) {
+                throw new ApplicationError(
+                  `${taken} is already used by another desk in this workspace`,
+                );
+              }
+            }
+          }
+
           const existing = await tx.run(
             zql.email_channel_preferences.where('channelId', channelId).one(),
           );
@@ -16368,6 +16408,7 @@ export function createMutators(
               ...(ownerUserId !== undefined ? { ownerUserId } : {}),
               ...(assigneeUserGroupId !== undefined ? { assigneeUserGroupId } : {}),
               ...(sendAsEmail !== undefined ? { sendAsEmail } : {}),
+              ...(dlAliases !== undefined ? { dlAliases } : {}),
               ...(defaultCc !== undefined ? { defaultCc } : {}),
               ...(emailMergeMode !== undefined ? { emailMergeMode } : {}),
               ...(twoStepSendEnabled !== undefined ? { twoStepSendEnabled } : {}),
@@ -16391,6 +16432,7 @@ export function createMutators(
               assigneeUserGroupId: assigneeUserGroupId ?? null,
               boardId: null,
               sendAsEmail: sendAsEmail ?? null,
+              dlAliases: dlAliases ?? null,
               classificationEnabled: false,
               classificationPrompt: null,
               categoryField: null,
