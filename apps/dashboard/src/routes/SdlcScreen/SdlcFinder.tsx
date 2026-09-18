@@ -385,8 +385,17 @@ export function SdlcFinderColumn(props: {
     'finder.open',
     () => {
       if (!focusedRow) return;
-      if (focusedRow.kind === 'FOLDER') openFolder();
-      else props.onOpenCanvas(focusedRow.id);
+      if (focusedRow.kind === 'FOLDER') {
+        openFolder();
+        return;
+      }
+      // A link or a file is not a canvas: opening one by its id as if it were
+      // asked for an artifact that does not exist.
+      if (focusedRow.kind === 'LINK' || focusedRow.kind === 'ATTACHMENT') {
+        props.onOpenItem({ kind: focusedRow.kind, id: focusedRow.id }, props.parent);
+        return;
+      }
+      props.onOpenCanvas(focusedRow.id);
     },
     bind,
   );
