@@ -8,6 +8,7 @@ import { isAgentInvocableBy } from "xyne-claw-shared";
 import { fetch as httpFetch } from "undici";
 import { CONFIG } from "../../config.js";
 import { resolveAgentProviderConfigs, resolveSubagentProviderMode } from "../../lib/agent-provider-config.js";
+import { runAttachmentRefsEnabled, uploadRunAttachment } from "../../lib/run-attachment-store.js";
 import { setSession } from "../../lib/session-context.js";
 import { getChannel, type ChannelDeliveryTarget, type MessagingChannelKey } from "./plugin.js";
 import { sanitizeId } from "./schema.js";
@@ -80,13 +81,36 @@ function channelSurfaceInstructions(channel: MessagingChannelKey): string {
   return lines.join("\n");
 }
 
+/** A photo or PDF is the same weight here as in Spaces, so it takes the same
+ *  route: bytes to object storage and a ref in the body, falling back to
+ *  base64 when the flag is off or the upload fails — a storage hiccup must
+ *  never cost the person their attachment. */
+async function toRunAttachments(
+  conversationId: string,
+  messageKey: string,
+  files: ReadonlyArray<{ fileName: string; mimeType: string; data: Buffer }>,
+): Promise<Array<{ fileName: string; mimeType: string; data?: string; gcsRef?: string; sizeBytes: number }>> {
+  const useRefs = runAttachmentRefsEnabled();
+  return Promise.all(
+    files.map(async (file, index) => {
+      const uploaded = useRefs
+        ? await uploadRunAttachment(conversationId, `${messageKey}-${index}`, file.data, file.mimeType)
+        : null;
+      return uploaded
+        ? { fileName: file.fileName, mimeType: file.mimeType, gcsRef: uploaded.gcsRef, sizeBytes: uploaded.sizeBytes }
+        : { fileName: file.fileName, mimeType: file.mimeType, data: file.data.toString("base64"), sizeBytes: file.data.length };
+    }),
+  );
+}
+
 export async function dispatchChannelRun(input: {
   agent: BoundAgent;
   userId: string;
   task: string;
-  /** Files the person sent with the message. Inlined as base64 in the run
-   *  body, the same shape Spaces uses. */
-  attachments?: Array<{ fileName: string; mimeType: string; data: string; sizeBytes: number }>;
+  /** Files the person sent with the message, as raw bytes. Parked in object
+   *  storage when XYNE_RUN_ATTACHMENT_REFS is on and inlined as base64
+   *  otherwise — see toRunAttachments. */
+  attachments?: Array<{ fileName: string; mimeType: string; data: Buffer }>;
   conversationId: string;
   eventType: "APP_MENTIONED" | "DIRECT_MESSAGE";
   idempotencyKey: string;
@@ -98,6 +122,7 @@ export async function dispatchChannelRun(input: {
   if (!isAgentInvocableBy(input.agent.config as Record<string, unknown> | null, input.userId)) {
     throw new Error(`agent "${input.agent.slug}" is restricted — you don't have access to it`);
   }
+  const runAttachments = await toRunAttachments(input.conversationId, input.idempotencyKey, input.attachments ?? []);
 
   const providers = await resolveAgentProviderConfigs({ id: input.agent.id, config: input.agent.config });
   const response = await httpFetch(`${CONFIG.internalUrl}/claw/api/v1/internal/run`, {
@@ -121,7 +146,7 @@ export async function dispatchChannelRun(input: {
       ...(providers.parent ? { provider: providers.parent } : {}),
       ...(providers.providerOrder.length > 1 ? { providerOrder: providers.providerOrder } : {}),
       ...(Object.keys(providers.providerConfigs).length > 0 ? { providerConfigs: providers.providerConfigs } : {}),
-      ...(input.attachments?.length ? { attachments: input.attachments } : {}),
+      ...(runAttachments.length ? { attachments: runAttachments } : {}),
       additionalInstructions: channelSurfaceInstructions(input.target.channel),
       subagentProviderMode: resolveSubagentProviderMode(input.agent.config),
       ...(input.agent.config ? { agentConfig: input.agent.config } : {}),

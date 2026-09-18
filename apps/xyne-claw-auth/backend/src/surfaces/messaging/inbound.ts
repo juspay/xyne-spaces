@@ -273,16 +273,7 @@ export async function handleInbound(ctx: InboundContext, msg: InboundMessage): P
       eventType: msg.isGroup ? "APP_MENTIONED" : "DIRECT_MESSAGE",
       idempotencyKey: `${account.channel}:${account.id}:${msg.messageId}`,
       ...(msg.senderName ? { senderName: msg.senderName } : {}),
-      ...(msg.attachments?.length
-        ? {
-            attachments: msg.attachments.map((file) => ({
-              fileName: file.fileName,
-              mimeType: file.mimeType,
-              data: file.data.toString("base64"),
-              sizeBytes: file.data.length,
-            })),
-          }
-        : {}),
+      ...(msg.attachments?.length ? { attachments: msg.attachments } : {}),
       target,
     });
     log.info(`[inbound] dispatched session=${sessionId} agent=${agent.slug} account=${account.id} chat=${msg.chatId}`);
