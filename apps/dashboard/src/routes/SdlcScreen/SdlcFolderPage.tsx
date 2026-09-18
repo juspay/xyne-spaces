@@ -710,27 +710,28 @@ export function SdlcFolderPage(props: {
       >
         <div
           className={cn(
-            'flex shrink-0 items-center border-b border-border py-2',
+            'flex shrink-0 items-center gap-1.5 border-b border-border py-2',
             explorerCollapsed ? 'justify-center px-1' : 'px-3',
           )}
         >
-          {!explorerCollapsed && (
-            <span className='min-w-0 flex-1 truncate text-[11px] font-semibold uppercase tracking-[0.11em] text-muted-foreground'>
-              Explorer
-            </span>
-          )}
+          {/* Leads, for the same reason the hub sidebar's does. */}
           <button
             type='button'
             title={explorerCollapsed ? 'Show explorer' : 'Hide explorer'}
             aria-label={explorerCollapsed ? 'Show explorer' : 'Hide explorer'}
             aria-expanded={!explorerCollapsed}
             onClick={() => setUserPreference('sdlcExplorerCollapsed', !explorerCollapsed)}
-            className='flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-foreground/[0.08] hover:text-foreground'
+            className='-ml-1 flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-foreground/[0.08] hover:text-foreground'
             data-track-category='SdlcHub'
             data-track-name='ExplorerCollapsed'
           >
             <PanelLeft className='size-3.5' />
           </button>
+          {!explorerCollapsed && (
+            <span className='min-w-0 flex-1 truncate text-[11px] font-semibold uppercase tracking-[0.11em] text-muted-foreground'>
+              Explorer
+            </span>
+          )}
         </div>
         <div
           ref={treeRef}

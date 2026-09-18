@@ -1290,18 +1290,6 @@ export default function SdlcScreen(): ReactElement {
       : undefined;
     return (
       <>
-        <Button
-          size='icon'
-          variant='ghost'
-          aria-label='Members'
-          title='Members'
-          onClick={() => setMembersDialog(true)}
-          data-track-category='SdlcHub'
-          data-track-name='HeaderMembersClicked'
-          data-track-metadata={JSON.stringify({ place })}
-        >
-          <Users className='size-4' />
-        </Button>
         <CallTriggerModal
           channelId={channel.id}
           {...(channel.scopeType && { scopeType: channel.scopeType })}
@@ -3156,16 +3144,29 @@ export default function SdlcScreen(): ReactElement {
               railOpen ? 'justify-between px-4' : 'justify-center px-2',
             )}
           >
-            <div
-              className={cn(
-                'min-w-0 truncate text-[10.5px] font-semibold uppercase tracking-[0.13em] text-sidebar-foreground/60',
-                !railOpen && 'sr-only',
-              )}
-            >
-              SDLC Hub
+            {/* The toggle leads, so that peeking at a collapsed sidebar puts it
+              under the pointer and one click pins it open. */}
+            <div className='flex min-w-0 items-center gap-1.5'>
+              <button
+                type='button'
+                onClick={toggleRail}
+                title={railCollapsed ? 'Pin the sidebar open' : 'Collapse to icons'}
+                aria-label={railCollapsed ? 'Pin the sidebar open' : 'Collapse to icons'}
+                className='-ml-1 shrink-0 rounded-md p-1 text-sidebar-foreground/60 transition-colors hover:bg-sidebar-accent/60 hover:text-sidebar-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-sidebar-accent-ring'
+                data-track-category='SdlcHub'
+                data-track-name='SidebarRailToggled'
+              >
+                <PanelLeft className='size-3.5' />
+              </button>
+              <div
+                className={cn(
+                  'min-w-0 truncate text-[10.5px] font-semibold uppercase tracking-[0.13em] text-sidebar-foreground/60',
+                  !railOpen && 'sr-only',
+                )}
+              >
+                SDLC Hub
+              </div>
             </div>
-            {/* The toggle sits last so it lands hard against the sidebar's right
-              edge when open, and is the only thing left when folded. */}
             <div className='flex shrink-0 items-center gap-0.5'>
               {railOpen && (
                 <button
@@ -3194,17 +3195,6 @@ export default function SdlcScreen(): ReactElement {
                   <RefreshCw className='h-3.5 w-3.5' aria-hidden='true' />
                 </button>
               )}
-              <button
-                type='button'
-                onClick={toggleRail}
-                title={railCollapsed ? 'Pin the sidebar open' : 'Collapse to icons'}
-                aria-label={railCollapsed ? 'Pin the sidebar open' : 'Collapse to icons'}
-                className='-mr-1 rounded-md p-1 text-sidebar-foreground/60 transition-colors hover:bg-sidebar-accent/60 hover:text-sidebar-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-sidebar-accent-ring'
-                data-track-category='SdlcHub'
-                data-track-name='SidebarRailToggled'
-              >
-                <PanelLeft className='size-3.5' />
-              </button>
             </div>
           </div>
           <div className={cn('flex items-center gap-1 px-2 pb-2', !railOpen && 'hidden')}>
@@ -3215,6 +3205,20 @@ export default function SdlcScreen(): ReactElement {
                 onSelect={nextChannelId => void navigate(`/sdlc/${nextChannelId}/overview`)}
               />
             </div>
+            {/* Beside the hub it acts on, rather than in a header whose scope is
+              whatever the reader has open. */}
+            <button
+              type='button'
+              onClick={() => setMembersDialog(true)}
+              title='Members'
+              aria-label='Members'
+              className='flex size-7 shrink-0 items-center justify-center rounded-md text-sidebar-foreground/60 transition-colors hover:bg-sidebar-accent/60 hover:text-sidebar-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-sidebar-accent-ring'
+              data-track-category='SdlcHub'
+              data-track-name='HeaderMembersClicked'
+              data-track-metadata={JSON.stringify({ place: 'hub-picker' })}
+            >
+              <Users className='size-4' />
+            </button>
           </div>
           {railOpen ? (
             <SdlcSidebarFitSection id='sdlc-sidebar-hub' title='Hub'>
