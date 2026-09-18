@@ -1,3 +1,10 @@
+## [1.337.0-release-20260918.8](https://github.com/juspay/xyne-spaces/compare/v1.337.0-release-20260918.7...v1.337.0-release-20260918.8) (2026-09-18)
+
+
+### Bug Fixes
+
+* ticket api fix ([#1966](https://github.com/juspay/xyne-spaces/issues/1966)) ([#2063](https://github.com/juspay/xyne-spaces/issues/2063)) ([08e6c0b](https://github.com/juspay/xyne-spaces/commit/08e6c0be9573930b90df905a958903e8f0f89c8b))
+
 ## [1.337.0-release-20260918.7](https://github.com/juspay/xyne-spaces/compare/v1.337.0-release-20260918.6...v1.337.0-release-20260918.7) (2026-09-18)
 
 
