@@ -83,6 +83,7 @@ export function SdlcEmbeddedWebview(props: {
     const view = viewRefs.current.get(activeIdRef.current);
     if (!view) return;
     const message = JSON.stringify(payload ?? { channel: 'xyne-doc-host', type: 'noop' });
+    console.debug('[annotate/bridge] host evaluating; view?', Boolean(viewRefs.current.get(activeIdRef.current)));
     const drained = ask(
       () =>
         view.executeJavaScript(
@@ -206,6 +207,7 @@ export function SdlcEmbeddedWebview(props: {
       }
 
       if (message.type === SDLC_FRAME_MESSAGE.embedScript) {
+        console.debug('[annotate/bridge] host got embedScript', message.payload['type']);
         setAnnotateArmed(true);
         annotateRef.current(message.payload);
         return;
