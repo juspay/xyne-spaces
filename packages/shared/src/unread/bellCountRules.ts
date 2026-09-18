@@ -27,10 +27,7 @@ export const BELL_EXCLUDED_CLASSIFICATIONS = ['SKIP'] as const;
  * Legacy `direct_message` activity rows are dm-shelf content — fully excluded
  * from the bell count.
  */
-export const BELL_EXCLUDED_LEGACY_DIRECT_MESSAGES = true;
-
-/** Unread activities in closed/archived channels do not count in any shelf. */
-export const BELL_EXCLUDE_CLOSED_CHANNELS = true;
+export const BELL_EXCLUDED_LEGACY_DIRECT_MESSAGE_ACTIONS = ['direct_message'] as const;
 
 /** Channel scopes whose unreads belong to the dm shelf. */
 export const DM_SHELF_CHANNEL_SCOPES = ['DM', 'GROUP_DM'] as const;
@@ -38,10 +35,8 @@ export const DM_SHELF_CHANNEL_SCOPES = ['DM', 'GROUP_DM'] as const;
 /**
  * GROUP_DM unread top-level mention activities belong to the bell shelf
  * ("mention wins the bucket"), so the dm shelf subtracts them per channel.
+ * Actor actions of the rows it subtracts:
  */
-export const DM_SHELF_SUBTRACT_UNREAD_TOP_LEVEL_MENTIONS = true;
-
-/** Actor actions of unread top-level mention rows the dm shelf subtracts. */
 export const DM_SHELF_MENTION_ACTOR_ACTIONS = ['mentioned_user', 'group_mention'] as const;
 
 /** Bell count rules, assembled (see the individual constants above). */
@@ -49,11 +44,12 @@ export const BELL_COUNT_RULES = {
   excludedActorActions: BELL_EXCLUDED_ACTOR_ACTIONS,
   excludedCalls: { actionSource: 'call', actorAction: BELL_EXCLUDED_CALL_ACTOR_ACTION },
   excludedClassifications: BELL_EXCLUDED_CLASSIFICATIONS,
-  excludedLegacyDirectMessages: BELL_EXCLUDED_LEGACY_DIRECT_MESSAGES,
-  excludeClosedChannels: BELL_EXCLUDE_CLOSED_CHANNELS,
+  /** Legacy `direct_message` rows are dm-shelf content, never bell. */
+  excludedLegacyDirectMessageActions: BELL_EXCLUDED_LEGACY_DIRECT_MESSAGE_ACTIONS,
+  /** Closed channels are excluded via a per-user pair filter, not this list. */
+  excludeClosedChannels: true,
   dmShelf: {
     channelScopes: DM_SHELF_CHANNEL_SCOPES,
-    subtractUnreadTopLevelMentions: DM_SHELF_SUBTRACT_UNREAD_TOP_LEVEL_MENTIONS,
     mentionActorActions: DM_SHELF_MENTION_ACTOR_ACTIONS,
   },
 } as const;

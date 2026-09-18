@@ -272,12 +272,14 @@ export const WorkspaceSwitcher: React.FC = () => {
         title={displayName || 'Workspace'}
       >
         {initial}
-        {totalUnread > 0 && (
+        {/* Count/dot hidden while the popover is open — the popover's own rows
+            show every workspace's count, so the trigger badge is redundant. */}
+        {!isOpen && totalUnread > 0 && (
           <span className='absolute -top-1 -right-1 min-w-[16px] h-4 bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center px-1'>
             {totalUnread > 99 ? '99+' : totalUnread}
           </span>
         )}
-        {totalUnread === 0 && hasOtherWorkspaceUnread && (
+        {!isOpen && totalUnread === 0 && hasOtherWorkspaceUnread && (
           <span className='absolute -top-1 -right-1 size-[9px] bg-red-500 rounded-full border border-sidebar-accent-ring' />
         )}
       </button>

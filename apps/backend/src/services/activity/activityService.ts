@@ -7,8 +7,7 @@ import {
   BELL_COUNT_RULES,
   BELL_EXCLUDED_ACTOR_ACTIONS,
   BELL_EXCLUDED_CLASSIFICATIONS,
-  BELL_EXCLUDED_LEGACY_DIRECT_MESSAGES,
-  BELL_EXCLUDE_CLOSED_CHANNELS,
+  BELL_EXCLUDED_LEGACY_DIRECT_MESSAGE_ACTIONS,
   DM_SHELF_CHANNEL_SCOPES,
   DM_SHELF_MENTION_ACTOR_ACTIONS,
 } from '@xyne/shared';
@@ -846,7 +845,7 @@ export class ActivityService {
           actorAction: {
             notIn: [
               ...BELL_EXCLUDED_ACTOR_ACTIONS,
-              ...(BELL_EXCLUDED_LEGACY_DIRECT_MESSAGES ? ['direct_message'] : []),
+              ...BELL_EXCLUDED_LEGACY_DIRECT_MESSAGE_ACTIONS,
             ],
           },
           NOT: {
@@ -863,15 +862,13 @@ export class ActivityService {
       });
 
       // Channels closed *for this user* (isClosed/isDeleted are per-user flags).
-      const closedStatuses = BELL_EXCLUDE_CLOSED_CHANNELS
-        ? await this.prisma.channelUserStatus.findMany({
-            where: {
-              userId: { in: userIds },
-              OR: [{ isClosed: true }, { isDeleted: true }],
-            },
-            select: { userId: true, channelId: true },
-          })
-        : [];
+      const closedStatuses = await this.prisma.channelUserStatus.findMany({
+        where: {
+          userId: { in: userIds },
+          OR: [{ isClosed: true }, { isDeleted: true }],
+        },
+        select: { userId: true, channelId: true },
+      });
 
       const closedChannelsByUser = new Map<string, Set<string>>();
       for (const status of closedStatuses) {

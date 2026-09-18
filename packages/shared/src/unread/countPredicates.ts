@@ -8,8 +8,7 @@
 import {
   BELL_EXCLUDED_ACTOR_ACTIONS,
   BELL_EXCLUDED_CLASSIFICATIONS,
-  BELL_EXCLUDED_LEGACY_DIRECT_MESSAGES,
-  BELL_EXCLUDE_CLOSED_CHANNELS,
+  BELL_EXCLUDED_LEGACY_DIRECT_MESSAGE_ACTIONS,
   DM_SHELF_CHANNEL_SCOPES,
   DM_SHELF_MENTION_ACTOR_ACTIONS,
 } from './bellCountRules.js';
@@ -49,14 +48,10 @@ export const isBellCountedActivity = (
   if ((BELL_EXCLUDED_CLASSIFICATIONS as readonly string[]).includes(classification)) {
     return false;
   }
-  if (BELL_EXCLUDED_LEGACY_DIRECT_MESSAGES && activity.actorAction === 'direct_message') {
+  if ((BELL_EXCLUDED_LEGACY_DIRECT_MESSAGE_ACTIONS as readonly string[]).includes(activity.actorAction)) {
     return false;
   }
-  if (
-    BELL_EXCLUDE_CLOSED_CHANNELS &&
-    activity.channelId != null &&
-    closedChannelIds.has(activity.channelId)
-  ) {
+  if (activity.channelId != null && closedChannelIds.has(activity.channelId)) {
     return false;
   }
   return true;

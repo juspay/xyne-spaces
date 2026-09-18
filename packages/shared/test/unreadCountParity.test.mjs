@@ -137,7 +137,7 @@ test('shared rules shape is stable (backend Prisma translation depends on it)', 
   assert.equal(BELL_COUNT_RULES.excludedCalls.actionSource, 'call');
   assert.equal(BELL_COUNT_RULES.excludedCalls.actorAction, 'missed_call');
   assert.deepEqual([...BELL_COUNT_RULES.excludedClassifications], ['SKIP']);
-  assert.equal(BELL_COUNT_RULES.excludedLegacyDirectMessages, true);
+  assert.deepEqual([...BELL_COUNT_RULES.excludedLegacyDirectMessageActions], ['direct_message']);
   assert.equal(BELL_COUNT_RULES.excludeClosedChannels, true);
   assert.deepEqual([...BELL_COUNT_RULES.dmShelf.channelScopes], ['DM', 'GROUP_DM']);
   assert.deepEqual([...BELL_COUNT_RULES.dmShelf.mentionActorActions], [
