@@ -11,6 +11,7 @@ import {
   generateDocumentThumbnail,
   isPreviewableDocument,
 } from '../services/documentThumbnailService';
+import { isHeicAttachment, sniffHeicFile } from '../services/heicAttachmentService';
 import type { UploadedFile } from '../components/ui/files/Files.types';
 import { logger, Event } from '../utils/logger';
 
@@ -209,9 +210,18 @@ export function useDraftAttachments() {
           );
         }
         // For images, cache the full file blob so it displays instantly after send
-        // Images don't have a separate thumbnail - they use the full file directly
+        // Images don't have a separate thumbnail - they use the full file directly.
+        // HEIC is excluded: the original blob can't render in most browsers, and
+        // the chip fetches the server-side WebP thumbnail instead (see
+        // heicAttachmentService). Local Files are decided by their ftyp brand —
+        // the browser's type/extension is a guess that mislabels renamed HEICs
+        // as .jpg, which would cache an unrenderable blob.
         if (file.type.startsWith('image/')) {
-          queryClient.setQueryData(['preview-blob', attachmentId], file);
+          void sniffHeicFile(file).then(sniffed => {
+            if (!(sniffed ?? isHeicAttachment(file.type, file.name))) {
+              queryClient.setQueryData(['preview-blob', attachmentId], file);
+            }
+          });
         }
       });
 
