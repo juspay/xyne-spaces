@@ -1,5 +1,5 @@
 import { setup, assign, createActor } from 'xstate';
-import type { StorageAdapter } from '../platform/storage.js';
+import type { ChatCacheEntityKind, StorageAdapter } from '../platform/storage.js';
 import { queries } from '../zero/queries.js';
 import type { QueryResultType } from '@rocicorp/zero';
 import type { QueryResult } from '@rocicorp/zero/react';
@@ -605,6 +605,39 @@ export const getRecordingsQueryHash = (): string => {
 // would never fire before the page dies).
 let persistNow: (() => void) | null = null;
 
+const lastPersistedChannelRefs = new Map<string, unknown>();
+const lastPersistedThreadRefs = new Map<string, unknown>();
+
+/**
+ * Write each changed chat window as its own record, and delete the records of
+ * windows the cache dropped. Returns false when the adapter does not implement
+ * the whole per-entity contract, so the caller keeps the legacy blob path.
+ */
+function persistChatEntities(
+  storage: StorageAdapter,
+  kind: ChatCacheEntityKind,
+  entries: Record<string, unknown>,
+  fingerprint: string,
+  persistedRefs: Map<string, unknown>,
+): boolean {
+  const { writeChatEntity, removeChatEntity, loadChatEntities } = storage;
+  if (!loadChatEntities || !writeChatEntity || !removeChatEntity) return false;
+
+  for (const [id, value] of Object.entries(entries)) {
+    if (persistedRefs.get(id) === value) continue;
+    persistedRefs.set(id, value);
+    void Promise.resolve(writeChatEntity.call(storage, kind, id, value, fingerprint)).catch(
+      () => {},
+    );
+  }
+  for (const id of [...persistedRefs.keys()]) {
+    if (id in entries) continue;
+    persistedRefs.delete(id);
+    void Promise.resolve(removeChatEntity.call(storage, kind, id)).catch(() => {});
+  }
+  return true;
+}
+
 /**
  * Setup persistence middleware for query cache.
  * Accepts a StorageAdapter for platform-agnostic persistence.
@@ -615,6 +648,10 @@ export const setupQueryCachePersistence = (
   schemaVersion: string,
 ): void => {
   setStorageAdapter(storage);
+  // Entity references belong to the storage scope this setup establishes, so a
+  // previous user/workspace session must never suppress writes in a new one.
+  lastPersistedChannelRefs.clear();
+  lastPersistedThreadRefs.clear();
 
   const doPersist = (): void => {
     // Read the LATEST snapshot at flush time (not the one that scheduled
@@ -657,12 +694,22 @@ export const setupQueryCachePersistence = (
       lastPersistedRefs.set('channelConversations', channelConversations);
       const conversationHash = getChannelConversationsQueryHash({ userID: userId });
 
-      const payload: Record<string, unknown> = {
-        ...channelConversations,
-        [FINGERPRINT_FIELD]: conversationHash,
-      };
+      if (
+        !persistChatEntities(
+          storage,
+          'channel',
+          channelConversations,
+          conversationHash,
+          lastPersistedChannelRefs,
+        )
+      ) {
+        const payload: Record<string, unknown> = {
+          ...channelConversations,
+          [FINGERPRINT_FIELD]: conversationHash,
+        };
 
-      storage.saveContextProperty('channelConversations', payload).catch(() => {});
+        storage.saveContextProperty('channelConversations', payload).catch(() => {});
+      }
     }
 
     if (
@@ -671,14 +718,24 @@ export const setupQueryCachePersistence = (
       lastPersistedRefs.set(THREAD_CONVERSATIONS_KEY, threadConversations);
       const threadHash = getThreadConversationQueryHash({ userID: userId });
 
-      const threadPayload: Record<string, unknown> = {
-        ...threadConversations,
-        [THREAD_FINGERPRINT_FIELD]: threadHash,
-      };
+      if (
+        !persistChatEntities(
+          storage,
+          'thread',
+          threadConversations,
+          threadHash,
+          lastPersistedThreadRefs,
+        )
+      ) {
+        const threadPayload: Record<string, unknown> = {
+          ...threadConversations,
+          [THREAD_FINGERPRINT_FIELD]: threadHash,
+        };
 
-      storage
-        .saveContextProperty(THREAD_CONVERSATIONS_KEY, threadPayload)
-        .catch(() => {});
+        storage
+          .saveContextProperty(THREAD_CONVERSATIONS_KEY, threadPayload)
+          .catch(() => {});
+      }
     }
 
     if (lastPersistedRefs.get(CALL_HISTORY_KEY) !== callHistory) {
@@ -747,9 +804,12 @@ export const hydrateQueryCacheFromStorage = async (
   try {
     await storage.init(userId, schemaVersion);
 
+    // Adapters with per-entity chat storage keep their windows outside the
+    // context blob, so a session with only entities must still hydrate.
+    const chatEntities = (await storage.loadChatEntities?.()) ?? [];
     const context = await storage.loadContext();
 
-    if (!context) {
+    if (!context && chatEntities.length === 0) {
       return false;
     }
 
@@ -763,7 +823,21 @@ export const hydrateQueryCacheFromStorage = async (
     const currentConversationHash = getChannelConversationsQueryHash({ userID: userId });
     const currentThreadHash = getThreadConversationQueryHash({ userID: userId });
 
-    for (const [key, value] of Object.entries(context)) {
+    for (const entity of chatEntities) {
+      const expectedHash =
+        entity.kind === 'channel' ? currentConversationHash : currentThreadHash;
+      if (entity.fingerprint && entity.fingerprint !== expectedHash) continue;
+
+      if (entity.kind === 'channel') {
+        if (Array.isArray(entity.value) && entity.value.length > 0) {
+          conversationsData[entity.id] = entity.value as Conversation[];
+        }
+      } else if (entity.value && typeof entity.value === 'object') {
+        threadConversationsData[entity.id] = entity.value as ThreadConversation;
+      }
+    }
+
+    for (const [key, value] of Object.entries(context ?? {})) {
       if (key === 'channelConversations') {
         const raw = value as Record<string, unknown>;
 
@@ -773,11 +847,16 @@ export const hydrateQueryCacheFromStorage = async (
           continue;
         }
 
-        for (const [channelId, conversations] of Object.entries(raw)) {
-          if (channelId === FINGERPRINT_FIELD) continue;
-          if (Array.isArray(conversations) && conversations.length > 0) {
-            conversationsData[channelId] = conversations as Conversation[];
-          }
+        // The blob is unbounded on disk; the actor is not. Keep the newest
+        // entries so hydration can never exceed the in-memory LRU bound.
+        const channelEntries = Object.entries(raw).filter(
+          ([channelId, conversations]) =>
+            channelId !== FINGERPRINT_FIELD &&
+            Array.isArray(conversations) &&
+            (conversations as unknown[]).length > 0,
+        );
+        for (const [channelId, conversations] of channelEntries.slice(-MAX_CACHED_CHANNELS)) {
+          conversationsData[channelId] = conversations as Conversation[];
         }
       } else if (key === THREAD_CONVERSATIONS_KEY) {
         const raw = value as Record<string, unknown>;
@@ -785,12 +864,14 @@ export const hydrateQueryCacheFromStorage = async (
         if (storedHash !== undefined && storedHash !== currentThreadHash) {
           continue;
         }
-        for (const [conversationId, conversation] of Object.entries(raw)) {
-          if (conversationId === THREAD_FINGERPRINT_FIELD) continue;
-          if (conversation && typeof conversation === "object") {
-            threadConversationsData[conversationId] =
-              conversation as ThreadConversation;
-          }
+        const threadEntries = Object.entries(raw).filter(
+          ([conversationId, conversation]) =>
+            conversationId !== THREAD_FINGERPRINT_FIELD &&
+            conversation &&
+            typeof conversation === 'object',
+        );
+        for (const [conversationId, conversation] of threadEntries.slice(-MAX_CACHED_THREADS)) {
+          threadConversationsData[conversationId] = conversation as ThreadConversation;
         }
       } else if (key === CALL_HISTORY_KEY) {
         const raw = value as CallHistoryState & { [FINGERPRINT_FIELD]?: string };
