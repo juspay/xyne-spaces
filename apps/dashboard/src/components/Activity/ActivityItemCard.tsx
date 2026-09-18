@@ -467,10 +467,14 @@ export const ActivityItemCard = ({
               : 'text-foreground',
             isExpanded
               ? 'whitespace-normal break-normal'
-              : 'line-clamp-2 break-normal whitespace-normal rounded-md border border-border bg-muted/50 px-2.5 py-1.5',
+              : 'rounded-md border border-border bg-muted/50 px-2.5 py-1.5',
           )}
         >
-          {children}
+          {isExpanded ? (
+            children
+          ) : (
+            <div className='line-clamp-2 break-normal whitespace-normal'>{children}</div>
+          )}
         </div>
       </div>
     </Button>

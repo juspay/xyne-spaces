@@ -1,7 +1,12 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useContext } from 'react';
 import { RenderMessageWithHTML } from '../RenderMessageWithHTML/RenderMessageWithHTML';
 import { MaximizeTwoArrow } from '@xyne/icons';
 import useMeasure from '../../../hooks/useMeasure';
+
+// Ancestors that already provide their own expansion UI (e.g. the activity
+// view, which caps code blocks at 10 lines with its own toggle) set this to
+// true so ExpandableMessage doesn't stack a second Show more/less button.
+export const ExpandableMessageDisabledContext = React.createContext(false);
 
 interface ExpandableMessageProps {
   message?: string;
@@ -33,6 +38,7 @@ export const ExpandableMessage: React.FC<ExpandableMessageProps> = ({
   conversationId,
   slashCommandArtifactContext,
 }) => {
+  const disabled = useContext(ExpandableMessageDisabledContext);
   const [isExpanded, setIsExpanded] = useState(false);
   const [shouldShowButton, setShouldShowButton] = useState(false);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -41,12 +47,16 @@ export const ExpandableMessage: React.FC<ExpandableMessageProps> = ({
   const { height: contentHeight } = useMeasure({ ref: contentRef, observeResize: true });
 
   useEffect(() => {
+    if (disabled) {
+      setShouldShowButton(false);
+      return;
+    }
     if (contentRef.current) {
       const fullHeight = contentRef.current.scrollHeight;
       // Add a small buffer to account for rounding errors
       setShouldShowButton(fullHeight > maxHeight + 10);
     }
-  }, [contentHeight, message, maxHeight]);
+  }, [contentHeight, message, maxHeight, disabled]);
 
   const toggleExpanded = () => {
     setIsExpanded(!isExpanded);
@@ -58,7 +68,7 @@ export const ExpandableMessage: React.FC<ExpandableMessageProps> = ({
         ref={contentRef}
         className='transition-all duration-300 ease-in-out overflow-hidden'
         style={{
-          maxHeight: isExpanded ? 'none' : `${maxHeight}px`,
+          maxHeight: disabled || isExpanded ? 'none' : `${maxHeight}px`,
         }}
       >
         {children !== undefined ? (

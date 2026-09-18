@@ -14,6 +14,7 @@ import { ActivityItem } from '../ActivityItem';
 import { isCanvasActivity } from '../isCanvasActivity';
 import { NofocusRefProvider } from '../ActivityItemCard';
 import { CodeBlockRenderContext } from '../../Chat/RenderMessageWithHTML/RenderMessageWithHTML';
+import { ExpandableMessageDisabledContext } from '../../Chat/ExpandableMessage/ExpandableMessage';
 
 const ACTIVITY_CODE_BLOCK_OPTIONS = {
   collapseThreshold: 10,
@@ -914,9 +915,11 @@ const ActivityListView = (): ReactElement => {
                   );
                 return (
                   <div className='px-3 pb-1.5'>
-                    <CodeBlockRenderContext.Provider value={ACTIVITY_CODE_BLOCK_OPTIONS}>
-                      {row}
-                    </CodeBlockRenderContext.Provider>
+                    <ExpandableMessageDisabledContext.Provider value={true}>
+                      <CodeBlockRenderContext.Provider value={ACTIVITY_CODE_BLOCK_OPTIONS}>
+                        {row}
+                      </CodeBlockRenderContext.Provider>
+                    </ExpandableMessageDisabledContext.Provider>
                   </div>
                 );
               }}

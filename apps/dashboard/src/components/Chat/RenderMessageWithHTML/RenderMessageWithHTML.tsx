@@ -650,7 +650,10 @@ function MessageCodeBlock({
   const silentCollapse = !showExpandToggle && lines > previewLines;
 
   return (
-    <div className='xyne-code-block group/code-block relative my-3 max-w-full overflow-hidden rounded-[10px] border border-border bg-muted'>
+    <div
+      className='xyne-code-block group/code-block relative my-3 max-w-full overflow-hidden rounded-[10px] border border-border bg-muted'
+      onClick={e => e.stopPropagation()}
+    >
       <div
         className='relative overflow-hidden'
         style={
