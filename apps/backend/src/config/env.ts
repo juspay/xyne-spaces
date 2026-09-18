@@ -116,6 +116,10 @@ const envSchema = Joi.object({
   // horizontally scaled or public-facing deployment (state is process-local).
   DESK_MOCK_ENABLED: Joi.boolean().default(false),
   DESK_MOCK_DEFAULT_EMAIL_DOMAIN: Joi.string().default('desk-mock.xyne.test'),
+  // Per-channel ceiling on mock inbound mail injection. Validated here rather
+  // than read raw from process.env so a typo fails startup instead of silently
+  // falling back to the default.
+  MOCK_DESK_INCOMING_EMAIL_LIMIT: Joi.number().integer().positive().default(120),
   ENABLE_EMAIL_CLASSIFICATION_WORKER: Joi.boolean().default(false),
   // One switch for the whole feature, read by both processes: the API gates
   // its producer on it, the worker gates its drain loop on it. A separate
@@ -784,6 +788,7 @@ export const config = {
   deskTicketDebug: envVars.DESK_TICKET_DEBUG as boolean,
   isDeskMockEnabled: envVars.DESK_MOCK_ENABLED as boolean,
   deskMockDefaultEmailDomain: envVars.DESK_MOCK_DEFAULT_EMAIL_DOMAIN as string,
+  mockDeskIncomingEmailLimit: envVars.MOCK_DESK_INCOMING_EMAIL_LIMIT as number,
   enableEmailClassificationWorker: envVars.ENABLE_EMAIL_CLASSIFICATION_WORKER,
   // Radar execution engine. Two switches: enqueue on message insert, and run
   // the drain worker. A gated window always goes to the parser and a valid
