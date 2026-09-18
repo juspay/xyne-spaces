@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { classifyToolResult } from "./mcp-tool-result.js";
+import { classifyToolResult, verdictBlocksConnection } from "./mcp-tool-result.js";
 
 describe("classifyToolResult", () => {
   it("catches the shape Asana rejects a bad token with", () => {
@@ -54,5 +54,40 @@ describe("classifyToolResult", () => {
     // figma's health check asks for fileKey "test"; a VALID token still 404s.
     const verdict = classifyToolResult('{"error":"File not found: test"}');
     expect(verdict?.kind).toBe("unknown");
+  });
+
+  it("catches snake_case auth codes, which is how Slack answers a bad token", () => {
+    expect(classifyToolResult('{"ok":false,"error":"invalid_auth"}')).toEqual({
+      kind: "auth",
+      message: "invalid_auth",
+    });
+    expect(classifyToolResult('{"error":"not_authed"}')?.kind).toBe("auth");
+    expect(classifyToolResult('{"error":"token_revoked"}')?.kind).toBe("auth");
+  });
+
+  it("catches GitHub's wording too", () => {
+    expect(classifyToolResult('{"message":"Bad credentials","status":"401"}')?.kind).toBe("auth");
+  });
+
+  it("still lets a missing scope through — the token is valid, it just lacks a permission", () => {
+    expect(classifyToolResult('{"ok":false,"error":"missing_scope"}')?.kind).toBe("unknown");
+  });
+});
+
+describe("verdictBlocksConnection", () => {
+  it("blocks anything the connector reports as an error", () => {
+    expect(verdictBlocksConnection({ kind: "auth", message: "invalid_auth" })).toBe(true);
+    expect(verdictBlocksConnection({ kind: "transient", message: "rate limited" })).toBe(true);
+    expect(verdictBlocksConnection({ kind: "unknown", message: "something odd" })).toBe(true);
+  });
+
+  it("lets a clean reply through", () => {
+    expect(verdictBlocksConnection(null)).toBe(false);
+  });
+
+  it("does not block when our own health tool was called wrong", () => {
+    expect(verdictBlocksConnection({ kind: "params", message: "user_id must be provided" })).toBe(
+      false,
+    );
   });
 });

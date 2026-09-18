@@ -1,6 +1,6 @@
 import { callTool, evictSession, listToolsForUser } from "./mcp/runner.js";
 import { resolveConnectorDefinition } from "./mcp/connector-definitions.js";
-import { classifyToolResult } from "./lib/mcp-tool-result.js";
+import { classifyToolResult, verdictBlocksConnection } from "./lib/mcp-tool-result.js";
 import { createLogger } from "./logger.js";
 
 const log = createLogger("health");
@@ -64,8 +64,8 @@ export async function checkHealth(
     try {
       const called = await callTool(userId, serverType, credentials, name, params);
       const verdict = classifyToolResult(called.content);
-      if (verdict?.kind === "auth" || verdict?.kind === "transient") {
-        return { healthy: false, message: verdict.message, latencyMs: Date.now() - start };
+      if (verdictBlocksConnection(verdict)) {
+        return { healthy: false, message: verdict?.message ?? "Connector returned an error", latencyMs: Date.now() - start };
       }
       if (verdict) {
         log.warn(
@@ -75,7 +75,7 @@ export async function checkHealth(
     } catch (err) {
       const thrown = err instanceof Error ? err.message : String(err);
       const verdict = classifyToolResult(thrown);
-      if (verdict?.kind === "params" || verdict?.kind === "unknown") {
+      if (verdict?.kind === "params") {
         log.warn(
           `[health] ${serverType} health tool "${name}" failed for a non-credential reason (${verdict.kind}: ${verdict.message}) — accepting the credential; check healthcheckSpec`,
         );

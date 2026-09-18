@@ -1,12 +1,26 @@
 const AUTH_FAILURE_PHRASES = [
   "unauthorized",
+  "unauthenticated",
   "not authorized",
+  "not authed",
   "forbidden",
   "authentication failed",
+  "authentication error",
+  "authentication required",
+  "auth error",
+  "auth failed",
+  "invalid auth",
   "invalid api key",
   "invalid token",
+  "invalid access token",
+  "invalid key",
   "invalid credentials",
-  "invalid_grant",
+  "invalid grant",
+  "bad credentials",
+  "token expired",
+  "token revoked",
+  "expired key",
+  "account inactive",
   "access denied",
   "permission denied",
   "401",
@@ -70,10 +84,15 @@ export function classifyToolResult(content: string): ToolResultVerdict | null {
   if (!candidate) return null;
 
   const message = candidate.replace(/\s+/g, " ").slice(0, 200);
-  const lower = message.toLowerCase();
+  const lower = message.toLowerCase().replace(/[_-]+/g, " ");
 
   if (PARAM_PHRASES.some((phrase) => lower.includes(phrase))) return { kind: "params", message };
   if (TRANSIENT_PHRASES.some((phrase) => lower.includes(phrase))) return { kind: "transient", message };
   if (AUTH_FAILURE_PHRASES.some((phrase) => lower.includes(phrase))) return { kind: "auth", message };
   return extracted ? { kind: "unknown", message } : null;
+}
+
+export function verdictBlocksConnection(verdict: ToolResultVerdict | null): boolean {
+  if (!verdict) return false;
+  return verdict.kind !== "params";
 }
