@@ -178,9 +178,20 @@ acting as you needs your consent.
 
 ## Quickstart
 
-**Prerequisites** — Node.js 22.x, pnpm 10.15.0, and Docker (or OrbStack / Podman) with
-Compose. Details in [Prerequisites](docs/setup/prerequisites.md) — or, for a machine
-with nothing installed yet, follow [Local Setup](docs/setup/local-setup.md) end to end.
+**Prerequisites** — Node.js 22.x, pnpm 10.15.0, and a container runtime with Compose.
+
+On macOS we recommend **OrbStack** — lighter and faster than Docker Desktop. Install it
+with Homebrew (or download from [orbstack.dev](https://orbstack.dev)) and launch it once
+so the daemon starts:
+
+```bash
+brew install orbstack
+open -a OrbStack
+```
+
+Docker Desktop and Podman also work. Details in
+[Prerequisites](docs/setup/prerequisites.md) — or, for a machine with nothing installed
+yet, follow [Local Setup](docs/setup/local-setup.md) end to end.
 
 ```bash
 git clone https://github.com/juspay/xyne-spaces.git
