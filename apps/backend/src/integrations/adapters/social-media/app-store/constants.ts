@@ -18,6 +18,9 @@ export const APP_STORE_PUBLICATION_LAG_MARGIN_MS = 72 * 60 * 60 * 1000;
 
 export const APP_STORE_INITIAL_LOOKBACK_MS = 24 * 60 * 60 * 1000;
 
+/** Manual "Sync now" window. Fixed, because a reused row's createdAt is not the connect time. */
+export const APP_STORE_MANUAL_SYNC_LOOKBACK_MS = 30 * 24 * 60 * 60 * 1000;
+
 /** Page budget per run. Tripping it means the window was NOT fully covered — see flow.ts. */
 export const APP_STORE_MAX_PAGES_PER_SYNC = 20;
 

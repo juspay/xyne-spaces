@@ -184,7 +184,11 @@ class EmailFetchWorker {
   private async processSocialMediaJob(
     job: Bull.Job<SocialMediaFetchJobData>,
   ): Promise<void> {
-    const { sourceIds, channelId, workspaceId } = job.data;
+    const { sourceIds, channelId, workspaceId, startDate, endDate } = job.data;
+    const backfill =
+      startDate && endDate
+        ? { startDate: new Date(startDate), endDate: new Date(endDate) }
+        : undefined;
     logger.info(
       `[EMAIL-FETCH-WORKER] Processing review sync job ${job.id} — channel ${channelId}`,
     );
@@ -197,6 +201,7 @@ class EmailFetchWorker {
         for (const sourceId of sourceIds) {
           const result = await socialMediaService.syncSource(sourceId, {
             ignoreSyncCursor: true,
+            ...(backfill && { backfill }),
           });
           newInteractionCount += result.synced;
         }

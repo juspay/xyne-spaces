@@ -28,6 +28,8 @@ export enum ExternalSourcePlatform {
 export interface IngestionOptions {
   /** Bypass the source's persisted cursor for an explicit full/manual fetch. */
   ignoreSyncCursor?: boolean;
+  /** User-chosen backfill window. The only thing allowed to reach past the normal floor. */
+  backfill?: { startDate: Date; endDate: Date };
 }
 
 /**

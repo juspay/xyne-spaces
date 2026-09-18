@@ -6,6 +6,7 @@ import { logger } from '@/utils/logger';
 import { appStoreClient, type NormalizedAppStoreReview } from './client';
 import {
   APP_STORE_INITIAL_LOOKBACK_MS,
+  APP_STORE_MANUAL_SYNC_LOOKBACK_MS,
   APP_STORE_MAX_PAGES_PER_SYNC,
   APP_STORE_PUBLICATION_LAG_MARGIN_MS,
 } from './constants';
@@ -40,9 +41,15 @@ export class AppStoreReviewsFlow extends BaseFlow {
   ): Promise<unknown[]> {
     if (!source) throw new Error('App Store source is required');
 
-    // Still floored: a null cutoff disables the stop-paging short-circuit and drags in all history.
-    const floor = this.connectFloor(source);
-    const cutoff = options?.ignoreSyncCursor ? floor : this.computeCutoff(source);
+    // Always floored: a null cutoff disables the stop-paging short-circuit and drags in all history.
+    // A backfill is the only path allowed to reach back past the connect floor.
+    const backfill = options?.backfill;
+    const floor = backfill
+      ? backfill.startDate
+      : options?.ignoreSyncCursor
+        ? new Date(Date.now() - APP_STORE_MANUAL_SYNC_LOOKBACK_MS)
+        : this.connectFloor(source);
+    const cutoff = backfill || options?.ignoreSyncCursor ? floor : this.computeCutoff(source);
     const result = await appStoreClient.listReviews(
       source,
       cutoff,
@@ -86,7 +93,10 @@ export class AppStoreReviewsFlow extends BaseFlow {
 
     // Paging overshoots by up to a page, and the straggler pass keeps unstored below-cutoff
     // reviews as late arrivals — on a first sync that would ingest the app's back catalogue.
-    const inScope = ingestable.filter((review) => review.occurredAt >= floor);
+    const inScope = ingestable.filter(
+      (review) =>
+        review.occurredAt >= floor && (!backfill || review.occurredAt <= backfill.endDate),
+    );
     return this.dropAlreadySeenStragglers(source, inScope, cutoff);
   }
 
@@ -103,14 +113,9 @@ export class AppStoreReviewsFlow extends BaseFlow {
     return new Date(Math.max(base, this.connectFloor(source).getTime()));
   }
 
-  /** Nothing older than this was ever in scope for the desk, however the sync was triggered. */
+  /** Nothing older than this was ever in scope for the desk. */
   private connectFloor(source: ExternalSource): Date {
-    const metadata = source.externalMetadata as { connectedAt?: unknown } | null;
-    const connectedAt =
-      typeof metadata?.connectedAt === 'string' ? Date.parse(metadata.connectedAt) : Number.NaN;
-    // createdAt is only a fallback for rows written before connectedAt was stamped.
-    const base = Number.isFinite(connectedAt) ? connectedAt : source.createdAt.getTime();
-    return new Date(base - APP_STORE_PUBLICATION_LAG_MARGIN_MS);
+    return new Date(source.createdAt.getTime() - APP_STORE_PUBLICATION_LAG_MARGIN_MS);
   }
 
   /**

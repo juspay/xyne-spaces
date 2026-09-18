@@ -3222,15 +3222,13 @@ const SupportScreen = (): ReactElement => {
                               isRefetching
                                 ? 'Fetching latest…'
                                 : isSocialMediaDesk
-                                  ? 'Fetch all available reviews'
+                                  ? 'Fetch reviews'
                                   : 'Fetch latest emails'
                             }
                             side='bottom'
                           >
                             <button
-                              onClick={() =>
-                                isSocialMediaDesk ? handleRefetch() : setShowRefetchDialog(true)
-                              }
+                              onClick={() => setShowRefetchDialog(true)}
                               disabled={isRefetching}
                               className={cn(
                                 'p-1.5 rounded transition-colors text-muted-foreground hover:text-foreground hover:bg-muted',
@@ -4443,11 +4441,16 @@ const SupportScreen = (): ReactElement => {
       </Dialog>
 
       {/* Fetch Range Dialog */}
-      {canRefetch && !isSocialMediaDesk && (
+      {canRefetch && (
         <RefetchRangeDialog
           open={showRefetchDialog}
           onOpenChange={setShowRefetchDialog}
           isPending={isRefetching}
+          {...(isSocialMediaDesk && {
+            title: 'Fetch reviews',
+            subtitle: 'Pull new reviews or backfill a specific time range from the connected apps.',
+            summaryLabel: 'Will fetch reviews posted',
+          })}
           onConfirm={range => {
             setShowRefetchDialog(false);
             handleRefetch(range);

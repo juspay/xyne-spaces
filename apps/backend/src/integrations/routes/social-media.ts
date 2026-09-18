@@ -18,6 +18,20 @@ import appStoreRoutes from './social-media/app-store';
 const TAG = '[SocialMediaRoutes]';
 const router = express.Router();
 
+/** Returns undefined when no range was asked for, 'invalid' when one was asked for badly. */
+function parseBackfill(
+  body: unknown,
+): { startDate: Date; endDate: Date } | 'invalid' | undefined {
+  const { startDate, endDate } = (body ?? {}) as { startDate?: unknown; endDate?: unknown };
+  if (startDate === undefined && endDate === undefined) return undefined;
+  if (typeof startDate !== 'string' || typeof endDate !== 'string') return 'invalid';
+  const start = new Date(startDate);
+  const end = new Date(endDate);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return 'invalid';
+  if (start > end) return 'invalid';
+  return { startDate: start, endDate: end };
+}
+
 router.use(express.json());
 router.use(googlePlayRoutes);
 router.use(appStoreRoutes);
@@ -83,6 +97,12 @@ router.post(
         return;
       }
 
+      const backfill = parseBackfill(req.body);
+      if (backfill === 'invalid') {
+        res.status(400).json({ error: 'startDate and endDate must be ISO dates, start before end' });
+        return;
+      }
+
       const sources = await db.externalSource.findMany({
         where: {
           channelId: req.params.channelId,
@@ -104,6 +124,10 @@ router.post(
           channelId: req.params.channelId,
           requesterUserId: req.user!.id,
           workspaceId,
+          ...(backfill && {
+            startDate: backfill.startDate.toISOString(),
+            endDate: backfill.endDate.toISOString(),
+          }),
         });
         res.status(202).json({
           success: true,
@@ -117,6 +141,7 @@ router.post(
       for (const source of sources) {
         const result = await socialMediaService.syncSource(source.id, {
           ignoreSyncCursor: true,
+          ...(backfill && { backfill }),
         });
         synced += result.synced;
       }

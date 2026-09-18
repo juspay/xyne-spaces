@@ -1,10 +1,10 @@
 import crypto from 'crypto';
 import { ExternalSourcePlatform } from '@/integrations/core/types';
 
-export function buildAppStoreSourceName(workspaceId: string, appId: string): string {
+export function buildAppStoreSourceName(workspaceId: string, bundleId: string): string {
   return [
     ExternalSourcePlatform.APP_STORE,
-    crypto.createHash('sha256').update(`${workspaceId}:${appId}`).digest('hex').slice(0, 20),
+    crypto.createHash('sha256').update(`${workspaceId}:${bundleId}`).digest('hex').slice(0, 20),
   ].join('-');
 }
 
@@ -15,20 +15,19 @@ export function buildAppStoreSourceRecords(params: {
   ownerUserId: string;
   encryptedCredentials: string;
   applications: Array<{
-    appId: string;
     bundleId: string;
     displayName: string;
   }>;
 }) {
   const connectedAt = new Date().toISOString();
   return params.applications.map((application) => ({
-    name: buildAppStoreSourceName(params.workspaceId, application.appId),
+    name: buildAppStoreSourceName(params.workspaceId, application.bundleId),
     sourceType: ExternalSourcePlatform.APP_STORE,
     displayName: application.displayName,
     channelId: params.channelId,
-    externalIdentifier: application.appId,
-    // connectedAt, not createdAt: reactivation reuses the row, so createdAt can be years stale.
-    externalMetadata: { bundleId: application.bundleId, connectedAt },
+    // The bundle id, not Apple's numeric app id: it is the identifier users type and read, and the
+    // numeric one is re-resolved from it on demand.
+    externalIdentifier: application.bundleId,
     workspaceId: params.workspaceId,
     boardId: params.boardId,
     ownerUserId: params.ownerUserId,

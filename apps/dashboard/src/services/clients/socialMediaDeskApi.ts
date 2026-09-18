@@ -39,14 +39,15 @@ export async function disconnectSocialMediaDesk(channelId: string): Promise<void
   await apiInstance.post(`/integrations/social-media/${channelId}/disconnect`);
 }
 
-export async function fetchGooglePlayReviews(
+export async function fetchSocialMediaReviews(
   channelId: string,
+  range?: { startDate: string; endDate: string },
 ): Promise<
   { synced: number; sourceCount: number } | { success: true; queued: true; jobId: string }
 > {
   const response = await apiInstance.post<
     { synced: number; sourceCount: number } | { success: true; queued: true; jobId: string }
-  >(`/integrations/social-media/${channelId}/sync`);
+  >(`/integrations/social-media/${channelId}/sync`, range);
   return response.data;
 }
 
