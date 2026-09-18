@@ -1,5 +1,7 @@
 import { z } from 'zod';
+import { compile } from 'html-to-text';
 import { Prisma } from '@prisma/client';
+import { EmailType } from '@xyne/shared';
 import { db } from '@/database/client';
 import { logger } from '@/utils/logger';
 
@@ -9,98 +11,49 @@ import { logger } from '@/utils/logger';
  * grades). Neither column is in the Zero schema — everything is read and written here, over REST.
  */
 
-export const ONBOARDING_MAX_TICKETS_PER_TOPIC = 20;
-export const ONBOARDING_MAX_SCORE_PER_ANSWER = 10;
-/** One reply's limit, shared by the request body, the UI and the grading prompt. */
-export const ONBOARDING_MAX_REPLY_CHARS = 20000;
-/** The columns that must never leave this module's own endpoints (see getDeskConfig). */
-export const ONBOARDING_COLUMNS = ['onboardingConfig', 'onboardingAttempts'] as const;
+export const MAX_TICKETS_PER_TOPIC = 20;
+export const MAX_SCORE_PER_ANSWER = 10;
+export const MAX_REPLY_CHARS = 20000;
 
 export const nowIso = (): string => new Date().toISOString();
 
-// Stored as ISO strings by every writer here; not validated, so old rows can't be rejected.
-const dateString = z.string();
-
-/**
- * Every stored object passes unknown keys through: a write is a read-modify-write of the whole
- * column, so dropping them would let an older pod erase fields a newer shape added.
- */
+/** Unknown keys pass through: a write rewrites the whole column, so dropping them loses data. */
 const stored = <T extends z.ZodRawShape>(shape: T) => z.object(shape).passthrough();
-const nullableDate = dateString.nullable();
-
-const topicTicketSchema = stored({
-  id: z.string(),
-  ticketId: z.string(),
-  addedBy: z.string(),
-  addedAt: dateString,
-});
+const str = z.string();
+// Everything a row can legitimately be missing gets a default, so a topic or attempt written by
+// an older shape still reads instead of 500ing the whole desk. Identity fields stay required.
+const nstr = str.nullable().default(null);
+const nnum = z.number().nullable().default(null);
+const version = z.number().default(1);
 
 const topicSchema = stored({
-  id: z.string(),
-  name: z.string(),
-  graderAgentSlug: z.string().nullable(),
-  createdBy: z.string(),
-  createdAt: dateString,
-  updatedAt: dateString,
-  deletedAt: nullableDate,
-  tickets: z.array(topicTicketSchema),
-});
-
-const configSchema = stored({ version: z.literal(1), topics: z.array(topicSchema) });
-
-const reviewSchema = stored({
-  status: z.enum(['PENDING', 'GRADED', 'FAILED', 'SKIPPED']),
-  reasoning: z.string().nullable(),
-  missedPoints: z.array(z.string()),
-  agentSlug: z.string(),
-  sessionId: z.string().nullable(),
-  dispatchedAt: nullableDate,
-  retryCount: z.number(),
-  gradedAt: nullableDate,
-  error: z.string().nullable(),
-});
-
-const answerSchema = stored({
-  paperTicketId: z.string(),
-  ticketId: z.string(),
-  replyText: z.string(),
-  score: z.number().nullable(),
-  review: reviewSchema.nullable(),
+  id: str,
+  name: str,
+  graderAgentSlug: nstr,
+  ticketIds: z.array(str).default([]),
 });
 
 const attemptSchema = stored({
-  id: z.string(),
-  topicId: z.string(),
-  userId: z.string(),
+  id: str,
+  topicId: str,
+  userId: str,
   status: z.enum(['IN_PROGRESS', 'GRADING', 'GRADED', 'FAILED']),
-  startedAt: dateString,
-  draftSavedAt: nullableDate,
-  submittedAt: nullableDate,
-  durationSeconds: z.number().nullable(),
-  gradedAt: nullableDate,
-  totalScore: z.number().nullable(),
-  maxScore: z.number().nullable(),
-  answers: z.array(answerSchema),
+  startedAt: str,
+  submittedAt: nstr,
+  durationSeconds: nnum,
+  totalScore: nnum,
+  maxScore: nnum,
+  answers: z
+    .array(stored({ ticketId: str, replyText: str, score: nnum, reasoning: nstr, error: nstr }))
+    .default([]),
 });
 
-const attemptsSchema = stored({
-  version: z.literal(1),
-  attempts: z.array(attemptSchema),
-  /** "topicId:userId" → attempts ever submitted (kept after old attempts are pruned). */
-  counts: z.record(z.number()).default({}),
-});
+const configSchema = stored({ version, topics: z.array(topicSchema).default([]) });
+const attemptsSchema = stored({ version, attempts: z.array(attemptSchema).default([]) });
 
-export type OnboardingTopic = z.infer<typeof topicSchema>;
 export type OnboardingConfig = z.infer<typeof configSchema>;
 export type OnboardingAttempt = z.infer<typeof attemptSchema>;
 export type OnboardingAttempts = z.infer<typeof attemptsSchema>;
-
-export class OnboardingDataError extends Error {
-  constructor(column: string) {
-    super(`Onboarding data in ${column} is unreadable`);
-    this.name = 'OnboardingDataError';
-  }
-}
 
 /** Thrown for a request the caller can fix (bad input, wrong state); mapped to a 4xx. */
 export class OnboardingRequestError extends Error {
@@ -109,195 +62,178 @@ export class OnboardingRequestError extends Error {
     readonly status: number = 400
   ) {
     super(message);
-    this.name = 'OnboardingRequestError';
   }
 }
 
-/**
- * Parse a stored value. Missing means empty. Malformed throws: writing an "empty" value back
- * over data we failed to read would silently erase every paper or attempt on the desk.
- */
-function parseColumn<T>(
-  column: OnboardingColumn,
+/** Missing means empty. Malformed throws: writing "empty" back would erase the desk's papers. */
+function parse<T>(
+  col: string,
   schema: z.ZodType<T, z.ZodTypeDef, unknown>,
   raw: unknown,
   empty: T
 ): T {
   if (raw === null || raw === undefined) return empty;
   const parsed = schema.safeParse(raw);
-  if (!parsed.success) {
-    logger.error(`[Onboarding] ${column} failed to parse`, { issues: parsed.error.issues });
-    throw new OnboardingDataError(column);
-  }
-  return parsed.data;
+  if (parsed.success) return parsed.data;
+  logger.error(`[Onboarding] ${col} failed to parse`, { issues: parsed.error.issues });
+  throw new OnboardingRequestError('This desk’s onboarding data couldn’t be read', 500);
 }
 
-export const parseOnboardingConfig = (raw: unknown): OnboardingConfig =>
-  parseColumn('onboardingConfig', configSchema, raw, { version: 1, topics: [] });
+export const parseConfig = (raw: unknown): OnboardingConfig =>
+  parse('onboardingConfig', configSchema, raw, { version: 1, topics: [] });
 
-export const parseOnboardingAttempts = (raw: unknown): OnboardingAttempts =>
-  parseColumn('onboardingAttempts', attemptsSchema, raw, {
-    version: 1,
-    attempts: [],
-    counts: {},
-  });
+export const parseAttempts = (raw: unknown): OnboardingAttempts =>
+  parse('onboardingAttempts', attemptsSchema, raw, { version: 1, attempts: [] });
 
-export const attemptCountKey = (topicId: string, userId: string): string => `${topicId}:${userId}`;
-
-/** The desk's onboarding columns, or null when the desk has no preference row yet. */
-export async function loadPreferenceRow(channelId: string) {
-  return db.emailChannelPreference.findUnique({
+/** The desk's onboarding columns plus its owner, or null when the desk has no preference row. */
+export const loadPreferenceRow = (channelId: string) =>
+  db.emailChannelPreference.findUnique({
     where: { channelId },
     select: { ownerUserId: true, onboardingConfig: true, onboardingAttempts: true },
   });
-}
-
-/** Just the desk owner — every request resolves admin access, so this must stay cheap. */
-export async function loadDeskOwnerUserId(channelId: string): Promise<string | null> {
-  const row = await db.emailChannelPreference.findUnique({
-    where: { channelId },
-    select: { ownerUserId: true },
-  });
-  return row?.ownerUserId ?? null;
-}
-
-type OnboardingColumn = 'onboardingConfig' | 'onboardingAttempts';
 
 interface LockedRow {
   onboardingConfig: unknown;
   onboardingAttempts: unknown;
 }
 
-/** Return null to do nothing, or `{ next: null, result }` to answer without writing. */
-type Change<TValue, TResult> = (
-  value: TValue,
-  row: LockedRow
-) => { next: TValue | null; result: TResult } | null;
+type Change<V, R> = (value: V, row: LockedRow) => { next: V | null; result: R } | null;
 
 /**
- * Read-modify-write one onboarding column under a row lock, so concurrent draft saves, grade
- * callbacks and sweeper claims never overwrite each other. `change` must not do network I/O —
- * the lock is held while it runs. Return `null` to do nothing at all, or `{ next: null, result }`
- * to return a value without writing.
+ * Read-modify-write one column under a row lock, so a submit, a grade callback and an admin edit
+ * never overwrite each other. `change` must not do I/O — the lock is held while it runs; it
+ * returns null to skip the write, or `next: null` to answer without writing.
  */
-async function withLockedColumn<TValue, TResult>(
+function locked<V, R>(
   channelId: string,
   workspaceId: string,
-  column: OnboardingColumn,
-  parse: (raw: unknown) => TValue,
-  change: Change<TValue, TResult>
-): Promise<TResult | null> {
+  column: 'onboardingConfig' | 'onboardingAttempts',
+  parseValue: (raw: unknown) => V,
+  change: Change<V, R>
+): Promise<R | null> {
+  const where = Prisma.sql`WHERE "channelId" = ${channelId} AND "workspaceId" = ${workspaceId}`;
   return db.$transaction(
     async (tx) => {
       const [row] = await tx.$queryRaw<LockedRow[]>`
         SELECT "onboardingConfig", "onboardingAttempts"
-        FROM "public"."email_channel_preferences"
-        WHERE "channelId" = ${channelId} AND "workspaceId" = ${workspaceId}
-        FOR UPDATE
-      `;
-      // Every email desk gets its preference row when it's created, and the tab only shows there.
+        FROM "public"."email_channel_preferences" ${where} FOR UPDATE`;
       if (!row) throw new OnboardingRequestError('Desk settings not found for this channel', 404);
-
-      const outcome = change(parse(row[column]), row);
+      const outcome = change(parseValue(row[column]), row);
       if (!outcome) return null;
-      // `next: null` means "nothing changed": skip the write so the row isn't re-serialised and
-      // pushed through replication for a read.
-      if (outcome.next === null) return outcome.result;
-
-      const json = JSON.stringify(outcome.next);
-      await tx.$executeRaw`
-        UPDATE "public"."email_channel_preferences"
-        SET ${Prisma.raw(`"${column}"`)} = ${json}::jsonb
-        WHERE "channelId" = ${channelId} AND "workspaceId" = ${workspaceId}
-      `;
+      if (outcome.next !== null) {
+        await tx.$executeRaw`
+          UPDATE "public"."email_channel_preferences"
+          SET ${Prisma.raw(`"${column}"`)} = ${JSON.stringify(outcome.next)}::jsonb ${where}`;
+      }
       return outcome.result;
     },
-    // Zero's writes to other columns of this row hold the same row lock, so allow a longer wait
-    // than Prisma's 5s default before giving up.
+    // Zero's writes to other columns of this row take the same lock, so allow a longer wait.
     { maxWait: 10_000, timeout: 20_000 }
   );
 }
 
-export function updateOnboardingConfig<TResult>(
+export const updateConfig = <R>(
   channelId: string,
   workspaceId: string,
-  change: Change<OnboardingConfig, TResult>
-): Promise<TResult | null> {
-  return withLockedColumn(
-    channelId,
-    workspaceId,
-    'onboardingConfig',
-    parseOnboardingConfig,
-    change
-  );
-}
+  change: Change<OnboardingConfig, R>
+) => locked(channelId, workspaceId, 'onboardingConfig', parseConfig, change);
 
-export function updateOnboardingAttempts<TResult>(
+export const updateAttempts = <R>(
   channelId: string,
   workspaceId: string,
-  change: Change<OnboardingAttempts, TResult>
-): Promise<TResult | null> {
-  return withLockedColumn(
-    channelId,
-    workspaceId,
-    'onboardingAttempts',
-    parseOnboardingAttempts,
-    change
-  );
+  change: Change<OnboardingAttempts, R>
+) => locked(channelId, workspaceId, 'onboardingAttempts', parseAttempts, change);
+
+// Papers store ticket ids only: the first email (what the trainee answers) and the rest of the
+// thread (what the grader compares against) are read live. Internal notes are chat, not emails.
+const toText = compile({
+  wordwrap: false,
+  selectors: [
+    { selector: 'img', format: 'skip' },
+    // Keep real URLs (a payment link is often the answer); drop in-page anchors only.
+    { selector: 'a', options: { noAnchorUrl: true } },
+    // Quoted history from earlier messages in the thread.
+    { selector: 'blockquote', format: 'skip' },
+    { selector: 'div.gmail_quote', format: 'skip' },
+    { selector: '#appendonsend', format: 'skip' },
+  ],
+});
+
+/** `sentAt` is the provider's received time where we have it, else when the row was written. */
+export interface OnboardingEmail {
+  subject: string;
+  from: string;
+  sentAt: string;
+  inbound: boolean;
+  text: string;
 }
+
+/** A long merged thread would otherwise send hundreds of kilobytes to the grader per answer. */
+const MAX_THREAD_EMAILS = 10;
+const SELECT = { type: true, subject: true, from: true, body: true, createdAt: true } as const;
+
+type EmailRow = { type: string; subject: string; from: string; body: string; createdAt: Date };
+
+const toEmail = (e: EmailRow): OnboardingEmail => ({
+  subject: e.subject,
+  from: e.from,
+  sentAt: e.createdAt.toISOString(),
+  inbound: e.type === EmailType.DEFAULT,
+  text: toText(e.body)
+    .replace(/\n{3,}/g, '\n\n')
+    .trim(),
+});
+
+/** Tickets on this desk that can go on a paper: they must exist and have at least one email. */
+export async function findPaperEligibleTickets(
+  channelId: string,
+  ticketIds: string[]
+): Promise<string[]> {
+  if (ticketIds.length === 0) return [];
+  const tickets = await db.ticket.findMany({
+    where: { id: { in: ticketIds }, channelId, isArchived: false },
+    select: { id: true, emailCount: true },
+  });
+  // emailCount is null until backfilled, so only a known-zero count rules a ticket out; one that
+  // turns out to have no emails just reads as unavailable when the paper is taken.
+  return tickets.filter((t) => t.emailCount !== 0).map((t) => t.id);
+}
+
+type TicketContent = { firstEmail: OnboardingEmail; thread: OnboardingEmail[] } | null;
 
 /**
- * Drop soft-deleted topics that no stored attempt still references. Runs after an attempt
- * finishes (retention), on the config column's own lock.
+ * Read a paper ticket's content live. `includeThread` is false for the trainee, so the answer key
+ * never enters that response. Null when the ticket is gone or has no emails. `createdAt` carries
+ * the provider's received time, so ordering here is mail order, not ingest order.
  */
-export async function pruneOnboardingConfig(channelId: string, workspaceId: string): Promise<void> {
-  await updateOnboardingConfig(channelId, workspaceId, (config, row) => {
-    const attempts = parseOnboardingAttempts(row.onboardingAttempts).attempts;
-    const liveTopicIds = new Set(attempts.map((a) => a.topicId));
-    const topics = config.topics.filter((t) => t.deletedAt === null || liveTopicIds.has(t.id));
-    if (topics.length === config.topics.length) return { next: null, result: false };
-    return { next: { ...config, topics }, result: true };
+export async function loadTicketContent(
+  channelId: string,
+  ticketId: string,
+  includeThread: boolean
+): Promise<TicketContent> {
+  const ticket = await db.ticket.findFirst({
+    where: { id: ticketId, channelId },
+    select: { conversationId: true },
   });
-}
+  if (!ticket) return null;
+  const conversationId = ticket.conversationId;
+  const oldest = { orderBy: { createdAt: 'asc' }, select: { id: true, ...SELECT } } as const;
 
-/** Desks with at least one attempt being graded — the sweeper's work list. */
-export async function findChannelsWithGradingAttempts() {
-  return db.emailChannelPreference.findMany({
-    where: {
-      onboardingAttempts: {
-        path: ['attempts'],
-        array_contains: [{ status: 'GRADING' }],
-      },
-    },
-    select: { channelId: true, workspaceId: true },
-  });
-}
+  // The customer's first message; a ticket opened by an outbound compose falls back to its oldest.
+  const first =
+    (await db.email.findFirst({ where: { conversationId, type: EmailType.DEFAULT }, ...oldest })) ??
+    (await db.email.findFirst({ where: { conversationId }, ...oldest }));
+  if (!first) return null;
 
-/**
- * Keep, per person per paper: any open or grading attempt, the latest finished attempt, and the
- * best graded attempt. Everything else is dropped; `counts` still remembers how many there were.
- */
-export function pruneAttempts(
-  attempts: OnboardingAttempt[],
-  topicId: string,
-  userId: string
-): OnboardingAttempt[] {
-  const mine = attempts.filter((a) => a.topicId === topicId && a.userId === userId);
-  const finished = mine
-    .filter((a) => a.status === 'GRADED' || a.status === 'FAILED')
-    .sort((a, b) => (b.submittedAt ?? '').localeCompare(a.submittedAt ?? ''));
-  const latest = finished[0];
-  const best = finished
-    .filter((a) => a.status === 'GRADED' && a.maxScore)
-    .sort(
-      (a, b) => (b.totalScore ?? 0) / (b.maxScore ?? 1) - (a.totalScore ?? 0) / (a.maxScore ?? 1)
-    )[0];
+  // Newest first, since that is where the desk's resolution is, then oldest-first for reading.
+  const later = includeThread
+    ? await db.email.findMany({
+        where: { conversationId, id: { not: first.id } },
+        orderBy: { createdAt: 'desc' },
+        select: SELECT,
+        take: MAX_THREAD_EMAILS,
+      })
+    : [];
 
-  const keep = new Set<string>(
-    mine.filter((a) => a.status === 'IN_PROGRESS' || a.status === 'GRADING').map((a) => a.id)
-  );
-  if (latest) keep.add(latest.id);
-  if (best) keep.add(best.id);
-
-  return attempts.filter((a) => !(a.topicId === topicId && a.userId === userId) || keep.has(a.id));
+  return { firstEmail: toEmail(first), thread: later.reverse().map(toEmail) };
 }

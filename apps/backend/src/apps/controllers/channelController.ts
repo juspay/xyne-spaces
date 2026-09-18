@@ -3,35 +3,26 @@ import { z } from 'zod';
 import { repositories } from '@/database/repositories';
 import { EmailChannelPreferenceRepository } from '@/database/repositories/emailChannelPreferenceRepository';
 import { logger } from '@/utils/logger';
-import { ONBOARDING_COLUMNS } from '@/services/onboarding/onboardingStore';
 import { ChannelsResponse, ChannelListItem, ChannelListResponse } from '../types';
 
-// Onboarding exam data holds agents' replies and grader reasoning — never part of desk config.
-const HIDDEN_DESK_CONFIG_KEYS = new Set<string>(ONBOARDING_COLUMNS);
+const GetChannelInfoBodySchema = z.object({
+  channelId: z.string().min(1, 'Channel ID is required').trim().optional(),
+  channelName: z.string().min(1, 'Channel name is required').trim().optional(),
+}).refine(
+  data => !!data.channelId || !!data.channelName,
+  { message: 'Either channelId or channelName is required' }
+);
 
-const GetChannelInfoBodySchema = z
-  .object({
-    channelId: z.string().min(1, 'Channel ID is required').trim().optional(),
-    channelName: z.string().min(1, 'Channel name is required').trim().optional(),
-  })
-  .refine((data) => !!data.channelId || !!data.channelName, {
-    message: 'Either channelId or channelName is required',
-  });
-
-const GetDeskConfigBodySchema = z
-  .object({
-    channelId: z.string().min(1, 'Channel ID is required').trim().optional(),
-    channelName: z.string().min(1, 'Channel name is required').trim().optional(),
-  })
-  .refine((data) => !!data.channelId || !!data.channelName, {
-    message: 'Either channelId or channelName is required',
-  });
+const GetDeskConfigBodySchema = z.object({
+  channelId: z.string().min(1, 'Channel ID is required').trim().optional(),
+  channelName: z.string().min(1, 'Channel name is required').trim().optional(),
+}).refine(
+  data => !!data.channelId || !!data.channelName,
+  { message: 'Either channelId or channelName is required' }
+);
 
 const ListChannelsQuerySchema = z.object({
-  limit: z
-    .string()
-    .optional()
-    .transform((val) => (val ? parseInt(val, 10) : 100)),
+  limit: z.string().optional().transform(val => val ? parseInt(val, 10) : 100),
   cursor: z.string().optional(),
   projectId: z.string().optional(),
   scopeType: z.string().optional(),
@@ -46,12 +37,12 @@ export class ChannelController {
     try {
       // Validate request body with Zod
       const bodyResult = GetChannelInfoBodySchema.safeParse(req.body);
-
+      
       if (!bodyResult.success) {
-        res.status(400).json({
+        res.status(400).json({ 
           error: 'Validation error',
           code: 'VALIDATION_ERROR',
-          details: bodyResult.error.errors,
+          details: bodyResult.error.errors
         });
         return;
       }
@@ -64,9 +55,9 @@ export class ChannelController {
         : await repositories.channels.findByName(channelName!);
 
       if (!channel) {
-        res.status(404).json({
+        res.status(404).json({ 
           error: 'Channel not found',
-          code: 'CHANNEL_NOT_FOUND',
+          code: 'CHANNEL_NOT_FOUND'
         });
         return;
       }
@@ -82,15 +73,15 @@ export class ChannelController {
         createdBy: channel.createdBy,
         createdAt: channel.createdAt,
         participantCount: channel.participantCount,
-      };
+      }
 
       // Return channel data
       res.json(responseData);
     } catch (error) {
       logger.error('[CHANNEL-CONTROLLER] Error getting channel by name:', error);
-      res.status(500).json({
+      res.status(500).json({ 
         error: 'Internal server error',
-        code: 'INTERNAL_ERROR',
+        code: 'INTERNAL_ERROR'
       });
     }
   };
@@ -128,13 +119,14 @@ export class ChannelController {
 
       const emailChannelPreferenceRepo = new EmailChannelPreferenceRepository();
       const preference = await emailChannelPreferenceRepo.findByChannelId(channel.id);
-      const config = preference
-        ? Object.fromEntries(
-            Object.entries(preference).filter(([key]) => !HIDDEN_DESK_CONFIG_KEYS.has(key))
-          )
-        : null;
+      // Onboarding exam data holds agents' replies and grading — never part of desk config.
+      const config =
+        preference &&
+        Object.fromEntries(
+          Object.entries(preference).filter(([k]) => !k.startsWith('onboarding'))
+        );
 
-      res.status(200).json({ config });
+      res.status(200).json({ config: config ?? null });
     } catch (error) {
       logger.error('[CHANNEL-CONTROLLER] Error getting desk config:', error);
       res.status(500).json({
@@ -178,7 +170,7 @@ export class ChannelController {
       const items = hasMore ? channels.slice(0, limit) : channels;
       const nextCursor = hasMore ? items[items.length - 1].id : undefined;
 
-      const responseItems: ChannelListItem[] = items.map((channel) => ({
+      const responseItems: ChannelListItem[] = items.map(channel => ({
         id: channel.id,
         name: channel.name,
         description: channel.description || undefined,

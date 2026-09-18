@@ -147,10 +147,6 @@ import sdlcWikiInternalRoutes from '@/routes/sdlcWikiInternal';
 import { handleAutoDraftCallback } from '@/controllers/autodraftCallback.handler';
 import { handleDeskReportCallback } from '@/controllers/deskReportCallback.handler';
 import { handleOnboardingGradeCallback } from '@/controllers/onboardingController';
-import {
-  startOnboardingGradingSweeper,
-  stopOnboardingGradingSweeper,
-} from '@/services/onboarding/onboardingGrading';
 import automationWebhookRoutes from '@/automations/routes/webhook-trigger.handler';
 import activityLogRoutes from '@/routes/activityLog';
 import userActivityRoutes from '@/routes/userActivity';
@@ -653,7 +649,7 @@ export class App {
       handleDeskReportCallback,
     );
     this.app.post(
-      '/api/internal/onboarding/grade-callback/:channelId/:attemptId/:paperTicketId/:sessionId',
+      '/api/internal/onboarding/grade-callback/:channelId/:attemptId/:index',
       validateS2SKey,
       handleOnboardingGradeCallback,
     );
@@ -934,9 +930,6 @@ export class App {
       logger.info('Initializing ETA deadline queue...');
       await etaDeadlineQueue.initialize();
 
-      logger.info('Starting onboarding grading sweeper...');
-      startOnboardingGradingSweeper();
-
       logger.info('Initializing stage ETA deadline queue...');
       await stageEtaDeadlineQueue.initialize();
 
@@ -1170,8 +1163,6 @@ export class App {
 
       // Close ETA deadline queue
       await etaDeadlineQueue.close();
-
-      stopOnboardingGradingSweeper();
 
       // Close stage ETA deadline queue
       await stageEtaDeadlineQueue.close();

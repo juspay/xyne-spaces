@@ -1,221 +1,134 @@
+import { useCallback } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiInstance } from './apiClient';
 
 /** Desk onboarding exams. All data is served over REST from the desk's preference row. */
 
-export type OnboardingAttemptStatus = 'IN_PROGRESS' | 'GRADING' | 'GRADED' | 'FAILED';
-export type OnboardingReviewStatus = 'PENDING' | 'GRADED' | 'FAILED' | 'SKIPPED';
-
 export const ONBOARDING_MAX_TICKETS_PER_TOPIC = 20;
 export const ONBOARDING_MAX_REPLY_CHARS = 20000;
-export const ONBOARDING_MAX_SCORE_PER_ANSWER = 10;
-
-export interface OnboardingReview {
-  status: OnboardingReviewStatus;
-  reasoning: string | null;
-  missedPoints: string[];
-  agentSlug: string;
-  sessionId: string | null;
-  dispatchedAt: string | null;
-  retryCount: number;
-  gradedAt: string | null;
-  error: string | null;
-}
-
-export interface OnboardingAnswer {
-  paperTicketId: string;
-  replyText: string;
-  /** Admin view only. */
-  ticketId?: string;
-  score?: number | null;
-  review?: OnboardingReview | null;
-}
 
 export interface OnboardingAttempt {
   id: string;
   topicId: string;
   userId: string;
-  status: OnboardingAttemptStatus;
+  status: 'IN_PROGRESS' | 'GRADING' | 'GRADED' | 'FAILED';
   startedAt: string;
-  draftSavedAt: string | null;
   submittedAt: string | null;
   durationSeconds: number | null;
-  gradedAt: string | null;
   totalScore: number | null;
   maxScore: number | null;
-  answers: OnboardingAnswer[];
+  /** score, reasoning and error reach admins only. */
+  answers: {
+    replyText: string;
+    score?: number | null;
+    reasoning?: string | null;
+    error?: string | null;
+  }[];
 }
 
-export interface OnboardingTopicSummary {
+/** ticketIds, graderAgentSlug and defaultGraderAgentSlug reach admins only. */
+export interface OnboardingTopic {
   id: string;
   name: string;
   ticketCount: number;
-  /** Admin view only. */
   graderAgentSlug?: string | null;
   defaultGraderAgentSlug?: string;
-  tickets?: { id: string; ticketId: string }[];
-  createdAt?: string;
+  ticketIds?: string[];
+}
+
+export interface OnboardingTicket {
+  id: string;
+  xyneId: string;
+  title: string;
 }
 
 export interface OnboardingState {
   isAdmin: boolean;
-  topics: OnboardingTopicSummary[];
-  deletedTopics: { id: string; name: string }[];
+  topics: OnboardingTopic[];
   attempts: OnboardingAttempt[];
-  /** "topicId:userId" → attempts submitted. */
-  counts: Record<string, number>;
   users: { id: string; name: string; email: string }[];
-  tickets: { id: string; xyneId: string; title: string }[];
+  tickets: OnboardingTicket[];
 }
 
-export interface OnboardingAttachment {
-  id: string;
-  filename: string;
-  mimetype: string;
-  size: number;
+/** An attempt plus its paper: `questions[i]` is the first email of answer `i`, or null if gone. */
+export interface OnboardingExam extends OnboardingAttempt {
+  questions: ({ subject: string; from: string; sentAt: string; text: string } | null)[];
 }
 
-export interface OnboardingFirstEmail {
-  subject: string;
-  from: string;
-  sentAt: string;
-  text: string;
-  attachments: OnboardingAttachment[];
-}
+export type OnboardingTopicPatch = {
+  name?: string;
+  graderAgentSlug?: string | null;
+  ticketIds?: string[];
+  deleted?: true;
+};
 
-export type OnboardingTicketEmailResponse =
-  | { available: true; firstEmail: OnboardingFirstEmail }
-  | { available: false };
-
-export interface OnboardingThreadEmail {
-  id: string;
-  subject: string;
-  from: string;
-  sentAt: string;
-  inbound: boolean;
-  text: string;
-}
-
-export interface OnboardingAttemptReview extends Omit<OnboardingAttempt, 'answers'> {
-  answers: (OnboardingAnswer & {
-    content: {
-      firstEmail: OnboardingThreadEmail & { attachments: OnboardingAttachment[] };
-      thread: OnboardingThreadEmail[];
-    } | null;
-  })[];
-}
-
-export interface OnboardingReplyInput {
-  paperTicketId: string;
-  replyText: string;
-}
-
-interface Envelope<T> {
-  success: boolean;
-  data: T;
-  error?: string;
-}
-
-const base = (channelId: string): string => `/onboarding/${encodeURIComponent(channelId)}`;
-
-export async function fetchOnboardingState(channelId: string): Promise<OnboardingState> {
-  const res = await apiInstance.get<Envelope<OnboardingState>>(base(channelId));
+/** Every onboarding response is `{ data }`; every path is relative to the desk. */
+async function call<T>(
+  method: 'get' | 'post' | 'patch',
+  channelId: string,
+  path: string,
+  body?: unknown,
+  params?: Record<string, string>,
+): Promise<T> {
+  const url = `/onboarding/${encodeURIComponent(channelId)}${path}`;
+  const res =
+    method === 'get'
+      ? await apiInstance.get<{ data: T }>(url, { params })
+      : method === 'post'
+        ? await apiInstance.post<{ data: T }>(url, body)
+        : await apiInstance.patch<{ data: T }>(url, body);
   return res.data.data;
 }
 
-export async function searchOnboardingTickets(
-  channelId: string,
-  q: string,
-): Promise<{ id: string; title: string; xyneId: string }[]> {
-  const res = await apiInstance.get<Envelope<{ id: string; title: string; xyneId: string }[]>>(
-    `${base(channelId)}/search-tickets`,
-    { params: { q } },
-  );
-  return res.data.data;
-}
+const attempt = (id: string): string => `/attempts/${encodeURIComponent(id)}`;
+const topic = (id: string): string => `/topics/${encodeURIComponent(id)}`;
 
-export async function createOnboardingTopic(
-  channelId: string,
-  body: { name: string; graderAgentSlug?: string | null },
-): Promise<{ id: string }> {
-  const res = await apiInstance.post<Envelope<{ id: string }>>(`${base(channelId)}/topics`, body);
-  return res.data.data;
-}
+export const fetchOnboardingState = (channelId: string) =>
+  call<OnboardingState>('get', channelId, '');
 
-export async function updateOnboardingTopic(
-  channelId: string,
-  topicId: string,
-  body: { name?: string; graderAgentSlug?: string | null; deleted?: true },
-): Promise<void> {
-  await apiInstance.patch(`${base(channelId)}/topics/${encodeURIComponent(topicId)}`, body);
-}
+export const createOnboardingTopic = (channelId: string, name: string) =>
+  call<{ id: string }>('post', channelId, '/topics', { name });
 
-export async function setOnboardingTopicTickets(
-  channelId: string,
-  topicId: string,
-  ticketIds: string[],
-): Promise<void> {
-  await apiInstance.put(`${base(channelId)}/topics/${encodeURIComponent(topicId)}/tickets`, {
-    ticketIds,
-  });
-}
+export const updateOnboardingTopic = (channelId: string, id: string, patch: OnboardingTopicPatch) =>
+  call<boolean>('patch', channelId, topic(id), patch);
 
-export async function startOnboardingAttempt(
-  channelId: string,
-  topicId: string,
-): Promise<OnboardingAttempt> {
-  const res = await apiInstance.post<Envelope<OnboardingAttempt>>(
-    `${base(channelId)}/topics/${encodeURIComponent(topicId)}/attempts`,
-  );
-  return res.data.data;
-}
+export const startOnboardingAttempt = (channelId: string, topicId: string) =>
+  call<OnboardingExam>('post', channelId, `${topic(topicId)}/attempts`);
 
-export async function fetchOnboardingTicketEmail(
-  channelId: string,
-  attemptId: string,
-  paperTicketId: string,
-): Promise<OnboardingTicketEmailResponse> {
-  const res = await apiInstance.get<Envelope<OnboardingTicketEmailResponse>>(
-    `${base(channelId)}/attempts/${encodeURIComponent(attemptId)}/tickets/${encodeURIComponent(paperTicketId)}/email`,
-  );
-  return res.data.data;
-}
+export const submitOnboardingAttempt = (channelId: string, id: string, replies: string[]) =>
+  call<OnboardingAttempt>('post', channelId, `${attempt(id)}/submit`, { replies });
 
-export async function saveOnboardingDraft(
-  channelId: string,
-  attemptId: string,
-  replies: OnboardingReplyInput[],
-): Promise<{ draftSavedAt: string | null }> {
-  const res = await apiInstance.put<Envelope<{ draftSavedAt: string | null }>>(
-    `${base(channelId)}/attempts/${encodeURIComponent(attemptId)}/draft`,
-    { replies },
-  );
-  return res.data.data;
-}
-
-export async function submitOnboardingAttempt(
-  channelId: string,
-  attemptId: string,
-  replies: OnboardingReplyInput[],
-): Promise<OnboardingAttempt> {
-  const res = await apiInstance.post<Envelope<OnboardingAttempt>>(
-    `${base(channelId)}/attempts/${encodeURIComponent(attemptId)}/submit`,
-    { replies },
-  );
-  return res.data.data;
-}
-
-export async function fetchOnboardingAttemptReview(
-  channelId: string,
-  attemptId: string,
-): Promise<OnboardingAttemptReview> {
-  const res = await apiInstance.get<Envelope<OnboardingAttemptReview>>(
-    `${base(channelId)}/attempts/${encodeURIComponent(attemptId)}/review`,
-  );
-  return res.data.data;
-}
+export const retryOnboardingGrading = (channelId: string, id: string) =>
+  call<{ retried: boolean }>('post', channelId, `${attempt(id)}/retry`);
 
 /** The server's message for a failed request, or a fallback. */
 export function onboardingErrorMessage(err: unknown, fallback: string): string {
   const message = (err as { response?: { data?: { error?: unknown } } })?.response?.data?.error;
   return typeof message === 'string' && message ? message : fallback;
+}
+
+const GRADING_POLL_MS = 10_000;
+
+const onboardingStateQueryKey = (channelId: string) => ['desk-onboarding', channelId] as const;
+
+/**
+ * The Onboarding tab's state for one desk. Nothing syncs live, so while any visible attempt is
+ * being graded the query re-fetches every 10 seconds until grading finishes.
+ */
+export function useDeskOnboardingState(channelId: string) {
+  return useQuery({
+    queryKey: onboardingStateQueryKey(channelId),
+    queryFn: () => fetchOnboardingState(channelId),
+    enabled: !!channelId,
+    refetchInterval: query =>
+      query.state.data?.attempts.some(a => a.status === 'GRADING') ? GRADING_POLL_MS : false,
+  });
+}
+
+export function useInvalidateDeskOnboarding(channelId: string): () => Promise<void> {
+  const queryClient = useQueryClient();
+  return useCallback(
+    () => queryClient.invalidateQueries({ queryKey: onboardingStateQueryKey(channelId) }),
+    [queryClient, channelId],
+  );
 }
