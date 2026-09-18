@@ -14,6 +14,7 @@ import type { WorkspaceJoinPolicy as WorkspaceJoinPolicyValue, WorkspaceType as 
 
 import '../types/express';
 import { config } from '@/config/env';
+import { isRefreshAllowed } from '@/services/sessionRefreshValidator';
 import { DatabaseClient } from '@/database/client';
 import { runAsSystem } from '@/database/tenant/context';
 import { getEncryptionProvider } from '@/services/encryption';
@@ -159,7 +160,7 @@ export class AuthV2Controller {
     if (refreshToken) {
       try {
         const refreshTokenExpiry = new Date();
-        refreshTokenExpiry.setDate(refreshTokenExpiry.getDate() + 30);
+        refreshTokenExpiry.setDate(refreshTokenExpiry.getDate() + config.session.expiryDays);
 
         const deviceInfo = JSON.stringify({
           userAgent: req.headers['user-agent'],
@@ -634,7 +635,7 @@ export class AuthV2Controller {
 
         res.cookie('xyne_last_workspace', workspaceId, {
           ...cookieBase,
-          maxAge: 30 * 24 * 60 * 60 * 1000,
+          maxAge: config.session.expiryDays * 24 * 60 * 60 * 1000,
         });
 
         res.cookie(`xyne_ws_${workspaceId}_token`, jwtToken, {
@@ -736,8 +737,24 @@ export class AuthV2Controller {
 
       logger.info(`[${requestId}] Session found for user: ${session.user.email}`);
 
-      if (session.status !== 'ACTIVE' || new Date() > session.refreshTokenExpiry) {
-        logger.warn(`[${requestId}] Session expired or inactive`);
+      // ENABLE_PROVIDER_REVOCATION_CHECK gates the refresh-validity decision.
+      // Disabled → the original inline check (session status + expiry only) runs
+      // verbatim, calling nothing new. Enabled → the shared isRefreshAllowed
+      // decision (status/expiry/leftAt + Google/Microsoft revocation +
+      // deactivation cleanup), same as the v1/v2 auth middlewares — so this
+      // JWT-minting endpoint (used by Zero clients after a 401) can't re-issue a
+      // token for a revoked user.
+      if (!config.enableProviderRevocationCheck) {
+        if (session.status !== 'ACTIVE' || new Date() > session.refreshTokenExpiry) {
+          logger.warn(`[${requestId}] Session expired or inactive`);
+          res.status(401).json({
+            error: 'Session expired',
+            message: 'Please re-authenticate',
+          });
+          return;
+        }
+      } else if (!(await isRefreshAllowed(session))) {
+        logger.warn(`[${requestId}] Session refresh not allowed (invalid or revoked)`);
         res.status(401).json({
           error: 'Session expired',
           message: 'Please re-authenticate',
@@ -1026,7 +1043,7 @@ export class AuthV2Controller {
 
         res.cookie('xyne_last_workspace', workspaceId, {
           ...cookieBase,
-          maxAge: 30 * 24 * 60 * 60 * 1000,
+          maxAge: config.session.expiryDays * 24 * 60 * 60 * 1000,
         });
 
         res.cookie(`xyne_ws_${workspaceId}_token`, jwtToken, {
@@ -1363,7 +1380,7 @@ export class AuthV2Controller {
 
         res.cookie('xyne_last_workspace', workspaceId, {
           ...cookieBase,
-          maxAge: 30 * 24 * 60 * 60 * 1000,
+          maxAge: config.session.expiryDays * 24 * 60 * 60 * 1000,
         });
 
         res.cookie(`xyne_ws_${workspaceId}_token`, jwtToken, {
@@ -1650,7 +1667,7 @@ export class AuthV2Controller {
       if (pendingRefreshToken || provider==AuthProvider.EMAIL) {
         try {
           const refreshTokenExpiry = new Date();
-          refreshTokenExpiry.setDate(refreshTokenExpiry.getDate() + 30);
+          refreshTokenExpiry.setDate(refreshTokenExpiry.getDate() + config.session.expiryDays);
 
           const deviceInfo = JSON.stringify({
             userAgent: req.headers['user-agent'],
@@ -1702,7 +1719,7 @@ export class AuthV2Controller {
       // Set last workspace pointer
       res.cookie('xyne_last_workspace', workspaceId, {
         ...cookieOptions,
-        maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
+        maxAge: config.session.expiryDays * 24 * 60 * 60 * 1000,
       });
 
       if (sessionId) {
@@ -1834,7 +1851,7 @@ export class AuthV2Controller {
       if (pendingRefreshToken) {
         try {
           const refreshTokenExpiry = new Date();
-          refreshTokenExpiry.setDate(refreshTokenExpiry.getDate() + 30);
+          refreshTokenExpiry.setDate(refreshTokenExpiry.getDate() + config.session.expiryDays);
 
           const deviceInfo = JSON.stringify({
             userAgent: req.headers['user-agent'],
@@ -1886,14 +1903,14 @@ export class AuthV2Controller {
       if (sessionId) {
         res.cookie('user_session_id', sessionId, {
           ...cookieOptions,
-          maxAge: config.session.expiryDays * 24 * 60 * 60 * 1000, // 30 days
+          maxAge: config.session.expiryDays * 24 * 60 * 60 * 1000,
         });
       }
       
       // Set last workspace pointer
       res.cookie('xyne_last_workspace', targetWorkspaceId, {
         ...cookieOptions,
-        maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
+        maxAge: config.session.expiryDays * 24 * 60 * 60 * 1000,
       });
 
       setOnboardingCookie(res, isNewUser, {
@@ -2027,10 +2044,15 @@ export class AuthV2Controller {
 
         // Verify session exists and is valid
         let validSessionId: string | null = null;
+        let sessionRefreshExpiry: Date | null = null;
         if (sessionId) {
           const currentSession = await this.userSessionService.getSessionById(sessionId);
           if (currentSession && currentSession.status === 'ACTIVE') {
             validSessionId = currentSession.id;
+            // Reusing the session (fixed window): the DB refreshTokenExpiry is NOT
+            // extended on switch, so the cookies must reflect its remaining life,
+            // never a fresh now+expiryDays (which would outlive the DB record).
+            sessionRefreshExpiry = currentSession.refreshTokenExpiry;
             logger.info(`[SWITCH-WORKSPACE] Reusing existing session: ${validSessionId}`);
           }
         }
@@ -2038,6 +2060,12 @@ export class AuthV2Controller {
         if (!validSessionId) {
           logger.warn(`[SWITCH-WORKSPACE] No valid session found for workspace switch`);
         }
+
+        // Session-scoped cookie lifetime: exact remaining validity of the reused
+        // session so user_session_id (and the pointer) match the DB row.
+        const sessionCookieMaxAge = sessionRefreshExpiry
+          ? sessionRefreshExpiry.getTime() - Date.now()
+          : config.session.expiryDays * 24 * 60 * 60 * 1000;
 
         const token = jwtService.generateToken({
           sub: targetUser.id,
@@ -2053,11 +2081,11 @@ export class AuthV2Controller {
 
         // Set workspace-specific cookies
         res.cookie(`xyne_ws_${workspaceId}_token`, token, { ...cookieBase, maxAge: config.jwt.expirationSeconds * 1000 });
-        res.cookie('xyne_last_workspace', workspaceId, { ...cookieBase, maxAge: 30 * 24 * 60 * 60 * 1000 });
+        res.cookie('xyne_last_workspace', workspaceId, { ...cookieBase, maxAge: sessionCookieMaxAge });
 
         // Set global session cookie (reusing existing session)
         if (validSessionId) {
-          res.cookie('user_session_id', validSessionId, { ...cookieBase, maxAge: 30 * 24 * 60 * 60 * 1000 });
+          res.cookie('user_session_id', validSessionId, { ...cookieBase, maxAge: sessionCookieMaxAge });
         }
 
         logger.info(`[SWITCH-WORKSPACE] User ${currentUser.email} switched to workspace ${workspaceId}`);
@@ -2205,7 +2233,7 @@ export class AuthV2Controller {
         if (pendingRefreshToken) {
           try {
             const refreshTokenExpiry = new Date();
-            refreshTokenExpiry.setDate(refreshTokenExpiry.getDate() + 30);
+            refreshTokenExpiry.setDate(refreshTokenExpiry.getDate() + config.session.expiryDays);
             const deviceInfo = JSON.stringify({
               userAgent: req.headers['user-agent'],
               acceptLanguage: req.headers['accept-language'],
@@ -2257,7 +2285,7 @@ export class AuthV2Controller {
 
         res.cookie('xyne_last_workspace', targetWorkspaceId, {
           ...cookieOptions,
-          maxAge: 30 * 24 * 60 * 60 * 1000,
+          maxAge: config.session.expiryDays * 24 * 60 * 60 * 1000,
         });
 
         const isNewUser = !(await this.userService.hasCompletedOnboarding(userData.email));
@@ -2370,7 +2398,7 @@ export class AuthV2Controller {
       if (currentSession?.refreshToken) {
         try {
           const refreshTokenExpiry = new Date();
-          refreshTokenExpiry.setDate(refreshTokenExpiry.getDate() + 30);
+          refreshTokenExpiry.setDate(refreshTokenExpiry.getDate() + config.session.expiryDays);
           const newSession = await this.userSessionService.createSession({
             userId: workspaceUser.id,
             refreshToken: currentSession.refreshToken,
@@ -2404,7 +2432,7 @@ export class AuthV2Controller {
       if (newSessionId) {
         res.cookie('user_session_id', newSessionId, { ...cookieBase, maxAge: config.session.expiryDays * 24 * 60 * 60 * 1000 });
       }
-      res.cookie('xyne_last_workspace', targetWorkspaceId, { ...cookieBase, maxAge: 30 * 24 * 60 * 60 * 1000 });
+      res.cookie('xyne_last_workspace', targetWorkspaceId, { ...cookieBase, maxAge: config.session.expiryDays * 24 * 60 * 60 * 1000 });
       const isNewUser = !(await this.userService.hasCompletedOnboarding(fullUser.email));
       setOnboardingCookie(res, isNewUser, {
         secure: isProduction,

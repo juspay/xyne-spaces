@@ -2,6 +2,7 @@ import { logger, Event as LogEvent } from '../utils/logger';
 import { setup, createActor, assign } from 'xstate';
 import { RefObject } from 'react';
 import type { CanvasRole } from '../components/Chat/XyneAISidebar/utils/XyneAITypes';
+import { xyneCalendarActor } from './xyneCalendarMachine';
 
 // Available XyneAI states
 export type XyneAIState = 'closed' | 'open';
@@ -83,7 +84,27 @@ export interface AskAIInitialContextSelections {
     conversationId?: string;
     externalId?: string;
   }>;
+  calls?: Array<{ id: string; title: string; channelId?: string; conversationId?: string }>;
 }
+
+export interface WorkflowContext {
+  workflowId?: string | null;
+  executionId?: string | null;
+  stepId?: string | null;
+}
+
+export interface WorkflowInfo extends WorkflowContext {
+  title?: string | null;
+}
+
+export const toWorkflowContext = (info: WorkflowInfo | null): WorkflowContext | null =>
+  info
+    ? {
+        ...(info.workflowId ? { workflowId: info.workflowId } : {}),
+        ...(info.executionId ? { executionId: info.executionId } : {}),
+        ...(info.stepId ? { stepId: info.stepId } : {}),
+      }
+    : null;
 
 export interface XyneAIResearchContext {
   type: 'product' | 'repository';
@@ -128,6 +149,8 @@ export interface XyneAIContext {
   // mutually exclusive with it (see the OPEN handler below).
   kbFolderId: string | null;
   kbFolderName: string | null;
+  workflowInfo: WorkflowInfo | null;
+  workflowDismissed: boolean;
   // Bumped on every OPEN dispatched with a kbCollectionId. Lets the input box
   // re-attach the KB collection chip when the user clicks the Ask AI button
   // again from /knowledge-base after manually removing the chip.
@@ -137,6 +160,8 @@ export interface XyneAIContext {
   // Parent-driven message submission (for contextual CTAs such as SDLC actions).
   initialQuery: string | null;
   autoSendNonce: number;
+  /** Which surface dispatched the last OPEN (analytics `source`). Not persisted. */
+  openSource: string | null;
 }
 
 // Event types for XyneAI machine
@@ -160,14 +185,20 @@ export type XyneAIEvent =
       kbDocName?: string | null;
       kbFolderId?: string | null;
       kbFolderName?: string | null;
+      workflowInfo?: WorkflowInfo | null;
       initialContextSelections?: AskAIInitialContextSelections | null;
       researchContext?: XyneAIResearchContext | null;
       initialQuery?: string | null;
+      /** Analytics attribution for XYNE_AI_OPENED — which surface opened the panel. */
+      trackSource?: string;
     }
   | { type: 'CLOSE' }
   | { type: 'SET_FOCUS_SESSION'; sessionId: string | null }
   | { type: 'CLEAR_KB_CONTEXT' }
   | { type: 'SET_KB_CONTEXT'; kbCollectionId: string | null; kbChannelId?: string | null }
+  | { type: 'SET_WORKFLOW_CONTEXT'; workflowInfo: WorkflowInfo | null }
+  /** The user closed the workflow pill. Sticks until the subject changes. */
+  | { type: 'DISMISS_WORKFLOW_CONTEXT' }
   | { type: 'SET_CONTEXT'; contextType: XyneAIContextType; contextId: string }
   | { type: 'SET_CHANNEL'; channelId: string }
   | { type: 'SET_TICKET_CONTEXT'; channelId: string; threadInfo: ThreadInfo }
@@ -465,6 +496,9 @@ export const xyneAIMachine = setup({
     events: {} as XyneAIEvent,
   },
   actions: {
+    closeCalendar: () => {
+      xyneCalendarActor.send({ type: 'CLOSE' });
+    },
     // Update context when transitioning to different states
     setOpen: assign(({ event, context }) => {
       if (event.type === 'OPEN') {
@@ -528,11 +562,14 @@ export const xyneAIMachine = setup({
           kbDocName: event.kbDocName ?? null,
           kbFolderId: event.kbFolderId ?? null,
           kbFolderName: event.kbFolderName ?? null,
+          workflowInfo: event.workflowInfo ?? null,
+          workflowDismissed: event.workflowInfo ? false : context.workflowDismissed,
           researchContext: event.researchContext ?? null,
           initialQuery: event.initialQuery?.trim() || null,
           autoSendNonce: event.initialQuery?.trim()
             ? context.autoSendNonce + 1
             : context.autoSendNonce,
+          openSource: event.trackSource ?? null,
           // Bump the nonce on every KB-scoped OPEN (collection, file, OR
           // folder) so the sidebar re-attaches the right chip even if the
           // user previously removed it.
@@ -610,11 +647,14 @@ export const xyneAIMachine = setup({
           kbFolderId: event.kbFolderId !== undefined ? event.kbFolderId : context.kbFolderId,
           kbFolderName:
             event.kbFolderName !== undefined ? event.kbFolderName : context.kbFolderName,
+          workflowInfo: event.workflowInfo ?? null,
+          workflowDismissed: event.workflowInfo ? false : context.workflowDismissed,
           researchContext: event.researchContext ?? null,
           initialQuery: event.initialQuery?.trim() || null,
           autoSendNonce: event.initialQuery?.trim()
             ? context.autoSendNonce + 1
             : context.autoSendNonce,
+          openSource: event.trackSource ?? context.openSource,
           // Re-bump on every KB-scoped OPEN (collection, file, OR folder).
           kbOpenNonce:
             event.kbCollectionId || event.kbDocId || event.kbFolderId
@@ -640,6 +680,19 @@ export const xyneAIMachine = setup({
       };
       void saveContextToIndexedDB(newContext);
       return newContext;
+    }),
+    dismissWorkflowContext: assign(() => ({ workflowDismissed: true })),
+    setWorkflowContext: assign(({ context, event }) => {
+      if (event.type !== 'SET_WORKFLOW_CONTEXT') return {};
+      const next = event.workflowInfo;
+      const prev = context.workflowInfo;
+      const subjectChanged =
+        (next?.workflowId ?? null) !== (prev?.workflowId ?? null) ||
+        (next?.executionId ?? null) !== (prev?.executionId ?? null);
+      return {
+        workflowInfo: next,
+        workflowDismissed: subjectChanged ? false : context.workflowDismissed,
+      };
     }),
     setKbContext: assign(({ event }) => {
       if (event.type === 'SET_KB_CONTEXT') {
@@ -676,6 +729,7 @@ export const xyneAIMachine = setup({
         researchContext: null,
         initialQuery: null,
         autoSendNonce: context.autoSendNonce,
+        openSource: null,
       };
 
       // Clear from IndexedDB when closing
@@ -822,10 +876,13 @@ export const xyneAIMachine = setup({
     kbDocName: null,
     kbFolderId: null,
     kbFolderName: null,
+    workflowInfo: null,
+    workflowDismissed: false,
     kbOpenNonce: 0,
     researchContext: null,
     initialQuery: null,
     autoSendNonce: 0,
+    openSource: null,
   }),
   id: 'xyneAIMachine',
   initial: 'closed',
@@ -834,7 +891,7 @@ export const xyneAIMachine = setup({
       on: {
         OPEN: {
           target: 'open',
-          actions: 'setOpen',
+          actions: ['setOpen', 'closeCalendar'],
         },
         SET_TICKET_CONTEXT: {
           actions: 'setTicketContext',
@@ -847,6 +904,12 @@ export const xyneAIMachine = setup({
         },
         SET_KB_CONTEXT: {
           actions: 'setKbContext',
+        },
+        SET_WORKFLOW_CONTEXT: {
+          actions: 'setWorkflowContext',
+        },
+        DISMISS_WORKFLOW_CONTEXT: {
+          actions: 'dismissWorkflowContext',
         },
       },
     },
@@ -864,6 +927,12 @@ export const xyneAIMachine = setup({
         },
         SET_KB_CONTEXT: {
           actions: 'setKbContext',
+        },
+        SET_WORKFLOW_CONTEXT: {
+          actions: 'setWorkflowContext',
+        },
+        DISMISS_WORKFLOW_CONTEXT: {
+          actions: 'dismissWorkflowContext',
         },
         SET_CONTEXT: {
           actions: 'setContext',
@@ -904,6 +973,7 @@ const initializeActor = async (): Promise<void> => {
       // Only include defined values in the send event
       xyneAIActor.send({
         type: 'OPEN',
+        trackSource: 'restored',
         ...(persistedContext.contextType !== undefined &&
           persistedContext.contextType !== null && {
             contextType: persistedContext.contextType,

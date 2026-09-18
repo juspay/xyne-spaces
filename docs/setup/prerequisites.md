@@ -57,7 +57,7 @@ Desktop and OrbStack must actually be launched, and the daemon has to be up on L
 ```
 
 Allocate at least **8 GB of memory** (and ~20 GB of disk) to the container runtime. The
-infrastructure stack runs Postgres (×3), Redis, LiveKit, MinIO, Y-Sweet, Zero, Vespa,
+infrastructure stack runs Postgres (×3), Redis, LiveKit, RustFS (S3), Y-Sweet, Zero, Vespa,
 and an OpenTelemetry collector concurrently, and Vespa downloads an embedding model on
 its first run.
 

@@ -38,6 +38,8 @@
     --accent-foreground: 240 5.9% 10%;
     --destructive: 0 84.2% 60.2%;
     --destructive-foreground: 0 0% 98%;
+    --warning: 32 95% 44%;
+    --warning-foreground: 0 0% 100%;
     --border: 240 5.9% 90%;
     --input: 240 5.9% 90%;
     --ring: 240 5.9% 80%;
@@ -190,6 +192,8 @@
     --accent-foreground: 240 5.9% 10%;
     --destructive: 0 84.2% 60.2%;
     --destructive-foreground: 0 0% 98%;
+    --warning: 32 95% 44%;
+    --warning-foreground: 0 0% 100%;
     --border: 240 5.9% 90%;
     --input: 240 5.9% 90%;
     --ring: 240 5.9% 80%;
@@ -333,6 +337,8 @@
     --accent-foreground: 210 8% 93%;
     --destructive: 0 62% 55%;
     --destructive-foreground: 210 8% 93%;
+    --warning: 43 96% 56%;
+    --warning-foreground: 26 83% 14%;
     --border: 233 8% 23%; /* #36373F */
     --input: 231 5% 26%; /* #3F4046 */
     --ring: 213 6% 28%;
@@ -477,19 +483,27 @@
     @apply border-border;
   }
 
-  .scrollbar-none {
-    -ms-overflow-style: none;
-    scrollbar-width: none;
-  }
-  .scrollbar-none::-webkit-scrollbar {
-    display: none;
-  }
-
-  /* Custom scrollbars app-wide, every theme: transparent rails + subtle thumb.
-     Forcing a width switches WebKit off native scrollbars so the transparent
-     track actually applies. Opt-out utilities (.no-scrollbar, .scrollbar-none)
-     win via higher class specificity. */
-  * {
+  /* Custom scrollbars: transparent rails + subtle thumb, scoped to the actual
+     scroll containers (document root + Tailwind overflow utilities) instead of a
+     universal `*` rule. The old `* { scrollbar-color: hsl(var(--border)) ... }`
+     matched every element with declarations, which defeated Blink's ComputedStyle
+     sharing cache and forced a per-element re-resolution of the `--border` CSS var
+     on every style recalc. That dominated style-recalc time on channel/DM switch.
+     Scoping to elements that can actually show a scrollbar removes that cost while
+     keeping the same appearance. The ::-webkit-scrollbar* rules below stay global:
+     they match scrollbar pseudo-elements (only rendered on scrollable elements),
+     not real elements, so they do not defeat style sharing. The opt-out utilities
+     .no-scrollbar and .scrollbar-none live in @layer utilities, which overrides
+     @layer base regardless of source order, so they still win over this rule. */
+  html,
+  body,
+  #root,
+  .overflow-auto,
+  .overflow-x-auto,
+  .overflow-y-auto,
+  .overflow-scroll,
+  .overflow-x-scroll,
+  .overflow-y-scroll {
     scrollbar-width: thin;
     scrollbar-color: hsl(var(--border)) transparent;
   }
@@ -538,6 +552,10 @@
      block. */
   .app-wallpaper-image {
     background-image: var(--wallpaper-image);
+  }
+
+  [data-stream-ground="bleed"] .app-sidenav-frame {
+    border-color: transparent;
   }
 
   [data-theme="midnight"] input[type="date"]::-webkit-calendar-picker-indicator {
@@ -1299,6 +1317,17 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
     /* IE and Edge */
     scrollbar-width: none;
     /* Firefox */
+  }
+
+  /* Opt out of the app-wide thin scrollbar entirely (no visible scrollbar).
+     Lives in @layer utilities so it overrides the scoped scrollbar rule in
+     @layer base regardless of source order. */
+  .scrollbar-none {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  .scrollbar-none::-webkit-scrollbar {
+    display: none;
   }
 
   .thin-scrollbar {
@@ -2899,15 +2928,60 @@ html .bn-code-block-source-popup-ok-button:hover {
    Colours use theme tokens so the light and midnight themes both work
    automatically.
    ============================================================ */
-.canvas-surface {
-  --canvas-content-width: 720px;
+:where(.canvas-surface, .canvas-editor-title-column) {
+  --canvas-content-width: 600px;
   /* Matches BlockNote's default .bn-editor padding-inline — the drag-handle / "+" gutter. */
   --canvas-gutter: 54px;
+  --canvas-block-content-offset: 14px;
   /* Trailing room under the last block: a canvas that ends exactly at the last
      line reads as cramped, and this also gives somewhere to click past the end.
      Clamped so a short viewport keeps a usable amount and a tall one does not
      open a chasm. */
   --canvas-bottom-space: clamp(96px, 25vh, 280px);
+  --canvas-block-content-offset: 14px;
+}
+
+.canvas-editor-title-column {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: var(--canvas-content-width);
+  margin-inline: auto;
+  padding-left: var(--canvas-block-content-offset);
+  padding-right: 0;
+}
+
+.canvas-editor-title-column {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: var(--canvas-content-width);
+  margin-inline: auto;
+  padding-left: var(--canvas-block-content-offset);
+  padding-right: 0;
+}
+
+/* Starts on the first block's left edge and follows the width handles. */
+.canvas-surface .canvas-block-row {
+  box-sizing: border-box;
+  max-width: calc(var(--canvas-content-width) + 2 * var(--canvas-gutter));
+  margin-inline: auto;
+  padding-left: calc(var(--canvas-gutter) + var(--canvas-block-content-offset));
+  padding-right: var(--canvas-gutter);
+}
+
+/* The label reveal margin is sized for the page-title header, not this row. */
+.canvas-surface .canvas-block-row > * {
+  margin-bottom: 0;
+}
+
+.canvas-surface
+  .canvas-block-row
+  ~ *
+  .bn-editor
+  > .bn-block-group
+  > .bn-block-outer:first-child
+  > .bn-block
+  > .bn-block-content[data-content-type="heading"] {
+  padding-top: 0;
 }
 
 /* Centered reading column. .bn-editor keeps its inline padding as the
@@ -3412,7 +3486,7 @@ html .bn-code-block-source-popup-ok-button:hover {
    shifts uniformly and every block stays aligned, just a few px off the handles. */
 .canvas-surface .bn-editor .bn-block {
   box-sizing: border-box;
-  padding-left: 14px;
+  padding-left: var(--canvas-block-content-offset);
 }
 
 /* Read-only preview surfaces (message cards, config panels).
@@ -5170,4 +5244,114 @@ img.inline-emoji,
    can render over the following message rows.  */
 [data-testid="virtuoso-item-list"] [data-index]:has([data-input-id]) {
   z-index: 10;
+}
+
+@property --tab-on {
+  syntax: "<number>";
+  inherits: false;
+  initial-value: 1;
+}
+@property --tab-hover {
+  syntax: "<number>";
+  inherits: true;
+  initial-value: 0;
+}
+
+:root {
+  --tab-off: 0.4;
+}
+
+.streams-nav {
+  --tab-hover: 0;
+  transition: --tab-hover 0s;
+}
+
+.streams-nav:hover,
+.streams-nav:has(:focus-visible) {
+  --tab-hover: 1;
+  transition: --tab-hover 140ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .streams-nav {
+    transition: none;
+  }
+}
+
+.streams-nav-tab {
+  color: hsl(var(--muted-foreground) / var(--tab-off));
+  color: color-mix(
+    in oklab,
+    hsl(var(--muted-foreground) / var(--tab-off)),
+    hsl(var(--foreground)) calc(max(var(--tab-on), var(--tab-hover)) * 100%)
+  );
+  transition-property: transform;
+}
+
+@property --fade-x-start {
+  syntax: "<length>";
+  inherits: true;
+  initial-value: 32px;
+}
+@property --fade-x-end {
+  syntax: "<length>";
+  inherits: true;
+  initial-value: 32px;
+}
+@property --streams-fade-start {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+@property --streams-fade-end {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+
+.streams-fade-x {
+  --fade-x: 32px;
+  --fade-x-start: var(--fade-x);
+  --fade-x-end: var(--fade-x);
+  -webkit-mask-image: linear-gradient(
+    to right,
+    transparent 0,
+    #000 var(--streams-fade-start),
+    #000 calc(100% - var(--streams-fade-end)),
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    to right,
+    transparent 0,
+    #000 var(--streams-fade-start),
+    #000 calc(100% - var(--streams-fade-end)),
+    transparent 100%
+  );
+}
+@supports (animation-timeline: scroll()) {
+  .streams-fade-x {
+    animation:
+      streams-fade-start linear both,
+      streams-fade-end linear both;
+    animation-timeline: scroll(self inline), scroll(self inline);
+    animation-range:
+      0 var(--fade-x-start),
+      calc(100% - var(--fade-x-end)) 100%;
+  }
+  @keyframes streams-fade-start {
+    from {
+      --streams-fade-start: 0px;
+    }
+    to {
+      --streams-fade-start: var(--fade-x-start);
+    }
+  }
+  @keyframes streams-fade-end {
+    from {
+      --streams-fade-end: var(--fade-x-end);
+    }
+    to {
+      --streams-fade-end: 0px;
+    }
+  }
 }

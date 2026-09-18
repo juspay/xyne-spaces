@@ -13,7 +13,12 @@ interface SubTicketModalProps {
   ticketId: string;
   conversationId: string;
   sourceMessageId?: string;
-  onSuccess?: () => void;
+  initialTitle?: string;
+  initialDescription?: string;
+  /** Receives the created ticket, after the sub-ticket mapping is wired. */
+  onSuccess?: (createdTicket: { id: string; xyneId?: string | undefined }) => void;
+  /** Which surface opened the sub-ticket form; defaults to the modal itself. */
+  trackSource?: string;
 }
 
 type InitialAssignee = { type: 'assigneeTo' | 'userGroup'; value: string } | null;
@@ -24,7 +29,10 @@ export const SubTicketModal = ({
   ticketId,
   conversationId,
   sourceMessageId,
+  initialTitle,
+  initialDescription,
   onSuccess,
+  trackSource = 'sub_ticket_modal',
 }: SubTicketModalProps): ReactElement | null => {
   const zero = useZero();
 
@@ -62,7 +70,10 @@ export const SubTicketModal = ({
       initialPriority={ticket.priority}
       initialTags={initialTags}
       isFromSubTicket={true}
+      trackSource={trackSource}
       {...(sourceMessageId && { sourceMessageId })}
+      {...(initialTitle && { initialTitle })}
+      {...(initialDescription && { initialDescription })}
       parentTicketId={ticketId}
       onTicketCreated={createdTicket => {
         // Create SubTicket and mapping using Zero mutators
@@ -103,7 +114,7 @@ export const SubTicketModal = ({
         );
 
         onClose();
-        onSuccess?.();
+        onSuccess?.(createdTicket);
       }}
     />
   );

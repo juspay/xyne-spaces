@@ -13,9 +13,6 @@ export interface WorkerStartStreamMessage {
       query: string;
       displayQuery?: string;
       channelIds: string[];
-      collectionIds?: string[];
-      fileIds?: string[];
-      folderIds?: string[];
       canvasIds?: string[];
       ticketIds?: string[];
       callIds?: string[];
@@ -50,6 +47,11 @@ export interface WorkerStartStreamMessage {
       thinkingLevel?: 'off' | 'minimal' | 'low' | 'medium' | 'high';
       researchContext?: { type: string; id?: string; name: string } | null;
       canvasId?: string;
+      workflowContext?: {
+        workflowId?: string | null;
+        executionId?: string | null;
+        stepId?: string | null;
+      };
       messageAttachmentIds?: string[];
       attachments?: Array<{
         data: string;
@@ -177,12 +179,6 @@ async function executeStream(
         ...(requestBody.displayQuery && { display_query: requestBody.displayQuery }),
         /* eslint-disable @typescript-eslint/naming-convention */
         channel_ids: requestBody.channelIds,
-        ...(requestBody.collectionIds &&
-          requestBody.collectionIds.length > 0 && { collection_ids: requestBody.collectionIds }),
-        ...(requestBody.fileIds &&
-          requestBody.fileIds.length > 0 && { file_ids: requestBody.fileIds }),
-        ...(requestBody.folderIds &&
-          requestBody.folderIds.length > 0 && { folder_ids: requestBody.folderIds }),
         ...(requestBody.canvasIds &&
           requestBody.canvasIds.length > 0 && { canvas_ids: requestBody.canvasIds }),
         ...(requestBody.ticketIds &&
@@ -204,6 +200,7 @@ async function executeStream(
         ...(requestBody.canvasId && {
           canvas_id: requestBody.canvasId,
         }),
+        ...(requestBody.workflowContext && { workflowContext: requestBody.workflowContext }),
         ...(requestBody.messageAttachmentIds &&
           requestBody.messageAttachmentIds.length > 0 && {
             message_attachment_ids: requestBody.messageAttachmentIds,

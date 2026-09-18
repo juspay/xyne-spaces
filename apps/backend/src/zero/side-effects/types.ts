@@ -69,6 +69,8 @@ export interface ChannelPreviousValue {
 
 export interface EmailReadPreviousValue {
   lastReadEmailId: string;
+  ticketId?: string;
+  userId?: string;
 }
 
 export interface CanvasParticipantPreviousValue {
@@ -103,6 +105,12 @@ export interface ConversationParticipantPreviousValue {
   userId: string;
 }
 
+export interface ConversationLabelMappingPreviousValue {
+  channelId: string;
+  labelId: string;
+  conversationId: string;
+}
+
 export type PreviousValue =
   | ConversationPreviousValue
   | TicketPreviousValue
@@ -119,6 +127,7 @@ export type PreviousValue =
   | ChannelParticipantPreviousValue
   | ChannelUserStatusPreviousValue
   | ConversationParticipantPreviousValue
+  | ConversationLabelMappingPreviousValue
   | TicketStageRequestPreviousValue;
 
 export interface TicketStageRequestPreviousValue {
@@ -163,7 +172,8 @@ export const SIDE_EFFECT_OPERATION_CONFIG: SideEffectOperationConfigMap = {
   form_entity_values: ['insert', 'update', 'delete'],
   delayed_messages: ['insert', 'update', 'delete'],
   channels: ['update'],
-  email_reads: ['insert', 'update'],
+  email_reads: ['insert', 'update', 'delete'],
+  conversation_label_mappings: ['insert', 'delete'],
   channel_user_status: ['update'],
   conversation_participants: ['update'],
   ticket_stage_requests: ['insert', 'update', 'upsert'],

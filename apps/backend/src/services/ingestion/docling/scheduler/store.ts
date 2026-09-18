@@ -19,6 +19,7 @@ import { currentWorkspaceId } from '@/database/tenant/context';
 import { Prisma } from '@prisma/client';
 import { IngestionStatus } from '@xyne/shared';
 import { maybeNotifyCollectionIngestionComplete } from '@/services/collectionIngestionNotifier';
+import { cleanupStage } from './storage';
 import {
   DOCLING_FILE_STATUS,
   DOCLING_PART_STATUS,
@@ -93,6 +94,19 @@ const partFromRow = (row: RawRow): DoclingPart => ({
   createdAt: dateOrNull(row.created_at) || new Date(),
   updatedAt: dateOrNull(row.updated_at) || new Date(),
 });
+
+/**
+ * A file that fails terminally is never written and never cleaned up by the
+ * writer, so its staged parts and per-part OCR results — document-derived
+ * content — would sit in the default bucket forever. Drop them on the terminal
+ * transition instead, unless the operator asked to keep temp results for
+ * debugging. Detached and best-effort: cleanupStage logs its own failures and
+ * never throws, and a failed cleanup must not fail the transition.
+ */
+const cleanupStageAfterTerminalFailure = (fileId: string): void => {
+  if (config.doclingScheduler.keepTempResults) return;
+  void cleanupStage(fileId);
+};
 
 /** Mark the latest collection item for a file with an ingestion status. */
 const setCollectionItemStatus = async (
@@ -488,6 +502,7 @@ export const failDoclingFile = async (
   });
   // Terminal transition committed — check if the whole collection is now done.
   void maybeNotifyCollectionIngestionComplete(fileId).catch(() => {});
+  cleanupStageAfterTerminalFailure(fileId);
 };
 
 export const failDoclingFileIfOwned = async (
@@ -523,6 +538,7 @@ export const failDoclingFileIfOwned = async (
   });
   if (owned) {
     void maybeNotifyCollectionIngestionComplete(file.fileId).catch(() => {});
+    cleanupStageAfterTerminalFailure(file.fileId);
   }
   return owned;
 };

@@ -392,6 +392,7 @@ export const AIClassificationConfig: React.FC<AIClassificationConfigProps> = ({
                       className='text-xs font-medium text-desk-accent disabled:opacity-50 disabled:cursor-not-allowed'
                       data-track-category='DeskSettings'
                       data-track-name='SaveEditRule'
+                      data-track-metadata={JSON.stringify({ ruleCount: (mappings ?? []).length })}
                       data-ph-capture-attribute-track-id='desk_classification_rule_update'
                     >
                       Save
@@ -538,6 +539,7 @@ export const AIClassificationConfig: React.FC<AIClassificationConfigProps> = ({
                 className='rounded-[10px] bg-desk-accent px-[12px] py-[6px] text-sm font-medium text-white transition-colors hover:bg-desk-accent-hover disabled:cursor-not-allowed disabled:opacity-50'
                 data-track-category='DeskSettings'
                 data-track-name='ConfirmAddRule'
+                data-track-metadata={JSON.stringify({ ruleCount: (mappings ?? []).length })}
                 data-ph-capture-attribute-track-id='desk_classification_rule_create'
               >
                 Add Rule

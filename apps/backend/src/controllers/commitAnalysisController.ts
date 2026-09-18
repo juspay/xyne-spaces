@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { CommitAnalysisService, CommitAnalysisResult, AnalyzeCommitsRequest } from '@/services/commitAnalysisService';
+import { CommitAnalysisService, CommitAnalysisResult, AnalyzeCommitsRequest, countDistinctMigrationFiles } from '@/services/commitAnalysisService';
 import { TicketRepository } from '@/database/repositories/ticketRepository';
 import { ApplicationRepository } from '@/database/repositories/applicationRepository';
 import { ConversationRepository } from '@/database/repositories/conversationRepository';
@@ -7,6 +7,8 @@ import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
 import { conversationService } from '@/services/conversationService';
+import { recordTicketTimelineEvent } from '@/services/ticketTimelineEventService';
+import { buildWorkspaceCanvasUrl } from '@/services/canvasService';
 import { AffectedApplicationInfo, ReleaseService } from '@/services/release/core/';
 import { ReleaseRepository } from '@/database/repositories/releaseRepository';
 import { createCommitAnalysisCanvas, upsertCommitAnalysisCanvas, type CommitAnalysisRepoSlice } from '@/utils/commitAnalysisCanvas';
@@ -525,8 +527,9 @@ export class CommitAnalysisController {
 
       // One canvas per release: upsert the aggregated slices in place.
       let canvasUrl: string | undefined;
+      let canvasId: string | null | undefined;
       if (viewResults.length > 0) {
-        const canvasId = await upsertCommitAnalysisCanvas({
+        canvasId = await upsertCommitAnalysisCanvas({
           section: hotfixSync ? 'hotfix' : 'main',
           results: viewResults,
           affectedApplications,
@@ -543,21 +546,22 @@ export class CommitAnalysisController {
             deployedCommitId: primary.deployedCommitId,
             newCommitId: primary.newCommitId,
             affectedApplicationCount: affectedApplications.length,
-            migrationCount: migrationLinks.length,
+            migrationCount: countDistinctMigrationFiles(migrationLinks),
             envChangeCount: envChanges.length,
             workspaceId: params.workspaceId,
           },
         });
 
         if (canvasId) {
-          canvasUrl = `${config.slackFrontendUrl}/chat/canvas/${canvasId}`;
+          canvasUrl = buildWorkspaceCanvasUrl(params.workspaceId, canvasId);
         }
       }
 
       if (params.parentTicketId && results.length > 0) {
         await this.postToParentTicket(
           params.parentTicketId, results, primary.projectKey, primary.repoSlug, conversationId, channelId,
-          affectedApplications, userId, primary.deployedCommitId, primary.newCommitId, envChanges, migrationLinks,
+          affectedApplications, userId, primary.deployedCommitId, primary.newCommitId, params.workspaceId,
+          envChanges, migrationLinks,
           repoSlices,
         );
       }
@@ -611,6 +615,34 @@ export class CommitAnalysisController {
         },
       });
 
+      // The canvas updates in place, so a hotfix sync posts an activity line (via the
+      // canonical helper, for the right SYSTEM/isTicketActivity invariants) pointing at it.
+      if (hotfixSync) {
+        try {
+          const canvasLink = canvasId ? buildWorkspaceCanvasUrl(params.workspaceId, canvasId) : null;
+          let content: string;
+          if (canvasLink) {
+            content = `Hotfix synced — release analysis canvas updated ${canvasLink}`;
+          } else if (viewResults.length === 0) {
+            content = 'Hotfix synced — no new commits to analyse, so the analysis canvas was left unchanged. Nothing to open.';
+          } else {
+            content = 'Hotfix synced — the analysis canvas could not be updated, so there is no link to open. Re-run the sync to refresh it.';
+          }
+          await recordTicketTimelineEvent({
+            message: {
+              conversationId,
+              senderId: userId,
+              content,
+              activityType: 'RELEASE_SYNC',
+              workspaceId: params.workspaceId,
+              isAutomation: true,
+            },
+          });
+        } catch (noticeError) {
+          logger.warn(`[ReleaseTrigger] failed to post hotfix sync notice: ${noticeError instanceof Error ? noticeError.message : String(noticeError)}`);
+        }
+      }
+
       return {
         success: true,
         data: results,
@@ -640,6 +672,7 @@ export class CommitAnalysisController {
     userId: string,
     deployedCommitId: string,
     newCommitId: string,
+    workspaceId: string,
     envChanges?: Array<{ filePath: string; fileName: string; newValue: string }>,
     migrationLinks?: Array<{ filePath: string; diffUrl: string }>,
     repoSlices?: CommitAnalysisRepoSlice[]
@@ -667,14 +700,14 @@ export class CommitAnalysisController {
             deployedCommitId,
             newCommitId,
             affectedApplicationCount: affectedApplications.length,
-            migrationCount: migrationLinks?.length || 0,
+            migrationCount: countDistinctMigrationFiles(migrationLinks),
             envChangeCount: envChanges?.length || 0,
           },
           repoSlices,
         );
 
         if (canvasId) {
-          canvasUrl = `${config.slackFrontendUrl}/chat/canvas/${canvasId}`;
+          canvasUrl = buildWorkspaceCanvasUrl(workspaceId, canvasId);
         }
       }
 

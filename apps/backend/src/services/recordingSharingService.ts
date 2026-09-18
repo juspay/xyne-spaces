@@ -4,7 +4,7 @@ import {
   addReplyToData,
   EntityUserAccess,
   parseRepliesMd,
-  serializeInitialMessageMd,
+  buildInitialMessageMd,
   serializeRepliesMd,
   ShareableEntityType,
   type GrantableEntityUserAccess,
@@ -315,7 +315,7 @@ export class RecordingSharingService {
     };
 
     // Store the initial message snapshot for conversation lists.
-    const initialMessageMd = serializeInitialMessageMd({
+    const initialMessageMd = buildInitialMessageMd({
       messageId,
       conversationId,
       workspaceId: actor.workspaceId,
@@ -328,7 +328,7 @@ export class RecordingSharingService {
       showInChannel: false,
       visibleTo: null,
       createdAt: now.getTime(),
-      metadata: JSON.stringify(metadata),
+      metadata,
       nudgeCount: null,
       isSent: true,
       reactions_md: null,
@@ -405,7 +405,11 @@ export class RecordingSharingService {
       tx.reactionCount.deleteMany({ where: { messageId: post.messageId } }),
     ]);
 
-    if (replyCount === 0) {
+    // Ticket.conversation is a required relation: a conversation carrying a ticket can't be
+    // hard-deleted (Prisma Client throws P2014), so it falls through to the tombstone below.
+    const hasTicket = (await tx.ticket.count({ where: { conversationId: post.conversationId } })) > 0;
+
+    if (replyCount === 0 && !hasTicket) {
       await tx.conversationParticipant.deleteMany({
         where: { conversationId: post.conversationId },
       });
@@ -431,7 +435,7 @@ export class RecordingSharingService {
       },
     });
     // Update the conversation preview tombstone.
-    const tombstoneMd = serializeInitialMessageMd({
+    const tombstoneMd = buildInitialMessageMd({
       messageId: post.messageId,
       conversationId: post.conversationId,
       workspaceId: message.workspaceId,

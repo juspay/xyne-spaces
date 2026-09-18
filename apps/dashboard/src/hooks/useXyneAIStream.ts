@@ -9,8 +9,21 @@ import type {
 import type { ResearchContext } from '@xyne/shared';
 import type { AttachedContextItem } from '../components/Chat/XyneAISidebar/components/ContextPickerPanel';
 import type { UserActivity } from '../hooks/useUserActivity';
+import type { WorkflowContext } from '../machines/xyneAIMachine';
 import { xyneAIStreamManager, type StreamState } from '../services/XyneAI';
 import { buildXyneAIStreamThreadId } from '../utils/xyneAIStreamThreadId';
+import { globalClickTracker } from '../services/Analytics/globalClickTracker';
+import {
+  aiRunTrackingMetadata,
+  type XyneAiSendTrigger,
+  type XyneAiSurface,
+} from '../services/Analytics/xyneAiTracking';
+import {
+  trackWebSearchQuery,
+  trackDeepResearchQuery,
+  trackCanvasModeQuery,
+  trackAttachmentsAdded,
+} from '../services/otel/xyneAIMetrics';
 
 /**
  * Per-submit overrides for the stream options. When provided, each field takes
@@ -20,13 +33,6 @@ import { buildXyneAIStreamThreadId } from '../utils/xyneAIStreamThreadId';
  */
 export interface StreamOverrides {
   channelIds?: string[];
-  collectionIds?: string[];
-  fileIds?: string[];
-  /** Folder scopes from the composer picker. Sent to claw-auth as a single
-   *  'folder' attached_context pointer per id — xyneAIControllerV2.ts does
-   *  NOT expand this to a recursive file list; claw-auth resolves it itself,
-   *  at Vespa-query time. */
-  folderIds?: string[];
   webSearchEnabled?: boolean;
   deepResearchEnabled?: boolean;
   createCanvasEnabled?: boolean;
@@ -52,6 +58,9 @@ export interface StreamOverrides {
    *  optimistic user message so it matches the persisted pills after reload.
    *  Falls back to `attachedContext` when absent. Never sent to the backend. */
   displayAttachedContext?: AttachedContextItem[];
+  /** What caused this send, for the SEND_MESSAGE event. Regenerate and edit are
+   *  derived from their flags; pass 'auto_send' / 'suggestion' from those paths. */
+  trigger?: XyneAiSendTrigger;
 }
 
 interface UseXyneAIStreamParams {
@@ -62,19 +71,13 @@ interface UseXyneAIStreamParams {
   threadConversationId?: string | undefined;
   attachmentIds?: string[] | undefined; // Attachment IDs to fetch from GCS on backend
   canvasId?: string | null;
+  workflowContext?: WorkflowContext | null;
   setMessages: React.Dispatch<React.SetStateAction<Message[]>>;
   setConversationId: React.Dispatch<React.SetStateAction<string>>;
   setCurrentTraceId?: React.Dispatch<React.SetStateAction<string | undefined>>;
   webSearchEnabled?: boolean;
   deepResearchEnabled?: boolean;
   researchContext?: ResearchContext | null;
-  collectionIds?: string[];
-  fileIds?: string[];
-  /** Folder scopes from the composer picker. Sent to claw-auth as a single
-   *  'folder' attached_context pointer per id — xyneAIControllerV2.ts does
-   *  NOT expand this to a recursive file list; claw-auth resolves it itself,
-   *  at Vespa-query time. */
-  folderIds?: string[];
   createCanvasEnabled?: boolean;
   instant?: boolean;
   isV2?: boolean;
@@ -99,6 +102,10 @@ interface UseXyneAIStreamParams {
   suppressCompletionToast?: boolean;
   setDebugEvents?: React.Dispatch<React.SetStateAction<DebugEventRecord[]>>;
   setDebugArtifactsReadyVersion?: React.Dispatch<React.SetStateAction<number>>;
+  /** Which UI hosts this conversation — dimension on SEND_MESSAGE. */
+  surface?: XyneAiSurface;
+  /** xyneAIMachine contextType at submit time (panel only). */
+  contextType?: string | null;
 }
 
 /**
@@ -140,15 +147,13 @@ export const useXyneAIStream = ({
   threadConversationId,
   attachmentIds,
   canvasId,
+  workflowContext,
   setMessages,
   setConversationId,
   setCurrentTraceId,
   webSearchEnabled = false,
   deepResearchEnabled = false,
   researchContext,
-  collectionIds,
-  fileIds,
-  folderIds,
   createCanvasEnabled = false,
   instant = false,
   isV2 = false,
@@ -164,6 +169,8 @@ export const useXyneAIStream = ({
   modelProvider,
   thinkingLevel,
   suppressCompletionToast,
+  surface,
+  contextType,
   setDebugEvents,
   setDebugArtifactsReadyVersion,
 }: UseXyneAIStreamParams) => {
@@ -331,9 +338,6 @@ export const useXyneAIStream = ({
       const eResearchContext =
         ov && 'researchContext' in ov ? (ov.researchContext ?? null) : researchContext;
       const eChannelIds = ov?.channelIds ?? channelIds;
-      const eCollectionIds = ov?.collectionIds ?? collectionIds ?? [];
-      const eFileIds = ov?.fileIds ?? fileIds ?? [];
-      const eFolderIds = ov?.folderIds ?? folderIds ?? [];
       const eTicketIds = ov?.ticketIds ?? ticketIds;
       const eCanvasIds = ov?.canvasIds ?? canvasIds;
       const eCallIds = ov?.callIds ?? callIds;
@@ -448,6 +452,64 @@ export const useXyneAIStream = ({
         ? [...currentMessages, userMessage, botMessage]
         : [...currentMessages, botMessage];
 
+      // SEND_MESSAGE for every send the button cannot see: this is the one
+      // function every submit passes through (Enter, regenerate, edit,
+      // auto-sent initialQuery, suggestion chips) on both the panel and the
+      // /ai page. Fires before the request so a failed run still counts as an
+      // ask; the run's outcome is RESPONSE_* from the stream manager.
+      // A button send is already a click row under the button's own name
+      // (SEND_MESSAGE on the page, SUBMIT_MESSAGE in the panel) with the run
+      // dims baked into its metadata, so it is not repeated here.
+      const trigger: XyneAiSendTrigger = isRegenerate
+        ? 'regenerate'
+        : isEditUserMessage
+          ? 'edit'
+          : (ov?.trigger ?? 'submit');
+      if (trigger !== 'button') {
+        // Files/folders/collections ride in combinedAttachedContext (no
+        // separate id arrays) — count by type for the tracking metadata.
+        const eFileCount = combinedAttachedContext?.filter(i => i.type === 'file').length ?? 0;
+        const eFolderCount = combinedAttachedContext?.filter(i => i.type === 'folder').length ?? 0;
+        const eCollectionCount =
+          combinedAttachedContext?.filter(i => i.type === 'collection').length ?? 0;
+        globalClickTracker.trackManualEvent('XyneAI', 'SEND_MESSAGE', undefined, {
+          ...aiRunTrackingMetadata({
+            surface,
+            contextType,
+            agentSlug,
+            model: eModel,
+            modelProvider: eModelProvider,
+            thinkingLevel: eThinkingLevel,
+            webSearchEnabled: eWebSearchEnabled,
+            deepResearchEnabled: eDeepResearchEnabled,
+            createCanvasEnabled: eCreateCanvasEnabled,
+            instant: eInstant,
+            attachmentsCount: attachments.length,
+            channelCount: eChannelIds.length,
+            fileCount: eFileCount,
+            folderCount: eFolderCount,
+            collectionCount: eCollectionCount,
+            canvasCount: eCanvasIds?.length ?? 0,
+            ticketCount: eTicketIds?.length ?? 0,
+            callCount: eCallIds?.length ?? 0,
+            hasSelectionContext: !!selectionContexts?.length,
+            hasResearchContext: !!eResearchContext,
+            hasWorkflowContext: !!workflowContext,
+            queryLength: query.length,
+            isRegenerate: !!isRegenerate,
+            isEdit: !!isEditUserMessage,
+            conversationId,
+          }),
+          turnIndex: currentMessages.filter(m => m.type === 'user').length,
+          trigger,
+        });
+      }
+      // OpenTelemetry counters ride the same choke point so the /ai page counts too.
+      if (eWebSearchEnabled) trackWebSearchQuery();
+      if (eDeepResearchEnabled) trackDeepResearchQuery();
+      if (eCreateCanvasEnabled) trackCanvasModeQuery();
+      if (attachments.length > 0) trackAttachmentsAdded(attachments.length);
+
       // Start stream via the global stream manager
       // The stream manager will notify subscribers which will update messages with the streaming content
       const streamId = await xyneAIStreamManager.startStream(
@@ -456,13 +518,11 @@ export const useXyneAIStream = ({
           query: internalQuery,
           displayQuery: displayContent ?? query,
           channelIds: eChannelIds,
-          collectionIds: eCollectionIds,
-          fileIds: eFileIds,
-          folderIds: eFolderIds,
           conversationId,
           threadConversationId,
           attachmentIds,
           canvasId,
+          ...(workflowContext ? { workflowContext } : {}),
           webSearchEnabled: eWebSearchEnabled,
           deepResearchEnabled: eDeepResearchEnabled,
           createCanvasEnabled: eCreateCanvasEnabled,
@@ -496,13 +556,11 @@ export const useXyneAIStream = ({
     [
       threadId,
       channelIds,
-      collectionIds,
       conversationId,
       threadConversationId,
       attachmentIds,
       canvasId,
-      fileIds,
-      folderIds,
+      workflowContext,
       researchContext,
       webSearchEnabled,
       deepResearchEnabled,
@@ -522,6 +580,8 @@ export const useXyneAIStream = ({
       modelProvider,
       thinkingLevel,
       suppressCompletionToast,
+      surface,
+      contextType,
     ],
   );
 

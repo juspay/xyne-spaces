@@ -31,9 +31,6 @@ import {
   buildSdlcAskAiContext,
   resolveSdlcAskAiSelectedArtifact,
 } from '@/sdlc/sdlcAskAiContext';
-import { sdlcVcs } from '@/sdlc/vcs';
-import { computeWikiFreshness } from '@/sdlc/wiki/wikiFreshness';
-import { parseWikiExecutionContext } from '@/sdlc/wiki/wikiRunState';
 
 const emptyToUndefined = (val: unknown) => (val === '' ? undefined : val);
 
@@ -65,10 +62,10 @@ const SelectionContextSchema = z
   );
 
 // Attached context item schema - for Add Context feature.
-// `collection` and `file` are appended below from top-level `collection_ids`
-// and `file_ids` so the dashboard can keep its existing payload shape.
+// `collection`/`folder`/`file` items all arrive as ordinary entries in this
+// list — the dashboard already knows each one's cuid + name client-side.
 const AttachedContextItemSchema = z.object({
-  type: z.enum(['channel', 'ticket', 'canvas', 'call', 'activity', 'collection', 'file']),
+  type: z.enum(['channel', 'ticket', 'canvas', 'call', 'activity', 'collection', 'file', 'folder']),
   id: z.string().min(1),
   title: z.string().min(1),
   threadId: z.string().optional(),
@@ -94,6 +91,13 @@ const XyneAIRequestSchemaV2 = z.object({
   conversation_id: z.preprocess(emptyToUndefined, z.string().optional()),
   canvasId: z.string().optional(),
   canvas_id: z.string().optional(),
+  workflowContext: z
+    .object({
+      workflowId: z.string().min(1).nullish(),
+      executionId: z.string().min(1).nullish(),
+      stepId: z.string().min(1).nullish(),
+    })
+    .optional(),
   // Legacy aliases for canvasId (pre-XYNE-17290). Merged into canvasId below.
   canvasViewAccessId: z.string().optional(),
   canvas_view_access_id: z.string().optional(),
@@ -165,23 +169,6 @@ const XyneAIRequestSchemaV2 = z.object({
   ticket_ids: z.array(z.string().min(1)).optional(),
   callIds: z.array(z.string().min(1)).optional(),
   call_ids: z.array(z.string().min(1)).optional(),
-  // KB context. The dashboard sends these at the top level (legacy shape);
-  // we convert them into attached_context items of type 'collection' / 'file'
-  // below so the agent's prompt-prefix mechanism picks them up uniformly.
-  // `fileIds` arrive as stable CollectionItem.fileId UUIDs (the dashboard's
-  // Vespa identifier); we resolve them to CollectionItem.id (cuid) before
-  // forwarding because that's what claw-auth's KB tools expect.
-  collectionIds: z.array(z.string().min(1)).optional(),
-  collection_ids: z.array(z.string().min(1)).optional(),
-  fileIds: z.array(z.string().min(1)).optional(),
-  file_ids: z.array(z.string().min(1)).optional(),
-  // A folder scope from the composer picker. Forwarded to claw-auth as a
-  // single 'folder' attached_context pointer (like collectionIds is) — NOT
-  // expanded to individual file ids here. claw-auth resolves it to files
-  // itself at Vespa-query time; expanding it here could blow up to
-  // thousands of ids for one folder.
-  folderIds: z.array(z.string().min(1)).optional(),
-  folder_ids: z.array(z.string().min(1)).optional(),
   attachedContext: AttachedContextSchema,
   attached_context: AttachedContextSchema,
   displayQuery: z.string().optional(),
@@ -254,6 +241,7 @@ export class XyneAIControllerV2 {
       canvas_id,
       canvasViewAccessId,
       canvas_view_access_id,
+      workflowContext,
       createCanvasEnabled: createCanvasEnabledCC,
       create_canvas_enabled: createCanvasEnabledSC,
       webSearchEnabled: webSearchEnabledCC,
@@ -282,12 +270,6 @@ export class XyneAIControllerV2 {
       ticket_ids,
       callIds,
       call_ids,
-      collectionIds,
-      collection_ids,
-      fileIds,
-      file_ids,
-      folderIds,
-      folder_ids,
       attachedContext,
       attached_context,
       draftMode,
@@ -314,9 +296,6 @@ export class XyneAIControllerV2 {
     const effectiveCanvasIds = canvasIds?.length ? canvasIds : canvas_ids;
     const effectiveTicketIds = ticketIds?.length ? ticketIds : ticket_ids;
     const effectiveCallIds = callIds?.length ? callIds : call_ids;
-    const effectiveCollectionIds = collectionIds?.length ? collectionIds : collection_ids;
-    const effectiveFileIds = fileIds?.length ? fileIds : file_ids;
-    const effectiveFolderIds = folderIds?.length ? folderIds : folder_ids;
     // Same snake-case fallback rationale for branching params — the worker
     // sends snake_case; HTTP callers may use either.
     const effectiveParentMessageId = parentMessageIdCC || parentMessageIdSC;
@@ -434,46 +413,9 @@ export class XyneAIControllerV2 {
               }
             : selectedCanvas,
         );
-        // Baseline knowledge-document injection is disabled until the standalone
-        // baseline approval flow returns; READY baselines gate artifact creation instead.
-        const approvedBaseline: Array<{ title: string; content: string }> = [];
         const linkedContext = sdlcRepo.workspaceId
           ? await resolveAuthorizedSdlcLinkedContext(db, contextLinks, userId, sdlcRepo.workspaceId)
           : [];
-        const [baseBranchHeadSha, wikiRunLinks] = await Promise.all([
-          sdlcVcs.resolveBaseBranchHead(sdlcRepo.id).catch(() => null),
-          db.sdlcEntityLink.findMany({
-            where: {
-              sourceType: 'REPOSITORY',
-              sourceId: sdlcRepo.id,
-              targetType: 'WORKFLOW_EXECUTION',
-              relationType: 'WIKI_RUN',
-            },
-            orderBy: { createdAt: 'desc' },
-            take: 50,
-            select: { targetId: true },
-          }),
-        ]);
-        const latestSuccessfulWiki = wikiRunLinks.length
-          ? await db.workflowExecution.findFirst({
-              where: {
-                id: { in: wikiRunLinks.map((link) => link.targetId) },
-                workflowType: 'SDLC_WIKI',
-                status: 'SUCCESS',
-              },
-              orderBy: { createdAt: 'desc' },
-              select: { context: true },
-            })
-          : null;
-        let wikiCommitSha: string | null = null;
-        if (latestSuccessfulWiki?.context) {
-          try {
-            const wikiContext = parseWikiExecutionContext(latestSuccessfulWiki.context);
-            wikiCommitSha = wikiContext.targetHeadSha ?? wikiContext.cursorSha;
-          } catch {
-            wikiCommitSha = null;
-          }
-        }
         // Membership points at the repository through the polymorphic targetId, so
         // no relation covers it: read the edges, then the repositories they name.
         const siblingLinks = await db.sdlcEntityLink.findMany({
@@ -504,10 +446,8 @@ export class XyneAIControllerV2 {
             url: sibling.canonicalUrl || sibling.url,
           })),
           channelId: effectiveChannelIds[0],
-          baselineDocuments: approvedBaseline,
           linkedContext,
           ...(selectedArtifact ? { selectedArtifact } : {}),
-          wikiFreshness: computeWikiFreshness({ wikiCommitSha, baseBranchHeadSha }),
         });
       }
 
@@ -534,61 +474,6 @@ export class XyneAIControllerV2 {
         agentSlug,
       });
 
-      // Resolve KB context (collections + folders + files) → attached_context
-      // items so claw-auth's existing prompt-prefix mechanism surfaces them
-      // in the agent's prompt. We translate:
-      //   • Collection.id (cuid)         → 'collection' attached_context item
-      //   • Collection.id (cuid, folder) → 'folder' attached_context item
-      //   • CollectionItem.fileId (UUID) → CollectionItem.id (cuid) +
-      //                                    'file' attached_context item
-      // The cuid is what the agent's kb-* tools expect as fileId — see the
-      // KB-tools handlers and the validateKbGrants files-set in claw-auth.
-      // A folder is deliberately sent as ONE pointer, not expanded to its
-      // (potentially thousands of) files here — attachedContext is a small,
-      // model-facing prompt list (claw-auth caps it at 20 items total), not a
-      // bulk id manifest. claw-auth resolves the folder to files itself, at
-      // Vespa-query time (buildVespaScope in kb-handlers.ts), from the KB
-      // tree it already fetches for permission checks.
-      const kbAttachedContextItems: Array<{
-        type: 'collection' | 'folder' | 'file';
-        id: string;
-        title: string;
-      }> = [];
-      if (effectiveCollectionIds && effectiveCollectionIds.length > 0) {
-        const rows = await db.collection.findMany({
-          where: { id: { in: effectiveCollectionIds }, deletedAt: null },
-          select: { id: true, name: true },
-        });
-        for (const row of rows) {
-          kbAttachedContextItems.push({ type: 'collection', id: row.id, title: row.name });
-        }
-      }
-      if (effectiveFolderIds && effectiveFolderIds.length > 0) {
-        const rows = await db.collection.findMany({
-          where: { id: { in: effectiveFolderIds }, deletedAt: null },
-          select: { id: true, name: true },
-        });
-        for (const row of rows) {
-          kbAttachedContextItems.push({ type: 'folder', id: row.id, title: row.name });
-        }
-      }
-      if (effectiveFileIds && effectiveFileIds.length > 0) {
-        // The dashboard sends the stable `fileId` UUID, but the agent's
-        // kb-read-file expects CollectionItem.id (cuid). Resolve UUIDs to
-        // latest-version row ids in a single query.
-        const items = await db.collectionItem.findMany({
-          where: { fileId: { in: effectiveFileIds }, isLatest: true, deletedAt: null },
-          select: { id: true, name: true },
-        });
-        for (const it of items) {
-          kbAttachedContextItems.push({ type: 'file', id: it.id, title: it.name });
-        }
-      }
-      const mergedAttachedContext = [
-        ...(effectiveAttachedContext ?? []),
-        ...kbAttachedContextItems,
-      ];
-
       try {
         // Build the ClawRunRequest
         const runReq: ClawRunRequest = {
@@ -610,7 +495,8 @@ export class XyneAIControllerV2 {
           ticketIds: effectiveTicketIds,
           callIds: effectiveCallIds,
           ...(effectiveCanvasId && { canvasId: effectiveCanvasId }),
-          attachedContext: mergedAttachedContext,
+          ...(workflowContext && { workflowContext }),
+          attachedContext: effectiveAttachedContext ?? [],
           attachments,
           messageAttachmentIds,
           webSearchEnabled,
@@ -1094,11 +980,28 @@ export class XyneAIControllerV2 {
       res.status(400).json({ success: false, error: 'convId is required' });
       return;
     }
+    // Run-page cursor. claw caps the page (default 25) and pages it with a
+    // `before` runId; validated here rather than forwarded raw because both
+    // values end up in a downstream URL. Anything malformed is dropped, which
+    // just means "first page" — claw also warns about a cursor it ignored.
+    const rawLimit = req.query.limit;
+    const rawBefore = req.query.before;
+    const paging = {
+      ...(typeof rawLimit === 'string' && /^\d+$/.test(rawLimit) ? { limit: rawLimit } : {}),
+      ...(typeof rawBefore === 'string' && /^[A-Za-z0-9_.-]{1,128}$/.test(rawBefore)
+        ? { before: rawBefore }
+        : {}),
+    };
     try {
+      // `result` is forwarded untouched. The bundle carries `warnings`,
+      // `totalRuns`, `truncated` and per-event trace payloads whose shape is
+      // owned by xyne-claw's materializer; whitelisting fields here would blank
+      // debugger panels the next time that format grows one.
       const result = await getClawDebugArtifacts(
         { headers: req.headers, userId },
         convId,
-        (req.query.agentSlug as string) || 'ask-ai'
+        (req.query.agentSlug as string) || 'ask-ai',
+        paging
       );
       res.json(result);
     } catch (error) {

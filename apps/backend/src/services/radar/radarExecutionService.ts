@@ -2,14 +2,14 @@ import type { Prisma } from '@prisma/client';
 import { config } from '@/config/env';
 import { DatabaseClient } from '@/database/client';
 import { logger } from '@/utils/logger';
-import { extractUserMentions } from '@/utils/mentionParser';
+import { extractGroupMentions, extractUserMentions } from '@/utils/mentionParser';
 import { AttachmentEntityType } from '@xyne/shared';
 import {
   radarParser,
   type ParserOpenItem,
   type ParserWindowMessage,
 } from '@/services/radar/radarParser';
-import { validateTransitions } from '@/services/radar/radarValidator';
+import { noOpReassignFeedback, validateTransitions } from '@/services/radar/radarValidator';
 import { radarApplier } from '@/services/radar/radarApplier';
 import type { RadarScope } from '@/services/radar/radarScope';
 
@@ -157,8 +157,9 @@ class RadarExecutionService {
         return; // drained — the job may complete
       }
 
-      // Gate: three deterministic branches — a tracked scope (any reply may move
-      // a ball), an untracked one with a resolved @mention, or a two-person DM.
+      // Gate: four deterministic branches — a tracked scope (any reply may move
+      // a ball), an untracked one with a resolved @mention of a person or of a
+      // group, or a two-person DM.
       // No heuristics; the only probabilistic judgment belongs to the parser.
       const openItems = await this.loadOpenItems(scope, [
         ...new Set(window.map(m => m.conversationId)),
@@ -172,6 +173,17 @@ class RadarExecutionService {
       );
       const mentionedUserIds = [...new Set([...mentionsByMessage.values()].flat())];
 
+      // Group mentions open the gate but go no further — "@spaces can someone
+      // look at this" used to die here, in any channel nobody had tracked yet.
+      // Deliberately NOT merged into mentionedUserIds: that is the parser's
+      // closed set of assignment sources and a group id is not a person, so an
+      // item would be handed to something that can never resolve it. With no
+      // assignee to infer, the parser creates it with pendingOn: [].
+      const groupsByMessage = new Map(
+        window.map(m => [m.messageId, extractGroupMentions(m.content)]),
+      );
+      const mentionedGroupIds = [...new Set([...groupsByMessage.values()].flat())];
+
       // In a 1:1 DM every message is addressed to the other person, so the
       // counterpart is an implicit mention. Without this a DM can never
       // bootstrap: tracked needs an item to already exist and nobody @mentions
@@ -184,7 +196,20 @@ class RadarExecutionService {
         ? await this.dmParticipants(scope.channelId)
         : [];
       const isOneToOneDm = dmParticipants.length === 2;
-      const gatePassed = tracked || mentionedUserIds.length > 0 || isOneToOneDm;
+      const gatePassed =
+        tracked || mentionedUserIds.length > 0 || mentionedGroupIds.length > 0 || isOneToOneDm;
+
+      // Decided once: the run log and the log line below used to derive this
+      // separately, and the log line called every non-tracked pass a mention.
+      const gateReason = !gatePassed
+        ? 'skip'
+        : tracked
+          ? 'tracked-thread'
+          : mentionedUserIds.length > 0
+            ? 'new-mention'
+            : mentionedGroupIds.length > 0
+              ? 'group-mention'
+              : 'dm-counterpart';
 
       // Debug trail for the Radar debug panel: one row per drain pass,
       // written best-effort — observability must never break the pipeline.
@@ -195,13 +220,7 @@ class RadarExecutionService {
         // across the sibling conversations its messages happen to start.
         conversationId: scope.key,
         gatePassed,
-        gateReason: gatePassed
-          ? tracked
-            ? 'tracked-thread'
-            : mentionedUserIds.length > 0
-              ? 'new-mention'
-              : 'dm-counterpart'
-          : 'skip',
+        gateReason,
         windowSize: window.length,
         parserRan: false,
       };
@@ -210,9 +229,10 @@ class RadarExecutionService {
         logger.info('[RADAR-EXECUTION] Gate PASS', {
           conversationId,
           windowSize: window.length,
-          reason: tracked ? 'tracked-thread' : 'new-mention',
+          reason: gateReason,
           openItemCount: openItems.length,
           mentionedUserIds,
+          mentionedGroupIds,
           bootstrap: !state,
         });
         // Valid operations + audit + watermark commit in ONE transaction, and a
@@ -263,18 +283,6 @@ class RadarExecutionService {
             new Set(openItems.map(i => i.conversationId)),
             scope.isDmChannel,
           );
-          const transitions = await radarParser.parseWindow(
-            openItems.map(({ conversationId, ...item }) =>
-              threadLabels.size > 0
-                ? { ...item, thread: threadLabels.get(conversationId) ?? null }
-                : item,
-            ),
-            this.toParserMessages(window, mentionsByMessage, nameById, attachmentsByMessage, threadLabels),
-            knownUsers,
-            this.toParserMessages(context, contextMentions, nameById, attachmentsByMessage, threadLabels),
-          );
-          run.proposedOps = transitions.operations;
-          run.assessment = transitions.assessment;
           const windowSenders = new Map(window.map(m => [m.messageId, m.senderId]));
           // Legal assignees: window mentions + senders, plus everyone already
           // involved in the thread's open items or the context tail — the
@@ -302,17 +310,44 @@ class RadarExecutionService {
             window[0].workspaceId,
             candidateUserIds,
           );
-          const { valid, dropped } = validateTransitions(transitions.operations, {
+          const validationCtx = {
             openItems,
             windowSenders,
             // Mention ids are regex-scraped out of message HTML, so they are
             // attacker-authored: narrow them to ids that are really users in
             // this workspace before they can land in the ledger.
             allowedUserIds,
-          });
+          };
+          const transitions = await radarParser.parseWindow(
+            openItems.map(({ conversationId, ...item }) =>
+              threadLabels.size > 0
+                ? { ...item, thread: threadLabels.get(conversationId) ?? null }
+                : item,
+            ),
+            this.toParserMessages(window, mentionsByMessage, nameById, attachmentsByMessage, threadLabels),
+            knownUsers,
+            this.toParserMessages(context, contextMentions, nameById, attachmentsByMessage, threadLabels),
+            undefined,
+            // The validator doubles as the parser's semantic check: a reassign
+            // it would drop as a no-op goes back to the model once, because
+            // that drop nearly always means the wrong open item was matched.
+            ops => noOpReassignFeedback(validateTransitions(ops, validationCtx).dropped, openItems),
+          );
+          run.proposedOps = transitions.operations;
+          run.assessment = transitions.assessment;
+          const { valid, dropped } = validateTransitions(transitions.operations, validationCtx);
           await this.directDmOwnerless(valid, scope, windowSenders, allowedUserIds);
           run.validOps = valid;
-          run.droppedOps = dropped;
+          // A repaired pass keeps its first attempt's rejects in the trail,
+          // flagged, so the debug panel shows what the model was corrected on.
+          run.droppedOps = transitions.repair
+            ? [
+                ...validateTransitions(transitions.repair.firstAttempt, validationCtx).dropped.map(
+                  d => ({ ...d, repaired: true }),
+                ),
+                ...dropped,
+              ]
+            : dropped;
           const last = window[window.length - 1];
           const applied = await radarApplier.apply({
             workspaceId: last.workspaceId,
@@ -321,6 +356,7 @@ class RadarExecutionService {
             conversationBySourceMessage: new Map(
               window.map(m => [m.messageId, m.conversationId]),
             ),
+            groupsBySourceMessage: groupsByMessage,
             operations: valid,
             watermark: { createdAt: last.createdAt, messageId: last.messageId },
             actorType: 'llm',
@@ -366,7 +402,7 @@ class RadarExecutionService {
           throw error;
         }
       } else {
-        logger.info('[RADAR-EXECUTION] Gate skip — untracked thread, no new @mention', {
+        logger.info('[RADAR-EXECUTION] Gate skip — untracked thread, no @mention of anyone', {
           conversationId,
           windowSize: window.length,
           bootstrap: !state,

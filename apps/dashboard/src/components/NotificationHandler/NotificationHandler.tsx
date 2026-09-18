@@ -182,7 +182,8 @@ export const NotificationHandler: React.FC = () => {
         }
       }
 
-      void navigate(resolvedUrl);
+      // Arrival events (TICKET_VIEWED, CHANNEL_VIEWED) read this to attribute the open.
+      void navigate(resolvedUrl, { state: { trackSource: 'notification' } });
     },
     [navigate],
   );
@@ -351,6 +352,15 @@ export const NotificationHandler: React.FC = () => {
                 globalClickTracker.trackManualEvent(
                   'NOTIFICATIONS',
                   'CLICK_NOTIFICATION_TOAST_VIEW',
+                  undefined,
+                  {
+                    // Without a target this event could not be tied to the
+                    // CHANNEL_VIEWED it causes, so notification click-through
+                    // was unattributable.
+                    notificationType,
+                    targetUrl: resolvedActionUrl,
+                    source: 'notification_toast',
+                  },
                 );
                 void handleNotificationClick(resolvedActionUrl, notificationWorkspaceId);
               },

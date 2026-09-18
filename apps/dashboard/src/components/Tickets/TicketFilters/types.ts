@@ -1,4 +1,4 @@
-import { TicketPriority, TicketStatusV2, FormContextMapping } from '@xyne/shared';
+import { TicketPriority } from '@xyne/shared';
 
 export interface BoardOption {
   id: string;
@@ -39,40 +39,6 @@ export interface TicketFilters {
 export interface DateRange {
   start?: number;
   end?: number;
-}
-
-export interface TicketFiltersProps {
-  filters: TicketFilters;
-  onFiltersChange: (filters: TicketFilters) => void;
-  projectId?: string;
-  className?: string;
-  availablePriorities?: TicketPriority[] | undefined;
-  availableUsers?: string[] | undefined;
-  availableBoards?: string[] | undefined;
-  availableBoardDetails?: BoardOption[] | undefined;
-  sourceChannelProjectIds?: string[] | undefined;
-  showBoardsFilter?: boolean;
-  availableTags?: string[] | undefined;
-  availableStages?: { name: string; status?: TicketStatusV2 | undefined }[] | undefined;
-  hideAssigneeFilter?: boolean;
-  hasPrReviewers?: boolean;
-  hasQaAssigned?: boolean;
-  formMappings?: readonly FormContextMapping[] | undefined;
-  /** Board name from parent (avoids waiting for lazy board list fetch) */
-  selectedBoardName?: string | undefined;
-  onBoardDropdownOpenChange?: (open: boolean) => void;
-  /** True while the Source channels submenu is open; drives lazy board→project resolution in the parent */
-  onSourceChannelsOpenChange?: (open: boolean) => void;
-  /** True while the More Filters dropdown is open; drives lazy board data fetch in parent */
-  onFiltersDropdownOpenChange?: (open: boolean) => void;
-  isTicketsSyncing?: boolean;
-  /** True when the selected board is a non-linear board */
-  isNonLinearBoard?: boolean;
-  channelId?: string;
-  groupBy?: string; // serialized groupBy — included in save view and hasActiveFilters check
-  hasActiveView?: boolean; // hides Save view button when a saved view is already active
-  // Hide the board selector + the dropdown's own Save view (the Views builder has its own).
-  workspaceView?: boolean;
 }
 
 export interface PriorityFilterProps {

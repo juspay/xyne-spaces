@@ -74,7 +74,6 @@ import {
 import { useMaxCameraHeight, filterQualityOptionsByMax } from '../../../hooks/useMaxCameraQuality';
 import { useVisibleNavigationItems } from '../../../hooks/useVisibleNavigationItems';
 import { useToolbarItems } from '../../../hooks/useToolbarItems';
-import { isRequiredToolbarPath } from '../../AppSidebar/navigationConfig';
 import type { PreferenceSection, PreferencesProps, NavItem } from '.';
 import { disconnectCalendar } from '../../../services/clients/calendarApi';
 import { toast } from 'sonner';
@@ -631,19 +630,16 @@ const CallsSection: FC<{ state: PreferencesState }> = ({ state }) => {
 
       <div className='flex items-center justify-between gap-4 p-3 rounded-lg border border-border bg-muted/30'>
         <div>
-          <p className='text-sm font-medium text-foreground'>Use new recording experience</p>
+          <p className='text-sm font-medium text-foreground'>Use new calls experience</p>
           <p className='text-xs text-muted-foreground mt-0.5'>
-            {state.canSwitchRecordingVersion
-              ? 'Switch between the classic and redesigned recording interface on this device.'
-              : 'Stop the active recording before switching experiences.'}
+            Switch between the classic and redesigned calls list on this device.
           </p>
         </div>
         <Switch
-          id='recording-version-v2'
-          aria-label='Use new recording experience'
-          checked={state.recordingVersion === 'v2'}
-          disabled={!state.canSwitchRecordingVersion}
-          onCheckedChange={checked => state.setRecordingVersion(checked ? 'v2' : 'v1')}
+          id='calls-version-v2'
+          aria-label='Use new calls experience'
+          checked={state.callsVersion === 'v2'}
+          onCheckedChange={checked => state.setCallsVersion(checked ? 'v2' : 'v1')}
         />
       </div>
 
@@ -687,6 +683,24 @@ const RecordingsSection: FC<{ state: PreferencesState }> = ({ state }) => (
       title='Recordings'
       subtitle='Configure how your recording summaries are generated'
     />
+
+    <div className='flex items-center justify-between gap-4 p-3 rounded-lg border border-border bg-muted/30'>
+      <div>
+        <p className='text-sm font-medium text-foreground'>Use new recording experience</p>
+        <p className='text-xs text-muted-foreground mt-0.5'>
+          {state.canSwitchRecordingVersion
+            ? 'Switch between the classic and redesigned recording interface on this device.'
+            : 'Stop the active recording before switching experiences.'}
+        </p>
+      </div>
+      <Switch
+        id='recording-version-v2'
+        aria-label='Use new recording experience'
+        checked={state.recordingVersion === 'v2'}
+        disabled={!state.canSwitchRecordingVersion}
+        onCheckedChange={checked => state.setRecordingVersion(checked ? 'v2' : 'v1')}
+      />
+    </div>
 
     <div className='p-3 rounded-lg border border-border bg-muted/30 space-y-3'>
       <div>
@@ -1013,6 +1027,22 @@ const DeveloperSection: FC<{ state: PreferencesState }> = ({ state }) => {
           </div>
         )}
 
+        <div className='flex items-center justify-between gap-4 p-3 rounded-lg border border-border bg-muted/30'>
+          <div>
+            <p className='text-sm font-medium text-foreground'>Streams</p>
+            <p className='text-xs text-muted-foreground mt-0.5'>
+              Arrange channels, boards, tickets and threads side by side in one scrolling deck. Off
+              while it is new — turning it on adds Streams to the Toolbar list, where you can put it
+              in the sidebar.
+            </p>
+          </div>
+          <Switch
+            id='show-streams'
+            checked={state.showStreams}
+            onCheckedChange={state.setShowStreams}
+          />
+        </div>
+
         {detectReactNativeWebView() && (
           <Button
             type='button'
@@ -1082,8 +1112,7 @@ const ToolbarSection: FC<{ state: PreferencesState }> = () => {
       <div className='flex flex-col gap-1.5'>
         {items.map(item => {
           const Icon = item.icon;
-          const required = isRequiredToolbarPath(item.path);
-          const checked = required || toolbarPaths.has(item.path);
+          const checked = toolbarPaths.has(item.path);
           return (
             <div
               key={item.path}
@@ -1096,11 +1125,9 @@ const ToolbarSection: FC<{ state: PreferencesState }> = () => {
                 <p className='text-sm font-medium text-foreground truncate'>{item.label}</p>
               </div>
               <div className='flex items-center gap-2.5 shrink-0'>
-                {required && <span className='text-xs text-muted-foreground'>Always on</span>}
                 <Switch
                   aria-label={`Show ${item.label} in toolbar`}
                   checked={checked}
-                  disabled={required}
                   onCheckedChange={value => setInToolbar(item.path, value)}
                 />
               </div>

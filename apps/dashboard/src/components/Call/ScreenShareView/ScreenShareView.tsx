@@ -6,7 +6,7 @@ import type { ParticipantInfo } from '../../../machines/roomMachine';
 import { logger, Event } from '../../../utils/logger';
 import { sortParticipants } from '../ParticipantGrid/sortParticipants';
 import { isScreenShareActive } from '../../../utils/livekitScreenShare';
-import { isTranscriptionAgentIdentity } from '../../../utils/livekitAgent';
+import { filterAgentTiles } from '../../../utils/livekitAgent';
 import { SpotlightView, type SpotlightMode } from '../SpotlightView';
 
 interface ScreenShareViewProps {
@@ -39,7 +39,7 @@ export function ScreenShareView({
   onToggleHandRaise,
 }: ScreenShareViewProps): React.ReactElement {
   // Derive AI enablement from aiController presence — same pattern as ParticipantGrid
-  const isAIAssistantEnabled = aiController !== null;
+  const isAIAssistantEnabled = !!aiController;
   const callId = useSelector(roomActor, state => state.context.callId);
 
   // Discord-style "swap to main stage": clicking a non-sharing participant's
@@ -120,18 +120,15 @@ export function ScreenShareView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focusedScreenShare.identity, focusedScreenShare.participant, pinnedCameraIdentity]);
 
-  // Host kill-switch: hide the agent tile from the sidebar while transcription is off.
+  // Agent tile only shows once someone invokes it, and never while transcription is off.
   const isTranscriptionEnabled = useSelector(
     roomActor,
     state => state.context.isTranscriptionEnabled,
   );
 
   // Sort sidebar: mic on → camera on → earlier joinedAt, always applied.
-  // Agent (Xyne Automatic) pinned to end unless AI assistant is enabled.
   const sortedParticipants = useMemo(() => {
-    const visible = isTranscriptionEnabled
-      ? participants
-      : participants.filter(p => !isTranscriptionAgentIdentity(p.identity));
+    const visible = filterAgentTiles(participants, isTranscriptionEnabled && isAIAssistantEnabled);
     return sortParticipants(visible, isAIAssistantEnabled);
   }, [participants, isAIAssistantEnabled, isTranscriptionEnabled]);
 

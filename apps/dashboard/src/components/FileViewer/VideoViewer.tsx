@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback, useImperativeHandle } from 'react';
 import { Play, Pause, Volume2, VolumeX, Maximize2, Minimize2, Settings } from 'lucide-react';
 import { BaseViewerProps } from './utils';
-import { BASE_URL, apiInstance } from '../../services/clients/apiClient';
+import { apiInstance, getAttachmentStreamUrl } from '../../services/clients/apiClient';
 import { useScope, useShortcutById } from '../../shortcuts';
 import { usePlatform } from '../../hooks/usePlatform';
 import { useMobileZoom } from '../../hooks/useMobileZoom';
@@ -23,6 +23,8 @@ interface VideoViewerProps extends BaseViewerProps {
   menuContent?: React.ReactNode;
   initialTime?: number;
   autoPlay?: boolean;
+  /** Immersive mode renders at the video's natural size; this scales it up to fill the viewer. */
+  fillContainer?: boolean;
 }
 
 const VideoViewer = React.forwardRef<HTMLVideoElement, VideoViewerProps>(
@@ -36,6 +38,7 @@ const VideoViewer = React.forwardRef<HTMLVideoElement, VideoViewerProps>(
       menuContent,
       initialTime,
       autoPlay = false,
+      fillContainer = false,
       disableGestures,
       onInteractionStateChange,
     },
@@ -77,7 +80,7 @@ const VideoViewer = React.forwardRef<HTMLVideoElement, VideoViewerProps>(
     const streamUrl = React.useMemo((): string => {
       if (attachmentId) {
         // Use the streaming endpoint for range request support
-        return `${BASE_URL}/attachments/${attachmentId}/stream`;
+        return getAttachmentStreamUrl(attachmentId);
       }
       // Fallback: create object URL from File
       if (source instanceof File) {
@@ -564,7 +567,10 @@ const VideoViewer = React.forwardRef<HTMLVideoElement, VideoViewerProps>(
           crossOrigin='use-credentials'
           className={cn(
             isImmersiveMode
-              ? 'relative z-10 max-h-full max-w-full h-auto w-auto'
+              ? cn(
+                  'relative z-10',
+                  fillContainer ? 'h-full w-full' : 'max-h-full max-w-full h-auto w-auto',
+                )
               : width && height
                 ? 'w-full h-full'
                 : 'max-w-full max-h-full',

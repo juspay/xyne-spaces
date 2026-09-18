@@ -16,6 +16,7 @@ import { UserGroupRepository } from '../database/repositories/userGroups';
 import { ProjectRepository } from '../database/repositories/projectRepository';
 import { Prisma, type User } from '@prisma/client';
 import { v4 as uuidv4 } from 'uuid';
+import { dlAddressesFor } from '@/services/dlResolver';
 import {
   createForwardedMessageXml,
   parseForwardedMessageXml,
@@ -141,19 +142,17 @@ export class ChannelController {
       // Names are user-supplied, so everything interpolated into the markup is escaped.
       const esc = (value: string): string =>
         value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-      const userPill = (userId: string, userName: string): string =>
-        `<span data-mention data-mention-type="user" data-user-id="${esc(userId)}" data-username="${esc(userName)}">${esc(userName)}</span>`;
       const channelPill = (id: string, label: string): string =>
         `<span data-channel-mention data-channel-id="${esc(id)}" data-channel-name="${esc(label)}" data-is-private="true">${esc(label)}</span>`;
 
-      const pills = newParticipants.map(p => userPill(p.userId, p.userName));
+      const names = newParticipants.map(p => esc(p.userName));
       let formattedUsers = '';
-      if (pills.length === 1) {
-        formattedUsers = pills[0];
-      } else if (pills.length > 1) {
-        formattedUsers = `${pills.slice(0, -1).join(', ')} and ${pills[pills.length - 1]}`;
+      if (names.length === 1) {
+        formattedUsers = names[0];
+      } else if (names.length > 1) {
+        formattedUsers = `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
       }
-      const actor = userPill(authData.id, authData.name);
+      const actor = esc(authData.name);
 
       const addedOrRemovedText = operationType === 'participants_added' ? 'added' : 'removed';
       let systemContent: string;
@@ -169,7 +168,7 @@ export class ChannelController {
       } else if (operationType === 'conversation_moved_target') {
         systemContent = `${actor} moved messages from a previous conversation into this one`;
       } else {
-        systemContent = `${formattedUsers} ${pills.length === 1 ? 'was' : 'were'} ${addedOrRemovedText} by ${actor}`;
+        systemContent = `${formattedUsers} ${names.length === 1 ? 'was' : 'were'} ${addedOrRemovedText} by ${actor}`;
       }
 
       // Create metadata
@@ -847,7 +846,7 @@ export class ChannelController {
         name?: string;
         description?: string;
         visibility?: ChannelVisibility;
-        projectId: string;
+        projectId?: string;
         participants?: string[];
         type?: 'DEFAULT' | 'EMAIL' | 'SUPPORT' | 'SLACK' | 'APP' | 'CALL';
         assigneeUserGroupId?: string;
@@ -860,13 +859,21 @@ export class ChannelController {
 
       const userId = req.user!.id;
 
-      // Validate required fields
-      if (!scopeType || !projectId) {
+      // Validate required fields. projectId is OPTIONAL only for a NATIVE channel
+      // (scopeType DEFAULT + type DEFAULT/unset). Everything else still requires a
+      // project: every desk type (EMAIL/SLACK/APP/CALL/SUPPORT/SOCIAL_MEDIA/SDLC — and
+      // any future type), plus DM/GROUP_DM/TICKET/DOCUMENT. Inverted on purpose so a
+      // new desk type is projectId-required by default without editing this check.
+      const isNativeChannel =
+        scopeType === ChannelScopeType.DEFAULT &&
+        (channelType === undefined || channelType === 'DEFAULT');
+      const projectIdRequired = !isNativeChannel;
+      if (!scopeType || (projectIdRequired && !projectId)) {
         res.status(400).json({
-          error: 'ScopeType and projectId are required',
+          error: projectIdRequired ? 'ScopeType and projectId are required' : 'ScopeType is required',
           details: {
             scopeType: !scopeType ? 'ScopeType is required' : undefined,
-            projectId: !projectId ? 'ProjectId is required' : undefined,
+            projectId: projectIdRequired && !projectId ? 'ProjectId is required' : undefined,
           }
         });
         return;
@@ -926,11 +933,12 @@ export class ChannelController {
             res.status(409).json({ error: 'Shared mailbox is disconnected' });
             return;
           }
-          const alreadyClaimed = await db.emailChannelPreference.findUnique({
-            where: { workspaceId_dlEmail: { workspaceId, dlEmail } },
-            select: { channelId: true },
+          const claimants = await db.emailChannelPreference.findMany({
+            where: { workspaceId, OR: [{ dlEmail: { not: null } }, { NOT: { dlAliases: null } }] },
+            select: { dlEmail: true, dlAliases: true },
           });
-          if (alreadyClaimed) {
+          const target = dlEmail.trim().toLowerCase();
+          if (claimants.some(pref => dlAddressesFor(pref).includes(target))) {
             res.status(409).json({ error: 'A desk already exists for this DL' });
             return;
           }
@@ -1061,6 +1069,8 @@ export class ChannelController {
         projectId,
         workspaceId: req.user!.workspaceId!,
         type: (channelType || 'DEFAULT') as ChannelType,
+        // Desk channels: honour the requested board as the default mapping (else oldest).
+        ...(boardId && { defaultBoardId: boardId }),
       };
 
       const channel = await this.channelRepository.create(channelData);
@@ -1126,13 +1136,13 @@ export class ChannelController {
         let resolvedBoardId: string | undefined = boardId;
         if (isDl && !resolvedBoardId) {
           const firstBoard = await db.board.findFirst({
-            where: { projectId: channel.projectId },
+            where: { projectId: projectId },
             orderBy: { createdAt: 'asc' },
             select: { id: true },
           });
           resolvedBoardId = firstBoard?.id;
           if (!resolvedBoardId) {
-            logger.error('Cannot create DL desk: project has no boards', { projectId: channel.projectId });
+            logger.error('Cannot create DL desk: project has no boards', { projectId: projectId });
             await db.channel.delete({ where: { id: channel.id } }).catch(() => {});
             res.status(409).json({ error: 'Project has no boards configured — cannot create DL desk' });
             return;
@@ -1175,7 +1185,7 @@ export class ChannelController {
           let callBoardId = boardId;
           if (!callBoardId) {
             const firstBoard = await db.board.findFirst({
-              where: { projectId: channel.projectId },
+              where: { projectId: projectId },
               orderBy: { createdAt: 'asc' },
               select: { id: true },
             });
@@ -1211,7 +1221,7 @@ export class ChannelController {
           let slackBoardId = boardId;
           if (!slackBoardId) {
             const firstBoard = await db.board.findFirst({
-              where: { projectId: channel.projectId },
+              where: { projectId: projectId },
               orderBy: { createdAt: 'asc' },
               select: { id: true },
             });
@@ -1293,7 +1303,7 @@ export class ChannelController {
           let appBoardId = boardId;
           if (!appBoardId) {
             const firstBoard = await db.board.findFirst({
-              where: { projectId: channel.projectId },
+              where: { projectId: projectId },
               orderBy: { createdAt: 'asc' },
               select: { id: true },
             });
@@ -1375,7 +1385,7 @@ export class ChannelController {
         scopeType: channel.scopeType as ChannelScopeType,
         description: channel.description,
         visibility: channel.visibility as ChannelVisibility,
-        projectId: channel.projectId,
+        projectId: projectId ?? '',
         createdAt: channel.createdAt,
       };
 

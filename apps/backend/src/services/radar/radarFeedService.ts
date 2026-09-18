@@ -1,11 +1,19 @@
 import { DatabaseClient } from '@/database/client';
-import { canAccessConversation, viewerChannelAccess } from '@/services/radar/radarAcl';
+import {
+  canAccessConversation,
+  viewerAccessibleChannelIds,
+  viewerChannelAccess,
+} from '@/services/radar/radarAcl';
 import { radarScopeFor, scopeKeyFor, type RadarScope } from '@/services/radar/radarScope';
+import { explainItemMute, mutedItemIds } from '@/services/radar/radarRuleEvaluator';
 
 const prisma = DatabaseClient.getInstance();
 
 /** Feeds page per thread-card, not per item; this bounds what the viewer sees. */
 export const MAX_FEED_ITEMS = 500;
+/** The Muted drawer's own budget, spent separately from the live list's, so a
+ *  rule can neither crowd out the feed nor be crowded out of the drawer. */
+export const MAX_MUTED_ITEMS = 500;
 /** Over-fetch: capping before the ACL filter would silently shorten the feed. */
 export const FEED_SCAN_LIMIT = MAX_FEED_ITEMS * 4;
 const THREAD_PREVIEW_CHARS = 200;
@@ -13,11 +21,17 @@ const THREAD_PREVIEW_CHARS = 200;
 const MAX_DEBUG_RUNS = 50;
 
 const stripHtml = (html: string): string =>
-  html.replace(/<[^>]*>/g, ' ').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim();
+  html
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
 
 interface AuthContext {
   userId: string;
   workspaceId: string;
+  /** Required: the ACL needs it to tell a guest from a member. */
+  role: string;
 }
 
 export interface FeedItem {
@@ -29,8 +43,14 @@ export interface FeedItem {
   contextSummary: string | null;
   requestedBy: string[];
   pendingOn: string[];
+  /** User groups the source message @mentioned, stamped at parse time. */
+  mentionedGroupIds: string[];
   createdAt: Date;
   updatedAt: Date;
+  /** True when one of the VIEWER's own rules mutes this item. Decided per read
+   *  and never stored — one item is a single row several people can see, and an
+   *  edited rule must re-answer for every item. */
+  muted: boolean;
 }
 
 /** The conversation columns the feed needs, read once per request. */
@@ -60,11 +80,13 @@ export interface FeedThreadCard {
 }
 
 /**
- * The two GIN-backed reads the engine exists to serve:
+ * The GIN-backed reads the engine exists to serve:
  *
  * - Pending Me: pendingOn ∋ me.
  * - Waiting On: requestedBy ∋ me, minus items I also hold. An ownerless item
  *   (pendingOn: []) stays here — tracked, nobody on the hook yet.
+ * - Pending Others: held by someone who is not me, whoever asked — plus my
+ *   own ownerless asks, so it is a superset of Waiting On.
  */
 class RadarFeedService {
   async pendingMe(auth: AuthContext): Promise<FeedThreadCard[]> {
@@ -79,6 +101,50 @@ class RadarFeedService {
   }
 
   /**
+   * Where Waiting On answers "what have I chased", this answers "what is this
+   * team holding" — every open item held by someone else, whoever asked, plus
+   * the viewer's own asks that nobody holds yet, since this is the only feed
+   * fetched in All mode and an ownerless ask is still the viewer's.
+   *
+   * It covers Waiting On only while the workspace fits inside the cap. This
+   * scan is workspace-wide and capped at MAX_FEED_ITEMS by recency, where the
+   * other two are GIN-scoped to the viewer and so are effectively unbounded
+   * for one person. Past that, an old ownerless ask of the viewer's is visible
+   * under "requested by me" and missing here, and a team narrows only what
+   * reached the workspace-wide window — silently, with nothing saying the feed
+   * was truncated.
+   *
+   * The other feeds name the viewer in a GIN predicate, so their scan window
+   * is about the viewer by construction. This one is not, so the viewer's
+   * channel rule goes into the WHERE as a channel id list — a leading
+   * predicate the (channelId, status) index can drive off, which a relation
+   * filter through each item's conversation could not. The bound has to be
+   * there at all because the scan is capped: a row dropped by the cap can
+   * never be put back by the check that runs after it.
+   *
+   * item.channelId is safe to scope on: reparenting a thread rewrites it in
+   * the same transaction that moves the conversation. The Jira migration is
+   * the one path that moves a conversation without it, so an item it touched
+   * could be missed here — never wrongly shown, since viewerChannelAccess
+   * still resolves through the conversation afterwards.
+   *
+   * An item the viewer stepped away from that a colleague still holds belongs
+   * here: Dismiss changes who is on the hook, not what the viewer may see.
+   */
+  async pendingOthers(auth: AuthContext): Promise<FeedThreadCard[]> {
+    const scoped = await viewerAccessibleChannelIds(auth);
+    return this.buildFeed(
+      auth,
+      {
+        channelId: { in: scoped },
+        NOT: { pendingOn: { has: auth.userId } },
+        OR: [{ pendingOn: { isEmpty: false } }, { requestedBy: { has: auth.userId } }],
+      },
+      scoped
+    );
+  }
+
+  /**
    * Read items, narrow to what the viewer may open, group into thread cards.
    *
    * The conversation rows are fetched ONCE and threaded through both halves:
@@ -89,11 +155,64 @@ class RadarFeedService {
   private async buildFeed(
     auth: AuthContext,
     filter: Record<string, unknown>,
+    /** Channel ids the caller already resolved for the scan bound, so the
+     *  post-query check does not repeat the lookup. */
+    scopedChannelIds?: string[]
   ): Promise<FeedThreadCard[]> {
     const items = await this.openItems(auth, filter);
     if (items.length === 0) return [];
-    const conversations = await this.conversationsFor(items.map(i => i.conversationId));
-    return this.groupByThread(await this.aclFilter(auth, items, conversations), conversations);
+    const conversations = await this.conversationsFor(items.map((i) => i.conversationId));
+    const allowed = await this.aclFilter(auth, items, conversations, scopedChannelIds);
+    // After the ACL, never before: an item the viewer may not open is not
+    // theirs to have an opinion about, and evaluating it would be work spent on
+    // rows that are about to be thrown away. But BEFORE the page cap, so a
+    // broad rule cannot spend the budget on rows the reader asked to tuck away
+    // and push the ones they want past the end of the window.
+    // Judged on the channel the CONVERSATION is in, which is what the ACL just
+    // resolved against. item.channelId is kept in sync by the reparent path
+    // (conversationRepository moves it in the same transaction as the
+    // conversation), but the Jira migration moves a conversation without it —
+    // so a channel rule reads the same source the permission check did rather
+    // than a column with one known stale path.
+    const muted = await mutedItemIds(
+      auth,
+      allowed.map((i) => ({
+        ...i,
+        channelId: conversations.get(i.conversationId)?.channelId ?? i.channelId,
+      }))
+    );
+    for (const item of allowed) item.muted = muted.has(item.id);
+    const visible = this.capByVerdict(allowed);
+    return this.groupByThread(visible, conversations);
+  }
+
+  /**
+   * Two independent budgets, not one shared pool. Sharing it meant either a
+   * broad rule spending the live list's room on rows the reader tucked away,
+   * or — once the live list was served first — a reader at the cap seeing an
+   * empty Muted drawer, which reads as "no rule matched anything" rather than
+   * "the budget ran out". Separate budgets can do neither.
+   *
+   * The cap bounds the response, it does not rank, so kept rows stay in
+   * recency order. Worst case is MAX_FEED_ITEMS + MAX_MUTED_ITEMS rows.
+   */
+  private capByVerdict(items: FeedItem[]): FeedItem[] {
+    if (items.length <= MAX_FEED_ITEMS) return items;
+    const keep = new Set<string>();
+    let live = 0;
+    let hushed = 0;
+    for (const item of items) {
+      if (item.muted) {
+        if (hushed < MAX_MUTED_ITEMS) {
+          keep.add(item.id);
+          hushed += 1;
+        }
+      } else if (live < MAX_FEED_ITEMS) {
+        keep.add(item.id);
+        live += 1;
+      }
+    }
+    return items.filter((i) => keep.has(i.id));
   }
 
   /**
@@ -105,21 +224,26 @@ class RadarFeedService {
     auth: AuthContext,
     items: FeedItem[],
     conversations: Map<string, FeedConversation>,
+    scopedChannelIds?: string[]
   ): Promise<FeedItem[]> {
     if (items.length === 0) return items;
-    // Resolve each item's channel from its conversation rather than trusting
-    // item.channelId, which is stamped at creation and never refreshed. An
-    // item whose conversation has since vanished is denied.
+    // Resolve each item's channel from its conversation rather than from
+    // item.channelId. The reparent path does keep that column in sync — see
+    // conversationRepository, which moves it in the same transaction — but the
+    // Jira migration moves a conversation without it, and the conversation is
+    // the row the permission actually belongs to. An item whose conversation
+    // has since vanished is denied.
     const access = await viewerChannelAccess(
       auth,
-      [...conversations.values()].map(c => c.channelId),
+      [...conversations.values()].map((c) => c.channelId),
+      scopedChannelIds
     );
-    return items
-      .filter(i => {
-        const channelId = conversations.get(i.conversationId)?.channelId;
-        return channelId ? access.get(channelId)?.allowed : false;
-      })
-      .slice(0, MAX_FEED_ITEMS);
+    // Not capped here: buildFeed caps after classifying, so the budget goes to
+    // rows the reader wants rather than to whatever was newest.
+    return items.filter((i) => {
+      const channelId = conversations.get(i.conversationId)?.channelId;
+      return channelId ? access.get(channelId)?.allowed : false;
+    });
   }
 
   /**
@@ -128,7 +252,7 @@ class RadarFeedService {
    * stamp the cards render.
    */
   private async conversationsFor(
-    conversationIds: string[],
+    conversationIds: string[]
   ): Promise<Map<string, FeedConversation>> {
     const unique = [...new Set(conversationIds)];
     if (unique.length === 0) return new Map();
@@ -143,10 +267,10 @@ class RadarFeedService {
       },
     });
     return new Map(
-      conversations.map(c => [
+      conversations.map((c) => [
         c.conversationId,
         { ...c, scopeType: c.channel?.scopeType ?? null },
-      ]),
+      ])
     );
   }
 
@@ -164,7 +288,7 @@ class RadarFeedService {
     return radarScopeFor(
       conversation.channel?.scopeType ?? null,
       conversation.channelId,
-      conversationId,
+      conversationId
     );
   }
 
@@ -177,8 +301,9 @@ class RadarFeedService {
   async debugItemTrail(auth: AuthContext, itemId: string) {
     const item = await prisma.executionItem.findUnique({ where: { id: itemId } });
     if (!item || item.workspaceId !== auth.workspaceId) return null;
-    // Authorize against the conversation, not item.channelId: that column is a
-    // stamp taken when the item was created and is never refreshed.
+    // Authorize against the conversation, not item.channelId: the reparent path
+    // keeps that column in sync, but the Jira migration does not, and the
+    // conversation is the row the permission belongs to.
     if (!(await canAccessConversation(auth, item.conversationId))) return null;
     const mutations = await prisma.executionItemMutation.findMany({
       where: { itemId },
@@ -187,9 +312,9 @@ class RadarFeedService {
 
     const messageIds = [
       ...new Set(
-        [item.sourceMessageId, ...mutations.map(m => m.sourceMessageId)].filter(
-          (id): id is string => !!id,
-        ),
+        [item.sourceMessageId, ...mutations.map((m) => m.sourceMessageId)].filter(
+          (id): id is string => !!id
+        )
       ),
     ];
     const messages = messageIds.length
@@ -205,7 +330,7 @@ class RadarFeedService {
         })
       : [];
     const sourceMessages = Object.fromEntries(
-      messages.map(m => [
+      messages.map((m) => [
         m.messageId,
         {
           senderId: m.senderId,
@@ -213,7 +338,7 @@ class RadarFeedService {
           text: stripHtml(m.content).slice(0, 300),
           createdAt: m.createdAt,
         },
-      ]),
+      ])
     );
 
     const itemScope = await this.scopeOf(item.conversationId);
@@ -234,7 +359,16 @@ class RadarFeedService {
       }),
     ]);
 
-    return { item, mutations, sourceMessages, threadState, latestMessage };
+    // The asking viewer's own answer and the rules behind it. Not a property of
+    // the item — somebody else opening this trail sees their own. Judged on the
+    // conversation's channel, the same source the feed uses, so the drawer
+    // cannot explain a verdict the feed did not reach.
+    const rules = await explainItemMute(auth, {
+      ...item,
+      channelId: itemScope?.channelId ?? item.channelId,
+    });
+
+    return { item, mutations, sourceMessages, threadState, latestMessage, rules };
   }
 
   /**
@@ -286,9 +420,7 @@ class RadarFeedService {
       // lookup by thread id can render the full trail set.
       prisma.executionItem.findMany({
         where: {
-          ...(scope?.isDmChannel
-            ? { channelId: scope.channelId }
-            : { conversationId }),
+          ...(scope?.isDmChannel ? { channelId: scope.channelId } : { conversationId }),
           workspaceId: auth.workspaceId,
         },
         orderBy: { createdAt: 'asc' },
@@ -307,7 +439,7 @@ class RadarFeedService {
       : null;
 
     const asPreview = (
-      m: { messageId: string; createdAt: Date; senderId: string | null; content: string } | null,
+      m: { messageId: string; createdAt: Date; senderId: string | null; content: string } | null
     ) =>
       m && {
         messageId: m.messageId,
@@ -325,8 +457,14 @@ class RadarFeedService {
     };
   }
 
-  private openItems(auth: AuthContext, filter: Record<string, unknown>): Promise<FeedItem[]> {
-    return prisma.executionItem.findMany({
+  private async openItems(
+    auth: AuthContext,
+    filter: Record<string, unknown>
+  ): Promise<FeedItem[]> {
+    // `muted` is not a column — it belongs to whoever is asking, and is filled
+    // in by buildFeed once their rules have been read. Defaulted here so the
+    // rest of the pipeline never handles a half-built item.
+    const rows = await prisma.executionItem.findMany({
       where: {
         workspaceId: auth.workspaceId,
         status: 'OPEN',
@@ -343,23 +481,25 @@ class RadarFeedService {
         contextSummary: true,
         requestedBy: true,
         pendingOn: true,
+        mentionedGroupIds: true,
         createdAt: true,
         updatedAt: true,
       },
     });
+    return rows.map(row => ({ ...row, muted: false }));
   }
 
   private groupByThread(
     items: FeedItem[],
-    conversations: Map<string, FeedConversation>,
+    conversations: Map<string, FeedConversation>
   ): FeedThreadCard[] {
     if (items.length === 0) return [];
 
     const cards = new Map<string, FeedThreadCard>();
     for (const item of items) {
       const conversation = conversations.get(item.conversationId);
-      // Resolved from the conversation, not item.channelId — that column is a
-      // stamp taken at creation and never refreshed.
+      // Resolved from the conversation, not item.channelId — same reason as the
+      // ACL above: one migration path moves a conversation without it.
       const channelId = conversation?.channelId ?? item.channelId;
       const scopeKey = scopeKeyFor(conversation?.scopeType, channelId, item.conversationId);
       const isDmCard = scopeKey !== item.conversationId;
@@ -394,7 +534,7 @@ class RadarFeedService {
     // Newest thread activity first; items inside a card are already
     // updatedAt-desc from the query.
     return [...cards.values()].sort(
-      (a, b) => (b.lastActivityAt?.getTime() ?? 0) - (a.lastActivityAt?.getTime() ?? 0),
+      (a, b) => (b.lastActivityAt?.getTime() ?? 0) - (a.lastActivityAt?.getTime() ?? 0)
     );
   }
 }

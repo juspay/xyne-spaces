@@ -144,6 +144,15 @@ function applyWindowPolicy(win: BrowserWindow): void {
         return { action: 'deny' };
       }
 
+      const childWebPreferences = {
+        nodeIntegration: false,
+        contextIsolation: true,
+        webviewTag: true,
+        preload: path.join(__dirname, '..', 'preload.js'),
+        backgroundThrottling: false,
+        spellcheck: true,
+      };
+
       if (urlObj.pathname.startsWith('/newWindow/create-ticket')) {
         return {
           action: 'allow',
@@ -152,6 +161,7 @@ function applyWindowPolicy(win: BrowserWindow): void {
             height: 820,
             minWidth: 640,
             minHeight: 600,
+            webPreferences: childWebPreferences,
           },
         };
       }
@@ -166,19 +176,15 @@ function applyWindowPolicy(win: BrowserWindow): void {
             minHeight: 600,
             titleBarStyle: 'hiddenInset',
             trafficLightPosition: { x: 19, y: 20 },
-            webPreferences: {
-              nodeIntegration: false,
-              contextIsolation: true,
-              webviewTag: true,
-              preload: path.join(__dirname, '..', 'preload.js'),
-              backgroundThrottling: false,
-              spellcheck: true,
-            },
+            webPreferences: childWebPreferences,
           },
         };
       }
 
-      return { action: 'allow' };
+      return {
+        action: 'allow',
+        overrideBrowserWindowOptions: { webPreferences: childWebPreferences },
+      };
 
     } catch (error) {
       log.warn('Failed to parse URL in setWindowOpenHandler:', details.url, error);
@@ -206,18 +212,18 @@ function applyWindowPolicy(win: BrowserWindow): void {
 
       const currentAppUrl = new URL(config.FRONTEND_URL);
       const currentUrl = win.webContents.getURL();
-      const currentUrlObj = new URL(currentUrl || '');
+      const currentUrlObj = currentUrl ? new URL(currentUrl) : null;
 
       // Allow in-app navigation (same origin as configured frontend or current page)
       if (
         navUrlObj.origin === currentAppUrl.origin ||
-        navUrlObj.origin === currentUrlObj.origin
+        navUrlObj.origin === currentUrlObj?.origin
       ) {
         return;
       }
 
       // Mirror the mTLS branch from setWindowOpenHandler
-      if (currentUrlObj.origin === config.MTLS_FRONTEND_URL) {
+      if (currentUrlObj?.origin === config.MTLS_FRONTEND_URL) {
         event.preventDefault();
         shell.openExternal(navUrl);
         notifyExternalOpen(navUrl);

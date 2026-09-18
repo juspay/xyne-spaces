@@ -1,17 +1,4 @@
-import type { SdlcEntityType, SdlcRelationType } from '@xyne/shared';
-
 export type SdlcChatTab = 'conversations' | 'ai';
-export type SdlcRightPanelMode = 'closed' | 'chat' | 'debugger';
-
-export const sdlcRightPanelMode = (input: {
-  chatOpen: boolean;
-  debuggerOpen: boolean;
-}): SdlcRightPanelMode => {
-  if (input.debuggerOpen) return 'debugger';
-  if (input.chatOpen) return 'chat';
-  return 'closed';
-};
-
 export const shouldUseInlineAssistantDebugger = (embeddedInSdlc: boolean): boolean =>
   !embeddedInSdlc;
 
@@ -21,8 +8,8 @@ export const SDLC_CHAT_PANEL_ID = 'sdlc-chat';
 const SDLC_CLOSED_PANEL_IDS = [SDLC_MAIN_PANEL_ID];
 const SDLC_OPEN_PANEL_IDS = [SDLC_MAIN_PANEL_ID, SDLC_CHAT_PANEL_ID];
 
-export const sdlcRightPanelIds = (mode: SdlcRightPanelMode): string[] =>
-  mode === 'closed' ? SDLC_CLOSED_PANEL_IDS : SDLC_OPEN_PANEL_IDS;
+export const sdlcRightPanelIds = (open: boolean): string[] =>
+  open ? SDLC_OPEN_PANEL_IDS : SDLC_CLOSED_PANEL_IDS;
 
 export const sdlcChatLayout = (input: {
   chatParam: string | null;
@@ -79,7 +66,7 @@ export const shouldStartFreshSdlcAssistant = (input: {
   actorChannelId: string | null;
   repositoryChannelId: string;
   actorRepositoryId: string | null;
-  repositoryId: string;
+  repositoryId: string | null;
 }): boolean =>
   !input.actorOpen ||
   input.selectedAgentSlug !== 'sdlc-agent' ||
@@ -97,14 +84,3 @@ export const shouldCloseInvalidSdlcConversationDeepLink = (input: {
   input.discussionOpen &&
   Boolean(input.selectedConversationId) &&
   !input.discussionContextResolved;
-
-export const shouldShowSdlcRelatedLink = (input: {
-  relationType: SdlcRelationType;
-  entityType: SdlcEntityType;
-  entityChannelId?: string | null;
-  repositoryChannelId?: string | null;
-}): boolean => {
-  if (input.relationType === 'DISCUSSION') return false;
-  if (input.entityType !== 'CONVERSATION') return true;
-  return Boolean(input.entityChannelId && input.entityChannelId !== input.repositoryChannelId);
-};

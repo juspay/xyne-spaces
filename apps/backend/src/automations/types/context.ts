@@ -1,5 +1,6 @@
 import type { z } from 'zod';
 import type { StepType } from './step-types';
+import type { PauseBranchSegment } from '../engine/pause-step';
 import {
   EMAIL_RECEIVED_EVENT,
   EmailReceivedOutputSchema,
@@ -75,4 +76,5 @@ export interface AutomationContext {
     error?: string | null;
     chain?: readonly string[];
   };
+  __pauseBranchPath?: PauseBranchSegment[];
 }

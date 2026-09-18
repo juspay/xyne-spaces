@@ -16,6 +16,20 @@ import { toast } from 'sonner';
 
 const fileConfig = defaultBlockSpecs.file.config;
 
+/**
+ * A default spec's `meta`, carried over with its render.
+ *
+ * BlockNote decides which block a pasted or dropped file becomes by scanning
+ * every spec's `meta.fileBlockAccept` for one that accepts the file's type.
+ * Replacing a spec's render without carrying its meta drops that, nothing
+ * matches, and every paste falls back to a plain file block — an image
+ * included. Spread rather than assigned, so an absent meta stays absent under
+ * exactOptionalPropertyTypes.
+ */
+function metaOf<TMeta>(spec: { implementation: { meta?: TMeta } }): { meta?: TMeta } {
+  return spec.implementation.meta ? { meta: spec.implementation.meta } : {};
+}
+
 const extensionOf = (name: string): string => {
   const dot = name.lastIndexOf('.');
   return dot > 0 ? name.slice(dot + 1).toUpperCase() : 'FILE';
@@ -142,6 +156,7 @@ function FileBlockView({ block, editor }: FileBlockViewProps): ReactElement {
 export const canvasFileBlockSpec = createReactBlockSpec(
   fileConfig,
   {
+    ...metaOf(defaultBlockSpecs.file),
     render: ({ block, editor }) => <FileBlockView block={block} editor={editor} />,
   },
   defaultBlockSpecs.file.extensions,
@@ -171,18 +186,18 @@ function withUploadingCard<P extends { block: { id: string; props: { name: strin
 
 export const canvasImageBlockSpec = createReactBlockSpec(
   defaultBlockSpecs.image.config,
-  { render: withUploadingCard(ImageBlock) },
+  { ...metaOf(defaultBlockSpecs.image), render: withUploadingCard(ImageBlock) },
   defaultBlockSpecs.image.extensions,
 )();
 
 export const canvasVideoBlockSpec = createReactBlockSpec(
   defaultBlockSpecs.video.config,
-  { render: withUploadingCard(VideoBlock) },
+  { ...metaOf(defaultBlockSpecs.video), render: withUploadingCard(VideoBlock) },
   defaultBlockSpecs.video.extensions,
 )();
 
 export const canvasAudioBlockSpec = createReactBlockSpec(
   defaultBlockSpecs.audio.config,
-  { render: withUploadingCard(AudioBlock) },
+  { ...metaOf(defaultBlockSpecs.audio), render: withUploadingCard(AudioBlock) },
   defaultBlockSpecs.audio.extensions,
 )();

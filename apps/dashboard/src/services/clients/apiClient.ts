@@ -1,7 +1,7 @@
 import axios, { AxiosInstance, InternalAxiosRequestConfig, AxiosResponse, AxiosError } from 'axios';
 import { v4 as uuidv4 } from 'uuid';
 import { reactNativeBridge } from '../../utils/reactNativeBridge';
-import { API_BASE_URL, APP_BASE_PATH } from '../../config';
+import { API_BASE_URL, APP_BASE_PATH, isExternalApp } from '../../config';
 import { logger, Logger } from '../../utils/logger';
 import {
   httpRequestDuration,
@@ -18,6 +18,10 @@ import {
 
 // Define the base URL
 export const BASE_URL = API_BASE_URL;
+
+/** Range-capable media endpoint; the element must use `crossOrigin='use-credentials'`. */
+export const getAttachmentStreamUrl = (attachmentId: string): string =>
+  `${BASE_URL}/attachments/${attachmentId}/stream`;
 
 // Cache regex patterns to avoid recompilation on each call
 const URL_SANITIZATION_PATTERNS = [
@@ -219,7 +223,8 @@ apiConfig.interceptors.response.use(
       });
     });
 
-    if (axiosError.response?.status === 401) {
+    // External guests have no session to lose, so a 401 must not log them out of the call.
+    if (axiosError.response?.status === 401 && !isExternalApp) {
       logger.warn(Logger.Event.AUTH_SESSION_EXPIRED, {
         url: sanitizedUrl,
         message: 'Received 401 Unauthorized. Logging out.',

@@ -8,7 +8,7 @@ redis:
   address: redis:6379
 
 keys:
-  devkey: devsecret
+  localdevkey: localdevsecret
 
 logging:
   level: warn
@@ -24,6 +24,6 @@ turn:
   enabled: false
 
 webhook:
-  api_key: devkey
+  api_key: localdevkey
   urls:
     - http://host.docker.internal:3001/api/livekit/webhook

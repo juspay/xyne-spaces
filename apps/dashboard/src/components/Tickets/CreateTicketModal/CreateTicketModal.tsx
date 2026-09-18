@@ -1,4 +1,9 @@
 import { logger, Event as LogEvent } from '../../../utils/logger';
+import {
+  isAiOriginatedSource,
+  trackTicketCreateFailed,
+  trackTicketCreateSucceeded,
+} from '../../../services/Analytics/ticketTracking';
 import { useCallback, useContext } from 'react';
 import { SelectMenuAlignment, SingleSelect } from '@juspay/blend-design-system';
 import { useForm } from '@tanstack/react-form';
@@ -89,6 +94,7 @@ import {
 import { DatePicker } from '../../ui/DatePicker/DatePicker';
 import { TextShimmer } from '../../ui/ShimmerText';
 import { SearchUserV2 } from '../../ui/SearchUser/SearchUserV2';
+import { TicketFieldSelector } from '../TicketFieldSelector/TicketFieldSelector';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import type { BoardMetadata } from '../../Board/BoardTicketFormConfig';
 import { isReleaseBoard, isMainReleaseBoard } from '../../../utils/boardUtils';
@@ -132,6 +138,8 @@ interface CreateTicketModalProps {
   entityLinkContext?: EntityLinkScope | undefined;
   isFromSubTicket?: boolean;
   isFromAI?: boolean;
+  /** Which surface opened the form — rides on CREATE_TICKET_SUCCEEDED / FAILED. */
+  trackSource?: string;
   allowChannelSelection?: boolean;
   useLocalAttachments?: boolean;
   focusDescriptionOnOpen?: boolean;
@@ -229,6 +237,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
   releaseChannelIds,
   isFromSubTicket = false,
   isFromAI = false,
+  trackSource = 'unknown',
   allowChannelSelection = false,
   useLocalAttachments = false,
   focusDescriptionOnOpen = false,
@@ -255,6 +264,11 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
   } = useDraftAttachments();
 
   const [searchParams, setSearchParams] = useSearchParams();
+  // For msSinceOpened on the create outcome — time-to-create per source.
+  const openedAtRef = useRef<number>(Date.now());
+  useEffect(() => {
+    if (isOpen) openedAtRef.current = Date.now();
+  }, [isOpen]);
   const searchParamsRef = useRef(searchParams);
   searchParamsRef.current = searchParams;
   const setSearchParamsRef = useRef(setSearchParams);
@@ -500,48 +514,14 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
   const selectedChannelProjectId =
     canSelectChannel && selectedChannel?.projectId ? selectedChannel.projectId : projectId;
   const effectiveChannelId = canSelectChannel ? (selectedChannelId ?? channelId) : channelId;
-  const [channelBoardMappings, mappingDetails] = useCachedQuery(
-    queries.boardsByChannel({ channelId: effectiveChannelId }),
-    { enabled: !!effectiveChannelId },
-  );
-  // main's board resolution (channel-board-mapping with a project-boards fallback)
-  // must define `boards` before the release additions below read it.
+  // Boards for ticket creation come from the selected channel's PROJECT (all of the
+  // project's boards). A projectless channel resolves to no project → no boards, and
+  // the UI shows the "no boards are configured" empty state.
   const [projectBoards] = useCachedQuery(
     queries.boardsListByProject({ projectId: selectedChannelProjectId ?? '' }),
     { enabled: !!selectedChannelProjectId },
   );
-  const boards = useMemo(() => {
-    // Release repos are project-scoped (its release boards), not channel-mapped.
-    if (ticketKind === 'release') return projectBoards ?? [];
-    const mappingSynced = mappingDetails.type === 'complete';
-    const mappedBoards = channelBoardMappings?.map(m => m.board) ?? [];
-    const filtered = mappedBoards.filter((b): b is NonNullable<typeof b> => Boolean(b));
-    const projectBoardsList = projectBoards ?? [];
-    if (filtered.length > 0) {
-      logger.debug(LogEvent.KANBAN_ENTITY_LOADED, {
-        source: 'CreateTicketModal',
-        resolution: 'channel-board-mapping',
-        channelId: effectiveChannelId,
-        mappedCount: filtered.length,
-        projectBoardsCount: projectBoardsList.length,
-      });
-      return filtered;
-    }
-    // Only fall back to project boards once the mapping query has fully synced —
-    // an empty result before that is just the zero cache warming up, not a truly
-    // unmapped channel.
-    if (!mappingSynced) {
-      return projectBoardsList;
-    }
-    logger.debug(LogEvent.KANBAN_ENTITY_LOADED, {
-      source: 'CreateTicketModal',
-      resolution: 'project-boards-fallback',
-      channelId: effectiveChannelId,
-      mappedCount: 0,
-      projectBoardsCount: projectBoardsList.length,
-    });
-    return projectBoardsList;
-  }, [channelBoardMappings, mappingDetails.type, projectBoards, effectiveChannelId, ticketKind]);
+  const boards = useMemo(() => projectBoards ?? [], [projectBoards]);
 
   // Read by the open-reset effect without adding `boards` to its deps.
   const boardsRef = useRef(boards);
@@ -1240,6 +1220,51 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
     return true;
   }, [form.state.isValid, form.state.isDirty, submitGateMessage, dynamicFieldErrors]);
 
+  // CREATE_TICKET_SUCCEEDED: the "it exists now" row. SUBMIT_CREATE_TICKET_MODAL is
+  // the click; this fires only after POST /tickets returned an id, with the shape
+  // of what was created and the surface that opened the form. Counts and
+  // booleans only — the title and description never leave through tracking.
+  const trackCreateSucceeded = (
+    formData: CreateTicketFormData,
+    created: TicketResponse | undefined,
+    effectiveChannelId: string | undefined,
+  ): void => {
+    if (!created?.id) return;
+    const dynamicFieldsFilledCount = Object.values(formData.dynamicFields ?? {}).filter(value =>
+      Array.isArray(value) ? value.length > 0 : !!value?.trim(),
+    ).length;
+    trackTicketCreateSucceeded(
+      {
+        id: created.id,
+        xyneId: created.xyneId ?? null,
+        ticketType: formData.ticketType ?? null,
+        priority: formData.priority,
+        statusV2: formData.status,
+        boardId: formData.boardId || null,
+        projectId: selectedBoard?.projectId ?? projectId ?? null,
+        channelId: effectiveChannelId ?? null,
+      },
+      {
+        source: trackSource,
+        aiOriginated: isAiOriginatedSource(trackSource) || isFromAI,
+        fromSourceMessage: !!sourceMessageId,
+        fromSourceConversation: !!sourceConversation,
+        prefilledFromShareLink: enableUrlSync && hasCreateTicketFlag(searchParamsRef.current),
+        isSubTicket: !!parentTicketId,
+        isRelease: formData.workflowType === 'release' || releaseOnly,
+        hasAssignee: formData.assignee?.type === 'assigneeTo',
+        hasUserGroup: formData.assignee?.type === 'userGroup',
+        hasDueDate: !!formData.eta,
+        attachmentsCount: formData.files?.length ?? 0,
+        subTicketsCount: normalizeSubTicketDrafts(subTickets).length,
+        tagsCount: formData.tags?.length ?? 0,
+        dynamicFieldsFilledCount,
+        standalone,
+        msSinceOpened: Date.now() - openedAtRef.current,
+      },
+    );
+  };
+
   const handleCreateTicket = async (formData: CreateTicketFormData) => {
     if (!user) return;
     try {
@@ -1496,6 +1521,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
         response = await apiInstance.post<TicketResponse>('/tickets', formDataPayload);
         createdTicketResponse = response.data;
         processTicketCreationResponse(response, formData.workflowType, effectiveChannelId);
+        trackCreateSucceeded(formData, response.data, effectiveChannelId);
       } else {
         // No files, use JSON
         response = await apiInstance.post<TicketResponse>('/tickets', {
@@ -1531,6 +1557,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
 
         createdTicketResponse = response.data;
         processTicketCreationResponse(response, formData.workflowType, effectiveChannelId);
+        trackCreateSucceeded(formData, response.data, effectiveChannelId);
       }
       const subticketsToCreate = normalizeSubTicketDrafts(subTickets);
       if (createdTicketResponse?.id && subticketsToCreate.length > 0) {
@@ -1570,6 +1597,10 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
       toast.error('Ticket Creation Failed', {
         description:
           error instanceof Error ? error.message : 'Failed to create ticket. Please try again.',
+      });
+      trackTicketCreateFailed(error, {
+        source: trackSource,
+        msSinceOpened: Date.now() - openedAtRef.current,
       });
     }
   };
@@ -1653,6 +1684,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
       parentTicketId,
       isFromSubTicket,
       isFromAI,
+      trackSource,
       subTickets: subTickets.length > 0 ? subTickets : undefined,
       excludedChatAttachmentIds:
         excludedChatAttachmentIds.size > 0 ? Array.from(excludedChatAttachmentIds) : undefined,
@@ -2068,6 +2100,12 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
               }
               data-track-category='Tickets'
               data-track-name='ShareCreateTicketModal'
+              data-track-metadata={JSON.stringify({
+                source: trackSource,
+                channelId,
+                ...(projectId && { projectId }),
+                hasShareableContent,
+              })}
             >
               <LinkIcon strokeWidth={2.33} className='size-3.5' />
             </Button>
@@ -2718,6 +2756,38 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                                 [fieldName]: isOpen,
                               }));
                             }}
+                          />
+                        </div>
+                        {error && <p className='text-xs text-red-600 mt-1'>{error}</p>}
+                      </>
+                    )}
+                    {fieldType === FormFieldType.TICKET && (
+                      <>
+                        <label className='text-sm font-medium text-foreground'>{`${fieldName}${!isOptional ? ' *' : ''}`}</label>
+                        <div className='border border-input rounded'>
+                          <TicketFieldSelector
+                            selectedValue={stringValue || null}
+                            onSelect={ticketId => {
+                              form.setFieldValue('dynamicFields', {
+                                ...formValues?.dynamicFields,
+                                [fieldName]: ticketId ?? '',
+                              });
+                              if (ticketId && error) {
+                                setDynamicFieldErrors(prev => {
+                                  const next = { ...prev };
+                                  delete next[fieldName];
+                                  return next;
+                                });
+                              } else if (!isOptional && !ticketId) {
+                                setDynamicFieldErrors(prev => ({
+                                  ...prev,
+                                  [fieldName]: `${fieldName} is required`,
+                                }));
+                              }
+                            }}
+                            projectId={projectId}
+                            placeholder={`Search ${fieldName.toLowerCase()}`}
+                            testId={`ticket-field-selector-${fieldName}`}
                           />
                         </div>
                         {error && <p className='text-xs text-red-600 mt-1'>{error}</p>}

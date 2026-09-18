@@ -9,7 +9,7 @@ import { resolveFormFieldDefinitionsForForm } from '@/utils/fieldDefinition';
 import { EntitySequenceService } from '@/services/entitySequenceService';
 import { randomUUID } from 'crypto';
 import {
-  serializeInitialMessageMd,
+  buildInitialMessageMd,
   serializeTicketMd,
   type InitialMessageSummary,
   type TicketCardSummary,
@@ -1617,27 +1617,11 @@ export class JiraMigrationImportService {
 
     await syncConversationTicketMdFromPrismaTicket(db as any, ticket);
     if (initialMessage) {
-      const summaryData: InitialMessageSummary = {
-        messageId: initialMessage.messageId,
-        conversationId: initialMessage.conversationId,
-        senderId: initialMessage.senderId,
-        content: initialMessage.content,
+      const md = buildInitialMessageMd({
+        ...initialMessage,
         msgType: initialMessage.msgType as InitialMessageSummary['msgType'],
-        hasAttachment: initialMessage.hasAttachment,
-        edited: initialMessage.edited,
-        isDeleted: initialMessage.isDeleted,
-        showInChannel: initialMessage.showInChannel,
-        visibleTo: initialMessage.visibleTo,
         createdAt: initialMessage.createdAt.getTime(),
-        metadata: initialMessage.metadata ? JSON.stringify(initialMessage.metadata) : null,
-        nudgeCount: initialMessage.nudgeCount,
-        isSent: initialMessage.isSent,
-        reactions_md: initialMessage.reactions_md,
-        link_preview_md: initialMessage.link_preview_md,
-        childConversationId: initialMessage.childConversationId,
-      };
-
-      const md = serializeInitialMessageMd(summaryData);
+      });
       if (md) {
         await db.conversation.update({
           where: { conversationId },
@@ -2996,8 +2980,6 @@ export class JiraMigrationImportService {
     if (!channel) throw new Error('Target channel not found');
     if (initialStages.length === 0) throw new Error('Target board has no stages');
     if (board.projectId !== project.id) throw new Error('Board does not belong to target project');
-    if (channel.projectId !== project.id) throw new Error('Channel does not belong to target project');
-
     // Workspace scoping: some Prisma client types in this repo omit `workspaceId` even though the DB schema
     // contains it (denormalized on Board/Channel and present on Project). Resolve it defensively.
     const workspaceId: string =
@@ -3318,7 +3300,7 @@ export class JiraMigrationImportService {
 	                },
 	              });
 	
-	              const initialMessageMd = serializeInitialMessageMd({
+	              const initialMessageMd = buildInitialMessageMd({
 	                messageId: initialMessageId,
 	                conversationId: generatedConversationId,
 	                senderId: initialTicketMessageSenderId,

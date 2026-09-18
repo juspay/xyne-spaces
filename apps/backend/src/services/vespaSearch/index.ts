@@ -216,6 +216,7 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
       board,       // Board name/ID
       tags,        // Comma-separated tags (ticket Tag framework — NOT thread types)
       threadType,  // Thread classification type(s) - comma-separated; matches thread roots
+      entity,      // Entity name(s) - comma-separated; AND-ed across slack + ticket results
       messageActs, // Thread type(s) a message was cited as evidence for - comma-separated
       dynamicFieldValues, // Dynamic field filters
       dynamicFieldDateRanges, // JSON string of fieldId -> { start, end }
@@ -228,6 +229,7 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
       callEndsAt,      // Call visible range end timestamp
       stage,       // Ticket stage
       assignee,    // Assigned user name
+      userGroup,   // User group ID(s) - comma-separated
       filterOnly,  // Flag for filter-only search (no query text)
       collectionId, // KB collection id(s) - comma-separated; restricts file results to those clIds
       fileId,      // KB file id(s) - comma-separated; restricts file results to those Vespa docIds (collectionItem.fileId)
@@ -317,19 +319,21 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
           // Access rule:
           //   - PRIVATE doc (isPrivate !== false): owner OR in `permissions`.
           //   - PUBLIC doc  (isPrivate === false): owner OR in `permissions`
-          //     OR a participant of the doc's chat channel (`channelRef`).
+          //     OR a participant of the doc's chat channel (`channelRef`)
+          //     OR, when the doc has no scoping channel at all, anyone —
+          //     matching collectionAccess.ts's resolveCollectionAccess,
+          //     where `!collection.isPrivate` grants every workspace member
+          //     implicit VIEWER with no channel gate. A KB collection created
+          //     directly (not tied to a channel) never gets a `channelRef`
+          //     (see mapper.ts's `if (rootCollection.scopeType === 'CHANNEL')`
+          //     guard), so without this branch every non-owner/non-permissions
+          //     user was permanently 403'd on a collection its own Share
+          //     dialog says is Public.
           const perms = Array.isArray(fields.permissions) ? fields.permissions : [];
           const isOwner = fields.ownerId === userId;
           const isShared = perms.includes(userId);
           const isPublic = fields.isPrivate === false;
-          // Private docs: owner or explicit `permissions` only.
-          // Public docs: owner, `permissions`, OR a participant of the doc's
-          // chat channel (via `channelRef`).
           let allowed = isOwner || isShared;
-          // Channel-participant access: a doc may belong to a chat channel via
-          // `channelRef` (format `id:namespace:chat_container::<channelId>`).
-          // Only consulted for public docs, and only when the cheaper checks
-          // above didn't already pass.
           if (!allowed && isPublic) {
             const channelRef =
               typeof fields.channelRef === 'string' ? fields.channelRef : '';
@@ -341,6 +345,8 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
                   userId,
                 );
               allowed = participant !== null;
+            } else {
+              allowed = true;
             }
           }
           if (!allowed) {
@@ -616,6 +622,30 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
       return;
     }
 
+    // Ticket tags search — uses Vespa grouping to get distinct tag values.
+    // Short-circuits the normal search pipeline and returns just tag strings.
+    if (String(type).trim() === 'ticket_tags') {
+      const projectIds = projectId ? toFilterValues(projectId, 'projectId') : undefined;
+      const boardIds = board ? toFilterValues(board, 'board') : undefined;
+      const { tags: tagResults, total } = await vespaService.searchService.searchTicketTags(
+        workspaceId,
+        {
+          projectId: projectIds?.[0],
+          boardIds,
+          query: q ? String(q) : undefined,
+          limit: limit ? Number(limit) : 100,
+        },
+      );
+      res.json({
+        success: true,
+        data: {
+          tags: tagResults,
+          total,
+        },
+      });
+      return;
+    }
+
     const isFilterOnlyDynamicFieldSearch =
       filterOnly === 'true' &&
       (dynamicFieldValues !== undefined || dynamicFieldDateRanges !== undefined);
@@ -840,6 +870,14 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
       options.slack.messageActs = tagValues;
     }
 
+    // Entity filter — same values for both schemas; AND-ed inside YqlBuilder so a doc must
+    // mention every requested entity.
+    if (entity) {
+      const entityNames = toFilterValues(entity, 'entity');
+      options.slack.entityNames = entityNames;
+      options.ticket.entityNames = entityNames;
+    }
+
     if (dynamicFieldValues) {
       options.ticket.dynamicFieldValues = toFilterValues(dynamicFieldValues, 'dynamicFieldValues');
     }
@@ -883,6 +921,10 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
 
     if (assignee) {
       options.ticket.assignedTo = toFilterValues(assignee, 'assignee');
+    }
+
+    if (userGroup) {
+      options.ticket.userGroupId = toFilterValues(userGroup, 'userGroup');
     }
 
     if (subApp) {
