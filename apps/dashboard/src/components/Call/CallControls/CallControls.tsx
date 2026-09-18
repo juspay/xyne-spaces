@@ -22,6 +22,7 @@ import {
   SmilePlus,
   UserCog,
   ImagePlus,
+  NotebookPen,
 } from 'lucide-react';
 import { useMediaDeviceSelect } from '@livekit/components-react';
 import { cn } from '../../../utils/classNames';
@@ -84,6 +85,9 @@ interface CallControlsProps {
   isParticipantsSidebarOpen: boolean;
   isHostControlsOpen?: boolean | undefined;
   onToggleHostControls?: (() => void) | undefined;
+  isNotesOpen?: boolean | undefined;
+  /** Omit to hide the notes button (e.g. external users) */
+  onToggleNotes?: (() => void) | undefined;
   isAIAssistantEnabled: boolean;
   aiController: { id: string; name: string } | null;
   localParticipantId: string | null;
@@ -135,6 +139,8 @@ export function CallControls({
   isParticipantsSidebarOpen,
   isHostControlsOpen = false,
   onToggleHostControls,
+  isNotesOpen = false,
+  onToggleNotes,
   isAIAssistantEnabled,
   aiController,
   localParticipantId,
@@ -1028,6 +1034,31 @@ export function CallControls({
               )}
             </button>
           </div>
+        )}
+
+        {/* Notes Button — shared notes canvas (series-wide for recurring calls) */}
+        {onToggleNotes && (
+          <button
+            onClick={onToggleNotes}
+            className={cn(
+              buttonClasses,
+              isNotesOpen ? 'bg-blue-600 hover:bg-blue-700 text-white' : midnightControlClass,
+            )}
+            style={hasCustomSizing ? { padding: `${buttonPadding}px` } : undefined}
+            title='Notes'
+            data-testid='call-notes-button'
+            data-track-event='BUTTON_CLICK'
+            data-track-category='CALLS'
+            data-track-name='TOGGLE_CALL_NOTES'
+            data-track-metadata={JSON.stringify({ callId, isOpen: isNotesOpen })}
+          >
+            <NotebookPen
+              className={hasCustomSizing ? '' : 'w-5 h-5 sm:w-6 sm:h-6'}
+              style={
+                hasCustomSizing ? { width: `${iconSize}px`, height: `${iconSize}px` } : undefined
+              }
+            />
+          </button>
         )}
 
         {/* Thread Chat Button — hidden for external users */}
