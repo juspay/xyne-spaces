@@ -105,7 +105,15 @@ import { getUserDisplayName, isUserDeactivated } from '../../../utils/userDispla
 import { LexicalSearchInput, type InitialQueryData } from './LexicalSearchInput';
 import { StatusIndicator } from '../../ui/StatusIndicator';
 import { useSearchMetrics, CMDK_USER_LIMIT } from '../../../hooks/useSearchMetrics';
-import { filterChannelsBySearchableNames, rankUsersWithMfu } from '../../../utils/rankingUtils';
+import {
+  filterChannelsBySearchableNames,
+  rankUsersWithMfu,
+  toChannelCandidates,
+  toUserCandidates,
+  type ChannelSearchItem,
+} from '../../../utils/rankingUtils';
+import { mergeRankedCandidates, type RankedCandidate } from '@xyne/shared/utils';
+import type { User } from '../../../machines/stateMachine';
 import { searchMetricsService } from '../../../services/searchMetricsService';
 import { useHistoryBackedOverlay } from '../../../hooks/useHistoryBackedOverlay';
 import {
@@ -349,6 +357,29 @@ type MentionGroupKey = (typeof MENTION_GROUPS)[number]['key'];
 /** Rows shown per section before "Show more", and the ceiling once expanded. */
 const MENTION_GROUP_PAGE = 5;
 const MENTION_GROUP_MAX = 20;
+
+// Rows shown collapsed in the flat ALL view's merged people+channel list, before "See more".
+// The entries are the ones the per-category sections would have rendered — this only changes
+// their order. The merge itself keeps more than this so expanding has something to reveal.
+const MERGED_DISPLAY_LIMIT = 8;
+const MERGED_CANDIDATE_LIMIT = MERGED_DISPLAY_LIMIT * 5;
+/** expandedCategories key for the merged section — not a ChannelCategory, it spans types. */
+const MERGED_CATEGORY = 'merged-people-channels';
+
+/**
+ * A row in the merged list is either a person or a channel/DM. The two narrowings below
+ * are sound because `toUserCandidates` is the only producer of `type: 'user'` and it only
+ * ever carries a user, while `toChannelCandidates` produces 'dm' and 'channel' and only
+ * ever carries a channel item.
+ */
+type MergedCandidate = RankedCandidate<User | ChannelSearchItem>;
+
+const isMergedUser = (candidate: MergedCandidate): candidate is RankedCandidate<User> =>
+  candidate.type === 'user';
+
+const isMergedChannel = (
+  candidate: MergedCandidate,
+): candidate is RankedCandidate<ChannelSearchItem> => candidate.type !== 'user';
 
 const isPreviewableTicketResult = (result: DisplaySearchResult | null): boolean =>
   !!result &&
@@ -705,6 +736,17 @@ const ChannelCommandMenu = ({
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
   const isFlatAllView = activeTab === TabType.ALL && !isGrouped;
 
+  /**
+   * Whether the LOCAL results render as one merged people+channel list instead of separate
+   * STARRED / PEOPLE / CHANNELS sections.
+   *
+   * Deliberately NOT tied to `isFlatAllView`: that flag reports how the BACKEND chose to
+   * group ITS results (flat only under the `unified` rank profile). How we order locally
+   * synced people and channels is an independent decision, so the merged list is the default
+   * on the ALL tab whatever rank profile is in play. Per-entity tabs keep their own section.
+   */
+  const useMergedLocalResults = activeTab === TabType.ALL;
+
   // type:channels shows grouped local channels (same as CHANNELS tab) — used by the
   // no-search channel browse further down.
   const types = parseTypeFilter(typeFilter);
@@ -749,6 +791,64 @@ const ChannelCommandMenu = ({
     void affinityVersion;
     return rankUsersWithMfu(filteredLocalUsers, allUsers, cleanedSearchText, dmContactRecency);
   }, [filteredLocalUsers, allUsers, cleanedSearchText, dmContactRecency, affinityVersion]);
+
+  /**
+   * ONE merged people + DM + channel list, for the flat ALL view only.
+   *
+   * Exactly the rows the sections already render — `rankedLocalUsers` (the USERS section)
+   * and `filteredLocalChannels` (STARRED, CHANNELS, GROUP DMS) — reordered into one list.
+   * Nothing is searched again and nothing new is admitted: the only change is the order.
+   *
+   * Each entry is tagged with the shared match tier, then `mergeRankedCandidates` applies
+   * affinity once across both, so a person and a channel can share a rung and compete
+   * directly. See docs/cmdk-search-ranking.md §15.
+   *
+   * Only computed when the merged list will actually render, so the per-entity tabs pay
+   * nothing for it.
+   */
+
+  const mergedLocalResults = useMemo<MergedCandidate[]>(() => {
+    void affinityVersion;
+    if (!useMergedLocalResults) return [];
+
+    // BROWSE (nothing typed): one list of every conversation, ordered by affinity — there is
+    // no query for tiers to describe, so `tierOf` puts them all on the top rung and affinity
+    // alone decides. 1:1 DMs are INCLUDED here, unlike in search: browse shows no people
+    // rows for them to duplicate, and a DM is the thing you navigate to.
+    if (!cleanedSearchText.trim()) {
+      return mergeRankedCandidates<User | ChannelSearchItem>(
+        [toChannelCandidates(filteredLocalChannels, '')],
+        MERGED_CANDIDATE_LIMIT,
+      );
+    }
+    // SEARCH: people and regular channels only.
+    //
+    // 1:1 DMs are out because the other participant is already here as a person, and
+    // selecting them opens that very conversation (navigateToUser ->
+    // resolveOrCreateDmChannelId) — the row would only ever be the same human twice.
+    // Self-DMs go with them; their only participant is you.
+    //
+    // Group DMs are out for a different reason: they keep their own GROUP DMS section,
+    // rendered separately below. Their match quality is borrowed from a participant, so
+    // mixing them in means a dozen group chats crowding out the person you actually typed.
+    const mergeableChannels = filteredLocalChannels.filter(
+      ({ channel }) => !isDMChannel(channel.scopeType),
+    );
+
+    return mergeRankedCandidates<User | ChannelSearchItem>(
+      [
+        toUserCandidates(rankedLocalUsers, cleanedSearchText),
+        toChannelCandidates(mergeableChannels, cleanedSearchText),
+      ],
+      MERGED_CANDIDATE_LIMIT,
+    );
+  }, [
+    useMergedLocalResults,
+    cleanedSearchText,
+    rankedLocalUsers,
+    filteredLocalChannels,
+    affinityVersion,
+  ]);
 
   // Slack-style strong user match: when the top-ranked user's full name
   // prefix-matches the query, the USERS section renders ABOVE the "Show
@@ -2670,6 +2770,90 @@ const ChannelCommandMenu = ({
   // Browse-mode hint sync lives in attachCommandRef's MutationObserver (the auto-select effect above
   // only runs during an active search).
 
+  /**
+   * The merged people/DM/channel list for the flat ALL view.
+   *
+   * One `Command.Group`, three kinds of row: people render as `SearchResultItem` (what the
+   * PEOPLE section uses), channels and DMs as `ChannelCommandItem` (what the CHANNELS and
+   * GROUP DMS sections use), so a row looks and behaves identically whichever list it
+   * appears in. Order comes entirely from `mergedLocalResults`.
+   */
+  const renderMergedLocalResults = () => {
+    if (mergedLocalResults.length === 0) return null;
+
+    // Same collapse/expand contract as every other local section, so the fold behaves the
+    // way the rest of the palette does. It expands in place rather than routing out: there
+    // is no results page that shows people and channels together.
+    const isExpanded = expandedCategories.has(MERGED_CATEGORY);
+    const hasMore = mergedLocalResults.length > MERGED_DISPLAY_LIMIT;
+    const displayItems =
+      !isExpanded && hasMore
+        ? mergedLocalResults.slice(0, MERGED_DISPLAY_LIMIT)
+        : mergedLocalResults;
+    const hiddenCount = mergedLocalResults.length - MERGED_DISPLAY_LIMIT;
+
+    return (
+      <div className='mb-4'>
+        <Command.Group
+          heading={`People & channels (${mergedLocalResults.length})`}
+          className='[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-mono'
+        >
+          {displayItems.map((candidate, index) => {
+            if (isMergedUser(candidate)) {
+              const user = candidate.item;
+              const result: DisplaySearchResult = {
+                id: user.id,
+                type: 'user' as const,
+                title: getUserDisplayName(user),
+                subtitle: user.email || '',
+                relevanceScore: 1,
+                metadata: {},
+              };
+              return (
+                <SearchResultItem
+                  key={`merged-user-${user.id}`}
+                  result={result}
+                  onSelect={res => handleBackendResultSelect(res, index + 1)}
+                  onItemMouseDown={handleItemMouseDown}
+                  isSelected={contextItems.some(c => c.id === `user-${user.id}`)}
+                />
+              );
+            }
+
+            if (!isMergedChannel(candidate)) return null;
+            const { channel } = candidate.item;
+            return (
+              <ChannelCommandItem
+                key={`merged-channel-${channel.id}`}
+                channel={channel}
+                currentUserID={currentUserID}
+                unreadCount={unreadCounts[channel.id] ?? 0}
+                onSelect={displayName => {
+                  void handleChannelSelect(channel, displayName, index + 1);
+                }}
+                onItemMouseDown={handleItemMouseDown}
+                getChannelIcon={getChannelIcon}
+                selectionVariant={selectionVariant}
+                isSelected={contextItems.some(c => c.id === `channel-${channel.id}`)}
+              />
+            );
+          })}
+          {hasMore && (
+            <SeeMoreItem
+              value='__see-more-merged__'
+              label={isExpanded ? 'See less' : `See ${hiddenCount} more`}
+              onSelect={() => toggleCategoryExpansion(MERGED_CATEGORY)}
+              hoverable={!isMobile}
+              trackCategory='CHANNEL_SEARCH'
+              trackName='TOGGLE_CATEGORY_EXPANSION'
+              trackMetadata={JSON.stringify({ category: MERGED_CATEGORY, isExpanded })}
+            />
+          )}
+        </Command.Group>
+      </div>
+    );
+  };
+
   // Render backend results for the search-active branch (flat list filtered by activeTab)
   const renderSearchBackendResults = () => (
     <>
@@ -3221,7 +3405,10 @@ const ChannelCommandMenu = ({
   // Starred always leads; a strong user/channel match then becomes the default
   // Enter target. `hasStrongUserMatch`/`hasStrongChannelMatch` already exclude
   // from:/in:/with: chips, where backend results lead instead.
-  const canHoist = activeTab === TabType.ALL && !isFlatAllView && !mentionSearchType;
+  // Hoisting lifts a strongly-matching SECTION above the others; with the merged list there
+  // are no competing sections to lift it over, and rendering a hoisted copy as well would
+  // duplicate rows the merged list already shows.
+  const canHoist = activeTab === TabType.ALL && !useMergedLocalResults && !mentionSearchType;
   const hoistStarred = canHoist && hasStrongStarredMatch;
   const hoistUser = canHoist && hasStrongUserMatch;
   const hoistChannel = canHoist && hasStrongChannelMatch;
@@ -4962,13 +5149,35 @@ const ChannelCommandMenu = ({
                         {hasFromOrInFilter ? (
                           <>
                             {backendResults.length > 0 && renderSearchBackendResults()}
-                            {renderSearchLocalSections()}
+                            {/* Flat ALL view replaces the per-category sections with ONE merged
+                                people/DM/channel list — rendering both would repeat every row.
+                                It renders unconditionally: it is local, so it must survive a
+                                Vespa failure or an empty backend response. */}
+                            {useMergedLocalResults ? (
+                              <>
+                                {renderMergedLocalResults()}
+                                {/* Group DMs keep their own section: (false,false,false)
+                                    renders that block alone. */}
+                                {renderSearchLocalSections(false, false, false)}
+                              </>
+                            ) : (
+                              renderSearchLocalSections()
+                            )}
                           </>
                         ) : (
                           <>
                             {/* A section pinned to the top (above) is skipped here to
                             avoid a double-render. */}
-                            {renderSearchLocalSections(!hoistStarred, !hoistUser, !hoistChannel)}
+                            {useMergedLocalResults ? (
+                              <>
+                                {renderMergedLocalResults()}
+                                {/* Group DMs keep their own section: (false,false,false)
+                                    renders that block alone. */}
+                                {renderSearchLocalSections(false, false, false)}
+                              </>
+                            ) : (
+                              renderSearchLocalSections(!hoistStarred, !hoistUser, !hoistChannel)
+                            )}
                             {backendResults.length > 0 && renderSearchBackendResults()}
                           </>
                         )}
@@ -4984,7 +5193,9 @@ const ChannelCommandMenu = ({
                           </>
                         ) : (
                           <>
-                            {renderBrowseLocalChannels()}
+                            {useMergedLocalResults
+                              ? renderMergedLocalResults()
+                              : renderBrowseLocalChannels()}
                             {/* People tab browse: rank by affinity (rankUsersWithMfu) like the
                                 search branch, instead of the raw, unranked backend user list. */}
                             {activeTab === TabType.USERS
