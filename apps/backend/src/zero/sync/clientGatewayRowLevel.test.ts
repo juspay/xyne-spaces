@@ -88,7 +88,7 @@ test('row-level subscribe forces the SOCKET workspace — client args cannot rea
   }
 });
 
-test('a GUEST-role socket is refused the row-level path (MEMBER-only)', { skip }, async () => {
+test('a GUEST-role socket is refused (guests over-admit under the non-guest gate → native Zero)', { skip }, async () => {
   const addCalls: unknown[] = [];
   const fo = fanout!;
   const origAdd = fo.addRowLevelClient;
@@ -101,6 +101,46 @@ test('a GUEST-role socket is refused the row-level path (MEMBER-only)', { skip }
     await new Promise((r) => setImmediate(r));
     assert.equal(addCalls.length, 0, 'guest never reaches addRowLevelClient');
     assert.ok(socket._sent.some((e: { event: string }) => e.event === 'sync:error'), 'guest got a sync:error');
+  } finally {
+    fo.addRowLevelClient = origAdd;
+  }
+});
+
+// The role gate admits every NON-guest role (member/admin/owner/community), not just MEMBER — the ACL is
+// role-invariant for them (see shareability.test), so the member-derived gate serves them correctly.
+for (const role of ['OWNER', 'ADMIN', 'COMMUNITY_MEMBER']) {
+  test(`a ${role}-role socket IS admitted (non-guest roles are served, not just MEMBER)`, { skip }, async () => {
+    const addCalls: unknown[] = [];
+    const se = syncEngine!, fo = fanout!, hash = hashOfNameAndArgs!;
+    const origSub = se.subscribe, origAdd = fo.addRowLevelClient;
+    se.subscribe = ((name: string, args: readonly unknown[]) => hash(name, args)) as typeof se.subscribe;
+    fo.addRowLevelClient = (async (s: unknown) => { addCalls.push(s); }) as typeof fo.addRowLevelClient;
+    try {
+      const socket = fakeSocket({ workspaceRole: role });
+      const trigger = attachSyncHandlers!(socket);
+      trigger();
+      socket._handlers['sync:subscribe']({ queryName: 'userDrafts', args: [{ workspaceId: 'W_A' }] }, () => {});
+      await new Promise((r) => setImmediate(r));
+      assert.equal(addCalls.length, 1, `${role} should be admitted to the sync engine`);
+      assert.ok(!socket._sent.some((e: { event: string }) => e.event === 'sync:error'), `${role} got no sync:error`);
+    } finally {
+      se.subscribe = origSub; fo.addRowLevelClient = origAdd;
+    }
+  });
+}
+
+test('an UNKNOWN/absent role is refused (fail-closed)', { skip }, async () => {
+  const addCalls: unknown[] = [];
+  const fo = fanout!;
+  const origAdd = fo.addRowLevelClient;
+  fo.addRowLevelClient = (async (s: unknown) => { addCalls.push(s); }) as typeof fo.addRowLevelClient;
+  try {
+    const socket = fakeSocket({ workspaceRole: undefined });
+    const trigger = attachSyncHandlers!(socket);
+    trigger();
+    socket._handlers['sync:subscribe']({ queryName: 'userDrafts', args: [{ workspaceId: 'W_A' }] }, () => {});
+    await new Promise((r) => setImmediate(r));
+    assert.equal(addCalls.length, 0, 'unknown role never reaches addRowLevelClient');
   } finally {
     fo.addRowLevelClient = origAdd;
   }

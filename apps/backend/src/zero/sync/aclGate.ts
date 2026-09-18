@@ -44,6 +44,17 @@ export function isSubscriberSentinel(value: unknown): boolean {
   return SUBSCRIBER_SENTINEL_VALUES.has(value);
 }
 
+/**
+ * The WorkspaceRole values the sync engine ADMITS. The gate is derived under a non-guest sentinel
+ * (sentinelCtx.role = MEMBER), so it encodes the non-guest ACL branch; these roles all share that
+ * branch, so the same gate is CORRECT for every one of them — an invariant the shareability CI guard
+ * enforces (deriving each role's ACL and asserting it equals MEMBER's). GUEST is deliberately absent:
+ * a guest ACL is stricter, so a guest under this gate would be OVER-admitted (a leak) — guests fall
+ * back to native Zero. (Mirror of WorkspaceRole in @xyne/shared minus GUEST; kept as strings so the
+ * gateway and the CI guard share one source and stay in lock-step.)
+ */
+export const NON_GUEST_ROLES: readonly string[] = ['OWNER', 'ADMIN', 'MEMBER', 'COMMUNITY_MEMBER'];
+
 type Row = Record<string, unknown>;
 /** Rows of a materialized grant table (its snapshot). */
 export type SnapshotProvider = (table: string) => Row[];
@@ -143,7 +154,19 @@ export function deriveAclGate(rootTable: string): AclGate {
  * SENTINEL_USER/SENTINEL_WORKSPACE mark the subscriber holes identically to the gate.
  */
 export function sentinelAclWhere(rootTable: string): Cond | undefined {
-  const acl = QueryACLFactory.getACL(rootTable as never, sentinelCtx);
+  return sentinelAclWhereForRole(rootTable, sentinelCtx.role as string);
+}
+
+/**
+ * The table's sentinel-resolved canSelect for an ARBITRARY workspace role — the derivation the gate
+ * uses, but with `ctx.role` overridden. Exposed for the shareability CI guard, which asserts every
+ * NON_GUEST_ROLES role yields the SAME ACL as MEMBER (so the member-derived gate serves them all
+ * correctly). A role whose ACL diverges must go native or get a per-role gate, not be silently
+ * under/over-served.
+ */
+export function sentinelAclWhereForRole(rootTable: string, role: string): Cond | undefined {
+  const ctx = { ...sentinelCtx, role, orgRole: role } as Context;
+  const acl = QueryACLFactory.getACL(rootTable as never, ctx);
   const query = acl.canSelect((zql as unknown as Record<string, never>)[rootTable]);
   return (query as { ast?: { where?: Cond } }).ast?.where;
 }

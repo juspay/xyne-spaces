@@ -4,7 +4,7 @@ import { logger } from '@/utils/logger';
 import { syncEngine } from './syncEngine';
 import { fanout, type SyncSocket } from './fanout';
 import { hashOfNameAndArgs } from './protocol';
-import { deriveAclGate } from './aclGate';
+import { deriveAclGate, NON_GUEST_ROLES } from './aclGate';
 import { queryMetaFor } from './queryMeta';
 import { grantQueryName, grantArgs } from './grantQueries';
 import { isRowLevelQuery, routeColumnOf, rowLevelEligibility } from './rowLevelQueries';
@@ -20,8 +20,9 @@ import { obsEmit } from './obs';
 export interface SyncIoSocket extends Socket {
   userId: string;
   workspaceId?: string;
-  /** Workspace role. The ACL gate is derived with a MEMBER sentinel ctx, so the sync engine
-   *  serves MEMBER-role principals only; others (esp. GUEST) are refused fail-closed. */
+  /** Workspace role. The ACL gate is derived under a non-guest (MEMBER) sentinel, so the sync engine
+   *  serves every non-guest role (member/admin/owner/community — see NON_GUEST_ROLES); GUEST and
+   *  unknown roles are refused fail-closed (guests would be over-admitted under the non-guest gate). */
   workspaceRole?: string;
 }
 
@@ -110,19 +111,20 @@ export function attachSyncHandlers(socket: SyncIoSocket): () => void {
   ): void {
     const workspaceId = socket.workspaceId;
     if (!workspaceId) return; // guaranteed set once `ready`; guard for safety
-    // FAIL-CLOSED role gate: deriveAclGate freezes the sentinel ctx at role=MEMBER, so the gate is
-    // only correct for MEMBER principals. A GUEST evaluated under the MEMBER shape would be admitted
-    // to PUBLIC channels the guest ACL (guestChannelAccessWhere) would deny — a leak; ADMIN/OWNER
-    // would be under-privileged (safe but wrong). Serve MEMBER only until per-role gates exist; the
-    // client falls back to stock Zero for everything else.
-    if (socket.workspaceRole !== 'MEMBER') {
-      obsEmit('sync-sub', { action: 'reject', socketId: connId, userId, queryName, reason: 'non-member-role' });
-      socket.emit('sync:error', { queryName, message: 'sync engine serves member-role principals only' });
+    // FAIL-CLOSED role gate. The gate is derived under a NON-GUEST sentinel (sentinelCtx.role = MEMBER),
+    // so it encodes the non-guest ACL branch. A GUEST evaluated under it would be admitted to things the
+    // guest ACL (guestChannelAccessWhere) denies — a LEAK — so guests are refused → native Zero. Every
+    // OTHER role (member/admin/owner/community) shares that same non-guest branch (asserted role-invariant
+    // by the shareability CI guard), so the gate is CORRECT for them — admit them. An unknown/absent role
+    // fails closed (not in NON_GUEST_ROLES).
+    if (!socket.workspaceRole || !NON_GUEST_ROLES.includes(socket.workspaceRole)) {
+      obsEmit('sync-sub', { action: 'reject', socketId: connId, userId, queryName, reason: 'guest-or-unknown-role' });
+      socket.emit('sync:error', { queryName, message: 'sync engine does not serve guest-role principals' });
       return;
     }
     // Row-level queries take a wholly separate path: the workspace partition is forced from the SOCKET
     // (never client args — it IS the tenant boundary, there is no gate), rows route by socket.userId,
-    // no gate/grants. Reached only for MEMBER role (guarded above).
+    // no gate/grants. Reached only for an admitted non-guest role (guarded above).
     if (isRowLevelQuery(queryName)) {
       subscribeRowLevel(queryName, ack, sinceOffset);
       return;

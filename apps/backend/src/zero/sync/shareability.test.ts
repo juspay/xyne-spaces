@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { SHARED_BASE_QUERIES, resolveSharedBase } from './baseQueries';
 import { queryMetaFor } from './queryMeta';
-import { deriveAclGate } from './aclGate';
+import { deriveAclGate, sentinelAclWhereForRole, NON_GUEST_ROLES } from './aclGate';
 import { syncContext } from './serviceIdentity';
 
 /**
@@ -30,6 +30,29 @@ test('every SHARED_BASE_QUERY is GATE-collapsible (no per-row admission)', () =>
       c.ok,
       `'${name}' is NOT gate-collapsible → it must NOT be in SHARED_BASE_QUERIES (serve it via native Zero). ${c.reason ?? ''}`,
     );
+  }
+});
+
+test('every SHARED_BASE_QUERY ACL is ROLE-INVARIANT across non-guest roles (member gate serves them all)', () => {
+  // The gate is derived once under a MEMBER (non-guest) sentinel and served to EVERY non-guest role
+  // (member/admin/owner/community — the gateway admits NON_GUEST_ROLES). That is correct ONLY if those
+  // roles produce the SAME ACL as MEMBER; a role whose canSelect diverges would be silently
+  // under/over-served. Assert equality here so a future admin-specific ACL branch turns the build RED —
+  // forcing a deliberate choice (serve that role native, or build a real per-role gate). GUEST is
+  // intentionally NOT checked: its ACL DOES differ (stricter), which is exactly why guests are refused.
+  for (const name of SHARED_BASE_QUERIES) {
+    const meta = queryMetaFor(name, SAMPLE_ARGS[name]);
+    assert.ok(meta, `queryMetaFor('${name}') should resolve a partition`);
+    const rootTable = meta!.rootTable;
+    const memberAst = JSON.stringify(sentinelAclWhereForRole(rootTable, 'MEMBER') ?? null);
+    for (const role of NON_GUEST_ROLES) {
+      assert.equal(
+        JSON.stringify(sentinelAclWhereForRole(rootTable, role) ?? null),
+        memberAst,
+        `'${name}' (${rootTable}) ACL differs for role '${role}' vs MEMBER — the member-derived gate would ` +
+          `mis-serve '${role}'. Serve it via native Zero or build a per-role gate; do not admit it here.`,
+      );
+    }
   }
 });
 
