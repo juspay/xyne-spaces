@@ -25,13 +25,50 @@ async function fetchFileText(token: string, url?: string): Promise<string | unde
   }
 }
 
-/** The channel's canvas files, with their HTML body downloaded via the token. */
+async function fileDownloadUrl(token: string, fileId: string): Promise<string | undefined> {
+  try {
+    const resp = await fetch('https://slack.com/api/files.info?file=' + fileId, { headers: { Authorization: `Bearer ${token}` } });
+    const j = (await resp.json()) as { ok?: boolean; file?: { url_private_download?: string; url_private?: string } };
+    return j.ok ? (j.file?.url_private_download || j.file?.url_private) : undefined;
+  } catch (e) {
+    logger.warn('[ChannelCanvases] files.info failed', { fileId, error: msg(e) });
+    return undefined;
+  }
+}
+
+// A canvas can embed other canvas files (<p class="embedded-file">File ID: sd:Fxxx…</p>); the real content lives in
+// those. Inline each embedded canvas's body in place of the reference so migration captures actual content, not a link.
+const EMBED_RE = /<p[^>]*class=['"]embedded-file['"][^>]*>[\s\S]*?File ID: sd:(F[A-Z0-9]+)[\s\S]*?<\/p>/g;
+const INNER_RE = /<div class="quip-canvas-content">([\s\S]*)<\/div>\s*$/;
+
+async function resolveEmbeds(token: string, html: string, seen: Set<string>, depth = 0): Promise<string> {
+  if (depth > 3) return html;
+  const embeds = [...html.matchAll(EMBED_RE)];
+  let out = html;
+  for (const m of embeds) {
+    const fileId = m[1];
+    if (seen.has(fileId)) { out = out.replace(m[0], ''); continue; } // guard against cycles
+    seen.add(fileId);
+    const body = await fetchFileText(token, await fileDownloadUrl(token, fileId));
+    let inner = '';
+    if (body) {
+      inner = (body.match(INNER_RE) || [])[1] ?? body;
+      inner = await resolveEmbeds(token, inner, seen, depth + 1);
+    }
+    out = out.replace(m[0], inner);
+  }
+  return out;
+}
+
+/** The channel's canvas files, HTML downloaded via the token and embedded canvases inlined. */
 export async function fetchChannelCanvases(token: string, files: SlackFile[]): Promise<ChannelCanvas[]> {
   const canvases: ChannelCanvas[] = [];
   for (const f of files) {
     if (!isCanvasFile(f)) continue;
-    const html = await fetchFileText(token, f.url_private_download || f.url_private);
-    if (html) canvases.push({ slackFileId: f.id, title: f.title || f.name || 'Canvas', slackUserId: f.user, html });
+    let html = await fetchFileText(token, f.url_private_download || f.url_private);
+    if (!html) continue;
+    html = await resolveEmbeds(token, html, new Set([f.id]));
+    canvases.push({ slackFileId: f.id, title: f.title || f.name || 'Canvas', slackUserId: f.user, html });
   }
   return canvases;
 }
