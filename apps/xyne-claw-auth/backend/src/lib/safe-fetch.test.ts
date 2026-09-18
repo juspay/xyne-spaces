@@ -309,6 +309,28 @@ describe("safeFetch", () => {
     expect(ok.status).toBe(200);
   });
 
+  it("truncates instead of throwing when truncateOversizeBody is set", async () => {
+    const res = await safeFetch(
+      `http://127.0.0.1:${port}/big`,
+      {},
+      { ...devLoopback, maxResponseBytes: 1024, truncateOversizeBody: true },
+    );
+    expect(res.status).toBe(200);
+    expect(res.headers.get("x-safe-fetch-truncated")).toBe("1");
+    // Exactly the cap — not the chunk boundary that happened to cross it.
+    expect((await res.arrayBuffer()).byteLength).toBe(1024);
+  });
+
+  it("does not mark a body that fits under the cap as truncated", async () => {
+    const res = await safeFetch(
+      `http://127.0.0.1:${port}/big`,
+      {},
+      { ...devLoopback, maxResponseBytes: 1024 * 1024, truncateOversizeBody: true },
+    );
+    expect(res.headers.get("x-safe-fetch-truncated")).toBeNull();
+    expect((await res.arrayBuffer()).byteLength).toBe(64 * 1024);
+  });
+
   it("enforces the redirect hop limit", async () => {
     await expect(safeFetch(`http://127.0.0.1:${port}/loop`, {}, devLoopback)).rejects.toMatchObject({
       code: "too-many-redirects",

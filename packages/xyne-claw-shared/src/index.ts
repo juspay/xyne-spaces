@@ -60,7 +60,7 @@ export {
 } from "./skill-diff/index.js";
 export type { SkillDiff, SkillForAuthz, ApproverResolution, SkillApprovalAuthz, SkillFileUpdateAuthz } from "./skill-diff/index.js";
 export { createSkillTool, updateSkillTool } from "./tools/skill-management/index.js";
-export { FlowBuilder, mdToMrkdwn, buildWriteApprovalFlow, buildWriteResultFlow, buildTwinApprovalFlow, buildUserQuestionFlow, buildCapacityRetryFlow, buildGoalSuggestionFlow, buildAgentCallProposalFlow, buildCloneApprovalFlow, buildSkillUpdateApprovalFlow, buildMcpConfigureFlow, buildMcpSuggestFlow, type McpSuggestConnector, buildCodeFlow, buildDiffFlow, buildTicketFlow, buildTicketProposalFlow, buildChartFlow, buildScheduledJobApprovalFlow, type ScheduledJobApprovalFlowParams } from "./flow/builder.js";
+export { FlowBuilder, mdToMrkdwn, buildWriteApprovalFlow, buildWriteResultFlow, buildTwinApprovalFlow, buildUserQuestionFlow, buildCapacityRetryFlow, buildGoalSuggestionFlow, buildAgentCallProposalFlow, buildCloneApprovalFlow, buildSkillUpdateApprovalFlow, buildMcpConfigureFlow, buildMcpSuggestFlow, type McpSuggestConnector, buildHostAccessFlow, buildCodeFlow, buildDiffFlow, buildTicketFlow, buildTicketProposalFlow, buildChartFlow, buildScheduledJobApprovalFlow, type ScheduledJobApprovalFlowParams } from "./flow/builder.js";
 export type { FlowDefinition, FlowComponent, FlowAction, SelectOption, TicketArtifact, ChartArtifact } from "./flow/builder.js";
 export { buildPlanFlow, PLAN_COMPONENT_ID } from "./flow/plan-flow.js";
 export { isFlowJsonContent, parseFlowJsonComponents, extractTextFromFlowJson, extractCleanTextFromFlowJson } from "./flow/flow-text.js";
@@ -185,3 +185,10 @@ export {
 export type { AttachmentFamily, InboundAttachmentFamily } from "./attachment-types.js";
 export { openPaletteMode, openPaletteModeFromTools, openPaletteAdmits, type OpenPaletteMode } from "./tools/open-palette.js";
 export { classifyToolRisk, riskAtOrBelow, TOOL_RISK_LADDER, type ToolRiskLevel } from "./tools/tool-risk.js";
+export {
+  AUTH_REQUIRED_ERROR_PREFIX,
+  authRequiredError,
+  isAuthRequiredError,
+  authRequiredToolMessage,
+} from "./types/auth-required.js";
+export type { AuthRequiredDetail, AuthRequiredReason, AuthRequiredSource } from "./types/auth-required.js";

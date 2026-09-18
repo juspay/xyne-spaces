@@ -155,6 +155,8 @@ import {
 import { toolOutputBaseDir, deleteSession, branchSession } from "../session-store.js";
 import { gcsUploadResultMarker, gcsDownloadResultMarker } from "../storage.js";
 import { takeLlmCitations } from "xyne-claw-shared";
+import type { AuthRequiredDetail } from "xyne-claw-shared";
+import { buildRequestAccessTool, type RequestAccessRef } from "../request-access.js";
 import { ingestAttachments } from "../attachment-ingest.js";
 import { metric } from "../metrics.js";
 import { runWithProviderFallback } from "../provider-fallback.js";
@@ -410,6 +412,65 @@ export function requestActiveRunHandoffs(capMs: number): number {
 // the per-turn promptInjections path).
 // Appended to the system prompt for agents in CITATION_GUIDE_AGENT_SLUGS only.
 // Lives in the system role so the model accepts it silently.
+/**
+ * Appended whenever `request-access` is registered (same gate as the tool).
+ *
+ * In the runtime prompt rather than any agent's configured one because the
+ * behaviour is not agent-specific, and because it then survives a re-seed or a
+ * prompt edit. Framed as the default rather than an option: a model treats "the
+ * fetch failed" as a terminal fact to report, and the whole ask-grant-resume
+ * loop only fires if it takes this one action instead.
+ */
+const REQUEST_ACCESS_GUIDE = `
+
+## When something needs the user's login
+
+You can ask for access. If a fetch is blocked because the site wants THIS USER to
+be logged in, call \`request-access\` with the exact URL and one line on what you
+were doing. The user gets a card, and granting access restarts this task
+automatically — so asking costs them one click and costs you nothing.
+
+Call it when any of these happen, and prefer calling it over giving up:
+- a 401 or 403;
+- you got a sign-in page, a login form, or an SSO redirect instead of the content
+  (usually a **200**, which is why it does not look like an error);
+- the body says unauthenticated / access denied / session expired;
+- a request SUCCEEDED but came back empty or suspiciously thin, and being logged
+  out would explain it. An empty list from a site you are not logged into is not
+  evidence that the list is empty.
+
+Do NOT call it for a 404, a rate limit, a 5xx, or an endpoint that refuses your
+credential TYPE rather than your identity — no login fixes those.
+
+Never end your turn saying you could not reach something because of a login,
+permission, or authentication problem WITHOUT having called \`request-access\`
+first. Reporting that block to the user instead of clearing it is the one
+outcome this tool exists to prevent. And do not work around it either — a proxy,
+a mirror, a container or a browser all hit the same wall.`;
+
+/**
+ * Added on top of the guide when this run has subagents to delegate to.
+ *
+ * A delegated sub-run has no card surface and so no `request-access` tool of its
+ * own, and `agent-delegation.ts` returns only the delegate's TEXT — the blocker
+ * does not travel with it. So the request reaches its last stop at the parent,
+ * which is the only one in the chain holding the tool.
+ */
+const DELEGATED_ACCESS_GUIDE = `
+
+### When a delegate says it was blocked
+
+Your subagents usually cannot ask for access themselves, and only their text
+comes back to you — not the blocker. So when a delegate reports a login page, an
+SSO redirect, a 401/403, or "I don't have access to X", that request has reached
+its last stop: you are the one holding \`request-access\`.
+
+Call it yourself with the URL the delegate named and one line on what the
+delegation was for. Do not re-delegate the same task hoping for a different
+result, and do not relay "the subagent couldn't access it" to the user as a
+finding. If the delegate named no URL, ask it for one, or request access to the
+host you were after.`;
+
 const CITATION_GUIDE_AGENT_SLUGS = new Set<string>(["ask-ai"]);
 const CITATION_GUIDE = `
 
@@ -1556,6 +1617,10 @@ export async function processTask(
   const proposeAgentRef: ProposeAgentRef = {};
   const describeAgentRef: DescribeAgentRef = {};
   const suggestConnectorsRef: SuggestConnectorsRef = {};
+  const requestAccessRef: RequestAccessRef = {};
+  // Credential blocker hit by an MCP tool (today: webfetch). Hoisted so the
+  // terminal callback can read it.
+  let mcpGetAuthRequired: (() => AuthRequiredDetail | null) | undefined;
   const blockedConnectors = new Set<string>();
   const emitBriefRef: EmitBriefRef = {};
   let callbackProvider = provider ?? "spaces";
@@ -1760,6 +1825,7 @@ export async function processTask(
       cleanup,
       getPendingActions,
       getAttachments: getMcpAttachments,
+      getAuthRequired: getMcpAuthRequired,
     } = await loadMcpToolsForUser(
       sessionId,
       sessionToken,
@@ -1777,6 +1843,7 @@ export async function processTask(
     // write-tool actions. See the hoisted `mcpGetPendingActions` declaration
     // near the top of this function for the full bug context.
     mcpGetPendingActions = getPendingActions;
+    mcpGetAuthRequired = getMcpAuthRequired;
     mcpCleanup = cleanup;
 
     // Task commands are parsed before custom-tool loading so command-owned
@@ -2868,6 +2935,9 @@ export async function processTask(
       // Same gate as describe-agent: a connector card is only worth posting
       // where a human is watching and can press Connect.
       allTools.push(buildSuggestConnectorsTool(suggestConnectorsRef, userId));
+      // Lets the agent raise a blocker no status code expresses: a 200 login
+      // wall, an SSO bounce.
+      allTools.push(buildRequestAccessTool(requestAccessRef));
     }
 
 
@@ -3711,6 +3781,11 @@ export async function processTask(
       agentSlug && CITATION_GUIDE_AGENT_SLUGS.has(agentSlug)
         ? CITATION_GUIDE
         : "";
+    // Same condition that registers the tool, so the model is never told to
+    // call something it was not given.
+    const accessGuide = describeAgentAvailable
+      ? REQUEST_ACCESS_GUIDE + (subagentTools.length > 0 ? DELEGATED_ACCESS_GUIDE : "")
+      : "";
     // Digital Twin mention flow runs with the agent's CONFIGURED system prompt
     // (systemPromptOverride), so the twin_deliver mandate baked into
     // buildSystemPrompt's fallback never reaches it — the model was never told
@@ -3759,8 +3834,8 @@ export async function processTask(
       ? `\n\n## Authoritative SDLC Run Context\n\nThe platform verified this immutable run context. Use these exact IDs and repository coordinates; never infer or replace them. Runtime credentials are intentionally absent.\n\n\`\`\`json\n${JSON.stringify({ ...trustedSdlcContext, interactiveGrant: undefined }, null, 2)}\n\`\`\``
       : "";
     const effectiveSystemPrompt = ((channelId
-      ? `${basePrompt}${citationGuide}${SPACES_MENTION_GUIDE}`
-      : `${basePrompt}${citationGuide}`) + authoritativeSdlcContext) + twinMandate + experimentGuide;
+      ? `${basePrompt}${citationGuide}${accessGuide}${SPACES_MENTION_GUIDE}`
+      : `${basePrompt}${citationGuide}${accessGuide}`) + authoritativeSdlcContext) + twinMandate + experimentGuide;
     // Proof (twin mention flow only) that BOTH prompt changes actually reach the
     // model: the twin_deliver mandate + its who/where line in the SYSTEM prompt,
     // and the "@mentioned by" note in the USER-prompt context. Grep the run logs
@@ -4483,6 +4558,11 @@ export async function processTask(
       // A draft (terminal, normally recovered in the catch) wins over a profile
       // card if a turn somehow produced both — the decision surface matters more
       // than the description.
+      // Server-detected (401/403) outranks the agent's report: it needed no
+      // judgement and cannot be talked into existing by a hostile page.
+      ...((mcpGetAuthRequired?.() ?? requestAccessRef.value)
+        ? { pendingAuthGrant: mcpGetAuthRequired?.() ?? requestAccessRef.value }
+        : {}),
       ...(suggestConnectorsRef.value
         ? { pendingConnectorSuggestions: suggestConnectorsRef.value }
         : {}),

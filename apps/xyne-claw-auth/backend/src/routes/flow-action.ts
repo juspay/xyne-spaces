@@ -57,6 +57,13 @@ import { registerRunRecovery } from "../queue/run-recovery-worker.js";
 import { enqueueDelayedJob, enqueueCronJob, type ScheduledJobData } from "../queue/scheduled-jobs-queue.js";
 import { retryNowByToken, cancelProviderRetry } from "../queue/provider-retry-worker.js";
 
+import {
+  upsertHostCredential,
+  hostAllowedForCredentials,
+  hostGrantKey,
+  type HostCredentialScheme,
+} from "../lib/host-credentials.js";
+import { resolveAuthGrants } from "../lib/auth-grant-store.js";
 import { createLogger } from "../logger.js";
 const log = createLogger("flow-action");
 
@@ -1912,6 +1919,71 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
     // "Retry now" dispatches immediately + stops the poller; "Stop retrying"
     // deschedules it. Both only carry the retryToken; the re-dispatch payload
     // lives in redis under that token (provider-retry-worker).
+    /*
+     * Per-host credential collected from the Spaces access card. The chat card
+     * posts straight to /host-bindings; Spaces cannot, so the same write
+     * happens here. The credential is never logged or echoed back, and the card
+     * is replaced with plain text so the filled field leaves the thread.
+     */
+    if (actionType === "host-access") {
+      const host = String(data["host"] ?? "").trim().toLowerCase();
+      const hostUserId = data["userId"] as string | undefined;
+      const hostAgentSlug = data["agentSlug"] as string | undefined;
+      const hostChannelId = data["channelId"] as string | undefined;
+      const hostConversationId = (data["conversationId"] as string | undefined) ?? conversationId;
+      const hostSpacesAppId = data["spacesAppId"] as string | undefined;
+
+      if (!host || !hostUserId) {
+        res.status(400).json({ type: "error", message: "Missing host-access fields in flowJSON.data" } satisfies AppActionResponse);
+        return;
+      }
+      // Only the person the card was addressed to may answer it: anyone else
+      // pressing Save would store THEIR secret against the blocked user.
+      if (!callerUserId || callerUserId !== hostUserId) {
+        log.error(`[flow-action] host-access: unauthorized — caller ${callerUserId ?? "(none)"} != expected ${hostUserId}`);
+        res.status(403).json({ type: "error", message: "Unauthorized" } satisfies AppActionResponse);
+        return;
+      }
+      if (actionId !== "host-access-save") {
+        res.status(400).json({ type: "error", message: `Unknown host-access action: ${actionId}` } satisfies AppActionResponse);
+        return;
+      }
+      // Same policy the HTTP route enforces.
+      if (!hostAllowedForCredentials(host)) {
+        res.status(403).json({ type: "error", message: `Credentials cannot be bound to ${host}` } satisfies AppActionResponse);
+        return;
+      }
+
+      const credential = String((values as Record<string, unknown> | undefined)?.["credential"] ?? "").trim();
+      if (!credential) {
+        res.status(400).json({ type: "error", message: "Enter a token, API key or cookie." } satisfies AppActionResponse);
+        return;
+      }
+      const rawScheme = String((values as Record<string, unknown> | undefined)?.["scheme"] ?? "bearer");
+      const scheme: HostCredentialScheme =
+        rawScheme === "cookie" || rawScheme === "header" ? rawScheme : "bearer";
+
+      await upsertHostCredential({ userId: hostUserId, host, secret: credential, scheme });
+      const resumed = await resolveAuthGrants(hostUserId, hostGrantKey(host), {
+        conversationId: hostConversationId,
+      }).catch(() => 0);
+
+      resp = {
+        type: "close_screen",
+        finalMessage: resumed > 0 ? "Saved — picking up where I stopped." : "Saved.",
+      };
+      res.json(resp);
+      void replaceFlowCardWithText(
+        messageId, hostAgentSlug,
+        resumed > 0
+          ? `Saved your credentials for **${host}**. Picking up where I stopped.`
+          : `Saved your credentials for **${host}**. Ask me again and I'll use them.`,
+        hostConversationId, hostChannelId, hostSpacesAppId,
+      );
+      log.info(`[flow-action] host-access saved host=${host} by=${callerUserId} scheme=${scheme} resumed=${resumed}`);
+      return;
+    }
+
     if (actionType === "capacity-retry") {
       const retryToken = data["retryToken"] as string | undefined;
       const capUserId = data["userId"] as string | undefined;

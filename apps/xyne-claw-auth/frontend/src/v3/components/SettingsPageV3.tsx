@@ -28,6 +28,10 @@ import {
   exchangeCodexOauth,
   shareMyProviderCredential,
   listAgents,
+  listHostBindings,
+  updateHostBinding,
+  deleteHostBinding,
+  type HostBinding,
   type ProviderCredential,
   type SubagentRouting,
   type GitHubDeviceCode,
@@ -46,6 +50,7 @@ import {
   PlugIcon,
   CaretRightIcon,
   ShareNetworkIcon,
+  GlobeIcon,
 } from "@phosphor-icons/react";
 import type { AgentLight } from "../../lib/types";
 
@@ -193,6 +198,11 @@ export function SettingsPageV3() {
             onMutate={() => setRefreshKey((k) => k + 1)}
             onError={(msg) => setError(msg)}
             onSaving={(key) => setSaving(key)}
+          />
+
+          <ConnectedHostsSection
+            userId={auth.status === "authenticated" ? auth.user.id : ""}
+            onError={(msg) => setError(msg)}
           />
 
           <AdvancedSettingsSection />
@@ -1359,5 +1369,284 @@ function AdvancedSettingsSection() {
         </div>
       )}
     </section>
+  );
+}
+
+/* =================================================================== */
+/*  CONNECTED HOSTS SECTION                                             */
+/* =================================================================== */
+
+/**
+ * Sites the user's agents can reach using the user's own login.
+ *
+ * Not connectors, and deliberately not listed with them: a host credential
+ * launches no server and exposes no tools. Per-user with no org or admin view
+ * behind it, and the copy says so. The secret is write-only — replaceable,
+ * never displayed.
+ */
+function ConnectedHostsSection({ userId, onError }: { userId: string; onError: (msg: string) => void }) {
+  const [hosts, setHosts] = useState<HostBinding[]>([]);
+  const [agents, setAgents] = useState<AgentLight[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [editing, setEditing] = useState<string | null>(null);
+  const [confirming, setConfirming] = useState<string | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [h, a] = await Promise.all([
+        listHostBindings(),
+        listAgents(userId).catch(() => [] as AgentLight[]),
+      ]);
+      setHosts(h);
+      setAgents(a);
+    } catch (err) {
+      onError(err instanceof Error ? err.message : "Failed to load connected hosts");
+    } finally {
+      setLoading(false);
+    }
+  }, [userId, onError]);
+
+  useEffect(() => { void load(); }, [load]);
+
+  const remove = async (host: string) => {
+    setBusy(host);
+    try {
+      await deleteHostBinding(host);
+      setConfirming(null);
+      await load();
+    } catch (err) {
+      onError(err instanceof Error ? err.message : "Failed to remove");
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  return (
+    <section>
+      <div className="mb-4">
+        <div className="flex items-center gap-2">
+          <GlobeIcon size={16} className="text-xyne-fg-secondary" />
+          <h2 className="text-sm font-[550] text-xyne-fg-primary">Connected Hosts</h2>
+        </div>
+        <p className="mt-0.5 text-[13px] text-xyne-fg-muted">
+          Sites your agents can reach using your login. Only you can see or change these — not
+          your teammates, and not an admin.
+        </p>
+      </div>
+
+      {loading ? (
+        <div className="space-y-2">
+          {[1, 2].map((i) => (
+            <div key={i} className="h-14 animate-pulse rounded-lg border border-xyne-border-subtle bg-xyne-surface-subtle" />
+          ))}
+        </div>
+      ) : hosts.length === 0 ? (
+        <div className="rounded-lg border border-dashed border-xyne-border px-4 py-6 text-center text-[13px] text-xyne-fg-muted">
+          Nothing connected yet. When an agent hits a site that needs your login, it will ask —
+          and whatever you grant shows up here.
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {hosts.map((h) => (
+            <div key={h.host} className="rounded-lg border border-xyne-border-subtle bg-xyne-surface">
+              <div className="flex items-center gap-3 px-3 py-2.5">
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <span className="truncate text-[13px] font-medium text-xyne-fg-primary">{h.host}</span>
+                    <Badge
+                      as="span"
+                      size="sm"
+                      variant={h.origin === "oauth" ? "success" : "neutral"}
+                      label={h.origin === "oauth" ? "Signed in" : "Token"}
+                    />
+                    {h.expired && <Badge as="span" size="sm" variant="error" label="Expired" />}
+                  </div>
+                  <div className="mt-0.5 truncate text-[12px] text-xyne-fg-muted">
+                    {describeBinding(h, agents)}
+                  </div>
+                </div>
+                <Button variant="ghost" size="sm" onClick={() => setEditing(editing === h.host ? null : h.host)}>
+                  {editing === h.host ? "Close" : "Edit"}
+                </Button>
+                {confirming === h.host ? (
+                  <>
+                    <Button variant="destructive" size="sm" disabled={busy === h.host} onClick={() => { void remove(h.host); }}>
+                      {busy === h.host ? "Removing…" : "Confirm"}
+                    </Button>
+                    <Button variant="ghost" size="sm" onClick={() => setConfirming(null)}>Cancel</Button>
+                  </>
+                ) : (
+                  <Button variant="ghost" size="sm" onClick={() => setConfirming(h.host)}>Remove</Button>
+                )}
+              </div>
+
+              {confirming === h.host && (
+                <div className="border-t border-xyne-border-subtle px-3 py-2 text-[12px] text-xyne-fg-muted">
+                  {h.origin === "oauth"
+                    ? `This also revokes the token at ${h.host}, so it stops working everywhere — not just here.`
+                    : `Your agents will stop being able to reach ${h.host}.`}
+                </div>
+              )}
+
+              {editing === h.host && (
+                <HostBindingEditor
+                  binding={h}
+                  agents={agents}
+                  onDone={() => { setEditing(null); void load(); }}
+                  onError={onError}
+                />
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+/** One line of plain English about who and what a credential covers. */
+function describeBinding(h: HostBinding, agents: AgentLight[]): string {
+  const parts: string[] = [];
+  parts.push(
+    h.scheme === "cookie" ? "Sent as a cookie"
+      : h.scheme === "header" ? `Sent as ${h.headerName ?? "a custom header"}`
+        : "Sent as a bearer token",
+  );
+  if (h.agentSlugs.length === 0) {
+    parts.push("all your agents");
+  } else {
+    const named = h.agentSlugs.map((slug) => agents.find((a) => a.slug === slug)?.name ?? slug);
+    parts.push(named.length === 1 ? `${named[0]} only` : `${named.length} agents`);
+  }
+  if (h.expiresAt && !h.expired) parts.push(`expires ${new Date(h.expiresAt).toLocaleDateString()}`);
+  if (h.lastUsedAt) parts.push(`last used ${new Date(h.lastUsedAt).toLocaleDateString()}`);
+  if (h.label) parts.push(h.label);
+  return parts.join(" · ");
+}
+
+function HostBindingEditor({
+  binding,
+  agents,
+  onDone,
+  onError,
+}: {
+  binding: HostBinding;
+  agents: AgentLight[];
+  onDone: () => void;
+  onError: (msg: string) => void;
+}) {
+  const [credential, setCredential] = useState("");
+  const [scheme, setScheme] = useState(binding.scheme);
+  const [headerName, setHeaderName] = useState(binding.headerName ?? "X-API-Key");
+  const [label, setLabel] = useState(binding.label ?? "");
+  const [allAgents, setAllAgents] = useState(binding.agentSlugs.length === 0);
+  const [slugs, setSlugs] = useState<string[]>(binding.agentSlugs);
+  const [saving, setSaving] = useState(false);
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      // Only what changed is sent; the backend writes only what it receives, so
+      // an untouched secret stays untouched.
+      await updateHostBinding(binding.host, {
+        ...(credential.trim() ? { credential: credential.trim() } : {}),
+        ...(scheme !== binding.scheme ? { scheme } : {}),
+        ...(scheme === "header" ? { headerName } : {}),
+        label: label.trim() || null,
+        agentSlugs: allAgents ? [] : slugs,
+      });
+      onDone();
+    } catch (err) {
+      onError(err instanceof Error ? err.message : "Failed to save");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="space-y-3 border-t border-xyne-border-subtle px-3 py-3">
+      <div>
+        <label className="mb-1 block text-[12px] font-medium text-xyne-fg-secondary">
+          Replace credential
+        </label>
+        <input
+          type="password"
+          value={credential}
+          onChange={(e) => setCredential(e.target.value)}
+          placeholder="Leave blank to keep the current one"
+          className="w-full rounded border border-xyne-border-subtle bg-xyne-surface px-2 py-1.5 text-[12px]"
+        />
+        <p className="mt-1 text-[11px] text-xyne-fg-muted">
+          The stored value is never shown — it can only be replaced.
+          {binding.origin === "oauth" && " Pasting one here turns this into a manual token, and it will stop renewing itself."}
+        </p>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <select
+          value={scheme}
+          onChange={(e) => setScheme(e.target.value as HostBinding["scheme"])}
+          className="rounded border border-xyne-border-subtle bg-xyne-surface px-2 py-1.5 text-[12px]"
+        >
+          <option value="bearer">Authorization: Bearer</option>
+          <option value="header">Custom header</option>
+          <option value="cookie">Cookie</option>
+        </select>
+        {scheme === "header" && (
+          <input
+            value={headerName}
+            onChange={(e) => setHeaderName(e.target.value)}
+            placeholder="Header name"
+            className="w-40 rounded border border-xyne-border-subtle bg-xyne-surface px-2 py-1.5 text-[12px]"
+          />
+        )}
+        <input
+          value={label}
+          onChange={(e) => setLabel(e.target.value)}
+          placeholder="Note (optional)"
+          className="min-w-0 flex-1 rounded border border-xyne-border-subtle bg-xyne-surface px-2 py-1.5 text-[12px]"
+        />
+      </div>
+
+      <div>
+        <label className="mb-1.5 block text-[12px] font-medium text-xyne-fg-secondary">
+          Which agents may use it
+        </label>
+        <label className="flex items-center gap-2 text-[12px] text-xyne-fg-primary">
+          <input type="checkbox" checked={allAgents} onChange={(e) => setAllAgents(e.target.checked)} />
+          All my agents
+        </label>
+        {!allAgents && (
+          <div className="mt-1.5 max-h-36 space-y-1 overflow-y-auto rounded border border-xyne-border-subtle p-2">
+            {agents.length === 0 ? (
+              <div className="text-[11px] text-xyne-fg-muted">No agents to choose from.</div>
+            ) : agents.map((a) => (
+              <label key={a.slug} className="flex items-center gap-2 text-[12px] text-xyne-fg-primary">
+                <input
+                  type="checkbox"
+                  checked={slugs.includes(a.slug)}
+                  onChange={(e) =>
+                    setSlugs((prev) => (e.target.checked ? [...prev, a.slug] : prev.filter((x) => x !== a.slug)))
+                  }
+                />
+                {a.name}
+              </label>
+            ))}
+          </div>
+        )}
+        <p className="mt-1 text-[11px] text-xyne-fg-muted">
+          Narrowing this is the difference between lending one agent your session and arming
+          every agent you run with it.
+        </p>
+      </div>
+
+      <div className="flex gap-2">
+        <Button variant="primary" size="sm" disabled={saving} onClick={() => { void save(); }}>
+          {saving ? "Saving…" : "Save changes"}
+        </Button>
+      </div>
+    </div>
   );
 }

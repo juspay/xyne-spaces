@@ -1,9 +1,11 @@
+import { registerAuthGrant } from "../lib/auth-grant-store.js";
 import { isAgentOwnedRun } from "../lib/agent-owned-runs.js";
 import { applyAiScreenCommand } from "../lib/ai-screen-commands.js";
 import { parseSlashCommand } from "../lib/parseSlashCommand.js";
 import { screenUploadFiles } from "../lib/upload-screening.js";
 import { Router, type Request, type RequestHandler, type Response } from "express";
 import { errMsg } from "../lib/errors.js";
+import type { AuthRequiredDetail } from "xyne-claw-shared";
 import { SDLC_AGENT_SLUG, isAgentInvocableBy, IMMEDIATE_TASK_COMMAND_RE, parseLocalSandboxCommand } from "xyne-claw-shared";
 import { recordDeliveredArtifacts } from "../lib/delivered-artifacts.js";
 import { recordUploadedArtifacts } from "../lib/conversation-artifact-signals.js";
@@ -2285,11 +2287,14 @@ internalRouter.post("/:slug/chat/:convId/callback", async (req: Request<{ slug: 
   // from query because the callback may land on a different pod than the SSE
   // owner, so pendingStreams may not have it locally.
   const queryAssistantMessageId = req.query["assistantMessageId"] as string | undefined;
-  const { result: rawResult, status, error, pendingActions, pendingResponses, sessionId, userId, toolsUsed, toolInvocations, tokenUsage, attachments, llmCitations, provider, model, fastMode } = req.body as {
+  const { result: rawResult, status, error, pendingActions, pendingResponses, sessionId, userId, toolsUsed, toolInvocations, tokenUsage, attachments, llmCitations, provider, model, fastMode, pendingAuthGrant } = req.body as {
     result?: string;
     status?: string;
     error?: string;
     pendingActions?: Array<Record<string, unknown>>;
+    /** The run stopped needing a credential. webhook.ts handles the Spaces
+     *  surface; this is the same signal for claw's own chat. */
+    pendingAuthGrant?: AuthRequiredDetail;
     pendingResponses?: Array<{ responseId?: string; message?: string }>;
     sessionId?: string;
     userId?: string;
@@ -2315,6 +2320,56 @@ internalRouter.post("/:slug/chat/:convId/callback", async (req: Request<{ slug: 
         ? pendingResponses.map((pr) => pr.message ?? "").filter(Boolean).join("\n\n")
         : rawResult;
   const callbackOrgId = await resolveCallbackOrgId(req, sessionId, userId);
+
+  /*
+   * Native-chat delivery for a credential blocker. webhook.ts posts a Flow card
+   * into Spaces; this is the second renderer for the same signal, riding the
+   * `pendingActions` column because the chat UI drops `ui-widget` SSE events.
+   *
+   * The entry carries no `signature`, so the write-approval path — which
+   * requires one — never picks it up.
+   */
+  const authGrantAction: Record<string, unknown> | null =
+    pendingAuthGrant && userId
+      ? {
+          kind: "connect",
+          serverType: pendingAuthGrant.serverType,
+          providerLabel: pendingAuthGrant.providerLabel,
+          reason: pendingAuthGrant.reason,
+          host: pendingAuthGrant.host,
+          // Needed twice over: a tenanted host publishes metadata under the
+          // path, and the callback replays this URL to check the new token.
+          ...(pendingAuthGrant.url ? { url: pendingAuthGrant.url } : {}),
+          ...(pendingAuthGrant.reason_text ? { reasonText: pendingAuthGrant.reason_text } : {}),
+        }
+      : null;
+  if (pendingAuthGrant && userId && callbackOrgId) {
+    // Replay the user's ORIGINAL words on resume — the run row is the only
+    // place they survive once this callback returns.
+    const originalTask = await agentRunRepository
+      .findBySessionId(sessionId ?? "")
+      .then((r) => r?.task ?? "")
+      .catch(() => "");
+    void registerAuthGrant({
+      userId,
+      serverType: pendingAuthGrant.serverType,
+      providerLabel: pendingAuthGrant.providerLabel,
+      host: pendingAuthGrant.host,
+      url: pendingAuthGrant.url,
+      ...(pendingAuthGrant.reason_text ? { reasonText: pendingAuthGrant.reason_text } : {}),
+      redispatch: {
+        userId,
+        task: originalTask,
+        agentSlug: req.params.slug,
+        orgId: callbackOrgId,
+        conversationId: req.params.convId,
+        channelId: "",
+        surface: "chat",
+      },
+    });
+  }
+  const effectivePendingActions =
+    authGrantAction ? [...(pendingActions ?? []), authGrantAction] : pendingActions;
 
   // Per-agent citation toggle (see webhook.ts for the same pattern). Reads
   // `config.replyOptions.includeCitations` on the agent row; defaults to
@@ -2452,7 +2507,7 @@ internalRouter.post("/:slug/chat/:convId/callback", async (req: Request<{ slug: 
     content: finalContent,
     status: finalStatus,
     ...(errorCode ? { errorCode } : {}),
-    ...(pendingActions?.length ? { pendingActions } : {}),
+    ...(effectivePendingActions?.length ? { pendingActions: effectivePendingActions } : {}),
     persisted: persistedFlag,
     ...(persistedAttachments.length ? { persistedAttachments } : {}),
   };
@@ -2479,7 +2534,7 @@ internalRouter.post("/:slug/chat/:convId/callback", async (req: Request<{ slug: 
       status: finalStatus,
       ...(errorCode ? { errorCode } : {}),
       ...(sessionId ? { sessionId } : {}),
-      ...(pendingActions?.length ? { pendingActions } : {}),
+      ...(effectivePendingActions?.length ? { pendingActions: effectivePendingActions } : {}),
       persisted: persistedFlag,
       ...(persistedAttachments.length ? { persistedAttachments } : {}),
     });

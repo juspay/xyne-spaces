@@ -14,6 +14,7 @@ model User {
   createdAt             DateTime                   @default(now())
   updatedAt             DateTime                   @updatedAt
   connections           UserMcpConnection[]
+  hostCredentials       UserHostCredential[]
   identities            GatewayIdentity[]
   agents                Agent[]
   agentConfigs          UserAgentConfig[]
@@ -1920,6 +1921,42 @@ model GlobalMcpCredentials {
   @@map("global_mcp_credentials")
 }
 
+/// Per-user credential for reaching ONE external hostname with `webfetch`.
+///
+/// Deliberately NOT an McpServer + UserMcpConnection pair: a host credential
+/// launches no server and exposes no tools, and modelling it as a connector
+/// leaked every bound hostname into everyone's catalogue on a shared row.
+/// One row per (user, host), so there is no cascade and no org fallback.
+model UserHostCredential {
+  id            String    @id @default(cuid())
+  userId        String
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// Exact lowercase hostname; matching is never by suffix, so
+  /// `api.example.com.attacker.net` cannot collect `api.example.com`'s secret.
+  host          String
+  /// How the secret is sent: "bearer" | "header" | "cookie".
+  scheme        String    @default("bearer")
+  /// Header name when scheme = "header" (e.g. X-API-Key).
+  headerName    String?
+  encryptedCred String    @db.Text
+  iv            String
+  authTag       String
+  /// Empty = every agent this user runs. Non-empty = only these slugs, so a
+  /// session cookie can be scoped to the one agent that needs it.
+  agentSlugs    String[]  @default([])
+  /// Optional user-facing note, e.g. "read-only PAT for the XYNE project".
+  label         String?
+  /// An aged-out credential re-prompts rather than failing runs with a 401.
+  expiresAt     DateTime?
+  lastUsedAt    DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@unique([userId, host])
+  @@index([userId])
+  @@map("user_host_credentials")
+}
+
 model UserMcpConnection {
   id             String    @id @default(cuid())
   userId         String
@@ -2919,4 +2956,45 @@ model ConversationArtifact {
   @@index([refService, refId])
   @@index([orgId])
   @@map("conversation_artifacts")
+}
+
+/// A dynamically-registered OAuth client (RFC 7591) for one host the agents got
+/// blocked on, plus the discovery result that produced it.
+///
+/// Shared across users, and safe to share because every field comes from
+/// metadata the host publishes about itself. Registering per user would pile up
+/// client registrations on somebody else's authorization server.
+///
+/// No user credential lives here: `encryptedSecret` is the CLIENT secret, which
+/// most servers never issue because we register as a public client using PKCE.
+model HostOAuthClient {
+  id                    String   @id @default(cuid())
+  /// Resource hostname the discovery started from, lowercase and exact.
+  host                  String   @unique
+  issuer                String
+  issuerHost            String
+  authorizationEndpoint String
+  tokenEndpoint         String
+  registrationEndpoint  String
+  /// RFC 7009, when published. Without it, "Remove" leaves a live token at the
+  /// provider until natural expiry.
+  revocationEndpoint    String?
+  /// RFC 8707 resource indicator published by the protected resource, if any.
+  resource              String?
+  /// Space-delimited scopes to request, chosen at registration time.
+  scope                 String?
+  clientId              String
+  encryptedSecret       String?  @db.Text
+  iv                    String?
+  authTag               String?
+  /// Re-register when our callback URL changes, rather than sending an
+  /// authorize request the server rejects for an unregistered redirect_uri.
+  redirectUri           String
+  /// Metadata is re-validated past a TTL so a rotated endpoint is picked up.
+  discoveredAt          DateTime @default(now())
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  @@index([issuerHost])
+  @@map("host_oauth_clients")
 }
