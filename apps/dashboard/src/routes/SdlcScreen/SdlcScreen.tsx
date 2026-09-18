@@ -96,8 +96,6 @@ import { CallTriggerModal } from '../../components/Call/CallTriggerModal/CallTri
 import { useAuthContextValues } from '../../hooks/useAuth';
 import { xyneAIActor, type ThreadInfo } from '../../machines/xyneAIMachine';
 import { apiInstance, getAttachmentStreamUrl } from '../../services/clients/apiClient';
-import { openLink } from '../../utils/openLink';
-import { openLinkFromSdlcFrame } from './useSdlcFrameBridge';
 import { searchService } from '../../services/searchService';
 import { cn } from '../../utils/classNames';
 import { queries } from '../../zero/queries';
@@ -1252,7 +1250,22 @@ export default function SdlcScreen(): ReactElement {
     navigateWithinSdlc(`/sdlc/${channelId}/${section}`, `?${search.toString()}`);
   };
 
-  const openFolder = openFolderId ? (folderById.get(openFolderId) ?? null) : null;
+  const openFolder = openFolderId
+    ? (folderById.get(openFolderId) ??
+      (selectedTrack && openFolderId === selectedTrack.id
+        ? { id: selectedTrack.id, name: selectedTrack.name }
+        : null))
+    : null;
+  /** True while the page open is the track's own, rather than a folder inside it. */
+  const openFolderIsTrack = Boolean(openFolder && openFolder.id === selectedTrackId);
+  /** Names a parent for the mutators, which care whether it is a track. */
+  const folderPageParent = (parent: {
+    id: string;
+    name: string;
+  }): { type: 'TRACK' | 'FOLDER'; id: string; name: string } =>
+    parent.id === selectedTrackId
+      ? { type: 'TRACK', id: parent.id, name: parent.name }
+      : { type: 'FOLDER', id: parent.id, name: parent.name };
   const activeFolderTab: FolderTab | null = openFolder
     ? selectedCanvasId
       ? { kind: 'CANVAS', id: selectedCanvasId }
@@ -1333,12 +1346,16 @@ export default function SdlcScreen(): ReactElement {
     );
   };
 
-  const openSdlcLink = (url: string, event?: { metaKey: boolean; ctrlKey: boolean }): void => {
-    // One way out of the lane: the host opens it in the app, unless the reader
-    // explicitly asked for a window of their own.
-    const wantsExternal = Boolean(event && (event.metaKey || event.ctrlKey));
-    if (!wantsExternal && openLinkFromSdlcFrame(url)) return;
-    openLink(url, event ?? null);
+  /** Opens a previewed item on the page of whatever holds it — its folder, or
+   *  the track's own page when it is filed straight on the track. */
+  const openPreviewedItem = (
+    kind: 'LINK' | 'ATTACHMENT',
+    id: string,
+    event?: { metaKey: boolean; ctrlKey: boolean },
+  ): void => {
+    const parentId = parentFolderOf.get(`${kind}:${id}`) ?? selectedTrackId;
+    if (!parentId) return;
+    openFolderPage(parentId, { kind, id }, event);
   };
 
   /** A track's own page, with its conversations alongside it. */
@@ -2889,16 +2906,11 @@ export default function SdlcScreen(): ReactElement {
                 }}
                 onOpenFolderPage={(folder, event) => openFolderPage(folder.id, null, event)}
                 onOpenItem={(item, parent, event) => {
-                  // Inside a folder it opens as a tab, like an artifact opens
-                  // its page. Filed straight on the track there is no such page,
-                  // so the link or file opens where it actually lives.
-                  if (parent.type === 'FOLDER') {
-                    openFolderPage(parent.id, { kind: item.kind, id: item.id }, event);
-                    return;
-                  }
-                  const href =
-                    item.kind === 'LINK' ? linkById.get(item.id)?.url : fileById.get(item.id)?.url;
-                  if (href) openSdlcLink(href, event);
+                  // It opens as a tab on the page of whatever holds it. A track
+                  // holds its own page — the root folder, named after the track
+                  // — so an item filed straight on the track opens there rather
+                  // than being handed to the host with nowhere of its own to be.
+                  openFolderPage(parent.id, { kind: item.kind, id: item.id }, event);
                 }}
                 onDiscussFolder={openFolderConversations}
                 onDiscussTrack={() => openConversations()}
@@ -2927,14 +2939,14 @@ export default function SdlcScreen(): ReactElement {
             {previewItem?.kind === 'LINK' && linkById.get(previewItem.id) && (
               <SdlcFinderItemPreview
                 item={{ kind: 'LINK', link: linkById.get(previewItem.id) as SdlcFinderLink }}
-                onOpen={(href, event) => openSdlcLink(href, event)}
+                onOpen={(_href, event) => openPreviewedItem('LINK', previewItem.id, event)}
                 onDiscuss={openItemConversations}
               />
             )}
             {previewItem?.kind === 'ATTACHMENT' && fileById.get(previewItem.id) && (
               <SdlcFinderItemPreview
                 item={{ kind: 'ATTACHMENT', file: fileById.get(previewItem.id) as SdlcFinderFile }}
-                onOpen={(href, event) => openSdlcLink(href, event)}
+                onOpen={(_href, event) => openPreviewedItem('ATTACHMENT', previewItem.id, event)}
                 onDiscuss={openItemConversations}
               />
             )}
@@ -3588,6 +3600,7 @@ export default function SdlcScreen(): ReactElement {
                   key={openFolder.id}
                   channelId={channel.id}
                   folder={openFolder}
+                  rootType={openFolderIsTrack ? 'TRACK' : 'FOLDER'}
                   maps={folderPageMaps}
                   activeTab={activeFolderTab}
                   onOpenTab={tab => openFolderPage(openFolder.id, tab)}
@@ -3595,6 +3608,12 @@ export default function SdlcScreen(): ReactElement {
                     // The chat icon means the same thing on every row: open this
                     // and show its conversations.
                     if (item.type === 'FOLDER') {
+                      // The root row of a track's page is the track itself, and
+                      // a track's conversations are not a folder's.
+                      if (item.id === selectedTrackId) {
+                        openConversations();
+                        return;
+                      }
                       openItemConversations({ type: 'FOLDER', id: item.id, name: item.name });
                       return;
                     }
@@ -3606,19 +3625,21 @@ export default function SdlcScreen(): ReactElement {
                       ? (activeFolderDiscussion?.id ?? discussionOwner?.canvasId ?? null)
                       : null
                   }
-                  onNewFolder={parent =>
-                    setNewFolderParent({ type: 'FOLDER', id: parent.id, name: parent.name })
-                  }
-                  onAddItem={(tab, parent) =>
-                    openAddItemDialog(tab, { type: 'FOLDER', id: parent.id, name: parent.name })
-                  }
+                  onNewFolder={parent => setNewFolderParent(folderPageParent(parent))}
+                  onAddItem={(tab, parent) => openAddItemDialog(tab, folderPageParent(parent))}
                   tabsContainer={folderTabsSlot}
                   onAddLink={addBrowsedLink}
                   parentFolderOf={parentFolderOf}
                   onMoveItem={(item, parentFolderId) =>
                     void call(
                       `sdlc-move-${item.id}`,
-                      () => moveItemAction(item, { type: 'FOLDER', id: parentFolderId }),
+                      () =>
+                        moveItemAction(
+                          item,
+                          parentFolderId === selectedTrackId
+                            ? { type: 'TRACK', id: parentFolderId }
+                            : { type: 'FOLDER', id: parentFolderId },
+                        ),
                       'Moved',
                     )
                   }

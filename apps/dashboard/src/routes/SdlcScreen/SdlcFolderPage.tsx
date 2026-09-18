@@ -168,7 +168,14 @@ interface TreeHandlers {
  * it expands, it can be added to, and it has its own conversations.
  */
 function TreeRow(
-  props: TreeHandlers & { node: TreeNode; depth: number; defaultExpanded?: boolean },
+  props: TreeHandlers & {
+    node: TreeNode;
+    depth: number;
+    defaultExpanded?: boolean;
+    /** What this row's children hang off. A track only for the root row of a
+     *  track's own page; a folder everywhere else. */
+    childrenParentType?: 'TRACK' | 'FOLDER';
+  },
 ): ReactElement {
   const expanded = useUserPreference('sdlcFolderTreeExpanded');
   const { node } = props;
@@ -296,7 +303,12 @@ function TreeRow(
         )}
       </div>
       {isOpen && (
-        <TreeLevel {...props} parentType='FOLDER' parentId={node.id} depth={props.depth + 1} />
+        <TreeLevel
+          {...props}
+          parentType={props.childrenParentType ?? 'FOLDER'}
+          parentId={node.id}
+          depth={props.depth + 1}
+        />
       )}
     </div>
   );
@@ -444,6 +456,8 @@ function TabLabel(props: { tab: FolderTab; maps: Maps }): ReactElement {
 export function SdlcFolderPage(props: {
   channelId: string;
   folder: { id: string; name: string };
+  /** A track's own page is this page with the track as its root. */
+  rootType?: 'TRACK' | 'FOLDER';
   maps: Maps;
   activeTab: FolderTab | null;
   onOpenTab: (tab: FolderTab | null) => void;
@@ -756,6 +770,7 @@ export function SdlcFolderPage(props: {
             node={{ kind: 'FOLDER', id: props.folder.id, name: props.folder.name }}
             depth={0}
             defaultExpanded
+            childrenParentType={props.rootType ?? 'FOLDER'}
             channelId={props.channelId}
             maps={props.maps}
             activeTab={active}
