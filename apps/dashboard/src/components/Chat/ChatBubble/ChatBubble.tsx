@@ -831,14 +831,12 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
     [message.attachments],
   );
 
+  // The fetch is deliberately not awaited before copyImage: awaiting would drop the
+  // click's transient user activation and the browser would refuse the clipboard write.
   const handleCopyImage = (): void => {
     const attachment = imageAttachments[0];
     if (!attachment) return;
-    fetchFile(attachment.id, attachment.originalFilename, attachment.mimetype)
-      .then(file => copyImage(file))
-      .catch(() => {
-        toast.error('Failed to copy image');
-      });
+    void copyImage(fetchFile(attachment.id, attachment.originalFilename, attachment.mimetype));
   };
 
   const canModifyMessage = user?.id ? isMessageEditable(message, user.id) : false;

@@ -458,17 +458,20 @@ const ActionTray: React.FC<{
   const { copyImage } = useClipboard();
   const [copied, setCopied] = useState(false);
 
-  const handleCopyImage = async (): Promise<void> => {
+  // Do NOT await the fetch before calling copyImage: awaiting here drops the click's
+  // transient user activation and the browser then refuses the clipboard write.
+  // copyImage takes the promise and starts the write synchronously.
+  const handleCopyImage = (): void => {
     if (!imageBlobUrl) return;
-    try {
-      const response = await axios.get<Blob>(imageBlobUrl, { responseType: 'blob' });
-      const blob = response.data;
-      await copyImage(blob);
+    const blobPromise = axios
+      .get<Blob>(imageBlobUrl, { responseType: 'blob' })
+      .then(response => response.data);
+
+    void copyImage(blobPromise).then(copiedOk => {
+      if (!copiedOk) return;
       setCopied(true);
       window.setTimeout(() => setCopied(false), 1200);
-    } catch {
-      toast.error('Failed to copy image');
-    }
+    });
   };
 
   return (
@@ -479,7 +482,7 @@ const ActionTray: React.FC<{
             <button
               onClick={e => {
                 e.stopPropagation();
-                void handleCopyImage();
+                handleCopyImage();
               }}
               className='p-2 rounded-md text-foreground hover:bg-muted transition-colors'
               title='Copy Image'
