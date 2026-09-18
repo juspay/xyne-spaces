@@ -155,6 +155,7 @@ import { useAuth, useAuthContextValues } from '../../hooks/useAuth';
 import { usePlatform } from '../../hooks/usePlatform';
 import { TicketListView } from '../../components/Tickets/TicketListView';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
+import { useRacedQuery } from '../../hooks/useRacedQuery';
 import { SupportKanbanBoard } from './SupportKanbanBoard';
 import { SupportTicketTable } from './SupportTicketTable';
 import { BoardType, FormContextType, TicketPriority, parseFieldOptionValues } from '@xyne/shared';
@@ -4728,7 +4729,11 @@ export const SupportTicketDetail = ({
     ],
   );
 
-  const [allEmails] = useCachedQuery(
+  // Raced against the REST execution of the same query: whichever resolves
+  // first paints, and Zero takes over permanently once it reports complete.
+  // The thread is the user-visible blocker on opening a ticket, so a cold
+  // client shows mail from HTTP instead of waiting on IVM hydration.
+  const [allEmails] = useRacedQuery(
     queries.getEmailsForConversationsV2({
       conversationIds: allConversationIds,
       channelId: routeChannelId,

@@ -8,7 +8,7 @@ import { Popover } from '../../ui/Popover/Popover';
 import { TicketListRow } from './TicketListRow';
 import { queries } from '../../../zero/queries';
 import { useShortcut } from '../../../shortcuts';
-import { useCachedQuery } from '../../../hooks/useCachedQuery';
+import { useRacedQuery } from '../../../hooks/useRacedQuery';
 import { useAuthContextValues } from '../../../hooks/useAuth';
 import { dataLoadDuration, safeRecordMetric } from '../../../services/otel';
 import { logger, Event } from '../../../utils/logger';
@@ -407,7 +407,12 @@ export const TicketListView = function TicketListView({
   );
 
   const pageStart = pageCursors[pageIndex] ?? null;
-  const [firstPage, firstPageDetails] = useCachedQuery(
+  // Only the base page races the REST endpoint. Later pages and the adaptive
+  // fetch-window escalations (fetchLimit doubling) each change `args`, so they
+  // would each start a fresh race — one HTTP round trip per rung, for rows the
+  // user never waits on (escalations resolve client-side in tens of ms).
+  const isBasePage = pageStart === null && fetchLimit === PAGE_SIZE + 1;
+  const [firstPage, firstPageDetails] = useRacedQuery(
     queries.supportTicketsPageV4({
       channelId,
       isMember,
@@ -436,6 +441,7 @@ export const TicketListView = function TicketListView({
       start: pageStart,
       dir: 'forward',
     }),
+    { raceEnabled: isBasePage },
   );
 
   const loadStartTimeRef = useRef<number | null>(Date.now());
