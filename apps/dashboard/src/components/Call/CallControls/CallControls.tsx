@@ -134,7 +134,7 @@ interface CallControlsProps {
   hidePresentationMode?: boolean | undefined;
   /** Full view: left-hand meeting details (clock, title), Meet's bottom-left corner. */
   infoSlot?: React.ReactNode;
-  /** Full view: raise-hand lives in the bar, as in Meet. */
+  /** Full view: raise / lower hand, offered in the ⋮ menu. */
   isHandRaised?: boolean | undefined;
   onToggleHandRaise?: (() => void) | undefined;
 }
@@ -675,20 +675,6 @@ export function CallControls({
     </div>
   );
 
-  const handRaiseControl = onToggleHandRaise && (
-    <ControlButton
-      sizing={sizing}
-      icon={Hand}
-      label={isHandRaised ? 'Lower hand' : 'Raise hand'}
-      tone={isHandRaised ? 'active' : 'neutral'}
-      aria-pressed={isHandRaised}
-      onClick={onToggleHandRaise}
-      data-track-category='CALLS'
-      data-track-name='TOGGLE_HAND_RAISE'
-      data-track-metadata={JSON.stringify({ raised: !isHandRaised, callId })}
-    />
-  );
-
   const leaveControl = (
     <ControlButton
       sizing={sizing}
@@ -924,6 +910,18 @@ export function CallControls({
         sideOffset={12}
         className='w-64 rounded-xl border-white/10 bg-[#1e1f20] p-1 text-[#e3e3e3] shadow-2xl'
       >
+        {onToggleHandRaise && (
+          <DropdownMenuItem
+            onClick={onToggleHandRaise}
+            className={menuItemClass}
+            data-track-category='CALLS'
+            data-track-name='TOGGLE_HAND_RAISE'
+            data-track-metadata={JSON.stringify({ raised: !isHandRaised, callId })}
+          >
+            {menuIcon(Hand, isHandRaised)}
+            <span>{isHandRaised ? 'Lower hand' : 'Raise hand'}</span>
+          </DropdownMenuItem>
+        )}
         <DropdownMenuItem
           onClick={handleWhiteboardClick}
           className={cn(menuItemClass, isWhiteboardOpen && 'bg-white/10')}
@@ -962,18 +960,6 @@ export function CallControls({
 
         {/* Controls that live in the bar on wider screens */}
         <DropdownMenuSeparator className='bg-white/10 lg:hidden' />
-        {onToggleHandRaise && (
-          <DropdownMenuItem
-            onClick={onToggleHandRaise}
-            className={cn(menuItemClass, 'sm:hidden')}
-            data-track-category='CALLS'
-            data-track-name='TOGGLE_HAND_RAISE'
-            data-track-metadata={JSON.stringify({ raised: !isHandRaised, callId })}
-          >
-            {menuIcon(Hand, isHandRaised)}
-            <span>{isHandRaised ? 'Lower hand' : 'Raise hand'}</span>
-          </DropdownMenuItem>
-        )}
         {onToggleCallChat && (
           <DropdownMenuItem
             onClick={onToggleCallChat}
@@ -1041,7 +1027,6 @@ export function CallControls({
         <div className='hidden items-center gap-2 sm:flex sm:gap-3'>
           {recordingControl}
           {reactionsControl}
-          {handRaiseControl}
         </div>
         {annotateControl}
         {moreMenu}
