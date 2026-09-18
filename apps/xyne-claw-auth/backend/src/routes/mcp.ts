@@ -1601,17 +1601,34 @@ router.post("/:sessionId/mcp/call", async (req: Request<{ sessionId: string }>, 
         return;
       }
       try {
+        if (isWebfetch) {
+          const fetched = await handleWebfetch(params ?? {}, {
+            highLimit: tool === "webfetch_high_limit",
+            // Resolution is by hostname only: passing identity here never
+            // lets the model choose WHICH credential is used.
+            userId,
+            ...(agentSlug ? { agentSlug } : {}),
+          });
+          // `authRequired` rides alongside the content so xyne-claw can end
+          // the run on it without depending on the model to relay anything.
+          res.json({
+            success: true,
+            data: {
+              content: fetched.content,
+              ...(fetched.authRequired ? { authRequired: fetched.authRequired } : {}),
+            },
+          });
+          return;
+        }
         const content = isIntrospect
           ? await handleAgentIntrospect(tool, params ?? {}, sessionAgentOrgId, userId)
-          : isOrchestrator
-            ? await postAgentCallProposal(params ?? {}, {
-                userId,
-                sessionId: req.params.sessionId,
-                ...(agentSlug ? { agentSlug } : {}),
-                ...(spacesAppId ? { spacesAppId } : {}),
-                ...(sessionAgentOrgId ? { orgId: sessionAgentOrgId } : {}),
-              })
-            : await handleWebfetch(params ?? {}, { highLimit: tool === "webfetch_high_limit" });
+          : await postAgentCallProposal(params ?? {}, {
+              userId,
+              sessionId: req.params.sessionId,
+              ...(agentSlug ? { agentSlug } : {}),
+              ...(spacesAppId ? { spacesAppId } : {}),
+              ...(sessionAgentOrgId ? { orgId: sessionAgentOrgId } : {}),
+            });
         res.json({ success: true, data: { content } });
       } catch (err) {
         log.error(`[mcp/call] built-in tool error (${tool}):`, err);

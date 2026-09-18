@@ -1311,6 +1311,66 @@ export interface McpSuggestConnector {
  * from the catalog when Connect is pressed, so a card that has been sitting in
  * a thread cannot act on a connector that has since changed.
  */
+/**
+ * "I need your login for <host> to finish" — the Spaces access card.
+ *
+ * Separate from `buildMcpSuggestFlow` because a host credential has no row in
+ * the connector catalog, so resolving it there found nothing and the card was
+ * silently skipped. Built from the host itself, and inline, because sending
+ * someone to a settings page mid-thread is where the friction comes back.
+ */
+export function buildHostAccessFlow(context: {
+  host: string;
+  /** The agent's own account of what it was doing. Untrusted text — rendered, never executed. */
+  reasonText?: string;
+  screenKey: string;
+  agentSlug?: string;
+  userId: string;
+  conversationId?: string;
+  channelId?: string;
+}): FlowDefinition {
+  const why = context.reasonText?.trim();
+  return new FlowBuilder(`host-access-${context.screenKey}`)
+    .addHeading('h', `Access needed for ${context.host}`, 3)
+    .addText(
+      'why',
+      why
+        ? `${why}\n\nPaste a token, API key or cookie for **${context.host}** and I'll carry on from where I stopped.`
+        : `I need your login for **${context.host}** to finish this. Paste a token, API key or cookie and I'll carry on from where I stopped.`,
+    )
+    .addInput('credential', 'credential', {
+      type: 'password',
+      label: 'Credential',
+      placeholder: 'Token, API key or cookie',
+      required: true,
+      helperText: `Encrypted at rest, only ever sent to ${context.host}, and only you can see or change it.`,
+    })
+    .addSelect('scheme', 'scheme', {
+      label: 'Send it as',
+      defaultValue: 'bearer',
+      options: [
+        { label: 'Authorization: Bearer', value: 'bearer' },
+        { label: 'Cookie', value: 'cookie' },
+        { label: 'X-API-Key header', value: 'header' },
+      ],
+    })
+    .addButton(
+      'save',
+      'Save & continue',
+      { type: 'submit', actionId: 'host-access-save', successMessage: 'Saved — picking up where I stopped.' },
+      { variant: 'primary' },
+    )
+    .setData({
+      actionType: 'host-access',
+      host: context.host,
+      ...(context.agentSlug ? { agentSlug: context.agentSlug } : {}),
+      userId: context.userId,
+      ...(context.conversationId ? { conversationId: context.conversationId } : {}),
+      ...(context.channelId ? { channelId: context.channelId } : {}),
+    })
+    .build();
+}
+
 export function buildMcpSuggestFlow(context: {
   connectors: McpSuggestConnector[];
   title?: string;

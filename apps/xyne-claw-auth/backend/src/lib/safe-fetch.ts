@@ -27,8 +27,22 @@ export interface SafeFetchOptions {
   lookup?: ((hostname: string) => Promise<ResolvedAddress[]>) | undefined;
   maxRedirects?: number;
   maxResponseBytes?: number;
+  /**
+   * When the body exceeds `maxResponseBytes`, stop at the cap and return the
+   * bytes read so far with `x-safe-fetch-truncated: 1` set, instead of throwing
+   * `response-too-large`.
+   *
+   * Exists for webfetch, whose contract is "return the FIRST n bytes and say so
+   * loudly" — a large directory dump is still useful truncated, and failing the
+   * whole fetch would regress the behaviour its comments record as deliberate.
+   * Every other caller wants the throw, so this stays opt-in.
+   */
+  truncateOversizeBody?: boolean;
   timeoutMs?: number;
 }
+
+/** Set on a response whose body was cut short by `truncateOversizeBody`. */
+export const TRUNCATED_HEADER = "x-safe-fetch-truncated";
 
 const DEFAULT_MAX_RESPONSE_BYTES = 10 * 1024 * 1024;
 const DEFAULT_TIMEOUT_MS = 15_000;
@@ -204,7 +218,7 @@ function pinnedAgent(address: string, family: number): Agent {
   return new Agent({ connect: { lookup } });
 }
 
-function normalizeHeaders(source: RequestInit["headers"]): Record<string, string> {
+export function normalizeHeaders(source: RequestInit["headers"]): Record<string, string> {
   const out: Record<string, string> = {};
   if (!source) return out;
   if (source instanceof Headers) source.forEach((value, name) => { out[name] = value; });
@@ -221,9 +235,15 @@ function stripSensitiveHeaders(headers: Record<string, string>): Record<string, 
 }
 
 /** Read the body under a byte cap and hand back a detached, replayable Response. */
-async function bufferCapped(response: Response, maxBytes: number, url: string): Promise<Response> {
+async function bufferCapped(
+  response: Response,
+  maxBytes: number,
+  url: string,
+  truncateOversize = false,
+): Promise<Response> {
   const chunks: Buffer[] = [];
   let total = 0;
+  let truncated = false;
   if (response.body) {
     const reader = (response.body as ReadableStream<Uint8Array>).getReader();
     try {
@@ -231,17 +251,27 @@ async function bufferCapped(response: Response, maxBytes: number, url: string): 
         const { value, done } = await reader.read();
         if (done) break;
         if (!value) continue;
-        total += value.byteLength;
-        if (total > maxBytes) {
-          throw new SafeFetchError(`Response exceeded ${maxBytes} bytes`, "response-too-large", url);
+        if (total + value.byteLength > maxBytes) {
+          if (!truncateOversize) {
+            throw new SafeFetchError(`Response exceeded ${maxBytes} bytes`, "response-too-large", url);
+          }
+          // Keep exactly up to the cap, then stop reading. The `finally` below
+          // cancels the stream so the socket is released rather than drained.
+          const keep = maxBytes - total;
+          if (keep > 0) chunks.push(Buffer.from(value.subarray(0, keep)));
+          truncated = true;
+          break;
         }
+        total += value.byteLength;
         chunks.push(Buffer.from(value));
       }
     } finally {
       await reader.cancel().catch(() => undefined);
     }
   }
-  const { status, statusText, headers } = response;
+  const { status, statusText } = response;
+  const headers = new Headers(response.headers);
+  if (truncated) headers.set(TRUNCATED_HEADER, "1");
   return new Response(Buffer.concat(chunks), { status, statusText, headers });
 }
 
@@ -293,7 +323,7 @@ export async function safeFetch(
 
     let buffered: Response;
     try {
-      buffered = await bufferCapped(response, maxBytes, url);
+      buffered = await bufferCapped(response, maxBytes, url, opts.truncateOversizeBody === true);
     } finally {
       await agent?.close().catch(() => undefined);
     }
@@ -306,7 +336,10 @@ export async function safeFetch(
 
     redirects += 1;
     if (redirects > maxRedirects) {
-      throw new SafeFetchError("Too many redirects", "too-many-redirects", url);
+      // Carry the URL we ended on, not the one we started from: for a login
+      // bounce that last hop is usually the identity provider, which is the
+      // single most useful fact about the failure.
+      throw new SafeFetchError(`Too many redirects (ended at ${url})`, "too-many-redirects", url);
     }
     const nextUrl = new URL(location, url).toString();
     if (new URL(nextUrl).origin !== parsed.origin) headers = stripSensitiveHeaders(headers);

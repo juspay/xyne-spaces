@@ -76,6 +76,8 @@ import {
   clearQueue,
   type QueuedMessage,
 } from "../lib/message-queue.js";
+import { WEBFETCH_HOST_SERVER_PREFIX } from "../lib/host-credentials.js";
+import { registerAuthGrant } from "../lib/auth-grant-store.js";
 import { createTraceId, createLogger } from "../logger.js";
 import { decrypt } from "../crypto.js";
 import { prisma } from "../db.js";
@@ -144,6 +146,8 @@ import {
   buildAgentCardFlow,
   buildAgentSummaryFlow,
   buildMcpSuggestFlow,
+  buildHostAccessFlow,
+  type AuthRequiredDetail,
   MAX_AGENT_LIST_CARDS,
   buildProviderSuggestFlow,
   buildCodeFlow,
@@ -3615,6 +3619,9 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     // without leaving the conversation.
     pendingConnectorSuggestions?: PendingConnectorSuggestions;
     blockedConnectors?: string[];
+    // The run stopped on a credential the user can supply. Drives a Connect
+    // card AND a parked grant that auto-resumes the task once they connect.
+    pendingAuthGrant?: AuthRequiredDetail;
   };
 
   const sessionId = payload.sessionId ?? "";
@@ -4928,7 +4935,76 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
   const rosterAsked =
     !payload.pendingConnectorSuggestions && wantsConnectorRoster(ctx.rootTask ?? ctx.task ?? "");
 
+  // A credential blocker outranks the heuristics below: the run did not merely
+  // mention a service, it STOPPED on one.
+  if (payload.pendingAuthGrant && ctx.senderId && ctx.agentSlug && ctx.agentOrgId && ctx.conversationId) {
+    const grant = payload.pendingAuthGrant;
+    void registerAuthGrant({
+      userId: ctx.senderId,
+      serverType: grant.serverType,
+      providerLabel: grant.providerLabel,
+      host: grant.host,
+      url: grant.url,
+      ...(grant.reason_text ? { reasonText: grant.reason_text } : {}),
+      redispatch: {
+        userId: ctx.senderId,
+        task: ctx.rootTask ?? ctx.task ?? "",
+        agentSlug: ctx.agentSlug,
+        orgId: ctx.agentOrgId,
+        conversationId: ctx.conversationId,
+        channelId: ctx.channelId ?? "",
+        surface: "spaces",
+        ...(ctx.resultForwardUrl ? { eventType: "automation", resultForwardUrl: ctx.resultForwardUrl } : {}),
+      },
+    });
+  }
+
+  /*
+   * A per-host credential is not a connector, so it cannot go through the
+   * connector suggestion path: that resolves each serverType against
+   * `mcp_servers`, where `webfetch-host:<host>` deliberately has no row, so the
+   * card was skipped entirely. Host grants get their own card.
+   */
+  const hostGrant =
+    payload.pendingAuthGrant?.serverType.startsWith(WEBFETCH_HOST_SERVER_PREFIX)
+      ? payload.pendingAuthGrant
+      : null;
+
+  if (hostGrant && agentCardDeliverable && ctx.senderId && ctx.conversationId) {
+    try {
+      const flow = withSpacesAppId(
+        buildHostAccessFlow({
+          host: hostGrant.host,
+          ...(hostGrant.reason_text ? { reasonText: hostGrant.reason_text } : {}),
+          screenKey: `${ctx.senderId}-${hostGrant.host}`,
+          ...(ctx.agentSlug ? { agentSlug: ctx.agentSlug } : {}),
+          userId: ctx.senderId,
+          conversationId: ctx.conversationId,
+          ...(ctx.channelId ? { channelId: ctx.channelId } : {}),
+        }),
+        ctx.spacesAppId,
+      );
+      await spacesAppFetch("/chat/postMessage", {
+        channelId: ctx.channelId,
+        conversationId: ctx.conversationId,
+        flow,
+        userId: ctx.spacesAppUserId,
+      }, ctx.appToken);
+      log.info(`[host-access] posted access card host=${hostGrant.host} conv=${ctx.conversationId}`);
+    } catch (err) {
+      log.warn("Failed to post host access card (non-fatal)", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  const authGrantSuggestion: PendingConnectorSuggestions | undefined =
+    payload.pendingAuthGrant && !hostGrant
+      ? { serverTypes: [payload.pendingAuthGrant.serverType] }
+      : undefined;
+
   const pendingConnectorSuggestions: PendingConnectorSuggestions | undefined =
+    authGrantSuggestion ??
     payload.pendingConnectorSuggestions ??
     (rosterAsked
       ? { serverTypes: [], listAll: true, inferred: true }
