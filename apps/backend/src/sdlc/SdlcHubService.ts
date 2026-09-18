@@ -922,24 +922,27 @@ export class SdlcHubService implements SdlcHub {
       : deriveDiffOps(live, nextBlocks, renderer.render);
 
     // Title and provenance are not suggestion-managed; keep them current.
-    if (input.title) {
-      await this.prisma.canvas.update({ where: { id: existing.id }, data: { title: input.title } });
-    }
-    await this.prisma.sdlcArtifact.upsert({
-      where: { artifactId: existing.id },
-      create: {
-        workspaceId: actor.workspaceId,
-        ...(repo ? { repoId: repo.id } : {}),
-        artifactId: existing.id,
-        artifactType: 'DEFAULT',
-        ...(generationCommit ? { generationCommit } : {}),
-        sourceReferences: stringifySdlcSourceReferences(resolved.sourceReferences),
-        createdBy: actor.userId,
-      },
-      update: {
-        ...(generationCommit ? { generationCommit } : {}),
-        sourceReferences: stringifySdlcSourceReferences(resolved.sourceReferences),
-      },
+    // One transaction: they are two halves of one provenance write.
+    await this.prisma.$transaction(async (tx) => {
+      if (input.title) {
+        await tx.canvas.update({ where: { id: existing.id }, data: { title: input.title } });
+      }
+      await tx.sdlcArtifact.upsert({
+        where: { artifactId: existing.id },
+        create: {
+          workspaceId: actor.workspaceId,
+          ...(repo ? { repoId: repo.id } : {}),
+          artifactId: existing.id,
+          artifactType: 'DEFAULT',
+          ...(generationCommit ? { generationCommit } : {}),
+          sourceReferences: stringifySdlcSourceReferences(resolved.sourceReferences),
+          createdBy: actor.userId,
+        },
+        update: {
+          ...(generationCommit ? { generationCommit } : {}),
+          sourceReferences: stringifySdlcSourceReferences(resolved.sourceReferences),
+        },
+      });
     });
 
     const created = ops.length

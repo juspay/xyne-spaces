@@ -35,14 +35,21 @@ function stableStringify(value: unknown): string {
   return JSON.stringify(normalize(value));
 }
 
-const LOCK_TTL_SECONDS = 30;
+// Long enough to outlive an accept-all on a large canvas: per-block renders,
+// two Y-Sweet round-trips, then the status writes. Released in `finally`.
+const LOCK_TTL_SECONDS = 120;
 
 /** Serialises concurrent accepts on one canvas; the loser gets onBusy(). */
 async function withCanvasLock<T>(canvasId: string, fn: () => Promise<T>, onBusy: () => T): Promise<T> {
   const key = `canvas-apply-lock:${canvasId}`;
   const acquired = await redisService
     .set(key, '1', LOCK_TTL_SECONDS, true)
-    .catch(() => true); // Redis down: proceed rather than block the feature
+    // Redis down: proceed rather than block the feature, but say so — this is
+    // the only guard against two accepts applying the same rows at once.
+    .catch(error => {
+      logger.warn(`[Suggestions] Redis lock unavailable for canvas ${canvasId}; applying without it`, error);
+      return true;
+    });
   if (!acquired) return onBusy();
   try {
     return await fn();
@@ -55,6 +62,13 @@ async function withCanvasLock<T>(canvasId: string, fn: () => Promise<T>, onBusy:
 function toJsonSafe(value: unknown): unknown {
   return JSON.parse(stableStringify(value));
 }
+
+/** Same paragraph, reformatted: whitespace is not a content difference. */
+const normalizeMarkdown = (markdown: string): string => markdown.trim().replace(/\s+/g, ' ');
+
+/** The identity an insert has: this text, after that block (null = top). */
+const insertKey = (anchorId: string | null, markdown: string): string =>
+  `${anchorId ?? ''}\u0000${normalizeMarkdown(markdown)}`;
 
 const topLevelIds = (blocks: BlockNoteBlock[]): string[] =>
   blocks.map(b => (b as { id?: string }).id).filter((id): id is string => Boolean(id));
@@ -88,6 +102,16 @@ export async function createSuggestionBatch({ workspaceId, canvasId, ops }: Crea
   }));
 
   const targetIds = ops.map(op => op.blockId).filter((id): id is string => Boolean(id));
+  // An insert has no blockId, so the block-based supersede below cannot see it:
+  // an agent that proposes the same new paragraph again (pending changes are
+  // invisible to its reads) would leave both generations PENDING, and accept-all
+  // would add the paragraph twice. Text plus the anchor it follows is the key an
+  // insert does have — same words in ANOTHER place stay a proposal of their own.
+  const incomingInserts = new Set(
+    ops
+      .filter(op => op.op === 'insert' && op.afterMarkdown !== undefined)
+      .map(op => insertKey(op.anchor ?? null, op.afterMarkdown as string))
+  );
   await prisma.$transaction(async tx => {
     if (targetIds.length) {
       // A newer proposal supersedes older pending rows for the same blocks.
@@ -95,6 +119,34 @@ export async function createSuggestionBatch({ workspaceId, canvasId, ops }: Crea
         where: { canvasId, status: 'PENDING', blockId: { in: targetIds } },
         data: { status: 'SUPERSEDED' },
       });
+    }
+    if (incomingInserts.size) {
+      // Matched on text, never wholesale: a concurrent proposal of DIFFERENT
+      // content keeps its pending review.
+      const pendingInserts = await tx.canvasSuggestionChange.findMany({
+        where: { canvasId, status: 'PENDING', op: 'insert' },
+        select: { id: true, afterContent: true, currentAnchorId: true },
+      });
+      // currentAnchorId, not proposedAnchorId: the live pointer is what the new
+      // batch's anchor was derived from, so the two agree while the row tracks
+      // the document. A row whose anchor drifted keeps its card — an extra card
+      // is recoverable, a wrongly dropped proposal is not.
+      const superseded = pendingInserts
+        .filter(row =>
+          incomingInserts.has(
+            insertKey(
+              row.currentAnchorId,
+              (row.afterContent as { markdown?: string } | null)?.markdown ?? ''
+            )
+          )
+        )
+        .map(row => row.id);
+      if (superseded.length) {
+        await tx.canvasSuggestionChange.updateMany({
+          where: { id: { in: superseded } },
+          data: { status: 'SUPERSEDED' },
+        });
+      }
     }
     await tx.canvasSuggestionChange.createMany({ data: rows });
   });

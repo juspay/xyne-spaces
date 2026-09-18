@@ -10,6 +10,14 @@ import type { BlockNoteBlock } from '@/types/blockNoteTypes';
 export const HANDLE_PATTERN = /^\[(b[0-9a-f]{4,12})\]\s?/;
 export const NEW_PATTERN = /^\[new\]\s?/i;
 
+const INLINE_MARKER = /^[ \t]*(?:\[new\]|\[b[0-9a-f]{4,12}\])[ \t]?/i;
+
+const stripInlineMarkers = (markdown: string): string =>
+  markdown
+    .split('\n')
+    .map(line => line.replace(INLINE_MARKER, ''))
+    .join('\n');
+
 /** handle ("b3") → real block id */
 export type HandleMap = Map<string, string>;
 
@@ -114,14 +122,18 @@ export function parseLabelledMarkdown(text: string): ParsedEntry[] {
         return {
           handle: handleMatch[1] as string,
           isNew: false,
-          markdown: chunk.replace(HANDLE_PATTERN, '').trim(),
+          markdown: stripInlineMarkers(chunk.replace(HANDLE_PATTERN, '')).trim(),
         };
       }
       if (NEW_PATTERN.test(chunk)) {
-        return { handle: null, isNew: true, markdown: chunk.replace(NEW_PATTERN, '').trim() };
+        return {
+          handle: null,
+          isNew: true,
+          markdown: stripInlineMarkers(chunk.replace(NEW_PATTERN, '')).trim(),
+        };
       }
-      // Bare: label dropped — recoverable later by similarity matching.
-      return { handle: null, isNew: false, markdown: chunk };
+      // Bare: no label of its own; inner markers are still the agent's, not content.
+      return { handle: null, isNew: false, markdown: stripInlineMarkers(chunk) };
     });
 }
 
