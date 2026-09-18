@@ -79,11 +79,11 @@ export function normalizeExternalUrl(url: string): string | null {
 }
 
 const PROVIDER_PATTERNS: { provider: string; test: (host: string, path: string) => boolean }[] = [
-  { provider: "google_docs", test: (h, p) => h.endsWith("docs.google.com") && p.startsWith("/document") },
-  { provider: "google_sheets", test: (h, p) => h.endsWith("docs.google.com") && p.startsWith("/spreadsheets") },
-  { provider: "google_slides", test: (h, p) => h.endsWith("docs.google.com") && p.startsWith("/presentation") },
-  { provider: "google_docs", test: (h, p) => h.endsWith("docs.google.com") && p.startsWith("/forms") },
-  { provider: "google_drive", test: (h) => h.endsWith("drive.google.com") || h.endsWith("docs.google.com") },
+  { provider: "google_docs", test: (h, p) => (h === "docs.google.com" || h.endsWith(".docs.google.com")) && p.startsWith("/document") },
+  { provider: "google_sheets", test: (h, p) => (h === "docs.google.com" || h.endsWith(".docs.google.com")) && p.startsWith("/spreadsheets") },
+  { provider: "google_slides", test: (h, p) => (h === "docs.google.com" || h.endsWith(".docs.google.com")) && p.startsWith("/presentation") },
+  { provider: "google_docs", test: (h, p) => (h === "docs.google.com" || h.endsWith(".docs.google.com")) && p.startsWith("/forms") },
+  { provider: "google_drive", test: (h) => h === "drive.google.com" || h.endsWith(".drive.google.com") || h === "docs.google.com" || h.endsWith(".docs.google.com") },
   { provider: "pitch", test: (h) => h === "pitch.com" || h.endsWith(".pitch.com") },
   { provider: "figma", test: (h) => h === "figma.com" || h.endsWith(".figma.com") },
   { provider: "notion", test: (h) => h === "notion.so" || h.endsWith(".notion.so") || h.endsWith(".notion.site") },
