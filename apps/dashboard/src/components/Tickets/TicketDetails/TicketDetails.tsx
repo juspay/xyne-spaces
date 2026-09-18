@@ -72,6 +72,7 @@ import { useRouteContext } from '../../../hooks/useRouteContext';
 import { TicketActivity } from '../TicketActivity';
 import { buildStageVisitFormValues } from '../TicketActivity/formSubmission';
 import { UserSelector } from '../CreateTicketModal/UserSelector';
+import { resolveAssigneeRef } from '../../../hooks/useTicketAssignee';
 import { UserGroupSelector } from '../CreateTicketModal/UserGroupSelector';
 import { SubTicketModal } from '../SubTicketModal/SubTicketModal';
 import { CreateTicketModal } from '../CreateTicketModal/CreateTicketModal';
@@ -4114,7 +4115,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
 
           <DetailChip className='pl-[6px] pr-2'>
             <UserSelector
-              selectedUserId={ticket.assignedTo ?? null}
+              selectedUserId={resolveAssigneeRef(ticket.assignedTo).userId}
               onUserSelect={handleAssigneeChange}
               channelId={ticket.channelId ?? undefined}
               noBorder={true}

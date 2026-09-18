@@ -188,7 +188,7 @@ export const DeskLabelsSidebar = ({
               active && hasActiveFilters
                 ? (filteredUnreadCount?.unreadCount ?? 0)
                 : (unreadCounts?.[label.id] ?? 0);
-            const showUnread = count > 0 && (!active || hasActiveFilters);
+            const showUnread = count > 0;
             return (
               <div
                 key={label.id}

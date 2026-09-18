@@ -169,7 +169,6 @@ import {
 import type { Ticket, FormFields, EmailChannelPreference } from '@xyne/shared';
 import { useShortcut, invokeShortcut } from '../../shortcuts';
 import { v4 as uuidv4 } from 'uuid';
-import { useUser } from '../../hooks/useUsers';
 import { BulkActionToolbar } from '../../components/Tickets/TicketTable/BulkActionToolbar';
 import { assigneeOptionToTicketUpdate } from '../../components/Tickets/TicketTable/TicketTableHelper';
 import {
@@ -179,8 +178,8 @@ import {
   useBulkTicketActions,
   type BulkTicketUpdates,
 } from '../../components/Tickets/TicketTable/useBulkTicketActions';
-import { getUserDisplayName } from '../../utils/userDisplayName';
-import { AssigneePicker } from '../../components/Tickets/TicketListView/AssigneePicker';
+import { UserSelector } from '../../components/Tickets/CreateTicketModal/UserSelector';
+import { useTicketAssignee, resolveAssigneeRef } from '../../hooks/useTicketAssignee';
 import { StagePicker } from '../../components/Tickets/TicketListView/StagePicker';
 import { PriorityPicker } from '../../components/Tickets/TicketListView/PriorityPicker';
 import { EmailComposer } from '../../components/xyne-desk/EmailComposer/EmailComposer';
@@ -4535,20 +4534,16 @@ const TicketMetaRow = ({
         priority?: string | null;
         stageName?: string | null;
         assignedTo?: string | null;
+        userGroupId?: string | null;
         aiCategory?: string | null;
         channelId?: string | null;
       }
     | undefined
     | null;
 }): ReactElement | null => {
-  const resolvedAssigneeId = ticket?.assignedTo?.replace(/^(user:|group:)/, '') || '';
-  const assignee = useUser(resolvedAssigneeId);
+  const assignee = resolveAssigneeRef(ticket?.assignedTo, ticket?.userGroupId);
+  const onAssign = useTicketAssignee(ticket?.id ?? '', assignee);
   if (!ticket) return null;
-  const assigneeName = resolvedAssigneeId
-    ? assignee
-      ? getUserDisplayName(assignee)
-      : '…'
-    : 'Unassigned';
   return (
     <div className='flex items-center flex-wrap gap-y-1 min-h-[24px]'>
       <div className='flex items-center gap-1.5 pr-3 mr-1.5 border-r border-border'>
@@ -4561,11 +4556,13 @@ const TicketMetaRow = ({
         <span className='text-[10px] font-semibold uppercase tracking-wider text-muted-foreground leading-none'>
           Assignee
         </span>
-        <AssigneePicker
-          ticketId={ticket.id}
-          assignedTo={ticket.assignedTo}
+        <UserSelector
+          selectedUserId={assignee.userId}
+          assignedGroupId={assignee.groupId}
+          onUserSelect={onAssign}
           channelId={ticket.channelId ?? undefined}
-          label={assigneeName}
+          variant='compact'
+          showLabel={true}
         />
       </div>
       {ticket.aiCategory && (
