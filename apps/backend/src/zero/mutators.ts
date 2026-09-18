@@ -10393,6 +10393,19 @@ export function createMutators(
             deletedAt: timestamp,
           });
 
+          const attachments = await tx.run(
+            zql.message_attachments
+              .where('entityId', commentId)
+              .where('entityType', AttachmentEntityType.CANVAS_COMMENT)
+              .where('isDeleted', false),
+          );
+          for (const attachment of attachments) {
+            await tx.mutate.message_attachments.update({
+              id: attachment.id,
+              isDeleted: true,
+            });
+          }
+
           const thread = await tx.run(zql.canvas_comment_threads.where('id', comment.threadId).one());
           if (thread) {
             const commentCount = await getCanvasThreadCommentCount(tx, comment.threadId);
