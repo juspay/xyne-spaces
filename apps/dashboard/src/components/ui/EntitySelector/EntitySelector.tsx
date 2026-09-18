@@ -404,7 +404,8 @@ export const EntitySelector: React.FC<EntitySelectorProps> = ({
     <Popover.Root open={open} onOpenChange={handleOpenChange}>
       {/* ========== TRIGGER BUTTON ========== */}
       <Popover.Trigger asChild>
-        {trigger ?? (variant === 'default' ? renderDefaultButtonTrigger() : renderInLineInputTrigger())}
+        {trigger ??
+          (variant === 'default' ? renderDefaultButtonTrigger() : renderInLineInputTrigger())}
       </Popover.Trigger>
 
       {/* ========== POPOVER CONTENT ========== */}
