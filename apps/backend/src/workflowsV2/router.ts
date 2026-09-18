@@ -12,9 +12,19 @@ import { attrsOf } from './utils';
 import type { XyneCtx } from './types';
 
 /**
- * Route key → the path param naming the workflow it acts on. The only `provider` routes
- * mounted behind app auth; a new SDK `provider` route absent here and from
- * {@link PUBLIC_ALLOWED_ROUTES} is not mounted at all. Re-check on an SDK bump.
+ * A workflow or folder name must be a well-formed string.
+ *
+ * Ported from xyne-search, where a JSON object arrived here as `{"$ne":"test"}` — a
+ * NoSQL-injection probe — and crashed the analytics UI on `name.toLowerCase()`. The
+ * character set is deliberately conservative: it covers every real name while refusing
+ * the shapes that turn a name into a payload.
+ */
+const NAME_PATTERN = /^[A-Za-z0-9 _()+-]+$/;
+
+/**
+ * Route key → the path param naming the workflow it acts on. Mounted behind app auth
+ * rather than the session, and absent from {@link PUBLIC_ALLOWED_ROUTES} so nothing else
+ * exposes it. Re-check on an SDK bump.
  */
 const APP_AUTH_ROUTES = new Map<string, string>([
   ['POST /v2/workflows/:workflowId/trigger/v2', 'workflowId'],
@@ -123,13 +133,15 @@ const assertTriggerableWorkflow = async (
 const buildRouteRequest = (req: Request, rawBodyRoute: boolean): RouteRequest => {
   const body: unknown = req.body;
 
-  // Ported from xyne-search, where `{"$ne":"test"}` arrived as a name and crashed the UI on
-  // `name.toLowerCase()`. Only the type is wrong there — the value itself is inert, and is
-  // stored as JSON and rendered by React.
   if (body && typeof body === 'object' && !Array.isArray(body) && 'name' in body) {
     const rawName = (body as Record<string, unknown>)['name'];
-    if (rawName !== undefined && rawName !== null && typeof rawName !== 'string') {
-      throw Object.assign(new Error('`name` must be a string'), { statusCode: 400 });
+    if (rawName !== undefined && rawName !== null) {
+      if (typeof rawName !== 'string' || !NAME_PATTERN.test(rawName)) {
+        throw Object.assign(
+          new Error('`name` may contain only letters, digits, spaces, and _ ( ) + -'),
+          { statusCode: 400 },
+        );
+      }
     }
   }
 
@@ -255,11 +267,9 @@ const needsSession = (access: RouteAccess): boolean => {
   }
 };
 
-type MountAuth = 'session' | 'app' | 'none';
-
 const mount = (
   router: Router,
-  auth: MountAuth,
+  authenticated: boolean,
   allow?: ReadonlySet<string>,
   guards: readonly express.RequestHandler[] = [],
 ): void => {
@@ -270,12 +280,12 @@ const mount = (
   });
 
   for (const route of routes) {
+    if (needsSession(route.access) !== authenticated) continue;
+
     const method = route.method.toLowerCase() as 'get' | 'post' | 'put' | 'delete';
     const key = `${route.method} ${route.path}`;
     const workflowIdParam = APP_AUTH_ROUTES.get(key);
 
-    if (needsSession(route.access) !== (auth === 'session')) continue;
-    if (auth !== 'session' && Boolean(workflowIdParam) !== (auth === 'app')) continue;
     if (allow && !allow.has(key)) continue;
 
     const middleware: express.RequestHandler[] = route.multipart
@@ -287,7 +297,7 @@ const mount = (
     router[method](route.path, ...guards, ...middleware, (req: Request, res: Response) => {
       void (async () => {
         try {
-          const ctx = auth === 'none' ? null : ctxFromRequest(req);
+          const ctx = authenticated || workflowIdParam ? ctxFromRequest(req) : null;
           if (ctx && workflowIdParam) await assertTriggerableWorkflow(req, ctx, workflowIdParam);
 
           const routeRequest = buildRouteRequest(req, route.rawBody === true);
@@ -316,13 +326,13 @@ const mount = (
 };
 
 export const workflowsRouter: Router = express.Router();
-mount(workflowsRouter, 'session');
+mount(workflowsRouter, true);
 
 export const workflowsPublicRouter: Router = express.Router();
-mount(workflowsPublicRouter, 'none', PUBLIC_ALLOWED_ROUTES, [webhookLimiter]);
+mount(workflowsPublicRouter, false, PUBLIC_ALLOWED_ROUTES, [webhookLimiter]);
 export const workflowsClawRouter: Router = express.Router();
-mount(workflowsClawRouter, 'session', CLAW_ALLOWED_ROUTES);
+mount(workflowsClawRouter, true, CLAW_ALLOWED_ROUTES);
 
 /** Registers only {@link APP_AUTH_ROUTES}; mounted under `/api/apps/workflows` behind `authenticateApp`. */
 export const workflowsAppRouter: Router = express.Router();
-mount(workflowsAppRouter, 'app');
+mount(workflowsAppRouter, false, new Set(APP_AUTH_ROUTES.keys()));
