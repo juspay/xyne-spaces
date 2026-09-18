@@ -1,3 +1,10 @@
+## [1.340.0](https://github.com/juspay/xyne-spaces/compare/v1.339.0...v1.340.0) (2026-09-18)
+
+
+### Features
+
+* rebuild tickets header to Tickets Home v2 ([#1985](https://github.com/juspay/xyne-spaces/issues/1985)) ([ff83e6f](https://github.com/juspay/xyne-spaces/commit/ff83e6ff62c348bbff0031f7622ee9321b47b562))
+
 ## [1.339.0](https://github.com/juspay/xyne-spaces/compare/v1.338.0...v1.339.0) (2026-09-18)
 
 
