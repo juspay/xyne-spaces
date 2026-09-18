@@ -159,7 +159,13 @@ import { useCachedQuery } from '../../hooks/useCachedQuery';
 import { useRacedQuery } from '../../hooks/useRacedQuery';
 import { SupportKanbanBoard } from './SupportKanbanBoard';
 import { SupportTicketTable } from './SupportTicketTable';
-import { BoardType, FormContextType, TicketPriority, parseFieldOptionValues } from '@xyne/shared';
+import {
+  BoardType,
+  FormContextType,
+  SOCIAL_MEDIA_SOURCE_TYPE,
+  TicketPriority,
+  parseFieldOptionValues,
+} from '@xyne/shared';
 import type { Ticket, FormFields, EmailChannelPreference } from '@xyne/shared';
 import { useShortcut, invokeShortcut } from '../../shortcuts';
 import { v4 as uuidv4 } from 'uuid';
@@ -187,7 +193,10 @@ import { EmailBodyRenderer } from '../../components/xyne-desk/EmailBody/EmailBod
 import CallThread from '../../components/xyne-desk/CallThread/CallThread';
 import { SlackThread, SlackComposer } from '../../components/xyne-desk/SlackThread';
 import { SocialMediaReplyComposer } from '../../components/xyne-desk/DeskReplyComposer';
-import { startGooglePlayOAuth } from '../../services/clients/socialMediaDeskApi';
+import {
+  connectAppStoreDesk,
+  startGooglePlayOAuth,
+} from '../../services/clients/socialMediaDeskApi';
 import { EmailThreadHeader } from '../../components/xyne-desk/EmailBody/EmailThreadHeader';
 import { DeskCalendarView } from '../../components/xyne-desk/DeskCalendar/DeskCalendarView';
 import { ConversationLabels } from '../../components/xyne-desk/ConversationLabels/ConversationLabels';
@@ -2332,7 +2341,13 @@ const SupportScreen = (): ReactElement => {
       dlEmail?: string;
       slackChannelId?: string;
       installedAppId?: string;
+      socialProvider?: 'GOOGLE_PLAY' | 'APP_STORE';
       applications?: Array<{ displayName: string; packageName: string }>;
+      appStore?: {
+        keyId: string;
+        privateKey: string;
+        applications: Array<{ bundleId: string }>;
+      };
     },
   ) => {
     const {
@@ -2342,15 +2357,56 @@ const SupportScreen = (): ReactElement => {
       dlEmail,
       slackChannelId,
       installedAppId,
+      socialProvider,
       applications,
+      appStore,
       channelType: _submittedChannelType,
       ...rest
     } = data;
     const isElectron = typeof window.electronAPI?.openExternal === 'function';
 
     if (deskType === 'SOCIAL_MEDIA') {
-      if (!applications?.length || !rest.boardId) {
-        toast.error('At least one Google Play application and a board are required');
+      if (!rest.boardId) {
+        toast.error('A board is required');
+        return;
+      }
+
+      // App Store authenticates with a key we hold, so connecting is one request — no redirect.
+      if (socialProvider === 'APP_STORE') {
+        if (!appStore?.applications?.length) {
+          toast.error('At least one bundle ID is required');
+          return;
+        }
+        void connectAppStoreDesk({
+          channelName: rest.name,
+          keyId: appStore.keyId,
+          privateKey: appStore.privateKey,
+          applications: appStore.applications,
+          projectId: rest.projectId,
+          boardId: rest.boardId,
+          ...(rest.assigneeUserGroupId && {
+            assigneeUserGroupId: rest.assigneeUserGroupId,
+          }),
+          visibility: rest.visibility === 'public' ? 'PUBLIC' : 'PRIVATE',
+        })
+          .then(channelId => {
+            setShowCreateChannelModal(false);
+            clearChannelConnectedEmailCache(channelId);
+            toast.success('App Store desk connected');
+            void navigate(`${supportBase}/${channelId}`);
+          })
+          .catch(error => {
+            // Surface the backend's own message: it carries Apple's reason for rejecting the key.
+            toast.error(
+              (error as { response?: { data?: { error?: string } } })?.response?.data?.error ??
+                (error instanceof Error ? error.message : 'Failed to connect App Store desk'),
+            );
+          });
+        return;
+      }
+
+      if (!applications?.length) {
+        toast.error('At least one Google Play application is required');
         return;
       }
       void startGooglePlayOAuth({
@@ -3167,15 +3223,13 @@ const SupportScreen = (): ReactElement => {
                               isRefetching
                                 ? 'Fetching latest…'
                                 : isSocialMediaDesk
-                                  ? 'Fetch all available Google Play reviews'
+                                  ? 'Fetch reviews'
                                   : 'Fetch latest emails'
                             }
                             side='bottom'
                           >
                             <button
-                              onClick={() =>
-                                isSocialMediaDesk ? handleRefetch() : setShowRefetchDialog(true)
-                              }
+                              onClick={() => setShowRefetchDialog(true)}
                               disabled={isRefetching}
                               className={cn(
                                 'p-1.5 rounded transition-colors text-muted-foreground hover:text-foreground hover:bg-muted',
@@ -4388,11 +4442,16 @@ const SupportScreen = (): ReactElement => {
       </Dialog>
 
       {/* Fetch Range Dialog */}
-      {canRefetch && !isSocialMediaDesk && (
+      {canRefetch && (
         <RefetchRangeDialog
           open={showRefetchDialog}
           onOpenChange={setShowRefetchDialog}
           isPending={isRefetching}
+          {...(isSocialMediaDesk && {
+            title: 'Fetch reviews',
+            subtitle: 'Pull new reviews or backfill a specific time range from the connected apps.',
+            summaryLabel: 'Will fetch reviews posted',
+          })}
           onConfirm={range => {
             setShowRefetchDialog(false);
             handleRefetch(range);
@@ -6101,7 +6160,10 @@ export const SupportTicketDetail = ({
                     drafts={ticketEmailDrafts}
                     replyBasePath='/integrations/social-media'
                     placeholder='Reply to this review…'
-                    maxLength={350}
+                    // Play caps replies at 350; Apple documents no maximum, so do not invent one.
+                    {...(channelIntegrationInfo.sourceType === SOCIAL_MEDIA_SOURCE_TYPE.GOOGLE_PLAY
+                      ? { maxLength: 350 }
+                      : {})}
                     trackingCategory='social-media-composer'
                   />
                 ) : null
