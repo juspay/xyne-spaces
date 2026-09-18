@@ -49,6 +49,7 @@ const STATIC_FIELDS: FilterFieldDef[] = [
   { id: 'tags', label: 'Labels', icon: Tag, noun: 'labels' },
   { id: 'stages', label: 'Stages', icon: Circle, noun: 'stages' },
   { id: 'ticketTypes', label: 'Type', icon: LayerTwo, noun: 'types' },
+  { id: 'merchantIds', label: 'Merchant ID', icon: Hashtag, noun: 'merchant IDs' },
   { id: 'sourceChannels', label: 'Source channels', icon: Hashtag, noun: 'channels' },
 ];
 
@@ -285,6 +286,16 @@ export const buildFilterChips = (
         const values = filters.ticketTypes ?? [];
         if (values.length === 0) return;
         push(field, { operator: 'include any of', value: summarize(values, field.noun) });
+        return;
+      }
+      case 'merchantIds': {
+        const values = filters.merchantIds ?? [];
+        if (values.length === 0) return;
+        push(field, {
+          operator: 'include any of',
+          value: summarize(values, field.noun),
+          mono: true,
+        });
         return;
       }
       case 'sourceChannels': {

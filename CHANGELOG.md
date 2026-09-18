@@ -1,3 +1,56 @@
+## [1.337.0-release-20260918.10](https://github.com/juspay/xyne-spaces/compare/v1.337.0-release-20260918.9...v1.337.0-release-20260918.10) (2026-09-18)
+
+
+### Reverts
+
+* Revert "feat: XYNE-63011 Calls tab new version (#1674)" (#2073) ([aa8ce02](https://github.com/juspay/xyne-spaces/commit/aa8ce027db423308687c7cf58d7863a702d0220b)), closes [#1674](https://github.com/juspay/xyne-spaces/issues/1674) [#2073](https://github.com/juspay/xyne-spaces/issues/2073)
+
+## [1.337.0-release-20260918.9](https://github.com/juspay/xyne-spaces/compare/v1.337.0-release-20260918.8...v1.337.0-release-20260918.9) (2026-09-18)
+
+
+### Features
+
+* fixed mimetype race ([#2062](https://github.com/juspay/xyne-spaces/issues/2062)) ([85126ca](https://github.com/juspay/xyne-spaces/commit/85126ca3f66c85ec3e3d07eb81793537e01f321d))
+* release ([#2068](https://github.com/juspay/xyne-spaces/issues/2068)) ([b5bf98e](https://github.com/juspay/xyne-spaces/commit/b5bf98e24a46aeee7901f66be043b323daa40add))
+
+
+### Bug Fixes
+
+* stop Radar creating a duplicate item when a requester re-asks ([#2066](https://github.com/juspay/xyne-spaces/issues/2066)) ([9a02e1a](https://github.com/juspay/xyne-spaces/commit/9a02e1a1e532418a9571238826142d6c793235c5))
+
+## [1.337.0-release-20260918.8](https://github.com/juspay/xyne-spaces/compare/v1.337.0-release-20260918.7...v1.337.0-release-20260918.8) (2026-09-18)
+
+
+### Bug Fixes
+
+* ticket api fix ([#1966](https://github.com/juspay/xyne-spaces/issues/1966)) ([#2063](https://github.com/juspay/xyne-spaces/issues/2063)) ([08e6c0b](https://github.com/juspay/xyne-spaces/commit/08e6c0be9573930b90df905a958903e8f0f89c8b))
+
+## [1.337.0-release-20260918.7](https://github.com/juspay/xyne-spaces/compare/v1.337.0-release-20260918.6...v1.337.0-release-20260918.7) (2026-09-18)
+
+
+### Features
+
+* app store integration in desk for release ([#2033](https://github.com/juspay/xyne-spaces/issues/2033)) ([e8dda62](https://github.com/juspay/xyne-spaces/commit/e8dda626fc5d0fb358f21e079ac135b631574499))
+
+
+### Bug Fixes
+
+* ticket create and update api merchantid addition ([#1999](https://github.com/juspay/xyne-spaces/issues/1999)) ([#2053](https://github.com/juspay/xyne-spaces/issues/2053)) ([f0d5d59](https://github.com/juspay/xyne-spaces/commit/f0d5d59629f8b2f1ac3adff928c29b4a91fa3f1d))
+
+## [1.337.0-release-20260918.6](https://github.com/juspay/xyne-spaces/compare/v1.337.0-release-20260918.5...v1.337.0-release-20260918.6) (2026-09-18)
+
+
+### Features
+
+* rebuild the ticket detail panel ([#2052](https://github.com/juspay/xyne-spaces/issues/2052)) ([f8c3240](https://github.com/juspay/xyne-spaces/commit/f8c324083972ffd5f37af3d2b978ed0f38c9c3e0))
+
+## [1.337.0-release-20260918.5](https://github.com/juspay/xyne-spaces/compare/v1.337.0-release-20260918.4...v1.337.0-release-20260918.5) (2026-09-18)
+
+
+### Bug Fixes
+
+* Implement API fallback + query for desk loading perf ([#2046](https://github.com/juspay/xyne-spaces/issues/2046)) ([8125a5f](https://github.com/juspay/xyne-spaces/commit/8125a5f62e47d446ec8c1447192312894a50ee32))
+
 ## [1.337.0-release-20260918.4](https://github.com/juspay/xyne-spaces/compare/v1.337.0-release-20260918.3...v1.337.0-release-20260918.4) (2026-09-18)
 
 
