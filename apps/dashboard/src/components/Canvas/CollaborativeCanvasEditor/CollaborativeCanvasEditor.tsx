@@ -151,6 +151,8 @@ interface CollaborativeCanvasEditorProps {
   currentUserRole?: CanvasRole | null;
   /** Pending agent suggestions, painted inline as decorations (never content). */
   suggestions?: InlineSuggestionRow[];
+  /** Scrolls with the document, above its first block. */
+  header?: React.ReactNode;
 }
 
 export const CollaborativeCanvasEditor = forwardRef<
@@ -179,6 +181,7 @@ export const CollaborativeCanvasEditor = forwardRef<
       canvasCreatedBy,
       currentUserRole,
       suggestions,
+      header,
     },
     ref,
   ) => {
@@ -850,6 +853,7 @@ export const CollaborativeCanvasEditor = forwardRef<
             }}
           >
             <CanvasWidthHandles surfaceRef={containerRef} />
+            {header}
             <div
               className='blocknote-editor-wrapper w-full max-w-full'
               style={{

@@ -10,18 +10,25 @@ import {
 } from 'react';
 import { Outlet, useNavigate, useParams } from 'react-router-dom';
 import { formatDistanceToNow } from 'date-fns';
+import { toast } from 'sonner';
 import {
+  BellOff,
   Bug,
   Check,
+  ChevronDown,
   ChevronRight,
   Hash,
   Hourglass,
   ListFilter,
   Loader2,
   MoreHorizontal,
+  Pencil,
   Search,
   Radar as RadarIcon,
   RefreshCw,
+  Settings,
+  Trash2,
+  UsersRound,
   X,
   Zap,
 } from 'lucide-react';
@@ -41,7 +48,7 @@ import {
   RadarThreadCard,
   RadarFeedItem,
 } from '../../api/radarApi';
-import { ChannelScopeType } from '@xyne/shared';
+import { ChannelScopeType, type User } from '@xyne/shared';
 import { useAuth } from '../../hooks/useAuth';
 import { useRadarEnabled } from '../../hooks/radarCacConfig';
 import { usePersistedRadarFilters } from '../../hooks/usePersistedRadarFilters';
@@ -50,18 +57,103 @@ import {
   usePersistedRadarTeams,
   type RadarTeam,
 } from '../../hooks/usePersistedRadarTeams';
+import {
+  MAX_RULES,
+  MAX_RULE_VALUES,
+  MAX_RULE_VALUE_LENGTH,
+  useRadarRules,
+} from '../../hooks/useRadarRules';
+import { sortRules, type RadarRuleCondition, type RadarRuleScope } from '@xyne/shared';
+// The app's one user-group search, as used by the @-mention popovers and Share.
+import { useUserGroupSearch } from '@xyne/shared/hooks';
 import { useActiveUsers, useUsersById } from '../../hooks/useUsers';
+import { useRankedActivePeople } from '../../hooks/useRankedPeopleSearch';
 import { useAllChannels } from '../../hooks/useChannels';
+// cmd+K's channel matcher and its name resolver, not a second one of Radar's:
+// the same fuzzy-plus-participant-token search the command menu, the slash
+// pickers and Forward already run, over the same item shape.
+import { filterChannelsBySearchableNames } from '../../utils/rankingUtils';
+import {
+  formatChannelLabel,
+  getDMNames,
+  parseDMParticipantIds,
+} from '../Chat/ChatDirectory/ChatDirectory.utils';
+import { useAffinityCallback } from '../../hooks/useAffinityCallback';
 import { cn } from '../../utils/classNames';
-import { getUserDisplayName, matchesUserQuery } from '../../utils/userDisplayName';
+import { getUserDisplayName } from '../../utils/userDisplayName';
 import { Dialog } from '../ui/Dialog/Dialog';
 import Avatar from '../ui/Avatar/Avatar';
 import { Tooltip } from '../ui/Tooltip';
+import { globalClickTracker } from '../../services/Analytics/globalClickTracker';
 
 type RadarTab = 'all' | 'pending' | 'waiting';
 
+/** A pane of the settings dialog. The union is the nav: adding a section here
+ *  and a row to settingsNav is the whole of registering one. */
+type RadarSettingsSection = 'rules' | 'teams';
+
+/** The scopes a rule can test, in the order the builder offers them, with the
+ *  word each reads as in a chip and the prompt for its value input. */
+const RULE_SCOPES: ReadonlyArray<{
+  id: RadarRuleScope;
+  label: string;
+  chip: string;
+  placeholder: string;
+}> = [
+  { id: 'channel', label: 'Channel', chip: 'in', placeholder: 'Search channels and DMs' },
+  { id: 'keyword', label: 'Keyword', chip: 'says', placeholder: 'deploy, sign-off, blocker…' },
+  {
+    id: 'mention',
+    label: 'Mentions',
+    chip: 'mentions',
+    placeholder: 'Search user groups',
+  },
+  { id: 'sender', label: 'Requested by', chip: 'from', placeholder: 'Search people' },
+];
+
+/** Value matches offered per query in the rule builder. */
+const RULE_VALUE_RESULTS = 8;
+
+/** `useUserGroupSearch` returns everything on an empty query; this asks for
+ *  nothing instead, since the picker draws nothing until it is asked. */
+const EMPTY_GROUP_QUERY = '￼';
+
+/** Groups held for chip names only — a chip falling back to a raw id is the
+ *  failure this bound guards, so it covers a whole workspace roster. */
+const GROUP_NAME_LIMIT = 500;
+
+/** Avatars stacked on a rule-builder row, as on the channel filter's rows. */
+const AVATARS_IN_RULE_ROW = 2;
+
+/** One offered rule value. `people` is whoever the row is made of — a DM's
+ *  participants or the one person — and empty for a named channel or a user
+ *  group, which get a tile instead. */
+interface RuleValueOption {
+  /** Row identity for React, and the first of `values`. */
+  value: string;
+  /** Every id this row stands for: one for a person or a group, and for a
+   *  channel every channel that renders to the label shown — picking the row
+   *  has to mean the row, not whichever of them happened to sort first. */
+  values: string[];
+  label: string;
+  people: string[];
+  /** A user group — no avatars to stack, so the row wears the group tile. */
+  group?: boolean;
+}
+
 /** Avatars rendered before the stack collapses into a +N chip. */
 const AVATARS_SHOWN = 3;
+
+/** Team-picker matches drawn per query; past this the search narrows instead. */
+const TEAM_PICKER_RESULTS = 25;
+
+/** Ranked candidates asked of the shared people search. Wide enough that
+ *  narrowing the result to one picker's own people still fills a page. */
+const RANKED_PEOPLE_LIMIT = 200;
+
+/** Feed cards drawn per page. The next page is fetched into view before the
+ *  reader reaches the end, so the feed still reads as one continuous list. */
+const FEED_PAGE = 20;
 
 /**
  * Radar — the execution feed. Card-based views over the open-item ledger:
@@ -99,6 +191,11 @@ const RadarPanel = (): ReactElement => {
   } | null>(null);
   const [debugLookup, setDebugLookup] = useState('');
   const [filtersOpen, setFiltersOpen] = useState(false);
+  // How much of the filtered feed is currently drawn. A card is not a cheap
+  // row — avatars, a meta line and one body per item — so drawing every match
+  // at once is what the reader feels as lag on a busy radar.
+  const [feedLimit, setFeedLimit] = useState(FEED_PAGE);
+  const feedEndRef = useRef<HTMLDivElement>(null);
   const [filterCategory, setFilterCategory] = useState<'pending' | 'channels' | 'time'>('pending');
   // "Pending on" replaces the old tabs: me maps to the pending feed, others to
   // the waiting feed, both to all. The selection is kept per user across
@@ -127,22 +224,51 @@ const RadarPanel = (): ReactElement => {
     clearAllFilters,
   } = usePersistedRadarFilters(user?.id);
   const { teams, createTeam, updateTeam, deleteTeam } = usePersistedRadarTeams(user?.id);
-  // The manage-teams dialog is transient: which team is being edited and the
-  // half-typed draft describe the dialog, not the feed, so none of it persists.
-  const [manageTeams, setManageTeams] = useState(false);
+  // Which settings pane is open, and null for shut — one state rather than an
+  // open flag beside a section, so the dialog can never be open on nothing.
+  const [settingsSection, setSettingsSection] = useState<RadarSettingsSection | null>(null);
+  // The team form is transient: which team is being edited and the half-typed
+  // draft describe the dialog, not the feed, so none of it persists.
   const [teamDraft, setTeamDraft] = useState<{
     id: string | null;
     name: string;
     memberIds: Set<string>;
   } | null>(null);
   const [memberSearch, setMemberSearch] = useState('');
+  // Every item's muted verdict is decided server-side, per read, so saving a
+  // rule changes nothing on screen until the feed is re-read. This counter is
+  // bumped once the server has accepted a write; the effect that watches it
+  // sits below load(), which is declared further down.
+  const [rulesVersion, setRulesVersion] = useState(0);
+  const onRulesSaved = useCallback((): void => setRulesVersion(n => n + 1), []);
+  const { rules, atRuleLimit, createRule, updateRule, deleteRule } = useRadarRules(
+    user?.id,
+    onRulesSaved,
+  );
+  // The rule being built, and the id it will replace when Save is pressed.
+  // Editing loads the rule back into this one builder rather than opening a
+  // second copy of it inside the row.
+  const [ruleDraft, setRuleDraft] = useState<{
+    id: string | null;
+    scope: RadarRuleScope;
+    conditions: RadarRuleCondition[];
+  }>({ id: null, scope: 'channel', conditions: [] });
+  const [ruleValueSearch, setRuleValueSearch] = useState('');
+  // Muted items are kept, not dropped, so the reader can check what a rule is
+  // doing — but shut, because the point of the rule was not to look at them.
+  const [mutedOpen, setMutedOpen] = useState(false);
   // Radix restores focus to its own trigger on close; this dialog has none,
-  // so the opener is remembered here and given focus back by hand.
-  const manageTeamsOpenerRef = useRef<HTMLButtonElement>(null);
+  // and more than one control opens it, so whichever was clicked is remembered
+  // here and given focus back by hand.
+  const settingsOpenerRef = useRef<HTMLElement | null>(null);
   // Requested by defaults to the reading almost everyone wants, so it opens
   // shut: the header carries the current choice, and only someone who wants
   // the other one has to open it.
   const [requestedByOpen, setRequestedByOpen] = useState(false);
+  // Same reasoning as the picker above: excluding a requester is the rare
+  // choice, and "from anyone" is already the answer for almost everyone — so
+  // it opens shut and states that answer rather than listing the workspace.
+  const [requesterPickerOpen, setRequesterPickerOpen] = useState(false);
   const [requesterSearch, setRequesterSearch] = useState('');
   const [holderSearch, setHolderSearch] = useState('');
   const [channelSearch, setChannelSearch] = useState('');
@@ -242,6 +368,49 @@ const RadarPanel = (): ReactElement => {
     [othersMode],
   );
 
+  // Impression: the feed has loaded and is on screen. Resolve / dismiss / open
+  // clicks below need this as their denominator. Fires once per load() — a
+  // mount, a tab return, or the Refresh control — keyed on the request
+  // sequence so the filter re-renders in between don't refire it.
+  const feedViewedSeqRef = useRef(0);
+  useEffect(() => {
+    if (loading || !radarEnabled) return;
+    if (feedViewedSeqRef.current === requestSeq.current) return;
+    feedViewedSeqRef.current = requestSeq.current;
+    const activeFilterKeys = [
+      ...(pendingMe !== pendingOthers ? ['pending_on'] : []),
+      ...(excludedRequesters.size ? ['requested_by'] : []),
+      ...(pendingUsers.size ? ['pending_users'] : []),
+      ...(teamIds.size ? ['teams'] : []),
+      ...(filterChannels.size ? ['channels'] : []),
+      ...(timeRange !== 'any' ? ['time_range'] : []),
+    ];
+    globalClickTracker.trackManualEvent('RADAR', 'RADAR_FEED_VIEWED', undefined, {
+      itemCount:
+        pending.reduce((n, c) => n + c.items.length, 0) +
+        waiting.reduce((n, c) => n + c.items.length, 0),
+      pendingMeCount: pending.reduce((n, c) => n + c.items.length, 0),
+      pendingOthersCount: waiting.reduce((n, c) => n + c.items.length, 0),
+      cardCount: pending.length + waiting.length,
+      othersMode,
+      activeFilterKeys,
+      teamFilterApplied: teamIds.size > 0,
+    });
+  }, [
+    loading,
+    radarEnabled,
+    pending,
+    waiting,
+    pendingMe,
+    pendingOthers,
+    excludedRequesters,
+    pendingUsers,
+    teamIds,
+    filterChannels,
+    timeRange,
+    othersMode,
+  ]);
+
   useEffect(() => {
     if (!radarEnabled) return;
     void load();
@@ -263,6 +432,76 @@ const RadarPanel = (): ReactElement => {
       document.removeEventListener('visibilitychange', refresh);
     };
   }, [load, radarEnabled]);
+
+  // A saved rule re-answers "is this muted" for every item, and only the server
+  // can answer it — so a write has to be followed by a read. Keyed on the
+  // version rather than on `rules`, which also moves for an optimistic write
+  // the server has not accepted yet, and guarded by a ref because `load`
+  // changes identity whenever a filter does and would otherwise refetch twice.
+  const loadedRulesVersion = useRef(0);
+  useEffect(() => {
+    if (!radarEnabled || loadedRulesVersion.current === rulesVersion) return;
+    loadedRulesVersion.current = rulesVersion;
+    void load(true);
+  }, [rulesVersion, load, radarEnabled]);
+
+  // The people-picker ranking every other surface uses — cmd+K, the slash
+  // pickers, Compose, Forward — rather than a matcher of radar's own: full-name
+  // token matching, then MFU affinity, then DM recency. One call per search box
+  // because a hook cannot live inside the picker, which renders conditionally.
+  // A generous limit: each picker narrows the result to the ids it offers, so
+  // the cap has to survive that intersection rather than bound what is drawn.
+  const rankedRequesters = useRankedActivePeople(requesterSearch, RANKED_PEOPLE_LIMIT);
+  const rankedHolders = useRankedActivePeople(holderSearch, RANKED_PEOPLE_LIMIT);
+  const rankedTeamPeople = useRankedActivePeople(memberSearch, RANKED_PEOPLE_LIMIT);
+  const rankedRulePeople = useRankedActivePeople(ruleValueSearch, RANKED_PEOPLE_LIMIT);
+
+  /** A saved rule holds ids; naming them needs the roster the ids came from.
+   *  Nobody with no rules and a closed pane pays for any of it. */
+  const ruleScopesInUse = useMemo(() => {
+    const scopes = new Set<RadarRuleScope>();
+    for (const rule of rules) for (const c of rule.conditions) scopes.add(c.scope);
+    return scopes;
+  }, [rules]);
+  const rulesPaneOpen = settingsSection === 'rules';
+  const needChannelLabels = rulesPaneOpen || ruleScopesInUse.has('channel');
+  const needGroupLabels = rulesPaneOpen || ruleScopesInUse.has('mention');
+
+  /** A mention query wears a leading "@" — the chips teach the reader to type
+   *  one, and it matches nothing, since groups are searched by name and alias. */
+  const effectiveRuleQuery =
+    ruleDraft.scope === 'mention'
+      ? ruleValueSearch.trim().replace(/^@+/, '').trim()
+      : ruleValueSearch.trim();
+
+  const ruleGroupMatches = useUserGroupSearch(
+    effectiveRuleQuery || EMPTY_GROUP_QUERY,
+    RULE_VALUE_RESULTS,
+  );
+  // Names for saved rules, which hold an id long after the search that found it.
+  // Both calls share one Zero subscription — InitialStateLoader already runs it
+  // — so the sentinel query buys no fewer rows, only the sort over all of them.
+  const allUserGroups = useUserGroupSearch(
+    needGroupLabels ? '' : EMPTY_GROUP_QUERY,
+    GROUP_NAME_LIMIT,
+  );
+  const ruleGroupNameById = useMemo(
+    () => new Map(allUserGroups.map(g => [g.id, g.name])),
+    [allUserGroups],
+  );
+
+  // Who a ticked team puts into the Others filter, and which team said so.
+  // The feed has always counted these people (effectivePendingUsers); the
+  // picker used to leave their row blank, so the list disagreed with what the
+  // feed was actually doing.
+  const lockedByTeam = useMemo(() => {
+    const byId = new Map<string, string>();
+    for (const team of teams) {
+      if (!teamIds.has(team.id)) continue;
+      for (const id of team.memberIds) if (!byId.has(id)) byId.set(id, team.name);
+    }
+    return byId;
+  }, [teams, teamIds]);
 
   const channelById = useMemo(() => new Map(channels.map(c => [c.id, c])), [channels]);
 
@@ -298,6 +537,55 @@ const RadarPanel = (): ReactElement => {
     }
     return `#${channel.name}`;
   };
+
+  // Every channel in cmd+K's own shape — the channel, the participant names to
+  // render, and the wider set to search. getDMNames is the canonical resolver
+  // for both, so a DM is named here exactly as the command menu names it.
+  // Subscribed for the effect, not the value: affinity weights are read
+  // imperatively inside the ranking helpers, so a fetch landing after mount is
+  // invisible until something re-renders — and subscribing is what starts that
+  // fetch in the first place.
+  useAffinityCallback();
+
+  // Every channel in cmd+K's own shape, but only for a reader who has a channel
+  // rule or is writing one: getDMNames resolves participant names for the whole
+  // channel list, and that is not work to do on every Radar open for a pane
+  // nobody touched.
+  const ruleChannelItems = useMemo(() => {
+    if (!needChannelLabels) return [];
+    // Read here rather than through selfId, which is declared further down;
+    // this memo has to sit above filterChannelLabel's other readers.
+    const me = localStorage.getItem('user_id') ?? '';
+    return channels.map(channel => {
+      const names = getDMNames(channel, me, usersById);
+      return { channel, searchableNames: names.display, searchNames: names.search };
+    });
+  }, [channels, usersById, needChannelLabels]);
+
+  // Channel id → the label it renders to, and each label → every id behind it.
+  // Several channels can render to one label, so the picker offers one row per
+  // label and writes every id under it: the rule then means what the row said,
+  // and the server compares ids without having to resolve a name of its own.
+  const { labelByChannelId, idsByChannelLabel } = useMemo(() => {
+    const byId = new Map<string, string>();
+    const byLabel = new Map<string, string[]>();
+    for (const item of ruleChannelItems) {
+      const label = formatChannelLabel(item);
+      byId.set(item.channel.id, label);
+      const ids = byLabel.get(label);
+      if (ids) ids.push(item.channel.id);
+      else byLabel.set(label, [item.channel.id]);
+    }
+    return { labelByChannelId: byId, idsByChannelLabel: byLabel };
+  }, [ruleChannelItems]);
+
+  /** A channel value's label, falling back to the id when the channel is gone
+   *  — so a rule written against a since-deleted channel still reads as
+   *  something rather than as a blank chip. */
+  const ruleChannelLabel = useCallback(
+    (channelId: string): string => labelByChannelId.get(channelId) ?? channelId,
+    [labelByChannelId],
+  );
 
   // The conversation is the ITEM's, not the card's: a DM card groups the whole
   // channel, so its items live in different threads and each has to open its own.
@@ -381,6 +669,19 @@ const RadarPanel = (): ReactElement => {
   const renderItemBody = (card: RadarThreadCard, item: RadarFeedItem, index: number | null) => {
     const itemKey = `item:${item.id}`;
     const dismissKey = `dismiss:${item.id}`;
+    // Same dimensions on open / resolve / dismiss so the three can be compared
+    // per item age and per side of the ledger. Ids only — no title text.
+    const itemTrackMetadata = JSON.stringify({
+      itemId: item.id,
+      channelId: card.channelId,
+      itemAgeHours: Math.max(
+        0,
+        Math.round((Date.now() - new Date(item.createdAt).getTime()) / 3_600_000),
+      ),
+      isPendingMe: !!selfId && item.pendingOn.includes(selfId),
+      isRequestedByMe: !!selfId && item.requestedBy.includes(selfId),
+      itemsOnCard: card.items.length,
+    });
     return (
       <div
         key={item.id}
@@ -390,6 +691,7 @@ const RadarPanel = (): ReactElement => {
           <button
             data-track-category='RADAR'
             data-track-name='OPEN_THREAD_FROM_ITEM'
+            data-track-metadata={itemTrackMetadata}
             className='text-left font-bold text-foreground hover:underline text-[15px]'
             onClick={e => {
               e.stopPropagation();
@@ -424,6 +726,7 @@ const RadarPanel = (): ReactElement => {
               <button
                 data-track-category='RADAR'
                 data-track-name='RESOLVE_ITEM'
+                data-track-metadata={itemTrackMetadata}
                 className='inline-flex items-center gap-1 px-2.5 py-1 rounded-full border border-border text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-accent transition-colors disabled:opacity-50'
                 disabled={busyKey === itemKey}
                 onClick={e => {
@@ -445,6 +748,7 @@ const RadarPanel = (): ReactElement => {
               <button
                 data-track-category='RADAR'
                 data-track-name='DISMISS_ITEM'
+                data-track-metadata={itemTrackMetadata}
                 className='inline-flex items-center gap-1 px-2.5 py-1 rounded-full border border-border text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-accent transition-colors disabled:opacity-50'
                 disabled={busyKey === dismissKey}
                 onClick={e => {
@@ -666,7 +970,13 @@ const RadarPanel = (): ReactElement => {
     ]),
   ];
   const otherHolders = [
-    ...new Set([...waiting.flatMap(c => c.items.flatMap(i => i.pendingOn)), ...pendingUsers]),
+    ...new Set([
+      ...waiting.flatMap(c => c.items.flatMap(i => i.pendingOn)),
+      ...pendingUsers,
+      // A ticked team's members, so the row they are ticked on exists even
+      // when they hold nothing in the current feed.
+      ...lockedByTeam.keys(),
+    ]),
   ].filter(id => id !== selfId && usersById.has(id));
 
   // Requesters are excluded, never included: "everyone but Bob" has to keep
@@ -746,6 +1056,73 @@ const RadarPanel = (): ReactElement => {
   if (filterChannels.size) {
     cards = cards.filter(({ card }) => filterChannels.has(card.channelId));
   }
+  // The server has already said which items this viewer's rules mute; the panel
+  // only places them. Nothing is dropped — a rule written too wide stays
+  // findable by whoever wrote it. A card whose items disagree is split, because
+  // a card is not a unit of attention; the asks inside it are.
+  const mutedCards: typeof cards = [];
+  let mutedItemCount = 0;
+  {
+    const live: typeof cards = [];
+    // Runs on every render over up to MAX_FEED_ITEMS, so the common case — no
+    // rule claims anything — passes the card through and allocates nothing.
+    for (const entry of cards) {
+      if (!entry.card.items.some(i => i.muted)) {
+        live.push(entry);
+        continue;
+      }
+      const kept = entry.card.items.filter(i => !i.muted);
+      const hushed = entry.card.items.filter(i => i.muted);
+      const split = (items: typeof entry.card.items): (typeof cards)[number] => ({
+        ...entry,
+        card: { ...entry.card, items },
+      });
+      if (kept.length > 0) live.push(split(kept));
+      mutedCards.push(split(hushed));
+      mutedItemCount += hushed.length;
+    }
+    cards = live;
+  }
+
+  // A new filter or tab is a different list, so it starts from the first page.
+  // A refresh of the same list deliberately does not: the reader may be deep
+  // in it, and collapsing back to one page under them would lose their place.
+  useEffect(() => {
+    setFeedLimit(FEED_PAGE);
+  }, [
+    tab,
+    pendingUsers,
+    teamIds,
+    excludedRequesters,
+    othersMode,
+    filterChannels,
+    timeRange,
+    customFrom,
+    customTo,
+    // A rule changes which items are in the list at all, so it starts over
+    // for the same reason a filter does.
+    rules,
+  ]);
+
+  // The sentinel sits after the last drawn card and is only rendered while
+  // there is more to draw, so this observes nothing once the feed is whole.
+  // The margin reaches a screenful past the end, so the next page is in place
+  // before it is scrolled to and the list never visibly stops.
+  // Both lists share one page budget, so expanding Muted cannot mount every
+  // match at once.
+  const moreToDraw = feedLimit < cards.length || (mutedOpen && feedLimit < mutedCards.length);
+  useEffect(() => {
+    const sentinel = feedEndRef.current;
+    if (!sentinel || !moreToDraw) return;
+    const observer = new IntersectionObserver(
+      entries => {
+        if (entries.some(e => e.isIntersecting)) setFeedLimit(n => n + FEED_PAGE);
+      },
+      { rootMargin: '600px' },
+    );
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [moreToDraw, feedLimit]);
 
   const runBadge = (run: RadarRunLog) =>
     run.error ? (
@@ -1119,92 +1496,185 @@ const RadarPanel = (): ReactElement => {
     // everyone else is drawn ticked and an empty set is everyone — no roster
     // is ever stored, so whoever asks next is in by default.
     mode: 'include' | 'exclude',
+    /** This box's query, already ranked by useRankedActivePeople. */
+    ranked: User[],
+    /** id → the ticked team that put them here; those rows are on and fixed. */
+    lockedOn?: Map<string, string>,
+    /** Pass to make the heading a disclosure; omit and the body always shows. */
+    collapse?: { open: boolean; onToggle: () => void; summary: string },
   ): ReactElement => {
-    const visible = ids.filter(id =>
-      nameOf(id).toLowerCase().includes(search.trim().toLowerCase()),
-    );
+    const query = search.trim();
+    // At rest the list answers "who is this narrowed to", so it draws only the
+    // people the filter already acts on — nothing at all when nothing is
+    // picked. The roster used to sit here answering a question nobody asked,
+    // and on a real workspace it was the slow path as well.
+    //
+    // With a query it answers "who do I mean" instead, over everyone on offer.
+    // Whoever is already ticked is searched with the rest rather than pinned
+    // above it: this box is three rows tall, so a ticked team's members would
+    // otherwise push every match below the fold. Ids the user store has no row
+    // for — an exclusion for a deleted account, drawn as "Someone" — cannot be
+    // matched by name, so they appear only in the unsearched list.
+    const offered = new Set(ids);
     const isOn = (id: string): boolean =>
-      mode === 'exclude' ? !selected.has(id) : selected.has(id);
+      lockedOn?.has(id) ? true : mode === 'exclude' ? !selected.has(id) : selected.has(id);
+    const candidates = query
+      ? // The hook searches every active user; this picker only offers the
+        // people its own half of the feed knows about.
+        ranked.filter(u => offered.has(u.id)).map(u => u.id)
+      : mode === 'exclude'
+        ? // Exclusion starts from everyone, so here the list IS the
+          // information: it is how you find out who has been asking you in the
+          // first place, and there is no name to type until you have seen it.
+          // It is short by construction — only the requesters in your own feed.
+          ids
+        : ids.filter(id => selected.has(id) || lockedOn?.has(id));
+    // Whoever is ticked leads, in either mode and searched or not: the tick is
+    // what the reader is looking for, and this box shows three rows at a time.
+    // Order within each group is left alone — relevance from the ranker, or the
+    // feed's own order at rest.
+    const visible = [...candidates.filter(isOn), ...candidates.filter(id => !isOn(id))];
     // Select all follows the search: with a query typed, it means the names on
     // screen, not the ones hidden behind it. In exclude mode it only ever puts
     // people back.
     const allVisibleOn = visible.length > 0 && visible.every(isOn);
     return (
       <div className='mt-3 ml-8 rounded-xl border border-border overflow-hidden'>
-        <div className='px-3 py-2 bg-muted/40 text-[10px] font-bold uppercase tracking-wide text-muted-foreground'>
-          {heading}
-        </div>
-        <div className='relative px-3 pt-2'>
-          <Search className='absolute left-5 top-1/2 mt-1 -translate-y-1/2 size-3.5 text-muted-foreground' />
-          <input
-            className='w-full pl-7 pr-2 py-1.5 rounded-lg border border-border bg-background text-sm text-foreground'
-            placeholder='Search people'
-            data-track-category='RADAR'
-            data-track-name='SEARCH_PICKER_PEOPLE'
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-          />
-        </div>
-        {/* With everyone already in, there is nothing to select. */}
-        {(mode === 'include' || selected.size > 0) && (
+        {collapse ? (
           <button
-            className='w-full flex items-center gap-3 px-3 py-2 text-sm font-semibold hover:bg-accent focus:outline-none focus-visible:bg-accent'
+            className='w-full flex items-center gap-2 px-3 py-2 bg-muted/40 text-left hover:bg-muted/60'
+            aria-expanded={collapse.open}
             data-track-category='RADAR'
-            data-track-name='FILTER_PENDING_SELECT_ALL'
-            onClick={() => {
-              // Exclude mode: the row means "everyone in", so it clears the
-              // whole exclusion set. Acting only on the names the search left
-              // on screen looks like a dead control when the excluded one is
-              // hidden behind the query.
-              if (mode === 'exclude') {
-                setSelected(new Set());
-                return;
-              }
-              const next = new Set(selected);
-              for (const id of visible) {
-                if (allVisibleOn) next.delete(id);
-                else next.add(id);
-              }
-              setSelected(next);
-            }}
+            data-track-name='TOGGLE_PICKER_PEOPLE'
+            onClick={collapse.onToggle}
           >
-            <span className='flex-1 text-left'>Select all</span>
-            {/* Exclusions exist, so not everyone is in — the row must not draw
-                as though it already is, whatever the search happens to show. */}
-            {checkbox(mode === 'exclude' ? selected.size === 0 : allVisibleOn)}
+            <span className='flex-1 text-[10px] font-bold uppercase tracking-wide text-muted-foreground'>
+              {heading}
+            </span>
+            <span className='text-xs text-muted-foreground'>{collapse.summary}</span>
+            {/* Down closed, up open — the direction the panel will move. */}
+            <ChevronDown
+              className={cn(
+                'size-3.5 text-muted-foreground transition-transform',
+                collapse.open && 'rotate-180',
+              )}
+            />
           </button>
+        ) : (
+          <div className='px-3 py-2 bg-muted/40 text-[10px] font-bold uppercase tracking-wide text-muted-foreground'>
+            {heading}
+          </div>
         )}
-        {/* Three rows, then scroll: the list is for finding a name, not reading
+        {collapse && !collapse.open ? null : (
+          <>
+            <div className='relative px-3 pt-2'>
+              <Search className='absolute left-5 top-1/2 mt-1 -translate-y-1/2 size-3.5 text-muted-foreground' />
+              <input
+                className='w-full pl-7 pr-2 py-1.5 rounded-lg border border-border bg-background text-sm text-foreground'
+                placeholder='Search people'
+                data-track-category='RADAR'
+                data-track-name='SEARCH_PICKER_PEOPLE'
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+              />
+            </div>
+            {/* With everyone already in, there is nothing to select — and over a
+            single row it says nothing the row itself does not. */}
+            {visible.length > 1 && (mode === 'include' || selected.size > 0) && (
+              <button
+                className='w-full flex items-center gap-3 px-3 py-2 text-sm font-semibold hover:bg-accent focus:outline-none focus-visible:bg-accent'
+                data-track-category='RADAR'
+                data-track-name='FILTER_PENDING_SELECT_ALL'
+                onClick={() => {
+                  // Exclude mode: the row means "everyone in", so it clears the
+                  // whole exclusion set. Acting only on the names the search left
+                  // on screen looks like a dead control when the excluded one is
+                  // hidden behind the query.
+                  if (mode === 'exclude') {
+                    setSelected(new Set());
+                    return;
+                  }
+                  const next = new Set(selected);
+                  for (const id of visible) {
+                    // A team's members are not this control's to turn off.
+                    if (lockedOn?.has(id)) continue;
+                    if (allVisibleOn) next.delete(id);
+                    else next.add(id);
+                  }
+                  setSelected(next);
+                }}
+              >
+                <span className='flex-1 text-left'>Select all</span>
+                {/* Exclusions exist, so not everyone is in — the row must not draw
+                as though it already is, whatever the search happens to show. */}
+                {checkbox(mode === 'exclude' ? selected.size === 0 : allVisibleOn)}
+              </button>
+            )}
+            {/* Three rows, then scroll: the list is for finding a name, not reading
             the roster. */}
-        {/* A visible scrollbar takes its width out of the rows, which pushes
+            {/* A visible scrollbar takes its width out of the rows, which pushes
             the tick column left of the unscrolled rows above it. Hiding it
             keeps one control column; the clipped fourth row is the affordance
             that there is more. */}
-        <div className='max-h-32 overflow-y-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden'>
-          {visible.length === 0 && (
-            <div className='px-3 py-2 text-xs text-muted-foreground'>
-              {ids.length === 0 ? 'Nobody here yet.' : 'No one matches.'}
+            <div className='max-h-32 overflow-y-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden'>
+              {visible.length === 0 && (
+                <div className='px-3 py-2 text-xs text-muted-foreground'>
+                  {query
+                    ? 'No one matches.'
+                    : mode === 'exclude'
+                      ? 'Nobody has asked you yet.'
+                      : 'Search to pick people.'}
+                </div>
+              )}
+              {visible.map(id => {
+                const lockedTeam = lockedOn?.get(id);
+                return (
+                  <button
+                    key={id}
+                    // Left enabled on purpose. A disabled button takes no pointer
+                    // events, so the one thing this row has to say — that a team
+                    // is holding it on, and which — never surfaced on hover.
+                    aria-disabled={!!lockedTeam}
+                    title={
+                      lockedTeam ? `On ${lockedTeam} — untick the team to remove them` : undefined
+                    }
+                    className={cn(
+                      'group/member w-full flex items-center gap-2.5 px-3 py-2 text-sm hover:bg-accent focus:outline-none focus-visible:bg-accent',
+                      lockedTeam && 'cursor-not-allowed',
+                    )}
+                    data-track-category='RADAR'
+                    data-track-name='FILTER_PENDING_USER'
+                    onClick={() => {
+                      // The team put them here; the team is where to take them off.
+                      if (lockedTeam) return;
+                      const next = new Set(selected);
+                      if (next.has(id)) next.delete(id);
+                      else next.add(id);
+                      setSelected(next);
+                    }}
+                  >
+                    <Avatar
+                      userId={id}
+                      size='rg'
+                      showActiveStatus
+                      className='shrink-0 rounded-lg'
+                    />
+                    <span className='flex-1 text-left truncate'>{nameOf(id)}</span>
+                    {/* Named on hover over the whole row, not just the tick: the
+                    row is where the pointer goes, and the reason this one will
+                    not turn off is the team, which is not otherwise on screen. */}
+                    {lockedTeam && (
+                      <span className='hidden group-hover/member:block shrink-0 max-w-[45%] truncate text-[11px] text-muted-foreground'>
+                        On {lockedTeam}
+                      </span>
+                    )}
+                    {checkbox(isOn(id))}
+                  </button>
+                );
+              })}
             </div>
-          )}
-          {visible.map(id => (
-            <button
-              key={id}
-              className='w-full flex items-center gap-2.5 px-3 py-2 text-sm hover:bg-accent focus:outline-none focus-visible:bg-accent'
-              data-track-category='RADAR'
-              data-track-name='FILTER_PENDING_USER'
-              onClick={() => {
-                const next = new Set(selected);
-                if (next.has(id)) next.delete(id);
-                else next.add(id);
-                setSelected(next);
-              }}
-            >
-              <Avatar userId={id} size='rg' showActiveStatus className='shrink-0 rounded-lg' />
-              <span className='flex-1 text-left truncate'>{nameOf(id)}</span>
-              {checkbox(isOn(id))}
-            </button>
-          ))}
-        </div>
+          </>
+        )}
       </div>
     );
   };
@@ -1212,46 +1682,75 @@ const RadarPanel = (): ReactElement => {
   // Every active member bar the viewer. A team narrows Others, which is
   // "pending on someone else", so the viewer's own name would be a member that
   // can never match — and so would someone who has left.
-  // Sorted once per roster change rather than on every keystroke anywhere in
-  // the panel, and searched with the predicate the rest of the app uses, so an
-  // email or an out-of-order two-token query finds the same person here as in
-  // cmd+K. The label is the same field that predicate reads, so a row can
-  // never match on a name it does not show.
-  const sortedTeamCandidates = useMemo(
+  const teamPoolIds = useMemo(
     () =>
-      activeUsers
-        .filter(u => u.id !== selfId)
-        .map(u => ({ id: u.id, label: getUserDisplayName(u), user: u }))
-        .sort((a, b) => a.label.localeCompare(b.label)),
-    [activeUsers, selfId],
+      // Nothing outside the teams pane reads this, so the feed does not pay
+      // for it on every roster change.
+      settingsSection === 'teams' ? activeUsers.filter(u => u.id !== selfId).map(u => u.id) : [],
+    [activeUsers, selfId, settingsSection],
   );
-  const teamCandidates = sortedTeamCandidates.filter(c => matchesUserQuery(c.user, memberSearch));
 
-  const selectedTeamNames = teams.filter(t => teamIds.has(t.id)).map(t => t.name);
+  // Two groups, and neither grows with the org: who is already picked — never
+  // more than MAX_TEAM_MEMBERS, and drawn whatever is typed, because the answer
+  // to "who is on this team" must not depend on the search box — then a capped
+  // page of everyone else, ordered by the same recipe cmd+K uses.
+  const { pickedCandidates, teamCandidates, teamCandidatesTruncated } = useMemo(() => {
+    const picked = teamDraft?.memberIds;
+    const pool = new Set(teamPoolIds);
+    const label = (id: string): string => getUserDisplayName(usersById.get(id));
+    const pickedCandidates = picked
+      ? [...picked]
+          .filter(id => pool.has(id))
+          .map(id => ({ id, label: label(id) }))
+          .sort((a, b) => a.label.localeCompare(b.label))
+      : [];
+    const query = memberSearch.trim();
+    if (!query) return { pickedCandidates, teamCandidates: [], teamCandidatesTruncated: false };
+    // Whoever is picked is already drawn above; a second row for them would be
+    // one tick control too many.
+    const ranked = rankedTeamPeople
+      .filter(u => u.id !== selfId && !picked?.has(u.id))
+      .map(u => u.id);
+    return {
+      pickedCandidates,
+      teamCandidates: ranked.slice(0, TEAM_PICKER_RESULTS).map(id => ({ id, label: label(id) })),
+      teamCandidatesTruncated: ranked.length > TEAM_PICKER_RESULTS,
+    };
+  }, [teamPoolIds, usersById, memberSearch, teamDraft?.memberIds, rankedTeamPeople, selfId]);
 
-  // Reads back the sentence the two halves make: who asked, then whose queue.
-  // Teams are named because the name is the point of having made one; loose
-  // people are counted, since a list of them is the thing a team replaces.
-  // The Me half reads the same way: who is excluded, if anyone.
-  const meSummary = ((): string => {
-    const excluded = [...excludedRequesters];
-    if (excluded.length === 0) return 'from anyone';
-    // Same shape as the Others half: name the first, count the rest.
-    const rest = excluded.length - 1;
-    return `all but ${nameOf(excluded[0] ?? '')}${rest ? ` +${rest}` : ''}`;
-  })();
-
-  const othersSummary = ((): string => {
-    const requester = othersMode === 'me' ? 'requested by me' : 'requested by anyone';
-    const peopleCount = pendingUsers.size;
-    if (selectedTeamNames.length === 0 && peopleCount === 0) return `${requester} · everyone`;
-    if (selectedTeamNames.length === 0) {
-      return `${requester} · ${peopleCount} ${peopleCount === 1 ? 'person' : 'people'}`;
-    }
-    const shown = selectedTeamNames.slice(0, 2);
-    const extra = selectedTeamNames.length - shown.length + peopleCount;
-    return `${requester} · ${shown.join(', ')}${extra ? ` +${extra}` : ''}`;
-  })();
+  // One row shape for both groups — the tick is the same control whether the
+  // person is being added or taken off, and the cap only ever bites on adding.
+  const memberRow = (
+    candidate: { id: string; label: string },
+    picked: boolean,
+  ): ReactElement | null => {
+    const draft = teamDraft;
+    if (!draft) return null;
+    const full = !picked && draft.memberIds.size >= MAX_TEAM_MEMBERS;
+    return (
+      <button
+        key={candidate.id}
+        disabled={full}
+        title={full ? `At most ${MAX_TEAM_MEMBERS} members` : undefined}
+        className={cn(
+          'w-full flex items-center gap-2.5 px-3 py-2 text-sm hover:bg-accent focus:outline-none focus-visible:bg-accent',
+          full && 'opacity-50 cursor-not-allowed',
+        )}
+        data-track-category='RADAR'
+        data-track-name='TEAM_MEMBER'
+        onClick={() => {
+          const next = new Set(draft.memberIds);
+          if (next.has(candidate.id)) next.delete(candidate.id);
+          else next.add(candidate.id);
+          setTeamDraft({ ...draft, memberIds: next });
+        }}
+      >
+        <Avatar userId={candidate.id} size='rg' showActiveStatus className='shrink-0 rounded-lg' />
+        <span className='flex-1 text-left truncate'>{candidate.label}</span>
+        {checkbox(picked)}
+      </button>
+    );
+  };
 
   const othersModePicker = (
     <div className='mt-3 ml-8 rounded-xl border border-border overflow-hidden'>
@@ -1268,17 +1767,17 @@ const RadarPanel = (): ReactElement => {
         <span className='text-xs text-muted-foreground'>
           {othersMode === 'me' ? 'Me' : 'Anyone'}
         </span>
-        <ChevronRight
+        <ChevronDown
           className={cn(
             'size-3.5 text-muted-foreground transition-transform',
-            requestedByOpen && 'rotate-90',
+            requestedByOpen && 'rotate-180',
           )}
         />
       </button>
       {requestedByOpen &&
         [
-          { id: 'me' as const, label: 'Me', hint: 'What you are chasing' },
-          { id: 'all' as const, label: 'Anyone', hint: 'Everything on them, whoever asked' },
+          { id: 'me' as const, label: 'Me' },
+          { id: 'all' as const, label: 'Anyone' },
         ].map(mode => (
           <button
             key={mode.id}
@@ -1287,10 +1786,7 @@ const RadarPanel = (): ReactElement => {
             data-track-name='FILTER_OTHERS_MODE'
             onClick={() => setOthersMode(mode.id)}
           >
-            <span className='flex-1 text-left'>
-              <span className='block font-bold'>{mode.label}</span>
-              <span className='block text-xs text-muted-foreground'>{mode.hint}</span>
-            </span>
+            <span className='flex-1 text-left font-bold'>{mode.label}</span>
             {radio(othersMode === mode.id)}
           </button>
         ))}
@@ -1306,13 +1802,12 @@ const RadarPanel = (): ReactElement => {
         {/* With no teams there is nothing to manage, so the one link in this
             slot is the one action available — making the first team. */}
         <button
-          ref={manageTeamsOpenerRef}
           className='text-[11px] font-bold text-[#e8604c] hover:underline'
           data-track-category='RADAR'
           data-track-name={teams.length === 0 ? 'CREATE_TEAM_FROM_EMPTY' : 'OPEN_MANAGE_TEAMS'}
-          onClick={() => {
+          onClick={e => {
             setTeamDraft(teams.length === 0 ? { id: null, name: '', memberIds: new Set() } : null);
-            setManageTeams(true);
+            openSettings('teams', e.currentTarget);
           }}
         >
           {teams.length === 0 ? '+ Create team' : 'Manage teams ›'}
@@ -1367,8 +1862,7 @@ const RadarPanel = (): ReactElement => {
     }
     // Straight back to the filters: the team was made in order to use it, and
     // the list behind this form is not a step anyone asked for.
-    setTeamDraft(null);
-    setManageTeams(false);
+    closeSettings();
   };
 
   const removeTeam = (team: RadarTeam): void => {
@@ -1382,199 +1876,667 @@ const RadarPanel = (): ReactElement => {
     });
   };
 
-  const closeManageTeams = (): void => {
-    setManageTeams(false);
+  // The search belongs to the form, not to the dialog: a query left over from
+  // the last member picked would otherwise decide what the next draft opens on.
+  const openTeamDraft = (draft: typeof teamDraft): void => {
+    setTeamDraft(draft);
+    setMemberSearch('');
+  };
+
+  const openSettings = (section: RadarSettingsSection, opener: HTMLElement | null): void => {
+    settingsOpenerRef.current = opener;
+    setSettingsSection(section);
+  };
+
+  const closeSettings = (): void => {
+    setSettingsSection(null);
     setTeamDraft(null);
     setMemberSearch('');
     // After Radix's own unmount focus handling, which runs on a zero timeout.
-    setTimeout(() => manageTeamsOpenerRef.current?.focus(), 50);
+    setTimeout(() => settingsOpenerRef.current?.focus(), 50);
   };
 
-  // The app's Dialog, so Escape, the focus trap, focus restore and the portal
-  // all come for free instead of being rebuilt here one bug at a time.
-  const manageTeamsDialog = (
-    <Dialog
-      open={manageTeams}
-      onOpenChange={open => {
-        if (!open) closeManageTeams();
-      }}
-      title={teamDraft ? (teamDraft.id ? 'Edit team' : 'New team') : 'Teams'}
-      description={
-        teamDraft ? 'Name the team and pick its members.' : 'Saved groups you can filter by.'
+  // ── Rules ──────────────────────────────────────────────────────────────
+
+  const ruleScope = RULE_SCOPES.find(s => s.id === ruleDraft.scope) ?? RULE_SCOPES[0]!;
+  const draftScopeValues =
+    ruleDraft.conditions.find(c => c.scope === ruleDraft.scope)?.values ?? [];
+
+  /** What a stored value reads as. Ids are how a rule points at a thing that
+   *  can be renamed; this is the one place that turns one back into a name. */
+  const ruleValueLabel = (scope: RadarRuleScope, value: string): string => {
+    if (scope === 'keyword') return `“${value}”`;
+    if (scope === 'channel') return ruleChannelLabel(value);
+    // A deleted group falls back to its id: the rule still matches what it
+    // matched, and a blank chip would hide the condition the reader wants gone.
+    if (scope === 'mention') return `@${ruleGroupNameById.get(value) ?? value}`;
+    return nameOf(value);
+  };
+
+  /** One picked row, which may stand for several ids. The length cap mirrors the
+   *  server's, so a pasted wall of text is refused here rather than saved and
+   *  then rejected. */
+  const addRuleValues = (values: string[]): void => {
+    const clean = [
+      ...new Set(
+        values.map(v => v.trim()).filter(v => v !== '' && v.length <= MAX_RULE_VALUE_LENGTH),
+      ),
+    ];
+    if (clean.length === 0) return;
+    const current = ruleDraft.conditions.find(c => c.scope === ruleDraft.scope)?.values ?? [];
+    const missing = clean.filter(v => !current.includes(v));
+    if (missing.length === 0) {
+      setRuleValueSearch('');
+      return;
+    }
+    // All of the row or none of it. A channel row stands for every channel that
+    // renders to its label, so taking the first few ids until the cap would
+    // save a chip that still READS as the label while matching only part of
+    // it — the same half-condition removeRuleValues exists to prevent.
+    if (current.length + missing.length > MAX_RULE_VALUES) {
+      toast.error(
+        missing.length > 1
+          ? `That adds ${missing.length} values and this condition has only ${
+              MAX_RULE_VALUES - current.length
+            } slot(s) left. Remove something first, or add fewer.`
+          : `A condition holds at most ${MAX_RULE_VALUES} values.`,
+      );
+      return;
+    }
+    setRuleValueSearch('');
+    setRuleDraft(draft => {
+      const existing = draft.conditions.find(c => c.scope === draft.scope);
+      const held = existing?.values ?? [];
+      const toAdd = clean.filter(v => !held.includes(v));
+      // Re-checked against the draft the updater was handed, not the one the
+      // click saw, so two fast picks cannot get past the cap between renders.
+      if (toAdd.length === 0 || held.length + toAdd.length > MAX_RULE_VALUES) return draft;
+      const next = [...held, ...toAdd];
+      return existing
+        ? {
+            ...draft,
+            conditions: draft.conditions.map(c =>
+              c.scope === draft.scope ? { ...c, values: next } : c,
+            ),
+          }
+        : { ...draft, conditions: [...draft.conditions, { scope: draft.scope, values: next }] };
+    });
+  };
+
+  /** Typed keywords, split the way the placeholder shows them: "deploy,
+   *  sign-off" is two keywords ORed. Kept whole it would be one literal that
+   *  whole-word matching only finds if a message says exactly "deploy,
+   *  sign-off" — a chip that reads right and never fires. Ids never come
+   *  through here; they are picked, not typed. */
+  const addTypedKeywords = (typed: string): void => addRuleValues(typed.split(','));
+
+  /** Every id the chip stood for, together — a channel chip is one label over
+   *  several ids, and removing half of them would leave a chip that still reads
+   *  the same and matches less. */
+  const removeRuleValues = (scope: RadarRuleScope, values: string[]): void => {
+    const drop = new Set(values);
+    // The condition goes with its last value: an empty one would read as a
+    // scope that matches anything, which is the opposite of what it now means.
+    setRuleDraft(draft => ({
+      ...draft,
+      conditions: draft.conditions
+        .map(c => (c.scope === scope ? { ...c, values: c.values.filter(v => !drop.has(v)) } : c))
+        .filter(c => c.values.length > 0),
+    }));
+  };
+
+  const resetRuleDraft = (): void => {
+    setRuleDraft({ id: null, scope: 'channel', conditions: [] });
+    setRuleValueSearch('');
+  };
+
+  /** A new rule at the limit is refused; editing one always goes through,
+   *  since it replaces a row rather than adding one. */
+  const ruleDraftBlocked = atRuleLimit && !ruleDraft.id;
+
+  const saveRuleDraft = (): void => {
+    if (ruleDraft.conditions.length === 0 || ruleDraftBlocked) return;
+    if (ruleDraft.id) updateRule(ruleDraft.id, ruleDraft.conditions);
+    else createRule(ruleDraft.conditions);
+    resetRuleDraft();
+  };
+
+  // What the value input offers. Only built while the pane is open. A row is
+  // shaped like the channel filter's: stacked avatars for anything made of
+  // people, the hash tile for a named channel.
+  const ruleValueOptions: RuleValueOption[] =
+    settingsSection !== 'rules' || ruleDraft.scope === 'keyword'
+      ? []
+      : ((): RuleValueOption[] => {
+          const query = effectiveRuleQuery;
+          const chosen = new Set(draftScopeValues);
+          const options: RuleValueOption[] = [];
+
+          // Nothing is offered until it is asked for. Every one of these
+          // rosters is the whole workspace, and a rule wants one row out of
+          // it — an unprompted list is a page to scroll past rather than an
+          // answer, and the weighting that makes these searches good only
+          // applies to a query. The team picker has drawn nothing until asked
+          // since it was rewritten, for the same reason.
+          if (!query) return [];
+
+          if (ruleDraft.scope === 'channel') {
+            // cmd+K's own matcher, over cmd+K's own item shape: fuzzy on a
+            // channel name, AND-across-tokens on DM participant names, so
+            // "kush mam" finds the DM with both of them here exactly as it
+            // does in the command menu, ranked by the same blend of match
+            // score and affinity.
+            const matched = filterChannelsBySearchableNames(ruleChannelItems, query);
+            // One row per label: several channels can render to the same one,
+            // and the row writes every id behind it so the rule means the row.
+            const seen = new Set<string>();
+            for (const item of matched) {
+              const label = formatChannelLabel(item);
+              if (seen.has(label)) continue;
+              seen.add(label);
+              const ids = idsByChannelLabel.get(label) ?? [item.channel.id];
+              if (ids.every(id => chosen.has(id))) continue;
+              const dm = isDirectMessage(item.channel.scopeType);
+              const participants = dm
+                ? parseDMParticipantIds(item.channel).filter(id => usersById.has(id))
+                : [];
+              const others = participants.filter(id => id !== selfId);
+              options.push({
+                value: item.channel.id,
+                values: ids,
+                // The tile carries the hash, so the row does not repeat it —
+                // the same split the channel filter makes.
+                label: dm ? label : label.replace(/^#/, ''),
+                people: others.length ? others : participants,
+              });
+              if (options.length >= RULE_VALUE_RESULTS) break;
+            }
+            return options;
+          }
+
+          if (ruleDraft.scope === 'mention') {
+            // Groups only: a mention rule asks what the message said, and what
+            // it named was the group, not whoever happens to be in it.
+            for (const group of ruleGroupMatches) {
+              if (chosen.has(group.id)) continue;
+              // Nobody can @mention a deactivated group, so offering one is
+              // offering a condition that can never hold. Rules already written
+              // against it still read as its name — ruleGroupNameById keeps them.
+              if (group.isActive === false) continue;
+              options.push({
+                value: group.id,
+                values: [group.id],
+                label: group.name,
+                people: [],
+                group: true,
+              });
+              if (options.length >= RULE_VALUE_RESULTS) break;
+            }
+            return options;
+          }
+
+          // Teams are deliberately NOT offered here. They live in the browser,
+          // and the engine that now enforces a mute has no table to resolve
+          // one against — a team rule would save cleanly and then quietly
+          // match nobody. Until teams are server-side, a rule names people.
+          for (const person of rankedRulePeople) {
+            if (chosen.has(person.id)) continue;
+            options.push({
+              value: person.id,
+              values: [person.id],
+              label: getUserDisplayName(person),
+              people: [person.id],
+            });
+            if (options.length >= RULE_VALUE_RESULTS) break;
+          }
+          return options.slice(0, RULE_VALUE_RESULTS);
+        })();
+
+  /** The channel filter's own row furniture: a stack of up to two avatars for
+   *  anything made of people, a tile for a named channel or a user group. */
+  const ruleValueIcon = (option: RuleValueOption): ReactElement =>
+    option.group ? (
+      <span className='size-6 shrink-0 rounded-lg bg-muted text-muted-foreground flex items-center justify-center'>
+        <UsersRound className='size-3.5' />
+      </span>
+    ) : option.people.length > 0 ? (
+      <span className='flex -space-x-1.5 shrink-0'>
+        {option.people.slice(0, AVATARS_IN_RULE_ROW).map(id => (
+          <Avatar key={id} userId={id} size='sm' className='rounded-lg ring-2 ring-popover' />
+        ))}
+      </span>
+    ) : (
+      <span className='size-6 shrink-0 rounded-lg bg-muted text-muted-foreground flex items-center justify-center'>
+        <Hash className='size-3.5' />
+      </span>
+    );
+
+  /** A condition's values as the reader picked them: one entry per label, over
+   *  every value that reads as that label. A channel label can cover several
+   *  ids, and drawing one chip per id would repeat the same word. */
+  const ruleChipParts = (
+    condition: RadarRuleCondition,
+  ): Array<{ label: string; values: string[] }> => {
+    const parts: Array<{ label: string; values: string[] }> = [];
+    const byLabel = new Map<string, number>();
+    for (const value of condition.values) {
+      const label = ruleValueLabel(condition.scope, value);
+      const at = byLabel.get(label);
+      if (at === undefined) {
+        byLabel.set(label, parts.length);
+        parts.push({ label, values: [value] });
+      } else {
+        parts[at]!.values.push(value);
       }
-      className='max-w-[520px] rounded-2xl border border-border overflow-hidden'
-      // The drawer variant drops title, description and className on the
-      // floor; this is a small form, and a dialog on every width keeps it one.
-      mobileVariant='dialog'
-    >
-      <div className='flex flex-col max-h-[80vh]'>
-        <div className='flex items-start gap-3 px-5 pt-4 pb-3 border-b border-border'>
-          <div className='flex-1 min-w-0'>
-            <div className='text-base font-bold'>
-              {teamDraft ? (teamDraft.id ? 'Edit team' : 'New team') : 'Teams'}
-            </div>
-          </div>
-          <button
-            aria-label='Close'
-            className='shrink-0 p-1 rounded-md text-muted-foreground hover:bg-accent'
-            data-track-category='RADAR'
-            data-track-name='CLOSE_MANAGE_TEAMS'
-            onClick={closeManageTeams}
-          >
-            <X className='size-4' />
-          </button>
+    }
+    return parts;
+  };
+
+  /** One rule's conditions as chips: values ORed inside a chip, chips ANDed. */
+  const ruleChips = (
+    conditions: RadarRuleCondition[],
+    onRemove?: (scope: RadarRuleScope, values: string[]) => void,
+  ): ReactElement[] =>
+    conditions.map((condition, i) => (
+      <span key={condition.scope} className='inline-flex items-center gap-2'>
+        {i > 0 && (
+          <span className='text-[10px] font-bold uppercase tracking-wide text-muted-foreground'>
+            and
+          </span>
+        )}
+        <span className='inline-flex items-center gap-1.5 rounded-full border border-border bg-background px-2.5 py-1 text-xs font-semibold'>
+          <span className='text-muted-foreground'>
+            {RULE_SCOPES.find(s => s.id === condition.scope)?.chip}
+          </span>
+          {ruleChipParts(condition).map((part, k) => (
+            <span key={part.values[0]} className='inline-flex items-center gap-1.5'>
+              {k > 0 && (
+                <span className='text-[10px] font-bold uppercase tracking-wide text-muted-foreground'>
+                  or
+                </span>
+              )}
+              <span className='max-w-[180px] truncate'>{part.label}</span>
+              {onRemove && (
+                <button
+                  aria-label={`Remove ${part.label}`}
+                  className='text-muted-foreground hover:text-foreground'
+                  data-track-category='RADAR'
+                  data-track-name='REMOVE_RULE_VALUE'
+                  onClick={() => onRemove(condition.scope, part.values)}
+                >
+                  <X className='size-3' />
+                </button>
+              )}
+            </span>
+          ))}
+        </span>
+      </span>
+    ));
+
+  const rulesSection = (
+    <div className='flex flex-col gap-5'>
+      <div className='text-lg font-bold'>Rules</div>
+
+      <div className='rounded-xl border border-border p-4 flex flex-col gap-3.5'>
+        <div className='text-[10px] font-bold uppercase tracking-wide text-muted-foreground'>
+          {ruleDraft.id ? 'Edit rule' : 'Build a rule'}
         </div>
 
-        <div className='flex-1 overflow-y-auto px-5 py-4'>
-          {!teamDraft && (
-            <div className='flex flex-col gap-2'>
-              {teams.map(team => (
-                <div
-                  key={team.id}
-                  className='flex items-center gap-3 rounded-xl border border-border px-3.5 py-3'
-                >
-                  <div className='flex-1 min-w-0'>
-                    <div className='text-sm font-bold truncate'>{team.name}</div>
-                    <div className='text-xs text-muted-foreground truncate'>
-                      {team.memberIds.length === 1
-                        ? '1 member'
-                        : `${team.memberIds.length} members`}
-                      {' · '}
-                      {team.memberIds.slice(0, 2).map(nameOf).join(', ')}
-                      {team.memberIds.length > 2 && ` +${team.memberIds.length - 2}`}
-                    </div>
-                  </div>
-                  <button
-                    className='shrink-0 rounded-full border border-border px-3 py-1.5 text-xs font-semibold hover:bg-accent'
-                    data-track-category='RADAR'
-                    data-track-name='EDIT_TEAM'
-                    onClick={() =>
-                      setTeamDraft({
-                        id: team.id,
-                        name: team.name,
-                        memberIds: new Set(team.memberIds),
-                      })
-                    }
-                  >
-                    Edit
-                  </button>
-                  <button
-                    className='shrink-0 rounded-full border border-[#e8604c]/40 text-[#e8604c] px-3 py-1.5 text-xs font-semibold hover:bg-[#e8604c]/10'
-                    data-track-category='RADAR'
-                    data-track-name='DELETE_TEAM'
-                    onClick={() => removeTeam(team)}
-                  >
-                    Delete
-                  </button>
-                </div>
-              ))}
+        {ruleDraft.conditions.length > 0 && (
+          <div className='flex flex-wrap items-center gap-2 rounded-lg border border-border bg-muted/30 p-2.5'>
+            {ruleChips(ruleDraft.conditions, removeRuleValues)}
+          </div>
+        )}
+
+        <div className='flex flex-wrap gap-2'>
+          {RULE_SCOPES.map(scope => (
+            <button
+              key={scope.id}
+              className={cn(
+                'rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors',
+                ruleDraft.scope === scope.id
+                  ? 'bg-foreground text-background border-foreground'
+                  : 'border-border text-foreground hover:bg-accent',
+              )}
+              data-track-category='RADAR'
+              data-track-name='RULE_SCOPE'
+              onClick={() => {
+                setRuleDraft(draft => ({ ...draft, scope: scope.id }));
+                setRuleValueSearch('');
+              }}
+            >
+              {scope.label}
+            </button>
+          ))}
+        </div>
+
+        <div className='flex gap-2'>
+          <div className='relative flex-1 min-w-0'>
+            <Search className='absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground' />
+            <input
+              className='w-full pl-7 pr-2 py-2 rounded-lg border border-border bg-background text-sm text-foreground'
+              placeholder={ruleScope.placeholder}
+              data-track-category='RADAR'
+              data-track-name='RULE_VALUE_SEARCH'
+              value={ruleValueSearch}
+              onChange={e => setRuleValueSearch(e.target.value)}
+              onKeyDown={e => {
+                if (e.key === 'Enter' && ruleDraft.scope === 'keyword')
+                  addTypedKeywords(ruleValueSearch);
+              }}
+            />
+          </div>
+          {/* Only keywords are typed. Everything else points at a thing with
+              an id, and is added by picking it from the list below. */}
+          {ruleDraft.scope === 'keyword' && (
+            <button
+              disabled={!ruleValueSearch.trim()}
+              className={cn(
+                'shrink-0 rounded-lg border px-3 py-2 text-xs font-bold',
+                ruleValueSearch.trim()
+                  ? 'border-foreground text-foreground hover:bg-accent'
+                  : 'border-border text-muted-foreground cursor-not-allowed',
+              )}
+              data-track-category='RADAR'
+              data-track-name='ADD_RULE_KEYWORD'
+              onClick={() => addTypedKeywords(ruleValueSearch)}
+            >
+              {draftScopeValues.length > 0 ? '+ Or' : '+ And'}
+            </button>
+          )}
+        </div>
+
+        {ruleValueOptions.length > 0 && (
+          <div className='rounded-lg border border-border overflow-hidden'>
+            {ruleValueOptions.map(option => (
               <button
-                className='rounded-xl border border-dashed border-border px-3.5 py-3 text-sm font-bold text-[#e8604c] hover:bg-accent'
+                key={option.value}
+                className='w-full flex items-center gap-3 px-3 py-2 text-sm text-left hover:bg-accent focus:outline-none focus-visible:bg-accent'
                 data-track-category='RADAR'
-                data-track-name='NEW_TEAM'
-                onClick={() => setTeamDraft({ id: null, name: '', memberIds: new Set() })}
+                data-track-name='ADD_RULE_VALUE'
+                onClick={() => addRuleValues(option.values)}
               >
-                + New team
+                {ruleValueIcon(option)}
+                <span className='flex-1 truncate'>{option.label}</span>
+                <span className='text-[10px] font-bold uppercase tracking-wide text-muted-foreground'>
+                  {draftScopeValues.length > 0 ? 'or' : 'and'}
+                </span>
+              </button>
+            ))}
+          </div>
+        )}
+        {ruleDraft.scope !== 'keyword' && ruleValueOptions.length === 0 && (
+          <div className='text-xs text-muted-foreground'>
+            {effectiveRuleQuery ? 'Nothing else matches.' : 'Search to add a condition.'}
+          </div>
+        )}
+
+        {/* Said before the save is attempted, not after: a refusal at the
+            button would take the draft with it. */}
+        {ruleDraftBlocked && (
+          <div className='text-xs text-muted-foreground'>
+            {MAX_RULES} rules is the limit. Delete one to add another.
+          </div>
+        )}
+
+        <div className='flex flex-wrap items-center justify-between gap-3 border-t border-border pt-3'>
+          {/* There is only one thing a rule does, but saying nothing leaves the
+              builder without a verb — the reader has to guess what Save means. */}
+          <div className='flex items-center gap-2'>
+            <span className='text-[10px] font-bold uppercase tracking-wide text-muted-foreground'>
+              Then
+            </span>
+            <span className='rounded-lg border border-border px-3 py-1.5 text-xs font-bold'>
+              Mute
+            </span>
+          </div>
+          <div className='flex items-center gap-2'>
+            {(ruleDraft.id || ruleDraft.conditions.length > 0) && (
+              <button
+                className='rounded-full px-3 py-2 text-xs font-semibold hover:bg-accent'
+                data-track-category='RADAR'
+                data-track-name='CANCEL_RULE'
+                onClick={resetRuleDraft}
+              >
+                Cancel
+              </button>
+            )}
+            <button
+              disabled={ruleDraft.conditions.length === 0 || ruleDraftBlocked}
+              title={ruleDraftBlocked ? `At most ${MAX_RULES} rules` : undefined}
+              className={cn(
+                'rounded-full px-4 py-2 text-xs font-bold transition-colors',
+                ruleDraft.conditions.length > 0 && !ruleDraftBlocked
+                  ? 'bg-foreground text-background'
+                  : 'bg-muted text-muted-foreground cursor-not-allowed',
+              )}
+              data-track-category='RADAR'
+              data-track-name='SAVE_RULE'
+              onClick={saveRuleDraft}
+            >
+              {ruleDraft.id ? 'Update rule' : 'Save rule'}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div className='rounded-xl border border-border overflow-hidden'>
+        <div className='flex items-center justify-between gap-3 border-b border-border bg-muted/30 px-4 py-2.5'>
+          <span className='text-[10px] font-bold uppercase tracking-wide text-muted-foreground'>
+            Your rules
+          </span>
+          <span className='text-xs text-muted-foreground'>
+            {rules.length === 1 ? '1 rule' : `${rules.length} rules`}
+          </span>
+        </div>
+        {sortRules(rules).map(rule => (
+          <div
+            key={rule.id}
+            className={cn(
+              'flex items-start justify-between gap-3 border-b border-border px-4 py-3 last:border-b-0',
+              rule.id === ruleDraft.id && 'bg-accent',
+            )}
+          >
+            <div className='flex flex-col gap-2 min-w-0 flex-1'>
+              <div className='flex flex-wrap items-center gap-2'>{ruleChips(rule.conditions)}</div>
+              <div className='flex items-center gap-2'>
+                <span className='text-[10px] font-bold uppercase tracking-wide text-muted-foreground'>
+                  Then
+                </span>
+                <span className='text-xs font-bold'>Mute</span>
+              </div>
+            </div>
+            <div className='flex shrink-0 items-center gap-1.5'>
+              <button
+                aria-label='Edit rule'
+                title='Edit rule'
+                className='rounded-full border border-border p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground'
+                data-track-category='RADAR'
+                data-track-name='EDIT_RULE'
+                onClick={() => {
+                  setRuleDraft({
+                    id: rule.id,
+                    scope: rule.conditions[0]?.scope ?? 'channel',
+                    conditions: rule.conditions.map(c => ({ ...c, values: [...c.values] })),
+                  });
+                  setRuleValueSearch('');
+                }}
+              >
+                <Pencil className='size-3.5' />
+              </button>
+              <button
+                aria-label='Delete rule'
+                title='Delete rule'
+                className='rounded-full border border-[#e8604c]/40 p-1.5 text-[#e8604c] hover:bg-[#e8604c]/10'
+                data-track-category='RADAR'
+                data-track-name='DELETE_RULE'
+                onClick={() => {
+                  deleteRule(rule.id);
+                  // Otherwise the builder is still offering to update a rule
+                  // that no longer exists, and Save would quietly do nothing.
+                  if (ruleDraft.id === rule.id) resetRuleDraft();
+                }}
+              >
+                <Trash2 className='size-3.5' />
               </button>
             </div>
-          )}
+          </div>
+        ))}
+        {rules.length === 0 && (
+          <div className='px-4 py-6 text-center text-sm text-muted-foreground'>
+            No rules yet. Everything reaches you.
+          </div>
+        )}
+      </div>
+    </div>
+  );
+  // The Teams pane. The list and the form are one pane rather than two
+  // dialogs: the form replaces the list in place and hands back to it, so the
+  // heading is the only thing that has to say which of the two is showing.
+  const teamsSection = (
+    <div className='flex flex-col gap-5'>
+      <div className='flex items-end justify-between gap-4 flex-wrap'>
+        <div className='min-w-0'>
+          <div className='text-lg font-bold'>
+            {teamDraft ? (teamDraft.id ? 'Edit team' : 'New team') : 'Teams'}
+          </div>
+          <div className='mt-1 max-w-[440px] text-[13px] leading-relaxed text-muted-foreground'>
+            {teamDraft
+              ? 'Name the team and pick its members.'
+              : 'A saved group of people. Filters can then show everything pending on that group, whoever asked.'}
+          </div>
+        </div>
+        {!teamDraft && (
+          <button
+            className='shrink-0 rounded-full bg-foreground px-4 py-2 text-sm font-semibold text-background hover:opacity-90'
+            data-track-category='RADAR'
+            data-track-name='NEW_TEAM'
+            onClick={() => openTeamDraft({ id: null, name: '', memberIds: new Set() })}
+          >
+            + New team
+          </button>
+        )}
+      </div>
 
-          {teamDraft && (
-            <div>
-              <div className='text-[10px] font-bold uppercase tracking-wide text-muted-foreground mb-1.5'>
-                Team name
-              </div>
-              <input
-                autoFocus
-                className='w-full px-3 py-2 rounded-lg border border-border bg-background text-sm text-foreground'
-                placeholder='e.g. Platform Pod'
-                data-track-category='RADAR'
-                data-track-name='TEAM_NAME'
-                value={teamDraft.name}
-                onChange={e => setTeamDraft({ ...teamDraft, name: e.target.value })}
-              />
-              <div className='flex items-center gap-2 mt-4 mb-1.5'>
-                <span className='flex-1 text-[10px] font-bold uppercase tracking-wide text-muted-foreground'>
-                  Members
-                </span>
-                <span className='text-xs text-muted-foreground'>
-                  {teamDraft.memberIds.size
-                    ? `${teamDraft.memberIds.size} selected`
-                    : 'none selected'}
-                </span>
-              </div>
-              <div className='rounded-xl border border-border overflow-hidden'>
-                <div className='relative px-3 pt-2 pb-1'>
-                  <Search className='absolute left-5 top-1/2 mt-0.5 -translate-y-1/2 size-3.5 text-muted-foreground' />
-                  <input
-                    className='w-full pl-7 pr-2 py-1.5 rounded-lg border border-border bg-background text-sm text-foreground'
-                    placeholder='Search people'
-                    data-track-category='RADAR'
-                    data-track-name='SEARCH_TEAM_MEMBERS'
-                    value={memberSearch}
-                    onChange={e => setMemberSearch(e.target.value)}
-                  />
+      {!teamDraft && (
+        <div className='flex flex-col gap-2'>
+          {teams.map(team => (
+            <div
+              key={team.id}
+              className='flex items-center gap-3 rounded-xl border border-border px-3.5 py-3'
+            >
+              <div className='flex-1 min-w-0'>
+                <div className='text-sm font-bold truncate'>{team.name}</div>
+                <div className='text-xs text-muted-foreground truncate'>
+                  {team.memberIds.length === 1 ? '1 member' : `${team.memberIds.length} members`}
+                  {' · '}
+                  {team.memberIds.slice(0, 2).map(nameOf).join(', ')}
+                  {team.memberIds.length > 2 && ` +${team.memberIds.length - 2}`}
                 </div>
-                {teamCandidates.length === 0 && (
-                  <div className='px-3 py-2 text-xs text-muted-foreground'>
-                    {memberSearch.trim() ? 'No one matches.' : 'Nobody here yet.'}
-                  </div>
-                )}
-                {teamCandidates.map(candidate => {
-                  const picked = teamDraft.memberIds.has(candidate.id);
-                  // The cap is what the picker enforces: past it, only
-                  // unticking stays available.
-                  const full = !picked && teamDraft.memberIds.size >= MAX_TEAM_MEMBERS;
-                  return (
-                    <button
-                      key={candidate.id}
-                      disabled={full}
-                      title={full ? `At most ${MAX_TEAM_MEMBERS} members` : undefined}
-                      className={cn(
-                        'w-full flex items-center gap-2.5 px-3 py-2 text-sm hover:bg-accent focus:outline-none focus-visible:bg-accent',
-                        full && 'opacity-50 cursor-not-allowed',
-                      )}
-                      data-track-category='RADAR'
-                      data-track-name='TEAM_MEMBER'
-                      onClick={() => {
-                        const next = new Set(teamDraft.memberIds);
-                        if (next.has(candidate.id)) next.delete(candidate.id);
-                        else next.add(candidate.id);
-                        setTeamDraft({ ...teamDraft, memberIds: next });
-                      }}
-                    >
-                      <Avatar
-                        userId={candidate.id}
-                        size='rg'
-                        showActiveStatus
-                        className='shrink-0 rounded-lg'
-                      />
-                      <span className='flex-1 text-left truncate'>{candidate.label}</span>
-                      {checkbox(picked)}
-                    </button>
-                  );
-                })}
               </div>
+              <button
+                className='shrink-0 rounded-full border border-border px-3 py-1.5 text-xs font-semibold hover:bg-accent'
+                data-track-category='RADAR'
+                data-track-name='EDIT_TEAM'
+                onClick={() =>
+                  openTeamDraft({
+                    id: team.id,
+                    name: team.name,
+                    memberIds: new Set(team.memberIds),
+                  })
+                }
+              >
+                Edit
+              </button>
+              <button
+                className='shrink-0 rounded-full border border-[#e8604c]/40 text-[#e8604c] px-3 py-1.5 text-xs font-semibold hover:bg-[#e8604c]/10'
+                data-track-category='RADAR'
+                data-track-name='DELETE_TEAM'
+                onClick={() => removeTeam(team)}
+              >
+                Delete
+              </button>
+            </div>
+          ))}
+          {teams.length === 0 && (
+            <div className='rounded-xl border border-dashed border-border px-4 py-8 text-center text-sm text-muted-foreground'>
+              No teams yet. Create a team to easily filter and see what’s pending.
             </div>
           )}
         </div>
+      )}
 
-        <div className='flex items-center gap-3 px-5 py-3 border-t border-border'>
-          <span className='flex-1 text-xs text-muted-foreground'>
-            {teamDraft ? '' : teams.length === 1 ? '1 team' : `${teams.length} teams`}
-          </span>
-          <button
-            className='rounded-full px-4 py-2 text-sm font-semibold hover:bg-accent'
+      {teamDraft && (
+        <div className='max-w-[520px]'>
+          <div className='text-[10px] font-bold uppercase tracking-wide text-muted-foreground mb-1.5'>
+            Team name
+          </div>
+          <input
+            autoFocus
+            className='w-full px-3 py-2 rounded-lg border border-border bg-background text-sm text-foreground'
+            placeholder='e.g. Platform Pod'
             data-track-category='RADAR'
-            data-track-name='MANAGE_TEAMS_BACK'
-            onClick={() => {
-              if (teamDraft) setTeamDraft(null);
-              else setManageTeams(false);
-            }}
-          >
-            {teamDraft ? 'Back' : 'Done'}
-          </button>
-          {teamDraft && (
+            data-track-name='TEAM_NAME'
+            value={teamDraft.name}
+            onChange={e => setTeamDraft({ ...teamDraft, name: e.target.value })}
+          />
+          <div className='flex items-center gap-2 mt-4 mb-1.5'>
+            <span className='flex-1 text-[10px] font-bold uppercase tracking-wide text-muted-foreground'>
+              Members
+            </span>
+            <span className='text-xs text-muted-foreground'>
+              {teamDraft.memberIds.size ? `${teamDraft.memberIds.size} selected` : 'none selected'}
+            </span>
+          </div>
+          <div className='rounded-xl border border-border overflow-hidden'>
+            <div className='relative px-3 pt-2 pb-1'>
+              <Search className='absolute left-5 top-1/2 mt-0.5 -translate-y-1/2 size-3.5 text-muted-foreground' />
+              <input
+                className='w-full pl-7 pr-2 py-1.5 rounded-lg border border-border bg-background text-sm text-foreground'
+                placeholder='Search people'
+                data-track-category='RADAR'
+                data-track-name='SEARCH_TEAM_MEMBERS'
+                value={memberSearch}
+                onChange={e => setMemberSearch(e.target.value)}
+              />
+            </div>
+            {pickedCandidates.length > 0 && (
+              <div className='px-3 pt-1.5 pb-0.5 text-[10px] font-bold uppercase tracking-wide text-muted-foreground'>
+                On this team
+              </div>
+            )}
+            {pickedCandidates.map(candidate => memberRow(candidate, true))}
+            {/* Only ever a divider between two populated groups. */}
+            {pickedCandidates.length > 0 && teamCandidates.length > 0 && (
+              <div className='mx-3 my-1 border-t border-border' />
+            )}
+            {teamCandidates.map(candidate => memberRow(candidate, false))}
+            {pickedCandidates.length + teamCandidates.length === 0 && (
+              <div className='px-3 py-2 text-xs text-muted-foreground'>
+                {memberSearch.trim() ? 'No one matches.' : 'Search to add people.'}
+              </div>
+            )}
+            {/* "else" because whoever is already on the team is listed right
+                above, however little the query matched. */}
+            {memberSearch.trim() && teamCandidates.length === 0 && pickedCandidates.length > 0 && (
+              <div className='px-3 py-2 text-xs text-muted-foreground'>No one else matches.</div>
+            )}
+            {teamCandidatesTruncated && (
+              <div className='px-3 py-2 text-xs text-muted-foreground'>
+                More people match — keep typing to narrow.
+              </div>
+            )}
+          </div>
+
+          <div className='flex items-center justify-end gap-3 mt-4'>
+            <button
+              className='rounded-full px-4 py-2 text-sm font-semibold hover:bg-accent'
+              data-track-category='RADAR'
+              data-track-name='TEAM_DRAFT_BACK'
+              onClick={() => openTeamDraft(null)}
+            >
+              Back
+            </button>
             <button
               disabled={!draftValid}
               className={cn(
@@ -1589,7 +2551,77 @@ const RadarPanel = (): ReactElement => {
             >
               {teamDraft.id ? 'Save team' : 'Create team'}
             </button>
-          )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+
+  // Every pane of the dialog, in nav order. Registering a section is this row
+  // plus a branch in the pane switch below.
+  const settingsNav: Array<{ id: RadarSettingsSection; label: string; count: number }> = [
+    { id: 'rules', label: 'Rules', count: rules.length },
+    { id: 'teams', label: 'Teams', count: teams.length },
+  ];
+
+  // The app's Dialog, so Escape, the focus trap, focus restore and the portal
+  // all come for free instead of being rebuilt here one bug at a time.
+  const settingsDialog = (
+    <Dialog
+      open={settingsSection !== null}
+      onOpenChange={open => {
+        if (!open) closeSettings();
+      }}
+      title='Radar settings'
+      description='Teams and everything else Radar keeps per person.'
+      className='max-w-[940px] rounded-2xl border border-border overflow-hidden'
+      // The drawer variant drops title, description and className on the
+      // floor; a dialog at every width keeps this one surface.
+      mobileVariant='dialog'
+    >
+      <div className='flex flex-col h-[640px] max-h-[85vh]'>
+        <div className='flex items-center justify-between gap-3 px-5 py-3.5 border-b border-border shrink-0'>
+          <div className='text-sm font-bold'>Settings</div>
+          <button
+            aria-label='Close'
+            className='shrink-0 p-1 rounded-md text-muted-foreground hover:bg-accent hover:text-foreground'
+            data-track-category='RADAR'
+            data-track-name='CLOSE_RADAR_SETTINGS'
+            onClick={closeSettings}
+          >
+            <X className='size-4' />
+          </button>
+        </div>
+
+        <div className='flex flex-1 min-h-0'>
+          <nav className='w-[190px] shrink-0 border-r border-border bg-muted/30 p-2.5'>
+            {settingsNav.map(section => {
+              const on = settingsSection === section.id;
+              return (
+                <button
+                  key={section.id}
+                  aria-current={on ? 'page' : undefined}
+                  className={cn(
+                    'w-full flex items-center gap-2 rounded-lg px-3 py-2 mb-0.5 text-sm font-semibold transition-colors',
+                    on
+                      ? 'bg-background text-foreground'
+                      : 'text-muted-foreground hover:bg-accent hover:text-foreground',
+                  )}
+                  data-track-category='RADAR'
+                  data-track-name='RADAR_SETTINGS_SECTION'
+                  onClick={() => setSettingsSection(section.id)}
+                >
+                  <span className='flex-1 text-left'>{section.label}</span>
+                  <span className='text-xs font-normal text-muted-foreground'>{section.count}</span>
+                </button>
+              );
+            })}
+          </nav>
+
+          <div className='flex-1 min-w-0 overflow-y-auto p-6'>
+            {settingsSection === 'rules' && rulesSection}
+            {settingsSection === 'teams' && teamsSection}
+          </div>
         </div>
       </div>
     </Dialog>
@@ -1617,12 +2649,7 @@ const RadarPanel = (): ReactElement => {
                 data-track-name='FILTER_PENDING_ME'
                 onClick={() => setPendingMe(v => !v)}
               >
-                <span className='flex-1 min-w-0 flex items-baseline gap-2 text-left'>
-                  <span className='font-bold'>Me</span>
-                  {pendingMe && (
-                    <span className='truncate text-xs text-muted-foreground'>{meSummary}</span>
-                  )}
-                </span>
+                <span className='flex-1 min-w-0 text-left font-bold'>Me</span>
                 {checkbox(pendingMe)}
               </button>
               {pendingMe &&
@@ -1634,6 +2661,22 @@ const RadarPanel = (): ReactElement => {
                   requesterSearch,
                   setRequesterSearch,
                   'exclude',
+                  rankedRequesters,
+                  undefined,
+                  {
+                    open: requesterPickerOpen,
+                    onToggle: () => setRequesterPickerOpen(open => !open),
+                    // Who is still in, not who is out: "All but 1" made the
+                    // reader do the subtraction, and the count that matters is
+                    // the one the feed is actually narrowed to.
+                    summary: (() => {
+                      if (excludedRequesters.size === 0) return 'Anyone';
+                      const included = requesterOptions.filter(
+                        id => !excludedRequesters.has(id),
+                      ).length;
+                      return `${included} ${included === 1 ? 'person' : 'people'}`;
+                    })(),
+                  },
                 )}
               <button
                 className={cn(
@@ -1651,12 +2694,7 @@ const RadarPanel = (): ReactElement => {
                   }
                 }}
               >
-                <span className='flex-1 min-w-0 flex items-baseline gap-2 text-left'>
-                  <span className='font-bold'>Others</span>
-                  {pendingOthers && (
-                    <span className='truncate text-xs text-muted-foreground'>{othersSummary}</span>
-                  )}
-                </span>
+                <span className='flex-1 min-w-0 text-left font-bold'>Others</span>
                 {checkbox(pendingOthers)}
               </button>
               {pendingOthers && teamsPicker}
@@ -1669,6 +2707,8 @@ const RadarPanel = (): ReactElement => {
                   holderSearch,
                   setHolderSearch,
                   'include',
+                  rankedHolders,
+                  lockedByTeam,
                 )}
               {pendingOthers && othersModePicker}
             </>
@@ -1806,6 +2846,16 @@ const RadarPanel = (): ReactElement => {
           >
             <RefreshCw className='size-4' />
           </button>
+          <button
+            title='Radar settings'
+            aria-haspopup='dialog'
+            className='p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent transition-colors'
+            data-track-category='RADAR'
+            data-track-name='OPEN_RADAR_SETTINGS'
+            onClick={e => openSettings('rules', e.currentTarget)}
+          >
+            <Settings className='size-4' />
+          </button>
           <div className='ml-auto flex items-center gap-1.5'>
             <Bug className='size-3.5 text-muted-foreground' />
             <input
@@ -1858,7 +2908,6 @@ const RadarPanel = (): ReactElement => {
               )}
             </button>
             {filtersOpen && filtersPanel}
-            {manageTeams && manageTeamsDialog}
           </span>
         </div>
 
@@ -1867,7 +2916,7 @@ const RadarPanel = (): ReactElement => {
             <div className='flex items-center gap-2 text-muted-foreground text-sm py-8'>
               <Loader2 className='size-4 animate-spin' /> Loading…
             </div>
-          ) : cards.length === 0 ? (
+          ) : cards.length === 0 && mutedCards.length === 0 ? (
             <div className='text-muted-foreground text-sm py-8'>
               {tab === 'waiting'
                 ? 'Nothing pending on anyone else.'
@@ -1877,7 +2926,42 @@ const RadarPanel = (): ReactElement => {
             </div>
           ) : (
             <div className='space-y-4 max-w-3xl'>
-              {cards.map(({ card, kind }) => renderCard(card, kind))}
+              {cards.slice(0, feedLimit).map(({ card, kind }) => renderCard(card, kind))}
+              {moreToDraw && <div ref={feedEndRef} aria-hidden className='h-px' />}
+              {/* Below everything, including the paging sentinel: the muted
+                  group is the floor of the feed, not a page of it. It says how
+                  much it is holding, because a rule that turns out to be too
+                  wide is only findable if its cost is visible. */}
+              {mutedCards.length > 0 && (
+                <div className='pt-2'>
+                  <button
+                    className='w-full flex items-center gap-2 rounded-xl border border-border px-4 py-2.5 text-left hover:bg-accent'
+                    aria-expanded={mutedOpen}
+                    data-track-category='RADAR'
+                    data-track-name='TOGGLE_MUTED'
+                    onClick={() => setMutedOpen(open => !open)}
+                  >
+                    <BellOff className='size-3.5 text-muted-foreground' />
+                    <span className='text-sm font-semibold text-muted-foreground'>Muted</span>
+                    <span className='flex-1 text-xs text-muted-foreground'>
+                      {mutedItemCount === 1 ? '1 item' : `${mutedItemCount} items`}
+                    </span>
+                    <ChevronDown
+                      className={cn(
+                        'size-3.5 text-muted-foreground transition-transform',
+                        mutedOpen && 'rotate-180',
+                      )}
+                    />
+                  </button>
+                  {mutedOpen && (
+                    <div className='mt-4 space-y-4 opacity-70'>
+                      {mutedCards
+                        .slice(0, feedLimit)
+                        .map(({ card, kind }) => renderCard(card, kind))}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -2034,6 +3118,34 @@ const RadarPanel = (): ReactElement => {
                       <span className='text-foreground font-semibold'>
                         {itemTrail.item.requestedBy.map(nameOf).join(', ') || '—'}
                       </span>
+                      {/* Whose answer this is: rules are per reader, so this
+                          says why the item is hidden FOR ME. */}
+                      <span className='text-muted-foreground'>Your rules</span>
+                      <span className='text-foreground font-semibold'>
+                        {itemTrail.rules.matched.length > 0 ? (
+                          <>
+                            muted
+                            <span className='font-normal text-muted-foreground'>
+                              {' by '}
+                              {itemTrail.rules.matched[0]!.conditions.map(
+                                c =>
+                                  `${RULE_SCOPES.find(s => s.id === c.scope)?.chip ?? c.scope} ${c.values
+                                    .map(v => ruleValueLabel(c.scope, v))
+                                    .join(' or ')}`,
+                              ).join(' and ')}
+                            </span>
+                            {itemTrail.rules.matched.length > 1 && (
+                              <span className='font-normal text-muted-foreground'>
+                                {` · and ${itemTrail.rules.matched.length - 1} more`}
+                              </span>
+                            )}
+                          </>
+                        ) : (
+                          <span className='font-normal text-muted-foreground'>
+                            no rule of yours matches this
+                          </span>
+                        )}
+                      </span>
                     </div>
                     <div className='mt-2.5 space-y-2.5 border-l-2 border-border pl-3'>
                       {itemTrail.mutations.map(m => {
@@ -2166,6 +3278,10 @@ const RadarPanel = (): ReactElement => {
           </div>
         </div>
       )}
+
+      {/* At the panel's root, not inside the filters: more than one control
+          opens it, and it belongs to Radar rather than to any one of them. */}
+      {settingsSection !== null && settingsDialog}
     </div>
   );
 };

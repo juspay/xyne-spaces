@@ -37,6 +37,7 @@ function toUserSearchResult(user: UserWithMappings) {
     notificationsPausedUntil: user.notificationsPausedUntil,
     assignmentUnavailableUntil: user.assignmentUnavailableUntil,
     calendarVisibility: user.calendarVisibility,
+    activityStatus: user.activityStatus,
     userGroups: user.userGroupMappings.reduce((acc, mapping) => {
       if (mapping.userGroup) {
         acc.push({

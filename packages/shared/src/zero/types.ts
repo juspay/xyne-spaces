@@ -119,6 +119,8 @@ export enum AttachmentEntityType {
   FORM_ENTITY_VALUE = 'FORM_ENTITY_VALUE',
   WORKFLOW_STEPS = 'WORKFLOW_STEPS',
   DESK_REPORT = 'DESK_REPORT',
+  RECORDING = 'RECORDING',
+  SDLC_HUB = 'SDLC_HUB',
 }
 
 // @ts-ignore TS1294
@@ -492,6 +494,11 @@ export enum UserStatus {
 }
 
 // @ts-ignore TS1294
+export enum UserActivityStatus {
+  IN_CALL = 'IN_CALL',
+}
+
+// @ts-ignore TS1294
 export enum UserType {
   USER = 'USER',
   BOT = 'BOT',
@@ -790,6 +797,7 @@ export enum FormFieldType {
   MULTI_SELECT = 'MULTI_SELECT',
   USER = 'USER',
   DOC = 'DOC',
+  TICKET = 'TICKET',
 }
 
 // @ts-ignore TS1294
@@ -981,6 +989,7 @@ export enum ProjectType {
 // @ts-ignore TS1294
 export enum SavedConfigContextType {
   BOARD = 'BOARD',
+  DESK_TICKET = 'DESK_TICKET',
 }
 
 // @ts-ignore TS1294

@@ -2,7 +2,7 @@ import { ChannelType } from '@xyne/shared';
 import { sdlcSectionForCanvas, type SdlcNavTarget, type SdlcSection } from '@xyne/shared/sdlc';
 import { db } from '@/database/client';
 import { runAsSystem } from '@/database/tenant/context';
-import { resolveFolderTrackId, resolveInheritedOwner } from './entityLinkService';
+import { resolveFolderTrackId, resolveItemTrackId, resolveInheritedOwner } from './entityLinkService';
 
 export interface SdlcNavIds {
   channelId?: string | null;
@@ -102,6 +102,11 @@ export const sdlcConversationOwner = memoize(
   (conversationId: string) => resolveInheritedOwner(db, conversationId),
 );
 
+export const sdlcFolderTrackId = memoize(
+  (folderId: string) => folderId,
+  (folderId: string) => resolveFolderTrackId(db, folderId),
+);
+
 export const sdlcConversationTicket = memoize(
   (conversationId: string) => conversationId,
   async (conversationId: string): Promise<string | null> =>
@@ -124,8 +129,14 @@ async function conversationLocation(conversationId: string): Promise<SdlcLocatio
   if (owner.sourceType === 'TRACK') {
     return { section: 'tracks', trackId: owner.sourceId, discussionId: conversationId };
   }
-  if (owner.sourceType === 'FOLDER') {
-    const trackId = await resolveFolderTrackId(db, owner.sourceId);
+  // A folder, an uploaded file and a link have no page of their own; their
+  // conversations are read from the track they are filed in.
+  if (
+    owner.sourceType === 'FOLDER' ||
+    owner.sourceType === 'ATTACHMENT' ||
+    owner.sourceType === 'LINK'
+  ) {
+    const trackId = await resolveItemTrackId(db, owner.sourceType, owner.sourceId);
     return trackId ? { section: 'tracks', trackId, discussionId: conversationId } : null;
   }
   const canvas = await canvasLocation(owner.sourceId);

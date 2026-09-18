@@ -23,6 +23,7 @@ import { ConnectionState } from 'livekit-client';
 import { formatDistanceToNow } from 'date-fns';
 import {
   useRecordingStore,
+  useRecordingVideoControls,
   sendRecordingEvent,
   useTranscriptStream,
 } from '../../hooks/useRecordingStore';
@@ -163,6 +164,7 @@ export default function RecordingsScreen(): ReactElement {
   const room = useRecordingStore(ctx => ctx.room);
   const activeLayout = useRecordingStore(ctx => ctx.activeLayout);
   const isTranscriptMinimized = useRecordingStore(ctx => ctx.isTranscriptMinimized);
+  const videoControls = useRecordingVideoControls();
 
   const [isCreatingCanvas, setIsCreatingCanvas] = useState(false);
   const [canvasCreationFailed, setCanvasCreationFailed] = useState(false);
@@ -433,6 +435,7 @@ export default function RecordingsScreen(): ReactElement {
       const primary = details[0];
       xyneAIActor.send({
         type: 'OPEN',
+        trackSource: 'recordings',
         startFreshChat: true,
         ...(primary?.channelId ? { channelId: primary.channelId } : {}),
         threadInfo: {
@@ -593,7 +596,7 @@ export default function RecordingsScreen(): ReactElement {
                 </div>
               </div>
               <p className='text-sm text-muted-foreground '>
-                Your audio recordings with automatic transcription
+                Your screen and audio recordings with automatic transcription
               </p>
             </div>
 
@@ -654,6 +657,10 @@ export default function RecordingsScreen(): ReactElement {
                             className='flex-1 min-w-0 text-left p-4 cursor-pointer'
                             data-track-category='RecordingsScreen'
                             data-track-name='view_recording'
+                            data-track-metadata={JSON.stringify({
+                              recordingId: recording.id,
+                              source: 'recordings_list',
+                            })}
                           >
                             <div className='flex items-start gap-4'>
                               {/* Icon */}
@@ -907,6 +914,7 @@ export default function RecordingsScreen(): ReactElement {
         onStop={handleStopRecording}
         onPause={handlePauseRecording}
         onResume={handleResumeRecording}
+        {...videoControls}
       />
 
       {/* ─── Save Title Modal (after stopping) ───── */}

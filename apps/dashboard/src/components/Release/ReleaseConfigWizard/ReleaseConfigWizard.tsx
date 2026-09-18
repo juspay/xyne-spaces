@@ -1,5 +1,6 @@
 /* eslint-disable local-rules/require-tracking-on-click */
 import { ReactElement, useEffect, useMemo, useState } from 'react';
+import { toast } from 'sonner';
 import { apiInstance } from '../../../services/clients/apiClient';
 import { Dialog } from '../../ui/Dialog/Dialog';
 import { Button } from '../../ui/Button';
@@ -10,6 +11,7 @@ import {
   ChevronRight,
   GitCommit,
   PlugZap,
+  Sparkles,
   Trash2,
   Users,
   X,
@@ -33,6 +35,13 @@ import {
 } from './ReleaseConfigWizard.types';
 import { queries } from '../../../zero/queries';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
+
+type SuggestedService = {
+  name: string;
+  regex: string;
+  envPaths: string[];
+  migrationPaths: string[];
+};
 
 // ─── Shared style tokens ─────────────────────────────────────────────────────
 const INPUT_CLASS =
@@ -380,6 +389,8 @@ interface Step3Props {
   /** null = not tested yet; otherwise the last test result. */
   connectionTest: { ok: boolean; message: string } | null;
   lockTrackingMode: boolean;
+  onSuggestServices: () => Promise<void>;
+  isSuggesting: boolean;
 }
 
 const Step3Applications = ({
@@ -401,6 +412,8 @@ const Step3Applications = ({
   isTestingConnection,
   connectionTest,
   lockTrackingMode,
+  onSuggestServices,
+  isSuggesting,
 }: Step3Props): ReactElement => {
   return (
     <div className='space-y-3'>
@@ -530,16 +543,29 @@ const Step3Applications = ({
       </div>
 
       {allowApplicationListChanges && (
-        <Button
-          variant='secondary'
-          onClick={onAddApplication}
-          data-track-category='Release'
-          data-track-name='ADD_APPLICATION'
-          className='w-full'
-          size='sm'
-        >
-          + Add service
-        </Button>
+        <div className='flex gap-2'>
+          <Button
+            variant='secondary'
+            onClick={onAddApplication}
+            data-track-category='Release'
+            data-track-name='ADD_APPLICATION'
+            className='flex-1'
+            size='sm'
+          >
+            + Add service
+          </Button>
+          <Button
+            variant='secondary'
+            onClick={() => void onSuggestServices()}
+            disabled={isSuggesting || !sharedRepoUrl.trim()}
+            className='flex-1'
+            size='sm'
+            title='Use AI to suggest services and env / migration paths from the repo'
+          >
+            <Sparkles size={14} />
+            {isSuggesting ? 'Suggesting…' : 'Suggest with AI'}
+          </Button>
+        </div>
       )}
     </div>
   );
@@ -662,6 +688,44 @@ const ReleaseConfigWizardForm = ({
     setConnectionTest(null);
   }, [form.sharedRepoUrl]);
 
+  const [isSuggesting, setIsSuggesting] = useState(false);
+  const [suggestions, setSuggestions] = useState<SuggestedService[] | null>(null);
+  const [suggestChecked, setSuggestChecked] = useState<boolean[]>([]);
+  const [suggestMode, setSuggestMode] = useState<'add' | 'replace'>('add');
+
+  const handleSuggestServices = async (): Promise<void> => {
+    if (!form.sharedRepoUrl.trim()) return;
+    setIsSuggesting(true);
+    try {
+      const response = await apiInstance.post<{ services?: SuggestedService[]; message?: string }>(
+        '/commits/analyze/suggest-services',
+        { repoUrl: form.sharedRepoUrl.trim(), projectId },
+      );
+      const services = response.data.services ?? [];
+      if (services.length === 0) {
+        toast.info(response.data.message ?? 'No services could be suggested for this repository.');
+        return;
+      }
+      setSuggestions(services);
+      setSuggestChecked(services.map(() => true));
+      // Default to replacing when there's nothing to preserve.
+      setSuggestMode(form.applications.some(app => app.name.trim()) ? 'add' : 'replace');
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, 'Failed to suggest services'));
+    } finally {
+      setIsSuggesting(false);
+    }
+  };
+
+  const applyPickedSuggestions = (): void => {
+    if (!suggestions) return;
+    const picked = suggestions.filter((_, i) => suggestChecked[i]);
+    if (picked.length === 0) return;
+    form.applyServiceSuggestions(picked, suggestMode);
+    setSuggestions(null);
+    toast.success(`Applied ${picked.length} service${picked.length > 1 ? 's' : ''}`);
+  };
+
   // The form keeps the complete group in memory even when application edit
   // displays one row. The backend uses the submitted list to detect removals.
   const existingAppNames = useMemo(
@@ -705,7 +769,81 @@ const ReleaseConfigWizardForm = ({
       }
       className='max-w-5xl'
     >
-      <div className='p-4 w-full'>
+      <div className='p-4 w-full relative'>
+        {suggestions && (
+          <div className='absolute inset-0 z-20 flex items-center justify-center bg-background/80 p-4'>
+            <div className='w-full max-w-lg space-y-3 rounded-xl border border-border bg-background p-4 shadow-lg'>
+              <div>
+                <h4 className='text-sm font-semibold'>
+                  AI found {suggestions.length} service{suggestions.length > 1 ? 's' : ''}
+                </h4>
+                <p className='text-xs text-muted-foreground'>Pick which to apply.</p>
+              </div>
+              <div className='max-h-[300px] space-y-2 overflow-y-auto'>
+                {suggestions.map((s, i) => (
+                  <label
+                    key={`${s.name}-${i}`}
+                    className='flex cursor-pointer items-start gap-2 rounded-md border border-border p-2 hover:bg-muted'
+                  >
+                    <input
+                      type='checkbox'
+                      checked={suggestChecked[i] ?? false}
+                      onChange={() =>
+                        setSuggestChecked(prev => prev.map((v, idx) => (idx === i ? !v : v)))
+                      }
+                      className='mt-0.5'
+                    />
+                    <div className='min-w-0'>
+                      <div className='text-sm font-medium'>
+                        {s.name}{' '}
+                        <span className='font-mono text-xs text-muted-foreground'>{s.regex}</span>
+                      </div>
+                      {(s.envPaths.length > 0 || s.migrationPaths.length > 0) && (
+                        <div className='truncate text-xs text-muted-foreground'>
+                          {s.envPaths.length > 0 && `env: ${s.envPaths.join(', ')}`}
+                          {s.envPaths.length > 0 && s.migrationPaths.length > 0 && ' · '}
+                          {s.migrationPaths.length > 0 &&
+                            `migrations: ${s.migrationPaths.join(', ')}`}
+                        </div>
+                      )}
+                    </div>
+                  </label>
+                ))}
+              </div>
+              <div className='flex items-center gap-4 text-sm'>
+                <label className='flex cursor-pointer items-center gap-1.5'>
+                  <input
+                    type='radio'
+                    checked={suggestMode === 'add'}
+                    onChange={() => setSuggestMode('add')}
+                  />
+                  Add to existing
+                </label>
+                <label className='flex cursor-pointer items-center gap-1.5'>
+                  <input
+                    type='radio'
+                    checked={suggestMode === 'replace'}
+                    onChange={() => setSuggestMode('replace')}
+                  />
+                  Replace all
+                </label>
+              </div>
+              <div className='flex justify-end gap-2'>
+                <Button variant='secondary' size='sm' onClick={() => setSuggestions(null)}>
+                  Cancel
+                </Button>
+                <Button
+                  variant='default'
+                  size='sm'
+                  disabled={suggestChecked.every(v => !v)}
+                  onClick={applyPickedSuggestions}
+                >
+                  Apply {suggestChecked.filter(Boolean).length}
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
         {form.currentStep === 2 && (
           <Step3Applications
             applications={visibleApplications}
@@ -726,6 +864,8 @@ const ReleaseConfigWizardForm = ({
             onTestConnection={handleTestConnection}
             isTestingConnection={isTestingConnection}
             connectionTest={connectionTest}
+            onSuggestServices={handleSuggestServices}
+            isSuggesting={isSuggesting}
           />
         )}
 

@@ -30,6 +30,7 @@ import {
   Bot,
   RocketShip,
   GitBranch,
+  LayoutGridTwoVertical,
   type PikaIconProps,
   Tag,
 } from '@xyne/icons';
@@ -89,6 +90,7 @@ export const NAVIGATION_ITEMS: NavigationItem[] = [
   { path: '/chat/dir', label: 'Chat', icon: Hashtag, popout: true },
   { path: '/chat/dm', label: 'DMs', icon: ChatDefault, popout: true },
   { path: '/chat/activity', label: 'Activity', icon: NotificationBellOn, popout: true },
+  { path: '/streams', label: 'Streams', icon: LayoutGridTwoVertical, popout: true },
   { path: '/calls', label: 'Calls', icon: PhoneDefault, popout: true },
   { path: '/recordings', label: 'Recordings', icon: AudioWaveIcon, popout: true },
   { path: '/projects', label: 'Tickets', icon: TicketToken, popout: true },

@@ -5,7 +5,9 @@ import {
   AutoDraftMode,
   ChannelType,
   ChannelRole,
+  DeskType,
   isDeskChannelType,
+  parseDeskMetricsGuestVisibility,
 } from '@xyne/shared';
 import { useEmailChannelPreference } from '../../../hooks/useEmailChannelPreference';
 import {
@@ -21,6 +23,14 @@ import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { queries } from '../../../zero/queries';
 import { DEFAULT_PRIORITY_PROMPT } from './constants';
 import type { SaveMappingPayload, ClassificationMapping } from '../../../types/classification';
+import {
+  DESK_FEATURE_FIELDS,
+  changedKeys,
+  errorKindOf,
+  trackDeskFeatureToggled,
+  trackDeskSettingsSaveFailed,
+  trackDeskSettingsSaved,
+} from './deskSettingsTracking';
 
 export const parseDefaultCc = (val: string | undefined | null): string[] =>
   val
@@ -29,6 +39,16 @@ export const parseDefaultCc = (val: string | undefined | null): string[] =>
         .map(s => s.trim())
         .filter(Boolean)
     : [];
+
+export const parseDlAliases = (val: string | undefined | null): string[] => {
+  if (!val) return [];
+  try {
+    const parsed: unknown = JSON.parse(val);
+    return Array.isArray(parsed) ? parsed.filter((s): s is string => typeof s === 'string') : [];
+  } catch {
+    return [];
+  }
+};
 
 const parseFrtStageNames = (val: string | undefined | null): string[] => {
   if (!val) return [];
@@ -103,6 +123,8 @@ export function useDeskSettingsForm(
   const isSocial = channelType === ChannelType.SOCIAL_MEDIA;
   const isCall = channelType === ChannelType.CALL;
   const isDeskChannel = isDeskChannelType(channelType);
+  const isDl = emailChannelPreference?.deskType === DeskType.DL;
+  const dlEmail = emailChannelPreference?.dlEmail ?? null;
   const currentInboxOwnerUserId = emailChannelPreference?.ownerUserId ?? null;
   const [channelParticipants] = useCachedQuery(
     queries.channelParticipants({ channelId: channelId ?? '' }),
@@ -199,6 +221,7 @@ export function useDeskSettingsForm(
   const pref = useDraft({
     ownerUserId: emailChannelPreference?.ownerUserId ?? '',
     sendAsEmail: emailChannelPreference?.sendAsEmail ?? '',
+    dlAliases: emailChannelPreference?.dlAliases ?? '[]',
     defaultCc: parseDefaultCc(emailChannelPreference?.defaultCc).join(','),
     assigneeUserGroupId: emailChannelPreference?.assigneeUserGroupId ?? '',
     autoMergeEmails: emailChannelPreference?.emailMergeMode === EmailMergeMode.ENABLED,
@@ -207,6 +230,7 @@ export function useDeskSettingsForm(
     autoDraftAgentSlug: emailChannelPreference?.autoDraftAgentSlug ?? null,
     metricsEnabled: emailChannelPreference?.metricsEnabled ?? false,
     frtStageNames: emailChannelPreference?.frtStageNames ?? '[]',
+    metricsGuestVisibility: emailChannelPreference?.metricsGuestVisibility ?? null,
     appWebhookDeliveryEnabled: emailChannelPreference?.appWebhookDeliveryEnabled ?? true,
     deskReportEnabled: emailChannelPreference?.deskReportEnabled ?? false,
     deskReportAgentSlug: emailChannelPreference?.deskReportAgentSlug ?? null,
@@ -230,6 +254,7 @@ export function useDeskSettingsForm(
 
   const ownerId = pref.draft.ownerUserId;
   const sendAsAlias = pref.draft.sendAsEmail;
+  const dlAliases = parseDlAliases(pref.draft.dlAliases);
   const ccEmails = parseDefaultCc(pref.draft.defaultCc);
   const defaultAssigneeGroupId = pref.draft.assigneeUserGroupId;
   const autoMergeEmails = pref.draft.autoMergeEmails;
@@ -239,6 +264,7 @@ export function useDeskSettingsForm(
   const autoDraftAgentSlug = pref.draft.autoDraftAgentSlug;
   const metricsEnabled = pref.draft.metricsEnabled;
   const frtStageNames = parseFrtStageNames(pref.draft.frtStageNames);
+  const guestVisibility = parseDeskMetricsGuestVisibility(pref.draft.metricsGuestVisibility);
   const appWebhookDeliveryEnabled = pref.draft.appWebhookDeliveryEnabled;
   const deskReportEnabled = pref.draft.deskReportEnabled;
   const deskReportAgentSlug = pref.draft.deskReportAgentSlug;
@@ -259,6 +285,14 @@ export function useDeskSettingsForm(
     pref.setField('ownerUserId', next);
   };
   const setSendAsAlias = (next: string) => pref.setField('sendAsEmail', next);
+  const setDlAliases = (updater: string[] | ((prev: string[]) => string[])) => {
+    if (!canManage) return;
+    pref.setField('dlAliases', prevStr => {
+      const prevArr = parseDlAliases(prevStr);
+      const nextArr = typeof updater === 'function' ? updater(prevArr) : updater;
+      return JSON.stringify(nextArr.map(a => a.trim().toLowerCase()).filter(Boolean));
+    });
+  };
   const setCcEmails = (updater: string[] | ((prev: string[]) => string[])) => {
     pref.setField('defaultCc', prevStr => {
       const prevArr = parseDefaultCc(prevStr);
@@ -295,6 +329,11 @@ export function useDeskSettingsForm(
       return JSON.stringify(nextArr);
     });
   };
+  const toggleGuestVisibility = (key: string) =>
+    pref.setField(
+      'metricsGuestVisibility',
+      JSON.stringify({ ...guestVisibility, [key]: guestVisibility[key] === false }),
+    );
 
   const setClassificationEnabled = (checked: boolean) => {
     if (!canManage) return;
@@ -330,7 +369,7 @@ export function useDeskSettingsForm(
       ? 'Add a category and a prompt before enabling auto-classification.'
       : null;
 
-  const save = async () => {
+  const save = async (tab?: string) => {
     if (!channelId || !isDirty) return;
     if (sendAsAliasError) {
       toast.error('Invalid send-as alias', { description: sendAsAliasError });
@@ -341,6 +380,40 @@ export function useDeskSettingsForm(
       return;
     }
     setSaving(true);
+    // SETTINGS_SAVED / FEATURE_TOGGLED read the diff, not the values: the form
+    // is one Save for thirty fields and "which ones" is the only question worth
+    // answering. Snapshot before the awaits — the server slices re-sync as the
+    // preference row replicates back, which would empty the diff.
+    const changedFields = [
+      ...changedKeys(pref.draft, pref.server),
+      ...changedKeys(cls.draft, cls.server).map(k => `classification.${k}`),
+      ...changedKeys(pri.draft, pri.server).map(k => `priority.${k}`),
+      ...(mappingsDirty ? ['classificationMappings'] : []),
+    ];
+    const deskType = emailChannelPreference?.deskType ?? null;
+    const saveStartedAt = Date.now();
+    const featureFlips: Parameters<typeof trackDeskFeatureToggled>[0][] = [];
+    (Object.keys(DESK_FEATURE_FIELDS) as (keyof typeof DESK_FEATURE_FIELDS)[]).forEach(key => {
+      if (pref.draft[key] === pref.server[key]) return;
+      featureFlips.push({
+        feature: DESK_FEATURE_FIELDS[key],
+        to: pref.draft[key] === true,
+        deskType,
+        channelId,
+        ...(key === 'autoAIDraft' && { agentSlug: pref.draft.autoDraftAgentSlug }),
+      });
+    });
+    if (cls.draft.enabled !== cls.server.enabled) {
+      featureFlips.push({ feature: 'classification', to: cls.draft.enabled, deskType, channelId });
+    }
+    if (pri.draft.enabled !== pri.server.enabled) {
+      featureFlips.push({
+        feature: 'priority_classification',
+        to: pri.draft.enabled,
+        deskType,
+        channelId,
+      });
+    }
     try {
       const d = pref.draft;
       const s = pref.server;
@@ -348,6 +421,10 @@ export function useDeskSettingsForm(
       if (d.ownerUserId !== s.ownerUserId && d.ownerUserId) patch.ownerUserId = d.ownerUserId;
       if (d.sendAsEmail !== s.sendAsEmail) patch.sendAsEmail = d.sendAsEmail.trim() || null;
       if (d.defaultCc !== s.defaultCc) patch.defaultCc = d.defaultCc || null;
+      if (d.dlAliases !== s.dlAliases) {
+        const aliases = parseDlAliases(d.dlAliases);
+        patch.dlAliases = aliases.length > 0 ? JSON.stringify(aliases) : null;
+      }
       if (d.assigneeUserGroupId !== s.assigneeUserGroupId) {
         patch.assigneeUserGroupId = d.assigneeUserGroupId || null;
       }
@@ -372,6 +449,9 @@ export function useDeskSettingsForm(
       if (d.frtStageNames !== s.frtStageNames) {
         const names = parseFrtStageNames(d.frtStageNames);
         patch.frtStageNames = names.length > 0 ? JSON.stringify(names) : null;
+      }
+      if (d.metricsGuestVisibility !== s.metricsGuestVisibility) {
+        patch.metricsGuestVisibility = d.metricsGuestVisibility;
       }
       if (d.deskReportEnabled !== s.deskReportEnabled) {
         patch.deskReportEnabled = d.deskReportEnabled;
@@ -436,7 +516,23 @@ export function useDeskSettingsForm(
       }
 
       if (Object.keys(patch).length > 0) await savePreference(patch);
-    } catch {
+      trackDeskSettingsSaved({
+        deskType,
+        channelId,
+        tab,
+        changedFields,
+        latencyMs: Date.now() - saveStartedAt,
+      });
+      featureFlips.forEach(trackDeskFeatureToggled);
+    } catch (err) {
+      trackDeskSettingsSaveFailed({
+        deskType,
+        channelId,
+        tab,
+        changedFields,
+        latencyMs: Date.now() - saveStartedAt,
+        errorKind: errorKindOf(err),
+      });
       toast.error('Failed to save desk settings', { description: 'Please try again.' });
     } finally {
       setSaving(false);
@@ -474,6 +570,10 @@ export function useDeskSettingsForm(
     sendAsAlias,
     setSendAsAlias,
     sendAsAliasError,
+    isDl,
+    dlEmail,
+    dlAliases,
+    setDlAliases,
     classificationConfigError,
     ccEmails,
     setCcEmails,
@@ -492,6 +592,8 @@ export function useDeskSettingsForm(
     setMetricsEnabled,
     frtStageNames,
     setFrtStageNames,
+    guestVisibility,
+    toggleGuestVisibility,
     appWebhookDeliveryEnabled,
     setAppWebhookDeliveryEnabled,
     deskReportEnabled,

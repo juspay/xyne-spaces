@@ -37,6 +37,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { withProfiler } from '../../../utils/withProfiler';
 import { getInitialMessageFromConversation } from '../../../utils/conversationMessageHelpers';
 import { usePendingForChannel, buildPendingChannelConversation } from '@xyne/shared/messages';
+import { useEphemeralChannelConversations } from '../../../hooks/useEphemeralMessages';
 import { MessageHoverToolbar } from '../HoverActionsToolbar/MessageHoverToolbar';
 
 export type ChatListProps = {
@@ -50,6 +51,18 @@ export type ChatListProps = {
   linkedConversationId?: string | null;
   channelScopeType?: ChannelScopeType | undefined;
   skipMarkAsReadRef: React.RefObject<boolean>;
+  unreadsOnly?: boolean;
+  onThreadClick?: (channelId: string, conversationId: string) => void;
+  /**
+   * What to show instead of the centred spinner while the first page loads.
+   *
+   * For hosts that already showed a placeholder before this mounted. The default
+   * overlay is opaque and full-bleed, so it replaces whatever the host had with a
+   * different loading language and then cuts to content — three states where the
+   * host only ever meant to show one. Handing the host's own placeholder down
+   * makes the middle state indistinguishable from the first.
+   */
+  loadingFallback?: React.ReactNode;
 };
 
 type Anchor = {
@@ -205,6 +218,9 @@ const ChatListV4: React.FC<ChatListProps> = ({
   linkedConversationId,
   channelScopeType,
   skipMarkAsReadRef,
+  unreadsOnly,
+  onThreadClick,
+  loadingFallback,
 }) => {
   // Save scroll position when unmounting due to /browser fullscreen navigation.
   useEffect(() => {
@@ -329,8 +345,23 @@ const ChatListV4: React.FC<ChatListProps> = ({
     return [...base, ...pendingRows];
   }, [conversations, pendingForChannel]);
 
+  // In unreads-only mode (the Unreads inbox), hide everything the user has
+  // already seen; pending rows carry the newest timestamps so they survive.
+  const filteredConversations = useMemo(() => {
+    if (!unreadsOnly || !channelParticipation?.lastViewedAt) return conversationsWithPending;
+    return conversationsWithPending.filter(
+      conv => conv.createdAt > channelParticipation.lastViewedAt,
+    );
+  }, [conversationsWithPending, unreadsOnly, channelParticipation?.lastViewedAt]);
+
+  const ephemeralConversations = useEphemeralChannelConversations(channelId);
+  const conversationsWithEphemeral = useMemo(() => {
+    if (ephemeralConversations.length === 0) return filteredConversations;
+    return [...filteredConversations, ...ephemeralConversations];
+  }, [filteredConversations, ephemeralConversations]);
+
   const { combinedMessages, itemHeights } = useCombinedMesseges(
-    conversationsWithPending,
+    conversationsWithEphemeral,
     isMobile,
     newConversationBoundary?.index ?? -1,
   );
@@ -486,17 +517,19 @@ const ChatListV4: React.FC<ChatListProps> = ({
     }
 
     Promise.all([
-      zero.run(
-        queries.channelConversationsPaginatedV3({
-          channelId,
-          isMember,
-          ...(conversationIdsFilter && { conversationIds: conversationIdsFilter }),
-          start: oldConversationsAnchorRef.current,
-          direction: 'forward',
-          limit: PAGE_SIZE,
-        }),
-        { type: 'complete' },
-      ),
+      !unreadsOnly
+        ? zero.run(
+            queries.channelConversationsPaginatedV3({
+              channelId,
+              isMember,
+              ...(conversationIdsFilter && { conversationIds: conversationIdsFilter }),
+              start: oldConversationsAnchorRef.current,
+              direction: 'forward',
+              limit: PAGE_SIZE,
+            }),
+            { type: 'complete' },
+          )
+        : Promise.resolve([]),
       newConversationsAnchor &&
         zero.run(
           queries.channelConversationsPaginatedV3({
@@ -615,7 +648,7 @@ const ChatListV4: React.FC<ChatListProps> = ({
 
   const fetchOlderMessages = useCallback(() => {
     // isFetchingOlder=true → suppressed (previous fetch in flight).
-    if (isFetchingOlderRef.current || hasReachedChannelStartRef.current) return;
+    if (isFetchingOlderRef.current || hasReachedChannelStartRef.current || unreadsOnly) return;
     isFetchingOlderRef.current = true;
     zero
       .run(
@@ -1119,6 +1152,10 @@ const ChatListV4: React.FC<ChatListProps> = ({
         onOpenThreadOverride(conversationId, e);
         return;
       }
+      if (onThreadClick) {
+        onThreadClick(channelId, conversationId);
+        return;
+      }
       const conversation = conversations.find(c => c.conversationId === conversationId);
       const conversationMetadata = conversation?.metadata as { ticketId?: string } | null;
       const initMsg = conversation ? getInitialMessageFromConversation(conversation) : null;
@@ -1135,7 +1172,7 @@ const ChatListV4: React.FC<ChatListProps> = ({
         standaloneNavigate(navigate, `${baseRoute}/${channelId}/${conversationId}`, { event: e });
       }
     },
-    [channelId, conversations, navigate, onOpenThreadOverride],
+    [channelId, conversations, navigate, onOpenThreadOverride, onThreadClick],
   );
 
   const isEventFromChannelInput = useCallback(
@@ -1362,7 +1399,11 @@ const ChatListV4: React.FC<ChatListProps> = ({
     );
 
   if (!isInitialLoadComplete && cachedConversations.length === 0)
-    return (
+    return loadingFallback !== undefined ? (
+      <div className='absolute inset-0 bg-background z-50' data-testid='chat-list-loading'>
+        {loadingFallback}
+      </div>
+    ) : (
       <div
         className='absolute inset-0 flex items-center justify-center bg-background z-50'
         data-testid='chat-list-loading'

@@ -1,4 +1,4 @@
-import { CallType } from '@xyne/shared';
+import { CallType, RecordingType } from '@xyne/shared';
 
 /**
  * Calls and recordings share the `Call` table and are told apart only by
@@ -17,4 +17,8 @@ export function isRecording(call: CallTypeCarrier | null | undefined): boolean {
 
 export function callSubject(call: CallTypeCarrier | null | undefined): 'recording' | 'call' {
   return isRecording(call) ? 'recording' : 'call';
+}
+
+export function isRecordingType(value: unknown): value is RecordingType {
+  return Object.values(RecordingType).includes(value as RecordingType);
 }

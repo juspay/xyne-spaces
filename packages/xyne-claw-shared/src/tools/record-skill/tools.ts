@@ -16,6 +16,7 @@ import type { ToolDefinition, ToolExecutionContext } from "../types.js";
 import {
   SANDBOX_CONFIG_SCHEMA,
   buildSandboxStoreKey,
+  sandboxConversationIdFromMeta,
   getSandboxSession,
   probeSession,
 } from "../sandbox/index.js";
@@ -135,7 +136,7 @@ export const analyzeSkillRecording: ToolDefinition = {
 
     const storeKey = buildSandboxStoreKey(
       context.meta?.["userId"],
-      context.meta?.["conversationId"],
+      sandboxConversationIdFromMeta(context.meta),
       context.meta?.["agentSlug"],
     );
     if (!storeKey) return "Error: No conversation context is available for the sandbox.";

@@ -4,6 +4,7 @@ import { QueryOptions } from '@/types/database';
 import { vespaQueue } from '@/queues/vespaQueue';
 import { messageSchema } from '@/vespa/src/types';
 import { logger } from '@/utils/logger';
+import { websocketService } from '@/services/websocketService';
 
 export interface CreateConversationInput {
   conversationId?: string; // Optional - for custom IDs (e.g., showInChannel child conversations)
@@ -151,7 +152,19 @@ export class ConversationRepository extends BaseRepository<Conversation, CreateC
     });
   }
 
+  /**
+   * Hard-deletes a conversation. Relations are app-level (relationMode="prisma"): label mappings
+   * and email drafts cascade, but a conversation that still has a ticket cannot be deleted
+   * (Ticket.conversation is required, Prisma Client throws P2014). Messages and participants
+   * must be removed by the caller first.
+   */
   async delete(id: string): Promise<Conversation> {
+    const ticketCount = await this.db.ticket.count({ where: { conversationId: id } });
+    if (ticketCount > 0) {
+      throw new Error(
+        `Cannot delete conversation ${id}: it has ${ticketCount} ticket(s). Delete or archive the ticket first.`,
+      );
+    }
     return await this.db.conversation.delete({
       where: { conversationId: id }
     });
@@ -535,6 +548,11 @@ export class ConversationRepository extends BaseRepository<Conversation, CreateC
         data: { lastViewedConversationId: null }
       })
     ]);
+
+    if (movedConversations.count > 0) {
+      websocketService.broadcastLabelUnreadCountsUpdate(sourceChannelId);
+      websocketService.broadcastLabelUnreadCountsUpdate(targetChannelId);
+    }
 
     return movedConversations.count;
   }
