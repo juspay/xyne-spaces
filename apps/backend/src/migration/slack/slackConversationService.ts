@@ -1096,7 +1096,7 @@ export async function runMigration(input: MigrationInput): Promise<MigrationResu
             resolveUser: (sid?: string) => Promise.resolve(sid ? slackToXyne.get(sid) : undefined),
             fallbackUserId,
           };
-          const [l, c] = await Promise.all([ingestChannelLinks(links, target), ingestChannelCanvases(canvases, target)]);
+          const [l, c] = await Promise.all([ingestChannelLinks(links, target), ingestChannelCanvases(canvases, target, wsConfig.slackBotToken)]);
           logger.info('[Migration] channel resources synced', { channelId: input.xyneSpaceChannelId, links: l, canvases: c });
         }
       } catch (error) {

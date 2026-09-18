@@ -710,11 +710,18 @@ export class SlackMigrationEngine {
             resolveUser: (sid?: string) => (sid ? resolve(sid) : Promise.resolve(undefined)),
             fallbackUserId,
           };
+          // Ingest each independently so one failing doesn't hide the other's result, and the log shows collected-vs-ingested.
           try {
-            const [l, c] = await Promise.all([ingestChannelLinks(links, target), ingestChannelCanvases(canvases, target)]);
-            logger.info('[SlackMigration] resources ingested', { convId: conv.id, links: l, canvases: c });
+            const n = await ingestChannelLinks(links, target);
+            logger.info('[SlackMigration] links ingested', { convId: conv.id, collected: links.length, ingested: n });
           } catch (e) {
-            logger.warn('[SlackMigration] resources ingest failed', { convId: conv.id, error: e instanceof Error ? e.message : String(e) });
+            logger.warn('[SlackMigration] links ingest failed', { convId: conv.id, error: e instanceof Error ? e.message : String(e) });
+          }
+          try {
+            const n = await ingestChannelCanvases(canvases, target, config.slackBotToken); // central bot token → rehost canvas images
+            logger.info('[SlackMigration] canvases ingested', { convId: conv.id, collected: canvases.length, ingested: n });
+          } catch (e) {
+            logger.warn('[SlackMigration] canvases ingest failed', { convId: conv.id, error: e instanceof Error ? e.message : String(e) });
           }
         }
       }
