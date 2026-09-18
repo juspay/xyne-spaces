@@ -338,13 +338,22 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
   // results — would hand the callback fresh results labelled with its stale query.
   const latestQueryRef = useRef('');
   const sessionFiltersRef = useRef<Set<string>>(new Set());
-  // Guards out-of-order responses. Each dispatch claims the next sequence number at the
-  // call site (alongside the abort below); only the latest run may commit its results, and
+  // Guards out-of-order responses. Each change to the search inputs claims the next sequence
+  // number (alongside the abort below); only the latest run may commit its results, and
   // the same seq gates the loader disarm — so no separate loader counter is needed. A
   // slow/stale response (e.g. a partial `from` query resolving after the completed `from:`
   // filter) is discarded instead of overwriting fresh results with an empty payload.
   const searchSeqRef = useRef(0);
-  // Cancels the previous in-flight vespaSearch when a newer search is dispatched.
+  // Seq of the newest run that has settled. onComplete waits until this catches up with
+  // searchSeqRef, so a run cancelled by an edit can't report the previous query's results.
+  const settledSeqRef = useRef(0);
+  // Read at dispatch rather than listed as an effect dep: callers pass an inline callback, so
+  // its identity changes every render. As a dep, a query with nothing to search (`from:`,
+  // an empty box) re-rendered via resetSearchState, re-ran the effect, and looped every
+  // debounce — leaving the loading state stuck on.
+  const onSearchCompleteRef = useRef(options.onSearchComplete);
+  onSearchCompleteRef.current = options.onSearchComplete;
+  // The in-flight vespaSearch, cancelled as soon as the search inputs change. Null once it settles.
   const searchAbortRef = useRef<AbortController | null>(null);
 
   /**
@@ -1257,12 +1266,17 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
           // Only the latest run may flip the shared loading flag off.
           if (!isStale()) {
             setIsSearching(false);
+            settledSeqRef.current = seq;
           }
           // Fires once every dispatched search has settled — including when a
           // superseded run is the last to settle — so it must report the results
           // that were actually committed and the query they came from, not this
-          // run's (possibly stale) searchText.
+          // run's (possibly stale) searchText. It also waits for the latest run: seq moves
+          // on as soon as the input changes, so a run cancelled by an edit (e.g. clearing
+          // the box) settles with nothing pending yet must not report the previous query —
+          // the results page would write it back into the URL and the input.
           if (
+            settledSeqRef.current === searchSeqRef.current &&
             pendingSearchCountRef.current === 0 &&
             latestResultsRef.current.length > 0 &&
             onComplete
@@ -1359,6 +1373,18 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
       return;
     }
 
+    // Discard on edit: the inputs changed, so any in-flight search is for a query the user has
+    // already moved past. Claim a new seq now (not at dispatch) so that run can neither commit
+    // its results nor disarm the loader during this debounce, and cancel it on the network.
+    const seq = ++searchSeqRef.current;
+    if (searchAbortRef.current) {
+      searchAbortRef.current.abort();
+      searchAbortRef.current = null;
+      // The cancelled query never produced results, so returning to it (e.g. type then
+      // backspace inside the debounce) must not be skipped by the dedup check above.
+      lastSearchedParamsRef.current.text = '';
+    }
+
     // Arm the loader now (before the 300ms debounce) so we never flash "No results"
     // in the gap before the request fires. Disarmed when the dispatched search settles.
     setIsSearchPending(true);
@@ -1376,10 +1402,6 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
         structuredFiltersKey,
         mentionsKey: currentMentionsKey,
       };
-      // Mint this dispatch's run identity here (not in the effect body) so the abort fires at
-      // dispatch time, not on every keystroke; seq and the abort stay atomic together.
-      const seq = ++searchSeqRef.current;
-      searchAbortRef.current?.abort();
       const abortController = new AbortController();
       searchAbortRef.current = abortController;
       void performSearch(
@@ -1390,13 +1412,16 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
         selectedMentions,
         filteredLocalUsers,
         filteredLocalChannels,
-        options.onSearchComplete,
+        onSearchCompleteRef.current,
       ).finally(() => {
         // Runs on every exit path of performSearch (returns, errors, aborts). Only the
         // newest dispatch may clear the flag — a superseded run settling (aborted
         // mid-flight) must not hide the loader while a fresher search is still running.
         if (seq === searchSeqRef.current) {
           setIsSearchPending(false);
+        }
+        if (searchAbortRef.current === abortController) {
+          searchAbortRef.current = null;
         }
       });
     }, 300);
@@ -1408,7 +1433,6 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
     selectedMentions,
     filteredLocalUsers,
     filteredLocalChannels.length,
-    options.onSearchComplete,
     options.mentionSearchType,
     performSearch,
     includeBotMessages,

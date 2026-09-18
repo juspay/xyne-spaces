@@ -47,6 +47,7 @@ import {
 } from '../../../search/filterRegistry';
 import { DisplaySearchResult } from '../../../types/search';
 import { SearchResultMessageCard } from './SearchResultMessageCard';
+import SearchSectionSkeleton from '../ChatDirectory/SearchSectionSkeleton';
 import { RenderMessageWithHTML } from '../RenderMessageWithHTML/RenderMessageWithHTML';
 import { SearchSnippetRenderer } from '../RenderMessageWithHTML/searchSnippetRender';
 import { SearchResultsContext, SearchResultsThread } from './SearchResultsContext';
@@ -846,7 +847,6 @@ const SearchResults = (): ReactElement => {
               onFiltersChange={handleFiltersChange}
               onSubmit={handleQuerySubmit}
               onLiveChange={setText}
-              isSearching={isLoading}
             />
           </div>
         </div>
@@ -886,10 +886,9 @@ const SearchResults = (): ReactElement => {
         className={cn(
           // pb-16 so the last card clears the bottom of the viewport instead of sitting
           // flush against it (and above the floating compare bar when it's up).
-          'flex-1 min-h-0 overflow-y-auto px-4 pb-16',
           // A re-search keeps the previous results on screen rather than blanking to a
-          // spinner — they fade back while the new ones land, and the box spins.
-          isLoading && results.length > 0 && 'opacity-50 transition-opacity duration-150',
+          // spinner — ResultsBody dims the backend results while the new ones land.
+          'flex-1 min-h-0 overflow-y-auto px-4 pb-16',
         )}
       >
         <TicketSearchHighlightContext.Provider value={ticketHighlightMap}>
@@ -1051,6 +1050,17 @@ const BACKEND_GROUP_ORDER = [
   'recording',
   'desk',
 ] as const;
+
+// Loading skeletons follow the Cmd+K palette: a specific tab shows one list only when its results
+// come from the backend. ALL shows Messages + Tickets sections like Cmd+K, plus Attachments —
+// the full page has room for it and files are common enough not to vanish on most searches.
+const SKELETON_GROUP_KEYS = ['conversation', 'ticket', 'attachment'] as const;
+const SKELETON_DOC_TYPES = new Set<SearchResultsFilters['docType']>([
+  'messages',
+  'tickets',
+  'files',
+  'desk',
+]);
 
 // Labels mirror cmdK's getGroupLabel exactly
 const GROUP_LABELS: Record<string, string> = {
@@ -1570,6 +1580,9 @@ function ResultsBody({
     const hasLocalSections =
       showLocalSections && (userResults.length > 0 || filteredLocalChannels.length > 0);
     const hasBackendSections = backendOnly.length > 0;
+    // Same loading rule as the Cmd+K palette: while a search is pending with no backend results,
+    // Messages and Tickets render skeleton sections; existing results stay, dimmed.
+    const showBackendSkeleton = isSearchPending && !hasBackendSections;
 
     // True empty: nothing to show at all
     if (!hasLocalSections && !hasBackendSections) {
@@ -1578,14 +1591,9 @@ function ResultsBody({
           <EmptyState title='Search for messages, files, and tickets' subtitle='Type to search' />
         );
       }
-      // isSearchPending is primary (race-proof); isLoading backstops a real in-flight fetch.
-      if (isLoading || isSearchPending) {
-        return (
-          <div className='flex items-center justify-center h-full'>
-            <Loader2 className='animate-spin text-muted-foreground' size={32} />
-          </div>
-        );
-      }
+    }
+    // isSearchPending is primary (race-proof); isLoading backstops a real in-flight fetch.
+    if (!hasLocalSections && !hasBackendSections && !isSearchPending && !isLoading) {
       return (
         <EmptyState
           title='No results found'
@@ -1614,26 +1622,42 @@ function ResultsBody({
         {/* Backend results: grouped into per-docType sections when the backend
             grouped the response, otherwise a single flat (e.g. time-sorted) list.
             Local users/channels above stay categorized regardless. */}
-        {isGrouped
-          ? BACKEND_GROUP_ORDER.filter(gk => grouped.has(gk)).map(gk => (
-              <div key={gk} className='mb-6'>
-                <p className='px-1 pb-2 text-xs font-medium text-muted-foreground uppercase tracking-wide font-mono'>
-                  {GROUP_LABELS[gk]} ({grouped.get(gk)!.length})
-                </p>
-                <div className='space-y-2'>
-                  {grouped.get(gk)!.map(result => renderCard(result))}
-                </div>
-              </div>
-            ))
-          : backendOnly.length > 0 && (
-              <div className='mb-6'>
-                <p className='px-1 pb-2 text-xs font-medium text-muted-foreground uppercase tracking-wide font-mono'>
-                  {GROUP_LABELS['others']} ({backendOnly.length})
-                </p>
-                <div className='space-y-2'>{backendOnly.map(result => renderCard(result))}</div>
-              </div>
-            )}
-        {footer}
+        {/* The skeleton ignores `isGrouped`: the backend answers every zero-result search with
+            `grouped: false`, which would otherwise change the loading layout between searches. */}
+        {showBackendSkeleton ? (
+          SKELETON_GROUP_KEYS.map(gk => (
+            <div key={gk} className='mb-6'>
+              <p className='px-1 pb-2 text-xs font-medium text-muted-foreground uppercase tracking-wide font-mono'>
+                {GROUP_LABELS[gk]}
+              </p>
+              <SearchSectionSkeleton />
+            </div>
+          ))
+        ) : (
+          <div className={cn('transition-opacity', isSearchPending && 'opacity-60')}>
+            {isGrouped
+              ? BACKEND_GROUP_ORDER.filter(gk => grouped.has(gk)).map(gk => (
+                  <div key={gk} className='mb-6'>
+                    <p className='px-1 pb-2 text-xs font-medium text-muted-foreground uppercase tracking-wide font-mono'>
+                      {GROUP_LABELS[gk]} ({grouped.get(gk)!.length})
+                    </p>
+                    <div className='space-y-2'>
+                      {grouped.get(gk)!.map(result => renderCard(result))}
+                    </div>
+                  </div>
+                ))
+              : backendOnly.length > 0 && (
+                  <div className='mb-6'>
+                    <p className='px-1 pb-2 text-xs font-medium text-muted-foreground uppercase tracking-wide font-mono'>
+                      {GROUP_LABELS['others']} ({backendOnly.length})
+                    </p>
+                    <div className='space-y-2'>{backendOnly.map(result => renderCard(result))}</div>
+                  </div>
+                )}
+          </div>
+        )}
+        {/* The skeleton is the loading state; skip the load-more sentinel and spinner under it. */}
+        {!showBackendSkeleton && footer}
       </div>
     );
   }
@@ -1643,6 +1667,14 @@ function ResultsBody({
     if (!displayQuery && !hasActiveFilters) {
       return (
         <EmptyState title='Search for messages, files, and tickets' subtitle='Type to search' />
+      );
+    }
+    // Same as a Cmd+K tab: one headerless skeleton list while a backend-sourced tab is pending.
+    if (isSearchPending && SKELETON_DOC_TYPES.has(docType)) {
+      return (
+        <div className='w-full pt-2 pb-6'>
+          <SearchSectionSkeleton rows={4} />
+        </div>
       );
     }
     // isSearchPending is primary (race-proof); isLoading backstops a real in-flight fetch.
@@ -1665,7 +1697,12 @@ function ResultsBody({
     );
   }
   return (
-    <div className='w-full space-y-2 pt-2 pb-6'>
+    <div
+      className={cn(
+        'w-full space-y-2 pt-2 pb-6 transition-opacity',
+        isSearchPending && 'opacity-60',
+      )}
+    >
       {results.map((result, index) => {
         const el = renderCard(result, index);
         if (!el) return null;
