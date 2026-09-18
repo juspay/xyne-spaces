@@ -65,9 +65,12 @@ export async function assertAttachmentAccess(
   // 1) Workspace isolation — never serve another workspace's file. Require a
   //    workspace context; an absent one is rejected rather than allowed through.
   if (!workspaceId || attachment.workspaceId !== workspaceId) {
-    logger.warn(
-      `Cross-workspace attachment access blocked: user ${userId} (ws ${workspaceId ?? 'none'}) -> attachment ${attachment.id} (ws ${attachment.workspaceId})`,
-    );
+    logger.warn('Cross-workspace attachment access blocked', {
+      userId,
+      workspaceId: workspaceId ?? 'none',
+      attachmentId: attachment.id,
+      attachmentWorkspaceId: attachment.workspaceId,
+    });
     return { ok: false, status: 404, body: { error: 'Attachment not found' } };
   }
 
@@ -77,9 +80,11 @@ export async function assertAttachmentAccess(
     attachment.entityType === AttachmentEntityType.DELAYED_MESSAGE
   ) {
     if (attachment.createdBy !== userId) {
-      logger.warn(
-        `Unauthorized draft attachment access: user ${userId} -> ${attachment.id} (creator ${attachment.createdBy})`,
-      );
+      logger.warn('Unauthorized draft attachment access', {
+        userId,
+        attachmentId: attachment.id,
+        creator: attachment.createdBy,
+      });
       return {
         ok: false,
         status: 403,
@@ -96,9 +101,12 @@ export async function assertAttachmentAccess(
       await canvasAuthService.requireViewAccess(attachment.entityId, userId);
       return { ok: true };
     } catch (error) {
-      logger.warn(
-        `Unauthorized canvas attachment access: user ${userId} -> ${attachment.id} (canvas ${attachment.entityId}): ${error instanceof Error ? error.message : 'denied'}`,
-      );
+      logger.warn('Unauthorized canvas attachment access', {
+        userId,
+        attachmentId: attachment.id,
+        canvasId: attachment.entityId,
+        error: error instanceof Error ? error.message : 'denied',
+      });
       return {
         ok: false,
         status: 403,
@@ -123,9 +131,11 @@ export async function assertAttachmentAccess(
         userId,
       );
       if (!isParticipant) {
-        logger.warn(
-          `Unauthorized SDLC hub attachment access: user ${userId} -> ${attachment.id} (hub ${attachment.entityId})`,
-        );
+        logger.warn('Unauthorized SDLC hub attachment access', {
+          userId,
+          attachmentId: attachment.id,
+          hubId: attachment.entityId,
+        });
         return {
           ok: false,
           status: 403,
@@ -144,9 +154,11 @@ export async function assertAttachmentAccess(
       return { ok: false, status: 404, body: { error: 'Attachment not found' } };
     }
     if (!(await callShareService.canViewRecordings(call, userId))) {
-      logger.warn(
-        `Unauthorized recording attachment access: user ${userId} -> ${attachment.id} (call ${call.id})`,
-      );
+      logger.warn('Unauthorized recording attachment access', {
+        userId,
+        attachmentId: attachment.id,
+        callId: call.id,
+      });
       return {
         ok: false,
         status: 403,
@@ -160,9 +172,11 @@ export async function assertAttachmentAccess(
   if (attachment.conversationId) {
     const conversation = await repositories.conversations.findById(attachment.conversationId);
     if (!conversation) {
-      logger.warn(
-        `Attachment access denied: conversation ${attachment.conversationId} not found for attachment ${attachment.id} (user ${userId})`,
-      );
+      logger.warn('Attachment access denied: conversation not found', {
+        conversationId: attachment.conversationId,
+        attachmentId: attachment.id,
+        userId,
+      });
       return { ok: false, status: 404, body: { error: 'Attachment not found' } };
     }
 
@@ -171,9 +185,11 @@ export async function assertAttachmentAccess(
       userId,
     );
     if (!isParticipant) {
-      logger.warn(
-        `Unauthorized attachment access: user ${userId} -> ${attachment.id} in channel ${conversation.channelId}`,
-      );
+      logger.warn('Unauthorized attachment access', {
+        userId,
+        attachmentId: attachment.id,
+        channelId: conversation.channelId,
+      });
       return {
         ok: false,
         status: 403,
@@ -215,9 +231,12 @@ export async function assertAttachmentAccess(
           userId,
         );
         if (!isParticipant) {
-          logger.warn(
-            `Unauthorized ${attachment.entityType} attachment access: user ${userId} -> ${attachment.id} (private channel ${ticket.channelId})`,
-          );
+          logger.warn('Unauthorized ticket-scoped attachment access', {
+            entityType: attachment.entityType,
+            userId,
+            attachmentId: attachment.id,
+            channelId: ticket.channelId,
+          });
           return {
             ok: false,
             status: 403,
