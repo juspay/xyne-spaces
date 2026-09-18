@@ -1,3 +1,10 @@
+## [1.337.0-release-20260918.10](https://github.com/juspay/xyne-spaces/compare/v1.337.0-release-20260918.9...v1.337.0-release-20260918.10) (2026-09-18)
+
+
+### Reverts
+
+* Revert "feat: XYNE-63011 Calls tab new version (#1674)" (#2073) ([aa8ce02](https://github.com/juspay/xyne-spaces/commit/aa8ce027db423308687c7cf58d7863a702d0220b)), closes [#1674](https://github.com/juspay/xyne-spaces/issues/1674) [#2073](https://github.com/juspay/xyne-spaces/issues/2073)
+
 ## [1.337.0-release-20260918.9](https://github.com/juspay/xyne-spaces/compare/v1.337.0-release-20260918.8...v1.337.0-release-20260918.9) (2026-09-18)
 
 
