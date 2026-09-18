@@ -233,7 +233,9 @@ export async function executeTool(
     });
 
     const fullUrl = `${selectedBackend.backendUrl}${pathWithParams}`;
-    console.log(`[execute] Calling service=${String(serviceName).replace(/\n|\r/g, " ")} tool=${String(toolName).replace(/\n|\r/g, " ")} method=${String(tool.method || "POST").replace(/\n|\r/g, " ")}`);
+    console.log(
+      `[execute] Calling service=${sanitizeForLog(serviceName)} tool=${sanitizeForLog(toolName)} method=${sanitizeForLog(tool.method || "POST")}`
+    );
 
     // Strip path params from body
     const requestArgEntries = new Map<string, unknown>();
