@@ -1,3 +1,10 @@
+## [1.339.0](https://github.com/juspay/xyne-spaces/compare/v1.338.0...v1.339.0) (2026-09-18)
+
+
+### Features
+
+* let a Radar reader mute what they don't want ([#1944](https://github.com/juspay/xyne-spaces/issues/1944)) ([f04e5cb](https://github.com/juspay/xyne-spaces/commit/f04e5cb5bf51d224804b847851d214c9bed09c3e))
+
 ## [1.338.0](https://github.com/juspay/xyne-spaces/compare/v1.337.0...v1.338.0) (2026-09-18)
 
 
