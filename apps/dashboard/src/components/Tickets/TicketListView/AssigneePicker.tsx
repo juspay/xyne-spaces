@@ -1,16 +1,17 @@
-import { ReactElement, useEffect, useMemo, useRef, useState } from 'react';
-import { SearchDefault as Search, UserPlus, MultipleCrossCancelDefault as X } from '@xyne/icons';
+import { ReactElement, useEffect, useMemo, useState } from 'react';
+import { UserPlus } from '@xyne/icons';
 import { AvatarSize } from '../../UserAvatar/UserAvatar';
-import { Popover } from '../../ui/Popover/Popover';
 import Tooltip from '../../ui/Tooltip';
 import UserAvatar from '../../UserAvatar/UserAvatar';
-import { useActiveUsers, useSelf } from '../../../hooks/useUsers';
+import { EntitySelector } from '../../ui/EntitySelector/EntitySelector';
+import type { SelectorOption } from '../../ui/EntitySelector/EntitySelector.types';
+import { useUsers, useSelf } from '../../../hooks/useUsers';
+import { useUserGroups } from '../../../hooks/useUserGroup';
 import { useZero } from '../../../hooks/useZero';
 import { mutators } from '../../../zero/mutators';
-import { getUserDisplayName, withYouLabel, matchesUserQuery } from '../../../utils/userDisplayName';
-import { cn } from '../../../utils/classNames';
+import { getUserDisplayName } from '../../../utils/userDisplayName';
 import { useChannelAssignGate } from '../../../hooks/useChannelAssignGate';
-import { channelMembersFirst, currentUserFirst } from '../../../utils/channelMembersFirst';
+import { useAssigneeOptions, assigneeOptionToTicketUpdate } from '../TicketTable/TicketTableHelper';
 import { surfaceMutationError } from '../../../utils/zeroMutationToast';
 import { trackTicketOutcome } from '../../../services/Analytics/ticketTracking';
 
@@ -21,7 +22,9 @@ interface AssigneePickerProps {
   label?: string;
 }
 
-type PickerUser = NonNullable<ReturnType<typeof useActiveUsers>>[number];
+// Options are only built once the popover has opened — one picker mounts per
+// row, and the roster + channel-members work is too expensive to pay eagerly.
+const EMPTY_LIST: never[] = [];
 
 export function AssigneePicker({
   ticketId,
@@ -30,41 +33,61 @@ export function AssigneePicker({
   label,
 }: AssigneePickerProps): ReactElement {
   const [open, setOpen] = useState(false);
-  const [search, setSearch] = useState('');
-  const users = useActiveUsers();
+  const [hasOpened, setHasOpened] = useState(false);
+  const users = useUsers();
+  const userGroups = useUserGroups();
   const selfId = useSelf()?.id;
   const zero = useZero();
-  const gate = useChannelAssignGate(channelId);
-  const searchRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    if (open) searchRef.current?.focus();
-  }, [open]);
+  // The channel-members query is expensive on prod — defer it until this
+  // popover actually opens.
+  const gate = useChannelAssignGate(hasOpened ? channelId : undefined);
 
   // assignedTo may be stored as `user:<id>` or `group:<id>` — strip for UserAvatar lookup.
+  const isGroupAssignee = assignedTo?.startsWith('group:') ?? false;
   const resolvedAssigneeId = assignedTo?.replace(/^(user:|group:)/, '') || '';
-  const assignedUserRow = resolvedAssigneeId
-    ? users?.find(user => user.id === resolvedAssigneeId)
+  const selectedValue = resolvedAssigneeId
+    ? `${isGroupAssignee ? 'group' : 'user'}:${resolvedAssigneeId}`
+    : null;
+  const assignedUserRow =
+    !isGroupAssignee && resolvedAssigneeId
+      ? users.find(user => user.id === resolvedAssigneeId)
+      : undefined;
+  const assignedGroupRow = isGroupAssignee
+    ? userGroups.find(group => group.id === resolvedAssigneeId)
     : undefined;
   const assigneeTooltip = assignedUserRow
     ? `Assignee: ${getUserDisplayName(assignedUserRow)}`
-    : 'Unassigned';
+    : assignedGroupRow
+      ? `Assignee: ${assignedGroupRow.name}`
+      : 'Unassigned';
 
-  const filteredUsers = useMemo(() => {
-    if (!users) return [];
-    const q = search.trim().toLowerCase();
-    const matched = !q ? users : users.filter(u => matchesUserQuery(u, search));
-    // You first, then channel members, then non-members (kept, since a user who
-    // left the channel may still be the assignee). Applies idle and searching.
-    const membersFirst = channelMembersFirst(matched, u => u.id, gate.memberIds);
-    return currentUserFirst(membersFirst, u => u.id, selfId);
-  }, [users, search, gate.memberIds, selfId]);
+  // Same options pipeline as the kanban card's assignee editor: Unassigned row
+  // + members-first / (You)-pinned roster + groups, then the non-member badge.
+  const baseOptions = useAssigneeOptions(
+    hasOpened ? users : EMPTY_LIST,
+    hasOpened ? userGroups : EMPTY_LIST,
+    gate.memberIds,
+    selfId,
+  );
+  const options = useMemo<SelectorOption[]>(() => {
+    if (!gate.shouldGate) return baseOptions;
+    return baseOptions.map(option => {
+      if (!option.value.startsWith('user:')) return option;
+      const userId = option.value.slice('user:'.length);
+      return gate.memberIds.has(userId) ? option : { ...option, badge: 'Not in channel' };
+    });
+  }, [baseOptions, gate.shouldGate, gate.memberIds]);
 
-  const assign = (userId: string | null): void => {
+  const applyUpdate = (value: string | null): void => {
+    // Unassigning clears whichever column the row displays: the agent normally,
+    // the team when only a group is assigned (mirrors the kanban card).
+    const updates = value
+      ? assigneeOptionToTicketUpdate(value)
+      : isGroupAssignee
+        ? { assignedTo: null, userGroupId: '' }
+        : { assignedTo: null };
     void surfaceMutationError(
-      zero.mutate(
-        mutators.ticket.update({ id: ticketId, assignedTo: userId, updatedAt: Date.now() }),
-      ),
+      zero.mutate(mutators.ticket.update({ id: ticketId, ...updates, updatedAt: Date.now() })),
       'Failed to update assignee',
     ).then(ok => {
       if (ok) {
@@ -73,23 +96,44 @@ export function AssigneePicker({
           { id: ticketId },
           {
             surface: 'list_inline',
-            unassigned: !userId,
-            selfAssigned: !!userId && userId === selfId,
+            unassigned: !value,
+            selfAssigned: !!selfId && value === `user:${selfId}`,
           },
         );
       }
     });
-    setOpen(false);
-    setSearch('');
   };
 
-  const handleSelectUser = (user: PickerUser): void => {
-    gate.gatedAssign({
-      userId: user.id,
-      userName: getUserDisplayName(user),
-      assign: () => assign(user.id),
-    });
+  const handleSelect = (value: string | null): void => {
+    if (value && value.startsWith('user:')) {
+      const userId = value.slice('user:'.length);
+      const userName = baseOptions.find(option => option.value === value)?.label ?? 'This user';
+      gate.gatedAssign({ userId, userName, assign: () => applyUpdate(value) });
+    } else {
+      applyUpdate(value);
+    }
   };
+
+  const handleOpenChange = (nextOpen: boolean): void => {
+    if (nextOpen) setHasOpened(true);
+    setOpen(nextOpen);
+  };
+
+  // Non-modal popover: the table can scroll while it's open, which would leave
+  // the portaled dropdown floating (or its virtualized row unmounting under
+  // it). Close on the first scroll that isn't the dropdown's own list.
+  useEffect(() => {
+    if (!open) return;
+    const handleScroll = (event: Event): void => {
+      const target = event.target;
+      if (target instanceof Element && target.closest('[data-radix-popper-content-wrapper]')) {
+        return;
+      }
+      setOpen(false);
+    };
+    document.addEventListener('scroll', handleScroll, true);
+    return (): void => document.removeEventListener('scroll', handleScroll, true);
+  }, [open]);
 
   const avatar = resolvedAssigneeId ? (
     <UserAvatar userId={resolvedAssigneeId} showActiveStatus={false} size={AvatarSize.SM} />
@@ -99,13 +143,12 @@ export function AssigneePicker({
     </span>
   );
 
+  // Radix composes its own toggle onto these buttons — they only stop the
+  // click/keys from reaching the row underneath.
   const trigger = label ? (
     <button
       type='button'
-      onClick={e => {
-        e.stopPropagation();
-        setOpen(prev => !prev);
-      }}
+      onClick={e => e.stopPropagation()}
       onKeyDown={e => e.stopPropagation()}
       className='inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-muted text-xs text-foreground hover:bg-border transition-colors whitespace-nowrap h-[24px]'
       aria-label={resolvedAssigneeId ? 'Change assignee' : 'Assign ticket'}
@@ -120,10 +163,7 @@ export function AssigneePicker({
   ) : (
     <button
       type='button'
-      onClick={e => {
-        e.stopPropagation();
-        setOpen(prev => !prev);
-      }}
+      onClick={e => e.stopPropagation()}
       onKeyDown={e => e.stopPropagation()}
       className='flex items-center justify-center w-5 h-5 shrink-0 overflow-hidden rounded-sm hover:opacity-80 transition-opacity leading-none'
       aria-label={resolvedAssigneeId ? 'Change assignee' : 'Assign ticket'}
@@ -137,91 +177,28 @@ export function AssigneePicker({
   );
 
   return (
-    <Popover
-      trigger={trigger}
-      open={open}
-      onOpenChange={setOpen}
-      modal
-      onCloseAutoFocus={event => event.preventDefault()}
-      align='end'
-      sideOffset={4}
-      className='p-0 w-64'
+    // The dropdown portal's clicks bubble through the React tree to the row —
+    // this wrapper keeps a selection from also opening the ticket.
+    // eslint-disable-next-line jsx-a11y/no-static-element-interactions, local-rules/require-tracking-on-click -- propagation island; the controls inside carry their own tracking
+    <span
+      className='contents'
+      onClick={e => e.stopPropagation()}
+      onKeyDown={e => e.stopPropagation()}
     >
-      <div className='flex flex-col max-h-72'>
-        <div className='p-2 border-b border-border'>
-          <div className='relative'>
-            <Search className='absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground' />
-            <input
-              ref={searchRef}
-              type='text'
-              placeholder='Search users...'
-              value={search}
-              onChange={e => setSearch(e.target.value)}
-              className='w-full pl-8 pr-2 py-1.5 border border-input rounded-md bg-background text-xs text-foreground placeholder:text-muted-foreground focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none'
-              data-track-category='Tickets'
-              data-track-name='SearchAssigneePicker'
-            />
-          </div>
-        </div>
-        <div className='overflow-y-auto flex-1'>
-          <button
-            type='button'
-            data-ph-capture-attribute-track-id='ticket_unassign_row'
-            onClick={e => {
-              e.stopPropagation();
-              assign(null);
-            }}
-            className={cn(
-              'w-full text-left px-3 py-2 text-xs hover:bg-muted transition-colors flex items-center gap-2',
-              !resolvedAssigneeId && 'bg-muted',
-            )}
-            data-track-category='Tickets'
-            data-track-name='UnassignRowTicket'
-          >
-            <span className='flex items-center justify-center w-5 h-5 rounded-sm bg-border'>
-              <X className='w-3 h-3 text-muted-foreground' />
-            </span>
-            <span className='text-foreground'>Unassigned</span>
-          </button>
-          {filteredUsers.map(user => (
-            <button
-              key={user.id}
-              type='button'
-              data-ph-capture-attribute-track-id='ticket_assign_row'
-              onClick={e => {
-                e.stopPropagation();
-                handleSelectUser(user);
-              }}
-              className={cn(
-                'w-full text-left px-3 py-2 text-xs hover:bg-muted transition-colors flex items-center gap-2',
-                resolvedAssigneeId === user.id && 'bg-muted',
-              )}
-              data-track-category='Tickets'
-              data-track-name='SelectRowAssignee'
-            >
-              <UserAvatar userId={user.id} showActiveStatus={false} size={AvatarSize.SM} />
-              <div className='flex-1 min-w-0'>
-                <div className='text-foreground truncate'>
-                  {withYouLabel(getUserDisplayName(user), user.id === selfId)}
-                </div>
-                {user.email ? (
-                  <div className='text-[10px] text-muted-foreground truncate'>{user.email}</div>
-                ) : null}
-              </div>
-              {gate.shouldGate && !gate.memberIds.has(user.id) && (
-                <span className='shrink-0 text-[10px] leading-none px-1.5 py-0.5 rounded border border-border bg-muted text-muted-foreground whitespace-nowrap'>
-                  Not in channel
-                </span>
-              )}
-            </button>
-          ))}
-          {filteredUsers.length === 0 && (
-            <div className='px-3 py-3 text-xs text-muted-foreground text-center'>
-              No users found
-            </div>
-          )}
-        </div>
-      </div>
-    </Popover>
+      <EntitySelector
+        options={options}
+        selectedValue={selectedValue}
+        onSelect={handleSelect}
+        placeholder='Select assignee'
+        searchPlaceholder='Search users...'
+        virtualize
+        align='end'
+        dropdownMinWidth='16rem'
+        isOpen={open}
+        onOpenChange={handleOpenChange}
+        trigger={trigger}
+        onCloseAutoFocus={event => event.preventDefault()}
+      />
+    </span>
   );
 }

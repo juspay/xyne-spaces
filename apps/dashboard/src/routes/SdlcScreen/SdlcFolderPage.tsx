@@ -33,6 +33,8 @@ import {
   subscribeToEmbeddedPage,
 } from './useSdlcFrameBridge';
 import type { SdlcEmbedTab } from './sdlcFrameMessages';
+import { AttachmentPreviewPane } from '../../components/FileViewer/AttachmentPreviewPane';
+import { detectFileType } from '../../components/FileViewer/utils';
 import { fileKind, formatFileSize } from './fileKind';
 import type { SdlcFinderCanvas, SdlcFinderFile, SdlcFinderLink } from './SdlcFinder';
 
@@ -168,7 +170,14 @@ interface TreeHandlers {
  * it expands, it can be added to, and it has its own conversations.
  */
 function TreeRow(
-  props: TreeHandlers & { node: TreeNode; depth: number; defaultExpanded?: boolean },
+  props: TreeHandlers & {
+    node: TreeNode;
+    depth: number;
+    defaultExpanded?: boolean;
+    /** What this row's children hang off. A track only for the root row of a
+     *  track's own page; a folder everywhere else. */
+    childrenParentType?: 'TRACK' | 'FOLDER';
+  },
 ): ReactElement {
   const expanded = useUserPreference('sdlcFolderTreeExpanded');
   const { node } = props;
@@ -296,7 +305,12 @@ function TreeRow(
         )}
       </div>
       {isOpen && (
-        <TreeLevel {...props} parentType='FOLDER' parentId={node.id} depth={props.depth + 1} />
+        <TreeLevel
+          {...props}
+          parentType={props.childrenParentType ?? 'FOLDER'}
+          parentId={node.id}
+          depth={props.depth + 1}
+        />
       )}
     </div>
   );
@@ -444,6 +458,8 @@ function TabLabel(props: { tab: FolderTab; maps: Maps }): ReactElement {
 export function SdlcFolderPage(props: {
   channelId: string;
   folder: { id: string; name: string };
+  /** A track's own page is this page with the track as its root. */
+  rootType?: 'TRACK' | 'FOLDER';
   maps: Maps;
   activeTab: FolderTab | null;
   onOpenTab: (tab: FolderTab | null) => void;
@@ -710,27 +726,28 @@ export function SdlcFolderPage(props: {
       >
         <div
           className={cn(
-            'flex shrink-0 items-center border-b border-border py-2',
+            'flex shrink-0 items-center gap-1.5 border-b border-border py-2',
             explorerCollapsed ? 'justify-center px-1' : 'px-3',
           )}
         >
-          {!explorerCollapsed && (
-            <span className='min-w-0 flex-1 truncate text-[11px] font-semibold uppercase tracking-[0.11em] text-muted-foreground'>
-              Explorer
-            </span>
-          )}
+          {/* Leads, for the same reason the hub sidebar's does. */}
           <button
             type='button'
             title={explorerCollapsed ? 'Show explorer' : 'Hide explorer'}
             aria-label={explorerCollapsed ? 'Show explorer' : 'Hide explorer'}
             aria-expanded={!explorerCollapsed}
             onClick={() => setUserPreference('sdlcExplorerCollapsed', !explorerCollapsed)}
-            className='flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-foreground/[0.08] hover:text-foreground'
+            className='-ml-1 flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-foreground/[0.08] hover:text-foreground'
             data-track-category='SdlcHub'
             data-track-name='ExplorerCollapsed'
           >
             <PanelLeft className='size-3.5' />
           </button>
+          {!explorerCollapsed && (
+            <span className='min-w-0 flex-1 truncate text-[11px] font-semibold uppercase tracking-[0.11em] text-muted-foreground'>
+              Explorer
+            </span>
+          )}
         </div>
         <div
           ref={treeRef}
@@ -755,6 +772,7 @@ export function SdlcFolderPage(props: {
             node={{ kind: 'FOLDER', id: props.folder.id, name: props.folder.name }}
             depth={0}
             defaultExpanded
+            childrenParentType={props.rootType ?? 'FOLDER'}
             channelId={props.channelId}
             maps={props.maps}
             activeTab={active}
@@ -906,17 +924,22 @@ function TabContent(props: {
   if (!file) return <Missing what='file' />;
   const kind = fileKind(file.mimetype, file.name);
 
-  // The attachment stream serves images and PDFs inline and forces everything
-  // else to download, so only those two can be shown in place.
-  if (file.mimetype.startsWith('image/')) {
+  // The same viewers the rest of the app previews attachments with — csv, xlsx,
+  // docx, pptx, markdown and html included — rather than a second, poorer set
+  // living here. They fetch through apiInstance, so the lane's api base applies
+  // and the stream's download headers never come into it.
+  if (detectFileType(file.mimetype, file.name)) {
     return (
-      <div className='flex h-full items-center justify-center overflow-auto bg-foreground/[0.03] p-6'>
-        <img src={file.url} alt={file.name} className='max-h-full max-w-full object-contain' />
+      <div className='flex h-full min-h-0 flex-col'>
+        <AttachmentPreviewPane
+          attachmentId={file.id}
+          fileName={file.name}
+          mimeType={file.mimetype}
+          fileSize={file.size}
+          flush
+        />
       </div>
     );
-  }
-  if (file.mimetype === 'application/pdf') {
-    return <iframe src={file.url} title={file.name} className='size-full border-0' />;
   }
   return (
     <div className='flex h-full flex-col items-center justify-center gap-3 p-8 text-center'>
