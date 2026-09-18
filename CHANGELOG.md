@@ -1,3 +1,15 @@
+## [1.345.2](https://github.com/juspay/xyne-spaces/compare/v1.345.1...v1.345.2) (2026-09-18)
+
+
+### Bug Fixes
+
+* cmd+k search placeholder overlap ([#1932](https://github.com/juspay/xyne-spaces/issues/1932)) ([ecba927](https://github.com/juspay/xyne-spaces/commit/ecba927ca54956e4c39b5f56c3f60dc6b44ed53b))
+
+
+### Reverts
+
+* Revert "feat: XYNE-63011 Calls tab new version (#1674)" (#2067) ([0b08c5b](https://github.com/juspay/xyne-spaces/commit/0b08c5b3a5f173969e396a04010d87181c757f86)), closes [#1674](https://github.com/juspay/xyne-spaces/issues/1674) [#2067](https://github.com/juspay/xyne-spaces/issues/2067)
+
 ## [1.345.1](https://github.com/juspay/xyne-spaces/compare/v1.345.0...v1.345.1) (2026-09-18)
 
 
