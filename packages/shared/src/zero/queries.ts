@@ -170,11 +170,12 @@ export const parseAssigneeFilter = (values: readonly string[]): ParsedAssigneeFi
   };
 };
 
-// Zero reads `actualFieldValue` as a parsed JSON value, so the comparison operand must be
-// the value itself. JSON.stringify-ing strings here double-encoded them ('"x"' vs 'x') and
-// the equality never matched — silently returning zero rows for every string-valued
-// form-field filter, on the desk and on the kanban board alike.
 const toActualFieldValueQueryValue = (
+  value: string | number | boolean,
+): string | number | boolean =>
+  typeof value === 'string' ? JSON.stringify(value) : value;
+
+const toDeskActualFieldValueQueryValue = (
   value: string | number | boolean,
 ): string | number | boolean => value;
 
@@ -202,7 +203,7 @@ const applySupportDynamicFieldFilters = (
         fevQuery = fevQuery.where((helpers: any) =>
           helpers.or(
             ...values.map((value: string | number | boolean) =>
-              helpers.cmp('actualFieldValue', '=', toActualFieldValueQueryValue(value)),
+              helpers.cmp('actualFieldValue', '=', toDeskActualFieldValueQueryValue(value)),
             ),
           ),
         );
