@@ -10,6 +10,7 @@ import { extForMime, fileNameFromResource } from "./attachment-filename.js";
 import { STATIC_ADAPTERS } from "./static-adapters.js";
 import { resolveConnectorDefinition } from "./connector-definitions.js";
 import { getSpacesAuthForUser, getWorkspaceIdForUser } from "../lib/spaces-db.js";
+import { SPACES_SESSION_CREDENTIAL_SERVER_TYPES } from "../lib/spaces-session-server-types.js";
 import { provisionStdioCommand } from "./provision.js";
 import { prisma } from "../db.js";
 import { decrypt } from "../crypto.js";
@@ -192,13 +193,7 @@ async function getOrCreateSession(
 ): Promise<Client> {
   const key = sessionKey(userId, serverType, agentSlug, credentials);
 
-  // For xyne-spaces: ALWAYS read fresh creds from the Spaces DB FIRST, before
-  // any cache lookup. The cached child process has its token baked into env
-  // at spawn time; we must compare that against the live token and evict the
-  // session if Spaces' middleware has rotated the JWT. Without this, the
-  // creds-loader's "live-first hit" is computed and then thrown away — the
-  // child keeps calling Spaces with a stale env-baked token and 401s.
-  if (serverType === "xyne-spaces" || serverType === "xyne-dashboard") {
+  if (SPACES_SESSION_CREDENTIAL_SERVER_TYPES.has(serverType)) {
     // Benchmark lane: the onyx-ask-ai agent ALWAYS routes to the benchmark Vespa
     // cluster, regardless of whether a live login session exists. The agent's
     // app token is resolved so the spaces tools authenticate via /api/apps/*
