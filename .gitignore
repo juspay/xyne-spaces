@@ -170,6 +170,7 @@ dist
 
 # Gatsby files
 .cache/
+.venv/
 
 # Storybook build outputs
 .out
@@ -242,3 +243,6 @@ security-reports/
 
 # Build exports (make export-dashboard-bundle)
 out/
+
+# local demo reel assets (never commit)
+demo-reel/

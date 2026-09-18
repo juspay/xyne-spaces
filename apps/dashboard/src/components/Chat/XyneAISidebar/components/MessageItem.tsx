@@ -1,3 +1,4 @@
+import { PageSelectionPreview } from './PageSelectionPreview';
 import { logger, Event as LogEvent } from '../../../../utils/logger';
 import {
   ReactElement,
@@ -1401,6 +1402,11 @@ export const MessageItem = React.memo(
                         onClick={() => handleSelectionContextClick(selection.canvasId)}
                       />
                     ))}
+                  </div>
+                )}
+                {message.pageSelection && (
+                  <div className='mb-3'>
+                    <PageSelectionPreview selection={message.pageSelection} />
                   </div>
                 )}
                 {/* Attachment previews */}

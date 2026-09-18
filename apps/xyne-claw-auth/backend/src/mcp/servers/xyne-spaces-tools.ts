@@ -4843,6 +4843,66 @@ const spacesScheduleCall: ToolDef = {
     }),
 };
 
+// ── spaces-start-call ─────────────────────────────────────────────────
+
+const spacesStartCall: ToolDef = {
+  name: "spaces-start-call",
+  description:
+    "Ring people on Spaces right now and start a live call. Use it when the user asks to call, ring, dial or get " +
+    "someone on a call — not for a future meeting, which is spaces-schedule-call. Resolve names to user IDs with " +
+    "spaces-users first. The people you name are rung on their Spaces clients and can accept or decline; you cannot " +
+    "make anyone answer. Report who was rung and the call link, and never claim a call was answered.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      targetUserIds: {
+        type: "array",
+        items: { type: "string" },
+        description: "User IDs to ring (use spaces-users to resolve names).",
+      },
+      channelId: { type: "string", description: "Ring a channel instead of named users." },
+      callType: { type: "string", enum: ["AUDIO", "VIDEO"], description: "Defaults to AUDIO." },
+      conversationId: {
+        type: "string",
+        description: "The AI conversation this call belongs to, so the call is linked back to this chat.",
+      },
+    },
+    required: [],
+  },
+  handler: withToolErrors("Start call error", async (args) => {
+      const targets = (args["targetUserIds"] as string[] | undefined) ?? [];
+      if (!args["channelId"] && targets.length === 0) {
+        return err("Must provide either channelId or targetUserIds.");
+      }
+
+      const body: Record<string, unknown> = {
+        callType: args["callType"] === "VIDEO" ? "VIDEO" : "AUDIO",
+      };
+      if (targets.length > 0) body["invitedUserIds"] = targets;
+      if (args["channelId"]) body["channelId"] = args["channelId"];
+      if (args["conversationId"]) body["conversationId"] = args["conversationId"];
+
+      const data = (await spacesFetch("/api/calls/claw/initiate", {
+        method: "POST",
+        body: JSON.stringify(body),
+      })) as { success?: boolean; callId?: string; externalId?: string; roomLink?: string };
+
+      if (data.success === false) return err("Failed to start the call.");
+      const who = targets.length > 0 ? `${targets.length} person(s)` : `channel ${String(args["channelId"])}`;
+      return ok(
+        [
+          `Ringing ${who} on Spaces now.`,
+          data.callId ? `  callId: ${data.callId}` : "",
+          data.externalId ? `  externalId: ${data.externalId}` : "",
+          data.roomLink ? `  join: ${data.roomLink}` : "",
+          "They can accept or decline; tell the user it is ringing, not that it was answered.",
+        ]
+          .filter(Boolean)
+          .join("\n"),
+      );
+    }),
+};
+
 // ── spaces-whoami ─────────────────────────────────────────────────────
 
 const spacesWhoami: ToolDef = {
@@ -4890,7 +4950,7 @@ const spacesReadCanvas: ToolDef = {
       const viewAccessId = String(params["viewAccessId"] ?? "").trim();
       if (!viewAccessId) return err("viewAccessId is required");
 
-      const s2sKey = process.env["INTERNAL_S2S_KEY"] ?? "";
+      const s2sKey = process.env["INTERNAL_S2S_KEY"] || process.env["XYNE_CLAW_S2S_KEY"] || "";
       const result = (await spacesFetch(
         `/api/internal/canvas/view/${encodeURIComponent(viewAccessId)}`,
         {
@@ -4941,7 +5001,7 @@ const spacesEditCanvas: ToolDef = {
       if (!viewAccessId) return err("viewAccessId is required");
       if (!content) return err("content is required");
 
-      const s2sKey = process.env["INTERNAL_S2S_KEY"] ?? "";
+      const s2sKey = process.env["INTERNAL_S2S_KEY"] || process.env["XYNE_CLAW_S2S_KEY"] || "";
       const result = (await spacesFetch(
         `/api/internal/canvas/view/${encodeURIComponent(viewAccessId)}`,
         {
@@ -5192,6 +5252,9 @@ const spacesCreateCanvas: ToolDef = {
   name: "spaces-create-canvas",
   description:
     "Create a new canvas in Xyne Spaces from markdown content. " +
+    "Use it for documents the user should keep: notes, specs, summaries and architecture write-ups. " +
+    "A ```mermaid fenced block renders as a live diagram in the canvas, so put flowcharts, sequence diagrams and " +
+    "architecture diagrams in one. " +
     "Returns the canvas URL and viewAccessId. " +
     "The user will be set as an OWNER of the canvas.",
   inputSchema: {
@@ -5210,6 +5273,16 @@ const spacesCreateCanvas: ToolDef = {
         enum: ["PUBLIC", "PRIVATE"],
         description: "Visibility: PUBLIC (team-visible) or PRIVATE (invite-only). Default: PRIVATE",
       },
+      channelId: {
+        type: "string",
+        description:
+          "Hub channel to file the canvas in. Use the channelId from the run's open-surface context when the user is working in a hub, so the canvas lands where they are rather than unfiled.",
+      },
+      sdlcFolderId: {
+        type: "string",
+        description:
+          "Folder inside that hub to file the canvas in. Use the folderId from the run's open-surface context; requires channelId.",
+      },
     },
     required: ["title", "markdown"],
   },
@@ -5217,6 +5290,8 @@ const spacesCreateCanvas: ToolDef = {
       const title = String(args["title"] ?? "").trim();
       const markdown = String(args["markdown"] ?? "");
       const visibility = String(args["visibility"] ?? "PRIVATE");
+      const channelId = String(args["channelId"] ?? "").trim();
+      const sdlcFolderId = String(args["sdlcFolderId"] ?? "").trim();
 
       if (!title) return err("Title is required");
       if (!markdown) return err("Markdown content is required");
@@ -5227,6 +5302,8 @@ const spacesCreateCanvas: ToolDef = {
           title,
           markdown,
           visibility: visibility === "PUBLIC" ? "PUBLIC" : "PRIVATE",
+          ...(channelId ? { channelId } : {}),
+          ...(channelId && sdlcFolderId ? { sdlcFolderId } : {}),
         }),
       })) as {
         id: string;
@@ -5242,6 +5319,7 @@ const spacesCreateCanvas: ToolDef = {
         prefixChunk(1, "Canvas created successfully!", [
           ``,
           `Title: ${data.title}`,
+          ...(channelId && sdlcFolderId ? [`Filed in the hub folder the user is working in.`] : []),
           `URL: ${data.url}`,
           `Visibility: ${data.visibility}`,
           `View Access ID: ${data.viewAccessId}`,
@@ -8963,6 +9041,7 @@ export const tools: ToolDef[] = [
   spacesUpdateTicket,
   spacesUpdateBulkTickets,
   spacesScheduleCall,
+  spacesStartCall,
   spacesReadCanvas,
   spacesEditCanvas,
   spacesTriggerAgent,

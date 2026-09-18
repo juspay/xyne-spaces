@@ -1637,6 +1637,7 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
       canvases: selectedCanvases,
       transcripts: selectedTranscripts,
       recordings: selectedRecordings,
+      localFolders: [],
     });
 
     const handlePickerToggleChannel = (channel: Channel, displayName: string): void => {

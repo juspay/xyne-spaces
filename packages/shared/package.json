@@ -17,6 +17,11 @@
       "import": "./dist/sdlc.js",
       "default": "./dist/sdlc.js"
     },
+    "./commands": {
+      "types": "./dist/commands.d.ts",
+      "import": "./dist/commands.js",
+      "default": "./dist/commands.js"
+    },
     "./zero": {
       "types": "./dist/zero/index.d.ts",
       "import": "./dist/zero/index.js",

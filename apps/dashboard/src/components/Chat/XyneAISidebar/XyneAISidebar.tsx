@@ -805,10 +805,15 @@ const XyneAISidebar = ({
       canvases: selectedCanvases,
       transcripts: selectedTranscripts,
       recordings: selectedRecordings,
+      localFolders: [],
     }),
     agentSlug: effectiveAgentSlug,
     model: selectedModel,
-    modelProvider: selectedModel ? (agentModelsData?.pinProvider ?? 'litellm') : null,
+    modelProvider: !selectedModel
+      ? null
+      : selectedModel.startsWith('local-harness:')
+        ? 'local-harness'
+        : (agentModelsData?.pinProvider ?? 'litellm'),
     thinkingLevel,
   });
 
@@ -1934,6 +1939,7 @@ const XyneAISidebar = ({
     canvases: selectedCanvases,
     transcripts: selectedTranscripts,
     recordings: selectedRecordings,
+    localFolders: [],
   };
 
   const sharedInputSectionProps = {
