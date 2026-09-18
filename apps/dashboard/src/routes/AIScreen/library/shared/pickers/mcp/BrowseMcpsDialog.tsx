@@ -106,6 +106,7 @@ interface BrowseMcpsDialogProps {
   onOpenChange: (open: boolean) => void;
   catalog: readonly McpCatalogEntry[];
   connectedServerIds: ReadonlySet<string>;
+  orgCoveredServerIds?: ReadonlySet<string>;
   loading: boolean;
   isError: boolean;
   onRetry: () => void;
@@ -119,6 +120,7 @@ export function BrowseMcpsDialog({
   onOpenChange,
   catalog,
   connectedServerIds,
+  orgCoveredServerIds,
   loading,
   isError,
   onRetry,
@@ -227,6 +229,7 @@ export function BrowseMcpsDialog({
               selection={selection}
               onSelectionChange={onSelectionChange}
               connected={!!openEntry.server && connectedServerIds.has(openEntry.server.id)}
+              orgCovered={!!openEntry.server && !!orgCoveredServerIds?.has(openEntry.server.id)}
             />
           ),
         },

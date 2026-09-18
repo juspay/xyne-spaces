@@ -6,6 +6,7 @@ import { CONFIG } from "../config.js";
 import { validateCredentials } from "../validation.js";
 import { checkHealth } from "../health.js";
 import { verifyMcpCredentials } from "../lib/mcp-credential-verify.js";
+import { availabilityForServerIds } from "../lib/connector-availability.js";
 import { hasConnectorDefinition } from "../mcp/connector-definitions.js";
 import { evictSession } from "../mcp/runner.js";
 import { syncToolsForServer } from "../tool-sync.js";
@@ -38,6 +39,23 @@ router.get("/:userId/connections", asyncHandler(async (req: Request<{ userId: st
   }));
 
   ok(res, data);
+}));
+
+// GET /:userId/connections/availability
+router.get("/:userId/connections/availability", asyncHandler(async (req: Request<{ userId: string }>, res: Response) => {
+  const userId = req.params.userId;
+  const servers = await prisma.mcpServer.findMany({ where: { enabled: true }, select: { id: true, type: true } });
+  const availability = await availabilityForServerIds(userId, servers.map((s) => s.id));
+
+  ok(
+    res,
+    servers.map((server) => ({
+      mcpServerId: server.id,
+      type: server.type,
+      personal: availability.personal.has(server.id),
+      org: availability.org.has(server.id),
+    })),
+  );
 }));
 
 router.post("/:userId/connections", asyncHandler(async (req: Request<{ userId: string }>, res: Response) => {

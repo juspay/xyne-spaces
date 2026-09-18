@@ -229,6 +229,7 @@ export function AgentPreviewToolsEditor({
         }}
         catalog={mcp.entries}
         connectedServerIds={mcp.connectedServerIds}
+        orgCoveredServerIds={mcp.orgCoveredServerIds}
         loading={mcp.loading}
         isError={mcp.isError}
         onRetry={mcp.refetch}

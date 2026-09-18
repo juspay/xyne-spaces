@@ -2,6 +2,7 @@ import { useState, type ReactElement, type ReactNode } from 'react';
 import { CopyCopied, CopyDefault } from '@xyne/icons';
 import { cn } from '@/utils/classNames';
 import {
+  scopeHint,
   scopeLabel,
   isToolSelected,
   selectedTools,
@@ -10,6 +11,7 @@ import {
   type McpSelection,
 } from './mcpCatalog';
 import { McpConnectForm } from './McpConnectForm';
+import Tooltip from '@/components/ui/Tooltip';
 import { Pill } from '../../primitives/Pill';
 import { McpLogo } from './McpLogo';
 import { useMcpConnect } from './useMcpConnect';
@@ -104,6 +106,7 @@ interface McpDetailPanelProps {
   selection: McpSelection;
   onSelectionChange: (next: McpSelection) => void;
   connected: boolean;
+  orgCovered?: boolean;
 }
 
 export function McpDetailPanel({
@@ -112,6 +115,7 @@ export function McpDetailPanel({
   selection,
   onSelectionChange,
   connected,
+  orgCovered = false,
 }: McpDetailPanelProps): ReactElement {
   const { server } = entry;
   const chosen = selectedTools(selection, entry);
@@ -121,6 +125,11 @@ export function McpDetailPanel({
   const [authOpen, setAuthOpen] = useState(false);
   const connect = useMcpConnect(server, () => setAuthOpen(false));
   const needsConnection = connect.strategy === 'oauth' || connect.fields.length > 0;
+  const connectionHint = connected
+    ? 'Runs with the key you connected.'
+    : orgCovered
+      ? 'Runs with a key your organisation shares. Connect your own to use it instead.'
+      : 'Needs a key before this connector can do anything.';
 
   return (
     <div className='flex min-h-0 flex-1 flex-col gap-8 overflow-y-auto px-[22px] pb-9 pt-2'>
@@ -132,13 +141,21 @@ export function McpDetailPanel({
               <span className='truncate text-sm font-semibold leading-[1.3] tracking-[-0.28px] text-foreground'>
                 {entry.label}
               </span>
-              <Pill tone={entry.scope === 'global' ? 'success' : 'neutral'}>
-                {scopeLabel(entry.scope)}
-              </Pill>
+              <Tooltip content={scopeHint(entry.scope)} side='top'>
+                <span className='flex'>
+                  <Pill tone={entry.scope === 'global' ? 'success' : 'neutral'}>
+                    {scopeLabel(entry.scope)}
+                  </Pill>
+                </span>
+              </Tooltip>
               {needsConnection && (
-                <Pill tone={connected ? 'success' : 'warning'}>
-                  {connected ? 'Connected' : 'Not connected'}
-                </Pill>
+                <Tooltip content={connectionHint} side='top'>
+                  <span className='flex'>
+                    <Pill tone={connected || orgCovered ? 'success' : 'warning'}>
+                      {connected ? 'Connected' : orgCovered ? 'Available via org' : 'Not connected'}
+                    </Pill>
+                  </span>
+                </Tooltip>
               )}
             </span>
             <span className='truncate text-xs font-semibold leading-4 tracking-[-0.24px] text-muted-foreground'>
@@ -153,14 +170,22 @@ export function McpDetailPanel({
               connect.reset();
               setAuthOpen(open => !open);
             }}
+            title={
+              orgCovered
+                ? 'Your own key takes precedence over the shared one'
+                : `Connect ${entry.label}`
+            }
             data-track-category='Claw Agents'
             data-track-name='Create agent v2: connect MCP from detail'
             className={cn(
-              'flex h-7 shrink-0 items-center justify-center rounded-lg border border-transparent bg-primary px-2 text-sm font-medium leading-[1.2] text-primary-foreground transition-colors hover:bg-primary/90',
+              'flex h-7 shrink-0 items-center justify-center rounded-lg px-2 text-sm font-medium leading-[1.2] transition-colors',
+              orgCovered
+                ? 'border border-border bg-card text-foreground hover:bg-muted'
+                : 'border border-transparent bg-primary text-primary-foreground hover:bg-primary/90',
               authOpen && 'opacity-50',
             )}
           >
-            {authOpen ? 'Connecting' : 'Connect'}
+            {authOpen ? 'Connecting' : orgCovered ? 'Use your own key' : 'Connect'}
           </button>
         )}
       </div>

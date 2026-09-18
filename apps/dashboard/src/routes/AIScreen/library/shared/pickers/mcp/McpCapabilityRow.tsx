@@ -22,7 +22,8 @@ export function McpCapabilityRow({
   suggestContext,
 }: McpCapabilityRowProps): ReactElement {
   const [browseOpen, setBrowseOpen] = useState(false);
-  const { entries, connectedServerIds, loading, isError, refetch } = useMcpCatalog();
+  const { entries, connectedServerIds, orgCoveredServerIds, loading, isError, refetch } =
+    useMcpCatalog();
   const suggestions = useMcpSuggestions(entries, suggestContext);
 
   const selectedEntries = useMemo(
@@ -155,6 +156,7 @@ export function McpCapabilityRow({
         onOpenChange={setBrowseOpen}
         catalog={entries}
         connectedServerIds={connectedServerIds}
+        orgCoveredServerIds={orgCoveredServerIds}
         loading={loading}
         isError={isError}
         onRetry={refetch}

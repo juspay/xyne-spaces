@@ -48,6 +48,17 @@ export function scopeLabel(scope: McpScope): string {
   return SCOPE_LABELS.get(scope) ?? 'Unlisted';
 }
 
+const SCOPE_HINTS = new Map<McpScope, string>([
+  ['global', 'Added by someone here and approved for the whole workspace.'],
+  ['personal', 'Added by one person — only they can see it.'],
+  ['built-in', 'Ships with Xyne. Everyone can see it, though it may still need a key.'],
+  ['unknown', 'This connector has no publish scope recorded.'],
+]);
+
+export function scopeHint(scope: McpScope): string {
+  return SCOPE_HINTS.get(scope) ?? 'This connector has no publish scope recorded.';
+}
+
 export function buildMcpCatalog(
   availableTools: AvailableTools | null,
   servers: readonly McpServer[],
