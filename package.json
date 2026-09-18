@@ -306,7 +306,7 @@
       "protobufjs@8": "8.7.1",
       "qs": "6.15.2",
       "react-router": "7.18.2",
-      "sharp": "0.35.0",
+      "sharp": "0.35.4",
       "shell-quote": "1.10.0",
       "simple-git": "3.36.0",
       "socket.io-parser": "4.2.7",
