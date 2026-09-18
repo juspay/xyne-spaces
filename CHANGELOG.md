@@ -1,3 +1,15 @@
+## [1.337.0-release-20260918.11](https://github.com/juspay/xyne-spaces/compare/v1.337.0-release-20260918.10...v1.337.0-release-20260918.11) (2026-09-18)
+
+
+### Features
+
+* Adding artifacts / links / xyne-ai enhanced version ([#2008](https://github.com/juspay/xyne-spaces/issues/2008)) ([#2060](https://github.com/juspay/xyne-spaces/issues/2060)) ([7491cd9](https://github.com/juspay/xyne-spaces/commit/7491cd91bc771b295178bf9ed846d2a0c633e6ed)), closes [#1920](https://github.com/juspay/xyne-spaces/issues/1920) [#1962](https://github.com/juspay/xyne-spaces/issues/1962) [#1967](https://github.com/juspay/xyne-spaces/issues/1967) [#1982](https://github.com/juspay/xyne-spaces/issues/1982) [#1994](https://github.com/juspay/xyne-spaces/issues/1994) [#2007](https://github.com/juspay/xyne-spaces/issues/2007) [#1978](https://github.com/juspay/xyne-spaces/issues/1978) [#2031](https://github.com/juspay/xyne-spaces/issues/2031) [#2036](https://github.com/juspay/xyne-spaces/issues/2036)
+
+
+### Bug Fixes
+
+* SDLC rel 18 ([#2054](https://github.com/juspay/xyne-spaces/issues/2054)) ([f309394](https://github.com/juspay/xyne-spaces/commit/f309394cc03336cf122f95e58172a3003f01999a)), closes [#2005](https://github.com/juspay/xyne-spaces/issues/2005) [#1995](https://github.com/juspay/xyne-spaces/issues/1995) [#2027](https://github.com/juspay/xyne-spaces/issues/2027) [#1945](https://github.com/juspay/xyne-spaces/issues/1945) [#1945](https://github.com/juspay/xyne-spaces/issues/1945) [#1959](https://github.com/juspay/xyne-spaces/issues/1959)
+
 ## [1.337.0-release-20260918.10](https://github.com/juspay/xyne-spaces/compare/v1.337.0-release-20260918.9...v1.337.0-release-20260918.10) (2026-09-18)
 
 
