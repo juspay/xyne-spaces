@@ -54,7 +54,7 @@ const CHANNELS: ChannelMeta[] = [
     noun: "number",
     icon: <DeviceMobileIcon size={17} className="mt-0.5 shrink-0 text-xyne-fg-secondary" />,
     caveat:
-      "Your own number, linked by scanning a QR the way WhatsApp Web does. Out of the box it answers only where you address it — your own chat and the groups you tick below — so it never replies to someone on your behalf unless you switch that on.",
+      "Your own number, linked by scanning a QR the way WhatsApp Web does. Out of the box it answers only where you address it — your own chat and the groups you tick below — so it never replies to someone on your behalf unless you switch that on. This is not an official WhatsApp API: your number carries the risk of being blocked, so use a number you can afford to lose.",
   },
   {
     key: "whatsapp-cloud",
