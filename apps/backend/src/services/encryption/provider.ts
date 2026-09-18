@@ -28,7 +28,7 @@ const provider: EncryptionProvider = {
   },
 
   async getEncryptedFieldsConfig(): Promise<Record<string, EncryptedFieldConfig>> {
-    if (!config.enc.enableDbEncryption && process.env.ENABLE_DB_DECRYPTION !== 'true') return {};
+    if (!config.enc.enableDbEncryption && !config.enc.enableDbDecryption) return {};
     return unsupported('getEncryptedFieldsConfig');
   },
 
