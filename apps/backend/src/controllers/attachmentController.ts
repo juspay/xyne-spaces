@@ -10,6 +10,8 @@ import { storageService, getStorageService } from '../services/storage/index';
 import { normalizeStoragePath } from '@xyne/storage';
 import { logger } from '../utils/logger';
 import { setSafeDownloadHeaders } from '../utils/safeAttachmentDownload';
+import { getHeicRendition, HeicRenditionError, isHeicAttachment, toWebpFilename } from '../services/heicRenditionService';
+import { heicRenditionQueue } from '../queues/heicRenditionQueue';
 import { MessageAttachment } from '@prisma/client';
 import { AttachmentEntityType, ChannelVisibility } from '@xyne/shared';
 import {
@@ -381,6 +383,47 @@ export class AttachmentController {
 
       const service = getAttachmentStorage(attachment);
 
+      // Opt-in browser-renderable rendition: the original HEIC stays the
+      // canonical bytes; ?format=webp serves a lossy (q85) WebP derivative
+      // (generated + cached on first request).
+      if (req.query.format === 'webp' && isHeicAttachment(attachment.mimetype, attachment.originalFilename)) {
+        try {
+          const webpBuffer = await getHeicRendition(service, filePath, 'full');
+
+          res.setHeader('Content-Length', webpBuffer.length);
+          setSafeDownloadHeaders(res, {
+            mimetype: 'image/webp',
+            filename: toWebpFilename(attachment.originalFilename),
+          });
+          setAttachmentCacheHeaders(res, attachment);
+
+          res.send(webpBuffer);
+          return;
+        } catch (error) {
+          const code = error instanceof HeicRenditionError ? error.code : 'CONVERSION_FAILED';
+          if (code === 'PENDING') {
+            void heicRenditionQueue.enqueueRenditions({ storagePath: filePath });
+            res.setHeader('Retry-After', '2');
+            res.status(503).json({ error: 'WebP rendition is being generated', code: 'PENDING' });
+            return;
+          }
+          if (code === 'NOT_HEIC' || code === 'TOO_LARGE') {
+            logger.info('[AttachmentController] HEIC rendition unavailable, serving original', {
+              attachmentId,
+              code,
+            });
+          } else {
+            logger.warn('[AttachmentController] HEIC→WebP rendition failed', {
+              attachmentId,
+              code,
+              error: error instanceof Error ? error.message : String(error),
+            });
+            res.status(502).json({ error: 'Failed to generate WebP rendition', code });
+            return;
+          }
+        }
+      }
+
       logger.info(`Streaming attachment ${attachmentId} from path: ${filePath}`);
 
       const buffer = await service.getFileBuffer(filePath);
@@ -433,7 +476,50 @@ export class AttachmentController {
       }
 
       // Check if thumbnail exists
+      // HEIC attachments have no upstream thumbnail (the image pipeline
+      // can't decode HEVC), so generate one lazily from the original on
+      // first request and serve the cached rendition afterwards.
       if (!attachment.thumbnailUrl) {
+        const filePath = normalizeStoragePath(attachment.url);
+
+        if (filePath && isHeicAttachment(attachment.mimetype, attachment.originalFilename)) {
+          try {
+            const service = getAttachmentStorage(attachment);
+            const thumbBuffer = await getHeicRendition(service, filePath, 'thumb');
+
+            res.setHeader('Content-Length', thumbBuffer.length);
+            setSafeDownloadHeaders(res, {
+              mimetype: 'image/webp',
+              filename: 'thumbnail.webp',
+            });
+            res.setHeader('Cache-Control', 'private, max-age=3600');
+
+            res.send(thumbBuffer);
+            return;
+          } catch (error) {
+            const code = error instanceof HeicRenditionError ? error.code : 'CONVERSION_FAILED';
+            if (code === 'PENDING') {
+              void heicRenditionQueue.enqueueRenditions({ storagePath: filePath });
+              res.setHeader('Retry-After', '2');
+              res.status(503).json({ error: 'Thumbnail is being generated', code: 'PENDING' });
+              return;
+            }
+            if (code === 'NOT_HEIC' || code === 'TOO_LARGE') {
+              logger.info('[AttachmentController] HEIC thumbnail unavailable', {
+                attachmentId,
+                code,
+              });
+            } else {
+              logger.error('[AttachmentController] HEIC thumbnail generation failed', {
+                attachmentId,
+                error: error instanceof Error ? error.message : String(error),
+              });
+              res.status(500).json({ error: 'Failed to generate thumbnail' });
+              return;
+            }
+          }
+        }
+
         res.status(404).json({ error: 'Thumbnail not available for this attachment' });
         return;
       }

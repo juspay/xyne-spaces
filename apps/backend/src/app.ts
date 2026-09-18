@@ -1113,6 +1113,10 @@ export class App {
     const { messageClassificationQueue } = await import('@/queues/messageClassificationQueue');
     await messageClassificationQueue.initialize();
 
+    logger.info('Initializing HEIC rendition queue (producer)...');
+    const { heicRenditionQueue } = await import('@/queues/heicRenditionQueue');
+    await heicRenditionQueue.initialize();
+
     if (config.enableTagGenerationPipeline) {
       logger.info('Initializing tag generation pipeline queue (producer)...');
       registerDeskEmailTags(tagGenerationPipeline);
