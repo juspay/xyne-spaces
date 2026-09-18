@@ -311,7 +311,7 @@ export async function executeTool(
     }
 
     const duration = Date.now() - startTime;
-    console.log(`[execute] SUCCESS service=${String(serviceName).replace(/\n|\r/g, " ")} tool=${String(toolName).replace(/\n|\r/g, " ")} backend=${String(selectedBackend.backendId).replace(/\n|\r/g, " ")} status=${backendResponse.status} duration=${duration}ms`);
+    console.log(`[execute] SUCCESS service=${sanitizeForLog(serviceName)} tool=${sanitizeForLog(toolName)} backend=${sanitizeForLog(selectedBackend.backendId)} status=${backendResponse.status} duration=${duration}ms`);
 
     return {
       success: true,
