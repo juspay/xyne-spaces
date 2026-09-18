@@ -1303,7 +1303,6 @@ model PullRequests {
 
   // Relations
   workflowExecution WorkflowExecution? @relation(fields: [workflowExecutionId], references: [id])
-  commits           Commit[]           // Individual commits in this PR
 
   @@index([workflowExecutionId])
   @@index([date])
@@ -1331,9 +1330,6 @@ model Commit {
   committedAt     DateTime
 
   createdAt       DateTime
-
-  // Relations
-  pullRequest PullRequests @relation(fields: [pullRequestId], references: [id], onDelete: Cascade)
 
   @@unique([pullRequestId, commitSha])
   @@map("commits")

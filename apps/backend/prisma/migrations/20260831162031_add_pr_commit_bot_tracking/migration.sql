@@ -16,9 +16,6 @@ CREATE TABLE "public"."commits" (
 -- CreateIndex
 CREATE UNIQUE INDEX "commits_pullRequestId_commitSha_key" ON "public"."commits"("pullRequestId", "commitSha");
 
--- AddForeignKey
-ALTER TABLE "public"."commits" ADD CONSTRAINT "commits_pullRequestId_fkey" FOREIGN KEY ("pullRequestId") REFERENCES "public"."pull_requests"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
 -- AlterTable: Add bot commit tracking fields to pull_requests
 ALTER TABLE "public"."pull_requests" ADD COLUMN "botCommitCount" INTEGER,
 ADD COLUMN "humanCommitCount" INTEGER,
