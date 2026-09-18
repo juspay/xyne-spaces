@@ -94,13 +94,19 @@ export const SDLC_CUSTOM_TOOL_NAMES = [
   ...SDLC_PLANNING_TOOLS,
 ] as const;
 
+/** Workflow MCP tools that write; granted "allow" for the reason above. */
+export const SDLC_WORKFLOW_WRITE_TOOLS = ["workflow_create", "workflow_update", "workflow_run"] as const;
+
 export interface SdlcAgentToolProfile {
   tools: { direct: string[]; custom: string[]; subagents: string[] };
   toolPermissions: Record<string, "allow" | "ask">;
   agentToolAllows: string[];
 }
 
-export function buildSdlcAgentToolProfile(spacesMcpToolNames: readonly string[]): SdlcAgentToolProfile {
+export function buildSdlcAgentToolProfile(
+  spacesMcpToolNames: readonly string[],
+  workflowMcpToolNames: readonly string[] = [],
+): SdlcAgentToolProfile {
   const uniqueToolNames = [...new Set(spacesMcpToolNames)];
   if (uniqueToolNames.length !== spacesMcpToolNames.length) {
     throw new Error("Duplicate tool names in Xyne Spaces MCP export");
@@ -109,7 +115,7 @@ export function buildSdlcAgentToolProfile(spacesMcpToolNames: readonly string[])
   if (retired.length > 0) {
     throw new Error(`Retired SDLC tools remain exported: ${retired.join(", ")}`);
   }
-  const direct = [...uniqueToolNames];
+  const direct = [...uniqueToolNames, ...new Set(workflowMcpToolNames)];
   const missing = SDLC_DIRECT_TOOL_NAMES.filter((name) => !direct.includes(name));
   if (missing.length > 0) {
     throw new Error(`SDLC MCP tools missing from Xyne Spaces server: ${missing.join(", ")}`);
@@ -120,6 +126,12 @@ export function buildSdlcAgentToolProfile(spacesMcpToolNames: readonly string[])
   }
   for (const tool of SDLC_TOOL_CAPABILITIES) {
     if (tool.transport === "direct") toolPermissions[`xyne-spaces__${tool.name}`] = "allow";
+  }
+  // Workflow writes are "allow", not "ask": SDLC runs are also triggered BY
+  // workflows (sessions like wf-…), where nobody is in a thread to approve, so
+  // an "ask" would fail closed and stall the run. Matches ask-ai's seeded config.
+  for (const name of SDLC_WORKFLOW_WRITE_TOOLS) {
+    if (direct.includes(name)) toolPermissions[`xyne-workflows__${name}`] = "allow";
   }
   return {
     tools: {
@@ -138,8 +150,11 @@ export function sdlcTrustedBindingFor(toolName: string): SdlcTrustedBinding {
 
 let cachedProfile: SdlcAgentToolProfile | undefined;
 
-export function sdlcAgentToolProfile(spacesMcpToolNames: readonly string[]): SdlcAgentToolProfile {
-  cachedProfile ??= buildSdlcAgentToolProfile(spacesMcpToolNames);
+export function sdlcAgentToolProfile(
+  spacesMcpToolNames: readonly string[],
+  workflowMcpToolNames: readonly string[] = [],
+): SdlcAgentToolProfile {
+  cachedProfile ??= buildSdlcAgentToolProfile(spacesMcpToolNames, workflowMcpToolNames);
   return cachedProfile;
 }
 

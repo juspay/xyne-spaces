@@ -243,3 +243,5 @@ security-reports/
 
 # Build exports (make export-dashboard-bundle)
 out/
+
+.venv
