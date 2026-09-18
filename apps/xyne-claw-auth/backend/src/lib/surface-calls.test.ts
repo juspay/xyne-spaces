@@ -8,8 +8,9 @@ const device = (
   id: string,
   seenMsAgo: number | null,
   focusedMsAgo: number | null = null,
-): { id: string; deviceName: string; lastSeenAt: Date | null; focusedAt: Date | null } => ({
+): { id: string; orgId: string; deviceName: string; lastSeenAt: Date | null; focusedAt: Date | null } => ({
   id,
+  orgId: "org-1",
   deviceName: `mac-${id}`,
   lastSeenAt: seenMsAgo === null ? null : ago(seenMsAgo),
   focusedAt: focusedMsAgo === null ? null : ago(focusedMsAgo),

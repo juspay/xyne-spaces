@@ -35,6 +35,7 @@ function deadlineFor(toolName: string): number {
 
 interface DeviceRow {
   id: string;
+  orgId: string;
   deviceName: string;
   lastSeenAt: Date | null;
   focusedAt: Date | null;
@@ -84,7 +85,7 @@ export async function callSurfaceTool(input: {
 
   const devices = await prisma.localHarnessDevice.findMany({
     where: { userId, revokedAt: null },
-    select: { id: true, deviceName: true, lastSeenAt: true, focusedAt: true },
+    select: { id: true, orgId: true, deviceName: true, lastSeenAt: true, focusedAt: true },
   });
 
   const picked = pickDevice(devices);
@@ -108,6 +109,7 @@ export async function callSurfaceTool(input: {
   const call = await prisma.surfaceCall.create({
     data: {
       userId,
+      orgId: picked.device.orgId,
       deviceId: picked.device.id,
       sessionId: input.sessionId ?? null,
       toolName,
