@@ -34,7 +34,17 @@ const LITELLM_API_KEY = process.env["LITELLM_AUTOMATION_API_KEY"]?.trim() || (pr
 const CURATOR_MODEL = process.env["LITELLM_AUTOMATION_MODEL"]?.trim()
   || process.env["LITELLM_MODEL"]
   || "claude-haiku-4-5-20251001";
-const CURATOR_TIMEOUT_MS = Number(process.env["USAGE_PATTERN_CURATOR_TIMEOUT_MS"] ?? 90_000);
+/**
+ * Ten minutes, matching curator.ts and user-memory-curator.ts, which share this
+ * key. That is not generosity: LITELLM_AUTOMATION_API_KEY is the LOW-PRIORITY
+ * key by design (see above), so its requests queue behind interactive traffic
+ * and the wait, not the generation, is what the clock is mostly measuring.
+ *
+ * At 90s this timed out on 10 of 10 attempts in production on 2026-09-18 while
+ * its 600s siblings on the same key were fine, and every agent that cleared the
+ * corpus thresholds came back `distill-failed`.
+ */
+const CURATOR_TIMEOUT_MS = Number(process.env["USAGE_PATTERN_CURATOR_TIMEOUT_MS"] ?? 600_000);
 
 const MAX_SAMPLES = 80;
 const MAX_CHARS_PER_TASK = 320;
@@ -263,7 +273,13 @@ export async function curateUsagePatterns(req: UsagePatternRequest): Promise<Usa
         tool_choice: { type: "function", function: { name: "emit_usage_patterns" } },
         temperature: 0.2,
       }),
-    }, { timeoutMs: CURATOR_TIMEOUT_MS, label: "usage-pattern-curator" });
+      // Single shot. The default 3 retries are 5s/15s/45s apart with the timeout
+      // applied PER ATTEMPT, so a failing call kept hammering LiteLLM for ~7
+      // minutes after claw-auth had already hung up — orphaned load that showed
+      // up as the 429s at the tail of that incident. Retrying belongs to the
+      // BullMQ job, which survives a pod restart and holds no LLM slot while it
+      // waits; here it only burns quota nobody is waiting on.
+    }, { timeoutMs: CURATOR_TIMEOUT_MS, label: "usage-pattern-curator", maxRetries: 0 });
     if (!res.ok) {
       log.warn(`[usage-pattern-curator] LiteLLM ${res.status}: ${(await res.text()).slice(0, 300)}`);
       return FAILED;

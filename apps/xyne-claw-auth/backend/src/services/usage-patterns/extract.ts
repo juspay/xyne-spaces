@@ -24,7 +24,10 @@ const MAX_CALLER_RUNS = 400;
 /** A task is a request, not a document; the tail is context, not the ask. */
 export const MAX_TASK_CHARS = 280;
 
-const CALL_AGENT_TOOL = "call-agent";
+/** Delegation leaves no run of its own, so this tool name is the only trace of
+ *  it. The roster scan reads the same invocations to find agents that are
+ *  reached ONLY through a caller. */
+export const CALL_AGENT_TOOL = "call-agent";
 
 /** A run still in flight has no outcome yet, and outcome is half the signal —
  *  including one would report an unfinished task as a success. */
