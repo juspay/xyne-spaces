@@ -13,7 +13,7 @@ const code = ts.transpileModule(source.replaceAll('import.meta.env', '__env'), {
 
 function config(env, origin = 'http://dev.example.test:5174') {
   const exports = {};
-  vm.runInNewContext(code, { exports, window: { location: new URL(origin) }, __env: env });
+  vm.runInNewContext(code, { exports, window: { location: new URL(origin) }, __env: env, __APP_VERSION__: 'test' });
   return exports;
 }
 

@@ -145,6 +145,8 @@ import { Popover } from '../../components/ui/Popover';
 import { Tooltip } from '../../components/ui/Tooltip';
 import { fileKind } from './fileKind';
 import { SdlcFolderPage, SCRATCH_TAB_ID, type FolderTab } from './SdlcFolderPage';
+import { setSdlcCommentContext } from './sdlcCommentStore';
+import { publishPendingPassage, registerSelectionSink } from '../../components/workspaceItems';
 
 /** What a conversation in a track can be filed against, beside an artifact. */
 interface SdlcItemDiscussion {
@@ -234,6 +236,7 @@ const EMPTY_CONTEXT_SELECTIONS: ContextSelections = {
   canvases: [],
   transcripts: [],
   recordings: [],
+  localFolders: [],
 };
 
 function updatedAtLabel(value?: number): string {
@@ -310,6 +313,9 @@ export default function SdlcScreen(): ReactElement {
     [selectedRepo, channel],
   );
   const zero = useZero();
+  useEffect(() => {
+    setSdlcCommentContext({ zero: zero as never });
+  }, [zero]);
   const [busy, setBusy] = useState<string | null>(null);
   const [artifactDialog, setArtifactDialog] = useState<{ id: string; name: string } | null>(null);
   const [relatedCanvasIds, setRelatedCanvasIds] = useState<string[]>([]);
@@ -1690,6 +1696,20 @@ export default function SdlcScreen(): ReactElement {
     },
     [channel, repo, selectedAgentSlug, setSelectedAgentSlug],
   );
+
+  // "Ask Xyne" on a picked passage goes to this hub's assistant, the way the AI
+  // screen's sink goes to its composer.
+  useEffect(() => {
+    registerSelectionSink('sdlc-item', {
+      send: passage => {
+        // The passage rides along as a structured selection; the message is
+        // just the question, so the thread reads like a question rather than a
+        // wall of quoted text.
+        publishPendingPassage(passage);
+        askSdlcAssistant(passage.question?.trim() || 'What does this passage say?');
+      },
+    });
+  }, [askSdlcAssistant]);
 
   const renderWorkflowControls = (label: string, workflow: HubWorkflow): ReactElement => {
     const running = workflow.phase === 'RUNNING';
@@ -4093,7 +4113,7 @@ export default function SdlcScreen(): ReactElement {
       </Dialog>
 
       <SdlcHubDialog
-        projectId={channel.projectId}
+        projectId={channel.projectId ?? ''}
         open={hubDialog !== null}
         onOpenChange={open => setHubDialog(open ? hubDialog : null)}
         {...(hubDialog === 'manage'

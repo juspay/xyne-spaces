@@ -16,6 +16,8 @@ import type { McpToolInfo } from "../types.js";
 import { AGENT_INTROSPECT_TOOL_DEFS } from "xyne-claw-shared";
 
 import { createLogger } from "../../logger.js";
+import { findAgents, INDEX_KINDS, type IndexKind } from "../../services/agent-index/index.js";
+import { listTools, searchTools } from "../../services/tool-index/index.js";
 const log = createLogger("agent-introspect");
 
 // Slugs MUST match the `tools` rows seeded by the add_agent_introspect_tools
@@ -128,33 +130,91 @@ export async function handleGetAgentConfig(params: Record<string, unknown>, cont
   });
 }
 
-export async function handleListAvailableTools(contextOrgId?: string): Promise<string> {
+const SEARCH_TOOLS_DEFAULT_LIMIT = 15;
+const SEARCH_TOOLS_MAX_LIMIT = 50;
+/** Enough to tell two subagents apart; the full text is a `get_agent_config` away. */
+const SUBAGENT_DESCRIPTION_CHARS = 160;
+
+function clampText(value: string | null | undefined, max: number): string {
+  const text = (value ?? "").replace(/\s+/g, " ").trim();
+  return text.length > max ? `${text.slice(0, max - 1)}…` : text;
+}
+
+/**
+ * The catalog, searched or browsed. Replaces `list_available_tools`, which
+ * dumped every integration's full tool list regardless of query and grew with
+ * every integration connected.
+ *
+ * Subagent/integration indexes come back only when BROWSING (no query) —
+ * folding them into every search response would reintroduce that bloat.
+ */
+export async function handleSearchTools(
+  params: Record<string, unknown>,
+  contextOrgId?: string,
+): Promise<string> {
   if (!contextOrgId) {
-    log.error("[agent-introspect/list-available-tools] orgId is required; refusing global tools catalog");
+    log.error("[agent-introspect/search-tools] orgId is required; refusing global tools catalog");
     return JSON.stringify({ error: "orgId is required" });
   }
-  // Lazy import to avoid a load-order cycle (routes/tools imports mcp pieces).
+
+  const query = typeof params["query"] === "string" ? params["query"].trim() : "";
+  const rawLimit = Number(params["limit"]);
+  const limit = Math.min(
+    Math.max(Number.isFinite(rawLimit) && rawLimit > 0 ? Math.floor(rawLimit) : SEARCH_TOOLS_DEFAULT_LIMIT, 1),
+    SEARCH_TOOLS_MAX_LIMIT,
+  );
+  const integration = typeof params["integration"] === "string" ? params["integration"].trim() : "";
+  const rawRisk = typeof params["maxRisk"] === "string" ? params["maxRisk"] : "";
+  const maxRisk = (["read", "write", "destructive"] as const).find((r) => r === rawRisk);
+
+  const opts = {
+    limit,
+    orgId: contextOrgId,
+    ...(integration ? { integrations: [integration] } : {}),
+    ...(maxRisk ? { maxRisk } : {}),
+  };
+
+  // Empty search results are ambiguous (no match vs. nothing indexed yet), so
+  // fall back to the full listing rather than reporting a catalog as empty.
+  const tools = query ? await searchTools(query, opts) : await listTools(opts);
+  const matches = query && tools.length === 0 ? await listTools(opts) : tools;
+
+  const rendered = matches.map((t) => ({
+    slug: t.slug,
+    name: t.name,
+    integration: t.integration,
+    risk: t.risk,
+    description: t.description.replace(/\s+/g, " ").slice(0, 300),
+    requiredParams: t.params.filter((p) => p.required).map((p) => p.name),
+    grantedToAgents: t.grantedToAgents ?? 0,
+  }));
+
+  if (query) {
+    return JSON.stringify({
+      mode: matches === tools ? "search" : "search-empty-fell-back-to-list",
+      tools: rendered,
+      note: "Call search_tools with no `query` to browse the full catalog, including subagents and the integration index.",
+    });
+  }
+
+  // Lazy import: routes/tools imports mcp pieces, so a static import here is a load-order cycle.
   const { buildAvailableToolsCatalog } = await import("../../routes/tools.js");
   const catalog = await buildAvailableToolsCatalog(undefined, contextOrgId);
-  const integrations = (catalog.integrations ?? []).map((i) => ({
-    slug: i.slug,
-    label: i.label,
-    kind: i.kind,
-    connected: i.connected,
-    usageCount: i.usageCount,
-    readTools: (i.readTools ?? []).map((t) => ({ slug: t.slug, name: t.name, risk: t.riskLevel })),
-    writeTools: (i.writeTools ?? []).map((t) => ({ slug: t.slug, name: t.name, risk: t.riskLevel })),
-  }));
-  const subagents = (catalog.subagents ?? []).map((s) => ({
-    name: s.name,
-    description: s.description,
-    serverType: s.serverType,
-    source: s.source,
-  }));
+
   return JSON.stringify({
-    integrations,
-    subagents,
-    customGroups: catalog.customGroups ?? [],
+    mode: "list",
+    tools: rendered,
+    subagents: (catalog.subagents ?? []).map((sa) => ({
+      name: sa.name,
+      description: clampText(sa.description, SUBAGENT_DESCRIPTION_CHARS),
+      serverType: sa.serverType,
+    })),
+    integrations: (catalog.integrations ?? []).map((i) => ({
+      slug: i.slug,
+      label: i.label,
+      connected: i.connected,
+      tools: (i.readTools?.length ?? 0) + (i.writeTools?.length ?? 0),
+    })),
   });
 }
 
@@ -296,6 +356,55 @@ export async function handleGetAgentRuns(
   });
 }
 
+/**
+ * Semantic lookup over the agent index. Returns a shortlist with the matching
+ * text so the caller can judge fit — a ranked list of bare slugs is the
+ * affordance this tool exists to replace.
+ */
+export async function handleFindAgents(params: Record<string, unknown>, contextOrgId?: string): Promise<string> {
+  const taskDescription = String(params["taskDescription"] ?? "").trim();
+  if (!taskDescription) return JSON.stringify({ error: "`taskDescription` is required" });
+  if (!contextOrgId) {
+    log.warn("[agent-introspect] refusing find_agents without contextOrgId");
+    return JSON.stringify({ count: 0, agents: [] });
+  }
+
+  const limit = Math.min(Math.max(Number(params["maxResults"]) || 5, 1), 20);
+  const kinds = stringList(params["searchDocumentKinds"]).filter((k): k is IndexKind =>
+    (INDEX_KINDS as readonly string[]).includes(k),
+  );
+  const requiredToolSlugs = stringList(params["requiredToolSlugs"]);
+
+  try {
+    const matches = await findAgents(contextOrgId, taskDescription, {
+      limit,
+      ...(kinds.length ? { kinds } : {}),
+      ...(requiredToolSlugs.length ? { requiresCapability: requiredToolSlugs } : {}),
+    });
+    return JSON.stringify({
+      count: matches.length,
+      ...(requiredToolSlugs.length ? { requiredToolSlugs } : {}),
+      agents: matches.map((m) => ({
+        slug: m.slug,
+        score: Number(m.score.toFixed(3)),
+        matchedOn: m.matchedKinds,
+        purpose: m.identity ?? null,
+        usage: m.usage ?? null,
+        capabilities: m.capabilities ?? [],
+        excerpt: m.evidence,
+      })),
+    });
+  } catch (err) {
+    log.warn(`[agent-introspect] find_agents failed: ${err instanceof Error ? err.message : String(err)}`);
+    return JSON.stringify({ error: "agent index unavailable", count: 0, agents: [] });
+  }
+}
+
+function stringList(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.filter((v): v is string => typeof v === "string" && v.trim() !== "").map((v) => v.trim());
+}
+
 export async function handleAgentIntrospect(
   tool: string,
   params: Record<string, unknown>,
@@ -307,10 +416,12 @@ export async function handleAgentIntrospect(
       return handleListAgents(params, contextOrgId);
     case "get_agent_config":
       return handleGetAgentConfig(params, contextOrgId);
-    case "list_available_tools":
-      return handleListAvailableTools(contextOrgId);
+    case "search_tools":
+      return handleSearchTools(params, contextOrgId);
     case "get_agent_runs":
       return handleGetAgentRuns(params, contextOrgId, requestingUserId);
+    case "find_agents":
+      return handleFindAgents(params, contextOrgId);
     default:
       log.warn(`[agent-introspect] unknown tool ${tool}`);
       throw new Error(`Unknown agent-introspect tool: ${tool}`);

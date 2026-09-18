@@ -4,12 +4,13 @@ import {
   MessageAttachmentRepository,
   CreateMessageAttachmentInput,
 } from '../database/repositories/messageAttachmentRepository';
-import { ConversationRepository } from '../database/repositories/conversationRepository';
 import { ChannelParticipantRepository } from '../database/repositories/channelParticipantRepository';
 import { storageService, getStorageService } from '../services/storage/index';
 import { normalizeStoragePath } from '@xyne/storage';
 import { logger } from '../utils/logger';
 import { setSafeDownloadHeaders } from '../utils/safeAttachmentDownload';
+import { getHeicRendition, HeicRenditionError, isHeicAttachment, toWebpFilename } from '../services/heicRenditionService';
+import { heicRenditionQueue } from '../queues/heicRenditionQueue';
 import { MessageAttachment } from '@prisma/client';
 import { AttachmentEntityType, ChannelVisibility } from '@xyne/shared';
 import {
@@ -18,7 +19,7 @@ import {
   SDLC_TRACK_FLAT_RELATION,
   SDLC_TRACK_MEMBERSHIP_RELATION,
 } from '@xyne/shared/sdlc';
-import { canvasAuthService } from '../services/canvasAuthService';
+import { assertAttachmentAccess as assertAttachmentAccessShared, type AttachmentAccessResult } from '../services/attachmentAccessService';
 import { uploadFiles } from '../services/fileUploadService';
 import { config } from '../config/env';
 import { vespaQueue } from '@/queues/vespaQueue';
@@ -26,8 +27,6 @@ import { fileSchema, SubApp } from '@/vespa/src/types';
 import { DatabaseClient } from '../database/client';
 import { NAMESPACE } from '@/vespa/vespaConfig';
 import { isSupportedMimeType } from '@/services/fileProcessor';
-import { repositories } from '@/database/repositories';
-import { callShareService } from '@/services/callShareService';
 
 const db = DatabaseClient.getInstance();
 
@@ -56,12 +55,10 @@ const setAttachmentCacheHeaders = (res: Response, attachment: MessageAttachment)
 
 export class AttachmentController {
   private messageAttachmentRepository: MessageAttachmentRepository;
-  private conversationRepository: ConversationRepository;
   private channelParticipantRepository: ChannelParticipantRepository;
 
   constructor() {
     this.messageAttachmentRepository = new MessageAttachmentRepository();
-    this.conversationRepository = new ConversationRepository();
     this.channelParticipantRepository = new ChannelParticipantRepository();
   }
 
@@ -122,226 +119,16 @@ export class AttachmentController {
   }
 
   /**
-   * Authorization for attachment reads (download / thumbnail).
-   *
-   * Layered and safe for every AttachmentEntityType:
-   *  1. Tenant isolation — the attachment must belong to the caller's workspace.
-   *  2. DRAFT / DELAYED_MESSAGE — only the creator may read it.
-   *  3. Chat attachments (those carrying a conversationId) — the caller must be
-   *     a participant of the owning channel. Mirrors streamAttachment.
-   *  4. RECORDING — the caller must be able to view the call's recordings.
-   * Non-chat types without a conversation (TICKET, EMAIL, FORM_ENTITY_VALUE,
-   * IMPACT, …) are bounded by the workspace check only, preserving existing
-   * in-workspace access.
+   * Authorization for attachment reads (download / thumbnail). Delegates to the
+   * shared attachment-access service so every attachment route enforces identical
+   * checks.
    */
-  private async assertAttachmentAccess(
+  private assertAttachmentAccess(
     attachment: MessageAttachment,
     userId: string,
     workspaceId?: string,
-  ): Promise<{ ok: true } | { ok: false; status: number; body: Record<string, string> }> {
-    // 1) Workspace isolation — never serve another workspace's file.
-    //    Require a workspace context; an absent one is rejected rather than
-    //    allowed through.
-    if (!workspaceId || attachment.workspaceId !== workspaceId) {
-      logger.warn(
-        `Cross-workspace attachment access blocked: user ${userId} (ws ${workspaceId ?? 'none'}) -> attachment ${attachment.id} (ws ${attachment.workspaceId})`,
-      );
-      return { ok: false, status: 404, body: { error: 'Attachment not found' } };
-    }
-
-    // 2) Draft / scheduled message attachments — creator only.
-    if (
-      attachment.entityType === AttachmentEntityType.DRAFT ||
-      attachment.entityType === AttachmentEntityType.DELAYED_MESSAGE
-    ) {
-      if (attachment.createdBy !== userId) {
-        logger.warn(
-          `Unauthorized draft attachment access: user ${userId} -> ${attachment.id} (creator ${attachment.createdBy})`,
-        );
-        return {
-          ok: false,
-          status: 403,
-          body: { error: 'Forbidden', message: 'You do not have permission to access this attachment' },
-        };
-      }
-      return { ok: true };
-    }
-
-    // 2.5) Canvas attachments carry a synthetic conversationId (`canvas_<id>`)
-    //      and are not backed by a real conversation row. Authorize via canvas
-    //      view access (mirrors CanvasController's edit-access check on upload)
-    //      rather than channel participation.
-    if (attachment.entityType === AttachmentEntityType.CANVAS) {
-      try {
-        await canvasAuthService.requireViewAccess(attachment.entityId, userId);
-        return { ok: true };
-      } catch (error) {
-        logger.warn(
-          `Unauthorized canvas attachment access: user ${userId} -> ${attachment.id} (canvas ${attachment.entityId}): ${error instanceof Error ? error.message : 'denied'}`,
-        );
-        return {
-          ok: false,
-          status: 403,
-          body: { error: 'Forbidden', message: 'You do not have permission to access this attachment' },
-        };
-      }
-    }
-
-    // 2.55) SDLC hub files have no conversation to authorize through: they are
-    //       filed into a folder, and their entityId is the hub itself. Seeing the
-    //       hub is what earns seeing the file, on the same terms as a private
-    //       channel's ticket documents above.
-    if (attachment.entityType === AttachmentEntityType.SDLC_HUB) {
-      const channel = await db.channel.findUnique({
-        where: { id: attachment.entityId },
-        select: { visibility: true, workspaceId: true },
-      });
-      if (!channel || channel.workspaceId !== workspaceId) {
-        return { ok: false, status: 404, body: { error: 'Attachment not found' } };
-      }
-      if (channel.visibility !== ChannelVisibility.PUBLIC) {
-        const isParticipant = await this.channelParticipantRepository.isParticipant(
-          attachment.entityId,
-          userId,
-        );
-        if (!isParticipant) {
-          logger.warn(
-            `Unauthorized SDLC hub attachment access: user ${userId} -> ${attachment.id} (hub ${attachment.entityId})`,
-          );
-          return {
-            ok: false,
-            status: 403,
-            body: { error: 'Forbidden', message: 'You do not have permission to access this attachment' },
-          };
-        }
-      }
-      return { ok: true };
-    }
-
-    // 2.6) Note-taker recordings — same rule as the recording download endpoints.
-    if (attachment.entityType === AttachmentEntityType.RECORDING) {
-      const recording = await repositories.callRecordings.findById(attachment.entityId);
-      const call = recording ? await repositories.calls.findById(recording.callId) : null;
-      if (!call || call.workspaceId !== workspaceId) {
-        return { ok: false, status: 404, body: { error: 'Attachment not found' } };
-      }
-      if (!(await callShareService.canViewRecordings(call, userId))) {
-        logger.warn(
-          `Unauthorized recording attachment access: user ${userId} -> ${attachment.id} (call ${call.id})`,
-        );
-        return {
-          ok: false,
-          status: 403,
-          body: { error: 'Forbidden', message: 'You do not have permission to access this attachment' },
-        };
-      }
-      return { ok: true };
-    }
-
-    // 3) Conversation-backed (chat/DM/transcript) attachments — must participate.
-    if (attachment.conversationId) {
-      const conversation = await this.conversationRepository.findById(attachment.conversationId);
-      if (!conversation) {
-        logger.warn(
-          `Attachment access denied: conversation ${attachment.conversationId} not found for attachment ${attachment.id} (user ${userId})`,
-        );
-        return { ok: false, status: 404, body: { error: 'Attachment not found' } };
-      }
-
-      const isParticipant = await this.channelParticipantRepository.isParticipant(
-        conversation.channelId,
-        userId,
-      );
-      if (!isParticipant) {
-        logger.warn(
-          `Unauthorized attachment access: user ${userId} -> ${attachment.id} in channel ${conversation.channelId}`,
-        );
-        return {
-          ok: false,
-          status: 403,
-          body: { error: 'Forbidden', message: 'You do not have permission to access this attachment' },
-        };
-      }
-    }
-
-    // 4) Impact / stage-form DOC attachments (conversationId is null) — resolve the
-    //    owning ticket's channel and require the same access the ticket needs: a PUBLIC
-    //    channel is readable by any workspace member, a PRIVATE channel only by its
-    //    participants. Without this, any workspace member could download a private
-    //    channel ticket's impact/form documents by guessing the attachment id.
-    if (
-      attachment.entityType === AttachmentEntityType.IMPACT ||
-      attachment.entityType === AttachmentEntityType.FORM_ENTITY_VALUE
-    ) {
-      const ticketId = await this.resolveTicketIdForAttachmentEntity(
-        attachment.entityType,
-        attachment.entityId,
-      );
-      // Not ticket-scoped (e.g. a USER-scoped form value) — no channel to gate on;
-      // keep the workspace-bounded behavior rather than over-block a legitimate read.
-      if (ticketId) {
-        const ticket = await db.ticket.findUnique({
-          where: { id: ticketId },
-          select: { channelId: true, workspaceId: true },
-        });
-        if (!ticket || ticket.workspaceId !== workspaceId) {
-          return { ok: false, status: 404, body: { error: 'Attachment not found' } };
-        }
-        const channel = await db.channel.findUnique({
-          where: { id: ticket.channelId },
-          select: { visibility: true },
-        });
-        if (!channel) {
-          return { ok: false, status: 404, body: { error: 'Attachment not found' } };
-        }
-        if (channel.visibility !== ChannelVisibility.PUBLIC) {
-          const isParticipant = await this.channelParticipantRepository.isParticipant(
-            ticket.channelId,
-            userId,
-          );
-          if (!isParticipant) {
-            logger.warn(
-              `Unauthorized ${attachment.entityType} attachment access: user ${userId} -> ${attachment.id} (private channel ${ticket.channelId})`,
-            );
-            return {
-              ok: false,
-              status: 403,
-              body: { error: 'Forbidden', message: 'You do not have permission to access this attachment' },
-            };
-          }
-        }
-      }
-    }
-
-    return { ok: true };
-  }
-
-  /**
-   * Resolve the ticket that owns an IMPACT or FORM_ENTITY_VALUE attachment so its
-   * download can be gated by the ticket's channel access. Returns null when the
-   * entity is not ticket-scoped (e.g. a non-TICKET form entity), in which case the
-   * caller keeps the workspace-bounded default.
-   */
-  private async resolveTicketIdForAttachmentEntity(
-    entityType: AttachmentEntityType,
-    entityId: string,
-  ): Promise<string | null> {
-    if (entityType === AttachmentEntityType.IMPACT) {
-      const impact = await db.impact.findUnique({
-        where: { id: entityId },
-        select: { ticketId: true },
-      });
-      return impact?.ticketId ?? null;
-    }
-    // FORM_ENTITY_VALUE — only ticket-scoped values map to a channel.
-    const formValue = await db.formEntityValues.findUnique({
-      where: { id: entityId },
-      select: { entityId: true, entityType: true },
-    });
-    if (formValue && formValue.entityType === 'TICKET') {
-      return formValue.entityId;
-    }
-    return null;
+  ): Promise<AttachmentAccessResult> {
+    return assertAttachmentAccessShared(attachment, userId, workspaceId);
   }
 
   /**
@@ -380,6 +167,47 @@ export class AttachmentController {
       }
 
       const service = getAttachmentStorage(attachment);
+
+      // Opt-in browser-renderable rendition: the original HEIC stays the
+      // canonical bytes; ?format=webp serves a lossy (q85) WebP derivative
+      // (generated + cached on first request).
+      if (req.query.format === 'webp' && isHeicAttachment(attachment.mimetype, attachment.originalFilename)) {
+        try {
+          const webpBuffer = await getHeicRendition(service, filePath, 'full');
+
+          res.setHeader('Content-Length', webpBuffer.length);
+          setSafeDownloadHeaders(res, {
+            mimetype: 'image/webp',
+            filename: toWebpFilename(attachment.originalFilename),
+          });
+          setAttachmentCacheHeaders(res, attachment);
+
+          res.send(webpBuffer);
+          return;
+        } catch (error) {
+          const code = error instanceof HeicRenditionError ? error.code : 'CONVERSION_FAILED';
+          if (code === 'PENDING') {
+            void heicRenditionQueue.enqueueRenditions({ storagePath: filePath });
+            res.setHeader('Retry-After', '2');
+            res.status(503).json({ error: 'WebP rendition is being generated', code: 'PENDING' });
+            return;
+          }
+          if (code === 'NOT_HEIC' || code === 'TOO_LARGE') {
+            logger.info('[AttachmentController] HEIC rendition unavailable, serving original', {
+              attachmentId,
+              code,
+            });
+          } else {
+            logger.warn('[AttachmentController] HEIC→WebP rendition failed', {
+              attachmentId,
+              code,
+              error: error instanceof Error ? error.message : String(error),
+            });
+            res.status(502).json({ error: 'Failed to generate WebP rendition', code });
+            return;
+          }
+        }
+      }
 
       logger.info(`Streaming attachment ${attachmentId} from path: ${filePath}`);
 
@@ -433,7 +261,50 @@ export class AttachmentController {
       }
 
       // Check if thumbnail exists
+      // HEIC attachments have no upstream thumbnail (the image pipeline
+      // can't decode HEVC), so generate one lazily from the original on
+      // first request and serve the cached rendition afterwards.
       if (!attachment.thumbnailUrl) {
+        const filePath = normalizeStoragePath(attachment.url);
+
+        if (filePath && isHeicAttachment(attachment.mimetype, attachment.originalFilename)) {
+          try {
+            const service = getAttachmentStorage(attachment);
+            const thumbBuffer = await getHeicRendition(service, filePath, 'thumb');
+
+            res.setHeader('Content-Length', thumbBuffer.length);
+            setSafeDownloadHeaders(res, {
+              mimetype: 'image/webp',
+              filename: 'thumbnail.webp',
+            });
+            res.setHeader('Cache-Control', 'private, max-age=3600');
+
+            res.send(thumbBuffer);
+            return;
+          } catch (error) {
+            const code = error instanceof HeicRenditionError ? error.code : 'CONVERSION_FAILED';
+            if (code === 'PENDING') {
+              void heicRenditionQueue.enqueueRenditions({ storagePath: filePath });
+              res.setHeader('Retry-After', '2');
+              res.status(503).json({ error: 'Thumbnail is being generated', code: 'PENDING' });
+              return;
+            }
+            if (code === 'NOT_HEIC' || code === 'TOO_LARGE') {
+              logger.info('[AttachmentController] HEIC thumbnail unavailable', {
+                attachmentId,
+                code,
+              });
+            } else {
+              logger.error('[AttachmentController] HEIC thumbnail generation failed', {
+                attachmentId,
+                error: error instanceof Error ? error.message : String(error),
+              });
+              res.status(500).json({ error: 'Failed to generate thumbnail' });
+              return;
+            }
+          }
+        }
+
         res.status(404).json({ error: 'Thumbnail not available for this attachment' });
         return;
       }
