@@ -45,6 +45,9 @@ export const EntitySelector: React.FC<EntitySelectorProps> = ({
   showUnassignOption = false,
   unassignLabel = 'Unassign',
   headerAction,
+  trigger,
+  onCloseAutoFocus,
+  align = 'start',
   virtualize = false,
   // Only virtualize (opt-in) once the list is large enough to matter.
   virtualizeThreshold = 30,
@@ -401,15 +404,18 @@ export const EntitySelector: React.FC<EntitySelectorProps> = ({
     <Popover.Root open={open} onOpenChange={handleOpenChange}>
       {/* ========== TRIGGER BUTTON ========== */}
       <Popover.Trigger asChild>
-        {variant === 'default' ? renderDefaultButtonTrigger() : renderInLineInputTrigger()}
+        {trigger ?? (variant === 'default' ? renderDefaultButtonTrigger() : renderInLineInputTrigger())}
       </Popover.Trigger>
 
       {/* ========== POPOVER CONTENT ========== */}
       <Popover.Portal>
         <Popover.Content
           side='bottom'
-          align='start'
+          align={align}
           sideOffset={4}
+          // Keep a gutter when collision detection clamps the dropdown to a
+          // viewport edge, instead of leaving it flush against it.
+          collisionPadding={8}
           className='z-[100] w-auto max-w-96 max-h-96 overflow-y-auto overflow-x-hidden rounded-lg border border-border bg-background shadow-lg'
           style={{
             maxHeight: 360,
@@ -434,6 +440,7 @@ export const EntitySelector: React.FC<EntitySelectorProps> = ({
           }}
           onWheel={e => e.stopPropagation()}
           onTouchMove={e => e.stopPropagation()}
+          {...(onCloseAutoFocus ? { onCloseAutoFocus } : {})}
           onOpenAutoFocus={e => {
             e.preventDefault();
             inputRef.current?.focus();
