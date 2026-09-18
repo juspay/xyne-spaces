@@ -71,7 +71,7 @@ import {
 } from '../../components/Tickets/CreateTicketModal/createTicket.utils';
 import { StageFormModal } from '../../components/Tickets/StageFormModal/StageFormModal';
 import { useMachine } from '@xstate/react';
-import { ticketFiltersMachine } from '../../machines/ticketFiltersMachine';
+import { getStorageKey, ticketFiltersMachine } from '../../machines/ticketFiltersMachine';
 import { setBoardNavParams } from '../../components/Tickets/boardNavStore';
 import type { KanbanTicketsPageBaseArgs } from './useKanbanTicketsPage';
 import type { FormFieldGroup, GroupByType, Stage } from './KanbanBoardScreen.types';
@@ -352,6 +352,14 @@ type KanbanLocalTicket = Ticket & {
 // 'flow' is the dedicated mode for FLOW boards (plan-driven run graph); it is
 // never offered in the layout toggle and only reachable on flow boards.
 type LayoutView = 'kanban' | 'table' | 'calendar' | 'flow';
+
+type StorableLayoutView = Exclude<LayoutView, 'flow'>;
+
+const isLayoutView = (value: string | null): value is LayoutView =>
+  value === 'kanban' || value === 'table' || value === 'calendar' || value === 'flow';
+
+const isStorableLayoutView = (value: string | null): value is StorableLayoutView =>
+  value === 'kanban' || value === 'table' || value === 'calendar';
 type TicketGraphMapping = QueryResultType<typeof queries.subTicketMappingsForTickets>[number];
 type TicketGraphSubTicket = NonNullable<TicketGraphMapping['subTicket']>;
 type FlowRunActivity = QueryResultType<typeof queries.ticketActivitiesForTickets>[number];
@@ -678,12 +686,19 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   }, [searchParams]);
   const [state, send] = useMachine(ticketFiltersMachine);
   const requestedLayoutView = searchParams.get('layout');
-  const layoutView: LayoutView =
-    requestedLayoutView === 'kanban' ||
-    requestedLayoutView === 'calendar' ||
-    requestedLayoutView === 'flow'
-      ? requestedLayoutView
-      : 'table';
+  const layoutStorageKey = `kanban-layout-${getStorageKey(channelId, viewMode, projectIdParam, boardId, viewId)}`;
+  const storedLayoutView = useMemo((): StorableLayoutView | null => {
+    try {
+      const raw = localStorage.getItem(layoutStorageKey);
+      return isStorableLayoutView(raw) ? raw : null;
+    } catch {
+      return null;
+    }
+  }, [layoutStorageKey]);
+  const defaultLayoutView: StorableLayoutView = storedLayoutView ?? 'kanban';
+  const layoutView: LayoutView = isLayoutView(requestedLayoutView)
+    ? requestedLayoutView
+    : defaultLayoutView;
   const isKanbanLayout = layoutView === 'kanban';
   const showTicketReport = searchParams.get('ticketReport') === '1';
   // Flow view: the open run lives in the URL so browser back returns to the
@@ -1338,7 +1353,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
       setSearchParams(
         prev => {
           const next = new URLSearchParams(prev);
-          next.set('layout', 'table');
+          next.set('layout', defaultLayoutView);
           next.delete('run');
           return next;
         },
@@ -1351,6 +1366,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     selectedBoardDetail,
     filteredSingleBoardId,
     layoutView,
+    defaultLayoutView,
     setSearchParams,
   ]);
   const handleFlowStatusChange = useCallback(
@@ -4043,13 +4059,20 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     : null;
   const handleLayoutChange = useCallback(
     (layout: LayoutView): void => {
+      if (isStorableLayoutView(layout)) {
+        try {
+          localStorage.setItem(layoutStorageKey, layout);
+        } catch {
+          // Ignore storage errors (quota exceeded, etc.)
+        }
+      }
       setSearchParams(prev => {
         const p = new URLSearchParams(prev);
         p.set('layout', layout);
         return p;
       });
     },
-    [setSearchParams],
+    [setSearchParams, layoutStorageKey],
   );
   const handleHeaderCreateTicket = useCallback((): void => {
     setCreateTicketSeed(null);
