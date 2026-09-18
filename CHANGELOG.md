@@ -1,3 +1,10 @@
+## [1.345.1](https://github.com/juspay/xyne-spaces/compare/v1.345.0...v1.345.1) (2026-09-18)
+
+
+### Bug Fixes
+
+* fixed and unified assignee picker ([#2061](https://github.com/juspay/xyne-spaces/issues/2061)) ([5c6f7e4](https://github.com/juspay/xyne-spaces/commit/5c6f7e4ad40cc6534ed9faa84de6b71a8ea173bb))
+
 ## [1.345.0](https://github.com/juspay/xyne-spaces/compare/v1.344.0...v1.345.0) (2026-09-18)
 
 
