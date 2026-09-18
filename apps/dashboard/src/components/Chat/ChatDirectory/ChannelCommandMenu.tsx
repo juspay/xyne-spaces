@@ -650,13 +650,9 @@ const ChannelCommandMenu = ({
   // Mention search state - declared before useSearchMetrics so it can be passed to the hook
   const [mentionSearchQuery, setMentionSearchQuery] = useState('');
   const [mentionSearchType, setMentionSearchType] = useState<ChipType | null>(null);
-  // True only during the ~100ms settle window between a chip commit (insertMentionRef fires)
-  // and the setTimeout in handleMentionSelect clearing mentionSearchType. popupFilterHint
-  // reads this to suppress the ghost suffix for exactly that window (see its use below).
-  // This must be a transient ref, not a derived check like `selectedMentions.length > 0`:
-  // a fresh second typeahead and a stale render echoing the first commit carry identical
-  // state (same type, empty query, resting label), so render-time state alone can't tell
-  // them apart — only "did a commit just happen" can, and that's history, not state.
+  // True only during the ~100ms settle window after a chip commit, until mentionSearchType
+  // clears. Must be a transient ref, not a derived check: a fresh typeahead and a stale
+  // echo of the last commit carry identical render state, so only history tells them apart.
   const justCommittedMentionRef = useRef(false);
   // Which `mentions:` sections have been expanded past their first five rows.
   const [expandedMentionGroups, setExpandedMentionGroups] = useState<
@@ -1417,8 +1413,7 @@ const ChannelCommandMenu = ({
       }
 
       if (insertMentionRef.current) {
-        // Open the settle window (see justCommittedMentionRef's declaration): the suffix
-        // stays hidden for exactly this commit, not for filters picked afterward.
+        // Open the settle window (see declaration) — hides the suffix for this commit only.
         justCommittedMentionRef.current = true;
         insertMentionRef.current({
           id: mention.id,
@@ -2018,11 +2013,8 @@ const ChannelCommandMenu = ({
   // "pick a value" context, so the first candidate previews at rest); the row's gray→blue tier
   // still signals navigation. Empty when there's no matching candidate.
   const popupFilterHint = useMemo(() => {
-    // While a committed chip is settling, mentionSearchType is still set for a few frames,
-    // so the suffix would keep rendering at the *pre-commit* caret position — stacked on top
-    // of the just-inserted pill. Suppress it for that window only; see
-    // justCommittedMentionRef's declaration for why render-time state alone can't
-    // distinguish "just committed" from "genuinely fresh typeahead".
+    // While a commit settles, mentionSearchType is still set for a few frames — hide the
+    // suffix so it doesn't stack on the just-inserted pill at the pre-commit caret position.
     if (justCommittedMentionRef.current) return '';
     if (!mentionSearchType || !mentionActiveLabel) return '';
     const query = mentionSearchQuery.trim();
@@ -2049,10 +2041,8 @@ const ChannelCommandMenu = ({
     userTrigger,
     channelTrigger,
     mentionActiveLabel,
-    // Not read by the memo body — included so the memo recomputes the moment a chip lands:
-    // selectedMentions updates synchronously with the commit, while a ref change never
-    // triggers a re-render. Without this dep, the memo could keep serving the pre-commit
-    // suffix until some other dep happened to change.
+    // Not read by the memo body — forces a recompute when a chip lands; a ref change alone
+    // never re-renders, so without this the memo could serve the stale pre-commit suffix.
     selectedMentions.length,
   ]);
 
@@ -2633,9 +2623,8 @@ const ChannelCommandMenu = ({
       searchText.trim().length > 0 || selectedMentions.length > 0 || commandActive;
     // While a mention typeahead is open, selection is owned by selectedMentionIndex — don't
     // also auto-select a cmdk row, or two rows light up.
-    // The show-results row renders as soon as there's searchText, even before results
-    // stream in (see showResultsForRow), so a typed query is reason enough to fire;
-    // without it, a query with zero hits would leave nothing selected.
+    // The show-results row renders as soon as there's searchText (see showResultsForRow),
+    // so a typed query is reason enough to fire even with zero hits.
     if (
       !hasActiveSearch ||
       (!hasResults && !commandActive && !searchText.trim()) ||
@@ -2653,11 +2642,8 @@ const ChannelCommandMenu = ({
           item => item.getAttribute('data-show-results-item') === 'true',
         );
 
-        // Rest on the first real result when one exists. The global overlay only runs in
-        // 'popup' mode now (see useSearchMode), so the inline palette's old preference for
-        // "Show detailed results" no longer applies here. Fall back to the show-results
-        // row when no real row is selectable (zero hits, still streaming, or it's the
-        // only row).
+        // Rest on the first real result; fall back to the show-results row when no real
+        // row is selectable (zero hits, still streaming, or it's the only row).
         const firstReal = rows.findIndex(
           item => item.getAttribute('data-show-results-item') !== 'true',
         );
