@@ -17,6 +17,7 @@
 import { Router, type Request, type Response } from "express";
 import { Prisma } from "@prisma/client";
 import { asyncHandler, ok, badRequest, unauthorized, forbidden, notFound, HttpError } from "../lib/http.js";
+import { validateCredentialBaseUrl } from "../lib/mcp-base-url.js";
 import { prisma } from "../db.js";
 import { encrypt } from "../crypto.js";
 import { CONFIG } from "../config.js";
@@ -495,6 +496,9 @@ router.post("/:name/mcp/connections", asyncHandler(async (req: Request, res: Res
   }
   const server = await prisma.mcpServer.findUnique({ where: { type: mcpServerType } });
   if (!server) throw notFound(`Unknown mcpServerType: ${mcpServerType}`);
+
+  const baseUrlError = validateCredentialBaseUrl(credentials);
+  if (baseUrlError) throw badRequest(baseUrlError);
 
   const { ciphertext, iv, authTag } = encrypt(JSON.stringify(credentials), CONFIG.encryptionKey);
   const cleanDisplayName = typeof displayName === "string" && displayName.trim().length > 0

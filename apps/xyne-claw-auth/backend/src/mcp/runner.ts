@@ -1,4 +1,5 @@
 import path from "node:path";
+import { createHash } from "node:crypto";
 import { errMsg } from "../lib/errors.js";
 import { existsSync } from "node:fs";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -161,7 +162,33 @@ function sessionKey(
   if (PER_AGENT_SERVER_TYPES.has(serverType) && agentSlug) {
     return `${userId}:${serverType}:${agentSlug}`;
   }
+  // Endpoint-scoped connectors: the effective creds carry the target endpoint
+  // (`baseUrl`) instead of it being fixed on the mcp_servers row, so the SAME
+  // (user, serverType) pair can legitimately resolve to different stacks
+  // depending on which agent pinned which AgentMcpConnection. Keying only by
+  // user would hand agent B the cached HTTP client that agent A warmed against
+  // a different stack — wrong data, and A's key travelling to B's endpoint.
+  // Fingerprint the endpoint identity (never log/return the raw secret).
+  const endpointId = endpointFingerprint(credentials);
+  if (endpointId) {
+    return `${userId}:${serverType}:endpoint:${endpointId}`;
+  }
   return `${userId}:${serverType}`;
+}
+
+/**
+ * Short, non-reversible fingerprint of the credential-supplied endpoint
+ * identity. Returns null for connectors that don't carry a `baseUrl`, so every
+ * existing connector keeps its legacy key and its cache-hit behaviour.
+ */
+function endpointFingerprint(credentials?: Record<string, unknown>): string | null {
+  const baseUrl = credentials?.["baseUrl"];
+  if (typeof baseUrl !== "string" || baseUrl.trim().length === 0) return null;
+  const secret = credentials?.["apiKey"] ?? credentials?.["token"] ?? "";
+  return createHash("sha256")
+    .update(`${baseUrl.trim()}\u0000${typeof secret === "string" ? secret : ""}`)
+    .digest("hex")
+    .slice(0, 12);
 }
 
 /** Close + drop sessions idle longer than the TTL. Best-effort; never throws. */
@@ -606,13 +633,22 @@ export async function evictSession(userId: string, serverType: string, agentSlug
     if (keys.length === 0) log.info(`[mcp/runner] evictSession no-op for ${key} (not cached)`);
     return;
   }
-  const session = sessions.get(key);
-  if (session) {
-    log.info(`[mcp/runner] evicting cached session for ${key}`);
-    sessions.delete(key);
-    await session.transport.close().catch(() => {});
-  } else {
+  // Endpoint-scoped sessions hang off `${key}:endpoint:<fp>` and the caller
+  // (creds rotated / connection removed) has no fingerprint to pass, so evict
+  // the exact key AND every endpoint variant for this (user, serverType).
+  const keys = [...sessions.keys()].filter(
+    (candidate) => candidate === key || candidate.startsWith(`${key}:endpoint:`),
+  );
+  if (keys.length === 0) {
     log.info(`[mcp/runner] evictSession no-op for ${key} (not cached)`);
+    return;
+  }
+  for (const candidate of keys) {
+    const scopedSession = sessions.get(candidate);
+    if (!scopedSession) continue;
+    log.info(`[mcp/runner] evicting cached session for ${candidate}`);
+    sessions.delete(candidate);
+    await scopedSession.transport.close().catch(() => {});
   }
 }
 
