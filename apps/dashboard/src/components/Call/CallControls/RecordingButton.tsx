@@ -4,6 +4,11 @@ import { RecordingType } from '@xyne/shared';
 import { cn } from '../../../utils/classNames';
 import { ControlButton, type ControlSizing } from './ControlButton';
 
+/** Text label for the full-view button; the red fill shows it's live. */
+function RecLabel(): React.ReactElement {
+  return <span className='text-[11px] font-extrabold leading-none tracking-tight'>REC</span>;
+}
+
 export interface RecordingButtonProps {
   isRecording: boolean;
   /** Only the participant who started the recording may stop it. */
@@ -60,17 +65,18 @@ export function RecordingButton({
     <div className='relative' ref={pickerRef}>
       <ControlButton
         sizing={sizing}
-        icon={isRecording ? CircleStop : CircleDot}
+        // Full view shows "REC" in the round button; the mini window keeps the icon.
+        icon={sizing.isFullView ? RecLabel : isRecording ? CircleStop : CircleDot}
         label={
           isRecording
             ? stopDisabled
               ? 'Recording in progress — only the person who started it can stop it'
               : 'Stop recording'
-            : 'Start AI recording'
+            : 'Start recording'
         }
         tone={isRecording ? 'off' : showPicker ? 'active' : 'neutral'}
         className={cn(
-          isRecording && 'animate-pulse [animation-duration:3s]',
+          !sizing.isFullView && isRecording && 'animate-pulse [animation-duration:3s]',
           stopDisabled && 'cursor-default opacity-90 hover:bg-[#dc362e]',
         )}
         onClick={handleButtonClick}
@@ -96,7 +102,7 @@ export function RecordingButton({
           )}
         >
           <div className='px-4 pt-2.5 pb-1.5 text-[10px] font-semibold uppercase tracking-widest text-[#9aa0a6]'>
-            Start AI recording
+            Start recording
           </div>
           <button
             onClick={() => handlePick(RecordingType.AUDIO_ONLY)}

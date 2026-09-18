@@ -20,7 +20,7 @@ import {
   SmilePlus,
   ImagePlus,
   Hand,
-  NotebookPen,
+  NotepadText,
 } from 'lucide-react';
 import { useMediaDeviceSelect } from '@livekit/components-react';
 import { cn } from '../../../utils/classNames';
@@ -746,7 +746,7 @@ export function CallControls({
   const notesControl = onToggleNotes && (
     <ControlButton
       sizing={sizing}
-      icon={NotebookPen}
+      icon={NotepadText}
       label='Notes'
       tone={isNotesOpen ? 'active' : 'neutral'}
       aria-pressed={isNotesOpen}
@@ -984,7 +984,7 @@ export function CallControls({
             data-track-name='TOGGLE_CALL_NOTES'
             data-track-metadata={JSON.stringify({ callId, isOpen: isNotesOpen })}
           >
-            {menuIcon(NotebookPen, isNotesOpen)}
+            {menuIcon(NotepadText, isNotesOpen)}
             <span>Notes</span>
           </DropdownMenuItem>
         )}
