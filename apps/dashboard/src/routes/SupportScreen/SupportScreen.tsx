@@ -179,7 +179,7 @@ import {
   type BulkTicketUpdates,
 } from '../../components/Tickets/TicketTable/useBulkTicketActions';
 import { UserSelector } from '../../components/Tickets/CreateTicketModal/UserSelector';
-import { useTicketAssignee, resolveAssigneeId } from '../../hooks/useTicketAssignee';
+import { useTicketAssignee, resolveAssigneeRef } from '../../hooks/useTicketAssignee';
 import { StagePicker } from '../../components/Tickets/TicketListView/StagePicker';
 import { PriorityPicker } from '../../components/Tickets/TicketListView/PriorityPicker';
 import { EmailComposer } from '../../components/xyne-desk/EmailComposer/EmailComposer';
@@ -4534,13 +4534,15 @@ const TicketMetaRow = ({
         priority?: string | null;
         stageName?: string | null;
         assignedTo?: string | null;
+        userGroupId?: string | null;
         aiCategory?: string | null;
         channelId?: string | null;
       }
     | undefined
     | null;
 }): ReactElement | null => {
-  const onAssign = useTicketAssignee(ticket?.id ?? '');
+  const assignee = resolveAssigneeRef(ticket?.assignedTo, ticket?.userGroupId);
+  const onAssign = useTicketAssignee(ticket?.id ?? '', assignee);
   if (!ticket) return null;
   return (
     <div className='flex items-center flex-wrap gap-y-1 min-h-[24px]'>
@@ -4555,7 +4557,8 @@ const TicketMetaRow = ({
           Assignee
         </span>
         <UserSelector
-          selectedUserId={resolveAssigneeId(ticket.assignedTo)}
+          selectedUserId={assignee.userId}
+          assignedGroupId={assignee.groupId}
           onUserSelect={onAssign}
           channelId={ticket.channelId ?? undefined}
           variant='compact'

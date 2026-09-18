@@ -6,6 +6,7 @@ import type { SelectorOption } from '../../ui/EntitySelector/EntitySelector.type
 import { useActiveUsers, useSelf, useUser } from '../../../hooks/useUsers';
 import { getUserDisplayName, matchesUserQuery, withYouLabel } from '../../../utils/userDisplayName';
 import { useChannelAssignGate } from '../../../hooks/useChannelAssignGate';
+import { useUserGroupById } from '../../../hooks/useUserGroup';
 import { channelMembersFirst, currentUserFirst } from '../../../utils/channelMembersFirst';
 
 interface UserSelectorProps {
@@ -16,6 +17,11 @@ interface UserSelectorProps {
   variant?: 'button' | 'compact';
   /** Compact-only: render avatar + name pill instead of the icon-only trigger */
   showLabel?: boolean;
+  /**
+   * Compact-only: group assignee to show when no user is assigned. The list
+   * still picks users; the caller decides what assigning one does to the group.
+   */
+  assignedGroupId?: string | null;
   noBorder?: boolean;
   placeholder?: string;
 }
@@ -33,6 +39,7 @@ export function UserSelector({
   channelId,
   variant = 'button',
   showLabel = false,
+  assignedGroupId,
   noBorder,
   placeholder = 'Assign User',
 }: UserSelectorProps): ReactElement {
@@ -42,6 +49,7 @@ export function UserSelector({
   const activeUsers = useActiveUsers();
   const selfId = useSelf()?.id;
   const selectedUser = useUser(selectedUserId || '');
+  const assignedGroup = useUserGroupById(assignedGroupId || '');
 
   /**
    * Every option allocates a <UserAvatar/> element, and a ticket list mounts one
@@ -100,18 +108,27 @@ export function UserSelector({
 
   // `selectedUserId` may point at a user who is not active (or not loaded yet);
   // useUser covers the full user map, so it resolves more than activeUsers does.
+  // A user assignee wins over a group, matching resolveAssigneeRef.
   const assigneeName = selectedUserId
     ? selectedUser
       ? getUserDisplayName(selectedUser)
       : '…'
-    : 'Unassigned';
-  const assigneeTooltip = selectedUser
-    ? `Assignee: ${getUserDisplayName(selectedUser)}`
-    : 'Unassigned';
+    : assignedGroupId
+      ? assignedGroup
+        ? assignedGroup.name
+        : '…'
+      : 'Unassigned';
+  const hasAssignee = !!selectedUserId || !!assignedGroupId;
+  const assigneeTooltip = hasAssignee ? `Assignee: ${assigneeName}` : 'Unassigned';
 
   const renderCompactTrigger = (): ReactElement => {
     const avatar = selectedUserId ? (
       <UserAvatar userId={selectedUserId} size={AvatarSize.SM} shape={AvatarShape.CIRCULAR} />
+    ) : assignedGroup ? (
+      // Group badge styled to match TicketHoverCard's assignee rendering.
+      <span className='flex size-5 items-center justify-center rounded-full bg-border text-[9px] font-medium text-muted-foreground'>
+        {assignedGroup.name.charAt(0).toUpperCase()}
+      </span>
     ) : (
       <span className='inline-flex items-center justify-center w-5 h-5 rounded-sm border border-dashed border-border text-muted-foreground hover:text-foreground hover:border-foreground'>
         <UserPlus className='w-3 h-3' />
@@ -122,7 +139,7 @@ export function UserSelector({
     return (
       <button
         type='button'
-        aria-label={selectedUserId ? 'Change assignee' : 'Assign ticket'}
+        aria-label={hasAssignee ? 'Change assignee' : 'Assign ticket'}
         data-track-category='Tickets'
         data-track-name='ToggleRowAssignee'
         onClick={stopRowInteraction}
@@ -161,7 +178,7 @@ export function UserSelector({
       onSearchChange={setSearchValue}
       disableClientFiltering={true}
       noBorder={noBorder || false}
-      showUnassignOption={true}
+      showUnassignOption={hasAssignee}
       // There is an explicit "Unassign" row; re-clicking the current assignee
       // must not silently clear the assignment.
       allowDeselect={false}

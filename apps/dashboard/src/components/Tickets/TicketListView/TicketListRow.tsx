@@ -9,7 +9,7 @@ import { Checkbox } from '../../ui/Checkbox/Checkbox';
 import { useAuthContextValues } from '../../../hooks/useAuth';
 import type { TicketListItem } from './TicketListView.types';
 import { UserSelector } from '../CreateTicketModal/UserSelector';
-import { useTicketAssignee, resolveAssigneeId } from '../../../hooks/useTicketAssignee';
+import { useTicketAssignee, resolveAssigneeRef } from '../../../hooks/useTicketAssignee';
 import { PriorityPicker } from './PriorityPicker';
 import { AutoDraftStatus } from '@xyne/shared';
 import { getTicketListColumnAlignClass } from './ticketListColumns';
@@ -100,7 +100,8 @@ export const TicketListRow = ({
 }: TicketListRowProps): ReactElement => {
   const ticketIdValue = ticket.xyneId || ticket.id || '';
   const isHumanInterventionTicket = ticket.stageName?.toLowerCase().includes('human') ?? false;
-  const onAssign = useTicketAssignee(ticket.id);
+  const assignee = resolveAssigneeRef(ticket.assignedTo, ticket.userGroupId);
+  const onAssign = useTicketAssignee(ticket.id, assignee);
 
   const metadata = ticket.metadata as { fromEmailAddress?: string | null } | null | undefined;
   const fromEmailAddress = metadata?.fromEmailAddress;
@@ -341,7 +342,8 @@ export const TicketListRow = ({
       </div>
       <div className={cn('flex min-w-0 items-center', getTicketListColumnAlignClass('assignee'))}>
         <UserSelector
-          selectedUserId={resolveAssigneeId(ticket.assignedTo)}
+          selectedUserId={assignee.userId}
+          assignedGroupId={assignee.groupId}
           onUserSelect={onAssign}
           channelId={ticket.channelId ?? undefined}
           variant='compact'

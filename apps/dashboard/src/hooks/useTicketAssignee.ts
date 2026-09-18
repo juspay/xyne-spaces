@@ -5,27 +5,60 @@ import { mutators } from '../zero/mutators';
 import { surfaceMutationError } from '../utils/zeroMutationToast';
 import { trackTicketOutcome } from '../services/Analytics/ticketTracking';
 
+export interface AssigneeRef {
+  /** Bare user id, or null when unassigned or assigned to a group. */
+  userId: string | null;
+  /** Bare group id, or null when a user assignee takes precedence. */
+  groupId: string | null;
+}
+
 /**
- * `assignedTo` is stored either bare or prefixed (`user:<id>` / `group:<id>`).
- * Returns the user id for user assignments and null for group assignments —
- * a user picker cannot represent a group, and feeding it a group id makes the
- * trigger render a never-resolving placeholder instead of an honest "unassigned".
+ * A ticket's assignee lives in two columns: a user in `assignedTo` (bare id),
+ * a group in `userGroupId` — except legacy rows, which still hold `group:<id>`
+ * in `assignedTo`. A user assignee wins over a group.
+ *
+ * Mirrors TicketCard / TicketHoverCard so every surface agrees on what a ticket
+ * is assigned to.
  */
-export const resolveAssigneeId = (assignedTo: string | null | undefined): string | null => {
-  if (!assignedTo || assignedTo.startsWith('group:')) return null;
-  return assignedTo.replace(/^user:/, '') || null;
+export const resolveAssigneeRef = (
+  assignedTo: string | null | undefined,
+  userGroupId?: string | null,
+): AssigneeRef => {
+  const userId =
+    assignedTo && !assignedTo.startsWith('group:')
+      ? assignedTo.replace(/^user:/, '') || null
+      : null;
+  if (userId) return { userId, groupId: null };
+  const groupId = assignedTo?.startsWith('group:')
+    ? assignedTo.slice('group:'.length) || null
+    : userGroupId || null;
+  return { userId: null, groupId };
 };
 
-export function useTicketAssignee(ticketId: string): (userId: string | null) => void {
+/**
+ * Inline assignee mutation for ticket rows. Pass the ticket's resolved assignee
+ * so unassigning clears whichever column is actually being displayed.
+ */
+export function useTicketAssignee(
+  ticketId: string,
+  assignee?: AssigneeRef,
+): (userId: string | null) => void {
   const zero = useZero();
   const selfId = useSelf()?.id;
+  const displaysUser = !!assignee?.userId;
 
   return useCallback(
     (userId: string | null): void => {
+      // Assigning a user leaves any group in place — autoassignment boards keep
+      // team + agent together. Unassigning clears whichever one is displayed;
+      // '' clears userGroupId, since the mutator ignores null for it.
+      const updates = userId
+        ? { assignedTo: userId }
+        : displaysUser
+          ? { assignedTo: null }
+          : { assignedTo: null, userGroupId: '' };
       void surfaceMutationError(
-        zero.mutate(
-          mutators.ticket.update({ id: ticketId, assignedTo: userId, updatedAt: Date.now() }),
-        ),
+        zero.mutate(mutators.ticket.update({ id: ticketId, ...updates, updatedAt: Date.now() })),
         'Failed to update assignee',
       ).then(ok => {
         if (ok) {
@@ -41,6 +74,6 @@ export function useTicketAssignee(ticketId: string): (userId: string | null) => 
         }
       });
     },
-    [zero, ticketId, selfId],
+    [zero, ticketId, selfId, displaysUser],
   );
 }

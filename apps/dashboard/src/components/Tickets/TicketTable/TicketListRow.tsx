@@ -6,7 +6,7 @@ import { HoverCard } from '../../ui/HoverCard/HoverCard';
 import { TicketHoverCard } from './TicketHoverCard';
 import { PriorityPicker } from '../TicketListView/PriorityPicker';
 import { UserSelector } from '../CreateTicketModal/UserSelector';
-import { useTicketAssignee, resolveAssigneeId } from '../../../hooks/useTicketAssignee';
+import { useTicketAssignee, resolveAssigneeRef } from '../../../hooks/useTicketAssignee';
 import { StatusPicker, DueDatePicker, LabelPicker } from './TicketListRowPickers';
 
 export type SubTicketProgress = { done: number; total: number };
@@ -59,7 +59,8 @@ export const TicketListRow: React.FC<TicketListRowProps> = ({
   onOpen,
 }) => {
   const createdShort = shortDate(ticket.createdAt);
-  const onAssign = useTicketAssignee(ticket.id);
+  const assignee = resolveAssigneeRef(ticket.assignedTo, ticket.userGroupId);
+  const onAssign = useTicketAssignee(ticket.id, assignee);
   const ageDays = (() => {
     if (!visibleColumns.has('age') || !ticket.createdAt) return null;
     const created = new Date(ticket.createdAt);
@@ -203,7 +204,8 @@ export const TicketListRow: React.FC<TicketListRowProps> = ({
 
         {visibleColumns.has('assignee') && (
           <UserSelector
-            selectedUserId={resolveAssigneeId(ticket.assignedTo)}
+            selectedUserId={assignee.userId}
+            assignedGroupId={assignee.groupId}
             onUserSelect={onAssign}
             channelId={ticket.channelId}
             variant='compact'

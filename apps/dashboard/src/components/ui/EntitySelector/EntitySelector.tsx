@@ -537,9 +537,7 @@ export const EntitySelector: React.FC<EntitySelectorProps> = ({
               onTouchMove={e => e.stopPropagation()}
             >
               {/* Unassign — pinned above the list, never virtualized */}
-              {showUnassignOption && selectedValue && (
-                <div className='p-1 pb-0'>{renderUnassignRow()}</div>
-              )}
+              {showUnassignOption && <div className='p-1 pb-0'>{renderUnassignRow()}</div>}
               <Virtuoso
                 ref={virtuosoRef}
                 data={filteredOptions}
@@ -550,10 +548,7 @@ export const EntitySelector: React.FC<EntitySelectorProps> = ({
                 // No padding on the scroller (it adds a spurious horizontal bar);
                 // `- 48` leaves room for the pinned unassign row.
                 style={{
-                  height:
-                    showUnassignOption && selectedValue
-                      ? virtualizedHeight - 48
-                      : virtualizedHeight,
+                  height: showUnassignOption ? virtualizedHeight - 48 : virtualizedHeight,
                   width: '100%',
                   overflowX: 'hidden',
                 }}
@@ -585,7 +580,7 @@ export const EntitySelector: React.FC<EntitySelectorProps> = ({
                   data-testid={testId ? `${testId}-options` : undefined}
                   className='p-1 space-y-1'
                 >
-                  {showUnassignOption && selectedValue && <li>{renderUnassignRow()}</li>}
+                  {showUnassignOption && <li>{renderUnassignRow()}</li>}
                   {filteredOptions.map((option, index) => (
                     <li
                       role='option'

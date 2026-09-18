@@ -161,6 +161,11 @@ export interface EntitySelectorProps {
   testId?: string;
 
   /** Show an "Unassign" option at the top of the dropdown when a value is selected */
+  /**
+   * Render a row that clears the selection. The caller decides when it is
+   * offered — it is not gated on `selectedValue`, since a caller may hold a
+   * selection that `selectedValue` cannot represent (e.g. a group assignee).
+   */
   showUnassignOption?: boolean;
 
   /** Label for the unassign option. Default: 'Unassign' */
