@@ -1,6 +1,6 @@
 {
   "name": "xyne-spaces-dashboard",
-  "version": "1.337.0-release-20260918.1",
+  "version": "1.337.0-release-20260918.5",
   "type": "module",
   "description": "Xyne Spaces - Workflow Automation Dashboard",
   "scripts": {
@@ -162,6 +162,7 @@
     "framer-motion": "^12.23.24",
     "fuse.js": "^7.1.0",
     "hast-util-to-html": "^9.0.5",
+    "heic2any": "^0.0.4",
     "highlight.js": "11.11.1",
     "html2canvas": "^1.4.1",
     "js-cookie": "^3.0.8",

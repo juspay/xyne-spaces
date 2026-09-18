@@ -1,3 +1,31 @@
+## [1.337.0-release-20260918.5](https://github.com/juspay/xyne-spaces/compare/v1.337.0-release-20260918.4...v1.337.0-release-20260918.5) (2026-09-18)
+
+
+### Bug Fixes
+
+* Implement API fallback + query for desk loading perf ([#2046](https://github.com/juspay/xyne-spaces/issues/2046)) ([8125a5f](https://github.com/juspay/xyne-spaces/commit/8125a5f62e47d446ec8c1447192312894a50ee32))
+
+## [1.337.0-release-20260918.4](https://github.com/juspay/xyne-spaces/compare/v1.337.0-release-20260918.3...v1.337.0-release-20260918.4) (2026-09-18)
+
+
+### Bug Fixes
+
+* API assessment remediations (BOLA + upload validation) [hotfix release-20260918] ([#2035](https://github.com/juspay/xyne-spaces/issues/2035)) ([785b440](https://github.com/juspay/xyne-spaces/commit/785b440a9f2ecd964f8220e554bc30374a467cc0)), closes [#2029](https://github.com/juspay/xyne-spaces/issues/2029)
+
+## [1.337.0-release-20260918.3](https://github.com/juspay/xyne-spaces/compare/v1.337.0-release-20260918.2...v1.337.0-release-20260918.3) (2026-09-18)
+
+
+### Bug Fixes
+
+* make ticket CSV/JSON export return rows again in table layout ([#2044](https://github.com/juspay/xyne-spaces/issues/2044)) ([5d0a791](https://github.com/juspay/xyne-spaces/commit/5d0a791204b153eb9fdbf5b1aaec1a68325c7694))
+
+## [1.337.0-release-20260918.2](https://github.com/juspay/xyne-spaces/compare/v1.337.0-release-20260918.1...v1.337.0-release-20260918.2) (2026-09-18)
+
+
+### Features
+
+* heic attachment support for spaces ([#2039](https://github.com/juspay/xyne-spaces/issues/2039)) ([cbcaa9e](https://github.com/juspay/xyne-spaces/commit/cbcaa9e292b1f7fcf33343b916ff57491b389c4c))
+
 ## [1.337.0-release-20260918.1](https://github.com/juspay/xyne-spaces/compare/v1.336.1...v1.337.0-release-20260918.1) (2026-09-18)
 
 

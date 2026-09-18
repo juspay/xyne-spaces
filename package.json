@@ -1,7 +1,7 @@
 {
   "name": "xyne-spaces",
   "license": "Apache-2.0",
-  "version": "1.337.0-release-20260918.1",
+  "version": "1.337.0-release-20260918.5",
   "description": "Xyne Spaces - Monorepo with Backend and Dashboard",
   "scripts": {
     "prepare": "husky",
@@ -306,7 +306,7 @@
       "protobufjs@8": "8.7.1",
       "qs": "6.15.2",
       "react-router": "7.18.2",
-      "sharp": "0.35.0",
+      "sharp": "0.35.4",
       "shell-quote": "1.10.0",
       "simple-git": "3.36.0",
       "socket.io-parser": "4.2.7",

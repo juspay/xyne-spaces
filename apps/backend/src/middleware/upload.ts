@@ -8,7 +8,7 @@ import { config } from '@/config/env';
 import { db } from '../database/client';
 import { AttachmentUploadStatus } from '@xyne/shared';
 
-const MAX_FILE_SIZE_BYTES = 1024 * 1024 * 1024; // 1GB max file size
+export const MAX_FILE_SIZE_BYTES = 1024 * 1024 * 1024; // 1GB max file size
 const MAX_FILE_FIELDS = 20; // Supports files + thumbnails in one multipart request
 
 /**
@@ -162,6 +162,30 @@ function extensionOf(name: string): string {
   const lower = name.toLowerCase().trim();
   const dot = lower.lastIndexOf('.');
   return dot === -1 || dot === lower.length - 1 ? '' : lower.slice(dot + 1);
+}
+
+/**
+ * Screen an in-memory upload the same way the streaming storage path screens a
+ * stream: reject a non-allow-listed extension / dangerous declared type, and reject
+ * executable (PE / ELF / Mach-O) or EICAR content regardless of the name. For callers
+ * that hold the whole file in memory (e.g. the Slack-compat upload API) rather than
+ * going through the streaming storage engine.
+ */
+export async function screenUploadBuffer(
+  buffer: Buffer,
+  originalName: string,
+  mimetype?: string,
+): Promise<{ ok: true } | { ok: false; reason: string }> {
+  // Extension allow-list + dangerous declared-MIME block-list — fail closed.
+  if (classifyUpload(mimetype, originalName) !== 'allowed') {
+    return { ok: false, reason: 'file type not allowed' };
+  }
+  // Executable / EICAR content — fail closed on a positive detection.
+  const reason = await forbiddenContentReason(buffer.subarray(0, SNIFF_BYTES));
+  if (reason) {
+    return { ok: false, reason };
+  }
+  return { ok: true };
 }
 
 /**
