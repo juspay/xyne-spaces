@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ReactElement } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useMutation } from '@tanstack/react-query';
 import { toast } from 'sonner';
@@ -40,6 +40,12 @@ function inlineWidth(value: string, placeholder: string): string {
   return `${Math.max(value.length, placeholder.length) - 2}ch`;
 }
 
+interface DraftErrors {
+  name?: string;
+  slug?: string;
+  systemPrompt?: string;
+}
+
 interface ClawAgentCreateV2Props {
   agent?: Agent;
 }
@@ -55,6 +61,8 @@ const ClawAgentCreateV2 = ({ agent }: ClawAgentCreateV2Props = {}): ReactElement
 
   const [aiOpen, setAiOpen] = useState(false);
   const aiIntentRef = useRef<HTMLInputElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [showErrors, setShowErrors] = useState(false);
 
   useEffect(() => {
     if (aiOpen) aiIntentRef.current?.focus();
@@ -92,13 +100,32 @@ const ClawAgentCreateV2 = ({ agent }: ClawAgentCreateV2Props = {}): ReactElement
     generate.mutate({ intent, agentName: state.name });
   };
 
-  const canSubmit =
-    state.name.trim().length > 0 &&
-    slug.length > 0 &&
-    (isEdit || (nameCheck.nameValid && !nameCheck.checking)) &&
-    state.systemPrompt.trim().length > 0;
+  const errors = useMemo<DraftErrors>(() => {
+    const next: DraftErrors = {};
+    if (!state.name.trim()) next.name = 'Give your agent a name.';
+    else if (nameCheck.nameError) next.name = nameCheck.nameError;
+    if (!slug) next.slug = 'Add a handle so people can @mention this agent.';
+    else if (nameCheck.slugError) next.slug = nameCheck.slugError;
+    if (!state.systemPrompt.trim()) {
+      next.systemPrompt = 'Add instructions so the agent knows what it should do.';
+    }
+    return next;
+  }, [state.name, state.systemPrompt, slug, nameCheck.nameError, nameCheck.slugError]);
+
+  const visibleErrors: DraftErrors = showErrors
+    ? errors
+    : {
+        ...(nameCheck.nameError ? { name: nameCheck.nameError } : {}),
+        ...(nameCheck.slugError ? { slug: nameCheck.slugError } : {}),
+      };
 
   const handleSubmit = (): void => {
+    if (Object.keys(errors).length > 0) {
+      setShowErrors(true);
+      scrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
+      return;
+    }
+    setShowErrors(false);
     if (isEdit) {
       void saveMutation.save(state);
       return;
@@ -120,10 +147,12 @@ const ClawAgentCreateV2 = ({ agent }: ClawAgentCreateV2Props = {}): ReactElement
     });
   };
 
-  const fieldError = nameCheck.nameError ?? nameCheck.slugError;
-
   return (
-    <div className='h-full overflow-y-auto no-scrollbar' data-component='ClawAgentCreateV2'>
+    <div
+      ref={scrollRef}
+      className='h-full overflow-y-auto no-scrollbar'
+      data-component='ClawAgentCreateV2'
+    >
       <div className='mx-auto flex w-full max-w-[800px] flex-col gap-6 px-6 py-6'>
         <h1 className='text-2xl font-semibold leading-[1.2] tracking-[-0.24px] text-foreground'>
           {isEdit ? 'Edit agent' : 'Create agent'}
@@ -143,13 +172,21 @@ const ClawAgentCreateV2 = ({ agent }: ClawAgentCreateV2Props = {}): ReactElement
                   }
                   placeholder='Name your agent'
                   aria-label='Agent name'
+                  aria-invalid={visibleErrors.name !== undefined}
+                  aria-describedby={visibleErrors.name ? 'agent-v2-name-error' : undefined}
                   autoFocus
                   data-track-category='Claw Agents'
                   data-track-name='Create agent v2: name'
-                  className='text-base font-medium leading-6 tracking-[-0.1px] text-foreground placeholder:font-medium placeholder:text-muted-foreground'
+                  className='text-base font-medium leading-6 tracking-[-0.1px] text-foreground placeholder:font-medium placeholder:text-muted-foreground/60'
                 />
                 <PencilEditLine className='size-3 shrink-0 text-muted-foreground' aria-hidden />
               </div>
+
+              {visibleErrors.name && (
+                <p id='agent-v2-name-error' className='text-xs text-destructive'>
+                  {visibleErrors.name}
+                </p>
+              )}
 
               <div className='flex items-center gap-1.5'>
                 <div className='flex items-center gap-0.5 rounded-[10px] bg-muted py-0.5 pl-0.5 pr-1'>
@@ -162,8 +199,10 @@ const ClawAgentCreateV2 = ({ agent }: ClawAgentCreateV2Props = {}): ReactElement
                     }}
                     placeholder='Agent handle'
                     aria-label='Agent handle'
+                    aria-invalid={visibleErrors.slug !== undefined}
+                    aria-describedby={visibleErrors.slug ? 'agent-v2-slug-error' : undefined}
                     style={{ width: inlineWidth(slug, 'Agent handle') }}
-                    className='text-sm font-medium leading-5 tracking-[-0.14px] text-foreground placeholder:font-medium placeholder:text-muted-foreground'
+                    className='text-sm font-medium leading-5 tracking-[-0.14px] text-foreground placeholder:font-medium placeholder:text-muted-foreground/60'
                   />
                 </div>
                 {nameCheck.checking && state.name.trim().length > 0 && (
@@ -171,7 +210,11 @@ const ClawAgentCreateV2 = ({ agent }: ClawAgentCreateV2Props = {}): ReactElement
                 )}
               </div>
 
-              {fieldError && <p className='text-xs text-destructive'>{fieldError}</p>}
+              {visibleErrors.slug && (
+                <p id='agent-v2-slug-error' className='text-xs text-destructive'>
+                  {visibleErrors.slug}
+                </p>
+              )}
 
               <p className='flex items-center gap-1.5 text-sm leading-[1.5] text-foreground'>
                 Built by
@@ -220,6 +263,10 @@ const ClawAgentCreateV2 = ({ agent }: ClawAgentCreateV2Props = {}): ReactElement
                   value={state.systemPrompt}
                   onChange={e => update({ systemPrompt: e.target.value })}
                   placeholder='Ai drafted instructions will be updated here...'
+                  aria-invalid={visibleErrors.systemPrompt !== undefined}
+                  aria-describedby={
+                    visibleErrors.systemPrompt ? 'agent-v2-prompt-error' : undefined
+                  }
                   data-track-category='Claw Agents'
                   data-track-name='Create agent v2: prompt'
                   className='h-[250px] w-full resize-none bg-transparent p-4 text-sm leading-5 text-foreground placeholder:text-muted-foreground focus:outline-none'
@@ -296,6 +343,12 @@ const ClawAgentCreateV2 = ({ agent }: ClawAgentCreateV2Props = {}): ReactElement
                   </div>
                 </div>
               </div>
+
+              {visibleErrors.systemPrompt && (
+                <p id='agent-v2-prompt-error' className='text-xs text-destructive'>
+                  {visibleErrors.systemPrompt}
+                </p>
+              )}
             </div>
 
             <McpCapabilityRow
@@ -377,7 +430,6 @@ const ClawAgentCreateV2 = ({ agent }: ClawAgentCreateV2Props = {}): ReactElement
           <Button
             onClick={handleSubmit}
             loading={isEdit ? saveMutation.saving : createMutation.isPending}
-            disabled={!canSubmit}
             className='h-auto rounded-xl bg-foreground px-3 py-2.5 text-[15px] text-background hover:bg-foreground/90'
             data-track-category='Claw Agents'
             data-track-name={`Create agent v2: ${isEdit ? 'save' : 'create'}`}
