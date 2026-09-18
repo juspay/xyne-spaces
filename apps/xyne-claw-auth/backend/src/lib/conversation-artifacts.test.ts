@@ -2,6 +2,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const state = vi.hoisted(() => ({
   upserts: [] as Array<{ where: unknown; create: Record<string, unknown>; update: Record<string, unknown> }>,
+  fallbackOrgId: "org_from_user" as string | undefined,
+}));
+
+vi.mock("./users-jit.js", () => ({
+  orgIdForSpacesUser: vi.fn(async () => state.fallbackOrgId),
 }));
 
 vi.mock("../db.js", () => ({
@@ -89,9 +94,29 @@ describe("recordConversationArtifact caps", () => {
   const base = {
     conversationId: "conv_1",
     createdByUserId: "user_1",
+    orgId: "org_1",
     refService: "EXTERNAL" as const,
     kind: "LINK" as const,
   };
+
+  it("falls back to the user's org when the caller has none", async () => {
+    state.fallbackOrgId = "org_from_user";
+    await recordConversationArtifact({ ...base, orgId: null, refId: "https://example.com/a", title: "a" });
+    expect(state.upserts[0]?.create["orgId"]).toBe("org_from_user");
+  });
+
+  it("skips the record when no org can be resolved", async () => {
+    state.fallbackOrgId = undefined;
+    const row = await recordConversationArtifact({
+      ...base,
+      orgId: null,
+      refId: "https://example.com/b",
+      title: "b",
+    });
+    expect(row).toBeNull();
+    expect(state.upserts).toHaveLength(0);
+    state.fallbackOrgId = "org_from_user";
+  });
 
   it("truncates the title to 300 characters", async () => {
     await recordConversationArtifact({ ...base, refId: "https://a.example/x", title: "t".repeat(900) });

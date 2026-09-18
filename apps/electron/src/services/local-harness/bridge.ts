@@ -1,5 +1,5 @@
 import { promises as fsp } from 'fs';
-import { basename, dirname, join } from 'path';
+import { basename, dirname, join, resolve, sep } from 'path';
 import { hostname } from 'os';
 import { app, safeStorage } from 'electron';
 import Store from 'electron-store';
@@ -71,6 +71,7 @@ const POLL_ERROR_BACKOFF_MS = 5000;
 const RUN_HEARTBEAT_MS = 10000;
 const TOOL_PREFETCH_ATTEMPTS = 3;
 const TOOL_PREFETCH_RETRY_MS = 2000;
+const ATTACHMENT_MAX_BYTES = 25 * 1024 * 1024;
 const MAX_CONCURRENT_RUNS = 3;
 const POLL_CAPACITY_WAIT_MS = 2000;
 const INTERRUPT_GRACE_MS = 15000;
@@ -693,9 +694,22 @@ export class LocalHarnessBridge {
           continue;
         }
         const bytes = Buffer.from(await res.arrayBuffer());
-        const safeName = attachment.fileName.replace(/[^a-zA-Z0-9._-]/g, '_') || 'file';
-        const safeId = attachment.id.replace(/[^a-zA-Z0-9._-]/g, '_');
-        const target = join(dir, `${safeId}-${safeName}`);
+        if (bytes.byteLength > ATTACHMENT_MAX_BYTES) {
+          log.warn(
+            `[LocalHarness] attachment ${attachment.id} is ${bytes.byteLength} bytes; skipped`,
+          );
+          continue;
+        }
+        // Both halves of the name come off the wire, so they are reduced to a
+        // safe charset and the result is then proved to resolve inside `dir`
+        // before anything is written.
+        const safeName = basename(attachment.fileName).replace(/[^a-zA-Z0-9._-]/g, '_') || 'file';
+        const safeId = basename(attachment.id).replace(/[^a-zA-Z0-9._-]/g, '_') || 'id';
+        const target = resolve(dir, `${safeId}-${safeName}`);
+        if (target !== join(dir, `${safeId}-${safeName}`) || !target.startsWith(`${dir}${sep}`)) {
+          log.warn(`[LocalHarness] attachment ${attachment.id} resolved outside the run dir`);
+          continue;
+        }
         await fsp.writeFile(target, bytes);
         saved.push({ path: target, fileName: attachment.fileName, mimeType: attachment.mimeType });
       } catch (err) {
