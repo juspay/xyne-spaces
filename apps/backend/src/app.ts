@@ -208,9 +208,20 @@ import { errorHandler as sdkErrorHandler } from '@/api/sdk/handler';
 import { encryptedFieldsConfig } from '@xyne/shared';
 
 
+/**
+ * How long the HTTP server is given to finish in-flight requests after SIGTERM
+ * before the remaining sockets are abandoned. Must stay comfortably below the
+ * deployment's terminationGracePeriodSeconds (30s) so the drain completes
+ * before the kubelet escalates to SIGKILL.
+ */
+const SHUTDOWN_DRAIN_TIMEOUT_MS = 15_000;
+
 export class App {
   public app: Application;
   public httpServer: HttpServer;
+  /** True from the moment SIGTERM is received; makes /readyz report 503 so the
+   *  load balancer stops sending new traffic while the pod drains. */
+  public isShuttingDown = false;
 
   constructor() {
     this.app = express();
@@ -295,6 +306,23 @@ export class App {
   }
 
   private initializeRoutes(): void {
+    // Liveness: the process is up. Never reports draining state — a draining pod
+    // is still alive and must not be SIGKILLed by a failing liveness probe.
+    this.app.get('/healthz', (_req: Request, res: Response) => {
+      res.status(200).json({ status: 'ok' });
+    });
+
+    // Readiness: flips to 503 the instant SIGTERM arrives, so the load balancer
+    // pulls this pod out of rotation BEFORE the drain starts. Without this the
+    // LB keeps routing new requests into a process that is shutting down.
+    this.app.get('/readyz', (_req: Request, res: Response) => {
+      if (this.isShuttingDown) {
+        res.status(503).json({ status: 'draining' });
+        return;
+      }
+      res.status(200).json({ status: 'ok' });
+    });
+
     // Public routes (no ACL protection)
 
     // External source sync routes (body parsing handled in route file)
@@ -1133,8 +1161,42 @@ export class App {
     });
   }
 
+  /**
+   * Stops accepting new connections and lets in-flight requests finish before
+   * any dependency is torn down. Resolves when the server is closed or the
+   * drain deadline expires, whichever comes first.
+   */
+  private async drainHttpServer(): Promise<void> {
+    if (!this.httpServer.listening) {
+      return;
+    }
+    await new Promise<void>((resolve) => {
+      let settled = false;
+      const finish = (reason: string): void => {
+        if (settled) return;
+        settled = true;
+        logger.info(`HTTP server drain finished (${reason})`);
+        resolve();
+      };
+      this.httpServer.close(() => finish('all in-flight requests completed'));
+      // Keep-alive sockets would otherwise hold close() open past the grace period.
+      this.httpServer.closeIdleConnections?.();
+      setTimeout(() => finish('drain timeout reached'), SHUTDOWN_DRAIN_TIMEOUT_MS).unref();
+    });
+  }
+
   public async shutdown(): Promise<void> {
+    // 1. Fail readiness first so the load balancer stops sending new traffic.
+    this.isShuttingDown = true;
+
+    // 2. Drain in-flight HTTP work BEFORE tearing anything down. Previously the
+    //    order was inverted — Prisma, Redis and every queue were closed while
+    //    the server was still accepting, so requests already in the handler lost
+    //    their database connection mid-flight and failed instead of completing.
+    await this.drainHttpServer();
+
     try {
+      // 3. Only now: dependencies. Nothing is serving traffic at this point.
       // Shutdown OpenTelemetry
       await shutdownOpenTelemetry();
 
@@ -1205,11 +1267,6 @@ export class App {
 
       // Stop Slack migration nightly worker if running
       await slackMigrationWorker.stop();
-
-      // Close HTTP server
-      this.httpServer.close(() => {
-        logger.info('HTTP server closed');
-      });
 
       logger.info('Application shutdown complete');
     } catch (error) {

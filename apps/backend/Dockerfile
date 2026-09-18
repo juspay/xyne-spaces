@@ -96,4 +96,12 @@ EXPOSE 3001
 
 ENV NODE_ENV=production
 
-CMD ["pnpm", "run", "start"]
+# tsx is exec'd directly instead of `pnpm run start`. `pnpm run` does NOT
+# forward SIGTERM to the command it spawns: on `kubectl delete pod` pnpm dies
+# with `ELIFECYCLE Command failed` and the node child is killed without its
+# SIGTERM handler ever running, so the graceful drain in src/index.ts never
+# executed and in-flight requests were reset mid-flight (pre-prod 503s on a
+# deploy revert, 2026-09-18). Running tsx as PID 1 makes the signal reach the
+# process that owns the drain. Same command `pnpm run start` resolved to,
+# minus the pnpm hop.
+CMD ["./node_modules/.bin/tsx", "dist/index.js"]
