@@ -34,10 +34,6 @@ interface ParticipantTileProps {
   onToggleHandRaise?: (() => void) | undefined;
   /** Shows a hover "expand" button (top-right) that opens this tile full-screen. */
   onExpand?: (() => void) | undefined;
-  /** Hide the participant name overlay (used by presentation mode's full-bleed tile) */
-  hideNameLabel?: boolean | undefined;
-  /** Drop the speaking/raised-hand glow ring (a full-screen coloured frame looks wrong) */
-  hideSpeakingIndicator?: boolean | undefined;
 }
 
 export function ParticipantTile({
@@ -55,8 +51,6 @@ export function ParticipantTile({
   isHandRaised = false,
   onToggleHandRaise,
   onExpand,
-  hideNameLabel = false,
-  hideSpeakingIndicator = false,
 }: ParticipantTileProps): React.ReactElement {
   // Get track publications - these are observables that update automatically
   const cameraPublication = participant.participant?.getTrackPublication(Track.Source.Camera);
@@ -183,11 +177,6 @@ export function ParticipantTile({
     if (isFocused) {
       return 'border-[1.5px] border-blue-400';
     }
-    // Presentation mode fills the screen, so any state frame becomes a coloured
-    // border around the whole viewport — drop it entirely there.
-    if (hideSpeakingIndicator) {
-      return 'border-0';
-    }
     // Hand raised — amber to draw attention (a raised hand usually means the
     // person is waiting to speak, so it takes precedence over the speaking ring).
     if (isHandRaised) {
@@ -205,9 +194,6 @@ export function ParticipantTile({
   // the element, so nothing can cover it). Kept faint — the overlay border is the
   // real state signal; a strong glow bleeds onto neighbouring tiles.
   const getGlowClass = (): string => {
-    if (hideSpeakingIndicator) {
-      return '';
-    }
     if (isHandRaised) {
       return 'shadow-[0_0_8px_rgba(251,191,36,0.2)]';
     }
@@ -438,31 +424,29 @@ export function ParticipantTile({
           tile at once) their audio. */}
 
       {/* Participant Info Overlay */}
-      {!hideNameLabel && (
-        <div
-          className={cn(
-            'absolute z-10 flex items-center rounded-lg bg-black/45 backdrop-blur-md',
-            'ring-1 ring-inset ring-white/15 text-white font-medium visual-regression-hide',
-            compact
-              ? 'bottom-1 left-1 gap-1 px-1.5 py-0.5 text-[9px] max-w-[calc(100%-0.5rem)]'
-              : 'bottom-1.5 left-1.5 gap-1.5 px-2 py-1 text-[10px] sm:bottom-2.5 sm:left-2.5 sm:text-xs max-w-[calc(100%-1rem)]',
-          )}
-        >
-          {/* Mic state rides in the pill (Meet's placement). The standalone badge
-              below only appears when this label is hidden. */}
-          {!participant.isMicrophoneEnabled && (
-            <MicOff
-              className={cn(
-                'flex-shrink-0 text-red-400',
-                compact ? 'h-2.5 w-2.5' : 'h-3 w-3 sm:h-3.5 sm:w-3.5',
-              )}
-            />
-          )}
-          <span className='truncate'>
-            {participant.isLocal ? 'You' : isAIAgent ? 'Xyne Automatic' : participant.name}
-          </span>
-        </div>
-      )}
+      <div
+        className={cn(
+          'absolute z-10 flex items-center rounded-lg bg-black/45 backdrop-blur-md',
+          'ring-1 ring-inset ring-white/15 text-white font-medium visual-regression-hide',
+          compact
+            ? 'bottom-1 left-1 gap-1 px-1.5 py-0.5 text-[9px] max-w-[calc(100%-0.5rem)]'
+            : 'bottom-1.5 left-1.5 gap-1.5 px-2 py-1 text-[10px] sm:bottom-2.5 sm:left-2.5 sm:text-xs max-w-[calc(100%-1rem)]',
+        )}
+      >
+        {/* Mic state rides in the pill (Meet's placement) rather than as its own
+            badge, so a muted participant costs no extra corner. */}
+        {!participant.isMicrophoneEnabled && (
+          <MicOff
+            className={cn(
+              'flex-shrink-0 text-red-400',
+              compact ? 'h-2.5 w-2.5' : 'h-3 w-3 sm:h-3.5 sm:w-3.5',
+            )}
+          />
+        )}
+        <span className='truncate'>
+          {participant.isLocal ? 'You' : isAIAgent ? 'Xyne Automatic' : participant.name}
+        </span>
+      </div>
 
       {/* Background Blur Toggle - local tile only, when camera is on */}
       {showBlurToggle && (
@@ -584,21 +568,6 @@ export function ParticipantTile({
             activeColor={networkQuality === ConnectionQuality.Lost ? '#f87171' : '#fbbf24'}
             className={cn(compact ? 'w-2.5 h-2.5' : 'w-3.5 h-3.5')}
           />
-        </div>
-      )}
-
-      {/* Mute indicator — fallback for tiles that hide the name pill (presentation
-          mode), which is otherwise where mic state lives. */}
-      {!participant.isMicrophoneEnabled && hideNameLabel && (
-        <div
-          className={cn(
-            'absolute bg-red-500/90 backdrop-blur-md ring-1 ring-inset ring-white/20 rounded-full',
-            compact
-              ? 'top-0.5 right-0.5 p-0.5 shadow-sm'
-              : 'top-1 right-1 sm:top-2 sm:right-2 p-1 sm:p-1.5 shadow-lg',
-          )}
-        >
-          <MicOff className={cn('text-white', compact ? 'w-2.5 h-2.5' : 'w-2 h-2 sm:w-3 sm:h-3')} />
         </div>
       )}
     </div>
