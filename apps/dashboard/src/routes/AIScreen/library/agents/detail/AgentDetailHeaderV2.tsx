@@ -1,5 +1,6 @@
 import { useState, type ReactElement, type ReactNode } from 'react';
 import {
+  ChatDefault,
   ChevronBigLeft,
   CopyDefault,
   DeleteDustbin01,
@@ -77,14 +78,18 @@ const MenuItem = ({
 interface AgentDetailHeaderV2Props {
   agent: Agent;
   actions: AgentDetailActions;
+  canChat: boolean;
   onBack: () => void;
+  onChat: () => void;
   onEdit: () => void;
 }
 
 export function AgentDetailHeaderV2({
   agent,
   actions,
+  canChat,
   onBack,
+  onChat,
   onEdit,
 }: AgentDetailHeaderV2Props): ReactElement {
   const [menuOpen, setMenuOpen] = useState(false);
@@ -129,6 +134,14 @@ export function AgentDetailHeaderV2({
         )}
         {showPublish && (
           <Action label='Publish' busy={busy.publishing} onClick={() => void actions.publish()} />
+        )}
+
+        {canChat && (
+          <Action
+            label='Chat with agent'
+            icon={<ChatDefault className='size-4' aria-hidden />}
+            onClick={onChat}
+          />
         )}
 
         <Action
