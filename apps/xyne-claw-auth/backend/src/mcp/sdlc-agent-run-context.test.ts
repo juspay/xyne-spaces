@@ -19,9 +19,14 @@ describe("SDLC agent run context", () => {
     expect(parseSdlcAgentRunContext(pinned)).toEqual(pinned);
   });
 
+  it("accepts a context without the retired grant", () => {
+    const { interactiveGrant: _grant, ...withoutGrant } = pinned;
+    expect(parseSdlcAgentRunContext(withoutGrant)).toEqual(withoutGrant);
+  });
+
   it("rejects incomplete or retired contexts", () => {
     expect(parseSdlcAgentRunContext({ ...pinned, repository: { ...pinned.repository, id: "" } })).toBeNull();
-    expect(parseSdlcAgentRunContext({ ...pinned, interactiveGrant: undefined })).toBeNull();
+    expect(parseSdlcAgentRunContext({ ...pinned, actorUserId: undefined })).toBeNull();
     expect(parseSdlcAgentRunContext({ ...pinned, operation: "baseline" })).toBeNull();
   });
 });

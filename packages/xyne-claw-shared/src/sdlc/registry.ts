@@ -1,6 +1,6 @@
 export type SdlcToolTransport = "direct" | "custom" | "subagent";
 export type SdlcMutationLevel = "read" | "write";
-export type SdlcTrustedBinding = "none" | "hub" | "repository" | "interactive";
+export type SdlcTrustedBinding = "none" | "hub" | "repository" | "actor";
 
 export interface SdlcToolCapability {
   name: string;
@@ -23,6 +23,7 @@ export const SDLC_TOOL_NAMES = {
   createTrack: "spaces-sdlc-create-track",
   listArtifactTypes: "spaces-sdlc-list-artifact-types",
   listRepositories: "spaces-sdlc-list-repositories",
+  listEntityLinks: "spaces-sdlc-list-entity-links",
 } as const;
 
 export type SdlcToolName = (typeof SDLC_TOOL_NAMES)[keyof typeof SDLC_TOOL_NAMES];
@@ -33,11 +34,12 @@ export const SDLC_TOOL_CAPABILITIES: readonly SdlcToolCapability[] = [
   { name: SDLC_TOOL_NAMES.mutateArtifact, transport: "direct", group: "sdlc", mutation: "write", trustedBinding: "repository" },
   { name: SDLC_TOOL_NAMES.listArtifactVersions, transport: "direct", group: "sdlc", mutation: "read", trustedBinding: "hub" },
   { name: SDLC_TOOL_NAMES.readArtifactVersion, transport: "direct", group: "sdlc", mutation: "read", trustedBinding: "hub" },
-  { name: SDLC_TOOL_NAMES.createPullRequest, transport: "direct", group: "sdlc", mutation: "write", trustedBinding: "interactive" },
+  { name: SDLC_TOOL_NAMES.createPullRequest, transport: "direct", group: "sdlc", mutation: "write", trustedBinding: "actor" },
   { name: SDLC_TOOL_NAMES.listTracks, transport: "direct", group: "sdlc", mutation: "read", trustedBinding: "repository" },
   { name: SDLC_TOOL_NAMES.createTrack, transport: "direct", group: "sdlc", mutation: "write", trustedBinding: "repository" },
   { name: SDLC_TOOL_NAMES.listArtifactTypes, transport: "direct", group: "sdlc", mutation: "read", trustedBinding: "repository" },
   { name: SDLC_TOOL_NAMES.listRepositories, transport: "direct", group: "sdlc", mutation: "read", trustedBinding: "none" },
+  { name: SDLC_TOOL_NAMES.listEntityLinks, transport: "direct", group: "sdlc", mutation: "read", trustedBinding: "hub" },
 ] as const;
 
 export const SDLC_GENERIC_SANDBOX_TOOLS = [
@@ -51,7 +53,7 @@ export const SDLC_GENERIC_SANDBOX_TOOLS = [
   "sandbox-read-file",
   "sandbox-deliver-files",
   "sandbox-destroy",
-  "sandbox-repo-setup",
+  "sdlc-repository-access",
   "git-read",
 ] as const;
 

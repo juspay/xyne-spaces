@@ -594,7 +594,7 @@ digitalTwinRouter.put("/memory-files/:name", requireUserAuth, async (req, res) =
     const overCap = body.content.length > MAX_FILE_CHARS;
     const file = await upsertFile({
       agentSlug: TWIN_AGENT_SLUG,
-      userId,
+      owner: userId,
       name,
       content: body.content,
       updatedBy: "user",

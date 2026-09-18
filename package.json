@@ -1,7 +1,7 @@
 {
   "name": "xyne-spaces",
   "license": "Apache-2.0",
-  "version": "1.332.1",
+  "version": "1.328.0",
   "description": "Xyne Spaces - Monorepo with Backend and Dashboard",
   "scripts": {
     "prepare": "husky",
@@ -205,9 +205,6 @@
   },
   "packageManager": "pnpm@10.15.0",
   "pnpm": {
-    "onlyBuiltDependencies": [
-      "@getgauge/cli"
-    ],
     "packageExtensions": {
       "@semantic-release/commit-analyzer": {
         "dependencies": {
@@ -331,9 +328,6 @@
       "ws@7": "7.5.13",
       "ws@8": "8.21.1",
       "xlsx": "npm:@e965/xlsx@0.20.3"
-    },
-    "ignoredBuiltDependencies": [
-      "electron"
-    ]
+    }
   }
 }

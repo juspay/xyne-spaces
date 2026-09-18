@@ -211,12 +211,13 @@ export async function executeAppTool(
           field instanceof HTMLTextAreaElement
             ? HTMLTextAreaElement.prototype
             : HTMLInputElement.prototype;
-        const descriptor: PropertyDescriptor | undefined = Reflect.getOwnPropertyDescriptor(
-          proto,
-          'value',
-        );
+        const descriptor = Object.getOwnPropertyDescriptor(proto, 'value');
+        // The native setter is read off the prototype on purpose: assigning
+        // field.value directly would not notify React's value tracker. It is
+        // always invoked with `field` as its receiver on the next line.
+        // eslint-disable-next-line @typescript-eslint/unbound-method
         const setValue = descriptor?.set;
-        if (setValue) Reflect.apply(setValue, field, [text]);
+        setValue?.call(field, text);
         field.dispatchEvent(new Event('input', { bubbles: true }));
       } else {
         el.textContent = text;

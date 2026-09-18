@@ -56,6 +56,10 @@ import { attachArtifactToSessionApp } from "../lib/artifact-app-session.js";
 import { createLogger } from "../logger.js";
 const log = createLogger("agent-chat");
 
+function sanitizeForLog(value: unknown): string {
+  return String(value).replace(/[\r\n]+/g, " ");
+}
+
 const XYNE_CHAT_SURFACE_PRIMER = [
   "## Xyne AI chat surface",
   "You are answering inside the Xyne AI chat, not a terminal or a code editor. Your reply is rendered to the user as chat markdown in a conversation thread.",
@@ -67,10 +71,6 @@ const XYNE_CHAT_SURFACE_PRIMER = [
 function withXyneChatSurfacePrimer(systemPrompt: string | null | undefined): string {
   const base = (systemPrompt ?? "").trim();
   return base ? `${XYNE_CHAT_SURFACE_PRIMER}\n\n${base}` : XYNE_CHAT_SURFACE_PRIMER;
-}
-
-function sanitizeForLog(value: unknown): string {
-  return String(value).replace(/[\r\n]+/g, " ");
 }
 
 function withoutFollowUpRecorderInvocations(value: unknown[]): unknown[] {
@@ -906,10 +906,6 @@ router.get("/:slug/context/search", async (req: Request<{ slug: string }>, res: 
       res.status(400).json({ success: false, error: "type must be one of all|channel|ticket|canvas|call|repository" });
       return;
     }
-    if (rawType === "repository" && req.params.slug !== SDLC_AGENT_SLUG) {
-      res.status(400).json({ success: false, error: "Repository context is only available for the SDLC Assistant" });
-      return;
-    }
 
     const q = typeof req.query["q"] === "string" ? req.query["q"].trim() : "";
     const rawLimit = Number(req.query["limit"]);
@@ -1263,9 +1259,7 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
     }
     const conversationId = existingConvId ?? `chat-${randomUUID()}`;
 
-    const sdlcResolution = slug === "sdlc-agent"
-      ? await resolveSdlcRepositoryForUser(userId, researchContext, conversationId)
-      : { ok: true as const, repository: undefined };
+    const sdlcResolution = await resolveSdlcRepositoryForUser(userId, researchContext, conversationId);
     if (!sdlcResolution.ok) {
       res.status(sdlcResolution.status).json({ success: false, error: sdlcResolution.error });
       return;

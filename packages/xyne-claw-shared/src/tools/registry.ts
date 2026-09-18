@@ -239,6 +239,7 @@ register(sandbox.sandboxReadFile);
 register(sandbox.sandboxDeliverFiles);
 register(sandbox.sandboxDestroy);
 register(sandbox.sandboxRepoSetup);
+register(sandbox.sdlcRepositoryAccess);
 register(sandbox.gitRead);
 register(videoExplainer.createVideoExplainer);
 register(recordSkill.analyzeSkillRecording);

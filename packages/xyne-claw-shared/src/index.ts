@@ -183,3 +183,5 @@ export {
   videoFileExtension,
 } from "./attachment-types.js";
 export type { AttachmentFamily, InboundAttachmentFamily } from "./attachment-types.js";
+export { openPaletteMode, openPaletteModeFromTools, openPaletteAdmits, type OpenPaletteMode } from "./tools/open-palette.js";
+export { classifyToolRisk, riskAtOrBelow, TOOL_RISK_LADDER, type ToolRiskLevel } from "./tools/tool-risk.js";

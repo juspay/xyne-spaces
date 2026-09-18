@@ -3,7 +3,7 @@ import { prisma } from "../db.js";
 import { CONFIG } from "../config.js";
 import { decrypt } from "../crypto.js";
 import { errMsg } from "./errors.js";
-import { loadSdlcHubKnowledge } from "./sdlc-repository-context.js";
+import { loadSdlcHubKnowledge, resolveSdlcHubContextForUser } from "./sdlc-repository-context.js";
 import { spacesAppFetch } from "./spaces-api.js";
 import {
   chatMessageRepository,
@@ -888,7 +888,7 @@ export async function prepareRun(
         ? `${resolvedAttachedContext.promptPrefix}\n\n${mergedContext}`
         : resolvedAttachedContext.promptPrefix;
     }
-    if (agentSlug === SDLC_AGENT_SLUG && effectiveChannelId) {
+    if (effectiveChannelId) {
       try {
         const hubKnowledge = await loadSdlcHubKnowledge(effectiveChannelId, resolved.userId);
         if (hubKnowledge) mergedContext = mergedContext ? `${hubKnowledge}\n\n${mergedContext}` : hubKnowledge;
@@ -919,8 +919,15 @@ export async function prepareRun(
     // platform env value (secret-exfil / SSRF / GIT_SSH_COMMAND injection).
     // xyne-claw enforces this again in resolveToolConfig; this is the boundary.
     const isInternalRun = input.isInternalRun;
+    // SDLC context comes only from this request: agent editors can save any config JSON.
+    const {
+      sdlcContext: _storedSdlcContext,
+      sdlcRepository: _storedSdlcRepository,
+      requireSdlcRepository: _storedSdlcRequirement,
+      ...storedAgentConfig
+    } = agent.agentConfig;
     let mergedAgentConfig = stripPlatformConfigKeys({
-      ...agent.agentConfig,
+      ...storedAgentConfig,
       ...((body as { agentConfig?: Record<string, unknown> }).agentConfig ?? {}),
     });
     if (agentSlug === SDLC_AGENT_SLUG) {
@@ -950,7 +957,13 @@ export async function prepareRun(
       } = mergedAgentConfig;
       mergedAgentConfig = safeAgentConfig;
     }
-    const sdlcAgentRunContext = parseSdlcAgentRunContext(mergedAgentConfig["sdlcContext"]);
+    let sdlcAgentRunContext = parseSdlcAgentRunContext(mergedAgentConfig["sdlcContext"]);
+    if (!sdlcAgentRunContext) {
+      sdlcAgentRunContext = parseSdlcAgentRunContext(
+        await resolveSdlcHubContextForUser(resolved.userId, effectiveChannelId, conversationId),
+      );
+      if (sdlcAgentRunContext) mergedAgentConfig = { ...mergedAgentConfig, sdlcContext: sdlcAgentRunContext };
+    }
     const effectiveFastMode =
       explicitFastMode ??
       (await resolveFastMode(conversationId, agentSlug || "assistant", mergedAgentConfig));
