@@ -1,6 +1,5 @@
 import type { AnyQuery } from '@rocicorp/zero';
-import { schema, type BaseQueryResolver, type Context } from '@xyne/shared';
-import { zql } from '../queries';
+import { schema, type BaseQueryResolver, type Context, WORKSPACE_PARTITIONED_REGISTRY } from '@xyne/shared';
 import { syncContext } from './serviceIdentity';
 import { SENTINEL_USER, SENTINEL_WORKSPACE, isSubscriberSentinel, sentinelAclWhere, type Cond } from './aclGate';
 
@@ -38,46 +37,25 @@ export interface RowLevelSpec {
 /** The partition column of every row-level instance — the tenant boundary forced from the socket (R2). */
 export const ROW_LEVEL_PARTITION_COLUMN = 'workspaceId';
 
-const wsOf = (args: unknown): string => {
-  const ws = (args as { workspaceId?: unknown } | undefined)?.workspaceId;
-  if (typeof ws !== 'string' || ws === '') {
-    // R2 forces workspaceId from the socket, so a missing value here is an internal misuse, not client
-    // input — fail loud rather than materialize a garbage `where('workspaceId','')` instance.
-    throw new Error('rowLevelQueries: workspaceId is required to build a row-level base');
-  }
-  return ws;
-};
-
 /**
- * The row-level allowlist. Each base drops the per-user owner pin (routing does it) and partitions by
- * workspaceId, keeping every subscriber-independent literal the native query applies. Adding an entry
- * turns the CI guard RED unless its ACL is row-level eligible.
+ * The row-level allowlist — DERIVED from the single-source `WORKSPACE_PARTITIONED_REGISTRY` in
+ * `@xyne/shared` (its entries carrying a `routeColumn`), so the client and server build the IDENTICAL
+ * base. Each base drops the per-user owner pin (routing does it) and partitions by workspaceId, keeping
+ * every subscriber-independent literal the native query applies. Add a row-level entry in the shared
+ * registry; the CI guard turns RED unless its ACL is row-level eligible.
  */
-export const ROW_LEVEL_QUERIES: ReadonlyMap<string, RowLevelSpec> = new Map<string, RowLevelSpec>([
-  // bookmarks: ACL `userId == me`; native query adds `isDeleted == false` (subscriber-independent).
-  ['userBookmarks', {
-    routeColumn: 'userId',
-    base: ({ args }) =>
-      zql.bookmarks
-        .where('workspaceId', wsOf(args))
-        .where('isDeleted', false)
-        .orderBy('createdAt', 'desc'),
-  }],
-  // user_preferences: ACL `userId == me`. Native `.one()` is a per-subscriber projection dropped here —
-  // the workspace instance holds every user's row; fan-out routes each user their single row.
-  ['getCurrentUserPreference', {
-    routeColumn: 'userId',
-    base: ({ args }) => zql.user_preferences.where('workspaceId', wsOf(args)),
-  }],
-  // draft_messages: owner pin normalized into the ACL (draft-messages-acl.ts) so it is ACL-eligible.
-  ['userDrafts', {
-    routeColumn: 'userId',
-    base: ({ args }) => zql.draft_messages.where('workspaceId', wsOf(args)).related('attachments'),
-    relatedAudit:
-      'attachments → message_attachments joined by draft.id = entityId (1:1-owned: each attachment ' +
-      "belongs to one draft ⇒ one owner). Native serves it via message_attachments' own createdBy ACL arm.",
-  }],
-]);
+export const ROW_LEVEL_QUERIES: ReadonlyMap<string, RowLevelSpec> = new Map<string, RowLevelSpec>(
+  [...WORKSPACE_PARTITIONED_REGISTRY.entries()]
+    .filter(([, spec]) => spec.routeColumn)
+    .map(([name, spec]): [string, RowLevelSpec] => [
+      name,
+      {
+        routeColumn: spec.routeColumn as string,
+        base: (({ args }) => spec.base(args)) as BaseQueryResolver,
+        relatedAudit: spec.relatedAudit,
+      },
+    ]),
+);
 
 export function isRowLevelQuery(name: string): boolean {
   return ROW_LEVEL_QUERIES.has(name);

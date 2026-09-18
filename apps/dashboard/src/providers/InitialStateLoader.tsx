@@ -351,8 +351,10 @@ const InitialStateLoader: React.FC<InitialStateLoaderProps> = ({ children }): Re
     };
   }, [state.name]);
 
-  // Users: fallback-hydrated query (REST initial + Zero delta)
-  const [users, usersDetails] = useFallbackHydratedQuery(queries.getUsersV2());
+  // Users: sync-engine proof — route getUsersV2 straight through useCachedQuery (no lastUpdatedAt
+  // watermark/delta wrapper), so it hits the shared sync engine cleanly. Was:
+  //   const [users, usersDetails] = useFallbackHydratedQuery(queries.getUsersV2());
+  const [users, usersDetails] = useCachedQuery(queries.getUsersV2());
 
   // Channels: fallback-hydrated query (REST initial + Zero delta)
   const [allChannels, allChannelsDetails] = useFallbackHydratedQuery(queries.userAllChannels());

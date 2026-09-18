@@ -2,6 +2,13 @@
 export * from './zero/schema';
 export { defineQuery, QueryACLFactory } from './zero/acl';
 export type { BaseQueryResolver } from './zero/acl';
+export {
+  WORKSPACE_PARTITIONED_REGISTRY,
+  isWorkspacePartitioned,
+  workspaceRouteColumn,
+  workspacePartitionedBase,
+  type WorkspacePartitionedSpec,
+} from './sync/workspacePartitioned';
 export { encryptedFieldsConfig, type EncryptedTableConfig } from './zero/encrypted-fields';
 export { EncryptedFieldQueryError, validateQueryWhereClause, type Condition, type QueryAST } from './zero/client-transaction-wrapper';
 export * from './ai';

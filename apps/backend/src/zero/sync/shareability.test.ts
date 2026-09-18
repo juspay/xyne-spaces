@@ -16,6 +16,10 @@ import { syncContext } from './serviceIdentity';
  */
 const SAMPLE_ARGS: Record<string, Record<string, unknown>> = {
   channelLatestMultipleConversationsV4: { channelId: 'C1', isMember: true, limit: 25 },
+  // Workspace-partitioned BROADCAST: the gateway forces workspaceId from the socket, but the gate/
+  // partition analysis is identical either way — partition = workspaceId, ACL (non-guest) = workspaceId = ws.
+  getUsersV2: { workspaceId: 'W1' },
+  getAllUserGroups: { workspaceId: 'W1' },
 };
 
 test('every SHARED_BASE_QUERY is GATE-collapsible (no per-row admission)', () => {

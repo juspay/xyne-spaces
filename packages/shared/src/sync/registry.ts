@@ -8,26 +8,48 @@
 import { queryDefs } from '../zero/queries.js';
 import type { Context } from '../zero/schema.js';
 import type { Format } from './ivmHost.js';
+import {
+  WORKSPACE_PARTITIONED_REGISTRY,
+  isWorkspacePartitioned,
+  isClientServable,
+  workspacePartitionedBase,
+} from './workspacePartitioned.js';
 
-/** Query names served by the sync engine. Must match the backend allowlist. */
+/**
+ * Query names served by the sync engine. Must match the backend allowlist: channelLatest (gate) PLUS
+ * every CLIENT-SERVABLE workspace-partitioned query (broadcast + row-level). The client treats all of
+ * them identically — host the base, render the rows it receives — so the gate/row-level/broadcast
+ * distinction (which is purely how the SERVER decides what to send) never appears here. `.one()`
+ * (singular) queries are filtered out until the client applies the singular projection.
+ */
 export const SHARED_QUERY_NAMES: ReadonlySet<string> = new Set<string>([
   'channelLatestMultipleConversationsV4',
+  ...[...WORKSPACE_PARTITIONED_REGISTRY.entries()]
+    .filter(([, spec]) => isClientServable(spec))
+    .map(([name]) => name),
 ]);
 
 export function isSharedQuery(name: string | undefined | null): boolean {
   return !!name && SHARED_QUERY_NAMES.has(name);
 }
 
+// Workspace-partitioned queries need `ctx.workspaceId` injected into their args by `useQuery` (keys the
+// instance per-workspace + partitions the override base). Single-sourced from `@xyne/shared`.
+export { isWorkspacePartitioned };
+
 interface BaseDef {
   base?: (params: { ctx: Context; args?: unknown }) => { ast?: unknown } | undefined;
 }
 
 /**
- * The ACL-free base AST for a shared query — the same thing the backend materializes.
- * `.base` is attached by `defineQuery` (non-enumerable) and read from the raw `queryDefs`,
- * because `defineQueries` strips it from the built `queries` object.
+ * The ACL-free base AST for a shared query — the same thing the backend materializes. Workspace-
+ * partitioned queries use the single-source override base (reads `args.workspaceId`, injected from
+ * `ctx.workspaceId` by `useQuery`); everything else reads the query's own `.base` (attached by
+ * `defineQuery`, non-enumerable, off the raw `queryDefs` since `defineQueries` strips it).
  */
 export function resolveBaseAst(name: string, ctx: Context, args: unknown): any | undefined {
+  const wp = workspacePartitionedBase(name, args);
+  if (wp) return (wp as { ast?: unknown }).ast;
   const def = (queryDefs as unknown as Record<string, BaseDef>)[name];
   const ast = def?.base?.({ ctx, args })?.ast;
   return ast;

@@ -8,7 +8,7 @@ import { deriveAclGate, NON_GUEST_ROLES } from './aclGate';
 import { queryMetaFor } from './queryMeta';
 import { grantQueryName, grantArgs } from './grantQueries';
 import { isRowLevelQuery, routeColumnOf, rowLevelEligibility } from './rowLevelQueries';
-import { resolveSharedBase } from './baseQueries';
+import { resolveSharedBase, isWorkspacePartitioned } from './baseQueries';
 import { syncContext } from './serviceIdentity';
 import { obsEmit } from './obs';
 
@@ -128,6 +128,15 @@ export function attachSyncHandlers(socket: SyncIoSocket): () => void {
     if (isRowLevelQuery(queryName)) {
       subscribeRowLevel(queryName, ack, sinceOffset);
       return;
+    }
+    // Workspace-partitioned GATE queries (partition = workspaceId): FORCE the partition from the
+    // authenticated socket, overriding any client-supplied value. workspaceId is the tenant boundary,
+    // so — unlike a globally-unique channelId taken safely from args — it must never be client-
+    // controlled: this keys + materializes the instance under the socket's OWN workspace, so a client
+    // can neither join nor materialize another tenant's instance. Admission within the instance is
+    // still the ACL gate below (every member sees all rows → one shared instance, room-broadcast).
+    if (isWorkspacePartitioned(queryName)) {
+      args = [{ ...((args[0] ?? {}) as Record<string, ReadonlyJSONValue>), workspaceId }];
     }
     const dataInstanceKey = syncEngine.subscribe(queryName, args, connId);
     if (!dataInstanceKey) {
@@ -311,7 +320,11 @@ export function attachSyncHandlers(socket: SyncIoSocket): () => void {
     // the fallback to client args won't match either — intentionally left to disconnect teardown rather
     // than special-cased, since after `ready` the workspace is always present.
     const effectiveArgs: ReadonlyJSONValue[] =
-      isRowLevelQuery(queryName) && socket.workspaceId ? [{ workspaceId: socket.workspaceId }] : args;
+      isRowLevelQuery(queryName) && socket.workspaceId
+        ? [{ workspaceId: socket.workspaceId }]
+        : isWorkspacePartitioned(queryName) && socket.workspaceId
+        ? [{ ...((args[0] ?? {}) as Record<string, ReadonlyJSONValue>), workspaceId: socket.workspaceId }]
+        : args;
     const dataInstanceKey = hashOfNameAndArgs(queryName, effectiveArgs);
     const sub = subs.get(dataInstanceKey);
     if (!sub) return;

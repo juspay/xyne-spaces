@@ -14,7 +14,7 @@ import type {
 import type { UseQueryOptions, QueryResult } from '@rocicorp/zero/react';
 import { Event } from '../logger/events.js';
 import { useInstrumentation, useZero } from './useZero.js';
-import { isSharedQuery } from '../sync/registry.js';
+import { isSharedQuery, isWorkspacePartitioned } from '../sync/registry.js';
 import { useSharedQuery, useSyncEngineReady, useSyncServing } from '../sync/useSharedQuery.js';
 import { obsEmit, isShadow } from '../sync/obs.js';
 import { useZeroFallbackConfig } from './ZeroFallbackContext.js';
@@ -337,21 +337,29 @@ export function useQuery<
   // Shadow-diff: keep Zero running alongside the sync result and DISPLAY Zero (known-good),
   // so we can measure where the sync result deviates without corrupting the UI.
   const shadow = isShared && isShadow();
+  // Workspace-partitioned queries: inject ctx.workspaceId into the args so the instance keys per
+  // workspace and the override base partitions correctly. The caller never passes workspaceId (the
+  // query stays argless); the backend independently FORCES it from the socket, so this only keeps the
+  // client's instance key + local base aligned with the server's. Non-partitioned queries pass through.
+  const sharedArgs = useMemo(() => {
+    if (!isShared || !isWorkspacePartitioned(query.query.queryName)) return args;
+    return { ...((args as object) ?? {}), workspaceId: zero.context.workspaceId };
+  }, [isShared, args, query.query.queryName, zero.context.workspaceId]);
   const sharedHash = useMemo(() => {
     if (!isShared) return undefined;
     try {
       // @ts-expect-error internal query structure (mirrors useCachedQuery hashing)
       // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
-      return (query.query.fn({ ctx: zero.context, args }).hash() as string) || undefined;
+      return (query.query.fn({ ctx: zero.context, args: sharedArgs }).hash() as string) || undefined;
     } catch {
       return undefined;
     }
-  }, [isShared, query, zero.context, args]);
+  }, [isShared, query, zero.context, sharedArgs]);
   const sharedResult = useSharedQuery<TReturn>(
     isShared,
     sharedHash,
     query.query.queryName,
-    args,
+    sharedArgs,
     zero.context,
   );
 
