@@ -1,3 +1,15 @@
+## [1.337.0-release-20260918.7](https://github.com/juspay/xyne-spaces/compare/v1.337.0-release-20260918.6...v1.337.0-release-20260918.7) (2026-09-18)
+
+
+### Features
+
+* app store integration in desk for release ([#2033](https://github.com/juspay/xyne-spaces/issues/2033)) ([e8dda62](https://github.com/juspay/xyne-spaces/commit/e8dda626fc5d0fb358f21e079ac135b631574499))
+
+
+### Bug Fixes
+
+* ticket create and update api merchantid addition ([#1999](https://github.com/juspay/xyne-spaces/issues/1999)) ([#2053](https://github.com/juspay/xyne-spaces/issues/2053)) ([f0d5d59](https://github.com/juspay/xyne-spaces/commit/f0d5d59629f8b2f1ac3adff928c29b4a91fa3f1d))
+
 ## [1.337.0-release-20260918.6](https://github.com/juspay/xyne-spaces/compare/v1.337.0-release-20260918.5...v1.337.0-release-20260918.6) (2026-09-18)
 
 
