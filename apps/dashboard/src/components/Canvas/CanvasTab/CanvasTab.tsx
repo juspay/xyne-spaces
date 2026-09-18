@@ -58,7 +58,6 @@ import {
 } from '../canvasFilters';
 import { usePersistedCanvasPreferences } from '../../../hooks/usePersistedCanvasPreferences';
 import { Switch } from '@/components/ui/Switch';
-import { CanvasEditorHeader } from '../CanvasEditorHeader';
 import {
   createCanvasContentTextDiff,
   isVisibleCanvasContentDiffPart,
@@ -256,13 +255,6 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
   const queueTitleAutoFocus = useCallback((targetCanvasId: string): void => {
     if (titleAutoFocusConsumedCanvasIdRef.current === targetCanvasId) return;
     titleAutoFocusCanvasIdRef.current = targetCanvasId;
-  }, []);
-
-  const handleTitleAutoFocused = useCallback((): void => {
-    if (titleAutoFocusCanvasIdRef.current) {
-      titleAutoFocusConsumedCanvasIdRef.current = titleAutoFocusCanvasIdRef.current;
-    }
-    titleAutoFocusCanvasIdRef.current = null;
   }, []);
 
   const handleFileUpload = useCallback(
@@ -1019,23 +1011,8 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
         minute: '2-digit',
       })
     : null;
-  const shouldFocusCanvasTitleOnMount = Boolean(
-    canvas?.id && titleAutoFocusCanvasIdRef.current === canvas.id && !previewVersion,
-  );
-  const canvasTitleHeader = canvas?.id ? (
-    <div className='canvas-editor-title-column pb-6 pt-0 md:pt-2'>
-      <CanvasEditorHeader
-        canvas={canvas}
-        workspaceId={user?.workspaceId}
-        canEdit={canEdit && !isChannelArchived && !previewVersion}
-        title={currentTitle}
-        focusTitleOnMount={shouldFocusCanvasTitleOnMount}
-        onTitleChange={handleCanvasTitleChange}
-        onTitleSave={handleTitleSave}
-        onTitleAutoFocused={handleTitleAutoFocused}
-      />
-    </div>
-  ) : null;
+  // No title above the document — see the note in CanvasScreen.
+  const canvasTitleHeader = null;
 
   return (
     <div className='relative flex h-full bg-background'>
@@ -1273,7 +1250,7 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
                 onFileUpload={handleFileUpload}
                 onChange={handleCollaborativeContentChange}
                 onOpenCommentCountChange={setOpenCommentCount}
-                autoFocus={!shouldFocusCanvasTitleOnMount}
+                autoFocus
                 header={canvasTitleHeader}
               />
             ) : (
@@ -1289,7 +1266,7 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
                 canvasId={canvas?.id}
                 canvasTitle={currentTitle}
                 onOpenCommentCountChange={setOpenCommentCount}
-                autoFocus={!shouldFocusCanvasTitleOnMount}
+                autoFocus
                 header={canvasTitleHeader}
               />
             )}

@@ -1243,7 +1243,7 @@ export default function SdlcScreen(): ReactElement {
   const openCanvas = (canvasId: string, options?: OpenCanvasOptions): void => {
     if (!channelId) return;
 
-    const withDiscussion = Boolean(options?.withDiscussion);
+    const withDiscussion = options?.withDiscussion ?? true;
     if (shouldOpenInNewWindow(options?.event) && openCanvasInWindow(canvasId, withDiscussion)) {
       return;
     }
@@ -1354,6 +1354,14 @@ export default function SdlcScreen(): ReactElement {
     openLink(url, event ?? null);
   };
 
+  /** A track's own page, with its conversations alongside it. */
+  const trackSearch = (trackId: string): string => {
+    const search = new URLSearchParams({ track: trackId });
+    search.set('discussion', '1');
+    search.set('chat', 'conversations');
+    return `?${search.toString()}`;
+  };
+
   const folderPageSearch = (
     folderId: string,
     tab: FolderTab | null,
@@ -1392,8 +1400,10 @@ export default function SdlcScreen(): ReactElement {
     tab: FolderTab | null = null,
     event?: { metaKey: boolean; ctrlKey: boolean },
     /** Opens the conversation panel in the same navigation, rather than a second
-     *  one that would replace this entry and take the tab with it. */
-    withDiscussion = false,
+     *  one that would replace this entry and take the tab with it. On by
+     *  default: opening a folder, or a tab inside one, shows what is being
+     *  discussed about it. */
+    withDiscussion = true,
   ): void => {
     if (!channelId) return;
     if (shouldOpenInNewWindow(event) && openFolderInWindow(folderId, tab)) return;
@@ -1432,7 +1442,7 @@ export default function SdlcScreen(): ReactElement {
     setFolderDiscussion(null);
     navigateWithinSdlc(
       `/sdlc/${channelId}/tracks`,
-      selectedTrackId ? `?track=${encodeURIComponent(selectedTrackId)}` : '',
+      selectedTrackId ? trackSearch(selectedTrackId) : '',
     );
   };
 
@@ -1967,7 +1977,7 @@ export default function SdlcScreen(): ReactElement {
     setTrackDialog(false);
     setTrackName('');
     setTrackDescription('');
-    navigateWithinSdlc(`/sdlc/${channelId}/tracks`, `?track=${encodeURIComponent(id)}`);
+    navigateWithinSdlc(`/sdlc/${channelId}/tracks`, trackSearch(id));
   };
 
   const activeTrackOptions = tracks
@@ -3061,10 +3071,7 @@ export default function SdlcScreen(): ReactElement {
   };
   const openTrack = (trackId: string | null): void => {
     if (!channelId) return;
-    navigateWithinSdlc(
-      `/sdlc/${channelId}/tracks`,
-      trackId ? `?track=${encodeURIComponent(trackId)}` : '',
-    );
+    navigateWithinSdlc(`/sdlc/${channelId}/tracks`, trackId ? trackSearch(trackId) : '');
   };
 
   const sectionNavRows = SECTIONS.map(item => {
