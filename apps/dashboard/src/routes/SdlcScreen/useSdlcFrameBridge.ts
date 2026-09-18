@@ -163,9 +163,28 @@ export function embedPageOverElement(url: string, element: HTMLElement): () => v
     const overlays = document.querySelectorAll(
       '[role="dialog"], [role="menu"], [data-radix-popper-content-wrapper]',
     );
-    // An overlay holding the hole is not in the way — it is the thing asking
-    // for the page, as the dialog that browses for a link to save does.
-    return Array.from(overlays).some(overlay => !overlay.contains(element));
+    const hole = element.getBoundingClientRect();
+    return Array.from(overlays).some(overlay => {
+      // An overlay holding the hole is not in the way — it is the thing asking
+      // for the page, as the dialog that browses for a link to save does.
+      if (overlay.contains(element)) return false;
+      // A tooltip is not either: it is a label for the button under the
+      // pointer, and blanking the whole page to show one reads as the page
+      // vanishing when the mouse merely passes a toolbar icon.
+      if (overlay.matches('[role="tooltip"]') || overlay.querySelector('[role="tooltip"]')) {
+        return false;
+      }
+      // Nor is one that opens somewhere else entirely — a menu in the chat
+      // panel beside the page never covers it, so the page can stay.
+      const box = overlay.getBoundingClientRect();
+      if (box.width === 0 || box.height === 0) return false;
+      const overlaps =
+        box.left < hole.right &&
+        box.right > hole.left &&
+        box.top < hole.bottom &&
+        box.bottom > hole.top;
+      return overlaps;
+    });
   };
 
   const sync = (): void =>

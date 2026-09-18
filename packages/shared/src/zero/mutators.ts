@@ -407,6 +407,29 @@ async function hasCanvasVersionEditAccess(
   return false;
 }
 
+/**
+ * A hub entity carries no scope of its own: the CHANNEL it lives under is the
+ * edge pointing at it. Membership of any hub that placed the entity is what
+ * grants the right to comment on it.
+ */
+async function assertSdlcEntityMember(
+  tx: Transaction<Schema>,
+  entityId: string,
+  userId: string,
+): Promise<void> {
+  const edges = await tx.run(zql.sdlc_entity_links.where('targetId', entityId));
+  const channelIds = [
+    ...new Set(edges.map((edge) => edge.channelId).filter((id): id is string => Boolean(id))),
+  ];
+  for (const channelId of channelIds) {
+    const participant = await tx.run(
+      zql.channel_participants.where('channelId', channelId).where('userId', userId).one(),
+    );
+    if (participant) return;
+  }
+  throw new Error('Hub membership required');
+}
+
 async function assertCanvasCommentEditAccess(
   tx: Transaction<Schema>,
   canvasId: string,
@@ -8061,6 +8084,58 @@ export const mutators = defineMutators({
             baseBranch: newBaseBranch,
           });
         }
+      },
+    ),
+  },
+  sdlcItemComment: {
+    add: defineMutator(
+      z.object({
+        id: z.string(),
+        entityType: z.string().min(1),
+        entityId: z.string().min(1),
+        body: z.string().min(1),
+        anchorQuote: z.string().optional(),
+        anchorSelector: z.string().optional(),
+        timestamp: z.number(),
+      }),
+      async ({ tx, ctx, args }) => {
+        await assertSdlcEntityMember(tx, args.entityId, ctx.userID);
+        await tx.mutate.sdlc_item_comments.insert({
+          id: args.id,
+          workspaceId: ctx.workspaceId,
+          entityType: args.entityType,
+          entityId: args.entityId,
+          body: args.body,
+          anchorQuote: args.anchorQuote ?? null,
+          anchorSelector: args.anchorSelector ?? null,
+          resolved: false,
+          resolvedBy: null,
+          resolvedAt: null,
+          createdBy: ctx.userID,
+          createdAt: args.timestamp,
+          updatedAt: args.timestamp,
+        });
+      },
+    ),
+    setResolved: defineMutator(
+      z.object({
+        commentId: z.string(),
+        resolved: z.boolean(),
+        timestamp: z.number(),
+      }),
+      async ({ tx, ctx, args: { commentId, resolved, timestamp } }) => {
+        const comment = await tx.run(zql.sdlc_item_comments.where('id', commentId).one());
+        if (!comment) {
+          throw new Error('Comment not found');
+        }
+        await assertSdlcEntityMember(tx, comment.entityId, ctx.userID);
+        await tx.mutate.sdlc_item_comments.update({
+          id: commentId,
+          resolved,
+          resolvedBy: resolved ? ctx.userID : null,
+          resolvedAt: resolved ? timestamp : null,
+          updatedAt: timestamp,
+        });
       },
     ),
   },
