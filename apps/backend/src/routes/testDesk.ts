@@ -9,7 +9,6 @@ import {
   WorkspaceRole,
 } from '@xyne/shared';
 import { db } from '@/database/client';
-import { authMiddleware } from '@/middleware/auth';
 import { config } from '@/config/env';
 import { encrypt } from '@/services/encryptionService';
 import { emailService } from '@/services/emailService';
@@ -26,9 +25,12 @@ import {
 const router = Router();
 const channelExternalSourceResolver = new ChannelExternalSourceResolver();
 // Intentionally permissive for automation fixtures; provider-grade RFC validation
-// is covered by the real Gmail/Microsoft integrations.
-const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const INCOMING_EMAIL_LIMIT = getPositiveIntegerEnv('MOCK_DESK_INCOMING_EMAIL_LIMIT', 120);
+// is covered by the real Gmail/Microsoft integrations. Deliberately NOT a regex:
+// the previous /^[^\s@]+@[^\s@]+\.[^\s@]+$/ backtracks polynomially (CodeQL
+// js/polynomial-redos) and is evaluated over ~20 caller-supplied fields per
+// request, on most routes before any rate limiting.
+const MAX_EMAIL_LENGTH = 254;
+const INCOMING_EMAIL_LIMIT = config.mockDeskIncomingEmailLimit;
 const INCOMING_EMAIL_WINDOW_MS = 60_000;
 // Mock-only, process-local rate limiting. This is best-effort protection for
 // local/CI fixtures, not a production-grade distributed throttling mechanism.
@@ -76,13 +78,20 @@ function canManageWorkspaceDesk(role: string | undefined): boolean {
   return role === WorkspaceRole.OWNER || role === WorkspaceRole.ADMIN;
 }
 
-function getPositiveIntegerEnv(name: string, fallback: number): number {
-  const parsed = Number.parseInt(process.env[name] ?? '', 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
-}
-
+// Linear-time structural check: length cap, no whitespace, exactly one '@',
+// non-empty local part, and a domain with an interior dot. No backtracking, so
+// untrusted input cannot be shaped to burn CPU here.
 function isValidEmail(email: string): boolean {
-  return EMAIL_REGEX.test(email.trim());
+  const candidate = email.trim();
+  if (!candidate || candidate.length > MAX_EMAIL_LENGTH) return false;
+  if (/\s/.test(candidate)) return false;
+
+  const atIndex = candidate.indexOf('@');
+  if (atIndex <= 0 || atIndex !== candidate.lastIndexOf('@')) return false;
+
+  const domain = candidate.slice(atIndex + 1);
+  const dotIndex = domain.indexOf('.');
+  return dotIndex > 0 && dotIndex < domain.length - 1;
 }
 
 function normalizeEmail(value: string): string {
@@ -211,6 +220,30 @@ function isMockAttachmentInput(value: unknown): value is MockAttachmentInput {
   );
 }
 
+interface BulkGmailMessage {
+  messageId: string;
+  threadId: string;
+  from: string;
+  subject: string;
+  to?: unknown;
+  cc?: unknown;
+  bcc?: unknown;
+  replyTo?: unknown;
+  body?: unknown;
+  date?: unknown;
+}
+
+function isBulkGmailMessage(value: unknown): value is BulkGmailMessage {
+  if (!value || typeof value !== 'object') return false;
+  const record = value as Record<string, unknown>;
+  return (
+    typeof record.messageId === 'string' &&
+    typeof record.threadId === 'string' &&
+    typeof record.from === 'string' &&
+    typeof record.subject === 'string'
+  );
+}
+
 function asMockAttachments(value: unknown): Array<{
   filename: string;
   mimetype: string;
@@ -262,7 +295,9 @@ async function createMockEmailAttachments(params: {
   });
 }
 
-router.use(authMiddleware.authenticate);
+// Authentication is applied once, at the mount point in app.ts:
+//   this.app.use('/api/test', authMiddleware.authenticate, testDeskRoutes)
+// Re-applying it here would run two session/user lookups per request.
 
 router.post('/desk/workspace-mailbox', async (req, res, next) => {
   try {
@@ -486,7 +521,9 @@ router.post('/desk/channel-source/:channelId/disconnect', async (req, res, next)
       }
       return res.status(404).json({ error: 'No active mock Desk source found for this channel' });
     }
-    if (rejectNonMockSourceOverwrite(source, res)) return;
+    // Invariant: `source` was picked by `hasMockDeskCredentials` above, so it
+    // always carries mock credentials - a rejectNonMockSourceOverwrite guard
+    // here could never fire.
     if (!canManageWorkspaceSource && source.ownerUserId !== userId) {
       return res.status(403).json({ error: 'Only the source owner can disconnect this Desk source' });
     }
@@ -529,12 +566,28 @@ router.patch('/desk/channel/:channelId/auto-merge', async (req, res, next) => {
     }
     const channel = await db.channel.findFirst({
       where: { id: channelId, workspaceId },
-      select: { id: true },
+      select: { id: true, projectId: true },
     });
     if (!channel) return res.status(404).json({ error: 'Desk channel not found in current workspace' });
-    const preference = await db.emailChannelPreference.update({
+
+    // Upsert (not update): a channel that never had a Desk source configured has
+    // no preference row, and `update` throws Prisma P2025 -> 500. Mirrors the
+    // /desk/channel-source sibling, which upserts for the same reason.
+    const firstBoard = await db.board.findFirst({
+      where: { projectId: channel.projectId },
+      orderBy: { createdAt: 'asc' },
+      select: { id: true },
+    });
+    if (!firstBoard) {
+      return res.status(409).json({
+        error: 'Project has no boards configured - cannot set the Desk auto-merge preference',
+      });
+    }
+    const emailMergeMode = enabled ? 'ENABLED' : 'DISABLED';
+    const preference = await db.emailChannelPreference.upsert({
       where: { channelId },
-      data: { emailMergeMode: enabled ? 'ENABLED' : 'DISABLED' },
+      create: { channelId, workspaceId, boardId: firstBoard.id, emailMergeMode },
+      update: { emailMergeMode },
       select: { channelId: true, emailMergeMode: true },
     });
     return res.json({ success: true, ...preference });
@@ -547,11 +600,12 @@ router.post('/desk/slack-workspace', async (req, res, next) => {
   try {
     if (!requireMockDeskEnabled(res)) return;
 
-    const workspaceId = req.user?.workspaceId;
-    const userId = req.user?.id;
-    if (!workspaceId || !userId) {
-      return res.status(401).json({ error: 'Authenticated user workspace is required' });
-    }
+    // Workspace-wide source: same owner/admin gate as /desk/workspace-mailbox.
+    // Without it, any authenticated member could create or re-own the shared
+    // mock Slack ExternalSource (the upsert sets ownerUserId).
+    const manager = await requireWorkspaceDeskManager(req, res);
+    if (!manager) return;
+    const { workspaceId, userId } = manager;
 
     const name = `slack-mock-workspace-${workspaceId}`;
     const existingSource = await db.externalSource.findUnique({
@@ -799,7 +853,7 @@ router.post('/desk/pubsub/bulk-gmail', async (req, res, next) => {
     const workspaceId = req.user?.workspaceId;
     const channelId = typeof req.body?.channelId === 'string' ? req.body.channelId : '';
     const historyId = typeof req.body?.historyId === 'string' ? req.body.historyId : '';
-    const messages = Array.isArray(req.body?.messages) ? req.body.messages : [];
+    const messages: unknown[] = Array.isArray(req.body?.messages) ? req.body.messages : [];
     if (!userId || !workspaceId) {
       return res.status(401).json({ error: 'Authenticated workspace required' });
     }
@@ -818,20 +872,13 @@ router.post('/desk/pubsub/bulk-gmail', async (req, res, next) => {
     if (!source || source.workspaceId !== workspaceId) {
       return res.status(404).json({ error: 'No Google Desk source found for channel' });
     }
-    const invalid = messages.find(
-      (message: any) =>
-        typeof message?.messageId !== 'string' ||
-        typeof message?.threadId !== 'string' ||
-        typeof message?.from !== 'string' ||
-        typeof message?.subject !== 'string',
-    );
-    if (invalid) {
+    if (!messages.every(isBulkGmailMessage)) {
       return res.status(400).json({ error: 'Each message requires messageId, threadId, from, and subject' });
     }
     const deterministicAdapter = {
       ...googleAdapter,
       preprocess: async () =>
-        messages.map((message: any) => ({
+        messages.map((message) => ({
           pubsubData: { emailAddress: source.displayName, historyId },
           parsedEmail: {
             messageId: message.messageId,
