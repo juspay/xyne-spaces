@@ -24,6 +24,7 @@ export interface TicketFilters {
   created?: boolean; // filter to show only tickets created by current user
   stages?: string[];
   ticketTypes?: string[];
+  merchantIds?: string[]; // exact ticket.merchantId matches
   aiCategory?: string[]; // AI classification categories (e.g. "Mandate", "Refund")
   generatedTags?: string[]; // AI-generated tags in "category:tag" format (e.g. "priority:high")
   hasAiDraft?: boolean; // filter to show only tickets with AI-generated email drafts

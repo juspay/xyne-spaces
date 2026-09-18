@@ -52,6 +52,7 @@ type TicketCountsSnapshot = {
   createdBy: string | null;
   userGroupId: string | null;
   ticketType: string | null;
+  merchantId?: string | null;
   isStageOverdue: boolean;
   eta: number | null;
   createdAt: number;
@@ -260,6 +261,8 @@ const matchesRequest = (
     return false;
   if (filters.stages?.length && !filters.stages.includes(snapshot.stageName ?? '')) return false;
   if (filters.ticketTypes?.length && !filters.ticketTypes.includes(snapshot.ticketType ?? ''))
+    return false;
+  if (filters.merchantIds?.length && !filters.merchantIds.includes(snapshot.merchantId ?? ''))
     return false;
   if (filters.assigned !== undefined) {
     const isAssigned = Boolean(snapshot.assignedTo);
@@ -526,6 +529,9 @@ const normalizeFilters = (filters?: TicketFilters): KanbanCountsFilters | undefi
 
   const ticketTypes = sortUniqueValues(filters.ticketTypes);
   if (ticketTypes) normalized.ticketTypes = ticketTypes;
+
+  const merchantIds = sortUniqueValues(filters.merchantIds);
+  if (merchantIds) normalized.merchantIds = merchantIds;
 
   const dynamicFields = normalizeDynamicFields(filters.dynamicFields);
   if (dynamicFields) normalized.dynamicFields = dynamicFields;
