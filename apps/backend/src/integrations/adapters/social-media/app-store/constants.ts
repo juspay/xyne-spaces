@@ -38,7 +38,7 @@ export const APP_STORE_RECONCILE_INTERVAL_MS = 30 * 60 * 1000;
 export const APP_STORE_MAX_RECONCILE_PER_RUN = 50;
 
 export const APP_STORE_APP_FIELD = 'App Store App';
-export const APP_STORE_BUNDLE_ID_FIELD = 'App Store Bundle ID';
+export const APP_STORE_APP_ID_FIELD = 'App Store App ID';
 export const APP_STORE_TERRITORY_FIELD = 'App Store Territory';
 export const APP_STORE_RESPONSE_STATE_FIELD = 'App Store Response State';
 
