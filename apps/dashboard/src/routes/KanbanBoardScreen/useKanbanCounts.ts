@@ -24,8 +24,7 @@ interface UseKanbanCountsOptions extends FlowStepVisibilityOptions {
   columnType?: 'stage' | 'status';
   projectId?: string;
   boardId?: string;
-  userId?: string;
-  groupId?: string;
+  boardIds?: string[];
   filters?: TicketFilters;
   groupBy?: KanbanCountsGroupBy;
   showOverdueOnly?: boolean;
@@ -106,16 +105,6 @@ const getTicketCountsRoom = (
   if (request.viewMode === 'board') {
     if (request.projectId) return `ticket-counts:project:${request.projectId}`;
     if (request.boardId) return `ticket-counts:board:${request.boardId}`;
-    return null;
-  }
-
-  if (request.viewMode === 'user-tickets') {
-    if (request.userId) return `ticket-counts:user:${request.userId}`;
-    return null;
-  }
-
-  if (request.viewMode === 'group-tickets') {
-    if (request.groupId) return `ticket-counts:group:${request.groupId}`;
     return null;
   }
 
@@ -220,17 +209,6 @@ const matchesRequest = (
   if (request.boardId && snapshot.boardId !== request.boardId) return false;
   if (request.projectId && !request.boardId && snapshot.projectId !== request.projectId)
     return false;
-  if (request.userId && request.viewMode === 'user-tickets') {
-    if (
-      !matchesIdentity(snapshot.assignedTo, request.userId) &&
-      !matchesIdentity(snapshot.createdBy, request.userId)
-    ) {
-      return false;
-    }
-  }
-  if (request.groupId && request.viewMode === 'group-tickets') {
-    if (!matchesIdentity(snapshot.userGroupId, request.groupId)) return false;
-  }
   if (request.viewMode === 'my-tickets' && currentUserId) {
     const assignedMatch = matchesIdentity(snapshot.assignedTo, currentUserId);
     const createdMatch = matchesIdentity(snapshot.createdBy, currentUserId);
@@ -369,16 +347,17 @@ const applyGroupDelta = (
 ): KanbanCountGroup[] => {
   const nextGroups = groups.map(cloneGroup);
   for (const groupKey of groupKeys) {
-    const groupIndex = nextGroups.findIndex(group => group.groupKey === groupKey);
-    const displayName =
-      groupKey === ALL_TICKETS_GROUP || groupKey === UNASSIGNED_GROUP ? groupKey : groupKey;
+    // Snapshot keys may be `user:`-prefixed while deltas are bare — match both.
+    const groupIndex = nextGroups.findIndex(
+      group => group.groupKey === groupKey || normalizeIdentity(group.groupKey) === groupKey,
+    );
     let group = groupIndex >= 0 ? nextGroups[groupIndex] : null;
 
     if (!group) {
       if (delta <= 0) continue;
       group = {
         groupKey,
-        displayName,
+        displayName: groupKey,
         totalCount: 0,
         stages: {},
         statuses: {},
@@ -392,13 +371,12 @@ const applyGroupDelta = (
     } else {
       applyCountDelta(group, stageKeys, delta, 'stages');
     }
-
-    if (group.totalCount <= 0) {
-      return nextGroups.filter(item => item.groupKey !== groupKey);
-    }
   }
 
-  return nextGroups.sort((left, right) => left.displayName.localeCompare(right.displayName));
+  // Drop emptied groups only after every key applied.
+  return nextGroups
+    .filter(group => group.totalCount > 0)
+    .sort((left, right) => left.displayName.localeCompare(right.displayName));
 };
 
 const applyTicketCountsUpdate = (
@@ -563,8 +541,7 @@ const toRequest = (options: UseKanbanCountsOptions): KanbanCountsRequest => {
   if (options.columnType !== undefined) request.columnType = options.columnType;
   if (options.projectId !== undefined) request.projectId = options.projectId;
   if (options.boardId !== undefined) request.boardId = options.boardId;
-  if (options.userId !== undefined) request.userId = options.userId;
-  if (options.groupId !== undefined) request.groupId = options.groupId;
+  if (options.boardIds !== undefined) request.boardIds = options.boardIds;
   if (options.excludeFlowSteps !== undefined) request.excludeFlowSteps = options.excludeFlowSteps;
 
   const normalizedFilters = normalizeFilters(options.filters);

@@ -562,6 +562,7 @@ export function CustomLiveKitRoom({
           onDeleteTranscriptChange={setDeleteTranscript}
           submitting={dispositionSubmitting}
           error={dispositionError}
+          trackMetadata={{ callId, participantCount: participants.length, isHost }}
         />
         <TranscriptDispositionModal
           isOpen={showDispositionModal}
@@ -594,6 +595,7 @@ export function CustomLiveKitRoom({
             channelId={channelId}
             projectId={currentChannel.projectId}
             selectedBoardId={ticketBoardId}
+            trackSource='call'
             initialTitle={ticketTitle}
             initialDescription={ticketDescription}
             initialAssignee={initialTicketAssignee}
@@ -658,6 +660,7 @@ export function CustomLiveKitRoom({
         onDeleteTranscriptChange={setDeleteTranscript}
         submitting={dispositionSubmitting}
         error={dispositionError}
+        trackMetadata={{ callId, participantCount: participants.length, isHost }}
       />
       <TranscriptDispositionModal
         isOpen={showDispositionModal}
@@ -690,6 +693,7 @@ export function CustomLiveKitRoom({
           channelId={channelId}
           projectId={currentChannel.projectId}
           selectedBoardId={ticketBoardId}
+          trackSource='call'
           initialTitle={ticketTitle}
           initialDescription={ticketDescription}
           initialAssignee={initialTicketAssignee}

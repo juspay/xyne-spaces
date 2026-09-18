@@ -125,6 +125,7 @@ export interface NormalizedData {
     hasAttachments?: boolean;
     attachmentCount?: number;
     isReply?: boolean; // true for Ticket_Thread_Add events
+    targetConversationId?: string; // append here instead of thread matching
     
     [key: string]: string | number | boolean | Date | string[] | undefined; // Platform-specific metadata
   };

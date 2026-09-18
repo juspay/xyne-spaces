@@ -65,7 +65,7 @@ import {
   parseTicketEtaManagement,
   parseBoardEtaManagement,
 } from '@xyne/shared';
-import { useNavigate, Link, useLocation } from 'react-router-dom';
+import { useNavigate, Link, useLocation, useNavigationType } from 'react-router-dom';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { useCurrentUserRoleIds } from '../../../hooks/useRoles';
 import { useRouteContext } from '../../../hooks/useRouteContext';
@@ -95,6 +95,12 @@ import {
   VESPA_MAX_BOARD_FILTER_VALUES,
 } from '../../../hooks/useProjectTicketSearch';
 import { getSubTicketLinkErrorMessage, subTicketService } from '../../../services/subTicketService';
+import { globalClickTracker } from '../../../services/Analytics/globalClickTracker';
+import {
+  ticketTrackingMetadata,
+  trackTicketOutcome,
+} from '../../../services/Analytics/ticketTracking';
+import { readTrackSource } from '../../../services/Analytics/trackSource';
 import { RenderMessageWithHTML } from '../../Chat/RenderMessageWithHTML/RenderMessageWithHTML';
 import { TicketTagsBadge } from '../../xyne-desk/EmailBody/TagsBadgePopover';
 import { EntitySelector } from '../../ui/EntitySelector/EntitySelector';
@@ -109,6 +115,7 @@ import { calculateETADeadline, calculateWorkingDurationMs } from '../../../utils
 import { formatETADisplay, getLocalISOString, getStatusBadgeConfig } from '../utils';
 import { cn } from '../../../utils/classNames';
 import { getApiErrorMessage } from '../../../utils/apiError';
+import { surfaceMutationError } from '../../../utils/zeroMutationToast';
 import Button from '../../ui/Button';
 import { Dialog } from '../../ui/Dialog';
 import { FileBubble } from '../../ui/FileBubble/FileBubble';
@@ -132,6 +139,7 @@ import {
   type ResolvedBoardAdditionalField,
   type LeftoverFieldValue,
 } from '../../../utils/board/boardFormEntityValues';
+import { AddToStreamButton } from '../../Streams/components/AddToStreamMenu/AddToStreamMenu';
 
 type SubTicketTreeMapping = QueryResultType<typeof queries.subTicketMappingsForTickets>[number];
 type SubTicketTreeSubTicket = NonNullable<SubTicketTreeMapping['subTicket']>;
@@ -449,11 +457,25 @@ interface TicketDetailsProps {
   ticketId: string;
   onNavigateToTicket?: (ticketId: string) => void;
   expandedView?: boolean;
+  /**
+   * Drop the back chevron and the ticket id from the expanded header.
+   *
+   * For hosts that already name the ticket in their own chrome and have no
+   * "back" to offer — a Streams column is the ticket, so the id would read
+   * twice and the chevron would point nowhere.
+   */
+  hideBackNav?: boolean;
   onFillRCA?: () => void;
   /** Display the current stage without exposing manual lifecycle transitions. */
   stageReadOnly?: boolean;
   /** Show only the Sub-Tickets section, for hosts that give it its own tab. */
   subTicketsOnly?: boolean;
+  /**
+   * Where the open came from, for hosts that show a ticket without navigating
+   * (the SDLC track list). Route-driven hosts leave it unset and TICKET_VIEWED
+   * reads `location.state.trackSource` instead.
+   */
+  trackSource?: string;
 }
 
 const TicketKeyValuePair = ({
@@ -566,14 +588,17 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
   ticketId,
   onNavigateToTicket,
   expandedView = false,
+  hideBackNav = false,
   onFillRCA,
   stageReadOnly = false,
   subTicketsOnly = false,
+  trackSource,
 }) => {
   const zero = useZero();
   const navigate = useNavigate();
   const shareableOrigin = useShareableOrigin();
   const location = useLocation();
+  const navigationType = useNavigationType();
   const { isMobile } = usePlatform();
   const { baseRoute, buildChannelRoute } = useRouteContext();
 
@@ -639,6 +664,49 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
 
   // Query ticket data
   const [ticket] = useCachedQuery(queries.ticketDetailsByIdV2({ ticketId: ticketId }));
+
+  // TICKET_VIEWED: one event per ticket arrival, whichever way the user got here
+  // (kanban card, list row, chat link, notification, keyboard, deep link, back
+  // button). Waits for the row so the dimensions ride along, then latches on
+  // ticketId so re-renders and tab switches inside the same ticket don't refire.
+  // `source` follows the CHANNEL_VIEWED rule (see readTrackSource); a host that
+  // shows the ticket without navigating passes `trackSource` instead.
+  // No event label: the title is user content and eventLabel is stored unmasked.
+  const viewedTicketIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!ticket || !ticketId) return;
+    if (viewedTicketIdRef.current === ticketId) return;
+    viewedTicketIdRef.current = ticketId;
+
+    const source = trackSource ?? readTrackSource(location.state, navigationType, location.key);
+    const path = location.pathname;
+    const surface = path.includes('/projects')
+      ? 'projects'
+      : path.includes('/sdlc')
+        ? 'sdlc'
+        : path.includes('/activity')
+          ? 'activity'
+          : path.includes('/chat')
+            ? 'chat'
+            : 'other';
+
+    globalClickTracker.trackManualEvent('Tickets', 'TICKET_VIEWED', undefined, {
+      ...ticketTrackingMetadata(ticket),
+      source,
+      surface,
+      openedFromNotification: source === 'notification',
+      expandedView,
+    });
+  }, [
+    ticket,
+    ticketId,
+    trackSource,
+    location.state,
+    location.key,
+    location.pathname,
+    navigationType,
+    expandedView,
+  ]);
   const [ticketTypeDropdownOpened, setTicketTypeDropdownOpened] = useState(false);
   const [ticketTypeLookupResult, ticketTypeLookupDetails] = useCachedQuery(
     queries.lookupValuesByType({ type: LookupType.TICKET_TYPE }),
@@ -1426,10 +1494,6 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
   const [parentSubTickets] = useCachedQuery(
     queries.subTicketsByMappedTicketId({ mappedTicketId: ticketId }),
   );
-  // Gates the Create Sub-Ticket button only, mirroring subTicket.create's row-existence
-  // guard. linkExisting has no depth limit, so the picker below is deliberately not gated.
-  const canCreateNestedSubTicket =
-    (parentSubTickets?.length ?? 0) === 0 || boardData?.boardType === BoardType.FLOW;
 
   // Query parent tickets through the mappings
   const parentTicketIds = useMemo(
@@ -1847,17 +1911,104 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
   // dropped via `void zero.mutate(...)`, so the user got no feedback (e.g. an unassign
   // appeared to do nothing). Declared before the loading guard so the debounced
   // auto-save effects below can reuse it.
+  // Every field edit on this screen funnels through applyTicketUpdate, so the
+  // "it actually saved" outcome is reported once here rather than per handler.
+  // Callers must snapshot the row BEFORE awaiting the mutation: Zero applies
+  // the update optimistically, so by the time `.server` settles `ticketRef`
+  // already holds the new values and `previous` would equal `to`.
+  const ticketRef = useRef(ticket);
+  ticketRef.current = ticket;
+  const outcomeStagesRef = useRef(stages);
+  outcomeStagesRef.current = stages;
+  type TicketUpdate = Parameters<typeof mutators.ticket.update>[0];
+  type TicketRow = NonNullable<typeof ticket>;
+  const trackDetailsOutcome = useCallback(
+    (
+      update: TicketUpdate,
+      before: TicketRow | null | undefined,
+      stagesBefore = outcomeStagesRef.current,
+    ): void => {
+      if (!before) return;
+      const u = update as Record<string, unknown>;
+      const surface = 'details' as const;
+      if (u['isArchived'] === true) {
+        trackTicketOutcome('TICKET_ARCHIVED', before, { surface });
+        return;
+      }
+      // One update can carry several fields (a stage move also sets statusV2;
+      // a form save can change type and group). Report each so a multi-field
+      // update never hides the second change behind the first.
+      if (typeof u['stageName'] === 'string') {
+        const list = stagesBefore ?? [];
+        const fromSeq = list.find(s => s.name === before.stageName)?.sequenceNumber;
+        const toSeq = list.find(s => s.name === u['stageName'])?.sequenceNumber;
+        trackTicketOutcome('TICKET_STAGE_CHANGED', before, {
+          surface,
+          to: u['stageName'],
+          previous: before.stageName ?? null,
+          ...(typeof u['statusV2'] === 'string' && { toStatus: u['statusV2'] }),
+          ...(typeof fromSeq === 'number' &&
+            typeof toSeq === 'number' && { isBackward: toSeq < fromSeq }),
+        });
+      } else if (typeof u['statusV2'] === 'string') {
+        // Status riding a stage move is reported as `toStatus` above, not twice.
+        trackTicketOutcome('TICKET_STATUS_CHANGED', before, {
+          surface,
+          to: u['statusV2'],
+          previous: before.statusV2 ?? null,
+        });
+      }
+      if ('assignedTo' in u) {
+        const next = u['assignedTo'];
+        trackTicketOutcome('TICKET_ASSIGNED', before, {
+          surface,
+          unassigned: !next,
+          selfAssigned: !!next && next === currentUser?.id,
+          hadAssignee: !!before.assignedTo,
+        });
+      }
+      const enumOutcomes = [
+        ['priority', 'TICKET_PRIORITY_CHANGED'],
+        ['boardId', 'TICKET_BOARD_CHANGED'],
+      ] as const;
+      for (const [key, event] of enumOutcomes) {
+        if (typeof u[key] === 'string') {
+          trackTicketOutcome(event, before, {
+            surface,
+            to: u[key],
+            previous: before[key] ?? null,
+          });
+        }
+      }
+      const fieldNames: Record<string, string> = {
+        title: 'title',
+        description: 'description',
+        ticketType: 'ticketType',
+        userGroupId: 'userGroup',
+        eta: 'eta',
+      };
+      for (const [key, field] of Object.entries(fieldNames)) {
+        if (key in u) trackTicketOutcome('TICKET_FIELD_UPDATED', before, { surface, field });
+      }
+    },
+    [currentUser?.id],
+  );
+
   const applyTicketUpdate = useCallback(
     async (
       update: Parameters<typeof mutators.ticket.update>[0],
       errorFallback = 'Failed to update ticket',
     ): Promise<boolean> => {
+      // Snapshot before the await — see trackDetailsOutcome.
+      const before = ticketRef.current;
+      const stagesBefore = outcomeStagesRef.current;
       try {
         const result = await zero.mutate(mutators.ticket.update(update)).server;
         if (result.type === 'error') {
           toast.error(result.error.message || errorFallback);
           return false;
         }
+        trackDetailsOutcome(update, before, stagesBefore);
         return true;
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
@@ -1865,7 +2016,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
         return false;
       }
     },
-    [zero],
+    [zero, trackDetailsOutcome],
   );
 
   // Debounced auto-save while editing — persist the title as the user types
@@ -2092,6 +2243,12 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
           // Fallback only — the row renders from the linked ticket itself.
           candidate?.xyneId || candidate?.title || 'Subticket',
         )
+        .then(() => {
+          trackTicketOutcome('TICKET_LINKED', ticket, {
+            surface: 'details',
+            relation: 'sub_ticket',
+          });
+        })
         .catch((error: unknown) => {
           toast.error(getSubTicketLinkErrorMessage(error, 'Failed to link sub-ticket'));
         })
@@ -2120,6 +2277,12 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
 
       void subTicketService
         .unlink(mappingId)
+        .then(() => {
+          trackTicketOutcome('TICKET_UNLINKED', ticketRef.current, {
+            surface: 'details',
+            relation: 'sub_ticket',
+          });
+        })
         .catch((error: unknown) => {
           toast.error(getSubTicketLinkErrorMessage(error, 'Failed to unlink sub-ticket'));
         })
@@ -2702,15 +2865,31 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     // Use existing entry ID or generate a new one
     const entryId = currentStageEntry?.id || uuidv4();
 
-    void zero.mutate(
-      mutators.ticketStageEta.update({
-        id: entryId,
-        stageEta: newStageEtaDate.getTime(),
-        updatedAt: Date.now(),
-        ticketId: ticket.id,
-        stageId: currentStage.id,
-      }),
-    );
+    void zero
+      .mutate(
+        mutators.ticketStageEta.update({
+          id: entryId,
+          stageEta: newStageEtaDate.getTime(),
+          updatedAt: Date.now(),
+          ticketId: ticket.id,
+          stageId: currentStage.id,
+        }),
+      )
+      .server.then(result => {
+        if (result.type !== 'error') {
+          trackTicketOutcome('TICKET_FIELD_UPDATED', ticket, {
+            surface: 'details',
+            field: 'stageEta',
+          });
+        }
+      })
+      .catch((err: unknown) => {
+        logger.error(LogEvent.ZERO_MUTATION_ERROR, {
+          component: 'TicketDetails',
+          mutator: 'ticketStageEta.update',
+          error: err instanceof Error ? err.message : String(err),
+        });
+      });
 
     setEditingStageETA(false);
   };
@@ -2781,36 +2960,55 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
   const handleToggleTag = (tagName: string): void => {
     const existingTag = tags?.find(t => t.tagName === tagName);
 
-    if (existingTag) {
-      zero.mutate(
-        mutators.ticketTagV2.delete({
-          tagId: existingTag.id,
-          mappingId: existingTag.id,
-        }),
-      );
-    } else {
-      zero.mutate(
-        mutators.ticketTagV2.create({
-          ticketId: ticket.id,
-          tagId: uuidv4(),
-          projectTagId: uuidv4(),
-          mappingId: uuidv4(),
-          projectId: ticket.projectId,
-          tagName: tagName.trim(),
-        }),
-      );
-    }
+    const tagMutation = existingTag
+      ? zero.mutate(
+          mutators.ticketTagV2.delete({
+            tagId: existingTag.id,
+            mappingId: existingTag.id,
+          }),
+        )
+      : zero.mutate(
+          mutators.ticketTagV2.create({
+            ticketId: ticket.id,
+            tagId: uuidv4(),
+            projectTagId: uuidv4(),
+            mappingId: uuidv4(),
+            projectId: ticket.projectId,
+            tagName: tagName.trim(),
+          }),
+        );
+    // Outcome only once the server confirmed, not on the optimistic apply.
+    void surfaceMutationError(tagMutation, 'Failed to update labels').then(ok => {
+      if (ok) {
+        trackTicketOutcome('TICKET_FIELD_UPDATED', ticket, {
+          surface: 'details',
+          field: 'tags',
+          action: existingTag ? 'remove' : 'add',
+        });
+      }
+    });
 
     setTagSearchQuery('');
   };
 
   const handleRemoveTag = (tagId: string): void => {
-    zero.mutate(
-      mutators.ticketTagV2.delete({
-        tagId,
-        mappingId: tagId,
-      }),
-    );
+    void surfaceMutationError(
+      zero.mutate(
+        mutators.ticketTagV2.delete({
+          tagId,
+          mappingId: tagId,
+        }),
+      ),
+      'Failed to remove label',
+    ).then(ok => {
+      if (ok) {
+        trackTicketOutcome('TICKET_FIELD_UPDATED', ticket, {
+          surface: 'details',
+          field: 'tags',
+          action: 'remove',
+        });
+      }
+    });
   };
 
   const handleTagKeyDown = (e: React.KeyboardEvent<HTMLInputElement>): void => {
@@ -2904,6 +3102,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     const formFieldId = isPlaceholder
       ? formEntityValueId.replace(/^(placeholder|prefill)-/, '')
       : '';
+    let fieldMutation: Parameters<typeof surfaceMutationError>[0];
 
     if (isPlaceholder) {
       const resolvedFormId = formId ?? boardCustomFieldsFormId;
@@ -2915,7 +3114,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
       }
 
       // Create a new form entity value record
-      void zero.mutate(
+      fieldMutation = zero.mutate(
         mutators.formEntityValue.createV2({
           id: uuidv4(),
           entityId: ticketId,
@@ -2929,7 +3128,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
       );
     } else {
       // Update existing record
-      void zero.mutate(
+      fieldMutation = zero.mutate(
         mutators.formEntityValue.update({
           formEntityValueId,
           newValue,
@@ -2937,6 +3136,18 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
         }),
       );
     }
+    // Field id only — the value is user content. Reported once the server
+    // confirmed, not on the optimistic apply.
+    void surfaceMutationError(fieldMutation, 'Failed to save field').then(ok => {
+      if (ok) {
+        trackTicketOutcome('TICKET_FIELD_UPDATED', ticket, {
+          surface: 'details',
+          field: 'dynamicField',
+          isPlaceholder,
+          valueCount: newValue.length,
+        });
+      }
+    });
   };
 
   const renderRelatedTicketRow = (
@@ -3011,7 +3222,11 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                     {getReferenceTitle(relatedTicket)}
                   </button>
                 ) : (
-                  <Link className='text-sm font-normal text-foreground truncate' to={link}>
+                  <Link
+                    className='text-sm font-normal text-foreground truncate'
+                    to={link}
+                    state={{ trackSource: 'related_ticket' }}
+                  >
                     {getReferenceTitle(relatedTicket)}
                   </Link>
                 )
@@ -3082,6 +3297,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
         const workspaceId = location.pathname.split('/')[1];
         void navigate(
           `/${workspaceId}/support/${mappedTicket.channelId}/${mappedTicket.xyneId}?selectedTab=thread`,
+          { state: { trackSource: 'ticket_details' } },
         );
         return;
       }
@@ -3128,6 +3344,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
             const workspaceId = pathParts[1];
             void navigate(
               `/${workspaceId}/support/${mappedTicket.channelId}/${mappedTicket.xyneId}?selectedTab=thread`,
+              { state: { trackSource: 'ticket_details' } },
             );
           } else {
             const workspaceId = location.pathname.split('/')[1];
@@ -3135,7 +3352,9 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
               `${mappedTicket.channelId}/${mappedTicket.conversationId}/${mappedTicket.id}`,
               { selectedTab: 'thread' },
             );
-            void navigate(`/${workspaceId}${base}#origin=${mappedTicket.conversationId}`);
+            void navigate(`/${workspaceId}${base}#origin=${mappedTicket.conversationId}`, {
+              state: { trackSource: 'sub_ticket' },
+            });
           }
         }
         return;
@@ -3316,17 +3535,12 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     boardData?.boardType === BoardType.FLOW ? null : (
       <button
         onClick={() => setIsSubTicketModalOpen(true)}
-        disabled={!canCreateNestedSubTicket}
         data-testid='create-sub-ticket-button'
         data-track-event='BUTTON_CLICK'
         data-track-category='Tickets'
         data-track-name='CREATE_SUB_TICKET'
         data-track-metadata={JSON.stringify({ ticketId: ticket.id })}
-        title={canCreateNestedSubTicket ? undefined : 'Sub-tickets cannot be nested on this board'}
-        className={cn(
-          'flex items-center gap-2 mt-3 text-sm text-muted-foreground transition-colors',
-          canCreateNestedSubTicket ? 'hover:text-foreground' : 'cursor-not-allowed opacity-50',
-        )}
+        className='flex items-center gap-2 mt-3 text-sm text-muted-foreground transition-colors hover:text-foreground'
       >
         <Plus size={16} />
         Create Sub-Ticket
@@ -3338,19 +3552,38 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
       {expandedView && (
         <div className='flex items-center justify-between mb-6'>
           <div className='flex items-center gap-x-1/2'>
-            <button
-              onClick={handleBackFromExpandedView}
-              data-track-category='Tickets'
-              data-track-name='BackFromExpandedView'
-            >
-              <ChevronLeft size={18} className='text-foreground' />
-            </button>
-            <span className='text-[14px] font-medium text-foreground px-2 py-0.5'>
-              {ticket.xyneId}
-            </span>
+            {!hideBackNav && (
+              <>
+                <button
+                  onClick={handleBackFromExpandedView}
+                  data-track-category='Tickets'
+                  data-track-name='BackFromExpandedView'
+                >
+                  <ChevronLeft size={18} className='text-foreground' />
+                </button>
+                <span className='text-[14px] font-medium text-foreground px-2 py-0.5'>
+                  {ticket.xyneId}
+                </span>
+              </>
+            )}
           </div>
           <div className='flex items-center gap-x-2'>
             <BoardTicketNav ticketId={ticketId} />
+            {/* A control of its own rather than an item in an overflow menu,
+                because this header has no overflow menu to put it in. Carries
+                the channel and conversation so the column has a way across to
+                the discussion under the ticket — a ticket column without them
+                renders fine and dead-ends, which is the thing a stream exists
+                not to be. */}
+            <AddToStreamButton
+              source={{
+                kind: 'ticket',
+                ticketId,
+                ...(ticket.channelId ? { channelId: ticket.channelId } : {}),
+                ...(ticket.conversationId ? { conversationId: ticket.conversationId } : {}),
+              }}
+              className='h-8 w-8 rounded-lg border border-border'
+            />
             <Tooltip content='Copy Ticket Link'>
               <Button
                 className='p-2 border border-border rounded-lg h-8 w-8'
@@ -3359,7 +3592,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                 onClick={handleCopyTicketViewLink}
                 data-track-category='Tickets'
                 data-track-name='COPY_TICKET_LINK'
-                data-track-metadata={JSON.stringify({ ticketId: ticket?.id })}
+                data-track-metadata={JSON.stringify(ticketTrackingMetadata(ticket))}
                 aria-label='Copy Ticket'
               >
                 <LinkIcon size={20} />
@@ -4918,6 +5151,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                     const workspaceId = pathParts[1];
                     void navigate(
                       `/${workspaceId}/support/${parentTicket.channelId}/${parentTicket.xyneId}?selectedTab=thread`,
+                      { state: { trackSource: 'ticket_details' } },
                     );
                   } else {
                     const workspaceId = location.pathname.split('/')[1];
@@ -4925,7 +5159,9 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                       `${parentTicket.channelId}/${parentTicket.conversationId}/${parentTicket.id}`,
                       { selectedTab: 'thread' },
                     );
-                    void navigate(`/${workspaceId}${base}#origin=${parentTicket.conversationId}`);
+                    void navigate(`/${workspaceId}${base}#origin=${parentTicket.conversationId}`, {
+                      state: { trackSource: 'parent_ticket' },
+                    });
                   }
                 };
 
@@ -5143,6 +5379,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
           isOpen={isSubTicketModalOpen}
           onClose={() => setIsSubTicketModalOpen(false)}
           ticketId={ticketId}
+          trackSource='sub_ticket_modal'
           conversationId={ticket.conversationId}
           onSuccess={() => {
             // Subtickets are automatically synced via Zero
@@ -5160,6 +5397,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
           channelId={ticket.conversation?.channelId || ''}
           projectId={ticket.projectId}
           isFromSubTicket={true}
+          trackSource='sub_ticket_modal'
           initialTitle={selectedSubTicket?.title ?? ''}
           initialDescription={selectedSubTicket?.description ?? ''}
           onTicketCreated={createdTicket => {
@@ -5298,16 +5536,29 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                     );
 
                     // Directly update the stage for backward movement
-                    void zero.mutate(
-                      mutators.ticket.update({
-                        id: ticket.id,
-                        stageName: backwardStageChange.stageName,
-                        ...(backwardStageChange.newStatus && {
-                          statusV2: backwardStageChange.newStatus,
-                        }),
-                        updatedAt: Date.now(),
+                    const backwardUpdate = {
+                      id: ticket.id,
+                      stageName: backwardStageChange.stageName,
+                      ...(backwardStageChange.newStatus && {
+                        statusV2: backwardStageChange.newStatus,
                       }),
-                    );
+                      updatedAt: Date.now(),
+                    };
+                    const beforeBackward = ticketRef.current;
+                    const stagesBeforeBackward = outcomeStagesRef.current;
+                    void zero
+                      .mutate(mutators.ticket.update(backwardUpdate))
+                      .server.then(result => {
+                        if (result.type !== 'error')
+                          trackDetailsOutcome(backwardUpdate, beforeBackward, stagesBeforeBackward);
+                      })
+                      .catch((err: unknown) => {
+                        logger.error(LogEvent.ZERO_MUTATION_ERROR, {
+                          component: 'TicketDetails',
+                          mutator: 'ticket.update',
+                          error: err instanceof Error ? err.message : String(err),
+                        });
+                      });
 
                     setShowBackwardConfirmDialog(false);
                   }

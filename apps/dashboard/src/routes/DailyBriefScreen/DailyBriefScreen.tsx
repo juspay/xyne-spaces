@@ -28,6 +28,7 @@ import {
   trackDailyBriefSwitched,
   type BriefSwitchSource,
 } from '../../services/otel/dailyBriefMetrics';
+import { globalClickTracker } from '../../services/Analytics/globalClickTracker';
 
 const REMARK_PLUGINS = [remarkGfm];
 const IS_DEV = import.meta.env.DEV;
@@ -202,6 +203,9 @@ const DailyBriefScreen = (): ReactElement => {
   const viewingToday = selectedDate === null || selectedDate === todayBucket;
   // Read on unmount, where component state is already stale.
   const regenerateStartedAtRef = useRef<number | null>(null);
+  // Whether a brief existed when regenerate was pressed — read inside the
+  // async handler after `selected` may have changed under it.
+  const hasBriefRef = useRef(false);
   const isInPanelWebview = useIsInPanelWebview();
   const { introSeen, markIntroSeen } = useBriefIntroSeen();
   const {
@@ -362,6 +366,12 @@ const DailyBriefScreen = (): ReactElement => {
         },
       });
       if (failureMessage === null) {
+        // Outcome row: the click is `daily-brief-regenerate`; this is the brief
+        // actually coming back. Measured from the click, so it includes queueing.
+        globalClickTracker.trackManualEvent('DailyBrief', 'DAILY_BRIEF_REGENERATED', undefined, {
+          latencyMs: Date.now() - (regenerateStartedAtRef.current ?? Date.now()),
+          hadBrief: hasBriefRef.current,
+        });
         await load();
         update(() => void navigate(todayPath));
         if (!mountedRef.current || document.hidden) {
@@ -379,7 +389,18 @@ const DailyBriefScreen = (): ReactElement => {
       failureMessage = 'Regeneration failed.';
       update(() => setError('Regeneration failed.'));
     } finally {
-      if (failureMessage !== null) toast.error(failureMessage);
+      if (failureMessage !== null) {
+        toast.error(failureMessage);
+        globalClickTracker.trackManualEvent(
+          'DailyBrief',
+          'DAILY_BRIEF_REGENERATE_FAILED',
+          undefined,
+          {
+            latencyMs: Date.now() - (regenerateStartedAtRef.current ?? Date.now()),
+            hadBrief: hasBriefRef.current,
+          },
+        );
+      }
       regenerateStartedAtRef.current = null;
       update(() => {
         setRegenerating(false);
@@ -426,6 +447,25 @@ const DailyBriefScreen = (): ReactElement => {
     fetching ||
     (viewingToday && regenerating) ||
     (!showRaw && briefGenerating);
+  hasBriefRef.current = hasBrief;
+
+  // Impression: a brief is on screen. The regenerate / switch / settings clicks
+  // need this as their denominator. Latched per date so re-renders and the
+  // raw toggle don't refire; switching to another day is a new impression.
+  const briefViewedDateRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (isBusy || !selected?.date || selected.status !== 'ready') return;
+    if (briefViewedDateRef.current === selected.date) return;
+    briefViewedDateRef.current = selected.date;
+    globalClickTracker.trackManualEvent('DailyBrief', 'DAILY_BRIEF_VIEWED', undefined, {
+      date: selected.date,
+      isToday: viewingToday,
+      sectionCount: sections?.length ?? 0,
+      lineCount: sections?.reduce((n, s) => n + s.lines.length, 0) ?? 0,
+      isEnabled: briefEnabled ?? null,
+      hasStructuredData: !!selected.data,
+    });
+  }, [isBusy, selected, viewingToday, sections, briefEnabled]);
 
   const actionLabel = ((): string => {
     if ((loading && !selected) || fetching) return 'Loading…';

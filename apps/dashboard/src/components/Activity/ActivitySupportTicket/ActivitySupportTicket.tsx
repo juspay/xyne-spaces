@@ -87,6 +87,8 @@ const ActivitySupportTicket = ({
       navBasePath={ticketBase}
       onBack={handleBack}
       showAdjacentNav={showAdjacentNav}
+      host={showAdjacentNav ? 'activity' : 'search_panel'}
+      {...(!showAdjacentNav && { trackSource: 'search_panel' })}
     />
   );
 };

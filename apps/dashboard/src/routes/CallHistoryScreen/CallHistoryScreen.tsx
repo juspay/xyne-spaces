@@ -21,16 +21,7 @@ import { useLocation, useNavigate, useOutlet } from 'react-router-dom';
 import { Virtuoso } from 'react-virtuoso';
 import { useAuth } from '../../hooks/useAuth';
 import { useCallHistory } from './useCallHistory';
-import {
-  CallOrigin,
-  CallStatus,
-  CallType,
-  CallVisibility,
-  ChannelScopeType,
-  InvitationResponse,
-  MeetingStatus,
-  TagMethod,
-} from '@xyne/shared';
+import { CallStatus, TagMethod } from '@xyne/shared';
 import { logger, Event } from '../../utils/logger';
 import { dataLoadDuration, safeRecordMetric } from '../../services/otel';
 import AppNavigator from '../../components/AppNavigator/AppNavigator';
@@ -44,7 +35,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '../../components/ui/dropdown-menu';
-import { useActiveUserSearch, useUsers } from '../../hooks/useUsers';
+import { useActiveUsers, useActiveUserSearch, useUsers } from '../../hooks/useUsers';
 import { useAllChannels } from '../../hooks/useChannels';
 import { useZero } from '../../hooks/useZero';
 import { cn } from '../../utils/classNames';
@@ -52,14 +43,18 @@ import { isSameDay } from '../../utils/dateUtils';
 import { mutators } from '../../zero/mutators';
 import { CallCard } from './CallCard';
 import {
-  Call,
+  hasExternalChatAccess,
+  isDmScope,
   isMissedCallForUser,
   isExternalCalendarEvent,
+  isVisibleInCallList,
+  mapVespaCallResultToCall,
   isScheduledCallJoinable,
   RecentCallFilter,
   FILTER_LABELS,
 } from './callHistoryItem.utils';
 import { CallLabelFilter } from './CallLabelFilter';
+import { CallParticipantFilter } from './CallParticipantFilter';
 import { useResolvedRecordingLabels } from '../../hooks/useResolvedRecordingLabels';
 import { normalizeRecordingTags } from '../../utils/recordingUtils';
 import { CallExternalChatDialog } from '../../components/Call/CallExternalChatDialog/CallExternalChatDialog';
@@ -72,12 +67,14 @@ import MeetWithPanel from './MeetWithPanel';
 import { useOtherUserCalls } from '../../hooks/useOtherUserCalls';
 import { UpcomingCallsList } from '../../components/Call/UpcomingCallsList';
 import { useSearchMetrics } from '../../hooks/useSearchMetrics';
-import type { DisplaySearchResult } from '../../types/search';
 import { getUserDisplayName } from '../../utils/userDisplayName';
 import { ChipType, TabType } from '../../components/Chat/ChatDirectory/ChannelCommandMenu.types';
 import { type InitialQueryData } from '../../components/Chat/ChatDirectory/LexicalSearchInput';
 import { CallHistorySearchPanel } from './CallHistorySearchPanel';
 import { useCalendarSync } from '../../hooks/useCalendarSync';
+
+/** A chip the call search filters on: a `with:` user or an `in:` channel. */
+type CallSearchMention = { id: string; type: ChipType; prefix?: string; name?: string };
 
 interface EmptyStateProps {
   icon: LucideIcon;
@@ -87,137 +84,6 @@ interface EmptyStateProps {
 
 function isSameMonth(a: Date, b: Date): boolean {
   return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth();
-}
-
-function hasExternalChatAccess(call: Call): boolean {
-  return (
-    call.participants?.some(p => p.isExternal && p.response !== InvitationResponse.INVITED) ?? false
-  );
-}
-
-function isDmScope(scopeType: ChannelScopeType | string | null | undefined): boolean {
-  return scopeType === ChannelScopeType.DM || scopeType === ChannelScopeType.GROUP_DM;
-}
-
-function isVisibleInCallList(
-  call: Call,
-  currentUserId: string | undefined,
-  showChannelCalls: boolean,
-): boolean {
-  if (isExternalCalendarEvent(call)) return true;
-  if (showChannelCalls) return true;
-  return call.participants?.some(p => p.userId === currentUserId) ?? false;
-}
-
-function stripSearchHighlight(value: string | undefined): string {
-  return (value || '').replace(/<\/?hi>/g, '');
-}
-
-function timestampOrUndefined(value: number | undefined): number | undefined {
-  return value && value > 0 ? value : undefined;
-}
-
-function isJoinedInvitationResponse(response: string): boolean {
-  return (
-    response === String(InvitationResponse.ACCEPTED) || response === String(InvitationResponse.LEFT)
-  );
-}
-
-function mapVespaCallResultToCall(result: DisplaySearchResult, workspaceId: string): Call {
-  const context = result.searchContext;
-  const callId = context?.callId || result.id;
-  const startedAt =
-    timestampOrUndefined(context?.startedAt) ||
-    timestampOrUndefined(context?.startsAt) ||
-    Date.now();
-  const now = Date.now();
-  const participantResponses = context?.participantResponses || [];
-  const participantUserIds = context?.userIds || [];
-  const participantNames = context?.participantNames || [];
-  const participantEmails = context?.participantEmails || [];
-  const participantCount = Math.max(
-    participantUserIds.length,
-    participantResponses.length,
-    participantNames.length,
-    participantEmails.length,
-  );
-
-  return {
-    workspaceId,
-    id: callId,
-    externalId: context?.externalId || callId,
-    title: stripSearchHighlight(context?.title || result.title) || null,
-    createdByUserId: context?.createdByUserId || '',
-    organizerId: null,
-    channelId: context?.channelId || null,
-    orgName: null,
-    description: null,
-    callType: CallType.VIDEO,
-    callOrigin: (context?.callOrigin as CallOrigin | undefined) ?? CallOrigin.CHANNEL,
-    status: (context?.status as CallStatus | undefined) ?? CallStatus.ENDED,
-    roomLink: context?.roomLink || null,
-    startsAt: timestampOrUndefined(context?.startsAt) ?? null,
-    endsAt: timestampOrUndefined(context?.endsAt) ?? null,
-    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-    isRecurring: Boolean(context?.recurringSeriesId),
-    recurringSeriesId: context?.recurringSeriesId || null,
-    recurrenceRule: null,
-    instanceDate: null,
-    recordingEnabled: false,
-    recordingUrl: null,
-    recordingParticipants: '[]',
-    transcript: context?.hasTranscript ? 'available' : undefined,
-    aiSummary: null,
-    startedAt,
-    endedAt: timestampOrUndefined(context?.endedAt) ?? null,
-    lastActivityAt: timestampOrUndefined(context?.endedAt) || startedAt,
-    createdAt: startedAt,
-    updatedAt: now,
-    metadata: null,
-    callUpdatesChannel: null,
-    participantCount,
-    participantPreviewUserIds: JSON.stringify(
-      participantUserIds
-        .map((userId, index) =>
-          userId
-            ? {
-                userId,
-                hasJoined: isJoinedInvitationResponse(participantResponses[index] || ''),
-              }
-            : null,
-        )
-        .filter((entry): entry is { userId: string; hasJoined: boolean } => entry !== null),
-    ),
-    summaryTemplateId: null,
-    labels: [],
-    markedItems: [],
-    xyneManaged: false,
-    visibility: CallVisibility.PRIVATE,
-    participants: Array.from({ length: participantCount }, (_, index) => {
-      const userId = participantUserIds[index] || '';
-      const displayName = stripSearchHighlight(participantNames[index]);
-      const email = stripSearchHighlight(participantEmails[index]);
-      const isExternal = !userId;
-
-      return {
-        workspaceId,
-        id: `${callId}:${userId || `external-${index}`}`,
-        callId,
-        userId,
-        invitedBy: context?.createdByUserId || '',
-        invitedAt: startedAt,
-        response: (participantResponses[index] as InvitationResponse | undefined) || null,
-        meetingStatus: MeetingStatus.PENDING,
-        respondedAt: null,
-        joinedAt: null,
-        leftAt: null,
-        metadata: null,
-        displayName: displayName || null,
-        email: email || null,
-        isExternal,
-      };
-    }),
-  } as Call;
 }
 
 const CallHistoryScreen = (): ReactElement => {
@@ -259,6 +125,7 @@ const CallHistoryScreen = (): ReactElement => {
   });
   const [recentCallFilter, setRecentCallFilter] = useState<RecentCallFilter>('all');
   const [selectedLabels, setSelectedLabels] = useState<string[]>([]);
+  const [selectedParticipantIds, setSelectedParticipantIds] = useState<string[]>([]);
   const [upcomingDay, setUpcomingDay] = useState<Date>(() => {
     const d = new Date();
     d.setHours(0, 0, 0, 0);
@@ -301,9 +168,10 @@ const CallHistoryScreen = (): ReactElement => {
     closeEditModal,
     showChannelCalls,
     setShowChannelCalls,
-  } = useCallHistory(user?.id);
+  } = useCallHistory(user?.id, { isCalendarView: viewMode === 'calendar' });
 
   const allUsers = useUsers();
+  const activeUsers = useActiveUsers();
   const allChannels = useAllChannels();
   const [callMentionSearchType, setCallMentionSearchType] = useState<ChipType | null>(null);
   const [callMentionSearchQuery, setCallMentionSearchQuery] = useState('');
@@ -327,6 +195,34 @@ const CallHistoryScreen = (): ReactElement => {
     mentionSearchType: callMentionSearchType,
   });
   const titleSearchQuery = searchQuery.trim();
+  // The search box and the Participants dropdown are two sources of `with:` chips: the box
+  // owns the ones the user typed (only these seed its editor), the dropdown owns the ones
+  // they picked. Both are merged below into the single mentions list the search hook takes.
+  const [callSearchEditorMentions, setCallSearchEditorMentions] = useState<CallSearchMention[]>([]);
+  const participantMentions = useMemo<CallSearchMention[]>(
+    () =>
+      selectedParticipantIds.map(userId => {
+        const participant = allUsers.find(candidate => candidate.id === userId);
+        return {
+          id: userId,
+          type: ChipType.USER,
+          prefix: 'with:',
+          name: participant ? getUserDisplayName(participant) : userId,
+        };
+      }),
+    [allUsers, selectedParticipantIds],
+  );
+  useEffect(() => {
+    const merged = [...callSearchEditorMentions];
+    const seen = new Set(merged.map(mention => `${mention.type}:${mention.id}`));
+    for (const mention of participantMentions) {
+      const key = `${mention.type}:${mention.id}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      merged.push(mention);
+    }
+    setCallSearchSelectedMentions(merged);
+  }, [callSearchEditorMentions, participantMentions, setCallSearchSelectedMentions]);
   const userMentionResults = useActiveUserSearch(
     callMentionSearchType === ChipType.USER ? callMentionSearchQuery : '',
     8,
@@ -377,7 +273,7 @@ const CallHistoryScreen = (): ReactElement => {
   const hasCallSearchFilters =
     selectedCallSearchUserIds.length > 0 || selectedCallSearchChannelIds.length > 0;
   const callSearchInitialQuery = useMemo<InitialQueryData | null>(() => {
-    const mentions = callSearchSelectedMentions
+    const mentions = callSearchEditorMentions
       .filter(mention => mention.type === ChipType.USER || mention.type === ChipType.CHANNEL)
       .map(mention => ({
         id: mention.id,
@@ -387,14 +283,14 @@ const CallHistoryScreen = (): ReactElement => {
       }));
 
     return searchQuery || mentions.length > 0 ? { text: searchQuery, mentions } : null;
-  }, [callSearchSelectedMentions, searchQuery]);
+  }, [callSearchEditorMentions, searchQuery]);
   const isRestoringCallSearchRef = useRef(false);
 
   useEffect(() => {
-    if (outlet && (searchQuery || callSearchSelectedMentions.length > 0)) {
+    if (outlet && (searchQuery || callSearchEditorMentions.length > 0)) {
       isRestoringCallSearchRef.current = true;
     }
-  }, [callSearchSelectedMentions.length, outlet, searchQuery]);
+  }, [callSearchEditorMentions.length, outlet, searchQuery]);
 
   const closeCallMentionSearch = useCallback(() => {
     setCallMentionSearchType(null);
@@ -439,11 +335,11 @@ const CallHistoryScreen = (): ReactElement => {
       }
 
       setSearchQuery(text);
-      setCallSearchSelectedMentions(
+      setCallSearchEditorMentions(
         mentions
           .filter(mention => mention.type === ChipType.USER || mention.type === ChipType.CHANNEL)
           .map(mention => {
-            const existingMention = callSearchSelectedMentions.find(
+            const existingMention = callSearchEditorMentions.find(
               selected => selected.id === mention.id && selected.type === mention.type,
             );
             const user =
@@ -467,13 +363,7 @@ const CallHistoryScreen = (): ReactElement => {
           }),
       );
     },
-    [
-      allChannels,
-      allUsers,
-      callSearchSelectedMentions,
-      setCallSearchSelectedMentions,
-      setSearchQuery,
-    ],
+    [allChannels, allUsers, callSearchEditorMentions, setSearchQuery],
   );
 
   const handleInsertMentionReady = useCallback(
@@ -523,20 +413,7 @@ const CallHistoryScreen = (): ReactElement => {
   const callHistoryLoadStartTimeRef = useRef<number | null>(null);
   const [scrollContainer, setScrollContainer] = useState<HTMLDivElement | null>(null);
 
-  // Show a loader for at least 10 seconds (or until calls load) so the screen
-  // doesn't flash the empty state while the Zero query is still warming up.
-  const [showMinLoader, setShowMinLoader] = useState(true);
-  useEffect(() => {
-    if (!isLoading) {
-      setShowMinLoader(false);
-      return;
-    }
-    setShowMinLoader(true);
-    const timer = setTimeout(() => setShowMinLoader(false), 10000);
-    return () => clearTimeout(timer);
-  }, [isLoading]);
-
-  const showRecentCallsLoader = isLoading || (showMinLoader && (calls?.length ?? 0) === 0);
+  const showRecentCallsLoader = isLoading;
 
   const endedCallsCount = calls?.filter(c => c.status === CallStatus.ENDED).length ?? 0;
 
@@ -949,7 +826,7 @@ const CallHistoryScreen = (): ReactElement => {
             }}
             callMentionSearchType={callMentionSearchType}
             callMentionSearchQuery={callMentionSearchQuery}
-            callSearchSelectedMentions={callSearchSelectedMentions}
+            callSearchSelectedMentions={callSearchEditorMentions}
             callSearchInitialQuery={callSearchInitialQuery}
             filteredUserMentionResults={filteredUserMentionResults}
             channelMentionResults={channelMentionResults}
@@ -982,6 +859,7 @@ const CallHistoryScreen = (): ReactElement => {
               onClick={() => setIsInstantCallModalOpen(true)}
               data-track-category='CALLS'
               data-track-name='start-instant-call'
+              data-track-metadata={JSON.stringify({ source: 'call_history_tile' })}
               className='flex items-center gap-4 p-2.5 sm:p-4 rounded-xl border border-border hover:bg-accent/50 transition-colors text-left'
             >
               <div className='size-6 rounded-md bg-action-primary flex items-center justify-center shrink-0'>
@@ -1002,6 +880,7 @@ const CallHistoryScreen = (): ReactElement => {
               onClick={() => setIsScheduleModalOpen(true)}
               data-track-category='CALLS'
               data-track-name='schedule-call'
+              data-track-metadata={JSON.stringify({ source: 'call_history_tile' })}
               className='flex items-center gap-4 p-2.5 sm:p-4 rounded-xl border border-border hover:bg-accent/50 transition-colors text-left'
             >
               <div className='size-6 rounded-md bg-blue-500 flex items-center justify-center shrink-0'>
@@ -1272,6 +1151,11 @@ const CallHistoryScreen = (): ReactElement => {
                   Recents
                 </span>
                 <div className='flex items-center gap-2'>
+                  <CallParticipantFilter
+                    users={activeUsers}
+                    selectedUserIds={selectedParticipantIds}
+                    onSelectedUserIdsChange={setSelectedParticipantIds}
+                  />
                   <CallLabelFilter
                     labels={manualCallLabels}
                     selectedLabels={selectedLabels}
@@ -1336,12 +1220,11 @@ const CallHistoryScreen = (): ReactElement => {
                       }
                     }}
                     computeItemKey={(_, call) => call.id}
-                    itemContent={(i, call) => (
+                    itemContent={(_, call) => (
                       <div className='pb-3'>
                         <CallCard
                           call={call}
                           currentUserId={user?.id}
-                          isLastItem={i === displayRecentCalls.length - 1}
                           onCallClick={() => handleCallRowClick(call)}
                           onParticipantsClick={() => handleParticipantsClick(call)}
                           handleGotoTranscript={getGotoTranscriptHandler(call)}

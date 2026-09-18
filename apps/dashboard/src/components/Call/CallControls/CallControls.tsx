@@ -39,6 +39,7 @@ import { usePlatform } from '../../../hooks/usePlatform';
 import { useShortcutById, useShortcut } from '../../../shortcuts';
 import { InvitationResponse, type Call, type RecordingType } from '@xyne/shared';
 import { RecordingButton } from './RecordingButton';
+import { MarkMomentButton } from './MarkMomentButton';
 import {
   buildCallInviteText,
   getAiButtonColorClass,
@@ -205,6 +206,7 @@ export function CallControls({
     if (!hostId) return null;
     return currentCall?.participants?.find(p => p.userId === hostId)?.displayName ?? null;
   }, [currentCall?.createdByUserId, currentCall?.participants]);
+
   // All participants in the call can admit/decline, so everyone sees the pending count.
   const requestedParticipantCount = useMemo(() => {
     return (
@@ -764,6 +766,22 @@ export function CallControls({
             buttonClasses={buttonClasses}
             midnightControlClass={midnightControlClass}
             midnightPopoverClass={midnightPopoverClass}
+            callId={callId}
+          />
+        )}
+
+        {/* Lands on the call's timeline once the call ends. Creator-only mutator, and a
+            flag is only useful next to a transcript. External users have no ZeroProvider. */}
+        {!isExternalUser && (
+          <MarkMomentButton
+            externalId={externalId}
+            callStartedAtMs={currentCall?.startedAt ?? null}
+            isAllowed={isHost && isTranscriptionEnabled}
+            hasCustomSizing={hasCustomSizing}
+            iconSize={iconSize}
+            buttonPadding={buttonPadding}
+            buttonClasses={buttonClasses}
+            midnightControlClass={midnightControlClass}
             callId={callId}
           />
         )}

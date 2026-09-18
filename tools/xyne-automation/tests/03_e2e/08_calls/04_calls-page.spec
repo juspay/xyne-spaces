@@ -5,5 +5,6 @@
 * Using browser
 * Ensuring user "user-1" is logged in
 * clicking on "[data-testid='nav-calls']"
-* verifying "[data-testid='call-history-list']" is visible
 * verifying "[data-testid='new-call-button']" is visible
+* verifying "[data-testid='start-instant-call-option']" is visible
+* verifying "[data-testid='schedule-call-option']" is visible

@@ -435,6 +435,7 @@ export default function RecordingsScreen(): ReactElement {
       const primary = details[0];
       xyneAIActor.send({
         type: 'OPEN',
+        trackSource: 'recordings',
         startFreshChat: true,
         ...(primary?.channelId ? { channelId: primary.channelId } : {}),
         threadInfo: {
@@ -656,6 +657,10 @@ export default function RecordingsScreen(): ReactElement {
                             className='flex-1 min-w-0 text-left p-4 cursor-pointer'
                             data-track-category='RecordingsScreen'
                             data-track-name='view_recording'
+                            data-track-metadata={JSON.stringify({
+                              recordingId: recording.id,
+                              source: 'recordings_list',
+                            })}
                           >
                             <div className='flex items-start gap-4'>
                               {/* Icon */}

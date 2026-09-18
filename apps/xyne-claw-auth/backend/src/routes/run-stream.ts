@@ -10,7 +10,7 @@ import { gcsService } from "../services/storageService.js";
 import { appendCitations, hydrateInvocationIcons } from "../lib/citations.js";
 import { resolveAgentProviderConfigs, agentDefaultSpeed, parseFastModeProfile } from "../lib/agent-provider-config.js";
 import { resolveFastMode } from "../lib/fast-mode.js";
-import { resolveSdlcRepositoryForUser } from "../lib/sdlc-repository-context.js";
+import { resolveSdlcHubContextForUser, resolveSdlcRepositoryForUser } from "../lib/sdlc-repository-context.js";
 import {
   buildFollowUpConversationHistory,
   buildLateFollowUpInvocations,
@@ -471,19 +471,22 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
     const allowDebug = (await isClawAdmin(userId))
       || Boolean((await getAgentEditAccess(userId, slug, orgId))?.canEdit);
 
-    const sdlcResolution = slug === "sdlc-agent"
-      ? await resolveSdlcRepositoryForUser(
-          userId,
-          researchContext && typeof researchContext === "object" && !Array.isArray(researchContext)
-            ? researchContext as { type?: unknown; id?: unknown }
-            : undefined,
-          convId,
-        )
-      : { ok: true as const, repository: undefined };
+    const sdlcResolution = await resolveSdlcRepositoryForUser(
+      userId,
+      researchContext && typeof researchContext === "object" && !Array.isArray(researchContext)
+        ? researchContext as { type?: unknown; id?: unknown }
+        : undefined,
+      convId,
+    );
     if (!sdlcResolution.ok) {
       res.status(sdlcResolution.status).json({ success: false, error: sdlcResolution.error });
       return;
     }
+    const sdlcContext =
+      sdlcResolution.repository?.agentContext ??
+      (typeof channelId === "string"
+        ? await resolveSdlcHubContextForUser(userId, channelId, convId)
+        : undefined);
 
     // Resolve the agent's provider credentials so this SSE run uses the agent's
     // configured provider + model (e.g. a shared LiteLLM key) rather than the env
@@ -848,8 +851,9 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
 
     res.writeHead(200, {
       "Content-Type": "text/event-stream",
-      "Cache-Control": "no-cache",
+      "Cache-Control": "no-cache, no-transform",
       Connection: "keep-alive",
+      "X-Accel-Buffering": "no",
     });
 
     // Keepalive comment on the frontend leg (Spaces backend ← claw-auth).
@@ -941,9 +945,7 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
     } = incomingAgentConfig;
     const enrichedAgentConfig: Record<string, unknown> = {
       ...safeIncomingAgentConfig,
-      ...(sdlcResolution.repository
-        ? { sdlcContext: sdlcResolution.repository.agentContext }
-        : {}),
+      ...(sdlcContext ? { sdlcContext } : {}),
       followUpConversationHistory: buildFollowUpConversationHistory(
         existingMessageRows.map((message) => ({
           id: message.id,
