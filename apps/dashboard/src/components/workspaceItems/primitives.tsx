@@ -70,10 +70,14 @@ export function FileView({
   url,
   title,
   mimeType,
+  chrome,
 }: {
   url: string;
   title: string;
   mimeType?: string | undefined;
+  /** False lets a surface that frames the preview itself — the SDLC file tab,
+   *  whose tab strip is the frame — drop the viewer's own header and border. */
+  chrome?: boolean | undefined;
 }): ReactElement {
   const fileType = detectFileType(mimeType ?? '', title);
   const { file, loading, error } = useRemoteFile(
@@ -89,7 +93,7 @@ export function FileView({
 
   return (
     <div className={cn(fileType.wrapperClass, 'h-full max-h-full max-w-full bg-background')}>
-      <ViewerComponent source={file} fileName={title} />
+      <ViewerComponent source={file} fileName={title} {...(chrome === false && { chrome })} />
     </div>
   );
 }

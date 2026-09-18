@@ -26,6 +26,9 @@ export interface ItemViewProps {
   /** Wraps the embedded browser, so a surface can add its own chrome. */
   browserBanner?: EmbeddedBrowserExtras['banner'];
   browserOverlay?: EmbeddedBrowserExtras['overlay'];
+  /** False when the surface frames the preview itself, so the file viewer drops
+   *  its own header and border rather than sitting as a card inside a card. */
+  chrome?: boolean;
 }
 
 type EmbeddedBrowserExtras = Parameters<typeof EmbeddedBrowser>[0];
@@ -42,6 +45,7 @@ export function ItemView({
   slots,
   browserBanner,
   browserOverlay,
+  chrome,
 }: ItemViewProps): ReactElement {
   if (item.stale) {
     return <Centered>This item is no longer available where it was stored.</Centered>;
@@ -86,6 +90,7 @@ export function ItemView({
       url={contentUrl}
       title={item.title}
       {...(item.mimeType ? { mimeType: item.mimeType } : {})}
+      {...(chrome === false && { chrome })}
     />
   );
 }

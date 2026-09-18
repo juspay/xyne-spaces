@@ -1124,6 +1124,8 @@ function TabContent(props: {
   return (
     <ItemView
       item={item}
+      // The tab strip is the frame here, so the viewer should not draw a second.
+      chrome={false}
       slots={{
         canvas: canvasItem => props.renderCanvas(canvasItem.refId),
         browser: browsable => {
