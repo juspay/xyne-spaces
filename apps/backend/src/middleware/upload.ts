@@ -6,7 +6,7 @@ import { storageService } from '../services/storage';
 import { AppError } from './errorHandler';
 import { config } from '@/config/env';
 import { db } from '../database/client';
-import { AttachmentUploadStatus } from '@xyne/shared';
+import { AttachmentUploadStatus, isHeicBuffer } from '@xyne/shared';
 
 const MAX_FILE_SIZE_BYTES = 1024 * 1024 * 1024; // 1GB max file size
 const MAX_FILE_FIELDS = 20; // Supports files + thumbnails in one multipart request
@@ -572,10 +572,15 @@ const streamingStorage: multer.StorageEngine = {
         });
       });
 
-      const result = await uploadScreened(file.stream, originalName, file.mimetype, (body) =>
-        storageService.uploadStream(body, {
+      const { head, body } = await readHeadAndRewind(file.stream, 12);
+      const effectiveContentType = isHeicBuffer(head)
+        ? 'image/heic'
+        : file.mimetype || 'application/octet-stream';
+
+      const result = await uploadScreened(body, originalName, file.mimetype, (screenedBody) =>
+        storageService.uploadStream(screenedBody, {
           filename: originalName,
-          contentType: file.mimetype || 'application/octet-stream',
+          contentType: effectiveContentType,
           metadata: {
             originalName,
             uploadedAt: new Date().toISOString(),
@@ -600,6 +605,7 @@ const streamingStorage: multer.StorageEngine = {
         path: result.path,
         filename: result.filename,
         size: result.size,
+        mimetype: effectiveContentType,
       });
     })().catch((error) => cb(error as Error));
   },

@@ -13659,7 +13659,6 @@ export function createMutators(
                 entityType: AttachmentEntityType.DRAFT,
                 conversationId: conversationId || null,
                 originalFilename,
-                mimetype,
                 size,
                 width,
                 height
