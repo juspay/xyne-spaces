@@ -10,6 +10,8 @@ interface TableGroupSectionProps {
   totalCount?: number;
   /** true = section scrolls internally (grouped); false = page scroll (none). */
   internalScroll?: boolean;
+  /** Overrides row-open routing (the screen's handler knows SDLC hubs etc.). */
+  onTicketOpen?: (ticket: Ticket) => void;
   scrollElement: HTMLElement | null;
   visibleColumns: Set<string>;
   isComfortView: boolean;
@@ -25,6 +27,7 @@ export const TableGroupSection = ({
   pageSize,
   totalCount,
   internalScroll = false,
+  onTicketOpen,
   scrollElement,
   visibleColumns,
   isComfortView,
@@ -64,6 +67,7 @@ export const TableGroupSection = ({
       isLoading={isLoading}
       onLoadMore={loadMore}
       {...(totalCount !== undefined && !isSearchMode ? { totalCount } : {})}
+      {...(onTicketOpen ? { onRowClick: onTicketOpen } : {})}
       {...(internalScroll ? {} : { scrollElement })}
     />
   );

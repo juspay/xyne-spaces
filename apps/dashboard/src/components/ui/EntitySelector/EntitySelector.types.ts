@@ -1,4 +1,4 @@
-import { ReactNode } from 'react';
+import { ReactElement, ReactNode } from 'react';
 
 /**
  * Represents a single selectable option in the EntitySelector
@@ -127,6 +127,19 @@ export interface EntitySelectorProps {
    * against — a sidebar selector, say. Defaults to the trigger's own width.
    */
   dropdownMinWidth?: string;
+
+  /**
+   * Custom trigger element (e.g. an avatar button) rendered in place of the
+   * built-in variant triggers. The dropdown keeps the 'default' variant chrome,
+   * so the in-dropdown search box still shows.
+   */
+  trigger?: ReactElement;
+
+  /** Popover close-time focus hook — preventDefault to stop refocusing the trigger. */
+  onCloseAutoFocus?: (event: Event) => void;
+
+  /** Dropdown alignment against the trigger. 'end' suits triggers near the right edge. Default: 'start' */
+  align?: 'start' | 'center' | 'end';
 
   /** Opt in to virtualizing the options list (for large user/group lists). */
   virtualize?: boolean;
