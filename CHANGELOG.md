@@ -1,3 +1,10 @@
+## [1.345.4](https://github.com/juspay/xyne-spaces/compare/v1.345.3...v1.345.4) (2026-09-18)
+
+
+### Bug Fixes
+
+* skip non-meeting Google Calendar events at ingestion ([#2064](https://github.com/juspay/xyne-spaces/issues/2064)) ([3080f1e](https://github.com/juspay/xyne-spaces/commit/3080f1e738ebe7bb831ecf9e2cfecad4ae56f9c1))
+
 ## [1.345.3](https://github.com/juspay/xyne-spaces/compare/v1.345.2...v1.345.3) (2026-09-18)
 
 
