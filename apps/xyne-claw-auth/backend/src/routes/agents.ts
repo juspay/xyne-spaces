@@ -2204,6 +2204,125 @@ router.get("/:slug/shares", requireAgentOwnerContributorOrAdmin, async (req: Req
   }
 });
 
+// ── Ownership transfer ───────────────────────────────────────────────
+//
+// POST /agents/:slug/transfer-ownership — move `ownerUserId` to another user.
+//
+// Immediate and unilateral: there is deliberately NO acceptance step, so the
+// transfer lands the moment the owner confirms. Owner (or CLAW_ADMIN) only,
+// same-org target only — the same cross-org guard POST /:slug/shares applies.
+//
+// Why a transfer and not a clone: `cloneAgentForUser` intentionally does NOT
+// copy the Spaces app identity (`spacesAppId`/`spacesAppToken`/`signingSecret`),
+// shares, provider credentials or prompt history, so a clone is a NEW agent that
+// every channel has to re-install. Moving `ownerUserId` keeps the agent row —
+// and therefore every existing install, webhook and schedule — intact. Nothing
+// on the dispatch path reads the owner (providers resolve from the invoking user
+// + agent-scoped rows in lib/provider-resolution.ts), so runtime behaviour is
+// unchanged by the flip.
+//
+// What the flip DOES change is visibility: `ownerUserId` feeds the
+// "agents I can see" filters (agentRepository.listVisible, agentCatalogService,
+// callable-agent-resolver). On a personal-scope agent the outgoing owner would
+// lose the agent entirely, so we demote them to an EDITOR share in the SAME
+// transaction. That is correctness, not courtesy.
+//
+// SECURITY: agent-scoped provider credentials and MCP connections are keyed by
+// agentId and therefore follow the agent. The new owner inherits key material
+// the previous owner pasted. With no acceptance gate, the audit record is the
+// only durable trace — hence AGENT_OWNERSHIP_TRANSFERRED with both user ids.
+router.post(
+  "/:slug/transfer-ownership",
+  requireAgentOwnerOrAdmin,
+  asyncHandler(async (req: Request<{ slug: string }>, res: Response) => {
+    const ctx = (req as Request & { agentContext: import("../middleware/agent-acl.js").AgentContext }).agentContext;
+    const agent = ctx.agent;
+    const actorId = requireRequester(req);
+
+    const { newOwnerUserId, keepPreviousOwnerAsEditor = true } = (req.body ?? {}) as {
+      newOwnerUserId?: string;
+      keepPreviousOwnerAsEditor?: boolean;
+    };
+
+    if (!newOwnerUserId || typeof newOwnerUserId !== "string") {
+      throw badRequest("newOwnerUserId is required");
+    }
+    if (newOwnerUserId === agent.ownerUserId) {
+      throw badRequest("That user already owns this agent");
+    }
+
+    const target = await userRepository.findById(newOwnerUserId);
+    if (!target) throw notFound("Target user not found");
+
+    // Cross-org transfer would hand an agent to someone who cannot even see it
+    // (every read path is org-scoped). Mirrors the guard on POST /:slug/shares.
+    if (agent.orgId && target.orgId !== agent.orgId) {
+      throw forbidden("Cannot transfer an agent to a user in a different organization");
+    }
+
+    const previousOwnerId = agent.ownerUserId;
+
+    await prisma.$transaction(async (tx) => {
+      await tx.agent.update({
+        where: { id: agent.id },
+        data: { ownerUserId: newOwnerUserId },
+      });
+
+      // The owner is represented by `ownerUserId`, never by a share row — see
+      // getAgentEditAccess, which treats the two as distinct states. If the new
+      // owner previously held a share, drop it so the agent does not end up in a
+      // state the ACL helper does not model.
+      await tx.agentShare.deleteMany({
+        where: { agentId: agent.id, userId: newOwnerUserId },
+      });
+
+      // Keep the outgoing owner able to see and edit the agent. Without this the
+      // agent disappears from their list on a personal-scope agent.
+      if (previousOwnerId && keepPreviousOwnerAsEditor) {
+        await tx.agentShare.upsert({
+          where: { agentId_userId: { agentId: agent.id, userId: previousOwnerId } },
+          create: {
+            agentId: agent.id,
+            userId: previousOwnerId,
+            role: "EDITOR",
+            sharedBy: actorId,
+          },
+          update: { role: "EDITOR" },
+        });
+      }
+    });
+
+    await writeAuditLog({
+      actorUserId: actorId,
+      eventType: "AGENT_OWNERSHIP_TRANSFERRED",
+      targetId: agent.id,
+      description: `Ownership of agent "${agent.name}" transferred to ${target.email}`,
+      metadata: {
+        agentSlug: agent.slug,
+        previousOwnerUserId: previousOwnerId,
+        newOwnerUserId,
+        keepPreviousOwnerAsEditor,
+        byAdmin: ctx.isAdmin && !ctx.isOwner,
+      },
+    });
+
+    // Ownership is part of the indexed agent document's visibility, so refresh
+    // it best-effort. A stale index entry must never fail the transfer itself.
+    syncAgentToIndexBestEffort(agent.id, agent.orgId, agent.slug);
+
+    log.info(
+      `[agents] ownership transferred slug=${agent.slug} from=${previousOwnerId ?? "none"} to=${newOwnerUserId} by=${actorId}`,
+    );
+
+    ok(res, {
+      slug: agent.slug,
+      ownerUserId: newOwnerUserId,
+      previousOwnerUserId: previousOwnerId,
+      previousOwnerRole: previousOwnerId && keepPreviousOwnerAsEditor ? "EDITOR" : null,
+    });
+  }),
+);
+
 // ── Tool attach/detach ───────────────────────────────────────────────
 
 router.post("/:slug/tools", requireAgentOwnerOrAdmin, async (req: Request<{ slug: string }>, res: Response) => {
