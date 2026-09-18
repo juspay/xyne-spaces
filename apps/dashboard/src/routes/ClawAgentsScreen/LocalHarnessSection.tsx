@@ -315,7 +315,7 @@ const LocalHarnessSection = (): ReactElement | null => {
             {' · '}
             {status.containerRuntime.available
               ? 'Ready (Podman)'
-              : status.containerRuntime.reason ?? 'Unavailable'}
+              : (status.containerRuntime.reason ?? 'Unavailable')}
           </span>
         </div>
       )}

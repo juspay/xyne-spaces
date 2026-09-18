@@ -82,6 +82,10 @@ export function ItemView({
   }
 
   return (
-    <FileView url={contentUrl} title={item.title} {...(item.mimeType ? { mimeType: item.mimeType } : {})} />
+    <FileView
+      url={contentUrl}
+      title={item.title}
+      {...(item.mimeType ? { mimeType: item.mimeType } : {})}
+    />
   );
 }

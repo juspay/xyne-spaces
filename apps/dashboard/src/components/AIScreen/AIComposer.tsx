@@ -262,17 +262,14 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
   const [showCommandMenu, setShowCommandMenu] = useState(false);
   const [showCollectionPicker, setShowCollectionPicker] = useState(false);
   const aiScreenCommands = useMemo(() => commandsForSurface('ai-screen'), []);
-  const handleCommandSelect = useCallback(
-    (command: CommandDef): void => {
-      setShowCommandMenu(false);
-      setValue(prev => {
-        const trimmed = prev.replace(/^\s*\/\S*\s?/, '');
-        return `/${command.name} ${trimmed}`.replace(/\s+$/, ' ');
-      });
-      window.setTimeout(() => textareaRef.current?.focus(), 0);
-    },
-    [],
-  );
+  const handleCommandSelect = useCallback((command: CommandDef): void => {
+    setShowCommandMenu(false);
+    setValue(prev => {
+      const trimmed = prev.replace(/^\s*\/\S*\s?/, '');
+      return `/${command.name} ${trimmed}`.replace(/\s+$/, ' ');
+    });
+    window.setTimeout(() => textareaRef.current?.focus(), 0);
+  }, []);
   // Popovers for the agent / model selectors. Only used while compact, where
   // the pills are hidden and the "+" menu opens them instead.
   const [showAgentPicker, setShowAgentPicker] = useState(false);
@@ -649,7 +646,11 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
       const studioLabel = intent?.label ?? null;
       setVoiceStudioMode(studioLabel);
       const task = intent ? `/${intent.name} ${trimmed}` : trimmed;
-      onSubmit?.(task, undefined, { ...buildContext(), voiceMode: true, voiceStudioMode: studioLabel });
+      onSubmit?.(task, undefined, {
+        ...buildContext(),
+        voiceMode: true,
+        voiceStudioMode: studioLabel,
+      });
     },
     [onSubmit, buildContext],
   );
@@ -670,7 +671,6 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
     },
     [activeStudioMode],
   );
-
 
   const handleFileInputChange = (e: ChangeEvent<HTMLInputElement>): void => {
     const files = e.target.files;
@@ -768,7 +768,6 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
     <SandboxModeSwitch mode={sandboxMode} onModeChange={setSandboxMode} disabled={pending} />
   ) : null;
 
-
   // Anything the "+" menu owns that is currently on. Collections/files/folders
   // count even though they also show as pills — the menu is where they're
   // cleared from, so the trigger should point back at it.
@@ -841,7 +840,13 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
               onClose={() => setShowCommandMenu(false)}
               lockedCommand={
                 designMode?.active
-                  ? { name: 'design', onUnlock: () => { designMode.exit(); setShowCommandMenu(false); } }
+                  ? {
+                      name: 'design',
+                      onUnlock: () => {
+                        designMode.exit();
+                        setShowCommandMenu(false);
+                      },
+                    }
                   : undefined
               }
             />
@@ -928,7 +933,10 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
                 <ContextPill
                   key={`lf-${folder.path}`}
                   icon={
-                    <FolderGit2 className='h-3.5 w-3.5 shrink-0 text-muted-foreground' aria-hidden />
+                    <FolderGit2
+                      className='h-3.5 w-3.5 shrink-0 text-muted-foreground'
+                      aria-hidden
+                    />
                   }
                   label={folder.branch ? `${folder.name} · ${folder.branch}` : folder.name}
                   onRemove={() => removeLocalFolder(folder.path)}

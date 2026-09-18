@@ -13,14 +13,20 @@ interface CommandMenuProps {
   lockedCommand?: { name: string; onUnlock: () => void } | undefined;
 }
 
-export function CommandMenu({ commands, onSelect, onClose, lockedCommand }: CommandMenuProps): ReactElement {
+export function CommandMenu({
+  commands,
+  onSelect,
+  onClose,
+  lockedCommand,
+}: CommandMenuProps): ReactElement {
   const [query, setQuery] = useState('');
 
   const filtered = useMemo(() => {
     const q = query.trim().replace(/^\//, '').toLowerCase();
     if (!q) return commands;
     return commands.filter(
-      c => c.name.includes(q) || c.label.toLowerCase().includes(q) || c.help.toLowerCase().includes(q),
+      c =>
+        c.name.includes(q) || c.label.toLowerCase().includes(q) || c.help.toLowerCase().includes(q),
     );
   }, [commands, query]);
 
@@ -49,7 +55,9 @@ export function CommandMenu({ commands, onSelect, onClose, lockedCommand }: Comm
       />
       <div className='max-h-72 overflow-y-auto'>
         {grouped.length === 0 && (
-          <div className='px-2 py-3 text-sm text-muted-foreground'>No commands match “{query}”.</div>
+          <div className='px-2 py-3 text-sm text-muted-foreground'>
+            No commands match “{query}”.
+          </div>
         )}
         {grouped.map(({ section, items }) => (
           <div key={section} className='mb-1'>
@@ -71,7 +79,12 @@ export function CommandMenu({ commands, onSelect, onClose, lockedCommand }: Comm
                     data-track-category='XyneAI'
                     data-track-name='COMMAND_MENU_SELECT'
                   >
-                    <span className={cn('shrink-0 font-mono text-sm', locked ? 'text-primary' : 'text-foreground')}>
+                    <span
+                      className={cn(
+                        'shrink-0 font-mono text-sm',
+                        locked ? 'text-primary' : 'text-foreground',
+                      )}
+                    >
                       /{command.name}
                     </span>
                     {locked ? (
@@ -80,11 +93,15 @@ export function CommandMenu({ commands, onSelect, onClose, lockedCommand }: Comm
                       </span>
                     ) : (
                       command.argsHint && (
-                        <span className='shrink-0 font-mono text-xs text-muted-foreground/70'>{command.argsHint}</span>
+                        <span className='shrink-0 font-mono text-xs text-muted-foreground/70'>
+                          {command.argsHint}
+                        </span>
                       )
                     )}
                     <span className='truncate text-xs text-muted-foreground'>
-                      {locked ? 'Every message runs this command. Unlock to send plain messages.' : command.help}
+                      {locked
+                        ? 'Every message runs this command. Unlock to send plain messages.'
+                        : command.help}
                     </span>
                   </button>
                   {locked && lockedCommand && (

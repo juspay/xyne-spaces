@@ -18,6 +18,8 @@ export function PageSelectionPreview({ selection }: PageSelectionPreviewProps): 
         <button
           type='button'
           onClick={() => setOpen(value => !value)}
+          data-track-category='AskAI'
+          data-track-name='page-selection-expand'
           className='flex min-w-0 flex-1 items-center gap-1 text-left text-muted-foreground hover:text-foreground'
           aria-expanded={open}
         >
@@ -34,6 +36,8 @@ export function PageSelectionPreview({ selection }: PageSelectionPreviewProps): 
         <button
           type='button'
           onClick={event => openLink(selection.url, event)}
+          data-track-category='AskAI'
+          data-track-name='page-selection-open'
           className='shrink-0 rounded px-1.5 py-0.5 text-muted-foreground hover:bg-secondary/60 hover:text-foreground'
           title={selection.url}
         >

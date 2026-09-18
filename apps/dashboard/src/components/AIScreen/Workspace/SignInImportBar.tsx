@@ -80,6 +80,8 @@ export function SignInImportBar({ onImported }: { onImported: () => void }): Rea
       <button
         type='button'
         onClick={() => setDismissed(true)}
+        data-track-category='AskAI'
+        data-track-name='workspace-import-dismiss'
         className='flex-shrink-0 rounded-md px-2 py-1 text-muted-foreground hover:bg-secondary/60 hover:text-foreground'
       >
         Not now

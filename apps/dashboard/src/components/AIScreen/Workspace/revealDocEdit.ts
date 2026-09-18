@@ -45,15 +45,12 @@ function sendKey(
   modifiers: string[] = [],
 ): void {
   if (!view) return;
-  view.sendInputEvent({ type: 'keyDown', keyCode, modifiers });
-  view.sendInputEvent({ type: 'char', keyCode, modifiers });
-  view.sendInputEvent({ type: 'keyUp', keyCode, modifiers });
+  void view.sendInputEvent({ type: 'keyDown', keyCode, modifiers });
+  void view.sendInputEvent({ type: 'char', keyCode, modifiers });
+  void view.sendInputEvent({ type: 'keyUp', keyCode, modifiers });
 }
 
-async function typeText(
-  view: ReturnType<typeof getWorkspaceWebview>,
-  text: string,
-): Promise<void> {
+async function typeText(view: ReturnType<typeof getWorkspaceWebview>, text: string): Promise<void> {
   for (const character of text) {
     sendKey(view, character);
     await delay(12);

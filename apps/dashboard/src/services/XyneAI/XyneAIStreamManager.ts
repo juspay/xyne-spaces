@@ -1014,7 +1014,10 @@ class XyneAIStreamManager {
         // subscriber notifications that clobber the new stream's React state)
         this.activeStreams.delete(threadId);
         this.abortControllers.delete(existingStream.streamId);
-      } else if (existingStream.status === 'streaming' && existingStream.streamId.startsWith('stream-')) {
+      } else if (
+        existingStream.status === 'streaming' &&
+        existingStream.streamId.startsWith('stream-')
+      ) {
         this.parkStreamForHandoff(threadId, existingStream);
         initialMessages = initialMessages.map(msg =>
           msg.type === 'bot' && msg.isStreaming
@@ -1108,15 +1111,17 @@ class XyneAIStreamManager {
     // same shape the AI screen's composer sends, so the run frames it as "the
     // page they are reading" rather than as text they happened to type.
     const pendingPassage = consumePendingPassage();
-    const passageSelection = request.pageSelection ?? (pendingPassage
-      ? {
-          text: pendingPassage.text,
-          url: pendingPassage.url,
-          title: pendingPassage.title,
-          ...(pendingPassage.provider ? { provider: pendingPassage.provider } : {}),
-          intent: pendingPassage.intent,
-        }
-      : undefined);
+    const passageSelection =
+      request.pageSelection ??
+      (pendingPassage
+        ? {
+            text: pendingPassage.text,
+            url: pendingPassage.url,
+            title: pendingPassage.title,
+            ...(pendingPassage.provider ? { provider: pendingPassage.provider } : {}),
+            intent: pendingPassage.intent,
+          }
+        : undefined);
 
     // Send message to worker to start streaming
     const message: WorkerIncomingMessage = {
@@ -1167,7 +1172,8 @@ class XyneAIStreamManager {
                 filename: att.filename,
               })),
           }),
-          ...(request.sandboxMode && request.sandboxMode !== 'remote' && { sandboxMode: request.sandboxMode }),
+          ...(request.sandboxMode &&
+            request.sandboxMode !== 'remote' && { sandboxMode: request.sandboxMode }),
           ...(request.studioMode && { studioMode: request.studioMode }),
           ...(request.designArtifactAttachmentId && {
             designArtifactAttachmentId: request.designArtifactAttachmentId,
@@ -1335,12 +1341,16 @@ class XyneAIStreamManager {
       }
 
       case 'plan': {
-        const todos = Array.isArray(data['todos']) ? (data['todos'] as Message['planTodos']) : undefined;
+        const todos = Array.isArray(data['todos'])
+          ? (data['todos'] as Message['planTodos'])
+          : undefined;
         if (todos) {
           const planTitle = typeof data['title'] === 'string' ? data['title'] : undefined;
           updateMessages(prev =>
             prev.map(msg =>
-              msg.id === botMessageId ? { ...msg, planTodos: todos, ...(planTitle ? { planTitle } : {}) } : msg,
+              msg.id === botMessageId
+                ? { ...msg, planTodos: todos, ...(planTitle ? { planTitle } : {}) }
+                : msg,
             ),
           );
         }
@@ -2209,7 +2219,14 @@ class XyneAIStreamManager {
         }
         case 'plan': {
           if (!started) ensureViewerStream();
-          this.processStreamEvent({ type: 'plan', todos: data['todos'], title: data['title'] }, botMessageId, '', [], streamId, threadId);
+          this.processStreamEvent(
+            { type: 'plan', todos: data['todos'], title: data['title'] },
+            botMessageId,
+            '',
+            [],
+            streamId,
+            threadId,
+          );
           break;
         }
 

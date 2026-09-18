@@ -86,7 +86,10 @@ export function SandboxModeSwitch({
     [isControlled, onOpenChange],
   );
 
-  const [containerStatus, setContainerStatus] = useState<{ available: boolean; reason?: string } | null>(null);
+  const [containerStatus, setContainerStatus] = useState<{
+    available: boolean;
+    reason?: string;
+  } | null>(null);
   useEffect(() => {
     const api = typeof window !== 'undefined' ? window.electronAPI?.localHarness : undefined;
     if (!api?.getStatus) return;
@@ -148,7 +151,8 @@ export function SandboxModeSwitch({
     >
       <div className='flex flex-col py-1 px-1'>
         {SANDBOX_MODE_OPTIONS.map(option => {
-          const OptionIcon = option.value === 'local' ? Laptop : option.value === 'container' ? Box : Cloud;
+          const OptionIcon =
+            option.value === 'local' ? Laptop : option.value === 'container' ? Box : Cloud;
           const selected = option.value === mode;
           return (
             <button

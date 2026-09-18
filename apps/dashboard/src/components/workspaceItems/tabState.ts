@@ -37,7 +37,11 @@ export function activateTab(state: TabState, id: string): TabState {
  * is kept while its row has simply not arrived yet, so a just-created item does
  * not flicker out of the strip.
  */
-export function pruneTabs(state: TabState, knownIds: readonly string[], pending: readonly string[] = []): TabState {
+export function pruneTabs(
+  state: TabState,
+  knownIds: readonly string[],
+  pending: readonly string[] = [],
+): TabState {
   const known = new Set([...knownIds, ...pending]);
   const openIds = state.openIds.filter(id => known.has(id));
   if (openIds.length === state.openIds.length) return state;

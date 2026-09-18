@@ -164,21 +164,21 @@ export function useAnnotation({
           </button>
         ) : null}
         {sink ? (
-        <button
-          type='button'
-          onClick={ask}
-          className='rounded-md border border-border px-2 py-1 text-[11px] font-medium text-foreground hover:bg-secondary/60'
-          data-track-category='AskAI'
-          data-track-name='workspace-page-annotate-ask'
-        >
-          {draft.trim()
-            ? editable
-              ? 'Send edit to Xyne chat'
-              : 'Send question to Xyne chat'
-            : editable
-              ? 'Edit with Xyne'
-              : 'Ask with Xyne'}
-        </button>
+          <button
+            type='button'
+            onClick={ask}
+            className='rounded-md border border-border px-2 py-1 text-[11px] font-medium text-foreground hover:bg-secondary/60'
+            data-track-category='AskAI'
+            data-track-name='workspace-page-annotate-ask'
+          >
+            {draft.trim()
+              ? editable
+                ? 'Send edit to Xyne chat'
+                : 'Send question to Xyne chat'
+              : editable
+                ? 'Edit with Xyne'
+                : 'Ask with Xyne'}
+          </button>
         ) : null}
         {saved ? <span className='text-[11px] text-muted-foreground'>Saved</span> : null}
         <button

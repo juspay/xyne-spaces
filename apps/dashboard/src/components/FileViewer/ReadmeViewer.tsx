@@ -227,7 +227,7 @@ export const ReadmeViewer: React.FC<BaseViewerProps> = memo(({ source }) => {
         <td className='border border-border px-3 py-2 text-foreground align-top'>{children}</td>
       ),
       pre: ({ children }) => {
-        const child = Array.isArray(children) ? children[0] : children;
+        const child: unknown = Array.isArray(children) ? children[0] : children;
         const childClass =
           child && typeof child === 'object' && 'props' in child
             ? String((child as { props?: { className?: string } }).props?.className ?? '')

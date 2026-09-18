@@ -168,13 +168,16 @@ function WorkspacePaneInner({
   const [tab, setTab] = useState<WorkspaceTabId>('artifacts');
   const [tabs, setTabs] = useState<TabState>(EMPTY_TABS);
   const selectedId = tabs.activeId;
-  const setSelectedId = useCallback((next: string | null | ((current: string | null) => string | null)) => {
-    setTabs(current => {
-      const wanted = typeof next === 'function' ? next(current.activeId) : next;
-      if (wanted === null) return { openIds: current.openIds, activeId: null };
-      return openTab(current, wanted);
-    });
-  }, []);
+  const setSelectedId = useCallback(
+    (next: string | null | ((current: string | null) => string | null)) => {
+      setTabs(current => {
+        const wanted = typeof next === 'function' ? next(current.activeId) : next;
+        if (wanted === null) return { openIds: current.openIds, activeId: null };
+        return openTab(current, wanted);
+      });
+    },
+    [],
+  );
   const closeWorkspaceTab = useCallback((id: string) => {
     setTabs(current => closeTab(current, id));
   }, []);
@@ -299,11 +302,12 @@ function WorkspacePaneInner({
   const listedArtifacts = useMemo(() => {
     const hasDesign = artifacts.some(a => a.kind === 'DESIGN_HTML');
     const designFileIds = new Set(
-      artifacts.filter(a => a.kind === 'DESIGN_HTML' && a.latestVersionRef).map(a => a.latestVersionRef as string),
+      artifacts
+        .filter(a => a.kind === 'DESIGN_HTML' && a.latestVersionRef)
+        .map(a => a.latestVersionRef as string),
     );
     const isDesignHtmlFile = (a: ConversationArtifact): boolean =>
-      a.kind === 'FILE' &&
-      (designFileIds.has(a.refId) || (hasDesign && /\.html?$/i.test(a.title)));
+      a.kind === 'FILE' && (designFileIds.has(a.refId) || (hasDesign && /\.html?$/i.test(a.title)));
     return artifacts.filter(a => a.kind !== 'PAGE' && !isDesignHtmlFile(a));
   }, [artifacts]);
   const reviewGuide = useReviewGuide(artifacts);
@@ -410,7 +414,6 @@ function WorkspacePaneInner({
     return () => onShownAppChange?.(null);
   }, [onShownAppChange]);
 
-
   const openApp = useCallback((): void => {
     const appId = appMode?.appId;
     if (!appMode || !appId) return;
@@ -502,7 +505,7 @@ function WorkspacePaneInner({
             Open app
           </button>
         )}
-        {(
+        {
           <button
             type='button'
             onClick={onToggleMaximize}
@@ -512,13 +515,9 @@ function WorkspacePaneInner({
             data-track-category='AskAI'
             data-track-name='workspace-maximize'
           >
-            {maximized ? (
-              <Minimize2 className='h-4 w-4' />
-            ) : (
-              <Maximize2 className='h-4 w-4' />
-            )}
+            {maximized ? <Minimize2 className='h-4 w-4' /> : <Maximize2 className='h-4 w-4' />}
           </button>
-        )}
+        }
         {onCollapse && !maximized && (
           <button
             type='button'
@@ -534,9 +533,7 @@ function WorkspacePaneInner({
         )}
       </div>
 
-      <div
-        className='relative min-h-0 w-full min-w-0 flex-1 overflow-hidden'
-      >
+      <div className='relative min-h-0 w-full min-w-0 flex-1 overflow-hidden'>
         {showDetail ? (
           <WorkspaceSurface
             items={surfaceItems}

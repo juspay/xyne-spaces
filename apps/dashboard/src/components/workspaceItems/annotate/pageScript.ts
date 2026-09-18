@@ -178,4 +178,3 @@ export const ANNOTATE_SCRIPT_TAG = `<script>${BODY}</script>`;
 
 /** For a webview or a host-held page: evaluated in the page after it loads. */
 export const ANNOTATE_SCRIPT = BODY;
-

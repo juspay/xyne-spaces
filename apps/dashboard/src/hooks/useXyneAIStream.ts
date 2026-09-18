@@ -563,7 +563,9 @@ export const useXyneAIStream = ({
           ...(isV2 && eModel && eModelProvider ? { modelProvider: eModelProvider } : {}),
           ...(eThinkingLevel ? { thinkingLevel: eThinkingLevel } : {}),
           ...(suppressCompletionToast && { suppressCompletionToast: true }),
-          ...(ov?.sandboxMode && ov.sandboxMode !== 'remote' ? { sandboxMode: ov.sandboxMode } : {}),
+          ...(ov?.sandboxMode && ov.sandboxMode !== 'remote'
+            ? { sandboxMode: ov.sandboxMode }
+            : {}),
           ...(ov?.studioMode ? { studioMode: ov.studioMode } : {}),
           ...(ov?.designArtifactAttachmentId
             ? { designArtifactAttachmentId: ov.designArtifactAttachmentId }

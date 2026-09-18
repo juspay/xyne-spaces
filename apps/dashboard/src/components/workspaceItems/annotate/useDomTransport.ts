@@ -48,7 +48,10 @@ function selectorFor(el: HTMLElement, root: HTMLElement): string {
   return parts.join(' > ');
 }
 
-function findIn(root: HTMLElement, mark: { selector?: string; quote?: string }): HTMLElement | null {
+function findIn(
+  root: HTMLElement,
+  mark: { selector?: string; quote?: string },
+): HTMLElement | null {
   if (mark.selector) {
     try {
       const bySelector = root.querySelector<HTMLElement>(mark.selector);
@@ -129,9 +132,7 @@ export function useDomTransport(
     (marks: readonly CommentMark[]): void => {
       if (!root) return;
       root.querySelectorAll(`[${MARK_ATTR}]`).forEach(node => node.remove());
-      root
-        .querySelectorAll(`[${ANCHOR_ATTR}]`)
-        .forEach(node => node.removeAttribute(ANCHOR_ATTR));
+      root.querySelectorAll(`[${ANCHOR_ATTR}]`).forEach(node => node.removeAttribute(ANCHOR_ATTR));
       if (getComputedStyle(root).position === 'static') root.style.position = 'relative';
 
       const counts = new Map<HTMLElement, HTMLElement>();

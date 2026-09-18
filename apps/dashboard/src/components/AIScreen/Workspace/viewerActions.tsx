@@ -25,10 +25,7 @@ const ViewerActionsContext = createContext<ViewerActionsValue | null>(null);
  */
 export function ViewerActionsProvider({ children }: { children: ReactNode }): ReactElement {
   const [render, setRender] = useState<ViewerActionRender | null>(null);
-  const publish = useMemo(
-    () => (next: ViewerActionRender | null) => setRender(() => next),
-    [],
-  );
+  const publish = useMemo(() => (next: ViewerActionRender | null) => setRender(() => next), []);
   const value = useMemo(() => ({ render, publish }), [render, publish]);
   return <ViewerActionsContext.Provider value={value}>{children}</ViewerActionsContext.Provider>;
 }

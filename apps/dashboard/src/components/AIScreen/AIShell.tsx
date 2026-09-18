@@ -367,10 +367,7 @@ export function AIShell({
         <div className='h-full w-[2px] bg-transparent group-hover:bg-primary group-active:bg-primary' />
       </Separator>
 
-      <Panel
-        id='ai-chat'
-        minSize='30%'
-      >
+      <Panel id='ai-chat' minSize='30%'>
         <div
           ref={mainRef}
           className={cn(
@@ -454,7 +451,6 @@ export function AIShell({
           </Panel>
         </>
       )}
-
     </ResizableGroup>
   );
 }

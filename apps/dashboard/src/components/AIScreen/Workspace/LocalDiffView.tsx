@@ -239,6 +239,8 @@ function CoverageBar({
           <button
             type='button'
             onClick={() => setOpen(value => !value)}
+            data-track-category='AskAI'
+            data-track-name='review-coverage-toggle'
             className='flex-shrink-0 rounded px-1.5 py-0.5 text-muted-foreground hover:bg-secondary/60 hover:text-foreground'
           >
             {open ? 'Hide' : 'Show'}
@@ -253,6 +255,8 @@ function CoverageBar({
               key={path}
               type='button'
               onClick={() => onJump(path)}
+              data-track-category='AskAI'
+              data-track-name='review-jump-missing'
               className='block w-full truncate text-left font-mono text-[11px] text-foreground underline-offset-2 hover:underline'
             >
               {path}
@@ -263,6 +267,8 @@ function CoverageBar({
               <button
                 type='button'
                 onClick={() => onJump(row.file)}
+                data-track-category='AskAI'
+                data-track-name='review-jump-skipped'
                 className='min-w-0 flex-1 truncate text-left font-mono text-[11px] text-muted-foreground underline-offset-2 hover:underline'
               >
                 {row.file}
@@ -307,6 +313,8 @@ function ReviewHeader({
               <button
                 type='button'
                 onClick={() => onJump(entry.file)}
+                data-track-category='AskAI'
+                data-track-name='review-jump-finding'
                 disabled={!known.has(entry.file)}
                 className='min-w-0 flex-1 text-left disabled:opacity-60'
               >
@@ -344,6 +352,8 @@ function CommentNav({ comments }: { comments: AnchoredComment[] }): ReactElement
         type='button'
         onClick={() => go(index - 1)}
         aria-label='Previous comment'
+        data-track-category='AskAI'
+        data-track-name='review-comment-prev'
         className='grid h-6 w-6 flex-shrink-0 place-items-center rounded text-muted-foreground hover:bg-secondary/60 hover:text-foreground'
       >
         <ChevronLeft className='h-3.5 w-3.5' />
@@ -352,6 +362,8 @@ function CommentNav({ comments }: { comments: AnchoredComment[] }): ReactElement
         type='button'
         onClick={() => go(index + 1)}
         aria-label='Next comment'
+        data-track-category='AskAI'
+        data-track-name='review-comment-next'
         className='grid h-6 w-6 flex-shrink-0 place-items-center rounded text-muted-foreground hover:bg-secondary/60 hover:text-foreground'
       >
         <ChevronRight className='h-3.5 w-3.5' />
@@ -365,6 +377,8 @@ function CommentNav({ comments }: { comments: AnchoredComment[] }): ReactElement
               setIndex(at);
               scrollToId(commentAnchorId(comment.id));
             }}
+            data-track-category='AskAI'
+            data-track-name='review-comment-dot'
             title={`${comment.title} · ${comment.file}`}
             className={cn(
               'flex-shrink-0 rounded border px-1.5 py-0.5 font-mono text-[11px] transition-colors',
@@ -410,6 +424,8 @@ function FileSection({
         type='button'
         onClick={() => setOpen(value => !value)}
         disabled={file.lines.length === 0}
+        data-track-category='AskAI'
+        data-track-name='review-file-toggle'
         className='sticky top-0 z-[1] flex w-full min-w-0 items-center gap-2 border-b border-border bg-background px-3 py-2 text-left hover:bg-secondary/40'
       >
         {file.lines.length === 0 ? (
@@ -419,7 +435,10 @@ function FileSection({
         ) : (
           <ChevronRight className='h-3.5 w-3.5 flex-shrink-0 text-muted-foreground' />
         )}
-        <span className='min-w-0 flex-1 truncate font-mono text-xs text-foreground' title={file.path}>
+        <span
+          className='min-w-0 flex-1 truncate font-mono text-xs text-foreground'
+          title={file.path}
+        >
           {file.path}
         </span>
         {comments.length > 0 ? (
@@ -437,13 +456,17 @@ function FileSection({
           </span>
         ) : null}
         {file.lines.length === 0 ? (
-          <span className='flex-shrink-0 text-[11px] text-muted-foreground'>no textual changes</span>
+          <span className='flex-shrink-0 text-[11px] text-muted-foreground'>
+            no textual changes
+          </span>
         ) : (
           <>
             <span className='flex-shrink-0 font-mono text-[11px] text-emerald-500'>
               +{file.added}
             </span>
-            <span className='flex-shrink-0 font-mono text-[11px] text-rose-500'>-{file.removed}</span>
+            <span className='flex-shrink-0 font-mono text-[11px] text-rose-500'>
+              -{file.removed}
+            </span>
           </>
         )}
       </button>
@@ -492,10 +515,7 @@ export function LocalDiffView({
   const { patch, loading, error } = useLocalPatch(artifact);
   const parsed = useMemo(() => (patch ? parseUnifiedDiff(patch) : []), [patch]);
   const files = useMemo(() => orderedFiles(parsed, guide ?? null), [parsed, guide]);
-  const anchored = useMemo(
-    () => anchorComments(files, guide?.comments ?? []),
-    [files, guide],
-  );
+  const anchored = useMemo(() => anchorComments(files, guide?.comments ?? []), [files, guide]);
   const flat = useMemo(
     () => files.flatMap(file => anchored.get(file.path) ?? []),
     [files, anchored],
@@ -537,11 +557,7 @@ export function LocalDiffView({
   return (
     <div className='flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden bg-background'>
       {guide ? (
-        <ReviewHeader
-          guide={guide}
-          files={files}
-          onJump={path => scrollToId(fileAnchorId(path))}
-        />
+        <ReviewHeader guide={guide} files={files} onJump={path => scrollToId(fileAnchorId(path))} />
       ) : null}
       {coverage ? (
         <CoverageBar report={coverage} onJump={path => scrollToId(fileAnchorId(path))} />

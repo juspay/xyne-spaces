@@ -87,14 +87,8 @@ export function ModelThinkingSelector({
     () => models.find(m => m.id === selectedModel) ?? null,
     [models, selectedModel],
   );
-  const harnessModels = useMemo(
-    () => models.filter(m => m.provider === 'local-harness'),
-    [models],
-  );
-  const serverModels = useMemo(
-    () => models.filter(m => m.provider !== 'local-harness'),
-    [models],
-  );
+  const harnessModels = useMemo(() => models.filter(m => m.provider === 'local-harness'), [models]);
+  const serverModels = useMemo(() => models.filter(m => m.provider !== 'local-harness'), [models]);
   const recommendedHarness = useMemo(
     () => harnessModels.find(m => m.recommended) ?? null,
     [harnessModels],
