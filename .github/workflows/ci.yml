@@ -117,6 +117,29 @@ jobs:
         if: matrix.task == 'build'
         run: pnpm --filter xyne-spaces-dashboard run build
 
+  # ---------------------------------------------------------------------------
+  # Performance framework: offline validation only. Runs the catalog, profile,
+  # rate-limit, runner and CI-contract checks — it never sends traffic to an
+  # environment, so it is safe on every pull request, and needs no dependency
+  # install because the suite is plain `node --test` over dependency-free .mjs.
+  # ---------------------------------------------------------------------------
+  performance:
+    name: Performance framework validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      # No install step: the suite is plain `node --test` with no dependencies,
+      # and running it through the script keeps one definition of the command.
+      - name: Validate performance framework
+        run: pnpm perf:validate
+
   # Framework lint — self-contained (no workspace deps).
   framework-lint:
     name: Framework lint
