@@ -30,7 +30,7 @@ export const SourceChannelsSubmenu = ({
   const channels = useMemo(() => {
     const projectIdSet = new Set(projectIds);
     return browsableChannels
-      .filter(channel => projectIdSet.has(channel.projectId))
+      .filter(channel => channel.projectId !== null && projectIdSet.has(channel.projectId))
       .map(channel => ({ id: channel.id, name: channel.name }));
   }, [browsableChannels, projectIds]);
 

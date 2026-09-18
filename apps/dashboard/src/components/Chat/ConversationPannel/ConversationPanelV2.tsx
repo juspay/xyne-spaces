@@ -80,6 +80,27 @@ const DeactivatedDmArchiveBanner = (): ReactElement => {
   );
 };
 
+// Channel Tickets tab. Boards are sourced from the channel's PROJECT. A projectless
+// channel (projectId '' — projects are decoupled from channels) has no project to
+// source boards from, so render a graceful empty state (no board view, no ticket
+// creation) instead of the Kanban board.
+const ChannelTicketsTab = ({ channelId }: { channelId: string }): ReactElement => {
+  const channel = useChannel(channelId);
+  if (channel && !channel.projectId) {
+    return (
+      <div className='flex h-full flex-col items-center justify-center gap-1 p-8 text-center'>
+        <p className='text-sm font-medium text-foreground'>
+          No boards are configured for this channel
+        </p>
+        <p className='text-sm text-muted-foreground'>
+          Link this channel to a project to start creating and tracking tickets.
+        </p>
+      </div>
+    );
+  }
+  return <KanbanBoardScreen channelId={channelId} />;
+};
+
 const ConversationPanelV2 = ({
   channelId,
   previousChannelId,
@@ -311,7 +332,7 @@ const ConversationPanelV2 = ({
                   })}
                   cachedConversations={cachedConversations}
                   channelId={channelId}
-                  projectId={channel?.projectId}
+                  projectId={channel?.projectId ?? undefined}
                   channelScopeType={channel?.scopeType}
                   skipMarkAsReadRef={skipMarkAsReadRef}
                   {...(conversationIds && { conversationIds })}
@@ -347,7 +368,7 @@ const ConversationPanelV2 = ({
                 conversationId={conversationId}
               />
             ) : (
-              <KanbanBoardScreen channelId={channelId} />
+              <ChannelTicketsTab channelId={channelId} />
             ))}
           {tab === 'canvas' &&
             (canvasId ? <CanvasScreen canvasId={canvasId} /> : <CanvasTab channelId={channelId} />)}

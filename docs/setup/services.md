@@ -18,7 +18,7 @@ else in the stack is required for two people to work in the same place at the sa
 | `ysweet` | 8080 | Y-Sweet CRDT server — concurrent document and canvas editing |
 | `livekit` | 7880–7882 | WebRTC SFU for calls and huddles |
 | `livekit-egress` | — | Call recording and stream egress |
-| `minio` | 9000, 9001 | S3-compatible object storage (9001 is the console) |
+| `minio` | 9000, 9001 | S3-compatible object storage, served by RustFS (9001 is the console) |
 | `fake-gcs` | 4443 | Google Cloud Storage emulator |
 | `transcription-agent` | 8001 | Python speech-to-text worker |
 | `superposition` | 9999 | Feature flags and config |
