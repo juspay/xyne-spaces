@@ -2503,6 +2503,10 @@ export const sdlcRepositoryAccess: ToolDefinition = {
     if (actorUserId !== context.meta?.["userId"]?.trim()) {
       return "Error: SDLC run context does not belong to this run's user.";
     }
+    // The tool's sessionId is the sandbox. claw-auth checks the run session the token was minted for.
+    const runSessionId = context.sessionId;
+    const sessionToken = context.sessionToken;
+    if (!runSessionId || !sessionToken) return "Error: SDLC repository access needs a claw-auth run session.";
     const session = SESSION_STORE.get(sessionId);
     if (!session) return `Error: Session ${sessionId} not found. Call sandbox-create first.`;
     if (!isSessionOwnedByContext(session, sessionId, context)) {
@@ -2512,11 +2516,16 @@ export const sdlcRepositoryAccess: ToolDefinition = {
       return "Error: A shared read-only sandbox cannot hold repository credentials. Call sandbox-create for your own sandbox.";
     }
     try {
-      const { mode, repository } = await installSdlcRepositoryAccess(session, {
-        repoId,
-        workspaceId,
-        actorUserId,
-      });
+      const { mode, repository } = await installSdlcRepositoryAccess(
+        session,
+        { repoId, workspaceId, actorUserId },
+        {
+          authUrl: context.config["XYNE_CLAW_AUTH_URL"] ?? process.env["XYNE_CLAW_AUTH_URL"] ?? AUTH_URL_DEFAULT,
+          s2sKey: context.s2sKey ?? context.config["XYNE_CLAW_S2S_KEY"] ?? process.env["XYNE_CLAW_S2S_KEY"] ?? "",
+          runSessionId,
+          sessionToken,
+        },
+      );
       return JSON.stringify({
         sessionId,
         repoId,
