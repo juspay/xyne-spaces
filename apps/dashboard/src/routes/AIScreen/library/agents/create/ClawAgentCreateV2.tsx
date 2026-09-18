@@ -1,19 +1,10 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react';
+import { useCallback, useMemo, useRef, useState, type ReactElement } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useMutation } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import {
-  Ai01,
-  ArrowUp,
-  AtMark,
-  MaximizeTwoArrow,
-  MinimizeTwoArrow,
-  PencilEditLine,
-} from '@xyne/icons';
+import { Ai01, AtMark, PencilEditLine } from '@xyne/icons';
 import { Loader2 } from 'lucide-react';
-import { cn } from '@/utils/classNames';
 import { Button } from '@/components/ui/Button/index';
-import { ComposerVoiceButton } from '@/components/AIScreen/ComposerVoiceButton';
 import { useAuth } from '@/hooks/useAuth';
 import { useAgentNameCheck } from '@/hooks/useAgentNameCheck';
 import { useCreateClawAgent } from '@/hooks/useCreateClawAgent';
@@ -59,14 +50,8 @@ const ClawAgentCreateV2 = ({ agent }: ClawAgentCreateV2Props = {}): ReactElement
   const { user } = useAuth();
   const builtBy = agent?.owner?.name ?? agent?.owner?.email ?? user?.name ?? user?.email ?? 'you';
 
-  const [aiOpen, setAiOpen] = useState(false);
-  const aiIntentRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const [showErrors, setShowErrors] = useState(false);
-
-  useEffect(() => {
-    if (aiOpen) aiIntentRef.current?.focus();
-  }, [aiOpen]);
 
   const [state, setState] = useState<WizardState>(() =>
     agent ? wizardStateFromAgent(agent) : INITIAL_WIZARD_STATE,
@@ -90,13 +75,11 @@ const ClawAgentCreateV2 = ({ agent }: ClawAgentCreateV2Props = {}): ReactElement
       toast.error('Could not generate a prompt', { description: err.message }),
   });
 
-  const appendIntent = useCallback((text: string): void => {
-    setState(prev => ({ ...prev, aiIntent: `${prev.aiIntent} ${text}`.trim() }));
-  }, []);
+  const intent = state.systemPrompt.trim();
+  const canImprove = intent.length > 0 && !generate.isPending;
 
   const runGenerate = (): void => {
-    const intent = state.aiIntent.trim();
-    if (!intent || generate.isPending) return;
+    if (!canImprove) return;
     generate.mutate({ intent, agentName: state.name });
   };
 
@@ -272,75 +255,20 @@ const ClawAgentCreateV2 = ({ agent }: ClawAgentCreateV2Props = {}): ReactElement
                   className='h-[250px] w-full resize-none bg-transparent p-4 text-sm leading-5 text-foreground placeholder:text-muted-foreground focus:outline-none'
                 />
 
-                <div className='flex flex-col gap-2 bg-muted/60 p-1'>
-                  {aiOpen && (
-                    <div
-                      id='agent-v2-ai-intent'
-                      className='flex items-center gap-1 rounded-2xl border-[0.8px] border-border bg-background p-1'
-                    >
-                      <input
-                        ref={aiIntentRef}
-                        value={state.aiIntent}
-                        onChange={e => update({ aiIntent: e.target.value })}
-                        onKeyDown={e => {
-                          if (e.key === 'Enter') runGenerate();
-                        }}
-                        placeholder='Describe what this agent should do…'
-                        aria-label='Describe what this agent should do'
-                        data-track-category='Claw Agents'
-                        data-track-name='Create agent v2: AI intent'
-                        className='min-w-0 flex-1 bg-transparent p-2 text-sm leading-5 text-foreground placeholder:text-muted-foreground focus:outline-none'
-                      />
-                      <ComposerVoiceButton
-                        onTranscript={appendIntent}
-                        disabled={generate.isPending}
-                        className='size-9 shrink-0 rounded-xl'
-                      />
-                      <button
-                        type='button'
-                        onClick={runGenerate}
-                        disabled={generate.isPending || !state.aiIntent.trim()}
-                        aria-label='Generate with AI'
-                        data-track-category='Claw Agents'
-                        data-track-name='Create agent v2: generate prompt'
-                        className={cn(
-                          'flex size-9 shrink-0 items-center justify-center rounded-xl bg-foreground text-background transition-opacity',
-                          (generate.isPending || !state.aiIntent.trim()) &&
-                            'cursor-not-allowed opacity-40',
-                        )}
-                      >
-                        {generate.isPending ? (
-                          <Loader2 className='size-4 animate-spin' aria-hidden />
-                        ) : (
-                          <ArrowUp className='size-4' aria-hidden />
-                        )}
-                      </button>
-                    </div>
-                  )}
-
-                  <div className='flex items-center justify-between'>
-                    <div className='flex items-center gap-1.5 p-2'>
-                      <Ai01 className='size-4 text-foreground' aria-hidden />
-                      <span className='text-sm leading-5 text-foreground'>Generate with AI</span>
-                    </div>
-                    <button
-                      type='button'
-                      onClick={() => setAiOpen(open => !open)}
-                      aria-expanded={aiOpen}
-                      aria-controls='agent-v2-ai-intent'
-                      aria-label={aiOpen ? 'Hide AI prompt' : 'Write a prompt for AI'}
-                      title={aiOpen ? 'Hide AI prompt' : 'Write a prompt for AI'}
-                      data-track-category='Claw Agents'
-                      data-track-name='Create agent v2: toggle AI prompt'
-                      className='flex size-9 items-center justify-center rounded-xl text-muted-foreground transition-colors hover:bg-muted hover:text-foreground'
-                    >
-                      {aiOpen ? (
-                        <MinimizeTwoArrow className='size-4' aria-hidden />
-                      ) : (
-                        <MaximizeTwoArrow className='size-4' aria-hidden />
-                      )}
-                    </button>
-                  </div>
+                <div className='flex items-center justify-end bg-muted/60 p-2'>
+                  <Button
+                    variant='outline'
+                    size='sm'
+                    onClick={runGenerate}
+                    disabled={!canImprove}
+                    loading={generate.isPending}
+                    className='rounded-lg border-border bg-card text-foreground hover:bg-muted'
+                    data-track-category='Claw Agents'
+                    data-track-name='Create agent v2: improve prompt'
+                  >
+                    {!generate.isPending && <Ai01 className='size-4' aria-hidden />}
+                    Improve with AI
+                  </Button>
                 </div>
               </div>
 
