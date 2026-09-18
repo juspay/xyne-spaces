@@ -650,6 +650,14 @@ const ChannelCommandMenu = ({
   // Mention search state - declared before useSearchMetrics so it can be passed to the hook
   const [mentionSearchQuery, setMentionSearchQuery] = useState('');
   const [mentionSearchType, setMentionSearchType] = useState<ChipType | null>(null);
+  // True only during the ~100ms settle window between a chip commit (insertMentionRef fires)
+  // and the setTimeout in handleMentionSelect clearing mentionSearchType. popupFilterHint
+  // reads this to suppress the ghost suffix for exactly that window (see its use below).
+  // This must be a transient ref, not a derived check like `selectedMentions.length > 0`:
+  // a fresh second typeahead and a stale render echoing the first commit carry identical
+  // state (same type, empty query, resting label), so render-time state alone can't tell
+  // them apart — only "did a commit just happen" can, and that's history, not state.
+  const justCommittedMentionRef = useRef(false);
   // Which `mentions:` sections have been expanded past their first five rows.
   const [expandedMentionGroups, setExpandedMentionGroups] = useState<
     Record<MentionGroupKey, boolean>
@@ -1409,6 +1417,9 @@ const ChannelCommandMenu = ({
       }
 
       if (insertMentionRef.current) {
+        // Open the settle window (see justCommittedMentionRef's declaration): the suffix
+        // stays hidden for exactly this commit, not for filters picked afterward.
+        justCommittedMentionRef.current = true;
         insertMentionRef.current({
           id: mention.id,
           name: mention.name,
@@ -1418,6 +1429,7 @@ const ChannelCommandMenu = ({
 
         // Clear mention search state after a delay to allow insertion to complete
         setTimeout(() => {
+          justCommittedMentionRef.current = false;
           setMentionSearchType(null);
           setMentionSearchQuery('');
           setChannelTrigger(null);
@@ -2006,6 +2018,12 @@ const ChannelCommandMenu = ({
   // "pick a value" context, so the first candidate previews at rest); the row's gray→blue tier
   // still signals navigation. Empty when there's no matching candidate.
   const popupFilterHint = useMemo(() => {
+    // While a committed chip is settling, mentionSearchType is still set for a few frames,
+    // so the suffix would keep rendering at the *pre-commit* caret position — stacked on top
+    // of the just-inserted pill. Suppress it for that window only; see
+    // justCommittedMentionRef's declaration for why render-time state alone can't
+    // distinguish "just committed" from "genuinely fresh typeahead".
+    if (justCommittedMentionRef.current) return '';
     if (!mentionSearchType || !mentionActiveLabel) return '';
     const query = mentionSearchQuery.trim();
     // @/# navigate on select; every other prefix builds a filter chip (a "select").
@@ -2031,6 +2049,11 @@ const ChannelCommandMenu = ({
     userTrigger,
     channelTrigger,
     mentionActiveLabel,
+    // Not read by the memo body — included so the memo recomputes the moment a chip lands:
+    // selectedMentions updates synchronously with the commit, while a ref change never
+    // triggers a re-render. Without this dep, the memo could keep serving the pre-commit
+    // suffix until some other dep happened to change.
+    selectedMentions.length,
   ]);
 
   // Never surface a ghost when the input is truly empty (no free text AND no chip). A stale
@@ -2608,11 +2631,14 @@ const ChannelCommandMenu = ({
     // gate (which tracks Vespa results) so the first command row is highlighted at rest.
     const hasActiveSearch =
       searchText.trim().length > 0 || selectedMentions.length > 0 || commandActive;
-    // While a mention typeahead is open, selection is owned by selectedMentionIndex - don't
+    // While a mention typeahead is open, selection is owned by selectedMentionIndex — don't
     // also auto-select a cmdk row, or two rows light up.
+    // The show-results row renders as soon as there's searchText, even before results
+    // stream in (see showResultsForRow), so a typed query is reason enough to fire;
+    // without it, a query with zero hits would leave nothing selected.
     if (
       !hasActiveSearch ||
-      (!hasResults && !commandActive) ||
+      (!hasResults && !commandActive && !searchText.trim()) ||
       hasNavigatedRef.current ||
       mentionSearchType
     )
@@ -2622,25 +2648,21 @@ const ChannelCommandMenu = ({
       if (hasNavigatedRef.current) return;
       const items = commandRef.current?.querySelectorAll('[cmdk-item]:not([aria-disabled="true"])');
       if (items && items.length > 0) {
-        // Once there's a query or a filter, the user has expressed a search rather than a
-        // jump-to, so Enter should open the full results — that row becomes the resting
-        // target. With an empty box it stays on the first real result, where Enter is a
-        // quick-switch. The screen palette keeps first-row either way.
         const rows = Array.from(items);
         const showResultsIndex = rows.findIndex(
           item => item.getAttribute('data-show-results-item') === 'true',
         );
-        const hasSearchIntent = searchText.trim().length > 0 || selectedMentions.length > 0;
 
-        const firstReal = isScreenPalette
-          ? -1
-          : rows.findIndex(item => item.getAttribute('data-show-results-item') !== 'true');
+        // Rest on the first real result when one exists. The global overlay only runs in
+        // 'popup' mode now (see useSearchMode), so the inline palette's old preference for
+        // "Show detailed results" no longer applies here. Fall back to the show-results
+        // row when no real row is selectable (zero hits, still streaming, or it's the
+        // only row).
+        const firstReal = rows.findIndex(
+          item => item.getAttribute('data-show-results-item') !== 'true',
+        );
         const selectedIndex =
-          !isScreenPalette && hasSearchIntent && showResultsIndex !== -1
-            ? showResultsIndex
-            : firstReal === -1
-              ? 0
-              : firstReal;
+          firstReal !== -1 ? firstReal : showResultsIndex !== -1 ? showResultsIndex : 0;
         items.forEach((item, i) => {
           item.setAttribute('aria-selected', i === selectedIndex ? 'true' : 'false');
         });
