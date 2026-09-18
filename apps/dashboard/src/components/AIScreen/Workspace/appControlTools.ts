@@ -211,10 +211,9 @@ export async function executeAppTool(
           field instanceof HTMLTextAreaElement
             ? HTMLTextAreaElement.prototype
             : HTMLInputElement.prototype;
-        const descriptor: PropertyDescriptor | undefined = Reflect.getOwnPropertyDescriptor(
-          proto,
-          'value',
-        );
+        const descriptor = Reflect.getOwnPropertyDescriptor(proto, 'value') as
+          | { set?: (this: HTMLInputElement | HTMLTextAreaElement, value: string) => void }
+          | undefined;
         const setValue = descriptor?.set;
         if (setValue) Reflect.apply(setValue, field, [text]);
         field.dispatchEvent(new Event('input', { bubbles: true }));
