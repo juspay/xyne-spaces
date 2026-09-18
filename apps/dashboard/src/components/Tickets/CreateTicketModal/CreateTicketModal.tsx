@@ -519,21 +519,49 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
   const boardsRef = useRef(boards);
   boardsRef.current = boards;
 
-  // The channel's linked boards can span projects, so services are looked up
-  // across every project those boards belong to rather than the channel's own
-  // (deprecated) projectId.
-  const boardProjectIds = useMemo(() => {
+  // Get selected board's metadata for ticket form configuration
+  const selectedBoard = useMemo(
+    () => boards?.find(b => b.id === formValues.boardId),
+    [boards, formValues.boardId],
+  );
+  const isFlowRootTicket = selectedBoard?.boardType === BoardType.FLOW && !parentTicketId;
+  const isReleaseLine = ticketKind === 'release';
+  // Only main release boards are selectable (repos); services show as chips below.
+  // Keep the currently-primary board even if it lacks a provider.
+  const releaseBoards = useMemo(
+    () =>
+      (boards ?? [])
+        .filter(b => isMainReleaseBoard(b) || b.id === formValues.boardId)
+        .filter(b => isReleaseBoard(b.boardType)),
+    [boards, formValues.boardId],
+  );
+
+  const releaseBoardOptions = useMemo(
+    () =>
+      releaseBoards.map(b => ({
+        label: b.name,
+        value: b.id,
+        icon: <RepoDot color={repoColor(b.id)} />,
+      })),
+    [releaseBoards],
+  );
+
+  // Services are looked up per repo, so only the RELEASE boards' projects matter —
+  // not every project the channel's linked boards happen to span. A channel's boards
+  // can cross projects now, so this is a set rather than the channel's own
+  // (deprecated) projectId, but it stays as narrow as the repos on screen.
+  const releaseProjectIds = useMemo(() => {
     const ids = new Set<string>();
-    for (const board of boards) {
+    for (const board of releaseBoards) {
       if (board.projectId) ids.add(board.projectId);
     }
     return Array.from(ids).sort();
-  }, [boards]);
+  }, [releaseBoards]);
 
   // Services grouped by main release board → read-only chips under each repo.
   const [releaseApplications] = useCachedQuery(
-    queries.applicationsByProjectIds({ projectIds: boardProjectIds }),
-    { enabled: boardProjectIds.length > 0 },
+    queries.applicationsByProjectIds({ projectIds: releaseProjectIds }),
+    { enabled: isReleaseLine && releaseProjectIds.length > 0 },
   );
   const servicesByMainBoard = useMemo(() => {
     const map = new Map<string, string[]>();
@@ -547,24 +575,6 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
     }
     return map;
   }, [releaseApplications]);
-
-  // Get selected board's metadata for ticket form configuration
-  const selectedBoard = useMemo(
-    () => boards?.find(b => b.id === formValues.boardId),
-    [boards, formValues.boardId],
-  );
-  const isFlowRootTicket = selectedBoard?.boardType === BoardType.FLOW && !parentTicketId;
-  const isReleaseLine = ticketKind === 'release';
-  // Only main release boards are selectable (repos); services show as chips below.
-  // Keep the currently-primary board even if it lacks a provider.
-  const releaseBoardOptions = useMemo(
-    () =>
-      (boards ?? [])
-        .filter(b => isMainReleaseBoard(b) || b.id === formValues.boardId)
-        .filter(b => isReleaseBoard(b.boardType))
-        .map(b => ({ label: b.name, value: b.id, icon: <RepoDot color={repoColor(b.id)} /> })),
-    [boards, formValues.boardId],
-  );
 
   const boardMetadata = selectedBoard?.metadata as BoardMetadata | null;
 
