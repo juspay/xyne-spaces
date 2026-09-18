@@ -9,7 +9,6 @@ import {
   APP_STORE_KEY_ID_PATTERN,
   IOS_BUNDLE_ID_PATTERN,
 } from '@xyne/shared';
-import { Prisma } from '@prisma/client';
 import { z } from 'zod';
 import { authV2Middleware } from '@/middleware/authV2Middleware';
 import { db } from '@/database/client';
@@ -82,7 +81,7 @@ function assertSyncWorkerEnabled(): void {
 async function resolveApplications(
   credentials: AppStoreCredentials,
   applications: Array<{ bundleId: string }>,
-): Promise<Array<{ appId: string; bundleId: string; displayName: string }>> {
+): Promise<Array<{ bundleId: string; displayName: string }>> {
   return Promise.all(
     applications.map(async ({ bundleId }) => {
       let resolved: { appId: string; name: string } | null;
@@ -105,7 +104,7 @@ async function resolveApplications(
           `The key cannot see ${bundleId}. Check the app exists and the key's role allows it.`,
         );
       }
-      return { appId: resolved.appId, bundleId, displayName: resolved.name };
+      return { bundleId, displayName: resolved.name };
     }),
   );
 }
@@ -123,7 +122,7 @@ async function reactivateOrCreateSources(
     boardId: string;
     ownerUserId: string;
     encryptedCredentials: string;
-    applications: Array<{ appId: string; bundleId: string; displayName: string }>;
+    applications: Array<{ bundleId: string; displayName: string }>;
   },
 ): Promise<{ created: number; reactivated: number }> {
   const records = buildAppStoreSourceRecords(params);
@@ -154,7 +153,6 @@ async function reactivateOrCreateSources(
         credentials: record.credentials,
         channelId: record.channelId,
         boardId: record.boardId,
-        externalMetadata: record.externalMetadata,
         // Reset, or the first sync after a long dormancy re-scans the whole gap.
         lastSyncCursor: record.lastSyncCursor,
       },
@@ -366,8 +364,6 @@ async function setAppConnection(req: Request, res: Response, isActive: boolean):
     if (!(await authorizeSocialMediaManager(req.params.channelId, req.user!.id, workspaceId, res)))
       return;
 
-    let reactivation: { reconnectedAt: string; externalMetadata: Prisma.InputJsonValue } | null =
-      null;
     if (isActive) {
       const source = await db.externalSource.findFirst({
         where: {
@@ -376,7 +372,7 @@ async function setAppConnection(req: Request, res: Response, isActive: boolean):
           workspaceId,
           sourceType: ExternalSourcePlatform.APP_STORE,
         },
-        select: { credentials: true, externalMetadata: true },
+        select: { credentials: true },
       });
       if (!source) throw new AppStoreConnectError(404, 'App Store app not found');
       // Disconnect destroys the .p8, so reactivating without one can never sync.
@@ -387,15 +383,6 @@ async function setAppConnection(req: Request, res: Response, isActive: boolean):
             'Use "Replace key" to paste a new one before reconnecting apps.',
         );
       }
-      const reconnectedAt = new Date().toISOString();
-      const existingMetadata =
-        source.externalMetadata && typeof source.externalMetadata === 'object'
-          ? (source.externalMetadata as Prisma.JsonObject)
-          : {};
-      reactivation = {
-        reconnectedAt,
-        externalMetadata: { ...existingMetadata, connectedAt: reconnectedAt },
-      };
     }
 
     const result = await db.externalSource.updateMany({
@@ -406,13 +393,7 @@ async function setAppConnection(req: Request, res: Response, isActive: boolean):
         sourceType: ExternalSourcePlatform.APP_STORE,
       },
       // Re-enabling after dormancy must not replay the whole gap as "new" reviews.
-      data: reactivation
-        ? {
-            isActive,
-            lastSyncCursor: reactivation.reconnectedAt,
-            externalMetadata: reactivation.externalMetadata,
-          }
-        : { isActive },
+      data: isActive ? { isActive, lastSyncCursor: new Date().toISOString() } : { isActive },
     });
     if (result.count === 0) throw new AppStoreConnectError(404, 'App Store app not found');
 
@@ -451,13 +432,13 @@ router.post(
           workspaceId,
           sourceType: ExternalSourcePlatform.APP_STORE,
         },
-        select: { id: true, externalMetadata: true },
+        select: { id: true, externalIdentifier: true },
       });
       if (sources.length === 0) throw new AppStoreConnectError(404, 'App Store desk not found');
 
       // Prove the new key can still see every app before storing it.
       const bundleIds = sources
-        .map((source) => (source.externalMetadata as { bundleId?: string } | null)?.bundleId)
+        .map((source) => source.externalIdentifier)
         .filter((bundleId): bundleId is string => Boolean(bundleId));
       await resolveApplications(credentials, bundleIds.map((bundleId) => ({ bundleId })));
 

@@ -20,8 +20,7 @@ function starGlyphs(rating?: number): string {
 }
 
 export function readBundleId(source: ExternalSource): string | undefined {
-  const metadata = source.externalMetadata as { bundleId?: unknown } | null;
-  return typeof metadata?.bundleId === 'string' ? metadata.bundleId : undefined;
+  return source.externalIdentifier ?? undefined;
 }
 
 export class AppStoreReviewsTransformer extends BaseTransformer<unknown, NormalizedData[]> {
@@ -69,7 +68,7 @@ export class AppStoreReviewsTransformer extends BaseTransformer<unknown, Normali
           {
             fieldName: APP_STORE_BUNDLE_ID_FIELD,
             fieldType: FormFieldType.STRING,
-            value: bundleId ?? source.externalIdentifier ?? source.name,
+            value: bundleId ?? source.name,
           },
           {
             fieldName: APP_STORE_TERRITORY_FIELD,
