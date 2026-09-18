@@ -1,3 +1,5 @@
+## [1.342.3](https://github.com/juspay/xyne-spaces/compare/v1.342.2...v1.342.3) (2026-09-18)
+
 ## [1.342.2](https://github.com/juspay/xyne-spaces/compare/v1.342.1...v1.342.2) (2026-09-18)
 
 
