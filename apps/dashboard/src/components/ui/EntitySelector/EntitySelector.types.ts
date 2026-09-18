@@ -1,4 +1,4 @@
-import { ReactNode } from 'react';
+import { ReactElement, ReactNode } from 'react';
 
 /**
  * Represents a single selectable option in the EntitySelector
@@ -44,6 +44,33 @@ export interface SelectorOption {
 /**
  * Props for the EntitySelector component
  */
+/** State handed to a custom trigger renderer. */
+export interface TriggerState {
+  /** The option matching selectedValue, if it is present in `options`. */
+  selectedOption: SelectorOption | undefined;
+  open: boolean;
+}
+
+/**
+ * Autocapture naming for the rows EntitySelector renders itself. Defaults keep
+ * the generic ENTITY_PICKER naming; callers that already have funnels keyed to
+ * their own names can override per surface.
+ */
+export interface EntitySelectorAnalytics {
+  /** data-track-category for the search input, option rows and the clear row. Default: 'ENTITY_PICKER'. */
+  category?: string;
+  /** data-track-name for the search input. Default: unset (no attribute). */
+  searchName?: string;
+  /** data-track-name for option rows. Default: 'SELECT_OPTION'. */
+  optionName?: string;
+  /** data-track-name for the clear/unassign row and clear button. Default: 'CLEAR_SELECTION'. */
+  clearName?: string;
+  /** data-ph-capture-attribute-track-id for option rows. */
+  optionTrackId?: string;
+  /** data-ph-capture-attribute-track-id for the clear/unassign row. */
+  clearTrackId?: string;
+}
+
 export interface EntitySelectorProps {
   /** Array of options to display in the dropdown */
   options: SelectorOption[];
@@ -90,6 +117,34 @@ export interface EntitySelectorProps {
 
   /** Variant: 'default' = button trigger, 'inline' = input trigger */
   variant?: 'default' | 'inline';
+
+  /**
+   * Render a custom trigger in place of the built-in button/input — the escape
+   * hatch for callers that need their own chrome (dense table cells, avatars).
+   * Must return a single DOM element: it is wrapped in <Popover.Trigger asChild>,
+   * and Radix's Slot silently drops handlers onto a component child.
+   */
+  renderTrigger?: ((state: TriggerState) => ReactElement) | undefined;
+
+  /**
+   * Tooltip wrapped around the trigger. Owned here rather than by the caller
+   * because it has to sit *outside* <Popover.Trigger> to keep the Slot child a
+   * DOM element — wrapping the other way round breaks the popover.
+   */
+  triggerTooltip?: ReactNode | undefined;
+
+  /** Popover content alignment relative to the trigger. Default: 'start' */
+  align?: 'start' | 'center' | 'end' | undefined;
+
+  /**
+   * Clicking the already-selected option clears the selection. Default: true.
+   * Set false when the caller offers an explicit clear affordance (see
+   * showUnassignOption) and a re-click should be a no-op instead of a mutation.
+   */
+  allowDeselect?: boolean;
+
+  /** Overrides for the autocapture attributes on the rows this component renders. */
+  analytics?: EntitySelectorAnalytics | undefined;
 
   /** Optional inline input icon */
   showClearButton?: boolean;
