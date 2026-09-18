@@ -34,6 +34,7 @@ import { writeAuditLog } from "../lib/audit.js";
 import { buildAvailableToolsCatalog } from "./tools.js";
 import { validateAgentModelConfig, validateAwakeningConfig } from "../lib/agent-config-validation.js";
 import { syncAwakeningState } from "../awakening/lifecycle.js";
+import { removeAgentFromIndex, syncAgentToIndexBestEffort } from "../services/agent-index/index.js";
 import { auditModelSettingsChange } from "../lib/model-settings-audit.js";
 import { validateKbGrants } from "../lib/spaces-kb.js";
 import { ORG_SCOPED_SLUGS } from "../lib/org-scoped-slugs.js";
@@ -812,6 +813,10 @@ router.put("/:slug", async (req: Request<{ slug: string }>, res: Response) => {
 
     const agent = await agentRepository.update(req.params.slug, existing.orgId, data);
 
+    // Refresh the routing index so discovery reflects this edit. Same
+    // best-effort contract as the awakening sync below.
+    syncAgentToIndexBestEffort(agent.id, existing.orgId, existing.slug);
+
     // Create/park the scheduler state row so the awakening tick starts or
     // stops seeing this agent. Best-effort: a failure here must not fail the
     // config write — the next write, or a manual re-enable, reconciles it.
@@ -1459,6 +1464,12 @@ router.delete("/:slug", requireAgentOwnerOrAdmin, async (req: Request<{ slug: st
     }
 
     await agentRepository.delete(req.params.slug, agent.orgId);
+
+    // An index that still answers for a deleted agent is worse than one missing
+    // it — the orchestrator would route to a slug that cannot resolve.
+    void removeAgentFromIndex(req.params.slug, agent.orgId).catch((e) =>
+      log.warn(`[agents] agent index removal failed for ${req.params.slug}:`, e instanceof Error ? e.message : e),
+    );
 
     await writeAuditLog({
       actorUserId: requesterId,

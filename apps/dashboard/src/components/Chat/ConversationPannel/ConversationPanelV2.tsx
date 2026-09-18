@@ -89,9 +89,13 @@ const ConversationPanelV2 = ({
   showHeader = true,
   hideComposer = false,
   skipMarkAsRead = false,
+  suppressInputAutoFocus = false,
+  listLoadingFallback,
   conversationIds,
   onOpenThread,
   useLocalTabState = false,
+  unreadsOnly,
+  onThreadClick,
 }: {
   channelId: string;
   previousChannelId: string | null;
@@ -107,10 +111,31 @@ const ConversationPanelV2 = ({
   // Used by read-only surfaces such as the Unreads inbox.
   hideComposer?: boolean;
   skipMarkAsRead?: boolean;
+  // Never take the keyboard on mount.
+  //
+  // The composer's autofocus is not just a focus: TipTap's focus command runs
+  // ProseMirror's `scrollRectIntoView`, which writes `scrollLeft` on every
+  // scrollable ancestor to reveal the caret. In a single-panel screen that
+  // ancestor is the page and the write is a no-op. Inside a Streams column it is
+  // the strip, and the write drags the whole stream sideways by however much of
+  // that column the viewport was clipping — hundreds of pixels, once per column,
+  // arriving whenever each channel happens to resolve.
+  //
+  // Streams mounts six of these at once and the user picked none of them, so
+  // there is nothing here for the keyboard to claim.
+  suppressInputAutoFocus?: boolean;
+  /**
+   * Placeholder for the message list's first load, passed straight through to
+   * `ChatListV4`. For hosts that already painted their own placeholder before
+   * this panel mounted — see `loadingFallback` there.
+   */
+  listLoadingFallback?: React.ReactNode;
   // When true (e.g. rendered in the search-results pane, which owns its own `?tab=`
   // for the doc-type filter), keep the active tab in local state instead of the URL —
   // otherwise a foreign `tab=all` matches no conversation tab and blanks the body.
   useLocalTabState?: boolean;
+  unreadsOnly?: boolean;
+  onThreadClick?: (channelId: string, conversationId: string) => void;
 }): ReactElement => {
   const { baseRoute } = useRouteContext();
   const channel = useChannel(channelId);
@@ -120,7 +145,7 @@ const ConversationPanelV2 = ({
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
   const routerLocation = useLocation();
-  const skipInputAutoFocus = searchParams.get('nofocus') === '1';
+  const skipInputAutoFocus = suppressInputAutoFocus || searchParams.get('nofocus') === '1';
 
   // Strip the `nofocus` param from the URL after each channel navigation so it
   // doesn't persist on subsequent interactions (composing, tab switches).
@@ -276,6 +301,9 @@ const ConversationPanelV2 = ({
                 </div>
               ) : (
                 <ChatListV4
+                  {...(listLoadingFallback !== undefined && {
+                    loadingFallback: listLoadingFallback,
+                  })}
                   {...(urlConversationId && { linkedConversationId: urlConversationId })}
                   {...(urlCreatedAt && { linkedItemCreatedAt: { createdAt: urlCreatedAt } })}
                   {...(stateLinkedCutoffCreatedAt && {
@@ -288,7 +316,9 @@ const ConversationPanelV2 = ({
                   skipMarkAsReadRef={skipMarkAsReadRef}
                   {...(conversationIds && { conversationIds })}
                   {...(onOpenThread && { onOpenThread })}
-                ></ChatListV4>
+                  unreadsOnly={unreadsOnly ?? false}
+                  {...(onThreadClick && { onThreadClick })}
+                />
               )}
               {hideComposer ? null : shouldShowJoinChannel ? (
                 <JoinChannel channelId={channelId} channelTitle={channel?.name} />

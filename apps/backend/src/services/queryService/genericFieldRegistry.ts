@@ -11,7 +11,8 @@ const FORM_FIELD_TYPE_MAPPING: Record<FormFieldType, FieldType> = {
   SINGLE_SELECT: 'select',
   MULTI_SELECT: 'select',
   USER: 'string',
-  DOC: 'string'
+  DOC: 'string',
+  TICKET: 'string'
 };
 
 export type PrismaFieldType = 'String' | 'Int' | 'Float' | 'Boolean' | 'DateTime' | 'Json' | 'BigInt';

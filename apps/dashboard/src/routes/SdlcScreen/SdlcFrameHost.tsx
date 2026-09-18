@@ -5,6 +5,8 @@ import { SDLC_APP_BASE_PATH } from '../../config';
 import { useCallJoinOrInitiate } from '../../hooks/useCallJoinOrInitiate';
 import { useSdlcFrame } from './SdlcFrameContext';
 import { isSdlcPath, parseSdlcFrameMessage, SDLC_FRAME_MESSAGE } from './sdlcFrameMessages';
+import { openLink } from '../../utils/openLink';
+import { SdlcEmbeddedWebview } from './SdlcEmbeddedWebview';
 
 /**
  * Owns the SDLC lane's iframe for the lifetime of the workspace.
@@ -87,6 +89,13 @@ const SdlcFrameHost = (): ReactElement | null => {
         return;
       }
 
+      if (message.type === SDLC_FRAME_MESSAGE.openLink) {
+        // Forced in-app: the lane asked because it wants this in the app, not
+        // handed to the operating system.
+        openLink(message.url, null, { force: 'in-app' });
+        return;
+      }
+
       if (message.type === SDLC_FRAME_MESSAGE.reset) {
         // Timestamp forces a fresh document rather than a cached one. JS cannot
         // request a true cache-bypassing reload.
@@ -124,11 +133,12 @@ const SdlcFrameHost = (): ReactElement | null => {
     if (!isSdlcPath(location.pathname)) return;
     if (path === frameLocationRef.current) return;
 
-    // The bare hub link means "back to SDLC", so it returns to wherever the frame already is.
+    // The bare hub link means "back to SDLC", so it returns to wherever the frame
+    // already is — when that is an SDLC page, not the Workflows screen it also shows.
     const frameLocation = frameLocationRef.current;
     if (
       frameLocation &&
-      isSdlcPath(frameLocation) &&
+      /^\/[^/]+\/sdlc(\/|$)/.test(frameLocation) &&
       /^\/[^/]+\/sdlc\/?$/.test(location.pathname)
     ) {
       void navigate(frameLocation, { replace: true });
@@ -142,24 +152,30 @@ const SdlcFrameHost = (): ReactElement | null => {
   if (!container || !hasActivated || !initialSrcRef.current) return null;
 
   return createPortal(
-    <iframe
-      key={resetCount}
-      ref={iframeRef}
-      src={initialSrcRef.current}
-      title='SDLC'
-      style={{
-        position: 'fixed',
-        top: viewport?.top ?? 0,
-        left: viewport?.left ?? 0,
-        width: viewport?.width ?? 0,
-        height: viewport?.height ?? 0,
-        border: 0,
-        visibility: viewport ? 'visible' : 'hidden',
-        pointerEvents: viewport ? 'auto' : 'none',
-        zIndex: 1,
-      }}
-      allow='clipboard-read; clipboard-write'
-    />,
+    <>
+      <iframe
+        key={resetCount}
+        ref={iframeRef}
+        src={initialSrcRef.current}
+        title='SDLC'
+        style={{
+          position: 'fixed',
+          top: viewport?.top ?? 0,
+          left: viewport?.left ?? 0,
+          width: viewport?.width ?? 0,
+          height: viewport?.height ?? 0,
+          border: 0,
+          visibility: viewport ? 'visible' : 'hidden',
+          pointerEvents: viewport ? 'auto' : 'none',
+          zIndex: 1,
+        }}
+        allow='clipboard-read; clipboard-write'
+      />
+      <SdlcEmbeddedWebview
+        offset={viewport ? { top: viewport.top, left: viewport.left } : null}
+        getFrameWindow={() => iframeRef.current?.contentWindow ?? null}
+      />
+    </>,
     container,
   );
 };

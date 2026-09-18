@@ -1,5 +1,7 @@
 import type { DeleteID, InsertValue, Transaction, UpdateValue, UpsertValue } from '@rocicorp/zero';
 import {
+  SDLC_HUB_ITEM_FLAT_RELATION,
+  SDLC_HUB_ITEM_RELATION,
   SDLC_MEMBERSHIP_RELATION,
   SDLC_STRUCTURAL_RELATIONS,
   SDLC_TRACK_MEMBERSHIP_RELATION,
@@ -25,6 +27,15 @@ export class SdlcEntityLinksACL extends BaseACL<'sdlc_entity_links'> {
     if (args.relationType === SDLC_MEMBERSHIP_RELATION) {
       throw new MutationACLError(
         'Add a repository to a space through the SDLC space API',
+        'sdlc_entity_links',
+      );
+    }
+    if (
+      args.relationType === SDLC_HUB_ITEM_RELATION ||
+      args.relationType === SDLC_HUB_ITEM_FLAT_RELATION
+    ) {
+      throw new MutationACLError(
+        'Wiki and Hub Knowledge placement is written by the server',
         'sdlc_entity_links',
       );
     }

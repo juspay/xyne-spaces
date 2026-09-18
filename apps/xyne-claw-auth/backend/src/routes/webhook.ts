@@ -7,6 +7,8 @@
 
 import { Router, type Request, type Response } from "express";
 import { errMsg } from "../lib/errors.js";
+import { ingestDeliveredArtifact } from "../lib/conversation-artifact-signals.js";
+import { deliveredDesignCommand, recordDeliveredArtifacts } from "../lib/delivered-artifacts.js";
 import crypto from "node:crypto";
 import { CONFIG } from "../config.js";
 import {
@@ -143,7 +145,6 @@ import {
   prScreenId,
   isTwinDelivery,
   isUiWidget,
-  SDLC_REQUIRED_TOOLS,
 } from "xyne-claw-shared";
 import { scheduleProviderRetry } from "../queue/provider-retry-worker.js";
 import type { TwinDelivery, UiWidget, PrProvider, PrStatus } from "xyne-claw-shared";
@@ -2062,6 +2063,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
           progressUrl: `${CONFIG.internalUrl}/claw/api/v1/webhook/progress`,
           callbackUrl: `${CONFIG.internalUrl}/claw/api/v1/webhook/result`,
           serverFallbackBody: dispatchPayload as unknown as Record<string, unknown>,
+          continuation: { agentSlug: runAgentSlug },
         });
       } catch (err) {
         if (globalTwinSlotToken !== null) void releaseTwinSlot(globalTwinSlotToken);
@@ -2673,15 +2675,6 @@ export async function handleAutomationWebhook(
     workspaceId?: string | null;
     allowWriteInReadOnlyJob?: boolean;
     executionProfile?: "sdlc";
-    sdlcOperation?: "baseline" | "work" | "wiki";
-    sdlcWikiRole?:
-      | "BOOTSTRAP_SURVEY"
-      | "BOOTSTRAP_PAGE"
-      | "BOOTSTRAP_EDITOR"
-      | "BOOTSTRAP"
-      | "GENERATOR"
-      | "ARCHITECTURE_VALIDATOR"
-      | "CORRECTOR";
     sdlcContext?: Record<string, unknown>;
   };
 
@@ -2950,99 +2943,6 @@ export async function handleAutomationWebhook(
     s2sKeyMatches(req.headers["x-s2s-key"]);
   const baseAgentConfig = (agent.config as Record<string, unknown> | null) ?? {};
   const baseTools = (baseAgentConfig["tools"] as Record<string, unknown> | undefined) ?? {};
-  const wikiValidator =
-    payload.sdlcWikiRole === "BOOTSTRAP_EDITOR" ||
-    payload.sdlcWikiRole === "ARCHITECTURE_VALIDATOR";
-  const wikiSurvey = payload.sdlcWikiRole === "BOOTSTRAP_SURVEY";
-  const wikiPageWriter = payload.sdlcWikiRole === "BOOTSTRAP_PAGE";
-  const sdlcOutputFormat =
-    payload.sdlcOperation === "wiki" && wikiSurvey
-      ? {
-          type: "json",
-          schema: {
-            type: "object",
-            properties: {
-              repositorySummary: { type: "string" },
-              pages: {
-                type: "array",
-                items: {
-                  type: "object",
-                  properties: {
-                    path: { type: "string" },
-                    purpose: { type: "string" },
-                    concepts: { type: "array", items: { type: "string" } },
-                    priority: { type: "string", enum: ["HIGH", "MEDIUM", "LOW"] },
-                    archetype: {
-                      type: "string",
-                      enum: ["overview", "subsystem", "flow", "data-model", "interface", "operations", "decision"],
-                    },
-                    sourceAreas: { type: "array", items: { type: "string" } },
-                    relatedPages: { type: "array", items: { type: "string" } },
-                    tableCandidates: { type: "array", items: { type: "string" } },
-                    diagramCandidates: { type: "array", items: { type: "string" } },
-                  },
-                  required: ["path", "purpose", "concepts", "priority", "archetype", "sourceAreas", "relatedPages", "tableCandidates", "diagramCandidates"],
-                },
-              },
-            },
-            required: ["repositorySummary", "pages"],
-          },
-          requireToolsBeforeSubmit: [...SDLC_REQUIRED_TOOLS.wikiSurvey],
-        }
-      : payload.sdlcOperation === "wiki" && wikiValidator
-        ? {
-            type: "json",
-            schema: {
-              type: "object",
-              properties: {
-                complete: { type: "boolean" },
-                missingTopics: { type: "array", items: { type: "string" } },
-                issues: { type: "array", items: { type: "string" } },
-                suggestions: { type: "array", items: { type: "string" } },
-              },
-              required: ["complete", "missingTopics", "issues", "suggestions"],
-            },
-          }
-        : payload.sdlcOperation === "wiki"
-          ? {
-              type: "json",
-              schema: {
-                type: "object",
-                properties: { completed: { type: "boolean" } },
-                required: ["completed"],
-              },
-          requireToolsBeforeSubmit: wikiPageWriter
-            ? [...SDLC_REQUIRED_TOOLS.wikiPage]
-            : [...SDLC_REQUIRED_TOOLS.wikiFinalize],
-            }
-    : payload.sdlcOperation === "work"
-      ? {
-          type: "json",
-          schema: {
-            type: "object",
-            properties: {
-              summary: { type: "string" },
-              branchName: { type: "string" },
-              commitHash: { type: "string" },
-              pullRequestUrl: { type: "string" },
-            },
-            required: ["summary", "branchName", "commitHash", "pullRequestUrl"],
-          },
-          requireToolsBeforeSubmit: [...SDLC_REQUIRED_TOOLS.work],
-        }
-      : {
-          type: "json",
-          schema: {
-            type: "object",
-            properties: {
-              created: { type: "boolean" },
-              canvasId: { type: "string" },
-              artifactKind: { type: "string" },
-            },
-            required: ["created", "canvasId", "artifactKind"],
-          },
-          requireToolsBeforeSubmit: [...SDLC_REQUIRED_TOOLS.baseline],
-        };
   const forwardedAgentConfig: Record<string, unknown> | undefined =
     agent.config || payload.allowWriteInReadOnlyJob || sdlcProfile
       ? {
@@ -3060,7 +2960,6 @@ export async function handleAutomationWebhook(
                   ...((baseAgentConfig["toolPermissions"] as Record<string, unknown> | undefined) ?? {}),
                   ...SDLC_AGENT_TOOL_PROFILE.toolPermissions,
                 },
-                outputFormat: sdlcOutputFormat,
                 sdlcContext: payload.sdlcContext,
               }
             : {}),
@@ -3405,38 +3304,42 @@ async function persistCallbackAttachments(
  * revocable from Studio, opaque-origin serving. Best-effort — a share failure
  * must never disturb the delivered result.
  */
-async function publishThreadArtifactShare(
+async function ingestDeliveredFiles(
   ctx: SessionContext,
   runOwnerId: string,
+  chatMessageId: string,
   created: Array<{ id: string; originalFilename: string; mimeType: string }>,
+): Promise<{ designShareUrl: string | null }> {
+  if (!ctx.conversationId || !runOwnerId || created.length === 0) return { designShareUrl: null };
+  return recordDeliveredArtifacts({
+    conversationId: ctx.conversationId,
+    userId: runOwnerId,
+    orgId: ctx.agentOrgId ?? null,
+    messageId: chatMessageId ?? null,
+    task: ctx.task ?? null,
+    attachments: created,
+    allowDesignShare: ctx.responseMode === "conversation",
+  });
+}
+
+async function publishThreadArtifactShare(
+  ctx: SessionContext,
+  designShareLink: string | null,
 ): Promise<void> {
   try {
-    const command = ctx.task?.trimStart().toLowerCase().match(/^\/(design|dashboard)(?:\s|$)/)?.[1];
-    if (!command) return;
+    const command = deliveredDesignCommand(ctx.task);
+    if (!command || !designShareLink) return;
     if (ctx.responseMode !== "conversation" || !ctx.conversationId || !ctx.agentOrgId) return;
-    const html = [...created].reverse().find((a) =>
-      a.mimeType.toLowerCase().includes("html") || a.originalFilename.toLowerCase().endsWith(".html"),
-    );
-    if (!html) return;
-    const share = await upsertDesignShare({
-      ownerUserId: runOwnerId,
-      orgId: ctx.agentOrgId,
-      conversationId: ctx.conversationId,
-      attachmentId: html.id,
-      title: html.originalFilename.replace(/\.html?$/i, ""),
-      expiresAt: null,
-    });
-    const link = designShareUrl(share.sharePath);
     await postAgentMessage(
       { spacesAppUserId: ctx.spacesAppUserId, appToken: ctx.appToken },
       {
         channelId: ctx.channelId,
         conversationId: ctx.conversationId,
-        markdownText: `🔗 **Live ${command}:** ${link}\nOpens the rendered snapshot in the browser — the same link updates with future revisions in this thread.`,
+        markdownText: `🔗 **Live ${command}:** ${designShareLink}\nOpens the rendered snapshot in the browser — the same link updates with future revisions in this thread.`,
         metadata: { contentFormat: "markdown" },
       }
     );
-    clog.info(`[webhook/result] posted design share link shareId=${share.id} conv=${ctx.conversationId}`);
+    clog.info(`[webhook/result] posted design share link conv=${ctx.conversationId}`);
   } catch (err) {
     clog.warn(`[webhook/result] design share publish failed (non-fatal): ${errMsg(err)}`);
   }
@@ -4466,8 +4369,11 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
         // run-stream (interactive chat) path persists them, but this branch
         // silently dropped them, so pipeline/automation runs never showed
         // their reports (e.g. the error-pipeline RCA .html) as attachments.
-        .then((msg) => persistCallbackAttachments(msg.id, runOwnerId, payload.attachments))
-        .then((created) => publishThreadArtifactShare(ctx, runOwnerId, created))
+        .then(async (msg) => ({ msg, created: await persistCallbackAttachments(msg.id, runOwnerId, payload.attachments) }))
+        .then(async ({ msg, created }) => {
+          const delivered = await ingestDeliveredFiles(ctx, runOwnerId, msg.id, created);
+          await publishThreadArtifactShare(ctx, delivered.designShareUrl);
+        })
         .catch((e) => log.warn("Failed to save assistant ChatMessage", { error: errMsg(e) }));
     }
     // Automation reply: resolve the agent's plain `@Name` mentions into
@@ -4565,8 +4471,11 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
       // Same as the forward branch: keep agent-produced files on the
       // transcript row (Spaces gets them as posted files, but the claw chat
       // UI reads chat_attachments).
-      .then((msg) => persistCallbackAttachments(msg.id, runOwnerId, payload.attachments))
-        .then((created) => publishThreadArtifactShare(ctx, runOwnerId, created))
+      .then(async (msg) => ({ msg, created: await persistCallbackAttachments(msg.id, runOwnerId, payload.attachments) }))
+      .then(async ({ msg, created }) => {
+        const delivered = await ingestDeliveredFiles(ctx, runOwnerId, msg.id, created);
+        await publishThreadArtifactShare(ctx, delivered.designShareUrl);
+      })
       .catch((e) => log.warn("Failed to save assistant ChatMessage", { error: errMsg(e) }));
   }
 

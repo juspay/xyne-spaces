@@ -125,6 +125,7 @@ import {
   StageApproversACL,
   SurfaceLinksACL,
   SdlcFoldersACL,
+  SdlcItemCommentsACL,
   SurfaceNudgeCountsACL,
   SurfaceNudgesACL,
   ToolsACL,
@@ -283,6 +284,8 @@ export class QueryACLFactory {
         return new SdlcArtifactsACL(ctx) as BaseQueryACL<TTable>;
       case 'sdlc_folders':
         return new SdlcFoldersACL(ctx) as BaseQueryACL<TTable>;
+      case 'sdlc_item_comments':
+        return new SdlcItemCommentsACL(ctx) as BaseQueryACL<TTable>;
       case 'sdlc_tracks':
         return new SdlcTracksACL(ctx) as BaseQueryACL<TTable>;
       case 'saved_user_configurations':

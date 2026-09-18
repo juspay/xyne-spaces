@@ -47,7 +47,7 @@ import userAssignmentStateRoutes from '@/routes/userAssignmentState';
 import { UserManagementController } from '@/controllers/userManagementController';
 import { registerAllWorkflows } from '@/workflows';
 import workflowRoutes from '@/routes/workflows';
-import { workflowsClawRouter, workflowsRouter } from '@/workflowsV2/router';
+import { workflowsClawRouter, workflowsPublicRouter, workflowsRouter } from '@/workflowsV2/router';
 import { configSyncService } from '@/services/configSyncService';
 import { websocketService } from '@/services/websocketService';
 import { redisService } from '@/services/redisService';
@@ -79,6 +79,7 @@ import calendarWebhookRoutes from '@/routes/calendarWebhooks';
 import callLobbyRoutes from '@/routes/callLobby';
 import csatRoutes from '@/routes/csat';
 import voiceInputRoutes from '@/routes/voiceInput';
+import ttsRoutes from '@/routes/tts';
 import { attachVoiceInputStreamHandler } from '@/routes/voiceInputStream';
 import transcriptionAgentRoutes from '@/routes/transcriptionAgent';
 import livekitWebhookRoutes from '@/routes/livekitWebhook';
@@ -99,6 +100,7 @@ import boardRoutes from '@/routes/boards';
 import subTicketRoutes from '@/routes/subTickets';
 import boardConfigCopyRoutes from '@/routes/boardConfigCopy';
 import recordingPointerBackfillRoutes from '@/routes/recordingPointerBackfill';
+import sdlcRepoCredentialBackfillRoutes from '@/routes/sdlcRepoCredentialBackfill';
 import searchMetricsRoutes from '@/routes/searchMetrics';
 import knowledgeRoutes from '@/routes/knowledge';
 import vespaSearchRoutes from '@/routes/vespaSearch';
@@ -140,8 +142,8 @@ import { tagGenerationPipeline } from '@/tags/pipeline';
 import { automationRoutes, initializeAutomations } from '@/automations';
 import { handleClawCallback } from '@/automations/routes/claw-callback.handler';
 import { handleWorkflowClawCallback } from '@/workflowsV2/agents/callback';
-import sdlcWikiInternalRoutes from '@/routes/sdlcWikiInternal';
 import sdlcArtifactVersionsInternalRoutes from '@/routes/sdlcArtifactVersionsInternal';
+import sdlcWikiInternalRoutes from '@/routes/sdlcWikiInternal';
 import { handleAutoDraftCallback } from '@/controllers/autodraftCallback.handler';
 import { handleDeskReportCallback } from '@/controllers/deskReportCallback.handler';
 import automationWebhookRoutes from '@/automations/routes/webhook-trigger.handler';
@@ -183,7 +185,6 @@ import { teamIntelligenceQueue } from '@/team-intelligence/queue';
 import { emailClassificationQueue } from '@/queues/emailClassificationQueue';
 import { autoDraftQueue } from '@/queues/autoDraftQueue';
 import { entityExtractionQueue } from '@/queues/entityExtractionQueue';
-import { sdlcQueue } from '@/queues/sdlcQueue';
 import { initStorage } from '@/services/storage';
 
 import queryRoutes from '@/routes/query';
@@ -202,7 +203,7 @@ import officeConversionRoutes from '@/routes/officeConversion';
 import sdlcRoutes from '@/routes/sdlc';
 import sdlcClawRoutes from '@/routes/sdlcClaw';
 import sdlcVcsInternalRoutes from '@/routes/sdlcVcsInternal';
-import { handleSdlcClawCallback } from '@/sdlc/SdlcClawCallback';
+import sdlcAgentInternalRoutes from '@/routes/sdlcAgentInternal';
 import { createSdkPublicRouter, createSdkRouter } from '@/api/sdk';
 import { errorHandler as sdkErrorHandler } from '@/api/sdk/handler';
 import { encryptedFieldsConfig } from '@xyne/shared';
@@ -351,6 +352,7 @@ export class App {
 
     // LiveKit webhook routes (MUST be before body parser for raw body signature verification)
     this.app.use('/api/livekit', livekitWebhookRoutes);
+    this.app.use('/api/workflows-v2', workflowsPublicRouter);
 
     // Body parsing for all other routes (10mb limit)
     this.app.use(express.json({ limit: '10mb' }));
@@ -374,11 +376,9 @@ export class App {
 
     this.app.use('/api/automation-webhooks', webhookLimiter, automationWebhookRoutes);
 
-    // this.app.use('/api/workflows-v2', webhookLimiter, workflowsPublicRouter);
 
-    // Claw MCP route (user + app auth) — must be before /api/query
+    // Claw MCP route (user + app auth)
     this.app.use('/api/query/claw', authenticateUserOrApp, pythonQueryRoutes);
-    this.app.use('/api/query', authMiddleware.authenticate, pythonQueryRoutes);
 
     // Commit analysis routes (auth and ACL required)
     this.app.use('/api/commits/analyze', authMiddleware.authenticate, commitAnalysisRoutes);
@@ -446,6 +446,7 @@ export class App {
     // this one-off repair links summary canvases across every workspace. The
     // '-backfill' path suffix also puts it behind backfillMountGuard above.
     this.app.use('/api/admin/recording-pointer-backfill', recordingPointerBackfillRoutes);
+    this.app.use('/api/admin/sdlc-repo-credential-backfill', sdlcRepoCredentialBackfillRoutes);
     // Same shape: the one-off SDLC multi-repo data migration spans every workspace,
     // so it opens its own runAsSystem scope rather than taking workspaceScopedRoute.
 
@@ -530,6 +531,7 @@ export class App {
     this.app.use('/api/calendar/sync', authMiddleware.authenticate, calendarSyncRoutes); // Calendar manual sync
     this.app.use('/api/calendar/watch', authMiddleware.authenticate, calendarWatchRoutes); // Calendar watch setup
     this.app.use('/api/voice-input', authMiddleware.authenticate, voiceInputRoutes); // Low-latency chat voice input
+    this.app.use('/api/tts', authMiddleware.authenticate, ttsRoutes);
 
     // App routes
     this.app.use('/api/apps', appRoutes);
@@ -611,11 +613,6 @@ export class App {
       validateS2SKey,
       handleAutoDraftCallback,
     );
-    this.app.post(
-      '/api/internal/sdlc/claw-callback/:executionId/:step',
-      validateS2SKey,
-      handleSdlcClawCallback,
-    );
     // Claw's completion callback for a parked RUN_AGENT step. The session — not
     // the node path — identifies which attempt reported back; the handler
     // resolves the gate from it.
@@ -625,6 +622,7 @@ export class App {
       handleWorkflowClawCallback,
     );
     this.app.use('/api/internal/sdlc/vcs', validateS2SKey, sdlcVcsInternalRoutes);
+    this.app.use('/api/internal/sdlc/agent', validateS2SKey, sdlcAgentInternalRoutes);
 
     // Encrypted-fields config (S2S-only). Backend is the source of truth; the
     // encryption service fetches this and caches it instead of importing @xyne/shared.
@@ -637,6 +635,7 @@ export class App {
       );
       res.json({ encryptedFields });
     });
+
     this.app.use('/api/internal/sdlc/wiki', validateS2SKey, sdlcWikiInternalRoutes);
     this.app.use(
       '/api/internal/sdlc/artifact-versions',
@@ -959,9 +958,6 @@ export class App {
       await autoDraftQueue.initialize();
     }
 
-    logger.info('Initializing SDLC queue (producer)...');
-    await sdlcQueue.initialize();
-
     logger.info('Initializing automations module (registries + queue producers)...');
     await initializeAutomations();
 
@@ -1185,9 +1181,6 @@ export class App {
 
       // Close auto draft queue
       await autoDraftQueue.close();
-
-      // Close SDLC producer queue
-      await sdlcQueue.close();
 
       // Close radar execution producer queue (initialized above when enabled)
       const { radarExecutionQueue: radarQueue } = await import('@/queues/radarExecutionQueue');

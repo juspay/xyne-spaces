@@ -143,6 +143,8 @@ interface CollaborativeCanvasEditorProps {
   canvasCreatedBy?: string | undefined;
   /** Effective role of current user on this canvas */
   currentUserRole?: CanvasRole | null;
+  /** Scrolls with the document, above its first block. */
+  header?: React.ReactNode;
 }
 
 export const CollaborativeCanvasEditor = forwardRef<
@@ -170,6 +172,7 @@ export const CollaborativeCanvasEditor = forwardRef<
       canvasParticipants: preloadedParticipants,
       canvasCreatedBy,
       currentUserRole,
+      header,
     },
     ref,
   ) => {
@@ -804,6 +807,7 @@ export const CollaborativeCanvasEditor = forwardRef<
             }}
           >
             <CanvasWidthHandles surfaceRef={containerRef} />
+            {header}
             <div
               className='blocknote-editor-wrapper w-full max-w-full'
               style={{

@@ -43,6 +43,30 @@ export class EmailChannelPreferenceRepository {
   }
 
   /**
+   * Batch check which channels this user owns (desk owner)
+   * Returns a Set of channel IDs whose preference's ownerUserId matches
+   */
+  async findOwnedChannelIds(channelIds: string[], ownerUserId: string): Promise<Set<string>> {
+    if (channelIds.length === 0) {
+      return new Set<string>();
+    }
+
+    const preferences = await this.db.emailChannelPreference.findMany({
+      where: {
+        channelId: {
+          in: channelIds,
+        },
+        ownerUserId,
+      },
+      select: {
+        channelId: true,
+      },
+    });
+
+    return new Set(preferences.map(p => p.channelId));
+  }
+
+  /**
    * Create email channel preference
    * @throws Error if channel is not of type EMAIL
    */

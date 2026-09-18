@@ -30,7 +30,7 @@ import { CallTriggerModal } from '../../Call/CallTriggerModal/CallTriggerModal';
 import { VisibleChannel } from '../../../machines/stateMachine';
 import { useUser } from '../../../hooks/useUsers';
 import { isOneToOneDMChannel } from '../ChatDirectory/ChatDirectory.utils';
-import { isStatusExpired } from '../../../utils/statusUtils';
+import { resolveUserStatus } from '../../../utils/statusUtils';
 import { StatusIndicator } from '../../ui/StatusIndicator';
 import { XyneAIStar } from '../../icons/xyne-ai';
 
@@ -156,17 +156,17 @@ const ConversationHeaderMobile = ({
               </p>
               {channel &&
               isOneToOneDMChannel(channel.scopeType) &&
-              dmUser?.statusEmoji &&
-              (!dmUser.statusExpiryAt || !isStatusExpired(dmUser.statusExpiryAt)) ? (
+              resolveUserStatus(dmUser).hasStatus ? (
                 <small className='text-muted-foreground text-xs truncate max-w-[200px] flex items-center gap-1'>
                   <StatusIndicator
-                    statusEmoji={dmUser.statusEmoji}
-                    statusContent={dmUser.statusContent}
-                    statusExpiryAt={dmUser.statusExpiryAt}
+                    statusEmoji={dmUser?.statusEmoji}
+                    statusContent={dmUser?.statusContent}
+                    statusExpiryAt={dmUser?.statusExpiryAt}
+                    activityStatus={dmUser?.activityStatus}
                     size='sm'
                     showOnHover={false}
                   />
-                  {dmUser.statusContent}
+                  {resolveUserStatus(dmUser).content}
                 </small>
               ) : (
                 <small className='text-muted-foreground text-xs'>
@@ -309,7 +309,11 @@ const ConversationHeaderMobile = ({
         </div>
         <button
           onClick={() => {
-            xyneAIActor.send({ type: 'OPEN', channelId: channel.id });
+            xyneAIActor.send({
+              type: 'OPEN',
+              trackSource: 'channel_header_mobile',
+              channelId: channel.id,
+            });
           }}
           style={{ width: ROOT_SIZE, height: ROOT_SIZE }}
           className={cn(
