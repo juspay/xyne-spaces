@@ -115,12 +115,6 @@ interface TicketListViewProps {
   dynamicFieldEntries?: DynamicFieldFilterEntry[] | undefined;
   onTicketClick: (ticket: SupportTicketRow) => void;
   isMember: boolean;
-  /**
-   * Forwarded to the query so the folders that CAN be expressed server-side (Starred /
-   * Spam / Sent / Drafts) are filtered there. Inbox and All Mail apply no filter at all:
-   * they would need a NOT EXISTS predicate the Zero client rejects, and filtering them
-   * client-side meant a page could not be one fixed-size query.
-   */
   mailboxFolder?: MailboxFolder | undefined;
   activeTicketId?: string | null | undefined;
   showExtraFields?: boolean;
@@ -408,9 +402,6 @@ export const TicketListView = function TicketListView({
   );
 
   const pageStart = pageCursors[pageIndex] ?? null;
-  // Only the first page races the REST endpoint; later pages change `args` and
-  // would each start a fresh race for rows the user is no longer waiting on.
-  const isBasePage = pageStart === null;
   const [firstPage, firstPageDetails] = useRacedQuery(
     queries.supportTicketsPageV4({
       channelId,
@@ -440,7 +431,6 @@ export const TicketListView = function TicketListView({
       start: pageStart,
       dir: 'forward',
     }),
-    { raceEnabled: isBasePage },
   );
 
   const loadStartTimeRef = useRef<number | null>(Date.now());
@@ -534,9 +524,6 @@ export const TicketListView = function TicketListView({
     return unique;
   }, [firstPage]);
 
-  // No mailbox filtering here: Starred / Spam / Sent / Drafts are filtered server-side,
-  // and Inbox / All Mail deliberately show everything the page returned — archived and
-  // spam included — so one page view stays exactly one fixed-size query.
   const filteredAll = useMemo<SupportTicketRow[]>(() => {
     if (!dynamicFieldEntries?.length) return allRows;
     return allRows.filter(t =>
@@ -557,10 +544,6 @@ export const TicketListView = function TicketListView({
   }, [filteredTickets, onTicketsLoaded]);
 
   const complete = firstPageDetails.type === 'complete';
-  // The server window is always one page (+1 sentinel). Inbox / All Mail still filter
-  // client-side, so a page can render fewer than PAGE_SIZE rows when some of the fetched
-  // tickets are archived or spam — that is accepted rather than grown into, so one page
-  // view is always exactly one server query.
   const rowsEmpty = complete && filteredTickets.length === 0;
   const showInitialSkeletons = !complete && allRows.length === 0;
 

@@ -18,9 +18,7 @@ import { logger, Event } from '../utils/logger';
 export type RacedQuerySource = 'cache' | 'api' | 'zero';
 
 export interface RacedQueryMeta {
-  /** Which of the three stages produced the returned rows. */
   source: RacedQuerySource;
-  /** True once Zero has reported `complete` for the current args in this mount. */
   live: boolean;
 }
 
@@ -32,24 +30,6 @@ export type RacedQueryResult<TReturn> = readonly [
 
 const COMPLETE = { type: 'complete' } as const;
 
-/**
- * Races the backend REST execution of a Zero query against the Zero
- * subscription itself, and serves whichever is furthest along:
- *
- *   cache (instant, possibly stale) → api (fresh) → zero (live, authoritative)
- *
- * Each stage only ever replaces a strictly worse one, so the view never moves
- * backwards. Once Zero reports `complete` it owns the result for the rest of
- * the mount and the API call is disabled.
- *
- * The API leg goes through the same `/zero/query-fallback` executor the global
- * fallback uses, so the server runs the SAME query definition — identical ACL
- * and identical row shape, relations included. No per-query endpoint needed.
- *
- * Liveness comes from `useCachedQuery`'s `live` flag, not from `details.type`:
- * a persisted cache entry carries the `details` it was stored with, so a cached
- * result can claim `complete` while being a previous session's snapshot.
- */
 export function useRacedQuery<
   TTable extends keyof TSchema['tables'] & string,
   TInput extends ReadonlyJSONValue | undefined,
@@ -59,17 +39,11 @@ export function useRacedQuery<
   TContext extends BaseDefaultContext = DefaultContext,
 >(
   query: QueryRequest<TTable, TInput, TOutput, TSchema, TReturn, TContext>,
-  options?: UseCachedQueryOptions & { raceEnabled?: boolean },
+  options?: UseCachedQueryOptions,
 ): RacedQueryResult<TReturn> {
   const enabled = options?.enabled ?? true;
-  // Lets callers keep the plain cached path for query variants that shouldn't
-  // race — e.g. the ticket list's escalation rungs, where only the base page
-  // is worth an HTTP round trip.
-  const raceEnabled = options?.raceEnabled ?? true;
   const executeFallback = useFallbackExecutor();
 
-  // includeMeta:true always yields the 3-tuple, but the declared return is a
-  // union of both shapes, so the narrowing has to be asserted here.
   const [cachedData, cachedDetails, meta] = useCachedQuery(query, {
     ...options,
     includeMeta: true,
@@ -81,8 +55,6 @@ export function useRacedQuery<
   const args = query.args;
   const argsKey = useMemo(() => JSON.stringify(args ?? null), [args]);
 
-  // The latch is keyed on args: a new page / new ticket is a new race, and must
-  // not inherit the previous args' "Zero already won" state.
   const latchedArgsRef = useRef<string | null>(null);
   const [zeroWon, setZeroWon] = useState(false);
 
@@ -98,22 +70,18 @@ export function useRacedQuery<
     setZeroWon(true);
   }, [zeroLive, argsKey]);
 
-  const apiEnabled = enabled && raceEnabled && !zeroWon && executeFallback !== null;
+  const apiEnabled = enabled && !zeroWon && executeFallback !== null;
 
   const { data: apiData, isSuccess: apiSucceeded } = useApiQuery({
     queryKey: ['raced-query', queryName, argsKey],
     queryFn: () => executeFallback!(queryName, args),
     enabled: apiEnabled,
-    // One shot. The Zero subscription is the live channel; polling here would
-    // duplicate it and keep hitting the read replica for the whole mount.
     refetchInterval: false,
     refetchOnWindowFocus: false,
     staleTime: Infinity,
     retry: 1,
   });
 
-  // Elapsed is measured from when these args started racing, so it resets with
-  // the latch rather than reporting time since the component first mounted.
   const raceStartedAt = useRef(Date.now());
   useEffect(() => {
     raceStartedAt.current = Date.now();
