@@ -5,6 +5,7 @@
 import { defaultBlockSpecs, defaultStyleSpecs } from '@blocknote/core';
 import { v4 as uuidv4 } from 'uuid';
 import { DatabaseClient } from '@/database/client';
+import { newConnectId, createConnectGroupForEntity } from '@/database/connectGroup';
 import type { KnowledgeLearning } from '@/workflows/utils/knowledge-generator';
 import { logger } from '@/utils/logger';
 import { config } from '@/config/env';
@@ -234,6 +235,7 @@ export async function createKnowledgeCanvas(
     const content = formatLearningsToBlockNote(learnings, workflowExecutionId, finalTitle);
 
     // Create the canvas with PUBLIC visibility
+    const connectId = newConnectId();
     await prisma.canvas.create({
       data: {
         id: canvasId,
@@ -247,6 +249,7 @@ export async function createKnowledgeCanvas(
         lastEditedAt: now,
         createdAt: now,
         updatedAt: now,
+        connectId,
         metadata: {
           source: 'workflow_knowledge',
           workflowExecutionId,
@@ -259,6 +262,12 @@ export async function createKnowledgeCanvas(
         },
       },
     });
+    await createConnectGroupForEntity(prisma, {
+      entityType: 'canvas',
+      entityId: canvasId,
+      hostWorkspaceId: workspaceId,
+      connectId,
+    });
 
     // Add creator as OWNER participant
     await prisma.canvasParticipant.create({
@@ -270,6 +279,7 @@ export async function createKnowledgeCanvas(
         role: CanvasRole.OWNER,
         joinedAt: now,
         updatedAt: now,
+        connectId,
       },
     });
 

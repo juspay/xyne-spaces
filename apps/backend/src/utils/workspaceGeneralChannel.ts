@@ -1,6 +1,7 @@
 import { Prisma, PrismaClient } from '@prisma/client';
 import { sanitizeProjectCode, ProjectType, ChannelRole, ChannelScopeType, ChannelVisibility } from '@xyne/shared';
 import { repositories } from '@/database/repositories';
+import { newConnectId, createConnectGroupForEntity } from '@/database/connectGroup';
 
 type PrismaClientLike = PrismaClient | Prisma.TransactionClient;
 
@@ -63,6 +64,7 @@ export async function ensureGeneralChannelForWorkspace(
       });
     }
 
+    const connectId = newConnectId();
     channel = await db.channel.create({
       data: {
         name: 'general',
@@ -71,8 +73,15 @@ export async function ensureGeneralChannelForWorkspace(
         createdBy,
         projectId: project.id,
         workspaceId,
+        connectId,
       },
       select: { id: true },
+    });
+    await createConnectGroupForEntity(db, {
+      entityType: 'channel',
+      entityId: channel.id,
+      hostWorkspaceId: workspaceId,
+      connectId,
     });
 
     // Dual-write: mirror the channel→project board set into ChannelBoardMapping.

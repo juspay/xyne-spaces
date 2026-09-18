@@ -2,6 +2,7 @@ import { Prisma, PrismaClient } from '@prisma/client'
 import { BaseQueryACL, ACLContext } from '../base-acl'
 import { getGuestAccessibleCanvasIds, isGuestContext } from './channel-access-helper'
 import { getUserGroupIds } from './user-group-helper'
+import { connectReachWhere } from '../../connectGroup'
 
 /**
  * Non-guest reads are scoped to workspace + reachable canvases:
@@ -47,18 +48,26 @@ export class CanvasesACL extends BaseQueryACL<
     if (userGroupIds.length) participantMatchers.push({ userGroupId: { in: userGroupIds } })
     if (channelIds.length) participantMatchers.push({ channelId: { in: channelIds } })
 
+    // Slack Connect: connectId → connect_group workspace truth; else workspaceId.
+    const reach = await connectReachWhere(this.prisma, this.ctx.workspaceId, 'canvases')
+
     return {
-      workspaceId: this.ctx.workspaceId,
-      OR: [
-        { createdBy: userId },
-        { visibility: 'PUBLIC' },
-        { participants: { some: { OR: participantMatchers } } },
+      AND: [
+        reach,
+        {
+          OR: [
+            { createdBy: userId },
+            { visibility: 'PUBLIC' },
+            { participants: { some: { OR: participantMatchers } } },
+          ],
+        },
       ],
     }
   }
 
   async getMutateWhere(): Promise<Prisma.CanvasWhereInput> {
-    return { workspaceId: this.ctx.workspaceId }
+    // Slack Connect: update/delete scope follows the same connect_group reach as reads.
+    return connectReachWhere(this.prisma, this.ctx.workspaceId, 'canvases', 'write')
   }
 
   async canCreate(data: Prisma.CanvasUncheckedCreateInput): Promise<boolean> {

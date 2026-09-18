@@ -5,6 +5,7 @@ import {
 } from '@rocicorp/zero';
 import { schema, type Schema, type Context } from '../schema';
 import { QueryACLFactory } from './core/query-acl-factory';
+import { connectReach, CONNECT_SCOPED_TABLES } from './core/connect-reach';
 import type { TableName, SelectArgs } from './core/types';
 import type { StandardSchemaV1 } from '@standard-schema/spec';
 import type { ReadonlyJSONValue } from '@rocicorp/zero';
@@ -88,7 +89,9 @@ const WORKSPACE_SCOPED_TABLES: ReadonlySet<string> = new Set(
     .map(([name]) => name),
 );
 // Tables whose own ACL owns cross-workspace/global visibility (e.g. GLOBAL apps) — skip the backstop.
-const WORKSPACE_SCOPE_OPT_OUT: ReadonlySet<string> = new Set(['apps']);
+// 'connect_group' has no workspaceId column (tenancy is host/invited workspace ids), so the
+// scalar workspaceId backstop must not be appended to it.
+const WORKSPACE_SCOPE_OPT_OUT: ReadonlySet<string> = new Set(['apps', 'connect_group']);
 
 function applyQueryACL<TQuery>(
   query: TQuery,
@@ -107,6 +110,12 @@ function applyQueryACL<TQuery>(
     WORKSPACE_SCOPED_TABLES.has(tableName) &&
     !WORKSPACE_SCOPE_OPT_OUT.has(tableName)
   ) {
+    // Slack Connect: tables with a connectId resolve tenancy via connect_group (host/invited
+    // workspace), falling back to workspaceId for rows that have no connectId yet.
+    if (CONNECT_SCOPED_TABLES.has(tableName)) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      return (scoped as any).where(connectReach(ctx)) as TQuery;
+    }
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return (scoped as any).where('workspaceId', '=', ctx.workspaceId) as TQuery;
   }

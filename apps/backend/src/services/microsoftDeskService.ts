@@ -12,6 +12,7 @@ import { logger } from '../utils/logger';
 import { decrypt, encrypt } from './encryptionService';
 import { redisService } from './redisService';
 import { db } from '../database/client';
+import { newConnectId, createConnectGroupForEntity } from '../database/connectGroup';
 import { config } from '../config/env';
 import { ExternalSourceRepository } from '../database/repositories/externalSourceRepository';
 import { AttachmentUploadError } from '../integrations/core/baseMailReplySender';
@@ -291,6 +292,7 @@ export class MicrosoftDeskService {
 
     // New connection — create everything in a transaction
     const channelId = await db.$transaction(async (tx) => {
+      const connectId = newConnectId();
       const channel = await tx.channel.create({
         data: {
           scopeType: ChannelScopeType.DEFAULT,
@@ -301,7 +303,14 @@ export class MicrosoftDeskService {
           workspaceId: channelData.workspaceId,
           projectId: channelData.projectId,
           type: ChannelType.EMAIL,
+          connectId,
         },
+      });
+      await createConnectGroupForEntity(tx, {
+        entityType: 'channel',
+        entityId: channel.id,
+        hostWorkspaceId: channelData.workspaceId,
+        connectId,
       });
 
       const now = new Date();

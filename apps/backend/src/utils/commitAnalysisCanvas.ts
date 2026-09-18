@@ -11,6 +11,7 @@ import { CanvasSideEffectHandler } from '@/zero/side-effects/tables/canvas-handl
 import { vespaQueue } from '@/queues/vespaQueue';
 import { fileSchema, SubApp } from '@/vespa/src/types';
 import { db } from '@/database/client';
+import { newConnectId, createConnectGroupForEntity } from '@/database/connectGroup';
 import { withWorkspaceScope } from '@/database/tenant/context';
 import { CanvasRole, CanvasVisibility } from '@xyne/shared';
 
@@ -795,6 +796,7 @@ async function persistNewAnalysisCanvas(args: {
     throw new Error(`User ${createdByUserId} not found or has no workspace assigned`);
   }
 
+  const connectId = newConnectId();
   await prisma.canvas.create({
     data: {
       id: canvasId,
@@ -809,6 +811,7 @@ async function persistNewAnalysisCanvas(args: {
       lastEditedAt: now,
       createdAt: now,
       updatedAt: now,
+      connectId,
       channelId: metadata.channelId || null,
       metadata: {
         source: 'commit_analysis',
@@ -826,6 +829,12 @@ async function persistNewAnalysisCanvas(args: {
       },
     },
   });
+  await createConnectGroupForEntity(prisma, {
+    entityType: 'canvas',
+    entityId: canvasId,
+    hostWorkspaceId: creator.workspaceId,
+    connectId,
+  });
 
   await prisma.canvasParticipant.create({
     data: {
@@ -836,6 +845,7 @@ async function persistNewAnalysisCanvas(args: {
       role: CanvasRole.VIEWER,
       joinedAt: now,
       updatedAt: now,
+      connectId,
     },
   });
 

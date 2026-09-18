@@ -11,6 +11,7 @@ import { unifiedBotUserService } from '@/bots/unified';
 import { v4 as uuidv4 } from 'uuid';
 import type { BlockNoteBlock, BlockNoteInlineContent } from '@/types/blockNoteTypes';
 import { db } from '@/database/client';
+import { newConnectId, createConnectGroupForEntity } from '@/database/connectGroup';
 import { withWorkspaceScope } from '@/database/tenant/context';
 
 interface PRData {
@@ -216,6 +217,7 @@ Release notes have been generated for **${ticket.title}**
 
       const blocks = this.buildReleaseNotesBlocks(markdown, context);
 
+      const connectId = newConnectId();
       await prisma.canvas.create({
         data: {
           id: canvasId,
@@ -230,6 +232,7 @@ Release notes have been generated for **${ticket.title}**
           lastEditedAt: now,
           createdAt: now,
           updatedAt: now,
+          connectId,
           channelId: context.release.channelId || null,
           metadata: {
             source: 'release_notes',
@@ -239,6 +242,12 @@ Release notes have been generated for **${ticket.title}**
             ...(context.release.conversationId && { conversationId: context.release.conversationId }),
           },
         },
+      });
+      await createConnectGroupForEntity(prisma, {
+        entityType: 'canvas',
+        entityId: canvasId,
+        hostWorkspaceId: workspaceId,
+        connectId,
       });
 
       await prisma.canvasParticipant.create({
@@ -250,6 +259,7 @@ Release notes have been generated for **${ticket.title}**
           role: CanvasRole.VIEWER,
           joinedAt: now,
           updatedAt: now,
+          connectId,
         },
       });
 

@@ -1,6 +1,7 @@
 // Barrel export - allows clean imports from @xyne/shared
 export * from './zero/schema';
-export { defineQuery } from './zero/acl';
+export { defineQuery, connectReach, CONNECT_SCOPED_TABLES } from './zero/acl';
+export { setConnectQueryEnabledCanvas, getConnectQueryEnabledCanvas } from './zero/connect-flags';
 export { encryptedFieldsConfig, type EncryptedTableConfig } from './zero/encrypted-fields';
 export { EncryptedFieldQueryError, validateQueryWhereClause, type Condition, type QueryAST } from './zero/client-transaction-wrapper';
 export * from './ai';
