@@ -4729,10 +4729,6 @@ export const SupportTicketDetail = ({
     ],
   );
 
-  // Raced against the REST execution of the same query: whichever resolves
-  // first paints, and Zero takes over permanently once it reports complete.
-  // The thread is the user-visible blocker on opening a ticket, so a cold
-  // client shows mail from HTTP instead of waiting on IVM hydration.
   const [allEmails] = useRacedQuery(
     queries.getEmailsForConversationsV2({
       conversationIds: allConversationIds,

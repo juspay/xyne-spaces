@@ -95,16 +95,10 @@ export const buildDynamicFieldFilterEntries = (
   });
 };
 
-// Types whose stored `actualFieldValue` is a scalar, so the query can match them exactly
-// with an equality OR server-side. Anything outside this set degrades to a bare existence
-// check server-side and is refined on the client.
 const SCALAR_EQUALITY_FIELD_TYPES = new Set<FormFieldType>([
   FormFieldType.BOOLEAN,
   FormFieldType.NUMBER,
   FormFieldType.SINGLE_SELECT,
-  // STRING is matched exactly, not as a substring — the same contract the kanban board
-  // already uses. The values these fields actually hold are enum-like ("Other", "Yes",
-  // "Driver demanded more"), so whole-value matching is what users select anyway.
   FormFieldType.STRING,
 ]);
 
@@ -147,9 +141,6 @@ export const ticketMatchesDynamicFieldEntries = (
 ): boolean => {
   for (const entry of entries) {
     if (entry.fieldType === undefined) continue;
-    // Already matched exactly by the query's equality OR — re-checking here is redundant,
-    // and the value shape that reaches the client does not always match what this matcher
-    // assumes. Only refine the types the query could not express.
     if (SCALAR_EQUALITY_FIELD_TYPES.has(entry.fieldType)) continue;
     const fieldValue = formEntityValues?.find(v => v.fieldId === entry.fieldId);
     if (!fieldValue) return false;

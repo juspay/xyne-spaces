@@ -133,10 +133,6 @@ class LoggerWorker {
 
   private handleLog(payload?: WorkerMessage['payload']): void {
     if (payload?.level !== undefined && payload?.event) {
-      // `consoleLog` has been part of the logger API (defaulting to isLocalhost)
-      // since it was added, but nothing ever consumed it here — so logger.*
-      // calls never reached devtools and local debugging had to fall back to
-      // bare console statements.
       if (payload.consoleLog) {
         // eslint-disable-next-line no-console
         console.log(`[${payload.level}] ${String(payload.event)}`, payload.extraFields ?? {});
