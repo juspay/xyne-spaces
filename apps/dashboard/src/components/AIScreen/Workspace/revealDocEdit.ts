@@ -62,12 +62,16 @@ export async function revealDocEdit(documentId: string, anchor: string): Promise
   if (!view || !anchor || anchor.length < MIN_ANCHOR_CHARS) return false;
 
   let currentUrl = '';
+  let parsedUrl: URL;
   try {
     currentUrl = view.getURL();
+    parsedUrl = new URL(currentUrl);
   } catch {
     return false;
   }
-  if (!currentUrl.includes('docs.google.com')) return false;
+
+  const host = parsedUrl.hostname.toLowerCase();
+  if (host !== 'docs.google.com' && !host.endsWith('.docs.google.com')) return false;
   if (documentId && !currentUrl.includes(documentId)) return false;
 
   try {
