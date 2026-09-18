@@ -178,7 +178,7 @@ const AboutChannel = ({
     setIsSavingName(true);
     try {
       // Check for duplicate name before committing the optimistic mutation
-      const { isDuplicate } = await channelService.checkDuplicateChannel(trimmed);
+      const { isDuplicate } = await channelService.checkDuplicateChannel(trimmed, channel.id);
       if (isDuplicate) {
         setNameError(`A channel named "#${trimmed}" already exists`);
         setIsSavingName(false);
