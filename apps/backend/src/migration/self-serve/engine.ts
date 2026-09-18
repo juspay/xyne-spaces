@@ -698,7 +698,12 @@ export class SlackMigrationEngine {
         this.readConversationCanvases(job.gcsPrefix, conv.id),
       ]);
       if (links.length || canvases.length) {
-        const fallbackUserId = dmOwnerId ?? (job.ownerSlackId ? await resolve(job.ownerSlackId) : undefined);
+        // Author: DM owner → channel creator → the migration submitter (always a valid Xyne user, so channel
+        // migrations — which have no ownerSlackId — still ingest their links/canvases).
+        const fallbackUserId = dmOwnerId
+          ?? (job.ownerSlackId ? await resolve(job.ownerSlackId) : undefined)
+          ?? (job.slackChannelCreator ? await resolve(job.slackChannelCreator) : undefined)
+          ?? job.submittedByUserId;
         if (fallbackUserId) {
           const target = {
             xyneChannelId: channelId, workspaceId: job.workspaceId,
