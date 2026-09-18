@@ -1,5 +1,6 @@
 import { Router, type Request, type RequestHandler, type Response } from "express";
 import { errMsg } from "../lib/errors.js";
+import { validateCredentialBaseUrl } from "../lib/mcp-base-url.js";
 import { assertSafeOutboundUrl } from "../mcpgateway/services/http-client.js";
 import multer from "multer";
 import crypto from "node:crypto";
@@ -3201,6 +3202,16 @@ router.post("/:slug/mcp/connections", requireAgentOwnerContributorOrAdmin, async
     const server = await prisma.mcpServer.findUnique({ where: { type: mcpServerType } });
     if (!server) {
       res.status(404).json({ success: false, error: `Unknown mcpServerType: ${mcpServerType}` });
+      return;
+    }
+
+    // Endpoint-scoped connectors let the agent supply the target stack URL
+    // (`baseUrl`) alongside its key. That is an outbound destination the
+    // gateway will call server-side, so validate it here rather than at call
+    // time — a bad value must fail the save, not every later tool call.
+    const baseUrlError = validateCredentialBaseUrl(credentials);
+    if (baseUrlError) {
+      res.status(400).json({ success: false, error: baseUrlError });
       return;
     }
 
