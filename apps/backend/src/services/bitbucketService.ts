@@ -647,9 +647,12 @@ export class BitbucketService {
 
       let start = 0;
       const LIMIT = 100;
+      const MAX_PAGES = 50; // Safety limit: max 5000 commits
+      let page = 0;
 
       // Fetch all pages
-      while (true) {
+      while (page < MAX_PAGES) {
+        page++;
         const endpoint = `/projects/${projectKey}/repos/${repositorySlug}/pull-requests/${prId}/commits?limit=${LIMIT}&start=${start}`;
         const url = `${this.config.baseUrl}${endpoint}`;
 
@@ -679,7 +682,18 @@ export class BitbucketService {
         commits.push(...data.values);
 
         if (data.isLastPage) break;
-        start = data.nextPageStart ?? start + data.values.length;
+
+        // If nextPageStart is not provided or invalid, break to prevent infinite loop
+        if (!data.nextPageStart || data.nextPageStart === start) {
+          logger.warn(`Bitbucket: PR #${prId} pagination issue - nextPageStart not provided or unchanged, stopping`);
+          break;
+        }
+
+        start = data.nextPageStart;
+      }
+
+      if (page >= MAX_PAGES) {
+        logger.warn(`Bitbucket: PR #${prId} has more than ${MAX_PAGES * LIMIT} commits, truncated`);
       }
 
       logger.info(
