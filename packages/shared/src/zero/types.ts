@@ -123,6 +123,14 @@ export enum AttachmentEntityType {
   SDLC_HUB = 'SDLC_HUB',
 }
 
+// Attachment entity types belonging to a message that has not been sent yet. These are scoped to
+// their author, the same way draft_messages is scoped in DraftMessagesACL, so that an attachment
+// and the row it hangs off stay consistent with one another.
+export const UNSENT_ATTACHMENT_ENTITY_TYPES: AttachmentEntityType[] = [
+  AttachmentEntityType.DRAFT,
+  AttachmentEntityType.DELAYED_MESSAGE,
+];
+
 // Attachment entity types belonging to sent content, which is what a channel's file list shows.
 // Strictly narrower than "not unsent": an allowlist, so a newly added entity type is out of scope
 // by default and has to be opted in. Used by the reader; the ACL uses the broader list above,
