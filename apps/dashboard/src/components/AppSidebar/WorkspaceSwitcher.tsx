@@ -247,6 +247,14 @@ export const WorkspaceSwitcher: React.FC = () => {
 
   // Show only the active workspace's unread count on the switcher trigger.
   const totalUnread = workspaceId ? (activityCounts[workspaceId] ?? 0) : 0;
+  // When the active workspace has no unread but other workspaces do, show a
+  // dot so the dock's total (which spans all workspaces) is explainable
+  // from the UI alone.
+  const hasOtherWorkspaceUnread =
+    totalUnread === 0 &&
+    Object.entries(activityCounts).some(
+      ([id, count]) => id !== workspaceId && count > 0
+    );
   const createLabel = 'Create enterprise workspace';
 
   return (
@@ -268,6 +276,9 @@ export const WorkspaceSwitcher: React.FC = () => {
           <span className='absolute -top-1 -right-1 min-w-[16px] h-4 bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center px-1'>
             {totalUnread > 99 ? '99+' : totalUnread}
           </span>
+        )}
+        {totalUnread === 0 && hasOtherWorkspaceUnread && (
+          <span className='absolute -top-1 -right-1 size-[9px] bg-red-500 rounded-full border border-sidebar-accent-ring' />
         )}
       </button>
 
