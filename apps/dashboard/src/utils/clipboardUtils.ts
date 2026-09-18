@@ -345,14 +345,38 @@ const convertToPngBlob = (blob: Blob): Promise<Blob> => {
 };
 
 /**
- * Copies an image blob to the clipboard.
- * Converts non-PNG images to PNG first, as browsers only support image/png for clipboard writes.
+ * Copies an image to the clipboard.
+ *
+ * Accepts either a Blob or a Promise of one. Browsers only grant clipboard writes
+ * while the transient user activation from the originating click is still valid, and
+ * that activation is lost as soon as the handler awaits anything (a network fetch for
+ * the image, or the canvas PNG re-encode below). So the blob is never awaited here:
+ * the promise is handed straight to ClipboardItem, which lets
+ * navigator.clipboard.write() run synchronously inside the click handler while the
+ * browser resolves the bytes afterwards.
+ *
+ * Converts non-PNG images to PNG first, as browsers only support image/png for
+ * clipboard writes.
  */
-export const copyImageToClipboard = async (blob: Blob): Promise<void> => {
+export const copyImageToClipboard = async (source: Blob | Promise<Blob>): Promise<void> => {
   if (typeof ClipboardItem === 'undefined') {
     throw new Error('ClipboardItem is not supported in this browser');
   }
-  const pngBlob = blob.type === 'image/png' ? blob : await convertToPngBlob(blob);
-  const clipboardItem = new ClipboardItem({ 'image/png': pngBlob });
-  await navigator.clipboard.write([clipboardItem]);
+
+  const pngBlobPromise = Promise.resolve(source).then(blob =>
+    blob.type === 'image/png' ? blob : convertToPngBlob(blob),
+  );
+  // Prevent an unhandled rejection if the write path below bails out before awaiting it.
+  pngBlobPromise.catch(() => undefined);
+
+  try {
+    await navigator.clipboard.write([new ClipboardItem({ 'image/png': pngBlobPromise })]);
+  } catch (writeError) {
+    // Some engines reject a Promise value in ClipboardItem. Retry with the resolved
+    // blob; if resolving is what failed, surface the original write error instead.
+    const pngBlob = await pngBlobPromise.catch(() => {
+      throw writeError;
+    });
+    await navigator.clipboard.write([new ClipboardItem({ 'image/png': pngBlob })]);
+  }
 };

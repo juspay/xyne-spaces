@@ -4,7 +4,7 @@ import { copyImageToClipboard } from '../utils/clipboardUtils';
 
 type UseClipboardReturn = {
   copy: (text: string) => Promise<boolean>;
-  copyImage: (blob: Blob) => Promise<boolean>;
+  copyImage: (blob: Blob | Promise<Blob>) => Promise<boolean>;
   success: boolean | null; // null = not attempted yet
 };
 
@@ -27,7 +27,7 @@ export function useClipboard(): UseClipboardReturn {
     }
   }, []);
 
-  const copyImage = useCallback(async (blob: Blob) => {
+  const copyImage = useCallback(async (blob: Blob | Promise<Blob>) => {
     try {
       await copyImageToClipboard(blob);
       setSuccess(true);
