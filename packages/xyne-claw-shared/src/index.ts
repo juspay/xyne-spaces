@@ -63,11 +63,11 @@ export {
 } from "./skill-diff/index.js";
 export type { SkillDiff, SkillForAuthz, ApproverResolution, SkillApprovalAuthz, SkillFileUpdateAuthz } from "./skill-diff/index.js";
 export { createSkillTool, updateSkillTool } from "./tools/skill-management/index.js";
-export { FlowBuilder, mdToMrkdwn, buildWriteApprovalFlow, buildWriteResultFlow, buildTwinApprovalFlow, buildUserQuestionFlow, buildCapacityRetryFlow, buildGoalSuggestionFlow, buildAgentCallProposalFlow, buildCloneApprovalFlow, buildSkillUpdateApprovalFlow, buildMcpConfigureFlow, buildMcpSuggestFlow, type McpSuggestConnector, buildCodeFlow, buildDiffFlow, buildTicketFlow, buildTicketProposalFlow, buildChartFlow, buildScheduledJobApprovalFlow, type ScheduledJobApprovalFlowParams } from "./flow/builder.js";
+export { FlowBuilder, mdToMrkdwn, buildWriteApprovalFlow, buildWriteResultFlow, buildTwinApprovalFlow, buildUserQuestionFlow, buildCapacityRetryFlow, buildGoalSuggestionFlow, buildAgentCallProposalFlow, buildCloneApprovalFlow, buildSkillUpdateApprovalFlow, buildMcpConfigureFlow, buildMcpSuggestFlow, type McpSuggestConnector, buildProviderSuggestFlow, type ProviderSuggestItem, buildCodeFlow, buildDiffFlow, buildTicketFlow, buildTicketProposalFlow, buildChartFlow, buildScheduledJobApprovalFlow, type ScheduledJobApprovalFlowParams } from "./flow/builder.js";
 export type { FlowDefinition, FlowComponent, FlowAction, SelectOption, TicketArtifact, ChartArtifact } from "./flow/builder.js";
 export { buildPlanFlow, PLAN_COMPONENT_ID } from "./flow/plan-flow.js";
 export { isFlowJsonContent, parseFlowJsonComponents, extractTextFromFlowJson, extractCleanTextFromFlowJson } from "./flow/flow-text.js";
-export { buildAgentCardFlow, buildAgentListFlow, buildAgentSummaryFlow, agentIdentity, AGENT_COMPONENT_ID, MAX_AGENT_LIST_CARDS } from "./flow/agent-card.js";
+export { buildAgentCardFlow, buildAgentListFlow, buildAgentSummaryFlow, agentIdentity, AGENT_COMPONENT_ID, AGENT_EDITS_STATE_KEY, MAX_AGENT_LIST_CARDS } from "./flow/agent-card.js";
 export { validateMcpProposal } from "./flow/mcp-proposal.js";
 export type { McpProposal, McpProposalResult } from "./flow/mcp-proposal.js";
 export type {
@@ -77,7 +77,13 @@ export type {
   AgentCapability,
   AgentDetailRow,
   AgentConnectLink,
+  AgentSkill,
+  AgentKnowledge,
+  AgentKnowledgeSource,
+  AgentMemory,
+  AgentProviderStatus,
   AgentDraftPhase,
+  AgentToolSelection,
 } from "./flow/agent-card.js";
 export type { Todo, TodoStatus, PlanPhase, PlanTodoInput } from "./flow/plan-flow.js";
 export { buildPrFlow, prScreenId, PR_COMPONENT_ID } from "./flow/pr-flow.js";
