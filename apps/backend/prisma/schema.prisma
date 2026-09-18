@@ -4271,6 +4271,7 @@ model Apps {
   commands            AppCommand[]
   appPermissions AppPermission[]
 
+  @@unique([orgId, name])
   @@index([name])
   @@index([createdBy])
   @@index([orgId])
