@@ -27,6 +27,7 @@ import { fileSchema, SubApp } from '@/vespa/src/types';
 import { DatabaseClient } from '../database/client';
 import { NAMESPACE } from '@/vespa/vespaConfig';
 import { isSupportedMimeType } from '@/services/fileProcessor';
+import { cacheManager } from '../utils/cacheManager';
 
 const db = DatabaseClient.getInstance();
 
@@ -52,6 +53,32 @@ const setAttachmentCacheHeaders = (res: Response, attachment: MessageAttachment)
     res.setHeader('Cache-Control', 'private, max-age=3600');
   }
 };
+
+/**
+ * Bytes served for an open-ended range (`bytes=N-`). The player aborts the
+ * response as soon as it has buffered enough, so this bounds how much work one
+ * connection may do rather than how much is read up front. At the previous 1MB
+ * a 4K stream (25-45 Mbps) needed several requests per second of video, and
+ * every one of them paid the full resolve cost below before a byte moved.
+ */
+const RANGE_CHUNK_SIZE = 16 * 1024 * 1024;
+
+/**
+ * How long a resolved stream target stays reusable. Access revoked during this
+ * window keeps working until the entry expires, which is the price of not
+ * re-authorizing every chunk of an in-flight playback.
+ */
+const STREAM_TARGET_TTL_SECONDS = 30;
+
+interface ResolvedStreamTarget {
+  attachment: MessageAttachment;
+  filePath: string;
+  fileSize: number;
+}
+
+type StreamTargetResult =
+  | { ok: true; target: ResolvedStreamTarget }
+  | { ok: false; status: number; body: Record<string, string> };
 
 export class AttachmentController {
   private messageAttachmentRepository: MessageAttachmentRepository;
@@ -344,6 +371,66 @@ export class AttachmentController {
   };
 
   /**
+   * Look up, authorize and size an attachment for streaming.
+   *
+   * Playback is a stream of range requests — one every few seconds, and more
+   * while the player fills its buffer. Doing the attachment lookup, the
+   * workspace/participant authorization queries and two storage HEAD calls on
+   * every one of them put database and storage latency in front of each chunk,
+   * which starved the player and surfaced as mid-playback stalls on
+   * high-bitrate files. The result is therefore memoised per (user, attachment)
+   * for STREAM_TARGET_TTL_SECONDS. Only successful resolutions are cached, so a
+   * denial is always recomputed.
+   */
+  private async resolveStreamTarget(
+    attachmentId: string,
+    userId: string,
+    workspaceId: string | undefined,
+  ): Promise<StreamTargetResult> {
+    const cacheKey = `attachment-stream:${userId}:${workspaceId ?? 'none'}:${attachmentId}`;
+    const cached = cacheManager.get<ResolvedStreamTarget>(cacheKey);
+    if (cached) {
+      return { ok: true, target: cached };
+    }
+
+    const attachment = await this.messageAttachmentRepository.findById(attachmentId);
+    if (!attachment) {
+      return { ok: false, status: 404, body: { error: 'Attachment not found' } };
+    }
+
+    // Authorization: tenant + participant/creator checks
+    const access = await this.assertAttachmentAccess(attachment, userId, workspaceId);
+    if (!access.ok) {
+      return access;
+    }
+
+    const filePath = normalizeStoragePath(attachment.url);
+    if (!filePath) {
+      return { ok: false, status: 404, body: { error: 'Attachment not yet uploaded' } };
+    }
+
+    // getFileMetadata already fails on a missing object, so the fileExists()
+    // HEAD that used to precede it was a second round trip for the same answer.
+    let fileSize: number;
+    try {
+      const metadata = await getAttachmentStorage(attachment).getFileMetadata(filePath);
+      fileSize = parseInt(String(metadata.size || '0'), 10);
+    } catch (error) {
+      logger.error(`File not found in storage: ${filePath}`, error);
+      return { ok: false, status: 404, body: { error: 'File not found in storage' } };
+    }
+
+    logger.info(`Resolved attachment stream ${attachmentId} -> ${filePath} (${fileSize} bytes)`);
+
+    const target: ResolvedStreamTarget = { attachment, filePath, fileSize };
+    // Transcripts are rewritten in place, so a remembered size would go stale.
+    if (!NO_CACHE_TYPES.has(getAttachmentType(attachment))) {
+      cacheManager.set(cacheKey, target, STREAM_TARGET_TTL_SECONDS);
+    }
+    return { ok: true, target };
+  }
+
+  /**
    * GET /api/attachments/:attachmentId/stream
    * Stream video/audio files with range request support (HTTP 206 Partial Content)
    * This enables seeking in video players
@@ -359,46 +446,43 @@ export class AttachmentController {
         return;
       }
 
-      // Get attachment metadata from database
-      const attachment = await this.messageAttachmentRepository.findById(attachmentId);
-
-      if (!attachment) {
-        res.status(404).json({ error: 'Attachment not found' });
+      const resolved = await this.resolveStreamTarget(attachmentId, userId, req.user?.workspaceId);
+      if (!resolved.ok) {
+        res.status(resolved.status).json(resolved.body);
         return;
       }
 
-      // Authorization: tenant + participant/creator checks
-      const access = await this.assertAttachmentAccess(attachment, userId, req.user?.workspaceId);
-      if (!access.ok) {
-        res.status(access.status).json(access.body);
-        return;
-      }
-
-      const filePath = normalizeStoragePath(attachment.url);
-      if (!filePath) {
-        res.status(404).json({ error: 'Attachment not yet uploaded' });
-        return;
-      }
-
+      const { attachment, filePath, fileSize } = resolved.target;
       const service = getAttachmentStorage(attachment);
 
-      const fileExists = await service.fileExists(filePath);
-      if (!fileExists) {
-        logger.error(`File not found in storage: ${filePath}`);
-        res.status(404).json({ error: 'File not found in storage' });
-        return;
-      }
+      const pipeToResponse = async (options?: { start: number; end: number }): Promise<void> => {
+        const stream = await service.createReadStream(filePath, options);
 
-      const metadata = await service.getFileMetadata(filePath);
-      const fileSize = parseInt(String(metadata.size || '0'), 10);
+        // Seeking (or a player that has buffered enough) aborts the response
+        // mid-flight. Without this the storage stream stays open and keeps
+        // pulling bytes nobody will read — a scrub through a long video leaks
+        // one such stream per seek.
+        res.on('close', () => {
+          (stream as NodeJS.ReadableStream & { destroy?: () => void }).destroy?.();
+        });
+
+        stream.on('error', (error) => {
+          logger.error('Stream error:', error);
+          if (!res.headersSent) {
+            res.status(500).json({ error: 'Stream error' });
+          } else {
+            res.destroy();
+          }
+        });
+
+        stream.pipe(res);
+      };
 
       // Parse Range header (e.g., "bytes=0-1023")
       const range = req.headers.range;
 
       if (!range) {
         // No range requested - send entire file
-        logger.info(`Streaming entire file: ${filePath}`);
-
         setSafeDownloadHeaders(res, {
           mimetype: attachment.mimetype,
           filename: attachment.originalFilename,
@@ -407,21 +491,9 @@ export class AttachmentController {
         res.setHeader('Accept-Ranges', 'bytes');
         setAttachmentCacheHeaders(res, attachment);
 
-        const stream = await service.createReadStream(filePath);
-        stream.pipe(res);
-
-        stream.on('error', (error) => {
-          logger.error('Stream error:', error);
-          if (!res.headersSent) {
-            res.status(500).json({ error: 'Stream error' });
-          }
-        });
-
+        await pipeToResponse();
         return;
       }
-
-      // Parse range header
-      const CHUNK_SIZE = 1 * 1024 * 1024; // 1MB
 
       const parts = range.replace(/bytes=/, '').split('-');
       const start = parseInt(parts[0], 10);
@@ -432,11 +504,22 @@ export class AttachmentController {
         return;
       }
 
-      // If client didn't specify an end, limit it to CHUNK_SIZE
-      let end = parts[1] ? parseInt(parts[1], 10) : Math.min(start + CHUNK_SIZE - 1, fileSize - 1);
+      // A start at or past the end of the file is unsatisfiable. Answering 206
+      // with a negative Content-Length instead leaves the player waiting for
+      // bytes that never arrive.
+      if (fileSize <= 0 || start >= fileSize) {
+        res.setHeader('Content-Range', `bytes */${fileSize}`);
+        res.status(416).json({ error: 'Requested range not satisfiable' });
+        return;
+      }
+
+      // An open-ended range is answered with at most RANGE_CHUNK_SIZE bytes.
+      let end = parts[1]
+        ? parseInt(parts[1], 10)
+        : Math.min(start + RANGE_CHUNK_SIZE - 1, fileSize - 1);
 
       // Validate end value if it was parsed
-      if (parts[1] && isNaN(end)) {
+      if (parts[1] && (isNaN(end) || end < start)) {
         res.status(400).json({ error: 'Invalid Range header' });
         return;
       }
@@ -446,8 +529,6 @@ export class AttachmentController {
       }
 
       const chunkSize = end - start + 1;
-
-      logger.info(`Streaming range for ${filePath}: bytes ${start}-${end}/${fileSize}`);
 
       // Set headers for partial content
       res.status(206); // Partial Content
@@ -460,15 +541,7 @@ export class AttachmentController {
       res.setHeader('Accept-Ranges', 'bytes');
       setAttachmentCacheHeaders(res, attachment);
 
-      const stream = await service.createReadStream(filePath, { start, end });
-      stream.pipe(res);
-
-      stream.on('error', (error) => {
-        logger.error('Stream error:', error);
-        if (!res.headersSent) {
-          res.status(500).json({ error: 'Stream error' });
-        }
-      });
+      await pipeToResponse({ start, end });
     } catch (error) {
       logger.error('Error streaming attachment:', error);
       if (!res.headersSent) {
