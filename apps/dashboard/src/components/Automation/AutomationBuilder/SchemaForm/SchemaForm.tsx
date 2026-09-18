@@ -609,9 +609,7 @@ function RawInput({
       <Checkbox
         checked={value === true}
         onChange={checked => onChange(checked === true)}
-        label={
-          schema.description ? (sanitiseDescription(schema.description) ?? 'Enabled') : 'Enabled'
-        }
+        label='Enabled'
       />
     );
   }
