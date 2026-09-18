@@ -15,10 +15,8 @@ import { useAuth } from '../../hooks/useAuth';
 import { useCanCreateTicket, usePermissions } from '../../hooks/usePermissions';
 import { usePlatform } from '../../hooks/usePlatform';
 import { useRouteContext } from '../../hooks/useRouteContext';
-import { TextAlignJustify, FileSpreadsheet, Archive, Copy } from 'lucide-react';
+import { FileSpreadsheet, Archive } from 'lucide-react';
 import {
-  PlusDefault as Plus,
-  FilterHorizontal as Settings2,
   ChevronDown as ChevronDownIcon,
   ChevronRight,
   UserDefault as User,
@@ -26,13 +24,8 @@ import {
   CheckTickCircle as CircleCheckBig,
   Poll as Vote,
   Tag,
-  CheckTickSingle as CheckIcon,
-  MultipleCrossCancelDefault as X,
   ClockDefault as Clock,
   BarchartDefault as BarChart3,
-  BookmarkDefault as Bookmark,
-  Share02 as Share2,
-  Star,
   GitBranch,
   PencilEdit as Pencil,
   CheckTickCircle as CheckCircle2,
@@ -42,7 +35,6 @@ import {
   ArrowLeft,
   SearchDefault as Search,
   KanbanBoard as SquareKanban,
-  GridTable,
   Hashtag,
   LayersTo,
   EyeOff,
@@ -69,7 +61,8 @@ import {
   KeyboardSensor,
 } from '@dnd-kit/core';
 import { TicketCard } from '../../components/Tickets/TicketCard/TicketCard';
-import { TicketFiltersDropdown } from '../../components/Tickets/TicketFilters';
+import { TicketsHeader } from '../../components/Tickets/TicketsHeader/TicketsHeader';
+import { hasAnyFilterChip } from '../../components/Tickets/TicketsHeader/filterChips';
 import type { ProjectsScreenOutletContext } from '../ProjectsScreen/ProjectsScreen';
 import { CreateTicketModal } from '../../components/Tickets/CreateTicketModal/CreateTicketModal';
 import {
@@ -77,15 +70,16 @@ import {
   hasCreateTicketFlag,
 } from '../../components/Tickets/CreateTicketModal/createTicket.utils';
 import { StageFormModal } from '../../components/Tickets/StageFormModal/StageFormModal';
-import { ShareViewDialog } from '../../components/Project/ShareViewDialog/ShareViewDialog';
 import { useMachine } from '@xstate/react';
-import { ticketFiltersMachine } from '../../machines/ticketFiltersMachine';
+import { getStorageKey, ticketFiltersMachine } from '../../machines/ticketFiltersMachine';
 import { setBoardNavParams } from '../../components/Tickets/boardNavStore';
 import type { KanbanTicketsPageBaseArgs } from './useKanbanTicketsPage';
+import type { FormFieldGroup, GroupByType, Stage } from './KanbanBoardScreen.types';
+import { useHeaderSavedFilters } from './useHeaderSavedFilters';
 import type { TicketFilters } from '../../components/Tickets/TicketFilters/types';
 import { KanbanColumns } from '../../components/Tickets/KanbanColumns/KanbanColumns';
 import { useHiddenKanbanColumns } from './useHiddenKanbanColumns';
-import { ViewBoardPicker } from '../../components/Project/ViewBoardPicker/ViewBoardPicker';
+import { useViewStar } from '../../hooks/useViewStar';
 import { useDragAndDrop, type StageTransitionInfo } from '../../hooks/useDragAndDrop';
 import { useVespaTagSearch } from '../../hooks/useVespaTagSearch';
 import {
@@ -159,8 +153,10 @@ import { flowGroupColor } from '../../components/Board/FlowRun/FlowGroupNode';
 import { useFlowRunGraph } from '../../components/Board/FlowRun/useFlowRunGraph';
 import { STATUS_OPTIONS } from '../../components/Board/BoardStageConfigScreen/BoardStageConfigScreen.types';
 import { VIRTUAL_ROOT_ID as FLOW_VIRTUAL_ROOT_ID } from '../../components/Board/FlowPlanEditor/FlowPlanEditor.utils';
-import type { Stage } from './KanbanBoardScreen.types';
 import {
+  DEFAULT_VISIBLE_COLUMNS,
+  DERIVED_COLUMNS,
+  mergeSavedColumns,
   getStageColor,
   getStatusColumns,
   groupTicketsByStage,
@@ -200,26 +196,21 @@ import {
   TicketPriority,
   SavedConfigVisibility,
   SavedConfigEntityName,
-  UserResponsibility,
   SavedConfigContextType,
   ApproverType,
 } from '@xyne/shared';
 import { v4 as uuidv4 } from 'uuid';
-import AcOnSlow from '../../assets/icons/AcOnSlowIcon';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
-import { useViewStar } from '../../hooks/useViewStar';
 import { useUsers } from '../../hooks/useUsers';
 import { useUserGroups } from '../../hooks/useUserGroup';
 import { stateMachineActor } from '../../machines/stateMachine';
 import { Dialog } from '../../components/ui/Dialog';
 import Button from '../../components/ui/Button';
-import { Popover } from '../../components/ui/Popover/Popover';
 import { cn } from '../../utils/classNames';
 import { useZero } from '../../hooks/useZero';
 import { useIntersectionObserver } from '../../hooks/useIntersectionObserver';
 import { useBoardsSlaPolicies } from '../../hooks/useChannelSlaPolicy';
 import { useKanbanCounts } from './useKanbanCounts';
-import { valuesToFilters } from '../../utils/savedViewSerialization';
 import { globalClickTracker } from '../../services/Analytics/globalClickTracker';
 import { ticketCountBucket } from '../../services/Analytics/ticketTracking';
 import { readTrackSource } from '../../services/Analytics/trackSource';
@@ -256,6 +247,7 @@ const WORKSPACE_VIEW_ARRAY_KEYS = [
   'tags',
   'stages',
   'ticketTypes',
+  'merchantIds',
   'sourceChannels',
 ] as const satisfies (keyof TicketFilters)[];
 
@@ -269,18 +261,6 @@ const WORKSPACE_VIEW_NUMERIC_KEYS = [
 // `stage` is force-managed by the sub-status effect, so it is never persisted as
 // a user column. `board` is a normal user-controlled, persisted column (it must
 // survive in the draft / session / saved views like every other column).
-const DERIVED_COLUMNS = ['stage'];
-
-const DEFAULT_VISIBLE_COLUMNS = ['assignee', 'dueDate', 'status', 'priority', 'tags'];
-
-function mergeSavedColumns(prev: Set<string>, saved: string[]): Set<string> {
-  const next = new Set(saved);
-  for (const key of DERIVED_COLUMNS) {
-    if (prev.has(key)) next.add(key);
-  }
-  return next;
-}
-
 function filtersToValues(
   filters: TicketFilters,
   groupBy?: string,
@@ -353,15 +333,6 @@ interface BoardKanbanScreenProps {
   isStarred?: boolean;
 }
 
-type GroupByType = 'none' | 'assignee' | 'status' | 'priority' | FormFieldGroup;
-
-interface FormFieldGroup {
-  type: 'formField';
-  fieldId: string;
-  fieldName: string;
-  fieldType: FormFieldType;
-}
-
 function isFormFieldGroup(value: unknown): value is FormFieldGroup {
   return (
     typeof value === 'object' && value !== null && 'type' in value && value.type === 'formField'
@@ -382,6 +353,16 @@ type KanbanLocalTicket = Ticket & {
 // 'flow' is the dedicated mode for FLOW boards (plan-driven run graph); it is
 // never offered in the layout toggle and only reachable on flow boards.
 type LayoutView = 'kanban' | 'table' | 'calendar' | 'flow';
+
+type StorableLayoutView = Exclude<LayoutView, 'flow'>;
+
+const isLayoutView = (value: string | null): value is LayoutView =>
+  value === 'kanban' || value === 'table' || value === 'calendar' || value === 'flow';
+
+const isStorableLayoutView = (value: string | null): value is StorableLayoutView =>
+  value === 'kanban' || value === 'table' || value === 'calendar';
+
+type TicketExportAction = 'download-csv' | 'download-json' | 'copy-csv' | 'copy-json';
 type TicketGraphMapping = QueryResultType<typeof queries.subTicketMappingsForTickets>[number];
 type TicketGraphSubTicket = NonNullable<TicketGraphMapping['subTicket']>;
 type FlowRunActivity = QueryResultType<typeof queries.ticketActivitiesForTickets>[number];
@@ -523,7 +504,6 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   const [kanbanTicketsByColumn, setKanbanTicketsByColumn] = useState<Record<string, Ticket[]>>({});
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   const [tableScrollElement, setTableScrollElement] = useState<HTMLDivElement | null>(null);
-  const [isCustomizeOpen, setIsCustomizeOpen] = useState(false);
   const [flowSelection, setFlowSelection] = useState<FlowNodeSelection | null>(null);
   const [collapsedFlowGroups, setCollapsedFlowGroups] = useState<Set<string>>(new Set());
   const [flowLegendOpen, setFlowLegendOpen] = useState(false);
@@ -709,12 +689,19 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   }, [searchParams]);
   const [state, send] = useMachine(ticketFiltersMachine);
   const requestedLayoutView = searchParams.get('layout');
-  const layoutView: LayoutView =
-    requestedLayoutView === 'kanban' ||
-    requestedLayoutView === 'calendar' ||
-    requestedLayoutView === 'flow'
-      ? requestedLayoutView
-      : 'table';
+  const layoutStorageKey = `kanban-layout-${getStorageKey(channelId, viewMode, projectIdParam, boardId, viewId)}`;
+  const storedLayoutView = useMemo((): StorableLayoutView | null => {
+    try {
+      const raw = localStorage.getItem(layoutStorageKey);
+      return isStorableLayoutView(raw) ? raw : null;
+    } catch {
+      return null;
+    }
+  }, [layoutStorageKey]);
+  const defaultLayoutView: StorableLayoutView = storedLayoutView ?? 'kanban';
+  const layoutView: LayoutView = isLayoutView(requestedLayoutView)
+    ? requestedLayoutView
+    : defaultLayoutView;
   const isKanbanLayout = layoutView === 'kanban';
   const showTicketReport = searchParams.get('ticketReport') === '1';
   // Flow view: the open run lives in the URL so browser back returns to the
@@ -745,6 +732,8 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   );
   // Only calendar and flow still need the legacy full fetch.
   const shouldUseLegacyTicketsQuery = layoutView === 'calendar' || layoutView === 'flow';
+  const [pendingExport, setPendingExport] = useState<TicketExportAction | null>(null);
+  const legacyTicketsEnabled = shouldUseLegacyTicketsQuery || pendingExport !== null;
   const isTableLayout = layoutView === 'table';
   const [selectedViewId, setSelectedViewId] = useState<string | null>(null);
   // Which surface opened the create form; rides on CREATE_TICKET_SUCCEEDED.
@@ -959,11 +948,14 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
         }
       }
 
-      // Clear stages filter when board changes since stages are board-specific
+      // Stages and dynamic fields are board-specific, and the header only offers their chips
+      // while a board is in scope. Drop them whenever the board changes or scope is lost,
+      // otherwise they keep filtering with no visible chip to remove.
       const currentBoardId = filters.boards?.[0] ?? null;
       const newBoardId = nextFilters.boards?.[0] ?? null;
-      if (currentBoardId !== newBoardId) {
+      if (currentBoardId !== newBoardId || newBoardId === null) {
         delete nextFilters.stages;
+        delete nextFilters.dynamicFields;
       }
 
       send({
@@ -1260,18 +1252,6 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     setVisibleColumns(prev => mergeSavedColumns(prev, initialColumns ?? DEFAULT_VISIBLE_COLUMNS));
   }, [viewDraftKey, initialFilters, initialGroupBy, initialColumns, setFilters, setGroupBy]);
 
-  const { toggleStar } = useViewStar();
-
-  const [isShareViewDialogOpen, setIsShareViewDialogOpen] = useState(false);
-
-  const handleShareWorkspaceView = useCallback((): void => {
-    if (!viewId) {
-      toast.error('Save the view before sharing');
-      return;
-    }
-    setIsShareViewDialogOpen(true);
-  }, [viewId]);
-
   // Setup sensors for drag and drop
   const sensors = useSensors(
     useSensor(MouseSensor, {
@@ -1378,7 +1358,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
       setSearchParams(
         prev => {
           const next = new URLSearchParams(prev);
-          next.set('layout', 'table');
+          next.set('layout', defaultLayoutView);
           next.delete('run');
           return next;
         },
@@ -1391,6 +1371,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     selectedBoardDetail,
     filteredSingleBoardId,
     layoutView,
+    defaultLayoutView,
     setSearchParams,
   ]);
   const handleFlowStatusChange = useCallback(
@@ -1804,7 +1785,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     queries.ticketsQueryV2(ticketsQueryParams),
     {
       enabled:
-        shouldUseLegacyTicketsQuery &&
+        legacyTicketsEnabled &&
         ((viewMode === 'board' && !!boardId) ||
           (viewMode === 'project' && !!effectiveProjectId) ||
           // A workspace view has no channel or project to key on; `workspaceViewReady`
@@ -1879,26 +1860,18 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     return Object.values(TicketPriority);
   }, []);
 
-  const { availableUsers, hasPrReviewers, hasQaAssigned } = useMemo(() => {
+  const { availableUsers } = useMemo(() => {
     const userIds = new Set<string>();
-    let hasPrReviewers = false;
-    let hasQaAssigned = false;
     (kanbanSourceTickets as KanbanLocalTicket[] | undefined)?.forEach(ticket => {
       if (ticket.assignedTo) userIds.add(ticket.assignedTo);
       userIds.add(ticket.createdBy);
       if (Array.isArray(ticket.assignments)) {
         ticket.assignments.forEach(assignment => {
           if (assignment.userId) userIds.add(assignment.userId);
-          const responsibility = assignment.userResponsibility as UserResponsibility;
-          if (!hasPrReviewers && responsibility === UserResponsibility.PR_REVIEWER) {
-            hasPrReviewers = true;
-          } else if (!hasQaAssigned && responsibility === UserResponsibility.QA) {
-            hasQaAssigned = true;
-          }
         });
       }
     });
-    return { availableUsers: Array.from(userIds), hasPrReviewers, hasQaAssigned };
+    return { availableUsers: Array.from(userIds) };
   }, [kanbanSourceTickets]);
 
   // Get available board IDs based on view mode (only needed for my-tickets views)
@@ -2227,7 +2200,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   }, [filters.boards, deferredFilters.boards]);
 
   const filteredTickets = useMemo(() => {
-    if (!shouldUseLegacyTicketsQuery || !allProjectTickets) {
+    if (!legacyTicketsEnabled || !allProjectTickets) {
       return undefined;
     }
 
@@ -2265,7 +2238,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
 
     return tickets;
   }, [
-    shouldUseLegacyTicketsQuery,
+    legacyTicketsEnabled,
     allProjectTickets,
     deferredFilters,
     tagsByTicketId,
@@ -2733,13 +2706,14 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     [tableBoards],
   );
   // CSV/JSON export of the current table view. Ungated — it only serializes the
-  // already-visible, filtered tickets, so it needs no TICKET-REPORTS permission.
+  // same filtered, ACL-scoped rows the table itself lists, so it needs no
+  // TICKET-REPORTS permission.
   const channelNamesById = useMemo(
     () => new Map(allChannels.map(c => [c.id, c.name])),
     [allChannels],
   );
-  const handleTicketExport = useCallback(
-    (action: 'download-csv' | 'download-json' | 'copy-csv' | 'copy-json'): void => {
+  const runTicketExport = useCallback(
+    (action: TicketExportAction): void => {
       // Built lazily on click — serializing every filtered row is wasted work
       // until the user actually triggers an export.
       const payload = buildTicketExportPayload(filteredTickets ?? [], {
@@ -2779,6 +2753,29 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
       boardNamesById,
       tableVisibleColumns,
     ],
+  );
+  // The table layout no longer loads the full ticket list, so an export has to
+  // turn the legacy query on and wait for it. Board names ride a second query
+  // off those rows, so hold until they resolve or the Board column exports blank.
+  const exportRowsReady =
+    legacyTicketsEnabled &&
+    ticketsDetails.type === 'complete' &&
+    (tableBoardIds.length === 0 || tableBoards !== undefined);
+  useEffect(() => {
+    if (!pendingExport || !exportRowsReady) return;
+    setPendingExport(null);
+    runTicketExport(pendingExport);
+  }, [pendingExport, exportRowsReady, runTicketExport]);
+  const handleTicketExport = useCallback(
+    (action: TicketExportAction): void => {
+      if (exportRowsReady) {
+        runTicketExport(action);
+        return;
+      }
+      setPendingExport(action);
+      toast.info('Preparing export…');
+    },
+    [exportRowsReady, runTicketExport],
   );
   const flowRunExportRows = useMemo(() => {
     if (!isFlowBoard || !flowModel) return [];
@@ -4063,6 +4060,160 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     return availableColumns.filter(col => !['status', ...tableOnly].includes(col.key));
   }, [layoutView]);
 
+  const { toggleStar: toggleViewStar } = useViewStar();
+  const [headerProject] = useCachedQuery(queries.projectById({ projectId: projectIdParam ?? '' }), {
+    enabled: viewMode === 'project' && !!projectIdParam && !channelId,
+  });
+  const headerTitle = isWorkspaceView
+    ? savedViewName || 'New view'
+    : isMyTicketsView
+      ? 'My tickets'
+      : channelId
+        ? 'Tickets'
+        : viewMode === 'board'
+          ? (selectedBoardDetail?.name ?? 'Board')
+          : ((headerProject as { name: string } | undefined)?.name ?? 'Tickets');
+  const headerTicketCount = useMemo(
+    () =>
+      processedGroups.reduce(
+        (sum, group) => sum + Math.max(group.count, group.allTickets.length),
+        0,
+      ),
+    [processedGroups],
+  );
+  const headerIsFiltered = hasSearchTerm || hasAnyFilterChip(filters, showOverdueOnly);
+  const ownsSavedView = viewId !== undefined && isStarred !== undefined;
+  const headerStar = ownsSavedView
+    ? { isStarred, onToggle: () => toggleViewStar({ id: viewId, isStarred }) }
+    : null;
+  const handleLayoutChange = useCallback(
+    (layout: LayoutView): void => {
+      if (isStorableLayoutView(layout)) {
+        try {
+          localStorage.setItem(layoutStorageKey, layout);
+        } catch {
+          // Ignore storage errors (quota exceeded, etc.)
+        }
+      }
+      setSearchParams(prev => {
+        const p = new URLSearchParams(prev);
+        p.set('layout', layout);
+        return p;
+      });
+    },
+    [setSearchParams, layoutStorageKey],
+  );
+  const handleHeaderCreateTicket = useCallback((): void => {
+    setCreateTicketSeed(null);
+    setCreateTicketSource('kanban_header');
+    setIsCreateModalOpen(true);
+  }, []);
+  const handleHeaderClearFilters = useCallback((): void => {
+    setFilters(filters.boards?.length ? { boards: filters.boards } : {});
+    if (showOverdueOnly) setShowOverdueOnly(false);
+  }, [filters.boards, setFilters, showOverdueOnly, setShowOverdueOnly]);
+  const handleResetColumns = useCallback((): void => {
+    setVisibleColumns(new Set(DEFAULT_VISIBLE_COLUMNS));
+  }, []);
+  const handleOpenTicketReport = useCallback((): void => {
+    if (channelId && effectiveProjectId) {
+      setSearchParams(previous => {
+        const next = new URLSearchParams(previous);
+        next.set('ticketReport', '1');
+        return next;
+      });
+      return;
+    }
+    const params = new URLSearchParams();
+    if (effectiveProjectId) {
+      params.set('projectId', effectiveProjectId);
+      params.set('lockProject', '1');
+    }
+    if (boardId) params.set('boardId', boardId);
+    const prefix = user?.workspaceId ? `/${user.workspaceId}` : '';
+    void navigate(`${prefix}/ticket-reports${params.size ? `?${params.toString()}` : ''}`);
+  }, [channelId, effectiveProjectId, boardId, user?.workspaceId, navigate, setSearchParams]);
+  const headerSavedFilters = useHeaderSavedFilters({
+    savedConfigs,
+    savedViewsBoardId,
+    boards: filters.boards,
+    userId: user?.id,
+    activeViewKey,
+    selectedViewId,
+    setSelectedViewId,
+    setFilters,
+    setGroupBy,
+    setVisibleColumns,
+    onRequestDelete: item =>
+      setDeleteViewConfirm({ configId: item.id, name: item.name, isPublic: !item.isPrivate }),
+  });
+  const headerPickerContext = useMemo(
+    () => ({
+      projectId: isMyTicketsView ? '' : effectiveProjectId || '',
+      channelId,
+      availablePriorities,
+      availableUsers,
+      availableBoards,
+      availableBoardDetails,
+      sourceChannelProjectIds,
+      availableTags,
+      onLoadMoreTags: handleLoadMoreTags,
+      hasMoreTags: !tagsSearchQuery.trim() && hasMoreZeroTags,
+      onSearchTags: handleSearchTags,
+      availableStages,
+      formMappings:
+        filters.boards?.length === 1 && selectedBoardDetail
+          ? selectedBoardDetail.formContextMappings || []
+          : [],
+      selectedBoardName: selectedBoardDetail?.name ?? undefined,
+      isNonLinearBoard,
+      onBoardDropdownOpenChange: handleBoardDropdownOpenChange,
+      onSourceChannelsOpenChange: handleSourceChannelsOpenChange,
+      onFiltersDropdownOpenChange: handleFiltersDropdownOpenChange,
+    }),
+    [
+      isMyTicketsView,
+      effectiveProjectId,
+      channelId,
+      availablePriorities,
+      availableUsers,
+      availableBoards,
+      availableBoardDetails,
+      sourceChannelProjectIds,
+      availableTags,
+      handleLoadMoreTags,
+      tagsSearchQuery,
+      hasMoreZeroTags,
+      handleSearchTags,
+      availableStages,
+      filters.boards,
+      selectedBoardDetail,
+      isNonLinearBoard,
+      handleBoardDropdownOpenChange,
+      handleSourceChannelsOpenChange,
+      handleFiltersDropdownOpenChange,
+    ],
+  );
+  const headerNames = useMemo(
+    () => ({ userNamesById, userGroupNamesById, channelNamesById }),
+    [userNamesById, userGroupNamesById, channelNamesById],
+  );
+  const headerViewSave = isWorkspaceView
+    ? {
+        isDirty: isViewDirty,
+        ready: workspaceViewReady,
+        saving: isSavingWorkspaceView,
+        canSaveInPlace,
+        onReset: handleResetWorkspaceView,
+        onSave: handleSaveExistingView,
+        namePopoverOpen: isSavePopoverOpen,
+        onNamePopoverOpenChange: handleSavePopoverOpenChange,
+        nameDraft: workspaceViewNameDraft,
+        onNameDraftChange: setWorkspaceViewNameDraft,
+        onConfirmSave: handleConfirmSaveWorkspaceView,
+      }
+    : null;
+
   if (showTicketReport && channelId && effectiveProjectId) {
     return (
       <TicketReportsScreen
@@ -4088,820 +4239,53 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
       data-testid='projects-board-page'
       className='flex flex-col h-full w-full bg-muted relative'
     >
-      {/* Header */}
-      <div className='flex flex-col lg:flex-row flex-wrap lg:flex-nowrap lg:items-center justify-between px-4 py-3 bg-background flex-shrink-0 gap-3'>
-        {/* Filters - Left Side */}
-        {(effectiveProjectId || viewMode === 'my-tickets' || isWorkspaceView) && (
-          <div className='flex-1 min-w-0'>
-            <TicketFiltersDropdown
-              startSlot={
-                <>
-                  {projectsScreenContext?.leftHeaderSlot}
-                  {viewId && isStarred !== undefined && (
-                    <Button
-                      variant='outline'
-                      size='iconSm'
-                      onClick={() => toggleStar({ id: viewId, isStarred })}
-                      className='rounded-[10px] border-border hover:bg-muted'
-                      aria-label={isStarred ? 'Unstar view' : 'Star view'}
-                      data-track-category='Projects'
-                      data-track-name='StarView'
-                    >
-                      <Star
-                        className={cn(
-                          'size-3 text-muted-foreground',
-                          isStarred && 'fill-current text-status-pending',
-                        )}
-                      />
-                    </Button>
-                  )}
-                </>
-              }
-              filters={filters}
-              onFiltersChange={setFilters}
-              projectId={
-                isMyTicketsView
-                  ? '' // Don't filter by project in my-tickets - tickets can span multiple projects
-                  : effectiveProjectId || ''
-              }
-              availablePriorities={availablePriorities}
-              availableUsers={availableUsers}
-              availableBoards={availableBoards}
-              availableBoardDetails={availableBoardDetails}
-              sourceChannelProjectIds={sourceChannelProjectIds}
-              showBoardsFilter={!!channelId || isMyTicketsView}
-              availableTags={availableTags}
-              onSearchTags={handleSearchTags}
-              onLoadMoreTags={handleLoadMoreTags}
-              hasMoreTags={!tagsSearchQuery.trim() && hasMoreZeroTags}
-              availableStages={availableStages}
-              hasPrReviewers={hasPrReviewers}
-              hasQaAssigned={hasQaAssigned}
-              hideAssigneeFilter={viewMode === 'my-tickets' ? true : false}
-              isTicketsSyncing={isTicketsSyncing}
-              onBoardDropdownOpenChange={handleBoardDropdownOpenChange}
-              onSourceChannelsOpenChange={handleSourceChannelsOpenChange}
-              onFiltersDropdownOpenChange={handleFiltersDropdownOpenChange}
-              isNonLinearBoard={isNonLinearBoard}
-              formMappings={
-                filters.boards?.length === 1 && selectedBoardDetail
-                  ? selectedBoardDetail.formContextMappings || []
-                  : []
-              }
-              selectedBoardName={selectedBoardDetail?.name ?? undefined}
-              searchValue={searchInputValue}
-              onSearchChange={setSearchTerm}
-              isExactSearch={isExactSearch}
-              onExactSearchChange={setIsExactSearch}
-              {...(channelId ? { channelId } : {})}
-              groupBy={typeof groupBy === 'object' ? JSON.stringify(groupBy) : groupBy}
-              hasActiveView={!!selectedViewId}
-              workspaceView={isWorkspaceView}
-              trailingControl={
-                canExportTickets ? (
-                  <Button
-                    type='button'
-                    variant='outline'
-                    size='sm'
-                    className='rounded-[10px] border-border'
-                    onClick={() => {
-                      if (channelId && effectiveProjectId) {
-                        setSearchParams(previous => {
-                          const next = new URLSearchParams(previous);
-                          next.set('ticketReport', '1');
-                          return next;
-                        });
-                        return;
-                      }
-                      const params = new URLSearchParams();
-                      if (effectiveProjectId) {
-                        params.set('projectId', effectiveProjectId);
-                        params.set('lockProject', '1');
-                      }
-                      if (boardId) params.set('boardId', boardId);
-                      const prefix = user?.workspaceId ? `/${user.workspaceId}` : '';
-                      void navigate(
-                        `${prefix}/ticket-reports${params.size ? `?${params.toString()}` : ''}`,
-                      );
-                    }}
-                    data-track-category='TicketReports'
-                    data-track-name='OpenTicketReports'
-                  >
-                    <Download className='size-4' />
-                    <span>Export report</span>
-                  </Button>
-                ) : undefined
-              }
-              {...(isWorkspaceView
-                ? {
-                    leadingControl: (
-                      <ViewBoardPicker
-                        selectedBoardIds={filters.boards ?? []}
-                        onChange={boardIds => setFilters({ ...filters, boards: boardIds })}
-                        {...(isWorkspaceViewWithoutBoards
-                          ? {
-                              className:
-                                'border-orange-500 text-orange-600 hover:bg-orange-50 hover:text-orange-700',
-                            }
-                          : {})}
-                      />
-                    ),
-                  }
-                : {})}
-            />
-          </div>
-        )}
-
-        {/* Create Ticket / Save View Button - Right Side */}
-        <div className='flex flex-wrap lg:flex-col md:items-end gap-3 ml-auto md:ml-0'>
-          <div className='flex flex-wrap items-center justify-end gap-2'>
-            {isWorkspaceView && (
-              <div className='flex items-center gap-2'>
-                {isViewDirty && (
-                  <>
-                    <span className='text-[13px] text-muted-foreground whitespace-nowrap'>
-                      Unsaved changes
-                    </span>
-                    <Button
-                      variant='ghost'
-                      size='sm'
-                      onClick={handleResetWorkspaceView}
-                      data-track-category='Projects'
-                      data-track-name='ResetView'
-                    >
-                      Reset
-                    </Button>
-                  </>
-                )}
-                <Button
-                  variant='outline'
-                  size='sm'
-                  onClick={handleShareWorkspaceView}
-                  disabled={!workspaceViewReady}
-                  className='rounded-[10px] border-border hover:bg-muted'
-                  aria-label='Share view'
-                  data-track-category='Projects'
-                  data-track-name='ShareView'
-                >
-                  <Share2 className='w-3 h-3 text-muted-foreground' />
-                  <span>Share</span>
-                </Button>
-                {canSaveInPlace ? (
-                  <Button
-                    size='sm'
-                    onClick={handleSaveExistingView}
-                    disabled={isSavingWorkspaceView || !isViewDirty}
-                    className='rounded-[10px]'
-                    data-track-category='Projects'
-                    data-track-name='SaveView'
-                  >
-                    <Bookmark className='w-3 h-3' />
-                    <span>Save</span>
-                  </Button>
-                ) : (
-                  <Popover
-                    open={isSavePopoverOpen}
-                    onOpenChange={handleSavePopoverOpenChange}
-                    align='end'
-                    className='w-64 p-3'
-                    trigger={
-                      <Button
-                        size='sm'
-                        disabled={!hasSeededWorkspaceView || isSavingWorkspaceView}
-                        className='rounded-[10px]'
-                        data-track-category='Projects'
-                        data-track-name='SaveView'
-                      >
-                        <Bookmark className='w-3 h-3' />
-                        <span>{viewId ? 'Save' : 'Save view'}</span>
-                      </Button>
-                    }
-                  >
-                    <div className='flex flex-col gap-2'>
-                      <span className='text-[13px] font-medium text-foreground'>
-                        Name this view
-                      </span>
-                      <input
-                        autoFocus
-                        value={workspaceViewNameDraft}
-                        onChange={e => setWorkspaceViewNameDraft(e.target.value)}
-                        onKeyDown={e => {
-                          if (e.key === 'Enter') handleConfirmSaveWorkspaceView();
-                        }}
-                        placeholder='e.g. My open PRs'
-                        data-track-category='Projects'
-                        data-track-name='SaveViewNameInput'
-                        className={cn(
-                          'h-8 px-2 rounded-md border border-input bg-background text-[13px]',
-                          'text-foreground outline-none placeholder:text-muted-foreground',
-                          'focus-visible:ring-[3px] focus-visible:ring-ring/50',
-                        )}
-                      />
-                      <div className='flex justify-end gap-2 pt-1'>
-                        <Button
-                          variant='ghost'
-                          size='sm'
-                          onClick={() => setIsSavePopoverOpen(false)}
-                          data-track-category='Tickets'
-                          data-track-name='CANCEL_SAVE_WORKSPACE_VIEW'
-                        >
-                          Cancel
-                        </Button>
-                        <Button
-                          size='sm'
-                          onClick={handleConfirmSaveWorkspaceView}
-                          data-track-category='Tickets'
-                          data-track-name='CONFIRM_SAVE_WORKSPACE_VIEW'
-                          disabled={!workspaceViewNameDraft.trim() || isSavingWorkspaceView}
-                        >
-                          Save
-                        </Button>
-                      </div>
-                    </div>
-                  </Popover>
-                )}
-              </div>
-            )}
-            {canCreateTicket &&
-              ((channel && !channel.isArchived) || isMyTicketsView || isWorkspaceView) && (
-                <button
-                  data-testid='kanban-create-ticket-button'
-                  data-track-event='BUTTON_CLICK'
-                  data-track-category='Tickets'
-                  data-track-name='CREATE_TICKET_KANBAN'
-                  data-track-metadata={JSON.stringify({
-                    boardId,
-                    channelId,
-                    source: 'kanban_header',
-                  })}
-                  onClick={() => {
-                    setCreateTicketSeed(null);
-                    setCreateTicketSource('kanban_header');
-                    setIsCreateModalOpen(true);
-                  }}
-                  className='flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-primary-foreground bg-primary rounded-lg transition-colors flex-shrink-0'
-                >
-                  <Plus className='w-4 h-4' />
-                  <span className='hidden sm:inline font-semibold text-sm'>Create Ticket</span>
-                  <span className='sm:hidden'>Create</span>
-                </button>
-              )}
-          </div>
-          {/* Layout View Toggle (flow boards only have the flow view) */}
-          <div className='flex items-center gap-2'>
-            {/* CSV/JSON export — table view only, exports the filtered rows */}
-            {layoutView === 'table' && (
-              <DropdownMenu.Root>
-                <DropdownMenu.Trigger asChild>
-                  <Button
-                    type='button'
-                    variant='outline'
-                    size='sm'
-                    className='rounded-[10px] border-border'
-                    data-track-category='Tickets'
-                    data-track-name='OpenTableExportMenu'
-                  >
-                    <Download className='size-4' />
-                    <span>Export</span>
-                    <ChevronDownIcon className='h-3.5 w-3.5' />
-                  </Button>
-                </DropdownMenu.Trigger>
-                <DropdownMenu.Portal>
-                  <DropdownMenu.Content
-                    align='end'
-                    sideOffset={6}
-                    className='z-50 min-w-48 rounded-lg border border-border bg-background p-1 shadow-xl'
-                  >
-                    <DropdownMenu.Item
-                      onSelect={() => handleTicketExport('download-csv')}
-                      className='flex cursor-pointer items-center gap-2 rounded-md px-3 py-2 text-xs text-foreground outline-none data-[highlighted]:bg-muted'
-                      data-track-category='Tickets'
-                      data-track-name='DownloadTicketsCsv'
-                    >
-                      <FileText className='h-4 w-4 text-emerald-600' />
-                      Download CSV
-                    </DropdownMenu.Item>
-                    <DropdownMenu.Item
-                      onSelect={() => handleTicketExport('download-json')}
-                      className='flex cursor-pointer items-center gap-2 rounded-md px-3 py-2 text-xs text-foreground outline-none data-[highlighted]:bg-muted'
-                      data-track-category='Tickets'
-                      data-track-name='DownloadTicketsJson'
-                    >
-                      <FileText className='h-4 w-4 text-blue-500' />
-                      Download JSON
-                    </DropdownMenu.Item>
-                    <DropdownMenu.Separator className='my-1 h-px bg-border' />
-                    <DropdownMenu.Item
-                      onSelect={() => handleTicketExport('copy-csv')}
-                      className='flex cursor-pointer items-center gap-2 rounded-md px-3 py-2 text-xs text-foreground outline-none data-[highlighted]:bg-muted'
-                      data-track-category='Tickets'
-                      data-track-name='CopyTicketsCsv'
-                    >
-                      <Copy className='h-4 w-4 text-muted-foreground' />
-                      Copy to clipboard (CSV)
-                    </DropdownMenu.Item>
-                    <DropdownMenu.Item
-                      onSelect={() => handleTicketExport('copy-json')}
-                      className='flex cursor-pointer items-center gap-2 rounded-md px-3 py-2 text-xs text-foreground outline-none data-[highlighted]:bg-muted'
-                      data-track-category='Tickets'
-                      data-track-name='CopyTicketsJson'
-                    >
-                      <Copy className='h-4 w-4 text-muted-foreground' />
-                      Copy to clipboard (JSON)
-                    </DropdownMenu.Item>
-                  </DropdownMenu.Content>
-                </DropdownMenu.Portal>
-              </DropdownMenu.Root>
-            )}
-            {!isFlowBoard && (
-              <div className='flex items-center rounded-xl bg-muted border'>
-                <Tooltip content='Kanban'>
-                  <button
-                    onClick={() => {
-                      setSearchParams(prev => {
-                        const p = new URLSearchParams(prev);
-                        p.set('layout', 'kanban');
-                        return p;
-                      });
-                    }}
-                    className={`px-3 py-2 rounded-l-xl transition-colors border-r ${
-                      layoutView === 'kanban'
-                        ? 'bg-background text-foreground'
-                        : 'text-muted-foreground hover:text-foreground'
-                    }`}
-                    title='Kanban View'
-                    data-track-category='Tickets'
-                    data-track-name='SetKanbanView'
-                    data-testid='kanban-view-btn'
-                  >
-                    <SquareKanban className='w-3.5 h-3.5' />
-                  </button>
-                </Tooltip>
-                <Tooltip content='Table'>
-                  <button
-                    onClick={() => {
-                      setSearchParams(prev => {
-                        const p = new URLSearchParams(prev);
-                        p.set('layout', 'table');
-                        return p;
-                      });
-                    }}
-                    className={`px-3 py-2 transition-colors ${
-                      isMobile ? 'rounded-r-xl' : 'border-r'
-                    } ${
-                      layoutView === 'table'
-                        ? 'bg-background text-foreground'
-                        : 'text-muted-foreground hover:text-foreground'
-                    }`}
-                    title='Table View'
-                    data-track-category='Tickets'
-                    data-track-name='SetTableView'
-                    data-testid='table-view-btn'
-                  >
-                    <GridTable className='w-3.5 h-3.5' />
-                  </button>
-                </Tooltip>
-                {!isMobile && (
-                  <Tooltip content='Calendar View'>
-                    <button
-                      onClick={() => {
-                        setSearchParams(prev => {
-                          const p = new URLSearchParams(prev);
-                          p.set('layout', 'calendar');
-                          return p;
-                        });
-                      }}
-                      className={`px-3 py-2 rounded-r-xl transition-colors ${
-                        layoutView === 'calendar'
-                          ? 'bg-background text-foreground'
-                          : 'text-muted-foreground hover:text-foreground'
-                      }`}
-                      title='Calendar View'
-                      data-track-category='KANBAN'
-                      data-track-name='SetCalendarView'
-                      data-track-metadata={JSON.stringify({
-                        layout: 'calendar',
-                        viewMode,
-                        channelId,
-                      })}
-                      data-testid='calendar-view-btn'
-                    >
-                      <Calendar className='w-3.5 h-3.5' />
-                    </button>
-                  </Tooltip>
-                )}
-              </div>
-            )}
-
-            {/* My Tickets Filter Toggles - only show in my-tickets view */}
-            {viewMode === 'my-tickets' && (
-              /* CHANGE 1: Added 'overflow-hidden' */
-              <div className='flex items-center rounded-xl bg-muted border h-8 overflow-hidden'>
-                <Tooltip content='Assigned To Me'>
-                  <button
-                    onClick={() => {
-                      const newAssigned = !filters.assigned;
-                      setFilters({
-                        ...filters,
-                        assigned: newAssigned,
-                        created: newAssigned ? false : (filters.created ?? false), // If turning assigned on, turn created off
-                      });
-                    }}
-                    /* CHANGE 2: Replaced 'py-2' with 'h-full' */
-                    className={`px-3 h-full rounded-l-xl transition-colors border-r ${
-                      filters.assigned
-                        ? 'bg-background text-foreground'
-                        : 'text-muted-foreground hover:text-foreground'
-                    }`}
-                    data-track-category='KANBAN'
-                    data-track-name='ToggleAssignedToMeFilter'
-                    data-track-metadata={JSON.stringify({ assigned: !filters.assigned })}
-                  >
-                    <span className='text-xs font-medium'>Assigned To Me</span>
-                  </button>
-                </Tooltip>
-                <Tooltip content='Created By Me'>
-                  <button
-                    onClick={() => {
-                      const newCreated = !filters.created;
-                      setFilters({
-                        ...filters,
-                        created: newCreated,
-                        assigned: newCreated ? false : (filters.assigned ?? false), // If turning created on, turn assigned off
-                      });
-                    }}
-                    /* CHANGE 3: Replaced 'py-2' with 'h-full' */
-                    className={`px-3 h-full rounded-r-xl transition-colors ${
-                      filters.created
-                        ? 'bg-background text-foreground'
-                        : 'text-muted-foreground hover:text-foreground'
-                    }`}
-                    data-track-category='KANBAN'
-                    data-track-name='ToggleCreatedByMeFilter'
-                    data-track-metadata={JSON.stringify({ created: !filters.created })}
-                  >
-                    <span className='text-xs font-medium'>Created By Me</span>
-                  </button>
-                </Tooltip>
-              </div>
-            )}
-            {/* Stage Overdue Filter Toggle */}
-            <Tooltip content={showOverdueOnly ? 'Show All Tickets' : 'Show Only Overdue Tickets'}>
-              <button
-                onClick={() => setShowOverdueOnly(!showOverdueOnly)}
-                className={`px-3 py-2 transition-colors ${
-                  showOverdueOnly
-                    ? 'bg-red-100 text-red-700 border border-red-300'
-                    : 'bg-background text-muted-foreground hover:text-foreground border border-input'
-                } rounded-lg flex items-center gap-2`}
-                title='Filter Overdue Tickets'
-                data-track-category='KANBAN'
-                data-track-name='ToggleOverdueFilter'
-                data-track-metadata={JSON.stringify({
-                  showOverdueOnly: !showOverdueOnly,
-                  viewMode,
-                  channelId,
-                })}
-              >
-                <svg
-                  width='14'
-                  height='14'
-                  viewBox='0 0 12 12'
-                  fill='none'
-                  className={showOverdueOnly ? 'text-red-600' : 'text-muted-foreground'}
-                >
-                  <circle cx='6' cy='6' r='5' stroke='currentColor' strokeWidth='1.5' />
-                  <path
-                    d='M6 3v3.5M6 8.5h.01'
-                    stroke='currentColor'
-                    strokeWidth='1.5'
-                    strokeLinecap='round'
-                  />
-                </svg>
-              </button>
-            </Tooltip>
-
-            <DropdownMenu.Root open={isCustomizeOpen} onOpenChange={setIsCustomizeOpen}>
-              <DropdownMenu.Trigger>
-                <Tooltip content='Customize View'>
-                  <button
-                    className='flex items-center gap-2 px-3 py-2 rounded-xl border border-border bg-background hover:bg-muted transition-all outline-none focus:ring-2 focus:ring-border shadow-sm'
-                    title='Configure Columns'
-                  >
-                    <Settings2 className='w-3.5 h-3.5 text-muted-foreground' />
-                    <span className='sr-only'>Columns</span>
-                  </button>
-                </Tooltip>
-              </DropdownMenu.Trigger>
-
-              <DropdownMenu.Portal>
-                <DropdownMenu.Content
-                  align='end'
-                  sideOffset={8}
-                  className='z-50 w-[300px] bg-background border border-border rounded-lg shadow-xl animate-in fade-in zoom-in-95'
-                >
-                  <div className='mb-1 border-b flex items-center justify-between px-4 py-3'>
-                    <span className='text-sm font-bold tracking-wide text-foreground'>
-                      Customise view
-                    </span>
-                    <button
-                      onClick={() => setIsCustomizeOpen(false)}
-                      className='cursor-pointer hover:bg-muted rounded p-1 transition-colors'
-                      data-track-category='Tickets'
-                      data-track-name='CloseCustomizeView'
-                    >
-                      <X className='w-3.5 h-3.5' />
-                    </button>
-                  </div>
-
-                  {/* Saved Views section */}
-                  {savedViewsBoardId && savedConfigs && savedConfigs.length > 0 && (
-                    <div className='border-b border-border px-4 pt-4 pb-3'>
-                      <p className='text-sm font-medium text-muted-foreground mb-1'>Views</p>
-                      <div className='py-2 flex flex-wrap gap-2 max-h-[180px] overflow-y-auto'>
-                        {savedConfigs.map(config => {
-                          const isOwn = config.userId === user?.id;
-                          const isPrivate = config.visibility === SavedConfigVisibility.PRIVATE;
-                          const isActive = selectedViewId === config.id;
-                          return (
-                            <button
-                              key={config.id}
-                              type='button'
-                              data-track-category='saved-views'
-                              data-track-name='apply-saved-view'
-                              className={`group relative flex items-center gap-1.5 px-[10px] py-[6px] rounded-[10px] border cursor-pointer transition-colors ${
-                                isActive ? 'border-[#57AB02]' : 'border-[#DBDCDF]'
-                              }`}
-                              onClick={() => {
-                                const allValues = (config.values ?? []) as ReadonlyArray<{
-                                  entityName: SavedConfigEntityName;
-                                  fieldName: string;
-                                  fieldValue: string;
-                                }>;
-                                const groupByEntry = allValues.find(
-                                  v => v.fieldName === '__groupBy',
-                                );
-                                const columnsEntry = allValues.find(
-                                  v => v.fieldName === '__columns',
-                                );
-                                const filterValues = allValues.filter(
-                                  v => v.fieldName !== '__groupBy' && v.fieldName !== '__columns',
-                                );
-                                const newFilters = valuesToFilters(filterValues);
-                                if (columnsEntry) {
-                                  const savedColumns = columnsEntry.fieldValue
-                                    .split(',')
-                                    .filter(Boolean);
-                                  setVisibleColumns(prev => mergeSavedColumns(prev, savedColumns));
-                                } else {
-                                  setVisibleColumns(prev =>
-                                    mergeSavedColumns(prev, DEFAULT_VISIBLE_COLUMNS),
-                                  );
-                                }
-                                if (filters.boards) newFilters.boards = filters.boards;
-                                setFilters(newFilters);
-                                setSelectedViewId(config.id);
-                                try {
-                                  sessionStorage.setItem(activeViewKey, config.id);
-                                } catch (err) {
-                                  logger.error(Event.FRONTEND_ERROR, {
-                                    type: 'migrated_console_error',
-                                    message: String(
-                                      'Failed to persist active view to sessionStorage',
-                                    ),
-                                    error: err,
-                                  });
-                                }
-                                if (groupByEntry) {
-                                  try {
-                                    setGroupBy(JSON.parse(groupByEntry.fieldValue) as GroupByType);
-                                  } catch {
-                                    setGroupBy(groupByEntry.fieldValue as GroupByType);
-                                  }
-                                } else {
-                                  setGroupBy('none');
-                                }
-                                setIsCustomizeOpen(false);
-                              }}
-                            >
-                              <span className='text-sm font-medium truncate max-w-[160px] text-muted-foreground'>
-                                {config.name}
-                              </span>
-                              {isPrivate && (
-                                <span className='text-xs text-muted-foreground font-normal'>
-                                  Private
-                                </span>
-                              )}
-                              {isOwn && (
-                                <button
-                                  data-track-category='saved-views'
-                                  data-track-name='delete-saved-view'
-                                  className='hidden group-hover:flex items-center justify-center absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-secondary hover:bg-red-100 transition-colors'
-                                  title='Delete view'
-                                  onClick={e => {
-                                    e.stopPropagation();
-                                    setDeleteViewConfirm({
-                                      configId: config.id,
-                                      name: config.name,
-                                      isPublic: !isPrivate,
-                                    });
-                                  }}
-                                >
-                                  <X className='w-2.5 h-2.5 text-muted-foreground hover:text-red-500' />
-                                </button>
-                              )}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  )}
-
-                  {layoutView === 'table' && (
-                    <div className='px-4 py-3 border-b border-border'>
-                      <div className='flex items-center justify-between gap-2 rounded-lg bg-muted p-1 shadow-inner'>
-                        <button
-                          onClick={() => setIsComfortView(true)}
-                          className={`flex flex-1 flex-col items-center gap-1 rounded-md px-4 py-2
-            transition hover:bg-muted focus:outline-none
-            ${isComfortView ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground'}`}
-                          data-track-event='BUTTON_CLICK'
-                          data-track-category='Tickets'
-                          data-track-name='KANBAN_VIEW_COMFORTABLE'
-                          data-track-metadata={JSON.stringify({ boardId, viewMode: 'comfortable' })}
-                        >
-                          <AcOnSlow className='h-4 w-4' />
-                          <span className='text-[13px] font-medium tracking-tight'>
-                            Comfortable
-                          </span>
-                        </button>
-
-                        <button
-                          onClick={() => setIsComfortView(false)}
-                          className={`flex flex-1 flex-col items-center gap-1 rounded-md px-4 py-2
-            transition hover:bg-background hover:text-foreground
-            ${!isComfortView ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground'}`}
-                          data-track-event='BUTTON_CLICK'
-                          data-track-category='Tickets'
-                          data-track-name='KANBAN_VIEW_COMPACT'
-                          data-track-metadata={JSON.stringify({ boardId, viewMode: 'compact' })}
-                        >
-                          <TextAlignJustify className='h-4 w-4' />
-                          <span className='text-[13px] tracking-tight'>Compact</span>
-                        </button>
-                      </div>
-                    </div>
-                  )}
-
-                  {filteredAvailableColumns.map(column => (
-                    <DropdownMenu.CheckboxItem
-                      key={column.key}
-                      className='relative flex items-center justify-between py-3 px-4 text-sm text-foreground rounded-lg cursor-pointer outline-none select-none
-                     data-[highlighted]:bg-muted data-[highlighted]:text-foreground transition-colors'
-                      checked={visibleColumns.has(column.key)}
-                      onCheckedChange={checked => handleColumnVisibilityChange(column.key, checked)}
-                      onSelect={e => e.preventDefault()}
-                    >
-                      <div className='flex items-center gap-3'>
-                        <span className='text-muted-foreground group-data-[highlighted]:text-muted-foreground h-3 w-3'>
-                          {column.icon}
-                        </span>
-                        <span className='font-medium text-sm'>{column.label}</span>
-                      </div>
-                      <div
-                        className={`w-4 h-4 rounded border flex items-center justify-center transition-colors ${
-                          visibleColumns.has(column.key)
-                            ? 'bg-primary border'
-                            : 'border-input bg-background'
-                        }`}
-                      >
-                        {visibleColumns.has(column.key) && (
-                          <CheckIcon className='w-3 h-3 text-primary-foreground stroke-[3]' />
-                        )}
-                      </div>
-                    </DropdownMenu.CheckboxItem>
-                  ))}
-                </DropdownMenu.Content>
-              </DropdownMenu.Portal>
-            </DropdownMenu.Root>
-
-            <DropdownMenu.Root>
-              <DropdownMenu.Trigger asChild>
-                <button
-                  className='flex items-center gap-2 px-3 py-1.5 bg-background border border-border rounded-xl text-sm font-medium outline-none hover:bg-muted transition-all min-w-[160px]'
-                  data-testid='group-by-dropdown'
-                >
-                  <div className='flex items-center gap-2 flex-1'>
-                    <span className='text-muted-foreground font-normal'>Group by:</span>
-                    {typeof groupBy === 'object' && groupBy.type === 'formField'
-                      ? groupBy.fieldName
-                      : groupingOptions
-                          .find(opt => typeof opt.value === 'string' && opt.value === groupBy)
-                          ?.label.replace('Group by: ', '') || 'None'}
-                  </div>
-                  <ChevronDownIcon className='w-3.5 h-3.5 text-muted-foreground' />
-                </button>
-              </DropdownMenu.Trigger>
-
-              <DropdownMenu.Portal>
-                <DropdownMenu.Content
-                  align='end'
-                  sideOffset={8}
-                  className='z-50 min-w-[220px] p-1 bg-background border border-border rounded-lg flex flex-col gap-1 shadow-xl animate-in fade-in zoom-in-95'
-                >
-                  {/* Matching Header Style */}
-                  <div className='mb-1 border-b flex items-center justify-between px-4 py-3'>
-                    <span className='text-sm font-bold tracking-wide text-foreground'>
-                      Group by
-                    </span>
-                    {groupBy !== 'none' && (
-                      <DropdownMenu.Item
-                        className='outline-none'
-                        aria-label='Clear grouping'
-                        onSelect={() => {
-                          handleSetGroupBy('none');
-                        }}
-                      >
-                        <span className='cursor-pointer text-xs text-muted-foreground hover:text-foreground font-medium transition-colors'>
-                          Clear
-                        </span>
-                      </DropdownMenu.Item>
-                    )}
-                  </div>
-
-                  {/* Grouping Options */}
-                  {groupingOptions.map(({ value, label, icon }) => {
-                    const isSelected =
-                      typeof value === 'string'
-                        ? groupBy === value
-                        : typeof groupBy === 'object' &&
-                          groupBy.type === 'formField' &&
-                          groupBy.fieldId === value.fieldId;
-                    return (
-                      <DropdownMenu.CheckboxItem
-                        key={typeof value === 'object' ? `formField-${value.fieldId}` : value}
-                        className='relative flex items-center gap-2 justify-between py-3 px-4 text-sm rounded-xl text-foreground cursor-pointer outline-none select-none
-      transition-colors
-      data-[highlighted]:bg-muted data-[highlighted]:text-foreground
-      data-[state=checked]:bg-accent data-[state=checked]:text-foreground data-[state=checked]:font-semibold'
-                        checked={isSelected}
-                        onCheckedChange={() =>
-                          handleSetGroupBy(isSelected ? 'none' : (value as GroupByType))
-                        }
-                        data-testid={`group-by-${typeof value === 'string' ? value : value.fieldId}`}
-                      >
-                        <div className='flex items-center gap-3'>
-                          <span className='text-muted-foreground group-data-[highlighted]:text-muted-foreground h-3 w-3'>
-                            {icon}
-                          </span>
-                          <span className='font-medium'>{label.replace('Group by: ', '')}</span>
-                        </div>
-                      </DropdownMenu.CheckboxItem>
-                    );
-                  })}
-                </DropdownMenu.Content>
-              </DropdownMenu.Portal>
-            </DropdownMenu.Root>
-          </div>
-        </div>
-      </div>
-
-      {/* Active saved view indicator */}
-      {selectedViewId &&
-        savedConfigs &&
-        (() => {
-          const activeView = savedConfigs.find(c => c.id === selectedViewId);
-          if (!activeView) return null;
-          return (
-            <div className='flex items-center px-4 py-2 bg-background border-b border-border flex-shrink-0'>
-              <div className='flex items-center gap-2 px-3 py-1.5 rounded-xl border border-border bg-background text-sm text-foreground'>
-                <span className='font-medium'>{activeView.name}</span>
-                <button
-                  data-track-category='saved-views'
-                  data-track-name='dismiss-active-view'
-                  onClick={() => {
-                    setSelectedViewId(null);
-                    try {
-                      sessionStorage.removeItem(activeViewKey);
-                    } catch (err) {
-                      logger.error(Event.FRONTEND_ERROR, {
-                        type: 'migrated_console_error',
-                        message: String('Failed to remove active view from sessionStorage'),
-                        error: err,
-                      });
-                    }
-                    setFilters({ ...(filters.boards ? { boards: filters.boards } : {}) });
-                    setGroupBy('none');
-                  }}
-                  className='flex items-center justify-center hover:text-foreground transition-colors'
-                  title='Dismiss view'
-                >
-                  <X className='w-3.5 h-3.5' />
-                </button>
-              </div>
-            </div>
-          );
-        })()}
+      <TicketsHeader
+        startSlot={projectsScreenContext?.leftHeaderSlot}
+        title={headerTitle}
+        ticketCount={isTableLayout && hasSearchTerm ? null : headerTicketCount}
+        isFiltered={headerIsFiltered}
+        star={headerStar}
+        searchValue={searchInputValue}
+        onSearchChange={setSearchTerm}
+        isExactSearch={isExactSearch}
+        onExactSearchChange={setIsExactSearch}
+        share={isWorkspaceView && ownsSavedView ? { viewId, viewName: savedViewName } : null}
+        onCreateTicket={
+          canCreateTicket &&
+          ((channel && !channel.isArchived) || isMyTicketsView || isWorkspaceView)
+            ? handleHeaderCreateTicket
+            : null
+        }
+        createTicketMetadata={JSON.stringify({ boardId, channelId, source: 'kanban_header' })}
+        layoutView={layoutView}
+        onLayoutChange={handleLayoutChange}
+        showLayoutPicker={!isFlowBoard}
+        showCalendarLayout={!isMobile}
+        groupBy={groupBy}
+        groupingOptions={groupingOptions}
+        onGroupByChange={value => handleSetGroupBy(value as GroupByType)}
+        columns={filteredAvailableColumns}
+        visibleColumns={visibleColumns}
+        onColumnVisibilityChange={handleColumnVisibilityChange}
+        onResetColumns={handleResetColumns}
+        isComfortView={isComfortView}
+        onComfortViewChange={setIsComfortView}
+        savedFilters={headerSavedFilters}
+        showFilters={!!(effectiveProjectId || viewMode === 'my-tickets' || isWorkspaceView)}
+        filters={filters}
+        onFiltersChange={setFilters}
+        pickerContext={headerPickerContext}
+        names={headerNames}
+        workspaceView={isWorkspaceView}
+        hideAssigneeFilter={viewMode === 'my-tickets'}
+        showFlagFilters={viewMode === 'my-tickets'}
+        showOverdueOnly={showOverdueOnly}
+        onOverdueChange={setShowOverdueOnly}
+        onClearFilters={handleHeaderClearFilters}
+        viewSave={headerViewSave}
+        onExport={layoutView === 'table' ? handleTicketExport : null}
+        onOpenTicketReport={canExportTickets ? handleOpenTicketReport : null}
+      />
 
       {/* Board-wise View for my-tickets, channel stage view, or multiple boards filter */}
       {/* Board-wise View */}
@@ -5945,16 +5329,6 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
           initialStageName={createTicketSeed?.stageName ?? null}
           initialAssignee={createTicketSeed?.assignee ?? null}
           onTicketCreated={handleTicketCreated}
-        />
-      )}
-
-      {/* Share View Dialog */}
-      {isShareViewDialogOpen && viewId && (
-        <ShareViewDialog
-          isOpen={isShareViewDialogOpen}
-          onClose={() => setIsShareViewDialogOpen(false)}
-          viewId={viewId}
-          viewName={initialName ?? ''}
         />
       )}
 

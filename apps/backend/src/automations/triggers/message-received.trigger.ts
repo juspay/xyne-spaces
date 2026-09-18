@@ -43,7 +43,7 @@ const MessageReceivedConfigSchema = z.object({
     .boolean()
     .default(false)
     .describe(
-      'Also fire when an existing message is edited into a match — e.g. an alert card whose status field is rewritten in place. Only the transition fires: an edit that leaves an already-matching message still matching is ignored. Needs a Content Contains value to be meaningful.',
+      'Also fire when an edit turns a non-matching message into a match. Only that transition fires. Needs a Content Contains value.',
     ),
 });
 

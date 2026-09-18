@@ -77,6 +77,7 @@ import {
   subagentReferencingTool,
   type SubagentToolRefs,
 } from "./mcp-agent-tools.js";
+import { listTools, searchTools } from "../services/tool-index/index.js";
 
 const log = createLogger("mcp");
 
@@ -412,12 +413,46 @@ async function resolveServerNameForMcpCall(serverType: string, backendId?: strin
   return server?.name ?? serverType;
 }
 
-export function signAction(action: Record<string, unknown>): string {
-  return crypto.createHmac("sha256", CONFIG.actionSigningKey).update(JSON.stringify(action)).digest("hex");
+function canonicalize(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonicalize);
+  if (value && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    return Object.keys(record)
+      .sort()
+      .reduce<Record<string, unknown>>((acc, key) => {
+        acc[key] = canonicalize(record[key]);
+        return acc;
+      }, {});
+  }
+  return value;
 }
 
-function signLegacyAction(action: Record<string, unknown>): string {
-  return crypto.createHmac("sha256", CONFIG.legacyActionSigningKey).update(JSON.stringify(action)).digest("hex");
+export function canonicalActionPayload(action: Record<string, unknown>): string {
+  return JSON.stringify(canonicalize(action));
+}
+
+function hmac(key: string | Buffer, payload: string): string {
+  return crypto.createHmac("sha256", key).update(payload).digest("hex");
+}
+
+export function signAction(action: Record<string, unknown>): string {
+  return hmac(CONFIG.actionSigningKey, canonicalActionPayload(action));
+}
+
+function candidateSignatures(action: Record<string, unknown>): string[] {
+  const canonical = canonicalActionPayload(action);
+  const raw = JSON.stringify(action);
+  const payloads = canonical === raw ? [canonical] : [canonical, raw];
+  const keys = [CONFIG.actionSigningKey, CONFIG.legacyActionSigningKey].filter((k) => Boolean(k));
+  return keys.flatMap((key) => payloads.map((payload) => hmac(key, payload)));
+}
+
+function matchesAny(action: Record<string, unknown>, signature: string): boolean {
+  const given = Buffer.from(signature, "hex");
+  return candidateSignatures(action).some((candidate) => {
+    const current = Buffer.from(candidate, "hex");
+    return current.length === given.length && crypto.timingSafeEqual(current, given);
+  });
 }
 
 /**
@@ -849,9 +884,8 @@ async function loadEffectiveCredentialsWithSpacesFallback(
 }
 
 export function verifyActionSignature(action: Record<string, unknown>, signature: string): boolean {
-  const expected = signAction(action);
   try {
-    return crypto.timingSafeEqual(Buffer.from(expected, "hex"), Buffer.from(signature, "hex"));
+    return matchesAny(action, signature);
   } catch {
     return false;
   }
@@ -862,13 +896,7 @@ export function verifyActionSignatureAny(
   signature: string,
 ): boolean {
   try {
-    const given = Buffer.from(signature, "hex");
-    return actions.some((action) => {
-      const current = Buffer.from(signAction(action), "hex");
-      if (current.length === given.length && crypto.timingSafeEqual(current, given)) return true;
-      const legacy = Buffer.from(signLegacyAction(action), "hex");
-      return legacy.length === given.length && crypto.timingSafeEqual(legacy, given);
-    });
+    return actions.some((action) => matchesAny(action, signature));
   } catch {
     return false;
   }
@@ -1544,6 +1572,9 @@ router.post("/:sessionId/mcp/call", async (req: Request<{ sessionId: string }>, 
         callServerName,
         tool,
         parseGatewayServerType,
+        // Connector is the source of record for write tools, so the call gate's
+        // open-palette check matches what the listing already showed.
+        (await resolveConnectorDefinition(serverType).catch(() => undefined))?.writeTools?.includes(tool),
       ) &&
       // Custom-subagent escape hatch: tools referenced by the agent's enabled
       // subagent definitions are callable even though the agent's own config
@@ -2347,6 +2378,43 @@ router.post("/:sessionId/actions/sign", async (req: Request<{ sessionId: string 
     res.json({ success: true, data: { ...signedAction, signature: signedSignature } });
   } catch (err) {
     log.error("[actions/sign] error:", err);
+    res.status(500).json({ success: false, error: "Internal server error" });
+  }
+});
+
+/**
+ * GET /:sessionId/mcp/tools/search
+ *
+ * Backs the `search-tools` meta-tool for whole-deployment queries. Org comes
+ * from the session, not a query param a caller could set.
+ *
+ * Must stay nested under `/mcp/`: `requireStrictS2S` + `requireSessionToken`
+ * are registered on that prefix — a sibling path would be unauthenticated.
+ */
+router.get("/:sessionId/mcp/tools/search", async (req: Request<{ sessionId: string }>, res: Response) => {
+  try {
+    const userId = req.session!.userId;
+    const orgId = await resolveSessionAgentOrgId(userId, req.session?.spacesAppId);
+
+    const query = typeof req.query["q"] === "string" ? req.query["q"].trim() : "";
+    const integrations = typeof req.query["integrations"] === "string"
+      ? req.query["integrations"].split(",").map((s) => s.trim()).filter(Boolean)
+      : [];
+    const rawRisk = typeof req.query["maxRisk"] === "string" ? req.query["maxRisk"] : "";
+    const maxRisk = (["read", "write", "destructive"] as const).find((r) => r === rawRisk);
+    const limit = Number(req.query["limit"]) || 10;
+
+    const opts = {
+      ...(integrations.length ? { integrations } : {}),
+      ...(maxRisk ? { maxRisk } : {}),
+      ...(orgId ? { orgId } : {}),
+      limit,
+    };
+
+    const matches = query ? await searchTools(query, opts) : await listTools(opts);
+    res.json({ success: true, data: { mode: query ? "search" : "list", matches } });
+  } catch (err) {
+    log.error("[tools/search] error:", err);
     res.status(500).json({ success: false, error: "Internal server error" });
   }
 });
