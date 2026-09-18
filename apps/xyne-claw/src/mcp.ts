@@ -78,7 +78,7 @@ interface AuthResponse<T> {
 }
 
 export type { TrustedMcpToolBindings } from "xyne-claw-shared";
-import type { TrustedMcpToolBindings } from "xyne-claw-shared";
+import type { TrustedMcpToolBindings, AuthRequiredDetail } from "xyne-claw-shared";
 
 export function schemaWithTrustedMcpBindings(
   inputSchema: Record<string, unknown>,
@@ -336,15 +336,21 @@ export async function loadMcpToolsForUser(
   cleanup: () => Promise<void>;
   getPendingActions: () => Array<Record<string, unknown>>;
   getAttachments: () => Attachment[];
+  /** First credential blocker hit this run, if any. */
+  getAuthRequired: () => AuthRequiredDetail | null;
 }> {
   const permissions = toolPermissions ?? {};
+  let authRequiredSignal: AuthRequiredDetail | null = null;
   const servers = await authFetch<McpServerTools[]>(
     `/claw/api/v1/sessions/${encodeURIComponent(sessionId)}/mcp/tools`,
     sessionToken,
   );
 
   if (servers.length === 0) {
-    return { groups: [], cleanup: async () => {}, getPendingActions: () => [], getAttachments: () => [] };
+    return {
+      groups: [], cleanup: async () => {}, getPendingActions: () => [],
+      getAttachments: () => [], getAuthRequired: () => null,
+    };
   }
 
   const pendingActions: Array<Record<string, unknown>> = [];
@@ -411,6 +417,9 @@ export async function loadMcpToolsForUser(
             content: string;
             citations?: import("xyne-claw-shared").Citation[];
             pendingAction?: Record<string, unknown>;
+            /** Set by claw-auth's webfetch when the run is blocked on a
+             *  credential the user can supply; run.ts ends the run on it. */
+            authRequired?: AuthRequiredDetail;
             attachments?: Array<{ fileName: string; mimeType: string; data: string }>;
             /** Out-of-band debug payload (currently the Vespa YQL from kb-search /
              *  spaces-search). Stashed via recordDebug for tool_execution_end
@@ -436,6 +445,12 @@ export async function loadMcpToolsForUser(
 
           if (result.pendingAction) {
             pendingActions.push(result.pendingAction);
+          }
+
+          // Keep the FIRST blocker: the one the run actually stopped on.
+          // Recorded rather than left to the model to relay, which it will not.
+          if (result.authRequired && !authRequiredSignal) {
+            authRequiredSignal = result.authRequired;
           }
 
           // File forwarding: claw-auth lifted binary output (e.g. a generated
@@ -516,5 +531,11 @@ export async function loadMcpToolsForUser(
   const totalTools = groups.reduce((sum, g) => sum + g.tools.length, 0);
   log.info(`[mcp] Loaded ${totalTools} tools in ${groups.length} groups for session ${sessionId}`);
 
-  return { groups, cleanup: async () => {}, getPendingActions: () => pendingActions, getAttachments: () => mcpAttachments };
+  return {
+    groups,
+    cleanup: async () => {},
+    getPendingActions: () => pendingActions,
+    getAttachments: () => mcpAttachments,
+    getAuthRequired: () => authRequiredSignal,
+  };
 }

@@ -68,6 +68,11 @@ import {
   type ConversationSummary,
   type ChatMsg,
   type PendingAction,
+  createHostBinding,
+  listHostBindings,
+  discoverHostSignIn,
+  startHostSignIn,
+  type HostCredentialHint,
   type PlanTodo,
   type ProviderCredential,
   type ToolInvocation,
@@ -1374,15 +1379,333 @@ function PendingActionBlocks({
 }) {
   return (
     <div data-id="pending-action-blocks" className="space-y-2">
-      {actions.map((pa, idx) => (
-        <PendingActionItem
-          key={pa.signature || `${pa.serverType}-${pa.tool}-${idx}`}
-          action={pa}
-          onApprove={onApprove}
-          onApproveAndContinue={onApproveAndContinue}
-          onDecline={onDecline}
-        />
-      ))}
+      {actions.map((pa, idx) =>
+        pa.kind === "connect" ? (
+          <ConnectPromptItem key={`connect-${pa.serverType}-${idx}`} action={pa} />
+        ) : (
+          <PendingActionItem
+            key={pa.signature || `${pa.serverType}-${pa.tool}-${idx}`}
+            action={pa}
+            onApprove={onApprove}
+            onApproveAndContinue={onApproveAndContinue}
+            onDecline={onDecline}
+          />
+        ),
+      )}
+    </div>
+  );
+}
+
+function HostBindingPrompt({
+  host,
+  url,
+  reasonText,
+  reason,
+}: {
+  host: string;
+  url?: string;
+  reasonText?: string;
+  reason?: "not_connected" | "rejected" | "unknown_host";
+}) {
+  const wasRefused = reason === "rejected";
+  // Straight from the URL rather than drilled through PendingActionBlocks.
+  const [cardSearchParams] = useSearchParams();
+  const conversationId = cardSearchParams.get("conversation") ?? undefined;
+  /*
+   * A credential for this host already exists: the user answered this same
+   * request in another chat. Releasing every parked run on one Save was the old
+   * behaviour and it was wrong, so this conversation is still waiting — and the
+   * card has to say so, or it looks like nothing happened.
+   */
+  const [alreadyConnected, setAlreadyConnected] = useState(false);
+  const [showForm, setShowForm] = useState(false);
+  const [credential, setCredential] = useState("");
+  const [scheme, setScheme] = useState<"bearer" | "header" | "cookie">("bearer");
+  const [headerName, setHeaderName] = useState("X-API-Key");
+  const [state, setState] = useState<"idle" | "saving" | "done" | "error">("idle");
+  const [error, setError] = useState<string | null>(null);
+  const [resumed, setResumed] = useState(0);
+  /*
+   * Sign-in is an extra affordance, never a precondition: the paste form
+   * renders immediately and stays usable while this resolves.
+   *
+   * "unsupported" and "failed" stay apart: collapsing them into "no button"
+   * made a host that cannot do sign-in look identical to a discovery call that
+   * errored, with nothing on screen to tell them apart.
+   */
+  const [signIn, setSignIn] = useState<
+    "checking" | "unsupported" | "failed" | "ready" | "opening" | "waiting"
+  >("checking");
+  const [issuerHost, setIssuerHost] = useState<string | null>(null);
+  const [hint, setHint] = useState<HostCredentialHint | null>(null);
+  const [signInError, setSignInError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    if (!wasRefused) {
+      void listHostBindings()
+        .then((rows) => { if (live) setAlreadyConnected(rows.some((r) => r.host === host)); })
+        .catch(() => undefined);
+    }
+    discoverHostSignIn(host, url)
+      .then((r) => {
+        if (!live) return;
+        setIssuerHost(r.issuerHost ?? null);
+        setHint(r.hint ?? null);
+        setSignIn(r.available ? "ready" : "unsupported");
+        // Start on the transport the product wants, so the common case needs
+        // no choice at all.
+        if (r.hint) setScheme(r.hint.scheme);
+      })
+      .catch(() => { if (live) setSignIn("failed"); });
+    return () => { live = false; };
+  }, [host, url]);
+
+  const startSignIn = () => {
+    /*
+     * Opened SYNCHRONOUSLY, before the await: Safari and default-settings
+     * Firefox only honour window.open while a user gesture is on the stack, so
+     * opening after the POST resolves is silently blocked. Claim the tab now,
+     * point it somewhere once we know where.
+     */
+    const tab = window.open("", "_blank");
+    setSignIn("opening");
+    setSignInError(null);
+    void startHostSignIn({
+      host,
+      ...(url ? { url } : {}),
+      ...(conversationId ? { conversationId } : {}),
+      returnTo: window.location.href,
+    })
+      .then((r) => {
+        setIssuerHost(r.issuerHost);
+        if (tab) tab.location.href = r.authUrl;
+        else window.location.href = r.authUrl;
+        setSignIn("waiting");
+        void awaitSignIn(tab);
+      })
+      .catch((err: unknown) => {
+        tab?.close();
+        setSignIn("ready");
+        setSignInError(err instanceof Error ? err.message : String(err));
+      });
+  };
+
+  /*
+   * The sign-in finishes in ANOTHER TAB and its callback redirects that one, so
+   * this card is never told anything and sat on "Finish signing in…" forever.
+   * The callback writes the credential before redirecting, so the row appearing
+   * in the user's own binding list IS the completion signal.
+   */
+  const awaitSignIn = async (tab: Window | null) => {
+    const deadline = Date.now() + 3 * 60 * 1000;
+    while (Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 2500));
+      const connected = await listHostBindings()
+        .then((rows) => rows.some((row) => row.host === host))
+        .catch(() => false);
+      if (connected) {
+        tab?.close();
+        setResumed(1);
+        setState("done");
+        return;
+      }
+    }
+    // Say so rather than leaving the spinner up; the paste form still works.
+    setSignIn("ready");
+    setSignInError("Didn't see that sign-in complete. Try again, or paste a token instead.");
+  };
+
+  const save = async () => {
+    setState("saving");
+    setError(null);
+    try {
+      const r = await createHostBinding({
+        host,
+        credential,
+        scheme,
+        ...(scheme === "header" ? { headerName } : {}),
+        ...(conversationId ? { conversationId } : {}),
+      });
+      setResumed(r.resumedRuns);
+      setState("done");
+    } catch (err) {
+      setState("error");
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  if (alreadyConnected && !showForm && state !== "done") {
+    return (
+      <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-2.5">
+        <div className="mb-1 text-[11px] font-medium text-emerald-700">{host} is already connected</div>
+        <div className="mb-2 text-[11px] text-xyne-fg-secondary">
+          You connected it in another chat. This one didn't continue on its own — ask me again here
+          and I'll use it.
+        </div>
+        <button
+          type="button"
+          onClick={() => setShowForm(true)}
+          className="text-[11px] font-medium text-emerald-700 hover:underline"
+        >
+          Use a different credential
+        </button>
+      </div>
+    );
+  }
+
+  if (state === "done") {
+    return (
+      <div className="rounded-md border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1.5 text-[11px] text-emerald-700">
+        Connected {host}.
+        {resumed > 0 ? " Picking up where I left off…" : " Ask me again and I'll use them."}
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-lg border border-blue-500/30 bg-blue-500/10 p-2.5">
+      <div className="mb-1 text-[11px] font-medium text-blue-700">
+        {wasRefused ? `That credential didn't work for ${host}` : `Credentials needed for ${host}`}
+      </div>
+      <div className="mb-2 text-[11px] text-xyne-fg-secondary">
+        {reasonText ? `${reasonText}. ` : ""}
+        {wasRefused
+          ? `${host} refused the credential I had stored. Replace it below and I'll pick up where I stopped.`
+          : signIn === "ready" || signIn === "opening" || signIn === "waiting"
+            ? `Sign in and I'll continue automatically.`
+            : `Paste a token and I'll continue automatically — it's encrypted and only ever sent to ${host}.`}
+      </div>
+
+      {signIn === "waiting" && (
+        <div className="mb-2 rounded border border-blue-500/30 bg-blue-500/5 px-2 py-1.5 text-[11px] text-blue-700">
+          Waiting for you to finish signing in{issuerHost ? ` at ${issuerHost}` : ""} in the new tab…
+        </div>
+      )}
+
+      {hint && (
+        <div className="mb-2 rounded border border-xyne-border-subtle bg-xyne-surface px-2 py-1.5">
+          <a
+            href={hint.tokenUrl}
+            target="_blank"
+            rel="noreferrer noopener"
+            className="text-[11px] font-medium text-blue-700 hover:underline"
+          >
+            Get a token from {hint.product} →
+          </a>
+          <div className="mt-0.5 text-[10px] text-xyne-fg-secondary">{hint.note}</div>
+        </div>
+      )}
+
+      {signIn === "unsupported" && !hint && (
+        <div className="mb-2 text-[10px] text-xyne-fg-muted">
+          {host} doesn't support one-click sign-in, so a token or cookie is the only way in.
+        </div>
+      )}
+
+      {signIn === "failed" && (
+        <div className="mb-2 text-[10px] text-xyne-fg-muted">
+          Couldn't check whether {host} supports sign-in — pasting a credential still works.
+        </div>
+      )}
+
+      {(signIn === "ready" || signIn === "opening") && (
+        <div className="mb-2">
+          <button
+            type="button"
+            disabled={signIn === "opening"}
+            onClick={startSignIn}
+            className="rounded-md bg-blue-600 px-2.5 py-1 text-[11px] font-medium text-white hover:bg-blue-700 disabled:opacity-60"
+          >
+            {signIn === "opening" ? "Opening…" : `Sign in${issuerHost ? ` with ${issuerHost}` : ""}`}
+          </button>
+          {signInError && <div className="mt-1 text-[10px] text-red-600">{signInError}</div>}
+          <div className="mt-2 text-[10px] text-xyne-fg-secondary">or paste a token instead</div>
+        </div>
+      )}
+
+      <input
+        type="password"
+        value={credential}
+        onChange={(e) => { setCredential(e.target.value); }}
+        placeholder="Token, API key or cookie"
+        className="mb-2 w-full rounded border border-xyne-border-subtle bg-xyne-surface px-2 py-1 text-[11px]"
+      />
+      <div className="mb-2 flex flex-wrap items-center gap-2">
+        <select
+          value={scheme}
+          onChange={(e) => { setScheme(e.target.value as "bearer" | "header" | "cookie"); }}
+          className="rounded border border-xyne-border-subtle bg-xyne-surface px-1.5 py-1 text-[10px]"
+        >
+          <option value="bearer">Authorization: Bearer</option>
+          <option value="header">Custom header</option>
+          <option value="cookie">Cookie</option>
+        </select>
+        {scheme === "header" && (
+          <input
+            value={headerName}
+            onChange={(e) => { setHeaderName(e.target.value); }}
+            placeholder="Header name"
+            className="w-32 rounded border border-xyne-border-subtle bg-xyne-surface px-1.5 py-1 text-[10px]"
+          />
+        )}
+      </div>
+      {error && <div className="mb-2 text-[10px] text-red-600">{error}</div>}
+      <button
+        type="button"
+        disabled={state === "saving" || credential.trim().length === 0}
+        onClick={() => { void save(); }}
+        className="rounded-md bg-blue-600 px-2.5 py-1 text-[11px] font-medium text-white hover:bg-blue-700 disabled:opacity-60"
+      >
+        {state === "saving" ? "Saving…" : "Save & continue"}
+      </button>
+    </div>
+  );
+}
+
+/**
+ * "Connect <service> to continue" — shown when a run stopped on a credential.
+ * No approve/decline: the run resumes on the credential write, so the card's
+ * only job is to say what is missing and collect it.
+ */
+function ConnectPromptItem({ action }: { action: PendingAction }) {
+  const label = action.providerLabel || action.serverType;
+  const isReconnect = action.reason === "rejected";
+
+  /*
+   * Anything backed by a per-host credential is collected right here, whatever
+   * the reason. Sending a `webfetch-host:` type to /claw/v3/mcp is a dead end —
+   * these deliberately do not appear among the connectors — so a refused token
+   * used to land the user on a settings page with nothing on it.
+   */
+  const isHostCredential = action.serverType?.startsWith("webfetch-host:") === true;
+  if (action.host && (isHostCredential || action.reason === "unknown_host")) {
+    return (
+      <HostBindingPrompt
+        host={action.host}
+        {...(action.url ? { url: action.url } : {})}
+        {...(action.reasonText ? { reasonText: action.reasonText } : {})}
+        {...(action.reason ? { reason: action.reason } : {})}
+      />
+    );
+  }
+
+  return (
+    <div className="rounded-lg border border-blue-500/30 bg-blue-500/10 p-2.5">
+      <div className="mb-1 text-[11px] font-medium text-blue-700">
+        {isReconnect ? `Reconnect ${label}` : `Connect ${label}`}
+      </div>
+      <div className="mb-2 text-[11px] text-xyne-fg-secondary">
+        {isReconnect
+          ? `Your ${label} connection was refused by ${action.host ?? "the service"}. Reconnect it with access to this resource and I'll pick up where I stopped.`
+          : `I need ${label} access to finish this${action.host ? ` (${action.host})` : ""}. Connect it and I'll continue automatically — no need to ask again.`}
+      </div>
+      <a
+        href={`/claw/v3/mcp?connect=${encodeURIComponent(action.serverType)}`}
+        className="inline-block rounded-md bg-blue-600 px-2.5 py-1 text-[11px] font-medium text-white transition-colors hover:bg-blue-700"
+      >
+        {isReconnect ? `Reconnect ${label}` : `Connect ${label}`}
+      </a>
     </div>
   );
 }

@@ -3,6 +3,7 @@ import { requestLogger } from "../middleware/requestLogger.js";
 import { errorMiddleware } from "../lib/http.js";
 import { serversRouter } from "../routes/servers.js";
 import { connectionsRouter } from "../routes/connections.js";
+import { hostBindingsRouter, hostOAuthRouter, hostOAuthCallbackRouter } from "../routes/host-access.js";
 import { mcpRouter } from "../routes/mcp.js";
 import { sdlcRuntimeCredentialsRouter } from "../routes/sdlc-runtime-credentials.js";
 import { awakeningRouter } from "../routes/awakening.js";
@@ -132,6 +133,18 @@ function mountCoreApi(app: Express): void {
   app.use(`${BASE}/servers`, requireUserAuth, serversRouter);
   app.use(`${BASE}/users`, requireAuth, requireNoAccessToken, usersRouter);
   app.use(`${BASE}/users`, requireAuth, requireNoAccessToken, connectionsRouter);
+  // Per-host credential bindings created straight from an access card.
+  app.use(`${BASE}/host-bindings`, requireAuth, requireNoAccessToken, hostBindingsRouter);
+  /*
+   * ORDER IS LOAD-BEARING: `app.use(path, ...)` matches by PREFIX, so mounting
+   * the authed router first makes `requireAuth` answer /host-oauth/callback
+   * with a 401 before the callback router sees it — and the browser arriving
+   * from the authorization server carries no session of ours, so every sign-in
+   * dies there. The callback authenticates itself with the signed state plus
+   * the server-side flow record.
+   */
+  app.use(BASE, hostOAuthCallbackRouter);
+  app.use(`${BASE}/host-oauth`, requireAuth, requireNoAccessToken, hostOAuthRouter);
   // NOT behind requireAuth (so requireNoAccessToken never runs here): every
   // sub-path self-authenticates inside the router with requireStrictS2S +
   // requireSessionToken (routes/mcp.ts) — the run's HMAC session token is the

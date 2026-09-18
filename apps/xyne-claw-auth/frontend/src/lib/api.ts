@@ -320,6 +320,113 @@ export async function listConnections(userId: string): Promise<UserConnection[]>
   return data.data;
 }
 
+/** Bind a credential to a hostname and release the run parked on it. */
+export async function createHostBinding(payload: {
+  host: string;
+  credential: string;
+  scheme?: "bearer" | "header" | "cookie";
+  headerName?: string;
+  /** Resume only the run parked in THIS conversation, not every chat blocked on the host. */
+  conversationId?: string;
+}): Promise<{ resumedRuns: number }> {
+  const data = await request<{ success: boolean; data: { resumedRuns?: number } }>(
+    `${AUTH_API_URL}/api/v1/host-bindings`,
+    { method: "POST", body: JSON.stringify(payload) },
+  );
+  return { resumedRuns: data.data?.resumedRuns ?? 0 };
+}
+
+/** One host this user has credentials for. Never carries the secret. */
+export interface HostBinding {
+  host: string;
+  scheme: "bearer" | "header" | "cookie";
+  headerName: string | null;
+  label: string | null;
+  /** Empty = every agent. Non-empty = only these agent slugs. */
+  agentSlugs: string[];
+  expiresAt: string | null;
+  lastUsedAt: string | null;
+  createdAt: string;
+  origin: "oauth" | "manual";
+  expired: boolean;
+}
+
+/** The caller's own hosts. There is no endpoint that lists anyone else's. */
+export async function listHostBindings(): Promise<HostBinding[]> {
+  const data = await request<{ success: boolean; data: { hosts: HostBinding[] } }>(
+    `${AUTH_API_URL}/api/v1/host-bindings`,
+  );
+  return data.data?.hosts ?? [];
+}
+
+/** Partial: only the fields you send are written. */
+export async function updateHostBinding(
+  host: string,
+  patch: {
+    credential?: string;
+    scheme?: "bearer" | "header" | "cookie";
+    headerName?: string;
+    label?: string | null;
+    agentSlugs?: string[];
+    expiresAt?: string | null;
+    conversationId?: string;
+  },
+): Promise<{ resumedRuns: number }> {
+  const data = await request<{ success: boolean; data: { resumedRuns?: number } }>(
+    `${AUTH_API_URL}/api/v1/host-bindings/${encodeURIComponent(host)}`,
+    { method: "PATCH", body: JSON.stringify(patch) },
+  );
+  return { resumedRuns: data.data?.resumedRuns ?? 0 };
+}
+
+/** Remove a credential, revoking it at the provider when it came from a sign-in. */
+export async function deleteHostBinding(host: string): Promise<void> {
+  await request<{ success: boolean }>(
+    `${AUTH_API_URL}/api/v1/host-bindings/${encodeURIComponent(host)}`,
+    { method: "DELETE" },
+  );
+}
+
+/**
+ * Can this host sign the user in instead of asking for a paste? True only when
+ * it publishes OAuth metadata AND offers dynamic client registration, so most
+ * answer false. The first call makes live requests; the result is then cached.
+ */
+export interface HostCredentialHint {
+  /** Product name, shown so the user can sanity-check the link before clicking. */
+  product: string;
+  tokenUrl: string;
+  scheme: "bearer" | "header" | "cookie";
+  note: string;
+}
+
+export async function discoverHostSignIn(
+  host: string,
+  url?: string,
+): Promise<{ available: boolean; issuerHost?: string; hint?: HostCredentialHint }> {
+  const qs = new URLSearchParams({ host, ...(url ? { url } : {}) });
+  const data = await request<{
+    success: boolean;
+    data: { available: boolean; issuerHost?: string; hint?: HostCredentialHint };
+  }>(`${AUTH_API_URL}/api/v1/host-oauth/discover?${qs.toString()}`);
+  return data.data;
+}
+
+/** Begin a sign-in flow; the caller sends a browser tab to `authUrl`. */
+export async function startHostSignIn(payload: {
+  host: string;
+  url?: string;
+  returnTo?: string;
+  /** Carried across the OAuth round trip so only this chat resumes. */
+  conversationId?: string;
+}): Promise<{ authUrl: string; issuerHost: string }> {
+  const data = await request<{ success: boolean; data: { authUrl: string; issuerHost: string } }>(
+    `${AUTH_API_URL}/api/v1/host-oauth/authorize`,
+    { method: "POST", body: JSON.stringify(payload) },
+  );
+  return data.data;
+}
+
 export async function createConnection(
   userId: string,
   payload: { mcpServerId: string; credentials: Record<string, string> },
@@ -3032,6 +3139,19 @@ export interface PendingAction {
   params: Record<string, unknown>;
   userId: string;
   signature: string;
+  /**
+   * Discriminator, absent on write-approval actions. `"connect"` marks a
+   * credential prompt: the run stopped, and connecting resumes it.
+   */
+  kind?: "connect";
+  providerLabel?: string;
+  reason?: "not_connected" | "rejected" | "unknown_host";
+  host?: string;
+  /** The URL the run was blocked on: drives discovery on tenanted hosts, and
+   *  lets the callback verify the new token is accepted. */
+  url?: string;
+  /** Agent-written context for the card body. Untrusted — render as text only. */
+  reasonText?: string;
 }
 
 export interface ChatReply {

@@ -9,6 +9,7 @@ import { verifyMcpCredentials } from "../lib/mcp-credential-verify.js";
 import { availabilityForServerIds } from "../lib/connector-availability.js";
 import { hasConnectorDefinition } from "../mcp/connector-definitions.js";
 import { evictSession } from "../mcp/runner.js";
+import { resolveAuthGrants } from "../lib/auth-grant-store.js";
 import { syncToolsForServer } from "../tool-sync.js";
 import { pinUserIdParam } from "../middleware/pin-user-id-param.js";
 import { getWorkspaceIdForUser } from "../lib/spaces-db.js";
@@ -120,6 +121,11 @@ router.post("/:userId/connections", asyncHandler(async (req: Request<{ userId: s
   // path silently breaks because the cached child has the OLD env.
   await evictSession(userId, serverExists.type).catch((err) => {
     log.error(`[connections] evictSession failed for ${serverExists.type}:`, err);
+  });
+  // A run may be parked waiting for exactly this credential. Fire-and-forget:
+  // a resume failure must never fail the connect.
+  void resolveAuthGrants(userId, serverExists.type).then((n) => {
+    if (n > 0) log.info(`[connections] resumed ${n} run(s) parked on ${serverExists.type}`);
   });
   if (await hasConnectorDefinition(serverExists.type)) {
     syncToolsForServer(userId, serverExists.type, serverExists.name, credentials as Record<string, unknown>).catch((err) => {
