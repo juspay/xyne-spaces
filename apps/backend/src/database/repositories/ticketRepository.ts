@@ -69,6 +69,7 @@ const makeFallbackCountsSnapshot = (ticket: {
   createdBy: string;
   userGroupId: string | null;
   ticketType: string | null;
+  merchantId?: string | null;
   isStageOverdue?: boolean | null;
   eta: Date | null;
   createdAt: Date;
@@ -85,6 +86,7 @@ const makeFallbackCountsSnapshot = (ticket: {
   createdBy: ticket.createdBy,
   userGroupId: ticket.userGroupId,
   ticketType: ticket.ticketType,
+  merchantId: ticket.merchantId ?? null,
   isStageOverdue: ticket.isStageOverdue ?? false,
   eta: ticket.eta?.getTime() ?? null,
   createdAt: ticket.createdAt.getTime(),
@@ -417,6 +419,7 @@ export class TicketRepository {
         createdBy: true,
         userGroupId: true,
         ticketType: true,
+        merchantId: true,
         eta: true,
         createdAt: true,
         metadata: true,
