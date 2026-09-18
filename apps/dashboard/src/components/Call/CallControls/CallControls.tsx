@@ -746,7 +746,6 @@ export function CallControls({
   const notesControl = onToggleNotes && (
     <ControlButton
       sizing={sizing}
-      shape={panelShape}
       icon={NotebookPen}
       label='Notes'
       tone={isNotesOpen ? 'active' : 'neutral'}
@@ -979,7 +978,7 @@ export function CallControls({
         {onToggleNotes && (
           <DropdownMenuItem
             onClick={onToggleNotes}
-            className={cn(menuItemClass, 'lg:hidden')}
+            className={cn(menuItemClass, 'sm:hidden')}
             data-track-event='BUTTON_CLICK'
             data-track-category='CALLS'
             data-track-name='TOGGLE_CALL_NOTES'
@@ -1027,6 +1026,7 @@ export function CallControls({
         <div className='hidden items-center gap-2 sm:flex sm:gap-3'>
           {recordingControl}
           {reactionsControl}
+          {notesControl}
         </div>
         {annotateControl}
         {moreMenu}
@@ -1035,7 +1035,6 @@ export function CallControls({
 
       <div className='hidden items-center justify-end gap-0.5 lg:flex'>
         {copyInviteControl}
-        {notesControl}
         {callChatControl}
         {threadChatControl}
       </div>
