@@ -112,18 +112,27 @@ export function useRacedQuery<
     retry: 1,
   });
 
+  // Elapsed is measured from when these args started racing, so it resets with
+  // the latch rather than reporting time since the component first mounted.
+  const raceStartedAt = useRef(Date.now());
+  useEffect(() => {
+    raceStartedAt.current = Date.now();
+  }, [argsKey]);
+
   const wonByRef = useRef<RacedQuerySource | null>(null);
   useEffect(() => {
     const winner: RacedQuerySource = zeroWon ? 'zero' : apiSucceeded ? 'api' : 'cache';
     if (wonByRef.current === winner) return;
     wonByRef.current = winner;
     if (winner === 'cache') return;
+    const elapsedMs = Date.now() - raceStartedAt.current;
     logger.info(Event.ZERO_QUERY_COMPLETE, {
       source: 'useRacedQuery',
       query: queryName,
       winner,
+      elapsedMs,
     });
-  }, [zeroWon, apiSucceeded, queryName]);
+  }, [zeroWon, apiSucceeded, queryName, argsKey]);
 
   if (zeroWon) {
     return [cachedData, cachedDetails, { source: 'zero', live: true }];
