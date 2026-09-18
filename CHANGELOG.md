@@ -1,3 +1,10 @@
+## [1.337.0-release-20260918.4](https://github.com/juspay/xyne-spaces/compare/v1.337.0-release-20260918.3...v1.337.0-release-20260918.4) (2026-09-18)
+
+
+### Bug Fixes
+
+* API assessment remediations (BOLA + upload validation) [hotfix release-20260918] ([#2035](https://github.com/juspay/xyne-spaces/issues/2035)) ([785b440](https://github.com/juspay/xyne-spaces/commit/785b440a9f2ecd964f8220e554bc30374a467cc0)), closes [#2029](https://github.com/juspay/xyne-spaces/issues/2029)
+
 ## [1.337.0-release-20260918.3](https://github.com/juspay/xyne-spaces/compare/v1.337.0-release-20260918.2...v1.337.0-release-20260918.3) (2026-09-18)
 
 
