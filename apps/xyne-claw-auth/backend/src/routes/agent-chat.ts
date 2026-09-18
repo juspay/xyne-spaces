@@ -4,7 +4,6 @@ import { parseSlashCommand } from "../lib/parseSlashCommand.js";
 import { screenUploadFiles } from "../lib/upload-screening.js";
 import { Router, type Request, type RequestHandler, type Response } from "express";
 import { errMsg } from "../lib/errors.js";
-import { isAgentInvocableBy } from "xyne-claw-shared";
 import { SDLC_AGENT_SLUG, isAgentInvocableBy, IMMEDIATE_TASK_COMMAND_RE, parseLocalSandboxCommand } from "xyne-claw-shared";
 import { recordDeliveredArtifacts } from "../lib/delivered-artifacts.js";
 import { recordUploadedArtifacts } from "../lib/conversation-artifact-signals.js";

@@ -1,7 +1,7 @@
 import type { XyneAiSendTrigger } from '../../services/Analytics/xyneAiTracking';
 import { type ReactElement, useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { useNavigate, useParams, useLocation, useNavigationType } from 'react-router-dom';
-import { Upload, PanelRightOpen } from 'lucide-react';
+import { Upload } from 'lucide-react';
 import { AIShell, type WorkspacePanelControls } from '../../components/AIScreen/AIShell';
 import { ArtifactAppPane } from '../../components/AIScreen/ReactArtifact/ArtifactAppPane';
 import { AppCreationModeProvider } from '../../components/AIScreen/ReactArtifact/appCreationModeContext';

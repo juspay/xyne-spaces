@@ -80,7 +80,7 @@ export interface ContextSelections {
   folders?: { id: string; name: string }[];
   /** KB root collections scoped from the composer's collection picker. */
   collections?: { id: string; name: string }[];
-  localFolders?: SelectedLocalFolder[];
+  localFolders: SelectedLocalFolder[];
 }
 
 // Attached context item for v2 API. 'collection'/'folder'/'file' are all sent
@@ -177,7 +177,7 @@ export function toAttachedContext(selections: ContextSelections): AttachedContex
     });
   }
 
-  for (const folder of selections.localFolders ?? []) {
+  for (const folder of selections.localFolders) {
     items.push({
       type: 'local-folder',
       id: folder.path,

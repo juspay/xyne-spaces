@@ -896,6 +896,7 @@ const XyneAISidebar = ({
     canvases: selectedCanvases,
     transcripts: selectedTranscripts,
     recordings: selectedRecordings,
+    localFolders: [],
     folders: folderScopes,
     files: fileScopes,
     collections: selectedCollectionIds
