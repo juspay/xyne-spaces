@@ -255,7 +255,7 @@ export async function executeTool(
       "Content-Type": "application/json",
       [xAuthHeaderName]: authToken,
     };
-    console.log(`[execute] Forward request prepared service=${String(serviceName).replace(/\n|\r/g, " ")} tool=${String(toolName).replace(/\n|\r/g, " ")} method=${String(httpMethod).replace(/\n|\r/g, " ")}`);
+    console.log(`[execute] Forward request prepared service=${sanitizeForLog(serviceName)} tool=${sanitizeForLog(toolName)} method=${sanitizeForLog(httpMethod)}`);
 
     // Execute request
     let backendResponse: { status: number; data: unknown };
