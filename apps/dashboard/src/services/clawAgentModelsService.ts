@@ -13,6 +13,10 @@ export interface ClawAgentModel {
   id: string;
   /** Claw's label for the model. Raw model id today. */
   name: string;
+  provider?: 'local-harness';
+  harness?: string;
+  deviceName?: string;
+  recommended?: boolean;
 }
 
 export interface ClawAgentModelsResult {
@@ -23,6 +27,7 @@ export interface ClawAgentModelsResult {
    *  "litellm" = the agent's shared credential, "spaces" = the keyless
    *  platform provider (the workspace's synced allowed-model list). */
   pinProvider: 'litellm' | 'spaces';
+  recommendedId: string | null;
 }
 
 export async function fetchClawAgentModels(agentSlug: string): Promise<ClawAgentModelsResult> {
@@ -31,6 +36,7 @@ export async function fetchClawAgentModels(agentSlug: string): Promise<ClawAgent
     data: ClawAgentModel[];
     defaultModel: string | null;
     pinProvider?: 'litellm' | 'spaces';
+    recommendedId?: string | null;
   }>(`/xyne-ai/agents/${encodeURIComponent(agentSlug)}/models`);
   const result = response.data;
   if (!result.success) {
@@ -40,5 +46,6 @@ export async function fetchClawAgentModels(agentSlug: string): Promise<ClawAgent
     models: result.data ?? [],
     defaultModel: result.defaultModel ?? null,
     pinProvider: result.pinProvider ?? 'litellm',
+    recommendedId: result.recommendedId ?? null,
   };
 }

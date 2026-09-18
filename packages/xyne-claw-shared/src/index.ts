@@ -30,6 +30,7 @@ export type {
   LocalHarnessProgressEvent,
   LocalHarnessRunStatus,
   LocalHarnessRunResult,
+  LocalHarnessWorkspaceDiff,
 } from "./types/local-harness.js";
 export {
   LOCAL_HARNESS_PROVIDERS,
@@ -42,6 +43,10 @@ export {
   isLocalHarnessProgressEvent,
   isLocalHarnessDeviceRegistration,
   isLocalHarnessInstallationSync,
+  isLocalHarnessWorkspaceDiff,
+  clampLocalHarnessWorkspaceDiff,
+  LOCAL_HARNESS_DIFF_PATCH_MAX,
+  LOCAL_HARNESS_DIFF_STAT_MAX,
 } from "./types/local-harness.js";
 export {
   normalizeSkillContent,
@@ -155,8 +160,11 @@ export {
   TASK_COMMAND_NAMES,
   IMMEDIATE_TASK_COMMAND_RE,
   RECORD_SKILL_COMMAND_RE,
+  LOCAL_SANDBOX_COMMANDS,
+  LOCAL_SANDBOX_COMMAND_RE,
+  parseLocalSandboxCommand,
 } from "./task-command-names.js";
-export type { TaskCommandName } from "./task-command-names.js";
+export type { TaskCommandName, LocalSandboxCommandName } from "./task-command-names.js";
 export {
   matchesAttachmentType,
   isSupportedInboundAttachment,

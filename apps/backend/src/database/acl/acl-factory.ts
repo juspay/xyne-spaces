@@ -302,6 +302,8 @@ export class ACLFactory {
       return new BaseQueryACL(ctx, prisma)
     case 'sdlcFolder':
       return new BaseQueryACL(ctx, prisma)
+    case 'sdlcItemComment':
+      return new BaseQueryACL(ctx, prisma)
     case 'role':
       return new RolesACL(ctx, prisma)
     case 'savedUserConfiguration':

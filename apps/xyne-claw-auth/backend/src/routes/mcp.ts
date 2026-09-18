@@ -412,12 +412,46 @@ async function resolveServerNameForMcpCall(serverType: string, backendId?: strin
   return server?.name ?? serverType;
 }
 
-export function signAction(action: Record<string, unknown>): string {
-  return crypto.createHmac("sha256", CONFIG.actionSigningKey).update(JSON.stringify(action)).digest("hex");
+function canonicalize(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonicalize);
+  if (value && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    return Object.keys(record)
+      .sort()
+      .reduce<Record<string, unknown>>((acc, key) => {
+        acc[key] = canonicalize(record[key]);
+        return acc;
+      }, {});
+  }
+  return value;
 }
 
-function signLegacyAction(action: Record<string, unknown>): string {
-  return crypto.createHmac("sha256", CONFIG.legacyActionSigningKey).update(JSON.stringify(action)).digest("hex");
+export function canonicalActionPayload(action: Record<string, unknown>): string {
+  return JSON.stringify(canonicalize(action));
+}
+
+function hmac(key: string | Buffer, payload: string): string {
+  return crypto.createHmac("sha256", key).update(payload).digest("hex");
+}
+
+export function signAction(action: Record<string, unknown>): string {
+  return hmac(CONFIG.actionSigningKey, canonicalActionPayload(action));
+}
+
+function candidateSignatures(action: Record<string, unknown>): string[] {
+  const canonical = canonicalActionPayload(action);
+  const raw = JSON.stringify(action);
+  const payloads = canonical === raw ? [canonical] : [canonical, raw];
+  const keys = [CONFIG.actionSigningKey, CONFIG.legacyActionSigningKey].filter((k) => Boolean(k));
+  return keys.flatMap((key) => payloads.map((payload) => hmac(key, payload)));
+}
+
+function matchesAny(action: Record<string, unknown>, signature: string): boolean {
+  const given = Buffer.from(signature, "hex");
+  return candidateSignatures(action).some((candidate) => {
+    const current = Buffer.from(candidate, "hex");
+    return current.length === given.length && crypto.timingSafeEqual(current, given);
+  });
 }
 
 /**
@@ -849,9 +883,8 @@ async function loadEffectiveCredentialsWithSpacesFallback(
 }
 
 export function verifyActionSignature(action: Record<string, unknown>, signature: string): boolean {
-  const expected = signAction(action);
   try {
-    return crypto.timingSafeEqual(Buffer.from(expected, "hex"), Buffer.from(signature, "hex"));
+    return matchesAny(action, signature);
   } catch {
     return false;
   }
@@ -862,13 +895,7 @@ export function verifyActionSignatureAny(
   signature: string,
 ): boolean {
   try {
-    const given = Buffer.from(signature, "hex");
-    return actions.some((action) => {
-      const current = Buffer.from(signAction(action), "hex");
-      if (current.length === given.length && crypto.timingSafeEqual(current, given)) return true;
-      const legacy = Buffer.from(signLegacyAction(action), "hex");
-      return legacy.length === given.length && crypto.timingSafeEqual(legacy, given);
-    });
+    return actions.some((action) => matchesAny(action, signature));
   } catch {
     return false;
   }
