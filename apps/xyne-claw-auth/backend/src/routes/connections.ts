@@ -1,10 +1,11 @@
 import { Router, type Request, type Response } from "express";
-import { asyncHandler, ok, badRequest, notFound } from "../lib/http.js";
+import { asyncHandler, ok, badRequest, notFound, HttpError } from "../lib/http.js";
 import { prisma } from "../db.js";
 import { encrypt, decrypt } from "../crypto.js";
 import { CONFIG } from "../config.js";
 import { validateCredentials } from "../validation.js";
 import { checkHealth } from "../health.js";
+import { verifyMcpCredentials } from "../lib/mcp-credential-verify.js";
 import { hasConnectorDefinition } from "../mcp/connector-definitions.js";
 import { evictSession } from "../mcp/runner.js";
 import { syncToolsForServer } from "../tool-sync.js";
@@ -62,6 +63,17 @@ router.post("/:userId/connections", asyncHandler(async (req: Request<{ userId: s
   const validation = await validateCredentials(serverExists.type, credentials);
   if (!validation.valid) {
     throw badRequest(validation.error);
+  }
+
+  await evictSession(userId, serverExists.type).catch(() => {});
+  const verification = await verifyMcpCredentials({
+    sessionKey: userId,
+    serverType: serverExists.type,
+    serverName: serverExists.name,
+    credentials: credentials as Record<string, unknown>,
+  });
+  if (!verification.ok) {
+    throw new HttpError(verification.kind === "rejected" ? 400 : 502, verification.message);
   }
 
   const encrypted = encrypt(JSON.stringify(credentials), CONFIG.encryptionKey);

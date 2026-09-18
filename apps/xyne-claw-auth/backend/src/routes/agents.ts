@@ -19,6 +19,8 @@ import { prisma } from "../db.js";
 import { CONFIG } from "../config.js";
 import { encrypt, decrypt } from "../crypto.js";
 import { checkHealth } from "../health.js";
+import { verifyMcpCredentials } from "../lib/mcp-credential-verify.js";
+import { validateCredentials } from "../validation.js";
 import { fetchAndStoreSigningSecretFromSpacesApi } from "../lib/spaces-app-secret.js";
 import { extractCodexBearer } from "../lib/codex-creds.js";
 import { extractClaudeBearer } from "../lib/claude-creds.js";
@@ -3197,6 +3199,24 @@ router.post("/:slug/mcp/connections", requireAgentOwnerContributorOrAdmin, async
     const server = await prisma.mcpServer.findUnique({ where: { type: mcpServerType } });
     if (!server) {
       res.status(404).json({ success: false, error: `Unknown mcpServerType: ${mcpServerType}` });
+      return;
+    }
+
+    const shape = await validateCredentials(server.type, credentials as Record<string, unknown>);
+    if (!shape.valid) {
+      res.status(400).json({ success: false, error: shape.error });
+      return;
+    }
+
+    const verifySessionKey = `agent:${agent.id}:${instanceSlug}`;
+    const verification = await verifyMcpCredentials({
+      sessionKey: verifySessionKey,
+      serverType: server.type,
+      serverName: server.name,
+      credentials: credentials as Record<string, unknown>,
+    });
+    if (!verification.ok) {
+      res.status(verification.kind === "rejected" ? 400 : 502).json({ success: false, error: verification.message });
       return;
     }
 
