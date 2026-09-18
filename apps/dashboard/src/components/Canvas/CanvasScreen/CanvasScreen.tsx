@@ -1008,38 +1008,46 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
   const deletionEventsRef = useRef<BlockDeletionEvent[]>([]);
   const deletionFlushRef = useRef<number | null>(null);
 
-  const handleCollaborativeContentChange = useCallback(
-    (blocks: PartialBlock[]): void => {
-      latestContentRef.current = blocks;
-      hasPendingCollaborativeTimestampRef.current = true;
+  // One mutation carries at most 100 events, so a large deletion (select-all on
+  // a long document) needs several. Re-arm until the queue is drained: parking
+  // the tail until the user's next edit leaves pending anchors pointing at
+  // blocks that are gone.
+  const flushDeletions = useCallback((): void => {
+    deletionFlushRef.current = null;
+    const batch = deletionEventsRef.current.splice(0, 100);
+    const canvasId = selectedCanvasRef.current?.id;
+    if (!canvasId || !batch.length) return;
+    void z.mutate(
+      mutators.canvasSuggestion.blockDeleted({
+        canvasId,
+        events: batch,
+        timestamp: Date.now(),
+      }),
+    );
+    if (deletionEventsRef.current.length) {
+      deletionFlushRef.current = window.setTimeout(flushDeletionsRef.current, 0);
+    }
+  }, [z]);
+  const flushDeletionsRef = useRef(flushDeletions);
+  flushDeletionsRef.current = flushDeletions;
 
-      const nowIds = blocks
-        .map(block => (block as { id?: string }).id)
-        .filter((id): id is string => Boolean(id));
-      const prevIds = prevBlockIdsRef.current;
-      prevBlockIdsRef.current = nowIds;
-      if (!prevIds || !hasPendingSuggestionsRef.current) return;
+  const handleCollaborativeContentChange = useCallback((blocks: PartialBlock[]): void => {
+    latestContentRef.current = blocks;
+    hasPendingCollaborativeTimestampRef.current = true;
 
-      const events = computeDeletionEvents(prevIds, nowIds);
-      if (!events.length) return;
-      deletionEventsRef.current.push(...events);
-      if (deletionFlushRef.current !== null) window.clearTimeout(deletionFlushRef.current);
-      deletionFlushRef.current = window.setTimeout(() => {
-        deletionFlushRef.current = null;
-        const batch = deletionEventsRef.current.splice(0, 100);
-        const canvasId = selectedCanvasRef.current?.id;
-        if (!canvasId || !batch.length) return;
-        void z.mutate(
-          mutators.canvasSuggestion.blockDeleted({
-            canvasId,
-            events: batch,
-            timestamp: Date.now(),
-          }),
-        );
-      }, 500);
-    },
-    [z],
-  );
+    const nowIds = blocks
+      .map(block => (block as { id?: string }).id)
+      .filter((id): id is string => Boolean(id));
+    const prevIds = prevBlockIdsRef.current;
+    prevBlockIdsRef.current = nowIds;
+    if (!prevIds || !hasPendingSuggestionsRef.current) return;
+
+    const events = computeDeletionEvents(prevIds, nowIds);
+    if (!events.length) return;
+    deletionEventsRef.current.push(...events);
+    if (deletionFlushRef.current !== null) window.clearTimeout(deletionFlushRef.current);
+    deletionFlushRef.current = window.setTimeout(flushDeletionsRef.current, 500);
+  }, []);
 
   useEffect(() => {
     prevBlockIdsRef.current = null;
@@ -1064,6 +1072,10 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
     }, 500);
     return (): void => {
       window.clearInterval(seedTimer);
+      if (deletionFlushRef.current !== null) {
+        window.clearTimeout(deletionFlushRef.current);
+        deletionFlushRef.current = null;
+      }
       flushCollaborativeCanvasTimestampRef.current?.();
       saveCanvasExitSnapshotRef.current?.();
     };
