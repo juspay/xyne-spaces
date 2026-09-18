@@ -22,7 +22,6 @@ import { CopyButton } from '../../shared/primitives/CopyButton';
 import { McpLogo } from '../../shared/pickers/mcp/McpLogo';
 import { useMcpCatalog } from '../../shared/pickers/mcp/useMcpCatalog';
 import { useMcpCredentialFields } from '../../shared/pickers/mcp/useMcpCredentialFields';
-import { VerifiedTick } from '../../shared/pickers/mcp/McpIdentity';
 
 const NOTE =
   'Only connect tools you trust. Connectors are created by third-party developers and may change over time.';
@@ -179,7 +178,6 @@ const ClawMcpDetailV2 = (): ReactElement => {
                   <span className='truncate text-sm font-semibold leading-[22px] text-foreground'>
                     {entry.label}
                   </span>
-                  {entry.verified && <VerifiedTick />}
                   <Pill tone={connected ? 'success' : 'neutral'}>
                     {connected ? 'Connected' : 'Not connected'}
                   </Pill>

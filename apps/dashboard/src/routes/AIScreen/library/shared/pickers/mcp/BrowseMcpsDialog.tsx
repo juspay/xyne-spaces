@@ -70,7 +70,6 @@ const McpCard = ({
         <McpIdentity
           label={entry.label}
           iconType={entry.iconType}
-          verified={entry.verified}
           {...(state.enabled ? { trailing: <EnabledBadge /> } : {})}
         />
         <span className='flex size-7 shrink-0 items-center justify-center rounded-lg text-muted-foreground'>
@@ -246,7 +245,6 @@ export function BrowseMcpsDialog({
                 label={entry.label}
                 iconType={entry.iconType}
                 selected
-                verified={entry.verified}
                 onToggle={() => onSelectionChange(disableEntry(catalog, selection, entry))}
               />
             ))}
@@ -256,7 +254,6 @@ export function BrowseMcpsDialog({
                 label={match.entry.label}
                 iconType={match.entry.iconType}
                 selected={false}
-                verified={match.entry.verified}
                 onToggle={() =>
                   onSelectionChange(enableEntry(catalog, selection, match.entry, match.tools))
                 }

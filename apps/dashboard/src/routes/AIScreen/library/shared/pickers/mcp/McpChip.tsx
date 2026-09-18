@@ -7,17 +7,10 @@ interface McpChipProps {
   label: string;
   iconType: string;
   selected: boolean;
-  verified?: boolean;
   onToggle: () => void;
 }
 
-export function McpChip({
-  label,
-  iconType,
-  selected,
-  verified = false,
-  onToggle,
-}: McpChipProps): ReactElement {
+export function McpChip({ label, iconType, selected, onToggle }: McpChipProps): ReactElement {
   return (
     <button
       type='button'
@@ -34,13 +27,7 @@ export function McpChip({
           : 'border-dashed bg-card hover:bg-muted/50',
       )}
     >
-      <McpIdentity
-        label={label}
-        iconType={iconType}
-        verified={verified}
-        gap='tight'
-        muted={!selected}
-      />
+      <McpIdentity label={label} iconType={iconType} gap='tight' muted={!selected} />
       {selected ? (
         <MultipleCrossCancelDefault className='size-3 shrink-0 text-muted-foreground' aria-hidden />
       ) : (
