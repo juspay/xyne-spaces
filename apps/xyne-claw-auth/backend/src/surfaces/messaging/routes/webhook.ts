@@ -7,6 +7,7 @@
  */
 import { Router, type Request, type Response } from "express";
 import { errMsg } from "../../../lib/errors.js";
+import { CHALLENGE_RE } from "../const.js";
 import { createLogger } from "../../../logger.js";
 import { handleInbound } from "../inbound.js";
 import { getAccount, authStateFor, toChannelAccount } from "../store.js";
@@ -18,7 +19,7 @@ export const webhookRouter = Router({ mergeParams: true });
 /**
  * Provider endpoint verification (Meta: GET with hub.mode/hub.verify_token/
  * hub.challenge). The plugin decides whether the token matches the one the
- * admin stored; we echo the challenge verbatim as plain text, which is what
+ * admin stored; the challenge is then echoed back as plain text, which is what
  * the provider expects.
  */
 webhookRouter.get("/webhook/:accountId", async (req: Request, res: Response) => {
@@ -35,6 +36,11 @@ webhookRouter.get("/webhook/:accountId", async (req: Request, res: Response) => 
   }
   const token = typeof req.query["hub.verify_token"] === "string" ? req.query["hub.verify_token"] : "";
   const challenge = typeof req.query["hub.challenge"] === "string" ? req.query["hub.challenge"] : "";
+  if (!CHALLENGE_RE.test(challenge)) {
+    log.warn(`[channel-webhook] challenge rejected account=${accountId}: malformed`);
+    res.status(400).json({ success: false, error: "Bad request" });
+    return;
+  }
   const account = toChannelAccount(row);
   const ok = token ? await plugin.verifyChallenge(account, authStateFor(account.id), token).catch(() => false) : false;
   if (!ok) {
@@ -43,7 +49,8 @@ webhookRouter.get("/webhook/:accountId", async (req: Request, res: Response) => 
     return;
   }
   log.info(`[channel-webhook] challenge verified account=${accountId}`);
-  res.type("text/plain").send(challenge);
+  // nosniff so the response cannot be re-interpreted as anything but text.
+  res.type("text/plain").set("X-Content-Type-Options", "nosniff").send(challenge);
 });
 
 webhookRouter.post("/webhook/:accountId", async (req: Request, res: Response) => {

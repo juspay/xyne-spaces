@@ -1,5 +1,10 @@
 /** Tunables for the messaging-channel core. */
 
+/** A webhook provider's endpoint-verification challenge is a short opaque
+ *  token it generated. Echoing anything else would let a crafted link turn the
+ *  verification endpoint into a reflector for the caller's own content. */
+export const CHALLENGE_RE = /^[A-Za-z0-9_-]{1,256}$/;
+
 /** ConnectedSurface.surfaceTenantId prefix that marks a channel account row
  *  (vs Slack's "" org-level / team-id rows). Mirrored by the partial unique
  *  index in the messaging_channels migration. */
