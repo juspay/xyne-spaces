@@ -362,11 +362,14 @@ export const UserProfile: React.FC<UserProfileProps> = ({
               role='button'
               tabIndex={0}
             >
+              {/* Presence is shown once, by the labelled Active/Away row below.
+                  Enabling the avatar's own dot here renders a second green dot
+                  on the same card. Matches Settings + ProfileView. */}
               <Avatar
                 userId={user.id}
                 size={headerAvatarSize}
                 className='rounded-xl'
-                showActiveStatus={true}
+                showActiveStatus={false}
               />
               <div className='absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 rounded-xl flex items-center justify-center transition-opacity'>
                 <Camera className='size-8 text-white' />
@@ -387,7 +390,7 @@ export const UserProfile: React.FC<UserProfileProps> = ({
               userId={user.id}
               size={headerAvatarSize}
               className='rounded-xl'
-              showActiveStatus={true}
+              showActiveStatus={false}
             />
           )}
         </div>
