@@ -1,8 +1,16 @@
 import { logger, Event as LogEvent } from '../../../utils/logger';
-import React, { ReactElement, useEffect, useMemo, useState, useRef, useCallback } from 'react';
+import React, {
+  ReactElement,
+  ReactNode,
+  useEffect,
+  useMemo,
+  useState,
+  useRef,
+  useCallback,
+} from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Command } from 'cmdk';
-import { X, SlidersHorizontal, SignalHigh } from 'lucide-react';
+import { Clock, X, SlidersHorizontal, SignalHigh } from 'lucide-react';
 import {
   ChatDefault,
   UserTwo,
@@ -56,6 +64,16 @@ import {
 } from './ChannelCommandMenu.types';
 import type { ChannelTriggerType, UserTriggerType } from './MentionPlugin';
 import { loadRecents } from '../../../utils/contextPickerRecents';
+import {
+  loadRecentQueries,
+  saveRecentQuery,
+  removeRecentQuery,
+  clearRecentQueries,
+  recentQueryKey,
+  RECENTS_DISPLAY_LIMIT,
+  type RecentQuery,
+  type StoredMention,
+} from '../../../utils/cmdKRecents';
 import ThreadContextPanel from '../ThreadContextPanel/ThreadContextPanel';
 import {
   buildContextItemFromResult,
@@ -69,6 +87,7 @@ import {
 } from '../../../utils/searchNavigation';
 import { isElectronApp } from '../../../utils/electronApp';
 import { useAllChannels } from '../../../hooks/useChannels';
+import { useAuthContextValues } from '../../../hooks/useAuth';
 import { useAffinityCallback } from '../../../hooks/useAffinityCallback';
 import { useDeskContacts } from '../../../hooks/useDeskContacts';
 import { useDeskPeople, ALL_DESK } from '../../../hooks/useDeskPeople';
@@ -218,6 +237,68 @@ const backendGroupBelongsToTab = (groupKey: string, tab: TabType): boolean => {
   return false;
 };
 
+interface RecentRowProps {
+  value: string;
+  onSelect: () => void;
+  onMouseDown?: (e: React.MouseEvent) => void;
+  /** Renders a hover-revealed × that drops this entry. Mouse-only by design —
+   *  keyboard-reachable per-row delete is deliberately deferred. */
+  onRemove?: () => void;
+  trackName?: string;
+  trackMetadata?: string;
+  children: ReactNode;
+}
+const RecentRow = ({
+  value,
+  onSelect,
+  onMouseDown,
+  onRemove,
+  trackName,
+  trackMetadata,
+  children,
+}: RecentRowProps): ReactElement => {
+  const { isMobile } = usePlatform();
+  return (
+    <Command.Item
+      value={value}
+      onSelect={onSelect}
+      onMouseDown={onMouseDown}
+      className={cn(
+        'group flex items-center gap-2 px-2 py-1.5 rounded-sm cursor-pointer mt-1',
+        !isMobile && 'hover:bg-muted aria-selected:bg-muted',
+      )}
+      style={{ WebkitTapHighlightColor: 'transparent' }}
+      data-track-category='CHANNEL_SEARCH'
+      data-track-name={trackName}
+      data-track-metadata={trackMetadata}
+    >
+      {children}
+      {onRemove && !isMobile && (
+        <button
+          type='button'
+          aria-label='Remove from recents'
+          // mousedown fires before cmdk's selection and before the input blurs;
+          // stopping it here is what keeps the × from also replaying the search.
+          onMouseDown={e => {
+            e.preventDefault();
+            e.stopPropagation();
+          }}
+          onClick={e => {
+            e.preventDefault();
+            e.stopPropagation();
+            onRemove();
+          }}
+          data-track-category='CHANNEL_SEARCH'
+          data-track-name='REMOVE_RECENT_SEARCH'
+          className='flex-shrink-0 rounded p-0.5 text-muted-foreground opacity-0 transition-opacity hover:text-foreground group-hover:opacity-100 focus-visible:opacity-100'
+        >
+          <X size={12} />
+        </button>
+      )}
+    </Command.Item>
+  );
+};
+
 // Faint format hints for filters that open NO typeahead popup, so the caret would
 // otherwise sit after a bare colon with no cue. Shown only while the value is empty
 // (regex ends at `:` ) and cleared as soon as the user types a value.
@@ -234,6 +315,29 @@ const TEXT_FILTER_HINTS: Record<string, string> = {
   type: 'messages, files, tickets…',
 };
 const TEXT_FILTER_HINT_REGEX = /\b(before|after|on|range|board|tags|stage|status|type):\s*$/i;
+
+interface RecentSnapshot {
+  query: string;
+  mentions: StoredMention[];
+  tab: TabType;
+}
+
+// Recents persist the active tab as a bare string, so a value written by an older
+// build (or a since-renamed tab) has to be validated before it is restored.
+const TAB_TYPE_VALUES = new Set<string>(Object.values(TabType));
+const isTabType = (value: string): value is TabType => TAB_TYPE_VALUES.has(value);
+
+// Browse-mode section order. Recents are injected directly after STARRED.
+const BROWSE_CATEGORY_ORDER: ChannelCategory[] = [
+  ChannelCategory.STARRED,
+  ChannelCategory.CHANNELS,
+  ChannelCategory.DIRECT_MESSAGES,
+  ChannelCategory.GROUP_DMS,
+];
+
+// Starred collapses to 3 (rather than the general DISPLAY_LIMIT) so Recents and
+// the channel roster below it stay visible without scrolling.
+const STARRED_DISPLAY_LIMIT = 3;
 
 const isPreviewableTicketResult = (result: DisplaySearchResult | null): boolean =>
   !!result &&
@@ -295,6 +399,10 @@ const ChannelCommandMenu = ({
 }: ChannelCommandMenuProps): ReactElement | null => {
   const navigate = useNavigate();
   const channelData = useAllChannels();
+  // Recents are scoped per workspace as well as per user: without the workspace
+  // segment, switching workspaces in the same browser profile surfaces the other
+  // workspace's search history.
+  const { workspaceId } = useAuthContextValues();
   const commandRef = useRef<HTMLDivElement | null>(null);
   // MutationObserver (owned by attachCommandRef) that recomputes the ⌥↵ hint when cmdk adds/removes rows.
   const rowListObserverRef = useRef<MutationObserver | null>(null);
@@ -648,6 +756,17 @@ const ChannelCommandMenu = ({
   const insertTextRef = useRef<((text: string) => void) | null>(null);
   const [filterOpen, setFilterOpen] = useState(false);
   const [searchFiltersOpen, setSearchFiltersOpen] = useState(false);
+  const setContentRef = useRef<((text: string, mentions?: MentionData[]) => void) | null>(null);
+  const [recentQueries, setRecentQueries] = useState<RecentQuery[]>([]);
+  // "See more" collapses again on close, so the palette always opens compact.
+  const [recentsExpanded, setRecentsExpanded] = useState(false);
+  // Last capture-worthy search seen while the palette was open. Held in a ref so
+  // the close handler can still record it after state has been torn down.
+  const recentsSnapshotRef = useRef<RecentSnapshot | null>(null);
+  // Set by exit paths that must not record on close: opening a user or channel
+  // (navigation, not search), and selections that already recorded explicitly.
+  const skipRecentsOnCloseRef = useRef(false);
+  const recentsWasOpenRef = useRef(false);
 
   // Type autocomplete - derived from searchText
   const typeAutocomplete = useMemo(() => {
@@ -1056,6 +1175,33 @@ const ChannelCommandMenu = ({
     return params;
   }
 
+  // The search as it stands right now, in the shape recents persist, or null when
+  // there is nothing worth recording. No minimum length — any non-empty trimmed
+  // input qualifies, including one-character queries.
+  const buildRecentSnapshot = useCallback((): RecentSnapshot | null => {
+    if (contextSelectionMode) return null;
+
+    const query = searchText.trim();
+    const mentions: StoredMention[] = selectedMentions
+      .filter(mention => mention.type === MentionType.USER || mention.type === MentionType.CHANNEL)
+      .map(mention => ({
+        id: mention.id,
+        type: mention.type === MentionType.USER ? 'user' : 'channel',
+        ...(mention.prefix ? { prefix: mention.prefix } : {}),
+      }));
+
+    if (!query && mentions.length === 0) return null;
+    return { query, mentions, tab: activeTab };
+  }, [activeTab, contextSelectionMode, searchText, selectedMentions]);
+
+  const saveCurrentSearchToRecents = useCallback((): void => {
+    const snapshot = buildRecentSnapshot();
+    if (!snapshot) return;
+    saveRecentQuery(workspaceId, currentUserID, snapshot.query, snapshot.mentions, snapshot.tab);
+    // Recorded here, so the close this selection triggers must not record again.
+    skipRecentsOnCloseRef.current = true;
+  }, [buildRecentSnapshot, currentUserID, workspaceId]);
+
   // Keep the palette's history entry carrying the current search. The palette can be left
   // in many ways — opening a DM, a channel, a message, a ticket, the results page — and
   // each goes through its own handler, so recording it here is what makes ANY of them
@@ -1099,6 +1245,7 @@ const ChannelCommandMenu = ({
       // Swallowed on purpose — a broken log line must not block the results page.
     }
 
+    saveCurrentSearchToRecents();
     onOpenChange(false);
     // Land on the tab the user was already filtering by — Messages stays on Messages,
     // Files on Files, and so on. Tabs with no results-page docType (and plain All) fall
@@ -1112,6 +1259,7 @@ const ChannelCommandMenu = ({
   // Navigate to the full results page with a specific section's tab pre-selected
   // (from the screen-mode "See N more" links).
   const handleSeeMoreNavigate = (tab: SearchResultsDocType): void => {
+    saveCurrentSearchToRecents();
     onOpenChange(false);
     void navigate(
       `/search-results?${buildSearchParams(searchText, selectedMentions, usersById, allChannels, tab).toString()}`,
@@ -1878,6 +2026,10 @@ const ChannelCommandMenu = ({
       route,
     );
 
+    // Opening a channel or DM is navigation, not search: it records nothing, and
+    // the close it triggers must not record either.
+    skipRecentsOnCloseRef.current = true;
+
     if (consumeModifier()) {
       const channelResult = { id: channel.id, type: 'channel' } as DisplaySearchResult;
       await openSearchResult(
@@ -1909,9 +2061,21 @@ const ChannelCommandMenu = ({
       return;
     }
 
+    // Picking a person or a channel out of the results is navigation, not a
+    // search commit — same rule as handleChannelSelect. Everything else (message,
+    // ticket, attachment, collection) records.
+    const isNavigationResult = result.type === 'user' || result.type === 'channel';
+    if (isNavigationResult) {
+      skipRecentsOnCloseRef.current = true;
+    }
+
     // Track click on search result
-    if (searchText.trim()) {
+    const hasActiveSearch = searchText.trim().length > 0 || selectedMentions.length > 0;
+    if (hasActiveSearch) {
       onResultClick(result, rankPosition, result.searchContext?.channelId);
+      if (!contextSelectionMode && !isNavigationResult) {
+        saveCurrentSearchToRecents();
+      }
     }
 
     const useModifier = consumeModifier();
@@ -2169,6 +2333,64 @@ const ChannelCommandMenu = ({
     );
   }, [hasFromOrInFilter, groupedChannels, cleanedSearchText]);
 
+  // Track the live search while the palette is open, and deliberately stop at
+  // close: closing clears searchText, and if this kept running it would null the
+  // snapshot out from under the close handler below.
+  useEffect(() => {
+    if (!open) return;
+    recentsSnapshotRef.current = buildRecentSnapshot();
+  }, [open, buildRecentSnapshot]);
+
+  // Second commit point (the first is an explicit selection): dismissing the
+  // palette with a non-empty query records it. Esc, click-outside and close all
+  // land here, so a typed-but-abandoned search still builds history — while
+  // intermediate keystrokes never do, because capture happens at exit only.
+  useEffect(() => {
+    if (open) {
+      recentsWasOpenRef.current = true;
+      skipRecentsOnCloseRef.current = false;
+      return;
+    }
+    if (!recentsWasOpenRef.current) return;
+    recentsWasOpenRef.current = false;
+
+    const snapshot = recentsSnapshotRef.current;
+    recentsSnapshotRef.current = null;
+    if (skipRecentsOnCloseRef.current) {
+      skipRecentsOnCloseRef.current = false;
+      return;
+    }
+    if (!snapshot) return;
+    saveRecentQuery(workspaceId, currentUserID, snapshot.query, snapshot.mentions, snapshot.tab);
+  }, [open, currentUserID, workspaceId]);
+
+  // Read from localStorage on every open rather than once at mount, so a search
+  // recorded in another tab shows up here. Held in state (not a memo) because
+  // per-row × and Clear all mutate the store and must re-render.
+  useEffect(() => {
+    if (!open) return;
+    setRecentQueries(loadRecentQueries(workspaceId, currentUserID));
+    setRecentsExpanded(false);
+  }, [currentUserID, open, workspaceId]);
+
+  const handleRemoveRecent = useCallback(
+    (key: string): void => {
+      removeRecentQuery(workspaceId, currentUserID, key);
+      setRecentQueries(prev => prev.filter(entry => recentQueryKey(entry) !== key));
+    },
+    [currentUserID, workspaceId],
+  );
+
+  const handleClearRecents = useCallback((): void => {
+    clearRecentQueries(workspaceId, currentUserID);
+    setRecentQueries([]);
+  }, [currentUserID, workspaceId]);
+
+  const hasMoreRecents = recentQueries.length > RECENTS_DISPLAY_LIMIT;
+  const visibleRecentQueries = recentsExpanded
+    ? recentQueries
+    : recentQueries.slice(0, RECENTS_DISPLAY_LIMIT);
+
   const iconSize = 14;
 
   const allTabDefinitions: Array<{ id: TabType; label: string; icon?: ReactElement }> = [
@@ -2236,7 +2458,10 @@ const ChannelCommandMenu = ({
       filteredLocalUsers.length > 0) ||
     (activeTab !== TabType.CHANNELS && activeTab !== TabType.USERS && backendResults.length > 0);
 
-  const showEmptyState = searchText.trim() && !isLoading && !hasResults;
+  // Filter chips are search criteria even when Lexical has no remaining text.
+  // Recents/Starred browse mode is only for a genuinely empty search bar.
+  const isSearchEmpty = !searchText.trim() && selectedMentions.length === 0;
+  const showEmptyState = !isSearchEmpty && !isLoading && !hasResults;
 
   // Auto-select first result when search results change. Reset the
   // navigation flag when either the free-text query OR the active filter
@@ -2813,64 +3038,252 @@ const ChannelCommandMenu = ({
     </>
   );
 
-  // Render the local channels for the browse branch (no search text)
-  const renderBrowseLocalChannels = () => (
-    <>
-      {showGroupedLocalResults &&
-        (activeTab === TabType.ALL || activeTab === TabType.CHANNELS || isChannelsType) &&
-        filteredLocalChannels.length > 0 && (
-          <>
-            {Object.entries(groupedChannels).map(([category, items]) => {
-              const typedCategory = category as ChannelCategory;
-              const isExpanded = expandedCategories.has(category);
-              const shouldLimit = !search.trim();
-              const hasMore = items.length > DISPLAY_LIMIT;
-              const displayItems =
-                shouldLimit && !isExpanded && hasMore ? items.slice(0, DISPLAY_LIMIT) : items;
-              const hiddenCount = items.length - DISPLAY_LIMIT;
+  // Recent searches — replayed live, never restored from cached results, so a
+  // doc the user has since lost access to simply stops ranking. Hidden entirely
+  // when there is nothing to show (no header, no placeholder) and while the user
+  // is typing.
+  const renderRecentsSection = (): ReactElement | null => {
+    const eligible =
+      isSearchEmpty &&
+      activeTab === TabType.ALL &&
+      !mentionSearchType &&
+      !contextSelectionMode &&
+      (!inline || searchMode === 'screen');
+    if (!eligible || visibleRecentQueries.length === 0) return null;
 
-              return (
-                <div key={category} className='mb-4'>
-                  <Command.Group
-                    heading={getCategoryLabel(typedCategory)}
-                    className='[&_[cmdk-group-heading]]:px-2  [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-["Geist_Mono"]'
-                  >
-                    {displayItems.map(({ channel }, index) => {
-                      const unreadCount = unreadCounts[channel.id] ?? 0;
-                      return (
-                        <ChannelCommandItem
-                          key={channel.id}
-                          channel={channel}
-                          currentUserID={currentUserID}
-                          unreadCount={unreadCount}
-                          onSelect={displayName => {
-                            void handleChannelSelect(channel, displayName, index + 1);
-                          }}
-                          onItemMouseDown={handleItemMouseDown}
-                          getChannelIcon={getChannelIcon}
-                          isSelected={contextItems.some(c => c.id === `channel-${channel.id}`)}
-                        />
-                      );
-                    })}
-                    {shouldLimit && hasMore && (
-                      <SeeMoreItem
-                        value={`__see-more-browse-${category}__`}
-                        label={isExpanded ? 'See less' : `See ${hiddenCount} more`}
-                        onSelect={() => toggleCategoryExpansion(category)}
-                        hoverable={!isMobile}
-                        trackCategory='CHANNEL_SEARCH'
-                        trackName='TOGGLE_LOCAL_CHANNEL_EXPANSION'
-                        trackMetadata={JSON.stringify({ category, isExpanded })}
+    return (
+      <div className='mb-4'>
+        <div className='flex items-center justify-between px-2'>
+          <span className='text-xs font-medium uppercase tracking-wide text-muted-foreground font-["Geist_Mono"]'>
+            Recents
+          </span>
+          <button
+            type='button'
+            // Keep focus in the search input: a blur here closes the palette.
+            onMouseDown={e => {
+              e.preventDefault();
+            }}
+            onClick={handleClearRecents}
+            data-track-category='CHANNEL_SEARCH'
+            data-track-name='CLEAR_RECENT_SEARCHES'
+            className={cn('text-xs text-muted-foreground', !isMobile && 'hover:text-foreground')}
+          >
+            Clear all
+          </button>
+        </div>
+        <Command.Group>
+          {visibleRecentQueries.map(entry => {
+            const { query, mentions, tab } = entry;
+            const key = recentQueryKey(entry);
+
+            // Mentions are stored by id, so the chip re-hydrates to the same
+            // entity even if it has since been renamed. Names are resolved here,
+            // at render time, and never persisted.
+            const resolvedMentions: MentionData[] = (mentions ?? []).map(m => {
+              let name = m.id;
+              if (m.type === 'channel') {
+                name = channelData.find(c => c.id === m.id)?.name ?? m.id;
+              } else if (m.type === 'user') {
+                name = usersById.get(m.id)?.name ?? m.id;
+              }
+              return {
+                id: m.id,
+                name,
+                type: m.type,
+                prefix: m.prefix,
+              } as MentionData;
+            });
+
+            // Value drives cmdk matching; label keeps it readable and unique.
+            const filterLabel = resolvedMentions.map(m => `${m.prefix ?? ''}${m.name}`).join(' ');
+            const label = [filterLabel, query].filter(Boolean).join(' · ');
+
+            return (
+              <RecentRow
+                key={key}
+                value={`recent-query-${label}`}
+                trackName='SELECT_RECENT_SEARCH'
+                trackMetadata={JSON.stringify({
+                  hasFilters: resolvedMentions.length > 0,
+                  queryLength: query.length,
+                  tab: tab ?? null,
+                })}
+                onSelect={() => {
+                  // Restore the tab first so the replayed search runs under the
+                  // same scope it was captured in.
+                  if (tab && isTabType(tab) && activeEnabledTabs.includes(tab)) setActiveTab(tab);
+                  setContentRef.current?.(query, resolvedMentions);
+                }}
+                onRemove={() => {
+                  handleRemoveRecent(key);
+                }}
+              >
+                <Clock size={14} className='text-muted-foreground flex-shrink-0' />
+                <span className='flex flex-1 min-w-0 flex-wrap items-center gap-1 text-left'>
+                  {resolvedMentions.map(m => {
+                    const isUser = m.type === MentionType.USER;
+                    const channelEntry = isUser
+                      ? undefined
+                      : allChannels.find(c => c.channel.id === m.id);
+                    const displayName = isUser
+                      ? m.name
+                      : channelEntry
+                        ? isDMChannel(channelEntry.channel.scopeType)
+                          ? formatChannelLabel(channelEntry)
+                          : channelEntry.channel.name
+                        : m.name;
+                    const prefix = m.prefix ?? (isUser ? 'from:' : 'in:');
+                    return (
+                      <span
+                        key={`${m.prefix ?? ''}${m.id}`}
+                        className='inline-flex items-center gap-1.5 px-1.5 py-1 rounded bg-muted text-foreground text-xs font-medium h-6 shrink-0'
+                      >
+                        <span className='leading-tight'>{prefix.trim()}</span>
+                        {isUser ? (
+                          <Avatar
+                            userId={m.id}
+                            size='sm'
+                            className='rounded-none flex-shrink-0 size-3'
+                          />
+                        ) : (
+                          <div className='flex items-center justify-center flex-shrink-0 size-4 rounded-sm'>
+                            {channelEntry ? (
+                              getChannelIcon(channelEntry.channel)
+                            ) : (
+                              <Hashtag size={12} className='text-foreground' />
+                            )}
+                          </div>
+                        )}
+                        <span className='leading-tight'>{displayName}</span>
+                      </span>
+                    );
+                  })}
+                  {query.trim() && (
+                    <span className='min-w-0 max-w-full truncate text-sm font-medium text-foreground'>
+                      {query.trim()}
+                    </span>
+                  )}
+                </span>
+              </RecentRow>
+            );
+          })}
+          {hasMoreRecents && (
+            <SeeMoreItem
+              value='__see-more-recents__'
+              label={
+                recentsExpanded
+                  ? 'See less'
+                  : `See ${recentQueries.length - RECENTS_DISPLAY_LIMIT} more`
+              }
+              onSelect={() => {
+                setRecentsExpanded(prev => !prev);
+              }}
+              hoverable={!isMobile}
+              trackCategory='CHANNEL_SEARCH'
+              trackName='TOGGLE_RECENT_SEARCH_EXPANSION'
+              trackMetadata={JSON.stringify({ isExpanded: recentsExpanded })}
+            />
+          )}
+        </Command.Group>
+      </div>
+    );
+  };
+
+  // Render the local channels for the browse branch (no search text).
+  //
+  // Section order is Starred → Recents → Channels → DMs → Group DMs. Starred
+  // leads because it is explicit and user-curated, so its rows hold the
+  // positions people build muscle memory on; recents reshuffle after every
+  // search and would make the first selectable row unpredictable. Recents sit
+  // above the channel roster because "continue where I left off" beats browsing.
+  const renderBrowseLocalChannels = (): ReactElement => {
+    const showChannelGroups =
+      showGroupedLocalResults &&
+      (activeTab === TabType.ALL || activeTab === TabType.CHANNELS || isChannelsType) &&
+      filteredLocalChannels.length > 0;
+
+    // Explicit order, not Object.entries order: groupedChannels is built by
+    // insertion, so its key order follows whatever the channel list happened to
+    // contain first. Unknown categories fall to the end rather than vanishing.
+    const knownCategories = BROWSE_CATEGORY_ORDER.filter(
+      category => (groupedChannels[category]?.length ?? 0) > 0,
+    );
+    const extraCategories = Object.keys(groupedChannels).filter(
+      category =>
+        !BROWSE_CATEGORY_ORDER.includes(category as ChannelCategory) &&
+        (groupedChannels[category]?.length ?? 0) > 0,
+    );
+    const orderedCategories = showChannelGroups ? [...knownCategories, ...extraCategories] : [];
+
+    const recentsSection = renderRecentsSection();
+    const recentsVisible = recentsSection !== null;
+    // With no starred channels there is nothing to slot under, so recents lead.
+    const hasStarredGroup = orderedCategories.includes(ChannelCategory.STARRED);
+
+    return (
+      <>
+        {!hasStarredGroup && recentsSection}
+        {orderedCategories.map(category => {
+          const typedCategory = category as ChannelCategory;
+          const items = groupedChannels[category] ?? [];
+          const isExpanded = expandedCategories.has(category);
+          const isStarred = typedCategory === ChannelCategory.STARRED;
+          // Starred is capped tighter than the rest so Recents and the channel
+          // roster both stay above the fold. That cap exists only because Recents
+          // is competing for the space — with Recents hidden, Starred renders in
+          // full: no cap, no "See more".
+          const starredUncapped = isStarred && !recentsVisible;
+          const shouldLimit = !search.trim() && !starredUncapped;
+          const limit = isStarred ? STARRED_DISPLAY_LIMIT : DISPLAY_LIMIT;
+          const hasMore = items.length > limit;
+          const displayItems =
+            shouldLimit && !isExpanded && hasMore ? items.slice(0, limit) : items;
+          const hiddenCount = items.length - limit;
+
+          return (
+            <React.Fragment key={category}>
+              <div className='mb-4'>
+                <Command.Group
+                  heading={getCategoryLabel(typedCategory)}
+                  className='[&_[cmdk-group-heading]]:px-2  [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-["Geist_Mono"]'
+                >
+                  {displayItems.map(({ channel }, index) => {
+                    const unreadCount = unreadCounts[channel.id] ?? 0;
+                    return (
+                      <ChannelCommandItem
+                        key={channel.id}
+                        channel={channel}
+                        currentUserID={currentUserID}
+                        unreadCount={unreadCount}
+                        onSelect={displayName => {
+                          void handleChannelSelect(channel, displayName, index + 1);
+                        }}
+                        onItemMouseDown={handleItemMouseDown}
+                        getChannelIcon={getChannelIcon}
+                        isSelected={contextItems.some(c => c.id === `channel-${channel.id}`)}
                       />
-                    )}
-                  </Command.Group>
-                </div>
-              );
-            })}
-          </>
-        )}
-    </>
-  );
+                    );
+                  })}
+                  {shouldLimit && hasMore && (
+                    <SeeMoreItem
+                      value={`__see-more-browse-${category}__`}
+                      label={isExpanded ? 'See less' : `See ${hiddenCount} more`}
+                      onSelect={() => toggleCategoryExpansion(category)}
+                      hoverable={!isMobile}
+                      trackCategory='CHANNEL_SEARCH'
+                      trackName='TOGGLE_LOCAL_CHANNEL_EXPANSION'
+                      trackMetadata={JSON.stringify({ category, isExpanded })}
+                    />
+                  )}
+                </Command.Group>
+              </div>
+              {typedCategory === ChannelCategory.STARRED && recentsSection}
+            </React.Fragment>
+          );
+        })}
+      </>
+    );
+  };
 
   // Hoist the best local matches to the top of the list — applies in BOTH the
   // popup and the screen search bar. Only in the combined ALL view (a single-type
@@ -3579,6 +3992,9 @@ const ChannelCommandMenu = ({
             autocompleteSuffix={autocompleteSuffix ?? ''}
             onInsertTextReady={insertText => {
               insertTextRef.current = insertText;
+            }}
+            onSetContentReady={setContent => {
+              setContentRef.current = setContent;
             }}
             onSetTextReady={onSetTextReady}
             initialMention={initialMention}
@@ -4451,7 +4867,12 @@ const ChannelCommandMenu = ({
 
                 {showEmptyState && !mentionSearchType && (
                   <Command.Empty className='py-6 text-center text-sm text-muted-foreground'>
-                    No results found for &quot;{search}&quot;
+                    {/* A chip-only search (e.g. `from:alice`) has no free text to quote back. */}
+                    {search.trim() ? (
+                      <>No results found for &quot;{search}&quot;</>
+                    ) : (
+                      'No results found'
+                    )}
                   </Command.Empty>
                 )}
 
@@ -4468,7 +4889,7 @@ const ChannelCommandMenu = ({
                     {/* When a from:/in: chip is active, backend results appear first. Local sections
                         self-suppress via showGroupedUsers/showGroupedLocalResults when a filter makes
                         their category irrelevant (e.g. with:/from: → nothing renders). */}
-                    {searchText.trim() || typeFilter ? (
+                    {!isSearchEmpty ? (
                       <>
                         {hasFromOrInFilter ? (
                           <>

@@ -68,6 +68,7 @@ interface LexicalSearchInputProps {
   onManualKeystroke?: () => void;
   autocompleteSuffix?: string;
   onInsertTextReady?: (insertText: (text: string) => void) => void;
+  onSetContentReady?: (setContent: (text: string, mentions?: MentionData[]) => void) => void;
   onSetTextReady?: (setText: (text: string) => void) => void;
   initialMention?: MentionData | null | undefined;
   initialQuery?: InitialQueryData | null | undefined;
@@ -297,6 +298,45 @@ function InsertTextPlugin({
   return null;
 }
 
+function SetContentPlugin({
+  onSetContentReady,
+}: {
+  onSetContentReady?: (setContent: (text: string, mentions?: MentionData[]) => void) => void;
+}): null {
+  const [editor] = useLexicalComposerContext();
+
+  useEffect(() => {
+    if (onSetContentReady) {
+      const setContent = (text: string, mentions: MentionData[] = []): void => {
+        editor.update(() => {
+          const root = $getRoot();
+          root.clear();
+          const paragraph = $createParagraphNode();
+          // Insert mention nodes first
+          for (const mention of mentions) {
+            const mentionNode = $createFilterChip(mention);
+            paragraph.append(mentionNode);
+            paragraph.append($createTextNode(' '));
+          }
+          // Then the query text
+          if (text) {
+            const textNode = $createTextNode(text);
+            paragraph.append(textNode);
+            textNode.selectEnd();
+          } else if (paragraph.getLastChild()) {
+            paragraph.getLastChild()!.selectEnd();
+          }
+          root.append(paragraph);
+        });
+        editor.focus();
+      };
+      onSetContentReady(setContent);
+    }
+  }, [editor, onSetContentReady]);
+
+  return null;
+}
+
 // Imperative "replace the whole editor with plain text" (caret at end). Used by
 // the slash-command mode to seed `/call `/`/chat ` or clear a typed name fragment.
 function SetTextPlugin({
@@ -509,6 +549,7 @@ export function LexicalSearchInput({
   onManualKeystroke,
   autocompleteSuffix,
   onInsertTextReady,
+  onSetContentReady,
   onSetTextReady,
   initialMention,
   initialQuery,
@@ -600,6 +641,7 @@ export function LexicalSearchInput({
             />
           )}
           {onInsertTextReady && <InsertTextPlugin onInsertTextReady={onInsertTextReady} />}
+          {onSetContentReady && <SetContentPlugin onSetContentReady={onSetContentReady} />}
           {onSetTextReady && <SetTextPlugin onSetTextReady={onSetTextReady} />}
           <CursorPositionPlugin onPositionChange={handlePositionChange} />
           <SingleLinePastePlugin />
