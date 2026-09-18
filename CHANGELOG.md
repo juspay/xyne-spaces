@@ -1,3 +1,16 @@
+## [1.337.0-release-20260918.9](https://github.com/juspay/xyne-spaces/compare/v1.337.0-release-20260918.8...v1.337.0-release-20260918.9) (2026-09-18)
+
+
+### Features
+
+* fixed mimetype race ([#2062](https://github.com/juspay/xyne-spaces/issues/2062)) ([85126ca](https://github.com/juspay/xyne-spaces/commit/85126ca3f66c85ec3e3d07eb81793537e01f321d))
+* release ([#2068](https://github.com/juspay/xyne-spaces/issues/2068)) ([b5bf98e](https://github.com/juspay/xyne-spaces/commit/b5bf98e24a46aeee7901f66be043b323daa40add))
+
+
+### Bug Fixes
+
+* stop Radar creating a duplicate item when a requester re-asks ([#2066](https://github.com/juspay/xyne-spaces/issues/2066)) ([9a02e1a](https://github.com/juspay/xyne-spaces/commit/9a02e1a1e532418a9571238826142d6c793235c5))
+
 ## [1.337.0-release-20260918.8](https://github.com/juspay/xyne-spaces/compare/v1.337.0-release-20260918.7...v1.337.0-release-20260918.8) (2026-09-18)
 
 
