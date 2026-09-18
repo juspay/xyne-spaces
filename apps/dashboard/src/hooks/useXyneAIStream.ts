@@ -33,13 +33,6 @@ import {
  */
 export interface StreamOverrides {
   channelIds?: string[];
-  collectionIds?: string[];
-  fileIds?: string[];
-  /** Folder scopes from the composer picker. Sent to claw-auth as a single
-   *  'folder' attached_context pointer per id — xyneAIControllerV2.ts does
-   *  NOT expand this to a recursive file list; claw-auth resolves it itself,
-   *  at Vespa-query time. */
-  folderIds?: string[];
   webSearchEnabled?: boolean;
   deepResearchEnabled?: boolean;
   createCanvasEnabled?: boolean;
@@ -85,13 +78,6 @@ interface UseXyneAIStreamParams {
   webSearchEnabled?: boolean;
   deepResearchEnabled?: boolean;
   researchContext?: ResearchContext | null;
-  collectionIds?: string[];
-  fileIds?: string[];
-  /** Folder scopes from the composer picker. Sent to claw-auth as a single
-   *  'folder' attached_context pointer per id — xyneAIControllerV2.ts does
-   *  NOT expand this to a recursive file list; claw-auth resolves it itself,
-   *  at Vespa-query time. */
-  folderIds?: string[];
   createCanvasEnabled?: boolean;
   instant?: boolean;
   isV2?: boolean;
@@ -168,9 +154,6 @@ export const useXyneAIStream = ({
   webSearchEnabled = false,
   deepResearchEnabled = false,
   researchContext,
-  collectionIds,
-  fileIds,
-  folderIds,
   createCanvasEnabled = false,
   instant = false,
   isV2 = false,
@@ -355,9 +338,6 @@ export const useXyneAIStream = ({
       const eResearchContext =
         ov && 'researchContext' in ov ? (ov.researchContext ?? null) : researchContext;
       const eChannelIds = ov?.channelIds ?? channelIds;
-      const eCollectionIds = ov?.collectionIds ?? collectionIds ?? [];
-      const eFileIds = ov?.fileIds ?? fileIds ?? [];
-      const eFolderIds = ov?.folderIds ?? folderIds ?? [];
       const eTicketIds = ov?.ticketIds ?? ticketIds;
       const eCanvasIds = ov?.canvasIds ?? canvasIds;
       const eCallIds = ov?.callIds ?? callIds;
@@ -486,6 +466,12 @@ export const useXyneAIStream = ({
           ? 'edit'
           : (ov?.trigger ?? 'submit');
       if (trigger !== 'button') {
+        // Files/folders/collections ride in combinedAttachedContext (no
+        // separate id arrays) — count by type for the tracking metadata.
+        const eFileCount = combinedAttachedContext?.filter(i => i.type === 'file').length ?? 0;
+        const eFolderCount = combinedAttachedContext?.filter(i => i.type === 'folder').length ?? 0;
+        const eCollectionCount =
+          combinedAttachedContext?.filter(i => i.type === 'collection').length ?? 0;
         globalClickTracker.trackManualEvent('XyneAI', 'SEND_MESSAGE', undefined, {
           ...aiRunTrackingMetadata({
             surface,
@@ -500,9 +486,9 @@ export const useXyneAIStream = ({
             instant: eInstant,
             attachmentsCount: attachments.length,
             channelCount: eChannelIds.length,
-            fileCount: eFileIds.length,
-            folderCount: eFolderIds.length,
-            collectionCount: eCollectionIds.length,
+            fileCount: eFileCount,
+            folderCount: eFolderCount,
+            collectionCount: eCollectionCount,
             canvasCount: eCanvasIds?.length ?? 0,
             ticketCount: eTicketIds?.length ?? 0,
             callCount: eCallIds?.length ?? 0,
@@ -532,9 +518,6 @@ export const useXyneAIStream = ({
           query: internalQuery,
           displayQuery: displayContent ?? query,
           channelIds: eChannelIds,
-          collectionIds: eCollectionIds,
-          fileIds: eFileIds,
-          folderIds: eFolderIds,
           conversationId,
           threadConversationId,
           attachmentIds,
@@ -573,14 +556,11 @@ export const useXyneAIStream = ({
     [
       threadId,
       channelIds,
-      collectionIds,
       conversationId,
       threadConversationId,
       attachmentIds,
       canvasId,
       workflowContext,
-      fileIds,
-      folderIds,
       researchContext,
       webSearchEnabled,
       deepResearchEnabled,
