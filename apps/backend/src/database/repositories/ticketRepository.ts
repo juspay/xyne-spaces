@@ -1265,6 +1265,7 @@ export class TicketRepository {
       closedAt?: Date | null;
       closedBy?: string | null;
       aiPriority?: string;
+      merchantId?: string | null;
     },
     updatedBy: string,
     options: { cascadeFlow?: boolean } = {},
@@ -1280,6 +1281,7 @@ export class TicketRepository {
     if (fields.closedAt !== undefined) data.closedAt = fields.closedAt;
     if (fields.closedBy !== undefined) data.closedBy = fields.closedBy;
     if (fields.aiPriority !== undefined) data.aiPriority = fields.aiPriority;
+    if (fields.merchantId !== undefined) data.merchantId = fields.merchantId;
 
     if (Object.keys(data).length <= 2) {
       return;
@@ -1329,6 +1331,15 @@ export class TicketRepository {
         : null;
     }
     const previousStatus: TicketStatusV2 | null = prevSnapshot?.statusV2 ?? null;
+
+    // Same as createTicket: make sure the merchant row exists before linking to it.
+    if (fields.merchantId) {
+      await prisma.merchant.upsert({
+        where: { mid: fields.merchantId },
+        update: {},
+        create: { mid: fields.merchantId },
+      });
+    }
 
     const updatedTicket = await prisma.ticket.update({ where: { id: ticketId }, data });
 

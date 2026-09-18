@@ -95,6 +95,7 @@ const CreateTicketBodySchema = z.object({
   stageName: z.string().trim().optional(),
   eta: z.string().datetime({ message: 'ETA must be a valid ISO 8601 date string' }).optional(),
   ticketType: z.string().trim().optional(),
+  merchantId: z.string().trim().min(1, 'Merchant ID cannot be empty').optional(),
   dynamicFields: z.record(z.unknown()).optional(),
 }).refine(
   data => !!data.channelId || !!data.channelName,
@@ -123,6 +124,8 @@ const UpdateTicketBodySchema = z.object({
   boardId: z.string().min(1, 'Board ID cannot be empty').trim().optional(),
   isArchived: z.boolean().optional(),
   tags: z.array(z.string().trim().min(1, 'Tags cannot be empty')).optional(),
+  // null clears the merchant link
+  merchantId: z.string().trim().min(1, 'Merchant ID cannot be empty').nullable().optional(),
   dynamicFields: z.record(z.unknown()).optional(),
 }).refine(
   data => !!data.channelId || !!data.channelName || !!data.conversationId,
@@ -132,7 +135,8 @@ const UpdateTicketBodySchema = z.object({
     data.assigneeId || data.assignedToEmail || data.stageName || data.groupId ||
     data.title || data.description || data.priority || data.eta ||
     data.ticketType || data.statusV2 || data.boardId || data.assignedUserGroupAlias ||
-    data.isArchived !== undefined || data.tags || data.dynamicFields
+    data.isArchived !== undefined || data.tags || data.dynamicFields ||
+    data.merchantId !== undefined
   ),
   { message: 'At least one field to update is required', path: ['assigneeId'] }
 ).refine(
@@ -689,6 +693,7 @@ export class TicketController {
         stageName: requestedStageName,
         eta: etaString,
         ticketType,
+        merchantId,
         dynamicFields,
       } = bodyResult.data;
 
@@ -822,6 +827,7 @@ export class TicketController {
         stageName: resolvedStageName,
         eta: etaDate,
         ticketType,
+        merchantId,
         customFieldValues,
       });
 
@@ -935,6 +941,7 @@ export class TicketController {
         boardId,
         isArchived,
         tags,
+        merchantId,
         dynamicFields,
       } = bodyResult.data;
 
@@ -1120,6 +1127,7 @@ export class TicketController {
       if (ticketType !== undefined) directUpdates.ticketType = ticketType;
       if (statusV2 !== undefined) directUpdates.statusV2 = statusV2;
       if (isArchived !== undefined) directUpdates.isArchived = isArchived;
+      if (merchantId !== undefined) directUpdates.merchantId = merchantId;
 
       if (Object.keys(directUpdates).length > 0) {
         await repositories.tickets.updateTicketFields(ticketId, directUpdates, userId);
