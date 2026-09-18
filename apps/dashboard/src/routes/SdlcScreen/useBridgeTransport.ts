@@ -35,6 +35,7 @@ export function useBridgeTransport(enabled: boolean, events: TransportEvents): A
       return;
     }
     const onMessage = (event: MessageEvent): void => {
+      if (event.origin !== window.location.origin) return;
       const message = parseSdlcFrameMessage(event.data);
       if (!message || message.type !== SDLC_FRAME_MESSAGE.embedEvent) return;
       const payload = message.payload;
