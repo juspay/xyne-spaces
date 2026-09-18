@@ -8,7 +8,13 @@ import { safeHttpUrl } from './safeHttpUrl';
 import { LocalDiffView, LocalDiffActions, isLocalDiffArtifact } from './LocalDiffView';
 import type { ReviewGuide } from './reviewDiff';
 import { DesignPanel } from './design/DesignPanel';
-import { Centered, FileView, HtmlDocView, MarkdownView, SandboxedFrame } from '../../workspaceItems/primitives';
+import {
+  Centered,
+  FileView,
+  HtmlDocView,
+  MarkdownView,
+  SandboxedFrame,
+} from '../../workspaceItems/primitives';
 import { itemFromArtifact } from '../../workspaceItems';
 import { AiBrowserItemView } from './AiBrowserItemView';
 

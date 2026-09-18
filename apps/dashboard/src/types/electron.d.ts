@@ -237,7 +237,10 @@ export interface ElectronAPI {
     onPageToolRequest?: (
       listener: (req: { id: string; toolName: string; args: Record<string, unknown> }) => void,
     ) => () => void;
-    sendPageToolResult?: (id: string, result: { ok: boolean; content: string; image?: { data: string; mimeType: string } }) => void;
+    sendPageToolResult?: (
+      id: string,
+      result: { ok: boolean; content: string; image?: { data: string; mimeType: string } },
+    ) => void;
   };
   saveErrorReportFile?(
     fileName: string,
@@ -292,7 +295,15 @@ export interface ElectronWebviewElement extends HTMLElement {
   isLoading(): boolean;
   executeJavaScript(code: string, userGesture?: boolean): Promise<unknown>;
   sendInputEvent(event: Record<string, unknown>): Promise<void> | void;
-  capturePage(): Promise<{ toDataURL(): string; toPNG(): Uint8Array; getSize(): { width: number; height: number }; resize(options: { width?: number; height?: number }): { toDataURL(): string; getSize(): { width: number; height: number } } }>;
+  capturePage(): Promise<{
+    toDataURL(): string;
+    toPNG(): Uint8Array;
+    getSize(): { width: number; height: number };
+    resize(options: { width?: number; height?: number }): {
+      toDataURL(): string;
+      getSize(): { width: number; height: number };
+    };
+  }>;
   setZoomFactor?: (factor: number) => void;
 }
 

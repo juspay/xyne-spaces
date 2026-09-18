@@ -758,7 +758,13 @@ function PlanStatusIcon({ status }: { status: PlanTodo['status'] }): ReactElemen
   return <MoreHorizontal className='h-3.5 w-3.5' aria-hidden='true' />;
 }
 
-function PlanCard({ todos, title }: { todos: PlanTodo[]; title?: string | undefined }): ReactElement {
+function PlanCard({
+  todos,
+  title,
+}: {
+  todos: PlanTodo[];
+  title?: string | undefined;
+}): ReactElement {
   const done = todos.filter(todo => todo.status === 'completed').length;
   const failed = todos.filter(todo => todo.status === 'failed').length;
   return (
@@ -772,10 +778,14 @@ function PlanCard({ todos, title }: { todos: PlanTodo[]; title?: string | undefi
       <div className='space-y-1.5'>
         {todos.map((todo, index) => (
           <div key={todo.id || index} className='flex min-w-0 items-start gap-2'>
-            <span className={`mt-0.5 inline-flex h-4 w-4 shrink-0 items-center justify-center ${PLAN_STATUS_CLASSES[todo.status]}`}>
+            <span
+              className={`mt-0.5 inline-flex h-4 w-4 shrink-0 items-center justify-center ${PLAN_STATUS_CLASSES[todo.status]}`}
+            >
               <PlanStatusIcon status={todo.status} />
             </span>
-            <span className={`min-w-0 break-words leading-snug ${todo.status === 'in_progress' ? 'font-medium' : ''}`}>
+            <span
+              className={`min-w-0 break-words leading-snug ${todo.status === 'in_progress' ? 'font-medium' : ''}`}
+            >
               {todo.title}
             </span>
           </div>
@@ -2308,7 +2318,9 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
                   : {}),
               }
             : {}),
-          ...(pageSelection?.readSelection() ? { pageSelection: pageSelection.readSelection()! } : {}),
+          ...(pageSelection?.readSelection()
+            ? { pageSelection: pageSelection.readSelection()! }
+            : {}),
         },
       );
 

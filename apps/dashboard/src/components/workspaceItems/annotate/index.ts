@@ -11,9 +11,4 @@ export {
   type SelectionSink,
   type PassageSelection,
 } from './selectionSink';
-export type {
-  AnnotateTransport,
-  TransportEvents,
-  PickedBlock,
-  CommentMark,
-} from './transport';
+export type { AnnotateTransport, TransportEvents, PickedBlock, CommentMark } from './transport';

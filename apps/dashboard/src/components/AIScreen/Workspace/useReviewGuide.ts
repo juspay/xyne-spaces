@@ -5,9 +5,7 @@ import { parseReviewGuide, type ReviewGuide } from './reviewDiff';
 
 const GUIDE_FILENAME = /^review-comments\.json$/i;
 
-export function findGuideArtifact(
-  artifacts: ConversationArtifact[],
-): ConversationArtifact | null {
+export function findGuideArtifact(artifacts: ConversationArtifact[]): ConversationArtifact | null {
   const candidates = artifacts.filter(
     artifact => artifact.kind === 'FILE' && GUIDE_FILENAME.test(artifact.title.trim()),
   );

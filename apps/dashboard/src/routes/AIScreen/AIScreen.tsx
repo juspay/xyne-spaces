@@ -78,26 +78,36 @@ function WorkspaceAutoOpener({
     seenArtifacts.current = stamps;
     if (seen === null) return;
     const designVersionRefs = new Set(
-      artifacts.filter(a => a.kind === 'DESIGN_HTML' && a.latestVersionRef).map(a => a.latestVersionRef as string),
+      artifacts
+        .filter(a => a.kind === 'DESIGN_HTML' && a.latestVersionRef)
+        .map(a => a.latestVersionRef as string),
     );
     const fresh = artifacts.filter(
-      a =>
-        seen.get(a.id) !== a.updatedAt &&
-        !(a.kind === 'FILE' && designVersionRefs.has(a.refId)),
+      a => seen.get(a.id) !== a.updatedAt && !(a.kind === 'FILE' && designVersionRefs.has(a.refId)),
     );
     if (fresh.length === 0) return;
     const rank = (kind: ConversationArtifact['kind']): number =>
-      kind === 'DESIGN_HTML' ? 0
-      : kind === 'REVIEW_ROOM' ? 1
-      : kind === 'LESSON' ? 1
-      : kind === 'CANVAS' ? 1
-      : kind === 'REACT_APP' ? 2
-      : kind === 'DIFF' ? 3
-      : kind === 'PREVIEW' ? 4
-      : kind === 'SPEC' ? 5
-      : kind === 'FILE' ? 6
-      : kind === 'LINK' ? 7
-      : 8;
+      kind === 'DESIGN_HTML'
+        ? 0
+        : kind === 'REVIEW_ROOM'
+          ? 1
+          : kind === 'LESSON'
+            ? 1
+            : kind === 'CANVAS'
+              ? 1
+              : kind === 'REACT_APP'
+                ? 2
+                : kind === 'DIFF'
+                  ? 3
+                  : kind === 'PREVIEW'
+                    ? 4
+                    : kind === 'SPEC'
+                      ? 5
+                      : kind === 'FILE'
+                        ? 6
+                        : kind === 'LINK'
+                          ? 7
+                          : 8;
     const best = [...fresh].sort((a, b) => rank(a.kind) - rank(b.kind))[0]!;
     const tab =
       best.kind === 'PAGE'
@@ -594,80 +604,80 @@ const AIScreen = (): ReactElement => {
     <CitationDocsProvider>
       <DesignStudioProvider>
         <PageSelectionProvider submitPrompt={submitPrompt}>
-        <CitationWorkspaceOpener onOpenSources={openSourcesInWorkspace} />
-        <WorkspaceAutoOpener artifacts={conversationArtifacts} onOpen={openWorkspaceTab} />
-        <AppCreationModeProvider value={appModeSignal}>
-          <AIShell
-            activeSessionId={activeSessionId}
-            onCreateChat={handleCreateChat}
-            onSelectSession={handleSelectSession}
-            onAccount={handleAccount}
-            mobileOpen={mobileSidebarOpen}
-            onMobileOpenChange={setMobileSidebarOpen}
-            mainRef={dropZoneRef}
-            collapseSignal={collapseSignal}
-            onSidebarCollapsedChange={setSidebarCollapsed}
-            sidebarToggleRef={sidebarToggleRef}
-            workspacePanel={workspacePane}
-            workspaceOpen={workspaceOpen}
-            onExpandWorkspace={() => setWorkspaceOverride(true)}
-            onCloseWorkspace={() => setWorkspaceOverride(false)}
-            workspaceControlsRef={workspaceControlsRef}
-          >
-            {isDragging && !showChatView && (
-              <div className='pointer-events-none absolute inset-0 z-50 flex flex-col items-center justify-center rounded-xl border-2 border-dashed border-primary/50 bg-background/95 backdrop-blur-sm'>
-                <div className='flex flex-col items-center gap-3'>
-                  <div className='rounded-full bg-primary/10 p-4'>
-                    <Upload className='h-8 w-8 text-primary' />
-                  </div>
-                  <div className='text-center'>
-                    <p className='text-lg font-medium text-foreground'>Drop files to attach</p>
-                    <p className='text-sm text-muted-foreground'>
-                      Images, PDF, text, office documents, or data files
-                    </p>
-                  </div>
-                </div>
-              </div>
-            )}
-            {showChatView ? (
-              <AIChatThread
-                ref={chatThreadRef}
-                key={chatKey}
-                sessionId={activeSessionId || undefined}
-                initialQuery={initialQuery}
-                initialAttachments={initialAttachments}
-                initialExtras={initialExtras}
-                initialTrigger={initialTrigger}
-                onSetMobileSidebarOpen={setMobileSidebarOpen}
-                onConversationChange={handleConversationChange}
-                onAppChange={handleAppChange}
-                onToggleSidebar={handleToggleSidebar}
-                sidebarCollapsed={sidebarCollapsed}
-                onAgentChange={handleAgentChange}
-                onContextChange={handleContextChange}
-                onInitialQueryConsumed={handleInitialQueryConsumed}
-              />
-            ) : (
-              /* Landing page – centred greeting + composer */
-              <main className='flex h-full flex-1 items-center justify-center px-6 py-8'>
-                <div className='flex w-full max-w-3xl flex-col'>
-                  <AIEmptyState />
-                  <div className='mt-6'>
-                    <AIComposer
-                      ref={landingComposerRef}
-                      autoFocus
-                      onSubmit={handleComposerSubmit}
-                      onAgentChange={handleAgentChange}
-                      showAgentSelector={isV2}
-                      onContextChange={handleContextChange}
-                      hideDisclaimer
-                    />
+          <CitationWorkspaceOpener onOpenSources={openSourcesInWorkspace} />
+          <WorkspaceAutoOpener artifacts={conversationArtifacts} onOpen={openWorkspaceTab} />
+          <AppCreationModeProvider value={appModeSignal}>
+            <AIShell
+              activeSessionId={activeSessionId}
+              onCreateChat={handleCreateChat}
+              onSelectSession={handleSelectSession}
+              onAccount={handleAccount}
+              mobileOpen={mobileSidebarOpen}
+              onMobileOpenChange={setMobileSidebarOpen}
+              mainRef={dropZoneRef}
+              collapseSignal={collapseSignal}
+              onSidebarCollapsedChange={setSidebarCollapsed}
+              sidebarToggleRef={sidebarToggleRef}
+              workspacePanel={workspacePane}
+              workspaceOpen={workspaceOpen}
+              onExpandWorkspace={() => setWorkspaceOverride(true)}
+              onCloseWorkspace={() => setWorkspaceOverride(false)}
+              workspaceControlsRef={workspaceControlsRef}
+            >
+              {isDragging && !showChatView && (
+                <div className='pointer-events-none absolute inset-0 z-50 flex flex-col items-center justify-center rounded-xl border-2 border-dashed border-primary/50 bg-background/95 backdrop-blur-sm'>
+                  <div className='flex flex-col items-center gap-3'>
+                    <div className='rounded-full bg-primary/10 p-4'>
+                      <Upload className='h-8 w-8 text-primary' />
+                    </div>
+                    <div className='text-center'>
+                      <p className='text-lg font-medium text-foreground'>Drop files to attach</p>
+                      <p className='text-sm text-muted-foreground'>
+                        Images, PDF, text, office documents, or data files
+                      </p>
+                    </div>
                   </div>
                 </div>
-              </main>
-            )}
-          </AIShell>
-        </AppCreationModeProvider>
+              )}
+              {showChatView ? (
+                <AIChatThread
+                  ref={chatThreadRef}
+                  key={chatKey}
+                  sessionId={activeSessionId || undefined}
+                  initialQuery={initialQuery}
+                  initialAttachments={initialAttachments}
+                  initialExtras={initialExtras}
+                  initialTrigger={initialTrigger}
+                  onSetMobileSidebarOpen={setMobileSidebarOpen}
+                  onConversationChange={handleConversationChange}
+                  onAppChange={handleAppChange}
+                  onToggleSidebar={handleToggleSidebar}
+                  sidebarCollapsed={sidebarCollapsed}
+                  onAgentChange={handleAgentChange}
+                  onContextChange={handleContextChange}
+                  onInitialQueryConsumed={handleInitialQueryConsumed}
+                />
+              ) : (
+                /* Landing page – centred greeting + composer */
+                <main className='flex h-full flex-1 items-center justify-center px-6 py-8'>
+                  <div className='flex w-full max-w-3xl flex-col'>
+                    <AIEmptyState />
+                    <div className='mt-6'>
+                      <AIComposer
+                        ref={landingComposerRef}
+                        autoFocus
+                        onSubmit={handleComposerSubmit}
+                        onAgentChange={handleAgentChange}
+                        showAgentSelector={isV2}
+                        onContextChange={handleContextChange}
+                        hideDisclaimer
+                      />
+                    </div>
+                  </div>
+                </main>
+              )}
+            </AIShell>
+          </AppCreationModeProvider>
         </PageSelectionProvider>
       </DesignStudioProvider>
     </CitationDocsProvider>

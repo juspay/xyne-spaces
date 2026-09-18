@@ -262,7 +262,10 @@ export async function executePageTool(
       case 'page-screenshot': {
         const captured = await wv.capturePage();
         const size = captured.getSize();
-        const scaled = size.width > SCREENSHOT_MAX_WIDTH ? captured.resize({ width: SCREENSHOT_MAX_WIDTH }) : captured;
+        const scaled =
+          size.width > SCREENSHOT_MAX_WIDTH
+            ? captured.resize({ width: SCREENSHOT_MAX_WIDTH })
+            : captured;
         const dataUrl = scaled.toDataURL();
         const comma = dataUrl.indexOf(',');
         const data = comma >= 0 ? dataUrl.slice(comma + 1) : '';

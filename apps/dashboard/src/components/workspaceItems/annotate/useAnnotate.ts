@@ -83,10 +83,7 @@ export function useAnnotate({
     [item.id],
   );
 
-  useEffect(
-    () => registerAnchorRevealer(item.id, anchor => reveal(anchor)),
-    [item.id, reveal],
-  );
+  useEffect(() => registerAnchorRevealer(item.id, anchor => reveal(anchor)), [item.id, reveal]);
 
   const start = useCallback((): void => {
     setPicking(true);

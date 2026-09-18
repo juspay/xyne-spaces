@@ -26,14 +26,23 @@ function SpeakingBars(): ReactElement {
         <span
           key={i}
           className='w-1 rounded-full bg-claw-ai-fg'
-          style={{ height: '1.25rem', animation: `voicePulse 900ms ease-in-out ${i * 120}ms infinite` }}
+          style={{
+            height: '1.25rem',
+            animation: `voicePulse 900ms ease-in-out ${i * 120}ms infinite`,
+          }}
         />
       ))}
     </span>
   );
 }
 
-export function VoiceModeBar({ phase, studioMode, onHoldStart, onHoldEnd, onExit }: VoiceModeBarProps): ReactElement {
+export function VoiceModeBar({
+  phase,
+  studioMode,
+  onHoldStart,
+  onHoldEnd,
+  onExit,
+}: VoiceModeBarProps): ReactElement {
   const listening = phase === 'listening';
   const busy = phase === 'transcribing' || phase === 'thinking';
   const speaking = phase === 'speaking';
@@ -112,7 +121,12 @@ export function VoiceModeBar({ phase, studioMode, onHoldStart, onHoldEnd, onExit
             )}
           </button>
         </div>
-        <span className={cn('text-xs font-medium', listening ? 'text-red-500' : 'text-muted-foreground')}>
+        <span
+          className={cn(
+            'text-xs font-medium',
+            listening ? 'text-red-500' : 'text-muted-foreground',
+          )}
+        >
           {PHASE_LABEL[phase]}
         </span>
       </div>

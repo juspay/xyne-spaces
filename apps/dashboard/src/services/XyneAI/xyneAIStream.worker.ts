@@ -69,7 +69,10 @@ export interface WorkerStartStreamMessage {
       designArtifactAttachmentId?: string;
       designSelection?: DesignSelectionPayload;
       pageSelection?: PageSelectionPayload;
-      openItems?: { container?: string; items: Array<{ title: string; kind: string; url?: string; active?: boolean }> };
+      openItems?: {
+        container?: string;
+        items: Array<{ title: string; kind: string; url?: string; active?: boolean }>;
+      };
       parentMessageId?: string;
       isRegenerate?: boolean;
       // Branching: edit-user signals that the new user message is a sibling
@@ -231,7 +234,8 @@ async function executeStream(
               filename: a.filename,
             })),
           }),
-        ...(requestBody.sandboxMode && requestBody.sandboxMode !== 'remote' && { sandboxMode: requestBody.sandboxMode }),
+        ...(requestBody.sandboxMode &&
+          requestBody.sandboxMode !== 'remote' && { sandboxMode: requestBody.sandboxMode }),
         ...(requestBody.studioMode && { studioMode: requestBody.studioMode }),
         ...(requestBody.designArtifactAttachmentId && {
           designArtifactAttachmentId: requestBody.designArtifactAttachmentId,

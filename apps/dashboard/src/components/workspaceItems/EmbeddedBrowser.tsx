@@ -54,7 +54,6 @@ export function EmbeddedBrowser({
     void window.electronAPI?.focusHostWebContents?.();
   }, []);
 
-
   const attach = useCallback(
     (el: HTMLElement | null) => {
       const next = el ? (el as ElectronWebviewElement) : null;

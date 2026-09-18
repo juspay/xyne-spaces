@@ -13,10 +13,7 @@ import { SDLC_FRAME_MESSAGE, parseSdlcFrameMessage } from './sdlcFrameMessages';
  * nothing here can reach it directly. The host evaluates on our behalf and
  * relays what the page reports back; the annotator above cannot tell.
  */
-export function useBridgeTransport(
-  enabled: boolean,
-  events: TransportEvents,
-): AnnotateTransport {
+export function useBridgeTransport(enabled: boolean, events: TransportEvents): AnnotateTransport {
   const [ready, setReady] = useState(false);
   const handlers = useRef(events);
   handlers.current = events;

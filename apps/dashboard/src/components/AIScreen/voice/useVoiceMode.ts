@@ -80,8 +80,8 @@ export function useVoiceMode({ enabled, submit, voice }: UseVoiceModeParams): Us
       const tick = (): void => {
         analyser.getByteTimeDomainData(data);
         let sum = 0;
-        for (let i = 0; i < data.length; i += 1) {
-          const x = (data[i] - 128) / 128;
+        for (const sample of data) {
+          const x = (sample - 128) / 128;
           sum += x * x;
         }
         const rms = Math.sqrt(sum / data.length);

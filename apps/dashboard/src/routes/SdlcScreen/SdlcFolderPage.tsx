@@ -663,7 +663,10 @@ export function SdlcFolderPage(props: {
   const notePickedRef = useRef<() => void>(() => undefined);
   const bridgeTransport = useBridgeTransport(browsing && canHostEmbedPages(), {
     onPick: block => {
-      setDraftAnchor({ quote: block.text, ...(block.selector ? { selector: block.selector } : {}) });
+      setDraftAnchor({
+        quote: block.text,
+        ...(block.selector ? { selector: block.selector } : {}),
+      });
       setCommentsOpen(true);
       notePickedRef.current();
     },
@@ -948,10 +951,7 @@ export function SdlcFolderPage(props: {
         <div className='flex min-h-0 flex-1 overflow-hidden bg-background'>
           {active ? (
             <>
-              <div
-                ref={setViewerRoot}
-                className='relative min-h-0 min-w-0 flex-1 overflow-hidden'
-              >
+              <div ref={setViewerRoot} className='relative min-h-0 min-w-0 flex-1 overflow-hidden'>
                 <TabContent
                   tab={active}
                   maps={props.maps}
@@ -997,7 +997,12 @@ const EMPTY_ITEM: WorkspaceItem = {
 
 function tabItem(tab: FolderTab, maps: Maps): WorkspaceItem | null {
   if (tab.kind === 'BROWSER') {
-    return itemFromSdlc({ id: tab.id, title: 'Browsing', kind: 'BROWSER', url: SCRATCH_START_PAGE });
+    return itemFromSdlc({
+      id: tab.id,
+      title: 'Browsing',
+      kind: 'BROWSER',
+      url: SCRATCH_START_PAGE,
+    });
   }
   if (tab.kind === 'CANVAS') {
     const canvas = maps.canvasById.get(tab.id);
@@ -1006,12 +1011,23 @@ function tabItem(tab: FolderTab, maps: Maps): WorkspaceItem | null {
   if (tab.kind === 'LINK') {
     const link = maps.linkById.get(tab.id);
     return link
-      ? itemFromSdlc({ id: tab.id, title: link.title.trim() || link.url, kind: 'LINK', url: link.url })
+      ? itemFromSdlc({
+          id: tab.id,
+          title: link.title.trim() || link.url,
+          kind: 'LINK',
+          url: link.url,
+        })
       : null;
   }
   const file = maps.fileById.get(tab.id);
   return file
-    ? itemFromSdlc({ id: tab.id, title: file.name, kind: 'FILE', url: file.url, mimeType: file.mimetype })
+    ? itemFromSdlc({
+        id: tab.id,
+        title: file.name,
+        kind: 'FILE',
+        url: file.url,
+        mimeType: file.mimetype,
+      })
     : null;
 }
 
@@ -1082,7 +1098,11 @@ function TabContent(props: {
 }): ReactElement {
   const item = tabItem(props.tab, props.maps);
   if (!item) {
-    return <Missing what={props.tab.kind === 'LINK' ? 'link' : props.tab.kind === 'CANVAS' ? 'canvas' : 'file'} />;
+    return (
+      <Missing
+        what={props.tab.kind === 'LINK' ? 'link' : props.tab.kind === 'CANVAS' ? 'canvas' : 'file'}
+      />
+    );
   }
 
   return (

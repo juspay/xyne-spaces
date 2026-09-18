@@ -151,21 +151,21 @@ export function WorkspaceSurface({
 
         <div className='flex min-h-0 w-full min-w-0 flex-1 overflow-hidden'>
           <div className='min-h-0 w-full min-w-0 flex-1 overflow-hidden'>
-          {active && own ? (
-            <div key={active.id} className='h-full min-h-0 w-full min-w-0'>
-              {own}
-            </div>
-          ) : active ? (
-            <ItemView
-              key={active.id}
-              item={active}
-              {...(slots ? { slots } : {})}
-              {...(browserBanner ? { browserBanner } : {})}
-              {...(browserOverlay ? { browserOverlay } : {})}
-            />
-          ) : (
-            (empty ?? <Centered>Nothing open yet.</Centered>)
-          )}
+            {active && own ? (
+              <div key={active.id} className='h-full min-h-0 w-full min-w-0'>
+                {own}
+              </div>
+            ) : active ? (
+              <ItemView
+                key={active.id}
+                item={active}
+                {...(slots ? { slots } : {})}
+                {...(browserBanner ? { browserBanner } : {})}
+                {...(browserOverlay ? { browserOverlay } : {})}
+              />
+            ) : (
+              (empty ?? <Centered>Nothing open yet.</Centered>)
+            )}
           </div>
           {active && commentsOpen ? (
             <CommentsPanel

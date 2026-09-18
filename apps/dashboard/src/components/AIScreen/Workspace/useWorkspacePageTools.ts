@@ -11,7 +11,9 @@ export function useWorkspacePageTools(): void {
 
   useEffect(() => {
     registerAppControlHost({
-      navigate: path => navigate(path),
+      navigate: path => {
+        void navigate(path);
+      },
       currentPath: () => location.pathname,
       workspaceId: () => workspaceId ?? location.pathname.split('/').filter(Boolean)[0] ?? '',
     });

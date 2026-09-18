@@ -152,7 +152,8 @@ export function parseReviewGuide(raw: string): ReviewGuide | null {
         ? Math.floor(lineValue)
         : null;
     comments.push({
-      id: typeof row['id'] === 'string' && row['id'] ? row['id'] : `C${String(comments.length + 1)}`,
+      id:
+        typeof row['id'] === 'string' && row['id'] ? row['id'] : `C${String(comments.length + 1)}`,
       file,
       line,
       severity: severityOf(row['severity']),
