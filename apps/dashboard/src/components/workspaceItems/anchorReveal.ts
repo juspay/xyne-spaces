@@ -14,7 +14,7 @@ export function registerAnchorRevealer(itemId: string, revealer: AnchorRevealer)
 export function revealAnchor(itemId: string, anchor: CommentAnchor | undefined): boolean {
   if (!anchor) return false;
   const revealer = revealers.get(itemId);
-  if (!revealer) return false;
+  if (typeof revealer !== 'function') return false;
   revealer(anchor);
   return true;
 }
