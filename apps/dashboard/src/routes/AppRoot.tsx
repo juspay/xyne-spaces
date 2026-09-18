@@ -53,6 +53,7 @@ import { LegacyKbRedirect } from '../components/knowledgeBaseV2/LegacyKbRedirect
 import { MemoryScreen } from './MemoryScreen';
 import { FileViewerLayout } from '../components/knowledgeBase/layout/FileViewerLayout';
 import AnalyticsScreen from './AnalyticsScreen/AnalyticsScreen';
+import SecretsScreen from './SecretsScreen/SecretsScreen';
 import ProjectsScreen from './ProjectsScreen/ProjectsScreen';
 import UserGroupsScreen from './UserGroupsScreen/UserGroupsScreen';
 import ProjectDetailScreen from './ProjectDetailScreen/ProjectDetailScreen';
@@ -1593,6 +1594,14 @@ export const router = createBrowserRouter(
                   element: (
                     <ResourceProtectedRoute resourceName='ANALYTICS'>
                       <AnalyticsScreen />
+                    </ResourceProtectedRoute>
+                  ),
+                },
+                {
+                  path: 'secrets',
+                  element: (
+                    <ResourceProtectedRoute resourceName='SECRETS'>
+                      <SecretsScreen />
                     </ResourceProtectedRoute>
                   ),
                 },

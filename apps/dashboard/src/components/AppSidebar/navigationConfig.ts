@@ -33,6 +33,7 @@ import {
   LayoutGridTwoVertical,
   type PikaIconProps,
   Tag,
+  KeySlant,
 } from '@xyne/icons';
 import { AudioLines } from 'lucide-react';
 
@@ -153,6 +154,7 @@ export const NAVIGATION_ITEMS: NavigationItem[] = [
   },
   { path: '/team-intelligence', label: 'Team Intelligence', icon: Atom, popout: true },
   { path: '/claw-agents', label: 'Claw Agents', icon: Bot, popout: true },
+  { path: '/secrets', label: 'Secrets', icon: KeySlant, iconSize: 18, popout: true },
 ];
 
 // Paths shown in the toolbar by default (before any user customization).
