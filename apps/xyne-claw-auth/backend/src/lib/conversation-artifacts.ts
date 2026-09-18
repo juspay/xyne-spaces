@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import type { ConversationArtifact } from "@prisma/client";
 import { prisma } from "../db.js";
+import { orgIdForSpacesUser } from "./users-jit.js";
 import { createLogger } from "../logger.js";
 
 const log = createLogger("conversation-artifacts");
@@ -159,6 +160,13 @@ export async function recordConversationArtifact(
   if (url && url.length > ARTIFACT_URL_MAX) url = url.slice(0, ARTIFACT_URL_MAX);
   const title = (input.title?.trim() || refId).slice(0, ARTIFACT_TITLE_MAX);
 
+  const orgId =
+    input.orgId ?? (await orgIdForSpacesUser(input.createdByUserId, "conversation-artifacts"));
+  if (!orgId) {
+    log.warn(`skipped record: no org for user=${input.createdByUserId} kind=${input.kind}`);
+    return null;
+  }
+
   const mutable = definedOnly({
     title,
     latestVersionRef: input.latestVersionRef,
@@ -166,7 +174,7 @@ export async function recordConversationArtifact(
     provider: input.provider,
     messageId: input.messageId,
     runId: input.runId,
-    orgId: input.orgId,
+    orgId,
   });
 
   return prisma.conversationArtifact.upsert({
@@ -185,7 +193,7 @@ export async function recordConversationArtifact(
       url,
       provider: input.provider ?? null,
       latestVersionRef: input.latestVersionRef ?? null,
-      orgId: input.orgId ?? null,
+      orgId,
     },
     update: {
       ...mutable,

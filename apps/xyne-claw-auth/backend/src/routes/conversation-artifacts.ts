@@ -243,6 +243,7 @@ conversationArtifactsRouter.post("/:id/comments", async (req: Request, res: Resp
       data: {
         conversationId: artifact.conversationId,
         artifactId: artifact.id,
+        orgId: artifact.orgId,
         userId: requesterId,
         body,
         ...(anchor ? { anchor } : {}),

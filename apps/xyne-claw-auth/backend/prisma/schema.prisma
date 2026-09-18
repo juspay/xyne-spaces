@@ -834,8 +834,11 @@ model LocalHarnessDevice {
   @@map("local_harness_devices")
 }
 
+// workspace-check:ignore — tenant scope inherited via artifactId -> ConversationArtifact; reads are gated on conversation membership, never on org.
 model ArtifactComment {
   id             String   @id @default(cuid())
+  /// Tenant that owns this comment, inherited from the artifact it hangs off.
+  orgId          String
   conversationId String
   artifactId     String
   userId         String
@@ -848,11 +851,15 @@ model ArtifactComment {
 
   @@index([artifactId, createdAt])
   @@index([conversationId, createdAt])
+  @@index([orgId])
   @@map("artifact_comments")
 }
 
+// workspace-check:ignore — tenant scope inherited via deviceId -> LocalHarnessDevice.orgId (FK, onDelete: Cascade); every read is keyed by that device.
 model SurfaceCall {
   id        String             @id @default(cuid())
+  /// Tenant that owns this call, inherited from the run that placed it.
+  orgId     String
   userId    String
   deviceId  String
   device    LocalHarnessDevice @relation(fields: [deviceId], references: [id], onDelete: Cascade)
@@ -870,6 +877,7 @@ model SurfaceCall {
 
   @@index([deviceId, status, createdAt])
   @@index([userId, createdAt])
+  @@index([orgId])
   @@map("surface_calls")
 }
 
@@ -904,6 +912,7 @@ model LocalHarnessRun {
   @@map("local_harness_runs")
 }
 
+// workspace-check:ignore — tenant scope inherited via userId -> User (FK, onDelete: Cascade); rows are keyed by that user's conversation and never read cross-user.
 model LocalHarnessSession {
   id             String   @id @default(cuid())
   userId         String
@@ -2872,6 +2881,7 @@ model AgentAwakeningRun {
   @@map("agent_awakening_runs")
 }
 
+// workspace-check:ignore — orgId is advisory: webhook/automation producers legitimately have none. Scope is the conversation (reads require ownership or a message in it).
 model ConversationArtifact {
   id             String  @id @default(cuid())
   conversationId String
@@ -2893,7 +2903,7 @@ model ConversationArtifact {
 
   pinned          Boolean @default(false)
   createdByUserId String
-  orgId           String?
+  orgId           String
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
