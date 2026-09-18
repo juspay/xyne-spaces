@@ -291,7 +291,11 @@ export const buildFilterChips = (
       case 'merchantIds': {
         const values = filters.merchantIds ?? [];
         if (values.length === 0) return;
-        push(field, { operator: 'include any of', value: summarize(values, field.noun), mono: true });
+        push(field, {
+          operator: 'include any of',
+          value: summarize(values, field.noun),
+          mono: true,
+        });
         return;
       }
       case 'sourceChannels': {

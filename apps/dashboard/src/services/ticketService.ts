@@ -94,3 +94,17 @@ export const getKanbanCounts = async (
   const response = await apiInstance.post<KanbanCountsResponse>('/tickets/kanban/counts', payload);
   return response.data;
 };
+
+export interface Merchant {
+  id: string;
+  mid: string;
+}
+
+/**
+ * Every known merchant, for the tickets Merchant ID filter. The list is small and
+ * has no tenant scoping server-side, so it is fetched once and searched locally.
+ */
+export const getMerchants = async (): Promise<Merchant[]> => {
+  const response = await apiInstance.get<{ success: boolean; merchants: Merchant[] }>('/merchants');
+  return response.data.merchants ?? [];
+};
