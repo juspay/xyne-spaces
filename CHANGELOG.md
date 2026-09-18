@@ -1,3 +1,10 @@
+## [1.342.0](https://github.com/juspay/xyne-spaces/compare/v1.341.0...v1.342.0) (2026-09-18)
+
+
+### Features
+
+* pre read canvas in calls ([#1936](https://github.com/juspay/xyne-spaces/issues/1936)) ([d6cd92b](https://github.com/juspay/xyne-spaces/commit/d6cd92b4a04c053fd2232ca7448b06b3467f1c06))
+
 ## [1.341.0](https://github.com/juspay/xyne-spaces/compare/v1.340.2...v1.341.0) (2026-09-18)
 
 
