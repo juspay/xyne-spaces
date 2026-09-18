@@ -4,10 +4,9 @@
  * `:channel` param is resolved against the plugin registry per request.
  *
  * Auth split: the webhook ingress authenticates itself per plugin (no user
- * session — messengers POST there); the account and pairing routes are an
- * admin API behind a verified Spaces user session; /my-numbers is the same
- * session with no admin gate, because it only ever touches the caller's own
- * identity rows.
+ * session — messengers POST there); the account routes are an admin API behind
+ * a verified Spaces user session; /my-numbers is the same session with no admin
+ * gate, because it only ever touches the caller's own identity rows.
  */
 import { Router, type Request, type Response, type NextFunction } from "express";
 import { requireUserAuth } from "../../../middleware/require-auth.js";

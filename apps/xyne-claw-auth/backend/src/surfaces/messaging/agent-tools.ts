@@ -14,38 +14,44 @@
  */
 import type { McpToolInfo } from "../../mcp/types.js";
 import { enqueueAndWait } from "./delivery.js";
-import type { ChannelDeliveryTarget, MessagingChannelKey } from "./plugin.js";
+import { getChannel, type ChannelDeliveryTarget, type MessagingChannelKey } from "./plugin.js";
+import { agentActionsSchema, type AgentActionGates } from "./schema.js";
 import { getAccount, toChannelAccount } from "./store.js";
 
-export interface AgentActionGates {
-  sendToOtherChats: boolean;
-  reactions: boolean;
-  listGroups: boolean;
-}
+const gatesSchema = agentActionsSchema();
 
-const DEFAULT_GATES: AgentActionGates = { sendToOtherChats: false, reactions: true, listGroups: true };
-
+/** Read the gates out of a plugin's opaque residue. Anything missing or
+ *  malformed falls back to the channel-neutral defaults. */
 export function agentActionGatesOf(channelConfig: unknown): AgentActionGates {
   const raw =
-    channelConfig && typeof channelConfig === "object"
-      ? ((channelConfig as { agentActions?: unknown }).agentActions as Record<string, unknown> | undefined)
-      : undefined;
-  if (!raw || typeof raw !== "object") return DEFAULT_GATES;
-  return {
-    sendToOtherChats: typeof raw["sendToOtherChats"] === "boolean" ? raw["sendToOtherChats"] : DEFAULT_GATES.sendToOtherChats,
-    reactions: typeof raw["reactions"] === "boolean" ? raw["reactions"] : DEFAULT_GATES.reactions,
-    listGroups: typeof raw["listGroups"] === "boolean" ? raw["listGroups"] : DEFAULT_GATES.listGroups,
-  };
+    channelConfig && typeof channelConfig === "object" ? (channelConfig as { agentActions?: unknown }).agentActions : undefined;
+  const parsed = gatesSchema.safeParse(raw ?? undefined);
+  return parsed.success ? parsed.data : gatesSchema.parse(undefined);
 }
 
 /** Tool names must be identifier-ish, so "whatsapp-cloud" → "whatsapp_cloud". */
-export function channelToolPrefix(channel: MessagingChannelKey): string {
+function channelToolPrefix(channel: MessagingChannelKey): string {
   return channel.replace(/-/g, "_");
 }
 
+/**
+ * The tools this channel can actually honour.
+ *
+ * Offering one it cannot — group listing on a business number that may not be
+ * in groups at all — spends a model turn on a call that fails, and teaches it
+ * the tool is unreliable rather than absent. Capability, not channel name,
+ * decides.
+ */
 export function channelAgentTools(channel: MessagingChannelKey): McpToolInfo[] {
   const label = channel.startsWith("whatsapp") ? "WhatsApp" : channel;
   const prefix = channelToolPrefix(channel);
+  const plugin = getChannel(channel);
+  const groups = plugin?.capabilities.groups ?? false;
+  const reactions = plugin?.capabilities.reactions ?? false;
+  // A shared business number is something people message, not something that
+  // opens conversations — so it is never given a way to address another chat.
+  // Without that, resolving a target has nothing to resolve for.
+  const mayAddressOtherChats = plugin?.accountScope !== "org";
   return [
     {
       name: `${prefix}_send_message`,
@@ -57,7 +63,9 @@ export function channelAgentTools(channel: MessagingChannelKey): McpToolInfo[] {
         type: "object",
         properties: {
           text: { type: "string", description: "Message text. Markdown is converted to the messenger's formatting." },
-          to: { type: "string", description: "Target chat: phone number, group id, or group name. Omit for the current chat." },
+          ...(mayAddressOtherChats
+            ? { to: { type: "string", description: "Target chat: phone number, group id, or group name. Omit for the current chat." } }
+            : {}),
           mentions: {
             type: "array",
             items: { type: "string" },
@@ -67,7 +75,8 @@ export function channelAgentTools(channel: MessagingChannelKey): McpToolInfo[] {
         required: ["text"],
       },
     },
-    {
+    ...(reactions
+      ? [{
       name: `${prefix}_react`,
       description: `React with an emoji to a ${label} message. Defaults to the message that started this conversation turn.`,
       inputSchema: {
@@ -79,13 +88,17 @@ export function channelAgentTools(channel: MessagingChannelKey): McpToolInfo[] {
         },
         required: ["emoji"],
       },
-    },
-    {
+    }]
+      : []),
+    ...(groups
+      ? [{
       name: `${prefix}_list_groups`,
       description: `List the ${label} groups this account is a member of (id, name, participant count).`,
       inputSchema: { type: "object", properties: {}, required: [] },
-    },
-    {
+    }]
+      : []),
+    ...(mayAddressOtherChats
+      ? [{
       name: `${prefix}_resolve_target`,
       description: `Check whether a phone number is on ${label} / find a group id by name. Returns the chat id to use with ${channel}_send_message.`,
       inputSchema: {
@@ -93,7 +106,8 @@ export function channelAgentTools(channel: MessagingChannelKey): McpToolInfo[] {
         properties: { target: { type: "string", description: "Phone number with country code, or a group name." } },
         required: ["target"],
       },
-    },
+    }]
+      : []),
   ];
 }
 
@@ -168,6 +182,15 @@ export async function handleChannelAgentTool(input: {
       if (!emoji) return JSON.stringify({ ok: false, error: "emoji is required" });
       const messageId = str(params, "message_id");
       const chat = str(params, "chat") ?? target.chatId;
+      // A reaction lands in someone's chat as a notification from this number,
+      // so reaching into another chat is the same permission as sending there,
+      // not a lesser one.
+      if (!sameChat(chat, target.chatId) && !gates.sendToOtherChats) {
+        return JSON.stringify({
+          ok: false,
+          error: `Reacting in other chats is disabled for this ${channel} account. Omit "chat" to react here.`,
+        });
+      }
       const ref = messageId
         ? { chatId: chat, messageId, raw: { key: { remoteJid: chat, id: messageId, fromMe: false } } }
         : target.quoted;

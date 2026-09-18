@@ -28,7 +28,7 @@ import type { AccountConfig } from "./schema.js";
 
 /** Every channel key the core may see. Keep in sync with the `surfaces` seed
  *  rows; the type keeps `triggerSource` unions closed and greppable. */
-export const MESSAGING_CHANNEL_KEYS = ["whatsapp", "whatsapp-cloud", "telegram"] as const;
+export const MESSAGING_CHANNEL_KEYS = ["whatsapp", "whatsapp-cloud"] as const;
 export type MessagingChannelKey = (typeof MESSAGING_CHANNEL_KEYS)[number];
 
 export function isMessagingChannelKey(value: unknown): value is MessagingChannelKey {
@@ -49,21 +49,17 @@ export function isMessagingChannelKey(value: unknown): value is MessagingChannel
 export type AccountScope = "org" | "user";
 
 export type ConnState = "pending_login" | "connected" | "disconnected" | "logged_out";
-export type LoginKind = "qr" | "token" | "oauth";
+export type LoginKind = "qr" | "token";
 export type ChannelTransport = "connection" | "webhook";
 export type StopReason = "shutdown" | "logout" | "rebind" | "lease_lost";
 
 export interface ChannelCapabilities {
   groups: boolean;
-  threads: boolean;
   reactions: boolean;
   typing: boolean;
   media: boolean;
   /** Hard per-message text limit of the messenger; the core chunks to it. */
   maxTextChars: number;
-  /** Largest inbound file the plugin will fetch and hand to a run. Absent
-   *  means the plugin does not fetch inbound media at all. */
-  maxInboundBytes?: number;
   maxImageBytes?: number;
   maxFileBytes?: number;
   /** Present only when the messenger renders tappable cards natively. The
@@ -143,7 +139,7 @@ export interface InboundMessage {
    *  transport sees the owner's own traffic (a linked device) sets this. */
   fromOwner?: boolean;
   /** The account owner talking to their own number (WhatsApp "You" chat).
-   *  Runs as the account's fallback user, no pairing. Plugins set this only
+   *  Runs as the owner, with no identity row to look up. Plugins set this only
    *  for messages they did NOT send themselves. */
   selfChat?: boolean;
   ref: MessageRef;
@@ -179,7 +175,7 @@ export interface ChannelAccount {
   id: string;
   orgId: string;
   channel: MessagingChannelKey;
-  /** `surfaces.id` of the channel row (the identity/pairing key). */
+  /** `surfaces.id` of the channel row; also the identity key. */
   surfaceId: string;
   accountKey: string;
   config: AccountConfig;

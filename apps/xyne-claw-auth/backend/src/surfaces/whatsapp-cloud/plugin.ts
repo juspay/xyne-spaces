@@ -15,7 +15,7 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { fetch as httpFetch, FormData } from "undici";
 import type { ChannelPlugin, InteractiveCard, OutboundFile, AuthStateStore } from "../messaging/plugin.js";
-import { formatForWhatsApp } from "./format.js";
+import { formatForWhatsApp } from "../whatsapp/format.js";
 import { parseCloudWebhook } from "./messages.js";
 import {
   GRAPH_ORIGIN,
@@ -133,7 +133,6 @@ export const whatsappCloudPlugin: ChannelPlugin<CloudHandle, WhatsAppCloudConfig
     // Business numbers cannot join groups — this is a platform limit, not a
     // missing feature.
     groups: false,
-    threads: false,
     reactions: true,
     typing: true,
     media: true,

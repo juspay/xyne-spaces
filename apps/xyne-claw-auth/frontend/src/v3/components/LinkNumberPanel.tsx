@@ -82,54 +82,39 @@ export function LinkNumberPanel({
 
   if (justLinked) {
     return (
-      <div className="rounded-xl border border-xyne-border-subtle p-4">
-        <h2 className="text-lg font-semibold text-xyne-fg-primary">You're connected</h2>
-        <p className="mt-2 text-sm text-xyne-fg-secondary">
-          <span className="font-mono text-xyne-fg-primary">{formatNumber(justLinked.senderId)}</span> now runs as {userEmail}.
-          {justLinked.sendTo ? (
-            <>
-              {" "}
-              Message <span className="font-mono text-xyne-fg-primary">{justLinked.sendTo}</span> on {channelName} and it will
-              answer as you — nothing else to set up.
-            </>
-          ) : (
-            <> Message the assistant on {channelName} and it will answer as you — nothing else to set up.</>
-          )}
-        </p>
-        <button
-          onClick={() => setJustLinked(null)}
-          className="mt-5 text-xs text-xyne-fg-secondary underline-offset-2 hover:underline"
-        >
-          Add another number
+      <div className="text-[12px] text-xyne-fg-secondary">
+        <span className="font-mono text-xyne-fg-primary">{formatNumber(justLinked.senderId)}</span> now runs as {userEmail}.{" "}
+        {justLinked.sendTo ? (
+          <>
+            Message <span className="font-mono text-xyne-fg-primary">{justLinked.sendTo}</span> on {channelName} and it answers as
+            you.
+          </>
+        ) : (
+          <>Message the assistant on {channelName} and it answers as you.</>
+        )}
+        <button onClick={() => setJustLinked(null)} className="ml-2 text-xyne-fg-muted underline-offset-2 hover:underline">
+          Add another
         </button>
       </div>
     );
   }
 
   return (
-    <div className="rounded-xl border border-xyne-border-subtle p-4">
-      <h2 className="text-lg font-semibold text-xyne-fg-primary">Connect your {channelName} number</h2>
-      <p className="mt-2 text-sm text-xyne-fg-secondary">
-        Add the number you message from and it will run as {userEmail} — your own Xyne access, your own history.
-      </p>
-
+    <div className="space-y-2">
       {loaded && accounts.length === 0 && (
-        <p className="mt-5 text-sm text-xyne-fg-secondary">
-          There's no {channelName} assistant available for you to link to yet.
-        </p>
+        <p className="text-[12px] text-xyne-fg-muted">No {channelName} assistant is available for you to link to yet.</p>
       )}
 
       {accounts.length > 0 && (
         <>
-          {accounts.length > 1 && (
-            <label className="mt-5 block">
-              <span className="text-xs uppercase tracking-wide text-xyne-fg-muted">Assistant</span>
+          <div className="flex items-center gap-2">
+            {accounts.length > 1 && (
               <select
                 value={accountId}
                 onChange={(event) => setAccountId(event.target.value)}
-                className="mt-1 w-full rounded-md border border-xyne-border-subtle bg-transparent px-3 py-2 text-sm text-xyne-fg-primary"
+                className="h-8 shrink-0 rounded-md border border-xyne-border-subtle bg-transparent px-2 text-[12px] text-xyne-fg-primary"
               >
-                <option value="">Choose one…</option>
+                <option value="">Assistant…</option>
                 {accounts.map((account) => (
                   <option key={account.id} value={account.id}>
                     {account.label}
@@ -137,47 +122,45 @@ export function LinkNumberPanel({
                   </option>
                 ))}
               </select>
-            </label>
-          )}
-
-          <label className="mt-4 block">
-            <span className="text-xs uppercase tracking-wide text-xyne-fg-muted">Your number</span>
+            )}
             <input
               value={phone}
               onChange={(event) => setPhone(event.target.value)}
               placeholder="+91 98765 43210"
               inputMode="tel"
-              className="mt-1 w-full rounded-md border border-xyne-border-subtle bg-transparent px-3 py-2 font-mono text-sm text-xyne-fg-primary placeholder:text-xyne-fg-muted"
+              className="h-8 min-w-0 flex-1 rounded-md border border-xyne-border-subtle bg-transparent px-2.5 font-mono text-[12px] text-xyne-fg-primary placeholder:text-xyne-fg-muted"
             />
-            <span className="mt-1 block text-xs text-xyne-fg-muted">+91 is assumed — add a country code for any other country.</span>
-          </label>
+            <button
+              onClick={submit}
+              disabled={busy || phone.trim().length < 6 || (accounts.length > 1 && !accountId)}
+              className="h-8 shrink-0 rounded-md bg-xyne-brand px-3 text-[12px] font-medium text-white transition hover:opacity-90 disabled:opacity-60"
+            >
+              {busy ? "Connecting…" : "Connect"}
+            </button>
+          </div>
+          <p className="text-[11px] text-xyne-fg-muted">+91 assumed unless you add a country code.</p>
 
-          {error && <p className="mt-3 text-sm text-xyne-error-fg">{error}</p>}
-
-          <button
-            onClick={submit}
-            disabled={busy || phone.trim().length < 6 || (accounts.length > 1 && !accountId)}
-            className="mt-5 w-full rounded-md bg-xyne-brand px-4 py-2 text-sm font-medium text-white transition hover:opacity-90 disabled:opacity-60"
-          >
-            {busy ? "Connecting…" : "Connect this number"}
-          </button>
+          {error && <p className="text-[12px] text-xyne-error-fg">{error}</p>}
         </>
       )}
 
       {linked.length > 0 && (
-        <div className="mt-8 border-t border-xyne-border-subtle pt-5">
-          <p className="text-xs uppercase tracking-wide text-xyne-fg-muted">Your linked numbers</p>
-          <ul className="mt-3 space-y-2">
-            {linked.map((number) => (
-              <li key={number.senderId} className="flex items-center justify-between gap-4 text-sm">
-                <span className="font-mono text-xyne-fg-primary">{formatNumber(number.senderId)}</span>
-                <button onClick={() => void unlink(number.senderId)} className="text-xs text-xyne-fg-secondary hover:text-xyne-error-fg">
-                  Unlink
-                </button>
-              </li>
-            ))}
-          </ul>
-        </div>
+        <ul className="space-y-1.5">
+          {linked.map((number) => (
+            <li
+              key={number.senderId}
+              className="flex items-center justify-between gap-2 rounded-md border border-xyne-border-subtle px-2.5 py-1.5 text-[12px]"
+            >
+              <span className="font-mono text-xyne-fg-primary">{formatNumber(number.senderId)}</span>
+              <button
+                onClick={() => void unlink(number.senderId)}
+                className="text-[11px] text-xyne-fg-muted hover:text-xyne-error-fg"
+              >
+                Unlink
+              </button>
+            </li>
+          ))}
+        </ul>
       )}
     </div>
   );

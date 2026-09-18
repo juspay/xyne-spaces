@@ -51,7 +51,7 @@ interface Runtime {
 
 const MAX_SEND_ATTEMPTS = 3;
 
-export function loginArtifactKey(accountId: string): string {
+function loginArtifactKey(accountId: string): string {
   return `${REDIS_PREFIX}:login:${accountId}`;
 }
 

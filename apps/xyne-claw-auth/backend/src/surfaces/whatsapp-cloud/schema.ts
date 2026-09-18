@@ -6,6 +6,7 @@
  */
 import { z } from "zod";
 import { normalizePhoneDigits } from "../messaging/phone.js";
+import { agentActionsSchema } from "../messaging/schema.js";
 
 /** Graph API version the plugin talks. Pinned, not floating: Meta ships
  *  breaking changes per version and deprecates old ones on a schedule. */
@@ -19,16 +20,8 @@ export const SECRET_VERIFY_TOKEN = "verify-token";
 
 export const whatsappCloudConfigSchema = z
   .object({
-    /** Shown in the admin UI; the authoritative id lives in the secret store. */
-    displayPhoneNumber: z.string().trim().optional(),
-    /** Same agent-action gates as the Baileys channel. */
-    agentActions: z
-      .object({
-        sendToOtherChats: z.boolean().default(false),
-        reactions: z.boolean().default(true),
-        listGroups: z.boolean().default(false),
-      })
-      .default({ sendToOtherChats: false, reactions: true, listGroups: false }),
+    /** No group support on this transport, so nothing to list. */
+    agentActions: agentActionsSchema({ listGroups: false }),
   })
   .strict();
 export type WhatsAppCloudConfig = z.infer<typeof whatsappCloudConfigSchema>;

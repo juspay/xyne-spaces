@@ -1,11 +1,10 @@
 /**
  * "My number" — self-service linking for ordinary org members, not admins.
  *
- * The admin routes in pairings.ts answer "who is asking to be let in?". These
- * answer the opposite question, asked by someone already signed in to Claw:
- * "here is my phone number, make messages from it run as me." No admin and no
+ * One question, asked by someone already signed in to Claw: "here is my phone
+ * number, make messages from it run as me." No admin approval and no
  * confirmation from the phone — the session says who the caller is, and the
- * number they type is taken at face value (see linkNumber in pairing.ts for
+ * number they type is taken at face value (see linkNumber in identity.ts for
  * what that does and does not protect).
  *
  * Every route is org-scoped to the caller's session and only ever touches the

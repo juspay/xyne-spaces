@@ -40,7 +40,7 @@ function clamp(value: string, max: number): string {
  * headings into a card that scrolls, this one has 1024 characters and only
  * *bold* to work with.
  */
-export function describeWriteAction(tool: string, params: Record<string, unknown>): string {
+function describeWriteAction(tool: string, params: Record<string, unknown>): string {
   switch (tool) {
     case "user-send-message": {
       const where = str(params["channelId"])
@@ -83,7 +83,7 @@ export function describeWriteAction(tool: string, params: Record<string, unknown
 }
 
 /** Read the loosely-typed pendingAction claw sends into our shape. */
-export function parseSignedAction(raw: unknown): SignedWriteAction | null {
+function parseSignedAction(raw: unknown): SignedWriteAction | null {
   if (!raw || typeof raw !== "object") return null;
   const r = raw as Record<string, unknown>;
   const serverType = str(r["serverType"]);

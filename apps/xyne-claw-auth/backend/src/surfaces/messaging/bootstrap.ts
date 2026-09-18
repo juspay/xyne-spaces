@@ -11,7 +11,7 @@ import { whatsappPlugin } from "../whatsapp/plugin.js";
 
 let registered = false;
 
-export function registerChannels(): void {
+function registerChannels(): void {
   if (registered) return;
   registered = true;
   registerChannel(whatsappPlugin);

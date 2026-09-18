@@ -9,7 +9,7 @@
  */
 
 /** Assumed when the typed number carries no country code of its own. */
-export const DEFAULT_COUNTRY_CODE = "91";
+const DEFAULT_COUNTRY_CODE = "91";
 /** A national number without its country code, e.g. Indian mobiles. */
 const NATIONAL_LENGTH = 10;
 

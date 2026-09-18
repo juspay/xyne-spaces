@@ -28,7 +28,7 @@ export type OrgAdminResolution =
 
 /** Caller must be an admin of the requested org (body/query orgId, else the
  *  session org), or a platform admin. */
-export async function resolveOrgAdmin(req: Request): Promise<OrgAdminResolution> {
+async function resolveOrgAdmin(req: Request): Promise<OrgAdminResolution> {
   const userId = getRequesterId(req);
   const sessionOrgId = getOrgId(req);
   if (!userId || !sessionOrgId) return { ok: false, status: 401, error: "Authenticated organization session required" };

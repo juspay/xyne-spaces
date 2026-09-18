@@ -58,7 +58,7 @@ export interface InboundWithMedia extends InboundMessage {
   media?: MediaDescriptor;
 }
 
-export function mediaOf(content: proto.IMessage | null | undefined): MediaDescriptor | null {
+function mediaOf(content: proto.IMessage | null | undefined): MediaDescriptor | null {
   if (!content) return null;
   const type = getContentType(content);
   const node = type ? ((content as Record<string, unknown>)[type] as Record<string, unknown> | undefined) : undefined;
@@ -114,7 +114,7 @@ function contextInfoOf(content: proto.IMessage | null | undefined): proto.IConte
 }
 
 /** Strip "@<selfphone>" mention tokens WhatsApp inlines into the text. */
-export function stripSelfMention(text: string, self: SelfIdentity): string {
+function stripSelfMention(text: string, self: SelfIdentity): string {
   const phone = phoneFromJid(self.jid);
   let out = text;
   if (phone) out = out.replace(new RegExp(`@${phone}\\b`, "g"), " ");

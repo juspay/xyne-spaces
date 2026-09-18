@@ -16,7 +16,7 @@ import {
 } from "@whiskeysockets/baileys";
 import type { AuthStateStore } from "../messaging/plugin.js";
 
-export const CREDS_CATEGORY = "creds";
+const CREDS_CATEGORY = "creds";
 
 export interface StoredAuthState {
   state: AuthenticationState;

@@ -62,7 +62,7 @@ export function extractText(message: CloudMessage): string {
 /** The option id of a tapped button or list row, if this is one. That id is
  *  ours — we minted it when we sent the card — and is what correlates the tap
  *  back to the action it stands for. */
-export function extractCardReplyId(message: CloudMessage): string | undefined {
+function extractCardReplyId(message: CloudMessage): string | undefined {
   if (message.type !== "interactive") return undefined;
   return message.interactive?.button_reply?.id ?? message.interactive?.list_reply?.id ?? undefined;
 }

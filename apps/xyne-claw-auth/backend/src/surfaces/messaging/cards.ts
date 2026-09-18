@@ -21,16 +21,17 @@ import { randomBytes } from "node:crypto";
 import { redisService } from "../../redis.js";
 import { createLogger } from "../../logger.js";
 import { REDIS_PREFIX } from "./const.js";
+import type { SignedWriteAction } from "../../lib/approved-write.js";
 import type { InteractiveCard, InteractiveLimits } from "./plugin.js";
 
 const log = createLogger("channel-cards");
 
 /** Parked options live as long as WhatsApp's customer-service window: past it
  *  we could not send the outcome back anyway. */
-export const CARD_TTL_S = 24 * 60 * 60;
+const CARD_TTL_S = 24 * 60 * 60;
 /** A typed "1" only resolves against the most recent menu, and not for long —
  *  it is far weaker evidence of intent than a tap on a specific button. */
-export const CARD_MENU_TTL_S = 30 * 60;
+const CARD_MENU_TTL_S = 30 * 60;
 
 /** What tapping an option actually does. Deliberately small and explicit: a
  *  card can never carry a free-form instruction back into the runtime. */
@@ -39,17 +40,6 @@ export type CardAction =
   | { kind: "decline-write"; label: string }
   | { kind: "agent"; slug: string }
   | { kind: "reply"; text: string };
-
-/** A signed pending write, exactly as claw minted it. Opaque to this module. */
-export interface SignedWriteAction {
-  serverType: string;
-  tool: string;
-  params: Record<string, unknown>;
-  userId: string;
-  signature: string;
-  agentSlug?: string;
-  spacesAppId?: string;
-}
 
 export interface ParkedOption {
   action: CardAction;

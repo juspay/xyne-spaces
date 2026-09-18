@@ -1,6 +1,7 @@
 /** WhatsApp-specific residue stored under `ConnectedSurface.config.channel`. */
 import { z } from "zod";
 import { normalizePhoneDigits } from "../messaging/phone.js";
+import { agentActionsSchema } from "../messaging/schema.js";
 
 export const whatsappChannelConfigSchema = z
   .object({
@@ -10,16 +11,7 @@ export const whatsappChannelConfigSchema = z
     markOnline: z.boolean().default(false),
     /** Let the owner talk to the agent from the number's own "You" chat. */
     selfChat: z.boolean().default(true),
-    /** What the AGENT may do on this number beyond replying in the current
-     *  chat (OpenClaw's `actions` gates). */
-    agentActions: z
-      .object({
-        /** Send to numbers/groups other than the chat that triggered the run. */
-        sendToOtherChats: z.boolean().default(false),
-        reactions: z.boolean().default(true),
-        listGroups: z.boolean().default(true),
-      })
-      .default({ sendToOtherChats: false, reactions: true, listGroups: true }),
+    agentActions: agentActionsSchema(),
   })
   .strict();
 export type WhatsAppChannelConfig = z.infer<typeof whatsappChannelConfigSchema>;

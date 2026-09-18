@@ -18,19 +18,16 @@
  */
 import { createLogger } from "../logger.js";
 import { errMsg } from "./errors.js";
+import type { SignedWriteAction as BaseWriteAction } from "./write-actions.js";
 import { AGENT_TOOL_SLUGS } from "./agent-tools-apply.js";
 import { GATEWAY_KEY_PREFIX, parseGatewayCatalogSource } from "../mcpgateway/key-format.js";
 
 const log = createLogger("approved-write");
 
-/** A pending write exactly as claw minted it: the signature covers these four
- *  fields and nothing else (routes/mcp.ts signAction). */
-export interface SignedWriteAction {
-  serverType: string;
-  tool: string;
-  params: Record<string, unknown>;
-  userId: string;
-  signature: string;
+/** A pending write exactly as claw minted it. The signature covers only the
+ *  four fields of the base shape (routes/mcp.ts signAction); the two optional
+ *  ones ride along so a re-signed card can be verified in either form. */
+export interface SignedWriteAction extends BaseWriteAction {
   agentSlug?: string;
   spacesAppId?: string;
 }

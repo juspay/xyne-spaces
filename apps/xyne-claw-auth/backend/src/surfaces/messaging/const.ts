@@ -30,6 +30,9 @@ export const AGENT_ROUTE_RE = /^[@/]([a-z0-9][a-z0-9_-]*)(?:\s+|$)/i;
 export const AGENTS_COMMAND_RE = /^[@/]agents\s*$/i;
 
 export const DEFAULT_RATE_LIMIT_PER_MINUTE = 10;
+/** Reaction dropped on the triggering message so the sender can see the run
+ *  started before any text comes back. */
+export const DEFAULT_ACK_REACTION = "\u{1F440}";
 /** How often a business number repeats "add your number in Claw" to one sender. */
 export const UNLINKED_NOTICE_TTL_S = 60 * 60;
 

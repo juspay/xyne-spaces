@@ -1,10 +1,11 @@
 /**
- * Org admin card for messaging channels (WhatsApp today; Telegram etc. later
- * are one more entry in CHANNELS). Talks to /claw/api/v1/surfaces/:channel.
+ * Card for messaging channels (WhatsApp today; Telegram etc. later are one more
+ * entry in CHANNELS). Talks to /claw/api/v1/surfaces/:channel.
  *
- * Flow: add a number (label + default agent) → Connect (QR dialog polls the
- * login artifact until the phone links) → policy settings
- * per account.
+ * Rendered in two places, selected by `scope`: user-scoped channels on a
+ * person's own Settings page, org-scoped ones on the organisation page. Flow is
+ * the same either way — pick the agent, connect (a QR dialog for a linked
+ * device, a token form for a business number), then the per-account settings.
  */
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { ArrowsClockwiseIcon, CaretDownIcon, CaretUpIcon, DeviceMobileIcon, SealCheckIcon, CopyIcon } from "@phosphor-icons/react";
@@ -43,28 +44,21 @@ interface ChannelMeta {
    *  number and live in their Settings; "org" accounts are shared and live on
    *  the organisation page. */
   scope: "org" | "user";
-  /** Whether this channel answers direct messages at all. Off for a personal
-   *  number: a linked device sees every DM the person receives, and answering
-   *  those sends messages from them that they did not write. Flip to true to
-   *  bring the DM and self-chat controls back. */
-  dms: boolean;
 }
 
 const CHANNELS: ChannelMeta[] = [
   {
     key: "whatsapp",
     scope: "user",
-    dms: false,
     name: "WhatsApp (linked device)",
     noun: "number",
     icon: <DeviceMobileIcon size={17} className="mt-0.5 shrink-0 text-xyne-fg-secondary" />,
     caveat:
-      "Your own number, linked by scanning a QR the way WhatsApp Web does. Answers in groups it is added to — it stays silent in direct messages, including your own, so it never replies to someone on your behalf.",
+      "Your own number, linked by scanning a QR the way WhatsApp Web does. Out of the box it answers only where you address it — your own chat and the groups you tick below — so it never replies to someone on your behalf unless you switch that on.",
   },
   {
     key: "whatsapp-cloud",
     scope: "org",
-    dms: true,
     name: "WhatsApp Business API",
     noun: "number",
     icon: <SealCheckIcon size={17} className="mt-0.5 shrink-0 text-xyne-fg-secondary" />,
@@ -73,15 +67,6 @@ const CHANNELS: ChannelMeta[] = [
   },
 ];
 
-const DM_POLICY_OPTIONS = [
-  { value: "linked", label: "Linked only — unknown senders are told to add their number in Claw" },
-  { value: "disabled", label: "Disabled — ignore direct messages" },
-];
-const GROUP_POLICY_OPTIONS = [
-  { value: "allowlist", label: "Allowlist — only listed groups" },
-  { value: "open", label: "Open — any group" },
-  { value: "disabled", label: "Disabled — ignore groups" },
-];
 
 function connStateBadge(state: ChannelAccountView["connState"]): { label: string; variant: "success" | "warning" | "neutral" | "info" } {
   switch (state) {
@@ -384,7 +369,7 @@ function AccountRow({
         </div>
       </div>
       {expanded && (
-        <div className="mt-3 grid gap-4 lg:grid-cols-2">
+        <div className="mt-3">
           <PolicyEditor channel={channel} account={account} agentOptions={agentOptions} onChanged={onChanged} />
         </div>
       )}
@@ -405,18 +390,15 @@ function PolicyEditor({
 }) {
   const { show } = useSnackbar();
   const [agentSlug, setAgentSlug] = useState<string | null>(account.agent?.slug ?? null);
-  const [dmPolicy, setDmPolicy] = useState<string | null>(account.dmPolicy);
-  const [groupPolicy, setGroupPolicy] = useState<string | null>(account.groupPolicy);
+  const [answerOtherDms, setAnswerOtherDms] = useState(account.dmPolicy !== "disabled");
+  const [answerGroups, setAnswerGroups] = useState(account.groupPolicy !== "disabled");
   const [groupAllowlist, setGroupAllowlist] = useState(account.groupAllowlist.join("\n"));
-  const [groupAllowFrom, setGroupAllowFrom] = useState(account.groupAllowFrom.join("\n"));
   const [requireMention, setRequireMention] = useState(account.requireMention);
   const [groupHistoryLimit, setGroupHistoryLimit] = useState(String(account.groupHistoryLimit));
-  const [ackReaction, setAckReaction] = useState(account.ackReaction ?? "");
+  const [ackReaction, setAckReaction] = useState(account.ackReaction ?? "\u{1F440}");
   const residue = (account.channelConfig ?? {}) as { selfChat?: boolean; agentActions?: { sendToOtherChats?: boolean; reactions?: boolean; listGroups?: boolean } };
   const [selfChat, setSelfChat] = useState(residue.selfChat ?? true);
   const [agentSend, setAgentSend] = useState(residue.agentActions?.sendToOtherChats ?? false);
-  const [agentReact, setAgentReact] = useState(residue.agentActions?.reactions ?? true);
-  const [agentGroups, setAgentGroups] = useState(residue.agentActions?.listGroups ?? true);
   const [saving, setSaving] = useState(false);
 
   const save = async () => {
@@ -424,17 +406,20 @@ function PolicyEditor({
     try {
       await updateChannelAccount(channel.key, account.id, {
         ...(agentSlug && agentSlug !== account.agent?.slug ? { agentSlug } : {}),
-        dmPolicy: (channel.dms ? (dmPolicy ?? "linked") : "disabled") as ChannelAccountView["dmPolicy"],
-        groupPolicy: (groupPolicy ?? "allowlist") as ChannelAccountView["groupPolicy"],
+        dmPolicy: (answerOtherDms ? "linked" : "disabled") as ChannelAccountView["dmPolicy"],
+        groupPolicy: (answerGroups ? "allowlist" : "disabled") as ChannelAccountView["groupPolicy"],
         groupAllowlist: splitList(groupAllowlist),
-        groupAllowFrom: splitList(groupAllowFrom),
         requireMention,
         ...(Number.isFinite(Number(groupHistoryLimit)) ? { groupHistoryLimit: Number(groupHistoryLimit) } : {}),
-        ...(ackReaction.trim() ? { ackReaction: ackReaction.trim() } : {}),
+        ackReaction: ackReaction.trim(),
         channel: {
           ...(account.channelConfig ?? {}),
-          selfChat,
-          agentActions: { sendToOtherChats: agentSend, reactions: agentReact, listGroups: agentGroups },
+          ...(channel.scope === "user"
+            ? {
+                selfChat,
+                agentActions: { ...(residue.agentActions ?? {}), sendToOtherChats: agentSend },
+              }
+            : {}),
         },
       });
       show({ variant: "success", title: "Settings saved" });
@@ -449,32 +434,61 @@ function PolicyEditor({
   return (
     <div className="rounded-lg border border-xyne-border-subtle p-3">
       <h3 className="text-[12px] font-semibold text-xyne-fg-primary">Who can talk to this {channel.noun}</h3>
-      <div className="mt-3 grid gap-3">
+      <div className="mt-3 grid gap-3 md:grid-cols-2 md:items-start">
         <SelectField label="Default agent" options={agentOptions} value={agentSlug ?? undefined} onValueChange={setAgentSlug} />
-        {channel.dms ? (
-          <SelectField label="Direct messages" options={DM_POLICY_OPTIONS} value={dmPolicy ?? undefined} onValueChange={setDmPolicy} />
-        ) : (
-          <p className="rounded-md border border-xyne-border-subtle px-3 py-2 text-[11px] text-xyne-fg-muted">
-            Direct messages are off for this {channel.noun}. The agent answers only in groups it has been added to.
-          </p>
+        {account.capabilities.reactions && (
+          <TextField
+            label="Ack reaction"
+            hint="Dropped on a message the moment a run starts, so the sender knows it landed. Clear the box for none."
+            placeholder="👀"
+            value={ackReaction}
+            onChange={(event) => setAckReaction(event.target.value)}
+          />
         )}
-        {account.capabilities.groups && (
+
+        {channel.scope === "user" && (
+        <div className="grid gap-2 rounded-md border border-xyne-border-subtle p-3 md:col-span-2">
+          <p className="text-[12px] font-semibold text-xyne-fg-primary">What this {channel.noun} does</p>
+          <p className="-mt-1 text-[11px] text-xyne-fg-muted">Anything switched off is ignored entirely — no reply, no run.</p>
+          <ToggleRow
+            label="My own chat"
+            hint="Messages you send to your own number run the agent as you."
+            checked={selfChat}
+            onChange={setSelfChat}
+          />
+          <ToggleRow
+            label="Direct messages from other people"
+            hint="People who have linked their number run as themselves; anyone else is told where to register. On your own number, leave this off unless you want it replying to strangers for you."
+            checked={answerOtherDms}
+            onChange={setAnswerOtherDms}
+          />
+          {account.capabilities.groups && (
+            <ToggleRow
+              label="Groups"
+              hint="Only the groups ticked below, and only when the agent is addressed."
+              checked={answerGroups}
+              onChange={setAnswerGroups}
+            />
+          )}
+          <ToggleRow
+            label="Let it message someone else"
+            hint="Off, it only ever answers where it was spoken to. On, it can start a message to another number or group when you ask it to."
+            checked={agentSend}
+            onChange={setAgentSend}
+          />
+        </div>
+        )}
+
+        {account.capabilities.groups && answerGroups && (
           <>
-            <SelectField label="Groups" options={GROUP_POLICY_OPTIONS} value={groupPolicy ?? undefined} onValueChange={setGroupPolicy} />
-            <GroupPicker
-              channel={channel}
-              account={account}
-              selected={splitList(groupAllowlist)}
-              onChange={(ids) => setGroupAllowlist(ids.join("\n"))}
-            />
-            <TextField
-              label="Group senders"
-              hint="Optional: only these numbers may trigger the agent inside groups."
-              multiline
-              rows={2}
-              value={groupAllowFrom}
-              onChange={(event) => setGroupAllowFrom(event.target.value)}
-            />
+            <div className="md:col-span-2">
+              <GroupPicker
+                channel={channel}
+                account={account}
+                selected={splitList(groupAllowlist)}
+                onChange={(ids) => setGroupAllowlist(ids.join("\n"))}
+              />
+            </div>
             <div className="flex items-center justify-between gap-3">
               <div>
                 <p className="text-[12px] text-xyne-fg-primary">Only answer when addressed</p>
@@ -493,20 +507,8 @@ function PolicyEditor({
             />
           </>
         )}
-        <div className="mt-1 border-t border-xyne-border-subtle pt-3">
-          <p className="text-[12px] font-semibold text-xyne-fg-primary">What the agent may do on this {channel.noun}</p>
-          <p className="text-[11px] text-xyne-fg-muted">Replying in the chat that messaged it is always allowed.</p>
-        </div>
-        {channel.dms && (
-          <ToggleRow label="Self chat" hint="Messages you send to your own number run the agent as you, the account owner." checked={selfChat} onChange={setSelfChat} />
-        )}
-        <ToggleRow label="Send to other chats" hint="Let the agent message other numbers and groups when asked." checked={agentSend} onChange={setAgentSend} />
-        <ToggleRow label="React to messages" hint="Let the agent add emoji reactions." checked={agentReact} onChange={setAgentReact} />
-        <ToggleRow label="List groups" hint="Let the agent see which groups this number is in." checked={agentGroups} onChange={setAgentGroups} />
-        {account.capabilities.reactions && (
-          <TextField label="Ack reaction" hint="Emoji added to a message when a run starts (optional)." placeholder="👀" value={ackReaction} onChange={(event) => setAckReaction(event.target.value)} />
-        )}
-        <div>
+
+        <div className="md:col-span-2">
           <Button variant="primary" size="sm" disabled={saving} onClick={() => void save()}>
             {saving ? "Saving…" : "Save settings"}
           </Button>

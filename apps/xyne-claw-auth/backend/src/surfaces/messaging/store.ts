@@ -15,11 +15,11 @@ import type { ChannelAccount, MessagingChannelKey, AuthStateStore } from "./plug
 import { isMessagingChannelKey } from "./plugin.js";
 import { parseAccountConfig, type AccountConfig } from "./schema.js";
 
-export function isAccountKey(tenantId: string): boolean {
+function isAccountKey(tenantId: string): boolean {
   return tenantId.startsWith(ACCOUNT_KEY_PREFIX);
 }
 
-export function newAccountKey(): string {
+function newAccountKey(): string {
   return `${ACCOUNT_KEY_PREFIX}${randomBytes(12).toString("hex")}`;
 }
 

@@ -7093,7 +7093,7 @@ export async function resyncChannelEntityTypes(
 
 // ── Messaging channels (WhatsApp, Telegram, …) — surfaces/messaging admin API ──
 
-export type MessagingChannelKey = "whatsapp" | "whatsapp-cloud" | "telegram";
+export type MessagingChannelKey = "whatsapp" | "whatsapp-cloud";
 export type ChannelConnState = "pending_login" | "connected" | "disconnected" | "logged_out";
 export type ChannelDmPolicy = "linked" | "disabled";
 export type ChannelGroupPolicy = "allowlist" | "open" | "disabled";
@@ -7113,14 +7113,13 @@ export interface ChannelAccountView {
   dmPolicy: ChannelDmPolicy;
   groupPolicy: ChannelGroupPolicy;
   groupAllowlist: string[];
-  groupAllowFrom: string[];
   requireMention: boolean;
   groupHistoryLimit: number;
   ackReaction?: string;
   rateLimitPerMinute: number;
   channelConfig: Record<string, unknown> | null;
   agent: { slug: string; name: string } | null;
-  login: { kind: "qr" | "token" | "oauth" };
+  login: { kind: "qr" | "token" };
   /** "org": one shared business number. "user": this is one person's own
    *  number and only they (or an admin) can see or manage it. */
   scope: "org" | "user";
@@ -7142,7 +7141,6 @@ export interface ChannelAccountPolicyPatch {
   dmPolicy?: ChannelDmPolicy;
   groupPolicy?: ChannelGroupPolicy;
   groupAllowlist?: string[];
-  groupAllowFrom?: string[];
   requireMention?: boolean;
   groupHistoryLimit?: number;
   ackReaction?: string;
@@ -7153,7 +7151,7 @@ export interface ChannelAccountPolicyPatch {
 export interface ChannelLoginArtifact {
   connState: ChannelConnState;
   desiredState: "running" | "stopped";
-  login: { kind: "qr" | "token" | "oauth" };
+  login: { kind: "qr" | "token" };
   artifact: string | null;
   /** Data URL of the rendered QR (login.kind === "qr"). */
   qr: string | null;

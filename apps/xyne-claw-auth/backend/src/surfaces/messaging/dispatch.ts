@@ -45,7 +45,7 @@ export function channelConversationId(
  * Getting this backwards is how the agent ended up telling someone to approve
  * a card that was never on their screen.
  */
-export function channelSurfaceInstructions(channel: MessagingChannelKey): string {
+function channelSurfaceInstructions(channel: MessagingChannelKey): string {
   const plugin = getChannel(channel);
   const name = channel.startsWith("whatsapp") ? "WhatsApp" : channel;
   const limit = plugin?.capabilities.maxTextChars ?? 4000;

@@ -20,9 +20,9 @@ import { CONTROL_CHANNEL, LEASE_TTL_MS, REDIS_PREFIX } from "./const.js";
 
 const log = createLogger("channel-placement");
 
-export const HOLDER_ID = `${hostname()}:${process.pid}`;
+const HOLDER_ID = `${hostname()}:${process.pid}`;
 
-export function leaseKey(accountId: string): string {
+function leaseKey(accountId: string): string {
   return `${REDIS_PREFIX}:lease:${accountId}`;
 }
 

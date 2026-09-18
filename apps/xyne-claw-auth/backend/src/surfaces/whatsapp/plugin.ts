@@ -32,7 +32,7 @@ import type {
   StopReason,
 } from "../messaging/plugin.js";
 import { makeStoredAuthState } from "./auth-state.js";
-import { formatForWhatsApp } from "../whatsapp-cloud/format.js";
+import { formatForWhatsApp } from "./format.js";
 import { toInbound, type MediaDescriptor, type SelfIdentity } from "./messages.js";
 import { jidFromTarget, phoneFromJid, whatsappChannelConfigSchema, type WhatsAppChannelConfig } from "./schema.js";
 
@@ -253,12 +253,10 @@ export const whatsappPlugin: ChannelPlugin<WhatsAppHandle, WhatsAppChannelConfig
   accountScope: "user",
   capabilities: {
     groups: true,
-    threads: false,
     reactions: true,
     typing: true,
     media: true,
     maxTextChars: MAX_TEXT_CHARS,
-    maxInboundBytes: MAX_INBOUND_BYTES,
     maxImageBytes: MAX_IMAGE_BYTES,
     maxFileBytes: MAX_FILE_BYTES,
   },

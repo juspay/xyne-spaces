@@ -13,6 +13,7 @@ import { redeemApproval } from "./approvals.js";
 import { consumeOption, parseMenuChoice, tokenForMenuChoice } from "./cards.js";
 import { DEDUP_TTL_S, NOT_LINKED_TEXT, REDIS_PREFIX, UNLINKED_NOTICE_TTL_S } from "./const.js";
 import { enqueueOutbound } from "./delivery.js";
+import { agentActionGatesOf } from "./agent-tools.js";
 import { channelConversationId, dispatchChannelRun } from "./dispatch.js";
 import { drainGroupContext, rememberGroupMessage, renderGroupContext } from "./group-context.js";
 import { resolveIdentity } from "./identity.js";
@@ -134,23 +135,16 @@ export async function handleInbound(ctx: InboundContext, msg: InboundMessage): P
   // one-to-one chat offers.
   const namedInText = namesAnAgent(text);
 
-  // Self-chat: the owner messaging their own number. It is their account, so
-  // there is nobody to authorise — but requireMention still applies, because a
-  // note to self is not a request, and answering every one of them would turn
-  // their own chat into a conversation they did not ask for.
-  const decision = msg.selfChat
-    ? !policy.requireMention || namedInText || msg.replyToSelf
-      ? { action: "dispatch" as const, reason: "self chat" }
-      : { action: "ignore" as const, reason: "self chat, agent not addressed" }
-    : evaluatePolicy(policy, {
-        isGroup: msg.isGroup && plugin.capabilities.groups,
-        senderId: msg.senderId,
-        chatId: msg.chatId,
-        hasIdentity: linkedUserId !== null,
-        mentionedSelf: msg.mentionedSelf,
-        replyToSelf: msg.replyToSelf,
-        namedInText,
-      });
+  const decision = evaluatePolicy(policy, {
+    isGroup: msg.isGroup && plugin.capabilities.groups,
+    senderId: msg.senderId,
+    chatId: msg.chatId,
+    hasIdentity: linkedUserId !== null,
+    mentionedSelf: msg.mentionedSelf,
+    replyToSelf: msg.replyToSelf,
+    namedInText,
+    selfChat: msg.selfChat === true,
+  });
   if (decision.action === "ignore") {
     // Nobody addressed us, but this is still a room we belong in — keep the
     // line so the next reply knows what was being discussed.
@@ -175,11 +169,9 @@ export async function handleInbound(ctx: InboundContext, msg: InboundMessage): P
     // to salespeople, to delivery drivers, and to any other Claw account that
     // happens to reply to them, which two such numbers turn into a loop that
     // nothing else stops. So a user-scoped account stays silent.
-    if (plugin.accountScope === "user") {
-      log.info(`[inbound] unlinked sender on a personal account, staying silent account=${account.id}`);
-      return;
-    }
-    // Even on a business number, say it once rather than on every message.
+    // Answering strangers is what the "direct messages from other people"
+    // setting decides: reaching here at all means it is switched on. Say it
+    // once an hour per sender rather than on every message.
     if (await shouldTellUnlinked(account.id, msg.senderId)) {
       await enqueueOutbound(account.id, { kind: "text", chatId: msg.chatId, text: NOT_LINKED_TEXT, quoted: msg.ref });
     }
@@ -196,12 +188,9 @@ export async function handleInbound(ctx: InboundContext, msg: InboundMessage): P
   const userId = linkedUserId ?? (msg.fromOwner ? (account.config.ownerUserId ?? null) : null);
   const reply = (body: string) => enqueueOutbound(account.id, { kind: "text", chatId: msg.chatId, text: body, quoted: msg.ref });
   if (!userId) {
-    // Same rule as an unlinked DM: a personal number must not answer on its
-    // owner's behalf, and in a group that reply would be public.
-    if (plugin.accountScope === "user") {
-      log.info(`[inbound] unlinked sender, staying silent account=${account.id} chat=${msg.chatId}`);
-      return;
-    }
+    // Anyone may use the agent; they just have to say who they are first.
+    // Told once an hour per sender, so a group does not fill up with it.
+    if (!(await shouldTellUnlinked(account.id, msg.senderId))) return;
     await reply(NOT_LINKED_TEXT);
     return;
   }
@@ -263,7 +252,10 @@ export async function handleInbound(ctx: InboundContext, msg: InboundMessage): P
       messageId: msg.ref.messageId,
     });
   }
-  if (policy.ackReaction && plugin.capabilities.reactions) {
+  // "React to messages: off" has to mean this number never reacts. The ack is
+  // not the agent asking, but it is still an emoji arriving from them, and two
+  // settings that both say "reactions" must not disagree.
+  if (policy.ackReaction && plugin.capabilities.reactions && agentActionGatesOf(account.config.channel).reactions) {
     await enqueueOutbound(account.id, { kind: "react", ref: msg.ref, emoji: policy.ackReaction });
   }
 

@@ -8,7 +8,29 @@
  * is parsed strictly.
  */
 import { z } from "zod";
-import { DEFAULT_RATE_LIMIT_PER_MINUTE, GROUP_HISTORY_LIMIT } from "./const.js";
+import { DEFAULT_ACK_REACTION, DEFAULT_RATE_LIMIT_PER_MINUTE, GROUP_HISTORY_LIMIT } from "./const.js";
+
+/** What the AGENT may do on a channel beyond replying in the chat that
+ *  triggered the run (OpenClaw's `actions` block). */
+export interface AgentActionGates {
+  /** Send to chats other than the one that triggered the run. */
+  sendToOtherChats: boolean;
+  reactions: boolean;
+  listGroups: boolean;
+}
+
+/** One shape for every channel; a plugin embeds this in its residue schema and
+ *  overrides only the defaults its transport can honour. */
+export function agentActionsSchema(defaults: Partial<AgentActionGates> = {}) {
+  const value: AgentActionGates = { sendToOtherChats: false, reactions: true, listGroups: true, ...defaults };
+  return z
+    .object({
+      sendToOtherChats: z.boolean().default(value.sendToOtherChats),
+      reactions: z.boolean().default(value.reactions),
+      listGroups: z.boolean().default(value.listGroups),
+    })
+    .default(value);
+}
 
 export const DM_POLICIES = ["linked", "disabled"] as const;
 /**
@@ -34,16 +56,15 @@ export const accountPolicySchema = z.object({
   groupPolicy: z.enum(GROUP_POLICIES).default("allowlist"),
   /** Group/chat ids the account answers in under groupPolicy "allowlist". */
   groupAllowlist: idList.default([]),
-  /** If non-empty, only these senders may trigger the account inside groups. */
-  groupAllowFrom: idList.default([]),
   /** In groups, only answer when @mentioned or replied-to. */
   requireMention: z.boolean().default(true),
   /** How many unaddressed group messages to carry forward as context on the
    *  next reply. 0 disables it — the agent then only ever sees what was said
    *  directly to it. */
   groupHistoryLimit: z.number().int().min(0).max(200).default(GROUP_HISTORY_LIMIT),
-  /** Emoji reaction sent on the triggering message when a run starts. */
-  ackReaction: z.string().trim().max(8).optional(),
+  /** Emoji reaction sent on the triggering message when a run starts. Empty
+   *  string turns it off; blank config gets the default. */
+  ackReaction: z.string().trim().max(8).default(DEFAULT_ACK_REACTION),
   rateLimitPerMinute: z.number().int().min(1).max(600).default(DEFAULT_RATE_LIMIT_PER_MINUTE),
 });
 export type AccountPolicy = z.infer<typeof accountPolicySchema>;

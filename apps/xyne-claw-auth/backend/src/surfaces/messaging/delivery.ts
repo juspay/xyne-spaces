@@ -2,7 +2,7 @@
  * Outbound side of the messaging core.
  *
  * Anything that wants to send to a channel account — the /webhook/result
- * handler, pairing replies, dispatch-failure notes — ENQUEUES an item into the
+ * handler, the agent's own tools, dispatch-failure notes — ENQUEUES an item into the
  * account's Redis outbox. Only the pod that owns the account's lease drains
  * that outbox (account-manager.ts) and talks to the plugin. That keeps the
  * "which pod has the socket" question in exactly one place and lets a reply

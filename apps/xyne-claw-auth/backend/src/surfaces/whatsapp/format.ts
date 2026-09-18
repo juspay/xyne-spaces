@@ -1,7 +1,8 @@
 /**
- * Markdown → WhatsApp dialect. WhatsApp renders *bold*, _italic_, ~strike~,
- * `mono` and ```fenced``` blocks, nothing else; headings, links and list
- * markers must become plain text that still reads well on a phone.
+ * Markdown → WhatsApp dialect, shared by both WhatsApp transports. WhatsApp
+ * renders *bold*, _italic_, ~strike~, `mono` and ```fenced``` blocks, nothing
+ * else; headings, links and list markers must become plain text that still
+ * reads well on a phone.
  */
 export function formatForWhatsApp(markdown: string): string {
   const lines = markdown.replace(/\r\n/g, "\n").split("\n");
