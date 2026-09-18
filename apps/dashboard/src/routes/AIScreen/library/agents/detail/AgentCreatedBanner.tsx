@@ -51,7 +51,7 @@ export function AgentCreatedBanner({
       </button>
 
       <div className='flex flex-col items-center gap-1.5 text-center'>
-        <p className='font-serif text-[14px] font-bold italic leading-[18px] text-foreground'>
+        <p className='font-serif text-[14px] font-semibold italic leading-[18px] text-foreground'>
           {agent.name} {pendingRegistration ? 'is waiting on an admin' : 'is ready'}
         </p>
         <p className='text-[13px] font-normal leading-[18px] text-foreground/80'>{summary}</p>
@@ -68,7 +68,7 @@ export function AgentCreatedBanner({
               onClick={() => openAgentChat(agent.slug)}
               data-track-category='Claw Agents'
               data-track-name='Agent detail v2: chat with new agent'
-              className='flex h-7 items-center rounded-[8px] bg-foreground px-2.5 text-[13px] font-semibold leading-[18px] text-background shadow-sm transition-opacity hover:opacity-90'
+              className='flex h-7 items-center rounded-[8px] border border-border bg-background px-2.5 text-[13px] font-semibold leading-[18px] text-foreground shadow-sm transition-colors hover:bg-accent'
             >
               Chat with agent
             </button>
