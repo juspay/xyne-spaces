@@ -387,6 +387,7 @@ export interface MerchantTicketListItem {
   channelId: string;
   boardId?: string | null;
   projectId?: string;
+  merchantId?: string | null;
   senderEmail?: string;
   senderName?: string;
   customFormData?: TicketCustomFormData | null;
