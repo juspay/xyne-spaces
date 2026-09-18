@@ -560,6 +560,7 @@ export class EmailController {
                 uploadedByUserId: userId,
                 storageProvider: 'zoho',
                 conversationId: conversationId,
+                channelId: conversation.channelId,
                 workspaceId: emailWorkspaceId,
                 metadata: { zohoAttachmentId: attachmentId, source: 'zoho_upload' },
               }),

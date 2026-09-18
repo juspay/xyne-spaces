@@ -17,6 +17,11 @@ export interface CreateMessageAttachmentInput {
   createdBy: string;
   storageProvider: string;
   conversationId: string | null;
+  // Denormalized conversation.channelId. Required rather than optional so every call site makes an
+  // explicit choice: the channel for conversation-anchored attachments, null for the rest. A null
+  // keeps the row out of every channel-scoped read, which is the intended behaviour for uploads
+  // that do not belong to a conversation.
+  channelId: string | null;
   workspaceId: string;
   metadata?: Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
   createdAt?: Date;
@@ -42,6 +47,7 @@ export class MessageAttachmentRepository {
         createdBy: data.createdBy,
         storageProvider: data.storageProvider,
         conversationId: data.conversationId,
+        channelId: data.channelId,
         workspaceId: data.workspaceId,
         metadata: data.metadata || {},
         ...(data.uploadStatus && { uploadStatus: data.uploadStatus }),
