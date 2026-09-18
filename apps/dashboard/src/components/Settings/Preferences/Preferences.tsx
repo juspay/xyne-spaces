@@ -795,7 +795,7 @@ const LaunchSection: FC<{ state: PreferencesState }> = ({ state }) => (
   <div className='space-y-4'>
     <SectionHeader title='Launch' subtitle='Configure your startup experience' />
     <div className='p-3 rounded-lg border border-border bg-muted/30'>
-      <DailyBriefToggle available />
+      <DailyBriefToggle />
       <div className='mt-3 border-t border-border pt-3'>
         <div className='flex items-center justify-between gap-4'>
           <div>
