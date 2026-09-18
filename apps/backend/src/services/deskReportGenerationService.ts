@@ -124,6 +124,9 @@ export class DeskReportGenerationService {
     const pending = await messageAttachmentRepo.create({
       entityId: channelId,
       entityType: DESK_REPORT_ENTITY_TYPE,
+      // Channel-scoped but not conversation-anchored: the channel already lives in entityId.
+      // Setting channelId here would newly surface desk reports in the channel file list.
+      channelId: null,
       originalFilename: `${channelName}-desk-report.html`,
       size: 0,
       mimetype: 'text/html',

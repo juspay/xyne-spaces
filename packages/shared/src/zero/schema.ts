@@ -972,6 +972,7 @@ export const messageAttachmentTable = table('message_attachments')
     createdBy: string(),
     metadata: json().optional(),
     conversationId: string().optional(),
+    channelId: string().optional(), // denormalized conversation.channelId; NULL = not conversation-anchored
     thumbnailUrl: string().optional(),
     isDeleted: boolean(),
     uploadStatus: enumeration<AttachmentUploadStatus>().optional(),
