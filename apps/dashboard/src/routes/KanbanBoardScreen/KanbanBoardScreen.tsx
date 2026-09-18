@@ -5085,6 +5085,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                     pageSize={groupBy === 'none' ? 50 : 20}
                     totalCount={group.count}
                     internalScroll={groupBy !== 'none'}
+                    onTicketOpen={ticket => handleTicketClick({} as React.MouseEvent, ticket)}
                     scrollElement={tableScrollElement}
                     visibleColumns={tableVisibleColumns}
                     isComfortView={isComfortView}
