@@ -20,7 +20,12 @@ export const sdlcChatLayout = (input: {
   // no longer opens the SDLC panel — SdlcScreen migrates old ?chat=ai links by
   // opening the sidebar once and stripping the param.
   const activeTab: SdlcChatTab = input.chatParam === 'ai' ? 'ai' : 'conversations';
-  const panelOpen = input.discussionParam === '1';
+  // Open unless the reader closed it. Every surface that can hold a discussion —
+  // a track, a folder, an artifact, a link, a file — shows it by default, so the
+  // absence of the param means open and only an explicit '0' closes. What the
+  // panel is scoped to, and whether there is anything to scope it to at all, is
+  // still decided by the screen.
+  const panelOpen = input.discussionParam !== '0';
   return {
     activeTab,
     panelOpen,
@@ -40,8 +45,8 @@ export const sdlcChatNavigationSearch = (input: {
   });
 
   if (!currentLayout.panelOpen) {
-    const search = destination.toString();
-    return search ? `?${search}` : '';
+    destination.set('discussion', '0');
+    return `?${destination.toString()}`;
   }
 
   destination.delete('conversation');

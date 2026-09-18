@@ -1051,8 +1051,7 @@ export default function SdlcScreen(): ReactElement {
     discussionParam: routeSearchParams.get('discussion'),
   });
   const sdlcChatTab = chatLayout.activeTab;
-  const discussionOpen =
-    routeSearchParams.get('discussion') === '1' && sdlcChatTab === 'conversations';
+  const discussionOpen = chatLayout.panelOpen && sdlcChatTab === 'conversations';
   const rightPanelOpen = chatLayout.panelOpen;
   const selectedDiscussionConversationId = routeSearchParams.get('conversation');
   useEffect(() => {
@@ -1482,7 +1481,8 @@ export default function SdlcScreen(): ReactElement {
         next.set('discussion', '1');
         next.set('chat', 'conversations');
       } else {
-        next.delete('discussion');
+        // Explicit, because an absent param now means open.
+        next.set('discussion', '0');
         next.delete('chat');
       }
       if (input.conversationId) next.set('conversation', input.conversationId);
