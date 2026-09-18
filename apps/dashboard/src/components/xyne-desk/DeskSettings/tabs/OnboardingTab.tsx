@@ -439,13 +439,15 @@ const AttemptRow: React.FC<{
                 {answer.replyText.trim() || <em className='text-muted-foreground'>Left blank</em>}
               </div>
             </div>
-            {answer.reasoning && (
+            {/* Guarded here too: the server projection already strips these for members, and the
+                client should not be the one place a regression could surface the answer key. */}
+            {isAdmin && answer.reasoning && (
               <div className='flex flex-col gap-[4px] border-l-2 border-desk-accent pl-3'>
                 <span className='text-xs font-medium text-muted-foreground'>Grader feedback</span>
                 <div className='text-sm leading-relaxed text-foreground'>{answer.reasoning}</div>
               </div>
             )}
-            {answer.error && (
+            {isAdmin && answer.error && (
               <div className='rounded-[8px] bg-red-500/10 px-2 py-1.5 text-sm text-red-700 dark:text-red-300'>
                 {answer.error}
               </div>
