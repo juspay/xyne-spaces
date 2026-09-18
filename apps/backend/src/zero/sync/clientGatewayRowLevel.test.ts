@@ -88,7 +88,7 @@ test('row-level subscribe forces the SOCKET workspace — client args cannot rea
   }
 });
 
-test('a GUEST-role socket is refused (guests over-admit under the non-guest gate → native Zero)', { skip }, async () => {
+test('a GUEST-role socket is refused at the CONNECTION level (sync:unavailable, never sync:ready → native Zero)', { skip }, async () => {
   const addCalls: unknown[] = [];
   const fo = fanout!;
   const origAdd = fo.addRowLevelClient;
@@ -96,11 +96,15 @@ test('a GUEST-role socket is refused (guests over-admit under the non-guest gate
   try {
     const socket = fakeSocket({ workspaceRole: 'GUEST' });
     const trigger = attachSyncHandlers!(socket);
-    trigger();
+    trigger(); // resolves workspace → hits the connection-level role gate
+    // The gate refuses the whole connection: no sync:ready (so the client stays on native Zero),
+    // an explicit sync:unavailable instead. A subsequent optimistic subscribe just parks in `pending`
+    // (ready never went true) and never reaches the engine.
     socket._handlers['sync:subscribe']({ queryName: 'userDrafts', args: [{ workspaceId: 'W_A' }] }, () => {});
     await new Promise((r) => setImmediate(r));
     assert.equal(addCalls.length, 0, 'guest never reaches addRowLevelClient');
-    assert.ok(socket._sent.some((e: { event: string }) => e.event === 'sync:error'), 'guest got a sync:error');
+    assert.ok(socket._sent.some((e: { event: string }) => e.event === 'sync:unavailable'), 'guest got a connection-level sync:unavailable');
+    assert.ok(!socket._sent.some((e: { event: string }) => e.event === 'sync:ready'), 'guest never got sync:ready');
   } finally {
     fo.addRowLevelClient = origAdd;
   }
@@ -129,7 +133,7 @@ for (const role of ['OWNER', 'ADMIN', 'COMMUNITY_MEMBER']) {
   });
 }
 
-test('an UNKNOWN/absent role is refused (fail-closed)', { skip }, async () => {
+test('an UNKNOWN/absent role is refused at the CONNECTION level (fail-closed → sync:unavailable, no sync:ready)', { skip }, async () => {
   const addCalls: unknown[] = [];
   const fo = fanout!;
   const origAdd = fo.addRowLevelClient;
@@ -141,6 +145,8 @@ test('an UNKNOWN/absent role is refused (fail-closed)', { skip }, async () => {
     socket._handlers['sync:subscribe']({ queryName: 'userDrafts', args: [{ workspaceId: 'W_A' }] }, () => {});
     await new Promise((r) => setImmediate(r));
     assert.equal(addCalls.length, 0, 'unknown role never reaches addRowLevelClient');
+    assert.ok(socket._sent.some((e: { event: string }) => e.event === 'sync:unavailable'), 'unknown role got sync:unavailable');
+    assert.ok(!socket._sent.some((e: { event: string }) => e.event === 'sync:ready'), 'unknown role never got sync:ready');
   } finally {
     fo.addRowLevelClient = origAdd;
   }

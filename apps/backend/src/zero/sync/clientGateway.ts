@@ -334,6 +334,18 @@ export function attachSyncHandlers(socket: SyncIoSocket): () => void {
       pending.length = 0; // no workspace — nothing to serve
       return;
     }
+    // CONNECTION-level role gate. The shared engine's ACL gate is derived under a non-guest
+    // (MEMBER) sentinel, so a guest/unknown principal would be over-admitted (its stricter ACL
+    // ignored) — refuse the whole connection. Emit `sync:unavailable` (not `sync:ready`) so the
+    // client never engages the engine and stays on native Zero from the first render, rather than
+    // subscribing a dead instance and relying on a per-query `sync:error`. The per-subscribe gate
+    // in `subscribe()` stays as defense-in-depth (an optimistic subscribe could still race here).
+    if (!socket.workspaceRole || !NON_GUEST_ROLES.includes(socket.workspaceRole)) {
+      pending.length = 0;
+      obsEmit('sync-sub', { action: 'unavailable', socketId: connId, userId, reason: 'guest-or-unknown-role' });
+      socket.emit('sync:unavailable', { reason: 'role-not-served' });
+      return;
+    }
     ready = true;
     socket.emit('sync:ready');
     for (const p of pending) subscribe(p.queryName, p.args, p.ack, p.sinceOffset);

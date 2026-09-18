@@ -15,7 +15,7 @@ import type { UseQueryOptions, QueryResult } from '@rocicorp/zero/react';
 import { Event } from '../logger/events.js';
 import { useInstrumentation, useZero } from './useZero.js';
 import { isSharedQuery } from '../sync/registry.js';
-import { useSharedQuery, useSyncEngineReady } from '../sync/useSharedQuery.js';
+import { useSharedQuery, useSyncEngineReady, useSyncServing } from '../sync/useSharedQuery.js';
 import { obsEmit, isShadow } from '../sync/obs.js';
 import { useZeroFallbackConfig } from './ZeroFallbackContext.js';
 import { useFallbackQuery } from './useFallbackQuery.js';
@@ -326,9 +326,13 @@ export function useQuery<
   // caches whatever this returns, unchanged.
   const zero = useZero();
   const syncReady = useSyncEngineReady();
+  // Serving = the server hasn't refused this principal (`sync:unavailable`, e.g. a guest). When it
+  // has, a shared query is NOT routed to the engine at all — it stays on native Zero. This is the
+  // role-agnostic connection-level fallback; the SWR handoff below is the per-query safety net.
+  const serving = useSyncServing();
   const isShared = useMemo(
-    () => syncReady && isSharedQuery(query.query.queryName),
-    [syncReady, query.query.queryName],
+    () => syncReady && serving && isSharedQuery(query.query.queryName),
+    [syncReady, serving, query.query.queryName],
   );
   // Shadow-diff: keep Zero running alongside the sync result and DISPLAY Zero (known-good),
   // so we can measure where the sync result deviates without corrupting the UI.
@@ -365,14 +369,18 @@ export function useQuery<
     metrics.incrementCounter('zero.query.operations', { query: queryName, stage: 'start' });
   }, [queryName, argsKey, isEnabled, isShared]);
 
-  // Disable Zero for shared queries — the sync engine serves them. In shadow mode keep
-  // Zero enabled (it's displayed and used as the comparison baseline).
+  // SWR handoff: keep Zero live until the sync engine has actually HYDRATED this query, then
+  // disable it. Zero is the safety net — if the engine never hydrates (a silent failure: stuck
+  // hydration, a per-query `sync:error`, a connection that never readies), Zero keeps serving and
+  // the query never blanks. This makes the fallback automatic and role-agnostic. In shadow mode Zero
+  // is always kept (it's the displayed baseline). Once hydrated, steady-state load moves off Zero.
+  const sharedHydrated = isShared && sharedResult?.[1]?.type === 'complete';
   const effectiveOptions = useMemo(() => {
-    if (!isShared || shadow) return options;
+    if (!isShared || shadow || !sharedHydrated) return options;
     return typeof options === 'object' && options !== null
       ? { ...options, enabled: false }
       : { enabled: false };
-  }, [isShared, shadow, options]);
+  }, [isShared, shadow, sharedHydrated, options]);
   const result = useQueryWithFallback(query, effectiveOptions);
   const [data, details] = result;
 

@@ -15,12 +15,24 @@ import {
   getSyncClient,
   isSyncEngineReady,
   subscribeSyncEngineReady,
+  isSyncUnavailable,
+  subscribeSyncServing,
 } from './runtime.js';
 import { resolveBaseAst, astToFormat } from './registry.js';
 
 /** Reactive: re-renders when the sync engine initializes (which may be post-first-render). */
 export function useSyncEngineReady(): boolean {
   return useSyncExternalStore(subscribeSyncEngineReady, isSyncEngineReady, isSyncEngineReady);
+}
+
+/**
+ * Reactive: true while the server is willing to serve this principal through the shared engine.
+ * Flips false on `sync:unavailable` (guest/unknown role) so `useQuery` falls back to native Zero,
+ * and back true on a later `sync:ready`. Re-renders subscribers on the transition.
+ */
+export function useSyncServing(): boolean {
+  const unavailable = useSyncExternalStore(subscribeSyncServing, isSyncUnavailable, isSyncUnavailable);
+  return !unavailable;
 }
 
 export function useSharedQuery<TReturn>(

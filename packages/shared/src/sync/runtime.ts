@@ -17,6 +17,7 @@ let host: IvmHost | null = null;
 let client: SyncClient | null = null;
 let ready = false;
 const readyListeners = new Set<() => void>();
+const servingListeners = new Set<() => void>();
 
 /**
  * Initialize the client sync engine with the app's socket transport. Idempotent. Optimistic-overlay
@@ -46,6 +47,12 @@ export function initSyncEngine(
       /* internal moved / unresolved outside a bundler — echo path still retires overlays */
     });
   client = new SyncClient(host, transport, store);
+  // Fan the client's connection-level serving flag (`sync:unavailable` ↔ `sync:ready`) out to the
+  // module-level subscribers, so a component that subscribed BEFORE init is still notified when the
+  // server later refuses this principal (guest) — mirroring how readiness is made reactive above.
+  client.onServingChange(() => {
+    for (const listener of servingListeners) listener();
+  });
   // NOTE: don't call client.start() here — this runs from a mount effect that can fire
   // before the socket exists, and the dashboard transport's `on` no-ops on a null socket.
   // start() is called lazily on the first subscribe (socket present by then); its
@@ -71,5 +78,22 @@ export function subscribeSyncEngineReady(onChange: () => void): () => void {
   readyListeners.add(onChange);
   return () => {
     readyListeners.delete(onChange);
+  };
+}
+
+/**
+ * Whether the server has refused to serve this principal via the shared engine (`sync:unavailable`
+ * — a guest/unknown role). When true, `useQuery` routes shared queries to native Zero and never
+ * engages the engine. Defaults to `false` before init / before the server has spoken.
+ */
+export function isSyncUnavailable(): boolean {
+  return client?.isUnavailable() ?? false;
+}
+
+/** Subscribe to serving-availability changes (for `useSyncExternalStore`). */
+export function subscribeSyncServing(onChange: () => void): () => void {
+  servingListeners.add(onChange);
+  return () => {
+    servingListeners.delete(onChange);
   };
 }

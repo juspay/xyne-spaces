@@ -36,6 +36,15 @@ const EVT = {
    * its `sync:subscribe` handler, so a subscribe sent then is silently dropped.
    */
   ready: 'sync:ready',
+  /**
+   * Server → client, connection-level. The backend won't serve this principal at all (e.g. a
+   * guest/unknown role, whose stricter ACL the shared gate can't represent). The client flips a
+   * reactive flag so every shared query falls back to native Zero and the engine is never engaged.
+   * A subsequent `sync:ready` (reconnect, possibly with a changed role) clears it.
+   */
+  unavailable: 'sync:unavailable',
+  /** Server → client, per-query. A single subscribe was refused (not shareable / raced the gate). */
+  error: 'sync:error',
   disconnect: 'disconnect',
 } as const;
 
@@ -120,6 +129,30 @@ export class SyncClient {
    * only what's on screen now, not every channel ever visited.
    */
   #connectionReady = false;
+  /**
+   * The server signalled `sync:unavailable` — this principal is not served by the shared engine
+   * (role gate). Reactive: `useQuery` reads it so the whole app falls back to native Zero without
+   * engaging the engine. Cleared on a fresh `sync:ready` (a reconnect may carry a different role).
+   */
+  #unavailable = false;
+  readonly #servingListeners = new Set<() => void>();
+
+  /** Whether the server has refused to serve this principal (`sync:unavailable`). Reactive. */
+  isUnavailable(): boolean {
+    return this.#unavailable;
+  }
+
+  /** Notify when serving-availability flips (`sync:unavailable` ↔ `sync:ready`) — for `useSyncExternalStore`. */
+  onServingChange(onChange: () => void): () => void {
+    this.#servingListeners.add(onChange);
+    return () => this.#servingListeners.delete(onChange);
+  }
+
+  #setUnavailable(next: boolean): void {
+    if (this.#unavailable === next) return;
+    this.#unavailable = next;
+    this.#servingListeners.forEach((cb) => cb());
+  }
 
   /** Whether the fan-out snapshot for this query has arrived. */
   isHydrated(queryName: string, args: ReadonlyJSONValue[]): boolean {
@@ -153,6 +186,8 @@ export class SyncClient {
     this.#transport.on<DeltaMsg>(EVT.delta, this.#onDelta);
     this.#transport.on<RevokeMsg>(EVT.revoke, this.#onRevoke);
     this.#transport.on<void>(EVT.ready, this.#onReady);
+    this.#transport.on<{ reason?: string }>(EVT.unavailable, this.#onUnavailable);
+    this.#transport.on<{ queryName?: string; message?: string }>(EVT.error, this.#onError);
     this.#transport.on<void>(EVT.disconnect, this.#onDisconnect);
   }
 
@@ -256,8 +291,31 @@ export class SyncClient {
    */
   readonly #onReady = (): void => {
     this.#connectionReady = true;
+    // A fresh `sync:ready` means the server IS serving us now — clear any prior unavailable
+    // (a reconnect can carry a changed role). Shared queries re-engage the engine on re-render.
+    this.#setUnavailable(false);
     obsEmit('client-ws', { dir: 'down', event: 'ready', resent: this.#subs.size });
     for (const key of this.#subs.keys()) this.#send(key);
+  };
+
+  /**
+   * The server won't serve this principal (role gate). Flip the reactive flag → `useQuery` routes
+   * every shared query to native Zero. Any instances the client optimistically engaged before this
+   * arrived are torn down by React when `useSharedQuery` unmounts (isShared → false); we only need
+   * to stop the connection from being treated as ready so nothing re-sends.
+   */
+  readonly #onUnavailable = (msg?: { reason?: string }): void => {
+    this.#connectionReady = false;
+    obsEmit('client-ws', { dir: 'down', event: 'unavailable', reason: msg?.reason });
+    this.#setUnavailable(true);
+  };
+
+  /**
+   * A single subscribe was refused. The SWR handoff in `useQuery` already keeps Zero serving until
+   * the engine hydrates, so an errored query never blanks — this is observability + a hook point.
+   */
+  readonly #onError = (msg?: { queryName?: string; message?: string }): void => {
+    obsEmit('client-ws', { dir: 'down', event: 'error', queryName: msg?.queryName, message: msg?.message });
   };
 
   /** Connection dropped — the next `sync:ready` will re-drive all subscriptions. */
