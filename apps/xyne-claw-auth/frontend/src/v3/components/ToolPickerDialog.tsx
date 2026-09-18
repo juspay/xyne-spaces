@@ -11,6 +11,13 @@ export interface AgentToolSelection {
   custom: string[];
   gateway: string[];
   callableAgents: string[];
+  /**
+   * Lets the agent reach tools nobody granted it (`config.tools.openPalette`).
+   * Absent means off. "read" admits read-only tools, "all" also admits writes;
+   * destructive tools are refused at every setting. Still requires the user to
+   * hold credentials for the integration — this only removes the grant.
+   */
+  openPalette?: "read" | "all";
 }
 
 interface Props {
