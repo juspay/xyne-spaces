@@ -940,7 +940,7 @@ Available tools:
 
 Guidelines:
 - Never message third parties unless the user explicitly asked for it in this conversation.
-- Keep messages short; WhatsApp formatting is *bold*, _italic_, and plain lists.
+- Keep messages short. Write markdown (**bold**, _italic_, \`- \` lists); it is converted to WhatsApp's own styling when the message is sent, so do not write WhatsApp syntax yourself. There is no underline or heading — bold a line instead.
 - In groups, to @mention someone put @<number> in the text AND pass the number in "mentions".
 - Report exactly what was sent and to whom (chat id / group name).`,
     paramName: "task",
