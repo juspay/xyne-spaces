@@ -69,7 +69,7 @@ export type TicketFiltersEvent =
 /**
  * Generate a unique storage key based on channelId or boardId or ProjectId or viewMode
  */
-const getStorageKey = (
+export const getStorageKey = (
   channelId?: string,
   viewMode?: string,
   projectId?: string,
