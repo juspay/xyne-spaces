@@ -111,6 +111,9 @@ RAW_RE='\$(query|execute)Raw(Unsafe)?'
 # Paths that are never authored by hand. The generated Prisma clients DEFINE
 # these methods, so scanning them would fire on every `prisma generate`.
 EXCLUDED_RE='(^|/)(node_modules|dist|build|generated)/'
+# Binary assets have no Prisma calls; feeding them to awk dies on multibyte
+# conversion (PNG) under `set -e` and blocks otherwise-valid commits.
+BINARY_RE='\.(png|jpe?g|gif|webp|ico|pdf|woff2?|ttf|eot|mp4|webm|zip|gz)$'
 
 # This script is the one file that must spell the guarded names out in full —
 # it cannot be subject to its own rule. Nothing else is exempt.
@@ -175,6 +178,7 @@ while IFS=$'\t' read -r status p1 p2; do
 
     [ "$new_path" = "$SELF_PATH" ] && continue
     printf '%s' "$new_path" | grep -qE "$EXCLUDED_RE" && continue
+    printf '%s' "$new_path" | grep -qE "$BINARY_RE" && continue
 
     new_count=$(count_raw "$NEW_SPEC" "$new_path")
     [ "$new_count" = "0" ] && continue

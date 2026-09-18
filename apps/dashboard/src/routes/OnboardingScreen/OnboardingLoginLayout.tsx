@@ -11,6 +11,12 @@ export const onboardingEmailInputClassName =
 export const onboardingContinueButtonClassName =
   'h-14 w-full cursor-pointer rounded-full bg-[#232229] text-[15px] font-[550] leading-[1.5] tracking-[-0.1px] text-white transition-colors hover:bg-[#2e2d34] disabled:opacity-50';
 
+/**
+ * Right half of Figma 264:21707: solid #ff4242 only.
+ * Honeycomb 264:21708 is a non-stretching CSS background (native 1926.9×1165.04 px
+ * pinned at Figma x=-153, y=-78 — group children are MIN/MIN, never scaled).
+ * Channel illustration is a separate CENTER/CENTER layer in OnboardingLoginPreview.
+ */
 export const OnboardingLoginLayout = ({ children }: { children: ReactNode }): ReactElement => (
   <div className='flex h-[100dvh] w-full overflow-hidden bg-white'>
     <section className='flex h-full w-full flex-col items-center justify-center overflow-y-auto px-6 py-10 md:w-1/2'>
@@ -18,20 +24,15 @@ export const OnboardingLoginLayout = ({ children }: { children: ReactNode }): Re
     </section>
     <section
       className='relative hidden h-full w-1/2 overflow-hidden bg-[#ff4242] md:block'
-      style={{ containerType: 'size' }}
+      data-onboarding-red-panel=''
+      style={{
+        containerType: 'inline-size',
+        backgroundImage: 'url(/login-preview/honeycomb.svg)',
+        backgroundRepeat: 'no-repeat',
+        backgroundSize: '1926.9px 1165.04px',
+        backgroundPosition: '-153px -78px',
+      }}
     >
-      <img
-        src='/login-preview/honeycomb.svg'
-        alt=''
-        aria-hidden='true'
-        className='pointer-events-none absolute max-w-none'
-        style={{
-          left: 'calc(-153 / 864 * 100%)',
-          top: 'calc(-24 / 1010 * 100%)',
-          width: 'calc(1926.9 / 864 * 100%)',
-          height: 'calc(1165 / 1010 * 100%)',
-        }}
-      />
       <OnboardingLoginPreview />
     </section>
   </div>

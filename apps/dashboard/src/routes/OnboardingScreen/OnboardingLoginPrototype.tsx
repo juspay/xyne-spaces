@@ -16,13 +16,13 @@ import {
 export const OnboardingLoginPrototype = ({
   onAdvance,
 }: {
-  onAdvance: () => void;
+  onAdvance: (details: { email: string }) => void;
 }): ReactElement => {
   const [email, setEmail] = useState('');
 
   const advance = (event?: FormEvent): void => {
     event?.preventDefault();
-    onAdvance();
+    onAdvance({ email });
   };
 
   return (
