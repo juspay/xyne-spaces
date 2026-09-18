@@ -1,3 +1,10 @@
+## [1.337.0-release-20260918.5](https://github.com/juspay/xyne-spaces/compare/v1.337.0-release-20260918.4...v1.337.0-release-20260918.5) (2026-09-18)
+
+
+### Bug Fixes
+
+* Implement API fallback + query for desk loading perf ([#2046](https://github.com/juspay/xyne-spaces/issues/2046)) ([8125a5f](https://github.com/juspay/xyne-spaces/commit/8125a5f62e47d446ec8c1447192312894a50ee32))
+
 ## [1.337.0-release-20260918.4](https://github.com/juspay/xyne-spaces/compare/v1.337.0-release-20260918.3...v1.337.0-release-20260918.4) (2026-09-18)
 
 
