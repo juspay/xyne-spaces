@@ -81,10 +81,11 @@ class CommitAnalysisQueue {
 
       logger.info(`[COMMIT-ANALYSIS] Processing PR #${prId} (${vcsProvider})`);
 
+      const db = DatabaseClient.getInstance();
+
       try {
         // Run within workspace context
         await runAsServiceActor('commit-analysis-worker', workspaceId, async () => {
-          const db = DatabaseClient.getInstance();
 
           // Select VCS client based on provider
           const vcsClient =
@@ -131,10 +132,9 @@ class CommitAnalysisQueue {
         });
       } catch (error) {
         const errorMsg = error instanceof Error ? error.message : String(error);
-        logger.error(`[COMMIT-ANALYSIS] Failed to analyze PR #${prId}:`, error);
+        logger.error(`[COMMIT-ANALYSIS] Failed to analyze PR #${prId}: ${errorMsg}`);
 
         // Mark as failed in database
-        const db = DatabaseClient.getInstance();
         await db.pullRequests.update({
           where: { id: prInternalId },
           data: {
