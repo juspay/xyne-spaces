@@ -78,10 +78,15 @@ function assertSyncWorkerEnabled(): void {
   }
 }
 
+// 403, never 401: the dashboard logs the user out on any 401.
+const APP_STORE_KEY_REJECTED =
+  'App Store Connect rejected this key. This desk needs an Individual key ' +
+  '(Users and Access > Integrations > App Store Connect API); Team keys are not supported.';
+
 async function resolveApplications(
   credentials: AppStoreCredentials,
   applications: Array<{ bundleId: string }>,
-): Promise<Array<{ bundleId: string; displayName: string }>> {
+): Promise<Array<{ appId: string; displayName: string }>> {
   return Promise.all(
     applications.map(async ({ bundleId }) => {
       let resolved: { appId: string; name: string } | null;
@@ -89,12 +94,7 @@ async function resolveApplications(
         resolved = await appStoreClient.resolveApp(credentials, bundleId);
       } catch (error) {
         if (error instanceof AppStoreApiError && error.status === 401) {
-          // 403, never 401: the dashboard logs the user out on any 401.
-          throw new AppStoreConnectError(
-            403,
-            'App Store Connect rejected this key. This desk needs an Individual key ' +
-              '(Users and Access > Integrations > App Store Connect API); Team keys are not supported.',
-          );
+          throw new AppStoreConnectError(403, APP_STORE_KEY_REJECTED);
         }
         throw error;
       }
@@ -104,7 +104,30 @@ async function resolveApplications(
           `The key cannot see ${bundleId}. Check the app exists and the key's role allows it.`,
         );
       }
-      return { bundleId, displayName: resolved.name };
+      return { appId: resolved.appId, displayName: resolved.name };
+    }),
+  );
+}
+
+/** Rotation has only app ids to work with, so it checks visibility directly. */
+async function assertAppsVisible(credentials: AppStoreCredentials, appIds: string[]): Promise<void> {
+  await Promise.all(
+    appIds.map(async (appId) => {
+      let visible: boolean;
+      try {
+        visible = await appStoreClient.appIsVisible(credentials, appId);
+      } catch (error) {
+        if (error instanceof AppStoreApiError && error.status === 401) {
+          throw new AppStoreConnectError(403, APP_STORE_KEY_REJECTED);
+        }
+        throw error;
+      }
+      if (!visible) {
+        throw new AppStoreConnectError(
+          404,
+          `The key cannot see app ${appId}. Check the app exists and the key's role allows it.`,
+        );
+      }
     }),
   );
 }
@@ -122,7 +145,7 @@ async function reactivateOrCreateSources(
     boardId: string;
     ownerUserId: string;
     encryptedCredentials: string;
-    applications: Array<{ bundleId: string; displayName: string }>;
+    applications: Array<{ appId: string; displayName: string }>;
   },
 ): Promise<{ created: number; reactivated: number }> {
   const records = buildAppStoreSourceRecords(params);
@@ -437,10 +460,10 @@ router.post(
       if (sources.length === 0) throw new AppStoreConnectError(404, 'App Store desk not found');
 
       // Prove the new key can still see every app before storing it.
-      const bundleIds = sources
+      const appIds = sources
         .map((source) => source.externalIdentifier)
-        .filter((bundleId): bundleId is string => Boolean(bundleId));
-      await resolveApplications(credentials, bundleIds.map((bundleId) => ({ bundleId })));
+        .filter((appId): appId is string => Boolean(appId));
+      await assertAppsVisible(credentials, appIds);
 
       await db.externalSource.updateMany({
         where: { id: { in: sources.map((source) => source.id) } },

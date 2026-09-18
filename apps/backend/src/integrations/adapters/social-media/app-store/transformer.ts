@@ -6,7 +6,7 @@ import { EmailType, FormFieldType } from '@xyne/shared';
 import type { NormalizedAppStoreReview } from './client';
 import {
   APP_STORE_APP_FIELD,
-  APP_STORE_BUNDLE_ID_FIELD,
+  APP_STORE_APP_ID_FIELD,
   APP_STORE_RESPONSE_STATE_FIELD,
   APP_STORE_TERRITORY_FIELD,
 } from './constants';
@@ -17,10 +17,6 @@ function starGlyphs(rating?: number): string {
   if (!rating || !Number.isFinite(rating)) return '';
   const filled = Math.max(0, Math.min(5, Math.round(rating)));
   return `${'★'.repeat(filled)}${'☆'.repeat(5 - filled)} `;
-}
-
-export function readBundleId(source: ExternalSource): string | undefined {
-  return source.externalIdentifier ?? undefined;
 }
 
 export class AppStoreReviewsTransformer extends BaseTransformer<unknown, NormalizedData[]> {
@@ -38,7 +34,6 @@ export class AppStoreReviewsTransformer extends BaseTransformer<unknown, Normali
     // feeds derivePriorityFromSubject, so a review titled "urgent" would self-assign priority + SLA.
     const subject = `${starGlyphs(review.rating)}${source.displayName} review from ${author}`;
     const body = review.title ? `${review.title}\n\n${review.body}` : review.body;
-    const bundleId = readBundleId(source);
 
     const interactions: NormalizedData[] = [
       {
@@ -66,9 +61,9 @@ export class AppStoreReviewsTransformer extends BaseTransformer<unknown, Normali
             value: source.displayName,
           },
           {
-            fieldName: APP_STORE_BUNDLE_ID_FIELD,
+            fieldName: APP_STORE_APP_ID_FIELD,
             fieldType: FormFieldType.STRING,
-            value: bundleId ?? source.name,
+            value: source.externalIdentifier ?? source.name,
           },
           {
             fieldName: APP_STORE_TERRITORY_FIELD,

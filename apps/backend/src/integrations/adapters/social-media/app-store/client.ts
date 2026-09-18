@@ -95,8 +95,6 @@ function parseDate(value: unknown): Date | null {
 
 export class AppStoreClient {
   private tokenCache = new Map<string, CachedToken>();
-  /** bundleId -> Apple's numeric app id. Immutable upstream, so caching it needs no invalidation. */
-  private appIdCache = new Map<string, string>();
 
   decryptCredentials(encryptedCredentials: string): AppStoreCredentials {
     if (!encryptedCredentials) {
@@ -162,20 +160,18 @@ export class AppStoreClient {
     this.tokenCache.delete(cacheKey);
   }
 
-  /** Apple pages reviews by numeric app id only, so the stored bundle id must be traded for one. */
-  private async resolveAppId(
-    credentials: AppStoreCredentials,
-    bundleId: string,
-  ): Promise<string> {
-    const cached = this.appIdCache.get(bundleId);
-    if (cached) return cached;
-
-    const resolved = await this.resolveApp(credentials, bundleId);
-    if (!resolved) {
-      throw new AppStoreApiError(404, `App Store Connect no longer lists ${bundleId}`);
+  /** Rotation check: the stored app id is enough, no bundle id round-trip needed. */
+  async appIsVisible(credentials: AppStoreCredentials, appId: string): Promise<boolean> {
+    try {
+      const payload = await this.request<{ data?: AppleResource }>(
+        `/v1/apps/${encodeURIComponent(appId)}?fields[apps]=name`,
+        credentials,
+      );
+      return Boolean(payload.data?.id);
+    } catch (error) {
+      if (error instanceof AppStoreApiError && error.status === 404) return false;
+      throw error;
     }
-    this.appIdCache.set(bundleId, resolved.appId);
-    return resolved.appId;
   }
 
   private async request<T>(
@@ -255,9 +251,8 @@ export class AppStoreClient {
     maxPages: number,
   ): Promise<ListReviewsResult> {
     const credentials = this.decryptCredentials(source.credentials);
-    const bundleId = source.externalIdentifier;
-    if (!bundleId) throw new Error('App Store source is missing its bundle id');
-    const appId = await this.resolveAppId(credentials, bundleId);
+    const appId = source.externalIdentifier;
+    if (!appId) throw new Error('App Store source is missing its Apple app id');
 
     const reviews: NormalizedAppStoreReview[] = [];
     let url: string | undefined =
