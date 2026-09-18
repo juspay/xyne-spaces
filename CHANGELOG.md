@@ -1,3 +1,10 @@
+## [1.337.0-release-20260918.3](https://github.com/juspay/xyne-spaces/compare/v1.337.0-release-20260918.2...v1.337.0-release-20260918.3) (2026-09-18)
+
+
+### Bug Fixes
+
+* make ticket CSV/JSON export return rows again in table layout ([#2044](https://github.com/juspay/xyne-spaces/issues/2044)) ([5d0a791](https://github.com/juspay/xyne-spaces/commit/5d0a791204b153eb9fdbf5b1aaec1a68325c7694))
+
 ## [1.337.0-release-20260918.2](https://github.com/juspay/xyne-spaces/compare/v1.337.0-release-20260918.1...v1.337.0-release-20260918.2) (2026-09-18)
 
 
