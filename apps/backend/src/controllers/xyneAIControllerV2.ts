@@ -16,6 +16,12 @@ import {
   cancelClawAgentRun,
   listClawConversations,
   getClawConversationMessages,
+  listClawConversationArtifacts,
+  getClawConversationArtifact,
+  updateClawConversationArtifact,
+  clawArtifactComments,
+  addClawArtifactComment,
+  resolveClawArtifactComment,
   rateClawRun,
   streamClawConversationLive,
   getClawDebugArtifacts,
@@ -65,7 +71,17 @@ const SelectionContextSchema = z
 // `collection`/`folder`/`file` items all arrive as ordinary entries in this
 // list — the dashboard already knows each one's cuid + name client-side.
 const AttachedContextItemSchema = z.object({
-  type: z.enum(['channel', 'ticket', 'canvas', 'call', 'activity', 'collection', 'file', 'folder']),
+  type: z.enum([
+    'channel',
+    'ticket',
+    'canvas',
+    'call',
+    'activity',
+    'collection',
+    'file',
+    'folder',
+    'local-folder',
+  ]),
   id: z.string().min(1),
   title: z.string().min(1),
   threadId: z.string().optional(),
@@ -116,6 +132,12 @@ const XyneAIRequestSchemaV2 = z.object({
   // Per-run thinking level from the composer's dropdown. Absent = the agent's
   // configured default (modelSettings.thinkingLevel or provider default).
   thinkingLevel: z.enum(['off', 'minimal', 'low', 'medium', 'high']).optional(),
+  studioMode: z.literal('design').optional(),
+  sandboxMode: z.enum(['local', 'remote', 'container']).optional(),
+  designArtifactAttachmentId: z.string().min(1).max(200).optional(),
+  designSelection: z.unknown().optional(),
+  pageSelection: z.unknown().optional(),
+  openItems: z.unknown().optional(),
   researchContext: ResearchContextSchema.optional().nullable(),
   research_context: ResearchContextSchema.optional().nullable(),
   attachments: z
@@ -184,7 +206,7 @@ const XyneAIRequestSchemaV2 = z.object({
    *  LiteLLM credential, "spaces" = the keyless platform provider (the models
    *  endpoint's pinProvider says which). Defaults to "litellm" for old
    *  clients. */
-  modelProvider: z.enum(['litellm', 'spaces']).optional(),
+  modelProvider: z.enum(['litellm', 'spaces', 'local-harness']).optional(),
   agentSlug: z.string().optional().default('ask-ai'),
 });
 
@@ -250,6 +272,12 @@ export class XyneAIControllerV2 {
       deep_research_enabled: deepResearchEnabledSC,
       instant,
       thinkingLevel,
+      studioMode,
+      sandboxMode,
+      designArtifactAttachmentId,
+      designSelection,
+      pageSelection,
+      openItems,
       researchContext,
       research_context,
       attachments,
@@ -503,6 +531,12 @@ export class XyneAIControllerV2 {
           deepResearchEnabled,
           instant,
           ...(thinkingLevel ? { thinkingLevel } : {}),
+          ...(studioMode ? { studioMode } : {}),
+          ...(sandboxMode ? { sandboxMode } : {}),
+          ...(designArtifactAttachmentId ? { designArtifactAttachmentId } : {}),
+          ...(designSelection !== undefined ? { designSelection } : {}),
+          ...(pageSelection !== undefined ? { pageSelection } : {}),
+          ...(openItems !== undefined ? { openItems } : {}),
           researchContext: effectiveResearchContext,
           ...(sdlcDashboardContext && { dashboardContext: sdlcDashboardContext }),
           createCanvasEnabled,
@@ -838,6 +872,145 @@ export class XyneAIControllerV2 {
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Internal server error';
       logger.error('[XyneAIv2] getMessages error:', error);
+      res.status(503).json({ success: false, error: message });
+    }
+  };
+
+  listConversationArtifacts = async (req: Request, res: Response): Promise<void> => {
+    const userId = (req as any).user?.id;
+    if (!userId) {
+      res.status(401).json({ success: false, error: 'Authentication required' });
+      return;
+    }
+
+    const { convId } = req.params;
+    if (!convId) {
+      res.status(400).json({ success: false, error: 'convId is required' });
+      return;
+    }
+
+    try {
+      const result = await listClawConversationArtifacts({ headers: req.headers, userId }, convId);
+      res.json(result);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Internal server error';
+      logger.error('[XyneAIv2] listConversationArtifacts error:', error);
+      res.status(503).json({ success: false, error: message });
+    }
+  };
+
+  getConversationArtifact = async (req: Request, res: Response): Promise<void> => {
+    const userId = (req as any).user?.id;
+    if (!userId) {
+      res.status(401).json({ success: false, error: 'Authentication required' });
+      return;
+    }
+
+    const { id } = req.params;
+    if (!id) {
+      res.status(400).json({ success: false, error: 'id is required' });
+      return;
+    }
+
+    try {
+      const result = await getClawConversationArtifact({ headers: req.headers, userId }, id);
+      res.json(result);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Internal server error';
+      logger.error('[XyneAIv2] getConversationArtifact error:', error);
+      res.status(503).json({ success: false, error: message });
+    }
+  };
+
+  listArtifactComments = async (req: Request, res: Response): Promise<void> => {
+    const userId = (req as any).user?.id;
+    if (!userId) {
+      res.status(401).json({ success: false, error: 'Authentication required' });
+      return;
+    }
+    const { id } = req.params;
+    if (!id) {
+      res.status(400).json({ success: false, error: 'id is required' });
+      return;
+    }
+    try {
+      res.json(await clawArtifactComments({ headers: req.headers, userId }, id));
+    } catch (error) {
+      logger.error('[XyneAIV2] listArtifactComments failed', error);
+      res.status(500).json({ success: false, error: 'Failed to list comments' });
+    }
+  };
+
+  addArtifactComment = async (req: Request, res: Response): Promise<void> => {
+    const userId = (req as any).user?.id;
+    if (!userId) {
+      res.status(401).json({ success: false, error: 'Authentication required' });
+      return;
+    }
+    const { id } = req.params;
+    const { body, anchor } = req.body as { body?: string; anchor?: unknown };
+    if (!id || !body?.trim()) {
+      res.status(400).json({ success: false, error: 'id and body are required' });
+      return;
+    }
+    try {
+      const payload = { body, ...(anchor === undefined ? {} : { anchor }) };
+      res.status(201).json(await addClawArtifactComment({ headers: req.headers, userId }, id, payload));
+    } catch (error) {
+      logger.error('[XyneAIV2] addArtifactComment failed', error);
+      res.status(500).json({ success: false, error: 'Failed to add the comment' });
+    }
+  };
+
+  resolveArtifactComment = async (req: Request, res: Response): Promise<void> => {
+    const userId = (req as any).user?.id;
+    if (!userId) {
+      res.status(401).json({ success: false, error: 'Authentication required' });
+      return;
+    }
+    const { id, commentId } = req.params;
+    if (!id || !commentId) {
+      res.status(400).json({ success: false, error: 'id and commentId are required' });
+      return;
+    }
+    try {
+      const resolved = (req.body as { resolved?: unknown })?.resolved === true;
+      res.json(await resolveClawArtifactComment({ headers: req.headers, userId }, id, commentId, resolved));
+    } catch (error) {
+      logger.error('[XyneAIV2] resolveArtifactComment failed', error);
+      res.status(500).json({ success: false, error: 'Failed to update the comment' });
+    }
+  };
+
+  updateConversationArtifact = async (req: Request, res: Response): Promise<void> => {
+    const userId = (req as any).user?.id;
+    if (!userId) {
+      res.status(401).json({ success: false, error: 'Authentication required' });
+      return;
+    }
+
+    const { id } = req.params;
+    if (!id) {
+      res.status(400).json({ success: false, error: 'id is required' });
+      return;
+    }
+
+    const { title, pinned, status } = req.body as {
+      title?: string;
+      pinned?: boolean;
+      status?: string;
+    };
+
+    try {
+      const result = await updateClawConversationArtifact({ headers: req.headers, userId }, id, {
+        ...(typeof title === 'string' ? { title } : {}),
+        ...(typeof pinned === 'boolean' ? { pinned } : {}),
+        ...(typeof status === 'string' ? { status } : {}),
+      });
+      res.json(result);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Internal server error';
+      logger.error('[XyneAIv2] updateConversationArtifact error:', error);
       res.status(503).json({ success: false, error: message });
     }
   };

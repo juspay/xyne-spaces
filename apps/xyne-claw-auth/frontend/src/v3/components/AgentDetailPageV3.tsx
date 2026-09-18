@@ -73,6 +73,9 @@ function extractToolsFromConfig(config: Record<string, unknown> | undefined | nu
     custom:    t.custom ?? [],
     gateway:   t.gateway ?? [],
     callableAgents: t.callableAgents ?? [],
+    // Anything unrecognised reads as off — a stray value must not widen a
+    // boundary, and the backend's parser makes the same call.
+    ...(t.openPalette === "read" || t.openPalette === "all" ? { openPalette: t.openPalette } : {}),
   };
 }
 
@@ -466,6 +469,7 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
       !sameSet(draftTools.custom, baseTools.custom) ||
       !sameSet(draftTools.gateway, baseTools.gateway) ||
       !sameSet(draftTools.callableAgents, baseTools.callableAgents) ||
+      draftTools.openPalette !== baseTools.openPalette ||
       !sameSet(draftSkillIds, baseSkills) ||
       kbChanged ||
       kbScopeChanged ||
@@ -537,7 +541,12 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
     setSavingConfig(true);
     try {
       const nextConfig = { ...(agent.config ?? {}) } as Record<string, unknown>;
-      if (draftTools.subagents.length || draftTools.direct.length || draftTools.custom.length || draftTools.gateway.length || draftTools.callableAgents.length) {
+      // `openPalette` must count as content here, or an agent with the flag set
+      // and no explicit grants loses `config.tools` — and the flag — on every save.
+      if (
+        draftTools.subagents.length || draftTools.direct.length || draftTools.custom.length ||
+        draftTools.gateway.length || draftTools.callableAgents.length || draftTools.openPalette
+      ) {
         nextConfig.tools = draftTools;
       } else {
         delete nextConfig.tools;
