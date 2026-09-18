@@ -78,11 +78,10 @@ export function SdlcHubDialog({
     () => (Array.isArray(projectRows) ? (projectRows as Array<{ id: string; name: string }>) : []),
     [projectRows],
   );
-  // The project comes from where the dialog opens; only the top-level screen asks, and
-  // not even there when there is a single project to choose.
-  const onlyProjectId = !projectId && projects.length === 1 ? projects[0]!.id : null;
+  // Seeded from the current hub's project, or the only one there is; still a picker, a
+  // new hub need not live in the same project.
+  const onlyProjectId = projects.length === 1 ? projects[0]!.id : null;
   const activeProjectId = pickedProjectId ?? onlyProjectId;
-  const showProjectPicker = !editing && !projectId && projects.length !== 1;
   const projectOptions = useMemo<SelectorOption[]>(
     () =>
       projects.map(project => ({
@@ -285,9 +284,11 @@ export function SdlcHubDialog({
         </p>
 
         <div className='mt-6 space-y-5'>
-          {showProjectPicker && (
+          {!editing && (
             <div>
-              <p className='mb-2 text-sm font-medium'>Project</p>
+              <p className='mb-2 text-sm font-medium'>
+                Project <span className='text-destructive'>*</span>
+              </p>
               <EntitySelector
                 options={projectOptions}
                 selectedValue={activeProjectId}
@@ -312,7 +313,7 @@ export function SdlcHubDialog({
           {!editing && (
             <div>
               <label htmlFor='sdlc-hub-name' className='block text-sm font-medium'>
-                Name
+                Name <span className='text-destructive'>*</span>
               </label>
               <Input
                 id='sdlc-hub-name'
