@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { ChannelType, UserType } from '@xyne/shared';
+import { ChannelScopeType, ChannelType, UserType, type Channel } from '@xyne/shared';
 import {
   Bot,
   Hash,
@@ -14,7 +14,7 @@ import { useCachedQuery } from '../../../../hooks/useCachedQuery';
 import { queries } from '../../../../zero/queries';
 import { useActiveUserSearch, useUser, useUsers } from '../../../../hooks/useUsers';
 import { useUserGroups } from '../../../../hooks/useUserGroup';
-import { useAllChannels, useChannel, useChannelSearch } from '../../../../hooks/useChannels';
+import { searchChannels, useAllChannels, useChannel } from '../../../../hooks/useChannels';
 import UserAvatar, { AvatarShape, AvatarSize } from '../../../UserAvatar/UserAvatar';
 import { EntitySelector } from '../../../ui/EntitySelector/EntitySelector';
 import { EntityMultiSelector } from '../../../ui/EntitySelector/EntityMultiSelector';
@@ -235,6 +235,21 @@ function UserGroupField({ value, onChange, placeholder }: FieldProps): React.Rea
   );
 }
 
+function useAutomationChannelSearch(search: string, limit: number): Channel[] {
+  const channels = useAllChannels();
+  return useMemo(
+    () =>
+      searchChannels(
+        channels.filter(
+          c => c.scopeType !== ChannelScopeType.DM && c.scopeType !== ChannelScopeType.GROUP_DM,
+        ),
+        search,
+        limit,
+      ),
+    [channels, search, limit],
+  );
+}
+
 function channelIcon(type: string | null | undefined): React.ReactElement {
   return type === ChannelType.EMAIL ? (
     <Mail className='size-4 text-muted-foreground' />
@@ -245,7 +260,7 @@ function channelIcon(type: string | null | undefined): React.ReactElement {
 
 function ChannelField({ value, onChange, placeholder }: FieldProps): React.ReactElement {
   const [search, setSearch] = useState('');
-  const channels = useChannelSearch(search, 15);
+  const channels = useAutomationChannelSearch(search, 15);
   const selectedChannel = useChannel(value ?? '');
 
   const baseOptions: SelectorOption[] = useMemo(() => {
@@ -591,21 +606,19 @@ function MultiUserGroups({ value, onChange, placeholder }: MultiFieldProps): Rea
 
 function MultiChannels({ value, onChange, placeholder }: MultiFieldProps): React.ReactElement {
   const [search, setSearch] = useState('');
-  const channels = useAllChannels();
+  const channels = useAutomationChannelSearch(search, 10);
+  const allChannels = useAllChannels();
   const options: SelectorOption[] = useMemo(() => {
     const byId = new Map<
       string,
       { id: string; name?: string | null; type: string | null | undefined }
     >();
-    for (const c of channels ?? []) byId.set(c.id, { id: c.id, name: c.name, type: c.type });
-    const lower = search.trim().toLowerCase();
-    const base = Array.from(byId.values())
-      .filter(c => (lower ? (c.name ?? '').toLowerCase().includes(lower) : true))
-      .map(c => ({
-        value: c.id,
-        label: c.name || '(unnamed channel)',
-        icon: channelIcon(c.type),
-      }));
+    for (const c of allChannels ?? []) byId.set(c.id, { id: c.id, name: c.name, type: c.type });
+    const base = channels.map(c => ({
+      value: c.id,
+      label: c.name || '(unnamed channel)',
+      icon: channelIcon(c.type),
+    }));
     const present = new Set(base.map(o => o.value));
     const selectedExtra: SelectorOption[] = value
       .filter(v => !present.has(v))
@@ -618,7 +631,7 @@ function MultiChannels({ value, onChange, placeholder }: MultiFieldProps): React
         };
       });
     return [...selectedExtra, ...base];
-  }, [channels, search, value]);
+  }, [allChannels, channels, value]);
   return (
     <EntityMultiSelector
       options={options}
