@@ -1,3 +1,11 @@
+## [1.338.0](https://github.com/juspay/xyne-spaces/compare/v1.337.0...v1.338.0) (2026-09-18)
+
+
+### Features
+
+* Decoupling projects final phase ([#1581](https://github.com/juspay/xyne-spaces/issues/1581)) ([fa7746d](https://github.com/juspay/xyne-spaces/commit/fa7746dd8d44d3db0502e79016bee512ae060816))
+* Minio fix ([#1981](https://github.com/juspay/xyne-spaces/issues/1981)) ([3ef49c0](https://github.com/juspay/xyne-spaces/commit/3ef49c09f49865701907452cfdf2a3209f9d8c5d))
+
 ## [1.337.0](https://github.com/juspay/xyne-spaces/compare/v1.336.1...v1.337.0) (2026-09-18)
 
 
