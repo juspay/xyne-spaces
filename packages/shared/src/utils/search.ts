@@ -20,17 +20,29 @@ const isDeactivated = (user: UserLike): boolean => user.status === UserStatus.IN
 // at/above weak fuzzy matches. Mirrors the score-0 convention used for channel token matches.
 const TOKEN_MATCH_SCORE = 0;
 
-export function searchUsers<T extends UserLike>(
+/**
+ * Search users and return scored results, mirroring `searchChannelsWithScores`.
+ *
+ * `searchUsers` has always computed this score — the same −10 / −5 prefix and
+ * word-boundary shifts the channel matcher uses — and thrown it away on its final
+ * `.map(r => r.item)`. The Cmd+K global-phase merge needs it: to interleave people with
+ * channels it has to know how well each candidate matched, not just the order.
+ *
+ * The score is RELEVANCE ONLY — no affinity is folded in here. Callers that merge across
+ * sources apply affinity once, in the merge, so it is not counted twice.
+ */
+export function searchUsersWithScores<T extends UserLike>(
   users: T[],
   query: string,
   limit = 10,
-): T[] {
+): { item: T; score: number }[] {
   // No query: keep the incoming order but float active users above deactivated
   // ones. Array.sort is stable (ES2019+), so order within each group is intact.
   if (!query.trim()) {
     return [...users]
       .sort((a, b) => Number(isDeactivated(a)) - Number(isDeactivated(b)))
-      .slice(0, limit);
+      .slice(0, limit)
+      .map(item => ({ item, score: 0 }));
   }
 
   const q = query.toLowerCase();
@@ -102,8 +114,11 @@ export function searchUsers<T extends UserLike>(
       }
       return a.item.name.localeCompare(b.item.name);
     })
-    .slice(0, limit)
-    .map(r => r.item);
+    .slice(0, limit);
+}
+
+export function searchUsers<T extends UserLike>(users: T[], query: string, limit = 10): T[] {
+  return searchUsersWithScores(users, query, limit).map(r => r.item);
 }
 
 /**
