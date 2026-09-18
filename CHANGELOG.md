@@ -1,3 +1,16 @@
+## [1.343.0](https://github.com/juspay/xyne-spaces/compare/v1.342.3...v1.343.0) (2026-09-18)
+
+
+### Features
+
+* Adding artifacts / links / xyne-ai enhanced version ([#2008](https://github.com/juspay/xyne-spaces/issues/2008)) ([c913d99](https://github.com/juspay/xyne-spaces/commit/c913d997d8e95e1a5b042765ede549c853b92bb4)), closes [#1920](https://github.com/juspay/xyne-spaces/issues/1920) [#1962](https://github.com/juspay/xyne-spaces/issues/1962) [#1967](https://github.com/juspay/xyne-spaces/issues/1967) [#1982](https://github.com/juspay/xyne-spaces/issues/1982) [#1994](https://github.com/juspay/xyne-spaces/issues/1994) [#2007](https://github.com/juspay/xyne-spaces/issues/2007) [#1978](https://github.com/juspay/xyne-spaces/issues/1978) [#2031](https://github.com/juspay/xyne-spaces/issues/2031) [#2036](https://github.com/juspay/xyne-spaces/issues/2036)
+
+
+### Bug Fixes
+
+* Implement API fallback + query for desk loading perf ([#2014](https://github.com/juspay/xyne-spaces/issues/2014)) ([06c984d](https://github.com/juspay/xyne-spaces/commit/06c984dd92d9ae120a98fa1fb64e09b526fbe249))
+* stop duplicating boolean field help text in automation builder ([#2024](https://github.com/juspay/xyne-spaces/issues/2024)) ([da4d02e](https://github.com/juspay/xyne-spaces/commit/da4d02ed634fa1e420e16e496a95442b799f2c5c))
+
 ## [1.342.3](https://github.com/juspay/xyne-spaces/compare/v1.342.2...v1.342.3) (2026-09-18)
 
 ## [1.342.2](https://github.com/juspay/xyne-spaces/compare/v1.342.1...v1.342.2) (2026-09-18)
