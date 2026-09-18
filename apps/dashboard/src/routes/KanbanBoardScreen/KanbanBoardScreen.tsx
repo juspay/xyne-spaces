@@ -4190,7 +4190,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
       <TicketsHeader
         startSlot={projectsScreenContext?.leftHeaderSlot}
         title={headerTitle}
-        ticketCount={headerTicketCount}
+        ticketCount={isTableLayout && hasSearchTerm ? null : headerTicketCount}
         isFiltered={headerIsFiltered}
         star={headerStar}
         searchValue={searchInputValue}
