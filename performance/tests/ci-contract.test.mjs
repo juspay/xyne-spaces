@@ -95,3 +95,14 @@ test('the Zero query scenario treats a TransformFailed 200 as a failure', () => 
 
   assert.match(source, /isTransformFailure/);
 });
+
+test('CI runs the offline performance suite, so it is not hook-dependent', () => {
+  const source = readFileSync(
+    path.join(repositoryRoot, '.github', 'workflows', 'ci.yml'),
+    'utf8',
+  );
+
+  assert.match(source, /perf:validate/);
+  // Must be its own job, not bolted onto a build that could skip it.
+  assert.match(source, /^\s{2}performance:/m);
+});
