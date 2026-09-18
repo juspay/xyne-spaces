@@ -5045,18 +5045,38 @@ const spacesEditCanvas: ToolDef = {
         viewAccessId?: string;
         error?: string;
         updatedAt?: string;
+        status?: string;
+        changeCount?: number;
       };
 
       if (result.error) return err(result.error);
       const citations: Citation[] = [];
       pushCanvasCitation(citations, viewAccessId, 1, result.title ?? title);
-      return okCited(
-        prefixChunk(1, "Canvas updated.", [
-          `Title: ${result.title ?? "(unknown)"}`,
-          `URL: ${result.url ?? "(unknown)"}`,
-        ]),
-        citations,
-      );
+      const details = [
+        `Title: ${result.title ?? "(unknown)"}`,
+        `URL: ${result.url ?? "(unknown)"}`,
+      ];
+      // Suggestion mode: the canvas is NOT changed — the edit parks as
+      // suggestions a human accepts. Say so, or the model reports it as done,
+      // and tell it not to resend: pending changes stay out of reads.
+      if (result.status === "pending-review") {
+        const n = result.changeCount ?? 0;
+        return okCited(
+          prefixChunk(
+            1,
+            `Proposed ${n} change(s) for human review in the canvas. Nothing is applied until someone accepts them. Reads will not show them yet, so do not resend them.`,
+            details,
+          ),
+          citations,
+        );
+      }
+      if (result.status === "no-changes") {
+        return okCited(
+          prefixChunk(1, "No changes: the content already matches the canvas.", details),
+          citations,
+        );
+      }
+      return okCited(prefixChunk(1, "Canvas updated.", details), citations);
     }),
 };
 
@@ -5555,7 +5575,7 @@ async function mutateSdlcArtifact(args: Record<string, unknown>, ctx: HandlerCon
         return ok(
           n === 0
             ? `No changes detected — the artifact already matches. ${JSON.stringify(data.artifact)}`
-            : `Queued ${n} change(s) for human review in the canvas — not applied until accepted. ${JSON.stringify(data.artifact)}`,
+            : `Queued ${n} change(s) for human review in the canvas — not applied until accepted. Reads will not show them yet, so do not resend them. ${JSON.stringify(data.artifact)}`,
         );
       }
       return ok(JSON.stringify(data.artifact));
