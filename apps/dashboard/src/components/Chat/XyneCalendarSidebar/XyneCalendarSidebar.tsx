@@ -1099,7 +1099,7 @@ const XyneCalendarSidebarTimeline = memo(
       deleteModalCall,
       handleDeleteConfirm,
       closeDeleteModal,
-    } = useCallHistory(user?.id);
+    } = useCallHistory(user?.id, { isCalendarView: true });
     const visibleChannels = useAllVisibleChannels();
     const currentRoomExternalId = useSelector(roomActor, state => state.context.externalId);
     const isRoomSessionActive = useSelector(
