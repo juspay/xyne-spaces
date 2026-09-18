@@ -1385,6 +1385,15 @@ export default function SdlcScreen(): ReactElement {
     return search.toString();
   };
 
+  /** The track's page in a window of its own — the same thing a folder gets. */
+  const openTrackInWindow = (trackId: string): boolean => {
+    if (!workspaceId || !channelId) return false;
+    return openStandaloneWindow(
+      `/sdlc/${workspaceId}/${channelId}/tracks${trackSearch(trackId)}`,
+      `sdlc-track:${trackId}`,
+    );
+  };
+
   const openFolderInWindow = (folderId: string, tab: FolderTab | null = null): boolean => {
     if (!workspaceId || !channelId) return false;
     return openStandaloneWindow(
@@ -1608,6 +1617,16 @@ export default function SdlcScreen(): ReactElement {
   const closeConversations = useCallback((): void => {
     setDiscussionUrl({ open: false, conversationId: null });
   }, [setDiscussionUrl]);
+
+  // Toggles the panel without disturbing its scope: the url already says what it
+  // is showing, so only the open flag moves.
+  useShortcutById('sdlc.toggleConversations', () => {
+    if (!chatPanelAvailable) return;
+    setDiscussionUrl({
+      open: !rightPanelOpen,
+      conversationId: rightPanelOpen ? null : selectedDiscussionConversationId,
+    });
+  });
 
   const selectDiscussionConversation = useCallback(
     (conversationId: string | null, options?: { selectedTab?: 'details' }): void => {
@@ -3069,8 +3088,12 @@ export default function SdlcScreen(): ReactElement {
       </section>
     );
   };
-  const openTrack = (trackId: string | null): void => {
+  const openTrack = (
+    trackId: string | null,
+    event?: { metaKey: boolean; ctrlKey: boolean },
+  ): void => {
     if (!channelId) return;
+    if (trackId && shouldOpenInNewWindow(event) && openTrackInWindow(trackId)) return;
     navigateWithinSdlc(`/sdlc/${channelId}/tracks`, trackId ? trackSearch(trackId) : '');
   };
 
@@ -3261,7 +3284,7 @@ export default function SdlcScreen(): ReactElement {
                   <button
                     key={track.id}
                     type='button'
-                    onClick={() => openTrack(track.id)}
+                    onClick={event => openTrack(track.id, event)}
                     {...(selectedTrackId === track.id && { 'aria-current': 'page' as const })}
                     className={cn(
                       'mb-0.5 flex h-[32px] w-full items-center gap-2.5 rounded-[6px] px-2 text-[13px] text-sidebar-foreground transition-colors',
@@ -3303,7 +3326,7 @@ export default function SdlcScreen(): ReactElement {
                         <button
                           key={track.id}
                           type='button'
-                          onClick={() => openTrack(track.id)}
+                          onClick={event => openTrack(track.id, event)}
                           {...(selectedTrackId === track.id && { 'aria-current': 'page' as const })}
                           className={cn(
                             'mb-0.5 flex h-[32px] w-full items-center gap-2.5 rounded-[6px] px-2 text-[13px] text-sidebar-foreground/60 transition-colors',
