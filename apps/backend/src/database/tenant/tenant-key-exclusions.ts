@@ -6,7 +6,6 @@ export const TENANT_KEY_EXCLUDED_MODELS = [
   'AiProvisioningStatus',
   'CanvasCommentThread',
   'CanvasComment',
-  'Commit', // Scoped via pullRequest.workspaceId (FK relationship)
   'LookupValue',
   'Merchant',
   'ActivityAlias',

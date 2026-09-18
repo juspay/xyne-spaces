@@ -176,7 +176,6 @@ export class ACLFactory {
       return new CanvasCommentThreadsACL(ctx, prisma)
     case 'commit':
       return new CommitsACL(ctx, prisma)
-    // Scoped via pullRequest.workspaceId relationship
     case 'entityAccess':
       // Carries workspaceId, so the base clause ({ workspaceId }) is the whole rule.
       return new BaseQueryACL(ctx, prisma)
