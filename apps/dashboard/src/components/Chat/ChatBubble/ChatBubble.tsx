@@ -834,11 +834,12 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   const handleCopyImage = (): void => {
     const attachment = imageAttachments[0];
     if (!attachment) return;
-    fetchFile(attachment.id, attachment.originalFilename, attachment.mimetype)
-      .then(file => copyImage(file))
-      .catch(() => {
-        toast.error('Failed to copy image');
-      });
+    // Hand copyImage a thunk instead of awaiting the download first: the clipboard
+    // write must be issued inside this click's task or the browser blocks it.
+    // copyImage reports its own failure toast, including the underlying reason.
+    void copyImage(() =>
+      fetchFile(attachment.id, attachment.originalFilename, attachment.mimetype),
+    );
   };
 
   const canModifyMessage = user?.id ? isMessageEditable(message, user.id) : false;

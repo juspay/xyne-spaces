@@ -32,6 +32,7 @@ export * from './utils/linkPreviewParser';
 export * from './utils/messageContent';
 export * from './utils/ticketMetadata';
 export * from './utils/fileTypes';
+export * from './utils/heic';
 export * from './utils/channel';
 export * from './utils/socialMedia';
 export * from './utils/csv';

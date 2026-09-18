@@ -7,6 +7,12 @@ import { useLocation } from 'react-router-dom';
 import { detectFileType, formatFileSize } from './utils';
 import { fetchFile, downloadFile, createPreviewUrl } from '../../services/clients/fileFetchService';
 import { downloadAttachment } from '../Chat/MessageAttachment/utils';
+import {
+  heicWebpDownloadUrl,
+  isHeicAttachment,
+  isWebRenderableImageType,
+  toWebpFilename,
+} from '../../services/heicAttachmentService';
 import { usePlatform } from '../../hooks/usePlatform';
 import { useShortcut, useScope } from '../../shortcuts';
 import { cn } from '../../utils/classNames';
@@ -70,15 +76,17 @@ const SlidePlaceholder: React.FC<{ file: FileItem }> = ({ file }) => {
   const [blobUrl, setBlobUrl] = useState<string | null>(null);
   const urlRef = useRef<string | null>(null);
 
-  const isImage = file.mimeType.startsWith('image/');
   const isVideo = file.mimeType.startsWith('video/');
+  // HEIC can't render from its original bytes — use the server's WebP thumbnail
+  const isHeic = isHeicAttachment(file.mimeType, file.fileName);
+  const isImage = file.mimeType.startsWith('image/') || isHeic;
 
   useEffect(() => {
     // For images, fetch the preview thumbnail so user sees the image during swipe
     if (!isImage && !(isVideo && file.thumbnailUrl)) return;
 
     const source =
-      isVideo && file.thumbnailUrl && file.attachmentId
+      file.attachmentId && ((isVideo && file.thumbnailUrl) || isHeic)
         ? `/attachments/${file.attachmentId}/thumbnail`
         : file.attachmentId || file.fileUrl;
 
@@ -96,7 +104,7 @@ const SlidePlaceholder: React.FC<{ file: FileItem }> = ({ file }) => {
         urlRef.current = null;
       }
     };
-  }, [file.attachmentId, file.fileUrl, file.thumbnailUrl, isImage, isVideo]);
+  }, [file.attachmentId, file.fileUrl, file.thumbnailUrl, isImage, isVideo, isHeic]);
 
   if (blobUrl) {
     return (
@@ -133,6 +141,7 @@ export const SlideContent: React.FC<{
   const fileType = detectFileType(file.mimeType, file.fileName);
   const isVideo = fileType?.displayName === 'Video';
   const isCarouselMode = Boolean(disableGestures);
+  const isHeic = isHeicAttachment(file.mimeType, file.fileName);
 
   const [viewerResetKey, setViewerResetKey] = useState(0);
   const prevActiveRef = useRef(isActive);
@@ -152,10 +161,23 @@ export const SlideContent: React.FC<{
 
     if (isVideo) return;
 
+    // HEIC can't render from its original bytes; fetch the server's lossy
+    // (q85) WebP rendition instead (the plain fileUrl still serves the original).
+    if (isHeic) {
+      fetchFile(
+        heicWebpDownloadUrl(file.attachmentId || file.fileUrl),
+        toWebpFilename(file.fileName),
+        'image/webp',
+      )
+        .then(setFileData)
+        .catch(err => setError(err instanceof Error ? err.message : 'Failed to load file'));
+      return;
+    }
+
     fetchFile(file.fileUrl, file.fileName, file.mimeType)
       .then(setFileData)
       .catch(err => setError(err instanceof Error ? err.message : 'Failed to load file'));
-  }, [file.fileUrl, file.fileName, file.mimeType, isVideo, isActive]);
+  }, [file.fileUrl, file.fileName, file.mimeType, file.attachmentId, isVideo, isActive, isHeic]);
 
   if (error) {
     return (
@@ -218,6 +240,17 @@ export const SlideContent: React.FC<{
   // No loader - render file if we have it, otherwise nothing (keeps stale content)
   if (!fileData) {
     return null;
+  }
+
+  // HEIC fall-through: the webp fetch returned the original bytes. A
+  // browser-renderable image (renamed JPEG) still renders; HEIC originals
+  // cannot — show the non-image fallback instead of a broken <img>.
+  if (isHeic && !isWebRenderableImageType(fileData.type)) {
+    return (
+      <div className='text-muted text-center'>
+        <p>Preview not available</p>
+      </div>
+    );
   }
 
   const ViewerComponent = fileType.component;
@@ -345,6 +378,7 @@ const FilePreviewModalInner: React.FC<FilePreviewModalProps> = ({
 
   // For videos, skip the download and use streaming directly
   const isVideo = fileType?.displayName === 'Video';
+  const isHeic = isHeicAttachment(currentMimeType, currentFileName);
 
   // Expand mounted slides as user navigates (current ±1), reset on close
   useEffect(() => {
@@ -456,11 +490,24 @@ const FilePreviewModalInner: React.FC<FilePreviewModalProps> = ({
     setIsLoading(true);
     setError(null);
 
-    fetchFile(currentFileUrl, currentFileName, currentMimeType)
+    // HEIC can't render from its original bytes; fetch the WebP rendition
+    fetchFile(
+      isHeic ? heicWebpDownloadUrl(currentFileUrl) : currentFileUrl,
+      isHeic ? toWebpFilename(currentFileName) : currentFileName,
+      isHeic ? 'image/webp' : currentMimeType,
+    )
       .then(setFileData)
       .catch(err => setError(err instanceof Error ? err.message : 'Failed to load file'))
       .finally(() => setIsLoading(false));
-  }, [isOpen, currentFileUrl, currentFileName, currentMimeType, isVideo, hasStackNavigation]);
+  }, [
+    isOpen,
+    currentFileUrl,
+    currentFileName,
+    currentMimeType,
+    isVideo,
+    isHeic,
+    hasStackNavigation,
+  ]);
 
   // Handle download with utility function
   const handleDownload = async (): Promise<void> => {
@@ -485,7 +532,11 @@ const FilePreviewModalInner: React.FC<FilePreviewModalProps> = ({
           onRetry={() => {
             setIsLoading(true);
             setError(null);
-            fetchFile(currentFileUrl, currentFileName, currentMimeType)
+            fetchFile(
+              isHeic ? heicWebpDownloadUrl(currentFileUrl) : currentFileUrl,
+              isHeic ? toWebpFilename(currentFileName) : currentFileName,
+              isHeic ? 'image/webp' : currentMimeType,
+            )
               .then(setFileData)
               .catch(err => setError(err instanceof Error ? err.message : 'Failed to load file'))
               .finally(() => setIsLoading(false));
@@ -535,6 +586,14 @@ const FilePreviewModalInner: React.FC<FilePreviewModalProps> = ({
     // For non-video files, ensure we have file data before rendering
     if (!fileData) {
       return <LoadingState message='Loading file data...' />;
+    }
+
+    // HEIC fall-through: the webp fetch returned the original bytes. A
+    // browser-renderable image (renamed JPEG) still renders; HEIC originals
+    // (TOO_LARGE) cannot — drop to the non-image fallback instead of a
+    // silently broken <img>.
+    if (isHeic && !isWebRenderableImageType(fileData.type)) {
+      return <UnsupportedFileState onDownload={() => void handleDownload()} />;
     }
 
     // Render the appropriate viewer component
@@ -642,7 +701,10 @@ const FilePreviewModalInner: React.FC<FilePreviewModalProps> = ({
     );
   };
 
-  const isImage = fileType?.displayName === 'Image';
+  const isImage = fileType?.displayName === 'Image' || isHeic;
+  // HEIC fall-through to non-renderable original bytes — skip the background
+  // image too; it would be a silently broken <img> behind the fallback UI.
+  const heicOriginalBytes = isHeic && fileData !== null && !isWebRenderableImageType(fileData.type);
 
   const [backgroundImageUrl, setBackgroundImageUrl] = useState<string | null>(null);
 
@@ -656,7 +718,7 @@ const FilePreviewModalInner: React.FC<FilePreviewModalProps> = ({
   useEffect(() => {
     let objectUrl: string | null = null;
 
-    if (isImage && fileData) {
+    if (isImage && fileData && !heicOriginalBytes) {
       objectUrl = URL.createObjectURL(fileData);
       setBackgroundImageUrl(objectUrl);
     } else {
@@ -666,7 +728,7 @@ const FilePreviewModalInner: React.FC<FilePreviewModalProps> = ({
     return (): void => {
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [isImage, fileData]);
+  }, [isImage, fileData, heicOriginalBytes]);
 
   const { copyImage } = useClipboard();
   const [copied, setCopied] = useState(false);
@@ -1096,8 +1158,13 @@ const AttachmentGalleryModalInner: React.FC = () => {
 
   const fileType = detectFileType(currentMimeType, currentFileName);
   const isVideo = fileType?.displayName === 'Video';
-  const isImage = fileType?.displayName === 'Image';
+  const isHeic = isHeicAttachment(currentMimeType, currentFileName);
+  const isImage = fileType?.displayName === 'Image' || isHeic;
   const isPdf = fileType?.displayName === 'PDF Document';
+  // HEIC fall-through to non-renderable original bytes (NOT_HEIC/TOO_LARGE):
+  // skip the image render paths; they would be a silently broken <img>.
+  const heicOriginalBytes =
+    isHeic && machineFileData !== null && !isWebRenderableImageType(machineFileData.type);
 
   // Track mounted slides
   useEffect(() => {
@@ -1245,6 +1312,13 @@ const AttachmentGalleryModalInner: React.FC = () => {
       return <LoadingState message='Loading file data...' />;
     }
 
+    // HEIC fall-through: the webp fetch returned the original bytes. A
+    // browser-renderable image (renamed JPEG) still renders; HEIC originals
+    // (TOO_LARGE) cannot — drop to the non-image fallback.
+    if (heicOriginalBytes) {
+      return <UnsupportedFileState onDownload={() => void handleDownload()} />;
+    }
+
     const ViewerComponent = fileType.component;
     const initialPage: number | undefined = currentAttachment?.initialPage;
     return (
@@ -1260,11 +1334,11 @@ const AttachmentGalleryModalInner: React.FC = () => {
 
   // Background image for images
   const backgroundImageUrl = useMemo(() => {
-    if (isImage && machineFileData) {
+    if (isImage && machineFileData && !heicOriginalBytes) {
       return URL.createObjectURL(machineFileData);
     }
     return null;
-  }, [isImage, machineFileData]);
+  }, [isImage, machineFileData, heicOriginalBytes]);
 
   // Cleanup background URL
   useEffect(() => {

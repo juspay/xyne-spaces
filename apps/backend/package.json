@@ -1,6 +1,6 @@
 {
   "name": "xyne-spaces-backend",
-  "version": "1.340.2",
+  "version": "1.342.2",
   "description": "Backend server for Xyne Spaces application",
   "main": "dist/index.js",
   "type": "module",
@@ -115,6 +115,7 @@
     "google-auth-library": "^10.4.0",
     "googleapis": "^144.0.0",
     "hdbscan-ts": "^1.0.17",
+    "heic-decode": "2.1.0",
     "helmet": "^7.1.0",
     "html-to-text": "^9.0.5",
     "http-proxy-middleware": "^3.0.5",
@@ -151,6 +152,7 @@
     "remark-parse": "^11.0.0",
     "remove-markdown": "^0.6.3",
     "rrule": "^2.8.1",
+    "sharp": "^0.35.4",
     "simple-git": "^3.36.0",
     "simple-oauth2": "^5.1.0",
     "socket.io": "^4.8.1",

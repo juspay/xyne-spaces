@@ -20,6 +20,7 @@ import { ScreenShareView } from '../ScreenShareView/ScreenShareView';
 import { ControlRequestDialog } from '../CallModals/ControlRequestDialog';
 import { ParticipantsSidebar } from '../ParticipantsSidebar/ParticipantsSidebar';
 import { HostControlsPanel } from '../HostControlsPanel/HostControlsPanel';
+import { CallNotesPanel } from '../CallNotesPanel/CallNotesPanel';
 import { ConnectionStatusIndicators } from '../ConnectionStatusIndicators/ConnectionStatusIndicators';
 import { sendDrawEvent } from '../../../hooks/useDrawStore';
 import { useCallWhiteboardStore } from '../../../stores/callWhiteboardStore';
@@ -171,6 +172,7 @@ export function FullCallView({
   const [focusedScreenShareIdentity, setFocusedScreenShareIdentity] = useState<string | null>(null);
   const [isParticipantsSidebarOpen, setIsParticipantsSidebarOpen] = useState(false);
   const [isHostControlsOpen, setIsHostControlsOpen] = useState(false);
+  const [isNotesOpen, setIsNotesOpen] = useState(false);
   const isWhiteboardOpen = useCallWhiteboardStore(s => s.isOpen);
   const [isPresentationMode, setIsPresentationMode] = useState(false);
   useAutoPresentationMode(isTelepresenceEnabled, setIsPresentationMode);
@@ -370,6 +372,7 @@ export function FullCallView({
       }
       if (!prev) {
         setIsHostControlsOpen(false);
+        setIsNotesOpen(false);
       }
       return !prev;
     });
@@ -385,10 +388,25 @@ export function FullCallView({
       }
       if (!prev) {
         setIsParticipantsSidebarOpen(false);
+        setIsNotesOpen(false);
       }
       return !prev;
     });
   }, [isChatOpen, onToggleThread, isCallChatOpen, onToggleCallChat]);
+
+  // Notes share the right sidebar slot with thread, participants and host controls
+  const handleToggleNotes = useCallback((): void => {
+    setIsNotesOpen(prev => {
+      if (!prev && isChatOpen) {
+        onToggleThread();
+      }
+      if (!prev) {
+        setIsParticipantsSidebarOpen(false);
+        setIsHostControlsOpen(false);
+      }
+      return !prev;
+    });
+  }, [isChatOpen, onToggleThread]);
 
   // Close participants sidebar when chat opens
   useEffect(() => {
@@ -398,7 +416,10 @@ export function FullCallView({
     if (isChatOpen && isHostControlsOpen) {
       setIsHostControlsOpen(false);
     }
-  }, [isChatOpen, isParticipantsSidebarOpen, isHostControlsOpen]);
+    if (isChatOpen && isNotesOpen) {
+      setIsNotesOpen(false);
+    }
+  }, [isChatOpen, isParticipantsSidebarOpen, isHostControlsOpen, isNotesOpen]);
 
   // Show toast for incoming call chat messages
   useCallChatNotifications(room, localParticipantId, onCallChatNewMessage);
@@ -422,7 +443,8 @@ export function FullCallView({
   );
 
   // Determine if any right sidebar is open (for layout adjustments)
-  const isRightSidebarOpen = isChatOpen || isParticipantsSidebarOpen || isHostControlsOpen;
+  const isRightSidebarOpen =
+    isChatOpen || isParticipantsSidebarOpen || isHostControlsOpen || isNotesOpen;
 
   return (
     <div
@@ -579,6 +601,8 @@ export function FullCallView({
             isParticipantsSidebarOpen={isParticipantsSidebarOpen}
             isHostControlsOpen={isHostControlsOpen}
             onToggleHostControls={handleToggleHostControls}
+            isNotesOpen={isNotesOpen}
+            onToggleNotes={isExternalUser ? undefined : handleToggleNotes}
             isAIAssistantEnabled={isAIAssistantEnabled}
             aiController={aiController}
             localParticipantId={localParticipantId}
@@ -664,6 +688,12 @@ export function FullCallView({
       {isHostControlsOpen && isHostProp && (
         <div className='fixed right-0 top-0 h-full w-full md:w-[500px] bg-background shadow-xl z-[60]'>
           <HostControlsPanel callId={callId} onClose={handleToggleHostControls} />
+        </div>
+      )}
+
+      {isNotesOpen && !isExternalUser && (
+        <div className='fixed right-0 top-0 h-full w-full md:w-[500px] bg-background shadow-xl z-[60]'>
+          <CallNotesPanel callId={callId} channelId={channelId} onClose={handleToggleNotes} />
         </div>
       )}
 

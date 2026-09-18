@@ -98,6 +98,9 @@ router.post(
 // PRD Generation endpoint (generates PRD canvas from call transcript)
 router.post('/:callId/generate-prd', callController.generatePRD);
 
+// Get or create the collaborative notes canvas (shared across a recurring series)
+router.post('/:callId/notes-canvas', callController.getOrCreateNotesCanvas);
+
 // Detailed Summary Generation endpoint (generates comprehensive summary from call transcript)
 router.post('/:callId/generate-detailed-summary', callController.generateDetailedSummary);
 
