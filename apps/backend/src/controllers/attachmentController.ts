@@ -20,6 +20,7 @@ import {
   SDLC_TRACK_MEMBERSHIP_RELATION,
 } from '@xyne/shared/sdlc';
 import { assertAttachmentAccess as assertAttachmentAccessShared, type AttachmentAccessResult } from '../services/attachmentAccessService';
+import { canvasAuthService } from '../services/canvasAuthService';
 import { uploadFiles } from '../services/fileUploadService';
 import { config } from '../config/env';
 import { vespaQueue } from '@/queues/vespaQueue';

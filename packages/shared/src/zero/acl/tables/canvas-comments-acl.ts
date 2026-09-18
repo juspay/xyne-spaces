@@ -2,6 +2,7 @@ import type { Query } from '@rocicorp/zero';
 import type { Schema, Context } from '../../schema';
 import { CanvasVisibility } from '../../schema';
 import { BaseQueryACL } from '../core/base-acl';
+import { guestCanvasAccessWhere, isGuestContext } from '../core/guest-acl-utils';
 
 export class CanvasCommentsACL extends BaseQueryACL<'canvas_comments'> {
   constructor(ctx: Context) {
@@ -11,6 +12,14 @@ export class CanvasCommentsACL extends BaseQueryACL<'canvas_comments'> {
   canSelect<TReturn>(
     query: Query<'canvas_comments', Schema, TReturn>,
   ): Query<'canvas_comments', Schema, TReturn> {
+    if (isGuestContext(this.ctx)) {
+      return query.where('workspaceId', this.ctx.workspaceId).whereExists('thread', thread =>
+        thread.whereExists('canvas', canvas =>
+          canvas.where(guestCanvasAccessWhere(this.ctx)),
+        ),
+      );
+    }
+
     return query.where('workspaceId', this.ctx.workspaceId).whereExists('thread', thread =>
       thread.whereExists('canvas', canvas =>
         canvas.where(({ or, cmp, exists }) =>

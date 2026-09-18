@@ -570,11 +570,13 @@ export function CanvasInlineCommentThread({
                     allUsers,
                   )}
                 </p>
-                <MessageCardAttachmentThumbnails
-                  attachments={toPanelAttachments(comment.attachments)}
-                  className='ml-[33px] mt-1'
-                  trackCategory='CANVAS_COMMENT'
-                />
+                {!comment.deletedAt && (
+                  <MessageCardAttachmentThumbnails
+                    attachments={toPanelAttachments(comment.attachments)}
+                    className='ml-[33px] mt-1'
+                    trackCategory='CANVAS_COMMENT'
+                  />
+                )}
               </div>
             );
           })}
