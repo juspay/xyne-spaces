@@ -1509,6 +1509,24 @@ export const sdlcFolderTable = table('sdlc_folders')
   })
   .primaryKey('id');
 
+export const sdlcItemCommentTable = table('sdlc_item_comments')
+  .columns({
+    id: string(),
+    workspaceId: string(),
+    entityType: string(),
+    entityId: string(),
+    body: string(),
+    anchorQuote: string().optional(),
+    anchorSelector: string().optional(),
+    resolved: boolean(),
+    resolvedBy: string().optional(),
+    resolvedAt: number().optional(),
+    createdBy: string(),
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey('id');
+
 export const sdlcTrackTable = table('sdlc_tracks')
   .columns({
     workspaceId: string(),
@@ -3405,6 +3423,20 @@ export const sdlcEntityLinkTableRelationships = relationships(sdlcEntityLinkTabl
   }),
 }));
 
+export const sdlcItemCommentTableRelationships = relationships(
+  sdlcItemCommentTable,
+  ({ many }) => ({
+    // The commented entity is placed in a hub by an edge, so the hub is reached
+    // the way a folder reaches it: through the edges pointing at the same id.
+    // targetId is polymorphic, so readers filter by relationType.
+    sdlcEntityLinks: many({
+      sourceField: ['entityId'],
+      destField: ['targetId'],
+      destSchema: sdlcEntityLinkTable,
+    }),
+  }),
+);
+
 export const sdlcArtifactTableRelationships = relationships(sdlcArtifactTable, ({ one }) => ({
   repo: one({
     sourceField: ['repoId'],
@@ -4840,6 +4872,7 @@ export const schema = createSchema({
     sdlcEntityLinkTable,
     sdlcArtifactTable,
     sdlcFolderTable,
+    sdlcItemCommentTable,
     sdlcTrackTable,
     emailTable,
     emailDraftTable,
@@ -4940,6 +4973,7 @@ export const schema = createSchema({
     sdlcEntityLinkTableRelationships,
     sdlcArtifactTableRelationships,
     sdlcFolderTableRelationships,
+    sdlcItemCommentTableRelationships,
     sdlcTrackTableRelationships,
     messageTableRelationships,
     messageArtifactTableRelationships,
@@ -5112,6 +5146,7 @@ export type Repo = Row<typeof schema.tables.repos>;
 export type SdlcEntityLink = Row<typeof schema.tables.sdlc_entity_links>;
 export type SdlcArtifact = Row<typeof schema.tables.sdlc_artifacts>;
 export type SdlcFolder = Row<typeof schema.tables.sdlc_folders>;
+export type SdlcItemComment = Row<typeof schema.tables.sdlc_item_comments>;
 export type SdlcTrack = Row<typeof schema.tables.sdlc_tracks>;
 export type EmailDraft = Row<typeof schema.tables.email_drafts>;
 export type ConversationLabel = Row<typeof schema.tables.conversation_labels>;
