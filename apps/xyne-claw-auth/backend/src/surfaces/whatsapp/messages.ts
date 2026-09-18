@@ -41,6 +41,48 @@ function sameUser(a: string | null | undefined, self: SelfIdentity): boolean {
   return n === normalize(self.jid) || (self.lid !== undefined && n === normalize(self.lid));
 }
 
+/** The media node on a message, if it carries one. Audio and stickers are
+ *  listed because they are common; whether we can do anything useful with them
+ *  is the caller's problem, not this function's. */
+export interface MediaDescriptor {
+  kind: "image" | "video" | "document" | "audio" | "sticker";
+  mimeType: string;
+  fileName: string;
+  sizeBytes: number;
+}
+
+/** An inbound message plus what the plugin needs to go and fetch its file.
+ *  `media` is plugin-local: the core never reads it, it only sees the
+ *  `attachments` the plugin produces from it. */
+export interface InboundWithMedia extends InboundMessage {
+  media?: MediaDescriptor;
+}
+
+export function mediaOf(content: proto.IMessage | null | undefined): MediaDescriptor | null {
+  if (!content) return null;
+  const type = getContentType(content);
+  const node = type ? ((content as Record<string, unknown>)[type] as Record<string, unknown> | undefined) : undefined;
+  if (!node) return null;
+  const mimeType = typeof node["mimetype"] === "string" ? node["mimetype"] : "";
+  const sizeBytes = Number(node["fileLength"] ?? 0) || 0;
+  switch (type) {
+    case "imageMessage":
+      return { kind: "image", mimeType: mimeType || "image/jpeg", fileName: "image.jpg", sizeBytes };
+    case "videoMessage":
+      return { kind: "video", mimeType: mimeType || "video/mp4", fileName: "video.mp4", sizeBytes };
+    case "audioMessage":
+      return { kind: "audio", mimeType: mimeType || "audio/ogg", fileName: "audio.ogg", sizeBytes };
+    case "stickerMessage":
+      return { kind: "sticker", mimeType: mimeType || "image/webp", fileName: "sticker.webp", sizeBytes };
+    case "documentMessage": {
+      const named = typeof node["fileName"] === "string" && node["fileName"] ? node["fileName"] : "document";
+      return { kind: "document", mimeType: mimeType || "application/octet-stream", fileName: named, sizeBytes };
+    }
+    default:
+      return null;
+  }
+}
+
 /** Text of a message across the shapes WhatsApp uses for "someone typed". */
 export function extractText(content: proto.IMessage | null | undefined): string {
   if (!content) return "";
@@ -89,7 +131,7 @@ export interface ToInboundOptions {
   selfChat?: boolean;
 }
 
-export function toInbound(msg: WAMessage, self: SelfIdentity, opts: ToInboundOptions = {}): InboundMessage | null {
+export function toInbound(msg: WAMessage, self: SelfIdentity, opts: ToInboundOptions = {}): InboundWithMedia | null {
   const key = msg.key;
   const remoteJid = key?.remoteJid ?? "";
   const messageId = key?.id ?? "";
@@ -102,13 +144,20 @@ export function toInbound(msg: WAMessage, self: SelfIdentity, opts: ToInboundOpt
   if (!type || type === "protocolMessage" || type === "reactionMessage" || type === "senderKeyDistributionMessage") {
     return null;
   }
+  // A media message with no caption has no text, but it is still something the
+  // person sent and must not be dropped as empty.
+  const media = mediaOf(content);
 
   const isGroup = isJidGroup(remoteJid) === true;
   const chatId = normalize(remoteJid);
   const fromMe = key?.fromMe === true;
-  // The owner's own messages in the "You" chat are input; anything we sent
-  // (tracked by id) or sent elsewhere from the phone is an echo.
-  const selfChat = fromMe && !isGroup && sameUser(remoteJid, self) && opts.selfChat !== false && !(opts.sentIds?.has(messageId) ?? false);
+  // Everything this account sends comes back to us, and so does everything the
+  // owner types on their own phone — both arrive as fromMe. The only thing
+  // separating them is whether WE sent it, which is what sentIds records.
+  // Without that split the owner cannot talk to their own agent in a group,
+  // because their message looks identical to the agent's own echo.
+  const fromOwner = fromMe && !(opts.sentIds?.has(messageId) ?? false);
+  const selfChat = fromOwner && !isGroup && sameUser(remoteJid, self) && opts.selfChat !== false;
   const rawSender = selfChat ? self.jid : isGroup ? (key?.participant ?? "") : remoteJid;
   // Newer WhatsApp servers add the phone-number twin of a LID sender on the
   // key; prefer it so allowlists written as phone numbers keep matching.
@@ -138,7 +187,9 @@ export function toInbound(msg: WAMessage, self: SelfIdentity, opts: ToInboundOpt
     text,
     mentionedSelf,
     replyToSelf,
-    fromSelf: fromMe && !selfChat,
+    ...(media ? { media } : {}),
+    fromSelf: fromMe && !fromOwner,
+    ...(fromOwner ? { fromOwner: true } : {}),
     ...(selfChat ? { selfChat: true } : {}),
     ref,
     ...(timestamp !== undefined ? { timestamp } : {}),

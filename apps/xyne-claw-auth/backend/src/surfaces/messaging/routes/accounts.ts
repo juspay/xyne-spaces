@@ -129,12 +129,29 @@ router.post("/accounts", async (req: Request, res: Response) => {
     return;
   }
   const config: AccountConfig = parseAccountConfig({
-    label: body.data.label,
+    label: body.data.label ?? agent.name,
     createdByUserId: caller.userId,
     // On a user-scoped channel this records whose number it is, which is what
     // the owner's own "You" chat dispatches against. It is never used for
     // anybody else's messages.
-    ...(plugin.accountScope === "user" ? { ownerUserId: caller.userId } : {}),
+    ...(plugin.accountScope === "user"
+      ? {
+          ownerUserId: caller.userId,
+          // A personal number answers in groups only for now: a linked device
+          // sees every DM the person receives, and answering those means
+          // sending messages from them that they did not write. And there it
+          // waits to be addressed, since not every line in a chat someone owns
+          // is a request.
+          dmPolicy: "disabled" as const,
+          requireMention: true,
+        }
+      : {
+          // A shared business number is the opposite: every message sent to it
+          // was deliberately sent to a service, so a plain "what's my leave
+          // balance?" is the normal case and demanding "/agent" in front of it
+          // would be friction for no gain.
+          requireMention: false,
+        }),
     desiredState: "stopped",
     connState: "disconnected",
     ...(residue.value !== undefined ? { channel: residue.value } : {}),
@@ -326,4 +343,38 @@ router.delete("/accounts/:id/identities/:senderId", async (req: Request, res: Re
   const result = await unlinkIdentity({ surfaceId: account.surfaceId, accountKey: account.accountKey, senderId });
   log.info(`[channels] identity unlinked account=${account.id} sender=${senderId} by=${resolved.userId}`);
   res.json({ success: true, removed: result.count });
+});
+
+/**
+ * Groups this account can be allowlisted into. Without this the only way to
+ * find a group id is to message the group and read it out of the server log,
+ * which is fine for whoever runs the server and useless for everyone else.
+ */
+router.get("/accounts/:id/groups", async (req: Request, res: Response) => {
+  const resolved = await resolveAccountRequest(req);
+  if (!resolved.ok) {
+    res.status(resolved.status).json({ success: false, error: resolved.error });
+    return;
+  }
+  const account = toChannelAccount(resolved.account);
+  if (!resolved.plugin.listGroups) {
+    res.json({ success: true, groups: [], supported: false });
+    return;
+  }
+  if (account.config.connState !== "connected") {
+    res.status(409).json({ success: false, error: `This ${resolved.plugin.displayName} account is not connected.` });
+    return;
+  }
+  try {
+    const groups = await accountManager.listGroups(account.id);
+    if (groups === null) {
+      // Another pod holds the socket; a sweep moves it within ~30s.
+      res.status(503).json({ success: false, error: "This account is running on another server right now — try again in a moment." });
+      return;
+    }
+    res.json({ success: true, groups, supported: true });
+  } catch (err) {
+    log.warn(`[channels] listGroups failed account=${account.id}: ${errMsg(err)}`);
+    res.status(502).json({ success: false, error: "Could not read the group list from the messenger." });
+  }
 });

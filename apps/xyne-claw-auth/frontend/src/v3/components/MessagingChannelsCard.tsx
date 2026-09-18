@@ -7,7 +7,7 @@
  * per account.
  */
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
-import { ArrowsClockwiseIcon, CaretDownIcon, CaretUpIcon, SealCheckIcon, CopyIcon } from "@phosphor-icons/react";
+import { ArrowsClockwiseIcon, CaretDownIcon, CaretUpIcon, DeviceMobileIcon, SealCheckIcon, CopyIcon } from "@phosphor-icons/react";
 
 import {
   createChannelAccount,
@@ -15,18 +15,20 @@ import {
   getChannelLoginArtifact,
   listAgents,
   listChannelAccounts,
+  listChannelGroups,
   loginChannelAccount,
   logoutChannelAccount,
   updateChannelAccount,
   type ChannelAccountView,
+  type ChannelGroup,
   type MessagingChannelKey,
-  type OrgDetail,
 } from "../../lib/api";
 import { Badge } from "./ui/Badge";
 import { Button } from "./ui/Button";
 import { ConfirmDialog } from "./ui/ConfirmDialog";
 import { Dialog } from "./ui/Dialog";
 import { SelectField } from "./ui/SelectField";
+import { useAdminStatus } from "../hooks/useAdminStatus";
 import { Switch } from "./ui/Switch";
 import { TextField } from "./ui/TextField";
 import { useSnackbar } from "./ui/Snackbar";
@@ -37,11 +39,32 @@ interface ChannelMeta {
   noun: string;
   icon: ReactNode;
   caveat: string;
+  /** Mirrors the plugin's accountScope: "user" accounts are one person's own
+   *  number and live in their Settings; "org" accounts are shared and live on
+   *  the organisation page. */
+  scope: "org" | "user";
+  /** Whether this channel answers direct messages at all. Off for a personal
+   *  number: a linked device sees every DM the person receives, and answering
+   *  those sends messages from them that they did not write. Flip to true to
+   *  bring the DM and self-chat controls back. */
+  dms: boolean;
 }
 
 const CHANNELS: ChannelMeta[] = [
   {
+    key: "whatsapp",
+    scope: "user",
+    dms: false,
+    name: "WhatsApp (linked device)",
+    noun: "number",
+    icon: <DeviceMobileIcon size={17} className="mt-0.5 shrink-0 text-xyne-fg-secondary" />,
+    caveat:
+      "Your own number, linked by scanning a QR the way WhatsApp Web does. Answers in groups it is added to — it stays silent in direct messages, including your own, so it never replies to someone on your behalf.",
+  },
+  {
     key: "whatsapp-cloud",
+    scope: "org",
+    dms: true,
     name: "WhatsApp Business API",
     noun: "number",
     icon: <SealCheckIcon size={17} className="mt-0.5 shrink-0 text-xyne-fg-secondary" />,
@@ -84,22 +107,37 @@ function splitList(value: string): string[] {
     .filter(Boolean);
 }
 
-export function MessagingChannelsCard({ userId, org }: { userId: string; org: OrgDetail }) {
+/**
+ * Placement follows the app's existing split: per-user configuration lives in
+ * Settings beside your own provider keys, org configuration on the org page.
+ * The admin check is the backstop for the org page, which members can open too.
+ */
+export function MessagingChannelsCard({
+  userId,
+  scope,
+  orgId,
+}: {
+  userId: string;
+  scope: "org" | "user";
+  /** Org-scoped channels only; a personal account uses the session's org. */
+  orgId?: string;
+}) {
+  const { isAdmin } = useAdminStatus();
+  if (scope === "org" && !isAdmin) return null;
   return (
     <>
-      {CHANNELS.map((channel) => (
-        <ChannelSection key={channel.key} channel={channel} userId={userId} org={org} />
+      {CHANNELS.filter((channel) => channel.scope === scope).map((channel) => (
+        <ChannelSection key={channel.key} channel={channel} userId={userId} orgId={orgId} />
       ))}
     </>
   );
 }
 
-function ChannelSection({ channel, userId, org }: { channel: ChannelMeta; userId: string; org: OrgDetail }) {
+function ChannelSection({ channel, userId, orgId }: { channel: ChannelMeta; userId: string; orgId?: string }) {
   const { show } = useSnackbar();
   const [accounts, setAccounts] = useState<ChannelAccountView[]>([]);
   const [loading, setLoading] = useState(true);
   const [agents, setAgents] = useState<Array<{ slug: string; name: string }>>([]);
-  const [newLabel, setNewLabel] = useState("");
   const [newAgent, setNewAgent] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [qrAccount, setQrAccount] = useState<ChannelAccountView | null>(null);
@@ -111,14 +149,14 @@ function ChannelSection({ channel, userId, org }: { channel: ChannelMeta; userId
     async (silent = false) => {
       if (!silent) setLoading(true);
       try {
-        setAccounts(await listChannelAccounts(channel.key, org.id));
+        setAccounts(await listChannelAccounts(channel.key, orgId));
       } catch (error) {
         if (!silent) show({ variant: "error", title: errorMessage(error, `Failed to load ${channel.name} accounts`) });
       } finally {
         if (!silent) setLoading(false);
       }
     },
-    [channel.key, channel.name, org.id, show],
+    [channel.key, channel.name, orgId, show],
   );
 
   useEffect(() => {
@@ -140,11 +178,13 @@ function ChannelSection({ channel, userId, org }: { channel: ChannelMeta; userId
   const agentOptions = useMemo(() => agents.map((agent) => ({ value: agent.slug, label: `${agent.name} (/${agent.slug})` })), [agents]);
 
   const create = async () => {
-    if (!newLabel.trim() || !newAgent) return;
+    if (!newAgent) return;
     setCreating(true);
     try {
-      const account = await createChannelAccount(channel.key, { orgId: org.id, label: newLabel.trim(), agentSlug: newAgent });
-      setNewLabel("");
+      const account = await createChannelAccount(channel.key, {
+        ...(orgId ? { orgId } : {}),
+        agentSlug: newAgent,
+      });
       await load(true);
       show({ variant: "success", title: `${channel.name} ${channel.noun} added` });
       await connect(account);
@@ -200,7 +240,7 @@ function ChannelSection({ channel, userId, org }: { channel: ChannelMeta; userId
           <div>
             <h2 className="text-[13px] font-semibold text-xyne-fg-primary">{channel.name}</h2>
             <p className="mt-1 text-[12px] text-xyne-fg-muted">
-              Let people message a {channel.name} {channel.noun} and talk to this org's agents. Each {channel.noun} has a default
+              Let people message a {channel.name} {channel.noun} and talk to your agents. Each {channel.noun} has a default
               agent; a message starting with <code>/agent-slug</code> picks another one.
             </p>
             <p className="mt-1 text-[11px] text-xyne-fg-muted">{channel.caveat}</p>
@@ -211,15 +251,11 @@ function ChannelSection({ channel, userId, org }: { channel: ChannelMeta; userId
         </Button>
       </div>
 
-      <div className="mt-4 grid gap-3 md:grid-cols-[1fr_1fr_auto] md:items-end">
-        <TextField
-          label="Label"
-          placeholder={`e.g. Support ${channel.noun}`}
-          value={newLabel}
-          onChange={(event) => setNewLabel(event.target.value)}
-        />
+      {/* No name to type: an account is identified by the agent that answers
+          on it, so the label is derived from the agent server-side. */}
+      <div className="mt-4 grid gap-3 md:grid-cols-[1fr_auto] md:items-end">
         <SelectField label="Default agent" options={agentOptions} value={newAgent ?? undefined} onValueChange={(value) => setNewAgent(value)} placeholder="Pick an agent" />
-        <Button variant="primary" size="sm" disabled={creating || !newLabel.trim() || !newAgent} onClick={() => void create()}>
+        <Button variant="primary" size="sm" disabled={creating || !newAgent} onClick={() => void create()}>
           {creating ? "Adding…" : `Add ${channel.noun}`}
         </Button>
       </div>
@@ -236,7 +272,6 @@ function ChannelSection({ channel, userId, org }: { channel: ChannelMeta; userId
               channel={channel}
               account={account}
               agentOptions={agentOptions}
-              org={org}
               userId={userId}
               expanded={expanded === account.id}
               onToggle={() => setExpanded(expanded === account.id ? null : account.id)}
@@ -292,7 +327,6 @@ function AccountRow({
   channel,
   account,
   agentOptions,
-  org,
   userId,
   expanded,
   onToggle,
@@ -304,7 +338,6 @@ function AccountRow({
   channel: ChannelMeta;
   account: ChannelAccountView;
   agentOptions: Array<{ value: string; label: string }>;
-  org: OrgDetail;
   userId: string;
   expanded: boolean;
   onToggle: () => void;
@@ -352,7 +385,7 @@ function AccountRow({
       </div>
       {expanded && (
         <div className="mt-3 grid gap-4 lg:grid-cols-2">
-          <PolicyEditor channel={channel} account={account} agentOptions={agentOptions} org={org} onChanged={onChanged} />
+          <PolicyEditor channel={channel} account={account} agentOptions={agentOptions} onChanged={onChanged} />
         </div>
       )}
     </div>
@@ -363,13 +396,11 @@ function PolicyEditor({
   channel,
   account,
   agentOptions,
-  org,
   onChanged,
 }: {
   channel: ChannelMeta;
   account: ChannelAccountView;
   agentOptions: Array<{ value: string; label: string }>;
-  org: OrgDetail;
   onChanged: () => void;
 }) {
   const { show } = useSnackbar();
@@ -393,7 +424,7 @@ function PolicyEditor({
     try {
       await updateChannelAccount(channel.key, account.id, {
         ...(agentSlug && agentSlug !== account.agent?.slug ? { agentSlug } : {}),
-        dmPolicy: (dmPolicy ?? "linked") as ChannelAccountView["dmPolicy"],
+        dmPolicy: (channel.dms ? (dmPolicy ?? "linked") : "disabled") as ChannelAccountView["dmPolicy"],
         groupPolicy: (groupPolicy ?? "allowlist") as ChannelAccountView["groupPolicy"],
         groupAllowlist: splitList(groupAllowlist),
         groupAllowFrom: splitList(groupAllowFrom),
@@ -420,17 +451,21 @@ function PolicyEditor({
       <h3 className="text-[12px] font-semibold text-xyne-fg-primary">Who can talk to this {channel.noun}</h3>
       <div className="mt-3 grid gap-3">
         <SelectField label="Default agent" options={agentOptions} value={agentSlug ?? undefined} onValueChange={setAgentSlug} />
-        <SelectField label="Direct messages" options={DM_POLICY_OPTIONS} value={dmPolicy ?? undefined} onValueChange={setDmPolicy} />
+        {channel.dms ? (
+          <SelectField label="Direct messages" options={DM_POLICY_OPTIONS} value={dmPolicy ?? undefined} onValueChange={setDmPolicy} />
+        ) : (
+          <p className="rounded-md border border-xyne-border-subtle px-3 py-2 text-[11px] text-xyne-fg-muted">
+            Direct messages are off for this {channel.noun}. The agent answers only in groups it has been added to.
+          </p>
+        )}
         {account.capabilities.groups && (
           <>
             <SelectField label="Groups" options={GROUP_POLICY_OPTIONS} value={groupPolicy ?? undefined} onValueChange={setGroupPolicy} />
-            <TextField
-              label="Allowed groups"
-              hint="Group ids (…@g.us). Find them in the backend log when a group message is ignored."
-              multiline
-              rows={2}
-              value={groupAllowlist}
-              onChange={(event) => setGroupAllowlist(event.target.value)}
+            <GroupPicker
+              channel={channel}
+              account={account}
+              selected={splitList(groupAllowlist)}
+              onChange={(ids) => setGroupAllowlist(ids.join("\n"))}
             />
             <TextField
               label="Group senders"
@@ -442,8 +477,10 @@ function PolicyEditor({
             />
             <div className="flex items-center justify-between gap-3">
               <div>
-                <p className="text-[12px] text-xyne-fg-primary">Require @mention in groups</p>
-                <p className="text-[11px] text-xyne-fg-muted">Off = reply to every message in allowed groups.</p>
+                <p className="text-[12px] text-xyne-fg-primary">Only answer when addressed</p>
+                <p className="text-[11px] text-xyne-fg-muted">
+                  An @mention, a reply to the agent, or a message starting with /agent-name. Off = answer everything.
+                </p>
               </div>
               <Switch checked={requireMention} onChange={setRequireMention} ariaLabel="Require mention" />
             </div>
@@ -460,7 +497,9 @@ function PolicyEditor({
           <p className="text-[12px] font-semibold text-xyne-fg-primary">What the agent may do on this {channel.noun}</p>
           <p className="text-[11px] text-xyne-fg-muted">Replying in the chat that messaged it is always allowed.</p>
         </div>
-        <ToggleRow label="Self chat" hint="Messages you send to your own number run the agent as the fallback user." checked={selfChat} onChange={setSelfChat} />
+        {channel.dms && (
+          <ToggleRow label="Self chat" hint="Messages you send to your own number run the agent as you, the account owner." checked={selfChat} onChange={setSelfChat} />
+        )}
         <ToggleRow label="Send to other chats" hint="Let the agent message other numbers and groups when asked." checked={agentSend} onChange={setAgentSend} />
         <ToggleRow label="React to messages" hint="Let the agent add emoji reactions." checked={agentReact} onChange={setAgentReact} />
         <ToggleRow label="List groups" hint="Let the agent see which groups this number is in." checked={agentGroups} onChange={setAgentGroups} />
@@ -663,5 +702,124 @@ function TokenLoginDialog({
         </div>
       )}
     </Dialog>
+  );
+}
+
+/**
+ * Pick the groups the agent may answer in, by name.
+ *
+ * The ids are opaque ("120363…@g.us") and a person has no way to discover one
+ * except by reading the server log, so the account is asked for its own group
+ * list instead. Ids already saved but not in that list are still shown, so a
+ * stale entry can be seen and removed rather than silently dropped.
+ */
+function GroupPicker({
+  channel,
+  account,
+  selected,
+  onChange,
+}: {
+  channel: ChannelMeta;
+  account: ChannelAccountView;
+  selected: string[];
+  onChange: (ids: string[]) => void;
+}) {
+  const [groups, setGroups] = useState<ChannelGroup[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [query, setQuery] = useState("");
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      setGroups(await listChannelGroups(channel.key, account.id));
+    } catch (err) {
+      setError(errorMessage(err, "Could not load groups"));
+    } finally {
+      setLoading(false);
+    }
+  }, [channel.key, account.id]);
+
+  useEffect(() => {
+    if (account.connState === "connected") void load();
+  }, [account.connState, load]);
+
+  const known = new Set((groups ?? []).map((group) => group.id));
+  const orphans = selected.filter((id) => !known.has(id));
+  const needle = query.trim().toLowerCase();
+  const shown = (groups ?? []).filter((group) => !needle || group.name.toLowerCase().includes(needle));
+  // Searching must never look like it deselected something, so the count is
+  // always of everything ticked, not of what survived the filter.
+  const searchable = (groups?.length ?? 0) > 6;
+
+  const toggle = (id: string) =>
+    onChange(selected.includes(id) ? selected.filter((value) => value !== id) : [...selected, id]);
+
+  return (
+    <div>
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-[12px] text-xyne-fg-primary">
+          Groups the agent answers in
+          {selected.length > 0 && <span className="ml-1 text-xyne-fg-muted">· {selected.length} selected</span>}
+        </p>
+        <Button variant="ghost" size="sm" disabled={loading} onClick={() => void load()}>
+          {loading ? "Loading…" : "Refresh"}
+        </Button>
+      </div>
+
+      {account.connState !== "connected" ? (
+        <p className="mt-1 text-[11px] text-xyne-fg-muted">Connect the {channel.noun} to see its groups.</p>
+      ) : error ? (
+        <p className="mt-1 text-[11px] text-xyne-error-fg">{error}</p>
+      ) : groups === null ? (
+        <p className="mt-1 text-[11px] text-xyne-fg-muted">Loading groups…</p>
+      ) : groups.length === 0 ? (
+        <p className="mt-1 text-[11px] text-xyne-fg-muted">
+          This {channel.noun} isn't in any groups yet. Add it to one from the phone, then Refresh.
+        </p>
+      ) : (
+        <>
+          {searchable && (
+            <input
+              type="search"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder={`Search ${groups.length} groups`}
+              className="mt-2 w-full rounded-md border border-xyne-border-subtle bg-transparent px-2 py-1.5 text-[12px] text-xyne-fg-primary placeholder:text-xyne-fg-muted"
+            />
+          )}
+          {shown.length === 0 ? (
+            <p className="mt-2 text-[11px] text-xyne-fg-muted">No group matches “{query.trim()}”.</p>
+          ) : (
+            <ul className="mt-2 max-h-48 overflow-y-auto rounded-md border border-xyne-border-subtle">
+              {shown.map((group) => (
+            <li key={group.id} className="flex items-center gap-2 border-b border-xyne-border-subtle px-2 py-1.5 last:border-b-0">
+              <input
+                type="checkbox"
+                id={`grp-${account.id}-${group.id}`}
+                checked={selected.includes(group.id)}
+                onChange={() => toggle(group.id)}
+              />
+              <label htmlFor={`grp-${account.id}-${group.id}`} className="min-w-0 flex-1 cursor-pointer">
+                <span className="block truncate text-[12px] text-xyne-fg-primary">{group.name || group.id}</span>
+                <span className="text-[11px] text-xyne-fg-muted">{group.participants} members</span>
+              </label>
+            </li>
+              ))}
+            </ul>
+          )}
+        </>
+      )}
+
+      {orphans.length > 0 && (
+        <p className="mt-1 text-[11px] text-xyne-fg-muted">
+          {orphans.length} saved group{orphans.length === 1 ? "" : "s"} the {channel.noun} is no longer in:{" "}
+          <button className="underline" onClick={() => onChange(selected.filter((id) => known.has(id)))}>
+            remove
+          </button>
+        </p>
+      )}
+    </div>
   );
 }

@@ -80,6 +80,9 @@ export async function dispatchChannelRun(input: {
   agent: BoundAgent;
   userId: string;
   task: string;
+  /** Files the person sent with the message. Inlined as base64 in the run
+   *  body, the same shape Spaces uses. */
+  attachments?: Array<{ fileName: string; mimeType: string; data: string; sizeBytes: number }>;
   conversationId: string;
   eventType: "APP_MENTIONED" | "DIRECT_MESSAGE";
   idempotencyKey: string;
@@ -114,6 +117,7 @@ export async function dispatchChannelRun(input: {
       ...(providers.parent ? { provider: providers.parent } : {}),
       ...(providers.providerOrder.length > 1 ? { providerOrder: providers.providerOrder } : {}),
       ...(Object.keys(providers.providerConfigs).length > 0 ? { providerConfigs: providers.providerConfigs } : {}),
+      ...(input.attachments?.length ? { attachments: input.attachments } : {}),
       additionalInstructions: channelSurfaceInstructions(input.target.channel),
       subagentProviderMode: resolveSubagentProviderMode(input.agent.config),
       ...(input.agent.config ? { agentConfig: input.agent.config } : {}),

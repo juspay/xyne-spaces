@@ -241,7 +241,7 @@ export function OrganizationsPageV3({ userId }: { userId: string }) {
               {canManage && (
                 <>
                   <SurfacesCard userId={userId} org={org} />
-                  <MessagingChannelsCard userId={userId} org={org} />
+                  <MessagingChannelsCard userId={userId} scope="org" orgId={org.id} />
                   <ServiceTokensCard userId={userId} org={org} />
                 </>
               )}

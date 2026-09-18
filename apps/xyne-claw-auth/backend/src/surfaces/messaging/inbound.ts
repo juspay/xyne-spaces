@@ -11,14 +11,14 @@ import { createLogger } from "../../logger.js";
 import { errMsg } from "../../lib/errors.js";
 import { redeemApproval } from "./approvals.js";
 import { consumeOption, parseMenuChoice, tokenForMenuChoice } from "./cards.js";
-import { DEDUP_TTL_S, NOT_LINKED_TEXT, REDIS_PREFIX } from "./const.js";
+import { DEDUP_TTL_S, NOT_LINKED_TEXT, REDIS_PREFIX, UNLINKED_NOTICE_TTL_S } from "./const.js";
 import { enqueueOutbound } from "./delivery.js";
 import { channelConversationId, dispatchChannelRun } from "./dispatch.js";
 import { drainGroupContext, rememberGroupMessage, renderGroupContext } from "./group-context.js";
 import { resolveIdentity } from "./identity.js";
 import type { AnyChannelPlugin, ChannelAccount, ChannelDeliveryTarget, InboundMessage } from "./plugin.js";
 import { evaluatePolicy } from "./policy.js";
-import { formatAgentList, parseAgentRoute } from "./routing.js";
+import { formatAgentList, namesAnAgent, parseAgentRoute } from "./routing.js";
 import { policyOf } from "./schema.js";
 import { findDefaultAgent, findOrgAgentBySlug, listOrgAgents, type BoundAgent } from "./store.js";
 
@@ -47,6 +47,19 @@ async function menuToken(accountId: string, chatId: string, text: string): Promi
   return choice === null ? null : tokenForMenuChoice(accountId, chatId, choice);
 }
 
+/** Tell one sender where to register at most once an hour, so a chatty
+ *  stranger cannot make the number repeat itself. Redis down ⇒ tell them. */
+async function shouldTellUnlinked(accountId: string, senderId: string): Promise<boolean> {
+  try {
+    const set = await redisService
+      .getConnection()
+      .set(`${REDIS_PREFIX}:unlinked-told:${accountId}:${senderId}`, "1", "EX", UNLINKED_NOTICE_TTL_S, "NX");
+    return set === "OK";
+  } catch {
+    return true;
+  }
+}
+
 /** Fixed 60s window per (account, sender). Redis down ⇒ allow. */
 async function overRateLimit(accountId: string, senderId: string, limit: number): Promise<boolean> {
   try {
@@ -64,7 +77,9 @@ export async function handleInbound(ctx: InboundContext, msg: InboundMessage): P
   const { account, plugin } = ctx;
   let text = msg.text.trim();
   // A tap can carry an empty title; the option id is the content.
-  if (msg.fromSelf || (!text && !msg.cardReplyId)) return;
+  // A photo sent with no caption is not an empty message — it is the whole
+  // message. Only genuinely contentless ones are dropped.
+  if (msg.fromSelf || (!text && !msg.cardReplyId && !msg.attachments?.length)) return;
   if (await isDuplicate(account.id, msg.messageId)) return;
 
   const policy = policyOf(account.config);
@@ -114,19 +129,28 @@ export async function handleInbound(ctx: InboundContext, msg: InboundMessage): P
     orgId: account.orgId,
   });
 
+  // Did they actually address the agent? A native @mention, a reply to one of
+  // its messages, or opening with "/slug" — the last being the only one a
+  // one-to-one chat offers.
+  const namedInText = namesAnAgent(text);
+
   // Self-chat: the owner messaging their own number. It is their account, so
-  // policy is skipped and the run belongs to the fallback user (defaults to
-  // whoever created the account).
+  // there is nobody to authorise — but requireMention still applies, because a
+  // note to self is not a request, and answering every one of them would turn
+  // their own chat into a conversation they did not ask for.
   const decision = msg.selfChat
-    ? { action: "dispatch" as const, reason: "self chat" }
+    ? !policy.requireMention || namedInText || msg.replyToSelf
+      ? { action: "dispatch" as const, reason: "self chat" }
+      : { action: "ignore" as const, reason: "self chat, agent not addressed" }
     : evaluatePolicy(policy, {
-    isGroup: msg.isGroup && plugin.capabilities.groups,
-    senderId: msg.senderId,
-    chatId: msg.chatId,
-    hasIdentity: linkedUserId !== null,
-    mentionedSelf: msg.mentionedSelf,
-    replyToSelf: msg.replyToSelf,
-  });
+        isGroup: msg.isGroup && plugin.capabilities.groups,
+        senderId: msg.senderId,
+        chatId: msg.chatId,
+        hasIdentity: linkedUserId !== null,
+        mentionedSelf: msg.mentionedSelf,
+        replyToSelf: msg.replyToSelf,
+        namedInText,
+      });
   if (decision.action === "ignore") {
     // Nobody addressed us, but this is still a room we belong in — keep the
     // line so the next reply knows what was being discussed.
@@ -144,10 +168,21 @@ export async function handleInbound(ctx: InboundContext, msg: InboundMessage): P
     return;
   }
   if (decision.action === "unlinked") {
-    // Nobody needs vouching for: anyone who can use a Claw agent can sign in
-    // and add their own number. So there is nothing to approve, just a
-    // pointer to where they do it.
-    await enqueueOutbound(account.id, { kind: "text", chatId: msg.chatId, text: NOT_LINKED_TEXT, quoted: msg.ref });
+    // A shared business number exists to be messaged by people it does not know
+    // yet, so telling them where to register is the whole job. A personal
+    // number is the opposite: it is somebody's own WhatsApp, and auto-answering
+    // every stranger would send messages from them that they did not write —
+    // to salespeople, to delivery drivers, and to any other Claw account that
+    // happens to reply to them, which two such numbers turn into a loop that
+    // nothing else stops. So a user-scoped account stays silent.
+    if (plugin.accountScope === "user") {
+      log.info(`[inbound] unlinked sender on a personal account, staying silent account=${account.id}`);
+      return;
+    }
+    // Even on a business number, say it once rather than on every message.
+    if (await shouldTellUnlinked(account.id, msg.senderId)) {
+      await enqueueOutbound(account.id, { kind: "text", chatId: msg.chatId, text: NOT_LINKED_TEXT, quoted: msg.ref });
+    }
     return;
   }
 
@@ -158,9 +193,15 @@ export async function handleInbound(ctx: InboundContext, msg: InboundMessage): P
   // exception to that: a message marked fromMe on a user-scoped account can
   // only have come from a device its owner linked by scanning with their own
   // phone, which identifies them at least as well as a typed number does.
-  const userId = linkedUserId ?? (msg.selfChat ? (account.config.ownerUserId ?? null) : null);
+  const userId = linkedUserId ?? (msg.fromOwner ? (account.config.ownerUserId ?? null) : null);
   const reply = (body: string) => enqueueOutbound(account.id, { kind: "text", chatId: msg.chatId, text: body, quoted: msg.ref });
   if (!userId) {
+    // Same rule as an unlinked DM: a personal number must not answer on its
+    // owner's behalf, and in a group that reply would be public.
+    if (plugin.accountScope === "user") {
+      log.info(`[inbound] unlinked sender, staying silent account=${account.id} chat=${msg.chatId}`);
+      return;
+    }
     await reply(NOT_LINKED_TEXT);
     return;
   }
@@ -192,7 +233,13 @@ export async function handleInbound(ctx: InboundContext, msg: InboundMessage): P
     }
   }
 
-  const task = route.task;
+  // Give a captionless attachment something to be a request about, so it does
+  // not fall through the "what would you like me to do?" branch below.
+  const task =
+    route.task ||
+    (msg.attachments?.length
+      ? `(sent ${msg.attachments.map((file) => file.fileName).join(", ")})`
+      : route.task);
   if (!task) {
     await reply(`What would you like /${agent.slug} to do?`);
     return;
@@ -234,6 +281,16 @@ export async function handleInbound(ctx: InboundContext, msg: InboundMessage): P
       eventType: msg.isGroup ? "APP_MENTIONED" : "DIRECT_MESSAGE",
       idempotencyKey: `${account.channel}:${account.id}:${msg.messageId}`,
       ...(msg.senderName ? { senderName: msg.senderName } : {}),
+      ...(msg.attachments?.length
+        ? {
+            attachments: msg.attachments.map((file) => ({
+              fileName: file.fileName,
+              mimeType: file.mimeType,
+              data: file.data.toString("base64"),
+              sizeBytes: file.data.length,
+            })),
+          }
+        : {}),
       target,
     });
     log.info(`[inbound] dispatched session=${sessionId} agent=${agent.slug} account=${account.id} chat=${msg.chatId}`);

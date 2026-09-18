@@ -26,6 +26,9 @@ export interface PolicyInput {
   hasIdentity: boolean;
   mentionedSelf: boolean;
   replyToSelf: boolean;
+  /** The text opened with "/slug" or "@slug" — the one-to-one equivalent of a
+   *  native mention, since messengers offer no @mention outside a group. */
+  namedInText?: boolean;
 }
 
 export interface PolicyDecision {
@@ -57,6 +60,11 @@ export function idInList(id: string, list: readonly string[]): boolean {
   return list.some((entry) => canonicalSenderId(entry) === target);
 }
 
+/** Mentioned natively, replying to us, or opening with the agent's name. */
+function addressed(input: PolicyInput): boolean {
+  return input.mentionedSelf || input.replyToSelf || input.namedInText === true;
+}
+
 export function evaluatePolicy(policy: AccountPolicy, input: PolicyInput): PolicyDecision {
   if (input.isGroup) {
     switch (policy.groupPolicy) {
@@ -73,7 +81,7 @@ export function evaluatePolicy(policy: AccountPolicy, input: PolicyInput): Polic
     if (policy.groupAllowFrom.length > 0 && !idInList(input.senderId, policy.groupAllowFrom)) {
       return { action: "ignore", reason: "sender not in groupAllowFrom", remember: true };
     }
-    if (policy.requireMention && !input.mentionedSelf && !input.replyToSelf) {
+    if (policy.requireMention && !addressed(input)) {
       return { action: "ignore", reason: "not mentioned", remember: true };
     }
     return { action: "dispatch", reason: "group policy passed" };
@@ -83,8 +91,12 @@ export function evaluatePolicy(policy: AccountPolicy, input: PolicyInput): Polic
     case "disabled":
       return { action: "ignore", reason: "dms disabled" };
     case "linked":
-      return input.hasIdentity
-        ? { action: "dispatch", reason: "sender linked" }
-        : { action: "unlinked", reason: "unknown sender" };
+      if (!input.hasIdentity) return { action: "unlinked", reason: "unknown sender" };
+      // requireMention is not a group-only rule: a one-to-one chat is still a
+      // conversation the person may be having with themselves, and answering
+      // every line of it is noise.
+      return policy.requireMention && !addressed(input)
+        ? { action: "ignore", reason: "not addressed" }
+        : { action: "dispatch", reason: "sender linked" };
   }
 }

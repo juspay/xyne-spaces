@@ -30,6 +30,8 @@ export const AGENT_ROUTE_RE = /^[@/]([a-z0-9][a-z0-9_-]*)(?:\s+|$)/i;
 export const AGENTS_COMMAND_RE = /^[@/]agents\s*$/i;
 
 export const DEFAULT_RATE_LIMIT_PER_MINUTE = 10;
+/** How often a business number repeats "add your number in Claw" to one sender. */
+export const UNLINKED_NOTICE_TTL_S = 60 * 60;
 
 /** Unaddressed group messages carried forward as context on the next reply.
  *  Matches OpenClaw's default group context window. */

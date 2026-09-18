@@ -1,5 +1,6 @@
 /** WhatsApp-specific residue stored under `ConnectedSurface.config.channel`. */
 import { z } from "zod";
+import { normalizePhoneDigits } from "../messaging/phone.js";
 
 export const whatsappChannelConfigSchema = z
   .object({
@@ -28,8 +29,8 @@ export function jidFromTarget(target: string): string | null {
   const t = target.trim();
   if (!t) return null;
   if (/@(s\.whatsapp\.net|g\.us|lid|newsletter)$/.test(t)) return t;
-  const digits = t.replace(/[\s()+-]/g, "");
-  return /^\d{6,20}$/.test(digits) ? `${digits}@s.whatsapp.net` : null;
+  const digits = normalizePhoneDigits(t);
+  return digits ? `${digits}@s.whatsapp.net` : null;
 }
 
 /** `9198765@s.whatsapp.net` → `9198765`; a LID or group id passes through. */

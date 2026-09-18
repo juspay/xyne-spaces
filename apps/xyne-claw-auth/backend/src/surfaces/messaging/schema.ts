@@ -97,7 +97,9 @@ export function policyOf(config: AccountConfig): AccountPolicy {
 
 export const createAccountBodySchema = z.object({
   orgId: z.string().trim().min(1).optional(),
-  label: z.string().trim().min(1).max(120),
+  /** Optional: a name to tell several accounts apart. Defaults to the agent's
+   *  name, which is the only identity a personal number needs. */
+  label: z.string().trim().min(1).max(120).optional(),
   /** Default agent for the account; must exist in the org. */
   agentSlug: z.string().trim().min(1),
   channel: z.record(z.string(), z.unknown()).optional(),

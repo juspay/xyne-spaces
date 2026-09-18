@@ -15,6 +15,16 @@ export interface AgentRoute {
   listAgents: boolean;
 }
 
+/**
+ * Did this message address the agent by name? A messenger only offers a native
+ * @mention inside a group, so in a one-to-one chat the equivalent is opening
+ * with "/slug" or "@slug" — which is what parseAgentRoute already reads.
+ */
+export function namesAnAgent(text: string): boolean {
+  const trimmed = text.trim();
+  return AGENTS_COMMAND_RE.test(trimmed) || AGENT_ROUTE_RE.test(trimmed);
+}
+
 export function parseAgentRoute(text: string): AgentRoute {
   const trimmed = text.trim();
   if (AGENTS_COMMAND_RE.test(trimmed)) return { task: "", listAgents: true };

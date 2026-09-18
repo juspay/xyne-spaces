@@ -103,6 +103,19 @@ class AccountManager {
     return this.runtimes.has(accountId);
   }
 
+  /**
+   * The groups this account is in, for the admin UI's allowlist picker.
+   *
+   * Only the pod holding the account's lease has the live socket to ask, so
+   * this returns null elsewhere and the caller says "try again" rather than
+   * pretending the account is in no groups.
+   */
+  async listGroups(accountId: string): Promise<Array<{ id: string; name: string; participants: number }> | null> {
+    const runtime = this.runtimes.get(accountId);
+    if (!runtime?.handle || !runtime.plugin.listGroups) return null;
+    return runtime.plugin.listGroups(runtime.handle);
+  }
+
   /** Re-evaluate one account now (admin login/logout/rebind). */
   async wake(accountId: string): Promise<void> {
     await publishControl({ op: "wake", accountId });

@@ -61,6 +61,9 @@ export interface ChannelCapabilities {
   media: boolean;
   /** Hard per-message text limit of the messenger; the core chunks to it. */
   maxTextChars: number;
+  /** Largest inbound file the plugin will fetch and hand to a run. Absent
+   *  means the plugin does not fetch inbound media at all. */
+  maxInboundBytes?: number;
   maxImageBytes?: number;
   maxFileBytes?: number;
   /** Present only when the messenger renders tappable cards natively. The
@@ -134,17 +137,34 @@ export interface InboundMessage {
   replyToSelf: boolean;
   /** Sent by the account itself (own echo) — always dropped by the core. */
   fromSelf: boolean;
+  /** Typed by the person who owns this account, on the device they linked —
+   *  in any chat, including groups. Distinct from `fromSelf`, which is the
+   *  account's own outgoing message echoed back to us. Only a plugin whose
+   *  transport sees the owner's own traffic (a linked device) sets this. */
+  fromOwner?: boolean;
   /** The account owner talking to their own number (WhatsApp "You" chat).
    *  Runs as the account's fallback user, no pairing. Plugins set this only
    *  for messages they did NOT send themselves. */
   selfChat?: boolean;
   ref: MessageRef;
+  /** Files attached to the message. Present only when the plugin could fetch
+   *  them within the size cap — a message whose media was too large or failed
+   *  to download still arrives, carrying its caption, so the agent answers
+   *  about what it can see rather than silently ignoring the person. */
+  attachments?: InboundAttachment[];
   /** The person tapped a button or list row on a card WE sent; this is that
    *  option's `id`. Set only by plugins with native cards — a text fallback
    *  comes back as ordinary text and is matched by cards.ts instead. */
   cardReplyId?: string;
   timestamp?: number;
   raw?: unknown;
+}
+
+/** A file someone sent us, already fetched and decrypted by the plugin. */
+export interface InboundAttachment {
+  fileName: string;
+  mimeType: string;
+  data: Buffer;
 }
 
 export interface OutboundFile {
@@ -212,7 +232,8 @@ export interface ChannelPlugin<Handle = unknown, ChannelConfig = unknown> {
   readonly capabilities: ChannelCapabilities;
   readonly login: { kind: LoginKind };
   /** Whether one account serves the org or one person. Drives who may create
-   *  and manage accounts here, and who may see them. */
+   *  and manage accounts here, who may see them, and whether the account may
+   *  answer strangers at all. */
   readonly accountScope: AccountScope;
   /** Values an admin must supply for a `token` login (tokens, ids, secrets).
    *  Each is stored encrypted under its `key` in the account's auth state. */

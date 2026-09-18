@@ -17,12 +17,15 @@ import {
   jidNormalizedUser,
   makeCacheableSignalKeyStore,
   makeWASocket,
+  downloadMediaMessage,
+  type WAMessage,
   type WASocket,
 } from "@whiskeysockets/baileys";
 import pino from "pino";
 import { errMsg } from "../../lib/errors.js";
 import type {
   AccountRuntimeContext,
+  InboundAttachment,
   ChannelPlugin,
   MessageRef,
   OutboundFile,
@@ -30,11 +33,15 @@ import type {
 } from "../messaging/plugin.js";
 import { makeStoredAuthState } from "./auth-state.js";
 import { formatForWhatsApp } from "../whatsapp-cloud/format.js";
-import { toInbound, type SelfIdentity } from "./messages.js";
+import { toInbound, type MediaDescriptor, type SelfIdentity } from "./messages.js";
 import { jidFromTarget, phoneFromJid, whatsappChannelConfigSchema, type WhatsAppChannelConfig } from "./schema.js";
 
 const MAX_TEXT_CHARS = 4000;
 const MAX_IMAGE_BYTES = 16 * 1024 * 1024;
+/** Largest inbound file we will fetch. Beyond this the message still reaches
+ *  the agent with its caption and a note, which is more useful than silence
+ *  and cheaper than pulling a phone video through the run pipeline. */
+const MAX_INBOUND_BYTES = 12 * 1024 * 1024;
 const MAX_FILE_BYTES = 64 * 1024 * 1024;
 const BACKOFF_MIN_MS = 1_000;
 const BACKOFF_MAX_MS = 60_000;
@@ -164,7 +171,18 @@ async function connect(handle: WhatsAppHandle): Promise<void> {
     for (const message of messages) {
       const inbound = toInbound(message, handle.self, { sentIds: handle.sentIds, selfChat });
       if (!inbound) continue;
-      void ctx.onInbound(inbound);
+      void (async () => {
+        if (inbound.media) {
+          const attachment = await fetchAttachment(handle, message, inbound.media);
+          if (attachment) inbound.attachments = [attachment];
+          else if (!inbound.text) {
+            // Nothing readable at all: say so rather than dropping it, so the
+            // person is not left staring at an unanswered message.
+            inbound.text = `[sent a ${inbound.media.kind} that could not be read]`;
+          }
+        }
+        await ctx.onInbound(inbound);
+      })().catch((err) => ctx.logger.warn(`[whatsapp] inbound handling failed: ${errMsg(err)}`));
     }
   });
 }
@@ -183,6 +201,36 @@ function scheduleReconnect(handle: WhatsAppHandle, delayOverride?: number): void
     });
   }, delay);
   handle.reconnectTimer.unref();
+}
+
+/**
+ * Fetch and decrypt one inbound file.
+ *
+ * WhatsApp media is encrypted on their CDN, so this is a real download plus a
+ * decrypt, not a URL we could hand onward. Failure is deliberately not fatal:
+ * the message still reaches the agent with its caption, because answering
+ * "I can see your message but not the attachment" beats answering nothing.
+ */
+async function fetchAttachment(
+  handle: WhatsAppHandle,
+  message: WAMessage,
+  media: MediaDescriptor,
+): Promise<InboundAttachment | null> {
+  if (media.sizeBytes > MAX_INBOUND_BYTES) {
+    handle.ctx.logger.info(
+      `[whatsapp] attachment too large (${media.sizeBytes} bytes) account=${handle.ctx.account.id}`,
+    );
+    return null;
+  }
+  try {
+    const data = (await downloadMediaMessage(message, "buffer", {})) as Buffer;
+    if (!Buffer.isBuffer(data) || data.length === 0) return null;
+    if (data.length > MAX_INBOUND_BYTES) return null;
+    return { fileName: media.fileName, mimeType: media.mimeType, data };
+  } catch (err) {
+    handle.ctx.logger.warn(`[whatsapp] attachment download failed: ${errMsg(err)}`);
+    return null;
+  }
 }
 
 function requireSock(handle: WhatsAppHandle): WASocket {
@@ -210,6 +258,7 @@ export const whatsappPlugin: ChannelPlugin<WhatsAppHandle, WhatsAppChannelConfig
     typing: true,
     media: true,
     maxTextChars: MAX_TEXT_CHARS,
+    maxInboundBytes: MAX_INBOUND_BYTES,
     maxImageBytes: MAX_IMAGE_BYTES,
     maxFileBytes: MAX_FILE_BYTES,
   },

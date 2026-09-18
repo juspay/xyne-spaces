@@ -7163,16 +7163,19 @@ function channelBase(channel: MessagingChannelKey): string {
   return `${AUTH_API_URL}/api/v1/surfaces/${channel}`;
 }
 
-export async function listChannelAccounts(channel: MessagingChannelKey, orgId: string): Promise<ChannelAccountView[]> {
+/** Omit `orgId` for a user-scoped channel: the server uses the session's org
+ *  and returns only the caller's own accounts. */
+export async function listChannelAccounts(channel: MessagingChannelKey, orgId?: string): Promise<ChannelAccountView[]> {
+  const query = orgId ? `?orgId=${encodeURIComponent(orgId)}` : "";
   const data = await request<{ success: boolean; accounts: ChannelAccountView[] }>(
-    `${channelBase(channel)}/accounts?orgId=${encodeURIComponent(orgId)}`,
+    `${channelBase(channel)}/accounts${query}`,
   );
   return data.accounts;
 }
 
 export async function createChannelAccount(
   channel: MessagingChannelKey,
-  input: { orgId: string; label: string; agentSlug: string; channel?: Record<string, unknown> },
+  input: { orgId?: string; label?: string; agentSlug: string; channel?: Record<string, unknown> },
 ): Promise<ChannelAccountView> {
   const data = await request<{ success: boolean; account: ChannelAccountView }>(`${channelBase(channel)}/accounts`, {
     method: "POST",
@@ -7280,4 +7283,20 @@ export async function unlinkMyChannelNumber(channel: MessagingChannelKey, sender
   await request<{ success: boolean }>(`${channelBase(channel)}/my-numbers/${encodeURIComponent(senderId)}`, {
     method: "DELETE",
   });
+}
+
+export interface ChannelGroup {
+  id: string;
+  name: string;
+  participants: number;
+}
+
+/** Groups the account is a member of, for the allowlist picker. Only the server
+ *  holding the account's connection can answer, so this can legitimately fail
+ *  with 503 while the account moves between servers. */
+export async function listChannelGroups(channel: MessagingChannelKey, accountId: string): Promise<ChannelGroup[]> {
+  const data = await request<{ success: boolean; groups: ChannelGroup[] }>(
+    `${channelBase(channel)}/accounts/${encodeURIComponent(accountId)}/groups`,
+  );
+  return data.groups;
 }

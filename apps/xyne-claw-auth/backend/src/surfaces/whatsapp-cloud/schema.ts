@@ -5,6 +5,7 @@
  * Account, addressed by its Phone Number ID and a system-user token.
  */
 import { z } from "zod";
+import { normalizePhoneDigits } from "../messaging/phone.js";
 
 /** Graph API version the plugin talks. Pinned, not floating: Meta ships
  *  breaking changes per version and deprecates old ones on a schedule. */
@@ -34,6 +35,5 @@ export type WhatsAppCloudConfig = z.infer<typeof whatsappCloudConfigSchema>;
 
 /** Meta addresses users by bare digits ("919876543210"), no JID suffix. */
 export function waIdFromTarget(target: string): string | null {
-  const digits = target.trim().replace(/[\s()+-]/g, "");
-  return /^\d{6,20}$/.test(digits) ? digits : null;
+  return normalizePhoneDigits(target);
 }
