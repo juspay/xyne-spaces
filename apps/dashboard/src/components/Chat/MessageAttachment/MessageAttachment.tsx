@@ -465,15 +465,15 @@ const ActionTray: React.FC<{
 
   const handleCopyImage = async (): Promise<void> => {
     if (!imageBlobUrl) return;
-    try {
+    // The fetch is deferred into copyImage so the clipboard write is issued inside
+    // this click's task; copyImage owns the success/failure toast.
+    const copied = await copyImage(async () => {
       const response = await axios.get<Blob>(imageBlobUrl, { responseType: 'blob' });
-      const blob = response.data;
-      await copyImage(blob);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 1200);
-    } catch {
-      toast.error('Failed to copy image');
-    }
+      return response.data;
+    });
+    if (!copied) return;
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1200);
   };
 
   return (
