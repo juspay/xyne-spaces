@@ -3,7 +3,7 @@ import type { ActivityWithRelated } from '../../types/activity';
 import { MessageBubble } from '../ui/MessageBubble/MessageBubble';
 import { AtMark } from '@xyne/icons';
 import { ActivityItemCard } from './ActivityItemCard';
-import { RenderMessageWithHTML } from '../Chat/RenderMessageWithHTML/RenderMessageWithHTML';
+import { htmlToPlainText } from '../../utils/sanitizer';
 import { getFlowJsonPreviewText } from '../../utils/flowPreview';
 import { useUser } from '../../hooks/useUsers';
 import { getUserDisplayName } from '../../utils/userDisplayName';
