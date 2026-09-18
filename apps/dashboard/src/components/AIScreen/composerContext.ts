@@ -6,6 +6,7 @@ import {
   type SelectedCanvas,
   type SelectedTranscript,
   type SelectedRecording,
+  type SelectedLocalFolder,
   type AttachedContextItem,
 } from '../Chat/XyneAISidebar/components/ContextPickerPanel';
 import type { StreamOverrides } from '../../hooks/useXyneAIStream';
@@ -27,6 +28,7 @@ export interface ComposerContext {
   canvases: SelectedCanvas[];
   transcripts: SelectedTranscript[];
   recordings: SelectedRecording[];
+  localFolders: SelectedLocalFolder[];
   collections: { id: string; name: string }[];
   fileScopes: { id: string; name: string }[];
   /** A specific folder scoped in (not the whole collection, not one file).
@@ -40,6 +42,8 @@ export interface ComposerContext {
   webSearchEnabled: boolean;
   deepResearchEnabled: boolean;
   createCanvasEnabled: boolean;
+  voiceMode: boolean;
+  voiceStudioMode: string | null;
   /** Single search + single answer pass instead of the full agentic tool
    *  loop — see xyne-claw-auth's run-stream.ts POST / instant branch. */
   instant: boolean;
@@ -50,10 +54,11 @@ export interface ComposerContext {
   model: string | null;
   /** Which provider the model pin rides — the models endpoint's pinProvider.
    *  null when no model is picked. */
-  modelProvider: 'litellm' | 'spaces' | null;
+  modelProvider: 'litellm' | 'spaces' | 'local-harness' | null;
   /** Per-run thinking level from the composer's thinking dropdown.
    *  null = the agent's configured default. */
   thinkingLevel: 'off' | 'minimal' | 'low' | 'medium' | 'high' | null;
+  sandboxMode: 'remote' | 'local' | 'container';
 }
 
 export const EMPTY_COMPOSER_CONTEXT: ComposerContext = {
@@ -62,6 +67,7 @@ export const EMPTY_COMPOSER_CONTEXT: ComposerContext = {
   canvases: [],
   transcripts: [],
   recordings: [],
+  localFolders: [],
   collections: [],
   fileScopes: [],
   folderScopes: [],
@@ -69,10 +75,13 @@ export const EMPTY_COMPOSER_CONTEXT: ComposerContext = {
   webSearchEnabled: false,
   deepResearchEnabled: false,
   createCanvasEnabled: false,
+  voiceMode: false,
+  voiceStudioMode: null,
   instant: false,
   model: null,
   modelProvider: null,
   thinkingLevel: null,
+  sandboxMode: 'remote',
 };
 
 /** True when the snapshot carries any context/toggle worth sending as overrides. */
@@ -83,6 +92,7 @@ export function hasComposerContext(ctx: ComposerContext): boolean {
     ctx.canvases.length > 0 ||
     ctx.transcripts.length > 0 ||
     ctx.recordings.length > 0 ||
+    ctx.localFolders.length > 0 ||
     ctx.collections.length > 0 ||
     ctx.fileScopes.length > 0 ||
     ctx.folderScopes.length > 0 ||
@@ -97,32 +107,24 @@ export function hasComposerContext(ctx: ComposerContext): boolean {
 }
 
 /**
- * The FULL context set for DISPLAY on the sent message's pills — channels,
- * tickets, canvases, calls PLUS the KB scopes (collections, folders, files)
- * with their titles. This mirrors what the Spaces backend merges into
- * attachedContext and persists (xyneAIControllerV2.ts), so the just-sent
- * message shows the same pills a reload will. Distinct from the `attachedContext`
- * actually SENT (channels/tickets/canvases/calls only) — the KB items ride as
- * collectionIds/fileIds/folderIds and the backend resolves+merges them, so
- * sending them here too would double-count.
+ * KB scopes (collections, folders, files) shared by the sent `attachedContext`
+ * and the richer display set below. Every KB picker stores CollectionItem.id
+ * (cuid) as fileScopes[].id — the id attached_context 'file' items carry, same
+ * as collections/folders — so files ride as ordinary attachedContext entries
+ * here too.
  */
-export function toDisplayAttachedContext(ctx: ComposerContext): AttachedContextItem[] {
-  return [
-    ...toAttachedContext({
-      channels: ctx.channels,
-      tickets: ctx.tickets,
-      canvases: ctx.canvases,
-      transcripts: ctx.transcripts,
-      recordings: ctx.recordings,
-    }),
-    ...ctx.collections.map(
-      (c): AttachedContextItem => ({ type: 'collection', id: c.id, title: c.name }),
-    ),
-    ...ctx.folderScopes.map(
-      (f): AttachedContextItem => ({ type: 'folder', id: f.id, title: f.name }),
-    ),
-    ...ctx.fileScopes.map((f): AttachedContextItem => ({ type: 'file', id: f.id, title: f.name })),
-  ];
+function toBaseAttachedContext(ctx: ComposerContext): AttachedContextItem[] {
+  return toAttachedContext({
+    channels: ctx.channels,
+    tickets: ctx.tickets,
+    canvases: ctx.canvases,
+    transcripts: ctx.transcripts,
+    recordings: ctx.recordings,
+    localFolders: ctx.localFolders,
+    files: ctx.fileScopes,
+    folders: ctx.folderScopes,
+    collections: ctx.collections,
+  });
 }
 
 /**
@@ -134,30 +136,24 @@ export function toDisplayAttachedContext(ctx: ComposerContext): AttachedContextI
 export function toStreamOverrides(ctx: ComposerContext): StreamOverrides {
   return {
     channelIds: ctx.channels.map(c => c.id),
-    collectionIds: ctx.collections.map(c => c.id),
-    fileIds: ctx.fileScopes.map(f => f.id),
-    folderIds: ctx.folderScopes.map(f => f.id),
     ticketIds: ctx.tickets.map(t => t.id),
     canvasIds: ctx.canvases.map(c => c.id),
     callIds: [...ctx.transcripts.map(t => t.id), ...ctx.recordings.map(r => r.id)],
-    attachedContext: toAttachedContext({
-      channels: ctx.channels,
-      tickets: ctx.tickets,
-      canvases: ctx.canvases,
-      transcripts: ctx.transcripts,
-      recordings: ctx.recordings,
-    }),
-    // Display-only richer set (adds KB pills with titles) so the just-sent
-    // message matches the post-reload persisted pills. NOT sent to the backend.
-    displayAttachedContext: toDisplayAttachedContext(ctx),
+    attachedContext: toBaseAttachedContext(ctx),
+    // Same content as attachedContext — kept as a separate field so the
+    // just-sent message's pills have an explicit source independent of
+    // whatever attachedContext ends up being sent.
+    displayAttachedContext: toBaseAttachedContext(ctx),
     webSearchEnabled: ctx.webSearchEnabled,
     deepResearchEnabled: ctx.deepResearchEnabled,
     createCanvasEnabled: ctx.createCanvasEnabled,
+    voiceMode: ctx.voiceMode,
     instant: ctx.instant,
     ...(ctx.model
       ? { model: ctx.model, ...(ctx.modelProvider ? { modelProvider: ctx.modelProvider } : {}) }
       : {}),
     ...(ctx.thinkingLevel ? { thinkingLevel: ctx.thinkingLevel } : {}),
+    ...(ctx.sandboxMode !== 'remote' ? { sandboxMode: ctx.sandboxMode } : {}),
     researchContext: ctx.research,
   };
 }

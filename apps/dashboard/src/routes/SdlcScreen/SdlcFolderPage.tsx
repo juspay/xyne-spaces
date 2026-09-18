@@ -12,6 +12,7 @@ import {
   FolderOpen,
   Link2,
   MessageCircle,
+  MessageSquare,
   Paperclip,
   Plus,
   RotateCw,
@@ -24,6 +25,7 @@ import { Popover } from '../../components/ui/Popover';
 import { setUserPreference, useUserPreference } from '../../machines/userPreferencesMachine';
 import { useScope, useShortcutById } from '../../shortcuts';
 import { openLink } from '../../utils/openLink';
+import { useBridgeTransport } from './useBridgeTransport';
 import {
   canHostEmbedPages,
   controlEmbeddedPage,
@@ -34,6 +36,19 @@ import {
 } from './useSdlcFrameBridge';
 import type { SdlcEmbedTab } from './sdlcFrameMessages';
 import { fileKind, formatFileSize } from './fileKind';
+import {
+  CommentsPanel,
+  ItemView,
+  commentStoreFor,
+  itemFromSdlc,
+  onCommentsRequested,
+  publishOpenItems,
+  revealAnchor,
+  useAnnotate,
+  useDomTransport,
+  type PickedBlock,
+  type WorkspaceItem,
+} from '../../components/workspaceItems';
 import type { SdlcFinderCanvas, SdlcFinderFile, SdlcFinderLink } from './SdlcFinder';
 
 export type FolderTabKind = 'CANVAS' | 'LINK' | 'ATTACHMENT' | 'BROWSER';
@@ -591,6 +606,95 @@ export function SdlcFolderPage(props: {
   // A link into a folder names one item; it joins the strip so the tab bar and
   // the address bar never disagree about what is open.
   const active = props.activeTab;
+  const [commentsOpen, setCommentsOpen] = useState(false);
+  const [focusCommentId, setFocusCommentId] = useState<string | null>(null);
+  const [picked, setPicked] = useState<PickedBlock | null>(null);
+  const [draftAnchor, setDraftAnchor] = useState<{ quote: string; selector?: string } | null>(null);
+  const [viewerRoot, setViewerRoot] = useState<HTMLDivElement | null>(null);
+  const activeItem = useMemo(
+    () => (active ? tabItem(active, props.maps) : null),
+    [active, props.maps],
+  );
+  // The scratch tab is ad-hoc browsing, not an item of the hub: it has no
+  // entity id of its own (every folder would share SCRATCH_TAB_ID), so a
+  // comment left here would be visible from every other folder's scratch tab.
+  const canComment = Boolean(
+    activeItem && active?.id !== SCRATCH_TAB_ID && commentStoreFor(activeItem),
+  );
+
+  useEffect(
+    () =>
+      onCommentsRequested(request => {
+        if (!activeItem || request.itemId !== activeItem.id) return;
+        setCommentsOpen(true);
+        setFocusCommentId(request.commentId ?? null);
+      }),
+    [activeItem],
+  );
+
+  // Tell the agent what the reader is looking at, so a question about "this
+  // page" is answered from the tabs rather than from the route name.
+  useEffect(() => {
+    publishOpenItems({
+      container: props.folder.name,
+      placement: {
+        channelId: props.channelId,
+        folderId: props.folder.id,
+        folderName: props.folder.name,
+      },
+      items: tabs.flatMap(tab => {
+        const item = tabItem(tab, props.maps);
+        if (!item) return [];
+        return [
+          {
+            title: item.title,
+            kind: tab.kind,
+            ...(item.url ? { url: item.url } : {}),
+            ...(active?.kind === tab.kind && active.id === tab.id ? { active: true } : {}),
+          },
+        ];
+      }),
+    });
+    return () => publishOpenItems(null);
+  }, [tabs, active, props.folder.id, props.folder.name, props.channelId, props.maps]);
+
+  const openThread = (commentId: string): void => {
+    setCommentsOpen(true);
+    setFocusCommentId(commentId);
+  };
+
+  // A browsed page is held by the host over a hole in this frame, so it is
+  // reached through the bridge; everything else renders here and is reached
+  // directly. The annotator above does not know which it got.
+  const browsing = active?.kind === 'BROWSER' || active?.kind === 'LINK';
+  const domTransport = useDomTransport(browsing ? null : viewerRoot, {
+    onPick: setPicked,
+    onMarkClick: openThread,
+  });
+  // A browsed page is drawn by the host ON TOP of this frame, so a box rendered
+  // here would sit behind it. The picked passage goes to the comments panel
+  // beside the page instead, which is the one place we can draw next to it.
+  const notePickedRef = useRef<() => void>(() => undefined);
+  const bridgeTransport = useBridgeTransport(browsing && canHostEmbedPages(), {
+    onPick: block => {
+      setDraftAnchor({
+        quote: block.text,
+        ...(block.selector ? { selector: block.selector } : {}),
+      });
+      setCommentsOpen(true);
+      notePickedRef.current();
+    },
+    onMarkClick: openThread,
+  });
+
+  const annotate = useAnnotate({
+    item: activeItem ?? EMPTY_ITEM,
+    url: activeItem?.url ?? '',
+    transport: browsing ? bridgeTransport : domTransport,
+    picked: browsing ? null : picked,
+    onPicked: setPicked,
+  });
+  notePickedRef.current = annotate.notePicked;
   /** The tab closed here, ignored for as long as the url still names it. */
   const closedRef = useRef<string | null>(null);
 
@@ -688,6 +792,29 @@ export function SdlcFolderPage(props: {
             data-track-name='ScratchBrowserOpened'
           >
             <Globe className='size-4' />
+          </button>
+        )}
+        {canComment && annotate.toggle}
+        {canComment && (
+          <button
+            type='button'
+            title={commentsOpen ? 'Hide comments' : 'Show comments'}
+            aria-label={commentsOpen ? 'Hide comments' : 'Show comments'}
+            onClick={() =>
+              setCommentsOpen(open => {
+                if (open) setDraftAnchor(null);
+                return !open;
+              })
+            }
+            className={cn(
+              'flex size-7 shrink-0 items-center justify-center self-center rounded-md transition-colors hover:bg-foreground/[0.08] hover:text-foreground',
+              canHostEmbedPages() ? 'mr-1' : 'ml-auto mr-1',
+              commentsOpen ? 'text-foreground' : 'text-muted-foreground',
+            )}
+            data-track-category='SdlcHub'
+            data-track-name='FolderCommentsToggled'
+          >
+            <MessageSquare className='size-4' />
           </button>
         )}
       </>
@@ -837,14 +964,27 @@ export function SdlcFolderPage(props: {
             </div>,
           )}
 
-        <div className='min-h-0 flex-1 overflow-hidden bg-background'>
+        <div className='flex min-h-0 flex-1 overflow-hidden bg-background'>
           {active ? (
-            <TabContent
-              tab={active}
-              maps={props.maps}
-              renderCanvas={props.renderCanvas}
-              {...(props.onAddLink ? { onAddLink: props.onAddLink } : {})}
-            />
+            <>
+              <div ref={setViewerRoot} className='relative min-h-0 min-w-0 flex-1 overflow-hidden'>
+                <TabContent
+                  tab={active}
+                  maps={props.maps}
+                  renderCanvas={props.renderCanvas}
+                  {...(props.onAddLink ? { onAddLink: props.onAddLink } : {})}
+                />
+                {annotate.box}
+              </div>
+              {commentsOpen && activeItem ? (
+                <CommentsPanel
+                  item={activeItem}
+                  focusCommentId={focusCommentId}
+                  draftAnchor={draftAnchor}
+                  onJump={comment => revealAnchor(activeItem.id, comment.anchor)}
+                />
+              ) : null}
+            </>
           ) : (
             <div className='flex h-full flex-col items-center justify-center gap-1.5 text-center'>
               <FolderOpen className='size-6 text-muted-foreground' />
@@ -860,80 +1000,55 @@ export function SdlcFolderPage(props: {
   );
 }
 
-function TabContent(props: {
-  tab: FolderTab;
-  maps: Maps;
-  renderCanvas: (canvasId: string) => ReactElement;
-  onAddLink?: (url: string, title: string) => void;
-}): ReactElement {
-  const { tab, maps } = props;
+/** Stands in while no tab is open, so the annotate hook keeps a stable shape. */
+const EMPTY_ITEM: WorkspaceItem = {
+  id: '',
+  kind: 'file',
+  title: '',
+  source: 'sdlc-item',
+  origin: 'source',
+  refId: '',
+  row: {},
+};
 
+function tabItem(tab: FolderTab, maps: Maps): WorkspaceItem | null {
   if (tab.kind === 'BROWSER') {
-    // Scratch browsing: nothing here is filed anywhere until the reader says so
-    // with the same Add button the other pages carry.
-    return (
-      <EmbeddedPage
-        url={SCRATCH_START_PAGE}
-        {...(props.onAddLink ? { onAddLink: props.onAddLink } : {})}
-      />
-    );
+    return itemFromSdlc({
+      id: tab.id,
+      title: 'Browsing',
+      kind: 'BROWSER',
+      url: SCRATCH_START_PAGE,
+    });
   }
-
-  if (tab.kind === 'CANVAS') return props.renderCanvas(tab.id);
-
+  if (tab.kind === 'CANVAS') {
+    const canvas = maps.canvasById.get(tab.id);
+    return canvas ? itemFromSdlc({ id: tab.id, title: canvas.title, kind: 'CANVAS' }) : null;
+  }
   if (tab.kind === 'LINK') {
     const link = maps.linkById.get(tab.id);
-    if (!link) return <Missing what='link' />;
-    if (canHostEmbedPages()) {
-      return (
-        <EmbeddedPage url={link.url} {...(props.onAddLink ? { onAddLink: props.onAddLink } : {})} />
-      );
-    }
-    return (
-      <div className='flex h-full flex-col items-center justify-center gap-3 p-8 text-center'>
-        {link.favicon ? (
-          <img src={link.favicon} alt='' className='size-10 rounded-lg object-contain' />
-        ) : (
-          <Link2 className='size-10 text-muted-foreground' />
-        )}
-        <div>
-          <p className='text-[15px] font-semibold'>{link.title.trim() || link.url}</p>
-          <p className='mt-0.5 text-[12.5px] text-muted-foreground'>{link.url}</p>
-        </div>
-        {link.description && (
-          <p className='max-w-[520px] text-[12.5px] leading-relaxed text-muted-foreground'>
-            {link.description}
-          </p>
-        )}
-        <button
-          type='button'
-          onClick={event => openFromTab(link.url, event)}
-          className='mt-1 rounded-md bg-primary px-4 py-2 text-[12.5px] font-medium text-primary-foreground transition-opacity hover:opacity-90'
-          data-track-category='SdlcHub'
-          data-track-name='FolderTabLinkOpened'
-        >
-          Open link
-        </button>
-      </div>
-    );
+    return link
+      ? itemFromSdlc({
+          id: tab.id,
+          title: link.title.trim() || link.url,
+          kind: 'LINK',
+          url: link.url,
+        })
+      : null;
   }
-
   const file = maps.fileById.get(tab.id);
-  if (!file) return <Missing what='file' />;
-  const kind = fileKind(file.mimetype, file.name);
+  return file
+    ? itemFromSdlc({
+        id: tab.id,
+        title: file.name,
+        kind: 'FILE',
+        url: file.url,
+        mimeType: file.mimetype,
+      })
+    : null;
+}
 
-  // The attachment stream serves images and PDFs inline and forces everything
-  // else to download, so only those two can be shown in place.
-  if (file.mimetype.startsWith('image/')) {
-    return (
-      <div className='flex h-full items-center justify-center overflow-auto bg-foreground/[0.03] p-6'>
-        <img src={file.url} alt={file.name} className='max-h-full max-w-full object-contain' />
-      </div>
-    );
-  }
-  if (file.mimetype === 'application/pdf') {
-    return <iframe src={file.url} title={file.name} className='size-full border-0' />;
-  }
+function FileFallback({ file }: { file: SdlcFinderFile }): ReactElement {
+  const kind = fileKind(file.mimetype, file.name);
   return (
     <div className='flex h-full flex-col items-center justify-center gap-3 p-8 text-center'>
       <kind.icon className='size-10 text-muted-foreground' />
@@ -953,6 +1068,82 @@ function TabContent(props: {
         Download
       </button>
     </div>
+  );
+}
+
+function LinkCard({ link }: { link: SdlcFinderLink }): ReactElement {
+  return (
+    <div className='flex h-full flex-col items-center justify-center gap-3 p-8 text-center'>
+      {link.favicon ? (
+        <img src={link.favicon} alt='' className='size-10 rounded-lg object-contain' />
+      ) : (
+        <Link2 className='size-10 text-muted-foreground' />
+      )}
+      <div>
+        <p className='text-[15px] font-semibold'>{link.title.trim() || link.url}</p>
+        <p className='mt-0.5 text-[12.5px] text-muted-foreground'>{link.url}</p>
+      </div>
+      {link.description && (
+        <p className='max-w-[520px] text-[12.5px] leading-relaxed text-muted-foreground'>
+          {link.description}
+        </p>
+      )}
+      <button
+        type='button'
+        onClick={event => openFromTab(link.url, event)}
+        className='mt-1 rounded-md bg-primary px-4 py-2 text-[12.5px] font-medium text-primary-foreground transition-opacity hover:opacity-90'
+        data-track-category='SdlcHub'
+        data-track-name='FolderTabLinkOpened'
+      >
+        Open link
+      </button>
+    </div>
+  );
+}
+
+/**
+ * One open tab, rendered by the shared workspace viewer. The folder keeps the
+ * two things only it can draw — its own embedded browser, which the host window
+ * holds over this frame, and the download card for a file no viewer previews.
+ */
+function TabContent(props: {
+  tab: FolderTab;
+  maps: Maps;
+  renderCanvas: (canvasId: string) => ReactElement;
+  onAddLink?: (url: string, title: string) => void;
+}): ReactElement {
+  const item = tabItem(props.tab, props.maps);
+  if (!item) {
+    return (
+      <Missing
+        what={props.tab.kind === 'LINK' ? 'link' : props.tab.kind === 'CANVAS' ? 'canvas' : 'file'}
+      />
+    );
+  }
+
+  return (
+    <ItemView
+      item={item}
+      slots={{
+        canvas: canvasItem => props.renderCanvas(canvasItem.refId),
+        browser: browsable => {
+          if (!canHostEmbedPages()) {
+            const link = props.maps.linkById.get(browsable.refId);
+            return link ? <LinkCard link={link} /> : null;
+          }
+          return (
+            <EmbeddedPage
+              url={browsable.url ?? SCRATCH_START_PAGE}
+              {...(props.onAddLink ? { onAddLink: props.onAddLink } : {})}
+            />
+          );
+        },
+        fileFallback: fileItem => {
+          const file = props.maps.fileById.get(fileItem.refId);
+          return file ? <FileFallback file={file} /> : null;
+        },
+      }}
+    />
   );
 }
 
