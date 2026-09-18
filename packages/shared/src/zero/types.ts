@@ -123,6 +123,16 @@ export enum AttachmentEntityType {
   SDLC_HUB = 'SDLC_HUB',
 }
 
+// Attachment entity types belonging to sent content, which is what a channel's file list shows.
+// Strictly narrower than "not unsent": an allowlist, so a newly added entity type is out of scope
+// by default and has to be opted in. Used by the reader; the ACL uses the broader list above,
+// since it is the boundary shared with every other message_attachments reader.
+export const CHANNEL_VISIBLE_ATTACHMENT_ENTITY_TYPES: AttachmentEntityType[] = [
+  AttachmentEntityType.CHAT,
+  AttachmentEntityType.EMAIL,
+  AttachmentEntityType.TICKET,
+];
+
 // @ts-ignore TS1294
 export enum TicketEnvironment {
   DEVELOPMENT = 'DEVELOPMENT',
