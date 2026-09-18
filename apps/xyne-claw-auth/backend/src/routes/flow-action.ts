@@ -2250,11 +2250,34 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
 
       const serverTodos = serverPlan.todos;
 
-      // Only the user the server recorded for this plan can approve/reject it.
-      if (!callerUserId || callerUserId !== planUserId) {
-        log.error(`[flow-action] plan-approval: unauthorized — caller ${callerUserId ?? "(none)"} != plan owner ${planUserId}`);
+      // ── Who may act on a plan card ────────────────────────────────────────
+      // A plan card is posted into a shared thread, so ANY member of the plan
+      // owner's organization may approve or reject it — not just the person who
+      // mentioned the agent. Same rule (and same wording) as the automation
+      // write-approval card above: identity is bound by the re-verified Spaces
+      // signature, org membership is read from the DB, and both lookups fail
+      // CLOSED. Execution identity is unchanged: Turn 2 still dispatches as
+      // `planUserId`, so a non-owner approver cannot borrow anyone's tools or
+      // credentials beyond what the plan owner already had. The approver is
+      // recorded in the audit line on the card and in the log below.
+      if (!callerUserId) {
+        log.error(`[flow-action] plan-approval: unauthorized — no caller identity conv=${planConversationId}`);
         res.status(403).json({ type: "error", message: "Unauthorized" } satisfies AppActionResponse);
         return;
+      }
+      if (callerUserId !== planUserId) {
+        const [planOwner, caller] = await Promise.all([
+          prisma.user.findUnique({ where: { id: planUserId }, select: { orgId: true } }),
+          prisma.user.findUnique({ where: { id: callerUserId }, select: { orgId: true } }),
+        ]);
+        if (!planOwner?.orgId || !caller?.orgId || caller.orgId !== planOwner.orgId) {
+          log.error(
+            `[flow-action] plan-approval: unauthorized — caller ${callerUserId} org ${caller?.orgId ?? "(none)"} != plan owner ${planUserId} org ${planOwner?.orgId ?? "(none)"}`,
+          );
+          res.status(403).json({ type: "error", message: "You must be in the plan owner's workspace to act on this plan." } satisfies AppActionResponse);
+          return;
+        }
+        log.info(`[flow-action] plan-approval: '${actionId}' by non-owner ${callerUserId} — plan owner ${planUserId} conv=${planConversationId} agent=${planAgentSlug}`);
       }
 
       // ── Reject ────────────────────────────────────────────────────────────
