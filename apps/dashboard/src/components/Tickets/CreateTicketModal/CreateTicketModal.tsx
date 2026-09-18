@@ -52,6 +52,7 @@ import { EntityLinkContext, type EntityLinkScope } from '../../../contexts/Entit
 import { useAllVisibleChannels } from '../../../hooks/useChannels';
 import { useTitleGenerator } from '../../../hooks/useTitleGenerator';
 import { useChannelAssignGate } from '../../../hooks/useChannelAssignGate';
+import { useChannelBoards } from '../../../hooks/useChannelBoards';
 import { useActiveUsers, useUsers, useSelf } from '../../../hooks/useUsers';
 import { channelMembersFirst, currentUserFirst } from '../../../utils/channelMembersFirst';
 import { useUserGroups } from '../../../hooks/useUserGroup';
@@ -428,10 +429,14 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
     }
   }, [usesLocalAttachments, providerClearDroppedFiles, channelId, sourceConversation]);
 
+  // Not filtered by whether the channel has boards: that lives in
+  // channel_board_mappings and cannot be evaluated cheaply for every channel.
+  // Picking a channel with no linked boards falls through to the "no boards are
+  // configured" empty state on the board field instead.
   const channels = useAllVisibleChannels().filter(
     channel =>
       channel.scopeType === ChannelScopeType.DEFAULT &&
-      (!allowChannelSelection || (!channel.isArchived && Boolean(channel.projectId))),
+      (!allowChannelSelection || !channel.isArchived),
   );
 
   // Track if title has been auto-generated for this modal session
@@ -504,33 +509,31 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
     gatedAssign: gatedAssignUser,
   } = useChannelAssignGate(selectedChannelId);
 
-  // Find selected channel to get its projectId
-  const selectedChannel = useMemo(
-    () => channels?.find(c => c.id === selectedChannelId),
-    [channels, selectedChannelId],
-  );
-
-  // Fetch boards for the selected channel's project (or default projectId)
-  const selectedChannelProjectId =
-    canSelectChannel && selectedChannel?.projectId ? selectedChannel.projectId : projectId;
   const effectiveChannelId = canSelectChannel ? (selectedChannelId ?? channelId) : channelId;
-  // Boards for ticket creation come from the selected channel's PROJECT (all of the
-  // project's boards). A projectless channel resolves to no project → no boards, and
-  // the UI shows the "no boards are configured" empty state.
-  const [projectBoards] = useCachedQuery(
-    queries.boardsListByProject({ projectId: selectedChannelProjectId ?? '' }),
-    { enabled: !!selectedChannelProjectId },
-  );
-  const boards = useMemo(() => projectBoards ?? [], [projectBoards]);
+  // Boards for ticket creation are the boards LINKED to the selected channel
+  // (channel_board_mappings), which may span projects. A channel with no linked
+  // boards yields none, and the board field renders an empty state instead.
+  const { boards } = useChannelBoards(effectiveChannelId);
 
   // Read by the open-reset effect without adding `boards` to its deps.
   const boardsRef = useRef(boards);
   boardsRef.current = boards;
 
+  // The channel's linked boards can span projects, so services are looked up
+  // across every project those boards belong to rather than the channel's own
+  // (deprecated) projectId.
+  const boardProjectIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const board of boards) {
+      if (board.projectId) ids.add(board.projectId);
+    }
+    return Array.from(ids).sort();
+  }, [boards]);
+
   // Services grouped by main release board → read-only chips under each repo.
   const [releaseApplications] = useCachedQuery(
-    queries.applicationsByProjectId({ projectId: selectedChannelProjectId ?? '' }),
-    { enabled: !!selectedChannelProjectId },
+    queries.applicationsByProjectIds({ projectIds: boardProjectIds }),
+    { enabled: boardProjectIds.length > 0 },
   );
   const servicesByMainBoard = useMemo(() => {
     const map = new Map<string, string[]>();
@@ -2391,6 +2394,18 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
           >
             {field => {
               if (ticketKind === 'release') return null;
+              // A channel with no linked boards would otherwise render an empty
+              // picker and only explain itself via "Board is required" on submit.
+              // Guarded on a channel actually being chosen — in the pick-a-channel
+              // variant there is none yet, and the boards are empty for that reason.
+              if (effectiveChannelId && boardOptions.length === 0) {
+                return (
+                  <p className='text-xs text-muted-foreground'>
+                    No boards are configured for this channel. Link a board to it before creating
+                    tickets.
+                  </p>
+                );
+              }
               return (
                 <EntitySelector
                   showSearch={false}

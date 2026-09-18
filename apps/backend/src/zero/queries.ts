@@ -5321,6 +5321,17 @@ dmChannelsLatestMessagesPaginated: defineQuery(
       return zql.applications.where('projectId', projectId);
     },
   ),
+  // Multi-project variant, for callers whose boards can span projects (a channel's
+  // linked boards come from channel_board_mappings and are not confined to one
+  // project). The IN-list stays stable for the same reason the single-arg version
+  // above does: it is keyed on the caller's board set, not on the user's current
+  // board selection.
+  applicationsByProjectIds: defineQuery(
+    z.object({ projectIds: z.array(z.string()) }),
+    ({ args: { projectIds } }) => {
+      return zql.applications.where(helpers => helpers.cmp('projectId', 'IN', projectIds));
+    },
+  ),
 
   releaseTicketsSearch: defineQuery(
     z.object({

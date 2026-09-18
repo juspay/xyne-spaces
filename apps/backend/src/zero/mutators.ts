@@ -1281,6 +1281,34 @@ export function createMutators(
             projectId: projectId,
             updatedAt: timestamp,
           });
+          
+          if (projectId) {
+            const projectBoards = await tx.run(
+              zql.boards.where('projectId', projectId).orderBy('createdAt', 'asc'),
+            );
+            const existingMappings = await tx.run(
+              zql.channel_board_mappings.where('channelId', channelId),
+            );
+            const alreadyLinked = new Set(existingMappings.map((mapping) => mapping.boardId));
+            // At most one row per channel may carry isDefault (partial unique index).
+            let claimDefault = !existingMappings.some((mapping) => mapping.isDefault);
+
+            for (const board of projectBoards) {
+              if (alreadyLinked.has(board.id)) continue;
+              await tx.mutate.channel_board_mappings.insert({
+                id: uuidv4(),
+                channelId: channelId,
+                boardId: board.id,
+                workspaceId: authData.workspaceId,
+                isDefault: claimDefault,
+                createdBy: authData.sub,
+                createdAt: timestamp,
+                updatedAt: timestamp,
+              });
+              claimDefault = false;
+              alreadyLinked.add(board.id);
+            }
+          }
 
           await tx.mutate.channel_stats.update({
             channelId,
@@ -2078,6 +2106,84 @@ export function createMutators(
             isClosed: false,
             updatedAt,
           });
+        },
+      ),
+      // Link boards to a channel (channel_board_mappings). Additive only: this never
+      // removes a mapping, so a board that is already linked is silently skipped
+      // rather than erroring — the unique (channelId, boardId) index would reject it,
+      // and a partially-applied batch is worse than an idempotent one.
+      linkBoards: defineMutator(
+        z.object({
+          channelId: z.string(),
+          // Ids are generated client-side (uuid) so the mutation stays idempotent
+          // across optimistic apply + server replay.
+          boards: z
+            .array(z.object({ mappingId: z.string(), boardId: z.string() }))
+            .min(1)
+            .max(100),
+          timestamp: z.number(),
+        }),
+        async ({ tx, args: { channelId, boards, timestamp } }) => {
+          const channel = await tx.run(zql.channels.where('id', channelId).one());
+          if (!channel) {
+            throw new Error("Channel doesn't exist");
+          }
+          if (channel.scopeType !== ChannelScopeType.DEFAULT) {
+            throw new Error('Boards can only be linked to channels');
+          }
+
+          // Workspace/org admins and owners, the channel's creator, or a channel
+          // admin. Enforced here rather than only in the UI — the button is hidden
+          // for everyone else, but hiding a button is not a permission check.
+          const isPrivileged =
+            authData.role === WorkspaceRole.ADMIN ||
+            authData.role === WorkspaceRole.OWNER ||
+            authData.orgRole === OrgRole.ADMIN ||
+            authData.orgRole === OrgRole.OWNER;
+          if (!isPrivileged && channel.createdBy !== authData.sub) {
+            const participant = await tx.run(zql.channel_participants
+              .where('channelId', channelId)
+              .where('userId', authData.sub)
+              .one());
+            if (!participant || participant.role !== ChannelRole.ADMIN) {
+              throw new Error(
+                'Only the channel owner, channel admins or workspace admins can link boards',
+              );
+            }
+          }
+
+          const existing = await tx.run(zql.channel_board_mappings.where('channelId', channelId));
+          const linkedBoardIds = new Set(existing.map(mapping => mapping.boardId));
+          // At most one row per channel may carry isDefault (enforced by a partial
+          // unique index), so only claim it when the channel has none yet.
+          let claimDefault = !existing.some(mapping => mapping.isDefault);
+
+          for (const { mappingId, boardId } of boards) {
+            if (linkedBoardIds.has(boardId)) continue;
+
+            const board = await tx.run(zql.boards.where('id', boardId).one());
+            if (!board) {
+              throw new Error('Board not found');
+            }
+            // The board comes from a client-supplied id, so re-check the tenant here.
+            if (board.workspaceId !== authData.workspaceId) {
+              throw new Error('Board not found');
+            }
+
+            await tx.mutate.channel_board_mappings.insert({
+              id: mappingId,
+              channelId,
+              boardId,
+              workspaceId: authData.workspaceId,
+              isDefault: claimDefault,
+              createdBy: authData.sub,
+              createdAt: timestamp,
+              updatedAt: timestamp,
+            });
+
+            claimDefault = false;
+            linkedBoardIds.add(boardId);
+          }
         },
       ),
       updateSelectedBoardId: defineMutator(
