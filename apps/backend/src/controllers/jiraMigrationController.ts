@@ -969,6 +969,52 @@ export class JiraMigrationController {
         }
       }
 
+      await jiraMigrationProgressService.patchJob(jobId, { currentStep: 'purging_tickets' });
+
+      // Phase 2: ticket-related deletes in chunks with throttle. Runs before the conversation
+      // purge: Ticket.conversation is a required relation, so Prisma Client refuses (P2014) to
+      // delete a conversation while its ticket still exists.
+      const ticketChunks = chunkArray(ticketIds, ticketChunkSize);
+      for (let index = 0; index < ticketChunks.length; index += 1) {
+        const chunk = ticketChunks[index];
+        if (chunk.length === 0) continue;
+
+        const ticketTxnResults = await db.$transaction([
+          db.ticketReferenceMapping.deleteMany({
+            where: { OR: [{ sourceTicketId: { in: chunk } }, { targetTicketId: { in: chunk } }] },
+          }),
+          db.ticketActivity.deleteMany({ where: { ticketId: { in: chunk } } }),
+          db.ticketAssignment.deleteMany({ where: { ticketId: { in: chunk } } }),
+          db.ticketEntityMapping.deleteMany({ where: { ticketId: { in: chunk } } }),
+          db.ticketTag.deleteMany({ where: { ticketId: { in: chunk } } }),
+          db.ticketTagMapping.deleteMany({ where: { ticketId: { in: chunk } } }),
+          db.ticketStageEta.deleteMany({ where: { ticketId: { in: chunk } } }),
+          db.ticketStageRequest.deleteMany({ where: { ticketId: { in: chunk } } }),
+          db.ticketSubTicketMapping.deleteMany({ where: { ticketId: { in: chunk } } }),
+          db.subTicket.updateMany({ where: { mappedTicketId: { in: chunk } }, data: { mappedTicketId: null } }),
+          db.formEntityValues.deleteMany({ where: { entityId: { in: chunk }, entityType: 'TICKET' } }),
+          db.emailRead.deleteMany({ where: { ticketId: { in: chunk } } }),
+          db.workflow.deleteMany({ where: { ticketId: { in: chunk } } }),
+          db.ticket.deleteMany({ where: { id: { in: chunk } } }),
+        ]);
+        const ticketDeleteResult = ticketTxnResults[ticketTxnResults.length - 1];
+        deletedTickets += ticketDeleteResult.count;
+
+        // Best-effort: remove tickets from Vespa search index so UI/search doesn't show stale results.
+        for (const ticketId of chunk) {
+          queueJiraPurgeTicketVespaDeleteJob(ticketId, actorUserId);
+        }
+
+        processedUnits += chunk.length;
+        await jiraMigrationProgressService.patchJob(jobId, {
+          processedIssues: processedUnits,
+        });
+
+        if (index < ticketChunks.length - 1) {
+          await sleep(ticketChunkDelayMs);
+        }
+      }
+
       await jiraMigrationProgressService.patchJob(jobId, { currentStep: 'purging_conversations' });
 
       // Phase 1c: conversation graph.
@@ -1008,50 +1054,6 @@ export class JiraMigrationController {
 
           processedUnits += chunk.length;
           await jiraMigrationProgressService.patchJob(jobId, { processedIssues: processedUnits });
-        }
-      }
-
-      await jiraMigrationProgressService.patchJob(jobId, { currentStep: 'purging_tickets' });
-
-      // Phase 2: ticket-related deletes in chunks with throttle.
-      const ticketChunks = chunkArray(ticketIds, ticketChunkSize);
-      for (let index = 0; index < ticketChunks.length; index += 1) {
-        const chunk = ticketChunks[index];
-        if (chunk.length === 0) continue;
-
-        const ticketTxnResults = await db.$transaction([
-          db.ticketReferenceMapping.deleteMany({
-            where: { OR: [{ sourceTicketId: { in: chunk } }, { targetTicketId: { in: chunk } }] },
-          }),
-          db.ticketActivity.deleteMany({ where: { ticketId: { in: chunk } } }),
-          db.ticketAssignment.deleteMany({ where: { ticketId: { in: chunk } } }),
-          db.ticketEntityMapping.deleteMany({ where: { ticketId: { in: chunk } } }),
-          db.ticketTag.deleteMany({ where: { ticketId: { in: chunk } } }),
-          db.ticketTagMapping.deleteMany({ where: { ticketId: { in: chunk } } }),
-          db.ticketStageEta.deleteMany({ where: { ticketId: { in: chunk } } }),
-          db.ticketStageRequest.deleteMany({ where: { ticketId: { in: chunk } } }),
-          db.ticketSubTicketMapping.deleteMany({ where: { ticketId: { in: chunk } } }),
-          db.subTicket.updateMany({ where: { mappedTicketId: { in: chunk } }, data: { mappedTicketId: null } }),
-          db.formEntityValues.deleteMany({ where: { entityId: { in: chunk }, entityType: 'TICKET' } }),
-          db.emailRead.deleteMany({ where: { ticketId: { in: chunk } } }),
-          db.workflow.deleteMany({ where: { ticketId: { in: chunk } } }),
-          db.ticket.deleteMany({ where: { id: { in: chunk } } }),
-        ]);
-        const ticketDeleteResult = ticketTxnResults[ticketTxnResults.length - 1];
-        deletedTickets += ticketDeleteResult.count;
-
-        // Best-effort: remove tickets from Vespa search index so UI/search doesn't show stale results.
-        for (const ticketId of chunk) {
-          queueJiraPurgeTicketVespaDeleteJob(ticketId, actorUserId);
-        }
-
-        processedUnits += chunk.length;
-        await jiraMigrationProgressService.patchJob(jobId, {
-          processedIssues: processedUnits,
-        });
-
-        if (index < ticketChunks.length - 1) {
-          await sleep(ticketChunkDelayMs);
         }
       }
 

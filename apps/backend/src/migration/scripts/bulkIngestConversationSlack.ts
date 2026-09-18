@@ -161,8 +161,11 @@ export async function bulkIngestConversationSlack(input: IngestConversationSlack
 
   const flush = async (): Promise<void> => {
     if (pending === 0 && resumeUpdates.length === 0) return;
-    if (convRows.length) await db.conversation.createMany({ data: convRows });
-    if (msgRows.length) await db.message.createMany({ data: msgRows });
+    // skipDuplicates keeps flush idempotent: if a later insert throws (e.g. the encryption provider times out) the
+    // buffer isn't reset, so the next flush re-sends these already-committed rows — a no-op here instead of a fatal
+    // conversationId/messageId unique-constraint cascade that would fail every remaining thread.
+    if (convRows.length) await db.conversation.createMany({ data: convRows, skipDuplicates: true });
+    if (msgRows.length) await db.message.createMany({ data: msgRows, skipDuplicates: true });
     if (attRows.length) await db.messageAttachment.createMany({ data: attRows });
     if (extRows.length) await db.externalMessage.createMany({ data: extRows, skipDuplicates: true });
     if (partMap.size) await db.conversationParticipant.createMany({ data: [...partMap.values()], skipDuplicates: true });

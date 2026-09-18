@@ -14,8 +14,14 @@ import {
   deleteConversationLabel,
   fetchConversationLabelDeleteImpact,
   type ConversationLabelDeleteImpact,
+  type LabelUnreadFilters,
 } from '../../../api/conversationLabelsApi';
 import { deskLabelRulesQueryKey } from '../AutoLabelWizard/AutoLabelRules';
+import {
+  normalizeLabelUnreadFilters,
+  useFilteredLabelUnreadCount,
+  useLabelUnreadCounts,
+} from './useLabelUnreadCounts';
 
 /**
  * Gmail-style "Labels" section for the desk sidebar. The "Labels" heading is not
@@ -47,6 +53,7 @@ interface DeskLabelsSidebarProps {
   activeLabelId: string | null;
   onSelectLabel: (labelId: string, labelName: string) => void;
   onDeletedLabel?: (labelId: string) => void;
+  labelUnreadFilters?: LabelUnreadFilters;
 }
 
 export const DeskLabelsSidebar = ({
@@ -55,6 +62,7 @@ export const DeskLabelsSidebar = ({
   activeLabelId,
   onSelectLabel,
   onDeletedLabel,
+  labelUnreadFilters,
 }: DeskLabelsSidebarProps): ReactElement => {
   const zero = useZero();
   const queryClient = useQueryClient();
@@ -62,6 +70,18 @@ export const DeskLabelsSidebar = ({
     queries.conversationLabelsByChannelIdV2({ channelId, isMember }),
     { enabled: !!channelId },
   );
+  const { data: unreadCounts } = useLabelUnreadCounts(channelId, isMember);
+  const normalizedLabelFilters = useMemo(
+    () => normalizeLabelUnreadFilters(labelUnreadFilters),
+    [labelUnreadFilters],
+  );
+  const hasActiveFilters = normalizedLabelFilters !== undefined;
+  const { data: filteredUnreadCount } = useFilteredLabelUnreadCount({
+    channelId,
+    labelId: activeLabelId,
+    filters: normalizedLabelFilters,
+    enabled: hasActiveFilters,
+  });
   const [createOpen, setCreateOpen] = useState(false);
   const [newName, setNewName] = useState('');
   const [deleteImpact, setDeleteImpact] = useState<ConversationLabelDeleteImpact | null>(null);
@@ -164,6 +184,11 @@ export const DeskLabelsSidebar = ({
           list.map(label => {
             const color = label.color ?? colorForName(label.name);
             const active = activeLabelId === label.id;
+            const count =
+              active && hasActiveFilters
+                ? (filteredUnreadCount?.unreadCount ?? 0)
+                : (unreadCounts?.[label.id] ?? 0);
+            const showUnread = count > 0 && (!active || hasActiveFilters);
             return (
               <div
                 key={label.id}
@@ -180,11 +205,24 @@ export const DeskLabelsSidebar = ({
                   className='flex items-center gap-3 flex-1 min-w-0 px-3 h-full text-left'
                   data-track-category='Support'
                   data-track-name='SelectSidebarLabel'
+                  data-track-metadata={JSON.stringify({ to: label.id })}
                 >
                   <span className='size-4 flex items-center justify-center shrink-0'>
                     <Tag size={14} style={{ color }} fill={color} />
                   </span>
-                  <span className='flex-1 truncate min-w-0'>{label.name}</span>
+                  <span
+                    className={cn(
+                      'flex-1 truncate min-w-0',
+                      showUnread && 'font-semibold text-sidebar-unread-foreground',
+                    )}
+                  >
+                    {label.name}
+                  </span>
+                  {showUnread && (
+                    <span className='shrink-0 min-w-4 px-1 rounded-full text-center text-[10px] font-semibold leading-4 bg-sidebar-accent-foreground/10 text-sidebar-accent-foreground'>
+                      {count > 99 ? '99+' : count}
+                    </span>
+                  )}
                 </button>
                 <button
                   type='button'

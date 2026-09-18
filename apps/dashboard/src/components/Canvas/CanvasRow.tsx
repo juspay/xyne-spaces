@@ -25,7 +25,6 @@ import { CanvasShareModal } from './CanvasShareModal';
 import { cn } from '../../utils/classNames';
 import { getCanvasLabelDotClassName, getCanvasLabels } from './canvasLabelUtils';
 import { canvasLabelsApi } from '../../api/canvasLabelsApi';
-import { getCanvasDisplayTitle, useCanvasTitleIcon } from './canvasTitleIcon';
 
 interface CanvasRowTrackNames {
   canvasOpen: string;
@@ -104,8 +103,6 @@ export const CanvasRow: React.FC<CanvasRowProps> = ({
   const isOwner = canvas.createdBy === currentUserId;
   const isEditor = canvas.accessLevel === CanvasRole.EDITOR;
   const canToggleStar = !!onToggleStar;
-  const titleIcon = useCanvasTitleIcon(canvas);
-  const displayTitle = getCanvasDisplayTitle(canvas.title, titleIcon) || 'Untitled';
   const canvasWithRestLabels =
     restLabels !== undefined ? { ...canvas, labels: restLabels } : canvas;
   const canvasLabels = getCanvasLabels(canvasWithRestLabels);
@@ -164,18 +161,13 @@ export const CanvasRow: React.FC<CanvasRowProps> = ({
               <RowIcon size={16} />
             </span>
             <Tooltip
-              content={displayTitle}
+              content={canvas.title || 'Untitled'}
               side='top'
               align='start'
               className='max-w-xs break-words'
             >
               <span className='min-w-0 flex-1 truncate block text-sm font-medium tracking-[-0.14px]'>
-                {titleIcon && (
-                  <span className='mr-1 inline-block text-sm leading-none align-[-1px]'>
-                    {titleIcon}
-                  </span>
-                )}
-                <HighlightedText text={displayTitle} query={highlightQuery} />
+                <HighlightedText text={canvas.title || 'Untitled'} query={highlightQuery} />
               </span>
             </Tooltip>
             {canvas.isArchived && (

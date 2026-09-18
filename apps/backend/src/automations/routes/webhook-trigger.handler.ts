@@ -120,7 +120,10 @@ router.post(
         }),
     );
 
-    await automationQueue.enqueueRun({ executionId: execution.id });
+    await automationQueue.enqueueRun(
+      { executionId: execution.id },
+      metadata.priority ? { priority: 1 } : {},
+    );
     logger.info(
       `[webhook-trigger] automation=${workflow.id} execution=${execution.id} accepted`,
     );

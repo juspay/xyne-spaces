@@ -1,4 +1,5 @@
 import { Request, Response } from 'express';
+import { randomUUID } from 'crypto';
 import {
   MessageAttachmentRepository,
   CreateMessageAttachmentInput,
@@ -11,6 +12,12 @@ import { logger } from '../utils/logger';
 import { setSafeDownloadHeaders } from '../utils/safeAttachmentDownload';
 import { MessageAttachment } from '@prisma/client';
 import { AttachmentEntityType, ChannelVisibility } from '@xyne/shared';
+import {
+  isAllowedSdlcUpload,
+  SDLC_CONTAINMENT_RELATION,
+  SDLC_TRACK_FLAT_RELATION,
+  SDLC_TRACK_MEMBERSHIP_RELATION,
+} from '@xyne/shared/sdlc';
 import { canvasAuthService } from '../services/canvasAuthService';
 import { uploadFiles } from '../services/fileUploadService';
 import { config } from '../config/env';
@@ -178,6 +185,37 @@ export class AttachmentController {
           body: { error: 'Forbidden', message: 'You do not have permission to access this attachment' },
         };
       }
+    }
+
+    // 2.55) SDLC hub files have no conversation to authorize through: they are
+    //       filed into a folder, and their entityId is the hub itself. Seeing the
+    //       hub is what earns seeing the file, on the same terms as a private
+    //       channel's ticket documents above.
+    if (attachment.entityType === AttachmentEntityType.SDLC_HUB) {
+      const channel = await db.channel.findUnique({
+        where: { id: attachment.entityId },
+        select: { visibility: true, workspaceId: true },
+      });
+      if (!channel || channel.workspaceId !== workspaceId) {
+        return { ok: false, status: 404, body: { error: 'Attachment not found' } };
+      }
+      if (channel.visibility !== ChannelVisibility.PUBLIC) {
+        const isParticipant = await this.channelParticipantRepository.isParticipant(
+          attachment.entityId,
+          userId,
+        );
+        if (!isParticipant) {
+          logger.warn(
+            `Unauthorized SDLC hub attachment access: user ${userId} -> ${attachment.id} (hub ${attachment.entityId})`,
+          );
+          return {
+            ok: false,
+            status: 403,
+            body: { error: 'Forbidden', message: 'You do not have permission to access this attachment' },
+          };
+        }
+      }
+      return { ok: true };
     }
 
     // 2.6) Note-taker recordings — same rule as the recording download endpoints.
@@ -584,7 +622,14 @@ export class AttachmentController {
         return;
       }
 
-      const { entityId, entityType, fileMetadata: fileMetadataJson } = req.body;
+      const {
+        entityId,
+        entityType,
+        fileMetadata: fileMetadataJson,
+        sdlcParentType,
+        sdlcParentId,
+        sdlcTrackId,
+      } = req.body;
       if (!entityId || !entityType) {
         res.status(400).json({ error: 'entityId and entityType are required' });
         return;
@@ -593,6 +638,7 @@ export class AttachmentController {
       const allowedEntityTypes: AttachmentEntityType[] = [
         AttachmentEntityType.IMPACT,
         AttachmentEntityType.FORM_ENTITY_VALUE,
+        AttachmentEntityType.SDLC_HUB,
       ];
       if (!allowedEntityTypes.includes(entityType)) {
         res.status(400).json({
@@ -609,10 +655,79 @@ export class AttachmentController {
         res.status(400).json({ error: 'Missing workspaceId' });
         return;
       }
+      // An SDLC hub file is owned by the hub itself, so the entity to verify is the
+      // channel — and membership of it, not just the workspace, is what earns the
+      // right to put a file in its tree.
+      if (entityType === AttachmentEntityType.SDLC_HUB) {
+        const channel = await db.channel.findUnique({
+          where: { id: entityId },
+          select: { workspaceId: true, visibility: true },
+        });
+        if (!channel || channel.workspaceId !== callerWorkspaceId) {
+          res.status(404).json({ error: 'Entity not found' });
+          return;
+        }
+        if (channel.visibility !== ChannelVisibility.PUBLIC) {
+          const isParticipant = await this.channelParticipantRepository.isParticipant(
+            entityId,
+            userId,
+          );
+          if (!isParticipant) {
+            res.status(403).json({ error: 'Forbidden', message: 'You are not a member of this hub' });
+            return;
+          }
+        }
+      }
+
+      // Where the file is filed in the hub's tree. Validated here and written
+      // below in the same request: a Zero mutator would have to read the
+      // attachment row this request is about to create, and the sync replica has
+      // not caught up yet, so that edge write failed every time.
+      let placement: { parentType: 'TRACK' | 'FOLDER'; parentId: string; trackId: string } | null =
+        null;
+      if (entityType === AttachmentEntityType.SDLC_HUB && sdlcParentId && sdlcTrackId) {
+        const parentType = sdlcParentType === 'FOLDER' ? 'FOLDER' : 'TRACK';
+        const trackEdge = await db.sdlcEntityLink.findFirst({
+          where: {
+            channelId: entityId,
+            targetType: 'TRACK',
+            targetId: sdlcTrackId,
+            relationType: SDLC_TRACK_MEMBERSHIP_RELATION,
+          },
+          select: { id: true },
+        });
+        if (!trackEdge) {
+          res.status(404).json({ error: 'Track not found in this hub' });
+          return;
+        }
+        if (parentType === 'FOLDER') {
+          const parentTrack = await db.sdlcEntityLink.findFirst({
+            where: {
+              channelId: entityId,
+              sourceType: 'TRACK',
+              targetType: 'FOLDER',
+              targetId: sdlcParentId,
+              relationType: SDLC_TRACK_FLAT_RELATION,
+            },
+            select: { sourceId: true },
+          });
+          if (!parentTrack || parentTrack.sourceId !== sdlcTrackId) {
+            res.status(400).json({ error: 'Parent folder belongs to another track' });
+            return;
+          }
+        } else if (sdlcParentId !== sdlcTrackId) {
+          res.status(400).json({ error: 'A track can only file into itself' });
+          return;
+        }
+        placement = { parentType, parentId: sdlcParentId, trackId: sdlcTrackId };
+      }
+
       const entityWorkspaceId =
-        entityType === AttachmentEntityType.IMPACT
-          ? (await db.impact.findUnique({ where: { id: entityId }, select: { workspaceId: true } }))?.workspaceId
-          : (await db.formEntityValues.findUnique({ where: { id: entityId }, select: { workspaceId: true } }))?.workspaceId;
+        entityType === AttachmentEntityType.SDLC_HUB
+          ? callerWorkspaceId
+          : entityType === AttachmentEntityType.IMPACT
+            ? (await db.impact.findUnique({ where: { id: entityId }, select: { workspaceId: true } }))?.workspaceId
+            : (await db.formEntityValues.findUnique({ where: { id: entityId }, select: { workspaceId: true } }))?.workspaceId;
       if (!entityWorkspaceId) {
         // FORM_ENTITY_VALUE ids are minted client-side before the row exists; upload runs first,
         // then createV2 creates/verifies the row, so a missing row is legitimate and must not 404.
@@ -631,6 +746,23 @@ export class AttachmentController {
       if (!files || files.length === 0) {
         res.status(400).json({ error: 'Files are required' });
         return;
+      }
+
+      // The picker's accept list is a convenience; this is the rule. A hub file
+      // is something a reader opens in place, so archives and executables are
+      // refused however they arrive.
+      if (entityType === AttachmentEntityType.SDLC_HUB) {
+        const refused = files
+          .filter(file => !isAllowedSdlcUpload(file.originalname, file.mimetype))
+          .map(file => file.originalname);
+        if (refused.length > 0) {
+          res.status(400).json({
+            error: 'Unsupported file type',
+            message: `These files cannot be added to a hub: ${refused.join(', ')}`,
+            files: refused,
+          });
+          return;
+        }
       }
 
       let parsedFileMetadata: Array<{ fileIndex: number; hasThumbnail?: boolean; width?: number; height?: number }> = [];
@@ -657,6 +789,7 @@ export class AttachmentController {
         throw new Error('workspaceId required: no authenticated workspace');
       }
       const attachmentData: CreateMessageAttachmentInput[] = uploadedFiles.map(file => ({
+        id: randomUUID(),
         entityId,
         entityType,
         originalFilename: file.originalName,
@@ -676,16 +809,47 @@ export class AttachmentController {
 
       await this.messageAttachmentRepository.createMany(attachmentData);
 
-      // Fetch the attachments we just created for this entity. Used to return
-      // IDs to the caller and to enqueue Vespa indexing.
-      const savedAttachments = await this.messageAttachmentRepository.findByEntityIdAndType(entityId, entityType);
+      // Read back exactly the rows this request wrote. Their ids were generated
+      // above for that reason: entityId is the hub channel for SDLC_HUB, so
+      // asking for the entity's attachments would hand us every file in the hub,
+      // and taking the newest few of those would pick up a concurrent upload by
+      // another member — filing their file into this caller's folder.
+      const createdIds = attachmentData.map(attachment => attachment.id as string);
+      const savedAttachments =
+        entityType === AttachmentEntityType.FORM_ENTITY_VALUE ||
+        entityType === AttachmentEntityType.SDLC_HUB
+          ? await this.messageAttachmentRepository.findByIds(createdIds)
+          : await this.messageAttachmentRepository.findByEntityIdAndType(entityId, entityType);
 
-      const responseAttachments =
-        entityType === AttachmentEntityType.FORM_ENTITY_VALUE
-          ? [...savedAttachments]
-              .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
-              .slice(0, files.length)
-          : savedAttachments;
+      const responseAttachments = savedAttachments;
+
+      if (placement && responseAttachments.length > 0) {
+        await db.sdlcEntityLink.createMany({
+          data: responseAttachments.flatMap(attachment => [
+            {
+              workspaceId,
+              channelId: entityId,
+              sourceType: placement.parentType,
+              sourceId: placement.parentId,
+              targetType: 'ATTACHMENT',
+              targetId: attachment.id,
+              relationType: SDLC_CONTAINMENT_RELATION,
+              createdBy: userId,
+            },
+            {
+              workspaceId,
+              channelId: entityId,
+              sourceType: 'TRACK',
+              sourceId: placement.trackId,
+              targetType: 'ATTACHMENT',
+              targetId: attachment.id,
+              relationType: SDLC_TRACK_FLAT_RELATION,
+              createdBy: userId,
+            },
+          ]),
+          skipDuplicates: true,
+        });
+      }
 
       if (responseAttachments.length > 0) {
         const attachments = responseAttachments.map(a => ({ id: a.id, mimetype: a.mimetype }));

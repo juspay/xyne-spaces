@@ -1,6 +1,13 @@
 import { Request, Response } from 'express';
 import type { Tag } from '@prisma/client';
-import { AttachmentEntityType, ActivityClassification, CanvasRole, TagMethod } from '@xyne/shared';
+import {
+  AttachmentEntityType,
+  ActivityClassification,
+  CanvasRole,
+  SDLC_CONTAINMENT_RELATION,
+  SDLC_TRACK_FLAT_RELATION,
+  TagMethod,
+} from '@xyne/shared';
 import { z } from 'zod';
 import { uploadFiles } from '../services/fileUploadService.js';
 import { MessageAttachmentRepository } from '../database/repositories/messageAttachmentRepository.js';
@@ -608,7 +615,7 @@ export class CanvasController {
         return;
       }
 
-      const { title, markdown, visibility, channelId } = req.body;
+      const { title, markdown, visibility, channelId, sdlcFolderId } = req.body;
       if (!title || !markdown) {
         res.status(400).json({ error: 'Title and markdown are required' });
         return;
@@ -654,6 +661,57 @@ export class CanvasController {
           },
         }),
       ]);
+
+      // File it where the user is working. Written here, in the same request,
+      // for the reason the attachment path documents: a Zero mutator would have
+      // to read the row this request just created, and the replica has not
+      // caught up yet.
+      if (channelId && typeof sdlcFolderId === 'string' && sdlcFolderId) {
+        const parentTrack = await prisma.sdlcEntityLink.findFirst({
+          where: {
+            channelId,
+            sourceType: 'TRACK',
+            targetType: 'FOLDER',
+            targetId: sdlcFolderId,
+            relationType: SDLC_TRACK_FLAT_RELATION,
+          },
+          select: { sourceId: true },
+        });
+        if (parentTrack) {
+          await prisma.sdlcEntityLink.createMany({
+            data: [
+              {
+                workspaceId: req.user!.workspaceId!,
+                channelId,
+                sourceType: 'FOLDER',
+                sourceId: sdlcFolderId,
+                targetType: 'CANVAS',
+                targetId: canvasId,
+                relationType: SDLC_CONTAINMENT_RELATION,
+                createdBy: creatorId,
+              },
+              {
+                workspaceId: req.user!.workspaceId!,
+                channelId,
+                sourceType: 'TRACK',
+                sourceId: parentTrack.sourceId,
+                targetType: 'CANVAS',
+                targetId: canvasId,
+                relationType: SDLC_TRACK_FLAT_RELATION,
+                createdBy: creatorId,
+              },
+            ],
+            skipDuplicates: true,
+          });
+        } else {
+          const safeSdlcFolderId = String(sdlcFolderId).replace(/[\r\n]+/g, '');
+          const safeChannelId = String(channelId).replace(/[\r\n]+/g, '');
+          const safeCanvasId = String(canvasId).replace(/[\r\n]+/g, '');
+          logger.warn(
+            `[CanvasController] SDLC folder ${safeSdlcFolderId} is not in a track of ${safeChannelId}; canvas ${safeCanvasId} left unplaced`,
+          );
+        }
+      }
 
       const ysweetInitialized = await initializeYSweetDoc(canvasId, blocks, creatorId);
       if (!ysweetInitialized) {

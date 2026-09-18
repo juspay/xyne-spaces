@@ -394,7 +394,7 @@ const AppSidebar = (): ReactElement => {
       {/* Top spacer aligns with the header strip / macOS traffic lights; make it a
           drag region so the window can be moved by its top-left corner in Electron. */}
       <div className='w-full h-[52px] shrink-0' style={APP_DRAG_STYLE} />
-      <div className='flex-1 min-h-0 p-3 flex flex-col items-center justify-between border-t border-r border-sidebar-border-muted'>
+      <div className='app-sidenav-frame flex-1 min-h-0 p-3 flex flex-col items-center justify-between border-t border-r border-sidebar-border-muted'>
         <WorkspaceSwitcher />
         <div className='flex-1 mt-5 space-y-8 overflow-y-auto scrollbar-none min-h-0 pr-2 -mr-2'>
           {isSupportContext ? (
@@ -478,7 +478,7 @@ const AppSidebar = (): ReactElement => {
                       {showOngoingCallDot && (
                         <span
                           aria-hidden='true'
-                          className='absolute -top-1 -right-1 size-[9px] rounded-full bg-status-success border border-[color-mix(in_srgb,var(--status-success)_45%,transparent)] animate-live-pulse motion-reduce:animate-none'
+                          className='absolute top-1 right-1 size-[7px] rounded-full bg-status-success border border-[color-mix(in_srgb,var(--status-success)_45%,transparent)] animate-live-pulse motion-reduce:animate-none'
                         />
                       )}
                     </Link>

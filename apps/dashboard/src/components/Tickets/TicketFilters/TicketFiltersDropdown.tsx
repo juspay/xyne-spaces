@@ -314,6 +314,11 @@ export const TicketFiltersDropdown = ({
         : [];
 
       fields.forEach(field => {
+        // The filter submenu has no UI for these field types — keep them out of
+        // the menu instead of dead-ending on "Unsupported field type".
+        if (field.fieldType === FormFieldType.TICKET || field.fieldType === FormFieldType.DOC) {
+          return;
+        }
         // Use field ID as key to ensure uniqueness
         if (!fieldsMap.has(field.id)) {
           fieldsMap.set(field.id, { field });
@@ -1060,7 +1065,6 @@ export const TicketFiltersDropdown = ({
               ref={inputRef}
               type='text'
               placeholder='Search Tickets'
-              autoFocus={!isMobile}
               value={searchValue ?? ''}
               onChange={e => onSearchChange?.(e.target.value)}
               className='w-full h-8 text-sm bg-transparent text-foreground rounded-lg pl-10 pr-[52px] focus:outline-none'

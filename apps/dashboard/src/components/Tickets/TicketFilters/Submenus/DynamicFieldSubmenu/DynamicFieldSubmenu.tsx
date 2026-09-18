@@ -80,19 +80,12 @@ export const DynamicFieldSubmenu = ({
   // Render SINGLE_SELECT or MULTI_SELECT
   if (fieldType === FormFieldType.SINGLE_SELECT || fieldType === FormFieldType.MULTI_SELECT) {
     const handleToggle = (option: string): void => {
-      if (fieldType === FormFieldType.SINGLE_SELECT) {
-        // Single select: replace value or clear if clicking selected
-        onChange(selectedValues.includes(option) ? [] : [option]);
-      } else {
-        // Multi select: toggle in array
-        const isSelected = selectedValues.includes(option);
-        onChange(
-          isSelected ? selectedValues.filter(v => v !== option) : [...selectedValues, option],
-        );
-      }
+      const isSelected = selectedValues.includes(option);
+      onChange(isSelected ? selectedValues.filter(v => v !== option) : [...selectedValues, option]);
     };
 
-    const isMultiSelect = fieldType === FormFieldType.MULTI_SELECT;
+    const isMultiSelect =
+      fieldType === FormFieldType.SINGLE_SELECT || fieldType === FormFieldType.MULTI_SELECT;
     const allVisibleSelected =
       filteredOptions.length > 0 && filteredOptions.every(o => selectedValues.includes(o));
 

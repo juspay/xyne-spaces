@@ -344,6 +344,10 @@ export class TicketRepository {
       operation: 'insert',
       ticket: createdSnapshot,
     });
+    if (createdSnapshot.channelId) {
+      // Desk label unread badges: a new ticket can enter filtered label views.
+      websocketService.broadcastLabelUnreadCountsUpdate(createdSnapshot.channelId);
+    }
 
 
     void (async (): Promise<void> => {
@@ -893,6 +897,9 @@ export class TicketRepository {
         assignedTo: currentTicket.assignedTo,
       },
     });
+    if (updatedSnapshot.channelId) {
+      websocketService.broadcastLabelUnreadCountsUpdate(updatedSnapshot.channelId);
+    }
 
     // Thread system message for the status change (activity rows for PR/STAGE_NAME/STATUS/ETA
     // were already written inside the transaction above). Messages are posted post-commit,
@@ -1142,6 +1149,10 @@ export class TicketRepository {
         assignedTo: previousAssigneeId,
       },
     });
+    if (assigneeSnapshot.channelId) {
+      // Desk payloads filter on assignedTo, so label badges invalidate on reassign.
+      websocketService.broadcastLabelUnreadCountsUpdate(assigneeSnapshot.channelId);
+    }
   }
 
   async assignUserGroupToTicket(ticketId: string, groupId: string, updatedBy: string): Promise<void> {
@@ -1172,6 +1183,49 @@ export class TicketRepository {
       });
     }
   } 
+
+  // Claims the release-insights in-flight flag. Read + write run in one SERIALIZABLE
+  // transaction (same pattern as the sharing services): a concurrent claimer's commit
+  // fails ours with P2034, and the retry re-reads the flag it just set. No raw SQL — the
+  // tenant extensions must see this write. Returns false when another generation holds
+  // the flag and it isn't older than `staleBefore`.
+  async claimReleaseInsightsGeneration(ticketId: string, staleBefore: Date): Promise<boolean> {
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      try {
+        return await prisma.$transaction(
+          async (tx) => {
+            const ticket = await tx.ticket.findUnique({
+              where: { id: ticketId },
+              select: { metadata: true },
+            });
+            if (!ticket) return false;
+            const current = (ticket.metadata as Record<string, unknown> | null) ?? {};
+            if (current.isGeneratingReleaseInsights === true) {
+              const startedAt = current.insightsGenerationStartedAt;
+              const started = typeof startedAt === 'string' ? Date.parse(startedAt) : NaN;
+              if (Number.isFinite(started) && started >= staleBefore.getTime()) return false;
+            }
+            await tx.ticket.update({
+              where: { id: ticketId },
+              data: {
+                metadata: {
+                  ...current,
+                  isGeneratingReleaseInsights: true,
+                  insightsGenerationStartedAt: new Date().toISOString(),
+                } as Prisma.InputJsonObject,
+              },
+            });
+            return true;
+          },
+          { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
+        );
+      } catch (error) {
+        const isWriteConflict = (error as { code?: string } | null)?.code === 'P2034';
+        if (!isWriteConflict || attempt === 3) throw error;
+      }
+    }
+    return false;
+  }
 
   async updateTicketMetadata(ticketId: string, metadata: Record<string, any>): Promise<void> {
     const ticket = await prisma.ticket.findUnique({
@@ -1437,6 +1491,9 @@ export class TicketRepository {
           priority: prevSnapshot.priority,
         },
       });
+      if (metadataSnapshot.channelId) {
+        websocketService.broadcastLabelUnreadCountsUpdate(metadataSnapshot.channelId);
+      }
     }
   }
 

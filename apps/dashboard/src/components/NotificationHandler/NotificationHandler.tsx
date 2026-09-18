@@ -182,7 +182,8 @@ export const NotificationHandler: React.FC = () => {
         }
       }
 
-      void navigate(resolvedUrl);
+      // Arrival events (TICKET_VIEWED, CHANNEL_VIEWED) read this to attribute the open.
+      void navigate(resolvedUrl, { state: { trackSource: 'notification' } });
     },
     [navigate],
   );
