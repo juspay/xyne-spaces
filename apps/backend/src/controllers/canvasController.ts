@@ -32,6 +32,10 @@ import {
 } from '../services/canvasService.js';
 const CANVAS_LABEL_SOURCE_TYPE = 'canvas';
 const CANVAS_LABEL_CATEGORY = 'generic';
+
+function sanitizeForLog(value: unknown): string {
+  return String(value ?? '').replace(/[\r\n\u2028\u2029]+/g, '');
+}
 const MAX_CANVAS_LABEL_BULK_IDS = 200;
 // Shared cap for both add (names) and remove (labelIds): how many labels one
 // request can mutate at once.
@@ -704,9 +708,9 @@ export class CanvasController {
             skipDuplicates: true,
           });
         } else {
-          const safeSdlcFolderId = String(sdlcFolderId).replace(/[\r\n]+/g, '');
-          const safeChannelId = String(channelId).replace(/[\r\n]+/g, '');
-          const safeCanvasId = String(canvasId).replace(/[\r\n]+/g, '');
+          const safeSdlcFolderId = sanitizeForLog(sdlcFolderId);
+          const safeChannelId = sanitizeForLog(channelId);
+          const safeCanvasId = sanitizeForLog(canvasId);
           logger.warn(
             `[CanvasController] SDLC folder ${safeSdlcFolderId} is not in a track of ${safeChannelId}; canvas ${safeCanvasId} left unplaced`,
           );
