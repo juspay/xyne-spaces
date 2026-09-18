@@ -21,7 +21,9 @@ import { executeCallLlmWithRetry, type SummaryModelType } from './callLlmRetry';
 import { callRecordingService } from '@/services/callRecordingService';
 import { callLabelService } from '@/services/callLabelService';
 import { TagMethod } from '@xyne/shared';
-import { callDocumentService } from '@/services/callDocumentService';
+import { callDocumentService, numberTranscriptSegments } from '@/services/callDocumentService';
+import { ensureSummaryCitations } from '@/services/callSummaryCitationRepair';
+import { maxSegmentId, parseNumberedSegmentIds } from '@/services/callSummaryCitations';
 import { logDetailedSummaryFailed } from '@/services/detailedSummaryFailureLog';
 import { RECORDING_TITLE_PROMPT } from '@/services/recordingSummaryTemplates';
 import { acquireLock, releaseLock } from '@/utils/distributedLock';
@@ -70,14 +72,17 @@ BRAND NAME CORRECTION:
 - Only apply this correction when the word is clearly a reference to the brand (e.g. "Xyne Spaces", "Xyne Calls")
 
 CITATION RULES:
-- The transcript is numbered: each line starts with [N] (e.g. "[1] [03:24] Alice: ...")
-- After any claim, fact, or outcome derived from the transcript, append a citation token [clf-N]
-  where N is the segment number from the transcript line that supports the claim
+- The transcript is numbered: each line starts with its segment id, e.g. "[12] [03:24] Alice: ..." — that line is segment 12
+- A citation is the literal characters [clf- + one number + ]. Valid ids for this transcript are 1 to {maxSegment}
+- ✅ CORRECT: "Revenue grew 12%[clf-3]."
+- ❌ WRONG: "Revenue grew 12%[3]." — a bare number is NOT a citation; it reaches the reader as broken literal text
+- ❌ WRONG: ranges [clf-3-5], lists [clf-3, 5], spaces [clf 3], footnotes [^1], or a "Sources"/"Citations" section
 - Place the token AFTER the word and BEFORE any trailing punctuation: "Revenue grew 12%[clf-3]."
 - Multiple consecutive tokens are allowed for multi-segment support: "discussed the roadmap[clf-5][clf-8]"
 - Cite at least one segment per key outcome and per action item when possible
 - Do NOT cite the Summary overview section — it is too high-level for precise citations
-- Do NOT invent segment numbers — only use numbers that appear in the transcript
+- BEFORE writing [clf-N], confirm line N actually states what you just wrote. Never guess or estimate a segment number — read it off the line
+- Do NOT invent segment numbers — only use numbers that appear in the transcript. An uncited statement is fine; a wrongly cited one is not
 
 CALL PARTICIPANTS:
 - The call creator is: {callCreator}
@@ -887,9 +892,23 @@ export class TranscriptService {
    */
   async generateCallSummary(transcript: string, callId?: string, modelType?: SummaryModelType): Promise<string | null> {
     const callCreator = await this.getCallCreatorName(callId);
+    // The prompt asks the model to cite segment numbers, so the transcript has to
+    // carry them. The note-taker path numbers before calling; the channel-call
+    // path does not, which left the model citing numbers it was never shown.
+    const existingSegmentIds = parseNumberedSegmentIds(transcript);
+    const numberedTranscript = existingSegmentIds.size > 0
+      ? transcript
+      : numberTranscriptSegments(transcript).numbered;
+    const highestSegmentId = maxSegmentId(
+      existingSegmentIds.size > 0 ? existingSegmentIds : parseNumberedSegmentIds(numberedTranscript),
+    );
     const prompt = CALL_SUMMARY_PROMPT
       .replace('{callCreator}', callCreator || 'Unknown')
-      .replace('{transcript}', transcript);
+      .replace(
+        '{maxSegment}',
+        highestSegmentId > 0 ? String(highestSegmentId) : 'the highest segment number shown',
+      )
+      .replace('{transcript}', numberedTranscript);
 
     const extracted = await executeCallLlmWithRetry(
       () => this.createAgent(callId, modelType),
@@ -902,7 +921,14 @@ export class TranscriptService {
       return null;
     }
 
-    return extracted.content;
+    const { markdown } = await ensureSummaryCitations({
+      markdown: extracted.content,
+      numberedTranscript,
+      callId: callId || 'unknown',
+      ...(modelType ? { modelType } : {}),
+    });
+
+    return markdown;
   }
 
   /** Resolve the creator's display name for the short-summary prompt. */
