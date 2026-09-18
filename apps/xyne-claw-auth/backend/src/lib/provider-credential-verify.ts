@@ -102,6 +102,12 @@ function providerLabel(provider: string): string {
   }
 }
 
+function trimTrailingSlashes(value: string): string {
+  let end = value.length;
+  while (end > 0 && value.charCodeAt(end - 1) === 47) end -= 1;
+  return value.slice(0, end);
+}
+
 function classify(provider: string, status: number, body: string): ProviderVerification {
   if (status >= 400 && status < 500) return rejected(status, body, provider);
   return unreachable(provider, `HTTP ${status}`);
@@ -166,7 +172,7 @@ function toModels(rows: Array<Record<string, unknown>>, idKey: string, nameKey: 
 }
 
 async function verifyClaude(input: VerifyProviderInput): Promise<ProviderVerification> {
-  const root = (input.baseUrl?.trim() || ANTHROPIC_BASE_URL).replace(/\/+$/, "");
+  const root = trimTrailingSlashes(input.baseUrl?.trim() || ANTHROPIC_BASE_URL);
   const isOauth = input.authType === "oauth_token";
   const headers: Record<string, string> = {
     "anthropic-version": ANTHROPIC_VERSION,
@@ -196,7 +202,7 @@ async function verifyCodex(input: VerifyProviderInput): Promise<ProviderVerifica
     const accountId = decodeChatgptAccountId(input.apiKey);
     if (accountId) headers["ChatGPT-Account-Id"] = accountId;
   } else {
-    url = `${(input.baseUrl?.trim() || OPENAI_BASE_URL).replace(/\/+$/, "")}/models`;
+    url = `${trimTrailingSlashes(input.baseUrl?.trim() || OPENAI_BASE_URL)}/models`;
     headers["User-Agent"] = "codex-cli";
   }
 
@@ -237,7 +243,7 @@ async function verifyOpenAiCompatible(
   input: VerifyProviderInput,
   fallbackBase: string,
 ): Promise<ProviderVerification> {
-  const root = (input.baseUrl?.trim() || fallbackBase).replace(/\/+$/, "");
+  const root = trimTrailingSlashes(input.baseUrl?.trim() || fallbackBase);
   const result = await getJson(provider, `${root}/models`, {
     Authorization: `Bearer ${input.apiKey}`,
     "User-Agent": "xyne-claw-auth",
