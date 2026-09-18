@@ -40,7 +40,7 @@ import type {
   RunHeader,
   ToolInvocation,
 } from "./types.js";
-import { isBlobRef } from "./types.js";
+import { isBlobRef, emptyLatency, emptyTokenUsage } from "./types.js";
 
 /** Total bytes of re-inlined per-event transcript we are willing to produce. */
 const DEFAULT_MAX_INLINE_BYTES = 8_000_000;
@@ -690,7 +690,10 @@ export function toV1Snapshot(run: ReadRun): DebugSessionSnapshot {
   // One build, one replay: the events and the snapshot's `messages` must be the
   // same transcript, and its warnings must reach the reader exactly once.
   const built = buildV1Events(run);
-  const latency = h.latency;
+  // A header written by an older writer — or torn by a crash mid-write — can
+  // arrive without these. Defaulting keeps ONE unreadable run from throwing and
+  // taking the whole /debug bundle (every other run in the thread) with it.
+  const latency = h.latency ?? emptyLatency();
   const warnings = [...run.warnings, ...built.warnings];
 
   const lastAssistantText =
@@ -710,7 +713,7 @@ export function toV1Snapshot(run: ReadRun): DebugSessionSnapshot {
       : {}),
     messages: built.transcript.messages,
     toolInvocations: deriveToolInvocations(run),
-    tokenUsage: h.tokenUsage,
+    tokenUsage: h.tokenUsage ?? emptyTokenUsage(),
     latency,
     lastAssistantText,
     events: built.events,
