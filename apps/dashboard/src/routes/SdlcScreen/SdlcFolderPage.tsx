@@ -35,6 +35,8 @@ import {
   subscribeToEmbeddedPage,
 } from './useSdlcFrameBridge';
 import type { SdlcEmbedTab } from './sdlcFrameMessages';
+import { AttachmentPreviewPane } from '../../components/FileViewer/AttachmentPreviewPane';
+import { detectFileType } from '../../components/FileViewer/utils';
 import { fileKind, formatFileSize } from './fileKind';
 import {
   CommentsPanel,
@@ -1049,6 +1051,23 @@ function tabItem(tab: FolderTab, maps: Maps): WorkspaceItem | null {
 
 function FileFallback({ file }: { file: SdlcFinderFile }): ReactElement {
   const kind = fileKind(file.mimetype, file.name);
+  // The same viewers the rest of the app previews attachments with — csv, xlsx,
+  // docx, pptx, markdown and html included — rather than a second, poorer set
+  // living here. They fetch through apiInstance, so the lane's api base applies
+  // and the stream's download headers never come into it.
+  if (detectFileType(file.mimetype, file.name)) {
+    return (
+      <div className='flex h-full min-h-0 flex-col'>
+        <AttachmentPreviewPane
+          attachmentId={file.id}
+          fileName={file.name}
+          mimeType={file.mimetype}
+          fileSize={file.size}
+          flush
+        />
+      </div>
+    );
+  }
   return (
     <div className='flex h-full flex-col items-center justify-center gap-3 p-8 text-center'>
       <kind.icon className='size-10 text-muted-foreground' />
