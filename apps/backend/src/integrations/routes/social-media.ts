@@ -6,18 +6,35 @@ import { config as appConfig } from '@/config/env';
 import { emailFetchQueue } from '@/queues/emailFetchQueue';
 import { InteractionReplyValidationError } from '../core/baseInteractionReplySender';
 import { ExternalSourcePlatform } from '../core/types';
+import { SOCIAL_MEDIA_PLATFORMS } from '../social-media/constants';
 import { socialMediaService } from '../social-media/socialMediaService';
 import {
   authorizeSocialMediaManager,
   canAccessSocialMediaChannel,
 } from './social-media/access';
 import googlePlayRoutes from './social-media/google-play';
+import appStoreRoutes from './social-media/app-store';
 
 const TAG = '[SocialMediaRoutes]';
 const router = express.Router();
 
+/** Returns undefined when no range was asked for, 'invalid' when one was asked for badly. */
+function parseBackfill(
+  body: unknown,
+): { startDate: Date; endDate: Date } | 'invalid' | undefined {
+  const { startDate, endDate } = (body ?? {}) as { startDate?: unknown; endDate?: unknown };
+  if (startDate === undefined && endDate === undefined) return undefined;
+  if (typeof startDate !== 'string' || typeof endDate !== 'string') return 'invalid';
+  const start = new Date(startDate);
+  const end = new Date(endDate);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return 'invalid';
+  if (start > end) return 'invalid';
+  return { startDate: start, endDate: end };
+}
+
 router.use(express.json());
 router.use(googlePlayRoutes);
+router.use(appStoreRoutes);
 
 router.post(
   '/:conversationId/reply',
@@ -80,11 +97,17 @@ router.post(
         return;
       }
 
+      const backfill = parseBackfill(req.body);
+      if (backfill === 'invalid') {
+        res.status(400).json({ error: 'startDate and endDate must be ISO dates, start before end' });
+        return;
+      }
+
       const sources = await db.externalSource.findMany({
         where: {
           channelId: req.params.channelId,
           workspaceId,
-          sourceType: ExternalSourcePlatform.GOOGLE_PLAY,
+          sourceType: { in: [...SOCIAL_MEDIA_PLATFORMS] },
           isActive: true,
         },
         select: { id: true },
@@ -101,6 +124,10 @@ router.post(
           channelId: req.params.channelId,
           requesterUserId: req.user!.id,
           workspaceId,
+          ...(backfill && {
+            startDate: backfill.startDate.toISOString(),
+            endDate: backfill.endDate.toISOString(),
+          }),
         });
         res.status(202).json({
           success: true,
@@ -114,6 +141,7 @@ router.post(
       for (const source of sources) {
         const result = await socialMediaService.syncSource(source.id, {
           ignoreSyncCursor: true,
+          ...(backfill && { backfill }),
         });
         synced += result.synced;
       }
@@ -146,7 +174,7 @@ router.post(
         where: {
           channelId: req.params.channelId,
           workspaceId,
-          sourceType: ExternalSourcePlatform.GOOGLE_PLAY,
+          sourceType: { in: [...SOCIAL_MEDIA_PLATFORMS] },
         },
         data: { isActive: false },
       });
@@ -154,6 +182,18 @@ router.post(
         res.status(404).json({ error: 'Social media source not found' });
         return;
       }
+
+      // An App Store .p8 is a team-wide key with no programmatic revocation, so disconnecting a
+      // desk must actually destroy our copy. Play's refresh token is scoped and user-revocable,
+      // and its reconnect path re-consents, so it is left alone here.
+      await db.externalSource.updateMany({
+        where: {
+          channelId: req.params.channelId,
+          workspaceId,
+          sourceType: ExternalSourcePlatform.APP_STORE,
+        },
+        data: { credentials: '' },
+      });
 
       res.json({
         message: 'Social media desk disconnected',
