@@ -199,13 +199,13 @@ const SERVERS = [
     transport: "stdio",
     credentialForm: {
       fields: [
-        { name: "privateAppAccessToken", label: "HubSpot Private App Access Token", type: "password", placeholder: "pat-..." },
+        { name: "hubspotPersonalAccessToken", label: "HubSpot Private App Access Token", type: "password", placeholder: "pat-..." },
       ],
     },
     launchConfigTemplate: {
       cmd: "npx",
       args: ["-y", "@hubspot/mcp-server"],
-      env: { PRIVATE_APP_ACCESS_TOKEN: "{{privateAppAccessToken}}" },
+      env: { PRIVATE_APP_ACCESS_TOKEN: "{{hubspotPersonalAccessToken}}" },
     },
     healthcheckSpec: { name: "hubspot-get-user-details", params: {} },
     writeToolPolicy: {
