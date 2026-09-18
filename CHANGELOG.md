@@ -1,3 +1,10 @@
+## [1.337.0-release-20260918.6](https://github.com/juspay/xyne-spaces/compare/v1.337.0-release-20260918.5...v1.337.0-release-20260918.6) (2026-09-18)
+
+
+### Features
+
+* rebuild the ticket detail panel ([#2052](https://github.com/juspay/xyne-spaces/issues/2052)) ([f8c3240](https://github.com/juspay/xyne-spaces/commit/f8c324083972ffd5f37af3d2b978ed0f38c9c3e0))
+
 ## [1.337.0-release-20260918.5](https://github.com/juspay/xyne-spaces/compare/v1.337.0-release-20260918.4...v1.337.0-release-20260918.5) (2026-09-18)
 
 
