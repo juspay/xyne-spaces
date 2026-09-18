@@ -704,8 +704,11 @@ export class CanvasController {
             skipDuplicates: true,
           });
         } else {
+          const safeSdlcFolderId = String(sdlcFolderId).replace(/[\r\n]+/g, '');
+          const safeChannelId = String(channelId).replace(/[\r\n]+/g, '');
+          const safeCanvasId = String(canvasId).replace(/[\r\n]+/g, '');
           logger.warn(
-            `[CanvasController] SDLC folder ${sdlcFolderId} is not in a track of ${channelId}; canvas ${canvasId} left unplaced`,
+            `[CanvasController] SDLC folder ${safeSdlcFolderId} is not in a track of ${safeChannelId}; canvas ${safeCanvasId} left unplaced`,
           );
         }
       }
