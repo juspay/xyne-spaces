@@ -156,6 +156,7 @@ import { useAuth, useAuthContextValues } from '../../hooks/useAuth';
 import { usePlatform } from '../../hooks/usePlatform';
 import { TicketListView } from '../../components/Tickets/TicketListView';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
+import { useRacedQuery } from '../../hooks/useRacedQuery';
 import { SupportKanbanBoard } from './SupportKanbanBoard';
 import { SupportTicketTable } from './SupportTicketTable';
 import { BoardType, FormContextType, TicketPriority, parseFieldOptionValues } from '@xyne/shared';
@@ -4788,7 +4789,7 @@ export const SupportTicketDetail = ({
     ],
   );
 
-  const [allEmails] = useCachedQuery(
+  const [allEmails] = useRacedQuery(
     queries.getEmailsForConversationsV2({
       conversationIds: allConversationIds,
       channelId: routeChannelId,
