@@ -72,6 +72,7 @@ import { TicketCard } from '../../components/Tickets/TicketCard/TicketCard';
 import { TicketFiltersDropdown } from '../../components/Tickets/TicketFilters';
 import type { ProjectsScreenOutletContext } from '../ProjectsScreen/ProjectsScreen';
 import { CreateTicketModal } from '../../components/Tickets/CreateTicketModal/CreateTicketModal';
+import { BulkCreateTicketsModal } from '../../components/Tickets/BulkCreateTicketsModal/BulkCreateTicketsModal';
 import {
   clearCreateTicketParams,
   hasCreateTicketFlag,
@@ -108,6 +109,7 @@ import type {
   FlowStepVisibilityOptions,
 } from '@xyne/shared';
 import {
+  BulkTicketMode,
   TicketStatusV2,
   ActivityType,
   FormContextType,
@@ -514,6 +516,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
 
   // ────────────────────────────────────────────────────────────────────
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const [isBulkCreateModalOpen, setIsBulkCreateModalOpen] = useState(false);
   const [createTicketSeed, setCreateTicketSeed] = useState<{
     status?: TicketStatusV2 | undefined;
     stageName?: string | undefined;
@@ -4545,6 +4548,25 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                 </Tooltip>
               </div>
             )}
+            {/* Bulk create belongs to the table, where rows are edited in a grid */}
+            {layoutView === 'table' && canCreateTicket && channel && !channel.isArchived && (
+              <Tooltip content='Bulk create tickets'>
+                <button
+                  data-testid='kanban-bulk-create-ticket-button'
+                  data-track-event='BUTTON_CLICK'
+                  data-track-category='TICKETS'
+                  data-track-name='BULK_CREATE_TICKET_KANBAN'
+                  data-track-metadata={JSON.stringify({ boardId, channelId })}
+                  onClick={() => setIsBulkCreateModalOpen(true)}
+                  className='flex items-center gap-2 px-3 py-2 rounded-xl border border-border bg-background hover:bg-muted transition-all outline-none focus:ring-2 focus:ring-border shadow-sm'
+                  title='Bulk create tickets'
+                >
+                  <Plus className='w-3.5 h-3.5 text-muted-foreground' />
+                  <span className='sr-only'>Bulk create tickets</span>
+                </button>
+              </Tooltip>
+            )}
+
             {/* Stage Overdue Filter Toggle */}
             <Tooltip content={showOverdueOnly ? 'Show All Tickets' : 'Show Only Overdue Tickets'}>
               <button
@@ -5955,6 +5977,20 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
           onClose={() => setIsShareViewDialogOpen(false)}
           viewId={viewId}
           viewName={initialName ?? ''}
+        />
+      )}
+
+      {/* Bulk Create Tickets Modal */}
+      {effectiveProjectId && channel && (
+        <BulkCreateTicketsModal
+          isOpen={isBulkCreateModalOpen}
+          onClose={() => setIsBulkCreateModalOpen(false)}
+          mode={BulkTicketMode.ALL_PARENTS}
+          fromTicketsTab={true}
+          channelId={channel.id}
+          projectId={effectiveProjectId}
+          boardId={currentBoardId ?? ''}
+          boardName={selectedBoardDetail?.name}
         />
       )}
 
