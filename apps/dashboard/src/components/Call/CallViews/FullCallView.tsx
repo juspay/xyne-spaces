@@ -692,8 +692,6 @@ export function FullCallView({
         callId={callId}
         isOpen={isPresentationMode}
         participant={presentationParticipant ?? null}
-        aiController={aiController}
-        requestedAiController={requestedAiController}
         onExit={() => setIsPresentationMode(false)}
       />
     </div>
