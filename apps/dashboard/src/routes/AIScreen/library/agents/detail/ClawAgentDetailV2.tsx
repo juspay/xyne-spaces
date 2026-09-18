@@ -83,7 +83,6 @@ const ClawAgentDetailV2 = (): ReactElement => {
               onChat={() => openAgentChat(agent.slug)}
               canChat={canOpenAgentChat}
               onBack={() => void navigate(returnPath)}
-              onEdit={() => void navigate(`${libraryPath}/agent/${agent.slug}/edit`)}
             />
           )}
 

@@ -4,7 +4,6 @@ import {
   ChevronBigLeft,
   CopyDefault,
   DeleteDustbin01,
-  PencilEditLine,
   ThreeDotsMenuHorizontal,
 } from '@xyne/icons';
 import { Loader2 } from 'lucide-react';
@@ -81,7 +80,6 @@ interface AgentDetailHeaderV2Props {
   canChat: boolean;
   onBack: () => void;
   onChat: () => void;
-  onEdit: () => void;
 }
 
 export function AgentDetailHeaderV2({
@@ -90,7 +88,6 @@ export function AgentDetailHeaderV2({
   canChat,
   onBack,
   onChat,
-  onEdit,
 }: AgentDetailHeaderV2Props): ReactElement {
   const [menuOpen, setMenuOpen] = useState(false);
   const [cloneOpen, setCloneOpen] = useState(false);
@@ -150,15 +147,6 @@ export function AgentDetailHeaderV2({
           busy={busy.cloning}
           onClick={() => setCloneOpen(true)}
         />
-
-        {canEdit && (
-          <Action
-            label='Edit'
-            primary
-            icon={<PencilEditLine className='size-4' aria-hidden />}
-            onClick={onEdit}
-          />
-        )}
 
         {hasMenu && (
           <Popover
