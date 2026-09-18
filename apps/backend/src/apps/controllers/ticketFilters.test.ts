@@ -21,6 +21,15 @@ describe('buildTicketFilterWhere', () => {
     expect(where.ticketType).toEqual({ in: ['bug'] });
   });
 
+  it('filters merchantId by explicit ids, or by presence via hasMerchantId', () => {
+    expect(buildTicketFilterWhere({ merchantId: ['m_1', 'm_2'] }).merchantId).toEqual({ in: ['m_1', 'm_2'] });
+    expect(buildTicketFilterWhere({ hasMerchantId: true }).merchantId).toEqual({ not: null });
+    expect(buildTicketFilterWhere({ hasMerchantId: false }).merchantId).toBeNull();
+    // Explicit ids win over the presence flag.
+    expect(buildTicketFilterWhere({ merchantId: ['m_1'], hasMerchantId: false }).merchantId).toEqual({ in: ['m_1'] });
+    expect(buildTicketFilterWhere({ merchantId: [] })).not.toHaveProperty('merchantId');
+  });
+
   it('expands identity columns to raw + prefixed stored forms (both formats)', () => {
     const where = buildTicketFilterWhere({
       assignedTo: ['user_1'],

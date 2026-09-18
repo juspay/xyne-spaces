@@ -148,6 +148,9 @@ const readFiltersFromUrl = (params: URLSearchParams): TicketFilters => {
   const ticketTypes = params.getAll('ticketTypes');
   if (ticketTypes.length) filters.ticketTypes = ticketTypes;
 
+  const merchantIds = params.getAll('merchantIds');
+  if (merchantIds.length) filters.merchantIds = merchantIds;
+
   const sourceChannels = params.getAll('sourceChannels');
   if (sourceChannels.length) filters.sourceChannels = sourceChannels;
 
@@ -236,6 +239,7 @@ const FILTER_PARAM_KEYS = [
   'tags',
   'stages',
   'ticketTypes',
+  'merchantIds',
   'sourceChannels',
   'aiCategory',
   'generatedTags',
@@ -281,6 +285,7 @@ const writeFiltersToUrl = (params: URLSearchParams, filters: TicketFilters): voi
   filters.tags?.forEach((t: string) => params.append('tags', t));
   filters.stages?.forEach((s: string) => params.append('stages', s));
   filters.ticketTypes?.forEach((t: string) => params.append('ticketTypes', t));
+  filters.merchantIds?.forEach((m: string) => params.append('merchantIds', m));
   filters.sourceChannels?.forEach((c: string) => params.append('sourceChannels', c));
   filters.aiCategory?.forEach((c: string) => params.append('aiCategory', c));
   filters.generatedTags?.forEach((t: string) => params.append('generatedTags', t));

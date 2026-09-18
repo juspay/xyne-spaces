@@ -127,7 +127,7 @@ import { RouterErrorFallback } from '../components/ErrorBoundary';
 import NotFoundScreen from './NotFoundScreen/NotFoundScreen';
 import ChatRedirect from '../components/Chat/ChatRedirect/ChatRedirect';
 import DirectoryRedirect from '../components/Chat/DirectoryRedirect/DirectoryRedirect';
-import CallsRoute from './CallsRoute/CallsRoute';
+import CallHistoryScreen from './CallHistoryScreen/CallHistoryScreen';
 import CallDetailScreen from './CallDetailScreen/CallDetailScreen';
 import RecordingsRoute from './RecordingsRoute/RecordingsRoute';
 import RecordingDetailRoute from './RecordingDetailRoute/RecordingDetailRoute';
@@ -1738,7 +1738,7 @@ export const router = createBrowserRouter(
                   path: 'calls',
                   element: (
                     <ToolbarProtectedRoute path='/calls'>
-                      <CallsRoute />
+                      <CallHistoryScreen />
                     </ToolbarProtectedRoute>
                   ),
                   children: [

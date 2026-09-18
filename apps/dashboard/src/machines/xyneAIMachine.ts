@@ -84,7 +84,6 @@ export interface AskAIInitialContextSelections {
     conversationId?: string;
     externalId?: string;
   }>;
-  calls?: Array<{ id: string; title: string; channelId?: string; conversationId?: string }>;
 }
 
 export interface WorkflowContext {
@@ -562,7 +561,8 @@ export const xyneAIMachine = setup({
           kbDocName: event.kbDocName ?? null,
           kbFolderId: event.kbFolderId ?? null,
           kbFolderName: event.kbFolderName ?? null,
-          workflowInfo: event.workflowInfo ?? null,
+          workflowInfo:
+            event.workflowInfo !== undefined ? event.workflowInfo : context.workflowInfo,
           workflowDismissed: event.workflowInfo ? false : context.workflowDismissed,
           researchContext: event.researchContext ?? null,
           initialQuery: event.initialQuery?.trim() || null,
@@ -647,7 +647,8 @@ export const xyneAIMachine = setup({
           kbFolderId: event.kbFolderId !== undefined ? event.kbFolderId : context.kbFolderId,
           kbFolderName:
             event.kbFolderName !== undefined ? event.kbFolderName : context.kbFolderName,
-          workflowInfo: event.workflowInfo ?? null,
+          workflowInfo:
+            event.workflowInfo !== undefined ? event.workflowInfo : context.workflowInfo,
           workflowDismissed: event.workflowInfo ? false : context.workflowDismissed,
           researchContext: event.researchContext ?? null,
           initialQuery: event.initialQuery?.trim() || null,

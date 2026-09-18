@@ -247,6 +247,7 @@ const WORKSPACE_VIEW_ARRAY_KEYS = [
   'tags',
   'stages',
   'ticketTypes',
+  'merchantIds',
   'sourceChannels',
 ] as const satisfies (keyof TicketFilters)[];
 
@@ -5084,6 +5085,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                     pageSize={groupBy === 'none' ? 50 : 20}
                     totalCount={group.count}
                     internalScroll={groupBy !== 'none'}
+                    onTicketOpen={ticket => handleTicketClick({} as React.MouseEvent, ticket)}
                     scrollElement={tableScrollElement}
                     visibleColumns={tableVisibleColumns}
                     isComfortView={isComfortView}
