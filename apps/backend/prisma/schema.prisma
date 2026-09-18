@@ -3418,6 +3418,30 @@ model SdlcEntityLink {
   @@schema("public")
 }
 
+// A comment anchored to a passage inside an SDLC hub item (a canvas, an uploaded
+// file, a linked page). The anchor is stored as the quoted text plus the css
+// selector it was picked from, so a thread survives edits that move the block.
+model SdlcItemComment {
+  id             String    @id @default(cuid())
+  workspaceId    String
+  entityType     String
+  entityId       String
+  body           String
+  anchorQuote    String?
+  anchorSelector String?
+  resolved       Boolean   @default(false)
+  resolvedBy     String?
+  resolvedAt     DateTime?
+  createdBy      String
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@index([entityType, entityId, createdAt])
+  @@index([workspaceId])
+  @@map("sdlc_item_comments")
+  @@schema("public")
+}
+
 // Provenance for SDLC-owned entities (one row per entity).
 // entityType is 'CANVAS' for now; 'TICKET' reserved for future flows.
 // sourceReferences holds stringified JSON: [{path, commitSha, symbol?, startLine?, endLine?}]

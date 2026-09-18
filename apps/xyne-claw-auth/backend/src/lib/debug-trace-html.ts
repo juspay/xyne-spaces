@@ -223,11 +223,14 @@ function buildTraceParts(run: DebugTraceRun): TraceParts {
         body: data["task"] ? `<div class="task">${cleanBlock(data["task"], 400)}</div>` : "",
       });
     } else if (kind === "session_tools") {
+      // loadableCount present means `tools` is the active set only, with the
+      // rest of the catalog dormant; absent means older snapshots with just toolCount/tools.
+      const loadable = num(data["loadableCount"]);
       rendered = row({
         offset: off,
         badge: "tools",
         kindClass: "k-session",
-        title: `Tool palette — ${num(data["toolCount"]) ?? 0} tools`,
+        title: `Tool palette — ${num(data["toolCount"]) ?? 0} ${loadable === null ? "tools" : "active"}${loadable ? ` (+${loadable} loadable via load-tools)` : ""}`,
         meta: Array.isArray(data["tools"]) ? clean((data["tools"] as unknown[]).join(", "), 300) : "",
       });
     } else if (kind === "mode_switch") {

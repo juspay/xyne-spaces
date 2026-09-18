@@ -17,12 +17,14 @@
  *
  * Diagnostics are first-class: a server that failed to list stays in
  * `servers[]` with its error, and report() renders one line per server so a
- * run's log (and list-tools output) can say "github failed to load: X"
+ * run's log (and search-tools output) can say "github failed to load: X"
  * instead of handing the model an absence it will confabulate a cause for.
  */
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import {
   findSubagentDefinitionForServer,
+  openPaletteAdmits,
+  openPaletteModeFromTools,
   type AgentToolsConfig,
   type SubagentDefinition,
 } from "xyne-claw-shared";
@@ -111,6 +113,7 @@ function authorize(
   tool: ToolDefinition,
   server: ResolvedServer,
   cfg: AgentToolsConfig | undefined,
+  isWrite: boolean,
 ): ToolVerdict {
   if (!cfg) return { allowed: true, reason: "no tools config (all tools)" };
   const subagents = new Set(cfg.subagents ?? []);
@@ -132,6 +135,13 @@ function authorize(
   if (serviceName && gateway.has(serviceName)) {
     return { allowed: true, reason: `gateway grant "${serviceName}"` };
   }
+  // Last, below every explicit grant, so a granted tool's verdict still
+  // reports the real reason — the run log reads this string.
+  const mode = openPaletteModeFromTools(cfg);
+  if (openPaletteAdmits(mode, tool.name, isWrite)) {
+    return { allowed: true, reason: `open palette (${mode})` };
+  }
+
   return {
     allowed: false,
     reason: `not granted (needs tools.subagents:"${grantUnit}" or a direct/custom/gateway pick)`,
@@ -154,12 +164,13 @@ export function resolveTools(input: ResolveToolsInput): ToolResolution {
     servers.push(server);
     const source = wrapper ? `subagent:${wrapper.name}` : `server:${group.serverType}`;
     for (const tool of group.tools) {
+      const isWrite = server.writeTools.has(extractRuntimeToolName(tool.name));
       tools.push({
         tool,
         server,
         source,
-        isWrite: server.writeTools.has(extractRuntimeToolName(tool.name)),
-        verdict: authorize(tool, server, input.toolsConfig),
+        isWrite,
+        verdict: authorize(tool, server, input.toolsConfig, isWrite),
       });
     }
   }
@@ -216,7 +227,7 @@ export interface FastPresentation {
   /** Always-active: allowed write tools (a human approves writes elsewhere in
    *  the flow — burying them behind load-tools would only add latency). */
   directTools: ResolvedTool[];
-  /** Lazy catalog: allowed read tools, loadable via list-tools/load-tools. */
+  /** Lazy catalog: allowed read tools, loadable via search-tools/load-tools. */
   catalogTools: ResolvedTool[];
 }
 

@@ -1,3 +1,26 @@
+## [1.342.3](https://github.com/juspay/xyne-spaces/compare/v1.342.2...v1.342.3) (2026-09-18)
+
+## [1.342.2](https://github.com/juspay/xyne-spaces/compare/v1.342.1...v1.342.2) (2026-09-18)
+
+
+### Bug Fixes
+
+* make ticket CSV/JSON export return rows again in table layout ([#2026](https://github.com/juspay/xyne-spaces/issues/2026)) ([d9ca437](https://github.com/juspay/xyne-spaces/commit/d9ca4378163b241d294d7c123c18ec749f81a291))
+
+## [1.342.1](https://github.com/juspay/xyne-spaces/compare/v1.342.0...v1.342.1) (2026-09-18)
+
+
+### Bug Fixes
+
+* API assessment remediations (BOLA attachment access + upload validation) ([#2029](https://github.com/juspay/xyne-spaces/issues/2029)) ([c6cb7bc](https://github.com/juspay/xyne-spaces/commit/c6cb7bc5d3f76981317836546e22697143cbdbe8))
+
+## [1.342.0](https://github.com/juspay/xyne-spaces/compare/v1.341.0...v1.342.0) (2026-09-18)
+
+
+### Features
+
+* pre read canvas in calls ([#1936](https://github.com/juspay/xyne-spaces/issues/1936)) ([d6cd92b](https://github.com/juspay/xyne-spaces/commit/d6cd92b4a04c053fd2232ca7448b06b3467f1c06))
+
 ## [1.341.0](https://github.com/juspay/xyne-spaces/compare/v1.340.2...v1.341.0) (2026-09-18)
 
 

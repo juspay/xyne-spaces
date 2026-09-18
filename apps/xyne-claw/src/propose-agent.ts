@@ -1,7 +1,7 @@
 /**
  * propose-agent — the terminal tool for AGENT AUTHORING (agent.config.agentAuthoring).
  *
- * An agent asked to "build me an agent" investigates (list_available_tools /
+ * An agent asked to "build me an agent" investigates (search_tools /
  * list_agents), then calls propose-agent exactly ONCE with the full draft, which:
  *   1. captures the spec into a closure ref (read back by run.ts), and
  *   2. HARD-STOPS the turn via abortRun — nothing is created yet, so there is
@@ -100,7 +100,7 @@ export function buildProposeAgentTool(
       "gets an agent card showing exactly what you drafted, and the agent is created",
       "ONLY if they approve it. Nothing is saved by this call.",
       "",
-      "BEFORE calling: run `list_available_tools` (and `list_agents` if you need to see",
+      "BEFORE calling: run `search_tools` (and `list_agents` if you need to see",
       "what already exists). `tools` must contain EXACT identifiers from that catalog —",
       "subagent names or custom tool slugs, one per entry, no prose. Anything that does",
       "not match is dropped and reported on the card, so guessing costs the user a tool.",
@@ -153,7 +153,7 @@ export function buildProposeAgentTool(
         tools: {
           type: "array",
           description:
-            "Exact tool slugs / subagent names from list_available_tools. Grant only what the agent's job needs.",
+            "Exact tool slugs / subagent names from search_tools. Grant only what the agent's job needs.",
           items: { type: "string" },
         },
         summary: {
