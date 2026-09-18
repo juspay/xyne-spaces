@@ -1,3 +1,18 @@
+## [1.344.0](https://github.com/juspay/xyne-spaces/compare/v1.343.0...v1.344.0) (2026-09-18)
+
+
+### Features
+
+* app store integration in desk ([#1605](https://github.com/juspay/xyne-spaces/issues/1605)) ([c133839](https://github.com/juspay/xyne-spaces/commit/c133839fec619fb18cc26da257672bcf92092ae9))
+* calls new design ([#2038](https://github.com/juspay/xyne-spaces/issues/2038)) ([99cefda](https://github.com/juspay/xyne-spaces/commit/99cefda833437b5bf5e702f7b00ebceb600a608e))
+* rebuild the ticket detail panel ([#2051](https://github.com/juspay/xyne-spaces/issues/2051)) ([b2732b9](https://github.com/juspay/xyne-spaces/commit/b2732b9b9a84e34fee1caa27688f1b321fdfb999))
+
+
+### Bug Fixes
+
+* show the project picker on every new SDLC hub ([#2032](https://github.com/juspay/xyne-spaces/issues/2032)) ([6512930](https://github.com/juspay/xyne-spaces/commit/65129304cc988d21e3c7a22a2a7c470b0ff116e3)), closes [#1995](https://github.com/juspay/xyne-spaces/issues/1995)
+* ticket api fix ([#1966](https://github.com/juspay/xyne-spaces/issues/1966)) ([6156ff4](https://github.com/juspay/xyne-spaces/commit/6156ff4e39aa5ab60fe6357bc53ec889471a2acd))
+
 ## [1.343.0](https://github.com/juspay/xyne-spaces/compare/v1.342.3...v1.343.0) (2026-09-18)
 
 
