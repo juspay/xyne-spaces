@@ -1,6 +1,12 @@
 import { Router, type Request, type RequestHandler, type Response } from "express";
 import { errMsg } from "../lib/errors.js";
 import { assertSafeOutboundUrl } from "../mcpgateway/services/http-client.js";
+import {
+  extractProviderMessage,
+  modelServedBy,
+  providerNeedsKey,
+  verifyProviderCredential,
+} from "../lib/provider-credential-verify.js";
 import multer from "multer";
 import crypto from "node:crypto";
 import { Prisma } from "@prisma/client";
@@ -14,6 +20,8 @@ import { prisma } from "../db.js";
 import { CONFIG } from "../config.js";
 import { encrypt, decrypt } from "../crypto.js";
 import { checkHealth } from "../health.js";
+import { verifyMcpCredentials } from "../lib/mcp-credential-verify.js";
+import { validateCredentials } from "../validation.js";
 import { fetchAndStoreSigningSecretFromSpacesApi } from "../lib/spaces-app-secret.js";
 import { extractCodexBearer } from "../lib/codex-creds.js";
 import { extractClaudeBearer } from "../lib/claude-creds.js";
@@ -3002,7 +3010,8 @@ export async function fetchAnthropicModels(apiKey: string, baseUrl?: string, aut
 
   if (!res.ok) {
     const text = await res.text().catch(() => "");
-    throw new Error(`Anthropic API ${res.status}: ${text.slice(0, 200)}`);
+    const detail = extractProviderMessage(text);
+    throw new Error(detail ? `Anthropic: ${detail}` : `Anthropic API ${res.status}`);
   }
 
   const body = (await res.json()) as {
@@ -3331,6 +3340,24 @@ router.post("/:slug/mcp/connections", requireAgentOwnerContributorOrAdmin, async
     const server = await prisma.mcpServer.findUnique({ where: { type: mcpServerType } });
     if (!server) {
       res.status(404).json({ success: false, error: `Unknown mcpServerType: ${mcpServerType}` });
+      return;
+    }
+
+    const shape = await validateCredentials(server.type, credentials as Record<string, unknown>);
+    if (!shape.valid) {
+      res.status(400).json({ success: false, error: shape.error });
+      return;
+    }
+
+    const verifySessionKey = `agent:${agent.id}:${instanceSlug}`;
+    const verification = await verifyMcpCredentials({
+      sessionKey: verifySessionKey,
+      serverType: server.type,
+      serverName: server.name,
+      credentials: credentials as Record<string, unknown>,
+    });
+    if (!verification.ok) {
+      res.status(verification.kind === "rejected" ? 400 : 502).json({ success: false, error: verification.message });
       return;
     }
 
@@ -4593,6 +4620,31 @@ router.post(
         return;
       }
 
+      if (apiKey && providerNeedsKey(provider)) {
+        const verification = await verifyProviderCredential(
+          {
+            provider,
+            apiKey,
+            baseUrl: baseUrl ?? existing?.baseUrl ?? null,
+            authType: authType ?? existing?.authType ?? null,
+          },
+          CONFIG.litellmBaseUrl,
+        );
+        if (!verification.ok) {
+          res
+            .status(verification.kind === "rejected" ? 400 : 502)
+            .json({ success: false, error: verification.message });
+          return;
+        }
+        if (!modelServedBy(verification.models, model ?? existing?.model ?? null)) {
+          res.status(400).json({
+            success: false,
+            error: `This key cannot serve the model "${model ?? existing?.model}". Pick one it has access to.`,
+          });
+          return;
+        }
+      }
+
       if (apiKey) {
         const { ciphertext, iv, authTag } = encrypt(apiKey, CONFIG.encryptionKey);
         await agentProviderCredentialsRepository.upsert(agent.id, provider, {
@@ -4641,6 +4693,63 @@ router.post(
       });
     } catch (err) {
       log.error("[agents] set provider-credentials error:", err);
+      res.status(500).json({ success: false, error: "Internal server error" });
+    }
+  },
+);
+
+router.post(
+  "/:slug/provider-credentials/:provider/verify",
+  requireAgentOwnerContributorOrAdmin,
+  async (req: Request<{ slug: string; provider: string }>, res: Response) => {
+    try {
+      const agent = req.agentContext!.agent;
+      const provider = req.params.provider;
+      if (!ALLOWED_PROVIDERS.has(provider)) {
+        res.status(400).json({ success: false, error: "invalid provider" });
+        return;
+      }
+
+      const cred = await agentProviderCredentialsRepository.findByAgentAndProvider(agent.id, provider);
+      if (!cred?.encryptedKey || !cred.iv || !cred.authTag) {
+        res.json({ success: true, data: { provider, status: "missing", message: "No key saved for this provider." } });
+        return;
+      }
+
+      const stored = decrypt(cred.encryptedKey, cred.iv, cred.authTag, CONFIG.encryptionKey);
+      const apiKey =
+        provider === "claude" ? extractClaudeBearer(stored) :
+        provider === "codex" ? extractCodexBearer(stored) :
+        stored;
+      const verification = await verifyProviderCredential(
+        { provider, apiKey, baseUrl: cred.baseUrl, authType: cred.authType },
+        CONFIG.litellmBaseUrl,
+      );
+
+      if (!verification.ok) {
+        res.json({
+          success: true,
+          data: {
+            provider,
+            status: verification.kind === "rejected" ? "invalid" : "unknown",
+            message: verification.message,
+          },
+        });
+        return;
+      }
+
+      const servesModel = modelServedBy(verification.models, cred.model);
+      res.json({
+        success: true,
+        data: {
+          provider,
+          status: servesModel ? "ok" : "model-unavailable",
+          models: verification.models.length,
+          ...(servesModel ? {} : { message: `This key cannot serve "${cred.model}".` }),
+        },
+      });
+    } catch (err) {
+      log.error("[agents] verify provider-credentials error:", err);
       res.status(500).json({ success: false, error: "Internal server error" });
     }
   },
