@@ -45,6 +45,7 @@ const CreateTicketParamsSchema = z.object({
   stageName: z.string().trim().optional(),
   eta: z.date().optional(),
   ticketType: z.string().trim().optional(),
+  merchantId: z.string().trim().min(1).optional(),
   customFieldValues: z.object({
     formId: z.string().min(1, 'Form ID is required').trim(),
     contextId: z.string().min(1, 'Context ID is required').trim(),
@@ -133,6 +134,7 @@ export async function createTicketWithConversation(
       stageName,
       eta,
       ticketType,
+      merchantId,
       customFieldValues,
     } = paramsResult.data;
 
@@ -209,6 +211,7 @@ export async function createTicketWithConversation(
         stageName,
         eta,
         ticketType,
+        merchantId,
         formFieldChanges,
       }, tx);
 
