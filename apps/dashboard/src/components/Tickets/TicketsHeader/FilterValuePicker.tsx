@@ -20,6 +20,10 @@ import type { DateRange, TicketFilters } from '../TicketFilters/types';
 import type { FilterFieldDef } from './filterChips';
 import type { FilterPickerContext } from './TicketsHeader.types';
 
+// Stable identity: a fresh [] on each render would change the prop identity every render
+// and invalidate the submenu's memoised list.
+const NO_MERCHANTS: string[] = [];
+
 interface FilterValuePickerProps {
   field: FilterFieldDef;
   filters: TicketFilters;
@@ -202,7 +206,7 @@ export const FilterValuePicker = ({
     case 'merchantIds':
       return (
         <MerchantIdSubmenu
-          selectedMerchantIds={filters.merchantIds || []}
+          selectedMerchantIds={filters.merchantIds ?? NO_MERCHANTS}
           onChange={(merchantIds: string[]) => setKey('merchantIds', merchantIds)}
         />
       );

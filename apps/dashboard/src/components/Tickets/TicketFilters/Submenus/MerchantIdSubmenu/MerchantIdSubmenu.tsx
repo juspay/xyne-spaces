@@ -11,26 +11,34 @@ interface MerchantIdSubmenuProps {
   className?: string;
 }
 
-// The merchant list is small and static enough to fetch once when the submenu opens;
-// typing then searches that list locally. An id that is not in the list can still be
-// added by hand (Enter), since the filter matches ticket.merchantId exactly and
-// tickets can carry ids that never reached the merchants table.
+const PAGE_SIZE = 50;
+const SEARCH_DEBOUNCE_MS = 300;
+
+// Merchant ids are searched server-side (`q` + `limit`): the merchants table grows a row
+// per distinct merchantId ever seen on a ticket and is never pruned, so it must not be
+// downloaded whole. An id that is not in the list can still be added by hand (Enter),
+// since the filter matches ticket.merchantId exactly and tickets can carry ids that never
+// reached the merchants table.
 export const MerchantIdSubmenu = ({
   selectedMerchantIds,
   onChange,
   className = '',
 }: MerchantIdSubmenuProps): ReactElement => {
   const [searchQuery, setSearchQuery] = useState('');
+  const [searchTerm, setSearchTerm] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
   const { isMobile } = usePlatform();
 
-  // Refetched every time the submenu opens: merchants appear as tickets are created,
-  // so a cached list goes stale quickly. The list is shown only once the response is in
-  // (isFetching, not isLoading) — a cached page of a few thousand rows would otherwise
-  // read as current while the real one is still loading.
-  const { data: merchants, isFetching } = useQuery({
-    queryKey: ['merchants'],
-    queryFn: getMerchants,
+  useEffect(() => {
+    const timer = setTimeout(() => setSearchTerm(searchQuery), SEARCH_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
+
+  // Refetched per open (the popover unmounts on close) so newly created merchants show up.
+  // One bounded page, not the table.
+  const { data, isFetching } = useQuery({
+    queryKey: ['merchants', searchTerm],
+    queryFn: () => getMerchants({ ...(searchTerm ? { q: searchTerm } : {}), limit: PAGE_SIZE }),
     staleTime: 0,
     refetchOnMount: 'always',
   });
@@ -43,29 +51,25 @@ export const MerchantIdSubmenu = ({
     return () => cancelAnimationFrame(rafId);
   }, [isMobile]);
 
-  // Selected ids first, then the rest of the fetched list; both filtered by the query.
-  const visibleIds = useMemo(() => {
-    const all = new Set<string>(selectedMerchantIds);
-    (merchants ?? []).forEach(merchant => all.add(merchant.mid));
-
-    const query = searchQuery.trim().toLowerCase();
-    const matches = [...all].filter(mid => !query || mid.toLowerCase().includes(query));
-
+  // Selected ids first (they must stay visible even when the server page omits them),
+  // then the server's own `mid ASC` order — so no client-side sort is needed.
+  const { visibleIds, selectedSet } = useMemo(() => {
     const selected = new Set(selectedMerchantIds);
-    return matches
-      .sort((a, b) => {
-        const bySelected = Number(selected.has(b)) - Number(selected.has(a));
-        return bySelected !== 0 ? bySelected : a.localeCompare(b);
-      })
-      .slice(0, 100);
-  }, [merchants, searchQuery, selectedMerchantIds]);
+    const query = searchTerm.trim().toLowerCase();
+    const out = selectedMerchantIds.filter(mid => !query || mid.toLowerCase().includes(query));
+    for (const merchant of data?.merchants ?? []) {
+      if (selected.has(merchant.mid)) continue;
+      out.push(merchant.mid);
+    }
+    return { visibleIds: out, selectedSet: selected };
+  }, [data, searchTerm, selectedMerchantIds]);
 
   const typedId = searchQuery.trim();
   const canAddTyped = typedId.length > 0 && !visibleIds.includes(typedId);
 
   const handleToggle = (merchantId: string): void => {
     onChange(
-      selectedMerchantIds.includes(merchantId)
+      selectedSet.has(merchantId)
         ? selectedMerchantIds.filter(id => id !== merchantId)
         : [...selectedMerchantIds, merchantId],
     );
@@ -128,7 +132,7 @@ export const MerchantIdSubmenu = ({
               </button>
             )}
             {visibleIds.map(merchantId => {
-              const isSelected = selectedMerchantIds.includes(merchantId);
+              const isSelected = selectedSet.has(merchantId);
               return (
                 <button
                   key={merchantId}
@@ -150,6 +154,11 @@ export const MerchantIdSubmenu = ({
                 </button>
               );
             })}
+            {data?.hasMore && (
+              <div className='px-3 py-2 text-xs text-muted-foreground'>
+                Showing first {PAGE_SIZE} — type to narrow the search.
+              </div>
+            )}
           </div>
         )}
       </div>
