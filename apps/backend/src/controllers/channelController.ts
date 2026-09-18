@@ -846,7 +846,7 @@ export class ChannelController {
         name?: string;
         description?: string;
         visibility?: ChannelVisibility;
-        projectId: string;
+        projectId?: string;
         participants?: string[];
         type?: 'DEFAULT' | 'EMAIL' | 'SUPPORT' | 'SLACK' | 'APP' | 'CALL';
         assigneeUserGroupId?: string;
@@ -859,13 +859,21 @@ export class ChannelController {
 
       const userId = req.user!.id;
 
-      // Validate required fields
-      if (!scopeType || !projectId) {
+      // Validate required fields. projectId is OPTIONAL only for a NATIVE channel
+      // (scopeType DEFAULT + type DEFAULT/unset). Everything else still requires a
+      // project: every desk type (EMAIL/SLACK/APP/CALL/SUPPORT/SOCIAL_MEDIA/SDLC — and
+      // any future type), plus DM/GROUP_DM/TICKET/DOCUMENT. Inverted on purpose so a
+      // new desk type is projectId-required by default without editing this check.
+      const isNativeChannel =
+        scopeType === ChannelScopeType.DEFAULT &&
+        (channelType === undefined || channelType === 'DEFAULT');
+      const projectIdRequired = !isNativeChannel;
+      if (!scopeType || (projectIdRequired && !projectId)) {
         res.status(400).json({
-          error: 'ScopeType and projectId are required',
+          error: projectIdRequired ? 'ScopeType and projectId are required' : 'ScopeType is required',
           details: {
             scopeType: !scopeType ? 'ScopeType is required' : undefined,
-            projectId: !projectId ? 'ProjectId is required' : undefined,
+            projectId: projectIdRequired && !projectId ? 'ProjectId is required' : undefined,
           }
         });
         return;
@@ -1061,6 +1069,8 @@ export class ChannelController {
         projectId,
         workspaceId: req.user!.workspaceId!,
         type: (channelType || 'DEFAULT') as ChannelType,
+        // Desk channels: honour the requested board as the default mapping (else oldest).
+        ...(boardId && { defaultBoardId: boardId }),
       };
 
       const channel = await this.channelRepository.create(channelData);
@@ -1126,13 +1136,13 @@ export class ChannelController {
         let resolvedBoardId: string | undefined = boardId;
         if (isDl && !resolvedBoardId) {
           const firstBoard = await db.board.findFirst({
-            where: { projectId: channel.projectId },
+            where: { projectId: projectId },
             orderBy: { createdAt: 'asc' },
             select: { id: true },
           });
           resolvedBoardId = firstBoard?.id;
           if (!resolvedBoardId) {
-            logger.error('Cannot create DL desk: project has no boards', { projectId: channel.projectId });
+            logger.error('Cannot create DL desk: project has no boards', { projectId: projectId });
             await db.channel.delete({ where: { id: channel.id } }).catch(() => {});
             res.status(409).json({ error: 'Project has no boards configured — cannot create DL desk' });
             return;
@@ -1175,7 +1185,7 @@ export class ChannelController {
           let callBoardId = boardId;
           if (!callBoardId) {
             const firstBoard = await db.board.findFirst({
-              where: { projectId: channel.projectId },
+              where: { projectId: projectId },
               orderBy: { createdAt: 'asc' },
               select: { id: true },
             });
@@ -1211,7 +1221,7 @@ export class ChannelController {
           let slackBoardId = boardId;
           if (!slackBoardId) {
             const firstBoard = await db.board.findFirst({
-              where: { projectId: channel.projectId },
+              where: { projectId: projectId },
               orderBy: { createdAt: 'asc' },
               select: { id: true },
             });
@@ -1293,7 +1303,7 @@ export class ChannelController {
           let appBoardId = boardId;
           if (!appBoardId) {
             const firstBoard = await db.board.findFirst({
-              where: { projectId: channel.projectId },
+              where: { projectId: projectId },
               orderBy: { createdAt: 'asc' },
               select: { id: true },
             });
@@ -1375,7 +1385,7 @@ export class ChannelController {
         scopeType: channel.scopeType as ChannelScopeType,
         description: channel.description,
         visibility: channel.visibility as ChannelVisibility,
-        projectId: channel.projectId,
+        projectId: projectId ?? '',
         createdAt: channel.createdAt,
       };
 

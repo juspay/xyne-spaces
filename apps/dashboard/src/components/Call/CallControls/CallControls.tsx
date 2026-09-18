@@ -22,7 +22,6 @@ import {
   SmilePlus,
   UserCog,
   ImagePlus,
-  Flag,
 } from 'lucide-react';
 import { useMediaDeviceSelect } from '@livekit/components-react';
 import { cn } from '../../../utils/classNames';
@@ -40,7 +39,7 @@ import { usePlatform } from '../../../hooks/usePlatform';
 import { useShortcutById, useShortcut } from '../../../shortcuts';
 import { InvitationResponse, type Call, type RecordingType } from '@xyne/shared';
 import { RecordingButton } from './RecordingButton';
-import { useCallMarkMoment } from '../hooks/useCallMarkMoment';
+import { MarkMomentButton } from './MarkMomentButton';
 import {
   buildCallInviteText,
   getAiButtonColorClass,
@@ -208,13 +207,6 @@ export function CallControls({
     return currentCall?.participants?.find(p => p.userId === hostId)?.displayName ?? null;
   }, [currentCall?.createdByUserId, currentCall?.participants]);
 
-  // Creator-only mutator, and a flag is only useful next to a transcript, so the
-  // button is hidden rather than shown to everyone else.
-  const { markMoment, canMark: canMarkMoment } = useCallMarkMoment(
-    externalId,
-    currentCall?.startedAt ?? null,
-    isHost && isTranscriptionEnabled,
-  );
   // All participants in the call can admit/decline, so everyone sees the pending count.
   const requestedParticipantCount = useMemo(() => {
     return (
@@ -778,26 +770,20 @@ export function CallControls({
           />
         )}
 
-        {/* Lands on the call's timeline once the call ends */}
-        {canMarkMoment && (
-          <button
-            onClick={markMoment}
-            className={cn(buttonClasses, midnightControlClass)}
-            style={hasCustomSizing ? { padding: `${buttonPadding}px` } : undefined}
-            title='Mark this moment'
-            aria-label='Mark this moment'
-            data-track-event='BUTTON_CLICK'
-            data-track-category='CALLS'
-            data-track-name='MARK_MOMENT'
-            data-track-metadata={JSON.stringify({ callId })}
-          >
-            <Flag
-              className={hasCustomSizing ? '' : 'w-5 h-5 sm:w-6 sm:h-6'}
-              style={
-                hasCustomSizing ? { width: `${iconSize}px`, height: `${iconSize}px` } : undefined
-              }
-            />
-          </button>
+        {/* Lands on the call's timeline once the call ends. Creator-only mutator, and a
+            flag is only useful next to a transcript. External users have no ZeroProvider. */}
+        {!isExternalUser && (
+          <MarkMomentButton
+            externalId={externalId}
+            callStartedAtMs={currentCall?.startedAt ?? null}
+            isAllowed={isHost && isTranscriptionEnabled}
+            hasCustomSizing={hasCustomSizing}
+            iconSize={iconSize}
+            buttonPadding={buttonPadding}
+            buttonClasses={buttonClasses}
+            midnightControlClass={midnightControlClass}
+            callId={callId}
+          />
         )}
 
         {/* Annotate (Draw) Toggle — only shown when a screen share is active */}

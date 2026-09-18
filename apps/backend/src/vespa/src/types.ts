@@ -205,7 +205,10 @@ export interface VespaChatContainerDocument extends VespaDocument {
   isPrivate: boolean;
   createdBy: string;
   ownerId: string;
-  projectId: string;
+  // Optional: a channel may have no project (channel.projectId is being decoupled).
+  // Omitted from the Vespa doc when absent → empty attribute; project-scoped chat
+  // search (`projectId contains X`) simply won't match projectless channels.
+  projectId?: string;
   metadata: string;
   lastActivityAt: number;
   createdAt: number;

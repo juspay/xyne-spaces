@@ -8,7 +8,7 @@ already in place, skip to [Prerequisites](prerequisites.md) for the version chec
 What you will end up with:
 
 - Node 22 + pnpm 10.15.0 (the exact versions CI uses)
-- A container runtime with the infrastructure stack (Postgres, Redis, MinIO, …)
+- A container runtime with the infrastructure stack (Postgres, Redis, RustFS, …)
 - The repo cloned, configured, and running at **http://localhost:5173**
 
 Expect 30–60 minutes on a fresh machine, most of it downloads.
@@ -60,7 +60,7 @@ brew install --cask docker    # Docker Desktop
 
 Open OrbStack or Docker Desktop once so the daemon starts, and give it at least
 **8 GB memory / 20 GB disk** in its settings. The stack runs Postgres, Redis,
-LiveKit, MinIO, Y-Sweet, Zero, and more at the same time.
+LiveKit, RustFS, Y-Sweet, Zero, and more at the same time.
 
 Continue at [Clone and run](#clone-and-run).
 
@@ -176,7 +176,7 @@ and local secrets are generated. You will be asked:
    (`pnpm run reset`) before starting over. Fresh asks for confirmation — it
    deletes every local database and bucket.
 3. **Which infrastructure features do you need?** — a checkbox picker. *Chat &
-   Tickets* (Postgres, Redis, Zero, MinIO) is always on; toggle Calls, Canvas,
+   Tickets* (Postgres, Redis, Zero, RustFS) is always on; toggle Calls, Canvas,
    Search, and the rest only if you need them. Choose **Everything**, **Core**, or
    pick individually. Fewer features = fewer containers = faster start.
 4. **Local login** — a default admin (`admin@xyne.ai` / `xynelocal@123`) is always

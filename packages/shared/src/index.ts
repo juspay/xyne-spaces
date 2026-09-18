@@ -23,6 +23,7 @@ export * from './utils/formFieldOptions';
 export * from './utils/slaCalculator';
 export * from './utils/project';
 export * from './utils/activityMetadataParser';
+export * from './utils/radarRules';
 export * from './utils/canvasHierarchy';
 export * from './utils/canvasDestinationAccess';
 export * from './utils/canvasFolderNameConflict';
