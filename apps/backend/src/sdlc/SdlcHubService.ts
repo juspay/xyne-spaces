@@ -761,7 +761,9 @@ export class SdlcHubService implements SdlcHub {
           render: renderer.render,
           ...(receipt ? { seenBlockIds: new Set(receipt.blockIds) } : {}),
         })
-      : deriveDiffOps(live, nextBlocks, renderer.render);
+      : deriveDiffOps(live, nextBlocks, renderer.render, reason =>
+          logger.warn(`[SDLC] Artifact diff degraded for canvas ${existing.id}: ${reason}`)
+        );
 
     // Title and provenance are not suggestion-managed; keep them current.
     // One transaction: they are two halves of one provenance write.

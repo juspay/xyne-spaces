@@ -155,24 +155,47 @@ export interface DerivedOp {
   orderIndex: number;
 }
 
-/** Longest common subsequence of two id sequences — the blocks that did NOT move. */
 export function lcsStationary(a: string[], b: string[]): Set<string> {
-  const dp: number[][] = Array.from({ length: a.length + 1 }, () => new Array(b.length + 1).fill(0));
-  for (let i = 1; i <= a.length; i++) {
-    for (let j = 1; j <= b.length; j++) {
-      dp[i]![j] = a[i - 1] === b[j - 1] ? dp[i - 1]![j - 1]! + 1 : Math.max(dp[i - 1]![j]!, dp[i]![j - 1]!);
-    }
+  const positionInA = new Map<string, number>();
+  for (let i = 0; i < a.length; i++) {
+    const id = a[i] as string;
+    if (!positionInA.has(id)) positionInA.set(id, i);
   }
+
+  // b's entries as positions in a, keeping only ids a actually holds.
+  const positions: number[] = [];
+  const ids: string[] = [];
+  const seen = new Set<string>();
+  for (const id of b) {
+    const at = positionInA.get(id);
+    if (at === undefined || seen.has(id)) continue;
+    seen.add(id);
+    positions.push(at);
+    ids.push(id);
+  }
+
+  // Patience LIS: tails[k] is the index of the smallest tail of a run of length
+  // k+1; parent[] chains each entry to the run it extends.
+  const tails: number[] = [];
+  const parent: number[] = new Array(positions.length).fill(-1);
+  for (let i = 0; i < positions.length; i++) {
+    let low = 0;
+    let high = tails.length;
+    while (low < high) {
+      const mid = (low + high) >> 1;
+      if ((positions[tails[mid] as number] as number) < (positions[i] as number)) low = mid + 1;
+      else high = mid;
+    }
+    if (low > 0) parent[i] = tails[low - 1] as number;
+    if (low === tails.length) tails.push(i);
+    else tails[low] = i;
+  }
+
   const keep = new Set<string>();
-  let i = a.length;
-  let j = b.length;
-  while (i > 0 && j > 0) {
-    if (a[i - 1] === b[j - 1]) {
-      keep.add(a[i - 1] as string);
-      i--;
-      j--;
-    } else if (dp[i - 1]![j]! >= dp[i]![j - 1]!) i--;
-    else j--;
+  let at = tails.length ? (tails[tails.length - 1] as number) : -1;
+  while (at >= 0) {
+    keep.add(ids[at] as string);
+    at = parent[at] as number;
   }
   return keep;
 }
