@@ -70,8 +70,6 @@
     "@langfuse/otel": "^4.5.1",
     "@langfuse/tracing": "^4.5.1",
     "@livekit/protocol": "1.48.0",
-    "@mariozechner/pi-agent-core": "^0.61.0",
-    "@mariozechner/pi-ai": "^0.61.0",
     "@napi-rs/canvas": "^0.1.88",
     "@opencode-ai/sdk": "^1.1.42",
     "@openfeature/server-sdk": "^1.20.1",
