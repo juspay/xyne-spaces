@@ -16,6 +16,7 @@ import { queries } from '../../../zero/queries';
 import { useQuery } from '../../../hooks/useQuery';
 import { ChatListItem } from '../ChatListItem/ChatListItem';
 import { DatePill } from '../DatePill';
+import type { JumpTarget } from '../DatePill';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { findLastEditableMessage, isEventFromEmptyInput } from '../../../utils/chatUtils';
 import { useShortcutById } from '../../../shortcuts';
@@ -78,6 +79,9 @@ type UpdatedConveresationsAnchor = {
 };
 
 const PAGE_SIZE = 50;
+// How much history to load above a date-jump landing point so the jumped-to day
+// does not render flush against the top of the viewport with nothing before it.
+const JUMP_CONTEXT_SIZE = PAGE_SIZE / 2;
 
 function dedupeAndSort(a: Conversation[], b: Conversation[]): Conversation[] {
   const map = new Map<string, Conversation>();
@@ -293,6 +297,8 @@ const ChatListV4: React.FC<ChatListProps> = ({
   const [latestConversationsList, setLatestConversationsList] = useState<Conversation[]>([]);
   const latestConversationsListRef = useRef<Conversation[]>([]);
   const [stickyDate, setStickyDate] = useState<string | null>(null);
+  // Timestamp behind the sticky pill — seeds the calendar in its jump menu.
+  const [stickyTimestamp, setStickyTimestamp] = useState<number | null>(null);
   const [showScrollButton, setShowScrollButton] = useState(false);
   const [isFirstItemScrolledOff, setIsFirstItemScrolledOff] = useState(false);
 
@@ -320,6 +326,10 @@ const ChatListV4: React.FC<ChatListProps> = ({
   const initialLinkedIdRef = useRef<string | null>(null);
   const requestedFetchKeyRef = useRef<string | null>(null);
   const lastAutoScrollKeyRef = useRef<string | undefined>(undefined);
+  // Conversation a pending date-jump should land on; consumed by the jump scroll effect.
+  const pendingJumpConversationIdRef = useRef<string | null>(null);
+  const isJumpingRef = useRef(false);
+  const [isJumping, setIsJumping] = useState(false);
 
   // ── Scroll container ──────────────────────────────────────────────────────────
   const parentRef = useRef<HTMLDivElement>(null);
@@ -756,6 +766,118 @@ const ChatListV4: React.FC<ChatListProps> = ({
         isFetchingRef.current = false;
       });
   }, [channelId, newConversationsAnchor, isInitialLoadComplete, zero]);
+
+  // ── Jump to date ──────────────────────────────────────────────────────────────
+  // Loads the window around the requested day and scrolls to the first conversation
+  // on/after it. The fetched window is MERGED into the current list (never replaces
+  // it), so the live tail stays loaded and normal lazy paging continues from the
+  // jumped position in both directions.
+  const handleJumpToDate = useCallback(
+    (target: JumpTarget): void => {
+      if (isJumpingRef.current || unreadsOnly) return;
+      const timestamp = target.type === 'channel-start' ? 0 : target.timestamp;
+
+      // Already inside the loaded window, with history above it: pure scroll, no fetch.
+      const landingLoaded = conversationsRef.current.find(conv => conv.createdAt >= timestamp);
+      const oldestLoaded = conversationsRef.current[0];
+      const hasContextAbove =
+        hasReachedChannelStartRef.current ||
+        (!!oldestLoaded && oldestLoaded.createdAt <= timestamp);
+      if (landingLoaded && hasContextAbove) {
+        const loadedIdx = combinedMessages.findIndex(
+          item => item.data.conversationId === landingLoaded.conversationId,
+        );
+        if (loadedIdx !== -1) {
+          pendingJumpConversationIdRef.current = null;
+          virtualizer.scrollToIndex(loadedIdx, { align: 'start', behavior: 'auto' });
+          return;
+        }
+      }
+
+      isJumpingRef.current = true;
+      setIsJumping(true);
+      void (async () => {
+        try {
+          const [older, newer] = await Promise.all([
+            // forward = at/older than the anchor — context above the landing point.
+            zero.run(
+              queries.channelConversationsPaginatedV3({
+                channelId,
+                isMember,
+                ...(conversationIdsFilter && { conversationIds: conversationIdsFilter }),
+                start: { createdAt: timestamp },
+                direction: 'forward',
+                limit: JUMP_CONTEXT_SIZE,
+              }),
+              { type: 'complete' },
+            ),
+            // backward = strictly newer than the anchor — the requested day onwards.
+            zero.run(
+              queries.channelConversationsPaginatedV3({
+                channelId,
+                isMember,
+                ...(conversationIdsFilter && { conversationIds: conversationIdsFilter }),
+                start: { createdAt: timestamp },
+                direction: 'backward',
+                limit: PAGE_SIZE,
+              }),
+              { type: 'complete' },
+            ),
+          ]);
+
+          const jumpWindow = dedupeAndSort(older, newer);
+          // Land on the first conversation of the requested day; if the channel has
+          // nothing after it, land on the newest conversation before it instead.
+          const landing =
+            jumpWindow.find(conv => conv.createdAt >= timestamp) ??
+            jumpWindow[jumpWindow.length - 1];
+          // Empty channel / nothing on either side of the anchor: nothing to jump to.
+          if (!landing) return;
+
+          const merged = dedupeAndSort(conversationsRef.current, jumpWindow);
+          pendingJumpConversationIdRef.current = landing.conversationId;
+          setConversationsState(merged);
+          if (merged[0]) {
+            oldConversationsAnchorRef.current = { createdAt: merged[0].createdAt };
+          }
+          // Nothing older than the anchor exists → true start of the channel.
+          // Otherwise re-open upward paging from the newly jumped window.
+          hasReachedChannelStartRef.current = older.length === 0;
+        } finally {
+          isJumpingRef.current = false;
+          setIsJumping(false);
+        }
+      })();
+    },
+    [
+      channelId,
+      isMember,
+      conversationIdsFilter,
+      combinedMessages,
+      unreadsOnly,
+      virtualizer,
+      zero,
+      setConversationsState,
+    ],
+  );
+
+  // Scroll to the jump target once the fetched window has rendered. This runs off
+  // combinedMessages rather than inside the fetch because the row only exists after
+  // the merged state is committed.
+  useEffect(() => {
+    const targetId = pendingJumpConversationIdRef.current;
+    if (!targetId) return;
+    const idx = combinedMessages.findIndex(item => item.data.conversationId === targetId);
+    if (idx === -1) return;
+    pendingJumpConversationIdRef.current = null;
+    requestAnimationFrame(() => {
+      virtualizer.scrollToIndex(idx, { align: 'start', behavior: 'auto' });
+      // Re-snap after the rows measure — height estimates drift on tall messages.
+      window.setTimeout(() => {
+        virtualizer.scrollToIndex(idx, { align: 'start', behavior: 'auto' });
+      }, 80);
+    });
+  }, [combinedMessages, virtualizer]);
 
   // ── New message boundary ──────────────────────────────────────────────────────
   useEffect(() => {
@@ -1368,6 +1490,7 @@ const ChatListV4: React.FC<ChatListProps> = ({
         const oldestItem = sorted[0];
         if (oldestItem?.[1]) {
           setStickyDate(formatDatePill(oldestItem[1].timestamp));
+          setStickyTimestamp(oldestItem[1].timestamp);
         }
 
         const topmostItem = Array.from(visibleDatesRef.current.values())
@@ -1439,7 +1562,15 @@ const ChatListV4: React.FC<ChatListProps> = ({
       {stickyDate && isFirstItemScrolledOff && (
         <div className='absolute top-0 left-0 right-0 z-10 pointer-events-none'>
           <div className='relative flex justify-center py-2'>
-            <DatePill dateText={stickyDate} />
+            {/* The overlay itself stays click-through; only the pill takes pointer events. */}
+            <div className='pointer-events-auto'>
+              <DatePill
+                dateText={stickyDate}
+                onJump={unreadsOnly ? undefined : handleJumpToDate}
+                jumpAnchorDate={stickyTimestamp !== null ? new Date(stickyTimestamp) : undefined}
+                jumpDisabled={isJumping}
+              />
+            </div>
           </div>
         </div>
       )}
@@ -1515,7 +1646,12 @@ const ChatListV4: React.FC<ChatListProps> = ({
                         className={shouldHideInlineDatePill ? 'invisible' : 'block'}
                         aria-hidden={shouldHideInlineDatePill}
                       >
-                        <DatePill dateText={dateText} />
+                        <DatePill
+                          dateText={dateText}
+                          onJump={unreadsOnly ? undefined : handleJumpToDate}
+                          jumpAnchorDate={item.createdAt}
+                          jumpDisabled={isJumping}
+                        />
                       </div>
                     )}
                     {isNewMessageBoundary && (
