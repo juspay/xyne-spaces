@@ -490,6 +490,7 @@ model WorkflowExecution {
   workflowSteps           WorkflowStep[]
   // @deprecated - lock table replaced by Redis-based expiry (workflow:lock:{id})
   workflowExecutionLock   WorkflowExecutionLock?
+  workflowExecutionState  WorkflowExecutionState?
   externalStepResponses   ExternalStepResponse[]
   pullRequests            PullRequests[]
   /// @deprecated -> back-relation of the legacy repos.sdlcSetupExecutionId
@@ -511,8 +512,14 @@ model WorkflowExecutionState {
   currentStepIndex    Int     @default(0)
   pausePath           String?
   pauseType           String?
+  fireAt              DateTime?
+  origin              String?
+  endReason           String?
+
+  workflowExecution WorkflowExecution @relation(fields: [workflowExecutionId], references: [id], onDelete: Cascade)
 
   @@index([workflowExecutionId])
+  @@index([fireAt])
   @@map("workflow_execution_states")
   @@schema("workflow")
 }

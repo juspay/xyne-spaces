@@ -51,6 +51,7 @@ import {
   Plus,
   RefreshCw,
   Search,
+  Settings,
   ShieldCheck,
   Sparkles,
   SquareArrowOutUpRight,
@@ -63,6 +64,7 @@ import { EntitySelector } from '../../components/ui/EntitySelector/EntitySelecto
 import { Tabs } from '../../components/ui/Tabs';
 import NotFoundScreen from '../NotFoundScreen/NotFoundScreen';
 import { SdlcHubDialog } from './SdlcHubDialog';
+import { SdlcHubRepositoriesDialog } from './SdlcHubRepositoriesDialog';
 import {
   SdlcHubPicker,
   persistSdlcSectionHeights,
@@ -96,8 +98,6 @@ import { CallTriggerModal } from '../../components/Call/CallTriggerModal/CallTri
 import { useAuthContextValues } from '../../hooks/useAuth';
 import { xyneAIActor, type ThreadInfo } from '../../machines/xyneAIMachine';
 import { apiInstance, getAttachmentStreamUrl } from '../../services/clients/apiClient';
-import { openLink } from '../../utils/openLink';
-import { openLinkFromSdlcFrame } from './useSdlcFrameBridge';
 import { searchService } from '../../services/searchService';
 import { cn } from '../../utils/classNames';
 import { queries } from '../../zero/queries';
@@ -1051,8 +1051,7 @@ export default function SdlcScreen(): ReactElement {
     discussionParam: routeSearchParams.get('discussion'),
   });
   const sdlcChatTab = chatLayout.activeTab;
-  const discussionOpen =
-    routeSearchParams.get('discussion') === '1' && sdlcChatTab === 'conversations';
+  const discussionOpen = chatLayout.panelOpen && sdlcChatTab === 'conversations';
   const rightPanelOpen = chatLayout.panelOpen;
   const selectedDiscussionConversationId = routeSearchParams.get('conversation');
   useEffect(() => {
@@ -1243,7 +1242,7 @@ export default function SdlcScreen(): ReactElement {
   const openCanvas = (canvasId: string, options?: OpenCanvasOptions): void => {
     if (!channelId) return;
 
-    const withDiscussion = Boolean(options?.withDiscussion);
+    const withDiscussion = options?.withDiscussion ?? true;
     if (shouldOpenInNewWindow(options?.event) && openCanvasInWindow(canvasId, withDiscussion)) {
       return;
     }
@@ -1253,7 +1252,22 @@ export default function SdlcScreen(): ReactElement {
     navigateWithinSdlc(`/sdlc/${channelId}/${section}`, `?${search.toString()}`);
   };
 
-  const openFolder = openFolderId ? (folderById.get(openFolderId) ?? null) : null;
+  const openFolder = openFolderId
+    ? (folderById.get(openFolderId) ??
+      (selectedTrack && openFolderId === selectedTrack.id
+        ? { id: selectedTrack.id, name: selectedTrack.name }
+        : null))
+    : null;
+  /** True while the page open is the track's own, rather than a folder inside it. */
+  const openFolderIsTrack = Boolean(openFolder && openFolder.id === selectedTrackId);
+  /** Names a parent for the mutators, which care whether it is a track. */
+  const folderPageParent = (parent: {
+    id: string;
+    name: string;
+  }): { type: 'TRACK' | 'FOLDER'; id: string; name: string } =>
+    parent.id === selectedTrackId
+      ? { type: 'TRACK', id: parent.id, name: parent.name }
+      : { type: 'FOLDER', id: parent.id, name: parent.name };
   const activeFolderTab: FolderTab | null = openFolder
     ? selectedCanvasId
       ? { kind: 'CANVAS', id: selectedCanvasId }
@@ -1291,18 +1305,6 @@ export default function SdlcScreen(): ReactElement {
       : undefined;
     return (
       <>
-        <Button
-          size='icon'
-          variant='ghost'
-          aria-label='Members'
-          title='Members'
-          onClick={() => setMembersDialog(true)}
-          data-track-category='SdlcHub'
-          data-track-name='HeaderMembersClicked'
-          data-track-metadata={JSON.stringify({ place })}
-        >
-          <Users className='size-4' />
-        </Button>
         <CallTriggerModal
           channelId={channel.id}
           {...(channel.scopeType && { scopeType: channel.scopeType })}
@@ -1346,12 +1348,24 @@ export default function SdlcScreen(): ReactElement {
     );
   };
 
-  const openSdlcLink = (url: string, event?: { metaKey: boolean; ctrlKey: boolean }): void => {
-    // One way out of the lane: the host opens it in the app, unless the reader
-    // explicitly asked for a window of their own.
-    const wantsExternal = Boolean(event && (event.metaKey || event.ctrlKey));
-    if (!wantsExternal && openLinkFromSdlcFrame(url)) return;
-    openLink(url, event ?? null);
+  /** Opens a previewed item on the page of whatever holds it — its folder, or
+   *  the track's own page when it is filed straight on the track. */
+  const openPreviewedItem = (
+    kind: 'LINK' | 'ATTACHMENT',
+    id: string,
+    event?: { metaKey: boolean; ctrlKey: boolean },
+  ): void => {
+    const parentId = parentFolderOf.get(`${kind}:${id}`) ?? selectedTrackId;
+    if (!parentId) return;
+    openFolderPage(parentId, { kind, id }, event);
+  };
+
+  /** A track's own page, with its conversations alongside it. */
+  const trackSearch = (trackId: string): string => {
+    const search = new URLSearchParams({ track: trackId });
+    search.set('discussion', '1');
+    search.set('chat', 'conversations');
+    return `?${search.toString()}`;
   };
 
   const folderPageSearch = (
@@ -1373,6 +1387,15 @@ export default function SdlcScreen(): ReactElement {
     return search.toString();
   };
 
+  /** The track's page in a window of its own — the same thing a folder gets. */
+  const openTrackInWindow = (trackId: string): boolean => {
+    if (!workspaceId || !channelId) return false;
+    return openStandaloneWindow(
+      `/sdlc/${workspaceId}/${channelId}/tracks${trackSearch(trackId)}`,
+      `sdlc-track:${trackId}`,
+    );
+  };
+
   const openFolderInWindow = (folderId: string, tab: FolderTab | null = null): boolean => {
     if (!workspaceId || !channelId) return false;
     return openStandaloneWindow(
@@ -1392,8 +1415,10 @@ export default function SdlcScreen(): ReactElement {
     tab: FolderTab | null = null,
     event?: { metaKey: boolean; ctrlKey: boolean },
     /** Opens the conversation panel in the same navigation, rather than a second
-     *  one that would replace this entry and take the tab with it. */
-    withDiscussion = false,
+     *  one that would replace this entry and take the tab with it. On by
+     *  default: opening a folder, or a tab inside one, shows what is being
+     *  discussed about it. */
+    withDiscussion = true,
   ): void => {
     if (!channelId) return;
     if (shouldOpenInNewWindow(event) && openFolderInWindow(folderId, tab)) return;
@@ -1432,7 +1457,7 @@ export default function SdlcScreen(): ReactElement {
     setFolderDiscussion(null);
     navigateWithinSdlc(
       `/sdlc/${channelId}/tracks`,
-      selectedTrackId ? `?track=${encodeURIComponent(selectedTrackId)}` : '',
+      selectedTrackId ? trackSearch(selectedTrackId) : '',
     );
   };
 
@@ -1472,7 +1497,8 @@ export default function SdlcScreen(): ReactElement {
         next.set('discussion', '1');
         next.set('chat', 'conversations');
       } else {
-        next.delete('discussion');
+        // Explicit, because an absent param now means open.
+        next.set('discussion', '0');
         next.delete('chat');
       }
       if (input.conversationId) next.set('conversation', input.conversationId);
@@ -1593,6 +1619,16 @@ export default function SdlcScreen(): ReactElement {
   const closeConversations = useCallback((): void => {
     setDiscussionUrl({ open: false, conversationId: null });
   }, [setDiscussionUrl]);
+
+  // Toggles the panel without disturbing its scope: the url already says what it
+  // is showing, so only the open flag moves.
+  useShortcutById('sdlc.toggleConversations', () => {
+    if (!chatPanelAvailable) return;
+    setDiscussionUrl({
+      open: !rightPanelOpen,
+      conversationId: rightPanelOpen ? null : selectedDiscussionConversationId,
+    });
+  });
 
   const selectDiscussionConversation = useCallback(
     (conversationId: string | null, options?: { selectedTab?: 'details' }): void => {
@@ -1967,7 +2003,7 @@ export default function SdlcScreen(): ReactElement {
     setTrackDialog(false);
     setTrackName('');
     setTrackDescription('');
-    navigateWithinSdlc(`/sdlc/${channelId}/tracks`, `?track=${encodeURIComponent(id)}`);
+    navigateWithinSdlc(`/sdlc/${channelId}/tracks`, trackSearch(id));
   };
 
   const activeTrackOptions = tracks
@@ -2891,16 +2927,11 @@ export default function SdlcScreen(): ReactElement {
                 }}
                 onOpenFolderPage={(folder, event) => openFolderPage(folder.id, null, event)}
                 onOpenItem={(item, parent, event) => {
-                  // Inside a folder it opens as a tab, like an artifact opens
-                  // its page. Filed straight on the track there is no such page,
-                  // so the link or file opens where it actually lives.
-                  if (parent.type === 'FOLDER') {
-                    openFolderPage(parent.id, { kind: item.kind, id: item.id }, event);
-                    return;
-                  }
-                  const href =
-                    item.kind === 'LINK' ? linkById.get(item.id)?.url : fileById.get(item.id)?.url;
-                  if (href) openSdlcLink(href, event);
+                  // It opens as a tab on the page of whatever holds it. A track
+                  // holds its own page — the root folder, named after the track
+                  // — so an item filed straight on the track opens there rather
+                  // than being handed to the host with nowhere of its own to be.
+                  openFolderPage(parent.id, { kind: item.kind, id: item.id }, event);
                 }}
                 onDiscussFolder={openFolderConversations}
                 onDiscussTrack={() => openConversations()}
@@ -2929,14 +2960,14 @@ export default function SdlcScreen(): ReactElement {
             {previewItem?.kind === 'LINK' && linkById.get(previewItem.id) && (
               <SdlcFinderItemPreview
                 item={{ kind: 'LINK', link: linkById.get(previewItem.id) as SdlcFinderLink }}
-                onOpen={(href, event) => openSdlcLink(href, event)}
+                onOpen={(_href, event) => openPreviewedItem('LINK', previewItem.id, event)}
                 onDiscuss={openItemConversations}
               />
             )}
             {previewItem?.kind === 'ATTACHMENT' && fileById.get(previewItem.id) && (
               <SdlcFinderItemPreview
                 item={{ kind: 'ATTACHMENT', file: fileById.get(previewItem.id) as SdlcFinderFile }}
-                onOpen={(href, event) => openSdlcLink(href, event)}
+                onOpen={(_href, event) => openPreviewedItem('ATTACHMENT', previewItem.id, event)}
                 onDiscuss={openItemConversations}
               />
             )}
@@ -3059,12 +3090,13 @@ export default function SdlcScreen(): ReactElement {
       </section>
     );
   };
-  const openTrack = (trackId: string | null): void => {
+  const openTrack = (
+    trackId: string | null,
+    event?: { metaKey: boolean; ctrlKey: boolean },
+  ): void => {
     if (!channelId) return;
-    navigateWithinSdlc(
-      `/sdlc/${channelId}/tracks`,
-      trackId ? `?track=${encodeURIComponent(trackId)}` : '',
-    );
+    if (trackId && shouldOpenInNewWindow(event) && openTrackInWindow(trackId)) return;
+    navigateWithinSdlc(`/sdlc/${channelId}/tracks`, trackId ? trackSearch(trackId) : '');
   };
 
   const sectionNavRows = SECTIONS.map(item => {
@@ -3149,16 +3181,29 @@ export default function SdlcScreen(): ReactElement {
               railOpen ? 'justify-between px-4' : 'justify-center px-2',
             )}
           >
-            <div
-              className={cn(
-                'min-w-0 truncate text-[10.5px] font-semibold uppercase tracking-[0.13em] text-sidebar-foreground/60',
-                !railOpen && 'sr-only',
-              )}
-            >
-              SDLC Hub
+            {/* The toggle leads, so that peeking at a collapsed sidebar puts it
+              under the pointer and one click pins it open. */}
+            <div className='flex min-w-0 items-center gap-1.5'>
+              <button
+                type='button'
+                onClick={toggleRail}
+                title={railCollapsed ? 'Pin the sidebar open' : 'Collapse to icons'}
+                aria-label={railCollapsed ? 'Pin the sidebar open' : 'Collapse to icons'}
+                className='-ml-1 shrink-0 rounded-md p-1 text-sidebar-foreground/60 transition-colors hover:bg-sidebar-accent/60 hover:text-sidebar-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-sidebar-accent-ring'
+                data-track-category='SdlcHub'
+                data-track-name='SidebarRailToggled'
+              >
+                <PanelLeft className='size-3.5' />
+              </button>
+              <div
+                className={cn(
+                  'min-w-0 truncate text-[10.5px] font-semibold uppercase tracking-[0.13em] text-sidebar-foreground/60',
+                  !railOpen && 'sr-only',
+                )}
+              >
+                SDLC Hub
+              </div>
             </div>
-            {/* The toggle sits last so it lands hard against the sidebar's right
-              edge when open, and is the only thing left when folded. */}
             <div className='flex shrink-0 items-center gap-0.5'>
               {railOpen && (
                 <button
@@ -3187,17 +3232,6 @@ export default function SdlcScreen(): ReactElement {
                   <RefreshCw className='h-3.5 w-3.5' aria-hidden='true' />
                 </button>
               )}
-              <button
-                type='button'
-                onClick={toggleRail}
-                title={railCollapsed ? 'Pin the sidebar open' : 'Collapse to icons'}
-                aria-label={railCollapsed ? 'Pin the sidebar open' : 'Collapse to icons'}
-                className='-mr-1 rounded-md p-1 text-sidebar-foreground/60 transition-colors hover:bg-sidebar-accent/60 hover:text-sidebar-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-sidebar-accent-ring'
-                data-track-category='SdlcHub'
-                data-track-name='SidebarRailToggled'
-              >
-                <PanelLeft className='size-3.5' />
-              </button>
             </div>
           </div>
           <div className={cn('flex items-center gap-1 px-2 pb-2', !railOpen && 'hidden')}>
@@ -3208,6 +3242,20 @@ export default function SdlcScreen(): ReactElement {
                 onSelect={nextChannelId => void navigate(`/sdlc/${nextChannelId}/overview`)}
               />
             </div>
+            {/* Beside the hub it acts on, rather than in a header whose scope is
+              whatever the reader has open. */}
+            <button
+              type='button'
+              onClick={() => setMembersDialog(true)}
+              title='Members'
+              aria-label='Members'
+              className='flex size-7 shrink-0 items-center justify-center rounded-md text-sidebar-foreground/60 transition-colors hover:bg-sidebar-accent/60 hover:text-sidebar-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-sidebar-accent-ring'
+              data-track-category='SdlcHub'
+              data-track-name='HeaderMembersClicked'
+              data-track-metadata={JSON.stringify({ place: 'hub-picker' })}
+            >
+              <Users className='size-4' />
+            </button>
           </div>
           {railOpen ? (
             <SdlcSidebarFitSection id='sdlc-sidebar-hub' title='Hub'>
@@ -3238,7 +3286,7 @@ export default function SdlcScreen(): ReactElement {
                   <button
                     key={track.id}
                     type='button'
-                    onClick={() => openTrack(track.id)}
+                    onClick={event => openTrack(track.id, event)}
                     {...(selectedTrackId === track.id && { 'aria-current': 'page' as const })}
                     className={cn(
                       'mb-0.5 flex h-[32px] w-full items-center gap-2.5 rounded-[6px] px-2 text-[13px] text-sidebar-foreground transition-colors',
@@ -3280,7 +3328,7 @@ export default function SdlcScreen(): ReactElement {
                         <button
                           key={track.id}
                           type='button'
-                          onClick={() => openTrack(track.id)}
+                          onClick={event => openTrack(track.id, event)}
                           {...(selectedTrackId === track.id && { 'aria-current': 'page' as const })}
                           className={cn(
                             'mb-0.5 flex h-[32px] w-full items-center gap-2.5 rounded-[6px] px-2 text-[13px] text-sidebar-foreground/60 transition-colors',
@@ -3396,6 +3444,40 @@ export default function SdlcScreen(): ReactElement {
                     </div>
                   );
                 })}
+              </SdlcSidebarSection>
+              <SdlcSidebarSectionSeparator />
+              <SdlcSidebarSection
+                id='sdlc-sidebar-repositories'
+                title='Repositories'
+                count={channelRepos.length}
+                action={{
+                  label: 'Manage repositories',
+                  trackName: 'HubRepositoriesOpened',
+                  icon: <Settings className='size-3.5' />,
+                  onClick: () => setHubDialog('manage'),
+                }}
+              >
+                {channelRepos.map(repository => (
+                  <a
+                    key={repository.id}
+                    href={repository.canonicalUrl || repository.url}
+                    target='_blank'
+                    rel='noreferrer'
+                    className='mb-0.5 flex h-[32px] w-full items-center gap-2.5 rounded-[6px] px-2 text-[13px] text-sidebar-foreground transition-colors hover:bg-foreground/[0.06]'
+                    title={repository.canonicalUrl || repository.url}
+                    data-track-category='SdlcHub'
+                    data-track-name='HubRepositoryOpened'
+                    data-track-metadata={JSON.stringify({ repoId: repository.id })}
+                  >
+                    <GitBranch size={15} className='shrink-0 text-sidebar-foreground/70' />
+                    <span className='flex-1 truncate text-left'>{repository.name}</span>
+                  </a>
+                ))}
+                {channelRepos.length === 0 && (
+                  <p className='px-2 py-3 text-[12.5px] text-sidebar-foreground/50'>
+                    No repositories yet.
+                  </p>
+                )}
               </SdlcSidebarSection>
               {/* Slack. Panels have to fill the group, so without something here to
                 take the leftover height the group refuses to collapse the last
@@ -3577,6 +3659,7 @@ export default function SdlcScreen(): ReactElement {
                   key={openFolder.id}
                   channelId={channel.id}
                   folder={openFolder}
+                  rootType={openFolderIsTrack ? 'TRACK' : 'FOLDER'}
                   maps={folderPageMaps}
                   activeTab={activeFolderTab}
                   onOpenTab={tab => openFolderPage(openFolder.id, tab)}
@@ -3584,6 +3667,12 @@ export default function SdlcScreen(): ReactElement {
                     // The chat icon means the same thing on every row: open this
                     // and show its conversations.
                     if (item.type === 'FOLDER') {
+                      // The root row of a track's page is the track itself, and
+                      // a track's conversations are not a folder's.
+                      if (item.id === selectedTrackId) {
+                        openConversations();
+                        return;
+                      }
                       openItemConversations({ type: 'FOLDER', id: item.id, name: item.name });
                       return;
                     }
@@ -3595,19 +3684,21 @@ export default function SdlcScreen(): ReactElement {
                       ? (activeFolderDiscussion?.id ?? discussionOwner?.canvasId ?? null)
                       : null
                   }
-                  onNewFolder={parent =>
-                    setNewFolderParent({ type: 'FOLDER', id: parent.id, name: parent.name })
-                  }
-                  onAddItem={(tab, parent) =>
-                    openAddItemDialog(tab, { type: 'FOLDER', id: parent.id, name: parent.name })
-                  }
+                  onNewFolder={parent => setNewFolderParent(folderPageParent(parent))}
+                  onAddItem={(tab, parent) => openAddItemDialog(tab, folderPageParent(parent))}
                   tabsContainer={folderTabsSlot}
                   onAddLink={addBrowsedLink}
                   parentFolderOf={parentFolderOf}
                   onMoveItem={(item, parentFolderId) =>
                     void call(
                       `sdlc-move-${item.id}`,
-                      () => moveItemAction(item, { type: 'FOLDER', id: parentFolderId }),
+                      () =>
+                        moveItemAction(
+                          item,
+                          parentFolderId === selectedTrackId
+                            ? { type: 'TRACK', id: parentFolderId }
+                            : { type: 'FOLDER', id: parentFolderId },
+                        ),
                       'Moved',
                     )
                   }
@@ -4057,25 +4148,20 @@ export default function SdlcScreen(): ReactElement {
 
       <SdlcHubDialog
         projectId={channel.projectId}
-        open={hubDialog !== null}
-        onOpenChange={open => setHubDialog(open ? hubDialog : null)}
-        {...(hubDialog === 'manage'
-          ? {
-              hub: {
-                channelId: channel.id,
-                repoIds: channelRepos.map(item => item.id),
-                repositories: channelRepos.map(item => ({
-                  id: item.id,
-                  name: item.name,
-                  url: item.canonicalUrl || item.url,
-                  projectId: item.projectId ?? null,
-                })),
-              },
-            }
-          : {})}
-        onSaved={savedChannelId => {
-          if (savedChannelId !== channelId) void navigate(`/sdlc/${savedChannelId}/overview`);
-        }}
+        open={hubDialog === 'create'}
+        onOpenChange={open => setHubDialog(open ? 'create' : null)}
+        onSaved={savedChannelId => void navigate(`/sdlc/${savedChannelId}/overview`)}
+      />
+      <SdlcHubRepositoriesDialog
+        open={hubDialog === 'manage'}
+        onOpenChange={open => setHubDialog(open ? 'manage' : null)}
+        channelId={channel.id}
+        projectId={channel.projectId}
+        repositories={channelRepos.map(item => ({
+          id: item.id,
+          name: item.name,
+          url: item.canonicalUrl || item.url,
+        }))}
       />
 
       <Dialog
