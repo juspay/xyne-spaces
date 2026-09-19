@@ -10,7 +10,7 @@ const AIAgentCreateScreen = (): ReactElement => {
     <AIShell onCreateChat={onCreateChat} onSelectSession={onSelectSession}>
       <main
         data-id='ai-agent-create-view'
-        className='relative flex h-full flex-1 flex-col overflow-hidden bg-xyne-surface'
+        className='relative flex h-full flex-1 flex-col overflow-hidden'
       >
         <AgentCreateSplitPage />
       </main>

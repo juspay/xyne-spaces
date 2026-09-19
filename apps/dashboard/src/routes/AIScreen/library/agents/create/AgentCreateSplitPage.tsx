@@ -252,7 +252,7 @@ export function AgentCreateSplitPage(): ReactElement {
             />
           </Panel>
           <Separator className='w-[2px] cursor-col-resize'>
-            <div className='h-full w-[2px] bg-xyne-border' />
+            <div className='h-full w-[2px] bg-border' />
           </Separator>
           <Panel id='agent-create-hub-canvas' defaultSize='50%' minSize='30%' maxSize='70%'>
             {canvas}

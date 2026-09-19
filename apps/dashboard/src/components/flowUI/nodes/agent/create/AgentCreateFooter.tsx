@@ -30,12 +30,12 @@ export function AgentCreateFooter({
     return (
       <div className='flex w-full flex-col gap-2'>
         {createError ? (
-          <p className='text-sm leading-5 text-xyne-red-600' role='alert'>
+          <p className='text-sm leading-5 text-destructive' role='alert'>
             {createError}
           </p>
         ) : null}
         <div className='flex w-full min-h-[44px] items-center justify-between gap-3'>
-          {audit ?? <span className='text-sm text-xyne-fg-muted'>Created</span>}
+          {audit ?? <span className='text-sm text-muted-foreground'>Created</span>}
           {createdSlug ? <ChatWithAgentButton slug={createdSlug} /> : null}
         </div>
       </div>
@@ -45,7 +45,7 @@ export function AgentCreateFooter({
   if (phase === 'rejected') {
     return (
       <div className='flex w-full min-h-[44px] items-center'>
-        {audit ?? <span className='text-sm text-xyne-fg-muted'>Declined</span>}
+        {audit ?? <span className='text-sm text-muted-foreground'>Declined</span>}
       </div>
     );
   }
@@ -53,7 +53,7 @@ export function AgentCreateFooter({
   return (
     <div className='flex w-full flex-col gap-2'>
       {createError ? (
-        <p className='text-sm leading-5 text-xyne-red-600' role='alert'>
+        <p className='text-sm leading-5 text-destructive' role='alert'>
           {createError}
         </p>
       ) : null}
@@ -76,7 +76,7 @@ export function AgentCreateFooter({
           disabled={!canCreate || creating || discarding}
           loading={creating}
           className={cn(
-            'h-11 rounded-xl bg-xyne-brand px-4 text-[15px] text-xyne-fg-inverse hover:bg-xyne-fg-primary',
+            'h-11 rounded-xl bg-foreground px-4 text-[15px] text-background hover:bg-foreground/90',
           )}
           data-track-category='AGENT_ARTIFACT'
           data-track-name='CLICK_APPROVE'

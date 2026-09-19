@@ -39,7 +39,7 @@ export function BuiltinCapabilityRow({
       return (
         <span className='flex items-center gap-2'>
           <DotGridLoader />
-          <span className='text-xs leading-5 tracking-[-0.24px] text-xyne-fg-muted'>
+          <span className='text-xs leading-5 tracking-[-0.24px] text-muted-foreground'>
             Loading suggestions
           </span>
         </span>
@@ -49,7 +49,7 @@ export function BuiltinCapabilityRow({
     if (suggestions.status === 'error') {
       return (
         <span className='flex items-center gap-2 text-xs leading-5 tracking-[-0.24px]'>
-          <span className='text-xyne-fg-muted'>
+          <span className='text-muted-foreground'>
             Couldn&apos;t suggest tools{suggestions.error ? ` — ${suggestions.error}` : ''}
           </span>
           <button
@@ -57,7 +57,7 @@ export function BuiltinCapabilityRow({
             onClick={suggestions.run}
             data-track-category='Claw Agents'
             data-track-name='Create agent v2: retry built-in suggestions'
-            className='font-medium text-xyne-fg-primary underline-offset-2 hover:underline'
+            className='font-medium text-foreground underline-offset-2 hover:underline'
           >
             Try again
           </button>
@@ -72,7 +72,7 @@ export function BuiltinCapabilityRow({
         disabled={!suggestions.canRun || loading}
         data-track-category='Claw Agents'
         data-track-name='Create agent v2: suggest built-in tools'
-        className='flex items-center gap-1.5 rounded-lg px-1 py-0.5 text-xs leading-5 tracking-[-0.24px] text-xyne-fg-muted transition-colors hover:text-xyne-fg-primary disabled:pointer-events-none disabled:opacity-50'
+        className='flex items-center gap-1.5 rounded-lg px-1 py-0.5 text-xs leading-5 tracking-[-0.24px] text-muted-foreground transition-colors hover:text-foreground disabled:pointer-events-none disabled:opacity-50'
       >
         <Ai01 className='size-3.5 shrink-0' aria-hidden />
         {suggestions.status === 'ready' ? 'Suggest again' : 'Suggest tools'}
@@ -93,12 +93,12 @@ export function BuiltinCapabilityRow({
       <div className='flex w-full items-center justify-between gap-4'>
         <div className='flex min-w-0 items-center gap-4'>
           <div className='flex shrink-0 items-center gap-2'>
-            <span className='text-sm font-medium leading-[1.2] tracking-[-0.1px] text-xyne-fg-primary'>
+            <span className='text-sm font-medium leading-[1.2] tracking-[-0.1px] text-foreground'>
               Built in tools
             </span>
             <Tooltip side='top' content={CAPTION}>
               <span className='inline-flex'>
-                <InformationCircle className='size-4 text-xyne-fg-muted' aria-hidden />
+                <InformationCircle className='size-4 text-muted-foreground' aria-hidden />
               </span>
             </Tooltip>
           </div>
@@ -111,13 +111,13 @@ export function BuiltinCapabilityRow({
           aria-label='Browse built in tools'
           data-track-category='Claw Agents'
           data-track-name='Create agent v2: browse built-in tools'
-          className='flex size-7 shrink-0 items-center justify-center rounded-lg text-xyne-fg-muted transition-colors hover:bg-xyne-surface-subtle hover:text-xyne-fg-primary'
+          className='flex size-7 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground'
         >
           <PlusDefault className='size-4' aria-hidden />
         </button>
       </div>
 
-      <p className='text-sm leading-5 text-xyne-fg-muted'>{CAPTION}</p>
+      <p className='text-sm leading-5 text-muted-foreground'>{CAPTION}</p>
 
       {(selectedEntries.length > 0 || suggestedChips.length > 0) && (
         <div className='flex flex-wrap items-start gap-2 pt-1'>
@@ -141,7 +141,7 @@ export function BuiltinCapabilityRow({
       )}
 
       {suggestions.status === 'ready' && suggestions.suggested.length === 0 && (
-        <p className='text-xs text-xyne-fg-muted'>
+        <p className='text-xs text-muted-foreground'>
           No built-in tool matched this agent — browse the full list to pick one yourself.
         </p>
       )}

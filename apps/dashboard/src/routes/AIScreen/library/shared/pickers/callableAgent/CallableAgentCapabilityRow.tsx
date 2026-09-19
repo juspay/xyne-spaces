@@ -35,17 +35,17 @@ export function CallableAgentCapabilityRow({
       <div className='flex w-full items-center justify-between gap-4'>
         <div className='flex min-w-0 items-center gap-4'>
           <div className='flex shrink-0 items-center gap-2'>
-            <span className='text-sm font-medium leading-[1.2] tracking-[-0.1px] text-xyne-fg-primary'>
+            <span className='text-sm font-medium leading-[1.2] tracking-[-0.1px] text-foreground'>
               Agents
             </span>
             <Tooltip side='top' content={CAPTION}>
               <span className='inline-flex'>
-                <InformationCircle className='size-4 text-xyne-fg-muted' aria-hidden />
+                <InformationCircle className='size-4 text-muted-foreground' aria-hidden />
               </span>
             </Tooltip>
           </div>
           {addedEntries.length > 0 && (
-            <span className='text-xs leading-5 tracking-[-0.24px] text-xyne-fg-muted'>
+            <span className='text-xs leading-5 tracking-[-0.24px] text-muted-foreground'>
               {addedEntries.length} added
             </span>
           )}
@@ -57,13 +57,13 @@ export function CallableAgentCapabilityRow({
           aria-label='Browse agents'
           data-track-category='Claw Agents'
           data-track-name='Create agent v2: browse callable agents'
-          className='flex size-7 shrink-0 items-center justify-center rounded-lg text-xyne-fg-muted transition-colors hover:bg-xyne-surface-subtle hover:text-xyne-fg-primary'
+          className='flex size-7 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground'
         >
           <PlusDefault className='size-4' aria-hidden />
         </button>
       </div>
 
-      <p className='text-sm leading-5 text-xyne-fg-muted'>{CAPTION}</p>
+      <p className='text-sm leading-5 text-muted-foreground'>{CAPTION}</p>
 
       {addedEntries.length > 0 && (
         <div className='flex flex-wrap items-start gap-2 pt-1'>
