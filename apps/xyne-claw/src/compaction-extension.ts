@@ -24,6 +24,7 @@
 
 import type { ExtensionFactory } from "@earendil-works/pi-coding-agent";
 import { compact, estimateTokens } from "@earendil-works/pi-coding-agent";
+import { buildJevCompaction } from "./jev-compaction.js";
 import { metric } from "./metrics.js";
 
 import { createLogger } from "./logger.js";
@@ -77,6 +78,7 @@ function keptTail(branchEntries: Entry[], firstKeptEntryId: string | undefined):
 
 interface CompactionPrep {
   firstKeptEntryId?: string;
+  tokensBefore?: number;
   messagesToSummarize: unknown[];
   turnPrefixMessages?: unknown[];
   isSplitTurn?: boolean;
@@ -164,6 +166,7 @@ export const compactionExtension: ExtensionFactory = (pi) => {
       // keep ONLY the summary. The sentinel firstKeptEntryId makes
       // buildSessionContext yield just `[summary]` — a clean fresh start with no
       // lost content (the recent tool results now live inside the summary).
+      const jevStartedAt = Date.now();
       const freshPrep = {
         ...preparation,
         messagesToSummarize: summarizeSet,
@@ -171,11 +174,48 @@ export const compactionExtension: ExtensionFactory = (pi) => {
         isSplitTurn: false,
         firstKeptEntryId: FRESH_START_SENTINEL,
       };
+      // Selection before summarisation: Jev scores each tool call and the
+      // window is rebuilt verbatim, which costs a couple of seconds instead of
+      // the ~50s p50 an LLM rewrite takes. Falls through to that rewrite
+      // whenever Jev is off, unavailable, or has nothing to score.
+      const jev = await buildJevCompaction(summarizeSet).catch((err: unknown) => {
+        log.warn("[compaction] jev selection failed — falling back to summarisation:", err);
+        return null;
+      });
+      if (jev && jev.summary.trim()) {
+        metric.count("agent_compaction", { kind: "jev_selection" });
+        metric.observe("compaction_duration_ms", Date.now() - jevStartedAt, {
+          kind: "jev_selection",
+          summarized: summarizeSet.length,
+          keptTokens,
+          ok: true,
+        });
+        metric.observe("compaction_reduction_pct", Math.round((1 - jev.charsAfter / Math.max(1, jev.charsBefore)) * 100), {
+          kind: "jev_selection",
+        });
+        log.info(
+          `[compaction] Jev selection: kept ${jev.keptCalls} calls / ` +
+          `${jev.keptResults} verbatim results, dropped ${jev.droppedCalls} of ` +
+          `${jev.scoredCalls} scored (${jev.unscoredCalls} over cap), ` +
+          `${jev.charsBefore} → ${jev.charsAfter} chars ` +
+          `(${keptCount} msgs ~${keptTokens} tok est).`,
+        );
+        return {
+          compaction: {
+            summary: `${jev.summary}\n\n${buildResumeAnchor(requiredSubmitToolName)}`,
+            firstKeptEntryId: FRESH_START_SENTINEL,
+            tokensBefore: preparation.tokensBefore ?? 0,
+          } as unknown as NonNullable<Awaited<ReturnType<typeof compact>>>,
+        };
+      }
+
       // The summarize call is the longest single blocking operation in a run —
       // it stalls the session while it rewrites the window — and until this
       // timer it was the only LLM call in the system with no duration metric,
       // because pi calls completeSimple directly rather than the instrumented
       // streamFn that llm_call wraps.
+      // Own clock: including a failed Jev attempt here would make this number
+      // incomparable to the pre-Jev baseline it exists to be measured against.
       const compactionStartedAt = Date.now();
       let result: Awaited<ReturnType<typeof compact>> | undefined;
       try {
