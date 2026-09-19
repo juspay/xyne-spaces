@@ -71,7 +71,8 @@ function fieldEquals(
       return JSON.stringify(current.selectedSkillIds) === JSON.stringify(patch.selectedSkillIds);
     case 'knowledge':
       return (
-        (patch.selectedKbScope === undefined || patch.selectedKbScope === current.selectedKbScope) &&
+        (patch.selectedKbScope === undefined ||
+          patch.selectedKbScope === current.selectedKbScope) &&
         (patch.selectedKbResources === undefined ||
           JSON.stringify(current.selectedKbResources) === JSON.stringify(patch.selectedKbResources))
       );
@@ -128,11 +129,14 @@ function slicePatch(patch: AgentCreateChatPatch, field: AgentCreateField): Agent
     case 'tools':
       return patch.tools !== undefined ? { tools: patch.tools } : {};
     case 'skills':
-      return patch.selectedSkillIds !== undefined ? { selectedSkillIds: patch.selectedSkillIds } : {};
+      return patch.selectedSkillIds !== undefined
+        ? { selectedSkillIds: patch.selectedSkillIds }
+        : {};
     case 'knowledge': {
       const next: AgentCreateChatPatch = {};
       if (patch.selectedKbScope !== undefined) next.selectedKbScope = patch.selectedKbScope;
-      if (patch.selectedKbResources !== undefined) next.selectedKbResources = patch.selectedKbResources;
+      if (patch.selectedKbResources !== undefined)
+        next.selectedKbResources = patch.selectedKbResources;
       return next;
     }
     default:

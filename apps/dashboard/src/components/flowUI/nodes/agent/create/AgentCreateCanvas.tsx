@@ -55,6 +55,7 @@ function ConflictChooser({
         className='font-medium text-foreground underline-offset-2 hover:underline'
         data-track-category='AGENT_ARTIFACT'
         data-track-name='CONFLICT_KEEP_MINE'
+        data-testid='conflict-keep-mine'
       >
         Keep mine
       </button>
@@ -67,6 +68,7 @@ function ConflictChooser({
         className='font-medium text-foreground underline-offset-2 hover:underline'
         data-track-category='AGENT_ARTIFACT'
         data-track-name='CONFLICT_USE_CHAT'
+        data-testid='conflict-use-chat'
       >
         Use chat
       </button>
@@ -206,7 +208,10 @@ export function AgentCreateCanvas({
                       />
                     </div>
                     {checkingHandle && form.name.trim().length > 0 && (
-                      <Loader2 className='size-3.5 animate-spin text-muted-foreground' aria-hidden />
+                      <Loader2
+                        className='size-3.5 animate-spin text-muted-foreground'
+                        aria-hidden
+                      />
                     )}
                   </div>
 
@@ -279,7 +284,10 @@ export function AgentCreateCanvas({
 
               <ChatFillHighlight active={highlights.has('tools')}>
                 <div
-                  className={cn('flex flex-col gap-8', disabled && 'pointer-events-none opacity-60')}
+                  className={cn(
+                    'flex flex-col gap-8',
+                    disabled && 'pointer-events-none opacity-60',
+                  )}
                   onFocus={() => onFieldFocus('tools')}
                   onBlur={() => onFieldFocus(null)}
                 >

@@ -222,9 +222,7 @@ export const AgentPreview: React.FC<AgentPreviewProps> = ({
     isMobile || !conversationId ? undefined : (
       <InsideAgentPreviewContext.Provider value={true}>
         {isCreate ? (
-          <AgentCreateSessionContext.Provider
-            value={{ applyChatDraft: createForm.applyChatPatch }}
-          >
+          <AgentCreateSessionContext.Provider value={{ applyChatDraft: createForm.applyChatPatch }}>
             <PreviewThreadPanel
               {...(channelId ? { channelId } : {})}
               conversationId={conversationId}

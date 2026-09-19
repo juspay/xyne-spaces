@@ -221,7 +221,10 @@ export const FlowRenderer: React.FC<FlowRendererProps> = ({
           ),
         });
         toast.error('Message context not ready yet. Please try again in a moment.');
-        return { type: 'error' as const, message: 'Message context not ready yet. Please try again in a moment.' };
+        return {
+          type: 'error' as const,
+          message: 'Message context not ready yet. Please try again in a moment.',
+        };
       }
       if (!isInputChange) {
         setState(prev => {

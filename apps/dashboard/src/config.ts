@@ -8,8 +8,7 @@ export const isTestEnv =
   import.meta.env.MODE === 'test' || hostname === 'dashboard' || isSandboxLocal;
 
 /** Local-only: `VITE_ENABLE_DEV_AUTH=true` (dashboard `.env.local`) plus backend `ENABLE_DEV_AUTH`. */
-export const isDevAuthEnabled =
-  isLocalhost && import.meta.env.VITE_ENABLE_DEV_AUTH === 'true';
+export const isDevAuthEnabled = isLocalhost && import.meta.env.VITE_ENABLE_DEV_AUTH === 'true';
 
 /** Auto skip-auth via existing `POST /api/test/auth/login`. Never true in production. */
 export const isSkipAuthEnv = isTestEnv || isDevAuthEnabled;
@@ -42,13 +41,14 @@ const sameOriginPort = window.location.port ? `:${window.location.port}` : '';
 // Local skip-auth (`vite --mode test` or VITE_ENABLE_DEV_AUTH) must hit
 // same-origin `/api` so cookies set by the Vite proxy stick. Direct :3001 is
 // cross-origin from :5173/:5180 and Helmet CORP blocks encryption bootstrap.
-const backendPort = isLocalhost && isSkipAuthEnv
-  ? sameOriginPort
-  : isLocalhost
-    ? ':3001'
-    : isDockerTestEnv
-      ? ':5173'
-      : '';
+const backendPort =
+  isLocalhost && isSkipAuthEnv
+    ? sameOriginPort
+    : isLocalhost
+      ? ':3001'
+      : isDockerTestEnv
+        ? ':5173'
+        : '';
 
 // Replaces API_BASE_URL wholesale; the SDLC lane builds with '/sdlc-api'.
 // NOT named VITE_API_BASE_URL — that already means the backend origin with no

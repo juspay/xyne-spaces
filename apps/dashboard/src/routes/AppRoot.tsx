@@ -349,8 +349,7 @@ const XYNE_AI_PANEL_DEFAULT_SIZE = 35;
 const WorkspaceRedirect = (): ReactElement => {
   const { isAuthenticated, isLoading, user } = useAuth();
   const email = user?.email ?? localStorage.getItem('user_email');
-  const workspaceId =
-    user?.workspaceId || (email ? getLastActiveWorkspaceId(email) : null);
+  const workspaceId = user?.workspaceId || (email ? getLastActiveWorkspaceId(email) : null);
   if (isLoading) {
     return <></>;
   }
@@ -1525,7 +1524,10 @@ export const router = createBrowserRouter(
                   ),
                   children: [
                     { index: true, element: <AgentsTab /> },
-                    { path: 'create', element: <Navigate to='../ai/library/agent/create' replace /> },
+                    {
+                      path: 'create',
+                      element: <Navigate to='../ai/library/agent/create' replace />,
+                    },
                     { path: 'agents/:agentSlug', element: <ClawAgentDetailScreen /> },
                     { path: 'mcp', element: <McpTab /> },
                     { path: 'mcp/:mcpId', element: <ClawMcpDetailScreen /> },

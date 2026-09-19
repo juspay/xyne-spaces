@@ -34,10 +34,7 @@ export function AgentCreateChatPanel({
     try {
       const reply = await onSend(text);
       if (reply) {
-        setLines(prev => [
-          ...prev,
-          { id: `a-${Date.now()}`, role: 'assistant', text: reply },
-        ]);
+        setLines(prev => [...prev, { id: `a-${Date.now()}`, role: 'assistant', text: reply }]);
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Could not draft from chat. Try again.';
@@ -51,7 +48,10 @@ export function AgentCreateChatPanel({
   };
 
   return (
-    <div className='flex h-full min-w-0 flex-col bg-background' data-component='AgentCreateChatPanel'>
+    <div
+      className='flex h-full min-w-0 flex-col bg-background'
+      data-component='AgentCreateChatPanel'
+    >
       <div className='flex h-14 flex-shrink-0 items-center border-b border-border px-5'>
         <span className='font-mono text-sm leading-[18px] tracking-[0.2px] text-muted-foreground'>
           Chat
@@ -80,10 +80,7 @@ export function AgentCreateChatPanel({
           </p>
         ) : null}
       </div>
-      <form
-        onSubmit={handleSubmit}
-        className='flex-shrink-0 border-t border-border p-3'
-      >
+      <form onSubmit={handleSubmit} className='flex-shrink-0 border-t border-border p-3'>
         <div className='flex items-end gap-2 rounded-2xl border border-border bg-card p-1'>
           <textarea
             value={draft}

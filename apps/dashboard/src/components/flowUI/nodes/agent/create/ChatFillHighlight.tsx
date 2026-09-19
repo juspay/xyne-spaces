@@ -37,6 +37,7 @@ export function ChatFillHighlight({
       {visible && (
         <motion.div
           aria-hidden
+          data-testid='chat-fill-highlight'
           className='pointer-events-none absolute -inset-1 rounded-2xl ring-2 ring-ring will-change-[opacity,transform]'
           initial={reduceMotion ? { opacity: 1 } : { opacity: 0, scale: 0.98 }}
           animate={{ opacity: reduceMotion ? 1 : [0, 1, 1, 0], scale: 1 }}

@@ -5,16 +5,27 @@ import { useAuth } from '@/hooks/useAuth';
 import { useAgentNameCheck } from '@/hooks/useAgentNameCheck';
 import { usePlatform } from '@/hooks/usePlatform';
 import { AgentConfigAttachError } from '@/hooks/useCreateClawAgent';
-import { createAgent, generateAgentPrompt, updateAgent } from '@/services/claw/clawAgentWizardService';
+import {
+  createAgent,
+  generateAgentPrompt,
+  updateAgent,
+} from '@/services/claw/clawAgentWizardService';
 import { getAvailableTools, suggestTools } from '@/services/claw/clawToolsService';
 import { effectiveSlug, slugify } from '@/routes/ClawAgentsScreen/create/wizardState';
 import { AgentCreateCanvas } from '@/components/flowUI/nodes/agent/create/AgentCreateCanvas';
 import { AgentCreateChatPanel } from '@/components/flowUI/nodes/agent/create/AgentCreateChatPanel';
 import { AgentCreateFooter } from '@/components/flowUI/nodes/agent/create/AgentCreateFooter';
 import { DiscardDraftDialog } from '@/components/flowUI/nodes/agent/create/DiscardDraftDialog';
-import { descriptionFromIntent, nameFromGeneratedPrompt, nameFromIntent } from '@/components/flowUI/nodes/agent/create/canvasFromIdentity';
+import {
+  descriptionFromIntent,
+  nameFromGeneratedPrompt,
+  nameFromIntent,
+} from '@/components/flowUI/nodes/agent/create/canvasFromIdentity';
 import { toolboxFromSuggestion } from '@/components/flowUI/nodes/agent/create/toolboxFromSuggestion';
-import { EMPTY_CREATE_FORM, type AgentCreatePhase } from '@/components/flowUI/nodes/agent/create/types';
+import {
+  EMPTY_CREATE_FORM,
+  type AgentCreatePhase,
+} from '@/components/flowUI/nodes/agent/create/types';
 import { useAgentCreateForm } from '@/components/flowUI/nodes/agent/create/useAgentCreateForm';
 
 export function AgentCreateSplitPage(): ReactElement {
@@ -34,10 +45,7 @@ export function AgentCreateSplitPage(): ReactElement {
     slug: createForm.form.slug,
     slugManual: createForm.form.slugManual,
   });
-  const nameCheck = useAgentNameCheck(
-    phase === 'created' ? '' : createForm.form.name.trim(),
-    slug,
-  );
+  const nameCheck = useAgentNameCheck(phase === 'created' ? '' : createForm.form.name.trim(), slug);
   const handleError = nameCheck.slugError
     ? `@${slug} is taken. Rename the handle to create a new agent.`
     : nameCheck.nameError;
@@ -60,15 +68,12 @@ export function AgentCreateSplitPage(): ReactElement {
       try {
         const prompt = await generateAgentPrompt({
           intent: text,
-          ...(createForm.form.name.trim() ? { agentName: createForm.form.name.trim() } : {}),
+          ...(createForm.form.systemPrompt.trim()
+            ? { existingPrompt: createForm.form.systemPrompt.trim() }
+            : {}),
         });
-        const derivedName =
-          createForm.form.name.trim() ||
-          nameFromGeneratedPrompt(prompt) ||
-          nameFromIntent(text);
-        const derivedSlug = createForm.form.slugManual
-          ? createForm.form.slug
-          : slugify(derivedName);
+        const derivedName = nameFromGeneratedPrompt(prompt) || nameFromIntent(text);
+        const derivedSlug = slugify(derivedName);
         let tools = createForm.form.tools;
         try {
           const [suggestion, catalog] = await Promise.all([
@@ -85,8 +90,8 @@ export function AgentCreateSplitPage(): ReactElement {
         createForm.applyChatPatch(`hub-${Date.now()}`, {
           name: derivedName,
           slug: derivedSlug,
-          description: createForm.form.description.trim() || descriptionFromIntent(text),
-          systemPrompt: prompt || createForm.form.systemPrompt,
+          description: descriptionFromIntent(text),
+          systemPrompt: prompt,
           tools,
         });
         setPhase('draft');
@@ -211,7 +216,15 @@ export function AgentCreateSplitPage(): ReactElement {
       highlights={createForm.highlights}
       conflicts={createForm.conflicts}
       onResolveConflict={createForm.resolveConflict}
-      phase={phase === 'loading' ? 'loading' : phase === 'created' ? 'created' : phase === 'empty' ? 'empty' : 'draft'}
+      phase={
+        phase === 'loading'
+          ? 'loading'
+          : phase === 'created'
+            ? 'created'
+            : phase === 'empty'
+              ? 'empty'
+              : 'draft'
+      }
       builtBy={builtBy}
       handleError={handleError}
       checkingHandle={nameCheck.checking}
