@@ -1,3 +1,21 @@
+## [1.333.0-release-20260917.1](https://github.com/juspay/xyne-spaces/compare/v1.332.2-release-20260917.2...v1.333.0-release-20260917.1) (2026-09-19)
+
+
+### Features
+
+* added unread count for labels in desk channel ([#1711](https://github.com/juspay/xyne-spaces/issues/1711)) ([#1992](https://github.com/juspay/xyne-spaces/issues/1992)) ([e3ffe74](https://github.com/juspay/xyne-spaces/commit/e3ffe74e4c10faafd53b791dbc58a513abc2ee1d))
+
+
+### Bug Fixes
+
+* -Fix-internal-call-routing ([#1976](https://github.com/juspay/xyne-spaces/issues/1976)) ([8055986](https://github.com/juspay/xyne-spaces/commit/80559866a24c070ab87d6b626a292a7012e44483))
+* call recording on app desk ([#1991](https://github.com/juspay/xyne-spaces/issues/1991)) ([0330ae2](https://github.com/juspay/xyne-spaces/commit/0330ae2df5bfe4d356081d2cdcacf874c99c6b22))
+* custom feild lookup for ticket created trigger r17 ([#1971](https://github.com/juspay/xyne-spaces/issues/1971)) ([7075783](https://github.com/juspay/xyne-spaces/commit/7075783f6e29f7636950a3447ab9a04b0339b9fa)), closes [#1969](https://github.com/juspay/xyne-spaces/issues/1969) [#1901](https://github.com/juspay/xyne-spaces/issues/1901) [#1860](https://github.com/juspay/xyne-spaces/issues/1860) [#1851](https://github.com/juspay/xyne-spaces/issues/1851)
+* harden link-preview SSRF (host denylist + egress proxy option) ([#1965](https://github.com/juspay/xyne-spaces/issues/1965)) ([034b629](https://github.com/juspay/xyne-spaces/commit/034b629c311656d2d6bd5d360e78315863345881))
+* repository access release 17 ([#1995](https://github.com/juspay/xyne-spaces/issues/1995)) ([ea24b02](https://github.com/juspay/xyne-spaces/commit/ea24b02474ca48b9ce4896a620f7659606ddf8b8)), closes [#1945](https://github.com/juspay/xyne-spaces/issues/1945)
+* thread -d fix ([#2081](https://github.com/juspay/xyne-spaces/issues/2081)) ([3ecf52b](https://github.com/juspay/xyne-spaces/commit/3ecf52bcb66da7f9bbe5d04ee0434da20a920a29))
+* thread panel crash on non-ticket threads + quarantine flaky admin-navigation suite ([#1937](https://github.com/juspay/xyne-spaces/issues/1937)) ([#2011](https://github.com/juspay/xyne-spaces/issues/2011)) ([ea9b758](https://github.com/juspay/xyne-spaces/commit/ea9b758c9f64dba831cd358b5dd83bafe1a053f3))
+
 ## [1.332.2-release-20260917.2](https://github.com/juspay/xyne-spaces/compare/v1.332.2-release-20260917.1...v1.332.2-release-20260917.2) (2026-09-17)
 
 
