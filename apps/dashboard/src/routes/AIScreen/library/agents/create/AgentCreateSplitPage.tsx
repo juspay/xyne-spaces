@@ -236,6 +236,7 @@ export function AgentCreateSplitPage(): ReactElement {
 
         const patch = pickPatch(incoming, classification.fields);
         setSkeletonIdentity(false);
+        setSending(false);
         const sourceId = `hub-${Date.now()}`;
         const reveal = FIELD_ORDER.filter(field => classification.fields.includes(field));
         for (const field of reveal) {

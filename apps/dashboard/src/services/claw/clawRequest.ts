@@ -38,6 +38,9 @@ export const clawErrorText = (error: unknown, fallback: string): string => {
   if (isRateLimited(status, raw)) {
     return RATE_LIMIT_COPY;
   }
+  if (/timeout|aborted|failed to generate prompt/i.test(raw)) {
+    return 'Couldn’t reach the model. Try again in a moment.';
+  }
   if (/LLM returned/i.test(raw)) {
     return fallback;
   }

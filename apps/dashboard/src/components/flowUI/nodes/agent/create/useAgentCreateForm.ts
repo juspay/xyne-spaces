@@ -18,9 +18,11 @@ export function useAgentCreateForm(initial: AgentCreateFormState = EMPTY_CREATE_
   const [writingField, setWritingFieldState] = useState<AgentCreateField | null>(null);
   const highlightTimer = useRef<number | null>(null);
   const lastSourceRef = useRef<string | null>(null);
+  const formRef = useRef(form);
   const focusedRef = useRef(focused);
   const dirtyRef = useRef(dirty);
   const conflictsRef = useRef(conflicts);
+  formRef.current = form;
   focusedRef.current = focused;
   dirtyRef.current = dirty;
   conflictsRef.current = conflicts;
@@ -57,7 +59,11 @@ export function useAgentCreateForm(initial: AgentCreateFormState = EMPTY_CREATE_
 
   const patchForm = useCallback(
     (patch: Partial<AgentCreateFormState>, field?: AgentCreateField) => {
-      setForm(prev => ({ ...prev, ...patch }));
+      setForm(prev => {
+        const next = { ...prev, ...patch };
+        formRef.current = next;
+        return next;
+      });
       setDirty(prev => {
         const next = { ...prev };
         if (field) {
@@ -91,18 +97,16 @@ export function useAgentCreateForm(initial: AgentCreateFormState = EMPTY_CREATE_
         return [];
       }
       lastSourceRef.current = sourceId;
-      let changed: AgentCreateField[] = [];
-      setForm(current => {
-        const lock: FieldLock = { focused: focusedRef.current, dirty: dirtyRef.current };
-        const result = mergeChatPatch(current, incoming, lock, conflictsRef.current);
-        changed = result.changed;
-        setConflicts(result.conflicts);
-        if (options?.highlight !== false) {
-          markHighlights(result.changed);
-        }
-        return result.next;
-      });
-      return changed;
+      const lock: FieldLock = { focused: focusedRef.current, dirty: dirtyRef.current };
+      const result = mergeChatPatch(formRef.current, incoming, lock, conflictsRef.current);
+      formRef.current = result.next;
+      setForm(result.next);
+      setConflicts(result.conflicts);
+      conflictsRef.current = result.conflicts;
+      if (options?.highlight !== false) {
+        markHighlights(result.changed);
+      }
+      return result.changed;
     },
     [markHighlights],
   );
@@ -125,6 +129,7 @@ export function useAgentCreateForm(initial: AgentCreateFormState = EMPTY_CREATE_
 
   const resetFrom = useCallback((next: AgentCreateFormState, sourceId?: string) => {
     setForm(next);
+    formRef.current = next;
     setBaseline(next);
     setDirty({});
     setConflicts([]);

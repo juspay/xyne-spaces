@@ -12,7 +12,7 @@ interface ChatFillHighlightProps {
 
 /**
  * Cursor stays inside the field for the whole write. Sending, Q&A, and
- * waiting-on-the-model never set `active`. Reduced motion: static ring only.
+ * waiting-on-the-model never set `active`. Reduced motion: static ring + caret.
  */
 export function ChatFillHighlight({
   active,
@@ -55,20 +55,24 @@ export function ChatFillHighlight({
           </svg>
         </motion.span>
       )}
-      {visible && !reduceMotion && (
+      {visible && (
         <motion.span
           aria-hidden
           data-testid='chat-fill-caret'
-          className='pointer-events-none absolute z-10 w-[2px] rounded-full bg-foreground will-change-opacity'
+          className='pointer-events-none absolute z-10 w-[2px] rounded-full bg-foreground'
           style={{ left: caretLeft, top: caretTop, height: placement === 'inline' ? 18 : 22 }}
           initial={{ opacity: 1 }}
-          animate={{ opacity: [1, 1, 0, 0] }}
-          transition={{
-            duration: 0.9,
-            repeat: Infinity,
-            times: [0, 0.45, 0.55, 1],
-            ease: 'linear',
-          }}
+          animate={reduceMotion ? { opacity: 1 } : { opacity: [1, 1, 0, 0] }}
+          transition={
+            reduceMotion
+              ? { duration: 0 }
+              : {
+                  duration: 0.9,
+                  repeat: Infinity,
+                  times: [0, 0.45, 0.55, 1],
+                  ease: 'linear',
+                }
+          }
         />
       )}
     </div>
