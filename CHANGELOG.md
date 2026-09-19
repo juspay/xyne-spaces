@@ -1,3 +1,10 @@
+## [1.345.5](https://github.com/juspay/xyne-spaces/compare/v1.345.4...v1.345.5) (2026-09-19)
+
+
+### Bug Fixes
+
+* stop mid-playback stalls on high-bitrate attachment streaming ([#2021](https://github.com/juspay/xyne-spaces/issues/2021)) ([279d819](https://github.com/juspay/xyne-spaces/commit/279d81911fb90253072ffc94526ebd78e429c117))
+
 ## [1.345.4](https://github.com/juspay/xyne-spaces/compare/v1.345.3...v1.345.4) (2026-09-18)
 
 
