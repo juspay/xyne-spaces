@@ -3,6 +3,7 @@ import { CanvasRole, CanvasVisibility } from '@xyne/shared';
 import { v4 as uuidv4 } from 'uuid';
 import type { ReleaseReport, ReleaseReportChange } from '@xyne/shared';
 import { db } from '@/database/client';
+import { newConnectId, createConnectGroupForEntity, resolveCanvasConnectId } from '@/database/connectGroup';
 import type { BlockNoteBlock, BlockNoteInlineContent } from '@/types/blockNoteTypes';
 import { CanvasSideEffectHandler } from '@/zero/side-effects/tables/canvas-handler';
 import { vespaQueue } from '@/queues/vespaQueue';
@@ -258,6 +259,7 @@ export class ReleaseReportCanvasService {
             metadata,
           },
         });
+        const existingConnectId = await resolveCanvasConnectId(tx, existingCanvas.id);
         await tx.canvasParticipant.upsert({
           where: {
             canvasId_userId: {
@@ -273,6 +275,7 @@ export class ReleaseReportCanvasService {
             role: CanvasRole.VIEWER,
             joinedAt: now,
             updatedAt: now,
+            ...(existingConnectId ? { connectId: existingConnectId } : {}),
           },
           update: {
             role: CanvasRole.VIEWER,
@@ -287,6 +290,7 @@ export class ReleaseReportCanvasService {
       }
 
       const canvasId = uuidv4();
+      const connectId = newConnectId();
       await tx.canvas.create({
         data: {
           id: canvasId,
@@ -301,8 +305,15 @@ export class ReleaseReportCanvasService {
           isCollaborative: false,
           lastEditedBy: owner.id,
           lastEditedAt: now,
+          connectId,
           metadata,
         },
+      });
+      await createConnectGroupForEntity(tx, {
+        entityType: 'canvas',
+        entityId: canvasId,
+        hostWorkspaceId: report.release.workspaceId,
+        connectId,
       });
       await tx.canvasParticipant.create({
         data: {
@@ -313,6 +324,7 @@ export class ReleaseReportCanvasService {
           role: CanvasRole.VIEWER,
           joinedAt: now,
           updatedAt: now,
+          connectId,
         },
       });
 

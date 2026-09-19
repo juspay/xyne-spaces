@@ -16,6 +16,7 @@ import { authMiddleware } from '@/middleware/auth';
 import { authorize } from '@/middleware/authorize';
 import { BACKFILL_ADMIN_RESOURCE } from '@/middleware/backfillAdminAuth';
 import { db } from '@/database/client';
+import { newConnectId, createConnectGroupForEntity } from '@/database/connectGroup';
 import { redisService } from '@/services/redisService';
 import { config as appConfig } from '@/config/env';
 import {
@@ -1222,6 +1223,7 @@ router.get('/auth/callback', async (req: Request, res: Response): Promise<void> 
       });
 
       const txResult = await db.$transaction(async (tx) => {
+        const connectId = newConnectId();
         const ch = await tx.channel.create({
           data: {
             scopeType: ChannelScopeType.DEFAULT,
@@ -1232,7 +1234,14 @@ router.get('/auth/callback', async (req: Request, res: Response): Promise<void> 
             workspaceId: cd.workspaceId,
             projectId: cd.projectId,
             type: ChannelType.EMAIL,
+            connectId,
           },
+        });
+        await createConnectGroupForEntity(tx, {
+          entityType: 'channel',
+          entityId: ch.id,
+          hostWorkspaceId: cd.workspaceId,
+          connectId,
         });
         const now = new Date();
         const seenConversations = await tx.conversation.findMany({

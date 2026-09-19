@@ -444,6 +444,9 @@ export class ACLFactory {
         return new BaseACL<any>(ctx);
       case 'guest_access':
         return new GuestAccessACL(ctx, table);
+      case 'connect_group':
+        // Slack Connect reach table — no mutation ACL in Phase 1 (default pass-through).
+        return new BaseACL<any>(ctx);
     }
   }
 }

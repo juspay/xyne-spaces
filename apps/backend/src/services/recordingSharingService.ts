@@ -16,6 +16,7 @@ import {
   MessageType,
 } from '@xyne/shared';
 import { db } from '@/database/client';
+import { resolveCanvasConnectId } from '@/database/connectGroup';
 import { repositories } from '@/database/repositories';
 import { callShareService } from '@/services/callShareService';
 import { isRecording } from '@/utils/callTypeUtils';
@@ -1070,6 +1071,7 @@ export class RecordingSharingService {
             ? { userGroupId: target.id }
             : { channelId: target.id };
       if (action === 'grant') {
+        const connectId = await resolveCanvasConnectId(tx, canvasId);
         await tx.canvasParticipant.upsert({
           where,
           create: {
@@ -1078,6 +1080,7 @@ export class RecordingSharingService {
             workspaceId,
             role: CanvasRole.VIEWER,
             ...targetFields,
+            ...(connectId ? { connectId } : {}),
           },
           update: {},
         });

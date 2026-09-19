@@ -19,6 +19,7 @@ import { slackService } from '../services/slackService.js';
 import { activityService } from '../services/activity/activityService.js';
 import { DatabaseClient } from '@/database/client';
 import { tagRepository } from '@/database/repositories/tagRepository';
+import { newConnectId } from '@/database/connectGroup';
 import { getGroupMembersForNotification } from '../utils/mentionUtils.js';
 import { getSlackRecipientEmails } from '../utils/notificationHelper.js';
 import { cleanupProxiedFile } from '../utils/attachmentUtils';
@@ -632,6 +633,7 @@ export class CanvasController {
 
       const canvasId = uuidv4();
       const participantId = uuidv4();
+      const connectId = newConnectId();
 
       const blocks = await convertMarkdownToBlockNote(markdown);
 
@@ -651,6 +653,20 @@ export class CanvasController {
             lastEditedAt: now,
             createdAt: now,
             updatedAt: now,
+            connectId,
+          },
+        }),
+        prisma.connectGroup.create({
+          data: {
+            entityType: 'canvas',
+            entityId: canvasId,
+            hostWorkspaceId: req.user!.workspaceId!,
+            invitedEntityId: null,
+            invitedWorkspaceId: null,
+            connectId,
+            status: 'ACTIVE',
+            createdAt: now,
+            updatedAt: now,
           },
         }),
         prisma.canvasParticipant.create({
@@ -662,6 +678,7 @@ export class CanvasController {
             role: CanvasRole.OWNER,
             joinedAt: now,
             updatedAt: now,
+            connectId,
           },
         }),
       ]);

@@ -31,6 +31,7 @@ import {
 } from '@xyne/shared';
 import { ChannelRepository } from '@/database/repositories/channelRepository';
 import { DatabaseClient } from '@/database/client';
+import { newConnectId, createConnectGroupForEntity } from '@/database/connectGroup';
 import { AppError } from '@/middleware/errorHandler';
 import { convertMarkdownToBlockNote } from '@/services/canvasService';
 import { logger } from '@/utils/logger';
@@ -306,6 +307,7 @@ export class SdlcHubService implements SdlcHub {
     }
 
     const channelId = randomUUID();
+    const connectId = newConnectId();
     const now = new Date();
 
     await tx.channel.create({
@@ -322,6 +324,7 @@ export class SdlcHubService implements SdlcHub {
         participantCount: 1,
         addUserPolicy: ChannelAddUserPolicy.ADMINS_ONLY,
         showTicketsTabTicketsInChat: false,
+        connectId,
         metadata: {},
         channelStats: {
           create: {
@@ -347,6 +350,12 @@ export class SdlcHubService implements SdlcHub {
           },
         },
       },
+    });
+    await createConnectGroupForEntity(tx, {
+      entityType: 'channel',
+      entityId: channelId,
+      hostWorkspaceId: actor.workspaceId,
+      connectId,
     });
 
     // Dual-write: mirror the channel→project board set into ChannelBoardMapping so
@@ -693,6 +702,7 @@ export class SdlcHubService implements SdlcHub {
       () =>
         this.prisma.$transaction(async (tx) => {
           const viewAccessId = randomUUID();
+          const connectId = newConnectId();
           const canvas = await tx.canvas.create({
             data: {
               workspaceId: actor.workspaceId,
@@ -707,11 +717,18 @@ export class SdlcHubService implements SdlcHub {
               viewAccessId,
               visibility: CanvasVisibility.PRIVATE,
               isCollaborative: true,
+              connectId,
               metadata: {} as Prisma.InputJsonValue,
               participants: {
-                create: sdlcChannelCanvasParticipant(actor.workspaceId, channelId),
+                create: sdlcChannelCanvasParticipant(actor.workspaceId, channelId, connectId),
               },
             },
+          });
+          await createConnectGroupForEntity(tx, {
+            entityType: 'canvas',
+            entityId: canvas.id,
+            hostWorkspaceId: actor.workspaceId,
+            connectId,
           });
           if (input.trackId) {
             await tx.sdlcEntityLink.create({

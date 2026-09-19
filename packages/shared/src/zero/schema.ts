@@ -774,6 +774,7 @@ export const channelTable = table('channels')
     isArchived: boolean(),
     showTicketsTabTicketsInChat: boolean().optional(),
     callSummaryPrompt: string().optional(), // Per-channel detailed call summary sections override
+    connectId: string().optional(), // Slack Connect: connect_group handle (null until backfilled)
   })
   .primaryKey('id');
 
@@ -1326,6 +1327,7 @@ export const canvasTable = table('canvases')
     entryFile: string().optional(),
     quartoDocumentType: string().optional(),
     gcsPath: string().optional(),
+    connectId: string().optional(), // Slack Connect: connect_group handle (null until backfilled)
   })
   .primaryKey('id');
 
@@ -1340,6 +1342,7 @@ export const canvasVersionTable = table('canvas_versions')
     createdBy: string().optional(),
     createdAt: number(),
     updatedAt: number(),
+    connectId: string().optional(), // Slack Connect: resolved from parent canvas (null until backfilled)
   })
   .primaryKey('id');
 
@@ -1357,6 +1360,7 @@ export const canvasCommentThreadTable = table('canvas_comment_threads' /* Canvas
     statusUpdatedAt: number().optional(),
     createdBy: string(),
     createdAt: number(),
+    connectId: string().optional(), // Slack Connect: resolved from parent canvas (null until backfilled)
   })
   .primaryKey('id');
 
@@ -1373,6 +1377,7 @@ export const canvasCommentTable = table('canvas_comments' /* CanvasComment */)
     editedAt: number().optional(),
     deletedAt: number().optional(),
     createdAt: number(),
+    connectId: string().optional(), // Slack Connect: resolved from parent canvas (null until backfilled)
   })
   .primaryKey('id');
 
@@ -1387,6 +1392,7 @@ export const canvasParticipantTable = table('canvas_participants')
     role: enumeration<CanvasRole>(),
     joinedAt: number(),
     updatedAt: number(),
+    connectId: string().optional(), // Slack Connect: resolved from parent canvas (null until backfilled)
   })
   .primaryKey('id');
 
@@ -1399,6 +1405,24 @@ export const canvasUserStatusTable = table('canvas_user_status' /* CanvasUserSta
     isStarred: boolean(),
     createdAt: number(),
     updatedAt: number().optional(),
+    connectId: string().optional(), // Slack Connect: resolved from parent canvas (null until backfilled)
+  })
+  .primaryKey('id');
+
+// Slack Connect — one row per channel/canvas "connection" (see connect_group in Prisma).
+// Phase 1: always PRIVATE — invitedEntityId / invitedWorkspaceId NULL, status 'ACTIVE'.
+export const connectGroupTable = table('connect_group')
+  .columns({
+    id: string(),
+    entityType: string(), // 'channel' | 'canvas'
+    entityId: string(),
+    hostWorkspaceId: string(),
+    invitedEntityId: string().optional(),
+    invitedWorkspaceId: string().optional(),
+    connectId: string(),
+    status: string(),
+    createdAt: number(),
+    updatedAt: number(),
   })
   .primaryKey('id');
 
@@ -4003,13 +4027,23 @@ export const canvasTableRelationships = relationships(canvasTable, ({ one, many 
     destField: ['accessibleEntityId'],
     destSchema: guestAccessTable,
   }),
+  connectGroup: many({
+    sourceField: ['connectId'],
+    destField: ['connectId'],
+    destSchema: connectGroupTable,
+  }),
 }));
 
-export const canvasVersionTableRelationships = relationships(canvasVersionTable, ({ one }) => ({
+export const canvasVersionTableRelationships = relationships(canvasVersionTable, ({ one, many }) => ({
   canvas: one({
     sourceField: ['canvasId'],
     destField: ['id'],
     destSchema: canvasTable,
+  }),
+  connectGroup: many({
+    sourceField: ['connectId'],
+    destField: ['connectId'],
+    destSchema: connectGroupTable,
   }),
 }));
 
@@ -4041,12 +4075,17 @@ export const canvasCommentThreadTableRelationships = relationships(
       destField: ['id'],
       destSchema: userTable,
     }),
+    connectGroup: many({
+      sourceField: ['connectId'],
+      destField: ['connectId'],
+      destSchema: connectGroupTable,
+    }),
   }),
 );
 
 export const canvasCommentTableRelationships = relationships(
   canvasCommentTable,
-  ({ one }) => ({
+  ({ one, many }) => ({
     thread: one({
       sourceField: ['threadId'],
       destField: ['id'],
@@ -4057,10 +4096,15 @@ export const canvasCommentTableRelationships = relationships(
       destField: ['id'],
       destSchema: userTable,
     }),
+    connectGroup: many({
+      sourceField: ['connectId'],
+      destField: ['connectId'],
+      destSchema: connectGroupTable,
+    }),
   }),
 );
 
-export const canvasParticipantTableRelationships = relationships(canvasParticipantTable, ({ one }) => ({
+export const canvasParticipantTableRelationships = relationships(canvasParticipantTable, ({ one, many }) => ({
   canvas: one({
     sourceField: ['canvasId'],
     destField: ['id'],
@@ -4081,11 +4125,16 @@ export const canvasParticipantTableRelationships = relationships(canvasParticipa
     destField: ['id'],
     destSchema: channelTable,
   }),
+  connectGroup: many({
+    sourceField: ['connectId'],
+    destField: ['connectId'],
+    destSchema: connectGroupTable,
+  }),
 }));
 
 export const canvasUserStatusTableRelationships = relationships(
   canvasUserStatusTable,
-  ({ one }) => ({
+  ({ one, many }) => ({
     canvas: one({
       sourceField: ['canvasId'],
       destField: ['id'],
@@ -4095,6 +4144,11 @@ export const canvasUserStatusTableRelationships = relationships(
       sourceField: ['userId'],
       destField: ['id'],
       destSchema: userTable,
+    }),
+    connectGroup: many({
+      sourceField: ['connectId'],
+      destField: ['connectId'],
+      destSchema: connectGroupTable,
     }),
   }),
 );
@@ -4865,6 +4919,7 @@ export const schema = createSchema({
     canvasCommentTable,
     canvasParticipantTable,
     canvasUserStatusTable,
+    connectGroupTable,
     bookmarkTable,
     linkTable,
     linkAccessTable,
