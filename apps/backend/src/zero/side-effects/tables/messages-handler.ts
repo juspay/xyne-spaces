@@ -1,5 +1,6 @@
 import { v4 as uuidv4 } from 'uuid';
 import { BaseSideEffectHandler } from '../base-handler';
+import { isSelfMention, buildMentionActivityRecipients } from './selfMention';
 import type { SideEffectJobConfig, MessagePreviousValue } from '../types';
 import { db } from '@/database/client';
 import { withWorkspaceScope } from '@/database/tenant/context';
@@ -575,6 +576,10 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
         mentionSource: u.mentionSource
       }))
 
+    // Self-tag: the sender stays out of validMentionedUsers (and so out of
+    // notifications and the USER_MENTIONED event); it only gets an activity.
+    const selfMention = isSelfMention(mentionedUsers, senderId, channelParticipantIds);
+
     const mentionedAppUsersIds = validMentionedUsers.filter(u => appUserIds.includes(u.userId)).map(u => u.userId);
 
     if (mentionedAppUsersIds.length > 0) {
@@ -651,9 +656,15 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
       ),
     ];
 
-    if (validMentionedUsers.length > 0) {
+    const activityRecipients = buildMentionActivityRecipients(
+      validMentionedUsers,
+      senderId,
+      selfMention
+    );
+
+    if (activityRecipients.length > 0) {
       const isThreadActivity = conversation.initialMessageId !== messageId;
-      const activities = validMentionedUsers.map(user => ({
+      const activities = activityRecipients.map(user => ({
         id: uuidv4(),
         userId: user.userId,
         actorId: senderId,

@@ -25,6 +25,8 @@ export const MessageMentionActivity = ({
 
   const isThreadReply = message.conversation?.initialMessageId !== message.messageId;
 
+  const isSelfMention = activity.actorId === activity.userId;
+
   const targetPath = `${baseRoute}/${message.conversation?.channelId}${isThreadReply ? `/${message.conversation?.conversationId}` : ''}#origin=${message.conversation?.conversationId}${isThreadReply ? `&messageId=${message.messageId}` : ''}`;
   const supportTargetPath =
     message.conversation?.channelId && message.conversation?.conversationId
@@ -35,11 +37,15 @@ export const MessageMentionActivity = ({
     <ActivityItemCard
       activity={activity}
       actorId={sender.id}
-      actorName={getUserDisplayName(sender)}
+      actorName={isSelfMention ? 'You' : getUserDisplayName(sender)}
       channelId={message.conversation?.channelId}
       badgeIcon={<AtMark className='size-3 text-primary' />}
       badgeColorClass='bg-muted'
-      description={<span className='text-muted-foreground text-sm'>mentioned you in</span>}
+      description={
+        <span className='text-muted-foreground text-sm'>
+          {isSelfMention ? 'tagged yourself in' : 'mentioned you in'}
+        </span>
+      }
       targetPath={targetPath}
       focusThread={isThreadReply}
       supportTargetPath={supportTargetPath}
