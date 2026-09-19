@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState, type ReactElement } from 'react';
+import { useCallback, useMemo, useRef, useState, type ReactElement } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { Panel, ResizableGroup, Separator } from '@/components/ui/Resizable/Resizable';
 import { useAuth } from '@/hooks/useAuth';
@@ -23,14 +23,23 @@ import {
 } from '@/components/flowUI/nodes/agent/create/canvasFromIdentity';
 import {
   classifyCreateTurn,
+  detectIntakeGaps,
+  isSkipIntake,
+  isIntakeProceed,
   parseLocalRename,
+  planDescribe,
   shouldGeneratePrompt,
+  FIRST_DESCRIBE_FIELDS,
+  type CreateTurnClassification,
   type CreateTurnField,
 } from '@/components/flowUI/nodes/agent/create/classifyCreateTurn';
 import { slicePatch } from '@/components/flowUI/nodes/agent/create/mergeChatPatch';
 import {
   CLARIFY_REPLY,
+  draftThenAskReply,
+  intakeQuestionsReply,
   replyForCreateTurn,
+  SKIP_INTAKE_ACK,
   SKILLS_ROW_REPLY,
 } from '@/components/flowUI/nodes/agent/create/replyForCreateTurn';
 import { toolboxFromSuggestion } from '@/components/flowUI/nodes/agent/create/toolboxFromSuggestion';
@@ -83,6 +92,8 @@ export function AgentCreateSplitPage(): ReactElement {
   const [discardOpen, setDiscardOpen] = useState(false);
   const [createdSlug, setCreatedSlug] = useState<string | null>(null);
   const [skeletonIdentity, setSkeletonIdentity] = useState(false);
+  const intakeRef = useRef<{ seed: string; rounds: number } | null>(null);
+  const afterDraftRef = useRef<string | null>(null);
 
   const slug = effectiveSlug({
     name: createForm.form.name,
@@ -111,10 +122,59 @@ export function AgentCreateSplitPage(): ReactElement {
       createForm.clearHighlights();
       try {
         const canvasEmpty = canvasIsEmpty(createForm.form);
-        const classification = classifyCreateTurn(text, canvasEmpty);
+        const pending = intakeRef.current;
+        let intent = text;
+        let classification: CreateTurnClassification = classifyCreateTurn(text, canvasEmpty, {
+          ...(pending && canvasEmpty ? { intakePending: true } : {}),
+        });
+
+        if (pending && canvasEmpty) {
+          if (classification.kind === 'reply') {
+            return replyForCreateTurn(text, createForm.form, canvasEmpty);
+          }
+          if (isIntakeProceed(text)) {
+            intent = pending.seed;
+            classification = { kind: 'edit', fields: FIRST_DESCRIBE_FIELDS };
+            intakeRef.current = null;
+          } else if (
+            classification.kind === 'edit' &&
+            classification.fields.length === FIRST_DESCRIBE_FIELDS.length
+          ) {
+            const combined = `${pending.seed}\n${text}`.trim();
+            if (planDescribe(combined) === 'ask' && pending.rounds < 2) {
+              intakeRef.current = { seed: combined, rounds: pending.rounds + 1 };
+              return intakeQuestionsReply(combined);
+            }
+            intent = combined;
+            classification = {
+              kind: 'edit',
+              fields: FIRST_DESCRIBE_FIELDS,
+              askAfter: planDescribe(combined) === 'draft-then-ask',
+            };
+            intakeRef.current = null;
+          } else {
+            intakeRef.current = null;
+          }
+        } else if (afterDraftRef.current && !canvasEmpty && classification.kind !== 'reply') {
+          if (isSkipIntake(text)) {
+            afterDraftRef.current = null;
+            return SKIP_INTAKE_ACK;
+          }
+          if (classification.kind === 'clarify' || classification.fields.length === 0) {
+            intent = `${afterDraftRef.current}\n${text}`.trim();
+            classification = { kind: 'edit', fields: ['systemPrompt'] };
+            afterDraftRef.current = null;
+          } else {
+            afterDraftRef.current = null;
+          }
+        }
 
         if (classification.kind === 'reply') {
           return replyForCreateTurn(text, createForm.form, canvasEmpty);
+        }
+        if (classification.kind === 'intake') {
+          intakeRef.current = { seed: text, rounds: 1 };
+          return intakeQuestionsReply(text);
         }
         if (classification.kind === 'clarify') {
           return CLARIFY_REPLY;
@@ -140,7 +200,7 @@ export function AgentCreateSplitPage(): ReactElement {
 
         if (generate) {
           const prompt = await generateAgentPrompt({
-            intent: text,
+            intent,
             ...(createForm.form.systemPrompt.trim()
               ? { existingPrompt: createForm.form.systemPrompt.trim() }
               : {}),
@@ -149,13 +209,13 @@ export function AgentCreateSplitPage(): ReactElement {
             incoming.systemPrompt = prompt;
           }
           if (classification.fields.includes('name') && !renameTo) {
-            incoming.name = nameFromGeneratedPrompt(prompt) || nameFromIntent(text);
+            incoming.name = nameFromGeneratedPrompt(prompt) || nameFromIntent(intent);
           }
           if (classification.fields.includes('slug') && incoming.name) {
             incoming.slug = slugify(incoming.name);
           }
           if (classification.fields.includes('description') && canvasEmpty) {
-            incoming.description = descriptionFromIntent(text);
+            incoming.description = descriptionFromIntent(intent);
           }
         }
 
@@ -164,7 +224,7 @@ export function AgentCreateSplitPage(): ReactElement {
             const [suggestion, catalog] = await Promise.all([
               suggestTools({
                 systemPrompt: incoming.systemPrompt || createForm.form.systemPrompt || undefined,
-                description: text,
+                description: intent,
               }),
               getAvailableTools().catch(() => null),
             ]);
@@ -197,6 +257,10 @@ export function AgentCreateSplitPage(): ReactElement {
         }
         if (classification.fields.length === 1 && classification.fields[0] === 'systemPrompt') {
           return 'Updated instructions. Everything else is unchanged.';
+        }
+        if (classification.askAfter) {
+          afterDraftRef.current = intent;
+          return draftThenAskReply(detectIntakeGaps(intent));
         }
         return 'Filled the canvas. Edit anything, then Create Agent.';
       } catch (err) {
@@ -293,6 +357,8 @@ export function AgentCreateSplitPage(): ReactElement {
     setPhase('empty');
     setCreateError(null);
     setSkeletonIdentity(false);
+    intakeRef.current = null;
+    afterDraftRef.current = null;
   }, [canvasDirty, resetFrom]);
 
   const footer = useMemo(
@@ -317,6 +383,7 @@ export function AgentCreateSplitPage(): ReactElement {
       onFormChange={patch => {
         createForm.patchForm(patch);
         if (phase === 'empty') setPhase('draft');
+        intakeRef.current = null;
       }}
       onFieldFocus={createForm.onFieldFocus}
       highlights={createForm.highlights}
@@ -368,6 +435,8 @@ export function AgentCreateSplitPage(): ReactElement {
           setPhase('empty');
           setCreateError(null);
           setSkeletonIdentity(false);
+          intakeRef.current = null;
+          afterDraftRef.current = null;
         }}
       />
     </div>

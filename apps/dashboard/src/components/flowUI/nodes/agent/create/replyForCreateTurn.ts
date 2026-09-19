@@ -1,4 +1,5 @@
 import type { AgentCreateFormState } from './types';
+import { detectIntakeGaps, questionsForGaps, type IntakeGap } from './classifyCreateTurn';
 
 function snippet(text: string, max = 180): string {
   const compact = text.replace(/\s+/g, ' ').trim();
@@ -72,3 +73,28 @@ export const CLARIFY_REPLY =
 
 export const SKILLS_ROW_REPLY =
   'I can’t attach a skill by name yet — pick it from the Skills row on the canvas.';
+
+export const SKIP_INTAKE_ACK = 'All good. Edit the canvas or Create Agent whenever you’re ready.';
+
+export const INTAKE_SKIP_HINT = 'You can skip and type on the canvas instead.';
+
+function intakeLead(seed: string): string {
+  if (/standup/i.test(seed)) return 'A standup agent — a few specifics will make this better:';
+  if (/scribe/i.test(seed)) return 'A scribe — before I draft the canvas:';
+  return 'I can draft that. A few specifics will make a better agent:';
+}
+
+export function intakeQuestionsReply(seed: string, gaps?: IntakeGap[]): string {
+  const missing = gaps ?? detectIntakeGaps(seed);
+  const questions = questionsForGaps(missing);
+  const lines = questions.map(question => `• ${question}`).join('\n');
+  return `${intakeLead(seed)}\n\n${lines}\n\n${INTAKE_SKIP_HINT}`;
+}
+
+export function draftThenAskReply(gaps: IntakeGap[]): string {
+  const questions = questionsForGaps(gaps);
+  if (questions.length === 0) {
+    return 'Filled the canvas. Edit anything, then Create Agent.';
+  }
+  return `Filled the canvas. Edit anything, then Create Agent.\n\nStill useful:\n${questions.map(question => `• ${question}`).join('\n')}\n\nIgnore these and keep editing if you want.`;
+}

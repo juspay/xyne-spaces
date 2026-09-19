@@ -1,4 +1,4 @@
-export type CreateTurnKind = 'reply' | 'edit' | 'clarify';
+export type CreateTurnKind = 'reply' | 'edit' | 'clarify' | 'intake';
 
 export type CreateTurnField =
   | 'name'
@@ -9,10 +9,23 @@ export type CreateTurnField =
   | 'skills'
   | 'knowledge';
 
+export type IntakeGap = 'audience' | 'io' | 'format' | 'tools' | 'constraints';
+
+export type DescribePlan = 'ask' | 'draft-then-ask' | 'draft' | 'none';
+
 export interface CreateTurnClassification {
   kind: CreateTurnKind;
   fields: CreateTurnField[];
+  askAfter?: boolean;
 }
+
+export const FIRST_DESCRIBE_FIELDS: CreateTurnField[] = [
+  'name',
+  'slug',
+  'description',
+  'systemPrompt',
+  'tools',
+];
 
 const GREETING =
   /^(hi|hello|hey|yo|sup|howdy|thanks|thank you|thx|ok|okay|cool|great|nice|cheers)[\s!.]*$/i;
@@ -22,6 +35,12 @@ const HELP_PREFIX =
 
 const FIRST_DESCRIBE =
   /\b(build|create|make)\b.{0,24}\b(agent|bot|scribe|assistant)\b|\bagent that\b|\bshould (post|summarize|draft|fetch|monitor|track|remind|scribe)\b/i;
+
+const JOB_VERB =
+  /\b(post|posts|summarize|summarizes|fetch|fetches|monitor|track|remind|draft|scribe|triage|review|translate|schedule|notify|digest|watch|parse|extract|compile)\b/i;
+
+const SKIP_INTAKE =
+  /^(skip(\s+(that|this|those|the questions)?)?|just draft|go ahead|you pick|fill (it|the canvas)|draft it|n\/?a|nah|never mind|i'?ll (do|fill) it( myself)?|edit (it )?myself|no thanks)[\s!.]*$/i;
 
 export function parseLocalRename(text: string): string | null {
   const match = text
@@ -33,6 +52,14 @@ export function parseLocalRename(text: string): string | null {
   if (!name) return null;
   if (/^(it|this|that|the agent)$/i.test(name)) return null;
   return name.slice(0, 80);
+}
+
+export function isSkipIntake(text: string): boolean {
+  return SKIP_INTAKE.test(text.trim());
+}
+
+export function isIntakeProceed(text: string): boolean {
+  return isSkipIntake(text) || /^(ok|okay|sure|yep|yes)[\s!.]*$/i.test(text.trim());
 }
 
 function isQuestion(text: string): boolean {
@@ -102,10 +129,107 @@ function fieldsForExplicitEdit(text: string): CreateTurnField[] {
   return ['systemPrompt'];
 }
 
-export function classifyCreateTurn(text: string, canvasEmpty: boolean): CreateTurnClassification {
+export function detectIntakeGaps(text: string): IntakeGap[] {
+  const lower = text.toLowerCase();
+  const gaps: IntakeGap[] = [];
+  if (
+    !/\b(for|team|users?|engineers?|designers?|managers?|audience|customers?|who|sales|support)\b/.test(
+      lower,
+    )
+  ) {
+    gaps.push('audience');
+  }
+  const reads =
+    /\b(read|reads|from|fetch|watch|listen|input|inbox|calendar|github|jira|docs?|notion|email|transcript)\b/.test(
+      lower,
+    );
+  const writes = /\b(write|post|send|draft|create|update|output|reply|notify)\b/.test(lower);
+  if (!reads && !writes) {
+    gaps.push('io');
+  }
+  if (
+    !/\b(format|summary|summaries|bullet|json|table|digest|report|message|thread|email|slack)\b/.test(
+      lower,
+    )
+  ) {
+    gaps.push('format');
+  }
+  if (!/\b(mcp|tool|skill|slack|github|jira|notion|calendar|linear|gmail)\b/.test(lower)) {
+    gaps.push('tools');
+  }
+  if (
+    !/\b(never|must not|don't|do not|only|constraint|unless|approve|ask first|without)\b/.test(
+      lower,
+    )
+  ) {
+    gaps.push('constraints');
+  }
+  return gaps;
+}
+
+export function planDescribe(text: string): DescribePlan {
+  const trimmed = text.trim();
+  if (!trimmed) return 'none';
+  const words = trimmed.split(/\s+/).filter(Boolean);
+  const gaps = detectIntakeGaps(trimmed);
+  const specified = 5 - gaps.length;
+  const hasJob = JOB_VERB.test(trimmed) || /\bagent that\b/i.test(trimmed);
+  const agentRequest = FIRST_DESCRIBE.test(trimmed) || hasJob;
+  if (!agentRequest && words.length < 8) {
+    return 'none';
+  }
+  if (words.length <= 6) return 'ask';
+  if (/^(make|create|build|i want)\b.{0,48}\b(an?\s+)?(agent|bot|assistant)\b\.?$/i.test(trimmed)) {
+    return 'ask';
+  }
+  if (hasJob && specified >= 2) return 'draft-then-ask';
+  if (hasJob && words.length >= 12 && specified >= 1) return 'draft-then-ask';
+  if (words.length >= 24 && specified >= 3) {
+    return gaps.length === 0 ? 'draft' : 'draft-then-ask';
+  }
+  if (words.length >= 20) return 'draft-then-ask';
+  return 'ask';
+}
+
+export const INTAKE_GAP_ORDER: IntakeGap[] = ['audience', 'io', 'format', 'tools', 'constraints'];
+
+export const INTAKE_QUESTION: Record<IntakeGap, string> = {
+  audience: 'Who is this for?',
+  io: 'What should it read, and what should it write?',
+  format: 'What should the output look like?',
+  tools: 'Any tools or MCP servers it should use?',
+  constraints: 'Anything it must never do?',
+};
+
+export function questionsForGaps(gaps: IntakeGap[], max = 3): string[] {
+  return INTAKE_GAP_ORDER.filter(gap => gaps.includes(gap))
+    .slice(0, max)
+    .map(gap => INTAKE_QUESTION[gap]);
+}
+
+export function classifyCreateTurn(
+  text: string,
+  canvasEmpty: boolean,
+  options?: { intakePending?: boolean },
+): CreateTurnClassification {
   const trimmed = text.trim();
   if (!trimmed) {
     return { kind: 'clarify', fields: [] };
+  }
+  if (options?.intakePending && canvasEmpty) {
+    if (isSkipIntake(trimmed) || /^(ok|okay|sure|yep|yes)[\s!.]*$/i.test(trimmed)) {
+      return { kind: 'edit', fields: FIRST_DESCRIBE_FIELDS };
+    }
+    if (GREETING.test(trimmed) || isHelpQuestion(trimmed)) {
+      return { kind: 'reply', fields: [] };
+    }
+    if (parseLocalRename(trimmed)) {
+      return { kind: 'edit', fields: ['name', 'slug'] };
+    }
+    if (isCanvasEditImperative(trimmed.toLowerCase())) {
+      return { kind: 'edit', fields: fieldsForExplicitEdit(trimmed) };
+    }
+    return { kind: 'edit', fields: FIRST_DESCRIBE_FIELDS };
   }
   if (GREETING.test(trimmed)) {
     return { kind: 'reply', fields: [] };
@@ -119,20 +243,31 @@ export function classifyCreateTurn(text: string, canvasEmpty: boolean): CreateTu
   if (isCanvasEditImperative(trimmed.toLowerCase())) {
     return { kind: 'edit', fields: fieldsForExplicitEdit(trimmed) };
   }
-  if (isFirstDescribe(trimmed)) {
-    return {
-      kind: 'edit',
-      fields: ['name', 'slug', 'description', 'systemPrompt', 'tools'],
-    };
+  if (isFirstDescribe(trimmed) || (canvasEmpty && planDescribe(trimmed) !== 'none')) {
+    const plan = planDescribe(trimmed);
+    if (plan === 'ask') {
+      return { kind: 'intake', fields: [] };
+    }
+    if (plan === 'draft-then-ask') {
+      return { kind: 'edit', fields: FIRST_DESCRIBE_FIELDS, askAfter: true };
+    }
+    if (plan === 'draft') {
+      return { kind: 'edit', fields: FIRST_DESCRIBE_FIELDS };
+    }
   }
   const words = trimmed.split(/\s+/).filter(Boolean);
   if (words.length <= 6) {
     return { kind: 'clarify', fields: [] };
   }
   if (canvasEmpty) {
+    const plan = planDescribe(trimmed);
+    if (plan === 'ask') {
+      return { kind: 'intake', fields: [] };
+    }
     return {
       kind: 'edit',
-      fields: ['name', 'slug', 'description', 'systemPrompt', 'tools'],
+      fields: FIRST_DESCRIBE_FIELDS,
+      ...(plan === 'draft-then-ask' ? { askAfter: true } : {}),
     };
   }
   return { kind: 'clarify', fields: [] };
@@ -149,11 +284,3 @@ export function shouldGeneratePrompt(
   if (classification.fields.includes('systemPrompt')) return true;
   return canvasEmpty;
 }
-
-export const FIRST_DESCRIBE_FIELDS: CreateTurnField[] = [
-  'name',
-  'slug',
-  'description',
-  'systemPrompt',
-  'tools',
-];
