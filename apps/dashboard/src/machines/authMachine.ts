@@ -4,7 +4,7 @@ import axios from 'axios';
 import { v4 as uuidv4 } from 'uuid';
 import { reactNativeBridge } from '../utils/reactNativeBridge';
 import { posthogService } from '../services/Analytics/posthogService';
-import { API_BASE_URL, isSdlcSurface, isTestEnv } from '../config';
+import { API_BASE_URL, isSdlcSurface, isSkipAuthEnv } from '../config';
 import { logger } from '../utils/logger';
 import {
   CommunityJoinResultStatus,
@@ -69,6 +69,7 @@ interface AuthContext {
   landingChannelId: string | null;
   communityJoinRequest: CommunityJoinRequestContext | null;
   enterpriseJoinTarget: EnterpriseJoinTarget | null;
+  skipAuthAttempted: boolean;
 }
 
 type AuthEvent =
@@ -183,6 +184,7 @@ const createClearedContext = (): AuthContext => ({
   landingChannelId: null,
   communityJoinRequest: null,
   enterpriseJoinTarget: null,
+  skipAuthAttempted: false,
 });
 
 const getWorkspaces = (output?: OAuthCallbackOutput): Workspace[] => {
@@ -232,6 +234,7 @@ export const authMachine = createMachine(
       landingChannelId: null,
       communityJoinRequest: null,
       enterpriseJoinTarget: null,
+      skipAuthAttempted: false,
     },
     states: {
       checkingSession: {
@@ -273,6 +276,10 @@ export const authMachine = createMachine(
           {
             target: 'validatingSession',
             guard: 'hasStoredSession',
+          },
+          {
+            target: 'testAuthenticating',
+            guard: 'shouldAutoSkipAuth',
           },
           {
             target: 'unauthenticated',
@@ -793,6 +800,12 @@ export const authMachine = createMachine(
         },
       },
       unauthenticated: {
+        always: [
+          {
+            target: 'testAuthenticating',
+            guard: 'shouldAutoSkipAuth',
+          },
+        ],
         on: {
           GOOGLE_SIGNIN: [
             {
@@ -1094,6 +1107,7 @@ export const authMachine = createMachine(
         },
       },
       testAuthenticating: {
+        entry: assign({ skipAuthAttempted: true }),
         invoke: {
           src: 'performTestLogin',
           onDone: {
@@ -1148,7 +1162,8 @@ export const authMachine = createMachine(
         const userId = localStorage.getItem('user_id');
         return !!userId;
       },
-      isTestEnvironment: () => isTestEnv,
+      isTestEnvironment: () => isSkipAuthEnv,
+      shouldAutoSkipAuth: ({ context }) => isSkipAuthEnv && !context.skipAuthAttempted,
       hasUserInOutput: ({ event }) => {
         const e = event as { output?: OAuthCallbackOutput };
         return !!e.output?.user?.id;

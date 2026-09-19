@@ -7,6 +7,13 @@ export const isSandboxLocal = hostname.endsWith('.localhost');
 export const isTestEnv =
   import.meta.env.MODE === 'test' || hostname === 'dashboard' || isSandboxLocal;
 
+/** Local-only: `VITE_ENABLE_DEV_AUTH=true` (dashboard `.env.local`) plus backend `ENABLE_DEV_AUTH`. */
+export const isDevAuthEnabled =
+  isLocalhost && import.meta.env.VITE_ENABLE_DEV_AUTH === 'true';
+
+/** Auto skip-auth via existing `POST /api/test/auth/login`. Never true in production. */
+export const isSkipAuthEnv = isTestEnv || isDevAuthEnabled;
+
 export const isSandBox = hostname.includes('sandbox');
 export const isProd = !isLocalhost && !isSandBox && !isSandboxLocal;
 
@@ -32,9 +39,10 @@ const ELECTRON_BACKEND_ZERO_URL = isProd
     : 'http://localhost:4848';
 const isDockerTestEnv = isTestEnv && !isSandboxLocal;
 const sameOriginPort = window.location.port ? `:${window.location.port}` : '';
-// Local `vite --mode test` must hit same-origin `/api` so skip-auth cookies
-// set by the Vite proxy stick. Direct :3001 is cross-origin from :5173/:5180.
-const backendPort = isLocalhost && isTestEnv
+// Local skip-auth (`vite --mode test` or VITE_ENABLE_DEV_AUTH) must hit
+// same-origin `/api` so cookies set by the Vite proxy stick. Direct :3001 is
+// cross-origin from :5173/:5180 and Helmet CORP blocks encryption bootstrap.
+const backendPort = isLocalhost && isSkipAuthEnv
   ? sameOriginPort
   : isLocalhost
     ? ':3001'

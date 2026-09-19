@@ -111,16 +111,17 @@ export class TestAuthController {
         return;
       }
 
+      const body = (req.body ?? {}) as Record<string, unknown>;
       const setAsNewUser = TestAuthController.parseBooleanFlag(
-        req.query.setAsNewUser ?? req.body.setAsNewUser
+        req.query.setAsNewUser ?? body.setAsNewUser,
       );
       const email = typeof req.query.email === 'string'
         ? req.query.email
-        : typeof req.body.email === 'string'
-          ? req.body.email
+        : typeof body.email === 'string'
+          ? body.email
           : null;
-      const isAdminFlag = req.body.isAdmin === true || req.query.isAdmin === 'true';
-      let useFixedUser = req.query.fixed === 'true' || req.body.fixed === true;
+      const isAdminFlag = body.isAdmin === true || req.query.isAdmin === 'true';
+      let useFixedUser = req.query.fixed === 'true' || body.fixed === true;
 
       if (config.isSandboxTestMode) {
         useFixedUser = true;

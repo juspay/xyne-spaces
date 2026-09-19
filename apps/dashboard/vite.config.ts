@@ -146,10 +146,10 @@ export default defineConfig(({ command, mode }) => {
         },
         // The SDLC server is served through this one, so it must not self-proxy.
         ...(isSdlcSurface ? {} : sdlcEdgeProxy),
-        ...(env.VITE_ENVIRONMENT === 'test'
+        ...(env.VITE_ENVIRONMENT === 'test' || env.VITE_ENABLE_DEV_AUTH === 'true'
           ? {
               '/api': {
-                target: env.VITE_API_BASE_URL,
+                target: env.VITE_API_BASE_URL || 'http://localhost:3001',
                 changeOrigin: true,
                 secure: false,
                 ws: true,

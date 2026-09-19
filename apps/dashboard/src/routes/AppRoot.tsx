@@ -348,12 +348,19 @@ const XYNE_AI_PANEL_MIN_SIZE = 42;
 const XYNE_AI_PANEL_DEFAULT_SIZE = 35;
 
 const WorkspaceRedirect = (): ReactElement => {
-  const email = localStorage.getItem('user_email');
-  const workspaceId = email ? getLastActiveWorkspaceId(email) : null;
+  const { isAuthenticated, isLoading, user } = useAuth();
+  const email = user?.email ?? localStorage.getItem('user_email');
+  const workspaceId =
+    user?.workspaceId || (email ? getLastActiveWorkspaceId(email) : null);
+  if (isLoading) {
+    return <></>;
+  }
   if (workspaceId) {
     return <Navigate to={`/${workspaceId}`} replace />;
   }
-  // No workspace in storage — send to auth
+  if (isAuthenticated) {
+    return <></>;
+  }
   return <Navigate to='/auth' replace />;
 };
 

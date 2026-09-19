@@ -545,6 +545,10 @@ const AuthScreen = (): ReactElement | null => {
     setRegConfirmPasswordError('');
   };
 
+  if (isLoading) {
+    return null;
+  }
+
   if (isAuthenticated) {
     const dest = user?.workspaceId ? `/${user.workspaceId}` : '/';
     return <Navigate to={dest} replace={true}></Navigate>;

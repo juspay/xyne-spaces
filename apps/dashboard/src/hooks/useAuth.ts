@@ -323,6 +323,7 @@ export const useAuth = (): UseAuthReturn => {
       state.matches('validatingSession') ||
       state.matches('loggingOut') ||
       state.matches('authenticating') ||
+      state.matches('testAuthenticating') ||
       state.matches('loggingInToWorkspace') ||
       state.matches('joiningCommunityWorkspace') ||
       state.matches('submittingCreateOrg'),
