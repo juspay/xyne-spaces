@@ -1809,24 +1809,18 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
       }
 
       const decision = actionId === "agent-draft-approve" ? "approve" : "reject";
-      // The chips the user kept, from the node's own flow-state key.
-      const keptCapabilityIds = Array.isArray(values[AGENT_COMPONENT_ID])
-        ? (values[AGENT_COMPONENT_ID] as unknown[]).filter((v): v is string => typeof v === "string")
-        : undefined;
-
       const { resolveAgentDraft } = await import("../lib/agent-card.js");
       const result = await resolveAgentDraft(
         requestId,
         callerUserId,
         decision,
-        keptCapabilityIds,
+        values[AGENT_COMPONENT_ID],
         cardAgentSlug,
       );
 
       if (!result.ok) {
-        resp = { type: "close_screen", finalMessage: result.error };
+        resp = { type: "error", message: result.error };
         res.json(resp);
-        void replaceFlowCardWithText(messageId, cardAgentSlug, `⚠️ ${result.error}`, cardConversationId, cardChannelId, cardSpacesAppId);
         return;
       }
 

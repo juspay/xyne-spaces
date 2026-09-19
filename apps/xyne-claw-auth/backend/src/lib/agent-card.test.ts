@@ -245,3 +245,59 @@ describe("isConnectorServerType", () => {
     expect(isConnectorServerType(undefined)).toBe(false);
   });
 });
+
+describe("applyCanvasOverlay", () => {
+  const spec = {
+    name: "PR Agent",
+    slug: "pr-agent",
+    description: "Reviews PRs",
+    systemPrompt: "You review pull requests for security risks and style.",
+    tools: ["spaces"],
+  };
+
+  it("lets the canvas rename, re-slug, and add tools the model missed", async () => {
+    const { applyCanvasOverlay } = await import("./agent-card.js");
+    const next = applyCanvasOverlay(spec, {
+      name: "Security Reviewer",
+      slug: "security-reviewer",
+      description: "Flags security risks",
+      systemPrompt: "You are a security reviewer. Call out auth and injection issues.",
+      toolIds: ["spaces", "web-search"],
+    });
+    expect(next.name).toBe("Security Reviewer");
+    expect(next.slug).toBe("security-reviewer");
+    expect(next.tools).toEqual(["spaces", "web-search"]);
+  });
+
+  it("lowercases a valid handle and ignores one that is still invalid", async () => {
+    const { applyCanvasOverlay } = await import("./agent-card.js");
+    expect(applyCanvasOverlay(spec, { slug: "NOPE" }).slug).toBe("nope");
+    expect(applyCanvasOverlay(spec, { slug: "Nope!" }).slug).toBe("pr-agent");
+  });
+});
+
+describe("parseAgentCanvasValue", () => {
+  it("reads a legacy string[] as capability ids only", async () => {
+    const { parseAgentCanvasValue } = await import("./agent-card.js");
+    expect(parseAgentCanvasValue(["spaces", "web-search"])).toEqual({
+      keptCapabilityIds: ["spaces", "web-search"],
+    });
+  });
+
+  it("reads a canvas object including extra tools", async () => {
+    const { parseAgentCanvasValue } = await import("./agent-card.js");
+    const parsed = parseAgentCanvasValue({
+      name: "PR Agent",
+      slug: "pr-agent",
+      description: "Reviews PRs",
+      systemPrompt: "You review PRs.",
+      toolIds: ["spaces", "web-search"],
+      skillIds: ["skill-1"],
+      kbScope: "COLLECTIONS",
+      knowledgeBase: [{ collectionId: "col-1", fileId: null }],
+    });
+    expect(parsed.overlay?.toolIds).toEqual(["spaces", "web-search"]);
+    expect(parsed.overlay?.skillIds).toEqual(["skill-1"]);
+    expect(parsed.overlay?.knowledgeBase).toEqual([{ collectionId: "col-1", fileId: null }]);
+  });
+});

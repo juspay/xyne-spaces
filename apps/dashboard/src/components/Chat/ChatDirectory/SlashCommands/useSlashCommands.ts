@@ -473,6 +473,12 @@ export function useSlashCommands({
     (kind: SearchCommandKind): void => {
       const handlers: Partial<Record<SearchCommandKind, () => void>> = {
         askai: () => xyneAIActor.send({ type: 'OPEN', trackSource: 'slash_command' }),
+        create: () => {
+          const path = workspaceId
+            ? `/${workspaceId}/ai/library/agent/create`
+            : '/ai/library/agent/create';
+          navigate(path);
+        },
         // Start a recording in place — no navigation. The global RecordingOverlay pill surfaces it
         // wherever the user is. Any state other than idle/error means a recording is live or
         // transitioning (recording/paused/starting/stopping) — show a conflict dialog instead of
@@ -496,7 +502,7 @@ export function useSlashCommands({
       exitCommandMode();
       onOpenChange(false);
     },
-    [exitCommandMode, onOpenChange, onCommandClick],
+    [exitCommandMode, onOpenChange, onCommandClick, navigate, workspaceId],
   );
 
   // `/goto`: route to the picked nav-bar section and close Cmd+K. Like runActionCommand, the deps

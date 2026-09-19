@@ -211,7 +211,7 @@ const ClawAgentCreateV2 = ({ agent }: ClawAgentCreateV2Props = {}): ReactElement
                 htmlFor='agent-v2-prompt'
                 className='text-sm font-medium leading-[1.2] tracking-[-0.1px] text-foreground'
               >
-                What it does
+                Instructions
               </label>
 
               <div className='w-full overflow-hidden rounded-2xl border border-border bg-card'>

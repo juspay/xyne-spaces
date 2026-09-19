@@ -221,7 +221,7 @@ export const FlowRenderer: React.FC<FlowRendererProps> = ({
           ),
         });
         toast.error('Message context not ready yet. Please try again in a moment.');
-        return;
+        return { type: 'error' as const, message: 'Message context not ready yet. Please try again in a moment.' };
       }
       if (!isInputChange) {
         setState(prev => {
@@ -258,6 +258,7 @@ export const FlowRenderer: React.FC<FlowRendererProps> = ({
         } else {
           onAppAction(response);
         }
+        return response;
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Action failed';
         logger.error(LogEvent.FRONTEND_ERROR, {
@@ -272,6 +273,7 @@ export const FlowRenderer: React.FC<FlowRendererProps> = ({
               : message,
           );
         }
+        return { type: 'error' as const, message };
       } finally {
         if (!isInputChange) {
           setState(prev => {

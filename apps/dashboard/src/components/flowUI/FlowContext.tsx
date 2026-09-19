@@ -17,7 +17,7 @@ export interface FlowContextValue {
   updateFieldValue: (name: string, value: unknown) => void;
   validateField: (name: string, value: unknown) => string | null;
   validateAllFields: () => boolean;
-  executeAction: (action: FlowAction) => Promise<void>;
+  executeAction: (action: FlowAction) => Promise<AppActionResponse | undefined>;
   onAppAction: (response: AppActionResponse) => void;
   messageId: string;
   conversationId: string;

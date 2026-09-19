@@ -326,6 +326,91 @@ function parseDraftSpec(raw: string | null): DraftAgentSpec | null {
   }
 }
 
+/** Dual-control canvas payload from the dashboard (flow-state `values.agent`). */
+export interface AgentCreateCanvasOverlay {
+  name?: string;
+  slug?: string;
+  description?: string;
+  systemPrompt?: string;
+  toolIds?: string[];
+  skillIds?: string[];
+  kbScope?: "COLLECTIONS" | "USER";
+  knowledgeBase?: Array<{ collectionId: string; fileId?: string | null }>;
+}
+
+export function parseAgentCanvasValue(raw: unknown): {
+  keptCapabilityIds?: string[];
+  overlay?: AgentCreateCanvasOverlay;
+} {
+  if (Array.isArray(raw)) {
+    return {
+      keptCapabilityIds: raw.filter((value): value is string => typeof value === "string"),
+    };
+  }
+  if (!raw || typeof raw !== "object") return {};
+  const record = raw as Record<string, unknown>;
+  const selected = Array.isArray(record["selected"])
+    ? record["selected"].filter((value): value is string => typeof value === "string")
+    : undefined;
+  const overlay: AgentCreateCanvasOverlay = {};
+  if (typeof record["name"] === "string") overlay.name = record["name"];
+  if (typeof record["slug"] === "string") overlay.slug = record["slug"];
+  if (typeof record["description"] === "string") overlay.description = record["description"];
+  if (typeof record["systemPrompt"] === "string") overlay.systemPrompt = record["systemPrompt"];
+  const toolIds = Array.isArray(record["toolIds"])
+    ? record["toolIds"].filter((value): value is string => typeof value === "string")
+    : selected;
+  if (toolIds) overlay.toolIds = toolIds;
+  if (Array.isArray(record["skillIds"])) {
+    overlay.skillIds = record["skillIds"].filter((value): value is string => typeof value === "string");
+  }
+  if (record["kbScope"] === "USER" || record["kbScope"] === "COLLECTIONS") {
+    overlay.kbScope = record["kbScope"];
+  }
+  if (Array.isArray(record["knowledgeBase"])) {
+    overlay.knowledgeBase = record["knowledgeBase"].flatMap((item) => {
+      if (!item || typeof item !== "object") return [];
+      const row = item as Record<string, unknown>;
+      if (typeof row["collectionId"] !== "string" || !row["collectionId"].trim()) return [];
+      return [
+        {
+          collectionId: row["collectionId"].trim(),
+          fileId: typeof row["fileId"] === "string" ? row["fileId"] : null,
+        },
+      ];
+    });
+  }
+  return { ...(selected ? { keptCapabilityIds: selected } : {}), overlay };
+}
+
+export function applyCanvasOverlay(
+  spec: DraftAgentSpec,
+  overlay: AgentCreateCanvasOverlay | undefined,
+): DraftAgentSpec {
+  if (!overlay) return spec;
+  const next: DraftAgentSpec = { ...spec, tools: [...spec.tools] };
+  if (typeof overlay.name === "string" && overlay.name.trim()) {
+    next.name = overlay.name.trim().slice(0, 80);
+  }
+  if (typeof overlay.slug === "string" && overlay.slug.trim()) {
+    const slug = overlay.slug.trim().toLowerCase();
+    if (isValidAgentSlug(slug)) next.slug = slug;
+  }
+  if (typeof overlay.description === "string") {
+    next.description = overlay.description.trim().slice(0, 300);
+  }
+  if (typeof overlay.systemPrompt === "string" && overlay.systemPrompt.trim()) {
+    next.systemPrompt = overlay.systemPrompt.trim().slice(0, 20_000);
+  }
+  if (Array.isArray(overlay.toolIds)) {
+    next.tools = overlay.toolIds
+      .filter((token): token is string => typeof token === "string" && token.trim().length > 0)
+      .map((token) => token.trim())
+      .filter((token, index, list) => list.indexOf(token) === index);
+  }
+  return next;
+}
+
 /**
  * Approve or reject a drafted agent.
  *
@@ -345,7 +430,7 @@ export async function resolveAgentDraft(
   requestId: string,
   callerUserId: string,
   decision: "approve" | "reject",
-  keptCapabilityIds?: string[],
+  canvasValue?: unknown,
   /** Drafting agent's slug, so the decided card keeps its "Built by" credit. */
   builtBy?: string,
 ): Promise<AgentDraftResolution> {
@@ -360,10 +445,12 @@ export async function resolveAgentDraft(
     return { ok: false, code: 403, error: "Only the person who requested this agent can decide it." };
   }
 
-  const spec = parseDraftSpec(request.proposedContent);
-  if (!spec) {
+  const parsedSpec = parseDraftSpec(request.proposedContent);
+  if (!parsedSpec) {
     return { ok: false, code: 400, error: "This draft is unreadable and can't be created. Ask for the agent again." };
   }
+  const parsedCanvas = parseAgentCanvasValue(canvasValue);
+  const spec = applyCanvasOverlay(parsedSpec, parsedCanvas.overlay);
 
   const catalog = await buildCatalogFor(request.orgId);
   const buildIdentity = async (grantedIds?: string[]): Promise<{ identity: AgentIdentity; resolved: ResolvedCapabilities }> => {
@@ -419,15 +506,17 @@ export async function resolveAgentDraft(
       return {
         ok: false,
         code: 409,
-        error: `An agent with the identifier "${spec.slug}" now exists — nothing was created.`,
+        error: `@${spec.slug} is taken. Rename the handle to create a new agent.`,
       };
     }
 
     // The user's chip selection can only remove capabilities: intersect it with
     // what the catalog actually grants rather than trusting it as the source.
-    const grantedIds = keptCapabilityIds
-      ? spec.tools.filter((t) => keptCapabilityIds.includes(t))
-      : spec.tools;
+    const grantedIds = parsedCanvas.overlay?.toolIds
+      ? spec.tools
+      : parsedCanvas.keptCapabilityIds
+        ? spec.tools.filter((token) => parsedCanvas.keptCapabilityIds!.includes(token))
+        : spec.tools;
     const { identity, resolved } = await buildIdentity(grantedIds);
 
     const created = await agentRepository.create({
@@ -439,11 +528,36 @@ export async function resolveAgentDraft(
       color: spec.color?.trim() || "#6366f1",
       modelId: spec.modelId?.trim() ?? "",
       config: { tools: toConfigTools(resolved) },
+      kbScope: parsedCanvas.overlay?.kbScope === "USER" ? "USER" : "COLLECTIONS",
       owner: { connect: { id: request.requesterId } },
       org: { connect: { id: request.orgId } },
     });
 
     await agentRequestRepository.recordAgentCreateResult(requestId, created.id).catch(() => {});
+
+    const overlay = parsedCanvas.overlay;
+    if (overlay?.skillIds && overlay.skillIds.length > 0) {
+      for (const skillId of overlay.skillIds) {
+        await agentRepository.upsertSkill(created.id, skillId).catch((err) => {
+          log.error(`[agent-card] skill attach failed for ${spec.slug} skill=${skillId}: ${errMsg(err)}`);
+        });
+      }
+    }
+    if (
+      overlay?.kbScope === "COLLECTIONS" &&
+      overlay.knowledgeBase &&
+      overlay.knowledgeBase.length > 0
+    ) {
+      try {
+        const { validateKbGrants } = await import("./spaces-kb.js");
+        const { accepted } = await validateKbGrants(callerUserId, overlay.knowledgeBase);
+        if (accepted.length > 0) {
+          await agentRepository.replaceCollections(created.id, accepted);
+        }
+      } catch (err) {
+        log.error(`[agent-card] knowledge attach failed for ${spec.slug}: ${errMsg(err)}`);
+      }
+    }
     await writeAuditLog({
       actorUserId: callerUserId,
       eventType: "AGENT_CREATED",
@@ -463,7 +577,7 @@ export async function resolveAgentDraft(
     log.error(
       `[agent-card] create failed for ${spec.slug} (request=${requestId}): ${errMsg(err)}`,
     );
-    return { ok: false, code: 500, error: "Couldn't create the agent just now — please try approving again." };
+    return { ok: false, code: 500, error: `Couldn't create @${spec.slug}. Check the handle is unique and try Create Agent again. Your draft is still here.` };
   }
 }
 
