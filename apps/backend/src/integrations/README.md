@@ -249,6 +249,19 @@ Both connect paths — this API and APP-channel creation — go through one repo
 
 When an install's `desk:write` grant is revoked (`activateInstalledPermissions` or app update via `syncFromAppApproved`), its `app-desk` sources are set `isActive=false` (hook: `AppPermissionRepository.deactivateAppDeskSourcesIfDeskWriteLost`), so the UI shows the desk as disconnected. There is no app-uninstall flow to hook — none exists in the API surface today; inbound remains protected per call by `requirePermission`.
 
+### History export API (app implements, Xyne calls)
+
+The desk fetch button can pull history from each connected app in addition to the mailbox. The app must expose one endpoint; Xyne paginates it with the same HMAC secret used for outbound webhooks.
+
+**`GET {installedApp.webhookUrl}/export/messages?startDate&endDate&cursor&limit`**
+
+- Query params: `startDate` / `endDate` (ISO 8601), `cursor` (opaque, absent for the first page), `limit` (max 200).
+- Auth headers on every page: `X-Xyne-Timestamp` (epoch seconds), `X-Xyne-Request-Signature` (hex HMAC-SHA256), `X-Source: XyneSpaces`. The signed string is `` `${timestamp}\nGET\n${pathWithQuery}` `` — **the canonical string includes the method and the full path+query**, sorted by `URL.searchParams.sort()`. This scheme is separate from the body-only `X-Xyne-Signature` webhook scheme; the shared secret is the same. Verify with a ±5 min skew window.
+- Response per page: `{ messages: [{ externalId, externalThreadId?, subject?, body, sender: { email, name? }, recipients?, sentAt }], nextCursor? }`.
+- **Oldest-first, monotonic cursor.** Pages must be ordered oldest-first and `nextCursor` must strictly advance forward (never revisit older items); `nextCursor` absent = terminal page. Cursor values are opaque strings — Xyne echoes them back verbatim as `cursor` on the next request. Mid-export arrivals at the old end must *not* be included (the `startDate..endDate` window is fixed).
+- **Request rate and throttling.** Pages are requested **back-to-back with no client-side delay** — page N+1 is issued as soon as page N is persisted, so a fast app will see a sustained serial request stream. To slow Xyne down, answer `429` (or `503`) with a `Retry-After` header (delta-seconds or HTTP-date); Xyne honors it, backs off in place, and continues the same export — up to 5 backoff-and-retry rounds per page (6 requests in total; a 6th throttled response ends the run), falling back to exponential backoff from 1s when the header is absent. Each retry is **re-signed**, so the `X-Xyne-Timestamp` skew window applies to the retry, not the original attempt. A `Retry-After` longer than the run's remaining budget is not slept through: the export stops cleanly, keeps what it ingested, and resumes from the same page on the next Fetch. Do not answer `429` without `Retry-After` if you need a specific pace — the exponential fallback may be shorter than you want.
+- Fetch requires `ENABLE_EMAIL_FETCH_WORKER=true` in the backend; otherwise the route returns `409` without calling the app.
+
 ---
 
 ## Adding a New Adapter
