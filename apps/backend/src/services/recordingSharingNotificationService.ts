@@ -7,6 +7,7 @@ import { logger } from '@/utils/logger';
 
 export type RecordingAccessActivityAction =
   | 'recording_shared'
+  | 'recording_access_changed'
   | 'recording_access_revoked';
 
 export interface RecordingAccessActivity {
@@ -47,7 +48,7 @@ export class RecordingSharingNotificationService {
 
     const isRevoked = share.entityUserAccess === EntityUserAccess.REVOKED;
     if (
-      (change.action === 'recording_shared' && isRevoked) ||
+      (change.action !== 'recording_access_revoked' && isRevoked) ||
       (change.action === 'recording_access_revoked' && !isRevoked)
     ) {
       return;
@@ -79,6 +80,12 @@ export class RecordingSharingNotificationService {
     const actorName = actor?.name || 'Someone';
     const subject = isRecordingShare ? 'recording' : 'call';
     const recordingTitle = call.title || `a ${subject}`;
+    // The level the recipient ends up with, for the "as an editor/viewer" copy.
+    const accessLabel = isRecordingShare
+      ? share.entityUserAccess === EntityUserAccess.EDIT
+        ? 'an editor'
+        : 'a viewer'
+      : undefined;
 
     await Promise.all([
       activityService.createActivities(
@@ -100,6 +107,7 @@ export class RecordingSharingNotificationService {
         actorName,
         change.action,
         subject,
+        accessLabel,
       ),
     ]);
   }
