@@ -2696,6 +2696,32 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
   // await it before writing their FULL snapshot — otherwise the two race on the
   // same debug-session.json path and can leave a torn/partial final trace.
   let partialFlushPromise: Promise<void> | null = null;
+  // `/debug` is served by claw-auth, which can only read GCS — it has no access
+  // to this pod's disk. Without publishing partials, a trace is invisible until
+  // the run completes, which is the opposite of when it is wanted. Throttled
+  // because flushDebugPartial fires at every turn and tool boundary.
+  let lastPartialUploadAt = 0;
+  const PARTIAL_UPLOAD_INTERVAL_MS = Math.max(
+    1_000,
+    Number(process.env["XYNE_DEBUG_PARTIAL_UPLOAD_MS"]) || 10_000,
+  );
+  // Awaited by its caller rather than fire-and-forget: the completion writer
+  // awaits partialFlushPromise before uploading the FULL snapshot, and a
+  // detached upload could land after it and overwrite the final trace with a
+  // partial one. flushDebugPartial is itself queued off the run loop, so
+  // awaiting here costs the run nothing.
+  const publishPartialSnapshot = async (snapshot: unknown): Promise<void> => {
+    if (!conversationId || debugWritten) return;
+    const now = Date.now();
+    if (now - lastPartialUploadAt < PARTIAL_UPLOAD_INTERVAL_MS) return;
+    lastPartialUploadAt = now;
+    const safeSessionId = (sessionId ?? "local").replace(/[^a-zA-Z0-9_-]/g, "-");
+    // Same object name the completion writer uses, so there is one object per
+    // run and the final snapshot replaces the last partial in place.
+    const runFile = `debug-run-${runStartedAt}-${safeSessionId}.json`;
+    await gcsUploadDebugRun(conversationId, runFile, Buffer.from(JSON.stringify(snapshot), "utf8"))
+      .catch(() => false);
+  };
   const flushDebugPartial = async (): Promise<void> => {
     if (!conversationId || debugWritten || partialDebugFlushing) return;
     partialDebugFlushing = true;
@@ -2749,6 +2775,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
       };
       await writeFile(`${debugDir}/debug-session.json`, JSON.stringify(snapshot), "utf8");
       await writeFile(`${debugDir}/debug-events.json`, JSON.stringify(leanEvents), "utf8");
+      await publishPartialSnapshot(snapshot);
     } catch (err) {
       log.warn(`[agent] partial debug flush failed: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
