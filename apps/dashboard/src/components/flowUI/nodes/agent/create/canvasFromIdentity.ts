@@ -54,6 +54,18 @@ export function patchFromIdentity(agent: AgentIdentity): AgentCreateChatPatch {
   };
 }
 
+export function nameFromGeneratedPrompt(prompt: string): string {
+  const quoted = prompt.match(/You are\s+['"]([^'"]+)['"]/i);
+  if (quoted?.[1]) {
+    return quoted[1].replace(/[,.]+$/g, '').trim().slice(0, 80);
+  }
+  const bare = prompt.match(/You are\s+([A-Z][\w][\w\s-]{0,40}?)(?:,|\.| —| -|\s+an?\s)/);
+  if (bare?.[1]) {
+    return bare[1].trim().slice(0, 80);
+  }
+  return '';
+}
+
 export function nameFromIntent(intent: string): string {
   const words = intent
     .replace(/[^\p{L}\p{N}\s-]+/gu, ' ')

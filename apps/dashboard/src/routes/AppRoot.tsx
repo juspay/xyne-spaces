@@ -27,7 +27,6 @@ import AgentsTab from './ClawAgentsScreen/tabs/AgentsTab';
 import McpTab from './ClawAgentsScreen/tabs/McpTab';
 import SkillsTab from './ClawAgentsScreen/tabs/SkillsTab';
 import ClawAgentDetailScreen from './ClawAgentsScreen/ClawAgentDetailScreen';
-import ClawAgentCreateScreen from './ClawAgentsScreen/ClawAgentCreateScreen';
 import ClawMcpDetailScreen from './ClawAgentsScreen/ClawMcpDetailScreen';
 import ClawSkillDetailScreen from './ClawAgentsScreen/ClawSkillDetailScreen';
 import ClawSkillCreateScreen from './ClawAgentsScreen/ClawSkillCreateScreen';
@@ -1526,7 +1525,7 @@ export const router = createBrowserRouter(
                   ),
                   children: [
                     { index: true, element: <AgentsTab /> },
-                    { path: 'create', element: <ClawAgentCreateScreen /> },
+                    { path: 'create', element: <Navigate to='../ai/library/agent/create' replace /> },
                     { path: 'agents/:agentSlug', element: <ClawAgentDetailScreen /> },
                     { path: 'mcp', element: <McpTab /> },
                     { path: 'mcp/:mcpId', element: <ClawMcpDetailScreen /> },

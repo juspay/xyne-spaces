@@ -12,7 +12,7 @@ import { AgentCreateCanvas } from '@/components/flowUI/nodes/agent/create/AgentC
 import { AgentCreateChatPanel } from '@/components/flowUI/nodes/agent/create/AgentCreateChatPanel';
 import { AgentCreateFooter } from '@/components/flowUI/nodes/agent/create/AgentCreateFooter';
 import { DiscardDraftDialog } from '@/components/flowUI/nodes/agent/create/DiscardDraftDialog';
-import { descriptionFromIntent, nameFromIntent } from '@/components/flowUI/nodes/agent/create/canvasFromIdentity';
+import { descriptionFromIntent, nameFromGeneratedPrompt, nameFromIntent } from '@/components/flowUI/nodes/agent/create/canvasFromIdentity';
 import { toolboxFromSuggestion } from '@/components/flowUI/nodes/agent/create/toolboxFromSuggestion';
 import { EMPTY_CREATE_FORM, type AgentCreatePhase } from '@/components/flowUI/nodes/agent/create/types';
 import { useAgentCreateForm } from '@/components/flowUI/nodes/agent/create/useAgentCreateForm';
@@ -62,7 +62,10 @@ export function AgentCreateSplitPage(): ReactElement {
           intent: text,
           ...(createForm.form.name.trim() ? { agentName: createForm.form.name.trim() } : {}),
         });
-        const derivedName = createForm.form.name.trim() || nameFromIntent(text);
+        const derivedName =
+          createForm.form.name.trim() ||
+          nameFromGeneratedPrompt(prompt) ||
+          nameFromIntent(text);
         const derivedSlug = createForm.form.slugManual
           ? createForm.form.slug
           : slugify(derivedName);
