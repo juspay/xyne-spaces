@@ -28,10 +28,10 @@ export function McpChip({
       data-track-category='Claw Agents'
       data-track-name='Create agent v2: toggle MCP chip'
       className={cn(
-        'flex shrink-0 items-center gap-1.5 overflow-hidden rounded-[10px] border-[0.8px] border-border py-1 pl-1 pr-2 transition-colors',
+        'flex shrink-0 items-center gap-1.5 overflow-hidden rounded-[10px] border-[0.8px] border-xyne-border py-1 pl-1 pr-2 transition-colors',
         selected
-          ? 'border-solid bg-muted hover:bg-muted/70'
-          : 'border-dashed bg-card hover:bg-muted/50',
+          ? 'border-solid bg-xyne-surface-sunken hover:bg-xyne-surface-subtle'
+          : 'border-dashed bg-xyne-surface hover:bg-xyne-surface-subtle',
       )}
     >
       <McpIdentity
@@ -42,9 +42,9 @@ export function McpChip({
         muted={!selected}
       />
       {selected ? (
-        <MultipleCrossCancelDefault className='size-3 shrink-0 text-muted-foreground' aria-hidden />
+        <MultipleCrossCancelDefault className='size-3 shrink-0 text-xyne-fg-muted' aria-hidden />
       ) : (
-        <PlusDefault className='size-3 shrink-0 text-muted-foreground' aria-hidden />
+        <PlusDefault className='size-3 shrink-0 text-xyne-fg-muted' aria-hidden />
       )}
     </button>
   );

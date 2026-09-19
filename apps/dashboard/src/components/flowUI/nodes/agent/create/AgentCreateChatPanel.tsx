@@ -49,39 +49,41 @@ export function AgentCreateChatPanel({
 
   return (
     <div
-      className='flex h-full min-w-0 flex-col bg-background'
+      className='flex h-full min-w-0 flex-col bg-xyne-surface'
       data-component='AgentCreateChatPanel'
     >
-      <div className='flex h-14 flex-shrink-0 items-center border-b border-border px-5'>
-        <span className='font-mono text-sm leading-[18px] tracking-[0.2px] text-muted-foreground'>
+      <div className='flex h-14 flex-shrink-0 items-center border-b border-xyne-border px-5'>
+        <span className='font-mono text-sm leading-[18px] tracking-[0.2px] text-xyne-fg-muted'>
           Chat
         </span>
       </div>
       <div className='flex-1 overflow-y-auto px-5 py-4'>
         {lines.length === 0 ? (
-          <p className='text-sm leading-5 text-muted-foreground'>
+          <p className='text-sm leading-5 text-xyne-fg-muted'>
             No draft yet. Say what this agent should do, or edit the canvas.
           </p>
         ) : (
           <ul className='flex flex-col gap-4'>
             {lines.map(line => (
               <li key={line.id} className='flex flex-col gap-1'>
-                <span className='text-xs font-medium uppercase tracking-wide text-muted-foreground'>
+                <span className='text-xs font-medium uppercase tracking-wide text-xyne-fg-muted'>
                   {line.role === 'user' ? 'You' : 'Xyne'}
                 </span>
-                <p className='whitespace-pre-wrap text-sm leading-5 text-foreground'>{line.text}</p>
+                <p className='whitespace-pre-wrap text-sm leading-5 text-xyne-fg-primary'>
+                  {line.text}
+                </p>
               </li>
             ))}
           </ul>
         )}
         {error ? (
-          <p className='mt-3 text-sm leading-5 text-destructive' role='alert'>
+          <p className='mt-3 text-sm leading-5 text-xyne-red-600' role='alert'>
             {error}
           </p>
         ) : null}
       </div>
-      <form onSubmit={handleSubmit} className='flex-shrink-0 border-t border-border p-3'>
-        <div className='flex items-end gap-2 rounded-2xl border border-border bg-card p-1'>
+      <form onSubmit={handleSubmit} className='flex-shrink-0 border-t border-xyne-border p-3'>
+        <div className='flex items-end gap-2 rounded-2xl border border-xyne-border bg-xyne-surface p-1'>
           <textarea
             value={draft}
             onChange={event => setDraft(event.target.value)}
@@ -97,14 +99,14 @@ export function AgentCreateChatPanel({
             rows={2}
             data-track-category='Claw Agents'
             data-track-name='Create agent chat: composer'
-            className='min-h-[44px] min-w-0 flex-1 resize-none bg-transparent p-2 text-sm leading-5 text-foreground placeholder:text-muted-foreground focus:outline-none disabled:opacity-60'
+            className='min-h-[44px] min-w-0 flex-1 resize-none bg-transparent p-2 text-sm leading-5 text-xyne-fg-primary placeholder:text-xyne-fg-muted focus:outline-none disabled:opacity-60'
           />
           <button
             type='submit'
             disabled={disabled || sending || !draft.trim()}
             aria-label='Send'
             className={cn(
-              'flex size-9 shrink-0 items-center justify-center rounded-xl bg-foreground text-background transition-opacity',
+              'flex size-9 shrink-0 items-center justify-center rounded-xl bg-xyne-brand text-xyne-fg-inverse transition-opacity',
               (disabled || sending || !draft.trim()) && 'cursor-not-allowed opacity-40',
             )}
             data-track-category='Claw Agents'

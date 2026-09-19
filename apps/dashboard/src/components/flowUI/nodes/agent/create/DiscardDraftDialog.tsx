@@ -24,8 +24,8 @@ export function DiscardDraftDialog({
     >
       <div className='flex flex-col gap-4'>
         <div className='flex flex-col gap-1'>
-          <p className='text-base font-medium text-foreground'>Discard this draft?</p>
-          <p className='text-sm leading-5 text-muted-foreground'>The conversation stays.</p>
+          <p className='text-base font-medium text-xyne-fg-primary'>Discard this draft?</p>
+          <p className='text-sm leading-5 text-xyne-fg-muted'>The conversation stays.</p>
         </div>
         <div className='flex justify-end gap-2'>
           <Button

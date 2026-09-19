@@ -38,7 +38,7 @@ export function ChatFillHighlight({
         <motion.div
           aria-hidden
           data-testid='chat-fill-highlight'
-          className='pointer-events-none absolute -inset-1 rounded-2xl ring-2 ring-ring will-change-[opacity,transform]'
+          className='pointer-events-none absolute -inset-1 rounded-2xl ring-2 ring-xyne-brand will-change-[opacity,transform]'
           initial={reduceMotion ? { opacity: 1 } : { opacity: 0, scale: 0.98 }}
           animate={{ opacity: reduceMotion ? 1 : [0, 1, 1, 0], scale: 1 }}
           transition={
@@ -51,7 +51,7 @@ export function ChatFillHighlight({
       {visible && !reduceMotion && (
         <motion.span
           aria-hidden
-          className='pointer-events-none absolute -left-1 -top-1 z-10 text-foreground will-change-transform'
+          className='pointer-events-none absolute -left-1 -top-1 z-10 text-xyne-fg-primary will-change-transform'
           initial={{ opacity: 0, x: -8, y: -8 }}
           animate={{ opacity: [0, 1, 1, 0], x: 0, y: 0 }}
           transition={{ duration: 1.2, times: [0, 0.2, 0.7, 1], ease: 'easeOut' }}

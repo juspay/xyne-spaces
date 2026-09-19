@@ -48,24 +48,24 @@ function ConflictChooser({
 }): ReactElement {
   return (
     <div className='flex flex-wrap items-center gap-2 text-sm leading-5'>
-      <span className='text-muted-foreground'>Chat proposed a different value.</span>
+      <span className='text-xyne-fg-muted'>Chat proposed a different value.</span>
       <button
         type='button'
         onClick={onKeep}
-        className='font-medium text-foreground underline-offset-2 hover:underline'
+        className='font-medium text-xyne-fg-primary underline-offset-2 hover:underline'
         data-track-category='AGENT_ARTIFACT'
         data-track-name='CONFLICT_KEEP_MINE'
         data-testid='conflict-keep-mine'
       >
         Keep mine
       </button>
-      <span className='text-muted-foreground' aria-hidden>
+      <span className='text-xyne-fg-muted' aria-hidden>
         ·
       </span>
       <button
         type='button'
         onClick={onUseChat}
-        className='font-medium text-foreground underline-offset-2 hover:underline'
+        className='font-medium text-xyne-fg-primary underline-offset-2 hover:underline'
         data-track-category='AGENT_ARTIFACT'
         data-track-name='CONFLICT_USE_CHAT'
         data-testid='conflict-use-chat'
@@ -140,9 +140,12 @@ export function AgentCreateCanvas({
   };
 
   return (
-    <div className='flex h-full min-w-0 flex-col bg-background' data-component='AgentCreateCanvas'>
-      <div className='flex h-14 flex-shrink-0 items-center justify-between border-b border-border px-5'>
-        <span className='font-mono text-sm leading-[18px] tracking-[0.2px] text-muted-foreground'>
+    <div
+      className='flex h-full min-w-0 flex-col bg-xyne-surface'
+      data-component='AgentCreateCanvas'
+    >
+      <div className='flex h-14 flex-shrink-0 items-center justify-between border-b border-xyne-border px-5'>
+        <span className='font-mono text-sm leading-[18px] tracking-[0.2px] text-xyne-fg-muted'>
           Agent
         </span>
         {onClose ? (
@@ -150,7 +153,7 @@ export function AgentCreateCanvas({
             type='button'
             onClick={onClose}
             aria-label='Close'
-            className='rounded-md p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground'
+            className='rounded-md p-1 text-xyne-fg-muted transition-colors hover:bg-xyne-surface-subtle hover:text-xyne-fg-primary'
             data-track-category='AGENT_ARTIFACT'
             data-track-name='CLOSE_AGENT_PREVIEW'
           >
@@ -183,14 +186,14 @@ export function AgentCreateCanvas({
                       disabled={disabled}
                       data-track-category='Claw Agents'
                       data-track-name='Create agent canvas: name'
-                      className='text-base font-medium leading-6 tracking-[-0.1px] text-foreground placeholder:font-medium placeholder:text-muted-foreground'
+                      className='text-base font-medium leading-6 tracking-[-0.1px] text-xyne-fg-primary placeholder:font-medium placeholder:text-xyne-fg-muted'
                     />
-                    <PencilEditLine className='size-3 shrink-0 text-muted-foreground' aria-hidden />
+                    <PencilEditLine className='size-3 shrink-0 text-xyne-fg-muted' aria-hidden />
                   </div>
 
                   <div className='flex items-center gap-1.5'>
-                    <div className='flex items-center gap-0.5 rounded-[10px] bg-muted py-0.5 pl-0.5 pr-1'>
-                      <AtMark className='size-4 shrink-0 text-muted-foreground' aria-hidden />
+                    <div className='flex items-center gap-0.5 rounded-[10px] bg-xyne-surface-sunken py-0.5 pl-0.5 pr-1'>
+                      <AtMark className='size-4 shrink-0 text-xyne-fg-muted' aria-hidden />
                       <AutoWidthInput
                         id='agent-create-handle'
                         value={form.slug}
@@ -204,25 +207,22 @@ export function AgentCreateCanvas({
                         aria-label='Handle'
                         disabled={disabled}
                         style={{ width: inlineWidth(form.slug, 'handle') }}
-                        className='text-sm font-medium leading-5 tracking-[-0.14px] text-foreground placeholder:font-medium placeholder:text-muted-foreground'
+                        className='text-sm font-medium leading-5 tracking-[-0.14px] text-xyne-fg-primary placeholder:font-medium placeholder:text-xyne-fg-muted'
                       />
                     </div>
                     {checkingHandle && form.name.trim().length > 0 && (
-                      <Loader2
-                        className='size-3.5 animate-spin text-muted-foreground'
-                        aria-hidden
-                      />
+                      <Loader2 className='size-3.5 animate-spin text-xyne-fg-muted' aria-hidden />
                     )}
                   </div>
 
                   {handleError ? (
-                    <p className='text-sm leading-5 text-destructive' role='alert'>
+                    <p className='text-sm leading-5 text-xyne-red-600' role='alert'>
                       {handleError}
                     </p>
                   ) : null}
 
                   {builtBy ? (
-                    <p className='flex items-center gap-1.5 text-sm leading-[1.5] text-foreground'>
+                    <p className='flex items-center gap-1.5 text-sm leading-[1.5] text-xyne-fg-primary'>
                       Built by
                       <span className='text-[color:var(--mention-color)]'>@{builtBy}</span>
                     </p>
@@ -237,7 +237,7 @@ export function AgentCreateCanvas({
                 <div className='flex w-full flex-col gap-3'>
                   <label
                     htmlFor='agent-create-description'
-                    className='text-sm font-medium leading-[1.2] tracking-[-0.1px] text-foreground'
+                    className='text-sm font-medium leading-[1.2] tracking-[-0.1px] text-xyne-fg-primary'
                   >
                     Description
                   </label>
@@ -251,7 +251,7 @@ export function AgentCreateCanvas({
                     placeholder='When to use this agent'
                     data-track-category='Claw Agents'
                     data-track-name='Create agent canvas: description'
-                    className='h-[86px] w-full resize-y rounded-2xl border border-border bg-card p-4 text-sm leading-5 text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60'
+                    className='h-[86px] w-full resize-y rounded-2xl border border-xyne-border bg-xyne-surface p-4 text-sm leading-5 text-xyne-fg-primary placeholder:text-xyne-fg-muted focus:outline-none focus:ring-1 focus:ring-xyne-brand disabled:opacity-60'
                   />
                   {renderConflict('description')}
                 </div>
@@ -261,7 +261,7 @@ export function AgentCreateCanvas({
                 <div className='flex w-full flex-col gap-3'>
                   <label
                     htmlFor='agent-create-instructions'
-                    className='text-sm font-medium leading-[1.2] tracking-[-0.1px] text-foreground'
+                    className='text-sm font-medium leading-[1.2] tracking-[-0.1px] text-xyne-fg-primary'
                   >
                     Instructions
                   </label>
@@ -276,7 +276,7 @@ export function AgentCreateCanvas({
                     placeholder='How it should work'
                     data-track-category='Claw Agents'
                     data-track-name='Create agent canvas: instructions'
-                    className='min-h-[180px] w-full resize-y rounded-2xl border border-border bg-card p-4 text-sm leading-5 text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60'
+                    className='min-h-[180px] w-full resize-y rounded-2xl border border-xyne-border bg-xyne-surface p-4 text-sm leading-5 text-xyne-fg-primary placeholder:text-xyne-fg-muted focus:outline-none focus:ring-1 focus:ring-xyne-brand disabled:opacity-60'
                   />
                   {renderConflict('systemPrompt')}
                 </div>
@@ -352,13 +352,13 @@ export function AgentCreateCanvas({
                 </div>
               </ChatFillHighlight>
 
-              {note ? <p className='text-sm leading-5 text-muted-foreground'>{note}</p> : null}
+              {note ? <p className='text-sm leading-5 text-xyne-fg-muted'>{note}</p> : null}
             </>
           )}
         </div>
       </div>
       {footer ? (
-        <div className='flex-shrink-0 border-t border-border bg-foreground/[0.03] px-6 py-3'>
+        <div className='flex-shrink-0 border-t border-xyne-border bg-xyne-surface-subtle px-6 py-3'>
           {footer}
         </div>
       ) : null}
