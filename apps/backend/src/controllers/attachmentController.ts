@@ -29,6 +29,7 @@ import { isSupportedMimeType } from '@/services/fileProcessor';
 import { repositories } from '@/database/repositories';
 import { callShareService } from '@/services/callShareService';
 import { cacheManager } from '../utils/cacheManager';
+import { pipeline } from 'node:stream/promises';
 
 const db = DatabaseClient.getInstance();
 
@@ -80,6 +81,25 @@ interface ResolvedStreamTarget {
 type StreamTargetResult =
   | { ok: true; target: ResolvedStreamTarget }
   | { ok: false; status: number; body: Record<string, string> };
+
+/**
+ * Make a value safe to interpolate into a log line. Route parameters reach the
+ * logs from the request, and a CR/LF inside one would let a caller forge extra
+ * log entries; the length cap keeps a long path from flooding a line.
+ */
+const forLog = (value: string): string => value.replace(/[\r\n]+/g, ' ').slice(0, 200);
+
+/**
+ * Resolutions currently in flight, keyed exactly like the TTL cache.
+ *
+ * On a cold cache the player opens several range requests at once, and every
+ * one of them would otherwise run the full resolve — the attachment lookup, the
+ * participant query and the storage HEAD — concurrently, precisely at the start
+ * of playback where the stall was worst. Sharing the in-flight promise collapses
+ * that burst into a single resolve. Entries are removed as soon as they settle,
+ * so this never holds a result; the TTL cache does that.
+ */
+const inFlightStreamTargets = new Map<string, Promise<StreamTargetResult>>();
 
 export class AttachmentController {
   private messageAttachmentRepository: MessageAttachmentRepository;
@@ -510,8 +530,12 @@ export class AttachmentController {
    * high-bitrate files. The result is therefore memoised per (user, attachment)
    * for STREAM_TARGET_TTL_SECONDS. Only successful resolutions are cached, so a
    * denial is always recomputed.
+   *
+   * The memo is per process. With several replicas a playback's chunks can land
+   * on different pods, each paying its own resolve once per TTL; the security
+   * trade documented on STREAM_TARGET_TTL_SECONDS holds per pod either way.
    */
-  private async resolveStreamTarget(
+  private resolveStreamTarget(
     attachmentId: string,
     userId: string,
     workspaceId: string | undefined,
@@ -519,9 +543,32 @@ export class AttachmentController {
     const cacheKey = `attachment-stream:${userId}:${workspaceId ?? 'none'}:${attachmentId}`;
     const cached = cacheManager.get<ResolvedStreamTarget>(cacheKey);
     if (cached) {
-      return { ok: true, target: cached };
+      return Promise.resolve({ ok: true, target: cached });
     }
 
+    // A resolve for this key is already running — wait on it instead of running
+    // a second copy of the same three round trips.
+    const inFlight = inFlightStreamTargets.get(cacheKey);
+    if (inFlight) {
+      return inFlight;
+    }
+
+    const pending = this.loadStreamTarget(attachmentId, userId, workspaceId, cacheKey).finally(
+      () => {
+        inFlightStreamTargets.delete(cacheKey);
+      },
+    );
+    inFlightStreamTargets.set(cacheKey, pending);
+    return pending;
+  }
+
+  /** The uncached resolve. Only ever called through resolveStreamTarget. */
+  private async loadStreamTarget(
+    attachmentId: string,
+    userId: string,
+    workspaceId: string | undefined,
+    cacheKey: string,
+  ): Promise<StreamTargetResult> {
     const attachment = await this.messageAttachmentRepository.findById(attachmentId);
     if (!attachment) {
       return { ok: false, status: 404, body: { error: 'Attachment not found' } };
@@ -545,11 +592,15 @@ export class AttachmentController {
       const metadata = await getAttachmentStorage(attachment).getFileMetadata(filePath);
       fileSize = parseInt(String(metadata.size || '0'), 10);
     } catch (error) {
-      logger.error(`File not found in storage: ${filePath}`, error);
+      logger.error(`File not found in storage: ${forLog(filePath)}`, error);
       return { ok: false, status: 404, body: { error: 'File not found in storage' } };
     }
 
-    logger.info(`Resolved attachment stream ${attachmentId} -> ${filePath} (${fileSize} bytes)`);
+    // attachment.id, not the route parameter: the id is echoed back from the row
+    // that was just loaded, so nothing user-supplied reaches the log line.
+    logger.info(
+      `Resolved attachment stream ${forLog(attachment.id)} -> ${forLog(filePath)} (${fileSize} bytes)`,
+    );
 
     const target: ResolvedStreamTarget = { attachment, filePath, fileSize };
     // Transcripts are rewritten in place, so a remembered size would go stale.
@@ -587,24 +638,35 @@ export class AttachmentController {
       const pipeToResponse = async (options?: { start: number; end: number }): Promise<void> => {
         const stream = await service.createReadStream(filePath, options);
 
-        // Seeking (or a player that has buffered enough) aborts the response
-        // mid-flight. Without this the storage stream stays open and keeps
-        // pulling bytes nobody will read — a scrub through a long video leaks
-        // one such stream per seek.
-        res.on('close', () => {
+        // Opening the stream is itself a round trip, and a scrubbing player can
+        // abort within it. The response would then already have closed before
+        // anything could be attached to it, so check before handing the stream
+        // to pipeline — otherwise it drains to a dead socket, which is the leak
+        // this endpoint is meant to avoid.
+        if (res.destroyed || res.writableEnded) {
           (stream as NodeJS.ReadableStream & { destroy?: () => void }).destroy?.();
-        });
+          return;
+        }
 
-        stream.on('error', (error) => {
+        try {
+          // pipeline destroys the storage stream when the response closes — a
+          // seek mid-transfer no longer leaves it draining — and routes every
+          // failure through one catch.
+          await pipeline(stream, res);
+        } catch (error) {
+          // The client going away first is ordinary during seeking, not a fault.
+          if ((error as NodeJS.ErrnoException)?.code === 'ERR_STREAM_PREMATURE_CLOSE') {
+            return;
+          }
           logger.error('Stream error:', error);
-          if (!res.headersSent) {
+          // pipeline destroys the response when the source fails, so there may
+          // be nothing left to answer on.
+          if (!res.headersSent && !res.destroyed) {
             res.status(500).json({ error: 'Stream error' });
-          } else {
+          } else if (!res.destroyed) {
             res.destroy();
           }
-        });
-
-        stream.pipe(res);
+        }
       };
 
       // Parse Range header (e.g., "bytes=0-1023")
