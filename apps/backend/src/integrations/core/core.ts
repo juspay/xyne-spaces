@@ -525,6 +525,7 @@ export class ExternalSourceCore {
     if (targetConversationId && isDeskChannel && normalizedData.emailData) {
       const conversation = await this.conversationRepo.findById(targetConversationId);
       if (conversation) {
+        const rootEmail = await this.emailRepo.findFirstByConversationId(conversation.conversationId);
         const uploadedFilesForTarget =
           AttachmentConversionService.convertDownloadedToUploaded(downloadedAttachments);
         const { email } = await emailService.addEmailToConversation({
@@ -536,7 +537,7 @@ export class ExternalSourceCore {
           emailCc: normalizedData.emailData.cc || [],
           emailBcc: normalizedData.emailData.bcc || [],
           emailReplyTo: normalizedData.emailData.replyTo || [],
-          externalThreadId: normalizedData.externalThreadId,
+          externalThreadId: rootEmail?.externalThreadId || normalizedData.externalThreadId,
           externalMessageId: normalizedData.externalId,
           rfcMessageId: normalizedData.rfcMessageId,
           uploadedFiles: uploadedFilesForTarget,
