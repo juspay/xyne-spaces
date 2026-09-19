@@ -31,6 +31,9 @@ import type { SlackMessage } from '@/migration/slack/utils/extractConversation';
 import { postMessage } from '@/migration/slack/utils/postMessage';
 import { getBotConfigByWorkspaceId } from '@/migration/slack/slackMigrationBotConfig';
 import { runWithSlackOfflineReference, type SlackOfflineReference } from '@/integrations/adapters/slack-webhook-tickets/utils/slackOfflineReference';
+import { listChannelFiles } from '@/migration/slack/channelFiles';
+import { fetchChannelLinks, ingestChannelLinks, type ChannelLink } from '@/migration/slack/channelLinks';
+import { fetchChannelCanvases, ingestChannelCanvases, type ChannelCanvas } from '@/migration/slack/channelCanvases';
 import { encryptStream, decryptStream, encryptBuffer, decryptBuffer } from './migrationCrypto';
 import { getMigrationRuntimeConfig, MIGRATION_DEFAULTS } from './migrationRuntimeConfig';
 import { ChannelInput, MigrationJob, MigrationType } from './types';
@@ -88,9 +91,12 @@ const paths = {
   conversationRefresh: (p: string, id: string, runTs: number) => `${p}/conversations/${id}.r${runTs}.jsonl`,
   conversationsDir: (p: string) => `${p}/conversations/`,
   cursors: (p: string) => `${p}/cursors.json`,
+  links: (p: string, id: string) => `${p}/links/${id}.json`,
+  canvases: (p: string, id: string) => `${p}/canvases/${id}.json`,
   pins: (p: string, id: string) => `${p}/pins/${id}.json`,
   usergroups: (p: string) => `${p}/usergroups.json`,
   channels: (p: string) => `${p}/channels.json`,
+  filesDir: (p: string) => `${p}/files/`,
   file: (p: string, fileId: string) => `${p}/files/${fileId}`,
   publicChannelsCache: (root: string, teamId: string) => `${root}/_public-channels/${teamId}.json`,
 };
@@ -149,6 +155,8 @@ export class SlackMigrationEngine {
   private readonly manifestCache = new Map<string, { at: number; convs: CollectedConversation[] }>();
   private static readonly WORKER_CACHE_TTL_MS = 30 * 60 * 1000;
   private readonly lockRedis = createRedisClient('slack-migration-ingest-lock');
+  // Storage-keys already uploaded per job (listed once) so a resume skips re-fetching them from Slack.
+  private readonly uploadedFiles = new Map<string, Promise<Set<string>>>();
 
   // Serialize writes per target channel so two jobs ingesting the same group DM don't race past dedup. TTL avoids
   // deadlock on a crashed holder; refreshed while held so a long ingest keeps it.
@@ -481,9 +489,23 @@ export class SlackMigrationEngine {
   }
 
   /** Stream one Slack-hosted file straight to storage (never buffered); returns its storage path. */
+  private uploadedFileSet(gcsPrefix: string): Promise<Set<string>> {
+    let set = this.uploadedFiles.get(gcsPrefix);
+    if (!set) {
+      set = this.storage.listFiles(paths.filesDir(gcsPrefix))
+        .then((files) => new Set(files.map((f) => f.name)))
+        .catch(() => new Set<string>());
+      this.uploadedFiles.set(gcsPrefix, set);
+    }
+    return set;
+  }
+
   private async streamFileToGcs(token: string, file: { id: string; url_private: string; url_private_download?: string; mimetype?: string }, gcsPrefix: string): Promise<string | undefined> {
     const cfg = await getMigrationRuntimeConfig();
     const dest = paths.file(gcsPrefix, file.id);
+    // Skip re-downloading a file already streamed on an earlier run (resume idempotency).
+    const uploaded = await this.uploadedFileSet(gcsPrefix);
+    if (uploaded.has(dest)) return this.storage.buildStorageUri(dest);
     const url = file.url_private_download || file.url_private;
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), cfg.fileTimeoutMs);
@@ -512,6 +534,7 @@ export class SlackMigrationEngine {
       });
       const ms = Date.now() - startedAt;
       if (ms >= 5000) logger.warn('[SlackMigration] slow attachment download', { id: file.id, ms });
+      uploaded.add(dest);
       // Full gs://bucket/key URI so ingestion reads the migration bucket, not the default attachment storage.
       return this.storage.buildStorageUri(dest);
     } catch (e) {
@@ -668,6 +691,41 @@ export class SlackMigrationEngine {
         ? await bulkIngestConversationSlack(ingestInput)
         : await ingestConversationSlack(ingestInput);
       await channelRepo.recalculateLastActivityFromMessages(channelId);
+
+      // Collected links + canvases → Xyne Link/Canvas (idempotent, non-fatal).
+      const [links, canvases] = await Promise.all([
+        this.readConversationLinks(job.gcsPrefix, conv.id),
+        this.readConversationCanvases(job.gcsPrefix, conv.id),
+      ]);
+      if (links.length || canvases.length) {
+        // Author: DM owner → channel creator → the migration submitter (always a valid Xyne user, so channel
+        // migrations — which have no ownerSlackId — still ingest their links/canvases).
+        const fallbackUserId = dmOwnerId
+          ?? (job.ownerSlackId ? await resolve(job.ownerSlackId) : undefined)
+          ?? (job.slackChannelCreator ? await resolve(job.slackChannelCreator) : undefined)
+          ?? job.submittedByUserId;
+        if (fallbackUserId) {
+          const target = {
+            xyneChannelId: channelId, workspaceId: job.workspaceId,
+            resolveUser: (sid?: string) => (sid ? resolve(sid) : Promise.resolve(undefined)),
+            fallbackUserId,
+          };
+          // Ingest each independently so one failing doesn't hide the other's result, and the log shows collected-vs-ingested.
+          try {
+            const n = await ingestChannelLinks(links, target);
+            logger.info('[SlackMigration] links ingested', { convId: conv.id, collected: links.length, ingested: n });
+          } catch (e) {
+            logger.warn('[SlackMigration] links ingest failed', { convId: conv.id, error: e instanceof Error ? e.message : String(e) });
+          }
+          try {
+            const n = await ingestChannelCanvases(canvases, target, config.slackBotToken); // central bot token → rehost canvas images
+            logger.info('[SlackMigration] canvases ingested', { convId: conv.id, collected: canvases.length, ingested: n });
+          } catch (e) {
+            logger.warn('[SlackMigration] canvases ingest failed', { convId: conv.id, error: e instanceof Error ? e.message : String(e) });
+          }
+        }
+      }
+
       return { ingested: messages.length, failed: ingestResult.errorDetails?.length ?? 0 };
       });
     });
@@ -719,6 +777,25 @@ export class SlackMigrationEngine {
   }
   writeCursors(gcsPrefix: string, cursors: Record<string, number>): Promise<void> {
     return this.writeJson(paths.cursors(gcsPrefix), cursors);
+  }
+
+  /** Collect a conversation's links + canvases from Slack → GCS (one files.list, shared), so they survive approve→ingest. Fail-soft. */
+  async collectConversationResources(token: string, convId: string, gcsPrefix: string): Promise<void> {
+    const cfg = await getMigrationRuntimeConfig();
+    const client = slackClient(token, cfg.requestTimeoutMs);
+    const files = await listChannelFiles(client, convId);
+    const links = await fetchChannelLinks(client, convId, files);
+    const canvases = await fetchChannelCanvases(token, files);
+    if (links.length) await this.writeJson(paths.links(gcsPrefix, convId), links);
+    if (canvases.length) await this.writeJson(paths.canvases(gcsPrefix, convId), canvases);
+  }
+
+  private readConversationLinks(gcsPrefix: string, convId: string): Promise<ChannelLink[]> {
+    return this.readJson<ChannelLink[]>(paths.links(gcsPrefix, convId)).catch(() => []);
+  }
+
+  private readConversationCanvases(gcsPrefix: string, convId: string): Promise<ChannelCanvas[]> {
+    return this.readJson<ChannelCanvas[]>(paths.canvases(gcsPrefix, convId)).catch(() => []);
   }
 
   writeManifest(gcsPrefix: string, conversations: CollectedConversation[]): Promise<void> {
