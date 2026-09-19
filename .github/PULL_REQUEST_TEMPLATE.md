@@ -12,6 +12,28 @@
 <!-- What changed, and why. Link the ticket (XYNE-xxxx) or issue. -->
 
 
+## RCA — required for Bugfix PRs
+<!-- Delete this whole section only if this is NOT a bugfix. Keep every heading below;
+     CI checks that each one has real content. -->
+
+### Root Cause
+<!-- The exact defect. Which commit/PR/behaviour introduced it, if known. -->
+
+### Missed Scenario
+<!-- Why dev, review, and QA did not catch it. Be specific: no test, test existed but
+     asserted the wrong thing, env-only path, race, data shape not covered, review gap. -->
+
+### Impact
+<!-- Which user flow broke, which actors (member/admin/app user/worker), which
+     environments, and for how long. -->
+
+### Fix
+<!-- What this change does and why it is the minimal correct fix. -->
+
+### Prevention
+<!-- A concrete artifact: test added in this PR, automation ticket ID, alert, guardrail,
+     lint/CI rule. "Be more careful" is not prevention. -->
+
 ## Areas Touched
 
 - [ ] `apps/backend` (API / worker)
