@@ -2,6 +2,7 @@ import { useState, type FormEvent, type ReactElement } from 'react';
 import { ArrowUp } from '@xyne/icons';
 import { Loader2 } from 'lucide-react';
 import { cn } from '@/utils/classNames';
+import { clawErrorText } from '@/services/claw/clawRequest';
 
 interface ChatLine {
   id: string;
@@ -37,8 +38,7 @@ export function AgentCreateChatPanel({
         setLines(prev => [...prev, { id: `a-${Date.now()}`, role: 'assistant', text: reply }]);
       }
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Could not draft from chat. Try again.';
-      setError(message);
+      setError(clawErrorText(err, 'Could not draft from chat. Try again.'));
     }
   };
 

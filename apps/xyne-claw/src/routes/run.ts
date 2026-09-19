@@ -5110,9 +5110,14 @@ router.post("/generate-prompt", validateS2SKey, async (req, res: Response) => {
     });
 
     if (!llmRes.ok) {
-      res
-        .status(500)
-        .json({ success: false, error: `LLM returned ${llmRes.status}` });
+      if (llmRes.status === 429) {
+        res.status(429).json({
+          success: false,
+          error: "Rate-limited right now. Try again in a moment.",
+        });
+        return;
+      }
+      res.status(500).json({ success: false, error: "Failed to generate prompt" });
       return;
     }
 

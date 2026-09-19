@@ -22,12 +22,26 @@ export class ClawApiError extends Error {
   }
 }
 
+const RATE_LIMIT_COPY = 'Rate-limited right now. Try again in a moment.';
+
+function isRateLimited(status: number, raw: string): boolean {
+  return status === 429 || /429|rate.?limit|too many requests/i.test(raw);
+}
+
 /** Converts a claw request failure to safe, consistent user-facing copy. */
 export const clawErrorText = (error: unknown, fallback: string): string => {
   if (error instanceof ClawApiError && error.status === 403) {
     return 'You don’t have permission to do that';
   }
-  return error instanceof Error ? error.message : fallback;
+  const raw = error instanceof Error ? error.message : '';
+  const status = error instanceof ClawApiError ? error.status : 0;
+  if (isRateLimited(status, raw)) {
+    return RATE_LIMIT_COPY;
+  }
+  if (/LLM returned/i.test(raw)) {
+    return fallback;
+  }
+  return raw || fallback;
 };
 
 export interface ClawApiRequestInit extends Omit<RequestInit, 'headers'> {
@@ -54,7 +68,8 @@ export async function clawRequest<T>(path: string, init?: RequestInit): Promise<
 
   if (!res.ok) {
     const body = (await res.json().catch(() => ({}))) as { error?: string };
-    throw new ClawApiError(res.status, body.error ?? `Request failed: ${res.status}`);
+    const raw = body.error ?? `Request failed: ${res.status}`;
+    throw new ClawApiError(res.status, clawErrorText(new ClawApiError(res.status, raw), raw));
   }
 
   return res.json() as Promise<T>;
