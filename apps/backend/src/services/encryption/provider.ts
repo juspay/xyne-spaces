@@ -2,6 +2,7 @@ import { config } from '@/config/env';
 import type {
   ClientEncryptionConfig,
   EncryptBatchItem,
+  EncryptedFieldConfig,
   EncryptionProvider,
   ProvisionEntityInput,
   ProvisionEntityResult,
@@ -24,6 +25,11 @@ const provider: EncryptionProvider = {
       };
     }
     return unsupported('getPublicConfig');
+  },
+
+  async getEncryptedFieldsConfig(): Promise<Record<string, EncryptedFieldConfig>> {
+    if (!config.enc.enableDbEncryption && !config.enc.enableDbDecryption) return {};
+    return unsupported('getEncryptedFieldsConfig');
   },
 
   async registerSessionKey(input: RegisterSessionKeyInput): Promise<RegisterSessionKeyResult> {
