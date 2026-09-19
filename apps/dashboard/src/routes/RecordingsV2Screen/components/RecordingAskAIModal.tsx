@@ -10,15 +10,15 @@ import { TextShimmer } from '../../../components/ui/ShimmerText';
 import { XyneAIStar } from '../../../components/icons/xyne-ai';
 import type { OatsRecordingEntry } from '../../../hooks/usePaginatedOatsRecordings';
 import { useRecordingTitleState } from '../../../hooks/useRecordingTitleState';
-import {
-  formatParticipantNames,
-  getPreviewParticipantUsers,
-} from '../../CallHistoryScreen/callHistoryItem.utils';
+import { getPreviewParticipantUsers } from '../../CallHistoryScreen/callHistoryItem.utils';
 import { cn } from '../../../utils/classNames';
 import { formatRecordingDuration, normalizeRecordingTags } from '../../../utils/recordingUtils';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
-import { formatRecordingTimestamp, toRecordingTitleInput } from '../utils/RecordingsV2.utils';
-import { buildDateGroupedRowsFromItems } from '../../../utils/dateGroupedList';
+import {
+  buildRecordingRows,
+  formatRecordingTimestamp,
+  toRecordingTitleInput,
+} from '../utils/RecordingsV2.utils';
 
 export interface RecordingAskAIModalProps {
   open: boolean;
@@ -39,6 +39,16 @@ interface SearchableRecording {
 const MAX_SELECTED_RECORDINGS = 25;
 
 const LIMIT_NOTICE_MS = 3200;
+
+/** Mirrors the list rows: two names, then a count for whoever is left. */
+function formatParticipants(participants: User[]): string {
+  const names = participants.map(participant => getUserDisplayName(participant));
+  if (names.length === 0) return 'Just you';
+  if (names.length <= 2) return names.join(' & ');
+
+  const remaining = names.length - 2;
+  return `${names[0]}, ${names[1]} & ${remaining} other${remaining === 1 ? '' : 's'}`;
+}
 
 const RecordingAskAIModal = ({
   open,
@@ -100,7 +110,7 @@ const RecordingAskAIModal = ({
   );
 
   const rows = useMemo(
-    () => buildDateGroupedRowsFromItems(filtered.map(entry => entry.recording)),
+    () => buildRecordingRows(filtered.map(entry => entry.recording)),
     [filtered],
   );
 
@@ -278,10 +288,10 @@ const RecordingAskAIModal = ({
                 ) : (
                   <RecordingOption
                     key={row.id}
-                    recording={row.item}
-                    participants={participantsByRecordingId.get(row.item.id) ?? []}
-                    checked={selectedIds.has(row.item.id)}
-                    blocked={isAtLimit && !selectedIds.has(row.item.id)}
+                    recording={row.recording}
+                    participants={participantsByRecordingId.get(row.recording.id) ?? []}
+                    checked={selectedIds.has(row.recording.id)}
+                    blocked={isAtLimit && !selectedIds.has(row.recording.id)}
                     onToggle={toggleRecording}
                   />
                 ),
@@ -372,13 +382,12 @@ const RecordingOption = ({
   return (
     <li
       role='option'
-      tabIndex={0}
       aria-selected={checked}
       aria-disabled={blocked}
       data-theme-tokens
       onClick={() => onToggle(recording.id)}
       onKeyDown={event => {
-        if (event.key !== 'Enter' && event.key !== ' ') return;
+        if (event.key !== 'Enter') return;
         event.preventDefault();
         onToggle(recording.id);
       }}
@@ -413,8 +422,7 @@ const RecordingOption = ({
           </span>
         )}
         <span className='mt-0.5 block truncate text-xs text-muted-foreground'>
-          {formatParticipantNames(participants.map(participant => getUserDisplayName(participant)))}{' '}
-          · {formatRecordingTimestamp(recording.startedAt)}
+          {formatParticipants(participants)} · {formatRecordingTimestamp(recording.startedAt)}
         </span>
       </span>
 

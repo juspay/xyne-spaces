@@ -7,6 +7,8 @@ import { buildMcpCatalog, type McpCatalogEntry } from './mcpCatalog';
 export interface McpCatalog {
   entries: McpCatalogEntry[];
   connectedServerIds: Set<string>;
+  /** Connectors the org covers with a shared credential — usable without your own. */
+  orgCoveredServerIds: Set<string>;
   /** The live connection per server, for actions that need its id (disconnect, health). */
   connectionsByServerId: Map<string, UserConnection>;
   loading: boolean;
@@ -28,6 +30,16 @@ export function useMcpCatalog(): McpCatalog {
     [mcp.data?.connections],
   );
 
+  const orgCoveredServerIds = useMemo(
+    () =>
+      new Set(
+        (mcp.data?.availability ?? [])
+          .filter(entry => entry.org && !entry.personal)
+          .map(entry => entry.mcpServerId),
+      ),
+    [mcp.data?.availability],
+  );
+
   const connectionsByServerId = useMemo(
     () =>
       new Map(
@@ -38,6 +50,7 @@ export function useMcpCatalog(): McpCatalog {
 
   return {
     entries,
+    orgCoveredServerIds,
     connectedServerIds,
     connectionsByServerId,
     loading: tools.isLoading,

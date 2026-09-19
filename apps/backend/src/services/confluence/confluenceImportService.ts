@@ -408,17 +408,6 @@ export class ConfluenceImportService {
       throw new Error(`Target project ${input.projectId} not found`);
     }
 
-    const actorMembership = await db.channelParticipant.findFirst({
-      where: {
-        userId: input.actorUserId,
-        channel: { projectId: input.projectId },
-      },
-      select: { id: true },
-    });
-    if (!actorMembership) {
-      throw new Error(`Actor user ${input.actorUserId} must belong to at least one channel in project ${input.projectId}`);
-    }
-
     const mappedChannelIds = Object.values(input.sectionMappings || {})
       .filter((mapping): mapping is { type: 'channel' | 'channelFolder'; channelId: string } =>
         (mapping.type === 'channel' || mapping.type === 'channelFolder') && typeof mapping.channelId === 'string',
@@ -428,16 +417,13 @@ export class ConfluenceImportService {
     if (mappedChannelIds.length > 0) {
       const channels = await db.channel.findMany({
         where: { id: { in: mappedChannelIds } },
-        select: { id: true, projectId: true, isArchived: true },
+        select: { id: true, isArchived: true },
       });
       const channelById = new Map(channels.map(channel => [channel.id, channel]));
 
       for (const channelId of mappedChannelIds) {
         const channel = channelById.get(channelId);
         if (!channel) throw new Error(`Mapped channel ${channelId} not found`);
-        if (channel.projectId !== input.projectId) {
-          throw new Error(`Mapped channel ${channelId} does not belong to project ${input.projectId}`);
-        }
         if (channel.isArchived) {
           throw new Error(`Mapped channel ${channelId} is archived`);
         }
@@ -485,7 +471,7 @@ export class ConfluenceImportService {
         workspaceId,
       });
 
-      projectId = targetChannel.projectId;
+      projectId = targetChannel.projectId ?? undefined;
       defaultChannelId = targetChannel.id;
       reusedProject = true;
       reusedChannels += 1;
@@ -551,7 +537,7 @@ export class ConfluenceImportService {
     channelId?: string;
     channelName?: string;
     workspaceId: string;
-  }): Promise<{ id: string; name: string; projectId: string }> {
+  }): Promise<{ id: string; name: string; projectId: string | null }> {
     if (input.channelId) {
       const channel = await db.channel.findFirst({
         where: {

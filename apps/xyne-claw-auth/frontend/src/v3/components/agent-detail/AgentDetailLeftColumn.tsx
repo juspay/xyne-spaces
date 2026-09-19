@@ -1680,6 +1680,28 @@ function DisclosureHeader({
 
 /* ── main component ────────────────────────────────────────────────── */
 
+const OPEN_PALETTE_OPTIONS: ReadonlyArray<{
+  value: "off" | "read" | "all";
+  label: string;
+  detail: string;
+}> = [
+  {
+    value: "off",
+    label: "Off",
+    detail: "Only the tools selected below. This is the default.",
+  },
+  {
+    value: "read",
+    label: "Read-only",
+    detail: "Also any read-only tool in the deployment, without a grant.",
+  },
+  {
+    value: "all",
+    label: "Reads + writes",
+    detail: "Also tools that write. Destructive tools are still refused.",
+  },
+];
+
 export function AgentDetailLeftColumn({
   agent,
   userId,
@@ -2171,6 +2193,53 @@ export function AgentDetailLeftColumn({
 
       {activeTab === "toolbox" && (
        <div className="border-t border-xyne-border-subtle px-4 py-4">
+        <div className="mb-4 rounded-lg border border-xyne-border-subtle bg-xyne-surface-raised px-3 py-3">
+          <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-xyne-fg-tertiary">
+            Beyond the selection
+          </div>
+          <p className="mb-3 text-xs leading-relaxed text-xyne-fg-secondary">
+            Lets this agent find and load tools nobody selected for it, using{" "}
+            <code className="text-xyne-fg-tertiary">search-tools</code> and{" "}
+            <code className="text-xyne-fg-tertiary">load-tools</code>. It still only reaches
+            integrations the signed-in user has connected — this removes the need for a grant,
+            not the need for credentials.
+          </p>
+          <div className="flex flex-col gap-1.5">
+            {OPEN_PALETTE_OPTIONS.map((option) => {
+              const selected = (draftTools.openPalette ?? "off") === option.value;
+              return (
+                <label
+                  key={option.value}
+                  className={`flex cursor-pointer items-start gap-2 rounded-md border px-2.5 py-2 transition-colors ${
+                    selected
+                      ? "border-xyne-border-strong bg-xyne-surface"
+                      : "border-transparent hover:bg-xyne-surface"
+                  } ${canEdit ? "" : "cursor-not-allowed opacity-60"}`}
+                >
+                  <input
+                    type="radio"
+                    name="open-palette"
+                    className="mt-0.5"
+                    checked={selected}
+                    disabled={!canEdit}
+                    onChange={() =>
+                      onDraftToolsChange((prev) => {
+                        const next = { ...prev };
+                        if (option.value === "off") delete next.openPalette;
+                        else next.openPalette = option.value;
+                        return next;
+                      })
+                    }
+                  />
+                  <span className="min-w-0">
+                    <span className="block text-xs font-medium text-xyne-fg-primary">{option.label}</span>
+                    <span className="block text-[11px] leading-snug text-xyne-fg-tertiary">{option.detail}</span>
+                  </span>
+                </label>
+              );
+            })}
+          </div>
+        </div>
         <ToolboxPicker
           availableTools={availableTools}
           loading={!availableTools}

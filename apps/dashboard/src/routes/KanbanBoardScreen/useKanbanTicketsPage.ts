@@ -204,7 +204,7 @@ const canRepresentGroupInVespa = (
   return true;
 };
 
-const getDynamicFieldScalarFilters = (
+export const getDynamicFieldScalarFilters = (
   filters: TicketFilters | undefined,
   zeroOnlyDynamicFieldIds: string[] | undefined,
 ): DynamicFieldScalarFilter[] | undefined => {
@@ -226,7 +226,7 @@ const getDynamicFieldScalarFilters = (
   return scalarFilters.length > 0 ? scalarFilters : undefined;
 };
 
-const getFormFieldValue = (
+export const getFormFieldValue = (
   groupBy: KanbanPageGroupBy | undefined,
   groupKey: string | undefined,
 ): string | number | boolean | undefined => {
@@ -243,7 +243,7 @@ const getFormFieldValue = (
   return groupKey;
 };
 
-const toQueryFilters = (
+export const toQueryFilters = (
   filters: TicketFilters | undefined,
 ): KanbanTicketsPageQueryArgs['filters'] => {
   if (!filters) return undefined;
@@ -264,6 +264,7 @@ const toQueryFilters = (
     created: filters.created,
     stages: filters.stages,
     ticketTypes: filters.ticketTypes,
+    merchantIds: filters.merchantIds,
     sourceChannels: filters.sourceChannels,
   };
 };
@@ -333,6 +334,8 @@ const hasFiltersVespaCannotApply = (
   // (ticketTypes is absent on purpose: it is not indexed in Vespa either, but the Zero
   // overlay in overlaidDirectVespaPage applies it on top of the search results instead.)
   if (filters?.sourceChannels?.length) return true;
+  // merchantId is not indexed in Vespa (search rows carry merchantId: null).
+  if (filters?.merchantIds?.length) return true;
   // Sent only in representable cases (single board, non-inverted assignee, ...); when the
   // pushdown value is undefined the filter is active but absent from the query.
   if (filters?.boards?.length && !pushdown.boardId) return true;
@@ -522,6 +525,7 @@ export const useKanbanTicketsPage = (
         boards: options.filters?.boards ?? [],
         stages: options.filters?.stages ?? [],
         ticketTypes: options.filters?.ticketTypes ?? [],
+        merchantIds: options.filters?.merchantIds ?? [],
         sourceChannels: options.filters?.sourceChannels ?? [],
         userGroups: options.filters?.userGroups ?? [],
         dynamicFields: options.filters?.dynamicFields ?? {},

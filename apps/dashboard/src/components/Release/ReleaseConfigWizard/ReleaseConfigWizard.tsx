@@ -262,7 +262,7 @@ const OwnerTeamPicker = ({
       onSelect={next => onChange(next ?? '')}
       placeholder='Select owner team'
       searchPlaceholder='Search user groups…'
-      showUnassignOption
+      showUnassignOption={!!value.trim()}
       unassignLabel='No owner team'
       width='100%'
     />

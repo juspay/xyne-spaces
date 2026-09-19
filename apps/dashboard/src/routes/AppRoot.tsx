@@ -127,7 +127,7 @@ import { RouterErrorFallback } from '../components/ErrorBoundary';
 import NotFoundScreen from './NotFoundScreen/NotFoundScreen';
 import ChatRedirect from '../components/Chat/ChatRedirect/ChatRedirect';
 import DirectoryRedirect from '../components/Chat/DirectoryRedirect/DirectoryRedirect';
-import CallsRoute from './CallsRoute/CallsRoute';
+import CallHistoryScreen from './CallHistoryScreen/CallHistoryScreen';
 import CallDetailScreen from './CallDetailScreen/CallDetailScreen';
 import RecordingsRoute from './RecordingsRoute/RecordingsRoute';
 import RecordingDetailRoute from './RecordingDetailRoute/RecordingDetailRoute';
@@ -135,6 +135,7 @@ import { RecordingOverlay } from '../components/Recording/RecordingOverlay/Recor
 import { RecordingCameraBubble } from '../components/Recording/RecordingCameraBubble/RecordingCameraBubble';
 import { ScreenPickerHost } from '../components/ScreenPicker/ScreenPickerHost';
 import { useRecordingVersion } from '../hooks/useRecordingVersion';
+import { useWorkspacePageTools } from '../components/AIScreen/Workspace';
 import { stopRecordingForTeardown } from '../hooks/useRecordingStore';
 import { isElectronApp } from '../utils/electronApp';
 import {
@@ -358,6 +359,7 @@ const WorkspaceRedirect = (): ReactElement => {
 };
 
 const AppRoot = (): ReactElement => {
+  useWorkspacePageTools();
   const { recordingVersion } = useRecordingVersion();
   // Create panel refs for WebView
   const leftPanelRef = useRef<PanelImperativeHandle>(null);
@@ -1736,7 +1738,7 @@ export const router = createBrowserRouter(
                   path: 'calls',
                   element: (
                     <ToolbarProtectedRoute path='/calls'>
-                      <CallsRoute />
+                      <CallHistoryScreen />
                     </ToolbarProtectedRoute>
                   ),
                   children: [

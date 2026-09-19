@@ -4,6 +4,7 @@ import {
   FormEntityType,
   FormFieldType,
   ChannelType,
+  DESK_CHANNEL_TYPES,
   ExternalEntityType,
 } from '@xyne/shared';
 import { db } from '@/database/client';
@@ -16,6 +17,7 @@ import { ozonetelConfigService, type OzonetelTicketRules } from './ozonetelConfi
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service';
 import { syncConversationTicketMdFromPrismaTicket } from '@/utils/ticketMd';
 import { resolveTelephonyAgentUserId } from './telephonyAgentUserService';
+import { resolveLinkedTicketTarget } from './telephonyTicketLink';
 import type {
   TelephonyDirection,
   TelephonyEvent,
@@ -414,7 +416,8 @@ export class TelephonyEmailService {
         id: emailId,
         channel: {
           workspaceId,
-          type: ChannelType.CALL,
+          // Not just CALL: a linked call's email lives on the ticket's app desk.
+          type: { in: Array.from(DESK_CHANNEL_TYPES) },
         },
       },
       select: {
@@ -422,6 +425,7 @@ export class TelephonyEmailService {
         channelId: true,
         conversationId: true,
         body: true,
+        channel: { select: { type: true } },
       },
     });
   }
@@ -495,7 +499,7 @@ export class TelephonyEmailService {
   async prepareCoreIngestion(
     event: TelephonyEvent,
     sourceId: string,
-  ): Promise<{ channelId: string; creatorUserId?: string } | null> {
+  ): Promise<{ channelId: string; creatorUserId?: string; targetConversationId?: string } | null> {
     const trackedCall = await this.findTrackedCallEmail(
       sourceId,
       event.externalId,
@@ -512,6 +516,21 @@ export class TelephonyEmailService {
         status: event.status,
       });
       return null;
+    }
+
+    // Linked calls attach to an existing ticket, so the createTicketOn* gates do not apply.
+    const linkedTicket = await resolveLinkedTicketTarget(event);
+    if (linkedTicket) {
+      logger.info(`${TAG} event linked to ticket`, {
+        externalId: event.externalId,
+        workspaceId: event.workspaceId,
+        ticketId: linkedTicket.ticketId,
+        status: event.status,
+      });
+      return {
+        channelId: linkedTicket.channelId,
+        targetConversationId: linkedTicket.conversationId,
+      };
     }
 
     const context = await this.resolveCreateContext(event);
@@ -659,6 +678,11 @@ export class TelephonyEmailService {
         title: true,
       },
     });
+    // Only linked calls land on a non-call desk; leave that customer ticket's title, assignee and fields alone.
+    if (ticket && existingEmail.channel.type !== ChannelType.CALL) {
+      return { emailId: existingEmail.id, externalId: event.externalId, ticketId: ticket.id };
+    }
+
     if (ticket) {
       const shouldUpdateAssignee =
         !!nextMeta.agentUserId && ticket.assignedTo !== nextMeta.agentUserId;

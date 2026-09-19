@@ -17,9 +17,11 @@
 * pressing "Escape"
 * verifying "[data-testid='clear-filters-btn']" is visible
 * clicking on "[data-testid='clear-filters-btn']"
+* clicking on "[data-testid='customise-view-btn']"
 * clicking on "[data-testid='table-view-btn']"
 * clicking on "[data-testid='calendar-view-btn']"
 * clicking on "[data-testid='kanban-view-btn']"
+* pressing "Escape"
 * clicking on "[data-testid='group-by-dropdown']"
 * clicking on "[data-testid='group-by-assignee']"
 * clicking on "[data-testid='group-by-dropdown']"

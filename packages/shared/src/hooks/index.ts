@@ -94,7 +94,7 @@ export {
 export { useQuery, useRawQuery } from "./useQuery.js";
 
 export { useCachedQuery } from "./useCachedQuery.js";
-export type { UseCachedQueryOptions } from "./useCachedQuery.js";
+export type { UseCachedQueryOptions, UseCachedQueryMeta, CachedQueryResult } from "./useCachedQuery.js";
 
 export { useCurrentUserRoleIds } from "./useRoles.js";
 export type { Role } from "./useRoles.js";

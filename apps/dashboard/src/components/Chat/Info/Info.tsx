@@ -120,12 +120,14 @@ const Info = ({
   const navigate = useNavigate();
   const location = useLocation();
   const channelUserStatus = useGetChannelUserStatus(channel.id);
-  const [project] = useCachedQuery(queries.projectById({ projectId: channel.projectId }));
+  // channel.projectId is nullable (decoupling). Empty string → no project/board match,
+  // and the panel falls back to the channel's board mappings below.
+  const [project] = useCachedQuery(queries.projectById({ projectId: channel.projectId ?? '' }));
   const [channelBoardMappings, mappingDetails] = useCachedQuery(
     queries.boardsByChannel({ channelId: channel.id }),
   );
   const [projectBoards] = useCachedQuery(
-    queries.boardsListByProject({ projectId: channel.projectId }),
+    queries.boardsListByProject({ projectId: channel.projectId ?? '' }),
   );
 
   const boards = useMemo(() => {

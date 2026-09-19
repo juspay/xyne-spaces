@@ -1,9 +1,9 @@
 import { useState, type ReactElement, type ReactNode } from 'react';
 import {
+  ChatDefault,
   ChevronBigLeft,
   CopyDefault,
   DeleteDustbin01,
-  PencilEditLine,
   ThreeDotsMenuHorizontal,
 } from '@xyne/icons';
 import { Loader2 } from 'lucide-react';
@@ -77,15 +77,17 @@ const MenuItem = ({
 interface AgentDetailHeaderV2Props {
   agent: Agent;
   actions: AgentDetailActions;
+  canChat: boolean;
   onBack: () => void;
-  onEdit: () => void;
+  onChat: () => void;
 }
 
 export function AgentDetailHeaderV2({
   agent,
   actions,
+  canChat,
   onBack,
-  onEdit,
+  onChat,
 }: AgentDetailHeaderV2Props): ReactElement {
   const [menuOpen, setMenuOpen] = useState(false);
   const [cloneOpen, setCloneOpen] = useState(false);
@@ -131,21 +133,20 @@ export function AgentDetailHeaderV2({
           <Action label='Publish' busy={busy.publishing} onClick={() => void actions.publish()} />
         )}
 
+        {canChat && (
+          <Action
+            label='Chat with agent'
+            icon={<ChatDefault className='size-4' aria-hidden />}
+            onClick={onChat}
+          />
+        )}
+
         <Action
           label='Clone'
           icon={<CopyDefault className='size-4' aria-hidden />}
           busy={busy.cloning}
           onClick={() => setCloneOpen(true)}
         />
-
-        {canEdit && (
-          <Action
-            label='Edit'
-            primary
-            icon={<PencilEditLine className='size-4' aria-hidden />}
-            onClick={onEdit}
-          />
-        )}
 
         {hasMenu && (
           <Popover

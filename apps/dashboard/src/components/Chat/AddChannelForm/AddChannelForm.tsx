@@ -1,5 +1,10 @@
-import React, { useState, useEffect, ReactElement, useMemo } from 'react';
-import { ANDROID_PACKAGE_NAME_PATTERN, normalizeChannelName } from '@xyne/shared';
+import React, { useState, useEffect, useRef, ReactElement, useMemo } from 'react';
+import {
+  ANDROID_PACKAGE_NAME_PATTERN,
+  APP_STORE_KEY_ID_PATTERN,
+  IOS_BUNDLE_ID_PATTERN,
+  normalizeChannelName,
+} from '@xyne/shared';
 import { useForm } from '@tanstack/react-form';
 import { useStore } from '@tanstack/react-store';
 import { useQuery } from '@tanstack/react-query';
@@ -94,7 +99,7 @@ const DESK_SOURCES: ReadonlyArray<{
   {
     value: DeskType.SOCIAL_MEDIA,
     label: 'Social media',
-    description: 'Create support tickets from Google Play reviews',
+    description: 'Create support tickets from Google Play and App Store reviews',
     icon: Share2,
   },
 ];
@@ -132,6 +137,37 @@ function areGooglePlayApplicationsValid(applications: GooglePlayApplicationInput
   );
 }
 
+export type SocialProvider = 'GOOGLE_PLAY' | 'APP_STORE';
+
+export interface AppStoreDeskInput {
+  keyId: string;
+  privateKey: string;
+  applications: Array<{ bundleId: string }>;
+}
+
+interface AppStoreApplicationRow {
+  id: string;
+  bundleId: string;
+}
+
+function createAppStoreApplication(): AppStoreApplicationRow {
+  return { id: crypto.randomUUID(), bundleId: '' };
+}
+
+// Apple never shows the .p8 again after download, so the only check we can make is shape.
+function isAppStorePrivateKey(value: string): boolean {
+  return value.includes('BEGIN PRIVATE KEY');
+}
+
+function areAppStoreApplicationsValid(applications: AppStoreApplicationRow[]): boolean {
+  if (applications.length === 0) return false;
+  const bundleIds = applications.map(application => application.bundleId);
+  return (
+    applications.every(application => IOS_BUNDLE_ID_PATTERN.test(application.bundleId)) &&
+    new Set(bundleIds).size === bundleIds.length
+  );
+}
+
 interface AddChannelFormProps {
   mode?: ChannelFormMode;
   onSubmit: (
@@ -143,7 +179,9 @@ interface AddChannelFormProps {
       dlEmail?: string;
       slackChannelId?: string;
       installedAppId?: string;
+      socialProvider?: SocialProvider;
       applications?: GooglePlayApplicationInput[];
+      appStore?: AppStoreDeskInput;
     },
   ) => void;
   onCancel: () => void;
@@ -162,6 +200,11 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
   hideVisibility = false,
   requireConnector = false,
 }) => {
+  // Project is optional only for NATIVE channel creation. Desk channels
+  // (requireConnector) and group-DM promotion keep it required.
+  const projectRequired = requireConnector || mode === 'promote';
+  // Sentinel for the "None (no project)" dropdown option (native channels only).
+  const NO_PROJECT_OPTION = '__none__';
   const [debouncedChannelName, setDebouncedChannelName] = useState('');
   const [channelName, setChannelName] = useState('');
   const [tagString, setTagString] = useState('');
@@ -173,6 +216,21 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
   const [googlePlayApplications, setGooglePlayApplications] = useState<GooglePlayApplicationRow[]>([
     createGooglePlayApplication(),
   ]);
+  const [socialProvider, setSocialProvider] = useState<SocialProvider>('GOOGLE_PLAY');
+  const [appStoreApplications, setAppStoreApplications] = useState<AppStoreApplicationRow[]>([
+    createAppStoreApplication(),
+  ]);
+  const [appStoreKeyId, setAppStoreKeyId] = useState('');
+  const [appStorePrivateKey, setAppStorePrivateKey] = useState('');
+
+  const isSocialMediaDeskValid = (boardId?: string): boolean => {
+    if (!boardId) return false;
+    return socialProvider === 'GOOGLE_PLAY'
+      ? areGooglePlayApplicationsValid(googlePlayApplications)
+      : APP_STORE_KEY_ID_PATTERN.test(appStoreKeyId.trim()) &&
+          isAppStorePrivateKey(appStorePrivateKey) &&
+          areAppStoreApplicationsValid(appStoreApplications);
+  };
   const selectedCallSource: CallSource = 'OZONETEL';
   const { isMobile } = usePlatform();
   const { data: oauthProviders } = useOAuthProviders();
@@ -279,11 +337,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
           return;
         if (deskType === DeskType.SLACK && !selectedSlackChannelId) return;
         if (deskType === DeskType.APP && !selectedInstalledAppId) return;
-        if (
-          deskType === DeskType.SOCIAL_MEDIA &&
-          (!areGooglePlayApplicationsValid(googlePlayApplications) || !value.boardId)
-        )
-          return;
+        if (deskType === DeskType.SOCIAL_MEDIA && !isSocialMediaDeskValid(value.boardId)) return;
       }
       if (mode === 'promote') {
         const promoteData: PromoteGroupDmRequest = {
@@ -321,10 +375,23 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
             connector: null,
             channelType: 'SOCIAL_MEDIA',
             deskType: DeskType.SOCIAL_MEDIA,
-            applications: googlePlayApplications.map(application => ({
-              displayName: application.displayName.trim(),
-              packageName: application.packageName,
-            })),
+            socialProvider,
+            ...(socialProvider === 'GOOGLE_PLAY'
+              ? {
+                  applications: googlePlayApplications.map(application => ({
+                    displayName: application.displayName.trim(),
+                    packageName: application.packageName,
+                  })),
+                }
+              : {
+                  appStore: {
+                    keyId: appStoreKeyId.trim(),
+                    privateKey: appStorePrivateKey.trim(),
+                    applications: appStoreApplications.map(application => ({
+                      bundleId: application.bundleId.trim(),
+                    })),
+                  },
+                }),
             assigneeUserGroupId: value.assigneeUserGroupId,
           });
         } else if (deskType === DeskType.DL) {
@@ -383,7 +450,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
     !nameValue ||
     nameValue.length < 2 ||
     nameValue.length > 80 ||
-    !projectIdValue ||
+    (projectRequired && !projectIdValue) ||
     (requireConnector && deskType === DeskType.EMAIL && !selectedConnector) ||
     (requireConnector &&
       deskType === DeskType.DL &&
@@ -392,7 +459,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
     (requireConnector && deskType === DeskType.APP && !selectedInstalledAppId) ||
     (requireConnector &&
       deskType === DeskType.SOCIAL_MEDIA &&
-      (!areGooglePlayApplicationsValid(googlePlayApplications) || !boardIdValue)) ||
+      !isSocialMediaDeskValid(boardIdValue)) ||
     (requireConnector && deskType === DeskType.CALL && !ozonetelConfig?.configured) ||
     duplicateCheck?.isDuplicate === true;
 
@@ -400,7 +467,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
     if (!nameValue || nameValue.length < 2) return 'Channel name must be at least 2 characters';
     if (nameValue.length > 80) return 'Channel name must be 80 characters or less';
     if (duplicateCheck?.isDuplicate) return 'Channel name already exists';
-    if (!projectIdValue) return 'Please select a project';
+    if (projectRequired && !projectIdValue) return 'Please select a project';
     if (requireConnector) {
       if (deskType === DeskType.EMAIL && !selectedConnector)
         return 'Please select an email provider (Google or Microsoft)';
@@ -411,7 +478,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
       }
       if (deskType === DeskType.SLACK && !selectedSlackChannelId)
         return 'Please select a Slack channel';
-      if (deskType === DeskType.SOCIAL_MEDIA) {
+      if (deskType === DeskType.SOCIAL_MEDIA && socialProvider === 'GOOGLE_PLAY') {
         if (googlePlayApplications.some(application => !application.displayName.trim()))
           return 'Please enter a display name for every application';
         if (
@@ -427,16 +494,41 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
           return 'Android package names must be unique';
         if (!boardIdValue) return 'Please select a board';
       }
+      if (deskType === DeskType.SOCIAL_MEDIA && socialProvider === 'APP_STORE') {
+        if (!APP_STORE_KEY_ID_PATTERN.test(appStoreKeyId.trim()))
+          return 'Enter the Key ID from App Store Connect';
+        if (!isAppStorePrivateKey(appStorePrivateKey))
+          return 'Paste the contents of the .p8 private key file';
+        if (
+          appStoreApplications.some(
+            application => !IOS_BUNDLE_ID_PATTERN.test(application.bundleId),
+          )
+        )
+          return 'Enter a valid bundle ID for every application';
+        if (
+          new Set(appStoreApplications.map(application => application.bundleId)).size !==
+          appStoreApplications.length
+        )
+          return 'Bundle IDs must be unique';
+        if (!boardIdValue) return 'Please select a board';
+      }
       if (deskType === DeskType.CALL && !ozonetelConfig?.configured)
         return 'Ozonetel is not configured. Set it up in Desk Integrations first.';
     }
     return null;
   })();
 
-  // Auto-select first project if none selected
+  // Auto-select the first project ONCE, when projects first load (previous default
+  // behavior). Guarded by a ref so a later projects-view re-emit does NOT overwrite an
+  // explicit "None (no project)" ('') selection the user made afterwards.
+  const didAutoSelectProjectRef = useRef(false);
   useEffect(() => {
-    if (!form.getFieldValue('projectId') && projects && projects.length > 0) {
-      form.setFieldValue('projectId', projects[0]!.id);
+    if (didAutoSelectProjectRef.current) return;
+    if (projects && projects.length > 0) {
+      didAutoSelectProjectRef.current = true;
+      if (!form.getFieldValue('projectId')) {
+        form.setFieldValue('projectId', projects[0]!.id);
+      }
     }
   }, [projects, form]);
 
@@ -767,137 +859,266 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
             <label htmlFor='social-provider' className='text-sm font-medium text-foreground'>
               Source <span className='text-muted-foreground'>*</span>
             </label>
-            <Select value='GOOGLE_PLAY' disabled>
+            <Select
+              value={socialProvider}
+              onValueChange={value => setSocialProvider(value as SocialProvider)}
+            >
               <SelectTrigger id='social-provider' className='w-full'>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value='GOOGLE_PLAY'>Google Play reviews</SelectItem>
+                <SelectItem value='APP_STORE'>App Store reviews</SelectItem>
               </SelectContent>
             </Select>
           </div>
-          <div className='space-y-3'>
-            <div className='flex items-center justify-between'>
-              <div className='text-sm font-medium text-foreground'>
-                Google Play applications <span className='text-muted-foreground'>*</span>
-              </div>
-              <button
-                type='button'
-                onClick={() =>
-                  setGooglePlayApplications(applications => [
-                    ...applications,
-                    createGooglePlayApplication(),
-                  ])
-                }
-                disabled={googlePlayApplications.length >= 20}
-                className='inline-flex items-center gap-1 text-sm text-primary hover:text-primary/80 disabled:cursor-not-allowed disabled:opacity-50'
-                data-track-category='ADD_CHANNEL_FORM'
-                data-track-name='ADD_GOOGLE_PLAY_APPLICATION'
-              >
-                <Plus className='size-4' />
-                Add application
-              </button>
-            </div>
-            {googlePlayApplications.map((application, index) => {
-              const duplicatePackage =
-                Boolean(application.packageName) &&
-                googlePlayApplications.some(
-                  (candidate, candidateIndex) =>
-                    candidateIndex !== index && candidate.packageName === application.packageName,
-                );
-              const invalidPackage =
-                Boolean(application.packageName) &&
-                !ANDROID_PACKAGE_NAME_PATTERN.test(application.packageName);
-              return (
-                <div
-                  key={application.id}
-                  className='space-y-3 rounded-lg border border-border bg-muted/20 p-3'
+          {socialProvider === 'GOOGLE_PLAY' && (
+            <div className='space-y-3'>
+              <div className='flex items-center justify-between'>
+                <div className='text-sm font-medium text-foreground'>
+                  Google Play applications <span className='text-muted-foreground'>*</span>
+                </div>
+                <button
+                  type='button'
+                  onClick={() =>
+                    setGooglePlayApplications(applications => [
+                      ...applications,
+                      createGooglePlayApplication(),
+                    ])
+                  }
+                  disabled={googlePlayApplications.length >= 20}
+                  className='inline-flex items-center gap-1 text-sm text-primary hover:text-primary/80 disabled:cursor-not-allowed disabled:opacity-50'
+                  data-track-category='ADD_CHANNEL_FORM'
+                  data-track-name='ADD_GOOGLE_PLAY_APPLICATION'
                 >
-                  <div className='flex items-center justify-between'>
-                    <span className='text-sm font-medium text-foreground'>
-                      Application {index + 1}
-                    </span>
-                    {googlePlayApplications.length > 1 && (
+                  <Plus className='size-4' />
+                  Add application
+                </button>
+              </div>
+              {googlePlayApplications.map((application, index) => {
+                const duplicatePackage =
+                  Boolean(application.packageName) &&
+                  googlePlayApplications.some(
+                    (candidate, candidateIndex) =>
+                      candidateIndex !== index && candidate.packageName === application.packageName,
+                  );
+                const invalidPackage =
+                  Boolean(application.packageName) &&
+                  !ANDROID_PACKAGE_NAME_PATTERN.test(application.packageName);
+                return (
+                  <div
+                    key={application.id}
+                    className='space-y-3 rounded-lg border border-border bg-muted/20 p-3'
+                  >
+                    <div className='flex items-center justify-between'>
+                      <span className='text-sm font-medium text-foreground'>
+                        Application {index + 1}
+                      </span>
+                      {googlePlayApplications.length > 1 && (
+                        <button
+                          type='button'
+                          onClick={() =>
+                            setGooglePlayApplications(applications =>
+                              applications.filter(
+                                (_, applicationIndex) => applicationIndex !== index,
+                              ),
+                            )
+                          }
+                          className='text-muted-foreground hover:text-destructive'
+                          aria-label={`Remove application ${index + 1}`}
+                          data-track-category='ADD_CHANNEL_FORM'
+                          data-track-name='REMOVE_GOOGLE_PLAY_APPLICATION'
+                        >
+                          <Trash2 className='size-4' />
+                        </button>
+                      )}
+                    </div>
+                    <div className='space-y-2'>
+                      <label
+                        htmlFor={`google-play-app-name-${index}`}
+                        className='text-sm text-foreground'
+                      >
+                        App display name
+                      </label>
+                      <Input
+                        id={`google-play-app-name-${index}`}
+                        value={application.displayName}
+                        onChange={event =>
+                          setGooglePlayApplications(applications =>
+                            applications.map((candidate, applicationIndex) =>
+                              applicationIndex === index
+                                ? { ...candidate, displayName: event.target.value }
+                                : candidate,
+                            ),
+                          )
+                        }
+                        placeholder='Xyne'
+                        autoComplete='off'
+                      />
+                    </div>
+                    <div className='space-y-2'>
+                      <label
+                        htmlFor={`android-package-name-${index}`}
+                        className='text-sm text-foreground'
+                      >
+                        Android package name
+                      </label>
+                      <Input
+                        id={`android-package-name-${index}`}
+                        value={application.packageName}
+                        onChange={event =>
+                          setGooglePlayApplications(applications =>
+                            applications.map((candidate, applicationIndex) =>
+                              applicationIndex === index
+                                ? { ...candidate, packageName: event.target.value.trim() }
+                                : candidate,
+                            ),
+                          )
+                        }
+                        placeholder='com.example.app'
+                        autoComplete='off'
+                        aria-invalid={invalidPackage || duplicatePackage}
+                      />
+                      {invalidPackage && (
+                        <p className='text-sm text-destructive'>Enter a valid package name.</p>
+                      )}
+                      {duplicatePackage && (
+                        <p className='text-sm text-destructive'>
+                          This package name has already been added.
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+              <p className='text-xs text-muted-foreground'>
+                One Google authorization will be used for every application in this channel.
+              </p>
+            </div>
+          )}
+          {socialProvider === 'APP_STORE' && (
+            <div className='space-y-3'>
+              <div className='space-y-2'>
+                <label htmlFor='app-store-key-id' className='text-sm text-foreground'>
+                  Key ID <span className='text-muted-foreground'>*</span>
+                </label>
+                <Input
+                  id='app-store-key-id'
+                  value={appStoreKeyId}
+                  onChange={event => setAppStoreKeyId(event.target.value.trim().toUpperCase())}
+                  placeholder='2X9R4HXF34'
+                  autoComplete='off'
+                  aria-invalid={
+                    Boolean(appStoreKeyId) && !APP_STORE_KEY_ID_PATTERN.test(appStoreKeyId.trim())
+                  }
+                />
+              </div>
+              <div className='space-y-2'>
+                <label htmlFor='app-store-private-key' className='text-sm text-foreground'>
+                  Private key (.p8) <span className='text-muted-foreground'>*</span>
+                </label>
+                <textarea
+                  id='app-store-private-key'
+                  value={appStorePrivateKey}
+                  onChange={event => setAppStorePrivateKey(event.target.value)}
+                  data-track-category='ADD_CHANNEL_FORM'
+                  data-track-name='EDIT_APP_STORE_PRIVATE_KEY'
+                  rows={5}
+                  spellCheck={false}
+                  placeholder={'-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----'}
+                  className='w-full rounded-md border border-border bg-background px-3 py-2 font-mono text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring'
+                />
+                <p className='text-xs text-muted-foreground'>
+                  Use an Individual key from Users and Access &gt; Integrations. Paste the whole
+                  file — App Store Connect only lets you download it once.
+                </p>
+              </div>
+
+              <div className='flex items-center justify-between pt-1'>
+                <div className='text-sm font-medium text-foreground'>
+                  Bundle IDs <span className='text-muted-foreground'>*</span>
+                </div>
+                <button
+                  type='button'
+                  onClick={() =>
+                    setAppStoreApplications(applications => [
+                      ...applications,
+                      createAppStoreApplication(),
+                    ])
+                  }
+                  disabled={appStoreApplications.length >= 20}
+                  className='inline-flex items-center gap-1 text-sm text-primary hover:text-primary/80 disabled:cursor-not-allowed disabled:opacity-50'
+                  data-track-category='ADD_CHANNEL_FORM'
+                  data-track-name='ADD_APP_STORE_APPLICATION'
+                >
+                  <Plus className='size-4' />
+                  Add application
+                </button>
+              </div>
+              {appStoreApplications.map((application, index) => {
+                const duplicateBundleId =
+                  Boolean(application.bundleId) &&
+                  appStoreApplications.some(
+                    (candidate, candidateIndex) =>
+                      candidateIndex !== index && candidate.bundleId === application.bundleId,
+                  );
+                const invalidBundleId =
+                  Boolean(application.bundleId) &&
+                  !IOS_BUNDLE_ID_PATTERN.test(application.bundleId);
+                return (
+                  <div key={application.id} className='flex items-start gap-2'>
+                    <div className='flex-1 space-y-1'>
+                      <Input
+                        id={`app-store-bundle-id-${index}`}
+                        value={application.bundleId}
+                        onChange={event =>
+                          setAppStoreApplications(applications =>
+                            applications.map((candidate, applicationIndex) =>
+                              applicationIndex === index
+                                ? { ...candidate, bundleId: event.target.value.trim() }
+                                : candidate,
+                            ),
+                          )
+                        }
+                        placeholder='com.example.app'
+                        autoComplete='off'
+                        aria-invalid={invalidBundleId || duplicateBundleId}
+                      />
+                      {invalidBundleId && (
+                        <p className='text-sm text-destructive'>Enter a valid bundle ID.</p>
+                      )}
+                      {duplicateBundleId && (
+                        <p className='text-sm text-destructive'>
+                          This bundle ID has already been added.
+                        </p>
+                      )}
+                    </div>
+                    {appStoreApplications.length > 1 && (
                       <button
                         type='button'
                         onClick={() =>
-                          setGooglePlayApplications(applications =>
+                          setAppStoreApplications(applications =>
                             applications.filter(
                               (_, applicationIndex) => applicationIndex !== index,
                             ),
                           )
                         }
-                        className='text-muted-foreground hover:text-destructive'
+                        className='mt-2 text-muted-foreground hover:text-destructive'
                         aria-label={`Remove application ${index + 1}`}
                         data-track-category='ADD_CHANNEL_FORM'
-                        data-track-name='REMOVE_GOOGLE_PLAY_APPLICATION'
+                        data-track-name='REMOVE_APP_STORE_APPLICATION'
                       >
                         <Trash2 className='size-4' />
                       </button>
                     )}
                   </div>
-                  <div className='space-y-2'>
-                    <label
-                      htmlFor={`google-play-app-name-${index}`}
-                      className='text-sm text-foreground'
-                    >
-                      App display name
-                    </label>
-                    <Input
-                      id={`google-play-app-name-${index}`}
-                      value={application.displayName}
-                      onChange={event =>
-                        setGooglePlayApplications(applications =>
-                          applications.map((candidate, applicationIndex) =>
-                            applicationIndex === index
-                              ? { ...candidate, displayName: event.target.value }
-                              : candidate,
-                          ),
-                        )
-                      }
-                      placeholder='Xyne'
-                      autoComplete='off'
-                    />
-                  </div>
-                  <div className='space-y-2'>
-                    <label
-                      htmlFor={`android-package-name-${index}`}
-                      className='text-sm text-foreground'
-                    >
-                      Android package name
-                    </label>
-                    <Input
-                      id={`android-package-name-${index}`}
-                      value={application.packageName}
-                      onChange={event =>
-                        setGooglePlayApplications(applications =>
-                          applications.map((candidate, applicationIndex) =>
-                            applicationIndex === index
-                              ? { ...candidate, packageName: event.target.value.trim() }
-                              : candidate,
-                          ),
-                        )
-                      }
-                      placeholder='com.example.app'
-                      autoComplete='off'
-                      aria-invalid={invalidPackage || duplicatePackage}
-                    />
-                    {invalidPackage && (
-                      <p className='text-sm text-destructive'>Enter a valid package name.</p>
-                    )}
-                    {duplicatePackage && (
-                      <p className='text-sm text-destructive'>
-                        This package name has already been added.
-                      </p>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-            <p className='text-xs text-muted-foreground'>
-              One Google authorization will be used for every application in this channel.
-            </p>
-          </div>
+                );
+              })}
+              <p className='text-xs text-muted-foreground'>
+                We look up each app&apos;s name and Apple ID from its bundle ID when you connect.
+              </p>
+            </div>
+          )}
         </div>
       )}
 
@@ -1008,33 +1229,48 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
         name='projectId'
         validators={{
           onChange: ({ value }) => {
-            if (!value?.trim()) return 'Project is required';
+            if (projectRequired && !value?.trim()) return 'Project is required';
             return undefined;
           },
         }}
       >
-        {field => (
-          <div className='space-y-1.5'>
-            <p className='text-sm font-medium text-foreground'>Project *</p>
-            <EntitySelector
-              testId='project-select-trigger'
-              options={projectOptions}
-              selectedValue={field.state.value || null}
-              onSelect={val => field.handleChange(val ?? '')}
-              placeholder={projectOptions.length > 0 ? 'Select a project' : 'No projects available'}
-              searchPlaceholder='Search projects...'
-              width='100%'
-            />
-            {field.state.meta.errors.length > 0 && (
-              <p className='text-sm text-destructive'>{field.state.meta.errors[0] as string}</p>
-            )}
-            {projectOptions.length === 0 && (
-              <p className='text-sm text-status-pending mt-1'>
-                No projects found. Please create a project first.
+        {field => {
+          // Native channels get a "None" option so they can be created project-less.
+          const selectorOptions = projectRequired
+            ? projectOptions
+            : [
+                ...projectOptions,
+                { value: NO_PROJECT_OPTION, label: 'None (no project)', icon: null },
+              ];
+          return (
+            <div className='space-y-1.5'>
+              <p className='text-sm font-medium text-foreground'>
+                {projectRequired ? 'Project *' : 'Project (optional)'}
               </p>
-            )}
-          </div>
-        )}
+              <EntitySelector
+                testId='project-select-trigger'
+                options={selectorOptions}
+                selectedValue={
+                  field.state.value ? field.state.value : projectRequired ? null : NO_PROJECT_OPTION
+                }
+                onSelect={val => field.handleChange(val && val !== NO_PROJECT_OPTION ? val : '')}
+                placeholder={
+                  projectOptions.length > 0 ? 'Select a project' : 'No projects available'
+                }
+                searchPlaceholder='Search projects...'
+                width='100%'
+              />
+              {field.state.meta.errors.length > 0 && (
+                <p className='text-sm text-destructive'>{field.state.meta.errors[0] as string}</p>
+              )}
+              {projectRequired && projectOptions.length === 0 && (
+                <p className='text-sm text-status-pending mt-1'>
+                  No projects found. Please create a project first.
+                </p>
+              )}
+            </div>
+          );
+        }}
       </form.Field>
 
       {/* Board Selection (desk channels only) */}

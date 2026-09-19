@@ -24,6 +24,7 @@ interface UseKanbanCountsOptions extends FlowStepVisibilityOptions {
   columnType?: 'stage' | 'status';
   projectId?: string;
   boardId?: string;
+  boardIds?: string[];
   filters?: TicketFilters;
   groupBy?: KanbanCountsGroupBy;
   showOverdueOnly?: boolean;
@@ -51,6 +52,7 @@ type TicketCountsSnapshot = {
   createdBy: string | null;
   userGroupId: string | null;
   ticketType: string | null;
+  merchantId?: string | null;
   isStageOverdue: boolean;
   eta: number | null;
   createdAt: number;
@@ -260,6 +262,8 @@ const matchesRequest = (
   if (filters.stages?.length && !filters.stages.includes(snapshot.stageName ?? '')) return false;
   if (filters.ticketTypes?.length && !filters.ticketTypes.includes(snapshot.ticketType ?? ''))
     return false;
+  if (filters.merchantIds?.length && !filters.merchantIds.includes(snapshot.merchantId ?? ''))
+    return false;
   if (filters.assigned !== undefined) {
     const isAssigned = Boolean(snapshot.assignedTo);
     if (filters.assigned !== isAssigned) return false;
@@ -346,16 +350,17 @@ const applyGroupDelta = (
 ): KanbanCountGroup[] => {
   const nextGroups = groups.map(cloneGroup);
   for (const groupKey of groupKeys) {
-    const groupIndex = nextGroups.findIndex(group => group.groupKey === groupKey);
-    const displayName =
-      groupKey === ALL_TICKETS_GROUP || groupKey === UNASSIGNED_GROUP ? groupKey : groupKey;
+    // Snapshot keys may be `user:`-prefixed while deltas are bare — match both.
+    const groupIndex = nextGroups.findIndex(
+      group => group.groupKey === groupKey || normalizeIdentity(group.groupKey) === groupKey,
+    );
     let group = groupIndex >= 0 ? nextGroups[groupIndex] : null;
 
     if (!group) {
       if (delta <= 0) continue;
       group = {
         groupKey,
-        displayName,
+        displayName: groupKey,
         totalCount: 0,
         stages: {},
         statuses: {},
@@ -369,13 +374,12 @@ const applyGroupDelta = (
     } else {
       applyCountDelta(group, stageKeys, delta, 'stages');
     }
-
-    if (group.totalCount <= 0) {
-      return nextGroups.filter(item => item.groupKey !== groupKey);
-    }
   }
 
-  return nextGroups.sort((left, right) => left.displayName.localeCompare(right.displayName));
+  // Drop emptied groups only after every key applied.
+  return nextGroups
+    .filter(group => group.totalCount > 0)
+    .sort((left, right) => left.displayName.localeCompare(right.displayName));
 };
 
 const applyTicketCountsUpdate = (
@@ -526,6 +530,9 @@ const normalizeFilters = (filters?: TicketFilters): KanbanCountsFilters | undefi
   const ticketTypes = sortUniqueValues(filters.ticketTypes);
   if (ticketTypes) normalized.ticketTypes = ticketTypes;
 
+  const merchantIds = sortUniqueValues(filters.merchantIds);
+  if (merchantIds) normalized.merchantIds = merchantIds;
+
   const dynamicFields = normalizeDynamicFields(filters.dynamicFields);
   if (dynamicFields) normalized.dynamicFields = dynamicFields;
 
@@ -540,6 +547,7 @@ const toRequest = (options: UseKanbanCountsOptions): KanbanCountsRequest => {
   if (options.columnType !== undefined) request.columnType = options.columnType;
   if (options.projectId !== undefined) request.projectId = options.projectId;
   if (options.boardId !== undefined) request.boardId = options.boardId;
+  if (options.boardIds !== undefined) request.boardIds = options.boardIds;
   if (options.excludeFlowSteps !== undefined) request.excludeFlowSteps = options.excludeFlowSteps;
 
   const normalizedFilters = normalizeFilters(options.filters);

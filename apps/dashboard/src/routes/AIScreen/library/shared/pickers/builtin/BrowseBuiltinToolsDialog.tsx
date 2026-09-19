@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactElement } from 'react';
+import { useEffect, useMemo, useState, type ReactElement } from 'react';
 import { cn } from '@/utils/classNames';
 import { searchByNameThenDescription } from '../../librarySearch';
 import { BROWSE_CARD, BROWSE_CARD_IDLE, BROWSE_CARD_SELECTED } from '../../primitives/browseCard';
@@ -112,6 +112,7 @@ interface BrowseBuiltinToolsDialogProps {
   onRetry: () => void;
   selection: BuiltinSelection;
   onSelectionChange: (next: BuiltinSelection) => void;
+  initialSource?: string | null;
   suggested: readonly SuggestedBuiltin[];
 }
 
@@ -124,11 +125,16 @@ export function BrowseBuiltinToolsDialog({
   onRetry,
   selection,
   onSelectionChange,
+  initialSource,
   suggested,
 }: BrowseBuiltinToolsDialogProps): ReactElement {
   const [query, setQuery] = useState('');
   const [risk, setRisk] = useState<string | null>(null);
   const [openSource, setOpenSource] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (open) setOpenSource(initialSource ?? null);
+  }, [open, initialSource]);
 
   const openEntry = catalog.find(entry => entry.source === openSource) ?? null;
 

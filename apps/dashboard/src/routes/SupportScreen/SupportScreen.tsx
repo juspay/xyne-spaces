@@ -126,8 +126,9 @@ import {
   toDynamicFieldQueryFilters,
   type DynamicFieldQueryFilter,
 } from '../../utils/board/dynamicFieldFilters';
-import { dynamicColumnKey } from '../../components/Tickets/TicketTable/dynamicFieldColumns';
+import { dynamicColumnKey } from '../../components/Tickets/TicketTable/TicketTableTypes';
 import { useDeskTableColumns, DESK_TABLE_BUILTIN_COLUMNS } from './useDeskTableColumns';
+import type { LabelUnreadFilters } from '../../api/conversationLabelsApi';
 import { tagsConfigApi } from '../../api/tagsConfigApi';
 import { classificationApi } from '../../api/classificationApi';
 import {
@@ -155,13 +156,19 @@ import { useAuth, useAuthContextValues } from '../../hooks/useAuth';
 import { usePlatform } from '../../hooks/usePlatform';
 import { TicketListView } from '../../components/Tickets/TicketListView';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
+import { useRacedQuery } from '../../hooks/useRacedQuery';
 import { SupportKanbanBoard } from './SupportKanbanBoard';
 import { SupportTicketTable } from './SupportTicketTable';
-import { BoardType, FormContextType, TicketPriority, parseFieldOptionValues } from '@xyne/shared';
+import {
+  BoardType,
+  FormContextType,
+  SOCIAL_MEDIA_SOURCE_TYPE,
+  TicketPriority,
+  parseFieldOptionValues,
+} from '@xyne/shared';
 import type { Ticket, FormFields, EmailChannelPreference } from '@xyne/shared';
 import { useShortcut, invokeShortcut } from '../../shortcuts';
 import { v4 as uuidv4 } from 'uuid';
-import { useUser } from '../../hooks/useUsers';
 import { BulkActionToolbar } from '../../components/Tickets/TicketTable/BulkActionToolbar';
 import { assigneeOptionToTicketUpdate } from '../../components/Tickets/TicketTable/TicketTableHelper';
 import {
@@ -171,8 +178,8 @@ import {
   useBulkTicketActions,
   type BulkTicketUpdates,
 } from '../../components/Tickets/TicketTable/useBulkTicketActions';
-import { getUserDisplayName } from '../../utils/userDisplayName';
-import { AssigneePicker } from '../../components/Tickets/TicketListView/AssigneePicker';
+import { UserSelector } from '../../components/Tickets/CreateTicketModal/UserSelector';
+import { useTicketAssignee, resolveAssigneeRef } from '../../hooks/useTicketAssignee';
 import { StagePicker } from '../../components/Tickets/TicketListView/StagePicker';
 import { PriorityPicker } from '../../components/Tickets/TicketListView/PriorityPicker';
 import { EmailComposer } from '../../components/xyne-desk/EmailComposer/EmailComposer';
@@ -185,9 +192,11 @@ import { EmailBodyRenderer } from '../../components/xyne-desk/EmailBody/EmailBod
 import CallThread from '../../components/xyne-desk/CallThread/CallThread';
 import { SlackThread, SlackComposer } from '../../components/xyne-desk/SlackThread';
 import { SocialMediaReplyComposer } from '../../components/xyne-desk/DeskReplyComposer';
-import { startGooglePlayOAuth } from '../../services/clients/socialMediaDeskApi';
+import {
+  connectAppStoreDesk,
+  startGooglePlayOAuth,
+} from '../../services/clients/socialMediaDeskApi';
 import { EmailThreadHeader } from '../../components/xyne-desk/EmailBody/EmailThreadHeader';
-import { CloudAgentDock } from '../../components/xyne-desk/CloudAgentDock/CloudAgentDock';
 import { DeskCalendarView } from '../../components/xyne-desk/DeskCalendar/DeskCalendarView';
 import { ConversationLabels } from '../../components/xyne-desk/ConversationLabels/ConversationLabels';
 import { TicketTagsRow } from '../../components/xyne-desk/EmailBody/TagsBadgePopover';
@@ -231,7 +240,7 @@ import { useShareableOrigin } from '../../hooks/useShareableOrigin';
 import { initDeskChannelOAuth } from '../../services/clients/integrationOAuthApi';
 import Dialog from '../../components/ui/Dialog';
 import { MergeTicketsDialog } from '../../components/Tickets/MergeTicketsDialog/MergeTicketsDialog';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { xyneAIActor } from '../../machines/xyneAIMachine';
 import { useSelector } from '@xstate/react';
 import { useSelectedAgent } from '../../hooks/useSelectedAgent';
@@ -255,6 +264,12 @@ import { CallParticipantsSelectionModal } from '../../components/Call/CallPartic
 import { ScheduleCallModal } from '../../components/Call/ScheduleCallModal/ScheduleCallModal';
 import { WorkspaceDeskEmailCard } from '../../components/xyne-desk/WorkspaceDeskEmailCard/WorkspaceDeskEmailCard';
 import { WorkspaceOzonetelCard } from '../../components/xyne-desk/WorkspaceOzonetelCard/WorkspaceOzonetelCard';
+import { CallButton } from '../../components/xyne-desk/CallButton/CallButton';
+import {
+  CloudAgentDock,
+  setCloudAgentOpenTicket,
+} from '../../components/xyne-desk/CloudAgentDock/CloudAgentDock';
+import { getOzonetelToolbar } from '../../services/clients/telephonyApi';
 
 // Unified type for tickets from the supportTicketsFiltered query
 type SupportTicket = QueryResultType<typeof queries.supportTicketsFilteredV4>[number];
@@ -396,6 +411,8 @@ const clearComposeLocalCache = (userId: string, instanceId: string, channelId: s
     /* ignore */
   }
 };
+
+const SHOW_DESK_CUSTOM_FIELD_COLUMNS = false;
 
 /** Display label for a server compose-draft row in the Drafts list. */
 const composeDraftLabel = (d: ComposeDraftRecord): string => {
@@ -830,6 +847,21 @@ const SupportScreen = (): ReactElement => {
     }),
     [filters, userID, dynamicFieldEntries, tagFilterConversationIds, selectedLabel?.id],
   );
+
+  // Mode-B label counts drop the label scoping from the shared filter surface.
+  const labelUnreadFilters = useMemo<LabelUnreadFilters>(() => {
+    const {
+      conversationIdWhitelist,
+      conversationLabelId: _conversationLabelId,
+      ...restTicketFilter
+    } = ticketFilter;
+    return {
+      ...restTicketFilter,
+      ...(conversationIdWhitelist !== undefined
+        ? { conversationIds: conversationIdWhitelist }
+        : {}),
+    };
+  }, [ticketFilter]);
 
   const availablePriorities = useMemo(() => Object.values(TicketPriority), []);
 
@@ -2308,7 +2340,13 @@ const SupportScreen = (): ReactElement => {
       dlEmail?: string;
       slackChannelId?: string;
       installedAppId?: string;
+      socialProvider?: 'GOOGLE_PLAY' | 'APP_STORE';
       applications?: Array<{ displayName: string; packageName: string }>;
+      appStore?: {
+        keyId: string;
+        privateKey: string;
+        applications: Array<{ bundleId: string }>;
+      };
     },
   ) => {
     const {
@@ -2318,15 +2356,56 @@ const SupportScreen = (): ReactElement => {
       dlEmail,
       slackChannelId,
       installedAppId,
+      socialProvider,
       applications,
+      appStore,
       channelType: _submittedChannelType,
       ...rest
     } = data;
     const isElectron = typeof window.electronAPI?.openExternal === 'function';
 
     if (deskType === 'SOCIAL_MEDIA') {
-      if (!applications?.length || !rest.boardId) {
-        toast.error('At least one Google Play application and a board are required');
+      if (!rest.boardId) {
+        toast.error('A board is required');
+        return;
+      }
+
+      // App Store authenticates with a key we hold, so connecting is one request — no redirect.
+      if (socialProvider === 'APP_STORE') {
+        if (!appStore?.applications?.length) {
+          toast.error('At least one bundle ID is required');
+          return;
+        }
+        void connectAppStoreDesk({
+          channelName: rest.name,
+          keyId: appStore.keyId,
+          privateKey: appStore.privateKey,
+          applications: appStore.applications,
+          projectId: rest.projectId,
+          boardId: rest.boardId,
+          ...(rest.assigneeUserGroupId && {
+            assigneeUserGroupId: rest.assigneeUserGroupId,
+          }),
+          visibility: rest.visibility === 'public' ? 'PUBLIC' : 'PRIVATE',
+        })
+          .then(channelId => {
+            setShowCreateChannelModal(false);
+            clearChannelConnectedEmailCache(channelId);
+            toast.success('App Store desk connected');
+            void navigate(`${supportBase}/${channelId}`);
+          })
+          .catch(error => {
+            // Surface the backend's own message: it carries Apple's reason for rejecting the key.
+            toast.error(
+              (error as { response?: { data?: { error?: string } } })?.response?.data?.error ??
+                (error instanceof Error ? error.message : 'Failed to connect App Store desk'),
+            );
+          });
+        return;
+      }
+
+      if (!applications?.length) {
+        toast.error('At least one Google Play application is required');
         return;
       }
       void startGooglePlayOAuth({
@@ -2676,10 +2755,12 @@ const SupportScreen = (): ReactElement => {
                   className: 'bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:text-blue-200',
                 };
     const isJoined = joinedChannelIds.has(c.id);
-    // Labels apply to email and app desks; mailbox folders (Inbox / Starred / Spam /
-    // Drafts / Sent) stay email-only. Both share this one expandable subtree.
+    // Labels apply to email and app desks; mailbox folders come in two forms — the
+    // full email set and a single "All items" entry for app desk channel
+    // type. Folders and labels share this one expandable subtree.
     const hasMailboxFolders = c.type === ChannelType.EMAIL;
-    const canExpandDesk = isJoined && (hasMailboxFolders || c.type === ChannelType.APP);
+    const hasBasicFolders = !hasMailboxFolders && c.type === ChannelType.APP;
+    const canExpandDesk = isJoined && (hasMailboxFolders || hasBasicFolders);
     const isExpanded = canExpandDesk && expandedDeskIds.has(c.id);
     const isActive = selectedChannelId === c.id;
     const status = statusByChannelId.get(c.id);
@@ -2790,12 +2871,25 @@ const SupportScreen = (): ReactElement => {
                 />
               </>
             )}
+            {hasBasicFolders && (
+              <DeskMailboxSidebar
+                variant='basic'
+                // The basic subtree is a single "All items" row — the effective folder
+                // for any non-email desk — so it highlights exactly when the channel
+                // is selected in list mode with no label selected.
+                activeFolder={
+                  selectedChannelId === c.id && viewMode === 'list' && !selectedLabel ? 'all' : null
+                }
+                onSelectFolder={(folder, label) => openMailbox(c.id, folder, label)}
+              />
+            )}
             <DeskLabelsSidebar
               channelId={c.id}
               isMember={isJoined}
               activeLabelId={selectedChannelId === c.id && selectedLabel ? selectedLabel.id : null}
               onSelectLabel={(labelId, labelName) => openLabel(c.id, labelId, labelName)}
               onDeletedLabel={handleDeletedLabel}
+              labelUnreadFilters={labelUnreadFilters}
             />
           </div>
         )}
@@ -3128,15 +3222,13 @@ const SupportScreen = (): ReactElement => {
                               isRefetching
                                 ? 'Fetching latest…'
                                 : isSocialMediaDesk
-                                  ? 'Fetch all available Google Play reviews'
+                                  ? 'Fetch reviews'
                                   : 'Fetch latest emails'
                             }
                             side='bottom'
                           >
                             <button
-                              onClick={() =>
-                                isSocialMediaDesk ? handleRefetch() : setShowRefetchDialog(true)
-                              }
+                              onClick={() => setShowRefetchDialog(true)}
                               disabled={isRefetching}
                               className={cn(
                                 'p-1.5 rounded transition-colors text-muted-foreground hover:text-foreground hover:bg-muted',
@@ -3751,7 +3843,7 @@ const SupportScreen = (): ReactElement => {
                                 </button>
                               );
                             })}
-                            {deskDynamicFields.length > 0 && (
+                            {SHOW_DESK_CUSTOM_FIELD_COLUMNS && deskDynamicFields.length > 0 && (
                               <>
                                 <div className='my-1 border-t border-border' />
                                 <div className='px-4 py-1 text-xs font-medium text-muted-foreground'>
@@ -3884,9 +3976,11 @@ const SupportScreen = (): ReactElement => {
                           </button>
                         </div>
                         {/* Keep desk-specific actions and expose the shared Ozonetel toolbar. */}
-                        {isSelectedChannelJoined && selectedChannelFull && (
-                          <CloudAgentDock buttonBehavior='floating' />
-                        )}
+                        {isSelectedChannelJoined &&
+                          selectedChannelFull &&
+                          selectedChannelFull.type !== ChannelType.APP && (
+                            <CloudAgentDock buttonBehavior='floating' />
+                          )}
                         {isSelectedChannelJoined &&
                           selectedChannelId &&
                           !COMPOSE_DISABLED_CHANNEL_TYPES.has(selectedChannelFull?.type) && (
@@ -4347,11 +4441,16 @@ const SupportScreen = (): ReactElement => {
       </Dialog>
 
       {/* Fetch Range Dialog */}
-      {canRefetch && !isSocialMediaDesk && (
+      {canRefetch && (
         <RefetchRangeDialog
           open={showRefetchDialog}
           onOpenChange={setShowRefetchDialog}
           isPending={isRefetching}
+          {...(isSocialMediaDesk && {
+            title: 'Fetch reviews',
+            subtitle: 'Pull new reviews or backfill a specific time range from the connected apps.',
+            summaryLabel: 'Will fetch reviews posted',
+          })}
           onConfirm={range => {
             setShowRefetchDialog(false);
             handleRefetch(range);
@@ -4435,20 +4534,16 @@ const TicketMetaRow = ({
         priority?: string | null;
         stageName?: string | null;
         assignedTo?: string | null;
+        userGroupId?: string | null;
         aiCategory?: string | null;
         channelId?: string | null;
       }
     | undefined
     | null;
 }): ReactElement | null => {
-  const resolvedAssigneeId = ticket?.assignedTo?.replace(/^(user:|group:)/, '') || '';
-  const assignee = useUser(resolvedAssigneeId);
+  const assignee = resolveAssigneeRef(ticket?.assignedTo, ticket?.userGroupId);
+  const onAssign = useTicketAssignee(ticket?.id ?? '', assignee);
   if (!ticket) return null;
-  const assigneeName = resolvedAssigneeId
-    ? assignee
-      ? getUserDisplayName(assignee)
-      : '…'
-    : 'Unassigned';
   return (
     <div className='flex items-center flex-wrap gap-y-1 min-h-[24px]'>
       <div className='flex items-center gap-1.5 pr-3 mr-1.5 border-r border-border'>
@@ -4461,11 +4556,13 @@ const TicketMetaRow = ({
         <span className='text-[10px] font-semibold uppercase tracking-wider text-muted-foreground leading-none'>
           Assignee
         </span>
-        <AssigneePicker
-          ticketId={ticket.id}
-          assignedTo={ticket.assignedTo}
+        <UserSelector
+          selectedUserId={assignee.userId}
+          assignedGroupId={assignee.groupId}
+          onUserSelect={onAssign}
           channelId={ticket.channelId ?? undefined}
-          label={assigneeName}
+          variant='compact'
+          showLabel={true}
         />
       </div>
       {ticket.aiCategory && (
@@ -4650,6 +4747,26 @@ export const SupportTicketDetail = ({
     }),
     { enabled: (!!ticketId || !!ticketIdParam) && !!routeChannelId },
   );
+  const { data: ozonetelToolbar } = useQuery({
+    queryKey: ['workspace-ozonetel-toolbar'],
+    queryFn: getOzonetelToolbar,
+  });
+  const customerPhoneFieldName = ozonetelToolbar?.customerPhoneFieldName?.trim() ?? '';
+  const [ticketFormValues] = useCachedQuery(
+    queries.getFormEntityValuesByEntityId({ entityId: ticket?.id ?? '' }),
+    { enabled: !!ticket?.id && !!customerPhoneFieldName },
+  );
+  // Calls link only when they dialled this number, so other numbers and inbound calls never land here.
+  const customerPhoneNumber = useMemo(() => {
+    if (!customerPhoneFieldName) return '';
+    const row = (ticketFormValues ?? []).find(
+      entry =>
+        (entry.globalField?.fieldName ?? entry.formField?.fieldName) === customerPhoneFieldName,
+    );
+    const value = row?.actualFieldValue ?? row?.fieldValue;
+    return typeof value === 'string' ? value.trim() : '';
+  }, [ticketFormValues, customerPhoneFieldName]);
+
   const detailConversationId = ticket?.conversationId ?? stateConversationId;
   const isAppSourcedTicket = getTicketReplyKind(ticket?.metadata) === 'app';
   const ticketEmailDrafts = useEmailDrafts(detailConversationId, routeChannelId, isMember);
@@ -4728,7 +4845,7 @@ export const SupportTicketDetail = ({
     ],
   );
 
-  const [allEmails] = useCachedQuery(
+  const [allEmails] = useRacedQuery(
     queries.getEmailsForConversationsV2({
       conversationIds: allConversationIds,
       channelId: routeChannelId,
@@ -5234,6 +5351,14 @@ export const SupportTicketDetail = ({
 
   // Get channel info and user status
   const channel = useChannel(channelId);
+
+  const openTicketId = ticket?.id;
+  const channelType = channel?.type;
+  useEffect(() => {
+    if (!openTicketId || !customerPhoneNumber || channelType !== ChannelType.APP) return undefined;
+    setCloudAgentOpenTicket({ ticketId: openTicketId, number: customerPhoneNumber });
+    return (): void => setCloudAgentOpenTicket(null);
+  }, [openTicketId, customerPhoneNumber, channelType]);
   const [mailboxRows] = useCachedQuery(
     queries.myTicketMailboxV2({
       ticketId: mailboxTicketId ?? '',
@@ -5422,6 +5547,7 @@ export const SupportTicketDetail = ({
                       </Tooltip>
                     </div>
                   )}
+                  {ticket && channel?.type === ChannelType.APP && <CallButton />}
                   {/* Status pill */}
                   {ticket && (
                     <div className='border border-border rounded-md overflow-hidden shrink-0'>
@@ -5693,7 +5819,7 @@ export const SupportTicketDetail = ({
                           )}
                         </>
                       )}
-                      {channel && (
+                      {channel && channel.type !== ChannelType.APP && (
                         <DropdownMenuItem
                           onSelect={e => e.preventDefault()}
                           className='p-0 focus:bg-transparent'
@@ -6031,7 +6157,10 @@ export const SupportTicketDetail = ({
                     drafts={ticketEmailDrafts}
                     replyBasePath='/integrations/social-media'
                     placeholder='Reply to this review…'
-                    maxLength={350}
+                    // Play caps replies at 350; Apple documents no maximum, so do not invent one.
+                    {...(channelIntegrationInfo.sourceType === SOCIAL_MEDIA_SOURCE_TYPE.GOOGLE_PLAY
+                      ? { maxLength: 350 }
+                      : {})}
                     trackingCategory='social-media-composer'
                   />
                 ) : null
