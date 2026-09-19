@@ -2,7 +2,7 @@ import { ReactElement } from 'react';
 import type { ActivityWithRelated } from '../../types/activity';
 import { MessageBubble } from '../ui/MessageBubble/MessageBubble';
 import { ActivityItemCard } from './ActivityItemCard';
-import { RenderMessageWithHTML } from '../Chat/RenderMessageWithHTML/RenderMessageWithHTML';
+import { htmlToPlainText } from '../../utils/sanitizer';
 import { getFlowJsonPreviewText } from '../../utils/flowPreview';
 import { useUser } from '../../hooks/useUsers';
 import { useRouteContext } from '../../hooks/useRouteContext';
@@ -55,13 +55,7 @@ export const DirectMessageActivity = ({
         />
       ) : (
         <div className='text-foreground text-sm line-clamp-1 truncate whitespace-normal break-all'>
-          {getFlowJsonPreviewText(message.content) ?? (
-            <RenderMessageWithHTML
-              message={message.content}
-              showEdited={message.edited}
-              disableLinks
-            />
-          )}
+          {getFlowJsonPreviewText(message.content) ?? htmlToPlainText(message.content)}
         </div>
       )}
     </ActivityItemCard>
