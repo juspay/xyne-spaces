@@ -10,7 +10,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@kubernetes/client-node": "^0.22.3",
+    "@kubernetes/client-node": "^2.0.0",
     "tsx": "^4.19.0"
   },
   "devDependencies": {
