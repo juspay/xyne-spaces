@@ -225,6 +225,39 @@ export async function gcsUploadSessionFromDisk(
   }
 }
 
+/**
+ * Write one session file straight to the archive, at the same object path the
+ * full archive would use. Spilled tool results are handed to the model as
+ * absolute local paths, but the next turn of that session can be claimed by a
+ * different pod, which restores the session from GCS and never sees a file
+ * written after the last archive. Writing through here makes the restore carry
+ * it, so the path the model was given still resolves.
+ */
+export async function gcsUploadSessionFile(
+  conversationId: string,
+  relPath: string,
+  data: string | Buffer,
+): Promise<boolean> {
+  const client = getStorage();
+  if (!client) return false;
+  try {
+    await client.uploadFileV2(typeof data === "string" ? Buffer.from(data, "utf8") : data, {
+      path: objectName(conversationId, relPath),
+      contentType: "application/octet-stream",
+      timeoutMs: STORAGE_TIMEOUT_MS,
+    });
+    return true;
+  } catch (err) {
+    noteIfCredsError(err);
+    metric.count("session_file_writethrough_failed");
+    log.warn(
+      `[gcs] write-through failed for ${conversationId}/${relPath}:`,
+      err instanceof Error ? err.message : String(err),
+    );
+    return false;
+  }
+}
+
 /** Upload one per-run debug snapshot. Returns true on success. */
 export async function gcsUploadDebugRun(storeKey: string, fileName: string, data: Buffer): Promise<boolean> {
   const client = getStorage();

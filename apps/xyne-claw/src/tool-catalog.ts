@@ -1,3 +1,5 @@
+import { jevEnabled, jevScoreItems, jevThreshold } from "./jev.js";
+import { metric } from "./metrics.js";
 import { Type } from "@sinclair/typebox";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import {
@@ -386,6 +388,40 @@ function matchScoped(entries: ToolCatalogEntry[], query: string): ToolCatalogEnt
 }
 
 /**
+ * Keyword hits first, then anything Jev scores as relevant that the keywords
+ * missed. The union is deliberate: substring matching finds nothing for
+ * "average first response time" against `spaces-desk-metrics`, but dropping
+ * what it does catch would be a regression for the phrasings it handles.
+ */
+async function matchScopedSifted(
+  entries: ToolCatalogEntry[],
+  query: string,
+): Promise<ToolCatalogEntry[]> {
+  const keyword = matchScoped(entries, query);
+  if (!jevEnabled()) return keyword;
+
+  const already = new Set(keyword.map((e) => e.name));
+  const scores = await jevScoreItems(query, entries, {
+    purpose: "tool-search",
+    key: (e) => e.name,
+    instructions: (e) =>
+      `Would calling this tool help with the request? \`${e.name}\`: ` +
+      `${e.oneLineDescription.slice(0, 300)}`,
+  });
+  if (!scores) return keyword;
+
+  const threshold = jevThreshold("JEV_TOOL_THRESHOLD", 0.4);
+  const added = entries
+    .filter((e) => !already.has(e.name) && (scores.get(e.name) ?? 0) >= threshold)
+    .sort((a, b) => (scores.get(b.name) ?? 0) - (scores.get(a.name) ?? 0));
+
+  if (added.length > 0) {
+    metric.count("tool_search_sift_added", { added: added.length, keyword: keyword.length });
+  }
+  return [...keyword, ...added];
+}
+
+/**
  * Resolves a name the model typed to the name the catalog actually holds.
  *
  * Agent-scope search quotes server-decorated runtime names (e.g.
@@ -702,7 +738,7 @@ export function buildFastModeMetaTools(options: {
 
         const allowed = maxRisk ? new Set(riskAtOrBelow(maxRisk as "read" | "write" | "destructive")) : null;
         const risked = allowed ? byServer.filter((e) => allowed.has(entryRisk(e))) : byServer;
-        const matched = query ? matchScoped(risked, query) : risked;
+        const matched = query ? await matchScopedSifted(risked, query) : risked;
         if (matched.length === 0) {
           return text(
             `No tool in this agent's catalog matches ${JSON.stringify(query)}. ` +

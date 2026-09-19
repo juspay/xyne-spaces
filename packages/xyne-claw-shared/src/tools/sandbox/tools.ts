@@ -1229,11 +1229,20 @@ export const sandboxCopyIn: ToolDefinition = {
       // endpoint per chunk and appends server-side, so no single request is
       // large and no workspace-image change is needed. 256 KiB keeps a clear
       // margin under the observed cap.
-      const { bytesWritten } = await session.files.writeStream(
-        destPath,
-        createReadStream(sourceAbs),
-        { chunkBytes: 256 * 1024 },
-      );
+      // A read stream reports ENOENT through an async 'error' event, not by
+      // rejecting writeStream, so without this race the failure escapes the
+      // catch below and reaches the process handler — killing a pod that is
+      // serving every other session. Racing it makes a missing spill file an
+      // ordinary rejection, which is what the ENOENT branch below expects.
+      const source = createReadStream(sourceAbs);
+      const sourceFailure = new Promise<never>((_, reject) => {
+        source.once("error", reject);
+      });
+      void sourceFailure.catch(() => {});
+      const { bytesWritten } = await Promise.race([
+        session.files.writeStream(destPath, source, { chunkBytes: 256 * 1024 }),
+        sourceFailure,
+      ]).finally(() => source.destroy());
       return JSON.stringify({ sourcePath: relPath, destPath, bytes: bytesWritten, copied: true });
     } catch (err) {
       if (isStaleSessionError(err)) {
