@@ -37,6 +37,10 @@ interface AgentCreateCanvasProps {
   footer?: ReactNode;
   readOnly?: boolean;
   onClose?: () => void;
+  /** First empty-canvas describe only: skeleton identity + instructions, Hub rows stay. */
+  skeletonIdentity?: boolean;
+  /** Field currently being written by chat. Drives the in-field caret. */
+  writingField?: AgentCreateField | null;
 }
 
 function ConflictChooser({
@@ -76,29 +80,27 @@ function ConflictChooser({
   );
 }
 
-function CanvasSkeleton(): ReactElement {
+function IdentitySkeleton(): ReactElement {
   return (
-    <div className='flex flex-col gap-8' aria-busy='true' aria-label='Drafting the agent'>
+    <div
+      className='flex flex-col gap-8'
+      aria-busy='true'
+      aria-label='Drafting identity'
+      data-testid='agent-create-identity-skeleton'
+    >
       <div className='flex flex-col gap-3'>
-        <Skeleton className='h-6 w-48' />
+        <Skeleton className='h-7 w-48' />
         <Skeleton className='h-8 w-36 rounded-[10px]' />
         <Skeleton className='h-4 w-40' />
       </div>
       <div className='flex flex-col gap-3'>
         <Skeleton className='h-4 w-24' />
-        <Skeleton className='h-[86px] w-full rounded-2xl' />
+        <Skeleton className='h-[86px] w-full rounded-none' />
       </div>
       <div className='flex flex-col gap-3'>
         <Skeleton className='h-4 w-28' />
-        <Skeleton className='h-[180px] w-full rounded-2xl' />
+        <Skeleton className='h-[180px] w-full rounded-none' />
       </div>
-      {['MCP', 'Tools', 'Skills', 'Knowledge'].map(label => (
-        <div key={label} className='flex flex-col gap-2'>
-          <Skeleton className='h-4 w-20' />
-          <Skeleton className='h-4 w-64' />
-          <Skeleton className='h-8 w-32 rounded-[10px]' />
-        </div>
-      ))}
     </div>
   );
 }
@@ -118,6 +120,8 @@ export function AgentCreateCanvas({
   footer,
   readOnly,
   onClose,
+  skeletonIdentity,
+  writingField = null,
 }: AgentCreateCanvasProps): ReactElement {
   const conflictByField = useMemo(
     () => new Map(conflicts.map(conflict => [conflict.field, conflict])),
@@ -139,10 +143,22 @@ export function AgentCreateCanvas({
     );
   };
 
+  const showIdentitySkeleton = Boolean(skeletonIdentity);
+  const isWriting = (field: AgentCreateField): boolean =>
+    writingField === field || highlights.has(field);
+  const activeWrite = writingField ?? [...highlights][0] ?? '';
+  const fieldClass =
+    'w-full resize-y border-0 border-b border-border bg-transparent px-0 py-2 text-sm leading-6 text-foreground placeholder:text-muted-foreground/70 focus:outline-none focus:ring-0 disabled:opacity-60';
+
   return (
-    <div className='flex h-full min-w-0 flex-col bg-background' data-component='AgentCreateCanvas'>
-      <div className='flex h-14 flex-shrink-0 items-center justify-between border-b border-border px-5'>
-        <span className='font-mono text-sm leading-[18px] tracking-[0.2px] text-muted-foreground'>
+    <div
+      className='flex h-full min-w-0 flex-col bg-background'
+      data-component='AgentCreateCanvas'
+      data-writing-field={activeWrite}
+      data-canvas-idle={skeletonIdentity || activeWrite ? 'false' : 'true'}
+    >
+      <div className='flex h-11 flex-shrink-0 items-center justify-between px-5'>
+        <span className='text-[11px] font-medium uppercase tracking-[0.16em] text-muted-foreground'>
           Agent
         </span>
         {onClose ? (
@@ -158,14 +174,14 @@ export function AgentCreateCanvas({
           </button>
         ) : null}
       </div>
-      <div className='flex-1 overflow-y-auto px-6 py-5'>
-        <div className='mx-auto flex w-full max-w-3xl flex-col gap-8'>
-          {phase === 'loading' ? (
-            <CanvasSkeleton />
+      <div className='flex-1 overflow-y-auto px-6 py-6'>
+        <div className='mx-auto flex w-full max-w-3xl flex-col gap-10'>
+          {showIdentitySkeleton ? (
+            <IdentitySkeleton />
           ) : (
             <>
-              <ChatFillHighlight active={highlights.has('name') || highlights.has('slug')}>
-                <div className='flex min-w-0 flex-col gap-1.5'>
+              <div className='flex min-w-0 flex-col gap-2'>
+                <ChatFillHighlight active={isWriting('name')} placement='inline'>
                   <div className='flex w-full items-center gap-2'>
                     <AutoWidthInput
                       id='agent-create-name'
@@ -178,18 +194,20 @@ export function AgentCreateCanvas({
                       }
                       onFocus={() => onFieldFocus('name')}
                       onBlur={() => onFieldFocus(null)}
-                      placeholder='Name your agent'
+                      placeholder='Untitled'
                       aria-label='Name'
                       disabled={disabled}
                       data-track-category='Claw Agents'
                       data-track-name='Create agent canvas: name'
-                      className='text-base font-medium leading-6 tracking-[-0.1px] text-foreground placeholder:font-medium placeholder:text-muted-foreground'
+                      className='text-xl font-medium leading-7 tracking-[-0.2px] text-foreground placeholder:font-medium placeholder:text-muted-foreground/70'
                     />
                     <PencilEditLine className='size-3 shrink-0 text-muted-foreground' aria-hidden />
                   </div>
+                </ChatFillHighlight>
 
+                <ChatFillHighlight active={isWriting('slug')} placement='inline'>
                   <div className='flex items-center gap-1.5'>
-                    <div className='flex items-center gap-0.5 rounded-[10px] bg-muted py-0.5 pl-0.5 pr-1'>
+                    <div className='flex items-center gap-0.5 py-0.5'>
                       <AtMark className='size-4 shrink-0 text-muted-foreground' aria-hidden />
                       <AutoWidthInput
                         id='agent-create-handle'
@@ -204,7 +222,7 @@ export function AgentCreateCanvas({
                         aria-label='Handle'
                         disabled={disabled}
                         style={{ width: inlineWidth(form.slug, 'handle') }}
-                        className='text-sm font-medium leading-5 tracking-[-0.14px] text-foreground placeholder:font-medium placeholder:text-muted-foreground'
+                        className='text-sm font-medium leading-5 tracking-[-0.14px] text-foreground placeholder:font-medium placeholder:text-muted-foreground/70'
                       />
                     </div>
                     {checkingHandle && form.name.trim().length > 0 && (
@@ -214,30 +232,30 @@ export function AgentCreateCanvas({
                       />
                     )}
                   </div>
+                </ChatFillHighlight>
 
-                  {handleError ? (
-                    <p className='text-sm leading-5 text-destructive' role='alert'>
-                      {handleError}
-                    </p>
-                  ) : null}
+                {handleError ? (
+                  <p className='text-sm leading-5 text-destructive' role='alert'>
+                    {handleError}
+                  </p>
+                ) : null}
 
-                  {builtBy ? (
-                    <p className='flex items-center gap-1.5 text-sm leading-[1.5] text-foreground'>
-                      Built by
-                      <span className='text-[color:var(--mention-color)]'>@{builtBy}</span>
-                    </p>
-                  ) : null}
+                {builtBy ? (
+                  <p className='flex items-center gap-1.5 text-sm leading-[1.5] text-muted-foreground'>
+                    Built by
+                    <span className='text-[color:var(--mention-color)]'>@{builtBy}</span>
+                  </p>
+                ) : null}
 
-                  {renderConflict('name')}
-                  {renderConflict('slug')}
-                </div>
-              </ChatFillHighlight>
+                {renderConflict('name')}
+                {renderConflict('slug')}
+              </div>
 
-              <ChatFillHighlight active={highlights.has('description')}>
-                <div className='flex w-full flex-col gap-3'>
+              <ChatFillHighlight active={isWriting('description')} placement='block'>
+                <div className='flex w-full flex-col gap-1'>
                   <label
                     htmlFor='agent-create-description'
-                    className='text-sm font-medium leading-[1.2] tracking-[-0.1px] text-foreground'
+                    className='text-[11px] font-medium uppercase tracking-[0.14em] text-muted-foreground'
                   >
                     Description
                   </label>
@@ -251,17 +269,17 @@ export function AgentCreateCanvas({
                     placeholder='When to use this agent'
                     data-track-category='Claw Agents'
                     data-track-name='Create agent canvas: description'
-                    className='h-[86px] w-full resize-y rounded-2xl border border-border bg-card p-4 text-sm leading-5 text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60'
+                    className={cn(fieldClass, 'h-[72px]')}
                   />
                   {renderConflict('description')}
                 </div>
               </ChatFillHighlight>
 
-              <ChatFillHighlight active={highlights.has('systemPrompt')}>
-                <div className='flex w-full flex-col gap-3'>
+              <ChatFillHighlight active={isWriting('systemPrompt')} placement='block'>
+                <div className='flex w-full flex-col gap-1'>
                   <label
                     htmlFor='agent-create-instructions'
-                    className='text-sm font-medium leading-[1.2] tracking-[-0.1px] text-foreground'
+                    className='text-[11px] font-medium uppercase tracking-[0.14em] text-muted-foreground'
                   >
                     Instructions
                   </label>
@@ -276,85 +294,84 @@ export function AgentCreateCanvas({
                     placeholder='How it should work'
                     data-track-category='Claw Agents'
                     data-track-name='Create agent canvas: instructions'
-                    className='min-h-[180px] w-full resize-y rounded-2xl border border-border bg-card p-4 text-sm leading-5 text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60'
+                    className={cn(fieldClass, 'min-h-[180px]')}
                   />
                   {renderConflict('systemPrompt')}
                 </div>
               </ChatFillHighlight>
-
-              <ChatFillHighlight active={highlights.has('tools')}>
-                <div
-                  className={cn(
-                    'flex flex-col gap-8',
-                    disabled && 'pointer-events-none opacity-60',
-                  )}
-                  onFocus={() => onFieldFocus('tools')}
-                  onBlur={() => onFieldFocus(null)}
-                >
-                  <McpCapabilityRow
-                    selection={form.tools}
-                    onSelectionChange={tools =>
-                      onFormChange({
-                        tools: { ...tools, callableAgents: form.tools.callableAgents },
-                      })
-                    }
-                    suggestContext={suggestContext}
-                  />
-                  <SubagentCapabilityRow
-                    selection={form.tools}
-                    onSelectionChange={tools =>
-                      onFormChange({
-                        tools: { ...tools, callableAgents: form.tools.callableAgents },
-                      })
-                    }
-                    suggestContext={suggestContext}
-                  />
-                  <BuiltinCapabilityRow
-                    selection={form.tools}
-                    onSelectionChange={tools =>
-                      onFormChange({
-                        tools: { ...tools, callableAgents: form.tools.callableAgents },
-                      })
-                    }
-                    suggestContext={suggestContext}
-                  />
-                  {renderConflict('tools')}
-                </div>
-              </ChatFillHighlight>
-
-              <ChatFillHighlight active={highlights.has('skills')}>
-                <div
-                  className={cn(disabled && 'pointer-events-none opacity-60')}
-                  onFocus={() => onFieldFocus('skills')}
-                  onBlur={() => onFieldFocus(null)}
-                >
-                  <SkillsCapabilityRow
-                    selectedIds={form.selectedSkillIds}
-                    onChange={selectedSkillIds => onFormChange({ selectedSkillIds })}
-                  />
-                  {renderConflict('skills')}
-                </div>
-              </ChatFillHighlight>
-
-              <ChatFillHighlight active={highlights.has('knowledge')}>
-                <div
-                  className={cn(disabled && 'pointer-events-none opacity-60')}
-                  onFocus={() => onFieldFocus('knowledge')}
-                  onBlur={() => onFieldFocus(null)}
-                >
-                  <KnowledgeCapabilityRow
-                    scope={form.selectedKbScope}
-                    onScopeChange={selectedKbScope => onFormChange({ selectedKbScope })}
-                    grants={form.selectedKbResources}
-                    onGrantsChange={selectedKbResources => onFormChange({ selectedKbResources })}
-                  />
-                  {renderConflict('knowledge')}
-                </div>
-              </ChatFillHighlight>
-
-              {note ? <p className='text-sm leading-5 text-muted-foreground'>{note}</p> : null}
             </>
           )}
+
+          <>
+            <ChatFillHighlight active={isWriting('tools')}>
+              <div
+                className={cn('flex flex-col gap-8', disabled && 'pointer-events-none opacity-60')}
+                onFocus={() => onFieldFocus('tools')}
+                onBlur={() => onFieldFocus(null)}
+              >
+                <McpCapabilityRow
+                  selection={form.tools}
+                  onSelectionChange={tools =>
+                    onFormChange({
+                      tools: { ...tools, callableAgents: form.tools.callableAgents },
+                    })
+                  }
+                  suggestContext={suggestContext}
+                />
+                <SubagentCapabilityRow
+                  selection={form.tools}
+                  onSelectionChange={tools =>
+                    onFormChange({
+                      tools: { ...tools, callableAgents: form.tools.callableAgents },
+                    })
+                  }
+                  suggestContext={suggestContext}
+                />
+                <BuiltinCapabilityRow
+                  selection={form.tools}
+                  onSelectionChange={tools =>
+                    onFormChange({
+                      tools: { ...tools, callableAgents: form.tools.callableAgents },
+                    })
+                  }
+                  suggestContext={suggestContext}
+                />
+                {renderConflict('tools')}
+              </div>
+            </ChatFillHighlight>
+
+            <ChatFillHighlight active={isWriting('skills')}>
+              <div
+                className={cn(disabled && 'pointer-events-none opacity-60')}
+                onFocus={() => onFieldFocus('skills')}
+                onBlur={() => onFieldFocus(null)}
+              >
+                <SkillsCapabilityRow
+                  selectedIds={form.selectedSkillIds}
+                  onChange={selectedSkillIds => onFormChange({ selectedSkillIds })}
+                />
+                {renderConflict('skills')}
+              </div>
+            </ChatFillHighlight>
+
+            <ChatFillHighlight active={isWriting('knowledge')}>
+              <div
+                className={cn(disabled && 'pointer-events-none opacity-60')}
+                onFocus={() => onFieldFocus('knowledge')}
+                onBlur={() => onFieldFocus(null)}
+              >
+                <KnowledgeCapabilityRow
+                  scope={form.selectedKbScope}
+                  onScopeChange={selectedKbScope => onFormChange({ selectedKbScope })}
+                  grants={form.selectedKbResources}
+                  onGrantsChange={selectedKbResources => onFormChange({ selectedKbResources })}
+                />
+                {renderConflict('knowledge')}
+              </div>
+            </ChatFillHighlight>
+
+            {note ? <p className='text-sm leading-5 text-muted-foreground'>{note}</p> : null}
+          </>
         </div>
       </div>
       {footer ? (

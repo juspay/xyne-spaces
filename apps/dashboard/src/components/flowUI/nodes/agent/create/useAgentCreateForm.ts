@@ -15,6 +15,7 @@ export function useAgentCreateForm(initial: AgentCreateFormState = EMPTY_CREATE_
   const [dirty, setDirty] = useState<Partial<Record<AgentCreateField, boolean>>>({});
   const [conflicts, setConflicts] = useState<AgentCreateConflict[]>([]);
   const [highlights, setHighlights] = useState<ReadonlySet<AgentCreateField>>(new Set());
+  const [writingField, setWritingFieldState] = useState<AgentCreateField | null>(null);
   const highlightTimer = useRef<number | null>(null);
   const lastSourceRef = useRef<string | null>(null);
   const focusedRef = useRef(focused);
@@ -36,15 +37,33 @@ export function useAgentCreateForm(initial: AgentCreateFormState = EMPTY_CREATE_
     }, 1400);
   }, []);
 
+  const clearHighlights = useCallback(() => {
+    if (highlightTimer.current !== null) {
+      window.clearTimeout(highlightTimer.current);
+      highlightTimer.current = null;
+    }
+    setHighlights(new Set());
+    setWritingFieldState(null);
+  }, []);
+
+  const setWritingField = useCallback((field: AgentCreateField | null) => {
+    if (highlightTimer.current !== null) {
+      window.clearTimeout(highlightTimer.current);
+      highlightTimer.current = null;
+    }
+    setWritingFieldState(field);
+    setHighlights(field ? new Set([field]) : new Set());
+  }, []);
+
   const patchForm = useCallback(
     (patch: Partial<AgentCreateFormState>, field?: AgentCreateField) => {
       setForm(prev => ({ ...prev, ...patch }));
-      if (field) {
-        setDirty(prev => ({ ...prev, [field]: true }));
-      } else {
-        const keys = Object.keys(patch) as Array<keyof AgentCreateFormState>;
-        setDirty(prev => {
-          const next = { ...prev };
+      setDirty(prev => {
+        const next = { ...prev };
+        if (field) {
+          next[field] = true;
+        } else {
+          const keys = Object.keys(patch) as Array<keyof AgentCreateFormState>;
           if (keys.includes('name')) next.name = true;
           if (keys.includes('slug')) next.slug = true;
           if (keys.includes('description')) next.description = true;
@@ -54,26 +73,36 @@ export function useAgentCreateForm(initial: AgentCreateFormState = EMPTY_CREATE_
           if (keys.includes('selectedKbResources') || keys.includes('selectedKbScope')) {
             next.knowledge = true;
           }
-          return next;
-        });
-      }
+        }
+        dirtyRef.current = next;
+        return next;
+      });
     },
     [],
   );
 
   const applyChatPatch = useCallback(
-    (sourceId: string, incoming: AgentCreateChatPatch): void => {
+    (
+      sourceId: string,
+      incoming: AgentCreateChatPatch,
+      options?: { highlight?: boolean },
+    ): AgentCreateField[] => {
       if (lastSourceRef.current === sourceId) {
-        return;
+        return [];
       }
       lastSourceRef.current = sourceId;
+      let changed: AgentCreateField[] = [];
       setForm(current => {
         const lock: FieldLock = { focused: focusedRef.current, dirty: dirtyRef.current };
         const result = mergeChatPatch(current, incoming, lock, conflictsRef.current);
+        changed = result.changed;
         setConflicts(result.conflicts);
-        markHighlights(result.changed);
+        if (options?.highlight !== false) {
+          markHighlights(result.changed);
+        }
         return result.next;
       });
+      return changed;
     },
     [markHighlights],
   );
@@ -99,10 +128,13 @@ export function useAgentCreateForm(initial: AgentCreateFormState = EMPTY_CREATE_
     setBaseline(next);
     setDirty({});
     setConflicts([]);
+    setHighlights(new Set());
+    setWritingFieldState(null);
     if (sourceId) lastSourceRef.current = sourceId;
   }, []);
 
   const onFieldFocus = useCallback((field: AgentCreateField | null) => {
+    focusedRef.current = field;
     setFocused(field);
   }, []);
 
@@ -113,6 +145,7 @@ export function useAgentCreateForm(initial: AgentCreateFormState = EMPTY_CREATE_
     dirty,
     conflicts,
     highlights,
+    writingField,
     canvasDirty: isFormDirty(form, baseline),
     patchForm,
     applyChatPatch,
@@ -120,5 +153,8 @@ export function useAgentCreateForm(initial: AgentCreateFormState = EMPTY_CREATE_
     resetFrom,
     onFieldFocus,
     setForm,
+    markHighlights,
+    clearHighlights,
+    setWritingField,
   };
 }

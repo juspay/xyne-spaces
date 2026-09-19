@@ -201,6 +201,7 @@ export const AgentPreview: React.FC<AgentPreviewProps> = ({
         form={createForm.form}
         onFormChange={createForm.patchForm}
         onFieldFocus={createForm.onFieldFocus}
+        writingField={createForm.writingField}
         highlights={createForm.highlights}
         conflicts={createForm.conflicts}
         onResolveConflict={createForm.resolveConflict}

@@ -21,12 +21,55 @@ import {
   nameFromGeneratedPrompt,
   nameFromIntent,
 } from '@/components/flowUI/nodes/agent/create/canvasFromIdentity';
+import {
+  classifyCreateTurn,
+  parseLocalRename,
+  shouldGeneratePrompt,
+  type CreateTurnField,
+} from '@/components/flowUI/nodes/agent/create/classifyCreateTurn';
+import { slicePatch } from '@/components/flowUI/nodes/agent/create/mergeChatPatch';
+import {
+  CLARIFY_REPLY,
+  replyForCreateTurn,
+  SKILLS_ROW_REPLY,
+} from '@/components/flowUI/nodes/agent/create/replyForCreateTurn';
 import { toolboxFromSuggestion } from '@/components/flowUI/nodes/agent/create/toolboxFromSuggestion';
 import {
   EMPTY_CREATE_FORM,
+  type AgentCreateChatPatch,
+  type AgentCreateField,
   type AgentCreatePhase,
 } from '@/components/flowUI/nodes/agent/create/types';
 import { useAgentCreateForm } from '@/components/flowUI/nodes/agent/create/useAgentCreateForm';
+
+const WRITE_MS = 1100;
+const FIELD_ORDER: AgentCreateField[] = [
+  'name',
+  'slug',
+  'description',
+  'systemPrompt',
+  'tools',
+  'skills',
+  'knowledge',
+];
+
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => {
+    window.setTimeout(resolve, ms);
+  });
+}
+
+function canvasIsEmpty(form: { name: string; systemPrompt: string }): boolean {
+  return !form.name.trim() && !form.systemPrompt.trim();
+}
+
+function pickPatch(patch: AgentCreateChatPatch, fields: CreateTurnField[]): AgentCreateChatPatch {
+  const next: AgentCreateChatPatch = {};
+  for (const field of fields) {
+    Object.assign(next, slicePatch(patch, field));
+  }
+  return next;
+}
 
 export function AgentCreateSplitPage(): ReactElement {
   const { user } = useAuth();
@@ -39,6 +82,7 @@ export function AgentCreateSplitPage(): ReactElement {
   const [createError, setCreateError] = useState<string | null>(null);
   const [discardOpen, setDiscardOpen] = useState(false);
   const [createdSlug, setCreatedSlug] = useState<string | null>(null);
+  const [skeletonIdentity, setSkeletonIdentity] = useState(false);
 
   const slug = effectiveSlug({
     name: createForm.form.name,
@@ -64,40 +108,101 @@ export function AgentCreateSplitPage(): ReactElement {
     async (text: string): Promise<string> => {
       setSending(true);
       setCreateError(null);
-      setPhase('loading');
+      createForm.clearHighlights();
       try {
-        const prompt = await generateAgentPrompt({
-          intent: text,
-          ...(createForm.form.systemPrompt.trim()
-            ? { existingPrompt: createForm.form.systemPrompt.trim() }
-            : {}),
-        });
-        const derivedName = nameFromGeneratedPrompt(prompt) || nameFromIntent(text);
-        const derivedSlug = slugify(derivedName);
-        let tools = createForm.form.tools;
-        try {
-          const [suggestion, catalog] = await Promise.all([
-            suggestTools({
-              systemPrompt: prompt || undefined,
-              description: text,
-            }),
-            getAvailableTools().catch(() => null),
-          ]);
-          tools = toolboxFromSuggestion(createForm.form.tools, suggestion, catalog);
-        } catch {
-          // Prompt still applies if tool suggest fails.
+        const canvasEmpty = canvasIsEmpty(createForm.form);
+        const classification = classifyCreateTurn(text, canvasEmpty);
+
+        if (classification.kind === 'reply') {
+          return replyForCreateTurn(text, createForm.form, canvasEmpty);
         }
-        createForm.applyChatPatch(`hub-${Date.now()}`, {
-          name: derivedName,
-          slug: derivedSlug,
-          description: descriptionFromIntent(text),
-          systemPrompt: prompt,
-          tools,
-        });
+        if (classification.kind === 'clarify') {
+          return CLARIFY_REPLY;
+        }
+        if (classification.fields.every(field => field === 'skills')) {
+          return SKILLS_ROW_REPLY;
+        }
+
+        const renameTo = parseLocalRename(text);
+        const generate = shouldGeneratePrompt(classification, canvasEmpty, text);
+        const firstDescribe = canvasEmpty && generate;
+
+        if (firstDescribe) {
+          setSkeletonIdentity(true);
+        }
+
+        const incoming: AgentCreateChatPatch = {};
+
+        if (renameTo) {
+          incoming.name = renameTo;
+          incoming.slug = slugify(renameTo);
+        }
+
+        if (generate) {
+          const prompt = await generateAgentPrompt({
+            intent: text,
+            ...(createForm.form.systemPrompt.trim()
+              ? { existingPrompt: createForm.form.systemPrompt.trim() }
+              : {}),
+          });
+          if (classification.fields.includes('systemPrompt')) {
+            incoming.systemPrompt = prompt;
+          }
+          if (classification.fields.includes('name') && !renameTo) {
+            incoming.name = nameFromGeneratedPrompt(prompt) || nameFromIntent(text);
+          }
+          if (classification.fields.includes('slug') && incoming.name) {
+            incoming.slug = slugify(incoming.name);
+          }
+          if (classification.fields.includes('description') && canvasEmpty) {
+            incoming.description = descriptionFromIntent(text);
+          }
+        }
+
+        if (classification.fields.includes('tools')) {
+          try {
+            const [suggestion, catalog] = await Promise.all([
+              suggestTools({
+                systemPrompt: incoming.systemPrompt || createForm.form.systemPrompt || undefined,
+                description: text,
+              }),
+              getAvailableTools().catch(() => null),
+            ]);
+            incoming.tools = toolboxFromSuggestion(createForm.form.tools, suggestion, catalog);
+          } catch {
+            // Prompt still applies if tool suggest fails.
+          }
+        }
+
+        const patch = pickPatch(incoming, classification.fields);
+        setSkeletonIdentity(false);
+        const sourceId = `hub-${Date.now()}`;
+        const reveal = FIELD_ORDER.filter(field => classification.fields.includes(field));
+        for (const field of reveal) {
+          const slice = slicePatch(patch, field);
+          if (Object.keys(slice).length === 0) continue;
+          const changed = createForm.applyChatPatch(`${sourceId}-${field}`, slice, {
+            highlight: false,
+          });
+          if (!changed.includes(field)) {
+            continue;
+          }
+          createForm.setWritingField(field);
+          await sleep(WRITE_MS);
+        }
+        createForm.setWritingField(null);
         setPhase('draft');
+        if (renameTo) {
+          return `Renamed to ${renameTo}. The rest of the canvas is unchanged.`;
+        }
+        if (classification.fields.length === 1 && classification.fields[0] === 'systemPrompt') {
+          return 'Updated instructions. Everything else is unchanged.';
+        }
         return 'Filled the canvas. Edit anything, then Create Agent.';
       } catch (err) {
-        setPhase(createForm.form.systemPrompt.trim() ? 'draft' : 'empty');
+        createForm.clearHighlights();
+        setSkeletonIdentity(false);
+        setPhase(canvasIsEmpty(createForm.form) ? 'empty' : 'draft');
         throw err;
       } finally {
         setSending(false);
@@ -187,6 +292,7 @@ export function AgentCreateSplitPage(): ReactElement {
     resetFrom(EMPTY_CREATE_FORM);
     setPhase('empty');
     setCreateError(null);
+    setSkeletonIdentity(false);
   }, [canvasDirty, resetFrom]);
 
   const footer = useMemo(
@@ -216,15 +322,9 @@ export function AgentCreateSplitPage(): ReactElement {
       highlights={createForm.highlights}
       conflicts={createForm.conflicts}
       onResolveConflict={createForm.resolveConflict}
-      phase={
-        phase === 'loading'
-          ? 'loading'
-          : phase === 'created'
-            ? 'created'
-            : phase === 'empty'
-              ? 'empty'
-              : 'draft'
-      }
+      skeletonIdentity={skeletonIdentity}
+      writingField={createForm.writingField}
+      phase={phase === 'created' ? 'created' : phase === 'empty' ? 'empty' : 'draft'}
       builtBy={builtBy}
       handleError={handleError}
       checkingHandle={nameCheck.checking}
@@ -267,6 +367,7 @@ export function AgentCreateSplitPage(): ReactElement {
           createForm.resetFrom(EMPTY_CREATE_FORM);
           setPhase('empty');
           setCreateError(null);
+          setSkeletonIdentity(false);
         }}
       />
     </div>

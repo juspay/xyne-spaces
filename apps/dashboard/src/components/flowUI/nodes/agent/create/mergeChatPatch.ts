@@ -116,7 +116,10 @@ function applyField(
   }
 }
 
-function slicePatch(patch: AgentCreateChatPatch, field: AgentCreateField): AgentCreateChatPatch {
+export function slicePatch(
+  patch: AgentCreateChatPatch,
+  field: AgentCreateField,
+): AgentCreateChatPatch {
   switch (field) {
     case 'name':
       return patch.name !== undefined ? { name: patch.name } : {};
