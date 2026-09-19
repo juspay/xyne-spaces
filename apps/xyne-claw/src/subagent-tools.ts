@@ -1469,6 +1469,10 @@ function customToolSlug(tool: ToolDefinition): string {
   return meta.slug ?? tool.name;
 }
 
+function unwrapWriteTools(): boolean {
+  return process.env["XYNE_UNWRAP_WRITE_TOOLS"] === "1";
+}
+
 function isCustomWriteTool(tool: ToolDefinition): boolean {
   return (tool as ToolDefinition & { isWriteTool?: boolean }).isWriteTool === true;
 }
@@ -1599,9 +1603,20 @@ export function buildSubagentTools(
         const hoisted = group.tools.filter((t) => isDirectPick(t.name));
         if (hoisted.length > 0) directTools.push(...hoisted);
       }
-      // Backwards compatibility: keep write tools visible at parent level for
-      // agents/prompts that already perform parent-driven approval flows.
-      directTools.push(...writeTools);
+      // Writes live in the subagent wrapper above and still queue a signed
+      // pendingAction on the parent run, so delegation loses neither the
+      // capability nor the approval gate. Force-unwrapping them here only made
+      // them permanently prompt-resident: they are skipped by the catalog, so
+      // anything not catalogued can never go dormant. Set
+      // XYNE_UNWRAP_WRITE_TOOLS=1 to restore the old parent-level push for an
+      // agent that still drives approvals itself.
+      if (unwrapWriteTools()) directTools.push(...writeTools);
+      else if (writeTools.length > 0) {
+        metric.count("write_tools_not_unwrapped", {
+          server: String(group.serverType ?? "unknown"),
+          count: writeTools.length,
+        });
+      }
     } else {
       // No subagent definition for this server type — keep all as direct
       directTools.push(...group.tools);

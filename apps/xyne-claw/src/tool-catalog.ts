@@ -190,6 +190,15 @@ function resolveCustomSubagentTools(
   return out;
 }
 
+// Writes were skipped here so they could never be lazily loaded. With the
+// parent-level force unwrap gone they would otherwise be unreachable, and
+// prompt-residency was never the safety mechanism: every write queues a signed
+// pendingAction that a human approves in claw-auth before it executes. Set
+// XYNE_CATALOG_EXCLUDE_WRITES=1 to restore the old exclusion.
+function excludeWritesFromCatalog(): boolean {
+  return process.env["XYNE_CATALOG_EXCLUDE_WRITES"] === "1";
+}
+
 export function buildToolCatalog(params: {
   groups: McpToolGroup[];
   customTools?: ToolDefinition[];
@@ -226,7 +235,7 @@ export function buildToolCatalog(params: {
       if (!def) continue;
       const writeSet = new Set(group.writeTools.map(String));
       for (const tool of group.tools) {
-        if (writeSet.has(extractRuntimeToolName(tool.name))) continue;
+        if (excludeWritesFromCatalog() && writeSet.has(extractRuntimeToolName(tool.name))) continue;
         addUnique(items, seen, tool, `subagent:${def.name}`, group.serverType);
       }
     }
@@ -235,7 +244,7 @@ export function buildToolCatalog(params: {
       for (const def of SUBAGENT_DEFINITIONS) {
         const matched = params.customTools.filter((tool) => customToolSource(tool) === def.serverType);
         for (const tool of matched) {
-          if (isCustomWriteTool(tool)) continue;
+          if (excludeWritesFromCatalog() && isCustomWriteTool(tool)) continue;
           addUnique(items, seen, tool, `subagent:${def.name}`, def.serverType);
         }
       }
