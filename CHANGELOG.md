@@ -1,3 +1,10 @@
+## [1.346.0](https://github.com/juspay/xyne-spaces/compare/v1.345.5...v1.346.0) (2026-09-19)
+
+
+### Features
+
+* add AI provider discovery cards to chat ([#1816](https://github.com/juspay/xyne-spaces/issues/1816)) ([18b3c57](https://github.com/juspay/xyne-spaces/commit/18b3c572c969a4e0b19c3daede5752ed83679757))
+
 ## [1.345.5](https://github.com/juspay/xyne-spaces/compare/v1.345.4...v1.345.5) (2026-09-19)
 
 
