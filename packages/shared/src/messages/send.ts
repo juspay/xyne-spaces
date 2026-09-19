@@ -98,7 +98,11 @@ export function sendMessage(
   }
 
   const fireTimestamp = Date.now();
-  updatePending(messageId, { mutatorFired: true, timestamp: fireTimestamp });
+  updatePending(messageId, {
+    mutatorFired: true,
+    timestamp: fireTimestamp,
+    firedAt: fireTimestamp,
+  });
 
   // First fire only: when the caller passes no attachments we OMIT attachmentIds
   // so a send that under-specifies still hits the mutator's legacy draft-scan

@@ -133,7 +133,7 @@ const ChatListItemComponent = ({
             data-track-category='PENDING_MESSAGE'
             data-track-name='retry_failed_send'
             className='font-medium underline hover:opacity-80'
-            onClick={() => firePendingMutator(zero, pendingEntry)}
+            onClick={() => firePendingMutator(zero, pendingEntry, { manual: true })}
           >
             Retry
           </button>
