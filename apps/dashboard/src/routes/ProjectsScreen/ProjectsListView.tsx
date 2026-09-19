@@ -13,6 +13,7 @@ import { useCachedQuery } from '../../hooks/useCachedQuery';
 import { usePlatform } from '../../hooks/usePlatform';
 import { usePermissions } from '../../hooks/usePermissions';
 import { useAuth } from '../../hooks/useAuth';
+import { useConfirmDialog } from '../../hooks/useConfirmDialog';
 import { DownloadDown as Download } from '@xyne/icons';
 
 const ProjectsListView = (): ReactElement => {
@@ -29,6 +30,7 @@ const ProjectsListView = (): ReactElement => {
       permission.resourceName === 'TICKET-REPORTS' &&
       (permission.accessType === AccessType.WRITE || permission.accessType === AccessType.ADMIN),
   );
+  const { confirm, ConfirmDialog } = useConfirmDialog();
   const searchInputRef = useRef<HTMLInputElement>(null);
   // Fetch all projects using zero
   const [projects] = useCachedQuery(queries.getAllProjects());
@@ -52,13 +54,30 @@ const ProjectsListView = (): ReactElement => {
 
   const handleUpdateProject = async (
     projectId: string,
-    data: { name?: string; description?: string },
+    data: { name?: string; description?: string; code?: string },
   ): Promise<void> => {
+    // Confirm before changing the project code — it can't be auto-undone.
+    if (data.code !== undefined) {
+      const confirmed = await confirm({
+        title: `Change project code to ${data.code}?`,
+        description:
+          `Only new tickets will use ${data.code}-… Existing tickets keep their current IDs and will not be renamed, so this project will contain a mix of old and new codes. ` +
+          `Numbering continues from the current count, so the next ticket won't be ${data.code}-0001. ` +
+          `Existing ticket links and search by the old code keep working, but commit/release analysis links PRs by the project's current code — PRs that reference the old code may stop matching automatically. ` +
+          `This can't be automatically undone.`,
+        confirmLabel: 'Change code',
+        cancelLabel: 'Cancel',
+        variant: 'destructive',
+      });
+      if (!confirmed) return;
+    }
+
     const result = zero.mutate(
       mutators.project.update({
         projectId,
         ...(data.name !== undefined && { name: data.name }),
         ...(data.description !== undefined && { description: data.description }),
+        ...(data.code !== undefined && { code: data.code }),
         timestamp: Date.now(),
       }),
     );
@@ -198,6 +217,8 @@ const ProjectsListView = (): ReactElement => {
           />
         </Dialog>
       )}
+
+      <ConfirmDialog />
     </div>
   );
 };
