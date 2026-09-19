@@ -171,14 +171,33 @@ export const compactionExtension: ExtensionFactory = (pi) => {
         isSplitTurn: false,
         firstKeptEntryId: FRESH_START_SENTINEL,
       };
-      const result = await compact(
-        freshPrep as unknown as Parameters<typeof compact>[0],
-        model,
-        auth.apiKey,
-        auth.headers ?? {},
-        undefined,
-        signal,
-      );
+      // The summarize call is the longest single blocking operation in a run —
+      // it stalls the session while it rewrites the window — and until this
+      // timer it was the only LLM call in the system with no duration metric,
+      // because pi calls completeSimple directly rather than the instrumented
+      // streamFn that llm_call wraps.
+      const compactionStartedAt = Date.now();
+      let result: Awaited<ReturnType<typeof compact>> | undefined;
+      try {
+        result = await compact(
+          freshPrep as unknown as Parameters<typeof compact>[0],
+          model,
+          auth.apiKey,
+          auth.headers ?? {},
+          undefined,
+          signal,
+        );
+      } finally {
+        // No session label: ExtensionContext carries no session id, so
+        // per-session attribution needs it plumbed through pi's extension API
+        // first. Duration is the number that was missing entirely.
+        metric.observe("compaction_duration_ms", Date.now() - compactionStartedAt, {
+          kind: "fresh_start",
+          summarized: summarizeSet.length,
+          keptTokens,
+          ok: result !== undefined,
+        });
+      }
 
       // Guard: a fresh start REPLACES the whole window with only this summary
       // (firstKeptEntryId = FRESH_START_SENTINEL makes buildSessionContext yield
