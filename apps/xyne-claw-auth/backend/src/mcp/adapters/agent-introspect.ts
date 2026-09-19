@@ -263,7 +263,8 @@ export async function handleGetAgentRuns(
     return JSON.stringify({ error: `No agent with slug "${agentSlug}"` });
   }
 
-  const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+  const windowDays = Math.min(Math.max(Math.trunc(Number(params["days"]) || 30), 1), 90);
+  const since = new Date(Date.now() - windowDays * 24 * 60 * 60 * 1000);
 
   const aggregateRows = await prisma.$queryRaw<Array<{
     total_runs: bigint;
@@ -272,6 +273,8 @@ export async function handleGetAgentRuns(
     cancelled_runs: bigint;
     p50_duration_s: number | null;
     p95_duration_s: number | null;
+    p50_llm_ms: number | null;
+    p50_tool_ms: number | null;
   }>>`
     SELECT
       COUNT(*) AS total_runs,
@@ -283,7 +286,11 @@ export async function handleGetAgentRuns(
       ) FILTER (WHERE status = 'completed' AND "completedAt" IS NOT NULL) AS p50_duration_s,
       PERCENTILE_CONT(0.95) WITHIN GROUP (
         ORDER BY EXTRACT(EPOCH FROM ("completedAt" - "startedAt"))
-      ) FILTER (WHERE status = 'completed' AND "completedAt" IS NOT NULL) AS p95_duration_s
+      ) FILTER (WHERE status = 'completed' AND "completedAt" IS NOT NULL) AS p95_duration_s,
+      PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY "llmTotalMs")
+        FILTER (WHERE "llmTotalMs" IS NOT NULL) AS p50_llm_ms,
+      PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY "toolMs")
+        FILTER (WHERE "toolMs" IS NOT NULL) AS p50_tool_ms
     FROM "agent_runs"
     WHERE "agentSlug" = ${agentSlug}
       AND "orgId" = ${contextOrgId}
@@ -305,6 +312,34 @@ export async function handleGetAgentRuns(
       AND (error IS NULL OR error <> 'interrupted (orphaned run)')
     GROUP BY "triggerSource"
     ORDER BY count DESC, "triggerSource" ASC
+  `;
+
+  // Daily series so a dashboard can show drift; the aggregate above hides a
+  // steady climb inside one number.
+  const perDayRows = await prisma.$queryRaw<Array<{
+    day: Date;
+    runs: bigint;
+    failed: bigint;
+    p50_duration_s: number | null;
+    p95_duration_s: number | null;
+  }>>`
+    SELECT
+      DATE_TRUNC('day', "startedAt") AS day,
+      COUNT(*) AS runs,
+      COUNT(*) FILTER (WHERE status IN ('failed','cancelled')) AS failed,
+      PERCENTILE_CONT(0.5) WITHIN GROUP (
+        ORDER BY EXTRACT(EPOCH FROM ("completedAt" - "startedAt"))
+      ) FILTER (WHERE status = 'completed' AND "completedAt" IS NOT NULL) AS p50_duration_s,
+      PERCENTILE_CONT(0.95) WITHIN GROUP (
+        ORDER BY EXTRACT(EPOCH FROM ("completedAt" - "startedAt"))
+      ) FILTER (WHERE status = 'completed' AND "completedAt" IS NOT NULL) AS p95_duration_s
+    FROM "agent_runs"
+    WHERE "agentSlug" = ${agentSlug}
+      AND "orgId" = ${contextOrgId}
+      AND "startedAt" >= ${since}
+      AND (error IS NULL OR error <> 'interrupted (orphaned run)')
+    GROUP BY day
+    ORDER BY day ASC
   `;
 
   const sampleRows = await prisma.$queryRaw<Array<{
@@ -337,7 +372,7 @@ export async function handleGetAgentRuns(
   return JSON.stringify({
     agentSlug: agent.slug,
     agentName: agent.name,
-    windowDays: 30,
+    windowDays,
     aggregates: {
       totalRuns,
       completedPct: pct(completedRuns, totalRuns),
@@ -345,8 +380,17 @@ export async function handleGetAgentRuns(
       cancelledPct: pct(cancelledRuns, totalRuns),
       p50DurationS: roundSeconds(aggregate?.p50_duration_s),
       p95DurationS: roundSeconds(aggregate?.p95_duration_s),
+      p50LlmMs: aggregate?.p50_llm_ms == null ? null : Math.round(aggregate.p50_llm_ms),
+      p50ToolMs: aggregate?.p50_tool_ms == null ? null : Math.round(aggregate.p50_tool_ms),
       byTriggerSource: triggerRows.map((r) => ({ triggerSource: r.trigger_source, count: Number(r.count) })),
     },
+    perDay: perDayRows.map((r) => ({
+      day: r.day.toISOString().slice(0, 10),
+      runs: Number(r.runs),
+      failed: Number(r.failed),
+      p50DurationS: roundSeconds(r.p50_duration_s),
+      p95DurationS: roundSeconds(r.p95_duration_s),
+    })),
     samples: sampleRows.map((r) => ({
       task: r.task,
       status: r.status,
