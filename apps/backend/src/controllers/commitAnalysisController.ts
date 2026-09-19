@@ -14,7 +14,6 @@ import { ReleaseRepository } from '@/database/repositories/releaseRepository';
 import { createCommitAnalysisCanvas, upsertCommitAnalysisCanvas, type CommitAnalysisRepoSlice } from '@/utils/commitAnalysisCanvas';
 import { parseBitbucketRepoUrl, parseGitHubRepoUrl } from '@/utils/repoUrlParser';
 import { escapeHtml } from '@/utils/htmlEscape';
-import { isSameCommit } from '@/utils/commitIds';
 import { buildVcsClient } from '@/services/release/buildVcsClient';
 import { ReleaseTrackingMode, VCSProviderType, MessageType } from '@xyne/shared';
 
@@ -391,8 +390,8 @@ export class CommitAnalysisController {
     results: CommitAnalysisResult[];
     viewResults: CommitAnalysisResult[];
     affectedApplications: AffectedApplicationInfo[];
-    migrationLinks: Array<{ filePath: string; diffUrl: string }>;
-    envChanges: Array<{ fileName: string; filePath: string; newValue: string; commitId?: string }>;
+    migrationLinks: Array<{ filePath: string; diffUrl: string; applicationId?: string }>;
+    envChanges: Array<{ fileName: string; filePath: string; newValue: string; commitId?: string; applicationId?: string }>;
     appMatchSummary: Array<{ name: string; regex: string; matchCount: number; regexValid: boolean }>;
   }> {
     const { conversationId, userId, channelId, currentTicketId, userName, isHotFix, hotfixSync } = params;
@@ -421,16 +420,11 @@ export class CommitAnalysisController {
 
     const results = await commitAnalysisService.analyzeCommits(analysisRequest);
 
-    // getCommitsBetween() appends the boundary (deployedCommitId) commit to the
-    // range. For a hotfix sync that boundary is the FROZEN release head — a
-    // main PR — so drop it from the view.
-    const viewResults = hotfixSync
-      ? results.filter((r) => !isSameCommit(r.commitId, deployedCommitId))
-      : results;
+    const viewResults = results;
 
     let affectedApplications: AffectedApplicationInfo[] = [];
-    let migrationLinks: Array<{ filePath: string; diffUrl: string }> = [];
-    let envChanges: Array<{ fileName: string; filePath: string; newValue: string; commitId?: string }> = [];
+    let migrationLinks: Array<{ filePath: string; diffUrl: string; applicationId?: string }> = [];
+    let envChanges: Array<{ fileName: string; filePath: string; newValue: string; commitId?: string; applicationId?: string }> = [];
     let appMatchSummary: Array<{ name: string; regex: string; matchCount: number; regexValid: boolean }> = [];
 
     if (projectId && currentTicketId) {
@@ -487,8 +481,8 @@ export class CommitAnalysisController {
       const results: CommitAnalysisResult[] = [];
       const viewResults: CommitAnalysisResult[] = [];
       const affectedApplications: AffectedApplicationInfo[] = [];
-      const migrationLinks: Array<{ filePath: string; diffUrl: string }> = [];
-      const envChanges: Array<{ fileName: string; filePath: string; newValue: string; commitId?: string }> = [];
+      const migrationLinks: Array<{ filePath: string; diffUrl: string; applicationId?: string }> = [];
+      const envChanges: Array<{ fileName: string; filePath: string; newValue: string; commitId?: string; applicationId?: string }> = [];
       const appMatchSummary: Array<{ name: string; regex: string; matchCount: number; regexValid: boolean }> = [];
       const repoSlices: CommitAnalysisRepoSlice[] = [];
 
@@ -509,6 +503,7 @@ export class CommitAnalysisController {
             deployedCommitId: ctx.deployedCommitId,
             newCommitId: ctx.newCommitId,
             results: slice.viewResults,
+            affectedApplications: slice.affectedApplications,
           });
         } catch (repoError) {
           failedRepos.push(label);
@@ -673,8 +668,8 @@ export class CommitAnalysisController {
     deployedCommitId: string,
     newCommitId: string,
     workspaceId: string,
-    envChanges?: Array<{ filePath: string; fileName: string; newValue: string }>,
-    migrationLinks?: Array<{ filePath: string; diffUrl: string }>,
+    envChanges?: Array<{ filePath: string; fileName: string; newValue: string; applicationId?: string }>,
+    migrationLinks?: Array<{ filePath: string; diffUrl: string; applicationId?: string }>,
     repoSlices?: CommitAnalysisRepoSlice[]
   ): Promise<void> {
     try {

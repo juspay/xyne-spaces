@@ -135,6 +135,12 @@ export const writeConversationAnchor = async (
   conversationId: string,
   summary: ParentMessageSummary,
 ): Promise<void> => {
+  // A conversation can never be its own parent thread / sub-ticket. Anchoring a
+  // conversation to itself renders as "replied to a thread: <self>" or
+  // "sub-ticket of <self>" on every message in it. This is the last line of
+  // defense; callers should also avoid the self-link (see below).
+  if (summary.conversationId && summary.conversationId === conversationId) return;
+
   const conversation = await tx.conversation.findUnique({
     where: { conversationId },
     select: { parent_message_md: true },
@@ -185,6 +191,14 @@ export const linkSubTicketConversationToParent = async (
     },
   });
   if (!parent?.conversationId) return;
+
+  // Release per-app / dev tickets are created sharing the release ticket's
+  // conversationId (see applicationRepository.createApplicationSubTickets). When
+  // such a child is linked under the release ticket, child and parent resolve to
+  // the SAME conversation — writing the anchor there stamps the release ticket's
+  // own conversation as "sub-ticket of itself". A shared conversation means there
+  // is no distinct child thread to anchor, so skip it.
+  if (child.conversationId === parent.conversationId) return;
 
   const parentConversation = await tx.conversation.findUnique({
     where: { conversationId: parent.conversationId },
