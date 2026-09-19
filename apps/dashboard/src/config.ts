@@ -31,7 +31,16 @@ const ELECTRON_BACKEND_ZERO_URL = isProd
     ? 'https://app.spaces.sandbox.xyne.juspay.net'
     : 'http://localhost:4848';
 const isDockerTestEnv = isTestEnv && !isSandboxLocal;
-const backendPort = isLocalhost ? ':3001' : isDockerTestEnv ? ':5173' : '';
+const sameOriginPort = window.location.port ? `:${window.location.port}` : '';
+// Local `vite --mode test` must hit same-origin `/api` so skip-auth cookies
+// set by the Vite proxy stick. Direct :3001 is cross-origin from :5173/:5180.
+const backendPort = isLocalhost && isTestEnv
+  ? sameOriginPort
+  : isLocalhost
+    ? ':3001'
+    : isDockerTestEnv
+      ? ':5173'
+      : '';
 
 // Replaces API_BASE_URL wholesale; the SDLC lane builds with '/sdlc-api'.
 // NOT named VITE_API_BASE_URL — that already means the backend origin with no
