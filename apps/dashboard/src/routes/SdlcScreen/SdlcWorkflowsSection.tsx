@@ -4,6 +4,7 @@ import { sdlcHubWorkflowFolderId } from '@xyne/shared';
 import { toast } from 'sonner';
 import { workflowClient } from '../../lib/workflowClient';
 import { queryClient } from '../../services/clients/queryClient';
+import { useWorkflowAssistantContext } from '../WorkflowScreen/useWorkflowAssistantContext';
 import { useSdlcWorkflowRouting } from './useSdlcWorkflowRouting';
 
 const notify = (kind: 'success' | 'error', message: string): void => {
@@ -13,6 +14,7 @@ const notify = (kind: 'success' | 'error', message: string): void => {
 
 const SdlcWorkflowsSection = (): ReactElement => {
   const { channelId, path, search, navigate } = useSdlcWorkflowRouting();
+  useWorkflowAssistantContext(path);
 
   // Once per mount: the root is the empty path, so redirecting every time traps the user.
   const landed = useRef(false);
