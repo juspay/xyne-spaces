@@ -24,6 +24,16 @@ interface TestUserData {
  * Test-only authentication endpoints that bypass Google OAuth.
  * @security NEVER expose in production!
  */
+const TEST_LOGIN_USER_SELECT = {
+  id: true,
+  email: true,
+  name: true,
+  picture: true,
+  workspaceId: true,
+  role: true,
+  orgMemberId: true,
+} as const;
+
 export class TestAuthController {
   private userService: UserService;
   private userSessionService: UserSessionService;
@@ -164,6 +174,33 @@ export class TestAuthController {
       let isNewUser = true;
       const db = DatabaseClient.getInstance();
 
+      // Local skip-auth (ENABLE_DEV_AUTH + DEFAULT_ADMIN_EMAIL) reuses the
+      // existing org/workspace for that email. createOrganizationWithUser
+      // throws if the admin already belongs to an organization, which is the
+      // normal state of a seeded local clone.
+      if (enableDevAuth && !TestAuthController.testOrgId) {
+        const existingOrgMember = await db.orgMember.findUnique({
+          where: { email: testUserData.email },
+        });
+        if (existingOrgMember) {
+          const existingUser = await db.user.findFirst({
+            where: {
+              email: testUserData.email,
+              orgMemberId: existingOrgMember.memberId,
+            },
+            orderBy: { createdAt: 'asc' },
+            select: TEST_LOGIN_USER_SELECT,
+          });
+          if (existingUser) {
+            TestAuthController.testOrgId = existingOrgMember.orgId;
+            TestAuthController.testWorkspaceId = existingUser.workspaceId;
+            logger.info(
+              `[${requestId}] Reusing existing org/workspace for ${testUserData.email} (dev skip-auth)`
+            );
+          }
+        }
+      }
+
       // Recover org/workspace IDs from DB if lost after server restart
       if (!TestAuthController.testOrgId) {
         const existingOrg = await db.organization.findUnique({
@@ -236,6 +273,7 @@ export class TestAuthController {
         // Create user in the existing workspace (or reuse if already exists)
         const existingUser = await db.user.findFirst({
           where: { email: testUserData.email, workspaceId: TestAuthController.testWorkspaceId! },
+          select: TEST_LOGIN_USER_SELECT,
         });
 
         if (existingUser) {
