@@ -191,6 +191,7 @@ import {
   deleteDraftEntityAttachments,
   deleteDelayedMessageEntityAttachments,
 } from '@/zero/utils/attachmentEntityCleanup';
+import { deleteHeicRenditions, isHeicAttachment } from '@/services/heicRenditionService';
 import { deliverDraftServerMessage } from '@/services/messageDeliveryService';
 import { organizationDomainService } from '@/services/organizationDomainService';
 // Data-driven visit versioning + ETA reset/continue decision for NON_LINEAR transitions.
@@ -4525,6 +4526,9 @@ export function createMutators(
                       if (attachment.thumbnailUrl) {
                         await storageService.deleteFile(attachment.thumbnailUrl);
                       }
+                      if (isHeicAttachment(attachment.mimetype, attachment.originalFilename)) {
+                        await deleteHeicRenditions(attachment.url);
+                      }
                     }
                   } catch (error) {
                     // Don't throw - continue deleting other files even if one fails
@@ -4560,6 +4564,9 @@ export function createMutators(
                   await storageService.deleteFile(attachment.url);
                   if (attachment.thumbnailUrl) {
                     await storageService.deleteFile(attachment.thumbnailUrl);
+                  }
+                  if (isHeicAttachment(attachment.mimetype, attachment.originalFilename)) {
+                    await deleteHeicRenditions(attachment.url);
                   }
                 }
               } catch (error) {
@@ -4632,6 +4639,9 @@ export function createMutators(
                 // Also delete thumbnail if it exists
                 if (attachment.thumbnailUrl) {
                   await storageService.deleteFile(attachment.thumbnailUrl);
+                }
+                if (isHeicAttachment(attachment.mimetype, attachment.originalFilename)) {
+                  await deleteHeicRenditions(attachment.url);
                 }
               }
             } catch (error) {
@@ -13677,7 +13687,6 @@ export function createMutators(
                 entityType: AttachmentEntityType.DRAFT,
                 conversationId: conversationId || null,
                 originalFilename,
-                mimetype,
                 size,
                 width,
                 height
