@@ -1,3 +1,10 @@
+## [1.333.0-release-20260917.2](https://github.com/juspay/xyne-spaces/compare/v1.333.0-release-20260917.1...v1.333.0-release-20260917.2) (2026-09-19)
+
+
+### Features
+
+* heic attachment support for spaces ([#2084](https://github.com/juspay/xyne-spaces/issues/2084)) ([dad161d](https://github.com/juspay/xyne-spaces/commit/dad161d96dc3a449b6e51c040aa7c503a3311776)), closes [#1895](https://github.com/juspay/xyne-spaces/issues/1895) [#2059](https://github.com/juspay/xyne-spaces/issues/2059)
+
 ## [1.333.0-release-20260917.1](https://github.com/juspay/xyne-spaces/compare/v1.332.2-release-20260917.2...v1.333.0-release-20260917.1) (2026-09-19)
 
 
