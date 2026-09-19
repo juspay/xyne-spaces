@@ -13,11 +13,25 @@ import { resolveSkillTab, SKILL_DETAIL_TABS, type SkillDetailTabId } from './ski
 import { useSkillDetailActions } from './useSkillDetailActions';
 
 const DATE = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+const DATE_TIME = new Intl.DateTimeFormat('en-GB', {
+  day: 'numeric',
+  month: 'short',
+  year: 'numeric',
+  hour: '2-digit',
+  minute: '2-digit',
+  hour12: false,
+});
 
 function formatCreated(value: string | undefined): string | null {
   if (!value) return null;
   const parsed = new Date(value);
   return Number.isNaN(parsed.getTime()) ? null : DATE.format(parsed);
+}
+
+function formatUpdated(value: string | undefined): string | null {
+  if (!value) return null;
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : DATE_TIME.format(parsed);
 }
 
 const ClawSkillDetailV2 = (): ReactElement => {
@@ -38,6 +52,7 @@ const ClawSkillDetailV2 = (): ReactElement => {
   };
 
   const created = formatCreated(skill?.createdAt);
+  const updated = formatUpdated(skill?.updatedAt);
   const author = skill?.owner?.name ?? skill?.owner?.email ?? null;
 
   return (
@@ -148,6 +163,12 @@ const ClawSkillDetailV2 = (): ReactElement => {
                     <>
                       <span aria-hidden>·</span>
                       <span>Created on {created}</span>
+                    </>
+                  )}
+                  {updated && (
+                    <>
+                      <span aria-hidden>·</span>
+                      <span>Last updated on: {updated}</span>
                     </>
                   )}
                 </div>
