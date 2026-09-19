@@ -1,3 +1,10 @@
+## [1.347.0](https://github.com/juspay/xyne-spaces/compare/v1.346.0...v1.347.0) (2026-09-19)
+
+
+### Features
+
+* compact grid layout for multiple file attachments ([#1717](https://github.com/juspay/xyne-spaces/issues/1717)) ([db3f2f8](https://github.com/juspay/xyne-spaces/commit/db3f2f81a1df2c610a3813422276bfbe480f3799))
+
 ## [1.346.0](https://github.com/juspay/xyne-spaces/compare/v1.345.5...v1.346.0) (2026-09-19)
 
 
