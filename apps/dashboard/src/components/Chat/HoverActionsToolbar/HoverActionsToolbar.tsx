@@ -33,6 +33,7 @@ import { ShortcutHint } from '../../ui/ShortcutHint';
 import Button from '../../ui/Button';
 import { useCustomEmojis } from '../../../hooks/useCustomEmojis';
 import { FrequentEmojiRow } from '../FrequentEmojiRow/FrequentEmojiRow';
+import { InlineQuickReactions } from '../FrequentEmojiRow/InlineQuickReactions';
 import { useTheme } from '../../../hooks/useTheme';
 import { ConversationSubscription } from '../ConversationSubscription';
 import {
@@ -217,6 +218,9 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
       key={`hover-actions-toolbar-${messageId}`}
       className={`absolute ${placement === 'below' ? 'top-1' : '-top-7'} right-4 z-50 p-1 flex items-center gap-1 rounded-lg border border-border bg-popover shadow-md`}
     >
+      {/* Frequently used emojis, one click each — then the full picker */}
+      {onEmojiPickerOpenChange && <InlineQuickReactions onSelect={applyReaction} />}
+
       {/* Emojis */}
       {onEmojiPickerOpenChange && (
         <Popover

@@ -19,6 +19,12 @@ const MAX_TRACKED = 50;
 /** Emojis shown in the picker's Frequently Used row. */
 export const FREQUENT_EMOJI_DISPLAY_LIMIT = 8;
 
+/**
+ * Shown inline on the hover toolbar before the user has reacted to anything, so the
+ * strip is never empty on a fresh install. Replaced by real usage on the first reaction.
+ */
+export const DEFAULT_QUICK_REACTIONS = ['\u{1F44D}', '\u2705', '\u{1F440}'];
+
 export interface FrequentEmojiEntry {
   /** Reaction token — unicode char, or `custom:<emojiId>:<name>`. */
   emoji: string;
