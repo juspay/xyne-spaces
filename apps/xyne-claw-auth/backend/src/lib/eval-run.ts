@@ -1,4 +1,5 @@
 import { prisma } from "../db.js";
+import { redisService } from "../redis.js";
 import { userProviderCredentialsRepository } from "../repositories/index.js";
 import { CONFIG } from "../config.js";
 import { createLogger } from "../logger.js";
@@ -30,6 +31,8 @@ export interface EvalDispatch extends EvalTarget {
 
 export interface EvalResult extends EvalTarget {
   sessionId: string;
+  /** Set when the run did not execute on the provider it was pinned to. */
+  requested?: string | undefined;
   status: string;
   totalMs: number | null;
   llmTotalMs: number | null;
@@ -40,6 +43,63 @@ export interface EvalResult extends EvalTarget {
   tokensCacheRead: number | null;
   tokensPerSec: number | null;
   error: string | null;
+}
+
+export interface EvalState {
+  id: string;
+  question: string;
+  startedAt: string;
+  deadlineAt: string;
+  channelId: string;
+  conversationId: string;
+  agentSlug: string;
+  spacesAppUserId: string;
+  appToken: string;
+  dispatches: EvalDispatch[];
+}
+
+const EVAL_STATE_PREFIX = "eval:pending:";
+const EVAL_STATE_SET = "eval:pending";
+const EVAL_STATE_TTL = 24 * 60 * 60;
+
+export async function saveEvalState(state: EvalState): Promise<void> {
+  const redis = redisService.getConnection();
+  await redis.set(`${EVAL_STATE_PREFIX}${state.id}`, JSON.stringify(state), "EX", EVAL_STATE_TTL);
+  await redis.sadd(EVAL_STATE_SET, state.id);
+}
+
+export async function listPendingEvals(): Promise<EvalState[]> {
+  const redis = redisService.getConnection();
+  const ids = await redis.smembers(EVAL_STATE_SET).catch(() => [] as string[]);
+  const out: EvalState[] = [];
+  for (const id of ids) {
+    const raw = await redis.get(`${EVAL_STATE_PREFIX}${id}`).catch(() => null);
+    if (!raw) {
+      await redis.srem(EVAL_STATE_SET, id).catch(() => 0);
+      continue;
+    }
+    try {
+      out.push(JSON.parse(raw) as EvalState);
+    } catch {
+      await redis.srem(EVAL_STATE_SET, id).catch(() => 0);
+    }
+  }
+  return out;
+}
+
+export async function clearEvalState(id: string): Promise<void> {
+  const redis = redisService.getConnection();
+  await redis.del(`${EVAL_STATE_PREFIX}${id}`).catch(() => 0);
+  await redis.srem(EVAL_STATE_SET, id).catch(() => 0);
+}
+
+/** One pod posts the comparison. Losers skip rather than double-post. */
+export async function claimEvalFinalize(id: string): Promise<boolean> {
+  const redis = redisService.getConnection();
+  const won = await redis
+    .set(`eval:finalizing:${id}`, "1", "EX", 120, "NX")
+    .catch(() => "OK" as const);
+  return won === "OK";
 }
 
 export async function resolveEvalTargets(input: {
@@ -59,8 +119,17 @@ export async function resolveEvalTargets(input: {
   const targets: EvalTarget[] = [];
   const claimed = new Set<string>();
 
+  // Pin every arm, the agent's own primary included. Without an override a run
+  // walks the agent's fallback order, so a "claude" arm can quietly execute on
+  // codex and the comparison comes out mislabelled. Overrides also clear the
+  // order, so a pinned arm cannot drift mid-run.
   const defaultProvider = resolution.resolvedParentProvider ?? PLATFORM_DEFAULT_PROVIDER;
-  targets.push({ provider: defaultProvider, useOverride: false });
+  const defaultModel = (resolution.providerConfigs?.[defaultProvider] as { model?: string } | undefined)?.model;
+  targets.push({
+    provider: defaultProvider,
+    useOverride: true,
+    ...(defaultModel ? { model: defaultModel } : {}),
+  });
   claimed.add(defaultProvider);
 
   for (const provider of AGENT_CRED_PROVIDERS) {
@@ -72,6 +141,7 @@ export async function resolveEvalTargets(input: {
 
   const personal = await Promise.all(
     PERSONAL_CRED_PROVIDERS.filter((p) => !claimed.has(p)).map(async (provider) => {
+      if (resolution.providerConfigs?.[provider]) return provider;
       const cred = await userProviderCredentialsRepository
         .findByUserAndProvider(input.userId, provider)
         .catch(() => null);
@@ -92,12 +162,9 @@ export async function resolveEvalTargets(input: {
 }
 
 export function evalReplyPrefix(target: EvalTarget): string {
-  const qualifier = target.model
-    ? ` · \`${target.model}\``
-    : target.useOverride
-      ? ""
-      : " · agent default";
-  return `**Provider: ${target.provider}**${qualifier}`;
+  // Placeholders, not literals: the delivery path fills them from the run's
+  // actual provider/model, so a fallback is visible here too.
+  return `**Provider: {provider}**{model} · _pinned to ${target.provider}_`;
 }
 
 export async function dispatchEvalRun(args: {
@@ -186,8 +253,13 @@ export async function readEvalResults(dispatches: EvalDispatch[]): Promise<EvalR
 
   return dispatches.map((d) => {
     const row = bySession.get(d.sessionId);
+    // Report the provider the run ACTUALLY used, not the one asked for. A run
+    // that fell back to another provider must not be labelled with the pin it
+    // ignored — that is the one thing an eval cannot get wrong.
+    const actual = row?.provider ?? undefined;
     return {
-      provider: d.provider,
+      provider: actual ?? d.provider,
+      requested: actual && actual !== d.provider ? d.provider : undefined,
       useOverride: d.useOverride,
       model: row?.model ?? d.model,
       sessionId: d.sessionId,

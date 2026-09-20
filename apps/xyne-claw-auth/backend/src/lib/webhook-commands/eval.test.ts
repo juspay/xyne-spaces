@@ -84,10 +84,11 @@ describe("eval provider selection", () => {
     const targets = await resolveEvalTargets({ userId: "u", agent: { slug: "xyne", orgId: "o" } });
     const names = targets.map((t) => t.provider).sort();
     expect(names).toEqual(["claude", "litellm", "spaces"]);
-    // The agent's configured provider runs with NO override — an override for a
-    // personal-cred provider would demand the USER's own key, which is what the
-    // first /eval run hit.
-    expect(targets.find((t) => t.provider === "claude")?.useOverride).toBe(false);
+    // Every arm is pinned, the agent's primary included: an unpinned run walks
+    // the agent's fallback order and can execute on a different provider than
+    // the one the row claims.
+    expect(targets.every((t) => t.useOverride)).toBe(true);
+    expect(targets.find((t) => t.provider === "claude")?.model).toBe("claude-opus-5");
     vi.doUnmock("../provider-resolution.js");
   });
 
@@ -109,15 +110,34 @@ describe("eval provider selection", () => {
 });
 
 describe("eval reply labelling", () => {
-  it("names the provider so parallel answers in one thread are distinguishable", async () => {
+  it("leaves provider and model as placeholders for the delivery path to fill", async () => {
     const { evalReplyPrefix } = await import("../eval-run.js");
-    expect(evalReplyPrefix({ provider: "codex", model: "gpt-5.6-sol", useOverride: true }))
-      .toBe("**Provider: codex** · `gpt-5.6-sol`");
+    const prefix = evalReplyPrefix({ provider: "codex", model: "gpt-5.6-sol", useOverride: true });
+    // Resolved from the run's ACTUAL provider in webhook.ts — a literal here
+    // would name the pin even when the run fell back to something else.
+    expect(prefix).toContain("{provider}");
+    expect(prefix).toContain("{model}");
   });
 
-  it("marks the arm that runs the agent as configured", async () => {
+  it("records which provider the arm was pinned to", async () => {
     const { evalReplyPrefix } = await import("../eval-run.js");
-    expect(evalReplyPrefix({ provider: "claude", useOverride: false }))
-      .toBe("**Provider: claude** · agent default");
+    expect(evalReplyPrefix({ provider: "claude", useOverride: true })).toContain("pinned to claude");
+  });
+});
+
+describe("eval fallback honesty", () => {
+  const started = new Date("2026-09-20T10:00:00.000Z");
+
+  it("labels a run by the provider it actually used and names the pin it ignored", () => {
+    const html = renderEvalHtml("q", [
+      result("codex", { model: "gpt-5.6-luna", requested: "claude" }),
+    ], started);
+    expect(html).toContain("codex");
+    expect(html).toContain("fell back from claude");
+  });
+
+  it("says nothing about fallback when the run honoured its pin", () => {
+    const html = renderEvalHtml("q", [result("codex")], started);
+    expect(html).not.toContain("fell back");
   });
 });

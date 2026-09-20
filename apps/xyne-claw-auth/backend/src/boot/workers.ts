@@ -1,4 +1,5 @@
 import { createLogger } from "../logger.js";
+import { initEvalSweeper, closeEvalSweeper } from "../queue/eval-sweeper.js";
 import { ERROR_PIPELINE } from "../config.js";
 import { runner as errorPipelineRunner } from "../error-pipeline/runner/runner.js";
 import { connectDb } from "../db.js";
@@ -54,6 +55,7 @@ const WORKERS: WorkerEntry[] = [
   { name: "local-harness-bridge", closeSync: beginLocalHarnessDrain },
   { name: "bitbucket-stats", closeSync: stopBitbucketStatsBackgroundRefresh },
   { name: "scheduled-jobs-worker", init: initScheduledJobsWorker, close: closeWorker },
+  { name: "eval-sweeper", init: initEvalSweeper, close: closeEvalSweeper },
   { name: "scheduled-jobs-queue", close: closeQueue },
   { name: "run-recovery-worker", init: initRunRecoveryWorker, close: closeRunRecoveryWorker },
   { name: "provider-retry-worker", init: initProviderRetryWorker, close: closeProviderRetryWorker },

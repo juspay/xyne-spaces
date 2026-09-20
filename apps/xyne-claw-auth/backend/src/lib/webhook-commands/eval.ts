@@ -2,11 +2,14 @@ import { randomUUID } from "node:crypto";
 import { errMsg } from "../errors.js";
 import { agentRepository } from "../../repositories/index.js";
 import {
-  awaitEvalResults,
+  EVAL_DEADLINE_MS,
   dispatchEvalRun,
+  readEvalResults,
+  saveEvalState,
   resolveEvalTargets,
   type EvalDispatch,
   type EvalResult,
+  type EvalState,
 } from "../eval-run.js";
 import { postGeneratedMarkdownFile } from "../spaces-generated-file.js";
 import type { WebhookCommandCtx } from "./context.js";
@@ -42,7 +45,7 @@ export function renderEvalHtml(question: string, results: EvalResult[], startedA
         r.status === "completed" ? "ok" : r.status === "pending" ? "pending" : "fail";
       const win = r.totalMs !== null && r.totalMs === fastest && r.status === "completed";
       return `<tr>
-  <td class="p">${esc(r.provider)}${win ? ' <span class="win">fastest</span>' : ""}<div class="m">${esc(r.model ?? "default")}${r.useOverride ? "" : " · agent default"}</div></td>
+  <td class="p">${esc(r.provider)}${win ? ' <span class="win">fastest</span>' : ""}<div class="m">${esc(r.model ?? "default")}${r.requested ? ` · fell back from ${esc(r.requested)}` : ""}${r.useOverride ? "" : " · agent default"}</div></td>
   <td><span class="b ${badge}">${esc(r.status)}</span></td>
   <td class="n bar"><div class="track"><span style="width:${width}%"></span></div>${ms(r.totalMs)}</td>
   <td class="n">${ms(r.llmTotalMs)}</td>
@@ -174,34 +177,47 @@ export async function handleEval(ctx: WebhookCommandCtx, question: string, reque
     REPLY_LABEL,
   );
 
-  void (async () => {
-  const results = await awaitEvalResults(dispatched);
-  const html = renderEvalHtml(trimmed, results, startedAt);
+  await saveEvalState({
+    id: traceId,
+    question: trimmed,
+    startedAt: startedAt.toISOString(),
+    deadlineAt: new Date(startedAt.getTime() + EVAL_DEADLINE_MS).toISOString(),
+    channelId,
+    conversationId,
+    agentSlug: ctx.agent.slug,
+    spacesAppUserId: ctx.agent.spacesAppUserId,
+    appToken: ctx.agent.appToken,
+    dispatches: dispatched,
+  });
+}
+
+/**
+ * Post the comparison for one eval. Runs from the sweeper, not the request, so
+ * a deploy mid-eval cannot lose the report — the earlier detached-promise
+ * version died with whichever pod happened to serve the command.
+ */
+export async function finalizeEval(state: EvalState, log: WebhookCommandCtx["log"]): Promise<void> {
+  const results = await readEvalResults(state.dispatches);
+  const html = renderEvalHtml(state.question, results, new Date(state.startedAt));
   const fastest = results
     .filter((r) => r.status === "completed" && r.totalMs !== null)
     .sort((a, b) => (a.totalMs ?? 0) - (b.totalMs ?? 0))[0];
+  const unfinished = results.filter((r) => r.status !== "completed").length;
 
   const summary =
     `⚖️ **Eval comparison** — ${results.length} provider${results.length === 1 ? "" : "s"}` +
     `${fastest ? ` · fastest \`${fastest.provider}\` at ${ms(fastest.totalMs)}` : ""}` +
-    `${results.some((r) => r.status !== "completed") ? ` · ${results.filter((r) => r.status !== "completed").length} did not complete` : ""}`;
+    `${unfinished ? ` · ${unfinished} did not complete` : ""}`;
 
-  try {
-    await postGeneratedMarkdownFile({
-      channelId,
-      conversationId,
-      userId: ctx.agent.spacesAppUserId,
-      appToken: ctx.agent.appToken,
-      filename: `eval-${ctx.agent.slug}-${traceId}.html`,
-      markdown: html,
-      mimeType: "text/html",
-      summary,
-    });
-  } catch (err) {
-    ctx.log.warn("/eval comparison upload failed", { error: errMsg(err) });
-    await ctx.reply(`${summary}\n\n⚠️ _Couldn't attach the comparison (upload failed)._`, REPLY_LABEL);
-  }
-  })().catch((err: unknown) => {
-    ctx.log.warn("/eval collection failed", { error: errMsg(err) });
+  await postGeneratedMarkdownFile({
+    channelId: state.channelId,
+    conversationId: state.conversationId,
+    userId: state.spacesAppUserId,
+    appToken: state.appToken,
+    filename: `eval-${state.agentSlug}-${state.id}.html`,
+    markdown: html,
+    mimeType: "text/html",
+    summary,
   });
+  log.info("/eval comparison posted", { eval: state.id, providers: results.length });
 }

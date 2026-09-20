@@ -3826,7 +3826,13 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     : payload.result ?? "";
 
   if (ctx?.replyPrefix && resultWithCitations.trim()) {
-    resultWithCitations = `${ctx.replyPrefix}\n\n${resultWithCitations}`;
+    // {provider}/{model} resolve from the RESULT, not from dispatch: a run that
+    // fell back to another provider must not be labelled with the pin it
+    // ignored, or the thread and the comparison report disagree.
+    const prefix = ctx.replyPrefix
+      .replace(/\{provider\}/g, typeof payload.provider === "string" && payload.provider ? payload.provider : "unknown")
+      .replace(/\{model\}/g, typeof payload.model === "string" && payload.model ? ` · \`${payload.model}\`` : "");
+    resultWithCitations = `${prefix}\n\n${resultWithCitations}`;
   }
 
   // Memory footer: count successful memory-search tool invocations for the run

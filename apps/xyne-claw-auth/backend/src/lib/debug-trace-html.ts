@@ -172,6 +172,14 @@ function collectSpans(all: DebugTraceEvent[], startBase: number | null): Span[] 
   if (startBase === null) return [];
   const spans: Span[] = [];
   const startAtByCall = new Map<string, number>();
+  const promptAtByCall = new Map<number, number>();
+  for (const event of all) {
+    if (event.kind !== "session_prompt") continue;
+    const call = num(event.llmCall);
+    const at = str(event.at);
+    const atMs = at ? Date.parse(at) : NaN;
+    if (call !== null && !Number.isNaN(atMs)) promptAtByCall.set(call, atMs);
+  }
 
   for (const event of all) {
     const at = str(event.at);
@@ -201,13 +209,18 @@ function collectSpans(all: DebugTraceEvent[], startBase: number | null): Span[] 
       continue;
     }
     if (kind === "assistant_turn_end") {
-      const usage = rec(data["usage"]);
-      const duration = num(data["totalMs"]) ?? num(usage["totalMs"]) ?? 0;
+      // The event carries no duration: a turn is measured from its paired
+      // session_prompt to this end event, the same way the timeline below does it.
+      const call = num(event.llmCall);
+      const began = call !== null ? promptAtByCall.get(call) : undefined;
+      if (began === undefined) continue;
+      const duration = atMs - began;
+      if (duration <= 0) continue;
       const ttft = num(data["ttftMs"]) ?? 0;
       spans.push({
         label: `LLM turn ${num(event.turn) ?? spans.filter((x) => x.kind === "llm").length + 1}`,
         detail: ttft > 0 ? `${ms(duration)} · ttft ${ms(ttft)}` : ms(duration),
-        startMs: atMs - duration - startBase,
+        startMs: began - startBase,
         durationMs: duration,
         waitMs: Math.min(ttft, duration),
         kind: "llm",

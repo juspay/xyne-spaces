@@ -234,17 +234,21 @@ describe("waterfall", () => {
     model: "private-large-spaces",
     startedAt: T0,
     finishedAt: at(100),
+    // An LLM turn carries no duration of its own — it is measured from its
+    // paired session_prompt, keyed by llmCall, exactly as production emits it.
     events: [
-      { kind: "assistant_turn_end", at: at(10), turn: 1, data: { totalMs: 10_000, ttftMs: 2_000 } },
+      { kind: "session_prompt", at: at(0), llmCall: 1 },
+      { kind: "assistant_turn_end", at: at(10), turn: 1, llmCall: 1, data: { ttftMs: 2_000 } },
       { kind: "tool_execution_start", at: at(10), toolCallId: "c1" },
       { kind: "tool_execution_end", at: at(70), toolCallId: "c1", data: { toolName: "spaces", durationMs: 60_000 } },
-      { kind: "assistant_turn_end", at: at(80), turn: 2, data: { totalMs: 10_000, ttftMs: 1_000 } },
+      { kind: "session_prompt", at: at(70), llmCall: 2 },
+      { kind: "assistant_turn_end", at: at(80), turn: 2, llmCall: 2, data: { ttftMs: 1_000 } },
       { kind: "tool_execution_start", at: at(80), toolCallId: "c2" },
       { kind: "tool_execution_end", at: at(82), toolCallId: "c2", data: { toolName: "todo-write", durationMs: 2_000, isError: true } },
     ],
   } as unknown as Parameters<typeof renderDebugTraceHtml>[0];
 
-  it("splits wall time into model, tool and unaccounted", () => {
+  it("measures a turn from its prompt, not from a field the event does not carry", () => {
     const html = renderDebugTraceHtml(run);
     expect(html).toContain("Where the time went");
     expect(html).toContain("model 20.0 s");
