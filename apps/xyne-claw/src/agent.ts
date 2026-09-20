@@ -46,6 +46,7 @@ import {
 } from "./session-store.js";
 import { acquireSessionLock, refreshSessionLock, releaseSessionLock, startSessionLockHeartbeat, SessionLockedError } from "./session-lock.js";
 import { kickOffPrReviewRoom, registerLivePrRunContext, unregisterLivePrRunContext } from "./pr-review-room.js";
+import { assessAnswer, type AnswerAssessment } from "./jev-completeness.js";
 import { gcsUploadDebugRun } from "./storage.js";
 import { createCommandGuard } from "./command-guard.js";
 import { writeSessionSkills, deleteSessionSkills } from "./session-skills.js";
@@ -375,6 +376,7 @@ interface DebugSessionSnapshot {
   tokenUsage: TokenUsage;
   latency: LatencyMetrics;
   lastAssistantText: string;
+  answerAssessment?: AnswerAssessment;
   events: DebugEventRecord[];
 }
 
@@ -3890,6 +3892,12 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
       await (partialFlushPromise ?? Promise.resolve()).catch(() => {});
       const debugDir = await ensureSessionDebugDir(conversationId);
       const { writeFile } = await import("node:fs/promises");
+      const answerAssessment = await assessAnswer({
+        task,
+        answer: text,
+        toolCalls: toolInvocations.length,
+      }).catch(() => null);
+
       const debugSnapshot: DebugSessionSnapshot = {
         schemaVersion: 1,
         conversationId,
@@ -3927,6 +3935,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
           toolMs: toolInvocations.reduce((sum, inv) => sum + (inv.durationMs ?? 0), 0),
         },
         lastAssistantText: text,
+        ...(answerAssessment ? { answerAssessment } : {}),
         events: cloneForDebug(debugEvents),
       };
       await writeFile(`${debugDir}/debug-session.json`, JSON.stringify(debugSnapshot, null, 2), "utf8");
