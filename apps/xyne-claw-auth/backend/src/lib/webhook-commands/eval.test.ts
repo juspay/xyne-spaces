@@ -141,3 +141,17 @@ describe("eval fallback honesty", () => {
     expect(html).not.toContain("fell back");
   });
 });
+
+describe("eval session isolation", () => {
+  it("gives each arm a distinct, id-safe session key", async () => {
+    const { evalSessionKey } = await import("../eval-run.js");
+    const conv = "93798b97-6c4a-4d9c-b471-0062fed175c4_xyne";
+    const a = evalSessionKey(conv, "abc123-claude");
+    const b = evalSessionKey(conv, "abc123-codex");
+    expect(a).not.toBe(b);
+    // Shared per-conversation session = shared lock: three of four arms failed
+    // with session_locked before each got its own.
+    expect(a).not.toBe(conv);
+    expect(a).toMatch(/^[A-Za-z0-9._-]+$/);
+  });
+});

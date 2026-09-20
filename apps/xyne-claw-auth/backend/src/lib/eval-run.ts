@@ -167,6 +167,12 @@ export function evalReplyPrefix(target: EvalTarget): string {
   return `**Provider: {provider}**{model} · _pinned to ${target.provider}_`;
 }
 
+/** Per-arm session key: safe id characters only, so the sandbox store and the
+ *  session lock accept it. */
+export function evalSessionKey(conversationId: string, traceId: string): string {
+  return `${conversationId}-eval-${traceId}`.replace(/[^A-Za-z0-9._-]/g, "-");
+}
+
 export async function dispatchEvalRun(args: {
   target: EvalTarget;
   task: string;
@@ -192,6 +198,12 @@ export async function dispatchEvalRun(args: {
       userId: args.userId,
       task: args.task,
       conversationId: args.conversationId,
+      // Each arm gets its OWN pi session. Without this every arm shares the
+      // thread's session JSONL, so they contend on one per-conversation lock
+      // (three of four died with session_locked) and any that did run would
+      // read the others' answers. Delivery still targets the real thread —
+      // only the session identity is split.
+      piSessionConversationId: evalSessionKey(args.conversationId, args.traceId),
       agentSlug: args.agentSlug,
       orgId: args.orgId,
       eventType: "APP_MENTIONED",
