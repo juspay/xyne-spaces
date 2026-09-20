@@ -165,6 +165,8 @@ import { vespaQueue } from '@/queues/vespaQueue';
 import { ticketReassignmentQueue } from '@/queues/ticketReassignmentQueue';
 import { userAssignmentStateService } from '@/services/userAssignmentStateService';
 import { notificationService } from '@/services/notificationService';
+import { activityService } from '@/services/activity/activityService';
+import { extractPlainTextFromHtml } from '@/utils/contentUtils';
 import { sendAddAndRemoveParticipantsSystemMessage, sendCallSystemMessage, updateCallSystemMessageOnEnd } from '@/zero/utils/systemMessagesUtils';
 import { addChannelParticipant, removeChannelParticipant } from '@/zero/utils/channelParticipantUtils';
 import { convert } from 'html-to-text';
@@ -854,6 +856,10 @@ async function createNonParticipantSystemMessages(
   isThreadReply: boolean,
   scopeType: string,
   workspaceId: string,
+  // Id of the message that carried the mention. Persisted on the banner so that
+  // adding the mentioned user later can replay the mention notification they
+  // were filtered out of at send time.
+  sourceMessageId?: string,
 ): Promise<void> {
   try {
     if (mentionedUserIds.length === 0 && mentionedGroupIds.length === 0) {
@@ -959,6 +965,8 @@ async function createNonParticipantSystemMessages(
           })),
           channelId,
           canAddUsers: !cannotAddUsers,
+          sourceMessageId,
+          sourceConversationId: conversationId,
         } as unknown as ReadonlyJSONValue,
       });
 
@@ -1006,6 +1014,8 @@ async function createNonParticipantSystemMessages(
           })),
           channelId,
           canAddUsers: !cannotAddUsers,
+          sourceMessageId,
+          sourceConversationId: conversationId,
         } as unknown as ReadonlyJSONValue,
       });
 
@@ -2873,6 +2883,7 @@ export function createMutators(
             false, // isThreadReply = false for initial channel messages
             channel.scopeType,
             authData.workspaceId,
+            messageId,
           );
 
 
@@ -3736,6 +3747,7 @@ export function createMutators(
             true, // isThreadReply = true for thread messages
             channel.scopeType,
             authData.workspaceId,
+            messageId,
           );
 
 
@@ -4282,6 +4294,86 @@ export function createMutators(
                   authData,
                   operationType: 'participants_added',
                 });
+              }
+            }
+
+            // Mention replay. A user tagged while outside the channel is filtered
+            // out of the mention pipeline at send time (MessagesSideEffectHandler
+            // gates both the activity records and the notification on channel
+            // participation), so without this they would only ever receive the
+            // generic "you were added to #channel" notification and would never
+            // learn they were tagged. Runs post-commit so the participant row and
+            // channel_user_status exist before the notification filter reads them.
+            const bannerSourceMessageId =
+              typeof metadata?.sourceMessageId === 'string' ? metadata.sourceMessageId : undefined;
+
+            if (validUsers.length > 0 && bannerSourceMessageId) {
+              const sourceMessage = await tx.run(
+                zql.messages.where('messageId', bannerSourceMessageId).one(),
+              );
+              const sourceConversation = sourceMessage
+                ? await tx.run(
+                    zql.conversations.where('conversationId', sourceMessage.conversationId).one(),
+                  )
+                : null;
+              const mentionActor = sourceMessage
+                ? await tx.run(zql.users.where('id', sourceMessage.senderId).one())
+                : null;
+
+              if (sourceMessage && !sourceMessage.isDeleted && sourceConversation) {
+                const addedUserIds = validUsers
+                  .map(u => u.userId)
+                  .filter(userId => userId !== sourceMessage.senderId);
+                const isThreadMessage =
+                  sourceConversation.initialMessageId !== sourceMessage.messageId;
+                const mentionPreview = extractPlainTextFromHtml(sourceMessage.content ?? '')
+                  .replace(/\s+/g, ' ')
+                  .trim();
+
+                if (addedUserIds.length > 0) {
+                  asyncTasks.push(async () => {
+                    try {
+                      await activityService.createActivities(
+                        addedUserIds.map(userId => ({
+                          id: uuidv4(),
+                          userId,
+                          workspaceId: authData.workspaceId,
+                          actorId: sourceMessage.senderId,
+                          actorAction: 'mentioned_user' as const,
+                          actionSource: 'message' as const,
+                          actionSourceId: sourceMessage.messageId,
+                          messageId: sourceMessage.messageId,
+                          channelId,
+                          isThreadActivity: isThreadMessage,
+                          classification: ActivityClassification.PENDING,
+                        })),
+                      );
+
+                      await notificationService.createMentionNotifications(
+                        addedUserIds,
+                        sourceMessage.messageId,
+                        sourceConversation.conversationId,
+                        channelId,
+                        channel.name ?? channelId,
+                        sourceMessage.senderId,
+                        mentionActor?.displayName || mentionActor?.name || 'Someone',
+                        mentionPreview,
+                        authData.workspaceId,
+                        undefined, // mentionType — this is a direct mention, not @channel/@here
+                        false, // isDMChannel
+                        isThreadMessage,
+                        mentionActor?.picture ?? '',
+                      );
+                    } catch (error) {
+                      logger.error('[NON-PARTICIPANT] Failed to replay mention notification after add', {
+                        channelId,
+                        sourceMessageId: bannerSourceMessageId,
+                        addedUserIds,
+                        error,
+                      });
+                    }
+                  });
+                }
               }
             }
           }
