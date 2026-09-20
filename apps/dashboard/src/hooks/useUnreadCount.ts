@@ -24,22 +24,20 @@ export const useAllUnreadCount = (): UnreadCounts => {
     // Build DM channel set from visible channels
     const dmChannelIds = new Set<string>();
     const groupDmChannelIds = new Set<string>();
-    const scopeByChannelId = new Map<string, string>();
+    // All channels visible to this user — closed/deleted channels are already
+    // filtered out server-side by userVisibleChannelsV3 (isClosed/isDeleted),
+    // so an activity whose channel is missing from this set is in a channel
+    // closed for this user and must not count (parity with the server's
+    // per-user closed-pair post-filter).
+    const visibleChannelIds = new Set<string>();
     for (const channel of visibleChannels ?? []) {
+      visibleChannelIds.add(channel.id);
       if (isDmShelfScopeType(channel.scopeType)) {
         dmChannelIds.add(channel.id);
-        scopeByChannelId.set(channel.id, channel.scopeType);
         if (channel.scopeType === ChannelScopeType.GROUP_DM) {
           groupDmChannelIds.add(channel.id);
         }
       }
-    }
-
-    // Channels closed for this user (isClosed is per-user on
-    // channel_user_status) do not count in any shelf.
-    const closedChannelIds = new Set<string>();
-    for (const status of userChannelStatuses) {
-      if (status.isClosed) closedChannelIds.add(status.channelId);
     }
 
     // Per-channel unread top-level GROUP_DM mention rows — the bell counts
@@ -56,11 +54,12 @@ export const useAllUnreadCount = (): UnreadCounts => {
     for (const activity of unreadActivities ?? []) {
       if (!activity.channelId) continue;
       if (dmChannelIds.has(activity.channelId)) continue;
+      if (!visibleChannelIds.has(activity.channelId)) continue;
       if (activity.isThreadActivity === true) continue;
       if (activity.actionSource === 'call' && activity.actorAction === 'missed_call') continue;
       const classification = activity.classification ?? ActivityClassification.PENDING;
       if (classification === ActivityClassification.SKIP) continue;
-      if (!isBellCountedActivity(activity, closedChannelIds)) continue;
+      if (!isBellCountedActivity(activity, EMPTY_CLOSED_SET)) continue;
 
       counts[activity.channelId] = (counts[activity.channelId] || 0) + 1;
     }
@@ -77,3 +76,7 @@ export const useAllUnreadCount = (): UnreadCounts => {
     return counts;
   }, [userChannelStatuses, unreadActivities, visibleChannels]);
 };
+
+// Closed channels are already excluded via the visibleChannelIds check above;
+// this predicate parameter stays for callers that track closed sets explicitly.
+const EMPTY_CLOSED_SET: ReadonlySet<string> = new Set();

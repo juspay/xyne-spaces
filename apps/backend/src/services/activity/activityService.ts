@@ -809,7 +809,10 @@ export class ActivityService {
                 isRead: false,
                 actorAction: { in: [...DM_SHELF_MENTION_ACTOR_ACTIONS] },
                 actionSource: 'message',
-                isThreadActivity: false,
+                // { not: true } (IS DISTINCT FROM TRUE) matches false AND null
+                // rows — parity with the client predicate's `!== true`, which
+                // treats legacy null rows as top-level mentions.
+                isThreadActivity: { not: true },
                 channelId: { in: groupDmChannelIds },
               },
               _count: {

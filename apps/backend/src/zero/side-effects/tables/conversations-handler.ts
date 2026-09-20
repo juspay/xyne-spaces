@@ -40,8 +40,14 @@ export class ConversationsSideEffectHandler extends BaseSideEffectHandler {
     // messages never bump channel_stats.lastActivityAt — only channel creation, membership
     // changes and calls do. Bump it to the conversation's createdAt so recompute runs and
     // unreadCount doesn't freeze at 0 for every channel the user has already viewed.
-    await db.channelStats.update({
-      where: { channelId: conversation.channelId },
+    // updateMany (not update): never throws on a missing channel_stats row, and the
+    // lastActivityAt guard makes the write monotonic — a redelivered older side-effect
+    // can never move the timestamp (and the DM shelf ordering) backward.
+    await db.channelStats.updateMany({
+      where: {
+        channelId: conversation.channelId,
+        lastActivityAt: { lt: conversation.createdAt }
+      },
       data: { lastActivityAt: conversation.createdAt }
     });
 

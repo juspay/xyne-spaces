@@ -10,32 +10,42 @@ import { stateMachineActor } from '../machines/stateMachine';
  * Matches the server's bellCount exactly — the shared
  * {@link isBellCountedActivity} predicate (BELL_COUNT_RULES in
  * @xyne/shared): excludes added_v2/removed, missed_call, SKIP, legacy
- * direct_message rows, and unread activities in channels closed for this
- * user. ERROR/PENDING count. DM-shelf unreads live in channelUserStatus
- * counts, not here.
+ * direct_message rows. ERROR/PENDING count. DM-shelf unreads live in
+ * channelUserStatus counts, not here.
+ *
+ * Closed-channel parity with the server: the server post-filters activities
+ * whose channel_user_status row is isClosed OR isDeleted for this user. The
+ * client's synced statuses come from userVisibleChannelsV3, which already
+ * filters both flags — so closed/deleted channels simply do not appear in
+ * visibleChannels, and an unread activity whose channel is absent from that
+ * set (and is not a null-channelId ticket row) is in a closed/deleted
+ * channel for this user and must not count.
  *
  * @returns count - Number of unread activities
  */
 export const useUnreadActivitiesCount = (): number => {
   const unreadActivities = useSelector(stateMachineActor, state => state.context.unreadActivities);
-  const userChannelStatuses = useSelector(
-    stateMachineActor,
-    state => state.context.userChannelStatuses,
-  );
+  const visibleChannels = useSelector(stateMachineActor, state => state.context.visibleChannels);
 
   return useMemo(() => {
     if (!unreadActivities || unreadActivities.length === 0) {
       return 0;
     }
 
-    // Channels closed for this user (isClosed is per-user on
-    // channel_user_status) do not count in any shelf.
-    const closedChannelIds = new Set<string>();
-    for (const status of userChannelStatuses) {
-      if (status.isClosed) closedChannelIds.add(status.channelId);
+    // Channels visible to this user (neither isClosed nor isDeleted for them).
+    const visibleChannelIds = new Set<string>();
+    for (const channel of visibleChannels ?? []) {
+      visibleChannelIds.add(channel.id);
     }
 
-    return unreadActivities.filter(activity => isBellCountedActivity(activity, closedChannelIds))
-      .length;
-  }, [unreadActivities, userChannelStatuses]);
+    return unreadActivities.filter(
+      activity =>
+        (activity.channelId === null || visibleChannelIds.has(activity.channelId)) &&
+        isBellCountedActivity(activity, EMPTY_CLOSED_SET),
+    ).length;
+  }, [unreadActivities, visibleChannels]);
 };
+
+// Closed channels are already excluded via the visibleChannelIds check above;
+// this predicate parameter stays for callers that track closed sets explicitly.
+const EMPTY_CLOSED_SET: ReadonlySet<string> = new Set();

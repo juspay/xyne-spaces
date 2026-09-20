@@ -261,7 +261,7 @@ describe('ActivityService.getWorkspaceActivityCounts', () => {
         actorAction?: { notIn?: string[]; in?: string[] };
         classification?: { notIn?: string[] };
         NOT?: { AND: Array<{ actionSource: string; actorAction: string }> };
-        isThreadActivity?: boolean;
+        isThreadActivity?: boolean | { not: boolean };
         actionSource?: string;
       };
       by: string[];
@@ -282,6 +282,25 @@ describe('ActivityService.getWorkspaceActivityCounts', () => {
     // The dm-shelf subtraction query (actorAction in shape).
     // Skipped entirely when no open GROUP_DM channels exist.
     expect(activityQueries.find(q => q.where.actorAction?.in)).toBeUndefined();
+
+    // When it DOES run (fixture with open GROUP_DM channels), its thread
+    // filter must be { not: true } (matches false AND null — legacy rows),
+    // mirroring the client predicate's `!== true`.
+    const groupDmResult = makeService({
+      ...baseFixture(),
+      dmStatuses: [
+        { userId: 'user-1', unreadCount: 2, channel: { id: 'gdm-1', scopeType: 'GROUP_DM' } },
+      ],
+    });
+    await groupDmResult.service.getWorkspaceActivityCounts(MEMBER_ID);
+    const groupDmQueries = (groupDmResult.whereClauses.activity ?? []).map(
+      (q: unknown) => q as { where: { actorAction?: { in?: string[] } }; by: string[] },
+    );
+    const mentionQuery = groupDmQueries.find(q => q.where.actorAction?.in);
+    expect(mentionQuery).toBeDefined();
+    expect(
+      (mentionQuery?.where as { isThreadActivity?: unknown }).isThreadActivity,
+    ).toEqual({ not: true });
 
     // The call query (by userId only, missed_call).
     const callQuery = activityQueries.find(q => q.by.length === 1);

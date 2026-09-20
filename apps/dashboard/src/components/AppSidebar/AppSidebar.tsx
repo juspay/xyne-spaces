@@ -325,7 +325,6 @@ const AppSidebar = (): ReactElement => {
     );
   };
 
-  const hasPendingDirectMessages = dmUnreadCount > 0;
   // Reactions render a dot (never a number): on the DM rail and the bell rail
   // only when the respective numeric badge is 0. Cleared on view.
   const showDmReactionDot = hasUnreadDmReactions && dmUnreadCount === 0;
@@ -413,9 +412,7 @@ const AppSidebar = (): ReactElement => {
                   const showOngoingCallDot =
                     item.path === '/calls' && hasOngoingCall && !showMissedCallBadge;
                   const showDmBadge = item.path === '/chat/dm' && dmUnreadCount > 0;
-                  const showPendingDmDot =
-                    item.path === '/chat/dm' &&
-                    (showDmReactionDot || (hasPendingDirectMessages && !showDmBadge));
+                  const showPendingDmDot = item.path === '/chat/dm' && showDmReactionDot;
                   const showActivityBadge =
                     item.path === '/chat/activity' && unreadActivityCount > 0;
                   const Icon = item.icon;

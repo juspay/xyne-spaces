@@ -28,7 +28,7 @@ jest.mock('@/database/client', () => ({
       findMany: jest.fn(),
     },
     channelStats: {
-      update: jest.fn(),
+      updateMany: jest.fn(),
     },
   },
 }));
@@ -43,7 +43,7 @@ const mockedDb = db as unknown as {
   conversation: { findUnique: jest.Mock };
   channel: { findUnique: jest.Mock };
   channelParticipant: { findMany: jest.Mock };
-  channelStats: { update: jest.Mock };
+  channelStats: { updateMany: jest.Mock };
 };
 const mockedHandleUnreadCount = handleUnreadCount as jest.Mock;
 
@@ -74,19 +74,32 @@ describe('ConversationsSideEffectHandler.onInsert (frozen-counter fix)', () => {
     mockedDb.channelParticipant.findMany.mockResolvedValue([
       { userId: 'user-recipient' },
     ] as never);
-    mockedDb.channelStats.update.mockResolvedValue({} as never);
+    mockedDb.channelStats.updateMany.mockResolvedValue({ count: 1 } as never);
     mockedHandleUnreadCount.mockResolvedValue(undefined);
   });
 
   it('bumps channel_stats.lastActivityAt to the conversation createdAt before recomputing', async () => {
     await makeHandler().onInsert({ entityId: CONVERSATION_ID } as never);
 
-    expect(mockedDb.channelStats.update).toHaveBeenCalledTimes(1);
-    expect(mockedDb.channelStats.update).toHaveBeenCalledWith({
-      where: { channelId: CHANNEL_ID },
+    expect(mockedDb.channelStats.updateMany).toHaveBeenCalledTimes(1);
+    expect(mockedDb.channelStats.updateMany).toHaveBeenCalledWith({
+      where: {
+        channelId: CHANNEL_ID,
+        lastActivityAt: { lt: CREATED_AT },
+      },
       data: { lastActivityAt: CREATED_AT },
     });
     expect(mockedHandleUnreadCount).toHaveBeenCalledTimes(1);
+  });
+
+  it('bumps before recomputing (call order matters — the recompute guard reads the bump)', async () => {
+    await makeHandler().onInsert({ entityId: CONVERSATION_ID } as never);
+
+    const bumpOrder = mockedDb.channelStats.updateMany.mock.invocationCallOrder[0];
+    const recomputeOrder = mockedHandleUnreadCount.mock.invocationCallOrder[0];
+    expect(bumpOrder).toBeDefined();
+    expect(recomputeOrder).toBeDefined();
+    expect(bumpOrder).toBeLessThan(recomputeOrder);
   });
 
   it('bumps lastActivityAt even for GROUP_DM channels', async () => {
@@ -96,7 +109,7 @@ describe('ConversationsSideEffectHandler.onInsert (frozen-counter fix)', () => {
 
     await makeHandler().onInsert({ entityId: CONVERSATION_ID } as never);
 
-    expect(mockedDb.channelStats.update).toHaveBeenCalledTimes(1);
+    expect(mockedDb.channelStats.updateMany).toHaveBeenCalledTimes(1);
     expect(mockedHandleUnreadCount).toHaveBeenCalledTimes(1);
   });
 
@@ -118,7 +131,7 @@ describe('ConversationsSideEffectHandler.onInsert (frozen-counter fix)', () => {
 
     await makeHandler().onInsert({ entityId: CONVERSATION_ID } as never);
 
-    expect(mockedDb.channelStats.update).not.toHaveBeenCalled();
+    expect(mockedDb.channelStats.updateMany).not.toHaveBeenCalled();
     expect(mockedHandleUnreadCount).not.toHaveBeenCalled();
   });
 
@@ -127,7 +140,7 @@ describe('ConversationsSideEffectHandler.onInsert (frozen-counter fix)', () => {
 
     await makeHandler().onInsert({ entityId: CONVERSATION_ID } as never);
 
-    expect(mockedDb.channelStats.update).not.toHaveBeenCalled();
+    expect(mockedDb.channelStats.updateMany).not.toHaveBeenCalled();
     expect(mockedHandleUnreadCount).not.toHaveBeenCalled();
   });
 });

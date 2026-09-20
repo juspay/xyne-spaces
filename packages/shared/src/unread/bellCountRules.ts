@@ -78,6 +78,8 @@ export const UNREAD_COUNT_MUTATORS = [
 
 /** Fire the unread refetch event (no-op outside a DOM environment). */
 export const emitUnreadRefetch = (): void => {
-  if (typeof window === 'undefined') return;
+  // Guard both window and CustomEvent: this module is imported by the shared
+  // useZero hook, which non-browser consumers (e.g. React Native) also use.
+  if (typeof window === 'undefined' || typeof CustomEvent === 'undefined') return;
   window.dispatchEvent(new CustomEvent(UNREAD_REFETCH_EVENT_NAME));
 };
