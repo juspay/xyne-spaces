@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { parseSlashCommand } from "../parseSlashCommand.js";
 import { renderEvalHtml } from "./eval.js";
 import type { EvalResult } from "../eval-run.js";
@@ -6,6 +6,7 @@ import type { EvalResult } from "../eval-run.js";
 function result(provider: string, over: Partial<EvalResult> = {}): EvalResult {
   return {
     provider,
+    useOverride: true,
     model: `${provider}-model`,
     sessionId: `s-${provider}`,
     status: "completed",
@@ -66,5 +67,43 @@ describe("eval comparison report", () => {
     expect(html).not.toContain("<script>x</script>");
     expect(html).toContain("&lt;script&gt;");
     expect(html).toContain("&lt;b&gt;boom");
+  });
+});
+
+describe("eval provider selection", () => {
+  it("runs the agent's own provider as the default arm and adds keyless ones", async () => {
+    vi.resetModules();
+    vi.doMock("../provider-resolution.js", () => ({
+      resolveProvidersForDispatch: async () => ({
+        runtimeProviderOrder: ["claude", "codex", "litellm"],
+        providerConfigs: { claude: { model: "claude-opus-5" } },
+        resolvedParentProvider: "claude",
+      }),
+    }));
+    const { resolveEvalTargets } = await import("../eval-run.js");
+    const targets = await resolveEvalTargets({ userId: "u", agent: { slug: "xyne", orgId: "o" } });
+    const names = targets.map((t) => t.provider).sort();
+    expect(names).toEqual(["claude", "litellm", "spaces"]);
+    // The agent's configured provider runs with NO override — an override for a
+    // personal-cred provider would demand the USER's own key, which is what the
+    // first /eval run hit.
+    expect(targets.find((t) => t.provider === "claude")?.useOverride).toBe(false);
+    vi.doUnmock("../provider-resolution.js");
+  });
+
+  it("does not try to override a personal-cred provider the user has not connected", async () => {
+    vi.resetModules();
+    vi.doMock("../provider-resolution.js", () => ({
+      resolveProvidersForDispatch: async () => ({
+        runtimeProviderOrder: ["claude", "codex"],
+        providerConfigs: {},
+        resolvedParentProvider: undefined,
+      }),
+    }));
+    const { resolveEvalTargets } = await import("../eval-run.js");
+    const targets = await resolveEvalTargets({ userId: "u", agent: { slug: "xyne", orgId: "o" } });
+    expect(targets.map((t) => t.provider).sort()).toEqual(["litellm", "spaces"]);
+    expect(targets.some((t) => t.provider === "claude" || t.provider === "codex")).toBe(false);
+    vi.doUnmock("../provider-resolution.js");
   });
 });

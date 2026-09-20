@@ -158,6 +158,117 @@ interface TraceParts {
   inner: string;
 }
 
+interface Span {
+  label: string;
+  detail: string;
+  startMs: number;
+  durationMs: number;
+  waitMs: number;
+  kind: "llm" | "tool" | "compaction";
+  isError: boolean;
+}
+
+function collectSpans(all: DebugTraceEvent[], startBase: number | null): Span[] {
+  if (startBase === null) return [];
+  const spans: Span[] = [];
+  const startAtByCall = new Map<string, number>();
+
+  for (const event of all) {
+    const at = str(event.at);
+    const atMs = at ? Date.parse(at) : NaN;
+    if (Number.isNaN(atMs)) continue;
+    const data = rec(event.data);
+    const kind = event.kind ?? "";
+
+    if (kind === "tool_execution_start") {
+      const id = str(event.toolCallId);
+      if (id) startAtByCall.set(id, atMs);
+      continue;
+    }
+    if (kind === "tool_execution_end") {
+      const id = str(event.toolCallId);
+      const duration = num(data["durationMs"]) ?? 0;
+      const began = (id ? startAtByCall.get(id) : undefined) ?? atMs - duration;
+      spans.push({
+        label: clean(str(data["toolName"]) ?? "tool", 44) || "tool",
+        detail: ms(duration),
+        startMs: began - startBase,
+        durationMs: duration,
+        waitMs: 0,
+        kind: "tool",
+        isError: data["isError"] === true,
+      });
+      continue;
+    }
+    if (kind === "assistant_turn_end") {
+      const usage = rec(data["usage"]);
+      const duration = num(data["totalMs"]) ?? num(usage["totalMs"]) ?? 0;
+      const ttft = num(data["ttftMs"]) ?? 0;
+      spans.push({
+        label: `LLM turn ${num(event.turn) ?? spans.filter((x) => x.kind === "llm").length + 1}`,
+        detail: ttft > 0 ? `${ms(duration)} · ttft ${ms(ttft)}` : ms(duration),
+        startMs: atMs - duration - startBase,
+        durationMs: duration,
+        waitMs: Math.min(ttft, duration),
+        kind: "llm",
+        isError: Boolean(data["errorMessage"]),
+      });
+      continue;
+    }
+    if (kind === "compaction_end") {
+      const duration = num(data["durationMs"]) ?? 0;
+      spans.push({
+        label: "compaction",
+        detail: ms(duration),
+        startMs: atMs - duration - startBase,
+        durationMs: duration,
+        waitMs: 0,
+        kind: "compaction",
+        isError: false,
+      });
+    }
+  }
+  return spans.sort((a, b) => a.startMs - b.startMs);
+}
+
+function renderWaterfall(spans: Span[], totalMs: number): string {
+  if (spans.length === 0 || totalMs <= 0) return "";
+  const pct = (value: number): number => Math.max(0, Math.min(100, (value / totalMs) * 100));
+
+  const covered = spans.reduce((sum, sp) => sum + sp.durationMs, 0);
+  const llmMs = spans.filter((s) => s.kind === "llm").reduce((n, s) => n + s.durationMs, 0);
+  const toolMs = spans.filter((s) => s.kind === "tool").reduce((n, s) => n + s.durationMs, 0);
+  const gap = Math.max(0, totalMs - covered);
+
+  const bars = spans
+    .map((sp) => {
+      const left = pct(sp.startMs);
+      const width = Math.max(0.4, pct(sp.durationMs));
+      const waitWidth = sp.waitMs > 0 ? Math.min(100, (sp.waitMs / sp.durationMs) * 100) : 0;
+      return `<div class="wf-row">
+  <div class="wf-label ${sp.isError ? "wf-err" : ""}">${escapeHtml(sp.label)}</div>
+  <div class="wf-track">
+    <div class="wf-bar wf-${sp.kind}${sp.isError ? " wf-bad" : ""}" style="left:${left.toFixed(2)}%;width:${width.toFixed(2)}%">
+      ${waitWidth > 0 ? `<span class="wf-wait" style="width:${waitWidth.toFixed(1)}%"></span>` : ""}
+    </div>
+  </div>
+  <div class="wf-time">${escapeHtml(sp.detail)}</div>
+</div>`;
+    })
+    .join("\n");
+
+  return [
+    `<h2>Where the time went</h2>`,
+    `<div class="wf-legend">`,
+    `<span><i class="wf-llm"></i>model ${ms(llmMs)}</span>`,
+    `<span><i class="wf-tool"></i>tools ${ms(toolMs)}</span>`,
+    `<span><i class="wf-gapc"></i>unaccounted ${ms(gap)}</span>`,
+    `<span class="wf-total">wall ${ms(totalMs)}</span>`,
+    `</div>`,
+    `<div class="wf">${bars}</div>`,
+  ].join("\n");
+}
+
 function buildTraceParts(run: DebugTraceRun): TraceParts {
   const all = events(run);
   const startedAt = str(run.startedAt);
@@ -451,6 +562,13 @@ function buildTraceParts(run: DebugTraceRun): TraceParts {
     ? `<p class="notice">Timeline truncated — the trace exceeded the ${Math.round(DEBUG_TRACE_MAX_BYTES / 1_000_000)} MB rendering cap. ${rows.length} of ${all.length} events shown.</p>`
     : "";
 
+  const wallEndAt = str(run.finishedAt);
+  const finishedMs = wallEndAt ? Date.parse(wallEndAt) : NaN;
+  const wallMs = startBase !== null && !Number.isNaN(finishedMs)
+    ? finishedMs - startBase
+    : Math.max(0, ...collectSpans(all, startBase).map((sp) => sp.startMs + sp.durationMs));
+  const waterfall = renderWaterfall(collectSpans(all, startBase), wallMs);
+
   return {
     agentSlug: clean(run.agentSlug, 60) || "run",
     headline: `${toolCalls} tool calls · ${llmTurns} LLM turns · ${compactions} compactions · ${all.length} events`,
@@ -460,6 +578,7 @@ function buildTraceParts(run: DebugTraceRun): TraceParts {
       `<h2>Tool calls by name</h2>`,
       `<div class="scroll"><table><thead><tr><th>Tool</th><th>Calls</th><th>Avg</th><th>Max</th><th>Errors</th></tr></thead>`,
       `<tbody>${statRows || `<tr><td colspan="5">No tool calls recorded.</td></tr>`}</tbody></table></div>`,
+      waterfall,
       `<h2>Timeline</h2>`,
       truncNotice,
       rows.join("\n"),
@@ -476,6 +595,23 @@ function shell(title: string, body: string): string {
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${title}</title>
 <style>
+.wf{display:flex;flex-direction:column;gap:3px;margin:10px 0 4px}
+.wf-row{display:grid;grid-template-columns:minmax(120px,190px) 1fr minmax(96px,auto);gap:10px;align-items:center;font-size:12px}
+.wf-label{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;opacity:.85}
+.wf-err{color:#e2704a}
+.wf-track{position:relative;height:13px;background:rgba(127,127,127,.14);border-radius:3px;overflow:hidden}
+.wf-bar{position:absolute;top:0;bottom:0;border-radius:3px;min-width:2px}
+.wf-llm{background:#6b74e0}
+.wf-tool{background:#2fa38d}
+.wf-compaction{background:#c98b2a}
+.wf-bad{background:#c8503a}
+.wf-wait{position:absolute;left:0;top:0;bottom:0;background:rgba(255,255,255,.34);border-right:1px solid rgba(255,255,255,.5)}
+.wf-time{text-align:right;font-variant-numeric:tabular-nums;opacity:.75;white-space:nowrap}
+.wf-legend{display:flex;flex-wrap:wrap;gap:14px;font-size:12px;opacity:.8;margin-top:8px;align-items:center}
+.wf-legend i{display:inline-block;width:11px;height:11px;border-radius:2px;margin-right:5px;vertical-align:-1px}
+.wf-legend .wf-gapc{background:rgba(127,127,127,.34)}
+.wf-total{margin-left:auto;font-variant-numeric:tabular-nums}
+
 :root { color-scheme: light dark; --bg:#fff; --fg:#16181d; --muted:#666e7a; --line:#e3e6ea; --accent:#2f6fd0; --warn:#b8620a; --err:#c0362c; --chip:#f2f4f7; }
 @media (prefers-color-scheme: dark) { :root { --bg:#14161a; --fg:#e6e8ec; --muted:#9aa3ae; --line:#2a2e35; --accent:#79aaf5; --warn:#e0a25a; --err:#ef7a70; --chip:#1e2229; } }
 * { box-sizing: border-box; }

@@ -42,7 +42,7 @@ export function renderEvalHtml(question: string, results: EvalResult[], startedA
         r.status === "completed" ? "ok" : r.status === "pending" ? "pending" : "fail";
       const win = r.totalMs !== null && r.totalMs === fastest && r.status === "completed";
       return `<tr>
-  <td class="p">${esc(r.provider)}${win ? ' <span class="win">fastest</span>' : ""}<div class="m">${esc(r.model ?? "default")}</div></td>
+  <td class="p">${esc(r.provider)}${win ? ' <span class="win">fastest</span>' : ""}<div class="m">${esc(r.model ?? "default")}${r.useOverride ? "" : " · agent default"}</div></td>
   <td><span class="b ${badge}">${esc(r.status)}</span></td>
   <td class="n bar"><div class="track"><span style="width:${width}%"></span></div>${ms(r.totalMs)}</td>
   <td class="n">${ms(r.llmTotalMs)}</td>
@@ -136,7 +136,10 @@ export async function handleEval(ctx: WebhookCommandCtx, question: string, reque
         channelId,
         agentSlug: ctx.agent.slug,
         orgId: ctx.agent.orgId,
+        agentId: ctx.agent.id,
         spacesAppToken: ctx.agent.appToken,
+        spacesAppId: ctx.agent.spacesAppId,
+        spacesAppUserId: ctx.agent.spacesAppUserId,
         traceId: `${traceId}-${target.provider}`,
       }),
     ),
@@ -145,11 +148,17 @@ export async function handleEval(ctx: WebhookCommandCtx, question: string, reque
   const dispatched: EvalDispatch[] = [];
   const failed: string[] = [];
   settled.forEach((outcome, i) => {
-    if (outcome.status === "fulfilled") dispatched.push(outcome.value);
-    else {
-      failed.push(targets[i]?.provider ?? "unknown");
-      ctx.log.warn("/eval dispatch failed", { provider: targets[i]?.provider, error: errMsg(outcome.reason) });
+    if (outcome.status === "fulfilled") {
+      dispatched.push(outcome.value);
+      return;
     }
+    const provider = targets[i]?.provider ?? "unknown";
+    const reason = errMsg(outcome.reason);
+    const short = /no .* credentials/i.test(reason)
+      ? "not connected"
+      : reason.slice(reason.lastIndexOf(":") + 1).trim().slice(0, 60) || "dispatch failed";
+    failed.push(`${provider} (${short})`);
+    ctx.log.warn("/eval dispatch failed", { provider, error: reason });
   });
 
   if (dispatched.length === 0) {

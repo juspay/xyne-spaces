@@ -1,6 +1,8 @@
 import { prisma } from "../db.js";
+import { userProviderCredentialsRepository } from "../repositories/index.js";
 import { CONFIG } from "../config.js";
 import { createLogger } from "../logger.js";
+import { setSession } from "./session-context.js";
 import { resolveProvidersForDispatch } from "./provider-resolution.js";
 
 const log = createLogger("eval-run");
@@ -11,10 +13,16 @@ export const EVAL_MAX_PROVIDERS = Math.max(1, Number(process.env["EVAL_MAX_PROVI
 
 const TERMINAL = new Set(["completed", "failed", "cancelled"]);
 
+export const PLATFORM_DEFAULT_PROVIDER = process.env["EVAL_DEFAULT_PROVIDER"] ?? "litellm";
+
 export interface EvalTarget {
   provider: string;
   model?: string | undefined;
+  useOverride: boolean;
 }
+
+const PERSONAL_CRED_PROVIDERS = ["claude", "codex", "copilot"] as const;
+const AGENT_CRED_PROVIDERS = ["litellm", "spaces"] as const;
 
 export interface EvalDispatch extends EvalTarget {
   sessionId: string;
@@ -48,18 +56,39 @@ export async function resolveEvalTargets(input: {
     ...(input.conversationId ? { conversationId: input.conversationId } : {}),
   });
 
-  const configured = new Set<string>(resolution.runtimeProviderOrder);
-  for (const name of Object.keys(resolution.providerConfigs ?? {})) configured.add(name);
-  if (resolution.resolvedParentProvider) configured.add(resolution.resolvedParentProvider);
+  const targets: EvalTarget[] = [];
+  const claimed = new Set<string>();
+
+  const defaultProvider = resolution.resolvedParentProvider ?? PLATFORM_DEFAULT_PROVIDER;
+  targets.push({ provider: defaultProvider, useOverride: false });
+  claimed.add(defaultProvider);
+
+  for (const provider of AGENT_CRED_PROVIDERS) {
+    if (claimed.has(provider)) continue;
+    claimed.add(provider);
+    const model = (resolution.providerConfigs?.[provider] as { model?: string } | undefined)?.model;
+    targets.push({ provider, useOverride: true, ...(model ? { model } : {}) });
+  }
+
+  const personal = await Promise.all(
+    PERSONAL_CRED_PROVIDERS.filter((p) => !claimed.has(p)).map(async (provider) => {
+      const cred = await userProviderCredentialsRepository
+        .findByUserAndProvider(input.userId, provider)
+        .catch(() => null);
+      return cred?.encryptedKey ? provider : null;
+    }),
+  );
+  for (const provider of personal) {
+    if (!provider) continue;
+    claimed.add(provider);
+    const model = (resolution.providerConfigs?.[provider] as { model?: string } | undefined)?.model;
+    targets.push({ provider, useOverride: true, ...(model ? { model } : {}) });
+  }
 
   const wanted = input.requested?.length
-    ? input.requested.filter((p) => configured.has(p))
-    : [...configured];
-
-  return wanted.slice(0, EVAL_MAX_PROVIDERS).map((provider) => {
-    const model = (resolution.providerConfigs?.[provider] as { model?: string } | undefined)?.model;
-    return model ? { provider, model } : { provider };
-  });
+    ? targets.filter((t) => input.requested?.includes(t.provider))
+    : targets;
+  return wanted.slice(0, EVAL_MAX_PROVIDERS);
 }
 
 export async function dispatchEvalRun(args: {
@@ -70,7 +99,11 @@ export async function dispatchEvalRun(args: {
   channelId: string;
   agentSlug: string;
   orgId: string;
+  agentId: string;
   spacesAppToken: string;
+  spacesAppId: string;
+  spacesAppUserId: string;
+  senderName?: string;
   traceId: string;
 }): Promise<EvalDispatch> {
   const res = await fetch(`${CONFIG.internalUrl}/claw/api/v1/internal/run`, {
@@ -90,10 +123,14 @@ export async function dispatchEvalRun(args: {
       callbackUrl: `${CONFIG.internalUrl}/claw/api/v1/webhook/result`,
       progressUrl: `${CONFIG.internalUrl}/claw/api/v1/webhook/progress`,
       channelId: args.channelId,
-      providerOverride: {
-        provider: args.target.provider,
-        ...(args.target.model ? { model: args.target.model } : {}),
-      },
+      ...(args.target.useOverride
+        ? {
+            providerOverride: {
+              provider: args.target.provider,
+              ...(args.target.model ? { model: args.target.model } : {}),
+            },
+          }
+        : {}),
     }),
   });
 
@@ -101,6 +138,28 @@ export async function dispatchEvalRun(args: {
   if (!res.ok || !body.success || !body.sessionId) {
     throw new Error(`eval dispatch failed for ${args.target.provider}: HTTP ${res.status} ${body.error ?? ""}`.trim());
   }
+
+  await setSession(
+    body.sessionId,
+    {
+      senderId: args.userId,
+      senderName: args.senderName ?? "",
+      mentionedUserId: args.userId,
+      channelId: args.channelId,
+      channelName: "",
+      conversationId: args.conversationId,
+      task: args.task,
+      agentId: args.agentId,
+      agentOrgId: args.orgId,
+      agentSlug: args.agentSlug,
+      responseMode: "conversation",
+      appToken: args.spacesAppToken,
+      spacesAppId: args.spacesAppId,
+      spacesAppUserId: args.spacesAppUserId,
+    },
+    { skipConversationIndex: true },
+  );
+
   return { ...args.target, sessionId: body.sessionId };
 }
 
@@ -119,6 +178,7 @@ export async function readEvalResults(dispatches: EvalDispatch[]): Promise<EvalR
     const row = bySession.get(d.sessionId);
     return {
       provider: d.provider,
+      useOverride: d.useOverride,
       model: row?.model ?? d.model,
       sessionId: d.sessionId,
       status: row?.status ?? "pending",
