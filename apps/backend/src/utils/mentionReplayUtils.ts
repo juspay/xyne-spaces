@@ -9,8 +9,10 @@
  * thing they ever see is the generic "added you to #channel" notification.
  *
  * The decision logic lives here — free of Zero/Prisma — so it can be unit
- * tested, and so the notification construction exists in exactly one place
- * instead of being re-derived at each call site.
+ * tested, and so the replay path builds its notification in one place instead
+ * of re-deriving the argument list at each call site. Note this covers the
+ * REPLAY path only: send-time mention delivery still lives in
+ * MessagesSideEffectHandler and is not routed through here.
  */
 
 import { v4 as uuidv4 } from 'uuid';

@@ -1,5 +1,6 @@
 import { ReactElement } from 'react';
 import { UserTwo } from '@xyne/icons';
+import { ChannelScopeType } from '@xyne/shared';
 import type { ActivityWithRelated } from '../../types/activity';
 import { ActivityItemCard } from './ActivityItemCard';
 import { useUser } from '../../hooks/useUsers';
@@ -29,6 +30,11 @@ export const ChannelAddedActivity = ({
 
   if (!channelId || !actor) return null;
 
+  // The same participant insert backs group DMs, where the user-facing concept
+  // is a group DM rather than a channel — and the route differs too.
+  const isGroupDm = channel?.scopeType === ChannelScopeType.GROUP_DM;
+  const targetPath = isGroupDm ? `${baseRoute}/dir/${channelId}` : `${baseRoute}/${channelId}`;
+
   return (
     <ActivityItemCard
       activity={activity}
@@ -37,14 +43,20 @@ export const ChannelAddedActivity = ({
       channelId={channelId}
       badgeIcon={<UserTwo className='size-3 text-primary' />}
       badgeColorClass='bg-muted'
-      description={<span className='text-muted-foreground text-sm'>added you to a channel</span>}
-      targetPath={`${baseRoute}/${channelId}`}
+      description={
+        <span className='text-muted-foreground text-sm'>
+          {isGroupDm ? 'added you to a group DM' : 'added you to a channel'}
+        </span>
+      }
+      targetPath={targetPath}
       isExpanded={isExpanded}
       actorAction={activity.actorAction}
       unresolvedChannelLabel='Private channel'
     >
       <div className='text-muted-foreground text-sm'>
-        You now have access to {channel?.name ? `#${channel.name}` : 'this channel'}.
+        {isGroupDm
+          ? 'You now have access to this group DM.'
+          : `You now have access to ${channel?.name ? `#${channel.name}` : 'this channel'}.`}
       </div>
     </ActivityItemCard>
   );
