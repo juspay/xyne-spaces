@@ -1,3 +1,24 @@
+## [1.347.0](https://github.com/juspay/xyne-spaces/compare/v1.346.0...v1.347.0) (2026-09-19)
+
+
+### Features
+
+* compact grid layout for multiple file attachments ([#1717](https://github.com/juspay/xyne-spaces/issues/1717)) ([db3f2f8](https://github.com/juspay/xyne-spaces/commit/db3f2f81a1df2c610a3813422276bfbe480f3799))
+
+## [1.346.0](https://github.com/juspay/xyne-spaces/compare/v1.345.5...v1.346.0) (2026-09-19)
+
+
+### Features
+
+* add AI provider discovery cards to chat ([#1816](https://github.com/juspay/xyne-spaces/issues/1816)) ([18b3c57](https://github.com/juspay/xyne-spaces/commit/18b3c572c969a4e0b19c3daede5752ed83679757))
+
+## [1.345.5](https://github.com/juspay/xyne-spaces/compare/v1.345.4...v1.345.5) (2026-09-19)
+
+
+### Bug Fixes
+
+* stop mid-playback stalls on high-bitrate attachment streaming ([#2021](https://github.com/juspay/xyne-spaces/issues/2021)) ([279d819](https://github.com/juspay/xyne-spaces/commit/279d81911fb90253072ffc94526ebd78e429c117))
+
 ## [1.345.4](https://github.com/juspay/xyne-spaces/compare/v1.345.3...v1.345.4) (2026-09-18)
 
 
