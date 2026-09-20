@@ -3,8 +3,9 @@ import type { SideEffectJobConfig, ChannelParticipantPreviousValue } from '../ty
 import { db } from '@/database/client';
 import { notificationService } from '@/services/notificationService';
 import { logger } from '@/utils/logger';
-import { ChannelScopeType } from '@xyne/shared';
+import { ChannelScopeType, ActivityClassification } from '@xyne/shared';
 import { refreshCanvasPermissionsForChannel } from '@/services/canvasPermissionSync';
+import { activityService } from '@/services/activity/activityService';
 
 export class ChannelParticipantsSideEffectHandler extends BaseSideEffectHandler {
 
@@ -82,6 +83,30 @@ export class ChannelParticipantsSideEffectHandler extends BaseSideEffectHandler 
         adderName,
         this.ctx.workspaceId
       );
+
+      // Mirror the notification into the activity feed. Being added to a channel
+      // was previously push-only: a user who missed or dismissed the push had no
+      // record of it in Activity. The activity id is the participant row id, so a
+      // retried side-effect job cannot create a second row for the same add.
+      await activityService
+        .createActivities([
+          {
+            id: job.entityId,
+            userId,
+            workspaceId: this.ctx.workspaceId,
+            actorId: adderId,
+            actorAction: 'channel_added',
+            actionSource: 'channel',
+            actionSourceId: channelId,
+            channelId,
+            classification: ActivityClassification.FYI,
+          },
+        ])
+        .catch(err =>
+          logger.error(
+            `[ChannelParticipantsHandler] channel_added activity failed for user ${userId} in channel ${channelId}: ${err}`,
+          ),
+        );
 
       logger.info(`[ChannelParticipantsHandler] Notification sent for user ${userId} added to channel ${channelId} by ${adderName}`);
 
