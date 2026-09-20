@@ -4,6 +4,7 @@ import { handleExperimentCommand } from "./experiment.js";
 import { handleQueueClear, handleQueueShow } from "./queue.js";
 import { handleHelp } from "./help.js";
 import { handleStatus } from "./status.js";
+import { handleEval } from "./eval.js";
 import { handleDebug } from "./debug.js";
 import { applyFastTaskCommand, handleFastModeToggle, handleFastModeUsage } from "./fast-mode.js";
 import { handleClear } from "./clear.js";
@@ -49,6 +50,11 @@ export async function handleWebhookCommands(ctx: WebhookCommandCtx): Promise<Com
 
   if (slash?.kind === "debug") {
     await handleDebug(ctx, slash.scope ?? "latest");
+    return { kind: "handled" };
+  }
+
+  if (slash?.kind === "eval") {
+    await handleEval(ctx, slash.question, slash.providers);
     return { kind: "handled" };
   }
 

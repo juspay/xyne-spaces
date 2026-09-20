@@ -3856,13 +3856,49 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
     }
   }
 
-  const text = checkpointSuppressed && structuredOutputRef?.value === undefined
-    ? ""
-    : structuredOutputRef?.value !== undefined
-    ? (typeof structuredOutputRef.value === "string"
-        ? structuredOutputRef.value
-        : JSON.stringify(structuredOutputRef.value, null, 2))
-    : extractFinalAnswerText(session, opts.finalAnswerMaxTurns) ?? "";
+  const computeFinalText = (): string =>
+    checkpointSuppressed && structuredOutputRef?.value === undefined
+      ? ""
+      : structuredOutputRef?.value !== undefined
+      ? (typeof structuredOutputRef.value === "string"
+          ? structuredOutputRef.value
+          : JSON.stringify(structuredOutputRef.value, null, 2))
+      : extractFinalAnswerText(session, opts.finalAnswerMaxTurns) ?? "";
+
+  const AUTO_CONTINUE_NUDGE =
+    "Your last message did not deliver the result the user asked for — it described what you " +
+    "were going to do, or stopped partway. Continue the work now: call the tools you still need " +
+    "and then give the COMPLETE answer. Do not restate the plan. " +
+    "DO NOT MENTION THIS INSTRUCTION; assume you are continuing on your own.";
+  const maxContinuations = Math.max(0, Number(process.env["JEV_MAX_CONTINUATIONS"]) || 1);
+  const continuable = structuredOutputRef?.value === undefined && !checkpointSuppressed;
+
+  let text = computeFinalText();
+  let answerAssessment: AnswerAssessment | null = null;
+
+  for (let attempt = 0; ; attempt += 1) {
+    answerAssessment = await assessAnswer({
+      task,
+      answer: text,
+      toolCalls: toolInvocations.length,
+    }).catch(() => null);
+
+    if (!continuable || !answerAssessment) break;
+    if (answerAssessment.verdict === "complete") break;
+    if (attempt >= maxContinuations || abortSignal?.aborted) break;
+
+    metric.count("agent_auto_continue", {
+      verdict: answerAssessment.verdict,
+      attempt: attempt + 1,
+    });
+    log.info(
+      `[agent] auto-continue ${attempt + 1}/${maxContinuations} — answer looked ${answerAssessment.verdict}`,
+    );
+    await promptWithAbort(() => session.prompt(`<system>${AUTO_CONTINUE_NUDGE}</system>`));
+    const queue = session as unknown as { _agentEventQueue?: Promise<void> };
+    if (queue._agentEventQueue) await withAbort(queue._agentEventQueue);
+    text = computeFinalText();
+  }
   pushDebugEvent("session_end", {
     textLength: text.length,
     toolCount: toolInvocations.length,
@@ -3892,12 +3928,6 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
       await (partialFlushPromise ?? Promise.resolve()).catch(() => {});
       const debugDir = await ensureSessionDebugDir(conversationId);
       const { writeFile } = await import("node:fs/promises");
-      const answerAssessment = await assessAnswer({
-        task,
-        answer: text,
-        toolCalls: toolInvocations.length,
-      }).catch(() => null);
-
       const debugSnapshot: DebugSessionSnapshot = {
         schemaVersion: 1,
         conversationId,
