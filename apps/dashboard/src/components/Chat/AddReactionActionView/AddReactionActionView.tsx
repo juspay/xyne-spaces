@@ -2,6 +2,8 @@ import React, { useRef } from 'react';
 import EmojiPicker, { EmojiStyle, Theme } from 'emoji-picker-react';
 import { EmojiPickerEmoji } from '../../../hooks/useCustomEmojis';
 import { useTheme } from '../../../hooks/useTheme';
+import { FrequentEmojiRow } from '../FrequentEmojiRow/FrequentEmojiRow';
+import { parseCustomEmoji } from '../../../utils/customEmojiUtils';
 
 interface AddReactionActionViewProps {
   handleEmojiSelect: (emoji: {
@@ -31,8 +33,21 @@ const AddReactionActionView = ({ handleEmojiSelect, customEmojis }: AddReactionA
     }
   };
 
+  // The row hands back a stored reaction token; split it back into the shape the
+  // parent already serialises, so both paths produce the identical `custom:` string.
+  const handleFrequentSelect = (emoji: string): void => {
+    const custom = parseCustomEmoji(emoji);
+
+    handleEmojiSelect(
+      custom
+        ? { emoji: custom.emojiId, isCustom: true, names: [custom.name] }
+        : { emoji, isCustom: false },
+    );
+  };
+
   return (
-    <div ref={containerRef} className='h-full' onTouchStart={handleTouchStart}>
+    <div ref={containerRef} className='flex h-full flex-col' onTouchStart={handleTouchStart}>
+      <FrequentEmojiRow onSelect={handleFrequentSelect} />
       <EmojiPicker
         emojiStyle={EmojiStyle.NATIVE}
         theme={emojiPickerTheme}
@@ -51,7 +66,7 @@ const AddReactionActionView = ({ handleEmojiSelect, customEmojis }: AddReactionA
         customEmojis={customEmojis || []}
         previewConfig={{ showPreview: true }}
         autoFocusSearch={false}
-        className='!w-full !h-full !rounded-[inherit] ![--epr-picker-border-color:transparent]'
+        className='!w-full !min-h-0 !flex-1 !rounded-[inherit] ![--epr-picker-border-color:transparent]'
       />
     </div>
   );

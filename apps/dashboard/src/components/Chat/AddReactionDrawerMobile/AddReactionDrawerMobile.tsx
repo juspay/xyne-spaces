@@ -3,6 +3,7 @@ import EmojiPicker, { EmojiStyle } from 'emoji-picker-react';
 import { Drawer } from 'vaul';
 import { parseReactionsMd } from '@xyne/shared';
 import { MobileAddReactionDrawerProps } from './types';
+import { FrequentEmojiRow } from '../FrequentEmojiRow/FrequentEmojiRow';
 
 const AddReactionDrawerMobile = ({
   messageId,
@@ -26,6 +27,14 @@ const AddReactionDrawerMobile = ({
         searchInput.blur();
       }
     }
+  };
+
+  // Shared by the picker grid and the Frequently Used row.
+  const applyReaction = (emojiName: string): void => {
+    const hasReacted = !!user && (reactionsData[emojiName] || []).includes(user.id);
+
+    toggleReaction({ messageId, emoji: emojiName, hasReacted });
+    setEmojiPickerOpen(false);
   };
 
   return (
@@ -63,9 +72,10 @@ const AddReactionDrawerMobile = ({
           <Drawer.Handle className='mt-2 !h-2 !w-[100px] !bg-gray-300 !dark:bg-gray-600' />
           <div
             ref={emojiPickerContainerRef}
-            className='h-full'
+            className='flex h-full flex-col'
             onTouchStart={handleEmojiPickerTouchStart}
           >
+            <FrequentEmojiRow onSelect={applyReaction} />
             <EmojiPicker
               emojiStyle={EmojiStyle.NATIVE}
               style={{
@@ -73,22 +83,16 @@ const AddReactionDrawerMobile = ({
                 ['--epr-emoji-gap' as string]: '4px',
               }}
               onEmojiClick={emoji => {
-                const emojiName = emoji.isCustom
-                  ? `custom:${emoji.emoji}:${emoji.names[0] || 'custom'}`
-                  : emoji.emoji;
-                const hasReacted = !!user && (reactionsData[emojiName] || []).includes(user.id);
-
-                toggleReaction({
-                  messageId,
-                  emoji: emojiName,
-                  hasReacted,
-                });
-                setEmojiPickerOpen(false);
+                applyReaction(
+                  emoji.isCustom
+                    ? `custom:${emoji.emoji}:${emoji.names[0] || 'custom'}`
+                    : emoji.emoji,
+                );
               }}
               customEmojis={customEmojis || []}
               previewConfig={{ showPreview: true }}
               autoFocusSearch={false}
-              className='!w-full !h-full !rounded-[inherit] ![--epr-picker-border-color:transparent]'
+              className='!w-full !min-h-0 !flex-1 !rounded-[inherit] ![--epr-picker-border-color:transparent]'
             />
           </div>
         </Drawer.Content>

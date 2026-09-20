@@ -6,6 +6,7 @@ import { useZero } from './useZero';
 import { useChannel } from './useChannels';
 import { globalClickTracker } from '../services/Analytics/globalClickTracker';
 import { channelTrackingMetadata } from '../services/Analytics/channelTracking';
+import { recordEmojiUse } from '../utils/frequentEmojis';
 
 export interface UseReactionsReturn {
   toggleReaction: (params: { messageId: string; emoji: string; hasReacted: boolean }) => void;
@@ -41,8 +42,13 @@ export const useReactions = (): UseReactionsReturn => {
           }),
         );
 
-        // Every picker and drawer funnels through here, so this is the one
-        // place a reaction is counted.
+        // Every picker and drawer funnels through here, so this is the one place a
+        // reaction is counted — including for the Frequently Used row. Removals are not
+        // counted: un-reacting is a correction, not a preference.
+        if (!hasReacted) {
+          recordEmojiUse(emoji);
+        }
+
         globalClickTracker.trackManualEvent(
           'MESSAGE',
           hasReacted ? 'REMOVE_REACTION' : 'ADD_REACTION',

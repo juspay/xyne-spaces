@@ -32,6 +32,7 @@ import { Tooltip } from '../../ui/Tooltip/Tooltip';
 import { ShortcutHint } from '../../ui/ShortcutHint';
 import Button from '../../ui/Button';
 import { useCustomEmojis } from '../../../hooks/useCustomEmojis';
+import { FrequentEmojiRow } from '../FrequentEmojiRow/FrequentEmojiRow';
 import { useTheme } from '../../../hooks/useTheme';
 import { ConversationSubscription } from '../ConversationSubscription';
 import {
@@ -179,6 +180,15 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
     onEmojiPickerOpenChange?.(open);
   };
 
+  // One path for every emoji this toolbar can apply — the picker grid and the
+  // Frequently Used row — so the toggle semantics and close behaviour cannot drift.
+  const applyReaction = (emojiName: string): void => {
+    const hasReacted = !!user && (reactionsData[emojiName] || []).includes(user.id);
+
+    toggleReaction({ messageId, emoji: emojiName, hasReacted });
+    handleEmojiOpenChange(false);
+  };
+
   const handleDropdownOpenChange = (open: boolean): void => {
     setIsDropdownOpen(open);
     onDropdownOpenChange?.(open);
@@ -231,32 +241,28 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
           avoidCollisions={true}
           className='z-[60] bg-popover rounded-lg shadow-md p-0'
         >
-          <EmojiPicker
-            style={{
-              width: '320px',
-              ['--epr-emoji-size' as string]: '22px',
-              ['--epr-emoji-gap' as string]: '4px',
-            }}
-            theme={emojiPickerTheme}
-            emojiStyle={EmojiStyle.NATIVE}
-            onEmojiClick={emoji => {
-              // For custom emojis, store the emojiId with a prefix
-              const emojiName = emoji.isCustom
-                ? `custom:${emoji.emoji}:${emoji.names[0] || 'custom'}`
-                : emoji.emoji;
-              // Check if the user has already reacted with this emoji
-              const hasReacted = !!user && (reactionsData[emojiName] || []).includes(user.id);
-
-              toggleReaction({
-                messageId,
-                emoji: emojiName,
-                hasReacted,
-              });
-              handleEmojiOpenChange(false);
-            }}
-            customEmojis={customEmojis || []}
-            previewConfig={{ showPreview: true }}
-          />
+          <div className='w-[320px]'>
+            <FrequentEmojiRow onSelect={applyReaction} />
+            <EmojiPicker
+              style={{
+                width: '320px',
+                ['--epr-emoji-size' as string]: '22px',
+                ['--epr-emoji-gap' as string]: '4px',
+              }}
+              theme={emojiPickerTheme}
+              emojiStyle={EmojiStyle.NATIVE}
+              onEmojiClick={emoji => {
+                // For custom emojis, store the emojiId with a prefix
+                applyReaction(
+                  emoji.isCustom
+                    ? `custom:${emoji.emoji}:${emoji.names[0] || 'custom'}`
+                    : emoji.emoji,
+                );
+              }}
+              customEmojis={customEmojis || []}
+              previewConfig={{ showPreview: true }}
+            />
+          </div>
         </Popover>
       )}
 
