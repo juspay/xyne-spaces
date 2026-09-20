@@ -107,3 +107,17 @@ describe("eval provider selection", () => {
     vi.doUnmock("../provider-resolution.js");
   });
 });
+
+describe("eval reply labelling", () => {
+  it("names the provider so parallel answers in one thread are distinguishable", async () => {
+    const { evalReplyPrefix } = await import("../eval-run.js");
+    expect(evalReplyPrefix({ provider: "codex", model: "gpt-5.6-sol", useOverride: true }))
+      .toBe("**Provider: codex** · `gpt-5.6-sol`");
+  });
+
+  it("marks the arm that runs the agent as configured", async () => {
+    const { evalReplyPrefix } = await import("../eval-run.js");
+    expect(evalReplyPrefix({ provider: "claude", useOverride: false }))
+      .toBe("**Provider: claude** · agent default");
+  });
+});

@@ -91,6 +91,15 @@ export async function resolveEvalTargets(input: {
   return wanted.slice(0, EVAL_MAX_PROVIDERS);
 }
 
+export function evalReplyPrefix(target: EvalTarget): string {
+  const qualifier = target.model
+    ? ` · \`${target.model}\``
+    : target.useOverride
+      ? ""
+      : " · agent default";
+  return `**Provider: ${target.provider}**${qualifier}`;
+}
+
 export async function dispatchEvalRun(args: {
   target: EvalTarget;
   task: string;
@@ -153,6 +162,7 @@ export async function dispatchEvalRun(args: {
       agentOrgId: args.orgId,
       agentSlug: args.agentSlug,
       responseMode: "conversation",
+      replyPrefix: evalReplyPrefix(args.target),
       appToken: args.spacesAppToken,
       spacesAppId: args.spacesAppId,
       spacesAppUserId: args.spacesAppUserId,

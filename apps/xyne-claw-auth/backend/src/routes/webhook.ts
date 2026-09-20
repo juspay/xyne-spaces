@@ -3825,6 +3825,10 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     }, llmCitations)
     : payload.result ?? "";
 
+  if (ctx?.replyPrefix && resultWithCitations.trim()) {
+    resultWithCitations = `${ctx.replyPrefix}\n\n${resultWithCitations}`;
+  }
+
   // Memory footer: count successful memory-search tool invocations for the run
   // and append a single italic line. Tool-based recall replaced prefetch-and-inject
   // — the agent now searches on demand, so the footer reflects calls, not facts.

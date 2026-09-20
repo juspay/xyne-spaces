@@ -49,6 +49,10 @@ export interface SessionContext {
   /** Display name shown in Spaces transient progress surfaces. */
   agentName?: string | undefined;
   responseMode: "conversation" | "approval";
+  /** Prepended to this run's delivered reply. Set when several runs answer the
+   *  same thread and the reader needs to tell them apart — /eval fans one
+   *  question out across providers, so each answer says which one produced it. */
+  replyPrefix?: string;
   /**
    * Suppress the thread reply for this run entirely.
    *
