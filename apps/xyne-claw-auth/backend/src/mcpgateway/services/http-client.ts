@@ -1,5 +1,6 @@
 import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
+import { isAllowlistedPrivateOrigin } from "../../lib/safe-fetch.js";
 
 export type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 
@@ -237,6 +238,10 @@ async function validatePublicDestination(rawUrl: string, method: HttpMethod): Pr
     /^127\./.test(host);
 
   if (!isProd && isLoopbackHost) {
+    return;
+  }
+
+  if (isAllowlistedPrivateOrigin(rawUrl)) {
     return;
   }
 

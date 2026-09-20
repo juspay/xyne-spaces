@@ -156,6 +156,7 @@ async function assertDestination(
   const parsed = parseSafeUrl(rawUrl, opts);
   const host = stripBrackets(parsed.hostname);
   const allowLoopback = loopbackAllowed(opts);
+  const allowPrivate = opts.allowPrivate === true || isAllowlistedPrivateOrigin(parsed.toString());
 
   const literal = isIP(host);
   if (literal !== 0) return { url: parsed, addresses: [{ address: host, family: literal }] };
@@ -164,7 +165,7 @@ async function assertDestination(
   // pinning exists to defeat rebinding on an untrusted name, so skip both the
   // resolve and the pin here — it would only add a lookup (and, for in-cluster
   // or *.local service names, a slow one) to a destination we already trust.
-  if (opts.allowPrivate) return { url: parsed, addresses: [] };
+  if (allowPrivate) return { url: parsed, addresses: [] };
 
   let resolved: ResolvedAddress[];
   try {
@@ -176,7 +177,7 @@ async function assertDestination(
     throw new SafeFetchError(`Could not resolve hostname: ${host}`, "dns", rawUrl);
   }
   for (const entry of resolved) {
-    if (opts.allowPrivate) continue;
+    if (allowPrivate) continue;
     if (allowLoopback && isLoopbackAddress(entry.address)) continue;
     if (isBlockedIpAddress(entry.address)) {
       throw new SafeFetchError(`Blocked destination address: ${entry.address}`, "blocked-address", rawUrl);
@@ -342,6 +343,25 @@ export function configOrigins(): string[] {
   ]
     .map(toOrigin)
     .filter((origin): origin is string => origin !== null);
+}
+
+export function privateOrigins(): string[] {
+  return (process.env["OUTBOUND_PRIVATE_ORIGIN_ALLOWLIST"] ?? "")
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0)
+    .map(toOrigin)
+    .filter((origin): origin is string => origin !== null);
+}
+
+/**
+ * Exact-origin match against operator-allowlisted private destinations, for
+ * in-cluster services a connector is legitimately configured to reach. Trusted
+ * by configuration, like a config origin — never by anything a caller supplies.
+ */
+export function isAllowlistedPrivateOrigin(rawUrl: string): boolean {
+  const candidate = toOrigin(rawUrl);
+  return candidate !== null && privateOrigins().includes(candidate);
 }
 
 /** Exact-origin match against the configured internal services. */
