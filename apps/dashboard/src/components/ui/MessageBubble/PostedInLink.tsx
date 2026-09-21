@@ -1,11 +1,14 @@
-import React from 'react';
-import { ChannelScopeType, ChannelVisibility, isDeskChannelType } from '@xyne/shared';
+import React, { useRef } from 'react';
+import { ChannelScopeType, ChannelType, ChannelVisibility, isDeskChannelType } from '@xyne/shared';
+import { buildSdlcPath, parseSdlcNavTarget } from '@xyne/shared/sdlc';
 import { Hash, Lock, MessageSquare, CornerUpRight } from 'lucide-react';
 import { useChannel, useGetChannelUserStatus } from '../../../hooks/useChannels';
 import { queries } from '../../../zero/queries';
 import { Tooltip } from '../Tooltip';
 import { useQuery } from '../../../hooks/useQuery';
 import { useNavigate } from '../../../hooks/useWorkspaceNavigate';
+import { apiInstance } from '../../../services/clients/apiClient';
+import { logger, Event } from '../../../utils/logger';
 
 interface PostedInLinkProps {
   originalChannelId: string;
@@ -26,6 +29,8 @@ export const PostedInLink: React.FC<PostedInLinkProps> = ({
   originalMessageId,
 }) => {
   const navigate = useNavigate();
+  // handleClick awaits a round trip; without this a double-click pushes two history entries.
+  const navigatingRef = useRef(false);
   const channel = useChannel(originalChannelId);
   const participationStatus = useGetChannelUserStatus(originalChannelId);
 
@@ -76,8 +81,38 @@ export const PostedInLink: React.FC<PostedInLinkProps> = ({
   };
 
   // Handle click navigation
-  const handleClick = (): void => {
-    if (!hasAccess) return;
+  const handleClick = async (): Promise<void> => {
+    if (!hasAccess || navigatingRef.current) return;
+
+    // An SDLC hub is a channel, but it is hidden from chat and rendered under /sdlc.
+    // Which page a conversation opens on lives in sdlc_entity_links, so the server resolves it.
+    if (channel?.type === ChannelType.SDLC) {
+      navigatingRef.current = true;
+      const target = await apiInstance
+        .get<{ target: unknown }>(
+          `/sdlc/channels/${encodeURIComponent(originalChannelId)}/nav-target`,
+          { params: { conversationId: originalConversationId, messageId: originalMessageId } },
+        )
+        .then(response => parseSdlcNavTarget(response.data.target))
+        .catch((error: unknown) => {
+          // 403 for a non-member, or the request simply failed — the hub root is the fallback.
+          logger.error(Event.FRONTEND_ERROR, {
+            type: 'sdlc_nav_target_failed',
+            channelId: originalChannelId,
+            conversationId: originalConversationId,
+            message: error instanceof Error ? error.message : 'Unknown error',
+          });
+          return null;
+        })
+        .finally(() => {
+          navigatingRef.current = false;
+        });
+      // A bare ?conversation= with no owner is stripped by the hub, so fall back to the hub root.
+      void navigate(
+        target ? buildSdlcPath(target) : `/sdlc/${encodeURIComponent(originalChannelId)}`,
+      );
+      return;
+    }
 
     // EMAIL channels live in the support screen, not the chat view.
     // Navigate directly to /support/:channelId/:xyneId to avoid the
@@ -113,7 +148,7 @@ export const PostedInLink: React.FC<PostedInLinkProps> = ({
   const linkContent = (
     <button
       type='button'
-      onClick={handleClick}
+      onClick={() => void handleClick()}
       data-track-category='MESSAGE'
       data-track-name='OPEN_POSTED_IN_CHANNEL'
       disabled={!hasAccess}
