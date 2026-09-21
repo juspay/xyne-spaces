@@ -186,12 +186,6 @@ const electronAPI = {
     return () => ipcRenderer.removeListener('recording:stop-for-teardown', listener);
   },
 
-  onCallStopForTeardown: (callback: () => void) => {
-    const listener = () => callback();
-    ipcRenderer.on('call:stop-for-teardown', listener);
-    return () => ipcRenderer.removeListener('call:stop-for-teardown', listener);
-  },
-
   onRecordingResumeRequest: (callback: () => void) => {
     const listener = () => callback();
     ipcRenderer.on('recording:resume-requested', listener);

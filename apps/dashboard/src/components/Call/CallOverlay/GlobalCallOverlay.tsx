@@ -63,10 +63,10 @@ export function GlobalCallOverlay({
       }
     };
 
-    window.addEventListener('pagehide', handleBeforeUnload);
+    window.addEventListener('beforeunload', handleBeforeUnload);
 
     return (): void => {
-      window.removeEventListener('pagehide', handleBeforeUnload);
+      window.removeEventListener('beforeunload', handleBeforeUnload);
     };
   }, []);
 

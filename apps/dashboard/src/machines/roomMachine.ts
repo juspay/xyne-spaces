@@ -1700,9 +1700,6 @@ export const roomMachine = setup({
             error: () => 'Call setup was interrupted',
           }),
         },
-        DISCONNECT: {
-          target: 'disconnecting',
-        },
       },
       invoke: {
         src: 'createCallEntry',
@@ -1848,11 +1845,6 @@ export const roomMachine = setup({
           },
         ],
       },
-      on: {
-        DISCONNECT: {
-          target: 'disconnecting',
-        },
-      },
     },
     connecting: {
       entry: assign({
@@ -1886,11 +1878,6 @@ export const roomMachine = setup({
                 event.error instanceof Error ? event.error.message : 'Failed to connect',
             }),
           ],
-        },
-      },
-      on: {
-        DISCONNECT: {
-          target: 'disconnecting',
         },
       },
     },

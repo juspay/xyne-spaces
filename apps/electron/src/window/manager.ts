@@ -20,69 +20,26 @@ import { EnrollmentEvent } from '../services/logger/enrollment-events';
 import { handleCertificateError, isCertificateError } from '../services/certificate-error-handler';
 import { dashboardLoad, enrollmentSkipped, mtlsFrontendLoaded } from '../services/enrollmentMetrics';
 import { safeRecordMetric } from '../services/telemetry';
-import {
-  isCallActive,
-  isRecordingInProgress,
-  stopCallForReload,
-  stopRecordingForReload,
-} from '../services/recording-controller';
+import { isRecordingInProgress, stopRecordingForReload } from '../services/recording-controller';
 import type { Counter } from '@opentelemetry/api';
 
-type ReloadSubject = 'recording' | 'call' | 'both';
-
-const RELOAD_COPY: Record<
-  ReloadSubject,
-  { title: string; message: string; detail: string; keep: string; proceed: string }
-> = {
-  recording: {
-    title: 'Recording in progress',
-    message: 'Reloading will stop your recording.',
-    detail: 'Everything captured so far is saved to your recordings.',
-    keep: 'Keep recording',
-    proceed: 'Stop and reload',
-  },
-  call: {
-    title: 'Call in progress',
-    message: 'Reloading will end your call.',
-    detail:
-      'Reloading drops you from this call. Everyone else stays on, and you can rejoin from the channel.',
-    keep: 'Stay on call',
-    proceed: 'Leave and reload',
-  },
-  both: {
-    title: 'Call and recording in progress',
-    message: 'Reloading will end your call and stop your recording.',
-    detail: 'Everything captured so far is saved to your recordings.',
-    keep: 'Keep both',
-    proceed: 'End and reload',
-  },
-};
-
-async function confirmReloadWhileBusy(window: BrowserWindow): Promise<boolean> {
-  const recording = isRecordingInProgress();
-  const call = isCallActive();
-  if (!recording && !call) return true;
-
-  const subject: ReloadSubject = recording && call ? 'both' : recording ? 'recording' : 'call';
-  const copy = RELOAD_COPY[subject];
+async function confirmReloadWhileRecording(window: BrowserWindow): Promise<boolean> {
+  if (!isRecordingInProgress()) return true;
 
   const { response } = await dialog.showMessageBox(window, {
     type: 'warning',
-    buttons: [copy.keep, copy.proceed],
+    buttons: ['Keep recording', 'Reload anyway'],
     defaultId: 0,
     cancelId: 0,
     noLink: true,
-    title: copy.title,
-    message: copy.message,
-    detail: copy.detail,
+    title: 'Recording in progress',
+    message: 'Reloading will stop your recording.',
+    detail: 'Everything captured so far is saved to your recordings.',
   });
 
   if (response !== 1) return false;
 
-  const pending: Promise<void>[] = [];
-  if (recording) pending.push(stopRecordingForReload());
-  if (call) pending.push(stopCallForReload());
-  await Promise.all(pending);
+  await stopRecordingForReload();
   return true;
 }
 
@@ -441,7 +398,7 @@ export async function createMainWindow(options?: { inactive?: boolean }): Promis
       try {
         if (mainWindow) {
           isReloading = true;
-          if (!(await confirmReloadWhileBusy(mainWindow))) return;
+          if (!(await confirmReloadWhileRecording(mainWindow))) return;
           // Clear cache before reloading for a true hard refresh
           await mainWindow.webContents.session.clearCache();
           await loadApp(mainWindow);
@@ -462,7 +419,7 @@ export async function createMainWindow(options?: { inactive?: boolean }): Promis
       try {
         if (mainWindow) {
           isReloading = true;
-          if (!(await confirmReloadWhileBusy(mainWindow))) return;
+          if (!(await confirmReloadWhileRecording(mainWindow))) return;
           await loadUrl(mainWindow, mainWindow.webContents.getURL());
         }
       } catch (error) {

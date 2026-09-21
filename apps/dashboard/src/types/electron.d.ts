@@ -119,7 +119,6 @@ export interface ElectronAPI {
   onWindowModeChanged: (callback: (data: { compact: boolean }) => void) => () => void;
   onRecordingSystemSuspend: (callback: () => void) => () => void;
   onRecordingStopForTeardown?: (callback: () => void) => () => void;
-  onCallStopForTeardown?: (callback: () => void) => () => void;
   onRecordingResumeRequest?: (callback: () => void) => () => void;
   onRecordingPauseRequest?: (callback: () => void) => () => void;
   onLog: (callback: (message: { data?: unknown[] }) => void) => () => void;

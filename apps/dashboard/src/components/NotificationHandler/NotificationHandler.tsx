@@ -30,7 +30,7 @@ import { getRecordingDefaultLayout } from '../../hooks/useRecordingDefaultLayout
 import { sendSosAlertEvent } from '../../stores/sosAlertStore';
 import { globalClickTracker } from '../../services/Analytics/globalClickTracker';
 import { setExternalMeeting, setMicBusy } from '../../stores/externalMeetingStore';
-import { confirmInterrupt } from '../InterruptGuard/InterruptGuard';
+import { confirmRecordingInterrupt } from '../Recording/RecordingInterruptGuard/RecordingInterruptGuard';
 
 // Singleton: a fresh Audio element PER NOTIFICATION leaked native listener
 // registrations and media elements — heap analysis showed "JS event
@@ -155,7 +155,7 @@ export const NotificationHandler: React.FC = () => {
       const currentWorkspaceId = activeWorkspaceIdRef.current;
 
       if (targetWorkspaceId && targetWorkspaceId !== currentWorkspaceId) {
-        if (!(await confirmInterrupt('workspaceSwitch'))) return;
+        if (!(await confirmRecordingInterrupt('workspaceSwitch'))) return;
         try {
           await axios.post(
             `${API_BASE_URL}/auth/switch-workspace`,
@@ -732,13 +732,6 @@ export const NotificationHandler: React.FC = () => {
   useEffect(() => {
     if (!isElectron || !window.electronAPI?.onRecordingStopForTeardown) return;
     return window.electronAPI.onRecordingStopForTeardown(stopRecordingForNavigation);
-  }, [isElectron]);
-
-  useEffect(() => {
-    if (!isElectron || !window.electronAPI?.onCallStopForTeardown) return;
-    return window.electronAPI.onCallStopForTeardown(() => {
-      roomActor.send({ type: 'DISCONNECT' });
-    });
   }, [isElectron]);
 
   // Same states useCallJoinOrInitiate treats as "in a call"; `initiating` lands

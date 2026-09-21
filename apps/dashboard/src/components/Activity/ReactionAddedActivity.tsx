@@ -1,12 +1,7 @@
 import { ReactElement } from 'react';
-import { parseSlashCommandArtifactMessage } from '@xyne/shared';
 import type { ActivityWithRelated } from '../../types/activity';
 import { MessageBubble } from '../ui/MessageBubble/MessageBubble';
 import { ActivityItemCard } from './ActivityItemCard';
-import {
-  SlashCommandArtifactActivityBody,
-  SlashCommandArtifactBadge,
-} from './SlashCommandArtifactActivity';
 import { RenderMessageWithHTML } from '../Chat/RenderMessageWithHTML/RenderMessageWithHTML';
 import { getFlowJsonPreviewText } from '../../utils/flowPreview';
 import { useUser } from '../../hooks/useUsers';
@@ -30,7 +25,6 @@ export const ReactionAddedActivity = ({
   if (!reaction || !message || !reaction.userId || !message.conversation) return null;
 
   const reactionPreview = getReactionMessagePreview(message.content);
-  const artifact = parseSlashCommandArtifactMessage(message.content);
   const actionText = activity.actorAction === 'added' ? 'reacted' : 'removed reaction';
   const isThreadReply = message.conversation?.initialMessageId !== message.messageId;
   const targetPath = `${baseRoute}/${message.conversation?.channelId}${isThreadReply ? `/${message.conversation?.conversationId}` : ''}#origin=${message.conversation?.conversationId}${isThreadReply ? `&messageId=${message.messageId}` : ''}`;
@@ -43,9 +37,6 @@ export const ReactionAddedActivity = ({
       channelId={message.conversation?.channelId}
       badgeIcon={renderEmoji(reaction.emojiName)}
       badgeColorClass='bg-muted'
-      {...(artifact && {
-        titlePrefix: <SlashCommandArtifactBadge badge={artifact.definition.badge} />,
-      })}
       description={
         <>
           <span className='text-muted-foreground text-sm'>{actionText}</span>
@@ -58,9 +49,7 @@ export const ReactionAddedActivity = ({
       useActivityCutoff
       isExpanded={isExpanded}
     >
-      {artifact ? (
-        <SlashCommandArtifactActivityBody messageId={message.messageId} body={artifact.body} />
-      ) : isExpanded ? (
+      {isExpanded ? (
         <MessageBubble
           message={message}
           showAvatar={false}
