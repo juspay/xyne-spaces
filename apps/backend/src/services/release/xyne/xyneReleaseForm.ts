@@ -1,4 +1,4 @@
-import { FormFieldType } from "@xyne/shared";
+import { FormFieldType, MIGRATION_TAGS } from "@xyne/shared";
 // Import from the specific file rather than the `../core` barrel — the barrel
 // re-exports releaseService which transitively pulls in the repository
 // container, and that container's circular self-import crashes at module-init
@@ -41,6 +41,21 @@ export class XyneFormSchemaProvider extends FormSchemaProvider<XyneChangeType> {
             type: FormFieldType.STRING,
             required: true,
             description: "The SQL query to execute",
+        },
+        {
+            name: "tags",
+            label: "Tags",
+            type: FormFieldType.MULTI_SELECT,
+            required: false,
+            description: "Deployment-risk tags set by the release manager",
+            options: MIGRATION_TAGS,
+        },
+        {
+            name: "note",
+            label: "Deployment note",
+            type: FormFieldType.STRING,
+            required: false,
+            description: "Free-text guidance for whoever runs this migration",
         },
     ] as const;
 
