@@ -46,6 +46,7 @@ import EmojiPicker, { EmojiStyle, Theme as EmojiTheme } from 'emoji-picker-react
 import { BotBubble } from '../../Chat/BotBubble';
 import { LinkPreview } from '../../Chat/LinkPreview/LinkPreview';
 import { InternalMessagePreview } from '../../Chat/LinkPreview/InternalMessagePreview';
+import { CallLinkPreview } from '../../Chat/LinkPreview/CallLinkPreview';
 import { getEmojiFontSizeClass } from '../../../utils/emojiUtils';
 import { RenderMessageWithHTML } from '../../Chat/RenderMessageWithHTML/RenderMessageWithHTML';
 import { createMarkdownComponents } from '../../../utils/markdownComponents';
@@ -1634,6 +1635,11 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                         type: 'internal_message',
                         ...previewResult.data,
                       }}
+                      onClose={() => setShowLinkPreview(false)}
+                    />
+                  ) : previewResult.type === 'call_preview' ? (
+                    <CallLinkPreview
+                      metadata={previewResult.data}
                       onClose={() => setShowLinkPreview(false)}
                     />
                   ) : (

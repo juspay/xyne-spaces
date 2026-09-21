@@ -61,6 +61,7 @@ const LINK_PREVIEW_TEXT_HEIGHT = 55; // text-only, no OG image (~44px base)
 const LINK_PREVIEW_IMAGE_HEIGHT_DESKTOP = 240; // OG image at ~380px width (~238px base)
 const LINK_PREVIEW_IMAGE_HEIGHT_MOBILE = 170; // OG image at ~260px mobile width (~158px base)
 const MESSAGE_PREVIEW_HEIGHT = 120; // internal linked-message card
+const CALL_PREVIEW_HEIGHT = 40; // single-row call card
 const THREAD_INDICATOR_HEIGHT = 36; // "N replies" bar: mt-2(8) + pt-2(8) + AvatarGroup sm(20)
 const REACTIONS_HEIGHT = 28; // height of one row of h-6 pills (24px) + ~4px gap
 /** Approx width of one reaction pill: emoji(22) + optional count(12) + px-2×2(16) + gap(4) */
@@ -465,15 +466,18 @@ export function estimateMessageHeight(
   const hasCallSummaryCanvas = !!metadata?.['detailedSummaryCanvasUrl'];
   if (hasCanvasLink || hasCallSummaryCanvas) height += 260;
 
-  // ── Link preview (both internal and external are stored in link_preview_md) ──
-  // Three distinct heights:
+  // ── Link preview (internal, call and external all live in link_preview_md) ──
+  // Four distinct heights:
   //   • Internal message preview (:::message_preview) → MESSAGE_PREVIEW_HEIGHT
+  //   • Call preview (:::call_preview) → CALL_PREVIEW_HEIGHT
   //   • External with OG image (\nimage: present in block) → platform-aware image height
   //   • External text-only → LINK_PREVIEW_TEXT_HEIGHT
   const linkPreviewMd = (message as unknown as { link_preview_md?: string | null }).link_preview_md;
   if (linkPreviewMd) {
     if (linkPreviewMd.includes(':::message_preview')) {
       height += MESSAGE_PREVIEW_HEIGHT;
+    } else if (linkPreviewMd.includes(':::call_preview')) {
+      height += CALL_PREVIEW_HEIGHT;
     } else if (/\nimage:\s*\S/.test(linkPreviewMd)) {
       height += isMobile ? LINK_PREVIEW_IMAGE_HEIGHT_MOBILE : LINK_PREVIEW_IMAGE_HEIGHT_DESKTOP;
     } else {

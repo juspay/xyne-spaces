@@ -388,6 +388,73 @@ export function parseInternalUrl(url: string): InternalLinkInfo | null {
 }
 
 // ---------------------------------------------------------------------------
+// Xyne call link detection
+// ---------------------------------------------------------------------------
+
+export interface CallLinkInfo {
+  url: string;
+  externalId: string;
+}
+
+const ABSOLUTE_URL_REGEX = /https?:\/\/[^\s<>"')\]]+/gi;
+
+/** Hosts (with port, when non-default) whose bare `/call/<id>` path is ours. */
+function callLinkHosts(): Set<string> {
+  const hosts = new Set<string>([...INTERNAL_HOSTS, ...INTERNAL_HOSTS_WITH_PORT]);
+
+  // The invite host is deployment config, often not an app host.
+  try {
+    const invite = new URL(config.externalCallInviteBaseUrl);
+    hosts.add(invite.hostname);
+    hosts.add(invite.host);
+  } catch {
+    // Misconfigured — the /external/call/ shape below still matches.
+  }
+
+  return hosts;
+}
+
+/**
+ * Xyne call URL -> external id, or null. Mirrors the dashboard's parseCallInviteLink:
+ * `/external/call/<id>` is ours on any host, bare `/call/<id>` needs a host match.
+ */
+export function parseCallUrl(url: string): CallLinkInfo | null {
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null;
+
+    const segments = parsed.pathname.split('/').filter(Boolean);
+
+    if (segments[0] === 'external' && segments[1] === 'call' && segments[2]) {
+      return { url, externalId: decodeURIComponent(segments[2]) };
+    }
+
+    const isLoopback = parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1';
+    const isOurHost = isLoopback || callLinkHosts().has(parsed.hostname) || callLinkHosts().has(parsed.host);
+    if (isOurHost && segments[0] === 'call' && segments[1]) {
+      return { url, externalId: decodeURIComponent(segments[1]) };
+    }
+
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/** First Xyne call link in (possibly HTML) message content. */
+export function extractCallLink(text: string): CallLinkInfo | null {
+  if (!text) return null;
+
+  const clean = stripAndDecodeHtml(text);
+  for (const raw of clean.match(ABSOLUTE_URL_REGEX) ?? []) {
+    const info = parseCallUrl(trimSurroundingPunctuation(raw));
+    if (info) return info;
+  }
+
+  return null;
+}
+
+// ---------------------------------------------------------------------------
 
 /**
  * Validate using native URL parser when possible.
