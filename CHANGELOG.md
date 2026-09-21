@@ -1,3 +1,10 @@
+## [1.355.1](https://github.com/juspay/xyne-spaces/compare/v1.355.0...v1.355.1) (2026-09-21)
+
+
+### Bug Fixes
+
+* remediate Payatu SCR vulnerable dependencies ([#1540](https://github.com/juspay/xyne-spaces/issues/1540)) ([b611f55](https://github.com/juspay/xyne-spaces/commit/b611f5588f2fb68aaae09d7c07cda8c17564a147))
+
 ## [1.355.0](https://github.com/juspay/xyne-spaces/compare/v1.354.1...v1.355.0) (2026-09-21)
 
 
