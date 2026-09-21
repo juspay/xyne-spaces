@@ -1,3 +1,10 @@
+## [1.351.2](https://github.com/juspay/xyne-spaces/compare/v1.351.1...v1.351.2) (2026-09-21)
+
+
+### Bug Fixes
+
+* tighten and align ticket detail header ([#2100](https://github.com/juspay/xyne-spaces/issues/2100)) ([6eee112](https://github.com/juspay/xyne-spaces/commit/6eee112d3c850e9e0ee18300ad183da7ad592832))
+
 ## [1.351.1](https://github.com/juspay/xyne-spaces/compare/v1.351.0...v1.351.1) (2026-09-21)
 
 
