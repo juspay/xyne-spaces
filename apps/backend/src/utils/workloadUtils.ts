@@ -32,22 +32,12 @@ async function getProjectAssignmentRoleIds(projectId: string): Promise<string[]>
  * All roleIds the user currently holds, unioned across both binding tables:
  *   - user_role_mappings (direct)
  *   - user_group_mappings.roleId (via group)
+ *
+ * Single-user form of {@link resolveUserRoleIds}, which owns the rule — keeping
+ * a second copy here is how the two would drift apart.
  */
 async function getUserRoleIds(userId: string): Promise<string[]> {
-  const [directMappings, groupMappings] = await Promise.all([
-    db.userRoleMapping.findMany({
-      where: { userId, role: { isActive: true } },
-      select: { roleId: true },
-    }),
-    db.userGroupMapping.findMany({
-      where: { userId, roleId: { not: null }, role: { isActive: true } },
-      select: { roleId: true },
-    }),
-  ]);
-  const roleIds = new Set<string>();
-  for (const m of directMappings) roleIds.add(m.roleId);
-  for (const m of groupMappings) if (m.roleId) roleIds.add(m.roleId);
-  return Array.from(roleIds);
+  return (await resolveUserRoleIds([userId])).get(userId) ?? [];
 }
 
 /**
@@ -152,22 +142,10 @@ export async function syncWorkloadForUsers(
     return;
   }
 
-  const projectAssignmentRoleIds = await getProjectAssignmentRoleIds(board.projectId);
-
-  const ticketIdsByRoleId = new Map<string, Set<string>>();
-  if (projectAssignmentRoleIds.length > 0) {
-    const roleAssignments = await db.ticketAssignment.findMany({
-      where: { roleId: { in: projectAssignmentRoleIds } },
-      select: { ticketId: true, roleId: true },
-    });
-    for (const assignment of roleAssignments) {
-      if (!assignment.roleId) continue;
-      if (!ticketIdsByRoleId.has(assignment.roleId)) ticketIdsByRoleId.set(assignment.roleId, new Set());
-      ticketIdsByRoleId.get(assignment.roleId)!.add(assignment.ticketId);
-    }
-  }
-
-  const [roleIdsByUserId, tickets, existingRows] = await Promise.all([
+  // Nothing here depends on anything else here, so it all goes in one round
+  // trip. Only the role-assignment read below needs a result from it.
+  const [projectAssignmentRoleIds, roleIdsByUserId, tickets, existingRows] = await Promise.all([
+    getProjectAssignmentRoleIds(board.projectId),
     resolveUserRoleIds(uniqueUserIds, userRoleIdsByUserId),
     // Counted in memory so the OR between "assigned to me" and "matches my role"
     // dedupes per ticket exactly like the previous per-user COUNT queries did.
@@ -182,8 +160,22 @@ export async function syncWorkloadForUsers(
     ),
   ]);
 
+  const ticketIdsByRoleId = new Map<string, Set<string>>();
+  if (projectAssignmentRoleIds.length > 0) {
+    const roleAssignments = await db.ticketAssignment.findMany({
+      where: { roleId: { in: projectAssignmentRoleIds } },
+      select: { ticketId: true, roleId: true },
+    });
+    for (const assignment of roleAssignments) {
+      if (!assignment.roleId) continue;
+      if (!ticketIdsByRoleId.has(assignment.roleId)) ticketIdsByRoleId.set(assignment.roleId, new Set());
+      ticketIdsByRoleId.get(assignment.roleId)!.add(assignment.ticketId);
+    }
+  }
+
   const existingByUserId = new Map(existingRows.map(row => [row.userId, row]));
 
+  const changed: Array<{ userId: string; activeTasks: number; totalTasks: number }> = [];
   for (const userId of uniqueUserIds) {
     const userRoleIds = roleIdsByUserId.get(userId) ?? [];
     const workloadRoleIds = projectAssignmentRoleIds.filter(id => userRoleIds.includes(id));
@@ -206,33 +198,42 @@ export async function syncWorkloadForUsers(
     if (existing && existing.activeTasks === activeTasks && existing.totalTasks === totalTasks) {
       continue;
     }
+    changed.push({ userId, activeTasks, totalTasks });
+  }
 
-    // Writes the row of the assignee rather than the caller, so it runs above the caller's own scope.
-    await withWorkspaceScope(() =>
-      repositories.userWorkloadMapping.upsert({
-        where: {
-          userId_userGroupId_boardId: {
+  // One row per user, each on its own composite key, so the writes are
+  // independent and go out together rather than one round trip at a time.
+  // Every withWorkspaceScope call opens its own AsyncLocalStorage scope, so
+  // running them concurrently does not let one scope leak into another.
+  await Promise.all(
+    changed.map(({ userId, activeTasks, totalTasks }) =>
+      // Writes the row of the assignee rather than the caller, so it runs above the caller's own scope.
+      withWorkspaceScope(() =>
+        repositories.userWorkloadMapping.upsert({
+          where: {
+            userId_userGroupId_boardId: {
+              userId,
+              userGroupId,
+              boardId,
+            },
+          },
+          create: {
             userId,
             userGroupId,
             boardId,
+            workspaceId: board.workspaceId,
+            activeTasks,
+            totalTasks,
+            createdBy,
           },
-        },
-        create: {
-          userId,
-          userGroupId,
-          boardId,
-          workspaceId: board.workspaceId,
-          activeTasks,
-          totalTasks,
-          createdBy,
-        },
-        update: {
-          activeTasks,
-          totalTasks,
-        },
-      }),
-    );
-  }
+          update: {
+            activeTasks,
+            totalTasks,
+          },
+        }),
+      ),
+    ),
+  );
 }
 
 /**
