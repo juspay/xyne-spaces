@@ -851,11 +851,15 @@ const CallHistoryScreen = (): ReactElement => {
   // call.labels stores Tag ids (no FK), not display text — resolve them once so
   // the dropdown shows real names. Every id is passed in, including generated
   // ones, since resolving is also what reveals the method.
-  const { resolveLabel: resolveCallLabel, resolveMethod: resolveCallLabelMethod } =
-    useResolvedRecordingLabels(availableCallLabels);
+  const {
+    resolveLabel: resolveCallLabel,
+    resolveMethod: resolveCallLabelMethod,
+    isResolved: isCallLabelResolved,
+  } = useResolvedRecordingLabels(availableCallLabels);
   const isManualCallLabel = useCallback(
-    (label: string): boolean => resolveCallLabelMethod(label) !== TagMethod.LLM,
-    [resolveCallLabelMethod],
+    (label: string): boolean =>
+      isCallLabelResolved(label) && resolveCallLabelMethod(label) !== TagMethod.LLM,
+    [isCallLabelResolved, resolveCallLabelMethod],
   );
   const manualCallLabels = useMemo(
     () =>
