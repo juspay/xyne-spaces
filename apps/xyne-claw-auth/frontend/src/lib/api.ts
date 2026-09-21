@@ -3110,10 +3110,24 @@ export interface ChatReply {
 // switcher. Any chat participant may call this — the backend reads the agent's
 // admin-set key and never returns it. Empty models ⇒ hide the picker.
 // `defaultModel` is the agent's configured model, used to preselect the dropdown.
+export interface EvalAgentModel {
+  provider: string;
+  model: string | null;
+  isDefault: boolean;
+}
+
+/** Providers (with the model each would use) this agent can really run on for the caller. */
+export async function listEvalAgentModels(slug: string): Promise<EvalAgentModel[]> {
+  const data = await request<{ success: boolean; models?: EvalAgentModel[] }>(
+    `${AUTH_API_URL}/api/v1/evals/agent-models/${encodeURIComponent(slug)}`,
+  );
+  return data.models ?? [];
+}
+
 export async function listChatLitellmModels(
   slug: string,
   userId: string,
-): Promise<{ models: Array<{ id: string; name: string }>; defaultModel: string | null }> {
+): Promise<{ models: Array<{ id: string; name: string }>; defaultModel: string | null; pinProvider: string | null }> {
   const res = await fetch(
     `${AUTH_API_URL}/api/v1/agent-chat/${encodeURIComponent(slug)}/litellm-models`,
     { credentials: "include", headers: { "x-user-id": userId } },
@@ -3123,8 +3137,9 @@ export async function listChatLitellmModels(
     success: boolean;
     data?: Array<{ id: string; name: string }>;
     defaultModel?: string | null;
+    pinProvider?: string | null;
   };
-  return { models: data.data ?? [], defaultModel: data.defaultModel ?? null };
+  return { models: data.data ?? [], defaultModel: data.defaultModel ?? null, pinProvider: data.pinProvider ?? null };
 }
 
 export async function sendChatMessage(

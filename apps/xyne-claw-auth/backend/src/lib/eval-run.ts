@@ -166,6 +166,8 @@ export async function resolveEvalTargets(input: {
   requested?: string[];
   judges?: string[];
   opts?: string[];
+  /** Skip credentialed providers the agent has no config for — a pin to one is dropped at dispatch. */
+  onlyConfigured?: boolean;
 }): Promise<EvalTarget[]> {
   const resolution = await resolveProvidersForDispatch({
     targetUserId: input.userId,
@@ -192,6 +194,7 @@ export async function resolveEvalTargets(input: {
 
   for (const provider of AGENT_CRED_PROVIDERS) {
     if (claimed.has(provider)) continue;
+    if (input.onlyConfigured && provider !== "spaces" && !resolution.providerConfigs?.[provider]) continue;
     claimed.add(provider);
     const model = (resolution.providerConfigs?.[provider] as { model?: string } | undefined)?.model;
     targets.push({ provider, useOverride: true, ...(model ? { model } : {}) });

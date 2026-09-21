@@ -70,6 +70,8 @@ import {
   startBackgroundGeneration,
   listEvalGenModels,
   listChatLitellmModels,
+  listEvalAgentModels,
+  type EvalAgentModel,
   type EvalGenModels,
   getGenerationJob,
   cancelGenerationJob,
@@ -409,6 +411,7 @@ export function EvalsPageV3({ userId }: { userId: string }) {
   // while the Run dialog is open. Keyed by agent slug. Distinct from
   // genModels.litellm, which is the platform catalog run on the platform key.
   const [litellmByAgent, setLitellmByAgent] = useState<Record<string, { id: string; name: string }[]>>({});
+  const [agentModelsBySlug, setAgentModelsBySlug] = useState<Record<string, EvalAgentModel[]>>({});
   // Right-docked, resizable side panels for an eval turn: the "Debug this
   // response" drawer and the citation source panel. Mutually exclusive (one dock
   // slot) — opening one closes the other, mirroring chat. Widths persist under
@@ -1031,6 +1034,11 @@ export function EvalsPageV3({ userId }: { userId: string }) {
         const m = genModels?.providers.find((x) => x.provider === p)?.model;
         return { genProvider: p, ...(m ? { genModel: m } : {}) };
       }
+      if (genChoice.startsWith("agent:")) {
+        const [, provider, ...rest] = genChoice.split(":");
+        const model = rest.join(":");
+        return provider ? { genProvider: provider, ...(model ? { genModel: model } : {}) } : {};
+      }
       if (genChoice.startsWith("spaces:")) return { genProvider: "spaces", genModel: genChoice.slice(7) };
       if (genChoice.startsWith("litellm:")) return { genProvider: "litellm", genModel: genChoice.slice(8) };
       return {};
@@ -1131,11 +1139,20 @@ export function EvalsPageV3({ userId }: { userId: string }) {
     for (const slug of slugs) {
       if (litellmByAgent[slug]) continue;
       listChatLitellmModels(slug, userId)
-        .then((r) => { if (!cancelled) setLitellmByAgent((prev) => ({ ...prev, [slug]: r.models })); })
+        .then((r) => {
+          if (cancelled) return;
+          setLitellmByAgent((prev) => ({ ...prev, [slug]: r.pinProvider === "litellm" ? r.models : [] }));
+        })
         .catch(() => { if (!cancelled) setLitellmByAgent((prev) => ({ ...prev, [slug]: [] })); });
     }
+    for (const slug of slugs) {
+      if (agentModelsBySlug[slug]) continue;
+      listEvalAgentModels(slug)
+        .then((models) => { if (!cancelled) setAgentModelsBySlug((prev) => ({ ...prev, [slug]: models })); })
+        .catch(() => { if (!cancelled) setAgentModelsBySlug((prev) => ({ ...prev, [slug]: [] })); });
+    }
     return () => { cancelled = true; };
-  }, [pendingRun, runAgents, userId, litellmByAgent]);
+  }, [pendingRun, runAgents, userId, litellmByAgent, agentModelsBySlug]);
 
   // ── Semantic judge ──
   /** Open the judge dialog for a folder (whole run) or one conversation. Lazily
@@ -2213,7 +2230,19 @@ export function EvalsPageV3({ userId }: { userId: string }) {
                           value={toSel(row.genChoice)}
                           onValueChange={(v) => setRow(idx, { genChoice: fromSel(v) })}
                           options={[
-                            { value: DEFAULT_OPT, label: "Default — agent settings" },
+                            {
+                              value: DEFAULT_OPT,
+                              label: (() => {
+                                const d = (agentModelsBySlug[row.slug] ?? []).find((mdl) => mdl.isDefault);
+                                return d
+                                  ? `Default — ${d.provider}${d.model ? ` · ${d.model}` : ""} (not pinned, may fall back)`
+                                  : "Default — agent settings";
+                              })(),
+                            },
+                            ...(agentModelsBySlug[row.slug] ?? []).map((mdl) => ({
+                              value: `agent:${mdl.provider}:${mdl.model ?? ""}`,
+                              label: `${mdl.provider}${mdl.model ? ` · ${mdl.model}` : ""} (this agent${mdl.isDefault ? ", its default" : ""} — pinned)`,
+                            })),
                             ...(genModels?.providers ?? []).map((p) => ({
                               value: `prov:${p.provider}`,
                               label: `${p.provider}${p.model ? ` · ${p.model}` : ""} (your provider)`,
