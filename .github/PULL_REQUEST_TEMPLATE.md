@@ -12,6 +12,14 @@
 <!-- What changed, and why. Link the ticket (XYNE-xxxx) or issue. -->
 
 
+## RCA — required for Bugfix PRs
+<!-- Delete this whole section only if this is NOT a bugfix. CI checks that Root Cause
+     has real content (at least 100 characters). -->
+
+### Root Cause
+<!-- The exact defect, and why it happened. Which commit/PR/behaviour introduced it,
+     if known. Not what the fix does — what actually broke. -->
+
 ## Areas Touched
 
 - [ ] `apps/backend` (API / worker)
