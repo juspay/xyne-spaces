@@ -1,3 +1,10 @@
+## [1.348.0-release-20260921.2](https://github.com/juspay/xyne-spaces/compare/v1.348.0-release-20260921.1...v1.348.0-release-20260921.2) (2026-09-21)
+
+
+### Features
+
+* workflow conversation flow ([#2086](https://github.com/juspay/xyne-spaces/issues/2086)) ([#2107](https://github.com/juspay/xyne-spaces/issues/2107)) ([f0ac7c8](https://github.com/juspay/xyne-spaces/commit/f0ac7c8e9f10c719b028414c4c13478f4bf2d28f))
+
 ## [1.348.0-release-20260921.1](https://github.com/juspay/xyne-spaces/compare/v1.347.0...v1.348.0-release-20260921.1) (2026-09-21)
 
 
