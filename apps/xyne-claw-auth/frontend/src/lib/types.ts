@@ -61,6 +61,16 @@ export interface Gateway {
   readonly updatedAt: string;
 }
 
+/** A service registered with the MCP Gateway registry (UI list view). */
+export interface GatewayServiceRow {
+  readonly serviceName: string;
+  readonly backendId: string;
+  readonly backendUrl: string;
+  readonly xAuthHeaderName: string | null;
+  readonly tokenEndpointUrl: string | null;
+  readonly toolCount: number;
+}
+
 export interface GatewayIdentity {
   readonly id: string;
   readonly gatewayId: string;
