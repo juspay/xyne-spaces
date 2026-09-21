@@ -4356,6 +4356,33 @@ export const mutators = defineMutators({
           id,
           ...updateData,
         });
+        if (description !== undefined) {
+          const existingDescription = await tx.run(
+            zql.ticket_descriptions.where('ticketId', id).one(),
+          );
+          // Same precedence as resolveTicketDescription, assembled from the two reads
+          // already in hand rather than re-querying the ticket with its relation.
+          const currentDescription = existingDescription?.description ?? currentTicket.description ?? '';
+
+          if (description !== currentDescription) {
+            if (existingDescription) {
+              await tx.mutate.ticket_descriptions.update({
+                ticketId: id,
+                description,
+                updatedAt,
+              });
+            } else {
+              await tx.mutate.ticket_descriptions.insert({
+                ticketId: id,
+                workspaceId: currentTicket.workspaceId,
+                channelId: currentTicket.channelId,
+                description,
+                createdAt: updatedAt,
+                updatedAt,
+              });
+            }
+          }
+        }
 
         await updateTicketMdFromZero(tx, zql, id);
       },
