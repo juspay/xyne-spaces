@@ -70,6 +70,9 @@ export function valuesToFilters(values: ReadonlyArray<SavedConfigValueRow>): Tic
       case 'ticketTypes':
         result.ticketTypes = [...(result.ticketTypes ?? []), fieldValue];
         break;
+      case 'merchantIds':
+        result.merchantIds = [...(result.merchantIds ?? []), fieldValue];
+        break;
       case 'sourceChannels':
         result.sourceChannels = [...(result.sourceChannels ?? []), fieldValue];
         break;
@@ -145,6 +148,7 @@ export function deskFiltersToValues(filters: TicketFilters): DeskValueRow[] {
   filters.createdBy?.forEach(v => addTicket('createdBy', v));
   filters.stages?.forEach(v => addTicket('stages', v));
   filters.ticketTypes?.forEach(v => addTicket('ticketTypes', v));
+  filters.merchantIds?.forEach(v => addTicket('merchantIds', v));
   filters.sourceChannels?.forEach(v => addTicket('sourceChannels', v));
   filters.tags?.forEach(v => addTicket('tags', v));
   if (filters.dueDateStart !== undefined) addTicket('dueDateStart', String(filters.dueDateStart));

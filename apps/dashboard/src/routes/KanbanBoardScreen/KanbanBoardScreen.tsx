@@ -247,6 +247,7 @@ const WORKSPACE_VIEW_ARRAY_KEYS = [
   'tags',
   'stages',
   'ticketTypes',
+  'merchantIds',
   'sourceChannels',
 ] as const satisfies (keyof TicketFilters)[];
 
@@ -360,6 +361,8 @@ const isLayoutView = (value: string | null): value is LayoutView =>
 
 const isStorableLayoutView = (value: string | null): value is StorableLayoutView =>
   value === 'kanban' || value === 'table' || value === 'calendar';
+
+type TicketExportAction = 'download-csv' | 'download-json' | 'copy-csv' | 'copy-json';
 type TicketGraphMapping = QueryResultType<typeof queries.subTicketMappingsForTickets>[number];
 type TicketGraphSubTicket = NonNullable<TicketGraphMapping['subTicket']>;
 type FlowRunActivity = QueryResultType<typeof queries.ticketActivitiesForTickets>[number];
@@ -618,9 +621,11 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
         const key =
           criterion === 'assignee'
             ? (ticket.assignedTo ?? 'Unassigned')
-            : criterion === 'status'
-              ? ticket.statusV2
-              : (ticket.priority ?? 'No Priority');
+            : criterion === 'createdBy'
+              ? ticket.createdBy || 'Unknown'
+              : criterion === 'status'
+                ? ticket.statusV2
+                : (ticket.priority ?? 'No Priority');
 
         (acc[key] ??= []).push(ticket);
         return acc;
@@ -729,6 +734,8 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   );
   // Only calendar and flow still need the legacy full fetch.
   const shouldUseLegacyTicketsQuery = layoutView === 'calendar' || layoutView === 'flow';
+  const [pendingExport, setPendingExport] = useState<TicketExportAction | null>(null);
+  const legacyTicketsEnabled = shouldUseLegacyTicketsQuery || pendingExport !== null;
   const isTableLayout = layoutView === 'table';
   const [selectedViewId, setSelectedViewId] = useState<string | null>(null);
   // Which surface opened the create form; rides on CREATE_TICKET_SUCCEEDED.
@@ -1486,6 +1493,11 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
         icon: <User className='h-4 w-4' />,
       },
       {
+        value: 'createdBy' as const,
+        label: 'Group by: Created By',
+        icon: <User className='h-4 w-4' />,
+      },
+      {
         value: 'status' as const,
         label: 'Group by: Status Category',
         icon: <CircleCheckBig className='h-4 w-4' />,
@@ -1780,7 +1792,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     queries.ticketsQueryV2(ticketsQueryParams),
     {
       enabled:
-        shouldUseLegacyTicketsQuery &&
+        legacyTicketsEnabled &&
         ((viewMode === 'board' && !!boardId) ||
           (viewMode === 'project' && !!effectiveProjectId) ||
           // A workspace view has no channel or project to key on; `workspaceViewReady`
@@ -2195,7 +2207,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   }, [filters.boards, deferredFilters.boards]);
 
   const filteredTickets = useMemo(() => {
-    if (!shouldUseLegacyTicketsQuery || !allProjectTickets) {
+    if (!legacyTicketsEnabled || !allProjectTickets) {
       return undefined;
     }
 
@@ -2233,7 +2245,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
 
     return tickets;
   }, [
-    shouldUseLegacyTicketsQuery,
+    legacyTicketsEnabled,
     allProjectTickets,
     deferredFilters,
     tagsByTicketId,
@@ -2701,13 +2713,14 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     [tableBoards],
   );
   // CSV/JSON export of the current table view. Ungated — it only serializes the
-  // already-visible, filtered tickets, so it needs no TICKET-REPORTS permission.
+  // same filtered, ACL-scoped rows the table itself lists, so it needs no
+  // TICKET-REPORTS permission.
   const channelNamesById = useMemo(
     () => new Map(allChannels.map(c => [c.id, c.name])),
     [allChannels],
   );
-  const handleTicketExport = useCallback(
-    (action: 'download-csv' | 'download-json' | 'copy-csv' | 'copy-json'): void => {
+  const runTicketExport = useCallback(
+    (action: TicketExportAction): void => {
       // Built lazily on click — serializing every filtered row is wasted work
       // until the user actually triggers an export.
       const payload = buildTicketExportPayload(filteredTickets ?? [], {
@@ -2747,6 +2760,29 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
       boardNamesById,
       tableVisibleColumns,
     ],
+  );
+  // The table layout no longer loads the full ticket list, so an export has to
+  // turn the legacy query on and wait for it. Board names ride a second query
+  // off those rows, so hold until they resolve or the Board column exports blank.
+  const exportRowsReady =
+    legacyTicketsEnabled &&
+    ticketsDetails.type === 'complete' &&
+    (tableBoardIds.length === 0 || tableBoards !== undefined);
+  useEffect(() => {
+    if (!pendingExport || !exportRowsReady) return;
+    setPendingExport(null);
+    runTicketExport(pendingExport);
+  }, [pendingExport, exportRowsReady, runTicketExport]);
+  const handleTicketExport = useCallback(
+    (action: TicketExportAction): void => {
+      if (exportRowsReady) {
+        runTicketExport(action);
+        return;
+      }
+      setPendingExport(action);
+      toast.info('Preparing export…');
+    },
+    [exportRowsReady, runTicketExport],
   );
   const flowRunExportRows = useMemo(() => {
     if (!isFlowBoard || !flowModel) return [];
@@ -3870,6 +3906,11 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
           entityId = normalizedId;
           displayName = userNamesById.get(normalizedId) || displayName;
         }
+      } else if (groupBy === 'createdBy' && groupName !== 'Unknown') {
+        const normalizedId = groupName.replace(/^user:/, '');
+        entityType = 'user';
+        entityId = normalizedId;
+        displayName = userNamesById.get(normalizedId) || displayName;
       } else if (groupBy === 'priority' && groupName !== 'No Priority') {
         priority = groupName as TicketPriority;
         displayName = groupName.charAt(0).toUpperCase() + groupName.slice(1).toLowerCase();
@@ -3906,9 +3947,10 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
 
     const isAssigneeGrouping =
       groupBy === 'assignee' ||
+      groupBy === 'createdBy' ||
       (isFormFieldGroup(groupBy) && groupBy.fieldType === FormFieldType.USER);
     if (isAssigneeGrouping) {
-      const isUnassigned = (key: string): boolean => key === 'Unassigned';
+      const isUnassigned = (key: string): boolean => key === 'Unassigned' || key === 'Unknown';
       mapped.sort((a, b) => {
         if (isUnassigned(a.key) !== isUnassigned(b.key)) return isUnassigned(a.key) ? 1 : -1;
         return a.displayName.localeCompare(b.displayName, undefined, { sensitivity: 'base' });
@@ -5056,6 +5098,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                     pageSize={groupBy === 'none' ? 50 : 20}
                     totalCount={group.count}
                     internalScroll={groupBy !== 'none'}
+                    onTicketOpen={ticket => handleTicketClick({} as React.MouseEvent, ticket)}
                     scrollElement={tableScrollElement}
                     visibleColumns={tableVisibleColumns}
                     isComfortView={isComfortView}
@@ -5223,7 +5266,9 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                                     status: col.status,
                                     stageName: col.stageName,
                                     assignee:
-                                      group.entityType === 'user' && group.entityId
+                                      groupBy !== 'createdBy' &&
+                                      group.entityType === 'user' &&
+                                      group.entityId
                                         ? { type: 'assigneeTo', value: group.entityId }
                                         : group.entityType === 'group' && group.entityId
                                           ? { type: 'userGroup', value: group.entityId }

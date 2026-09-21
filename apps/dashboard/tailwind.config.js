@@ -183,6 +183,11 @@ export default {
           '0%, 100%': { opacity: '1' },
           '50%': { opacity: '0.45' },
         },
+        // Meet-style "someone is talking" equaliser bars on tiles and the People panel.
+        'call-audio-bar': {
+          '0%, 100%': { transform: 'scaleY(0.35)' },
+          '50%': { transform: 'scaleY(1)' },
+        },
         'call-card-in': {
           from: { opacity: '0', transform: 'scale(0.96) translateY(6px)' },
           to: { opacity: '1', transform: 'scale(1) translateY(0)' },
@@ -301,6 +306,7 @@ export default {
         'call-radar': 'call-radar 2s cubic-bezier(0, 0, 0.2, 1) infinite',
         'live-ping': 'live-ping 2s cubic-bezier(0, 0, 0.2, 1) infinite',
         'live-pulse': 'live-pulse 2s ease-in-out infinite',
+        'call-audio-bar': 'call-audio-bar 0.9s ease-in-out infinite',
         'call-card-in': 'call-card-in 180ms cubic-bezier(0.2, 0.8, 0.2, 1)',
         'call-overlay-in': 'call-overlay-in 150ms linear',
         'accordion-down': 'accordion-down 0.2s ease-out',

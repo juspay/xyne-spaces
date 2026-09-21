@@ -2050,6 +2050,24 @@ export const sdlcEntityLinkTable = table("sdlc_entity_links")
   })
   .primaryKey("id");
 
+export const sdlcItemCommentTable = table("sdlc_item_comments")
+  .columns({
+    id: string(),
+    workspaceId: string(),
+    entityType: string(),
+    entityId: string(),
+    body: string(),
+    anchorQuote: string().optional(),
+    anchorSelector: string().optional(),
+    resolved: boolean(),
+    resolvedBy: string().optional(),
+    resolvedAt: number().optional(),
+    createdBy: string(),
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey("id");
+
 export const sdlcArtifactTable = table("sdlc_artifacts")
   .columns({
     workspaceId: string(),
@@ -5294,6 +5312,7 @@ export const schema = createSchema(
       vespaInsertionLogsTable,
       repoTable,
       sdlcEntityLinkTable,
+      sdlcItemCommentTable,
       sdlcArtifactTable,
       sdlcFolderTable,
       sdlcTrackTable,
@@ -5606,6 +5625,7 @@ export type LinkAccess = Row<typeof schema.tables.link_access>;
 export type VespaInsertionLogs = Row<typeof schema.tables.vespa_insertion_logs>;
 export type Repo = Row<typeof schema.tables.repos>;
 export type SdlcEntityLink = Row<typeof schema.tables.sdlc_entity_links>;
+export type SdlcItemComment = Row<typeof schema.tables.sdlc_item_comments>;
 export type SdlcArtifact = Row<typeof schema.tables.sdlc_artifacts>;
 export type SdlcFolder = Row<typeof schema.tables.sdlc_folders>;
 export type SdlcTrack = Row<typeof schema.tables.sdlc_tracks>;

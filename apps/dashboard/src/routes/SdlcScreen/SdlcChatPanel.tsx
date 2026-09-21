@@ -185,13 +185,19 @@ export function SdlcChatPanel({
           </div>
         ) : (
           <ConversationBadgeContext.Provider value={renderConversationBadge ?? null}>
-            <ConversationPanelV2
-              channelId={channelId}
-              previousChannelId={null}
-              showHeader={false}
-              conversationIds={conversationIds}
-              onOpenThread={conversationId => onSelectConversation(conversationId)}
-            />
+            {/* The panel's own height, minus the header — the same box the thread
+                branch gets. ConversationPanelV2's root is h-full, so without a
+                flex child to measure against it takes the whole aside and pushes
+                itself down past the header, scrolling the panel by 52px. */}
+            <div className='flex min-h-0 flex-1 flex-col'>
+              <ConversationPanelV2
+                channelId={channelId}
+                previousChannelId={null}
+                showHeader={false}
+                conversationIds={conversationIds}
+                onOpenThread={conversationId => onSelectConversation(conversationId)}
+              />
+            </div>
           </ConversationBadgeContext.Provider>
         )}
       </aside>

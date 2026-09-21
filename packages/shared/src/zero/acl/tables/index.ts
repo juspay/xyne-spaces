@@ -47,6 +47,7 @@ export { ReposACL } from './repos-acl';
 export { SdlcEntityLinksACL } from './sdlc-entity-links-acl';
 export { SdlcArtifactsACL } from './sdlc-artifacts-acl';
 export * from './sdlc-folders-acl';
+export * from './sdlc-item-comments-acl';
 export { SdlcTracksACL } from './sdlc-tracks-acl';
 export { RecurringCallParticipantsACL } from './recurring-call-participants-acl';
 export { RolesACL } from './roles-acl';

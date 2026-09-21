@@ -77,6 +77,7 @@ const kanbanTicketPageFiltersSchema = z.object({
   created: z.boolean().optional(),
   stages: z.array(z.string()).optional(),
   ticketTypes: z.array(z.string()).optional(),
+  merchantIds: z.array(z.string()).optional(),
   sourceChannels: z.array(z.string()).optional(),
 });
 
@@ -99,7 +100,7 @@ const kanbanTicketsPageArgsSchema = z.object({
     .nullable(),
   groupBy: z
     .union([
-      z.enum(['none', 'assignee', 'status', 'priority']),
+      z.enum(['none', 'assignee', 'createdBy', 'status', 'priority']),
       z.object({
         type: z.literal('formField'),
         fieldId: z.string(),
@@ -183,6 +184,10 @@ const toActualFieldValueQueryValue = (
 ): string | number | boolean =>
   typeof value === 'string' ? JSON.stringify(value) : value;
 
+const toDeskActualFieldValueQueryValue = (
+  value: string | number | boolean,
+): string | number | boolean => value;
+
 const supportDynamicFieldFiltersSchema = z
   .array(
     z.object({
@@ -207,7 +212,7 @@ const applySupportDynamicFieldFilters = (
         fevQuery = fevQuery.where((helpers: any) =>
           helpers.or(
             ...values.map((value: string | number | boolean) =>
-              helpers.cmp('actualFieldValue', '=', toActualFieldValueQueryValue(value)),
+              helpers.cmp('actualFieldValue', '=', toDeskActualFieldValueQueryValue(value)),
             ),
           ),
         );
@@ -427,6 +432,10 @@ const applyKanbanTicketPageConditions = (
     query = query.where('ticketType', 'IN', filters.ticketTypes);
   }
 
+  if (filters?.merchantIds?.length) {
+    query = query.where('merchantId', 'IN', filters.merchantIds);
+  }
+
   if (filters?.sourceChannels?.length) {
     query = query.where('channelId', 'IN', filters.sourceChannels);
   }
@@ -481,6 +490,8 @@ const applyKanbanTicketPageConditions = (
       groupKey === 'Unassigned'
         ? query.where('assignedTo', 'IS', null)
         : query.where('assignedTo', groupKey);
+  } else if (groupBy === 'createdBy' && groupKey) {
+    query = query.where('createdBy', groupKey);
   } else if (groupBy === 'status' && groupKey) {
     query = query.where('statusV2', groupKey as TicketStatusV2);
   } else if (groupBy === 'priority' && groupKey) {
@@ -4210,6 +4221,25 @@ export const queries = defineQueries({
       zql.sdlc_folders.whereExists('sdlcEntityLinks', link =>
         link.where('channelId', channelId).where('relationType', SDLC_TRACK_FLAT_RELATION),
       ),
+  ),
+  /** Every comment left on one hub entity, oldest first.
+   *  Scoped the way SdlcItemCommentsACL scopes writes: the commented entity
+   *  must sit in a hub the caller belongs to. Without this an entity id is
+   *  enough to read another workspace's comments. */
+  getSdlcItemComments: defineQuery(
+    z.object({ entityType: z.string(), entityId: z.string() }),
+    ({ ctx, args: { entityType, entityId } }) =>
+      zql.sdlc_item_comments
+        .where('entityType', entityType)
+        .where('entityId', entityId)
+        .whereExists('sdlcEntityLinks', link =>
+          link.whereExists('channel', channel =>
+            channel.whereExists('participants', participant =>
+              participant.where('userId', ctx.userID),
+            ),
+          ),
+        )
+        .orderBy('createdAt', 'asc'),
   ),
   getSdlcHubLinks: defineQuery(
     z.object({ channelId: z.string() }),
