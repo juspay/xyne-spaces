@@ -308,6 +308,33 @@ function ChannelSection({ channel, userId, orgId }: { channel: ChannelMeta; user
   );
 }
 
+/** A URL someone has to paste into a provider's console. Always visible, not
+ *  only during the connect dialog — Meta's webhook config is re-edited long
+ *  after the account is live. */
+function CopyableUrl({ url, label, hint }: { url: string; label: string; hint?: string }) {
+  const { show } = useSnackbar();
+  return (
+    <div className="grid gap-1.5">
+      <p className="text-[11px] uppercase tracking-wide text-xyne-fg-muted">{label}</p>
+      <div className="flex items-center gap-2 rounded-md border border-xyne-border-subtle p-2">
+        <code className="min-w-0 flex-1 truncate text-[12px] text-xyne-fg-primary">{url}</code>
+        <Button
+          variant="ghost"
+          size="sm"
+          leadingIcon={<CopyIcon size={13} />}
+          onClick={() => {
+            void navigator.clipboard.writeText(url);
+            show({ variant: "success", title: "Copied" });
+          }}
+        >
+          Copy
+        </Button>
+      </div>
+      {hint && <p className="text-[11px] text-xyne-fg-muted">{hint}</p>}
+    </div>
+  );
+}
+
 function AccountRow({
   channel,
   account,
@@ -434,6 +461,15 @@ function PolicyEditor({
   return (
     <div className="rounded-lg border border-xyne-border-subtle p-3">
       <h3 className="text-[12px] font-semibold text-xyne-fg-primary">Who can talk to this {channel.noun}</h3>
+      {account.webhookUrl && (
+        <div className="mt-3">
+          <CopyableUrl
+            url={account.webhookUrl}
+            label="Callback URL"
+            hint="Meta app → WhatsApp → Configuration → Edit webhook, with the verify token you set at connect time. Over a tunnel, swap the host and keep the path exactly as shown."
+          />
+        </div>
+      )}
       <div className="mt-3 grid gap-3 md:grid-cols-2 md:items-start">
         <SelectField label="Default agent" options={agentOptions} value={agentSlug ?? undefined} onValueChange={setAgentSlug} />
         {account.capabilities.reactions && (
@@ -665,24 +701,11 @@ function TokenLoginDialog({
             In your Meta app open WhatsApp, Configuration, and edit the webhook. Paste this callback URL and the verify
             token you just entered, then subscribe to the <code>messages</code> field.
           </p>
-          <div className="flex items-center gap-2 rounded-md border border-xyne-border-subtle p-2">
-            <code className="min-w-0 flex-1 truncate text-[12px] text-xyne-fg-primary">{webhookUrl}</code>
-            <Button
-              variant="ghost"
-              size="sm"
-              leadingIcon={<CopyIcon size={13} />}
-              onClick={() => {
-                void navigator.clipboard.writeText(webhookUrl);
-                show({ variant: "success", title: "Copied" });
-              }}
-            >
-              Copy
-            </Button>
-          </div>
-          <p className="text-[11px] text-xyne-fg-muted">
-            Meta needs to reach this over public HTTPS. On a laptop, put a tunnel in front and swap the host for the
-            tunnel's, keeping the path exactly as shown.
-          </p>
+          <CopyableUrl
+            url={webhookUrl}
+            label="Callback URL"
+            hint="Meta needs to reach this over public HTTPS. On a laptop, put a tunnel in front and swap the host for the tunnel's, keeping the path exactly as shown. You can find this again under Settings."
+          />
         </div>
       ) : (
         <div className="grid gap-3">
