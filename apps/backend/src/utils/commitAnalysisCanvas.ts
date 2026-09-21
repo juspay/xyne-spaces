@@ -212,6 +212,9 @@ function appScopes(
 
 const countLabel = (n: number, word: string): string => `${n} ${word}${n === 1 ? '' : 's'}`;
 
+// PR-less commits are keyed by commit so they can't poison the claimed set.
+const resultKey = (result: PrResult): number | string => result.pullRequest?.id ?? result.commitId;
+
 function uniquePrResults(results: PrResult[]): PrResult[] {
   const seen = new Map<number, PrResult>();
   for (const result of results) {
@@ -488,9 +491,9 @@ async function buildMainAnalysisBlocks(
     const unclaimedResults = (repoSlices?.length ? repoSlices : [{ results, affectedApplications }]).flatMap(slice => {
       const apps = slice.affectedApplications ?? affectedApplications;
       const claimed = new Set(
-        apps.flatMap(app => resultsForApplication(slice.results, app.matchedFiles).map(r => r.pullRequest?.id)),
+        apps.flatMap(app => resultsForApplication(slice.results, app.matchedFiles).map(resultKey)),
       );
-      return uniquePrResults(slice.results.filter(result => !claimed.has(result.pullRequest?.id)));
+      return uniquePrResults(slice.results.filter(result => !claimed.has(resultKey(result))));
     });
     const unclaimed: ServiceSection = {
       heading: '📦 Other changes',

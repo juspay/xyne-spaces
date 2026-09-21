@@ -388,7 +388,6 @@ export class CommitAnalysisController {
     params: CommitAnalysisParams,
   ): Promise<{
     results: CommitAnalysisResult[];
-    viewResults: CommitAnalysisResult[];
     affectedApplications: AffectedApplicationInfo[];
     migrationLinks: Array<{ filePath: string; diffUrl: string; applicationId?: string }>;
     envChanges: Array<{ fileName: string; filePath: string; newValue: string; commitId?: string; applicationId?: string }>;
@@ -420,8 +419,6 @@ export class CommitAnalysisController {
 
     const results = await commitAnalysisService.analyzeCommits(analysisRequest);
 
-    const viewResults = results;
-
     let affectedApplications: AffectedApplicationInfo[] = [];
     let migrationLinks: Array<{ filePath: string; diffUrl: string; applicationId?: string }> = [];
     let envChanges: Array<{ fileName: string; filePath: string; newValue: string; commitId?: string; applicationId?: string }> = [];
@@ -452,7 +449,7 @@ export class CommitAnalysisController {
       }
     }
 
-    return { results, viewResults, affectedApplications, migrationLinks, envChanges, appMatchSummary };
+    return { results, affectedApplications, migrationLinks, envChanges, appMatchSummary };
   }
 
   async analyzeCommits(params: CommitAnalysisParams): Promise<CommitAnalysisResponse> {
@@ -479,7 +476,6 @@ export class CommitAnalysisController {
       loadingMessageId = await postLoadingMessage(conversationId, userId);
 
       const results: CommitAnalysisResult[] = [];
-      const viewResults: CommitAnalysisResult[] = [];
       const affectedApplications: AffectedApplicationInfo[] = [];
       const migrationLinks: Array<{ filePath: string; diffUrl: string; applicationId?: string }> = [];
       const envChanges: Array<{ fileName: string; filePath: string; newValue: string; commitId?: string; applicationId?: string }> = [];
@@ -492,7 +488,6 @@ export class CommitAnalysisController {
         try {
           const slice = await this.analyzeReleaseContext(ctx, params);
           results.push(...slice.results);
-          viewResults.push(...slice.viewResults);
           affectedApplications.push(...slice.affectedApplications);
           migrationLinks.push(...slice.migrationLinks);
           envChanges.push(...slice.envChanges);
@@ -502,7 +497,7 @@ export class CommitAnalysisController {
             repoSlug: ctx.repoSlug,
             deployedCommitId: ctx.deployedCommitId,
             newCommitId: ctx.newCommitId,
-            results: slice.viewResults,
+            results: slice.results,
             affectedApplications: slice.affectedApplications,
           });
         } catch (repoError) {
@@ -523,10 +518,10 @@ export class CommitAnalysisController {
       // One canvas per release: upsert the aggregated slices in place.
       let canvasUrl: string | undefined;
       let canvasId: string | null | undefined;
-      if (viewResults.length > 0) {
+      if (results.length > 0) {
         canvasId = await upsertCommitAnalysisCanvas({
           section: hotfixSync ? 'hotfix' : 'main',
-          results: viewResults,
+          results,
           affectedApplications,
           envChanges,
           migrationLinks,
@@ -561,9 +556,9 @@ export class CommitAnalysisController {
         );
       }
 
-      const totalCommits = viewResults.length;
-      const commitsWithPR = viewResults.filter((r) => r.pullRequest !== null).length;
-      const commitsWithTicket = viewResults.filter((r) => r.ticket !== null).length;
+      const totalCommits = results.length;
+      const commitsWithPR = results.filter((r) => r.pullRequest !== null).length;
+      const commitsWithTicket = results.filter((r) => r.ticket !== null).length;
 
       const warningLines = [
         failedRepos.length > 0
@@ -618,7 +613,7 @@ export class CommitAnalysisController {
           let content: string;
           if (canvasLink) {
             content = `Hotfix synced — release analysis canvas updated ${canvasLink}`;
-          } else if (viewResults.length === 0) {
+          } else if (results.length === 0) {
             content = 'Hotfix synced — no new commits to analyse, so the analysis canvas was left unchanged. Nothing to open.';
           } else {
             content = 'Hotfix synced — the analysis canvas could not be updated, so there is no link to open. Re-run the sync to refresh it.';
