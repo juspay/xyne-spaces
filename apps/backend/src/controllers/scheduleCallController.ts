@@ -71,7 +71,6 @@ export class ScheduleCallController {
       callType: string;
       isRecurring: boolean;
       recurringSeriesId: string | null;
-      metadata: Prisma.JsonValue | null;
       title: string | null;
       createdByUserId: string;
     };
@@ -80,21 +79,33 @@ export class ScheduleCallController {
     const { call, newChannelId } = params;
     if (!this.shouldPostScheduledCallPill(call)) return;
 
-    const metadata = call.metadata as
-      | { channelPillMessageId?: string; channelPillInThread?: boolean }
-      | null;
-
-    // A thread-scheduled call's pill lives inside its thread, which does not travel with
-    // the call's channel. Leave it where it is. Keyed on the pill's own placement flag,
-    // not on metadata.conversationId — activateScheduledCall stamps that too, so a call
-    // that went live and bounced back to SCHEDULED would otherwise look thread-scheduled.
-    if (metadata?.channelPillInThread) return;
-
     const workspaceId = await repositories.channels.getWorkspaceId(newChannelId);
     const organizer = await repositories.users.findById(call.createdByUserId);
     const organizerName = organizer?.displayName || organizer?.name || 'Someone';
 
-    const { conversationId } = await DatabaseClient.getInstance().$transaction(async (tx) => {
+    const conversationId = await DatabaseClient.getInstance().$transaction(async (tx) => {
+      // `call` is the snapshot the handler loaded before the update, and several awaits
+      // (the participant delta, the repo update, the lookups above) have run since — so
+      // its metadata can be stale by now. Re-read it here instead: a second channel edit
+      // that retired this pill in the meantime would otherwise be clobbered, leaving its
+      // new pill live in a channel the call has left with its id gone from metadata, so
+      // nothing could ever retire it. This narrows the window to the two statements
+      // below rather than closing it — SELECT ... FOR UPDATE would, but raw SQL is
+      // barred here by scripts/validate-no-raw-sql.sh.
+      const current = await tx.call.findUnique({
+        where: { id: call.id },
+        select: { metadata: true },
+      });
+      const metadata = current?.metadata as
+        | { channelPillMessageId?: string; channelPillInThread?: boolean }
+        | null;
+
+      // A thread-scheduled call's pill lives inside its thread, which does not travel with
+      // the call's channel. Leave it where it is. Keyed on the pill's own placement flag,
+      // not on metadata.conversationId — activateScheduledCall stamps that too, so a call
+      // that went live and bounced back to SCHEDULED would otherwise look thread-scheduled.
+      if (metadata?.channelPillInThread) return null;
+
       if (metadata?.channelPillMessageId) {
         await repositories.calls.retireScheduledCallPill(tx, {
           messageId: metadata.channelPillMessageId,
@@ -104,7 +115,7 @@ export class ScheduleCallController {
         });
       }
 
-      return repositories.calls.createScheduledCallPill(tx, {
+      const pill = await repositories.calls.createScheduledCallPill(tx, {
         callId: call.id,
         callExternalId: call.externalId,
         channelId: newChannelId,
@@ -112,9 +123,12 @@ export class ScheduleCallController {
         senderId: call.createdByUserId,
         senderName: organizerName,
       });
+      return pill.conversationId;
     });
 
-    await messageMetadataService.syncInitialMessageMd(conversationId);
+    if (conversationId) {
+      await messageMetadataService.syncInitialMessageMd(conversationId);
+    }
   }
 
   private sendExternalInvitationInBackground(params: {

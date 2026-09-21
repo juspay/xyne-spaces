@@ -194,10 +194,9 @@ export function ScheduledCallPill({
   const state = toPillState(call.status);
   const isActive = state === 'ACTIVE';
   const isSettled = state === 'ENDED' || state === 'CANCELLED';
-  const isJoinable = state === 'SCHEDULED' || isActive;
   // A cancelled call has nothing to join, so its action becomes Reschedule and hands
   // the viewer to the Calls screen to rebook — the design system's own `cancelled`
-  // action. Ended keeps an inert Join; there is nothing to rejoin.
+  // action.
   const isReschedule = state === 'CANCELLED';
   // Ended calls open their summary page instead, per the design system's own `ended`
   // action. Always available: the viewer can read this call row — that is what renders
@@ -283,7 +282,6 @@ export function ScheduledCallPill({
         <button
           type='button'
           onClick={isReschedule ? openInCalls : isOpenSummary ? openSummary : handleJoin}
-          disabled={!isJoinable && !isReschedule && !isOpenSummary}
           className={cn('xs-cc__btn', isActive ? 'xs-cc__btn--call' : 'xs-cc__btn--secondary')}
           data-track-category='CALLS'
           data-track-name={
