@@ -20,15 +20,25 @@ export const isLocalHarnessAvailable = (): boolean =>
 
 const protocol = isLocalhost || isTestEnv || isSandboxLocal ? 'http' : 'https';
 
+// Electron backends are injected at build time (VITE_ELECTRON_*_BACKEND_URL);
+// one bundle serves prod and sandbox, and the serving hostname still selects
+// the lane at runtime. Localhost defaults so an unconfigured build never
+// targets a third-party host.
+const electronProdBackendUrl =
+  (import.meta.env['VITE_ELECTRON_PROD_BACKEND_URL'] as string | undefined) ||
+  'http://localhost:3001';
+const electronSandboxBackendUrl =
+  (import.meta.env['VITE_ELECTRON_SANDBOX_BACKEND_URL'] as string | undefined) ||
+  electronProdBackendUrl;
 const ELECTRON_BACKEND_URL = isProd
-  ? 'https://app.spaces.xyne.juspay.net'
+  ? electronProdBackendUrl
   : isSandBox
-    ? 'https://app.spaces.sandbox.xyne.juspay.net'
+    ? electronSandboxBackendUrl
     : 'http://localhost:3001';
 const ELECTRON_BACKEND_ZERO_URL = isProd
-  ? 'https://app.spaces.xyne.juspay.net'
+  ? electronProdBackendUrl
   : isSandBox
-    ? 'https://app.spaces.sandbox.xyne.juspay.net'
+    ? electronSandboxBackendUrl
     : 'http://localhost:4848';
 const isDockerTestEnv = isTestEnv && !isSandboxLocal;
 const backendPort = isLocalhost ? ':3001' : isDockerTestEnv ? ':5173' : '';
@@ -45,11 +55,19 @@ export const API_BASE_URL =
     : `${protocol}://${hostname}${backendPort}/api`);
 
 const zeroServerPort = isLocalhost ? ':4848' : isTestEnv ? ':4848' : '';
+// Apps assets origin. Split-origin deployments (dashboard on one host, apps
+// served from a second) inject VITE_APPS_PUBLIC_BASE_URL /
+// VITE_APPS_SANDBOX_BASE_URL at build time; everything else derives from the
+// serving host so self-hosted deployments work out of the box.
+const appsPublicBaseOverride =
+  (import.meta.env['VITE_APPS_PUBLIC_BASE_URL'] as string | undefined) || '';
+const appsSandboxBaseOverride =
+  (import.meta.env['VITE_APPS_SANDBOX_BASE_URL'] as string | undefined) || '';
 export const APPS_PUBLIC_BASE_URL = isLocalhost
   ? 'http://localhost:3001/api/apps'
   : isSandBox
-    ? 'https://spaces.sandbox.xyne.juspay.net/api/apps'
-    : 'https://spaces.xyne.juspay.net/api/apps';
+    ? appsSandboxBaseOverride || `${protocol}://${hostname}/api/apps`
+    : appsPublicBaseOverride || `${protocol}://${hostname}/api/apps`;
 
 // SDLC lane: same-origin path to its own zero-cache. Everything else derives from
 // the serving host. VITE_ZERO_SERVER is deliberately not read here — it is used
