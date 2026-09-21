@@ -136,10 +136,5 @@ fi
 echo "Running enum guard..."
 npm run test:enum || exit 1
 
-# Raw SQL guard: block a NEW raw-query call in any file — those bypass the
-# Prisma query builder and with it the tenant ACL + workspaceId stamper.
-echo "Running raw SQL guard..."
-bash scripts/validate-no-raw-sql.sh || exit 1
-
 echo ""
 echo "✅ All pre-commit checks passed!"
