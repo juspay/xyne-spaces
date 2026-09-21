@@ -15,7 +15,7 @@ const router = Router();
 const CLIENT_ID = "xyne-cli";
 const DEVICE_TTL_SECONDS = 600;
 const POLL_INTERVAL_SECONDS = 3;
-const SCOPES = ["agents:read", "runs:read", "runs:write"];
+const SCOPES = ["agents:read", "runs:read", "runs:write", "agents:write", "skills:write", "subagents:write"];
 // PAT lifetime in days. Verification (lib/cli-tokens.ts) already enforces
 // expiresAt; this bounds a leaked token's usefulness. 0 = non-expiring
 // (previous behavior — reserve for vetted service users, not the default).

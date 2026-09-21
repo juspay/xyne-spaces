@@ -311,6 +311,66 @@ class ClawClient {
 		return { sessionId, conversationId };
 	}
 
+	async createAgent(input: {
+		slug: string;
+		name: string;
+		description: string;
+		systemPrompt: string;
+		modelId?: string | undefined;
+		color?: string | undefined;
+	}): Promise<Record<string, unknown>> {
+		const raw = (await this.request("POST", "/agents", {
+			auth: true,
+			body: {
+				slug: input.slug,
+				name: input.name,
+				description: input.description,
+				systemPrompt: input.systemPrompt,
+				...(input.modelId ? { modelId: input.modelId } : {}),
+				...(input.color ? { color: input.color } : {}),
+			},
+		})) as Record<string, unknown>;
+		return unwrapData(raw);
+	}
+
+	async createSubagent(input: {
+		name: string;
+		description: string;
+		systemPrompt: string;
+		paramName?: string | undefined;
+		paramDescription?: string | undefined;
+	}): Promise<Record<string, unknown>> {
+		const raw = (await this.request("POST", "/subagents", {
+			auth: true,
+			body: {
+				name: input.name,
+				description: input.description,
+				systemPrompt: input.systemPrompt,
+				...(input.paramName ? { paramName: input.paramName } : {}),
+				...(input.paramDescription ? { paramDescription: input.paramDescription } : {}),
+			},
+		})) as Record<string, unknown>;
+		return unwrapData(raw);
+	}
+
+	async createSkill(input: {
+		slug: string;
+		content: string;
+		name?: string | undefined;
+		description?: string | undefined;
+	}): Promise<Record<string, unknown>> {
+		const raw = (await this.request("POST", "/skills", {
+			auth: true,
+			body: {
+				slug: input.slug,
+				content: input.content,
+				...(input.name ? { name: input.name } : {}),
+				...(input.description ? { description: input.description } : {}),
+			},
+		})) as Record<string, unknown>;
+		return unwrapData(raw);
+	}
+
 	async getRun(sessionId: string): Promise<ClawRun> {
 		return (await this.getRunWithDetail(sessionId)).run;
 	}
@@ -338,6 +398,20 @@ class ClawClient {
 }
 
 // ── Shared helpers ──────────────────────────────────────────────────────────
+
+function unwrapData(raw: Record<string, unknown>): Record<string, unknown> {
+	const data = raw?.["data"];
+	return data && typeof data === "object" && !Array.isArray(data) ? (data as Record<string, unknown>) : (raw ?? {});
+}
+
+function slugify(value: string): string {
+	return value
+		.trim()
+		.toLowerCase()
+		.replace(/[^a-z0-9]+/g, "-")
+		.replace(/^-+|-+$/g, "")
+		.slice(0, 80);
+}
 
 function sleep(ms: number): Promise<void> {
 	return new Promise((resolve) => setTimeout(resolve, ms));
@@ -576,6 +650,57 @@ const tools: Tool[] = [
 		},
 	},
 	{
+		name: "claw_create_agent",
+		description:
+			"Create a new personal Xyne Claw agent owned by the logged-in user. Write a real system prompt — role, procedure, which tools to use when, output format and limits — not a one-line summary. Requires claw_login first.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				name: { type: "string", description: "Human-readable agent title, e.g. 'Release Notes Writer'." },
+				description: { type: "string", description: "One line describing what the agent is for." },
+				system_prompt: { type: "string", description: "The agent's full operating instructions." },
+				slug: { type: "string", description: "Optional kebab-case identifier. Derived from name when omitted. Must be unique." },
+				model_id: { type: "string", description: "Optional model id to pin, e.g. 'claude-sonnet-5'." },
+				color: { type: "string", description: "Optional hex accent colour, e.g. '#6366f1'." },
+			},
+			required: ["name", "description", "system_prompt"],
+			additionalProperties: false,
+		},
+	},
+	{
+		name: "claw_create_subagent",
+		description:
+			"Create a new Xyne Claw subagent — a narrow specialist a parent agent delegates a single question to. It becomes selectable as a tool on any agent in the organization. Requires claw_login first.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				name: { type: "string", description: "Subagent identifier the parent agent calls, e.g. 'changelog'. Lowercase, no spaces. Must be unique in the org." },
+				description: { type: "string", description: "One line telling a parent agent WHEN to delegate to this subagent." },
+				system_prompt: { type: "string", description: "The subagent's full operating instructions." },
+				param_name: { type: "string", description: "Optional name of the single parameter it answers, e.g. 'question'." },
+				param_description: { type: "string", description: "Optional description of that parameter." },
+			},
+			required: ["name", "description", "system_prompt"],
+			additionalProperties: false,
+		},
+	},
+	{
+		name: "claw_create_skill",
+		description:
+			"Create a new personal Xyne Claw skill — a reusable markdown instruction file (SKILL.md) owned by the logged-in user. Requires claw_login first.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				name: { type: "string", description: "Human-readable skill title, e.g. 'Jenkins Investigation'." },
+				content: { type: "string", description: "The full SKILL.md markdown body." },
+				slug: { type: "string", description: "Optional kebab-case slug. Derived from name when omitted." },
+				description: { type: "string", description: "One-line description shown in the skill picker." },
+			},
+			required: ["name", "content"],
+			additionalProperties: false,
+		},
+	},
+	{
 		name: "claw_get_run",
 		description: "Get one Xyne Claw run status/result by session id. Requires claw_login first.",
 		inputSchema: {
@@ -726,6 +851,54 @@ server.setRequestHandler(CallToolRequestSchema, async (request, extra): Promise<
 					error: run.error,
 					detail,
 				});
+			}
+			case "claw_create_agent": {
+				const config = requireConfigOrThrow();
+				const agentName = requiredString(args, "name");
+				const description = requiredString(args, "description");
+				const systemPrompt = requiredString(args, "system_prompt");
+				const slug = optionalString(args, "slug") ?? slugify(agentName);
+				if (!slug) throw new ClawApiError("Could not derive a slug from name; pass `slug` explicitly.", 400);
+				const created = await new ClawClient(resolveBaseUrl(), config.token).createAgent({
+					slug,
+					name: agentName,
+					description,
+					systemPrompt,
+					modelId: optionalString(args, "model_id"),
+					color: optionalString(args, "color"),
+				});
+				return textResult(
+					`Created agent "${agentName}" (${slug}). Run it with claw_run_agent, or open it in Spaces to grant tools.`,
+					{ slug, name: agentName, agent: created },
+				);
+			}
+			case "claw_create_subagent": {
+				const config = requireConfigOrThrow();
+				const subName = requiredString(args, "name");
+				const created = await new ClawClient(resolveBaseUrl(), config.token).createSubagent({
+					name: subName,
+					description: requiredString(args, "description"),
+					systemPrompt: requiredString(args, "system_prompt"),
+					paramName: optionalString(args, "param_name"),
+					paramDescription: optionalString(args, "param_description"),
+				});
+				return textResult(
+					`Created subagent "${subName}". Select it as a tool on any agent that should delegate to it.`,
+					{ name: subName, subagent: created },
+				);
+			}
+			case "claw_create_skill": {
+				const config = requireConfigOrThrow();
+				const skillName = requiredString(args, "name");
+				const slug = optionalString(args, "slug") ?? slugify(skillName);
+				if (!slug) throw new ClawApiError("Could not derive a slug from name; pass `slug` explicitly.", 400);
+				const created = await new ClawClient(resolveBaseUrl(), config.token).createSkill({
+					slug,
+					content: requiredString(args, "content"),
+					name: skillName,
+					description: optionalString(args, "description"),
+				});
+				return textResult(`Created skill "${skillName}" (${slug}).`, { slug, name: skillName, skill: created });
 			}
 			default:
 				return errorResult(`Unknown tool: ${name}`);

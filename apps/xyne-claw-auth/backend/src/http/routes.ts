@@ -76,7 +76,7 @@ import { entityExtractionRouter } from "../routes/entity-extraction.js";
 import { cliAuthRouter } from "../routes/cli-auth.js";
 import { slackRouter } from "../surfaces/slack/routes/index.js";
 import { mcpGatewayRouter } from "../mcpgateway/index.js";
-import { requireAuth, requireNoAccessToken, allowReadAccessToken, requireStrictS2S, requireInternalS2S, requireUserAuth, optionalAuth, s2sKeyMatches } from "../middleware/require-auth.js";
+import { requireAuth, requireNoAccessToken, allowReadAccessToken, allowScopedAccessToken, requireStrictS2S, requireInternalS2S, requireUserAuth, optionalAuth, s2sKeyMatches } from "../middleware/require-auth.js";
 import { requireClawAdmin, requireSearchEvalAccess } from "../middleware/agent-acl.js";
 import { apiLimiter } from "../middleware/rate-limiters.js";
 
@@ -144,7 +144,7 @@ function mountCoreApi(app: Express): void {
   // allowReadAccessToken (NOT the hard barrier): device-flow CLI tokens are
   // minted with agents:read (routes/cli-auth.ts) so the CLI can list agents.
   // Reads (GET/HEAD) pass with that scope; token writes are still rejected.
-  app.use(`${BASE}/agents`, requireAuth, allowReadAccessToken("agents:read"), agentsRouter);
+  app.use(`${BASE}/agents`, requireAuth, allowScopedAccessToken({ read: "agents:read", write: "agents:write" }), agentsRouter);
   // NOT behind requireAuth (so requireNoAccessToken never runs here): the device
   // -flow endpoints must be reachable pre-authentication, and each route carries
   // its own guard (requireCliTokensEnabled / requireApproveAuth — routes/cli-auth.ts).
@@ -155,9 +155,9 @@ function mountCoreApi(app: Express): void {
   app.use(`${BASE}/chain-workflows`, requireAuth, requireNoAccessToken, chainWorkflowsRouter);
   app.use(`${BASE}/spaces`, requireAuth, requireNoAccessToken, spacesRouter);
   app.use(`${BASE}/tools`, requireAuth, requireNoAccessToken, toolsRouter);
-  app.use(`${BASE}/skills`, requireAuth, requireNoAccessToken, skillsRouter);
+  app.use(`${BASE}/skills`, requireAuth, allowScopedAccessToken({ write: "skills:write" }), skillsRouter);
   app.use(`${BASE}/knowledge-base`, requireAuth, requireNoAccessToken, knowledgeBaseRouter);
-  app.use(`${BASE}/subagents`, requireAuth, requireNoAccessToken, subagentsRouter);
+  app.use(`${BASE}/subagents`, requireAuth, allowScopedAccessToken({ write: "subagents:write" }), subagentsRouter);
   app.use(`${BASE}/sandbox`, requireAuth, requireNoAccessToken, sandboxRouter);
   app.use(`${BASE}/organizations`, requireAuth, requireNoAccessToken, organizationsRouter);
   app.use(`${BASE}/admin/digital-twin`, requireAuth, requireNoAccessToken, requireClawAdmin, adminDigitalTwinRouter);
