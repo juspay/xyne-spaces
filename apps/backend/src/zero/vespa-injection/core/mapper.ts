@@ -1,3 +1,4 @@
+import { readFromYSweetStrict } from '@/utils/ysweetUtils';
 import { extractMentionsFromContent } from '@/utils/mentionUtils';
 import { extractChannelMentions } from '@/utils/mentionParser';
 import { appSchema, callSchema, channelSchema, InsertDocument, mailSchema, messageSchema, projectSchema, schemaToDocType, SubApp, ticketSchema, userSchema, VespaAppDocument, VespaCallDocument, VespaChatContainerDocument, VespaChatMessageDocument, VespaDocType, VespaFileDocument, VespaMailDocument, VespaProjectDocument, VespaSchema, VespaTicketDocument, samTranscriptSchema } from '@/vespa/src/types';
@@ -360,7 +361,9 @@ export const mapChannel = async (
     isPrivate: args.visibility === ChannelVisibility.PRIVATE,
     createdBy: args.createdBy,
     ownerId: args.createdBy,
-    projectId: args.projectId,
+    // Omit when the channel has no project (decoupling); mirrors the collection
+    // path below (`channel?.projectId ?? undefined`). Feed drops undefined keys.
+    projectId: args.projectId ?? undefined,
     visibility: args.visibility,
     isIm: args.scopeType === ChannelScopeType.DM,
     isMpim: args.scopeType === ChannelScopeType.GROUP_DM,
@@ -839,9 +842,10 @@ export const mapCollection = async (
   if (rootCollection.scopeType === 'CHANNEL') {
     const channel = await db.channel.findUnique({
       where: { id: rootCollection.scopeId },
-      select: { projectId: true, workspaceId: true },
+      select: { workspaceId: true },
     });
-    projectId = channel?.projectId ?? undefined;
+    // projectId left undefined — channel collections no longer derive a project from
+    // channel.projectId (decoupled); the file doc's projectId is simply omitted.
     channelRef = getRef(channelSchema, rootCollection.scopeId);
     const resolved = await resolveOrgAndWorkspace(channel?.workspaceId);
     workspaceId = resolved.workspaceId;
@@ -924,11 +928,13 @@ export const mapCanvas = async (args: InsertValue<CanvasesSchema>, workspaceId?:
 
   let chunks: string[] = [];
 
-  // Focus only on manually created canvases (stored in DB as BlockNote JSON)
+  // Collaborative canvases store their content in Y-Sweet; legacy canvases use DB JSON.
   try {
-    const content = (args as any).content;
+    const content = args.isCollaborative
+      ? await readFromYSweetStrict(args.id, args.lastEditedBy || args.createdBy)
+      : args.content;
 
-    if (content) {
+    if (Array.isArray(content) && content.length > 0) {
       const markdown = await convertBlockNoteToMarkdown(content);
       const textStrategy = new TextStrategy();
       const result = await textStrategy.parse(Buffer.from(markdown), args.id);
@@ -940,6 +946,7 @@ export const mapCanvas = async (args: InsertValue<CanvasesSchema>, workspaceId?:
     }
   } catch (error) {
     logger.error(`[Mapper] Failed to extract text from canvas ${args.id}:`, error);
+    if (args.isCollaborative) throw error;
   }
 
   // Denormalized ACL: direct users + members of every channel/group the canvas is shared to.

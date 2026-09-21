@@ -35,6 +35,10 @@ export interface ApplyParams {
   scope: RadarScope;
   /** sourceMessageId -> conversationId, for a window spanning conversations. */
   conversationBySourceMessage?: Map<string, string>;
+  /** sourceMessageId -> the groups that message @mentioned, stamped onto the
+   *  items it creates. Stored rather than re-derived because mention rules are
+   *  evaluated on every feed read, for every reader. */
+  groupsBySourceMessage?: Map<string, string[]>;
   /** Validator-approved operations only — the applier trusts its input. */
   operations: ApplyOperation[];
   /**
@@ -114,6 +118,9 @@ class RadarApplier {
                   contextSummary: op.contextSummary ?? null,
                   requestedBy: op.requestedBy ?? [],
                   pendingOn: op.pendingOn ?? [],
+                  mentionedGroupIds: op.sourceMessageId
+                    ? (params.groupsBySourceMessage?.get(op.sourceMessageId) ?? [])
+                    : [],
                 },
               });
               if (op.tempId) realIdForTempId.set(op.tempId, item.id);

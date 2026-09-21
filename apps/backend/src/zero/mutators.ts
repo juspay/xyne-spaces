@@ -109,6 +109,7 @@ import {
   parseTicketEtaManagement,
   mergeTicketEtaManagement,
   type EtaRiskAcknowledgedActivityValue,
+  resolveTicketDescription,
 } from '@xyne/shared';
 import {
   normalizeThreadTypeName,
@@ -192,6 +193,7 @@ import {
   deleteDraftEntityAttachments,
   deleteDelayedMessageEntityAttachments,
 } from '@/zero/utils/attachmentEntityCleanup';
+import { deleteHeicRenditions, isHeicAttachment } from '@/services/heicRenditionService';
 import { deliverDraftServerMessage } from '@/services/messageDeliveryService';
 import { organizationDomainService } from '@/services/organizationDomainService';
 // Data-driven visit versioning + ETA reset/continue decision for NON_LINEAR transitions.
@@ -590,10 +592,26 @@ async function addMentionedConversationParticipants(
   }
 }
 
+/**
+ * Ticket.conversation is a required app-level relation (relationMode="prisma"). Zero writes skip
+ * Prisma Client's Restrict emulation, so every conversation delete checks this explicitly —
+ * otherwise the ticket is left pointing at a missing conversation.
+ */
+async function conversationHasTicket(
+  tx: Transaction<Schema>,
+  conversationId: string,
+): Promise<boolean> {
+  const ticket = await tx.run(zql.tickets.where('conversationId', conversationId).one());
+  return !!ticket;
+}
+
 async function deleteConversationWithParticipants(
   tx: Transaction<Schema>,
   conversationId: string,
 ): Promise<void> {
+  // A ticket thread must outlive its messages (see conversationHasTicket).
+  if (await conversationHasTicket(tx, conversationId)) return;
+
   const participants = await tx.run(
     zql.conversation_participants.where('conversationId', conversationId),
   );
@@ -4357,7 +4375,9 @@ export function createMutators(
 
           const isInitialMessage = conversation.initialMessageId === messageId;
           const hasReplies = otherMessages.length > 0;
-          const shouldSoftDelete = isInitialMessage && hasReplies;
+          // A ticket thread can't lose its conversation: tombstone the root instead.
+          const hasTicket = await conversationHasTicket(tx, conversation.conversationId);
+          const shouldSoftDelete = isInitialMessage && (hasReplies || hasTicket);
 
           // Clean up MENTIONED participants within Zero transaction
           const mentions = extractAllMentions(message.content);
@@ -4475,7 +4495,8 @@ export function createMutators(
               otherMessages[0].messageId === conversation.initialMessageId &&
               otherMessages[0].isDeleted === true;
 
-            const shouldDeleteConversation = otherMessages.length === 0 || isInitialMessageDeleted;
+            const shouldDeleteConversation =
+              !hasTicket && (otherMessages.length === 0 || isInitialMessageDeleted);
 
             if (shouldDeleteConversation) {
               // Delete ghost root FIRST, before the conversation.
@@ -4506,6 +4527,9 @@ export function createMutators(
                       // Also delete thumbnail if it exists
                       if (attachment.thumbnailUrl) {
                         await storageService.deleteFile(attachment.thumbnailUrl);
+                      }
+                      if (isHeicAttachment(attachment.mimetype, attachment.originalFilename)) {
+                        await deleteHeicRenditions(attachment.url);
                       }
                     }
                   } catch (error) {
@@ -4542,6 +4566,9 @@ export function createMutators(
                   await storageService.deleteFile(attachment.url);
                   if (attachment.thumbnailUrl) {
                     await storageService.deleteFile(attachment.thumbnailUrl);
+                  }
+                  if (isHeicAttachment(attachment.mimetype, attachment.originalFilename)) {
+                    await deleteHeicRenditions(attachment.url);
                   }
                 }
               } catch (error) {
@@ -4614,6 +4641,9 @@ export function createMutators(
                 // Also delete thumbnail if it exists
                 if (attachment.thumbnailUrl) {
                   await storageService.deleteFile(attachment.thumbnailUrl);
+                }
+                if (isHeicAttachment(attachment.mimetype, attachment.originalFilename)) {
+                  await deleteHeicRenditions(attachment.url);
                 }
               }
             } catch (error) {
@@ -5905,8 +5935,9 @@ export function createMutators(
           // Optional optimistic-concurrency guard + audit reason for a manual `eta` edit.
         }),
         async ({ tx, args: params }) => {
-          const ticket = await tx.run(zql.tickets.where('id', params.id).one());
+          const ticket = await tx.run(zql.tickets.where('id', params.id).related('ticketDescription').one());
           if (!ticket) throw new Error('Ticket not found');
+          const currentDescription = resolveTicketDescription(ticket);
           const currentBoard = await tx.run(zql.boards.where('id', ticket.boardId).one());
           if (
             currentBoard?.boardType === BoardType.FLOW &&
@@ -6302,8 +6333,10 @@ export function createMutators(
             updateData.statusUpdatedAt = params.updatedAt;
           }
 
+          const ticketRecord = ticket as Record<string, unknown>;
           for (const field of fields) {
-            if (params[field] !== undefined && params[field] !== ticket[field]) {
+            const previousValue = field === 'description' ? currentDescription : ticketRecord[field];
+            if (params[field] !== undefined && params[field] !== previousValue) {
               updateData[field] = params[field];
               if (field === 'kanbanPosition') continue;
               let activityType = field.toUpperCase();
@@ -6319,8 +6352,8 @@ export function createMutators(
               activities.push({
                 activityType,
                 value: field === 'stageName'
-                  ? { field: 'stageName', oldValue: ticket[field], newValue: params[field] }
-                  : { oldValue: ticket[field], newValue: params[field] },
+                  ? { field: 'stageName', oldValue: previousValue, newValue: params[field] }
+                  : { oldValue: previousValue, newValue: params[field] },
               });
             }
           }
@@ -6617,6 +6650,28 @@ export function createMutators(
           }
 
           await tx.mutate.tickets.update({ id: params.id, ...updateData });
+
+          if (params.description !== undefined && params.description !== currentDescription) {
+            const existingDescription = await tx.run(
+              zql.ticket_descriptions.where('ticketId', params.id).one()
+            );
+            if (existingDescription) {
+              await tx.mutate.ticket_descriptions.update({
+                ticketId: params.id,
+                description: params.description,
+                updatedAt: params.updatedAt,
+              });
+            } else {
+              await tx.mutate.ticket_descriptions.insert({
+                ticketId: params.id,
+                workspaceId: ticket.workspaceId,
+                channelId: ticket.channelId,
+                description: params.description,
+                createdAt: params.updatedAt,
+                updatedAt: params.updatedAt,
+              });
+            }
+          }
 
           if (
             params.statusV2 === TicketStatusV2.COMPLETED
@@ -7549,13 +7604,10 @@ export function createMutators(
             throw new Error('Project not found');
           }
 
-          // Validate channel exists and belongs to this project
+          // Validate channel exists (channel.projectId is decoupled — no project-membership check)
           const channel = await tx.run(zql.channels.where('id', channelId).one());
           if (!channel) {
             throw new Error('Channel not found');
-          }
-          if (channel.projectId !== projectId) {
-            throw new Error('Channel does not belong to this project');
           }
 
           if (rawApplications.length === 0) {
@@ -10552,7 +10604,7 @@ export function createMutators(
 
           // Channel folders no longer require a project (the channel canvas UI has
           // no project grouping), but the channel itself must still be valid and
-          // not archived. A projectId is optional; when present it must match.
+          // not archived. channel.projectId is decoupled and no longer checked here.
           if (channelId) {
             const channel = await tx.run(zql.channels.where('id', channelId).one());
             if (!channel) {
@@ -10561,10 +10613,6 @@ export function createMutators(
 
             if (channel.isArchived) {
               throw new Error('Channel is archived');
-            }
-
-            if (projectId && channel.projectId != null && channel.projectId !== projectId) {
-              throw new Error('Channel does not belong to project');
             }
           }
 
@@ -13416,11 +13464,12 @@ export function createMutators(
           );
           if (existing) {
             const existingAt = existing.lastReadEmailAt;
-            if (typeof existingAt !== 'number' || existingAt < lastReadEmailAt) {
+            if (typeof existingAt !== 'number' || existingAt < lastReadEmailAt || existing.hasNewEmail) {
               await tx.mutate.email_reads.update({
                 id: existing.id,
                 lastReadEmailId,
                 lastReadEmailAt,
+                hasNewEmail: false,
                 updatedAt,
               });
             }
@@ -13432,6 +13481,7 @@ export function createMutators(
               userId: ctx.userID,
               lastReadEmailId,
               lastReadEmailAt,
+              hasNewEmail: false,
               createdAt: updatedAt,
               updatedAt,
             });
@@ -13482,7 +13532,8 @@ export function createMutators(
               if (ex) {
                 if (
                   typeof ex.lastReadEmailAt === 'number' &&
-                  ex.lastReadEmailAt >= lastReadEmailAt
+                  ex.lastReadEmailAt >= lastReadEmailAt &&
+                  !ex.hasNewEmail
                 ) {
                   return undefined;
                 }
@@ -13490,6 +13541,7 @@ export function createMutators(
                   id: ex.id,
                   lastReadEmailAt,
                   lastReadEmailId,
+                  hasNewEmail: false,
                   updatedAt: timestamp,
                 });
               }
@@ -13500,6 +13552,7 @@ export function createMutators(
                 userId: ctx.userID,
                 lastReadEmailAt,
                 lastReadEmailId,
+                hasNewEmail: false,
                 createdAt: timestamp,
                 updatedAt: timestamp,
               });
@@ -13643,7 +13696,6 @@ export function createMutators(
                 entityType: AttachmentEntityType.DRAFT,
                 conversationId: conversationId || null,
                 originalFilename,
-                mimetype,
                 size,
                 width,
                 height

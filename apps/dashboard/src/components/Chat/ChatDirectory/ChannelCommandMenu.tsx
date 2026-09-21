@@ -46,6 +46,7 @@ import {
   resolveChannelLabel,
 } from './ChatDirectory.utils';
 import { useChannelDisplayName } from '../../../hooks/useChannelDisplayName';
+import { Tooltip } from '../../ui/Tooltip/Tooltip';
 import Avatar from '../../ui/Avatar/Avatar';
 import ChannelIcon from '../ChannelIcon/ChannelIcon';
 import Badge from '../../ui/Badge';
@@ -104,7 +105,15 @@ import { getUserDisplayName, isUserDeactivated } from '../../../utils/userDispla
 import { LexicalSearchInput, type InitialQueryData } from './LexicalSearchInput';
 import { StatusIndicator } from '../../ui/StatusIndicator';
 import { useSearchMetrics, CMDK_USER_LIMIT } from '../../../hooks/useSearchMetrics';
-import { filterChannelsBySearchableNames, rankUsersWithMfu } from '../../../utils/rankingUtils';
+import {
+  filterChannelsBySearchableNames,
+  rankUsersWithMfu,
+  toChannelCandidates,
+  toUserCandidates,
+  type ChannelSearchItem,
+} from '../../../utils/rankingUtils';
+import { mergeRankedCandidates, type RankedCandidate } from '@xyne/shared/utils';
+import type { User } from '../../../machines/stateMachine';
 import { searchMetricsService } from '../../../services/searchMetricsService';
 import { useHistoryBackedOverlay } from '../../../hooks/useHistoryBackedOverlay';
 import {
@@ -155,6 +164,53 @@ function stripHtmlTags(html: string): string {
   div.innerHTML = html;
   return div.textContent || html;
 }
+/**
+ * Bring a clicked tab to the middle of its own strip — and nothing else.
+ *
+ * This used to be `scrollIntoView({ inline: 'center' })`, which is not a
+ * request to scroll one element: it scrolls *every* scrollable ancestor until
+ * the target is centred in each. Harmless in a dialog, where there are none.
+ * Not harmless once this menu renders inside a page that scrolls — the Streams
+ * add-column palette lives in a horizontally scrolling stream, so centring a tab
+ * inside a 380px panel also centred that panel in the stream, and the whole row
+ * of columns slid sideways every time you picked a category.
+ *
+ * Scrolling the strip by the delta between the two centres does the visible
+ * half of the old behaviour and stops at the strip's own edge.
+ */
+const centreTabInStrip = (tab: HTMLElement): void => {
+  const strip = tab.closest<HTMLElement>('[data-tab-strip]');
+  if (!strip) return;
+  const tabBox = tab.getBoundingClientRect();
+  const stripBox = strip.getBoundingClientRect();
+  strip.scrollBy({
+    left: tabBox.left + tabBox.width / 2 - (stripBox.left + stripBox.width / 2),
+    behavior: 'smooth',
+  });
+};
+
+/**
+ * How a chosen row is marked.
+ *
+ * `filled` is the multi-select reading: a solid brand-coloured tick, the same
+ * weight as a checkbox, because in the Ask AI picker choosing and un-choosing is
+ * the whole interaction and the mark is the control.
+ *
+ * `outline` is for lists where the mark is a *fact*, not a control — the Streams
+ * add palette showing which columns the stream already holds. Those rows are inert,
+ * and a row of solid brand ticks down the side of an inert list reads as seven
+ * buttons demanding attention.
+ */
+export type SelectionVariant = 'filled' | 'outline';
+
+const selectionTickClass = (variant: SelectionVariant): string =>
+  cn(
+    'flex-shrink-0 flex items-center justify-center w-4 h-4 rounded-full',
+    variant === 'outline'
+      ? 'border border-border text-muted-foreground'
+      : 'bg-primary text-primary-foreground',
+  );
+
 // Exported so the Ask AI inline context picker (XyneAISidebar/ContextPicker)
 // renders channel rows with this exact component instead of a copy.
 export const ChannelCommandItem = ({
@@ -165,6 +221,7 @@ export const ChannelCommandItem = ({
   onItemMouseDown,
   getChannelIcon,
   isSelected = false,
+  selectionVariant = 'filled',
 }: {
   channel: Channel;
   currentUserID: string;
@@ -173,6 +230,7 @@ export const ChannelCommandItem = ({
   onItemMouseDown?: (e: React.MouseEvent) => void;
   getChannelIcon: (channel: Channel) => ReactElement;
   isSelected?: boolean;
+  selectionVariant?: SelectionVariant;
 }): ReactElement | null => {
   const { displayName } = useChannelDisplayName(channel, currentUserID);
   const { isMobile } = usePlatform();
@@ -213,7 +271,7 @@ export const ChannelCommandItem = ({
         )}
       </div>
       {isSelected ? (
-        <span className='flex-shrink-0 flex items-center justify-center w-4 h-4 rounded-full bg-primary text-primary-foreground'>
+        <span className={selectionTickClass(selectionVariant)}>
           <CheckTickSingle size={10} />
         </span>
       ) : (
@@ -300,6 +358,29 @@ type MentionGroupKey = (typeof MENTION_GROUPS)[number]['key'];
 const MENTION_GROUP_PAGE = 5;
 const MENTION_GROUP_MAX = 20;
 
+// Rows shown collapsed in the flat ALL view's merged people+channel list, before "See more".
+// The entries are the ones the per-category sections would have rendered — this only changes
+// their order. The merge itself keeps more than this so expanding has something to reveal.
+const MERGED_DISPLAY_LIMIT = 8;
+const MERGED_CANDIDATE_LIMIT = MERGED_DISPLAY_LIMIT * 5;
+/** expandedCategories key for the merged section — not a ChannelCategory, it spans types. */
+const MERGED_CATEGORY = 'merged-people-channels';
+
+/**
+ * A row in the merged list is either a person or a channel/DM. The two narrowings below
+ * are sound because `toUserCandidates` is the only producer of `type: 'user'` and it only
+ * ever carries a user, while `toChannelCandidates` produces 'dm' and 'channel' and only
+ * ever carries a channel item.
+ */
+type MergedCandidate = RankedCandidate<User | ChannelSearchItem>;
+
+const isMergedUser = (candidate: MergedCandidate): candidate is RankedCandidate<User> =>
+  candidate.type === 'user';
+
+const isMergedChannel = (
+  candidate: MergedCandidate,
+): candidate is RankedCandidate<ChannelSearchItem> => candidate.type !== 'user';
+
 const isPreviewableTicketResult = (result: DisplaySearchResult | null): boolean =>
   !!result &&
   (result.type === 'ticket' ||
@@ -346,6 +427,7 @@ const ChannelCommandMenu = ({
   open,
   onOpenChange,
   contextSelectionMode = false,
+  selectionVariant = 'filled',
   contextItems = [],
   onContextItemToggle,
   onContextSelectionConfirm,
@@ -355,6 +437,7 @@ const ChannelCommandMenu = ({
   restoreFromLastSearch,
   enabledTabs,
   inline = false,
+  compactTabs = false,
   onTabChange,
   initialTab,
   hideTabs = false,
@@ -598,6 +681,10 @@ const ChannelCommandMenu = ({
   // Mention search state - declared before useSearchMetrics so it can be passed to the hook
   const [mentionSearchQuery, setMentionSearchQuery] = useState('');
   const [mentionSearchType, setMentionSearchType] = useState<ChipType | null>(null);
+  // True only during the ~100ms settle window after a chip commit, until mentionSearchType
+  // clears. Must be a transient ref, not a derived check: a fresh typeahead and a stale
+  // echo of the last commit carry identical render state, so only history tells them apart.
+  const justCommittedMentionRef = useRef(false);
   // Which `mentions:` sections have been expanded past their first five rows.
   const [expandedMentionGroups, setExpandedMentionGroups] = useState<
     Record<MentionGroupKey, boolean>
@@ -653,6 +740,17 @@ const ChannelCommandMenu = ({
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
   const isFlatAllView = activeTab === TabType.ALL && !isGrouped;
 
+  /**
+   * Whether the LOCAL results render as one merged people+channel list instead of separate
+   * STARRED / PEOPLE / CHANNELS sections.
+   *
+   * Deliberately NOT tied to `isFlatAllView`: that flag reports how the BACKEND chose to
+   * group ITS results (flat only under the `unified` rank profile). How we order locally
+   * synced people and channels is an independent decision, so the merged list is the default
+   * on the ALL tab whatever rank profile is in play. Per-entity tabs keep their own section.
+   */
+  const useMergedLocalResults = activeTab === TabType.ALL;
+
   // type:channels shows grouped local channels (same as CHANNELS tab) — used by the
   // no-search channel browse further down.
   const types = parseTypeFilter(typeFilter);
@@ -697,6 +795,64 @@ const ChannelCommandMenu = ({
     void affinityVersion;
     return rankUsersWithMfu(filteredLocalUsers, allUsers, cleanedSearchText, dmContactRecency);
   }, [filteredLocalUsers, allUsers, cleanedSearchText, dmContactRecency, affinityVersion]);
+
+  /**
+   * ONE merged people + DM + channel list, for the flat ALL view only.
+   *
+   * Exactly the rows the sections already render — `rankedLocalUsers` (the USERS section)
+   * and `filteredLocalChannels` (STARRED, CHANNELS, GROUP DMS) — reordered into one list.
+   * Nothing is searched again and nothing new is admitted: the only change is the order.
+   *
+   * Each entry is tagged with the shared match tier, then `mergeRankedCandidates` applies
+   * affinity once across both, so a person and a channel can share a rung and compete
+   * directly. See docs/cmdk-search-ranking.md §15.
+   *
+   * Only computed when the merged list will actually render, so the per-entity tabs pay
+   * nothing for it.
+   */
+
+  const mergedLocalResults = useMemo<MergedCandidate[]>(() => {
+    void affinityVersion;
+    if (!useMergedLocalResults) return [];
+
+    // BROWSE (nothing typed): one list of every conversation, ordered by affinity — there is
+    // no query for tiers to describe, so `tierOf` puts them all on the top rung and affinity
+    // alone decides. 1:1 DMs are INCLUDED here, unlike in search: browse shows no people
+    // rows for them to duplicate, and a DM is the thing you navigate to.
+    if (!cleanedSearchText.trim()) {
+      return mergeRankedCandidates<User | ChannelSearchItem>(
+        [toChannelCandidates(filteredLocalChannels, '')],
+        MERGED_CANDIDATE_LIMIT,
+      );
+    }
+    // SEARCH: people and regular channels only.
+    //
+    // 1:1 DMs are out because the other participant is already here as a person, and
+    // selecting them opens that very conversation (navigateToUser ->
+    // resolveOrCreateDmChannelId) — the row would only ever be the same human twice.
+    // Self-DMs go with them; their only participant is you.
+    //
+    // Group DMs are out for a different reason: they keep their own GROUP DMS section,
+    // rendered separately below. Their match quality is borrowed from a participant, so
+    // mixing them in means a dozen group chats crowding out the person you actually typed.
+    const mergeableChannels = filteredLocalChannels.filter(
+      ({ channel }) => !isDMChannel(channel.scopeType),
+    );
+
+    return mergeRankedCandidates<User | ChannelSearchItem>(
+      [
+        toUserCandidates(rankedLocalUsers, cleanedSearchText),
+        toChannelCandidates(mergeableChannels, cleanedSearchText),
+      ],
+      MERGED_CANDIDATE_LIMIT,
+    );
+  }, [
+    useMergedLocalResults,
+    cleanedSearchText,
+    rankedLocalUsers,
+    filteredLocalChannels,
+    affinityVersion,
+  ]);
 
   // Slack-style strong user match: when the top-ranked user's full name
   // prefix-matches the query, the USERS section renders ABOVE the "Show
@@ -1357,6 +1513,8 @@ const ChannelCommandMenu = ({
       }
 
       if (insertMentionRef.current) {
+        // Open the settle window (see declaration) — hides the suffix for this commit only.
+        justCommittedMentionRef.current = true;
         insertMentionRef.current({
           id: mention.id,
           name: mention.name,
@@ -1366,6 +1524,7 @@ const ChannelCommandMenu = ({
 
         // Clear mention search state after a delay to allow insertion to complete
         setTimeout(() => {
+          justCommittedMentionRef.current = false;
           setMentionSearchType(null);
           setMentionSearchQuery('');
           setChannelTrigger(null);
@@ -1954,6 +2113,9 @@ const ChannelCommandMenu = ({
   // "pick a value" context, so the first candidate previews at rest); the row's gray→blue tier
   // still signals navigation. Empty when there's no matching candidate.
   const popupFilterHint = useMemo(() => {
+    // While a commit settles, mentionSearchType is still set for a few frames — hide the
+    // suffix so it doesn't stack on the just-inserted pill at the pre-commit caret position.
+    if (justCommittedMentionRef.current) return '';
     if (!mentionSearchType || !mentionActiveLabel) return '';
     const query = mentionSearchQuery.trim();
     // @/# navigate on select; every other prefix builds a filter chip (a "select").
@@ -1979,6 +2141,9 @@ const ChannelCommandMenu = ({
     userTrigger,
     channelTrigger,
     mentionActiveLabel,
+    // Not read by the memo body — forces a recompute when a chip lands; a ref change alone
+    // never re-renders, so without this the memo could serve the stale pre-commit suffix.
+    selectedMentions.length,
   ]);
 
   // Never surface a ghost when the input is truly empty (no free text AND no chip). A stale
@@ -2556,11 +2721,13 @@ const ChannelCommandMenu = ({
     // gate (which tracks Vespa results) so the first command row is highlighted at rest.
     const hasActiveSearch =
       searchText.trim().length > 0 || selectedMentions.length > 0 || commandActive;
-    // While a mention typeahead is open, selection is owned by selectedMentionIndex - don't
+    // While a mention typeahead is open, selection is owned by selectedMentionIndex — don't
     // also auto-select a cmdk row, or two rows light up.
+    // The show-results row renders as soon as there's searchText (see showResultsForRow),
+    // so a typed query is reason enough to fire even with zero hits.
     if (
       !hasActiveSearch ||
-      (!hasResults && !commandActive) ||
+      (!hasResults && !commandActive && !searchText.trim()) ||
       hasNavigatedRef.current ||
       mentionSearchType
     )
@@ -2570,25 +2737,18 @@ const ChannelCommandMenu = ({
       if (hasNavigatedRef.current) return;
       const items = commandRef.current?.querySelectorAll('[cmdk-item]:not([aria-disabled="true"])');
       if (items && items.length > 0) {
-        // Once there's a query or a filter, the user has expressed a search rather than a
-        // jump-to, so Enter should open the full results — that row becomes the resting
-        // target. With an empty box it stays on the first real result, where Enter is a
-        // quick-switch. The screen palette keeps first-row either way.
         const rows = Array.from(items);
         const showResultsIndex = rows.findIndex(
           item => item.getAttribute('data-show-results-item') === 'true',
         );
-        const hasSearchIntent = searchText.trim().length > 0 || selectedMentions.length > 0;
 
-        const firstReal = isScreenPalette
-          ? -1
-          : rows.findIndex(item => item.getAttribute('data-show-results-item') !== 'true');
+        // Rest on the first real result; fall back to the show-results row when no real
+        // row is selectable (zero hits, still streaming, or it's the only row).
+        const firstReal = rows.findIndex(
+          item => item.getAttribute('data-show-results-item') !== 'true',
+        );
         const selectedIndex =
-          !isScreenPalette && hasSearchIntent && showResultsIndex !== -1
-            ? showResultsIndex
-            : firstReal === -1
-              ? 0
-              : firstReal;
+          firstReal !== -1 ? firstReal : showResultsIndex !== -1 ? showResultsIndex : 0;
         items.forEach((item, i) => {
           item.setAttribute('aria-selected', i === selectedIndex ? 'true' : 'false');
         });
@@ -2617,6 +2777,90 @@ const ChannelCommandMenu = ({
 
   // Browse-mode hint sync lives in attachCommandRef's MutationObserver (the auto-select effect above
   // only runs during an active search).
+
+  /**
+   * The merged people/DM/channel list for the flat ALL view.
+   *
+   * One `Command.Group`, three kinds of row: people render as `SearchResultItem` (what the
+   * PEOPLE section uses), channels and DMs as `ChannelCommandItem` (what the CHANNELS and
+   * GROUP DMS sections use), so a row looks and behaves identically whichever list it
+   * appears in. Order comes entirely from `mergedLocalResults`.
+   */
+  const renderMergedLocalResults = () => {
+    if (mergedLocalResults.length === 0) return null;
+
+    // Same collapse/expand contract as every other local section, so the fold behaves the
+    // way the rest of the palette does. It expands in place rather than routing out: there
+    // is no results page that shows people and channels together.
+    const isExpanded = expandedCategories.has(MERGED_CATEGORY);
+    const hasMore = mergedLocalResults.length > MERGED_DISPLAY_LIMIT;
+    const displayItems =
+      !isExpanded && hasMore
+        ? mergedLocalResults.slice(0, MERGED_DISPLAY_LIMIT)
+        : mergedLocalResults;
+    const hiddenCount = mergedLocalResults.length - MERGED_DISPLAY_LIMIT;
+
+    return (
+      <div className='mb-4'>
+        <Command.Group
+          heading={`People & channels (${mergedLocalResults.length})`}
+          className='[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-mono'
+        >
+          {displayItems.map((candidate, index) => {
+            if (isMergedUser(candidate)) {
+              const user = candidate.item;
+              const result: DisplaySearchResult = {
+                id: user.id,
+                type: 'user' as const,
+                title: getUserDisplayName(user),
+                subtitle: user.email || '',
+                relevanceScore: 1,
+                metadata: {},
+              };
+              return (
+                <SearchResultItem
+                  key={`merged-user-${user.id}`}
+                  result={result}
+                  onSelect={res => handleBackendResultSelect(res, index + 1)}
+                  onItemMouseDown={handleItemMouseDown}
+                  isSelected={contextItems.some(c => c.id === `user-${user.id}`)}
+                />
+              );
+            }
+
+            if (!isMergedChannel(candidate)) return null;
+            const { channel } = candidate.item;
+            return (
+              <ChannelCommandItem
+                key={`merged-channel-${channel.id}`}
+                channel={channel}
+                currentUserID={currentUserID}
+                unreadCount={unreadCounts[channel.id] ?? 0}
+                onSelect={displayName => {
+                  void handleChannelSelect(channel, displayName, index + 1);
+                }}
+                onItemMouseDown={handleItemMouseDown}
+                getChannelIcon={getChannelIcon}
+                selectionVariant={selectionVariant}
+                isSelected={contextItems.some(c => c.id === `channel-${channel.id}`)}
+              />
+            );
+          })}
+          {hasMore && (
+            <SeeMoreItem
+              value='__see-more-merged__'
+              label={isExpanded ? 'See less' : `See ${hiddenCount} more`}
+              onSelect={() => toggleCategoryExpansion(MERGED_CATEGORY)}
+              hoverable={!isMobile}
+              trackCategory='CHANNEL_SEARCH'
+              trackName='TOGGLE_CATEGORY_EXPANSION'
+              trackMetadata={JSON.stringify({ category: MERGED_CATEGORY, isExpanded })}
+            />
+          )}
+        </Command.Group>
+      </div>
+    );
+  };
 
   // Render backend results for the search-active branch (flat list filtered by activeTab)
   const renderSearchBackendResults = () => (
@@ -2929,6 +3173,7 @@ const ChannelCommandMenu = ({
                     }}
                     onItemMouseDown={handleItemMouseDown}
                     getChannelIcon={getChannelIcon}
+                    selectionVariant={selectionVariant}
                     isSelected={contextItems.some(c => c.id === `channel-${channel.id}`)}
                   />
                 );
@@ -2992,6 +3237,7 @@ const ChannelCommandMenu = ({
                     }}
                     onItemMouseDown={handleItemMouseDown}
                     getChannelIcon={getChannelIcon}
+                    selectionVariant={selectionVariant}
                     isSelected={contextItems.some(c => c.id === `channel-${channel.id}`)}
                   />
                 );
@@ -3069,6 +3315,7 @@ const ChannelCommandMenu = ({
                       }}
                       onItemMouseDown={handleItemMouseDown}
                       getChannelIcon={getChannelIcon}
+                      selectionVariant={selectionVariant}
                       isSelected={contextItems.some(c => c.id === `channel-${channel.id}`)}
                     />
                   );
@@ -3135,6 +3382,7 @@ const ChannelCommandMenu = ({
                           }}
                           onItemMouseDown={handleItemMouseDown}
                           getChannelIcon={getChannelIcon}
+                          selectionVariant={selectionVariant}
                           isSelected={contextItems.some(c => c.id === `channel-${channel.id}`)}
                         />
                       );
@@ -3165,7 +3413,10 @@ const ChannelCommandMenu = ({
   // Starred always leads; a strong user/channel match then becomes the default
   // Enter target. `hasStrongUserMatch`/`hasStrongChannelMatch` already exclude
   // from:/in:/with: chips, where backend results lead instead.
-  const canHoist = activeTab === TabType.ALL && !isFlatAllView && !mentionSearchType;
+  // Hoisting lifts a strongly-matching SECTION above the others; with the merged list there
+  // are no competing sections to lift it over, and rendering a hoisted copy as well would
+  // duplicate rows the merged list already shows.
+  const canHoist = activeTab === TabType.ALL && !useMergedLocalResults && !mentionSearchType;
   const hoistStarred = canHoist && hasStrongStarredMatch;
   const hoistUser = canHoist && hasStrongUserMatch;
   const hoistChannel = canHoist && hasStrongChannelMatch;
@@ -4027,11 +4278,25 @@ const ChannelCommandMenu = ({
         >
           {/* Tabs - hidden when bot is selected or hideTabs is true */}
           <div
+            data-tab-strip
             className={`shrink-0 overflow-x-auto no-scrollbar px-4 py-1.5 focus:outline-none focus-visible:outline-none ${isMobile ? 'mx-1' : ''} ${hideTabs ? 'hidden' : ''}`}
           >
             <Tabs.Root value={activeTab}>
               <Tabs.List
-                className='flex items-center justify-start gap-2'
+                // `min-w-max` is what makes the strip a *scroller* rather than a
+                // squeezer. Without it the row is a plain flex line that shrinks
+                // its children to fit the 378px a column gives it: the active
+                // tab's label gets clipped mid-word and the 14px icons are
+                // squashed narrower to make room. Overflowing and scrolling is
+                // the correct failure — the tab keeps its size and the strip
+                // carries it. Only for compact hosts: everywhere else the row has
+                // the room it always had, and squeezing never happens.
+                className={cn(
+                  'flex items-center justify-start',
+                  // Tighter where six tabs share a column's width and 8px gaps are
+                  // 40px of the budget. A dialog has room for both.
+                  compactTabs ? 'min-w-max gap-1' : 'gap-2',
+                )}
                 onKeyDownCapture={e => {
                   // Capture arrow keys before Radix UI's internal handler
                   if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
@@ -4040,59 +4305,117 @@ const ChannelCommandMenu = ({
                   }
                 }}
               >
-                {tabs.map(tab => (
-                  <Tabs.Trigger
-                    key={tab.id}
-                    value={tab.id}
-                    onKeyDown={e => {
-                      // Disable left/right arrow key navigation between tabs
-                      if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
-                        e.preventDefault();
-                      }
-                    }}
-                    asChild
-                  >
-                    <button
-                      onClick={e => {
-                        if (activeTab === tab.id) {
-                          if (!inline) {
-                            setActiveTab(TabType.ALL);
-                            onTabChange?.(TabType.ALL);
-                          }
-                          // In inline mode, clicking the active tab does nothing
-                        } else {
-                          setActiveTab(tab.id);
-                          onTabChange?.(tab.id);
+                {tabs.map(tab => {
+                  /* Compact, only the active tab spells itself out.
+     
+                     Six icon+label tabs need 633px and the Streams palette gives
+                     the strip 378, so half of them used to sit off the right edge
+                     of a scroller with no affordance — reachable only by knowing
+                     they were there. Collapsed to icons the six fit in ~300px with
+                     room to spare, and the one that still needs words is the one
+                     saying what you are filtered to.
+     
+                     Same treatment as the Activity tab strip, including the way it
+                     is done: the label is a grid track animated from 1fr to 0fr, so
+                     it slides shut instead of vanishing. Every other host keeps all
+                     its labels — none of them is short of width. */
+                  const showLabel = !compactTabs || activeTab === tab.id;
+                  const trigger = (
+                    <Tabs.Trigger
+                      key={tab.id}
+                      value={tab.id}
+                      onKeyDown={e => {
+                        // Disable left/right arrow key navigation between tabs
+                        if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+                          e.preventDefault();
                         }
-                        // Blur input when clicking tabs
-                        if (inputRef.current) {
-                          inputRef.current.blur();
-                        }
-                        e.currentTarget.scrollIntoView({
-                          behavior: 'smooth',
-                          block: 'nearest',
-                          inline: 'center',
-                        });
                       }}
-                      className={cn(
-                        // No focus ring: Tab is bound to tab-cycling here, so a click-focused
-                        // trigger would paint a ring on the next Tab press. The active tab's
-                        // bg-accent treatment already communicates position.
-                        'flex items-center justify-center gap-2 px-3 py-1.5 text-sm whitespace-nowrap rounded-md transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-0',
-                        activeTab === tab.id
-                          ? 'bg-accent text-foreground'
-                          : 'text-muted-foreground hover:bg-accent hover:text-foreground',
-                        isMobile && 'text-base w-fit h-9 px-3',
-                      )}
-                      data-track-category='CHANNEL_SEARCH'
-                      data-track-name='SELECT_SEARCH_TAB'
-                      data-track-metadata={JSON.stringify({ tab: tab.id })}
+                      asChild
                     >
-                      {tab.icon}
-                      {tab.label}
-                    </button>
-                  </Tabs.Trigger>
-                ))}
+                      <button
+                        aria-label={tab.label}
+                        onClick={e => {
+                          if (activeTab === tab.id) {
+                            // Clicking the active tab clears the filter — but only
+                            // where ALL is somewhere to land. Inline callers that
+                            // omit it from `enabledTabs` have no unfiltered state,
+                            // so for them this stays a no-op, as it always was.
+                            if (!inline || activeEnabledTabs.includes(TabType.ALL)) {
+                              setActiveTab(TabType.ALL);
+                              onTabChange?.(TabType.ALL);
+                            }
+                          } else {
+                            setActiveTab(tab.id);
+                            onTabChange?.(tab.id);
+                          }
+                          // Blur input when clicking tabs
+                          if (inputRef.current) {
+                            inputRef.current.blur();
+                          }
+                          centreTabInStrip(e.currentTarget);
+                        }}
+                        className={cn(
+                          // No focus ring: Tab is bound to tab-cycling here, so a click-focused
+                          // trigger would paint a ring on the next Tab press. The active tab's
+                          // bg-accent treatment already communicates position.
+                          'flex items-center justify-center px-3 py-1.5 text-sm whitespace-nowrap rounded-md transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-0',
+                          // Paired with the strip's `min-w-max` — together they make
+                          // the row overflow instead of squeezing its tabs.
+                          compactTabs ? 'shrink-0' : null,
+                          activeTab === tab.id
+                            ? 'bg-accent text-foreground'
+                            : 'text-muted-foreground hover:bg-accent hover:text-foreground',
+                          isMobile && 'text-base w-fit h-9 px-3',
+                        )}
+                        data-track-category='CHANNEL_SEARCH'
+                        data-track-name='SELECT_SEARCH_TAB'
+                        data-track-metadata={JSON.stringify({ tab: tab.id })}
+                      >
+                        {tab.icon && (
+                          <span className='flex size-4 shrink-0 items-center justify-center'>
+                            {tab.icon}
+                          </span>
+                        )}
+                        <span
+                          className={cn(
+                            'grid overflow-hidden transition-[grid-template-columns,opacity,margin] duration-300 ease-in-out motion-reduce:transition-none',
+                            tab.icon ? 'ml-2' : null,
+                            showLabel
+                              ? 'grid-cols-[1fr] opacity-100'
+                              : 'ml-0 grid-cols-[0fr] opacity-0',
+                          )}
+                        >
+                          <span className='min-w-0 overflow-hidden whitespace-nowrap'>
+                            {tab.label}
+                          </span>
+                        </span>
+                      </button>
+                    </Tabs.Trigger>
+                  );
+                  // Wrapped unconditionally, even when the label is already
+                  // showing and the tooltip would repeat it. Swapping the wrapper
+                  // in and out on selection changes the element type at this
+                  // position, so React unmounts the old button and mounts a new
+                  // one — and a freshly mounted element has no previous value to
+                  // transition from, which is why the label used to snap open
+                  // instead of sliding. The Activity strip wraps unconditionally
+                  // for the same reason.
+                  //
+                  // Held shut rather than removed where the labels are already on
+                  // screen: a tooltip that repeats the word beside it is noise, and
+                  // every host but the compact one shows every label.
+                  return (
+                    <Tooltip
+                      key={tab.id}
+                      content={tab.label}
+                      side='top'
+                      delayDuration={500}
+                      {...(compactTabs ? {} : { open: false })}
+                    >
+                      {trigger}
+                    </Tooltip>
+                  );
+                })}
               </Tabs.List>
             </Tabs.Root>
           </div>
@@ -4794,7 +5117,7 @@ const ChannelCommandMenu = ({
                                   {item.title}
                                 </span>
                                 {isSelected && (
-                                  <span className='flex-shrink-0 flex items-center justify-center w-4 h-4 rounded-full bg-primary text-primary-foreground'>
+                                  <span className={selectionTickClass(selectionVariant)}>
                                     <CheckTickSingle size={10} />
                                   </span>
                                 )}
@@ -4834,13 +5157,35 @@ const ChannelCommandMenu = ({
                         {hasFromOrInFilter ? (
                           <>
                             {backendResults.length > 0 && renderSearchBackendResults()}
-                            {renderSearchLocalSections()}
+                            {/* Flat ALL view replaces the per-category sections with ONE merged
+                                people/DM/channel list — rendering both would repeat every row.
+                                It renders unconditionally: it is local, so it must survive a
+                                Vespa failure or an empty backend response. */}
+                            {useMergedLocalResults ? (
+                              <>
+                                {renderMergedLocalResults()}
+                                {/* Group DMs keep their own section: (false,false,false)
+                                    renders that block alone. */}
+                                {renderSearchLocalSections(false, false, false)}
+                              </>
+                            ) : (
+                              renderSearchLocalSections()
+                            )}
                           </>
                         ) : (
                           <>
                             {/* A section pinned to the top (above) is skipped here to
                             avoid a double-render. */}
-                            {renderSearchLocalSections(!hoistStarred, !hoistUser, !hoistChannel)}
+                            {useMergedLocalResults ? (
+                              <>
+                                {renderMergedLocalResults()}
+                                {/* Group DMs keep their own section: (false,false,false)
+                                    renders that block alone. */}
+                                {renderSearchLocalSections(false, false, false)}
+                              </>
+                            ) : (
+                              renderSearchLocalSections(!hoistStarred, !hoistUser, !hoistChannel)
+                            )}
                             {backendResults.length > 0 && renderSearchBackendResults()}
                           </>
                         )}
@@ -4856,7 +5201,9 @@ const ChannelCommandMenu = ({
                           </>
                         ) : (
                           <>
-                            {renderBrowseLocalChannels()}
+                            {useMergedLocalResults
+                              ? renderMergedLocalResults()
+                              : renderBrowseLocalChannels()}
                             {/* People tab browse: rank by affinity (rankUsersWithMfu) like the
                                 search branch, instead of the raw, unranked backend user list. */}
                             {activeTab === TabType.USERS

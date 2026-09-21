@@ -13,7 +13,7 @@ import { fileSchema, SubApp } from '@/vespa/src/types';
 import { db } from '@/database/client';
 import { withWorkspaceScope } from '@/database/tenant/context';
 import { CanvasRole, CanvasVisibility } from '@xyne/shared';
-import { syncToYSweet } from '@/utils/ysweetUtils';
+import { readFromYSweetStrict, syncToYSweet } from '@/utils/ysweetUtils';
 
 const prisma = DatabaseClient.getInstance();
 
@@ -812,13 +812,20 @@ export async function upsertCommitAnalysisCanvas(
     const now = new Date();
     const existing = await findExistingAnalysisCanvas(metadata.conversationId, metadata.channelId);
 
+    // Read the live document so rebuilding one section preserves the other.
+    // Legacy DB-backed canvases migrate after the replacement is stored successfully.
+    const existingBlocks = existing
+      ? existing.isCollaborative
+        ? await readFromYSweetStrict(existing.id, createdByUserId)
+        : (existing.content as unknown as BlockNoteBlock[]) ?? []
+      : [];
+
     let content: BlockNoteBlock[];
     let mentionedUserIds: string[];
 
     if (section === 'hotfix') {
       const hotfix = await buildHotfixSectionBlocks(results, envChanges, migrationLinks, metadata);
       if (existing) {
-        const existingBlocks = (existing.content as unknown as BlockNoteBlock[]) ?? [];
         content = [...stripHotfixSection(existingBlocks), ...hotfix.blocks];
       } else {
         // No canvas yet (hotfix arrived before any main analysis) — start from a
@@ -833,7 +840,7 @@ export async function upsertCommitAnalysisCanvas(
       const title = existing?.title || analysisCanvasTitle(metadata, now);
       const main = await buildMainAnalysisBlocks(results, affectedApplications, envChanges, migrationLinks, metadata, title, repoSlices);
       const preservedHotfix = existing
-        ? extractHotfixSection((existing.content as unknown as BlockNoteBlock[]) ?? [])
+        ? extractHotfixSection(existingBlocks)
         : [];
       content = [...main.blocks, ...preservedHotfix];
       mentionedUserIds = main.mentionedUserIds;
@@ -842,10 +849,15 @@ export async function upsertCommitAnalysisCanvas(
     if (existing) {
       const prevMeta = (existing.metadata as Record<string, unknown>) || {};
       const prevMentions = Array.isArray(prevMeta.mentionedUserIds) ? (prevMeta.mentionedUserIds as string[]) : [];
+      const synced = await syncToYSweet(existing.id, content, createdByUserId);
+      if (!synced) {
+        throw new Error(`Failed to save commit analysis canvas ${existing.id} to Y-Sweet`);
+      }
       await prisma.canvas.update({
         where: { id: existing.id },
         data: {
-          content: content as any,
+          content: [],
+          isCollaborative: true,
           lastEditedBy: createdByUserId,
           lastEditedAt: now,
           updatedAt: now,
@@ -868,8 +880,6 @@ export async function upsertCommitAnalysisCanvas(
         },
       });
       logger.info(`[CanvasService] Updated release analysis canvas ${existing.id} (section=${section}) for ${metadata.workspace}/${metadata.repoSlug}`);
-      // The editor renders the Y-Sweet doc, not canvases.content.
-      await syncToYSweet(existing.id, content, createdByUserId);
       // Non-fatal side-effects (see persistNewAnalysisCanvas).
       try {
         await fireCanvasSideEffectsAndIndex(existing.id, createdByUserId, false);
@@ -905,7 +915,7 @@ function analysisCanvasTitle(metadata: CommitAnalysisCanvasMetadata, now: Date):
 
 // Shared new-canvas persistence (row + participant + side effects) for both entry points.
 async function persistNewAnalysisCanvas(args: {
-  content: unknown;
+  content: BlockNoteBlock[];
   mentionedUserIds: string[];
   commitCount: number;
   createdByUserId: string;
@@ -926,16 +936,21 @@ async function persistNewAnalysisCanvas(args: {
     throw new Error(`User ${createdByUserId} not found or has no workspace assigned`);
   }
 
+  const synced = await syncToYSweet(canvasId, content, createdByUserId);
+  if (!synced) {
+    throw new Error(`Failed to save commit analysis canvas ${canvasId} to Y-Sweet`);
+  }
+
   await prisma.canvas.create({
     data: {
       id: canvasId,
       title: finalTitle,
-      content: content as any,
+      content: [],
       workspaceId: creator.workspaceId,
       createdBy: createdByUserId,
       visibility: CanvasVisibility.PUBLIC,
       isTemplate: false,
-      isCollaborative: false,
+      isCollaborative: true,
       lastEditedBy: createdByUserId,
       lastEditedAt: now,
       createdAt: now,

@@ -1,41 +1,13 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { AgGridReact } from 'ag-grid-react';
-import {
-  AllCommunityModule,
-  ModuleRegistry,
-  themeQuartz,
-  ICellRendererParams,
-  ColDef,
-  GridApi,
-  RowClickedEvent,
-  GridReadyEvent,
-  ValueGetterParams,
-} from 'ag-grid-community';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useVirtualizer } from '@tanstack/react-virtual';
 import type { Ticket, TicketTag } from '@xyne/shared';
-import { isDeskChannelType } from '@xyne/shared';
+import { isDeskChannelType, TicketStatusV2 } from '@xyne/shared';
+import { useCachedQuery } from '@xyne/shared/hooks';
 import { toast } from 'sonner';
-import { useZero } from '../../../hooks/useZero';
-import { useActiveUsers, useUser } from '../../../hooks/useUsers';
-import { useUserGroupById, useUserGroups } from '../../../hooks/useUserGroup';
-import {
-  CalendarDefault as Calendar,
-  CheckTickSingle as Check,
-  UserDefault as User,
-} from '@xyne/icons';
-import Tooltip, { TruncatedTooltip } from '../../ui/Tooltip';
-import { formatStatusLabel, getPriorityIcon, isEtaUrgent } from '../TicketCard/TicketCard.utils';
-import { mutators } from '../../../zero/mutators';
-import { surfaceMutationError } from '../../../utils/zeroMutationToast';
-import {
-  AssigneeCellEditor,
-  StatusCellEditor,
-  PriorityCellEditor,
-  StageCellEditor,
-  DueDateCellEditor,
-  TagsCellEditor,
-} from './CellEditor';
+import { queries } from '../../../zero/queries';
+import { useUserGroups } from '../../../hooks/useUserGroup';
+import { TicketListRow, type SubTicketProgress } from './TicketListRow';
 import { BulkActionToolbar } from './BulkActionToolbar';
-import { trackTicketOutcome } from '../../../services/Analytics/ticketTracking';
 import {
   dueDateToEta,
   MAX_BULK_TICKETS,
@@ -44,17 +16,12 @@ import {
   useBulkTicketActions,
   type BulkTicketUpdates,
 } from './useBulkTicketActions';
-import { assigneeOptionToTicketUpdate, StatusOptions } from './TicketTableHelper';
-import Avatar from '../../ui/Avatar/Avatar';
+import { assigneeOptionToTicketUpdate } from './TicketTableHelper';
 import { useNavigate } from 'react-router-dom';
-import { v4 as uuidv4 } from 'uuid';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { useRouteContext } from '../../../hooks/useRouteContext';
 import { useAllChannels } from '../../../hooks/useChannels';
-import { getUserDisplayName } from '../../../utils/userDisplayName';
-import { createGridSelectionRenderers } from '../../ui/DataGrid/gridSelection';
-
-ModuleRegistry.registerModules([AllCommunityModule]);
+import { useShortcut } from '../../../shortcuts';
 
 interface TicketTableProps {
   tickets: Ticket[];
@@ -64,30 +31,43 @@ interface TicketTableProps {
   onTitleClick?: (ticket: Ticket) => void;
   visibleColumns?: Set<string>;
   isComfortView?: boolean;
-  extraColumns?: ColDef<Ticket>[];
   selectedIds?: ReadonlySet<string>;
   onSelectionChange?: (tickets: Ticket[]) => void;
-  /** boardId -> board name, for the optional Board column. */
-  boardNamesById?: Map<string, string>;
+  hasMore?: boolean;
+  isLoadingMore?: boolean;
+  isLoading?: boolean;
+  onLoadMore?: () => void;
+  totalCount?: number;
+  /** Scrolling ancestor driving virtualization; absent = own scroll container. */
+  scrollElement?: HTMLElement | null;
+  /** 'scroll' (default) = infinite scroll; 'pages' = numbered pager (desk). */
+  paginationMode?: 'scroll' | 'pages';
+  pageSize?: number;
 }
 
-// The grid holds every ticket the channel query returned (no page limit) and
-// the bulk bar fans out a mutation per row, so select-all caps the SELECTION at
-// MAX_BULK_TICKETS and toasts the overflow — the toolbar count stays honest.
-const { IndexHeaderRenderer, IndexCellRenderer } = createGridSelectionRenderers<Ticket>({
-  maxSelectable: MAX_BULK_TICKETS,
-  onOverflow: (limit, total) =>
-    toast.info(
-      `Selected the first ${limit} of ${total} tickets — bulk actions apply to ${limit} at a time.`,
-    ),
-  tracking: {
-    category: 'Tickets',
-    selectAll: 'ToggleSelectAll',
-    select: 'SelectRow',
-    deselect: 'DeselectRow',
-  },
-  checkIcon: Check,
-});
+// The registry already skips editable targets; these guards cover the rest.
+// j/k must not fight an open overlay; Enter must never double-fire on a
+// focused control (the control's own activation wins).
+const isInsideOverlay = (): boolean => {
+  const el = document.activeElement;
+  return (
+    el instanceof HTMLElement &&
+    !!el.closest(
+      '[role="dialog"],[role="menu"],[role="listbox"],[data-radix-popper-content-wrapper]',
+    )
+  );
+};
+const isActivatableFocused = (): boolean => {
+  const el = document.activeElement;
+  if (!(el instanceof HTMLElement) || el === document.body) return false;
+  const tag = el.tagName;
+  return tag === 'BUTTON' || tag === 'A' || el.getAttribute('role') === 'button';
+};
+
+const ROW_HEIGHT_COMPACT = 40;
+const ROW_HEIGHT_COMFORT = 52;
+const TRAILING_ROW_HEIGHT = 44;
+const LOAD_MORE_REMAINING_ROWS = 8;
 
 export const TicketTable: React.FC<TicketTableProps> = ({
   tickets,
@@ -97,14 +77,18 @@ export const TicketTable: React.FC<TicketTableProps> = ({
   onTitleClick,
   isComfortView = false,
   visibleColumns = new Set(['assignee', 'dueDate', 'status', 'priority', 'stage', 'tags']),
-  extraColumns,
   selectedIds,
   onSelectionChange,
-  boardNamesById,
+  hasMore = false,
+  isLoadingMore = false,
+  isLoading = false,
+  onLoadMore,
+  totalCount,
+  scrollElement,
+  paginationMode = 'scroll',
+  pageSize = 25,
 }) => {
-  const zero = useZero();
-  // Assignment dropdowns must not offer deactivated users — the server rejects them.
-  const activeUsers = useActiveUsers();
+  const isPagesMode = paginationMode === 'pages';
   const navigate = useNavigate();
   const { isMobile } = usePlatform();
   const { baseRoute, buildChannelRoute } = useRouteContext();
@@ -114,792 +98,508 @@ export const TicketTable: React.FC<TicketTableProps> = ({
   const allChannels = useAllChannels();
   const channelsById = useMemo(() => new Map(allChannels.map(c => [c.id, c])), [allChannels]);
 
-  // Board-aware stage routing and the bulk mutators are shared with the Desk list
-  // view's bulk bar, which selects the same tickets outside this grid.
-  const { routeStageChange, applyUpdates, applyTags } = useBulkTicketActions();
-
-  const [gridApi, setGridApi] = useState<GridApi | null>(null);
-  const [selectedCount, setSelectedCount] = useState(0);
-  // Tracked off the selection so the bulk bar can offer that channel's members only.
-  const [bulkChannelId, setBulkChannelId] = useState<string | undefined>(undefined);
-  const bulkAssignableUsers = useBulkAssignableUsers(bulkChannelId);
-
-  useEffect(() => {
-    if (!gridApi || selectedIds === undefined) return;
-    gridApi.forEachNode(node => {
-      if (!node.data) return;
-      const shouldBeSelected = selectedIds.has((node.data as Ticket).id);
-      if (node.isSelected() !== shouldBeSelected) node.setSelected(shouldBeSelected);
-    });
-  }, [gridApi, selectedIds, tickets]);
-
+  const { applyUpdates, applyTags } = useBulkTicketActions();
   const userGroups = useUserGroups();
 
-  const theme = themeQuartz.withParams({
-    backgroundColor: 'hsl(var(--background))',
-    foregroundColor: 'hsl(var(--foreground))',
-    chromeBackgroundColor: 'hsl(var(--card))',
-    headerBackgroundColor: 'hsl(var(--card))',
-    headerTextColor: 'hsl(var(--muted-foreground))',
-    headerFontWeight: '600',
-    fontSize: '12px',
-    ...(isComfortView
-      ? {
-          columnBorder: false,
-          headerColumnBorder: false,
-          borderColor: 'transparent',
-        }
-      : {
-          columnBorder: { color: 'hsl(var(--border))', style: 'solid' },
-          headerColumnBorder: { color: 'hsl(var(--border))', style: 'solid' },
-        }),
-    rowBorder: { color: 'hsl(var(--border))', style: 'solid' },
-    headerRowBorder: { color: 'hsl(var(--border))', style: 'solid' },
-    selectedRowBackgroundColor: 'hsl(var(--accent))',
-  });
+  const [selected, setSelected] = useState<Map<string, Ticket>>(new Map());
+  const bulkChannelId = useMemo(() => sharedChannelId(Array.from(selected.values())), [selected]);
+  const bulkAssignableUsers = useBulkAssignableUsers(bulkChannelId);
 
-  const columnDefs = useMemo<ColDef<Ticket>[]>(() => {
-    const allColumns: Array<ColDef<Ticket> & { key: string }> = [
-      {
-        key: 'index',
-        headerName: '#',
-        width: 60,
-        maxWidth: 60,
-        pinned: 'left',
-        lockPosition: true,
-        suppressMovable: true,
-        headerComponent: IndexHeaderRenderer,
-        cellRenderer: IndexCellRenderer,
-        cellStyle: { padding: 0 },
-      },
+  const emitSelection = useCallback(
+    (next: Map<string, Ticket>) => {
+      setSelected(next);
+      onSelectionChange?.(Array.from(next.values()));
+    },
+    [onSelectionChange],
+  );
 
-      {
-        key: 'title',
-        headerName: 'Ticket name',
-        field: 'title',
-        minWidth: isComfortView ? 340 : 300,
-        flex: 1,
-        editable: true,
-        cellEditor: 'agTextCellEditor',
-        cellEditorParams: {
-          maxLength: 250,
-        },
-        onCellValueChanged: params => {
-          const newTitle = typeof params.newValue === 'string' ? params.newValue.trim() : '';
-          const oldValue = typeof params.oldValue === 'string' ? params.oldValue : '';
+  const selectedRef = useRef(selected);
+  selectedRef.current = selected;
+  const toggleSelect = useCallback(
+    (ticket: Ticket) => {
+      const next = new Map(selectedRef.current);
+      if (next.has(ticket.id)) next.delete(ticket.id);
+      else next.set(ticket.id, ticket);
+      setSelected(next);
+      onSelectionChange?.(Array.from(next.values()));
+    },
+    [onSelectionChange],
+  );
 
-          if (newTitle && newTitle !== oldValue && params.data) {
-            void surfaceMutationError(
-              zero.mutate(
-                mutators.ticket.update({
-                  id: params.data.id,
-                  title: newTitle,
-                  updatedAt: Date.now(),
-                }),
-              ),
-              'Failed to update title',
-            ).then(ok => {
-              if (ok && params.data) {
-                trackTicketOutcome('TICKET_FIELD_UPDATED', params.data, {
-                  surface: 'table_inline',
-                  field: 'title',
-                });
-              }
-            });
-          } else if (!newTitle) {
-            params.node?.setDataValue('title', oldValue);
-          }
-        },
-        cellRenderer: (params: ICellRendererParams<Ticket>): React.ReactNode => {
-          if (!params.data) return null;
+  const selectedIdsKey = selectedIds ? Array.from(selectedIds).sort().join(',') : null;
+  useEffect(() => {
+    if (selectedIds === undefined) return;
+    setSelected(prev => {
+      const next = new Map<string, Ticket>();
+      for (const ticket of tickets) if (selectedIds.has(ticket.id)) next.set(ticket.id, ticket);
+      for (const [id, ticket] of prev) {
+        if (selectedIds.has(id) && !next.has(id)) next.set(id, ticket);
+      }
+      return next;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed by content, not Set identity
+  }, [selectedIdsKey, tickets]);
 
-          const handleClick = (e: React.MouseEvent) => {
-            e.stopPropagation();
-          };
+  const handleSelectAll = useCallback(() => {
+    const next = new Map<string, Ticket>();
+    for (const ticket of tickets.slice(0, MAX_BULK_TICKETS)) next.set(ticket.id, ticket);
+    emitSelection(next);
+    if (tickets.length > MAX_BULK_TICKETS || hasMore) {
+      toast.info(
+        `Selected the first ${next.size} loaded tickets — bulk actions apply to ${MAX_BULK_TICKETS} at a time.`,
+      );
+    }
+  }, [tickets, hasMore, emitSelection]);
 
-          const handleKeyDown = (e: React.KeyboardEvent) => {
-            if (e.key === 'Enter' || e.key === ' ') {
-              e.stopPropagation();
-            }
-          };
-
-          const handleTicketClick = () => {
-            if (!params.data) return;
-
-            // Desk tickets open in the Support screen, not the chat ticket panel.
-            const ticketChannel = allChannels.find(c => c.id === params.data!.channelId);
-            if (isDeskChannelType(ticketChannel?.type) && params.data.xyneId) {
-              void navigate(`/support/${params.data.channelId}/${params.data.xyneId}`, {
-                state: {
-                  conversationId: params.data.conversationId,
-                  ticketId: params.data.id,
-                  trackSource: 'ticket_table_row',
-                },
-              });
-              return;
-            }
-
-            if (onTitleClick) {
-              onTitleClick(params.data);
-              return;
-            }
-
-            const currentUrl = window.location.pathname + window.location.search;
-            const navState = {
-              state: {
-                fromMyTickets: false,
-                returnToUrl: currentUrl,
-                trackSource: 'ticket_table_row',
-              },
-            };
-
-            // Desk/support tickets (EMAIL / SLACK / APP channels) open in the
-            // Support desk email view (/support/:channelId/:xyneId), not chat.
-            const ticketChannelType = channelsById.get(params.data.channelId)?.type;
-            if (isDeskChannelType(ticketChannelType)) {
-              // Deep-link when we have the xyneId; else fall back to the channel's
-              // support inbox — a desk ticket must never open in chat.
-              const supportRoute = params.data.xyneId
-                ? `/support/${params.data.channelId}/${params.data.xyneId}`
-                : `/support/${params.data.channelId}`;
-              void navigate(supportRoute, navState);
-              return;
-            }
-
-            // On mobile: navigate directly to ThreadMessages route with details tab
-            // On desktop: use tab-based route for expanded view in ConversationPannel
-            if (isMobile) {
-              void navigate(
-                `${baseRoute}/${params.data.channelId}/${params.data.conversationId}/${params.data.id}?selectedTab=details`,
-                navState,
-              );
-            } else {
-              void navigate(
-                buildChannelRoute(params.data.channelId, {
-                  tab: 'tickets',
-                  ticketId: params.data.id,
-                  conversationId: params.data.conversationId,
-                }),
-                navState,
-              );
-            }
-          };
-
-          return (
-            <div
-              className='flex items-center gap-2 h-full'
-              onClick={handleClick}
-              onKeyDown={handleKeyDown}
-              role='button'
-              tabIndex={0}
-              data-track-category='Tickets'
-              data-track-name='TicketRow'
-            >
-              <button
-                className='text-xs text-muted-foreground font-medium font-mono hover:text-blue-600 hover:underline transition-colors'
-                onClick={handleTicketClick}
-                data-track-category='Tickets'
-                data-track-name='OpenTicket'
-              >
-                {params.data.xyneId}
-              </button>
-              <TruncatedTooltip content={String(params.value ?? '')}>
-                <span className='truncate font-medium text-foreground'>{params.value}</span>
-              </TruncatedTooltip>
-            </div>
-          );
-        },
-      },
-
-      {
-        key: 'createdAt',
-        headerName: 'Created at',
-        field: 'createdAt',
-        minWidth: 175,
-        cellRenderer: (params: ICellRendererParams<Ticket>) => {
-          if (!params.value) return <span className='text-muted-foreground'>—</span>;
-          const createdAt = new Date(params.value as string | number | Date);
-          if (Number.isNaN(createdAt.getTime())) {
-            return <span className='text-muted-foreground'>—</span>;
-          }
-          const fullTimestamp = createdAt.toLocaleString('en-US', {
-            month: 'short',
-            day: 'numeric',
-            year: 'numeric',
-            hour: 'numeric',
-            minute: '2-digit',
-            hour12: true,
-          });
-          return (
-            <Tooltip content={fullTimestamp}>
-              <span className='text-sm text-muted-foreground whitespace-nowrap'>
-                {fullTimestamp}
-              </span>
-            </Tooltip>
-          );
-        },
-      },
-
-      {
-        key: 'age',
-        colId: 'age',
-        headerName: 'Age',
-        minWidth: 80,
-        // Sorts on days elapsed, not createdAt — that would invert the order.
-        valueGetter: (params: ValueGetterParams<Ticket>) => {
-          const createdAt = params.data?.createdAt;
-          if (!createdAt) return null;
-          const created = new Date(createdAt);
-          if (Number.isNaN(created.getTime())) return null;
-          return Math.max(0, Math.floor((Date.now() - created.getTime()) / 86400000));
-        },
-        cellRenderer: (params: ICellRendererParams<Ticket>) =>
-          typeof params.value === 'number' ? (
-            <span className='text-sm text-muted-foreground whitespace-nowrap'>{params.value}d</span>
-          ) : (
-            <span className='text-muted-foreground'>—</span>
-          ),
-      },
-
-      {
-        key: 'assignee',
-        headerName: 'Assignee',
-        field: 'assignedTo',
-        cellRenderer: AssigneeCellRenderer,
-        editable: true,
-        minWidth: 213,
-        cellEditor: AssigneeCellEditor,
-        cellEditorParams: {
-          users: activeUsers,
-        },
-        onCellValueChanged: params => {
-          if (params.newValue !== params.oldValue && params.data) {
-            void surfaceMutationError(
-              zero.mutate(
-                mutators.ticket.update({
-                  id: params.data.id,
-                  // The editor's options are encoded `user:<id>` / `group:<id>`;
-                  // the row stores a bare id, so translate before writing.
-                  ...(typeof params.newValue === 'string' && params.newValue
-                    ? assigneeOptionToTicketUpdate(params.newValue)
-                    : {}),
-                  updatedAt: Date.now(),
-                }),
-              ),
-              'Failed to update assignee',
-            ).then(ok => {
-              if (ok && params.data) {
-                trackTicketOutcome('TICKET_ASSIGNED', params.data, {
-                  surface: 'table_inline',
-                  unassigned: !params.newValue,
-                  toGroup:
-                    typeof params.newValue === 'string' && params.newValue.startsWith('group:'),
-                });
-              }
-            });
-          }
-        },
-      },
-
-      {
-        key: 'dueDate',
-        headerName: 'Due date',
-        field: 'eta',
-        editable: true,
-        minWidth: 140,
-        cellEditor: DueDateCellEditor,
-        cellRenderer: (params: ICellRendererParams<Ticket>) => {
-          if (!params.value) {
-            return (
-              <div className='flex items-center gap-3 h-full text-muted-foreground'>
-                <Calendar className='w-3.5 h-3.5' />
-                <span className='text-sm'>No due date</span>
-              </div>
-            );
-          }
-
-          const date = new Date(params.value as string | number | Date);
-          const formattedDate = date.toLocaleDateString('en-US', {
-            month: 'short',
-            day: 'numeric',
-            year: 'numeric',
-          });
-
-          const isUrgent = isEtaUrgent(params.data?.eta, params.data?.statusV2);
-
-          return (
-            <div
-              className={`flex items-center gap-2 h-full ${
-                isUrgent ? 'text-red-500' : 'text-muted-foreground'
-              }`}
-            >
-              <Calendar className='w-3.5 h-3.5' />
-              <span className='truncate text-sm'>{formattedDate}</span>
-            </div>
-          );
-        },
-      },
-
-      {
-        key: 'status',
-        headerName: 'Status Category',
-        field: 'statusV2',
-        editable: true,
-        minWidth: 170,
-        cellEditor: StatusCellEditor,
-        onCellValueChanged: params => {
-          if (params.newValue !== params.oldValue && params.data) {
-            void surfaceMutationError(
-              zero.mutate(
-                mutators.ticket.update({
-                  id: params.data.id,
-                  statusV2: String(params.newValue),
-                  updatedAt: Date.now(),
-                }),
-              ),
-              'Failed to update status',
-            ).then(ok => {
-              if (ok && params.data) {
-                trackTicketOutcome('TICKET_STATUS_CHANGED', params.data, {
-                  surface: 'table_inline',
-                  to: String(params.newValue),
-                  previous: params.oldValue ?? null,
-                });
-              }
-            });
-          }
-        },
-        cellRenderer: (params: ICellRendererParams<Ticket>) => {
-          const statusOption = StatusOptions.find(opt => opt.value === params.value);
-          return (
-            <div className='flex items-center gap-2 h-full'>
-              <div
-                className={`flex items-center gap-2 px-2 rounded-lg ${statusOption?.bgColor} ${statusOption?.textColor}`}
-              >
-                {statusOption?.icon && (
-                  <span className='flex-shrink-0 flex items-center justify-center'>
-                    {statusOption.icon}
-                  </span>
-                )}
-                <span className='inline-flex items-center rounded-full py-0.5 text-sm font-medium'>
-                  {formatStatusLabel(String(params.value))}
-                </span>
-              </div>
-            </div>
-          );
-        },
-      },
-
-      {
-        key: 'priority',
-        headerName: 'Priority',
-        field: 'priority',
-        editable: true,
-        minWidth: 140,
-        cellEditor: PriorityCellEditor,
-        onCellValueChanged: params => {
-          if (params.newValue !== params.oldValue && params.data) {
-            void surfaceMutationError(
-              zero.mutate(
-                mutators.ticket.update({
-                  id: params.data.id,
-                  priority: params.newValue as Ticket['priority'],
-                  updatedAt: Date.now(),
-                }),
-              ),
-              'Failed to update priority',
-            ).then(ok => {
-              if (ok && params.data) {
-                trackTicketOutcome('TICKET_PRIORITY_CHANGED', params.data, {
-                  surface: 'table_inline',
-                  to: params.newValue,
-                  previous: params.oldValue ?? null,
-                });
-              }
-            });
-          }
-        },
-        cellRenderer: (params: ICellRendererParams<Ticket>) => {
-          const formatPriority = (priority: string | null | undefined) => {
-            if (!priority) return '—';
-            return priority.charAt(0).toUpperCase() + priority.slice(1).toLowerCase();
-          };
-
-          const priorityValue = params.value as Ticket['priority'];
-
-          return (
-            <div className='flex items-center gap-2 h-full'>
-              <Tooltip content={`Priority: ${formatPriority(priorityValue)}`}>
-                <div className='flex items-center text-muted-foreground'>
-                  {getPriorityIcon(priorityValue)}
-                </div>
-              </Tooltip>
-              <span className='text-muted-foreground font-medium text-sm'>
-                {formatPriority(priorityValue)}
-              </span>
-            </div>
-          );
-        },
-      },
-
-      {
-        key: 'stage',
-        headerName: 'Stage',
-        field: 'stageName',
-        editable: true,
-        minWidth: 140,
-        cellEditor: StageCellEditor,
-        onCellValueChanged: params => {
-          if (params.newValue !== params.oldValue && params.data) {
-            void routeStageChange(params.data.id, params.data.boardId, String(params.newValue));
-          }
-        },
-        cellRenderer: (params: ICellRendererParams<Ticket>) => (
-          <div className='flex items-center h-full'>
-            {/* Stage names outgrow the 140px column; without `truncate` the cell
-                hard-clipped them with no ellipsis and no way to read the rest. */}
-            <TruncatedTooltip content={String(params.value ?? '—')}>
-              <span className='text-sm text-muted-foreground truncate'>{params.value ?? '—'}</span>
-            </TruncatedTooltip>
-          </div>
-        ),
-      },
-
-      {
-        key: 'createdBy',
-        headerName: 'Created by',
-        field: 'createdBy',
-        minWidth: 200,
-        cellRenderer: CreatedByCellRenderer,
-      },
-
-      {
-        key: 'board',
-        headerName: 'Board',
-        field: 'boardId',
-        minWidth: 160,
-        valueGetter: (params: ValueGetterParams<Ticket>) => {
-          const id = params.data?.boardId;
-          return (id && boardNamesById?.get(id)) || '';
-        },
-        cellRenderer: (params: ICellRendererParams<Ticket>) => (
-          <div className='flex items-center h-full'>
-            <TruncatedTooltip content={String(params.value || '—')}>
-              <span className='text-sm text-muted-foreground truncate'>{params.value || '—'}</span>
-            </TruncatedTooltip>
-          </div>
-        ),
-      },
-
-      {
-        key: 'channel',
-        headerName: 'Channel',
-        field: 'channelId',
-        minWidth: 160,
-        valueGetter: (params: ValueGetterParams<Ticket>) => {
-          const id = params.data?.channelId;
-          return (id && channelsById.get(id)?.name) || '';
-        },
-        cellRenderer: (params: ICellRendererParams<Ticket>) => (
-          <div className='flex items-center h-full'>
-            <TruncatedTooltip content={String(params.value || '—')}>
-              <span className='text-sm text-muted-foreground truncate'>{params.value || '—'}</span>
-            </TruncatedTooltip>
-          </div>
-        ),
-      },
-
-      {
-        key: 'type',
-        headerName: 'Type',
-        field: 'ticketType',
-        minWidth: 140,
-        cellRenderer: (params: ICellRendererParams<Ticket>) => (
-          <div className='flex items-center h-full'>
-            <span className='text-sm text-muted-foreground truncate'>{params.value || '—'}</span>
-          </div>
-        ),
-      },
-
-      {
-        key: 'tags',
-        headerName: 'Labels',
-        editable: true,
-        cellEditor: TagsCellEditor,
-        cellEditorParams: {
-          availableTags: availableTags,
-        },
-        valueGetter: params => {
-          if (!params.data) return [];
-          const tags = ticketTags?.get(params.data.id) || [];
-          return tags.map(t => t.name);
-        },
-        valueSetter: params => {
-          if (!params.data) return false;
-
-          const oldTags = ticketTags?.get(params.data.id) || [];
-          const oldTagNames = oldTags.map(t => t.name);
-          const newTagNames: string[] =
-            Array.isArray(params.newValue) &&
-            params.newValue.every((item): item is string => typeof item === 'string')
-              ? params.newValue
-              : [];
-
-          const toAdd = newTagNames.filter(t => !oldTagNames.includes(t));
-          const toRemove = oldTagNames.filter(t => !newTagNames.includes(t));
-          toAdd.forEach(tagName => {
-            if (params.data) {
-              void surfaceMutationError(
-                zero.mutate(
-                  mutators.ticketTagV2.create({
-                    ticketId: params.data.id,
-                    tagId: uuidv4(),
-                    projectTagId: uuidv4(),
-                    mappingId: uuidv4(),
-                    projectId: params.data.projectId,
-                    tagName,
-                  }),
-                ),
-                'Failed to add tag',
-              );
-            }
-          });
-
-          toRemove.forEach(tagName => {
-            const tag = oldTags.find(t => t.name === tagName);
-            if (tag?.id) {
-              void surfaceMutationError(
-                zero.mutate(mutators.ticketTagV2.delete({ tagId: tag.id, mappingId: tag.id })),
-                'Failed to remove tag',
-              );
-            }
-          });
-          if (params.data && (toAdd.length > 0 || toRemove.length > 0)) {
-            trackTicketOutcome('TICKET_FIELD_UPDATED', params.data, {
-              surface: 'table_inline',
-              field: 'tags',
-              addedCount: toAdd.length,
-              removedCount: toRemove.length,
-            });
-          }
-          return false;
-        },
-        cellRenderer: (params: ICellRendererParams<Ticket>) => {
-          if (!params.data) return null;
-
-          const tags = ticketTags?.get(params.data.id) || [];
-          if (!tags.length) return <span className='text-muted-foreground'>—</span>;
-
-          return (
-            <div className='flex items-center gap-2 h-full overflow-hidden'>
-              {tags.slice(0, 2).map(tag => (
-                <span
-                  key={tag.id}
-                  className='flex items-center gap-1.5 px-2 py-1 rounded-md text-xs font-medium border bg-muted text-muted-foreground border-border'
-                >
-                  <span className='w-2 h-2 rounded-full bg-xyne-purple-400'></span>
-                  {tag.name}
-                </span>
-              ))}
-              {tags.length > 2 && (
-                <span className='text-xs text-muted-foreground'>+{tags.length - 2}</span>
-              )}
-            </div>
-          );
-        },
-      },
-    ];
-
-    return [
-      ...allColumns.filter(
-        col => col.key === 'index' || col.key === 'title' || visibleColumns.has(col.key),
-      ),
-      ...(extraColumns ?? []),
-    ];
-  }, [
-    ticketTags,
-    zero,
-    visibleColumns,
-    activeUsers,
-    availableTags,
-    onTitleClick,
-    extraColumns,
-    channelsById,
-    boardNamesById,
-  ]);
+  const clearSelection = useCallback(() => emitSelection(new Map()), [emitSelection]);
 
   const handleBulkUpdate = useCallback(
     (updates: BulkTicketUpdates = {}) => {
-      if (!gridApi) return;
       if (Object.keys(updates).length > 0) {
-        applyUpdates(gridApi.getSelectedRows() as Ticket[], updates);
+        applyUpdates(Array.from(selected.values()), updates);
       }
-      gridApi.deselectAll();
-      setSelectedCount(0);
+      clearSelection();
     },
-    [gridApi, applyUpdates],
+    [selected, applyUpdates, clearSelection],
   );
 
   const handleBulkTagUpdate = useCallback(
     (tagsToAdd: string[]) => {
-      if (!gridApi) return;
-      applyTags(gridApi.getSelectedRows() as Ticket[], tagsToAdd);
-      gridApi.deselectAll();
+      applyTags(Array.from(selected.values()), tagsToAdd);
+      clearSelection();
     },
-    [gridApi, applyTags],
+    [selected, applyTags, clearSelection],
   );
 
-  return (
-    <>
-      <div className='flex flex-col'>
-        <div className='w-full min-h-[80px]'>
-          <AgGridReact
-            getRowId={params => (params.data as Ticket).id}
-            stopEditingWhenCellsLoseFocus={false}
-            domLayout='autoHeight'
-            rowSelection={{
-              mode: 'multiRow',
-              checkboxes: false,
-              enableClickSelection: false,
-              headerCheckbox: false,
-            }}
-            theme={theme}
-            ensureDomOrder={true}
-            onCellEditingStopped={params => {
-              if (params.node.rowIndex !== null && params.column) {
-                params.api.setFocusedCell(params.node.rowIndex, params.column.getId());
-              }
-            }}
-            onSelectionChanged={params => {
-              const selectedRows = params.api.getSelectedRows() as Ticket[];
-              setSelectedCount(selectedRows.length);
-              setBulkChannelId(sharedChannelId(selectedRows));
-              onSelectionChange?.(selectedRows);
-            }}
-            rowData={tickets}
-            columnDefs={columnDefs}
-            rowHeight={44}
-            headerHeight={44}
-            onRowClicked={(p: RowClickedEvent<Ticket>) => {
-              if (!p.event?.defaultPrevented && p.data) {
-                onRowClick?.(p.data);
-              }
-            }}
-            onGridReady={(params: GridReadyEvent) => {
-              setGridApi(params.api);
-              setTimeout(() => {
-                params.api.setFocusedCell(0, 'title');
-              }, 100);
-            }}
-            suppressCellFocus={false}
-            suppressNoRowsOverlay={true}
-            alwaysShowHorizontalScroll
-            pagination={true}
-            paginationPageSize={25}
-            paginationPageSizeSelector={false}
-          />
-        </div>
+  const openTicketImpl = useCallback(
+    (ticket: Ticket) => {
+      // Desk tickets open in the Support screen, not the chat ticket panel.
+      const ticketChannel = allChannels.find(c => c.id === ticket.channelId);
+      if (isDeskChannelType(ticketChannel?.type) && ticket.xyneId) {
+        void navigate(`/support/${ticket.channelId}/${ticket.xyneId}`, {
+          state: { conversationId: ticket.conversationId, ticketId: ticket.id },
+        });
+        return;
+      }
 
-        <div>
-          {selectedCount > 0 && (
-            <BulkActionToolbar
-              selectedCount={selectedCount}
-              users={bulkAssignableUsers}
-              userGroups={userGroups}
-              onAssigneeChange={val => handleBulkUpdate(assigneeOptionToTicketUpdate(val))}
-              onStatusChange={val => handleBulkUpdate({ statusV2: val })}
-              onPriorityChange={val => handleBulkUpdate(val === null ? {} : { priority: val })}
-              onStageChange={val => handleBulkUpdate({ stage: { name: val } })}
-              onDueDateChange={date => {
-                // `ticket.update` has no way to null an eta, so only a picked
-                // date is applied — clearing in bulk isn't supported yet.
-                if (date) handleBulkUpdate({ eta: dueDateToEta(date) });
-              }}
-              onClearSelection={() => handleBulkUpdate()}
+      if (onTitleClick) {
+        onTitleClick(ticket);
+        return;
+      }
+
+      const currentUrl = window.location.pathname + window.location.search;
+      const navState = { state: { fromMyTickets: false, returnToUrl: currentUrl } };
+
+      // Desk/support tickets (EMAIL / SLACK / APP channels) open in the
+      // Support desk email view (/support/:channelId/:xyneId), not chat.
+      const ticketChannelType = channelsById.get(ticket.channelId)?.type;
+      if (isDeskChannelType(ticketChannelType)) {
+        // Deep-link when we have the xyneId; else fall back to the channel's
+        // support inbox — a desk ticket must never open in chat.
+        const supportRoute = ticket.xyneId
+          ? `/support/${ticket.channelId}/${ticket.xyneId}`
+          : `/support/${ticket.channelId}`;
+        void navigate(supportRoute, navState);
+        return;
+      }
+
+      // On mobile: navigate directly to ThreadMessages route with details tab
+      // On desktop: use tab-based route for expanded view in ConversationPannel
+      if (isMobile) {
+        void navigate(
+          `${baseRoute}/${ticket.channelId}/${ticket.conversationId}/${ticket.id}?selectedTab=details`,
+          navState,
+        );
+      } else {
+        void navigate(
+          buildChannelRoute(ticket.channelId, {
+            tab: 'tickets',
+            ticketId: ticket.id,
+            conversationId: ticket.conversationId,
+          }),
+          navState,
+        );
+      }
+    },
+    [allChannels, channelsById, onTitleClick, navigate, isMobile, baseRoute, buildChannelRoute],
+  );
+  const openTicketRef = useRef(openTicketImpl);
+  useEffect(() => {
+    openTicketRef.current = openTicketImpl;
+  });
+  const openTicket = useCallback((ticket: Ticket) => openTicketRef.current(ticket), []);
+  const onOpen = onRowClick ?? openTicket;
+
+  const listRef = useRef<HTMLDivElement | null>(null);
+  const internalScrollRef = useRef<HTMLDivElement | null>(null);
+  const usesExternalScroller = scrollElement !== undefined;
+  const rowHeight = isComfortView ? ROW_HEIGHT_COMFORT : ROW_HEIGHT_COMPACT;
+
+  const [scrollMargin, setScrollMargin] = useState(0);
+  const measureScrollMargin = useCallback((): void => {
+    const scroller = scrollElement;
+    if (!scroller || !listRef.current) return;
+    const offset =
+      listRef.current.getBoundingClientRect().top -
+      scroller.getBoundingClientRect().top +
+      scroller.scrollTop;
+    setScrollMargin(prev => (Math.abs(prev - offset) < 1 ? prev : offset));
+  }, [scrollElement]);
+  useLayoutEffect(() => {
+    if (usesExternalScroller) measureScrollMargin();
+  });
+  useLayoutEffect(() => {
+    if (!usesExternalScroller || !scrollElement) return undefined;
+    const observer = new ResizeObserver(measureScrollMargin);
+    observer.observe(scrollElement);
+    return () => observer.disconnect();
+  }, [usesExternalScroller, scrollElement, measureScrollMargin]);
+
+  const [pageIndex, setPageIndex] = useState(0);
+  const pageCount = Math.max(1, Math.ceil(tickets.length / pageSize));
+  useEffect(() => {
+    setPageIndex(prev => Math.min(prev, pageCount - 1));
+  }, [pageCount]);
+  const pageTickets = useMemo(
+    () => (isPagesMode ? tickets.slice(pageIndex * pageSize, (pageIndex + 1) * pageSize) : tickets),
+    [isPagesMode, tickets, pageIndex, pageSize],
+  );
+
+  const showTrailingRow =
+    !isPagesMode && tickets.length > 0 && (hasMore || isLoadingMore || totalCount !== undefined);
+  const itemCount = isPagesMode ? 0 : tickets.length + (showTrailingRow ? 1 : 0);
+
+  const getScrollElement = useCallback(
+    () => (usesExternalScroller ? (scrollElement ?? null) : internalScrollRef.current),
+    [usesExternalScroller, scrollElement],
+  );
+
+  const virtualizer = useVirtualizer({
+    count: itemCount,
+    getScrollElement,
+    estimateSize: index => (index >= tickets.length ? TRAILING_ROW_HEIGHT : rowHeight),
+    // ~1.5 viewports of rows pre-mounted each direction, so fast scrolls land
+    // on rendered rows instead of a blank gap (the ghost shimmer covers what
+    // even this can't). Pickers and hover cards do their heavy work on open.
+    overscan: 45,
+    scrollMargin: usesExternalScroller ? scrollMargin : 0,
+  });
+  const virtualItems = virtualizer.getVirtualItems();
+
+  // Keyboard navigation: j/k to move, Enter to open the highlighted row.
+  const [highlightedIndex, setHighlightedIndex] = useState<number | null>(null);
+  const rowCount = tickets.length;
+  useEffect(() => {
+    setHighlightedIndex(prev =>
+      prev !== null && prev >= rowCount ? Math.max(0, rowCount - 1) : prev,
+    );
+  }, [rowCount]);
+
+  const moveBy = useCallback(
+    (delta: number) => {
+      setHighlightedIndex(prev => {
+        const next =
+          prev === null
+            ? delta > 0
+              ? 0
+              : Math.max(0, rowCount - 1)
+            : Math.max(0, Math.min(rowCount - 1, prev + delta));
+        if (isPagesMode) {
+          setPageIndex(Math.floor(next / pageSize));
+        } else {
+          virtualizer.scrollToIndex(next, { align: 'auto' });
+        }
+        return next;
+      });
+    },
+    [rowCount, isPagesMode, pageSize, virtualizer],
+  );
+
+  useShortcut('j', () => moveBy(1), {
+    scope: 'global',
+    description: 'Next ticket in list',
+    category: 'Tickets',
+    enabled: rowCount > 0,
+    when: () => !isInsideOverlay(),
+  });
+  useShortcut('k', () => moveBy(-1), {
+    scope: 'global',
+    description: 'Previous ticket in list',
+    category: 'Tickets',
+    enabled: rowCount > 0,
+    when: () => !isInsideOverlay(),
+  });
+  useShortcut(
+    'enter',
+    () => {
+      if (highlightedIndex === null) return;
+      const row = tickets[highlightedIndex];
+      if (row) onOpen(row);
+    },
+    {
+      scope: 'global',
+      description: 'Open selected ticket',
+      category: 'Tickets',
+      enabled: rowCount > 0 && highlightedIndex !== null,
+      when: () => !isInsideOverlay() && !isActivatableFocused(),
+    },
+  );
+
+  const lastRequestedAtRef = useRef(-1);
+
+  useEffect(() => {
+    lastRequestedAtRef.current = -1;
+  }, [onLoadMore]);
+  const lastRenderedIndex = virtualItems.length ? virtualItems[virtualItems.length - 1]!.index : -1;
+  useEffect(() => {
+    if (!hasMore || isLoadingMore || !onLoadMore) return;
+    if (lastRenderedIndex < 0 || tickets.length === 0) return;
+    if (lastRenderedIndex < tickets.length - LOAD_MORE_REMAINING_ROWS) return;
+    if (lastRequestedAtRef.current === tickets.length) return;
+    lastRequestedAtRef.current = tickets.length;
+    onLoadMore();
+  }, [lastRenderedIndex, tickets.length, hasMore, isLoadingMore, onLoadMore]);
+
+  const [visibleTicketIds, setVisibleTicketIds] = useState<string[]>([]);
+  useEffect(() => {
+    const ids = isPagesMode
+      ? pageTickets.map(t => t.id).sort()
+      : virtualItems
+          .filter(item => item.index < tickets.length)
+          .map(item => tickets[item.index]!.id)
+          .sort();
+    setVisibleTicketIds(prev =>
+      prev.length === ids.length && prev.every((id, i) => id === ids[i]) ? prev : ids,
+    );
+  }, [virtualItems, tickets, isPagesMode, pageTickets]);
+
+  const [subTicketMappings] = useCachedQuery(
+    queries.subTicketMappingsForTickets({ ticketIds: visibleTicketIds }),
+    { enabled: visibleTicketIds.length > 0 },
+  );
+  const subProgressByTicketId = useMemo(() => {
+    const map = new Map<string, SubTicketProgress>();
+    subTicketMappings?.forEach(mapping => {
+      const entry = map.get(mapping.ticketId) ?? { done: 0, total: 0 };
+      entry.total += 1;
+      if (mapping.subTicket?.mappedTicket?.statusV2 === TicketStatusV2.COMPLETED) entry.done += 1;
+      map.set(mapping.ticketId, entry);
+    });
+    return map;
+  }, [subTicketMappings]);
+
+  const visibleBoardIds = useMemo(() => {
+    const ticketsById = new Map(tickets.map(t => [t.id, t]));
+    return Array.from(
+      new Set(
+        visibleTicketIds.map(id => ticketsById.get(id)?.boardId).filter((id): id is string => !!id),
+      ),
+    ).sort();
+  }, [visibleTicketIds, tickets]);
+  const [visibleBoards] = useCachedQuery(queries.boardsByIds({ boardIds: visibleBoardIds }), {
+    enabled: visibleBoardIds.length > 0,
+  });
+  const boardNameById = useMemo(
+    () => new Map((visibleBoards ?? []).map(board => [board.id, board.name])),
+    [visibleBoards],
+  );
+
+  // Fast flicks outrun React row rendering no matter the overscan; these ghost
+  // regions cover the not-yet-mounted gaps with skeleton rows drawn in CSS,
+  // which paints synchronously with the scroll. Real rows replace them as soon
+  // as the virtualizer catches up.
+  const ghostStyle = useMemo<React.CSSProperties>(() => {
+    const barTop = (rowHeight - 12) / 2;
+    return {
+      backgroundImage:
+        `linear-gradient(to bottom, transparent ${barTop}px, hsl(var(--muted)) ${barTop}px, hsl(var(--muted)) ${barTop + 12}px, transparent ${barTop + 12}px), ` +
+        `linear-gradient(to bottom, transparent ${rowHeight - 1}px, hsl(var(--border)) ${rowHeight - 1}px)`,
+      backgroundSize: `min(45%, 360px) ${rowHeight}px, 100% ${rowHeight}px`,
+      backgroundPosition: '48px 0, 0 0',
+      backgroundRepeat: 'repeat-y, repeat-y',
+    };
+  }, [rowHeight]);
+  const ghostRegions: Array<{ top: number; height: number }> = [];
+  if (virtualItems.length > 0) {
+    const offset = usesExternalScroller ? scrollMargin : 0;
+    const firstTop = virtualItems[0]!.start - offset;
+    const lastEnd = virtualItems[virtualItems.length - 1]!.end - offset;
+    const totalSize = virtualizer.getTotalSize();
+    if (firstTop > 0) ghostRegions.push({ top: 0, height: firstTop });
+    if (lastEnd < totalSize) ghostRegions.push({ top: lastEnd, height: totalSize - lastEnd });
+  }
+
+  const listBody = (
+    <div
+      ref={listRef}
+      role='list'
+      className='relative w-full'
+      // getTotalSize() excludes scrollMargin; items translate by (start - margin).
+      style={{ height: `${virtualizer.getTotalSize()}px` }}
+    >
+      {ghostRegions.map(region => (
+        <div
+          key={`ghost-${region.top}`}
+          aria-hidden
+          className='pointer-events-none absolute left-0 w-full animate-pulse'
+          style={{ top: `${region.top}px`, height: `${region.height}px`, ...ghostStyle }}
+        />
+      ))}
+      {virtualItems.map(item => {
+        const start = item.start - (usesExternalScroller ? scrollMargin : 0);
+        if (item.index >= tickets.length) {
+          return (
+            <div
+              key='trailing'
+              className='absolute left-0 top-0 flex w-full items-center justify-center text-xs text-muted-foreground'
+              style={{ height: `${item.size}px`, transform: `translateY(${start}px)` }}
+            >
+              {hasMore || isLoadingMore
+                ? 'Loading more tickets…'
+                : // A total below the loaded count means the counts service is
+                  // still loading or failed — show no misleading number.
+                  totalCount !== undefined && totalCount >= tickets.length
+                  ? `End of results — ${totalCount} ticket${totalCount === 1 ? '' : 's'}`
+                  : 'End of results'}
+            </div>
+          );
+        }
+        const ticket = tickets[item.index]!;
+        return (
+          <div
+            key={ticket.id}
+            role='listitem'
+            className={`absolute left-0 top-0 w-full border-b border-border hover:bg-muted/60 ${
+              highlightedIndex === item.index ? 'bg-muted' : ''
+            }`}
+            style={{ height: `${item.size}px`, transform: `translateY(${start}px)` }}
+          >
+            <TicketListRow
+              ticket={ticket}
+              isSelected={selected.has(ticket.id)}
+              onToggleSelect={toggleSelect}
+              tags={ticketTags?.get(ticket.id) || []}
               availableTags={availableTags}
-              onTagsChange={handleBulkTagUpdate}
+              visibleColumns={visibleColumns}
+              subProgress={subProgressByTicketId.get(ticket.id)}
+              boardName={boardNameById.get(ticket.boardId)}
+              isComfortView={isComfortView}
+              onOpen={onOpen}
             />
+          </div>
+        );
+      })}
+    </div>
+  );
+
+  const pagerButton = (
+    label: string,
+    targetPage: number,
+    disabled: boolean,
+    trackName: string,
+  ): React.ReactNode => (
+    <button
+      key={trackName}
+      disabled={disabled}
+      onClick={() => setPageIndex(targetPage)}
+      className='rounded px-1.5 py-0.5 text-xs text-muted-foreground transition-colors enabled:hover:bg-muted enabled:hover:text-foreground disabled:opacity-40'
+      data-track-category='Tickets'
+      data-track-name={trackName}
+    >
+      {label}
+    </button>
+  );
+
+  const pagesBody = (
+    <>
+      <div role='list'>
+        {pageTickets.map((ticket, index) => (
+          <div
+            key={ticket.id}
+            role='listitem'
+            className={`border-b border-border hover:bg-muted/60 ${
+              highlightedIndex === pageIndex * pageSize + index ? 'bg-muted' : ''
+            }`}
+            style={{ height: `${rowHeight}px` }}
+          >
+            <TicketListRow
+              ticket={ticket}
+              isSelected={selected.has(ticket.id)}
+              onToggleSelect={toggleSelect}
+              tags={ticketTags?.get(ticket.id) || []}
+              availableTags={availableTags}
+              visibleColumns={visibleColumns}
+              subProgress={subProgressByTicketId.get(ticket.id)}
+              boardName={boardNameById.get(ticket.boardId)}
+              isComfortView={isComfortView}
+              onOpen={onOpen}
+            />
+          </div>
+        ))}
+      </div>
+      <div className='flex items-center justify-end gap-4 px-3 py-2 text-xs text-muted-foreground'>
+        <span>
+          {tickets.length === 0
+            ? '0 tickets'
+            : `${pageIndex * pageSize + 1} to ${Math.min((pageIndex + 1) * pageSize, tickets.length)} of ${tickets.length}`}
+        </span>
+        <div className='flex items-center gap-1'>
+          {pagerButton('⏮', 0, pageIndex === 0, 'TablePageFirst')}
+          {pagerButton('◀', Math.max(0, pageIndex - 1), pageIndex === 0, 'TablePagePrev')}
+          <span className='px-1'>
+            Page {pageIndex + 1} of {pageCount}
+          </span>
+          {pagerButton(
+            '▶',
+            Math.min(pageCount - 1, pageIndex + 1),
+            pageIndex >= pageCount - 1,
+            'TablePageNext',
           )}
+          {pagerButton('⏭', pageCount - 1, pageIndex >= pageCount - 1, 'TablePageLast')}
         </div>
       </div>
     </>
   );
-};
-
-const CreatedByCellRenderer = (params: ICellRendererParams<Ticket>) => {
-  const creator = useUser(params.data?.createdBy || '');
-  if (!params.data) return null;
-  if (!creator) {
-    return <span className='text-muted-foreground'>—</span>;
-  }
-  return (
-    <div className='flex items-center gap-3 h-full'>
-      <Tooltip content={getUserDisplayName(creator)}>
-        <Avatar
-          userId={creator.id}
-          className='rounded-full size-6 flex items-center justify-center'
-          showActiveStatus={false}
-        />
-      </Tooltip>
-      <span className='text-muted-foreground truncate font-medium'>
-        {getUserDisplayName(creator)}
-      </span>
-    </div>
-  );
-};
-
-const AssigneeCellRenderer = (params: ICellRendererParams<Ticket>) => {
-  const ticket = params.data;
-
-  // A user assignee wins over a group. Groups live in userGroupId; legacy rows
-  // still carry `group:<id>` in assignedTo, so both are resolved here.
-  const assignedUserId =
-    ticket?.assignedTo && !ticket.assignedTo.startsWith('group:')
-      ? ticket.assignedTo.replace(/^user:/, '')
-      : '';
-  const assignedGroupId = assignedUserId
-    ? ''
-    : ticket?.assignedTo?.startsWith('group:')
-      ? ticket.assignedTo.slice('group:'.length)
-      : ticket?.userGroupId || '';
-  const assignedUser = useUser(assignedUserId);
-  const assignedGroup = useUserGroupById(assignedGroupId);
-
-  if (!ticket) return null;
 
   return (
-    <div className='flex items-center h-full'>
-      {assignedUser ? (
-        <div className='flex items-center gap-3'>
-          <Tooltip content={getUserDisplayName(assignedUser)}>
-            <Avatar
-              userId={assignedUser.id}
-              className='rounded-full size-6 flex items-center justify-center'
-              showActiveStatus={false}
-            />
-          </Tooltip>
-          <span className='text-muted-foreground truncate font-medium'>
-            {getUserDisplayName(assignedUser)}
-          </span>
+    <div className='flex min-h-0 flex-1 flex-col'>
+      {isLoading && tickets.length === 0 ? (
+        <div className='flex h-24 items-center justify-center text-sm text-muted-foreground'>
+          Loading tickets…
         </div>
-      ) : assignedGroup ? (
-        <div className='flex items-center gap-2'>
-          <Tooltip content={assignedGroup.name}>
-            <div className='w-6 h-6 rounded-lg bg-border flex items-center justify-center'>
-              <span className='text-xs font-medium text-muted-foreground'>
-                {assignedGroup.name.charAt(0).toUpperCase()}
-              </span>
-            </div>
-          </Tooltip>
-          <span className='text-muted-foreground truncate'>{assignedGroup.name}</span>
+      ) : tickets.length === 0 ? (
+        <div className='flex h-24 items-center justify-center text-sm text-muted-foreground'>
+          No tickets match the current filters.
         </div>
+      ) : isPagesMode ? (
+        pagesBody
+      ) : usesExternalScroller ? (
+        listBody
       ) : (
-        <div className='flex items-center gap-2 text-muted-foreground'>
-          <div className='w-6 h-6 rounded-full border border-dashed border-muted-foreground flex items-center justify-center'>
-            <User className='w-3 h-3' strokeWidth={1.5} />
-          </div>
-          <span>Unassigned</span>
+        <div ref={internalScrollRef} className='min-h-0 flex-1 overflow-y-auto'>
+          {listBody}
         </div>
+      )}
+
+      {selected.size > 0 && (
+        <BulkActionToolbar
+          selectedCount={selected.size}
+          onSelectAll={handleSelectAll}
+          users={bulkAssignableUsers}
+          userGroups={userGroups}
+          onAssigneeChange={val => handleBulkUpdate(assigneeOptionToTicketUpdate(val))}
+          onStatusChange={val => handleBulkUpdate({ statusV2: val })}
+          onPriorityChange={val => handleBulkUpdate(val === null ? {} : { priority: val })}
+          onStageChange={val => handleBulkUpdate({ stage: { name: val } })}
+          onDueDateChange={date => {
+            // `ticket.update` has no way to null an eta, so only a picked
+            // date is applied — clearing in bulk isn't supported yet.
+            if (date) handleBulkUpdate({ eta: dueDateToEta(date) });
+          }}
+          onClearSelection={clearSelection}
+          availableTags={availableTags}
+          onTagsChange={handleBulkTagUpdate}
+        />
       )}
     </div>
   );

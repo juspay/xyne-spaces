@@ -256,6 +256,8 @@ export const EntityMultiSelector: React.FC<EntityMultiSelectorProps> = ({
             onTouchMove={e => {
               e.stopPropagation();
             }}
+            onClick={e => e.stopPropagation()}
+            onKeyDown={e => e.stopPropagation()}
             className='z-[100] w-auto max-w-64 max-h-96 overflow-y-auto no-scrollbar rounded-lg border border-border bg-background shadow-lg'
             // Never narrower than the trigger, matching EntitySelector. A compact
             // trigger still lets the content size the popover as before.

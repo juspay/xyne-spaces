@@ -1,4 +1,4 @@
-import type { Ticket, TicketTag, TicketStatusV2 } from '@xyne/shared';
+import type { Ticket, TicketTag, TicketStatusV2, FormFieldType } from '@xyne/shared';
 import type { BoardSlaPolicy } from '../../hooks/useChannelSlaPolicy';
 
 export interface Stage {
@@ -45,3 +45,19 @@ export interface DroppableStageProps {
   id: string;
   children: React.ReactNode;
 }
+
+export interface FormFieldGroup {
+  type: 'formField';
+  fieldId: string;
+  fieldName: string;
+  fieldType: FormFieldType;
+}
+
+export type GroupByType =
+  | 'none'
+  | 'assignee'
+  | 'createdBy'
+  | 'status'
+  | 'priority'
+  | 'merchantId'
+  | FormFieldGroup;

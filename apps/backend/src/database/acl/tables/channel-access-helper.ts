@@ -131,29 +131,8 @@ export async function getAccessibleChannelIds(
 
   const participantChannelIds = participantChannels.map((entry) => entry.channelId)
 
-  const publicParticipantChannels = await prisma.channel.findMany({
-    where: {
-      id: { in: participantChannelIds },
-      visibility: ChannelVisibility.PUBLIC,
-    },
-    select: { projectId: true },
-  })
-
-  const accessibleProjectIds = unique(publicParticipantChannels.map((entry) => entry.projectId))
-
-  const publicChannelsInProjects = accessibleProjectIds.length
-    ? await prisma.channel.findMany({
-        where: {
-          visibility: ChannelVisibility.PUBLIC,
-          projectId: { in: accessibleProjectIds },
-        },
-        select: { id: true },
-      })
-    : []
-
   return unique([
-    ...participantChannelIds,
-    ...publicChannelsInProjects.map((entry) => entry.id),
+    ...participantChannelIds
   ])
 }
 

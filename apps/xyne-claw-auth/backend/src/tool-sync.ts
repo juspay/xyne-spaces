@@ -1,5 +1,6 @@
 import { prisma } from "./db.js";
 import { listToolsForUser } from "./mcp/runner.js";
+import { removeToolFromIndexBestEffort, syncToolsToIndexBestEffort } from "./services/tool-index/index.js";
 import type { Prisma } from "@prisma/client";
 
 import { createLogger } from "./logger.js";
@@ -12,10 +13,11 @@ export async function syncToolsForServer(
   credentials: Record<string, unknown>,
 ): Promise<number> {
   const result = await listToolsForUser(userId, serverType, serverName, credentials);
-  let count = 0;
+  const synced: string[] = [];
 
   for (const tool of result.tools) {
     const slug = `${serverType}__${tool.name}`;
+    synced.push(slug);
     await prisma.tool.upsert({
       where: { slug },
       create: {
@@ -31,11 +33,14 @@ export async function syncToolsForServer(
         inputSchema: tool.inputSchema as Prisma.InputJsonValue,
       },
     });
-    count++;
   }
 
-  log.info(`[tool-sync] Registered ${count} tools from ${serverType}`);
-  return count;
+  // Batched once per server, not per tool — the index lists the bank once per
+  // call. Best-effort: Postgres is the record, the bank is a derived view.
+  syncToolsToIndexBestEffort(synced);
+
+  log.info(`[tool-sync] Registered ${synced.length} tools from ${serverType}`);
+  return synced.length;
 }
 
 // Per-(user,server) debounce so repeated picker opens don't re-list (= re-spawn)
@@ -94,9 +99,17 @@ export async function reconcileServerCatalog(
 
   // Prune catalog rows for this server it no longer exposes. (AgentTool links
   // cascade-delete — correct: a removed server tool can't stay selected.)
+  // Read slugs before deleteMany (it only returns a count) — the index needs
+  // names, or a pruned tool stays searchable but resolves to nothing.
+  const doomed = await prisma.tool.findMany({
+    where: { source: `mcp:${serverType}`, slug: { notIn: liveSlugs } },
+    select: { slug: true },
+  });
   const pruned = await prisma.tool.deleteMany({
     where: { source: `mcp:${serverType}`, slug: { notIn: liveSlugs } },
   });
+  syncToolsToIndexBestEffort(liveSlugs);
+  for (const tool of doomed) removeToolFromIndexBestEffort(tool.slug);
 
   lastReconcileAt.set(key, Date.now());
   log.info(`[tool-sync] reconcile ${serverType}: ${liveSlugs.length} live, ${pruned.count} pruned`);
