@@ -36,12 +36,18 @@ async function slackFileInfo(token: string, fileId: string): Promise<{ url?: str
 const IMG_RE = /<img\b[^>]*\bsrc=(["'])(.*?)\1[^>]*>/gi;
 const SLACK_FILE_ID = /\/([FG][A-Z0-9]{6,})(?=[/?]|$)/;
 
+// Slack's public emoji CDN — match on the parsed hostname, not a substring (a substring check is spoofable).
+const isSlackEmojiCdn = (src: string): boolean => {
+  try { const h = new URL(src).hostname.toLowerCase(); return h === 'slack-imgs.com' || h.endsWith('.slack-imgs.com'); }
+  catch { return false; }
+};
+
 async function rehostCanvasImages(html: string, canvasId: string, createdBy: string, token: string | undefined, target: MigrationTarget): Promise<string> {
   if (!token) return html;
   let out = html;
   for (const m of [...html.matchAll(IMG_RE)]) {
     const src = m[2];
-    if (!src || src.includes('slack-imgs.com')) continue; // public emoji CDN — already renders
+    if (!src || isSlackEmojiCdn(src)) continue; // public emoji CDN — already renders
     const fileId = (src.match(SLACK_FILE_ID) || [])[1];
     if (!fileId) continue;
     try {
@@ -170,9 +176,16 @@ async function resolveEmbeds(token: string, html: string, seen: Set<string>, dep
 // Slack canvas code blocks are a run of <p class="…prettyprint…">line</p>; BlockNote reads each as a plain <p>, so the
 // code block is lost (text stays, monospace/formatting doesn't). Merge each consecutive run into <pre><code> — which
 // BlockNote parses as a real codeBlock — with the lines joined by newlines.
+// Strip tags until stable — a single regex pass can leave a partial tag (e.g. "<<b>b>").
+function stripTags(s: string): string {
+  let prev: string;
+  let out = s;
+  do { prev = out; out = out.replace(/<[^>]+>/g, ''); } while (out !== prev);
+  return out;
+}
 function convertCodeBlocks(html: string): string {
   return html.replace(/(?:<p\b[^>]*class=["'][^"']*prettyprint[^"']*["'][^>]*>[\s\S]*?<\/p>\s*)+/gi, (run) => {
-    const lines = [...run.matchAll(/<p\b[^>]*>([\s\S]*?)<\/p>/gi)].map((m) => m[1].replace(/<[^>]+>/g, ''));
+    const lines = [...run.matchAll(/<p\b[^>]*>([\s\S]*?)<\/p>/gi)].map((m) => stripTags(m[1]));
     return `<pre><code>${lines.join('\n')}</code></pre>`;
   });
 }
