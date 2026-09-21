@@ -1,3 +1,10 @@
+## [1.354.1](https://github.com/juspay/xyne-spaces/compare/v1.354.0...v1.354.1) (2026-09-21)
+
+
+### Bug Fixes
+
+* downloads link fix in workspace invite email ([#2111](https://github.com/juspay/xyne-spaces/issues/2111)) ([2bc13be](https://github.com/juspay/xyne-spaces/commit/2bc13be7fa58fda969d77e7e060076f0d90d52c9))
+
 ## [1.354.0](https://github.com/juspay/xyne-spaces/compare/v1.353.0...v1.354.0) (2026-09-21)
 
 
