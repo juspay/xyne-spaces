@@ -22,31 +22,10 @@ import TicketView from '../components/Tickets/TicketView/TicketView';
 import { BrowserTabsScreen } from './BrowserTabsScreen';
 import { getLastActiveWorkspaceId } from '../machines/authMachine';
 import AgentsScreen from './AgentsScreen/AgentScreen';
-import ClawAgentsScreen from './ClawAgentsScreen';
-import AgentsTab from './ClawAgentsScreen/tabs/AgentsTab';
-import McpTab from './ClawAgentsScreen/tabs/McpTab';
-import SkillsTab from './ClawAgentsScreen/tabs/SkillsTab';
-import ClawAgentDetailScreen from './ClawAgentsScreen/ClawAgentDetailScreen';
-import ClawAgentCreateScreen from './ClawAgentsScreen/ClawAgentCreateScreen';
-import ClawMcpDetailScreen from './ClawAgentsScreen/ClawMcpDetailScreen';
-import ClawSkillDetailScreen from './ClawAgentsScreen/ClawSkillDetailScreen';
-import ClawSkillCreateScreen from './ClawAgentsScreen/ClawSkillCreateScreen';
 import ClawSettingsScreen from './ClawAgentsScreen/ClawSettingsScreen';
 import ClawMetricsScreen from './ClawAgentsScreen/ClawMetricsScreen';
 import { RequireClawAdmin } from './AIScreen/screens/RequireClawAdmin';
 import { RequireOrgManager } from './AIScreen/screens/RequireOrgManager';
-import SubagentsTab from './ClawAgentsScreen/tabs/SubagentsTab';
-import ClawSubagentDetailScreen from './ClawAgentsScreen/ClawSubagentDetailScreen';
-import ClawSubagentCreateScreen from './ClawAgentsScreen/ClawSubagentCreateScreen';
-import ClawOrganizationScreen from './ClawAgentsScreen/ClawOrganizationScreen';
-import ClawDigitalTwinScreen from './ClawAgentsScreen/ClawDigitalTwinScreen';
-import ClawDigitalTwinMetricsScreen from './ClawAgentsScreen/ClawDigitalTwinMetricsScreen';
-import DigitalTwinMemoriesTab from './ClawAgentsScreen/tabs/DigitalTwinMemoriesTab';
-import DigitalTwinHotTab from './ClawAgentsScreen/tabs/DigitalTwinHotTab';
-import DigitalTwinProposalsTab from './ClawAgentsScreen/tabs/DigitalTwinProposalsTab';
-import DigitalTwinRecallTab from './ClawAgentsScreen/tabs/DigitalTwinRecallTab';
-import DigitalTwinGraphTab from './ClawAgentsScreen/tabs/DigitalTwinGraphTab';
-import DigitalTwinSettingsTab from './ClawAgentsScreen/tabs/DigitalTwinSettingsTab';
 import { KnowledgeBaseV2Layout } from '../components/knowledgeBaseV2/KnowledgeBaseV2Layout';
 import KnowledgeBaseV2Screen from '../components/knowledgeBaseV2/KnowledgeBaseV2Screen';
 import { LegacyKbRedirect } from '../components/knowledgeBaseV2/LegacyKbRedirect';
@@ -235,7 +214,6 @@ import { RoleManagementScreen } from './RoleManagementScreen';
 import { TagReviewView } from '../components/tags/TagReview/TagReviewView';
 import { ResourceProtectedRoute } from '../components/Auth/ResourceProtectedRoute';
 import { WorkflowScreen } from './WorkflowScreen';
-import { GuestBlockedRoute } from '../components/Auth/GuestBlockedRoute';
 import { ToolbarProtectedRoute } from '../components/Auth/ToolbarProtectedRoute';
 import { WorkspaceManagementScreen } from './WorkspaceManagementScreen';
 import OrganisationsScreen from './OrganisationsScreen/OrganisationsScreen';
@@ -1509,45 +1487,6 @@ export const router = createBrowserRouter(
                       <AgentsScreen />
                     </ResourceProtectedRoute>
                   ),
-                },
-                {
-                  path: 'claw-agents',
-                  element: (
-                    <ToolbarProtectedRoute path='/claw-agents'>
-                      <GuestBlockedRoute>
-                        <ClawAgentsScreen />
-                      </GuestBlockedRoute>
-                    </ToolbarProtectedRoute>
-                  ),
-                  children: [
-                    { index: true, element: <AgentsTab /> },
-                    { path: 'create', element: <ClawAgentCreateScreen /> },
-                    { path: 'agents/:agentSlug', element: <ClawAgentDetailScreen /> },
-                    { path: 'mcp', element: <McpTab /> },
-                    { path: 'mcp/:mcpId', element: <ClawMcpDetailScreen /> },
-                    { path: 'skills', element: <SkillsTab /> },
-                    { path: 'skills/create', element: <ClawSkillCreateScreen /> },
-                    { path: 'skills/:skillSlug', element: <ClawSkillDetailScreen /> },
-                    { path: 'subagents', element: <SubagentsTab /> },
-                    { path: 'subagents/create', element: <ClawSubagentCreateScreen /> },
-                    { path: 'subagents/:subagentName', element: <ClawSubagentDetailScreen /> },
-                    { path: 'organization', element: <ClawOrganizationScreen /> },
-                    {
-                      path: 'digital-twin',
-                      element: <ClawDigitalTwinScreen />,
-                      children: [
-                        { index: true, element: <DigitalTwinMemoriesTab /> },
-                        { path: 'hot', element: <DigitalTwinHotTab /> },
-                        { path: 'proposals', element: <DigitalTwinProposalsTab /> },
-                        { path: 'recall', element: <DigitalTwinRecallTab /> },
-                        { path: 'graph', element: <DigitalTwinGraphTab /> },
-                        { path: 'metrics', element: <ClawDigitalTwinMetricsScreen /> },
-                        { path: 'settings', element: <DigitalTwinSettingsTab /> },
-                      ],
-                    },
-                    { path: 'metrics', element: <ClawMetricsScreen /> },
-                    { path: 'settings', element: <ClawSettingsScreen /> },
-                  ],
                 },
                 {
                   path: 'knowledge-base',
