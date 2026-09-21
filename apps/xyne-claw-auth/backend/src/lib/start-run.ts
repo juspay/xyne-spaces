@@ -60,7 +60,7 @@ import { dispatchRun } from "./dispatch-run.js";
 import { createLogger } from "../logger.js";
 import type { SessionContext } from "../routes/webhook.js";
 
-const JUDGE_BACKENDS = new Set(["jev", "ourjev", "llm"]);
+const JUDGE_BACKENDS = new Set(["jev", "ournormaljev", "ourtrainedjev", "llm"]);
 
 const log = createLogger("run");
 

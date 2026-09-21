@@ -1,7 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { evalJudgeRouter } from "../src/routes/eval-judge.js";
 
-const ENV_KEYS = ["JEV_API_KEY", "JEV_URL", "OUR_JEV_URL", "OUR_JEV_API_KEY"];
+const ENV_KEYS = [
+  "JEV_API_KEY", "JEV_URL", "OUR_JEV_URL", "OUR_JEV_API_KEY",
+  "OUR_NORMAL_JEV_URL", "OUR_NORMAL_JEV_API_KEY", "OUR_NORMAL_JEV_MODEL", "OUR_TRAINED_JEV_URL", "OUR_TRAINED_JEV_API_KEY", "OUR_TRAINED_JEV_MODEL",
+];
 
 function modelsHandler(): (req: unknown, res: unknown) => Promise<void> {
   const layer = (evalJudgeRouter as unknown as { stack: Array<{ route?: { path: string; stack: Array<{ handle: unknown }> } }> }).stack
@@ -35,7 +38,24 @@ describe("GET /eval-models", () => {
     await modelsHandler()({}, { json: (b: typeof body) => { body = b; } });
     expect(body.judgeBackends).toEqual(["jev"]);
     expect(body.models).not.toContain("jev");
-    expect(body.models).not.toContain("ourjev");
+    expect(body.models).not.toContain("ournormaljev");
+    expect(body.models).not.toContain("ourtrainedjev");
+  });
+
+  it("lists both of our Jev variants with labels once each is distinguishable", async () => {
+    process.env["JEV_API_KEY"] = "k-jev";
+    process.env["OUR_JEV_URL"] = "https://ourjev.internal/v1/systemone";
+    process.env["OUR_JEV_API_KEY"] = "k-ours";
+    process.env["OUR_NORMAL_JEV_MODEL"] = "our-jev-base";
+    process.env["OUR_TRAINED_JEV_MODEL"] = "our-jev-ft-v3";
+    let body: { models?: string[]; judgeBackends?: string[]; judgeBackendLabels?: Record<string, string> } = {};
+    await modelsHandler()({}, { json: (b: typeof body) => { body = b; } });
+    expect(body.judgeBackends).toEqual(["jev", "ournormaljev", "ourtrainedjev"]);
+    expect(body.judgeBackendLabels).toEqual({
+      jev: "Jev (typed evaluator)",
+      ournormaljev: "Our Jev — normal",
+      ourtrainedjev: "Our Jev — trained",
+    });
   });
 
   it("reports no judge backends when none are configured", async () => {

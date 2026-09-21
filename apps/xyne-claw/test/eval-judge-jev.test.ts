@@ -2,7 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { jevScoreFromProbabilities, judgeSemanticMatch } from "../src/eval-judge.js";
 
 const ENV_KEYS = [
-  "JEV_API_KEY", "JEV_URL", "OUR_JEV_URL", "OUR_JEV_API_KEY", "OUR_JEV_MODEL",
+  "JEV_API_KEY", "JEV_URL", "JEV_MODEL", "OUR_JEV_URL", "OUR_JEV_API_KEY",
+  "OUR_NORMAL_JEV_URL", "OUR_NORMAL_JEV_API_KEY", "OUR_NORMAL_JEV_MODEL", "OUR_TRAINED_JEV_URL", "OUR_TRAINED_JEV_API_KEY", "OUR_TRAINED_JEV_MODEL",
   "JUDGE_BACKEND", "JUDGE_SHADOW",
 ];
 
@@ -108,15 +109,16 @@ describe("judgeSemanticMatch via a jev backend", () => {
   it("grades with our self-hosted backend at its own url and key", async () => {
     process.env["OUR_JEV_URL"] = "https://ourjev.internal/v1/systemone";
     process.env["OUR_JEV_API_KEY"] = "k-ours";
+    process.env["OUR_TRAINED_JEV_MODEL"] = "our-jev-ft-v3";
     fetchMock.mockResolvedValue(systemOneReply({ same: 0, minor: 0, misses: 0, contradicts: 0, empty: 1 }));
-    const result = await judgeSemanticMatch({ expected: "a", generated: "", model: "ourjev" });
+    const result = await judgeSemanticMatch({ expected: "a", generated: "", model: "ourtrainedjev" });
     expect(String(fetchMock.mock.calls[0]![0])).toBe("https://ourjev.internal/v1/systemone");
     expect((fetchMock.mock.calls[0]![1] as RequestInit).headers).toMatchObject({ Authorization: "Bearer k-ours" });
     expect(result.score).toBe(0);
   });
 
   it("fails open when the backend is not configured", async () => {
-    const result = await judgeSemanticMatch({ expected: "a", generated: "b", model: "ourjev" });
+    const result = await judgeSemanticMatch({ expected: "a", generated: "b", model: "ournormaljev" });
     expect(result).toEqual({ score: null, reasoning: "judge_unavailable" });
     expect(fetchMock).not.toHaveBeenCalled();
   });

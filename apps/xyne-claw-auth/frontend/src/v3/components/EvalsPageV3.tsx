@@ -469,7 +469,7 @@ export function EvalsPageV3({ userId }: { userId: string }) {
   // What an empty/"default" model resolves to (e.g. "kimi-latest") — shown in
   // brackets next to "Default" so it's never a mystery or a duplicate entry.
   const [defaultModelName, setDefaultModelName] = useState("");
-  const [judgeBackends, setJudgeBackends] = useState<string[]>([]);
+  const [judgeBackends, setJudgeBackends] = useState<Array<{ id: string; label: string }>>([]);
   const loadModels = useCallback(async () => {
     const r = await listEvalModels();
     setModels(r.models);
@@ -2278,10 +2278,7 @@ export function EvalsPageV3({ userId }: { userId: string }) {
                   options={[
                     { value: DEFAULT_OPT, label: `Default model${defaultModelName ? ` (${defaultModelName})` : ""}` },
                     ...(copilotOptionLabel ? [{ value: "prov:copilot", label: copilotOptionLabel }] : []),
-                    ...judgeBackends.map((b) => ({
-                      value: b,
-                      label: b === "ourjev" ? "Our Jev (typed evaluator)" : "Jev (typed evaluator)",
-                    })),
+                    ...judgeBackends.map((b) => ({ value: b.id, label: b.label })),
                     ...models.map((m) => ({ value: m, label: m })),
                   ]}
                 />

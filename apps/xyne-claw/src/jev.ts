@@ -19,14 +19,15 @@ import {
   recordJudgeCall,
   recordJudgeShadow,
   shadowJudgeBackends,
+  SYSTEM_ONE_BACKENDS,
   type JudgeBackendName,
+  type SystemOneBackendName,
+  type SystemOneBackendSpec,
 } from "./judge-backend.js";
 import { llmJudgeConfig, llmJudgePost } from "./judge-llm.js";
 
 const log = createLogger("jev");
 
-const ENDPOINT = process.env["JEV_URL"] ?? "https://api.typesafe.ai/v1/systemone";
-const MODEL = process.env["JEV_MODEL"] ?? "jev-latest";
 const DEFAULT_TIMEOUT_MS = Math.max(200, Number(process.env["JEV_TIMEOUT_MS"] ?? 2500));
 const DEFAULT_BATCH = Math.min(Math.max(Number(process.env["JEV_BATCH"] ?? 50), 1), 100);
 
@@ -57,15 +58,21 @@ interface SystemOneConfig {
   model: string;
 }
 
-function systemOneConfig(backend: "jev" | "ourjev"): SystemOneConfig {
-  if (backend === "ourjev") {
-    return {
-      url: process.env["OUR_JEV_URL"]?.trim() ?? "",
-      key: process.env["OUR_JEV_API_KEY"]?.trim() ?? "",
-      model: process.env["OUR_JEV_MODEL"]?.trim() || MODEL,
-    };
-  }
-  return { url: ENDPOINT, key: process.env["JEV_API_KEY"]?.trim() ?? "", model: MODEL };
+function env(name: string): string {
+  return process.env[name]?.trim() ?? "";
+}
+
+function systemOneConfig(backend: SystemOneBackendName): SystemOneConfig & { distinct: boolean } {
+  const spec: SystemOneBackendSpec = SYSTEM_ONE_BACKENDS[backend];
+  const ownUrl = env(`${spec.envPrefix}_URL`);
+  const ownModel = env(`${spec.envPrefix}_MODEL`);
+  const shared = spec.sharedEnvPrefix;
+  return {
+    url: ownUrl || (shared ? env(`${shared}_URL`) : "") || spec.defaultUrl || "",
+    key: env(`${spec.envPrefix}_API_KEY`) || (shared ? env(`${shared}_API_KEY`) : ""),
+    model: ownModel || spec.defaultModel || "",
+    distinct: !shared || Boolean(ownUrl || ownModel),
+  };
 }
 
 export function judgeBackendConfigured(backend: JudgeBackendName): boolean {
@@ -74,7 +81,7 @@ export function judgeBackendConfigured(backend: JudgeBackendName): boolean {
     return Boolean(cfg.url && cfg.key && cfg.model);
   }
   const cfg = systemOneConfig(backend);
-  return Boolean(cfg.url && cfg.key);
+  return Boolean(cfg.url && cfg.key && cfg.distinct);
 }
 
 export function jevEnabled(): boolean {
@@ -102,7 +109,7 @@ async function post(
       Authorization: `Bearer ${cfg.key}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ state, model: cfg.model, questions }),
+    body: JSON.stringify({ state, ...(cfg.model ? { model: cfg.model } : {}), questions }),
   });
   if (!res.ok) throw new Error(`${backend} ${res.status}`);
   const body = (await res.json()) as { answers?: Record<string, JevAnswer> };

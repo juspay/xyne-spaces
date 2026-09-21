@@ -6654,11 +6654,23 @@ export async function cancelEvalImportJob(jobId: string, userId: string): Promis
 }
 
 /** Judge/extraction model options + what an empty ("default") model resolves to. */
-export async function listEvalModels(): Promise<{ models: string[]; defaultModel: string; judgeBackends: string[] }> {
-  const data = await request<{ success: boolean; models: string[]; defaultModel?: string; judgeBackends?: string[] }>(
-    `${AUTH_API_URL}/api/v1/evals/models`,
-  );
-  return { models: data.models ?? [], defaultModel: data.defaultModel ?? "", judgeBackends: data.judgeBackends ?? [] };
+export async function listEvalModels(): Promise<{
+  models: string[];
+  defaultModel: string;
+  judgeBackends: Array<{ id: string; label: string }>;
+}> {
+  const data = await request<{
+    success: boolean;
+    models: string[];
+    defaultModel?: string;
+    judgeBackends?: string[];
+    judgeBackendLabels?: Record<string, string>;
+  }>(`${AUTH_API_URL}/api/v1/evals/models`);
+  return {
+    models: data.models ?? [],
+    defaultModel: data.defaultModel ?? "",
+    judgeBackends: (data.judgeBackends ?? []).map((id) => ({ id, label: data.judgeBackendLabels?.[id] ?? id })),
+  };
 }
 
 /**

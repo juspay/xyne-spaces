@@ -215,21 +215,22 @@ describe("eval judge arms", () => {
   const started = new Date("2026-09-20T10:00:00.000Z");
 
   it("parses judges= without leaving it in the question", () => {
-    expect(parseSlashCommand("/eval judges=llm,jev,ourjev summarize the channel")).toEqual({
+    expect(parseSlashCommand("/eval judges=llm,jev,ournormaljev,ourtrainedjev summarize the channel")).toEqual({
       kind: "eval",
       question: "summarize the channel",
       providers: [],
-      judges: ["llm", "jev", "ourjev"],
+      judges: ["llm", "jev", "ournormaljev", "ourtrainedjev"],
     });
   });
 
   it("expands aliases and all, and ignores unknown judges", async () => {
     const { normalizeJudges, armKey, armLabel } = await import("../eval-run.js");
-    expect(normalizeJudges(["all"])).toEqual(["llm", "jev", "ourjev"]);
-    expect(normalizeJudges(["ours", "jev", "bogus", "jev"])).toEqual(["ourjev", "jev"]);
+    expect(normalizeJudges(["all"])).toEqual(["llm", "jev", "ournormaljev", "ourtrainedjev"]);
+    expect(normalizeJudges(["trained", "jev", "bogus", "jev", "normal"])).toEqual(["ourtrainedjev", "jev", "ournormaljev"]);
+    expect(normalizeJudges(["ourjev"])).toEqual([]);
     expect(normalizeJudges([])).toEqual([]);
     expect(armKey({ provider: "claude", useOverride: true, judge: "jev" })).toBe("claude-jev");
-    expect(armLabel({ provider: "claude", judge: "ourjev" })).toBe("claude + ourjev");
+    expect(armLabel({ provider: "claude", judge: "ourtrainedjev" })).toBe("claude + ourtrainedjev");
   });
 
   it("labels arms as llm + judge and reports the judge's cost and agreement", () => {
@@ -264,8 +265,8 @@ describe("eval judge arms", () => {
       judge: { backend: "jev", calls: 1, failed: 0, questions: 1, totalMs: 5, byPurpose: {}, shadows: [] },
     } as unknown as DebugTraceRun;
     const traces = new Map<string, EvalTrace>([["s-claude", { run, timing: null }]]);
-    const html = renderEvalHtml("q", [result("claude", { judge: "ourjev" })], started, traces, "xyne");
-    expect(html).toContain("asked ourjev");
+    const html = renderEvalHtml("q", [result("claude", { judge: "ourtrainedjev" })], started, traces, "xyne");
+    expect(html).toContain("asked ourtrainedjev");
   });
 });
 

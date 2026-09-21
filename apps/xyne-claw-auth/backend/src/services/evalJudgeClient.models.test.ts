@@ -19,12 +19,17 @@ describe("listEvalModels judgeBackends", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async () =>
-        modelsReply({ success: true, models: ["open-fast"], defaultModel: "open-fast", judgeBackends: ["jev", "ourjev"] }),
+        modelsReply({ success: true, models: ["open-fast"], defaultModel: "open-fast", judgeBackends: ["jev", "ournormaljev", "ourtrainedjev"], judgeBackendLabels: { jev: "Jev (typed evaluator)", ournormaljev: "Our Jev — normal", ourtrainedjev: "Our Jev — trained", bogus: 7 } }),
       ),
     );
     const out = await listEvalModels();
     expect(out.models).toEqual(["open-fast"]);
-    expect(out.judgeBackends).toEqual(["jev", "ourjev"]);
+    expect(out.judgeBackends).toEqual(["jev", "ournormaljev", "ourtrainedjev"]);
+    expect(out.judgeBackendLabels).toEqual({
+      jev: "Jev (typed evaluator)",
+      ournormaljev: "Our Jev — normal",
+      ourtrainedjev: "Our Jev — trained",
+    });
   });
 
   it("defaults judgeBackends to [] when claw omits it", async () => {
@@ -34,7 +39,7 @@ describe("listEvalModels judgeBackends", () => {
 
   it("returns empty lists when claw is unreachable", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response("nope", { status: 500 })));
-    expect(await listEvalModels()).toEqual({ models: [], defaultModel: "", judgeBackends: [] });
+    expect(await listEvalModels()).toEqual({ models: [], defaultModel: "", judgeBackends: [], judgeBackendLabels: {} });
   });
 
   it("appends judge backends for the judge picker but not for gen-models", async () => {

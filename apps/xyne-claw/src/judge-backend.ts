@@ -1,7 +1,41 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 
-export const JUDGE_BACKENDS = ["jev", "ourjev", "llm"] as const;
-export type JudgeBackendName = (typeof JUDGE_BACKENDS)[number];
+export interface SystemOneBackendSpec {
+  label: string;
+  envPrefix: string;
+  sharedEnvPrefix?: string;
+  defaultUrl?: string;
+  defaultModel?: string;
+}
+
+export const SYSTEM_ONE_BACKENDS = {
+  jev: {
+    label: "Jev (typed evaluator)",
+    envPrefix: "JEV",
+    defaultUrl: "https://api.typesafe.ai/v1/systemone",
+    defaultModel: "jev-latest",
+  },
+  ournormaljev: {
+    label: "Our Jev — normal",
+    envPrefix: "OUR_NORMAL_JEV",
+    sharedEnvPrefix: "OUR_JEV",
+  },
+  ourtrainedjev: {
+    label: "Our Jev — trained",
+    envPrefix: "OUR_TRAINED_JEV",
+    sharedEnvPrefix: "OUR_JEV",
+  },
+} as const satisfies Record<string, SystemOneBackendSpec>;
+
+export type SystemOneBackendName = keyof typeof SYSTEM_ONE_BACKENDS;
+export const SYSTEM_ONE_BACKEND_NAMES = Object.keys(SYSTEM_ONE_BACKENDS) as SystemOneBackendName[];
+
+export const JUDGE_BACKENDS = [...SYSTEM_ONE_BACKEND_NAMES, "llm"] as const;
+export type JudgeBackendName = SystemOneBackendName | "llm";
+
+export function judgeBackendLabel(backend: JudgeBackendName): string {
+  return backend === "llm" ? "LLM judge" : SYSTEM_ONE_BACKENDS[backend].label;
+}
 
 export interface JudgeCallRecord {
   backend: JudgeBackendName;

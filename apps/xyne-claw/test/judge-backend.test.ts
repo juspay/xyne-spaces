@@ -9,7 +9,8 @@ const QUESTIONS: Record<string, JevQuestion> = {
 };
 
 const ENV_KEYS = [
-  "JEV_API_KEY", "JEV_URL", "OUR_JEV_URL", "OUR_JEV_API_KEY", "OUR_JEV_MODEL",
+  "JEV_API_KEY", "JEV_URL", "JEV_MODEL", "OUR_JEV_URL", "OUR_JEV_API_KEY",
+  "OUR_NORMAL_JEV_URL", "OUR_NORMAL_JEV_API_KEY", "OUR_NORMAL_JEV_MODEL", "OUR_TRAINED_JEV_URL", "OUR_TRAINED_JEV_API_KEY", "OUR_TRAINED_JEV_MODEL",
   "JUDGE_LLM_URL", "JUDGE_LLM_API_KEY", "JUDGE_LLM_MODEL", "JUDGE_BACKEND", "JUDGE_SHADOW",
   "LITELLM_URL", "LITELLM_API_KEY", "LITELLM_AUTOMATION_API_KEY", "LITELLM_MODEL", "LITELLM_FAST_MODEL",
 ];
@@ -52,6 +53,8 @@ describe("judge backends", () => {
     process.env["JEV_API_KEY"] = "k-jev";
     process.env["OUR_JEV_URL"] = "https://ourjev.internal/v1/systemone";
     process.env["OUR_JEV_API_KEY"] = "k-ours";
+    process.env["OUR_NORMAL_JEV_MODEL"] = "our-jev-base";
+    process.env["OUR_TRAINED_JEV_MODEL"] = "our-jev-ft-v3";
     process.env["JUDGE_LLM_URL"] = "https://llm.internal/v1/chat/completions";
     process.env["JUDGE_LLM_API_KEY"] = "k-llm";
     process.env["JUDGE_LLM_MODEL"] = "judge-model";
@@ -61,7 +64,7 @@ describe("judge backends", () => {
 
     const seen: Record<string, string> = {};
     await Promise.all(
-      (["jev", "ourjev", "llm"] as const).map(
+      (["jev", "ournormaljev", "ourtrainedjev", "llm"] as const).map(
         (backend) =>
           new Promise<void>((resolve) => {
             setImmediate(async () => {
@@ -74,24 +77,56 @@ describe("judge backends", () => {
       ),
     );
 
-    expect(seen).toEqual({ jev: "jev", ourjev: "ourjev", llm: "llm" });
+    expect(seen).toEqual({ jev: "jev", ournormaljev: "ournormaljev", ourtrainedjev: "ourtrainedjev", llm: "llm" });
     const urls = fetchMock.mock.calls.map((c) => String(c[0])).sort();
     expect(urls).toEqual([
       "https://api.typesafe.ai/v1/systemone",
       "https://llm.internal/v1/chat/completions",
       "https://ourjev.internal/v1/systemone",
+      "https://ourjev.internal/v1/systemone",
     ]);
-    const ours = fetchMock.mock.calls.find((c) => String(c[0]).includes("ourjev"));
-    expect((ours?.[1] as RequestInit).headers).toMatchObject({ Authorization: "Bearer k-ours" });
+    const ours = fetchMock.mock.calls.filter((c) => String(c[0]).includes("ourjev"));
+    const sentModels = ours.map((c) => (JSON.parse(String((c[1] as RequestInit).body)) as { model?: string }).model).sort();
+    expect(sentModels).toEqual(["our-jev-base", "our-jev-ft-v3"]);
+    for (const call of ours) {
+      expect((call[1] as RequestInit).headers).toMatchObject({ Authorization: "Bearer k-ours" });
+    }
   });
 
   it("treats an unconfigured backend as unavailable so callers keep their old path", async () => {
     process.env["JEV_API_KEY"] = "k-jev";
-    pinRunJudgeBackend("ourjev");
-    expect(judgeBackendConfigured("ourjev")).toBe(false);
+    pinRunJudgeBackend("ourtrainedjev");
+    expect(judgeBackendConfigured("ourtrainedjev")).toBe(false);
     expect(jevEnabled()).toBe(false);
     expect(await jevAsk("state", QUESTIONS)).toBeNull();
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("hides a variant that would be indistinguishable from its sibling", () => {
+    process.env["OUR_JEV_URL"] = "https://ourjev.internal/v1/systemone";
+    process.env["OUR_JEV_API_KEY"] = "k-ours";
+    expect(judgeBackendConfigured("ournormaljev")).toBe(false);
+    expect(judgeBackendConfigured("ourtrainedjev")).toBe(false);
+
+    process.env["OUR_TRAINED_JEV_MODEL"] = "our-jev-ft-v3";
+    expect(judgeBackendConfigured("ourtrainedjev")).toBe(true);
+    expect(judgeBackendConfigured("ournormaljev")).toBe(false);
+
+    process.env["OUR_NORMAL_JEV_URL"] = "https://ourjev-base.internal/v1/systemone";
+    expect(judgeBackendConfigured("ournormaljev")).toBe(true);
+  });
+
+  it("lets a variant override the shared endpoint and key", async () => {
+    process.env["OUR_JEV_URL"] = "https://ourjev.internal/v1/systemone";
+    process.env["OUR_JEV_API_KEY"] = "k-ours";
+    process.env["OUR_TRAINED_JEV_URL"] = "https://trained.internal/v1/systemone";
+    process.env["OUR_TRAINED_JEV_API_KEY"] = "k-trained";
+    pinRunJudgeBackend("ourtrainedjev");
+    fetchMock.mockResolvedValueOnce(systemOneReply({ a: 1, b: 0 }));
+    await jevAsk("state", QUESTIONS);
+    expect(String(fetchMock.mock.calls[0]![0])).toBe("https://trained.internal/v1/systemone");
+    expect((fetchMock.mock.calls[0]![1] as RequestInit).headers).toMatchObject({ Authorization: "Bearer k-trained" });
+    expect(JSON.parse(String((fetchMock.mock.calls[0]![1] as RequestInit).body))).not.toHaveProperty("model");
   });
 
   it("records per-run call stats including failures", async () => {

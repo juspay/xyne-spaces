@@ -86,29 +86,44 @@ export async function extractEvalPairs(
   }
 }
 
-export async function listEvalModels(): Promise<{ models: string[]; defaultModel: string; judgeBackends: string[] }> {
-  if (!CONFIG.xyneClawS2sKey) return { models: [], defaultModel: "", judgeBackends: [] };
+export interface EvalModelList {
+  models: string[];
+  defaultModel: string;
+  judgeBackends: string[];
+  judgeBackendLabels: Record<string, string>;
+}
+
+const NO_EVAL_MODELS: EvalModelList = { models: [], defaultModel: "", judgeBackends: [], judgeBackendLabels: {} };
+
+export async function listEvalModels(): Promise<EvalModelList> {
+  if (!CONFIG.xyneClawS2sKey) return { ...NO_EVAL_MODELS };
   const url = `${CONFIG.xyneClawUrl.replace(/\/$/, "")}/eval-models`;
   try {
     const res = await fetch(url, {
       headers: { "x-s2s-key": CONFIG.xyneClawS2sKey },
       signal: AbortSignal.timeout(15_000),
     });
-    if (!res.ok) return { models: [], defaultModel: "", judgeBackends: [] };
+    if (!res.ok) return { ...NO_EVAL_MODELS };
     const data = (await res.json()) as {
       success?: boolean;
       models?: string[];
       defaultModel?: string;
       judgeBackends?: string[];
+      judgeBackendLabels?: Record<string, unknown>;
     };
+    const judgeBackendLabels: Record<string, string> = {};
+    for (const [id, label] of Object.entries(data.judgeBackendLabels ?? {})) {
+      if (typeof label === "string") judgeBackendLabels[id] = label;
+    }
     return {
       models: Array.isArray(data.models) ? data.models : [],
       defaultModel: typeof data.defaultModel === "string" ? data.defaultModel : "",
       judgeBackends: Array.isArray(data.judgeBackends)
         ? data.judgeBackends.filter((b): b is string => typeof b === "string")
         : [],
+      judgeBackendLabels,
     };
   } catch {
-    return { models: [], defaultModel: "", judgeBackends: [] };
+    return { ...NO_EVAL_MODELS };
   }
 }

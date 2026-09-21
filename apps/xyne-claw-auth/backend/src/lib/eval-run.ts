@@ -16,7 +16,7 @@ const TERMINAL = new Set(["completed", "failed", "cancelled"]);
 
 export const PLATFORM_DEFAULT_PROVIDER = process.env["EVAL_DEFAULT_PROVIDER"] ?? "litellm";
 
-export const EVAL_JUDGES = ["llm", "jev", "ourjev"] as const;
+export const EVAL_JUDGES = ["llm", "jev", "ournormaljev", "ourtrainedjev"] as const;
 export type EvalJudge = (typeof EVAL_JUDGES)[number];
 
 export interface EvalTarget {
@@ -30,7 +30,14 @@ export interface EvalTarget {
 export function normalizeJudges(requested: string[] | undefined): EvalJudge[] {
   if (!requested?.length) return [];
   if (requested.includes("all")) return [...EVAL_JUDGES];
-  const alias: Record<string, EvalJudge> = { llm: "llm", jev: "jev", ourjev: "ourjev", "our-jev": "ourjev", ours: "ourjev" };
+  const alias: Record<string, EvalJudge> = {
+    llm: "llm",
+    jev: "jev",
+    ournormaljev: "ournormaljev",
+    ourtrainedjev: "ourtrainedjev",
+    normal: "ournormaljev",
+    trained: "ourtrainedjev",
+  };
   const out: EvalJudge[] = [];
   for (const raw of requested) {
     const judge = alias[raw];
