@@ -1,3 +1,10 @@
+## [1.352.1](https://github.com/juspay/xyne-spaces/compare/v1.352.0...v1.352.1) (2026-09-21)
+
+
+### Bug Fixes
+
+* slash cmd UI fixes - @ mentions ([#2097](https://github.com/juspay/xyne-spaces/issues/2097)) ([5d927c9](https://github.com/juspay/xyne-spaces/commit/5d927c9f6b7176ab2c14ac99aad7a79772cbbebb))
+
 ## [1.352.0](https://github.com/juspay/xyne-spaces/compare/v1.351.2...v1.352.0) (2026-09-21)
 
 
