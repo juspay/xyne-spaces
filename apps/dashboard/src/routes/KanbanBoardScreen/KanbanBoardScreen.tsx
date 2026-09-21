@@ -5265,7 +5265,9 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                                     status: col.status,
                                     stageName: col.stageName,
                                     assignee:
-                                      group.entityType === 'user' && group.entityId
+                                      groupBy !== 'createdBy' &&
+                                      group.entityType === 'user' &&
+                                      group.entityId
                                         ? { type: 'assigneeTo', value: group.entityId }
                                         : group.entityType === 'group' && group.entityId
                                           ? { type: 'userGroup', value: group.entityId }
