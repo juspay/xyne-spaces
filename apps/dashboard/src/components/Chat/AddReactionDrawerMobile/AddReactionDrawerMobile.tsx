@@ -3,7 +3,9 @@ import EmojiPicker, { EmojiStyle } from 'emoji-picker-react';
 import { Drawer } from 'vaul';
 import { parseReactionsMd } from '@xyne/shared';
 import { MobileAddReactionDrawerProps } from './types';
-import { FrequentEmojiRow } from '../FrequentEmojiRow/FrequentEmojiRow';
+import { FrequentEmojiRow } from '../FrequentEmojis/FrequentEmojiRow';
+import { EMOJI_PICKER_CATEGORIES } from '../../../utils/emojiPickerCategories';
+import { toEmojiToken } from '../../../utils/customEmojiUtils';
 
 const AddReactionDrawerMobile = ({
   messageId,
@@ -29,7 +31,9 @@ const AddReactionDrawerMobile = ({
     }
   };
 
-  // Shared by the picker grid and the Frequently Used row.
+  // Shared by the picker grid and the Frequently Used row. The hasReacted lookup lives in
+  // `useApplyReaction`; this drawer is handed `toggleReaction` by its parent, so it keeps
+  // the parent's reactions map and only adds the close behaviour.
   const applyReaction = (emojiName: string): void => {
     const hasReacted = !!user && (reactionsData[emojiName] || []).includes(user.id);
 
@@ -75,20 +79,15 @@ const AddReactionDrawerMobile = ({
             className='flex h-full flex-col'
             onTouchStart={handleEmojiPickerTouchStart}
           >
-            <FrequentEmojiRow onSelect={applyReaction} />
+            <FrequentEmojiRow onSelect={applyReaction} messageId={messageId} />
             <EmojiPicker
               emojiStyle={EmojiStyle.NATIVE}
               style={{
                 ['--epr-emoji-size' as string]: '22px',
                 ['--epr-emoji-gap' as string]: '4px',
               }}
-              onEmojiClick={emoji => {
-                applyReaction(
-                  emoji.isCustom
-                    ? `custom:${emoji.emoji}:${emoji.names[0] || 'custom'}`
-                    : emoji.emoji,
-                );
-              }}
+              onEmojiClick={emoji => applyReaction(toEmojiToken(emoji))}
+              categories={EMOJI_PICKER_CATEGORIES}
               customEmojis={customEmojis || []}
               previewConfig={{ showPreview: true }}
               autoFocusSearch={false}

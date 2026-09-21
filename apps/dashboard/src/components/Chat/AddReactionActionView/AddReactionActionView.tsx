@@ -2,20 +2,23 @@ import React, { useRef } from 'react';
 import EmojiPicker, { EmojiStyle, Theme } from 'emoji-picker-react';
 import { EmojiPickerEmoji } from '../../../hooks/useCustomEmojis';
 import { useTheme } from '../../../hooks/useTheme';
-import { FrequentEmojiRow } from '../FrequentEmojiRow/FrequentEmojiRow';
-import { parseCustomEmoji } from '../../../utils/customEmojiUtils';
+import { FrequentEmojiRow } from '../FrequentEmojis/FrequentEmojiRow';
+import { toEmojiToken } from '../../../utils/customEmojiUtils';
+import { EMOJI_PICKER_CATEGORIES } from '../../../utils/emojiPickerCategories';
 
 interface AddReactionActionViewProps {
-  handleEmojiSelect: (emoji: {
-    emoji: string;
-    isCustom: boolean;
-    imageUrl?: string;
-    names?: string[];
-  }) => void;
+  /** Receives the stored reaction token — unicode char, or `custom:<emojiId>:<name>`. */
+  handleEmojiSelect: (emoji: string) => void;
   customEmojis: EmojiPickerEmoji[] | undefined;
+  /** Message the picker reacts to — carried on the analytics event. */
+  messageId?: string | undefined;
 }
 
-const AddReactionActionView = ({ handleEmojiSelect, customEmojis }: AddReactionActionViewProps) => {
+const AddReactionActionView = ({
+  handleEmojiSelect,
+  customEmojis,
+  messageId,
+}: AddReactionActionViewProps) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const { theme } = useTheme();
   const emojiPickerTheme = theme === 'midnight' ? Theme.DARK : Theme.LIGHT;
@@ -33,21 +36,9 @@ const AddReactionActionView = ({ handleEmojiSelect, customEmojis }: AddReactionA
     }
   };
 
-  // The row hands back a stored reaction token; split it back into the shape the
-  // parent already serialises, so both paths produce the identical `custom:` string.
-  const handleFrequentSelect = (emoji: string): void => {
-    const custom = parseCustomEmoji(emoji);
-
-    handleEmojiSelect(
-      custom
-        ? { emoji: custom.emojiId, isCustom: true, names: [custom.name] }
-        : { emoji, isCustom: false },
-    );
-  };
-
   return (
     <div ref={containerRef} className='flex h-full flex-col' onTouchStart={handleTouchStart}>
-      <FrequentEmojiRow onSelect={handleFrequentSelect} />
+      <FrequentEmojiRow onSelect={handleEmojiSelect} messageId={messageId} />
       <EmojiPicker
         emojiStyle={EmojiStyle.NATIVE}
         theme={emojiPickerTheme}
@@ -55,14 +46,8 @@ const AddReactionActionView = ({ handleEmojiSelect, customEmojis }: AddReactionA
           ['--epr-emoji-size' as string]: '22px',
           ['--epr-emoji-gap' as string]: '4px',
         }}
-        onEmojiClick={emoji => {
-          handleEmojiSelect({
-            emoji: emoji.emoji,
-            isCustom: emoji.isCustom,
-            imageUrl: emoji.imageUrl,
-            names: emoji.names,
-          });
-        }}
+        onEmojiClick={emoji => handleEmojiSelect(toEmojiToken(emoji))}
+        categories={EMOJI_PICKER_CATEGORIES}
         customEmojis={customEmojis || []}
         previewConfig={{ showPreview: true }}
         autoFocusSearch={false}
