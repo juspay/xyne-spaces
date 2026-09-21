@@ -1,17 +1,31 @@
 import { ReactElement, useEffect, useRef, useState } from 'react';
+import { ChevronDown } from 'lucide-react';
 import Badge from '../../ui/Badge';
 import { cn } from '../../../utils/classNames';
+import { JumpToDateMenu, JumpTarget } from './JumpToDateMenu';
 
 export interface DatePillProps {
   dateText: string;
   className?: string;
   staticRule?: boolean;
+  /**
+   * When provided the pill becomes a "jump to date" trigger: it renders a chevron
+   * affordance and opens the jump menu on click. Omit it for a read-only pill.
+   */
+  onJump?: ((target: JumpTarget) => void) | undefined;
+  /** Date this pill represents — seeds the calendar in the jump menu. */
+  jumpAnchorDate?: Date | undefined;
+  /** Disables the trigger while a jump is already in flight. */
+  jumpDisabled?: boolean;
 }
 
 export const DatePill = ({
   dateText,
   className,
   staticRule = false,
+  onJump,
+  jumpAnchorDate,
+  jumpDisabled = false,
 }: DatePillProps): ReactElement => {
   // Default false for rendering grey horizontal rule
   const [showLines, setShowLines] = useState(staticRule);
@@ -65,6 +79,12 @@ export const DatePill = ({
     };
   }, [staticRule]);
 
+  const badge = (
+    <Badge variant='outline' className={cn('bg-background', className)}>
+      {dateText}
+    </Badge>
+  );
+
   return (
     <div
       ref={wrapperRef}
@@ -78,9 +98,32 @@ export const DatePill = ({
       />
 
       <div className='relative'>
-        <Badge variant='outline' className={cn('bg-background', className)}>
-          {dateText}
-        </Badge>
+        {onJump ? (
+          <JumpToDateMenu anchorDate={jumpAnchorDate} onJump={onJump} disabled={jumpDisabled}>
+            <button
+              type='button'
+              aria-label={`Jump to a date. Currently showing ${dateText}`}
+              data-testid='date-pill-jump-trigger'
+              data-track-category='CHAT_LIST'
+              data-track-name='OPEN_JUMP_TO_DATE'
+              disabled={jumpDisabled}
+              className='rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60'
+            >
+              <Badge
+                variant='outline'
+                className={cn(
+                  'bg-background cursor-pointer gap-1 pr-1.5 hover:bg-accent hover:text-accent-foreground transition-colors',
+                  className,
+                )}
+              >
+                {dateText}
+                <ChevronDown className='w-3 h-3 opacity-60' />
+              </Badge>
+            </button>
+          </JumpToDateMenu>
+        ) : (
+          badge
+        )}
       </div>
     </div>
   );
