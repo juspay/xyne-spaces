@@ -11,7 +11,9 @@ import { createLogger } from "../logger.js";
 
 const log = createLogger("run");
 
-type AgentRunTriggerSource = "spaces" | "scheduled" | "chat" | "api" | "automation" | "slack" | "heartbeat" | "reflex";
+import type { MessagingChannelKey } from "../surfaces/messaging/plugin.js";
+
+type AgentRunTriggerSource = "spaces" | "scheduled" | "chat" | "api" | "automation" | "slack" | "heartbeat" | "reflex" | MessagingChannelKey;
 
 // ── SSE → legacy POST bridge ───────────────────────────────────────────────
 // Used by the proxy's SSE-with-translation branch. Consumes claw's open SSE
