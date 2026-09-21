@@ -488,6 +488,7 @@ export class GitHubWebhookService {
           ? context.repoName.split('/')
           : [context.projectName || '', context.repoName];
 
+        const vcsProvider = 'github' as const;
         await commitAnalysisQueue.enqueueAnalysis({
           workspaceId: result.pr.workspaceId,
           prId: context.prId,
@@ -495,7 +496,7 @@ export class GitHubWebhookService {
           repositoryUrl: context.repoUrl,
           projectKey: owner,
           repositorySlug: repo,
-          vcsProvider: 'github',
+          vcsProvider,
         });
 
         logger.info(`[GitHub-Webhook] Enqueued commit analysis for PR #${String(context.prId).replace(/[\r\n]/g, '')}`);

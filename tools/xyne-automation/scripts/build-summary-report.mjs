@@ -9,6 +9,7 @@ import path from 'node:path';
 
 const artifactDir = process.argv[2];
 if (!artifactDir) {
+  console.error('usage: build-summary-report.mjs <artifactDir> [out.html]');
   process.exit(2);
 }
 const outFile = process.argv[3] ?? path.join(artifactDir, 'report.html');

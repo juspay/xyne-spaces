@@ -444,6 +444,7 @@ export class BitbucketWebhookService {
 
     // Enqueue commit analysis job (async, non-blocking)
     if (result?.pr) {
+      const vcsProvider = 'bitbucket' as const;
       try {
         await commitAnalysisQueue.enqueueAnalysis({
           workspaceId: result.pr.workspaceId,
@@ -452,7 +453,7 @@ export class BitbucketWebhookService {
           repositoryUrl: context.repoUrl,
           projectKey: context.projectName,
           repositorySlug: context.repoSlug,
-          vcsProvider: 'bitbucket',
+          vcsProvider,
         });
 
         logger.info(`[Bitbucket-Webhook] Enqueued commit analysis for PR #${String(context.prId).replace(/[\r\n]/g, '')}`);

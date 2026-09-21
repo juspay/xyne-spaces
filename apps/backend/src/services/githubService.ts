@@ -536,13 +536,19 @@ export class GitHubService implements VcsClient {
       }> = [];
 
       const PER_PAGE = 100;
-      const MAX_PAGES = 50; // Safety limit: max 5000 commits
+      const MAX_PAGES = 50;
       let page = 1;
 
       // Fetch all pages
       while (page <= MAX_PAGES) {
         const url = `/repos/${owner}/${repo}/pulls/${prNumber}/commits?per_page=${PER_PAGE}&page=${page}`;
         const data = await this.restRequest<typeof commits>(url);
+
+        // Break if response is invalid
+        if (!Array.isArray(data)) {
+          logger.warn(`GitHub: PR #${prNumber} unexpected response structure, stopping pagination`);
+          break;
+        }
 
         commits.push(...data);
 

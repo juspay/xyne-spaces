@@ -647,7 +647,7 @@ export class BitbucketService {
 
       let start = 0;
       const LIMIT = 100;
-      const MAX_PAGES = 50; // Safety limit: max 5000 commits
+      const MAX_PAGES = 50;
       let page = 0;
 
       // Fetch all pages
@@ -678,6 +678,12 @@ export class BitbucketService {
           isLastPage: boolean;
           nextPageStart?: number;
         };
+
+        // Break if response structure is invalid
+        if (!data || !Array.isArray(data.values) || typeof data.isLastPage !== 'boolean') {
+          logger.warn(`Bitbucket: PR #${prId} unexpected response structure, stopping pagination`);
+          break;
+        }
 
         commits.push(...data.values);
 
