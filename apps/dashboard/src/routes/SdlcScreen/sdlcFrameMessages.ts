@@ -35,7 +35,7 @@ export interface SdlcFrameReadyMessage {
   type: typeof SDLC_FRAME_MESSAGE.ready;
 }
 
-/** Frame → parent: destroy this frame and mount a fresh one at the SDLC root. */
+/** Frame → parent: destroy this frame and mount a fresh one; the host picks the boot path. */
 export interface SdlcFrameResetMessage {
   type: typeof SDLC_FRAME_MESSAGE.reset;
 }
