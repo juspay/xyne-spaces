@@ -26,6 +26,7 @@ import {
 } from '@xyne/shared';
 import { BLOCKED_EXTENSIONS } from '../../ui/utils/files';
 import { useChannel, useChannelSearch } from '../../../hooks/useChannels';
+import { useChannelBoards } from '../../../hooks/useChannelBoards';
 import { intentClassifier } from '../../../services/onDeviceIntent';
 import { useIntentSuggestionToast } from '../../../hooks/useIntentSuggestionToast';
 import { ScheduleCallModal } from '../../Call/ScheduleCallModal/ScheduleCallModal';
@@ -339,6 +340,9 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
       includeSpecialMentions: !conversationId || allowThreadBroadcastMentions,
     });
     const channel = useChannel(channelId);
+    // Tickets need a board to land on, and a channel's boards come from
+    // channel_board_mappings — a channel with none can't create one.
+    const { hasBoards: channelHasBoards } = useChannelBoards(channelId);
     const isSupportChannel = channel?.type === ChannelType.SUPPORT;
     // SDLC channels are hidden from the chat directory, so "also send to
     // channel" has no destination a user could ever see — hide the toggle.
@@ -1211,6 +1215,8 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
                 })}
               {...(channel?.scopeType === ChannelScopeType.DEFAULT &&
                 canCreateTicket &&
+                // No linked boards means nowhere to put a ticket, so don't offer it.
+                channelHasBoards &&
                 !conversationId && {
                   onCreateTicket: (description: string | undefined) => {
                     void (async () => {

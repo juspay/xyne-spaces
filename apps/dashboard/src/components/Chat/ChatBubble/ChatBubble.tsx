@@ -60,6 +60,7 @@ import {
 } from '../ChatList/ChatListUtils';
 import { useUserBookmarks } from '../../../hooks/useUserBookmarks';
 import { useChannel } from '../../../hooks/useChannels';
+import { useChannelBoards } from '../../../hooks/useChannelBoards';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { logger, Event } from '../../../utils/logger';
 import { MessageActionsDrawer } from '../MessageActionsDrawer/MessageActionsDrawer';
@@ -189,6 +190,9 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   const { setSkipMarkAsRead } = React.useContext(ConversationTabContext);
   const { isMobile } = usePlatform();
   const channel = useChannel(channelId);
+  // Tickets need a board to land on, and a channel's boards come from
+  // channel_board_mappings — a channel with none can't create one.
+  const { hasBoards: channelHasBoards } = useChannelBoards(channelId);
   // Get sender info from useUser hook
   const sender = useUser(message.senderId);
 
@@ -1058,6 +1062,8 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
         !isSystemMessage &&
         !isMessageDeleted &&
         !hasTicket &&
+        // No linked boards means nowhere to put a ticket, so don't offer it.
+        channelHasBoards &&
         channelScopeType === ChannelScopeType.DEFAULT && {
           onCreateTicket: handleCreateTicket,
         }),
@@ -1395,6 +1401,8 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
                 !isSystemMessage &&
                 !isMessageDeleted &&
                 !hasTicket &&
+                // No linked boards means nowhere to put a ticket, so don't offer it.
+                channelHasBoards &&
                 channelScopeType === ChannelScopeType.DEFAULT && {
                   onCreateTicket: handleCreateTicket,
                 })}
