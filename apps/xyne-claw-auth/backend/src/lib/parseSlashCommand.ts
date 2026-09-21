@@ -36,6 +36,9 @@ export type SlashCommand =
   // `/help` — list the available slash commands.
   | { kind: "help" }
   | { kind: "status" }
+  // `/eval <question>` — run the question once on every configured provider,
+  // each answering in this thread, then attach a timing comparison.
+  | { kind: "eval"; question: string; providers: string[] }
   // `/debug` — attach one HTML file with the latest run's execution trace.
   // `/debug all` — every checkpointed session in the thread, newest first,
   // each expandable, so an issue can be traced across runs.
@@ -95,6 +98,17 @@ function parseFromSlash(trimmed: string): SlashCommand | null {
   }
   if (lower === "/status") {
     return { kind: "status" };
+  }
+  if (lower === "/eval" || lower.startsWith("/eval ")) {
+    const rest = trimmed.slice("/eval".length).trim();
+    const providers: string[] = [];
+    const question = rest
+      .replace(/(?:^|\s)providers?=([\w,\-]+)/gi, (_m, list: string) => {
+        for (const p of list.split(",").map((x) => x.trim().toLowerCase()).filter(Boolean)) providers.push(p);
+        return " ";
+      })
+      .trim();
+    return { kind: "eval", question, providers };
   }
   if (lower === "/debug") {
     return { kind: "debug" };

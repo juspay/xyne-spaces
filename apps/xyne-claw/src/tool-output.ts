@@ -27,6 +27,8 @@
  *     downstream invocation persistence. Stripped before anything stores them.
  */
 
+import { basename } from "node:path";
+import { gcsUploadSessionFile } from "./storage.js";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join as joinPath, resolve as resolvePath } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -253,6 +255,11 @@ export async function promoteIfOversized(
   try {
     await mkdir(dir, { recursive: true });
     await writeFile(absPath, lined, { encoding: "utf8" });
+    void gcsUploadSessionFile(
+      basename(outputBaseDir),
+      joinPath(".context", "tool-results", `${baseName}.json`),
+      lined,
+    );
   } catch (err) {
     const truncated = lined.slice(0, cap);
     return [
@@ -273,6 +280,15 @@ export async function promoteIfOversized(
     const rawFileName = `${baseName}-raw.json`;
     try {
       await writeFile(joinPath(dir, rawFileName), rawContent, { encoding: "utf8" });
+      // Awaited, unlike the lined copy above: this is the path the model is
+      // told to forward with sandbox-copy-in, and that call lands on whichever
+      // pod claims the NEXT turn. If it is not in the archive by then, that pod
+      // restores a session without it.
+      await gcsUploadSessionFile(
+        basename(outputBaseDir),
+        joinPath(".context", "tool-results", rawFileName),
+        rawContent,
+      );
       rawRelPath = joinPath("tool-results", rawFileName);
     } catch (err) {
       log.warn(`[tool-output] ${safeCategory}/${safeTool} raw sibling write failed: ${err instanceof Error ? err.message : String(err)}`);

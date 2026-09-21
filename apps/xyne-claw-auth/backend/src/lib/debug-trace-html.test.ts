@@ -223,3 +223,49 @@ describe("renderDebugTraceBundleHtml", () => {
     expect(html).toContain("1 session in this thread");
   });
 });
+
+describe("waterfall", () => {
+  const T0 = "2026-09-20T13:00:00.000Z";
+  const at = (secs: number): string => new Date(Date.parse(T0) + secs * 1000).toISOString();
+
+  const run = {
+    agentSlug: "xyne",
+    provider: "litellm",
+    model: "private-large-spaces",
+    startedAt: T0,
+    finishedAt: at(100),
+    // An LLM turn carries no duration of its own — it is measured from its
+    // paired session_prompt, keyed by llmCall, exactly as production emits it.
+    events: [
+      { kind: "session_prompt", at: at(0), llmCall: 1 },
+      { kind: "assistant_turn_end", at: at(10), turn: 1, llmCall: 1, data: { ttftMs: 2_000 } },
+      { kind: "tool_execution_start", at: at(10), toolCallId: "c1" },
+      { kind: "tool_execution_end", at: at(70), toolCallId: "c1", data: { toolName: "spaces", durationMs: 60_000 } },
+      { kind: "session_prompt", at: at(70), llmCall: 2 },
+      { kind: "assistant_turn_end", at: at(80), turn: 2, llmCall: 2, data: { ttftMs: 1_000 } },
+      { kind: "tool_execution_start", at: at(80), toolCallId: "c2" },
+      { kind: "tool_execution_end", at: at(82), toolCallId: "c2", data: { toolName: "todo-write", durationMs: 2_000, isError: true } },
+    ],
+  } as unknown as Parameters<typeof renderDebugTraceHtml>[0];
+
+  it("measures a turn from its prompt, not from a field the event does not carry", () => {
+    const html = renderDebugTraceHtml(run);
+    expect(html).toContain("Where the time went");
+    expect(html).toContain("model 20.0 s");
+    expect(html).toContain("tools 1m 02s");
+    expect(html).toContain("unaccounted 18.0 s");
+  });
+
+  it("positions each span by its start offset, not its order", () => {
+    const html = renderDebugTraceHtml(run);
+    // The 60s tool starts at 10s of a 100s run.
+    expect(html).toMatch(/wf-bar wf-tool[^"]*" style="left:10\.00%;width:60\.00%/);
+  });
+
+  it("marks a failed tool call and shows ttft inside the model bar", () => {
+    const html = renderDebugTraceHtml(run);
+    expect(html).toContain("wf-bad");
+    expect(html).toContain("wf-wait");
+    expect(html).toContain("ttft 2.0 s");
+  });
+});

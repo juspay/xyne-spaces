@@ -712,11 +712,26 @@ export async function prepareRun(
         .findByUserAndProvider(resolved.userId, runOverride.provider)
         .catch(() => null);
       if (!cred?.encryptedKey) {
-        return {
-          ok: false,
-          status: 400,
-          error: `No ${runOverride.provider} credentials for this user — connect it in Settings first`,
-        };
+        // Fall back to the AGENT's own credential for that provider. Requiring a
+        // personal key here was over-broad: every normal mention already runs on
+        // the agent's credentials, so pinning one of the providers the agent is
+        // ALREADY configured with spends the same quota by a different route. It
+        // is not a way to reach a provider nobody has connected — a provider
+        // absent from the agent's own config is still refused below.
+        const agentProviders = await resolveAgentProviderConfigs({ id: agent.id, config: agent.config })
+          .catch(() => null);
+        if (!agentProviders?.providerConfigs?.[runOverride.provider]) {
+          return {
+            ok: false,
+            status: 400,
+            error:
+              `No ${runOverride.provider} credentials for this user, and "${agentSlug}" has none configured either ` +
+              `— connect it in Settings, or add it to the agent's providers`,
+          };
+        }
+        log.info(
+          `[run] provider override ${runOverride.provider} using agent credentials agentSlug=${agentSlug} userId=${resolved.userId}`,
+        );
       }
     }
 
@@ -1095,7 +1110,26 @@ export async function prepareRun(
         // cred, ignore the override and fall through to normal resolution
         // rather than forcing a provider claw can't serve (which would silently
         // drop to the platform default).
-        const cfg = effectiveProviderConfigs?.[runOverride.provider];
+        // Resolve the agent's own configs when the request did not carry one for
+        // this provider. Without this the pin is silently dropped and the run
+        // lands on the platform default — /eval saw all four arms report
+        // "spaces" while each claimed a different pin.
+        let cfg = effectiveProviderConfigs?.[runOverride.provider];
+        if (!cfg) {
+          const fromAgent = await resolveAgentProviderConfigs({ id: agent.id, config: agent.config })
+            .catch(() => null);
+          const agentCfg = fromAgent?.providerConfigs?.[runOverride.provider];
+          if (agentCfg) {
+            effectiveProviderConfigs = { ...(effectiveProviderConfigs ?? {}), [runOverride.provider]: agentCfg };
+            cfg = agentCfg;
+          }
+        }
+        if (!cfg) {
+          log.warn(
+            `[run] provider override ${runOverride.provider} DROPPED — no credential resolved; ` +
+            `run will use ${effectiveProvider ?? "the platform default"} agentSlug=${agentSlug}`,
+          );
+        }
         if (cfg) {
           effectiveProvider = runOverride.provider;
           if (runOverride.model?.trim()) {

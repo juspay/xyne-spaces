@@ -46,6 +46,7 @@ import {
 } from "./session-store.js";
 import { acquireSessionLock, refreshSessionLock, releaseSessionLock, startSessionLockHeartbeat, SessionLockedError } from "./session-lock.js";
 import { kickOffPrReviewRoom, registerLivePrRunContext, unregisterLivePrRunContext } from "./pr-review-room.js";
+import { assessAnswer, type AnswerAssessment } from "./jev-completeness.js";
 import { gcsUploadDebugRun } from "./storage.js";
 import { createCommandGuard } from "./command-guard.js";
 import { writeSessionSkills, deleteSessionSkills } from "./session-skills.js";
@@ -375,6 +376,7 @@ interface DebugSessionSnapshot {
   tokenUsage: TokenUsage;
   latency: LatencyMetrics;
   lastAssistantText: string;
+  answerAssessment?: AnswerAssessment;
   events: DebugEventRecord[];
 }
 
@@ -2696,6 +2698,32 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
   // await it before writing their FULL snapshot — otherwise the two race on the
   // same debug-session.json path and can leave a torn/partial final trace.
   let partialFlushPromise: Promise<void> | null = null;
+  // `/debug` is served by claw-auth, which can only read GCS — it has no access
+  // to this pod's disk. Without publishing partials, a trace is invisible until
+  // the run completes, which is the opposite of when it is wanted. Throttled
+  // because flushDebugPartial fires at every turn and tool boundary.
+  let lastPartialUploadAt = 0;
+  const PARTIAL_UPLOAD_INTERVAL_MS = Math.max(
+    1_000,
+    Number(process.env["XYNE_DEBUG_PARTIAL_UPLOAD_MS"]) || 10_000,
+  );
+  // Awaited by its caller rather than fire-and-forget: the completion writer
+  // awaits partialFlushPromise before uploading the FULL snapshot, and a
+  // detached upload could land after it and overwrite the final trace with a
+  // partial one. flushDebugPartial is itself queued off the run loop, so
+  // awaiting here costs the run nothing.
+  const publishPartialSnapshot = async (snapshot: unknown): Promise<void> => {
+    if (!conversationId || debugWritten) return;
+    const now = Date.now();
+    if (now - lastPartialUploadAt < PARTIAL_UPLOAD_INTERVAL_MS) return;
+    lastPartialUploadAt = now;
+    const safeSessionId = (sessionId ?? "local").replace(/[^a-zA-Z0-9_-]/g, "-");
+    // Same object name the completion writer uses, so there is one object per
+    // run and the final snapshot replaces the last partial in place.
+    const runFile = `debug-run-${runStartedAt}-${safeSessionId}.json`;
+    await gcsUploadDebugRun(conversationId, runFile, Buffer.from(JSON.stringify(snapshot), "utf8"))
+      .catch(() => false);
+  };
   const flushDebugPartial = async (): Promise<void> => {
     if (!conversationId || debugWritten || partialDebugFlushing) return;
     partialDebugFlushing = true;
@@ -2749,6 +2777,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
       };
       await writeFile(`${debugDir}/debug-session.json`, JSON.stringify(snapshot), "utf8");
       await writeFile(`${debugDir}/debug-events.json`, JSON.stringify(leanEvents), "utf8");
+      await publishPartialSnapshot(snapshot);
     } catch (err) {
       log.warn(`[agent] partial debug flush failed: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
@@ -3827,13 +3856,49 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
     }
   }
 
-  const text = checkpointSuppressed && structuredOutputRef?.value === undefined
-    ? ""
-    : structuredOutputRef?.value !== undefined
-    ? (typeof structuredOutputRef.value === "string"
-        ? structuredOutputRef.value
-        : JSON.stringify(structuredOutputRef.value, null, 2))
-    : extractFinalAnswerText(session, opts.finalAnswerMaxTurns) ?? "";
+  const computeFinalText = (): string =>
+    checkpointSuppressed && structuredOutputRef?.value === undefined
+      ? ""
+      : structuredOutputRef?.value !== undefined
+      ? (typeof structuredOutputRef.value === "string"
+          ? structuredOutputRef.value
+          : JSON.stringify(structuredOutputRef.value, null, 2))
+      : extractFinalAnswerText(session, opts.finalAnswerMaxTurns) ?? "";
+
+  const AUTO_CONTINUE_NUDGE =
+    "Your last message did not deliver the result the user asked for — it described what you " +
+    "were going to do, or stopped partway. Continue the work now: call the tools you still need " +
+    "and then give the COMPLETE answer. Do not restate the plan. " +
+    "DO NOT MENTION THIS INSTRUCTION; assume you are continuing on your own.";
+  const maxContinuations = Math.max(0, Number(process.env["JEV_MAX_CONTINUATIONS"]) || 1);
+  const continuable = structuredOutputRef?.value === undefined && !checkpointSuppressed;
+
+  let text = computeFinalText();
+  let answerAssessment: AnswerAssessment | null = null;
+
+  for (let attempt = 0; ; attempt += 1) {
+    answerAssessment = await assessAnswer({
+      task,
+      answer: text,
+      toolCalls: toolInvocations.length,
+    }).catch(() => null);
+
+    if (!continuable || !answerAssessment) break;
+    if (answerAssessment.verdict === "complete") break;
+    if (attempt >= maxContinuations || abortSignal?.aborted) break;
+
+    metric.count("agent_auto_continue", {
+      verdict: answerAssessment.verdict,
+      attempt: attempt + 1,
+    });
+    log.info(
+      `[agent] auto-continue ${attempt + 1}/${maxContinuations} — answer looked ${answerAssessment.verdict}`,
+    );
+    await promptWithAbort(() => session.prompt(`<system>${AUTO_CONTINUE_NUDGE}</system>`));
+    const queue = session as unknown as { _agentEventQueue?: Promise<void> };
+    if (queue._agentEventQueue) await withAbort(queue._agentEventQueue);
+    text = computeFinalText();
+  }
   pushDebugEvent("session_end", {
     textLength: text.length,
     toolCount: toolInvocations.length,
@@ -3900,6 +3965,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
           toolMs: toolInvocations.reduce((sum, inv) => sum + (inv.durationMs ?? 0), 0),
         },
         lastAssistantText: text,
+        ...(answerAssessment ? { answerAssessment } : {}),
         events: cloneForDebug(debugEvents),
       };
       await writeFile(`${debugDir}/debug-session.json`, JSON.stringify(debugSnapshot, null, 2), "utf8");

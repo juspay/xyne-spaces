@@ -34,6 +34,7 @@ import {
 } from "@xyne/storage";
 import { GCS, STORAGE } from "./config.js";
 import { createLogger } from "./logger.js";
+import { metric } from "./metrics.js";
 
 const log = createLogger("gcs");
 
@@ -125,6 +126,10 @@ function noteIfCredsError(err: unknown): void {
   }
 }
 
+function isMissingFile(err: unknown): boolean {
+  return (err as NodeJS.ErrnoException | null)?.code === "ENOENT";
+}
+
 function objectName(conversationId: string, relPath: string): string {
   return `${SESSION_PREFIX}/${conversationId}/${relPath}`;
 }
@@ -168,23 +173,46 @@ export async function gcsUploadSessionFromDisk(
   try {
     const queue = [...files];
     let failed = false;
+    let vanished = 0;
     const worker = async (): Promise<void> => {
       for (let f = queue.shift(); f && !failed; f = queue.shift()) {
+        const stream = createReadStream(f.absPath);
+        // A read stream reports ENOENT via an async 'error' event, not via the
+        // await below, so without this it escapes the try/catch and kills the
+        // process. Racing it makes a vanished file an ordinary rejection.
+        const streamFailure = new Promise<never>((_, reject) => {
+          stream.once("error", reject);
+        });
+        void streamFailure.catch(() => {});
         try {
-          await client.uploadStreamToPath(createReadStream(f.absPath), {
-            path: objectName(conversationId, f.path),
-            contentType: "application/octet-stream",
-            resumable: f.sizeBytes > RESUMABLE_THRESHOLD_BYTES,
-            timeoutMs: STORAGE_TIMEOUT_MS,
-            ...(options.createOnly ? { ifNotExists: true } : {}),
-          });
+          await Promise.race([
+            client.uploadStreamToPath(stream, {
+              path: objectName(conversationId, f.path),
+              contentType: "application/octet-stream",
+              resumable: f.sizeBytes > RESUMABLE_THRESHOLD_BYTES,
+              timeoutMs: STORAGE_TIMEOUT_MS,
+              ...(options.createOnly ? { ifNotExists: true } : {}),
+            }),
+            streamFailure,
+          ]);
         } catch (err) {
+          // Tool-result spill files are written and cleaned concurrently, so one
+          // can disappear mid-archive. That file is unrecoverable either way —
+          // skipping keeps the rest of the session archivable.
+          if (isMissingFile(err)) {
+            stream.destroy();
+            vanished += 1;
+            log.warn(`[gcs] skipping vanished session file ${f.path} for ${conversationId}`);
+            continue;
+          }
+          stream.destroy();
           failed = true; // stop the other workers draining the queue
           throw err;
         }
       }
     };
     await Promise.all(Array.from({ length: Math.min(UPLOAD_CONCURRENCY, files.length) }, worker));
+    if (vanished > 0) metric.count("session_archive_file_vanished", { count: vanished });
     return true;
   } catch (err) {
     if (options.createOnly && isPreconditionFailed(err)) {
@@ -193,6 +221,39 @@ export async function gcsUploadSessionFromDisk(
     }
     noteIfCredsError(err);
     log.warn(`[gcs] direct upload failed for ${conversationId}:`, err instanceof Error ? err.message : String(err));
+    return false;
+  }
+}
+
+/**
+ * Write one session file straight to the archive, at the same object path the
+ * full archive would use. Spilled tool results are handed to the model as
+ * absolute local paths, but the next turn of that session can be claimed by a
+ * different pod, which restores the session from GCS and never sees a file
+ * written after the last archive. Writing through here makes the restore carry
+ * it, so the path the model was given still resolves.
+ */
+export async function gcsUploadSessionFile(
+  conversationId: string,
+  relPath: string,
+  data: string | Buffer,
+): Promise<boolean> {
+  const client = getStorage();
+  if (!client) return false;
+  try {
+    await client.uploadFileV2(typeof data === "string" ? Buffer.from(data, "utf8") : data, {
+      path: objectName(conversationId, relPath),
+      contentType: "application/octet-stream",
+      timeoutMs: STORAGE_TIMEOUT_MS,
+    });
+    return true;
+  } catch (err) {
+    noteIfCredsError(err);
+    metric.count("session_file_writethrough_failed");
+    log.warn(
+      `[gcs] write-through failed for ${conversationId}/${relPath}:`,
+      err instanceof Error ? err.message : String(err),
+    );
     return false;
   }
 }
