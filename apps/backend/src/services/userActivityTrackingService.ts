@@ -13,12 +13,14 @@ class UserActivityTrackingService {
     url?: string;
     triggerType: TriggerType;
     platform?: Platform;
+    // Real UserSession.id when the event belongs to one; a random id otherwise.
+    sessionId?: string;
     contextMetadata?: Record<string, unknown>;
   }): Promise<void> {
     try {
       const event = {
         user_id: params.userId,
-        session_id: uuidv4(),
+        session_id: params.sessionId || uuidv4(),
         event_category: params.eventCategory,
         event_name: params.eventName,
         event_label: params.eventLabel,
@@ -56,6 +58,43 @@ class UserActivityTrackingService {
       };
 
       await activityTrackingService.saveActivityEvent(event);
+  }
+
+  // ==================== Specific Auth Operations ====================
+
+  // LOGIN and LOGOUT share the UserSession.id as sessionId so the two rows pair
+  // up. eventLabel carries the login method / logout reason so daily reports can
+  // group on a plain column.
+  async trackLogin(
+    userId: string,
+    params: { sessionId: string; method: string; platform: Platform; metadata?: Record<string, unknown> },
+  ): Promise<void> {
+    await this.trackActivity({
+      userId,
+      eventCategory: 'AUTH',
+      eventName: 'LOGIN',
+      eventLabel: params.method,
+      triggerType: TriggerType.DB_MUTATION,
+      platform: params.platform,
+      sessionId: params.sessionId,
+      contextMetadata: { method: params.method, ...params.metadata },
+    });
+  }
+
+  async trackLogout(
+    userId: string,
+    params: { sessionId: string; reason: string; platform: Platform; metadata?: Record<string, unknown> },
+  ): Promise<void> {
+    await this.trackActivity({
+      userId,
+      eventCategory: 'AUTH',
+      eventName: 'LOGOUT',
+      eventLabel: params.reason,
+      triggerType: TriggerType.DB_MUTATION,
+      platform: params.platform,
+      sessionId: params.sessionId,
+      contextMetadata: { reason: params.reason, ...params.metadata },
+    });
   }
 
   // ==================== Specific Call Operations ====================

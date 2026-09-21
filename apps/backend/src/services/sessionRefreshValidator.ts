@@ -223,6 +223,25 @@ export async function isRefreshAllowed(session: LoadedSession | null): Promise<b
     userId: session?.user?.id,
   });
 
+  // A still-ACTIVE session denied here is the moment the user gets logged out,
+  // and the server is the only side that sees it — the client just receives a
+  // 401. Ending the session records the LOGOUT once; later requests with the
+  // same cookie hit status_EXPIRED / status_REVOKED above and record nothing.
+  // provider_revoked is recorded by the deactivation cleanup below.
+  if (session) {
+    const sessionId = session.id;
+    const endSession =
+      verdict.reason === 'refresh_token_expired'
+        ? userSessionService.expireSession(sessionId)
+        : verdict.reason === 'org_member_left' || verdict.reason === 'workspace_user_left'
+          ? userSessionService.revokeSession(sessionId, 'MEMBER_LEFT')
+          : null;
+    void endSession?.catch((err) => logger.error('[Refresh-Validate] Failed to end denied session', {
+      sessionId,
+      error: err instanceof Error ? err.message : String(err),
+    }));
+  }
+
   if (verdict.deactivate && session?.user) {
     const { id: userId, email } = session.user;
     void accountDeactivationService

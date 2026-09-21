@@ -1483,7 +1483,7 @@ export class AuthV2Controller {
       
       if (sessionId) {
         logger.info(`[${requestId}] Revoking session for user ${req.user?.email}`);
-        await this.userSessionService.revokeSession(sessionId);
+        await this.userSessionService.revokeSession(sessionId, 'USER_LOGOUT');
       }
 
       if (req.user && sessionId) {
@@ -1684,6 +1684,7 @@ export class AuthV2Controller {
             accessTokenExpiry: pendingAccessTokenExpiry,
             deviceInfo,
             ipAddress: req.ip || req.connection.remoteAddress || undefined,
+            platform,
           });
 
           sessionId = session.id;
@@ -1866,6 +1867,7 @@ export class AuthV2Controller {
             refreshTokenExpiry,
             deviceInfo,
             ipAddress: req.ip || req.connection.remoteAddress || undefined,
+            platform: this.detectPlatform(req),
           });
 
           sessionId = session.id;
@@ -2246,6 +2248,7 @@ export class AuthV2Controller {
               refreshTokenExpiry,
               deviceInfo,
               ipAddress: req.ip || req.connection.remoteAddress || undefined,
+              platform: this.detectPlatform(req),
             });
             sessionId = session.id;
           } catch (sessionError) {
@@ -2406,6 +2409,9 @@ export class AuthV2Controller {
             accessToken: currentSession.accessToken ?? undefined,
             deviceInfo: JSON.stringify({ userAgent: req.headers['user-agent'], timestamp: new Date().toISOString(), appVersion: req.headers['x-app-version'] }),
             ipAddress: req.ip || req.connection.remoteAddress || undefined,
+            // Already signed in — a session for the workspace they just created.
+            loginMethod: 'WORKSPACE_CREATED',
+            platform: this.detectPlatform(req),
           });
           newSessionId = newSession.id;
         } catch (sessionError) {
