@@ -35,16 +35,17 @@ describe("/eval parsing", () => {
       question: "how many tickets are open?",
       providers: [],
       judges: [],
+      opts: [],
     });
   });
 
   it("extracts a providers filter without leaving it in the question", () => {
     const parsed = parseSlashCommand("/eval providers=claude,codex summarize the channel");
-    expect(parsed).toEqual({ kind: "eval", question: "summarize the channel", providers: ["claude", "codex"], judges: [] });
+    expect(parsed).toEqual({ kind: "eval", question: "summarize the channel", providers: ["claude", "codex"], judges: [], opts: [] });
   });
 
   it("treats a bare /eval as a usage request", () => {
-    expect(parseSlashCommand("/eval")).toEqual({ kind: "eval", question: "", providers: [], judges: [] });
+    expect(parseSlashCommand("/eval")).toEqual({ kind: "eval", question: "", providers: [], judges: [], opts: [] });
   });
 
   it("does not claim commands that merely start with eval", () => {
@@ -220,6 +221,7 @@ describe("eval judge arms", () => {
       question: "summarize the channel",
       providers: [],
       judges: ["llm", "jev", "ournormaljev", "ourtrainedjev"],
+      opts: [],
     });
   });
 
@@ -267,6 +269,28 @@ describe("eval judge arms", () => {
     const traces = new Map<string, EvalTrace>([["s-claude", { run, timing: null }]]);
     const html = renderEvalHtml("q", [result("claude", { judge: "ourtrainedjev" })], started, traces, "xyne");
     expect(html).toContain("asked ourtrainedjev");
+  });
+});
+
+describe("eval optimization arms", () => {
+  it("parses opts= into one arm per | segment and keeps it out of the question", () => {
+    expect(parseSlashCommand("/eval opts=none|all|all,-jev_compaction what is aravind talking about")).toEqual({
+      kind: "eval",
+      question: "what is aravind talking about",
+      providers: [],
+      judges: [],
+      opts: ["none", "all", "all,-jev_compaction"],
+    });
+  });
+
+  it("gives each optimization arm its own id-safe key and a readable label", async () => {
+    const { armKey, armLabel, normalizeOptimizationArms } = await import("../eval-run.js");
+    const a = armKey({ provider: "litellm", useOverride: true, optimizations: "none" });
+    const b = armKey({ provider: "litellm", useOverride: true, optimizations: "all,-jev_compaction" });
+    expect(a).not.toBe(b);
+    expect(b).toMatch(/^[A-Za-z0-9._-]+$/);
+    expect(armLabel({ provider: "litellm", optimizations: "none" })).toBe("litellm · opts:none");
+    expect(normalizeOptimizationArms(["all", "all", "bad spec!"])).toEqual(["all"]);
   });
 });
 

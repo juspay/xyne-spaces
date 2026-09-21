@@ -57,6 +57,7 @@ import { packSdlcRunMeta, SDLC_META_KEYS, trustedSdlcToolBindings } from "xyne-c
 import { loadCustomTools } from "../custom-tools.js";
 import { buildCopilotTool } from "../copilot.js";
 import { pinRunJudgeBackend } from "../judge-backend.js";
+import { pinRunOptimizations } from "../optimizations.js";
 import { buildExperimentTools, buildExperimentReviewTools, type ExperimentContext } from "../experiment.js";
 import {
   executeRunFromPayload,
@@ -544,6 +545,7 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
     fastMode,
     resumedFromHandoff,
     judgeBackend,
+    optimizations,
     memoryBankId,
     twinDestinations,
     senderName,
@@ -557,6 +559,7 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
 
   const experiment = normalizeExperimentContext(rawExperiment);
   pinRunJudgeBackend(judgeBackend);
+  pinRunOptimizations(optimizations);
 
   // [AUTODBG] claw-side receipt of every /run forward (esp. automations). Confirms
   // the request crossed claw-auth → claw and which session id it arrived under

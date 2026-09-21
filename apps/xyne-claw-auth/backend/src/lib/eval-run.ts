@@ -25,6 +25,14 @@ export interface EvalTarget {
   useOverride: boolean;
   /** Judge backend for sift/compaction/completeness on this arm. */
   judge?: EvalJudge | undefined;
+  /** Optimization switch spec for this arm, e.g. "none", "all", "all,-jev_compaction". */
+  optimizations?: string | undefined;
+}
+
+const OPTIMIZATIONS_SPEC = /^[a-z0-9_,+\-]{1,400}$/i;
+
+export function normalizeOptimizationArms(requested: string[] | undefined): string[] {
+  return [...new Set((requested ?? []).filter((arm) => OPTIMIZATIONS_SPEC.test(arm)))];
 }
 
 export function normalizeJudges(requested: string[] | undefined): EvalJudge[] {
@@ -47,11 +55,20 @@ export function normalizeJudges(requested: string[] | undefined): EvalJudge[] {
 }
 
 export function armKey(target: EvalTarget): string {
-  return target.judge ? `${target.provider}-${target.judge}` : target.provider;
+  return [target.provider, target.judge, target.optimizations?.replace(/[^a-z0-9]+/gi, "_")]
+    .filter(Boolean)
+    .join("-");
 }
 
-export function armLabel(target: { provider: string; judge?: string | undefined }): string {
-  return target.judge ? `${target.provider} + ${target.judge}` : target.provider;
+export function armLabel(target: {
+  provider: string;
+  judge?: string | undefined;
+  optimizations?: string | undefined;
+}): string {
+  return [
+    target.judge ? `${target.provider} + ${target.judge}` : target.provider,
+    target.optimizations ? `opts:${target.optimizations}` : "",
+  ].filter(Boolean).join(" · ");
 }
 
 const PERSONAL_CRED_PROVIDERS = ["claude", "codex", "copilot"] as const;
@@ -148,6 +165,7 @@ export async function resolveEvalTargets(input: {
   conversationId?: string | undefined;
   requested?: string[];
   judges?: string[];
+  opts?: string[];
 }): Promise<EvalTarget[]> {
   const resolution = await resolveProvidersForDispatch({
     targetUserId: input.userId,
@@ -196,21 +214,25 @@ export async function resolveEvalTargets(input: {
   }
 
   const judges = normalizeJudges(input.judges);
+  const optArms = normalizeOptimizationArms(input.opts);
   const byProvider = input.requested?.length
     ? targets.filter((t) => input.requested?.includes(t.provider))
-    : judges.length > 0
+    : judges.length > 0 || optArms.length > 0
       ? targets.slice(0, 1)
       : targets;
-  const wanted = judges.length > 0
+  const byJudge: EvalTarget[] = judges.length > 0
     ? byProvider.flatMap((t) => judges.map((judge) => ({ ...t, judge })))
     : byProvider;
+  const wanted: EvalTarget[] = optArms.length > 0
+    ? byJudge.flatMap((t) => optArms.map((optimizations) => ({ ...t, optimizations })))
+    : byJudge;
   return wanted.slice(0, EVAL_MAX_PROVIDERS);
 }
 
 export function evalReplyPrefix(target: EvalTarget): string {
   // Placeholders, not literals: the delivery path fills them from the run's
   // actual provider/model, so a fallback is visible here too.
-  return `**Provider: {provider}**{model} · _pinned to ${target.provider}_${target.judge ? ` · judge: ${target.judge}` : ""}`;
+  return `**Provider: {provider}**{model} · _pinned to ${target.provider}_${target.judge ? ` · judge: ${target.judge}` : ""}${target.optimizations ? ` · opts: ${target.optimizations}` : ""}`;
 }
 
 /** Per-arm session key: safe id characters only, so the sandbox store and the
@@ -259,6 +281,7 @@ export async function dispatchEvalRun(args: {
       progressUrl: `${CONFIG.internalUrl}/claw/api/v1/webhook/progress`,
       channelId: args.channelId,
       ...(args.target.judge ? { judgeBackend: args.target.judge } : {}),
+      ...(args.target.optimizations ? { optimizations: args.target.optimizations } : {}),
       ...(args.target.useOverride
         ? {
             providerOverride: {
@@ -320,6 +343,7 @@ export async function readEvalResults(dispatches: EvalDispatch[]): Promise<EvalR
     return {
       provider: actual ?? d.provider,
       judge: d.judge,
+      optimizations: d.optimizations,
       requested: actual && actual !== d.provider ? d.provider : undefined,
       useOverride: d.useOverride,
       model: row?.model ?? d.model,

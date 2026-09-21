@@ -532,7 +532,7 @@ export async function prepareRun(
   const serviceToken = caller.serviceToken;
   const isServiceTokenCaller = serviceToken?.client === "service";
   {
-    const { task, context, conversationId, piSessionConversationId, agentSlug, callbackUrl, callbackSecret, channelId, deliverTo, projectId, projectName, cwd, eventType, triggerSource, slackDelivery, channelDelivery, traceId, provider, providerOrder, providerOverride, subagentProviders, subagentProviderMode, providerConfigs, progressUrl, attachments, recordingRefs, contextFiles, skills: bodySkills, attachedContext, ticketIds, canvasIds, callIds, idempotencyKey: requestedIdempotencyKey, isRegenerate, detached, fastMode, resumedFromHandoff, judgeBackend, generateFollowUpSuggestions } = body as {
+    const { task, context, conversationId, piSessionConversationId, agentSlug, callbackUrl, callbackSecret, channelId, deliverTo, projectId, projectName, cwd, eventType, triggerSource, slackDelivery, channelDelivery, traceId, provider, providerOrder, providerOverride, subagentProviders, subagentProviderMode, providerConfigs, progressUrl, attachments, recordingRefs, contextFiles, skills: bodySkills, attachedContext, ticketIds, canvasIds, callIds, idempotencyKey: requestedIdempotencyKey, isRegenerate, detached, fastMode, resumedFromHandoff, judgeBackend, optimizations, generateFollowUpSuggestions } = body as {
       task?: string;
       context?: string;
       conversationId?: string;
@@ -588,6 +588,7 @@ export async function prepareRun(
       fastMode?: boolean;
       resumedFromHandoff?: boolean;
       judgeBackend?: string;
+      optimizations?: unknown;
       generateFollowUpSuggestions?: boolean;
       /** Branching: when true, claw branches the PI session at the last user
        *  entry so the new assistant turn is a sibling of the previous one. */
@@ -1447,6 +1448,7 @@ export async function prepareRun(
       fastMode: effectiveFastMode,
       ...(resumedFromHandoff === true ? { resumedFromHandoff: true } : {}),
       ...(typeof judgeBackend === "string" && JUDGE_BACKENDS.has(judgeBackend) ? { judgeBackend } : {}),
+      ...(typeof optimizations === "string" && /^[a-z0-9_,+\-]{1,400}$/i.test(optimizations) ? { optimizations } : {}),
       // Plan/auto mode gate. This forwardBody is an explicit allowlist, so these
       // MUST be threaded here or claw never sees them and plan mode is inert.
       // 'plan' is set by the webhook mention dispatch (planMode agents, non-twin);

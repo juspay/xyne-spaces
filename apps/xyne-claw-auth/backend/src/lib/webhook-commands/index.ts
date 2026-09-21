@@ -54,7 +54,7 @@ export async function handleWebhookCommands(ctx: WebhookCommandCtx): Promise<Com
   }
 
   if (slash?.kind === "eval") {
-    await handleEval(ctx, slash.question, slash.providers, slash.judges);
+    await handleEval(ctx, slash.question, slash.providers, slash.judges, slash.opts);
     return { kind: "handled" };
   }
 

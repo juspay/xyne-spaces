@@ -224,6 +224,7 @@ export interface RunHeader {
    *  Stamped at finish; absent when jev is off or it declined to score. */
   answerAssessment?: AnswerAssessment;
   judge?: JudgeRunSummary;
+  optimizations?: Record<string, boolean>;
 }
 
 export function emptyTokenUsage(): TokenUsage {
@@ -289,6 +290,7 @@ export interface DebugSessionSnapshot {
   /** jev's completeness verdict for this run's answer (see RunHeader). */
   answerAssessment?: AnswerAssessment;
   judge?: JudgeRunSummary;
+  optimizations?: Record<string, boolean>;
   events: DebugEventRecord[];
   /** Additive: non-fatal problems hit while reading this run (dropped torn
    *  line, unreadable blob log, GCS miss). Surfaced in the UI so a partial

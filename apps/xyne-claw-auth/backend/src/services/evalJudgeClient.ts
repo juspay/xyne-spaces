@@ -91,9 +91,16 @@ export interface EvalModelList {
   defaultModel: string;
   judgeBackends: string[];
   judgeBackendLabels: Record<string, string>;
+  optimizations: EvalOptimizationSwitch[];
 }
 
-const NO_EVAL_MODELS: EvalModelList = { models: [], defaultModel: "", judgeBackends: [], judgeBackendLabels: {} };
+export interface EvalOptimizationSwitch {
+  key: string;
+  summary: string;
+  defaultOn: boolean;
+}
+
+const NO_EVAL_MODELS: EvalModelList = { models: [], defaultModel: "", judgeBackends: [], judgeBackendLabels: {}, optimizations: [] };
 
 export async function listEvalModels(): Promise<EvalModelList> {
   if (!CONFIG.xyneClawS2sKey) return { ...NO_EVAL_MODELS };
@@ -110,7 +117,19 @@ export async function listEvalModels(): Promise<EvalModelList> {
       defaultModel?: string;
       judgeBackends?: string[];
       judgeBackendLabels?: Record<string, unknown>;
+      optimizations?: unknown;
     };
+    const optimizations: EvalOptimizationSwitch[] = [];
+    for (const entry of Array.isArray(data.optimizations) ? data.optimizations : []) {
+      const o = entry as Record<string, unknown> | null;
+      if (o && typeof o["key"] === "string" && /^[a-z0-9_]{1,60}$/.test(o["key"])) {
+        optimizations.push({
+          key: o["key"],
+          summary: typeof o["summary"] === "string" ? o["summary"] : "",
+          defaultOn: o["defaultOn"] === true,
+        });
+      }
+    }
     const judgeBackendLabels: Record<string, string> = {};
     for (const [id, label] of Object.entries(data.judgeBackendLabels ?? {})) {
       if (typeof label === "string") judgeBackendLabels[id] = label;
@@ -122,6 +141,7 @@ export async function listEvalModels(): Promise<EvalModelList> {
         ? data.judgeBackends.filter((b): b is string => typeof b === "string")
         : [],
       judgeBackendLabels,
+      optimizations,
     };
   } catch {
     return { ...NO_EVAL_MODELS };

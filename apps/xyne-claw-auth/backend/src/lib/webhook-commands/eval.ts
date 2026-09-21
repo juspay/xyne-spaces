@@ -283,10 +283,11 @@ export async function handleEval(
   question: string,
   requested: string[],
   judges: string[] = [],
+  opts: string[] = [],
 ): Promise<void> {
   const trimmed = question.trim();
   if (!trimmed) {
-    await ctx.reply("`/eval <question>` — runs the question on every configured provider and posts a comparison. Add `judges=llm,jev,ournormaljev,ourtrainedjev` (or `judges=all`) to compare judge backends on one provider.", REPLY_LABEL);
+    await ctx.reply("`/eval <question>` — runs the question on every configured provider and posts a comparison. Add `opts=none|all` to A/B the optimization switches, or `judges=llm,jev,ournormaljev,ourtrainedjev` to compare judge backends, on one provider.", REPLY_LABEL);
     return;
   }
 
@@ -305,6 +306,7 @@ export async function handleEval(
     conversationId,
     ...(requested.length ? { requested } : {}),
     ...(judges.length ? { judges } : {}),
+    ...(opts.length ? { opts } : {}),
   });
 
   if (targets.length === 0) {

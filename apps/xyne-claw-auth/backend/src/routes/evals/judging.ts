@@ -18,11 +18,11 @@ const router = Router();
 // + what an empty model resolves to (shown as "Default (kimi-latest)" in the UI).
 router.get("/models", async (_req: Request, res: Response) => {
   try {
-    const { models, defaultModel, judgeBackends, judgeBackendLabels } = await listEvalModels();
-    res.json({ success: true, models, defaultModel, judgeBackends, judgeBackendLabels });
+    const { models, defaultModel, judgeBackends, judgeBackendLabels, optimizations } = await listEvalModels();
+    res.json({ success: true, models, defaultModel, judgeBackends, judgeBackendLabels, optimizations });
   } catch (err) {
     log.error("[evals] listModels error:", err);
-    res.json({ success: true, models: [], defaultModel: "", judgeBackends: [], judgeBackendLabels: {} });
+    res.json({ success: true, models: [], defaultModel: "", judgeBackends: [], judgeBackendLabels: {}, optimizations: [] });
   }
 });
 

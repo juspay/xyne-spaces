@@ -39,7 +39,7 @@ describe("listEvalModels judgeBackends", () => {
 
   it("returns empty lists when claw is unreachable", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response("nope", { status: 500 })));
-    expect(await listEvalModels()).toEqual({ models: [], defaultModel: "", judgeBackends: [], judgeBackendLabels: {} });
+    expect(await listEvalModels()).toEqual({ models: [], defaultModel: "", judgeBackends: [], judgeBackendLabels: {}, optimizations: [] });
   });
 
   it("appends judge backends for the judge picker but not for gen-models", async () => {

@@ -1,3 +1,4 @@
+import { s2sKeyMatches } from "../middleware/require-auth.js";
 import { isAgentOwnedRun } from "../lib/agent-owned-runs.js";
 import { applyAiScreenCommand } from "../lib/ai-screen-commands.js";
 import { parseSlashCommand } from "../lib/parseSlashCommand.js";
@@ -1138,6 +1139,19 @@ router.get("/:slug/litellm-models", async (req: Request<{ slug: string }>, res: 
 });
 
 // POST /agents/:slug/chat — send a message, stream progress via SSE, return result
+
+function evalRunSwitches(
+  req: Request,
+  optimizations: unknown,
+  judgeBackend: unknown,
+): { optimizations?: string; judgeBackend?: string } {
+  if (!s2sKeyMatches(req.headers["x-s2s-key"])) return {};
+  return {
+    ...(typeof optimizations === "string" && /^[a-z0-9_,+\-]{1,400}$/i.test(optimizations) ? { optimizations } : {}),
+    ...(typeof judgeBackend === "string" && /^[a-z0-9_]{1,40}$/i.test(judgeBackend) ? { judgeBackend } : {}),
+  };
+}
+
 router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response) => {
   try {
     const { slug } = req.params;
@@ -1147,6 +1161,8 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
       attachmentIds,
       attachedContext,
       providerOverride,
+      optimizations: requestedOptimizations,
+      judgeBackend: requestedJudgeBackend,
       isRegenerate,
       isEditUserMessage,
       parentUserMessageId,
@@ -1167,6 +1183,8 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
       attachmentIds?: string[];
       attachedContext?: unknown;
       providerOverride?: { provider?: string; model?: string };
+      optimizations?: unknown;
+      judgeBackend?: unknown;
       /** Branching: regenerate the assistant reply for `parentUserMessageId` as
        *  a sibling of the existing assistant. */
       isRegenerate?: boolean;
@@ -1863,6 +1881,7 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
       // dashboard chat (same bug existed for webhook + scheduled jobs).
       ...(effectiveAgentConfig ? { agentConfig: effectiveAgentConfig } : {}),
       fastMode: fastModeEnabled,
+      ...evalRunSwitches(req, requestedOptimizations, requestedJudgeBackend),
     };
 
     const forwardedTask = typeof forwardBody["task"] === "string" ? forwardBody["task"] as string : "";

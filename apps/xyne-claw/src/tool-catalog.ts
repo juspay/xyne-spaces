@@ -1,5 +1,6 @@
 import { jevEnabled, jevScoreItems, jevThreshold } from "./jev.js";
 import { recordJudgeOutcome } from "./judge-backend.js";
+import { optEnabled } from "./optimizations.js";
 import { metric } from "./metrics.js";
 import { Type } from "@sinclair/typebox";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
@@ -408,7 +409,7 @@ async function matchScopedSifted(
   query: string,
 ): Promise<ToolCatalogEntry[]> {
   const keyword = matchScoped(entries, query);
-  if (!jevEnabled()) return keyword;
+  if (!optEnabled("jev_tool_sift") || !jevEnabled()) return keyword;
 
   const already = new Set(keyword.map((e) => e.name));
   const scores = await jevScoreItems(query, entries, {

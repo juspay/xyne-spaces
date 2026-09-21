@@ -609,6 +609,15 @@ function judgeHeaderRows(
       ].filter(Boolean).join(" · "),
     ]);
   }
+  const switches = Object.entries(rec((run as unknown as Record<string, unknown>)["optimizations"]));
+  if (switches.length > 0) {
+    const on = switches.filter(([, v]) => v === true).map(([k]) => clean(k, 40));
+    const off = switches.filter(([, v]) => v !== true).map(([k]) => clean(k, 40));
+    out.push([
+      "Optimizations",
+      [on.length ? `ON: ${on.join(", ")}` : "ON: none", off.length ? `OFF: ${off.join(", ")}` : ""].filter(Boolean).join(" · "),
+    ]);
+  }
   const assessment = rec((run as unknown as Record<string, unknown>)["answerAssessment"]);
   if (str(assessment["verdict"])) {
     out.push([

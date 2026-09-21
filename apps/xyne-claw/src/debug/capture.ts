@@ -76,6 +76,7 @@ export interface CaptureHandles {
       latency: LatencyMetrics;
       answerAssessment?: AnswerAssessment;
       judge?: JudgeRunSummary;
+      optimizations?: Record<string, boolean>;
     },
   ): Promise<void>;
 }
@@ -151,6 +152,7 @@ export function startCapture(o: StartCaptureOpts): CaptureHandles {
           ...(textRef !== undefined ? { lastAssistantTextRef: textRef } : {}),
           ...(final.answerAssessment ? { answerAssessment: final.answerAssessment } : {}),
           ...(final.judge ? { judge: final.judge } : {}),
+          ...(final.optimizations ? { optimizations: final.optimizations } : {}),
         };
         store?.writeHeader(header);
         await store?.flush();

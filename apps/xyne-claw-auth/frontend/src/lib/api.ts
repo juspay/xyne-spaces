@@ -6359,6 +6359,8 @@ export interface StartGenerationAgent {
   agentSlug: string;
   genProvider?: string;
   genModel?: string;
+  optimizations?: string;
+  judgeBackend?: string;
 }
 
 /** Start a comparison of 1-3 agents over the same conversations. Each agent gets
@@ -6658,6 +6660,7 @@ export async function listEvalModels(): Promise<{
   models: string[];
   defaultModel: string;
   judgeBackends: Array<{ id: string; label: string }>;
+  optimizations: Array<{ key: string; summary: string; defaultOn: boolean }>;
 }> {
   const data = await request<{
     success: boolean;
@@ -6665,11 +6668,13 @@ export async function listEvalModels(): Promise<{
     defaultModel?: string;
     judgeBackends?: string[];
     judgeBackendLabels?: Record<string, string>;
+    optimizations?: Array<{ key: string; summary: string; defaultOn: boolean }>;
   }>(`${AUTH_API_URL}/api/v1/evals/models`);
   return {
     models: data.models ?? [],
     defaultModel: data.defaultModel ?? "",
     judgeBackends: (data.judgeBackends ?? []).map((id) => ({ id, label: data.judgeBackendLabels?.[id] ?? id })),
+    optimizations: data.optimizations ?? [],
   };
 }
 

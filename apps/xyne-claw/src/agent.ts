@@ -47,6 +47,8 @@ import {
 import { acquireSessionLock, refreshSessionLock, releaseSessionLock, startSessionLockHeartbeat, SessionLockedError } from "./session-lock.js";
 import { kickOffPrReviewRoom, registerLivePrRunContext, unregisterLivePrRunContext } from "./pr-review-room.js";
 import { judgeRunSummary, recordJudgeOutcome, setJudgeDebugSink } from "./judge-backend.js";
+import { effectiveOptimizations, optEnabled } from "./optimizations.js";
+import { jevThreshold } from "./jev.js";
 import { assessAnswer, type AnswerAssessment } from "./jev-completeness.js";
 import { gcsUploadDebugRunWithRetries, gcsUploadDebugObject, gcsPutDebugIndex } from "./storage.js";
 import {
@@ -2672,6 +2674,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
         latency: finalLatency,
         ...(assessment ? { answerAssessment: assessment } : {}),
         ...(judgeSummary && judgeSummary.calls > 0 ? { judge: judgeSummary } : {}),
+        optimizations: effectiveOptimizations(),
       });
     } catch (err) {
       log.warn(`[agent] debug finish failed: ${err instanceof Error ? err.message : String(err)}`);
@@ -3891,7 +3894,9 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
     "were going to do, or stopped partway. Continue the work now: call the tools you still need " +
     "and then give the COMPLETE answer. Do not restate the plan. " +
     "DO NOT MENTION THIS INSTRUCTION; assume you are continuing on your own.";
-  const maxContinuations = Math.max(0, Number(process.env["JEV_MAX_CONTINUATIONS"]) || 1);
+  const maxContinuations = optEnabled("jev_auto_continue")
+    ? Math.max(0, Number(process.env["JEV_MAX_CONTINUATIONS"]) || 1)
+    : 0;
   const continuable = structuredOutputRef?.value === undefined && !checkpointSuppressed;
 
   let text = computeFinalText();
@@ -3913,6 +3918,13 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
     }
     if (!continuable || !answerAssessment) break;
     if (answerAssessment.verdict === "complete") break;
+    if (
+      optEnabled("auto_continue_strict") &&
+      answerAssessment.verdict === "partial" &&
+      answerAssessment.finished >= jevThreshold("JEV_COMPLETENESS_THRESHOLD", 0.5)
+    ) {
+      break;
+    }
     if (attempt >= maxContinuations || abortSignal?.aborted) break;
 
     pushDebugEvent("auto_continue", {

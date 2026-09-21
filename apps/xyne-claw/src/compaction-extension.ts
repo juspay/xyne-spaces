@@ -26,6 +26,7 @@ import type { ExtensionFactory } from "@earendil-works/pi-coding-agent";
 import { compact, estimateTokens } from "@earendil-works/pi-coding-agent";
 import { buildJevCompaction } from "./jev-compaction.js";
 import { recordJudgeOutcome } from "./judge-backend.js";
+import { optEnabled } from "./optimizations.js";
 import { metric } from "./metrics.js";
 
 import { createLogger } from "./logger.js";
@@ -179,7 +180,7 @@ export const compactionExtension: ExtensionFactory = (pi) => {
       // window is rebuilt verbatim, which costs a couple of seconds instead of
       // the ~50s p50 an LLM rewrite takes. Falls through to that rewrite
       // whenever Jev is off, unavailable, or has nothing to score.
-      const jev = await buildJevCompaction(summarizeSet).catch((err: unknown) => {
+      const jev = !optEnabled("jev_compaction") ? null : await buildJevCompaction(summarizeSet).catch((err: unknown) => {
         log.warn("[compaction] jev selection failed — falling back to summarisation:", err);
         return null;
       });
