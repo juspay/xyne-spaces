@@ -2124,35 +2124,9 @@ export function createMutators(
             .max(100),
           timestamp: z.number(),
         }),
+        // Permission and tenancy live in ChannelBoardMappingsACL.canInsert, which the
+        // transaction wrapper runs on every insert below — same as every other table.
         async ({ tx, args: { channelId, boards, timestamp } }) => {
-          const channel = await tx.run(zql.channels.where('id', channelId).one());
-          if (!channel) {
-            throw new Error("Channel doesn't exist");
-          }
-          if (channel.scopeType !== ChannelScopeType.DEFAULT) {
-            throw new Error('Boards can only be linked to channels');
-          }
-
-          // Workspace/org admins and owners, the channel's creator, or a channel
-          // admin. Enforced here rather than only in the UI — the button is hidden
-          // for everyone else, but hiding a button is not a permission check.
-          const isPrivileged =
-            authData.role === WorkspaceRole.ADMIN ||
-            authData.role === WorkspaceRole.OWNER ||
-            authData.orgRole === OrgRole.ADMIN ||
-            authData.orgRole === OrgRole.OWNER;
-          if (!isPrivileged && channel.createdBy !== authData.sub) {
-            const participant = await tx.run(zql.channel_participants
-              .where('channelId', channelId)
-              .where('userId', authData.sub)
-              .one());
-            if (!participant || participant.role !== ChannelRole.ADMIN) {
-              throw new Error(
-                'Only the channel owner, channel admins or workspace admins can link boards',
-              );
-            }
-          }
-
           const existing = await tx.run(zql.channel_board_mappings.where('channelId', channelId));
           const linkedBoardIds = new Set(existing.map(mapping => mapping.boardId));
           // At most one row per channel may carry isDefault (enforced by a partial
@@ -2161,15 +2135,6 @@ export function createMutators(
 
           for (const { mappingId, boardId } of boards) {
             if (linkedBoardIds.has(boardId)) continue;
-
-            const board = await tx.run(zql.boards.where('id', boardId).one());
-            if (!board) {
-              throw new Error('Board not found');
-            }
-            // The board comes from a client-supplied id, so re-check the tenant here.
-            if (board.workspaceId !== authData.workspaceId) {
-              throw new Error('Board not found');
-            }
 
             await tx.mutate.channel_board_mappings.insert({
               id: mappingId,
