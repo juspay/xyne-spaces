@@ -1282,7 +1282,19 @@ export function createMutators(
             projectId: projectId,
             updatedAt: timestamp,
           });
-          
+
+          // The promoter becomes the new channel's admin, mirroring channel creation
+          // where the creator is ADMIN. Group DM participants are all MEMBER, and any
+          // participant may promote — without this the board-mapping inserts below
+          // would be rejected by ChannelBoardMappingsACL (channel admin or projects
+          // admin), rolling back the whole promotion for ordinary members.
+          if (participant.role !== ChannelRole.ADMIN) {
+            await tx.mutate.channel_participants.update({
+              id: participant.id,
+              role: ChannelRole.ADMIN,
+            });
+          }
+
           if (projectId) {
             const projectBoards = await tx.run(
               zql.boards.where('projectId', projectId).orderBy('createdAt', 'asc'),

@@ -1807,9 +1807,16 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
 
     // A workspace view has no projectId, so several selected boards can only be
     // scoped by listing them — otherwise the query fans out across the workspace.
-    // Other view modes already scope by projectId, so leave them alone.
+    // A channel view is in the same position now that it carries no projectId: a URL
+    // with repeated ?board= params yields several boards and no other scope, so it
+    // needs the same treatment. Project/board views still scope by projectId.
     const selectedBoards = filters.boards;
-    if (isWorkspaceView && !params.boardId && selectedBoards && selectedBoards.length > 1) {
+    if (
+      (isWorkspaceView || !!channelId) &&
+      !params.boardId &&
+      selectedBoards &&
+      selectedBoards.length > 1
+    ) {
       params.boardIds = selectedBoards;
     }
 
@@ -1836,6 +1843,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     viewMode,
     queryViewMode,
     isWorkspaceView,
+    channelId,
     boardId,
     effectiveProjectId,
     filteredSingleBoardId,
