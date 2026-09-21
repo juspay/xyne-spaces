@@ -1087,7 +1087,6 @@ export class CommitAnalysisService {
 
         totalEnvChanges += envChangeCount;
         totalMigrationChanges += migrationChangeCount;
-        // Stamp the owning application so the canvas can group changes per service.
         allMigrationLinks.push(...migrationLinks.map(link => ({ ...link, applicationId })));
         allEnvChanges.push(...envChanges.map(change => ({ ...change, applicationId })));
       } catch (error) {

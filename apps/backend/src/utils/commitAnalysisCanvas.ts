@@ -85,16 +85,9 @@ export interface CommitAnalysisRepoSlice {
   deployedCommitId: string;
   newCommitId: string;
   results: CommitAnalysisResult[];
-  // The applications this repo's analysis attributed. Lets the canvas scope each
-  // service's PRs to its own repo — matching by file path alone is ambiguous when
-  // two repos share a layout (both have backend/, frontend/, ...).
   affectedApplications?: AffectedApplicationInfo[];
 }
 
-// Env/migration rows carry the id of the application that claimed the file once
-// release analysis has attributed them (see saveReleaseChangesFromAnalysis and
-// buildReleaseChangeSummary). Optional: the hotfix scaffold and non-release
-// analyses build the canvas from unattributed rows.
 type CanvasEnvChange = { filePath: string; fileName: string; newValue: string; commitId?: string; applicationId?: string };
 type CanvasMigrationLink = { filePath: string; diffUrl: string; applicationId?: string };
 
@@ -180,10 +173,6 @@ function indexMigrationLinksByCommit(
   return map;
 }
 
-// Which PRs belong to a service. Mirrors filterResultsByApplication in
-// services/release/core/mapper.ts over the narrowed PrResult shape: filePaths is
-// trimmed to the service's own files so each PR renders only its env/migration
-// detail. A PR touching two services is listed under both.
 function resultsForApplication(results: PrResult[], matchedFiles: string[]): PrResult[] {
   if (matchedFiles.length === 0) return [];
   const matched = new Set(matchedFiles);
@@ -192,8 +181,6 @@ function resultsForApplication(results: PrResult[], matchedFiles: string[]): PrR
     .filter(result => result.filePaths.length > 0);
 }
 
-// One migration row is stored per file x commit, so a file touched by three
-// commits would otherwise be listed (and counted) three times.
 function uniqueMigrationsByPath(links: CanvasMigrationLink[]): CanvasMigrationLink[] {
   const seen = new Map<string, CanvasMigrationLink>();
   for (const link of links) {
@@ -202,9 +189,6 @@ function uniqueMigrationsByPath(links: CanvasMigrationLink[]): CanvasMigrationLi
   return [...seen.values()];
 }
 
-// Resolve which repo slice an application came from, so its PRs are drawn from
-// that repo's results only. Single-repo (or legacy callers without slices) fall
-// back to the global result set with no repo label.
 type AppScope = { results: PrResult[]; label?: string };
 function appScopes(
   affectedApplications: AffectedApplicationInfo[],
@@ -475,9 +459,6 @@ async function buildMainAnalysisBlocks(
   const migrationLinksByCommit = indexMigrationLinksByCommit(migrationLinks);
 
   if (affectedApplications.length > 0) {
-    // Per-service sections. Each affected application gets its own block holding
-    // the PRs, env vars and migrations attributed to it, so a reader can answer
-    // "what ships in <service>" without scanning the whole release.
     type ServiceSection = {
       heading: string;
       mappedTicketId?: string;
@@ -503,10 +484,7 @@ async function buildMainAnalysisBlocks(
       };
     });
 
-    // Whatever no service regex claimed still belongs in the canvas — dropping it
-    // would silently hide work that the pre-split layout showed. Claims are
-    // resolved per repo: PR ids are repo-local numbers, so repo A's claimed #100
-    // must not hide repo B's unclaimed #100.
+    // PR ids are repo-local, so "unclaimed" is resolved per repo.
     const unclaimedResults = (repoSlices?.length ? repoSlices : [{ results, affectedApplications }]).flatMap(slice => {
       const apps = slice.affectedApplications ?? affectedApplications;
       const claimed = new Set(
@@ -566,9 +544,7 @@ async function buildMainAnalysisBlocks(
         blocks.push({
           id: uuidv4(),
           type: 'bulletListItem',
-          // `code` and `link` marks can't co-exist on one text node (BlockNote
-          // rejects it at render time), so keep the path outside the link —
-          // same shape appendPullRequestBlocks uses.
+          // BlockNote rejects code+link on one text node; keep the path outside the link.
           content: [
             { type: 'text', text: '🗃️ ', styles: {} },
             { type: 'link', href: link.diffUrl, content: [{ type: 'text', text: 'View Diff → ', styles: {} }] },
@@ -584,8 +560,6 @@ async function buildMainAnalysisBlocks(
       }
     }
   } else {
-    // No applications to group by (the hotfix scaffold and non-release analyses
-    // both build with an empty list) — keep the flat / repo-grouped layout.
     if (envVarList.length > 0) {
       blocks.push({
         id: uuidv4(),
@@ -891,8 +865,7 @@ export async function upsertCommitAnalysisCanvas(
         },
       });
       logger.info(`[CanvasService] Updated release analysis canvas ${existing.id} (section=${section}) for ${metadata.workspace}/${metadata.repoSlug}`);
-      // The editor renders the collaborative Y-Sweet doc, not canvases.content —
-      // without this push a re-run silently leaves the open canvas stale.
+      // The editor renders the Y-Sweet doc, not canvases.content.
       await syncToYSweet(existing.id, content, createdByUserId);
       // Non-fatal side-effects (see persistNewAnalysisCanvas).
       try {

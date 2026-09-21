@@ -90,8 +90,7 @@ const ProjectDetailScreen = (): ReactElement => {
   const navState = location.state as { tab?: TabValue; from?: string } | null;
   const initialTab = navState?.tab ?? 'boards';
   // Entry point gates the tab set: Release Manager shows release-repo config,
-  // List Projects shows the SDLC repositories view. Read from the URL as well as
-  // nav state so a copied / shared Release Manager link keeps the RM view.
+  // List Projects shows the SDLC repositories view.
   const fromReleaseManager =
     navState?.from === 'releaseManager' || searchParams.get('from') === 'releaseManager';
   // Gate Create Release like the backend: admin/owner role, or a RELEASE-MANAGER WRITE grant.
@@ -183,10 +182,6 @@ const ProjectDetailScreen = (): ReactElement => {
     [applicationByBoardId],
   );
 
-  // The Boards tab is entry-point-scoped:
-  //  • Release Manager  → only release boards (main release + per-app boards)
-  //  • List Projects    → only non-release boards (Standard / Flow / etc.)
-  // A board is "release" if its type is RELEASE or it's an application board.
   const visibleBoards = useMemo(() => {
     const list = boards ?? [];
     return list.filter(board => {
@@ -196,8 +191,6 @@ const ProjectDetailScreen = (): ReactElement => {
     });
   }, [boards, fromReleaseManager, applicationBoardIds]);
 
-  // Only Release Manager needs the app-board nesting maps. Passing them under
-  // List Projects would render phantom release groups for filtered-out boards.
   const visibleApplicationByBoardId = useMemo(
     () =>
       fromReleaseManager

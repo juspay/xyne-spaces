@@ -356,8 +356,7 @@ export const formatDate = (date: Date | number): string => {
 };
 
 /**
- * Format date as DD/MM/YYYY, e.g. '08/09/2026'. Locale-independent (does not
- * depend on the machine locale the way `toLocaleDateString()` does).
+ * Format date as DD/MM/YYYY, e.g. '08/09/2026'
  */
 export const formatDateNumeric = (date: Date | number): string => {
   return format(new Date(date), 'dd/MM/yyyy');

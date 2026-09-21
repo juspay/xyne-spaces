@@ -44,8 +44,6 @@ interface BoardsTableProps {
   // True while the boards query is still resolving. Distinguishes
   // "still loading" from "genuinely no boards" so we don't flash the empty state.
   loading?: boolean;
-  // Show the board "Type" column. Hidden under Release Manager (every board there
-  // is a release board, so the column is redundant).
   showTypeColumn?: boolean;
 }
 

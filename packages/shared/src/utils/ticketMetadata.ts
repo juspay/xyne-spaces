@@ -176,9 +176,6 @@ export async function writeConversationAnchorFromZero(
   conversationId: string,
   summary: ParentMessageSummary,
 ): Promise<void> {
-  // A conversation can never be its own parent thread / sub-ticket. Anchoring a
-  // conversation to itself renders as "sub-ticket of <self>" on every message in
-  // it. Last line of defense; callers should also avoid the self-link (below).
   if (summary.conversationId && summary.conversationId === conversationId) return;
 
   const conversation = (await tx.run(
@@ -221,10 +218,6 @@ export async function linkSubTicketConversationToParentFromZero(
   )) as ZeroTicketLike | null;
   if (!parent?.conversationId) return;
 
-  // Release per-app / dev tickets are created sharing the release ticket's
-  // conversationId, so child and parent resolve to the SAME conversation. Writing
-  // the anchor there stamps the release ticket's own conversation as "sub-ticket
-  // of itself". A shared conversation has no distinct child thread to anchor.
   if (child.conversationId === parent.conversationId) return;
 
   const parentConversation = (await tx.run(
