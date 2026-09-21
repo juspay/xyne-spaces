@@ -4324,14 +4324,6 @@ export const queries: AnyQueryRegistry = defineQueries({
       direction: z.literal('forward').or(z.literal('backward')),
     }),
     ({ args: { channelId, limit, start, direction } }) => {
-      // Reads the denormalized channelId directly instead of testing each row's conversation.
-      // The channel filter is now a predicate ON THE SOURCE, so it is answered by
-      // (workspaceId, channelId, createdAt DESC, id) with one range seek. Previously the
-      // exists sat above an unconstrained source, so the limit could only terminate the
-      // ordered walk early when the channel had enough recent attachments — on a sparse
-      // channel it never filled and the walk ran the whole table.
-      // REQUIRES the channelId backfill to have completed; rows written before it are NULL
-      // and will not match.
       let query = zql.message_attachments
         .where('isDeleted', false)
         .where('entityType', 'IN', CHANNEL_VISIBLE_ATTACHMENT_ENTITY_TYPES)

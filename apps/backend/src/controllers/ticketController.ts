@@ -1251,8 +1251,6 @@ export class TicketController {
               },
               data: {
                 conversationId: conversationId,
-                // channelId travels with conversationId — a stale one would leave the row
-                // in the old channel's file list.
                 channelId: channelId ?? null,
               },
             });

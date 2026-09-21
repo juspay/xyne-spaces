@@ -749,8 +749,6 @@ export class CanvasController {
         entityId: canvasId,
         entityType: AttachmentEntityType.CANVAS,
         conversationId: `canvas_${canvasId}`,
-        // Synthetic key, matches no conversations row, so this was never in a channel file
-        // list. null keeps it that way rather than newly surfacing canvases there.
         channelId: null,
         originalFilename: uploadedFile.originalName,
         size: uploadedFile.fileSize,

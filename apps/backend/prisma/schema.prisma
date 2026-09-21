@@ -2477,8 +2477,6 @@ model MessageAttachment {
   @@index([entityId])
   @@index([entityId, id])
   @@index([entityId, position])
-  // Serves the channel file list: seek straight to one channel's attachments in createdAt order
-  // instead of walking the workspace. See 20260918_add_message_attachment_channel_id.
   @@index([workspaceId, channelId, createdAt(sort: Desc), id])
   @@map("message_attachments")
   @@schema("public")
