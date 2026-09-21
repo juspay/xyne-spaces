@@ -14,7 +14,7 @@ export interface OzonetelTicketRules {
   createTicketOnProgressive?: boolean;
   createTicketOnPredictive?: boolean;
   ticketSubjectTemplate?: string;
-  customerPhoneFieldName?: string;
+  phoneFieldNames?: string[];
 }
 
 export interface OzonetelConfigView {
@@ -35,7 +35,7 @@ export interface OzonetelConfigView {
 export interface OzonetelToolbarView {
   configured: boolean;
   toolbarUrl: string | null;
-  customerPhoneFieldName: string | null;
+  phoneFieldNames: string[];
 }
 
 export interface SaveOzonetelConfigInput {
