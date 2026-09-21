@@ -1,14 +1,6 @@
 import { ReactElement, useEffect, useState, useRef } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
-import { isSandBox, isProd } from '../../config';
-
-// Derive the deep link protocol for the running flavor based on hostname,
-// matching the DEEP_LINK_PROTOCOL values in the electron config.
-const DEEP_LINK_PROTOCOL = isProd
-  ? 'xyne-spaces'
-  : isSandBox
-    ? 'xyne-spaces-sandbox'
-    : 'xyne-spaces-dev';
+import { DEEP_LINK_PROTOCOL } from '../../utils/deepLink';
 
 const LaunchScreen = (): ReactElement => {
   const [searchParams] = useSearchParams();
