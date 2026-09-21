@@ -200,7 +200,8 @@ export class MigrationWorkers {
    * lookback are caught. Ingest reads base + snapshots as a union and dedups. Returns to AWAITING_APPROVAL.
    */
   private async refresh(job: MigrationJob): Promise<void> {
-    if (![MigrationStatus.AWAITING_APPROVAL, MigrationStatus.REFRESHING].includes(job.status)) return;
+    // Include QUEUED: reconcile re-enqueues an interrupted refresh as QUEUED; without it the job returns every pickup and thrashes forever.
+    if (![MigrationStatus.AWAITING_APPROVAL, MigrationStatus.REFRESHING, MigrationStatus.QUEUED].includes(job.status)) return;
     let token: string;
     try { token = this.engine.decryptToken(job); }
     catch { await this.store.update(job.id, { status: MigrationStatus.AWAITING_APPROVAL, refreshRequested: false, error: 'Refresh needs the Slack token, which is no longer available. Re-submit to migrate newer messages.' }); return; }

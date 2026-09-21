@@ -252,15 +252,12 @@ export const findOrCreateApp = async (
   // (permissions, webhooks, commands) are cleanly isolated.
   const xyneUser = await db.user.findFirst({ where: { email: 'john.doe@gmail.com' } });
   let creatorUser = xyneUser;
-  if (!creatorUser) {
-    if (config.env === 'development' && workspaceId) {
-      creatorUser = await db.user.findFirst({ where: { workspaceId } });
-    } else {
-      throw new Error('[findOrCreateApp] Creator user john.doe@gmail.com not found');
-    }
+  // Fall back to any target-workspace user (all envs); the john.doe seed isn't in prod → else every bot message fails.
+  if (!creatorUser && workspaceId) {
+    creatorUser = await db.user.findFirst({ where: { workspaceId } });
   }
   if (!creatorUser) {
-    throw new Error('[findOrCreateApp] No fallback workspace user found for local migration');
+    throw new Error('[findOrCreateApp] No creator user found for the target workspace');
   }
 
   // Build a unique app name so bots with identical display names (e.g. two
