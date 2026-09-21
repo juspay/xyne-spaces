@@ -97,6 +97,7 @@ const JEV_JUDGE_TIMEOUT_MS = Math.max(1000, Number(process.env["EVAL_JEV_TIMEOUT
 
 const JEV_CONFIDENT = 0.5;
 const JEV_CONTRADICTS_CONFIDENT = 0.6;
+const JEV_EMPTY_NOISE_FLOOR = 0.3;
 
 function unit(value: unknown): number {
   const n = typeof value === "number" && Number.isFinite(value) ? value : 0;
@@ -130,7 +131,8 @@ export function jevScoreFromProbabilities(raw: Partial<JevJudgeProbabilities>): 
   if (p.empty >= JEV_CONFIDENT) return 0;
   const band = jevBandScore(p);
   if (band === null) return null;
-  return Math.max(0, Math.min(100, Math.round(band * (1 - p.empty))));
+  const penalty = p.empty >= JEV_EMPTY_NOISE_FLOOR ? 1 - p.empty : 1;
+  return Math.max(0, Math.min(100, Math.round(band * penalty)));
 }
 
 const JEV_JUDGE_QUESTIONS: Record<keyof JevJudgeProbabilities, string> = {

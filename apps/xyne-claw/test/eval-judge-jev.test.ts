@@ -34,6 +34,23 @@ describe("jevScoreFromProbabilities", () => {
     expect(score(LIVE.unrelated)).toBe(0);
   });
 
+  it("is not dragged out of band by the baseline `empty` noise our self-hosted models report", () => {
+    const GRID = {
+      normalParaphrase: { same: 0.94, minor: 0.72, misses: 0.22, contradicts: 0.1, empty: 0.11 },
+      trainedParaphrase: { same: 0.94, minor: 0.79, misses: 0.19, contradicts: 0.05, empty: 0.08 },
+      normalWrong: { same: 0.08, minor: 0.14, misses: 0.63, contradicts: 0.88, empty: 0.16 },
+      trainedRefusal: { same: 0.04, minor: 0.06, misses: 0.45, contradicts: 0.88, empty: 0.23 },
+    };
+    expect(score(GRID.normalParaphrase)).toBeGreaterThanOrEqual(90);
+    expect(score(GRID.trainedParaphrase)).toBeGreaterThanOrEqual(90);
+    expect(score(GRID.normalWrong)).toBeLessThan(15);
+    expect(score(GRID.trainedRefusal)).toBeLessThan(15);
+  });
+
+  it("still penalises a genuinely elevated `empty` that stops short of the hard cutoff", () => {
+    expect(score({ same: 0.9, empty: 0.4 })).toBeLessThan(score({ same: 0.9, empty: 0.1 }));
+  });
+
   it("keeps the live cases in the right order", () => {
     const ordered = [LIVE.paraphrase, LIVE.minorGap, LIVE.partial, LIVE.wrong, LIVE.refusal].map(score);
     expect([...ordered].sort((a, b) => b - a)).toEqual(ordered);
