@@ -21,7 +21,6 @@ import { useUser } from '../../../hooks/useUsers';
 import { isUserDeactivated, getUserDisplayName } from '../../../utils/userDisplayName';
 import { StatusIndicator } from '../../ui/StatusIndicator';
 import { TicketPriority } from '@xyne/shared';
-import { cn } from '../../../utils/classNames';
 import { queries } from '../../../zero/queries';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 
@@ -262,12 +261,7 @@ const TicketSearchResultItem = ({
       onMouseDownCapture={handleMouseDown}
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
-      className={cn(
-        'flex w-full items-center gap-3 p-3 rounded-lg cursor-pointer hover:bg-accent aria-selected:bg-accent mt-1.5',
-        // Archived tickets read as inactive: dim the whole row. The "Archived" pill
-        // next to the title carries the actual meaning so this doesn't rely on colour.
-        isArchived && 'opacity-55',
-      )}
+      className='flex w-full items-center gap-3 p-3 rounded-lg cursor-pointer hover:bg-accent aria-selected:bg-accent mt-1.5'
     >
       <span className='flex shrink-0 items-center'>{getResultIcon(result)}</span>
       <div className='flex min-w-0 flex-1 flex-col gap-0.5'>
