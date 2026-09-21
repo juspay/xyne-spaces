@@ -1,3 +1,10 @@
+## [1.348.0-release-20260921.3](https://github.com/juspay/xyne-spaces/compare/v1.348.0-release-20260921.2...v1.348.0-release-20260921.3) (2026-09-21)
+
+
+### Bug Fixes
+
+* thread -d fix ([#2131](https://github.com/juspay/xyne-spaces/issues/2131)) ([efc6223](https://github.com/juspay/xyne-spaces/commit/efc622328bc92256e58c05ea879a0d3d344f656f))
+
 ## [1.348.0-release-20260921.2](https://github.com/juspay/xyne-spaces/compare/v1.348.0-release-20260921.1...v1.348.0-release-20260921.2) (2026-09-21)
 
 
