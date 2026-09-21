@@ -129,7 +129,13 @@ export default defineConfig(({ command, mode }) => {
       reportCompressedSize: false,
     },
     optimizeDeps: {
-      exclude: ['@terrastruct/d2'],
+      // @rocicorp/zero (and its /react entry) must NOT be pre-bundled: the sync engine's
+      // `#zql/*` / `#zero-client/*` deep imports load Zero's raw out/ files, and pre-bundling
+      // the bare entries gives the app a SECOND copy of every Zero class. The MutationTracker
+      // confirmation hook then patches the raw-file class while the app's Zero client runs the
+      // pre-bundled one — confirmations silently never arrive (dev-only split; prod rollup
+      // dedupes both paths to the same modules).
+      exclude: ['@terrastruct/d2', '@rocicorp/zero', '@rocicorp/zero/react'],
     },
     server: {
       port: devPort,
