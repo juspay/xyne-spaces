@@ -109,8 +109,8 @@ Two numbers, like juspay/hyperswitch-helm:
 Flow (`ci/` + `.github/workflows/`):
 
 1. **Publish Images** (`publish-images.yml`) - run by someone on the `IMAGE_BUILDERS`
-   allow-list, on a `vX.Y.Z` tag, behind the `release-publish` environment approval. Builds
-   every image in `ci/images.json` and pushes `ghcr.io/<owner>/<image>:X.Y.Z` and `:sha-<commit>`.
+   allow-list, on a `vX.Y.Z` tag. Builds every image in `ci/images.json` and pushes
+   `ghcr.io/<owner>/<image>:X.Y.Z` and `:sha-<commit>`.
 2. **Sync Chart Version** (`sync-chart-version.yml`) - called by step 1 (or run on its own).
    Merges `main` into `deployments`, runs `ci/scripts/bump-chart.sh X.Y.Z origin/main`, vendors
    chart dependencies, commits, tags **`chart-X.Y.Z`**, pushes, and pushes the packaged charts
@@ -119,9 +119,8 @@ Flow (`ci/` + `.github/workflows/`):
 3. The private infra repo pins `chart-X.Y.Z`. Its deploy pipeline can start this whole flow
    with a `repository_dispatch` (`publish-images`, payload `{version_tag}`).
 
-Setup needed once in the GitHub repo: the `IMAGE_BUILDERS` Actions variable, a
-`release-publish` environment with required reviewers, and - only if `deployments` is a
-protected branch - a `CHART_RELEASE_TOKEN` secret allowed to push to it.
+Setup needed once in the GitHub repo: the `IMAGE_BUILDERS` Actions variable, and - only if
+`deployments` is a protected branch - a `CHART_RELEASE_TOKEN` secret allowed to push to it.
 
 ## Working on charts
 
