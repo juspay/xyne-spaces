@@ -1,3 +1,11 @@
+## [1.360.0](https://github.com/juspay/xyne-spaces/compare/v1.359.0...v1.360.0) (2026-09-21)
+
+
+### Features
+
+* Helm Charts for OSS ([#2136](https://github.com/juspay/xyne-spaces/issues/2136)) ([3c56f0b](https://github.com/juspay/xyne-spaces/commit/3c56f0be8b66520bee3456011898452c03efeccd))
+* ringing status ([#2129](https://github.com/juspay/xyne-spaces/issues/2129)) ([4a6e8cc](https://github.com/juspay/xyne-spaces/commit/4a6e8cc07a651d410e6ec5c5a5d062e19f72ff15))
+
 ## [1.359.0](https://github.com/juspay/xyne-spaces/compare/v1.358.0...v1.359.0) (2026-09-21)
 
 
