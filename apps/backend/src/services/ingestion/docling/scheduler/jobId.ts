@@ -16,7 +16,7 @@
  *   docling:<fileId>:part:<partIndex>:attempt:<token>            untagged
  *
  * An untagged job id is owned by whoever finds it — that is the pre-isolation
- * format, and it keeps DOCLING_ENV_TAG a no-op until a deployment sets it.
+ * format, and it keeps the tag a no-op until DEPLOY_ENV is set.
  * A job id tagged for another environment is never ours to reap.
  *
  * The wrapper treats the job id as opaque and echoes it back on the results

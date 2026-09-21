@@ -69,7 +69,7 @@ const handleResultEvent = async (event: DoclingResultEvent) => {
   // The results stream is shared with every other environment on this Redis, so
   // events for their jobs land here too. Drop those before touching the DB —
   // they are expected traffic, not an error. (Each environment needs its own
-  // DOCLING_SCHEDULER_RESULT_GROUP, or one steals and acks the other's events.)
+  // DEPLOY_ENV, or one steals and acks the other's events.)
   if (!isOwnSchedulerJobId(jobId)) return
   const part = await getDoclingPartByJobId(jobId)
   if (!part) {

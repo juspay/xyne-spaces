@@ -6,6 +6,11 @@ dotenv.config();
 import { parseInternalAppHostMap } from '@/utils/internalHostMap';
 
 const envSchema = Joi.object({
+  // Deployment name (e.g. "prod", "preprod"). Namespaces every Redis key that two
+  // environments sharing one Redis / OCR wrapper could otherwise collide on: Bull
+  // queue prefixes, docling permit keys, docling job-id tag, docling result
+  // consumer group. MUST differ per environment; empty keeps the legacy names.
+  DEPLOY_ENV: Joi.string().allow('').default(''),
   NODE_ENV: Joi.string().valid('development', 'production', 'test').default('development'),
   SANDBOX_TEST_MODE: Joi.boolean().default(false),
   ORG_MEMBER_LIMIT: Joi.number().integer().min(1).allow(null).default(null),
@@ -560,26 +565,13 @@ const envSchema = Joi.object({
   // Submit (OCR wrapper) concurrency permits + leases
   DOCLING_ASYNC_SUBMIT_PERMITS: Joi.number().default(16),
   DOCLING_ASYNC_SUBMIT_PERMIT_LEASE_TTL_MS: Joi.number().default(21600000),
-  // Redis key prefix for the OCR submit/vespa-write semaphore permits. Internal to this
-  // repo only (no external wrapper reads/writes these keys), but MUST still be set to a
-  // distinct value per deployment environment (prod vs pre-prod) if they share a Redis
-  // instance, or the two environments' semaphores will share capacity accounting.
-  DOCLING_PERMIT_KEY_PREFIX: Joi.string().default('docling:scheduler:permit'),
-  // Owner tag stamped into every OCR job id this deployment mints. MUST be set
-  // to a distinct value per environment (prod vs pre-prod) when they share a
-  // Redis / OCR wrapper, or each environment's reaper will treat the other's
-  // in-flight jobs as stale and delete them from the wrapper's global active
-  // set. Empty (the default) means untagged: the pre-isolation format, owned by
-  // whichever environment finds it. See scheduler/jobId.ts.
-  DOCLING_ENV_TAG: Joi.string().allow('').default(''),
   // Redis results stream + consumer group (wrapper publishes to docling:results).
   // The STREAM is a shared wire protocol with the wrapper, but the consumer GROUP
   // is ours: Redis fans every event out to every group, so giving each environment
   // its own group name is what stops pre-prod consuming (and acking) a prod result
-  // that prod then never sees. Set DOCLING_SCHEDULER_RESULT_GROUP per environment.
+  // that prod then never sees. Derived from DEPLOY_ENV.
   DOCLING_RESULTS_STREAM: Joi.string().default('docling:results'),
   DOCLING_RESULT_KEY_PREFIX: Joi.string().default('docling:result'),
-  DOCLING_SCHEDULER_RESULT_GROUP: Joi.string().default('xyne-spaces-scheduler'),
   DOCLING_RESULT_READ_COUNT: Joi.number().default(2),
   DOCLING_RESULT_BLOCK_MS: Joi.number().default(5000),
   DOCLING_RESULT_MIN_IDLE_MS: Joi.number().default(600000),
@@ -631,8 +623,14 @@ if (error) {
   throw new Error(`Config validation error: ${error.message}`);
 }
 
+const deployEnv = envVars.DEPLOY_ENV as string
+/** `<base>:<DEPLOY_ENV>`, or just `<base>` when DEPLOY_ENV is unset (legacy name). */
+const withDeployEnv = (base: string, sep = ':') => (deployEnv ? `${base}${sep}${deployEnv}` : base)
+
 export const config = {
   env: envVars.NODE_ENV,
+  deployEnv,
+  vespaQueuePrefix: withDeployEnv('bull'),
   isTestEnv: envVars.NODE_ENV === 'test',
   isSandboxTestMode: envVars.SANDBOX_TEST_MODE === true,
   orgMemberLimit: (envVars.ORG_MEMBER_LIMIT as number | null) ?? null,
@@ -1275,11 +1273,11 @@ export const config = {
     keepTempResults: envVars.DOCLING_KEEP_TEMP_RESULTS as boolean,
     submitPermits: envVars.DOCLING_ASYNC_SUBMIT_PERMITS as number,
     submitPermitLeaseTtlMs: envVars.DOCLING_ASYNC_SUBMIT_PERMIT_LEASE_TTL_MS as number,
-    permitKeyPrefix: envVars.DOCLING_PERMIT_KEY_PREFIX as string,
-    envTag: envVars.DOCLING_ENV_TAG as string,
+    permitKeyPrefix: withDeployEnv('docling:scheduler:permit'),
+    envTag: deployEnv,
     resultsStream: envVars.DOCLING_RESULTS_STREAM as string,
     resultKeyPrefix: envVars.DOCLING_RESULT_KEY_PREFIX as string,
-    resultGroup: envVars.DOCLING_SCHEDULER_RESULT_GROUP as string,
+    resultGroup: withDeployEnv('xyne-spaces-scheduler', '-'),
     resultReadCount: envVars.DOCLING_RESULT_READ_COUNT as number,
     resultBlockMs: envVars.DOCLING_RESULT_BLOCK_MS as number,
     resultMinIdleMs: envVars.DOCLING_RESULT_MIN_IDLE_MS as number,
