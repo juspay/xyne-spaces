@@ -1,3 +1,5 @@
+import type { DesignSelectionPayload } from '../../components/AIScreen/Workspace/design/designStudioContext';
+import type { PageSelectionPayload } from '../../components/AIScreen/Workspace/pageSelectionContext';
 /**
  * Web Worker for XyneAI Streaming
  * Runs API calls on a separate thread to avoid blocking the main UI thread
@@ -13,9 +15,6 @@ export interface WorkerStartStreamMessage {
       query: string;
       displayQuery?: string;
       channelIds: string[];
-      collectionIds?: string[];
-      fileIds?: string[];
-      folderIds?: string[];
       canvasIds?: string[];
       ticketIds?: string[];
       callIds?: string[];
@@ -28,7 +27,8 @@ export interface WorkerStartStreamMessage {
           | 'activity'
           | 'collection'
           | 'folder'
-          | 'file';
+          | 'file'
+          | 'local-folder';
         id: string;
         title: string;
         threadId?: string;
@@ -61,6 +61,15 @@ export interface WorkerStartStreamMessage {
         mimeType: string;
         filename: string;
       }>;
+      sandboxMode?: 'remote' | 'local' | 'container';
+      studioMode?: 'design';
+      designArtifactAttachmentId?: string;
+      designSelection?: DesignSelectionPayload;
+      pageSelection?: PageSelectionPayload;
+      openItems?: {
+        container?: string;
+        items: Array<{ title: string; kind: string; url?: string; active?: boolean }>;
+      };
       parentMessageId?: string;
       isRegenerate?: boolean;
       // Branching: edit-user signals that the new user message is a sibling
@@ -78,7 +87,7 @@ export interface WorkerStartStreamMessage {
       /** Per-run model pin from the composer's model picker. */
       model?: string;
       /** pinProvider for `model` — which provider the pin rides. */
-      modelProvider?: 'litellm' | 'spaces';
+      modelProvider?: 'litellm' | 'spaces' | 'local-harness';
     };
   };
 }
@@ -182,12 +191,6 @@ async function executeStream(
         ...(requestBody.displayQuery && { display_query: requestBody.displayQuery }),
         /* eslint-disable @typescript-eslint/naming-convention */
         channel_ids: requestBody.channelIds,
-        ...(requestBody.collectionIds &&
-          requestBody.collectionIds.length > 0 && { collection_ids: requestBody.collectionIds }),
-        ...(requestBody.fileIds &&
-          requestBody.fileIds.length > 0 && { file_ids: requestBody.fileIds }),
-        ...(requestBody.folderIds &&
-          requestBody.folderIds.length > 0 && { folder_ids: requestBody.folderIds }),
         ...(requestBody.canvasIds &&
           requestBody.canvasIds.length > 0 && { canvas_ids: requestBody.canvasIds }),
         ...(requestBody.ticketIds &&
@@ -222,6 +225,15 @@ async function executeStream(
               filename: a.filename,
             })),
           }),
+        ...(requestBody.sandboxMode &&
+          requestBody.sandboxMode !== 'remote' && { sandboxMode: requestBody.sandboxMode }),
+        ...(requestBody.studioMode && { studioMode: requestBody.studioMode }),
+        ...(requestBody.designArtifactAttachmentId && {
+          designArtifactAttachmentId: requestBody.designArtifactAttachmentId,
+        }),
+        ...(requestBody.designSelection && { designSelection: requestBody.designSelection }),
+        ...(requestBody.pageSelection && { pageSelection: requestBody.pageSelection }),
+        ...(requestBody.openItems && { openItems: requestBody.openItems }),
         ...(requestBody.parentMessageId && {
           parent_message_id: requestBody.parentMessageId,
         }),

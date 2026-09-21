@@ -21,9 +21,11 @@ export class MigrationCleanupController {
     try {
       const { channelId } = req.body as { channelId?: string };
 
+      // Skip orphans that carry a ticket: Ticket.conversation is a required app-level relation,
+      // so deleting them would throw P2014 and stall the batch loop on the same rows.
       const where = channelId
-        ? { initialMessageId: 'temp', channelId }
-        : { initialMessageId: 'temp' };
+        ? { initialMessageId: 'temp', channelId, tickets: { none: {} } }
+        : { initialMessageId: 'temp', tickets: { none: {} } };
 
       // Respond immediately — batched deletion runs in background
       res.json({

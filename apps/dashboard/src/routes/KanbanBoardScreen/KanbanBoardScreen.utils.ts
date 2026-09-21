@@ -475,6 +475,13 @@ export const applyTicketFilters = (
       }
     }
 
+    // Merchant ID filter (exact match)
+    if (filters.merchantIds && filters.merchantIds.length > 0) {
+      if (!ticket.merchantId || !filters.merchantIds.includes(ticket.merchantId)) {
+        return false;
+      }
+    }
+
     // Source channel filter
     if (filters.sourceChannels && filters.sourceChannels.length > 0) {
       if (!ticket.channelId || !filters.sourceChannels.includes(ticket.channelId)) {
@@ -643,4 +650,16 @@ export const extractGroupableFormFields = (
       field.fieldType === FormFieldType.MULTI_SELECT ||
       field.fieldType === FormFieldType.USER,
   );
+};
+
+export const DERIVED_COLUMNS = ['stage'];
+
+export const DEFAULT_VISIBLE_COLUMNS = ['assignee', 'dueDate', 'status', 'priority', 'tags'];
+
+export const mergeSavedColumns = (prev: Set<string>, saved: string[]): Set<string> => {
+  const next = new Set(saved);
+  for (const key of DERIVED_COLUMNS) {
+    if (prev.has(key)) next.add(key);
+  }
+  return next;
 };

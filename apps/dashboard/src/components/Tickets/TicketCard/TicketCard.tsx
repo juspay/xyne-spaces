@@ -12,6 +12,7 @@ import {
   TicketTag,
   TicketStatusV2,
   addSlaHours,
+  resolveTicketDescription,
 } from '@xyne/shared';
 import { getPriorityIcon, formatEta, isEtaUrgent, isStageOverdue } from './TicketCard.utils';
 import { cn } from '../../../utils/classNames';
@@ -22,6 +23,7 @@ import { RenderMessageWithHTML } from '../../Chat/RenderMessageWithHTML/RenderMe
 import { useZero } from '../../../hooks/useZero';
 import { mutators } from '../../../zero/mutators';
 import { surfaceMutationError } from '../../../utils/zeroMutationToast';
+import { trackTicketOutcome } from '../../../services/Analytics/ticketTracking';
 import { TagSelector } from '../TicketTable/TagSelector';
 import Avatar from '../../ui/Avatar/Avatar';
 import { useUserGroupById, useUserGroups } from '../../../hooks/useUserGroup';
@@ -347,6 +349,14 @@ export const TicketCard: React.FC<TicketCardProps> = ({
         );
       }
     });
+    if (toAdd.length > 0 || toRemove.length > 0) {
+      trackTicketOutcome('TICKET_FIELD_UPDATED', ticket, {
+        surface: 'kanban_card',
+        field: 'tags',
+        addedCount: toAdd.length,
+        removedCount: toRemove.length,
+      });
+    }
   };
 
   const handleAssigneeChange = (value: string | null) => {
@@ -372,7 +382,15 @@ export const TicketCard: React.FC<TicketCardProps> = ({
         }),
       ),
       'Failed to update assignee',
-    );
+    ).then(ok => {
+      if (ok) {
+        trackTicketOutcome('TICKET_ASSIGNED', ticket, {
+          surface: 'kanban_card',
+          unassigned: !updates.assignedTo && !('userGroupId' in updates && updates.userGroupId),
+          toGroup: 'userGroupId' in updates && !!updates.userGroupId,
+        });
+      }
+    });
     setIsEditingAssignee(false);
   };
 
@@ -386,7 +404,15 @@ export const TicketCard: React.FC<TicketCardProps> = ({
         }),
       ),
       'Failed to update priority',
-    );
+    ).then(ok => {
+      if (ok) {
+        trackTicketOutcome('TICKET_PRIORITY_CHANGED', ticket, {
+          surface: 'kanban_card',
+          to: value,
+          previous: ticket.priority ?? null,
+        });
+      }
+    });
     setIsEditingPriority(false);
   };
 
@@ -829,7 +855,10 @@ export const TicketCard: React.FC<TicketCardProps> = ({
                     'whitespace-pre-wrap overflow-hidden text-muted-foreground text-clip line-clamp-1 sm:line-clamp-2 break-all text-[13px]',
                   )}
                 >
-                  <RenderMessageWithHTML message={ticket.description || ''} breakLongLinks={true} />
+                  <RenderMessageWithHTML
+                    message={resolveTicketDescription(ticket) || ''}
+                    breakLongLinks={true}
+                  />
                 </p>
               </div>
             )}

@@ -359,7 +359,20 @@ export class MicrosoftDeskService {
       // channel→boards without going through channel.projectId.
       // Default: explicit channelData.boardId if provided, else the first (oldest) board.
       if (boards.length > 0) {
-        const defaultBoardId = channelData.boardId ?? boards[0].id;
+        // Honour the requested boardId only when it actually belongs to this
+        // project's board set, otherwise fall back to the oldest board. Without
+        // this guard a requested boardId outside the project yields a mapping
+        // set with NO default row.
+        const defaultBoardId =
+          channelData.boardId && boards.some(b => b.id === channelData.boardId)
+            ? channelData.boardId
+            : boards[0].id;
+        if (channelData.boardId && channelData.boardId !== defaultBoardId) {
+          logger.warn(
+            `[CBM_DEFAULT] Requested boardId ${channelData.boardId} is not in project ${channelData.projectId} for channel ${channel.id}; ` +
+              `defaulting to oldest board ${defaultBoardId}.`,
+          );
+        }
         await tx.channelBoardMapping.createMany({
           data: boards.map(b => ({
             channelId: channel.id,

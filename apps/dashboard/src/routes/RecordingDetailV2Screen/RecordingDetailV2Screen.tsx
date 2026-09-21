@@ -96,7 +96,7 @@ import {
   type TranscriptPanelTarget,
 } from '../../components/Chat/TranscriptCitationModal/TranscriptSidePanel';
 import { transcriptCitationStore } from '../../components/Chat/TranscriptCitationModal';
-import { parseMarkedItems, type MarkedItem } from './components/markedItems';
+import { parseMarkedItems, type MarkedItem } from '../../components/CallTimeline/markedItems';
 import type { Canvas } from '../../components/Canvas/Canvas.types';
 import { xyneAIActor } from '../../machines/xyneAIMachine';
 import { useSelf } from '../../hooks/useUsers';
@@ -859,6 +859,7 @@ export default function RecordingDetailV2Screen({
 
     xyneAIActor.send({
       type: 'OPEN',
+      trackSource: 'recording_detail',
       startFreshChat: true,
       contextType: 'general',
       initialContextSelections: {

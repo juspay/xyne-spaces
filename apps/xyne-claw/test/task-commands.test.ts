@@ -277,3 +277,63 @@ describe("/spec task command", () => {
     expect(resolveTaskCommandMode("/spec XYNE-1", "plan")).toBe("auto");
   });
 });
+
+describe("/review", () => {
+  it("parses and loads the review skill pack", () => {
+    const command = parseTaskCommand("/review the local changes");
+    expect(command?.command).toBe("/review");
+    expect(command?.skillPaths).toContain("review-skills");
+  });
+
+  it("contracts for a delivered review room with diagrams", () => {
+    const command = parseTaskCommand("/review");
+    expect(command?.instruction).toContain("review-room.html");
+    expect(command?.instruction).toContain("mermaid");
+    expect(command?.nudge).toContain("review-room.html");
+  });
+
+  it("contracts for machine-readable comments the diff viewer can anchor", () => {
+    const command = parseTaskCommand("/review");
+    expect(command?.instruction).toContain("review-comments.json");
+    expect(command?.instruction).toContain("NEW-side line number");
+    expect(command?.instruction).toContain("order");
+    expect(command?.nudge).toContain("review-comments.json");
+  });
+
+  it("forces no tools and pins no sandbox profile, so it can run anywhere", () => {
+    const command = parseTaskCommand("/review");
+    expect(command?.autoTools).toEqual([]);
+    expect(command?.sandboxProfile).toBeUndefined();
+    expect(command?.requiredTool).toBeUndefined();
+  });
+
+  it("never edits the tree on its own", () => {
+    const command = parseTaskCommand("/review");
+    expect(command?.instruction).toContain("Do not edit, commit, or push");
+  });
+});
+
+describe("/learn", () => {
+  it("parses and loads the teaching skill pack", () => {
+    const command = parseTaskCommand("/learn how SSRF works from these links");
+    expect(command?.command).toBe("/learn");
+    expect(command?.skillPaths).toContain("learn-skills");
+  });
+
+  it("forces the browser tool so sources open where the user can watch", () => {
+    expect(parseTaskCommand("/learn")?.autoTools).toContain("open-url");
+  });
+
+  it("refuses to teach from a page it could not open", () => {
+    const instruction = parseTaskCommand("/learn")?.instruction ?? "";
+    expect(instruction).toContain("Never teach from a page");
+    expect(instruction).toContain("never backfill from memory");
+  });
+
+  it("contracts for a delivered lesson and forbids the chat fence", () => {
+    const command = parseTaskCommand("/learn");
+    expect(command?.instruction).toContain("lesson.html");
+    expect(command?.instruction).toContain("fenced html block");
+    expect(command?.nudge).toContain("lesson.html");
+  });
+});

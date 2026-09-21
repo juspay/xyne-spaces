@@ -59,7 +59,7 @@ export interface CreateChannelResponse {
   scopeType: ChannelScopeType;
   description?: string | null;
   visibility?: ChannelVisibility | null;
-  projectId: string;
+  projectId: string | null;
   createdAt: Date;
   participantResults?: {
     total: number;

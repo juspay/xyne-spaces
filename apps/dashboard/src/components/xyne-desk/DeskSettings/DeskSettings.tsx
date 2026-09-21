@@ -230,7 +230,7 @@ export const DeskSettings: React.FC<DeskSettingsProps> = ({ open, onClose, chann
                   </button>
                   <button
                     type='button'
-                    onClick={() => void save()}
+                    onClick={() => void save(activeTab)}
                     disabled={saving || !!saveBlockedReason}
                     title={saveBlockedReason ?? undefined}
                     className='rounded-[10px] border border-desk-accent bg-desk-accent px-3 py-1.5 text-sm font-medium text-white shadow-sm hover:opacity-90 focus:outline-none focus-visible:ring-1 focus-visible:ring-desk-accent disabled:cursor-not-allowed disabled:opacity-50'
