@@ -74,9 +74,12 @@ export type ChannelTab =
   | 'settings'
   | 'ai-features';
 
-const APP_USER_EMAIL_SUFFIX = '@app.xyne.ai';
-const isAppUserEmail = (email: string | null | undefined): boolean =>
-  !!email && email.toLowerCase().endsWith(APP_USER_EMAIL_SUFFIX);
+const APP_USER_EMAIL_SUFFIXES = ['@app.xyne.ai', '@bot.xyne.ai'];
+const isAppUserEmail = (email: string | null | undefined): boolean => {
+  if (!email) return false;
+  const lower = email.toLowerCase();
+  return APP_USER_EMAIL_SUFFIXES.some(suffix => lower.endsWith(suffix));
+};
 interface InfoProps {
   channel: VisibleChannel;
   previousChannelId?: string | null;
