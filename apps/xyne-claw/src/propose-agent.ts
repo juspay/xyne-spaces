@@ -1,7 +1,7 @@
 /**
  * propose-agent — the terminal tool for AGENT AUTHORING (agent.config.agentAuthoring).
  *
- * An agent asked to "build me an agent" investigates (list_available_tools /
+ * An agent asked to "build me an agent" investigates (search_tools /
  * list_agents), then calls propose-agent exactly ONCE with the full draft, which:
  *   1. captures the spec into a closure ref (read back by run.ts), and
  *   2. HARD-STOPS the turn via abortRun — nothing is created yet, so there is
@@ -48,6 +48,18 @@ export interface ProposedAgentSpec {
    *  catalog and reports back anything it could not match — the pod deliberately
    *  does NOT guess, because only claw-auth knows what this org has. */
   tools: string[];
+  mcps?: string[];
+  /** Skill names or slugs. Resolved by claw-auth against the org's skill
+   *  library; unmatched names are reported on the card, never persisted. */
+  skills?: string[];
+  /** Collection names the agent should be able to look things up in, plus whose
+   *  access decides what it can read. */
+  knowledge?: { scope?: "COLLECTIONS" | "USER"; collections?: string[] };
+  /** Providers tried in order, e.g. ["claude", "codex"]. */
+  providerOrder?: string[];
+  memory?: { enabled: boolean; requiresApproval?: boolean };
+  /** 'personal' belongs to the requester, 'global' is org-wide. */
+  scope?: "personal" | "global";
   /** One line the agent says in the thread alongside the card. The card can only
    *  show WHAT was drafted; this is where the agent says why it made the calls it
    *  did. Optional — claw-auth falls back to a neutral line. */
@@ -100,7 +112,7 @@ export function buildProposeAgentTool(
       "gets an agent card showing exactly what you drafted, and the agent is created",
       "ONLY if they approve it. Nothing is saved by this call.",
       "",
-      "BEFORE calling: run `list_available_tools` (and `list_agents` if you need to see",
+      "BEFORE calling: run `search_tools` (and `list_agents` if you need to see",
       "what already exists). `tools` must contain EXACT identifiers from that catalog —",
       "subagent names or custom tool slugs, one per entry, no prose. Anything that does",
       "not match is dropped and reported on the card, so guessing costs the user a tool.",
@@ -111,6 +123,17 @@ export function buildProposeAgentTool(
       "must NOT do. A one-line prompt makes a useless agent — be specific and concrete.",
       "",
       "`description` is the single line shown in the agent picker — what it does, not how.",
+      "",
+      "MCPs vs subagents: when the user asks for an INTEGRATION by name — 'add the github",
+      "MCP', 'give it Bitbucket' — put that name in `mcps`, not in `tools`. Several",
+      "integrations also ship a subagent under the SAME name, and a name in `tools` always",
+      "resolves to the subagent, so the user asks for an MCP and gets a subagent instead.",
+      "Use `tools` for subagents, individual tool slugs and built-in tools.",
+      "",
+      "Set `skills`, `knowledge`, `providerOrder`, `memory` and `scope` ONLY when the user",
+      "actually asked for them — an unrequested provider or a wrong knowledge scope is worse",
+      "than leaving the org default. Like `tools`, these are matched against the org catalog",
+      "by claw-auth: give the names the user said, do not invent ids.",
       "",
       "ALSO write `summary`: one or two sentences you say to the user next to the card,",
       "explaining what you built and WHY you made the key calls — which tools you granted",
@@ -153,8 +176,65 @@ export function buildProposeAgentTool(
         tools: {
           type: "array",
           description:
-            "Exact tool slugs / subagent names from list_available_tools. Grant only what the agent's job needs.",
+            "Exact tool slugs / subagent names from search_tools. Grant only what the agent's job needs.",
           items: { type: "string" },
+        },
+        mcps: {
+          type: "array",
+          description:
+            "Integration names the user asked for AS MCPs, e.g. ['github', 'bitbucket']. claw-auth grants that integration's tools. Use this whenever the user says 'add the X MCP' — putting the same name in `tools` grants the X SUBAGENT instead, which is a different thing.",
+          items: { type: "string" },
+        },
+        skills: {
+          type: "array",
+          description:
+            "Skill names or slugs from list_available_tools that this agent should be able to run. Omit when the user asked for none.",
+          items: { type: "string" },
+        },
+        knowledge: {
+          type: "object",
+          additionalProperties: false,
+          description:
+            "What this agent can look things up in. Omit entirely unless the user named collections or said whose access should apply.",
+          properties: {
+            scope: {
+              type: "string",
+              enum: ["COLLECTIONS", "USER"],
+              description:
+                "COLLECTIONS reads the collections listed below. USER reads whatever the asking user can already see.",
+            },
+            collections: {
+              type: "array",
+              description: "Collection names the user asked for, exactly as they said them.",
+              items: { type: "string" },
+            },
+          },
+        },
+        providerOrder: {
+          type: "array",
+          description:
+            "AI providers tried in order, e.g. ['claude', 'codex']. Omit unless the user named one — the org default is used otherwise.",
+          items: { type: "string" },
+        },
+        memory: {
+          type: "object",
+          additionalProperties: false,
+          description:
+            "Whether this agent remembers things between conversations. Omit unless the user asked for memory.",
+          properties: {
+            enabled: { type: "boolean" },
+            requiresApproval: {
+              type: "boolean",
+              description: "Whether new memories need a human review before they are kept.",
+            },
+          },
+          required: ["enabled"],
+        },
+        scope: {
+          type: "string",
+          enum: ["personal", "global"],
+          description:
+            "'personal' belongs to the requester (the default); 'global' is org-wide. Only set 'global' when the user clearly asked for everyone.",
         },
         summary: {
           type: "string",
@@ -225,6 +305,46 @@ export function buildProposeAgentTool(
         .filter((t, i, arr) => arr.indexOf(t) === i)
         .slice(0, MAX_TOOLS);
 
+      const stringList = (raw: unknown, cap: number): string[] =>
+        (Array.isArray(raw) ? (raw as unknown[]) : [])
+          .filter((v): v is string => typeof v === "string" && v.trim().length > 0)
+          .map((v) => v.trim())
+          .filter((v, i, arr) => arr.indexOf(v) === i)
+          .slice(0, cap);
+
+      const mcps = stringList(p["mcps"], MAX_TOOLS);
+      const skills = stringList(p["skills"], MAX_TOOLS);
+      const providerOrder = stringList(p["providerOrder"], 8);
+
+      const rawKnowledge = (p["knowledge"] ?? {}) as Record<string, unknown>;
+      const knowledgeScope: "COLLECTIONS" | "USER" | undefined =
+        rawKnowledge["scope"] === "USER"
+          ? "USER"
+          : rawKnowledge["scope"] === "COLLECTIONS"
+            ? "COLLECTIONS"
+            : undefined;
+      const collections = stringList(rawKnowledge["collections"], MAX_TOOLS);
+      const knowledge =
+        knowledgeScope || collections.length > 0
+          ? {
+              ...(knowledgeScope ? { scope: knowledgeScope } : {}),
+              ...(collections.length > 0 ? { collections } : {}),
+            }
+          : undefined;
+
+      const rawMemory = p["memory"] as Record<string, unknown> | undefined;
+      const memory =
+        rawMemory && typeof rawMemory["enabled"] === "boolean"
+          ? {
+              enabled: rawMemory["enabled"],
+              ...(typeof rawMemory["requiresApproval"] === "boolean"
+                ? { requiresApproval: rawMemory["requiresApproval"] }
+                : {}),
+            }
+          : undefined;
+
+      const scope = p["scope"] === "global" || p["scope"] === "personal" ? p["scope"] : undefined;
+
       const modelId = typeof p["modelId"] === "string" ? p["modelId"].trim().slice(0, 120) : "";
       const color = typeof p["color"] === "string" ? p["color"].trim().slice(0, 32) : "";
       const summary = typeof p["summary"] === "string" ? p["summary"].trim().slice(0, MAX_SUMMARY) : "";
@@ -237,6 +357,12 @@ export function buildProposeAgentTool(
           description,
           systemPrompt,
           tools,
+          ...(mcps.length > 0 ? { mcps } : {}),
+          ...(skills.length > 0 ? { skills } : {}),
+          ...(knowledge ? { knowledge } : {}),
+          ...(providerOrder.length > 0 ? { providerOrder } : {}),
+          ...(memory ? { memory } : {}),
+          ...(scope ? { scope } : {}),
           ...(modelId ? { modelId } : {}),
           ...(color ? { color } : {}),
           ...(summary ? { summary } : {}),

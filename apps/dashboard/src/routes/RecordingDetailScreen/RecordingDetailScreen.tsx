@@ -279,6 +279,7 @@ export default function RecordingDetailScreen(): ReactElement {
     const attachmentIds = (message?.attachments ?? []).map((att: { id: string }) => att.id);
     xyneAIActor.send({
       type: 'OPEN',
+      trackSource: 'recording_detail',
       startFreshChat: true,
       channelId: recording.channelId,
       threadInfo: {

@@ -8,13 +8,13 @@ import { Popover } from '../../ui/Popover/Popover';
 import { TicketListRow } from './TicketListRow';
 import { queries } from '../../../zero/queries';
 import { useShortcut } from '../../../shortcuts';
-import { useCachedQuery } from '../../../hooks/useCachedQuery';
+import { useRacedQuery } from '../../../hooks/useRacedQuery';
 import { useAuthContextValues } from '../../../hooks/useAuth';
 import { dataLoadDuration, safeRecordMetric } from '../../../services/otel';
 import { logger, Event } from '../../../utils/logger';
 import type { QueryResultType } from '@rocicorp/zero';
 import type { TicketListItem } from './TicketListView.types';
-import { TicketPriority, MailboxState } from '@xyne/shared';
+import { TicketPriority } from '@xyne/shared';
 import type { MailboxFolder } from '../../xyne-desk/DeskFolders/DeskMailboxSidebar';
 import {
   ticketMatchesDynamicFieldEntries,
@@ -88,7 +88,7 @@ const loadColumnWidths = (): TicketListColumnWidths => {
 };
 
 export type SupportTicketRow = NonNullable<
-  QueryResultType<typeof queries.supportTicketsPageV3>[number]
+  QueryResultType<typeof queries.supportTicketsPageV4>[number]
 >;
 
 type PageCursor = { id: string; lastEmailAt: number };
@@ -115,11 +115,6 @@ interface TicketListViewProps {
   dynamicFieldEntries?: DynamicFieldFilterEntry[] | undefined;
   onTicketClick: (ticket: SupportTicketRow) => void;
   isMember: boolean;
-  /**
-   * When set, the current page is filtered into a per-user mailbox folder (Inbox / All Mail /
-   * Starred / Spam) using each ticket's `userMailbox` overlay. Filtering is client-side
-   * (a ticket with no overlay row defaults to Inbox, which can't be expressed server-side).
-   */
   mailboxFolder?: MailboxFolder | undefined;
   activeTicketId?: string | null | undefined;
   showExtraFields?: boolean;
@@ -144,6 +139,7 @@ export interface SelectableRow {
   channelId: string;
   conversationId: string;
   stageName?: string | null;
+  statusV2?: string | null;
   priority?: TicketListItem['priority'];
   assignedTo?: string | null;
   userGroupId?: string | null;
@@ -234,7 +230,7 @@ export const TicketListView = function TicketListView({
   }, []);
   // Adaptive server fetch window. Starts at one page (+1 sentinel); grows only for the
   // client-filtered folders when a page needs more rows to fill after filtering.
-  const [fetchLimit, setFetchLimit] = useState(PAGE_SIZE + 1);
+
   const showSelectionColumn = !!onToggleSelect;
   const ticketListGridTemplate = useMemo(
     () => getTicketListGridTemplate(columnWidths, showSelectionColumn),
@@ -406,8 +402,8 @@ export const TicketListView = function TicketListView({
   );
 
   const pageStart = pageCursors[pageIndex] ?? null;
-  const [firstPage, firstPageDetails] = useCachedQuery(
-    queries.supportTicketsPageV3({
+  const [firstPage, firstPageDetails] = useRacedQuery(
+    queries.supportTicketsPageV4({
       channelId,
       isMember,
       assignedTo,
@@ -429,7 +425,7 @@ export const TicketListView = function TicketListView({
       // adaptive fetch window so their pages fill correctly after filtering.
       ...(mailboxFolder ? { mailboxFolder } : {}),
       dynamicFieldFilters,
-      limit: fetchLimit,
+      limit: PAGE_SIZE + 1,
       userGroups,
       ...(conversationLabelId ? { conversationLabelId } : {}),
       start: pageStart,
@@ -488,11 +484,6 @@ export const TicketListView = function TicketListView({
     loadStartTimeRef.current = Date.now();
   }, [filterKey]);
 
-  // Each page (and each filter) begins a fresh adaptive fetch from its own cursor.
-  useEffect(() => {
-    setFetchLimit(PAGE_SIZE + 1);
-  }, [pageStart, filterKey]);
-
   // Record first-page load duration once it becomes complete.
   useEffect(() => {
     if (firstPageDetails.type !== 'complete') return;
@@ -533,50 +524,15 @@ export const TicketListView = function TicketListView({
     return unique;
   }, [firstPage]);
 
-  // Filter the WHOLE fetched buffer into the active mailbox folder BEFORE paginating, so
-  // Inbox / All Mail paginate over the filtered result set (not a pre-sliced page). Inbox /
-  // All Mail must be filtered client-side: they include tickets with no overlay row
-  // (default = Inbox), which would need a NOT EXISTS predicate to filter server-side —
-  // unsupported on the Zero client (bug 3438). Spam / Starred are already filtered
-  // server-side, so this is a no-op for them.
   const filteredAll = useMemo<SupportTicketRow[]>(() => {
-    let rows = allRows;
-    if (mailboxFolder) {
-      rows = rows.filter(t => {
-        const overlay = (t.userMailbox ?? [])[0];
-        const state = overlay?.state ?? MailboxState.INBOX;
-        switch (mailboxFolder) {
-          case 'all':
-            return state === MailboxState.INBOX || state === MailboxState.ARCHIVED;
-          case 'starred':
-            return (
-              !!overlay?.starred &&
-              (state === MailboxState.INBOX || state === MailboxState.ARCHIVED)
-            );
-          case 'spam':
-            return state === MailboxState.SPAM;
-          case 'sent':
-          case 'drafts':
-            // Filtered server-side by a positive exists() (sent email / reply draft by me);
-            // the exists() also runs on the client, so every fetched row already qualifies —
-            // no overlay check here.
-            return true;
-          case 'inbox':
-          default:
-            return state === MailboxState.INBOX;
-        }
-      });
-    }
-    if (dynamicFieldEntries?.length) {
-      rows = rows.filter(t =>
-        ticketMatchesDynamicFieldEntries(
-          t.formEntityValues as FormEntityValueLike[] | undefined,
-          dynamicFieldEntries,
-        ),
-      );
-    }
-    return rows;
-  }, [allRows, mailboxFolder, dynamicFieldEntries]);
+    if (!dynamicFieldEntries?.length) return allRows;
+    return allRows.filter(t =>
+      ticketMatchesDynamicFieldEntries(
+        t.formEntityValues as FormEntityValueLike[] | undefined,
+        dynamicFieldEntries,
+      ),
+    );
+  }, [allRows, dynamicFieldEntries]);
 
   // Paginate over the FILTERED rows: render one PAGE_SIZE window; a (PAGE_SIZE+1)th filtered
   // row is the "next page exists" sentinel (mirrors the server keyset paging, on filtered rows).
@@ -588,19 +544,8 @@ export const TicketListView = function TicketListView({
   }, [filteredTickets, onTicketsLoaded]);
 
   const complete = firstPageDetails.type === 'complete';
-  // Server returned fewer rows than requested → the channel/folder is genuinely exhausted;
-  // no amount of extra fetching can surface additional rows.
-  const serverExhausted = allRows.length < fetchLimit;
-  // A client-filtered folder (Inbox / All Mail) can filter a full server page down below a
-  // page's worth. Keep growing the fetch window (effect below) until we have a full page
-  // (+1 sentinel) of MATCHING rows OR the source is genuinely exhausted — there is no fixed
-  // cap, so matching tickets sitting behind a long run of archived/spam are never missed.
-  // `converged` = the page is definitive (safe to show its empty state).
-  const needMoreRows = complete && !serverExhausted && filteredAll.length < PAGE_SIZE + 1;
-  const converged = complete && !needMoreRows;
-
-  const rowsEmpty = converged && filteredTickets.length === 0;
-  const showInitialSkeletons = (!complete && allRows.length === 0) || needMoreRows;
+  const rowsEmpty = complete && filteredTickets.length === 0;
+  const showInitialSkeletons = !complete && allRows.length === 0;
 
   const isLastPage = !hasNextPage;
 
@@ -631,25 +576,13 @@ export const TicketListView = function TicketListView({
     virtuosoRef.current?.scrollToIndex({ index: 0 });
   }, [pageIndex]);
 
-  // Grow the fetch window until the client-filtered page holds a full PAGE_SIZE (+1 sentinel)
-  // of matching rows, or the source is genuinely exhausted — so Inbox / All Mail never miss
-  // matching tickets that sit behind a long run of archived/spam rows. Doubling keeps this to
-  // O(log n) fetches even when a folder is sparse in a large channel; termination is
-  // guaranteed because `serverExhausted` flips true once the window exceeds the row count.
-  useEffect(() => {
-    if (!needMoreRows) return;
-    setFetchLimit(prev => prev * 2);
-    // fetchLimit is a dep so the effect re-evaluates after each grow, even if a cached
-    // refetch never lets `needMoreRows` flip to false in between.
-  }, [needMoreRows, fetchLimit]);
-
   // If a page past the first ends up empty (e.g. its rows were archived/deleted after we
   // navigated to it), fall back toward populated pages.
   useEffect(() => {
-    if (converged && filteredTickets.length === 0 && pageIndex > 0) {
+    if (complete && filteredTickets.length === 0 && pageIndex > 0) {
       goToPrevPage();
     }
-  }, [converged, filteredTickets.length, pageIndex, goToPrevPage]);
+  }, [complete, filteredTickets.length, pageIndex, goToPrevPage]);
 
   const firstRowBoardId = (filteredTickets[0] ?? allRows[0])?.boardId;
   useEffect(() => {
@@ -755,7 +688,7 @@ export const TicketListView = function TicketListView({
       }}
       className={cn('h-full w-full outline-none')}
       initialTopMostItemIndex={0}
-      increaseViewportBy={{ top: 0, bottom: 200 }}
+      increaseViewportBy={{ top: 1200, bottom: 1200 }}
       totalListHeightChanged={setBodyContentHeight}
       itemContent={(index, row) => {
         const ticketIdValue = row?.xyneId || row?.id || '';
@@ -786,6 +719,7 @@ export const TicketListView = function TicketListView({
                       channelId: row.channelId ?? '',
                       conversationId: row.conversationId ?? '',
                       stageName: row.stageName,
+                      statusV2: row.statusV2,
                       priority: row.priority,
                       assignedTo: row.assignedTo,
                       userGroupId: row.userGroupId,
@@ -818,6 +752,7 @@ export const TicketListView = function TicketListView({
       channelId: t.channelId ?? '',
       conversationId: t.conversationId ?? '',
       stageName: t.stageName,
+      statusV2: t.statusV2,
       priority: t.priority,
       assignedTo: t.assignedTo,
       userGroupId: t.userGroupId,

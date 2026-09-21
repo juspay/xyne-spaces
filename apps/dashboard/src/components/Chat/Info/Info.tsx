@@ -64,6 +64,7 @@ import { usePlatform } from '../../../hooks/usePlatform';
 import { v4 as uuidv4 } from 'uuid';
 import { VisibleChannel } from '../../../machines/stateMachine';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
+import { channelTrackingMetadata } from '../../../services/Analytics/channelTracking';
 
 export type ChannelTab = 'about' | 'members' | 'notifications' | 'settings' | 'ai-features';
 interface InfoProps {
@@ -119,12 +120,14 @@ const Info = ({
   const navigate = useNavigate();
   const location = useLocation();
   const channelUserStatus = useGetChannelUserStatus(channel.id);
-  const [project] = useCachedQuery(queries.projectById({ projectId: channel.projectId }));
+  // channel.projectId is nullable (decoupling). Empty string → no project/board match,
+  // and the panel falls back to the channel's board mappings below.
+  const [project] = useCachedQuery(queries.projectById({ projectId: channel.projectId ?? '' }));
   const [channelBoardMappings, mappingDetails] = useCachedQuery(
     queries.boardsByChannel({ channelId: channel.id }),
   );
   const [projectBoards] = useCachedQuery(
-    queries.boardsListByProject({ projectId: channel.projectId }),
+    queries.boardsListByProject({ projectId: channel.projectId ?? '' }),
   );
 
   const boards = useMemo(() => {
@@ -423,7 +426,7 @@ const Info = ({
             className={headerLinkContainerStyle}
             data-track-category='CHAT_INFO'
             data-track-name='LEAVE_CHANNEL'
-            data-track-metadata={JSON.stringify({ channelId: channel.id })}
+            data-track-metadata={JSON.stringify(channelTrackingMetadata(channel))}
             data-ph-capture-attribute-track-id='leave_channel'
           >
             <LucideLogOut size={16} className='text-destructive' />
@@ -995,6 +998,10 @@ const ChannelMembers = ({
               onClick={() => userToRemove && handleRemoveParticipant(userToRemove.id)}
               data-track-category='CHAT_INFO'
               data-track-name='CONFIRM_REMOVE_PARTICIPANT'
+              data-track-metadata={JSON.stringify({
+                ...channelTrackingMetadata(channel),
+                targetUserId: userToRemove?.id,
+              })}
               className='px-6'
               trackId='remove_channel_participant'
             >

@@ -1,7 +1,8 @@
+import type { XyneAiSendTrigger } from '../../services/Analytics/xyneAiTracking';
 import { type ReactElement, useState, useCallback, useEffect, useMemo, useRef } from 'react';
-import { useNavigate, useParams, useLocation } from 'react-router-dom';
-import { Upload, PanelRightOpen } from 'lucide-react';
-import { AIShell } from '../../components/AIScreen/AIShell';
+import { useNavigate, useParams, useLocation, useNavigationType } from 'react-router-dom';
+import { Upload } from 'lucide-react';
+import { AIShell, type WorkspacePanelControls } from '../../components/AIScreen/AIShell';
 import { ArtifactAppPane } from '../../components/AIScreen/ReactArtifact/ArtifactAppPane';
 import { AppCreationModeProvider } from '../../components/AIScreen/ReactArtifact/appCreationModeContext';
 import { useAppModeCollapseSidebar } from '../../hooks/useAppModeCollapseSidebar';
@@ -14,12 +15,112 @@ import {
 } from '../../components/AIScreen/AIComposer';
 import type { ComposerContext } from '../../components/AIScreen/composerContext';
 import { AIChatThread, type AIChatThreadHandle } from '../../components/AIScreen/AIChatThread';
-import { CitationDocsProvider } from '../../components/AIScreen/citationDocs';
-import { ChatWithCitationDocs } from '../../components/AIScreen/CitationDocsPanel';
+import { CitationDocsProvider, useCitationDocs } from '../../components/AIScreen/citationDocs';
+import {
+  DesignStudioProvider,
+  useDesignStudio,
+  hasDesignHtml,
+  PageSelectionProvider,
+} from '../../components/AIScreen/Workspace';
+import type { ConversationArtifact } from '../../services/XyneAI/XyneAIArtifactsService';
+import {
+  WorkspacePane,
+  useConversationArtifacts,
+  type WorkspaceAppMode,
+  type WorkspaceOpenRequest,
+} from '../../components/AIScreen/Workspace';
 import { xyneAIStreamManager } from '../../services/XyneAI/XyneAIStreamManager';
+import { globalClickTracker } from '../../services/Analytics/globalClickTracker';
+import { readTrackSource } from '../../services/Analytics/trackSource';
 import { useV2SessionInvalidator } from '../../hooks/useAskAISessionsV2';
 import { useSelectedAgent } from '../../hooks/useSelectedAgent';
 import { AI_ACTIVE_SESSION_KEY, AI_SHOW_CHAT_VIEW_KEY } from './aiSessionStorage';
+
+function CitationWorkspaceOpener({ onOpenSources }: { onOpenSources: () => void }): null {
+  const citations = useCitationDocs();
+  const activeId = citations?.activeId ?? null;
+  useEffect(() => {
+    if (!activeId) return;
+    onOpenSources();
+  }, [activeId, onOpenSources]);
+  return null;
+}
+
+function WorkspaceAutoOpener({
+  artifacts,
+  onOpen,
+}: {
+  artifacts: ConversationArtifact[];
+  onOpen: (tab: WorkspaceOpenRequest['tab'], artifactId?: string) => void;
+}): null {
+  const studio = useDesignStudio();
+  const messages = studio?.messages ?? [];
+  const designRunActive = useMemo(() => {
+    const lastUser = [...messages].reverse().find(m => m.type === 'user');
+    return /^\s*\/(design|dashboard)\b/i.test(lastUser?.content ?? '');
+  }, [messages]);
+  const draftMessageId = useMemo(() => {
+    const last = [...messages].reverse().find(m => m.type === 'bot');
+    if (!last) return null;
+    return hasDesignHtml(last.content || last.streamingContent || '') ? last.id : null;
+  }, [messages]);
+  const openedForDraft = useRef<string | null>(null);
+  useEffect(() => {
+    if (!draftMessageId || openedForDraft.current === draftMessageId) return;
+    openedForDraft.current = draftMessageId;
+    onOpen('artifacts');
+  }, [draftMessageId, onOpen]);
+
+  const seenArtifacts = useRef<Map<string, string> | null>(null);
+  useEffect(() => {
+    const stamps = new Map(artifacts.map(a => [a.id, a.updatedAt] as const));
+    const seen = seenArtifacts.current;
+    seenArtifacts.current = stamps;
+    if (seen === null) return;
+    const designVersionRefs = new Set(
+      artifacts
+        .filter(a => a.kind === 'DESIGN_HTML' && a.latestVersionRef)
+        .map(a => a.latestVersionRef as string),
+    );
+    const fresh = artifacts.filter(
+      a => seen.get(a.id) !== a.updatedAt && !(a.kind === 'FILE' && designVersionRefs.has(a.refId)),
+    );
+    if (fresh.length === 0) return;
+    const rank = (kind: ConversationArtifact['kind']): number =>
+      kind === 'DESIGN_HTML'
+        ? 0
+        : kind === 'REVIEW_ROOM'
+          ? 1
+          : kind === 'LESSON'
+            ? 1
+            : kind === 'CANVAS'
+              ? 1
+              : kind === 'REACT_APP'
+                ? 2
+                : kind === 'DIFF'
+                  ? 3
+                  : kind === 'PREVIEW'
+                    ? 4
+                    : kind === 'SPEC'
+                      ? 5
+                      : kind === 'FILE'
+                        ? 6
+                        : kind === 'LINK'
+                          ? 7
+                          : 8;
+    const best = [...fresh].sort((a, b) => rank(a.kind) - rank(b.kind))[0]!;
+    const tab =
+      best.kind === 'PAGE'
+        ? designRunActive
+          ? 'artifacts'
+          : 'sources'
+        : best.kind === 'DIFF' || best.kind === 'PREVIEW'
+          ? 'preview'
+          : 'artifacts';
+    onOpen(tab, best.id);
+  }, [artifacts, onOpen, designRunActive]);
+  return null;
+}
 
 const AIScreen = (): ReactElement => {
   const { workspaceId, sessionId: routeSessionId } = useParams<{
@@ -27,6 +128,7 @@ const AIScreen = (): ReactElement => {
     sessionId?: string;
   }>();
   const location = useLocation();
+  const navigationType = useNavigationType();
   /** '' for the landing page — `chat/new` is the literal, not a session id. */
   const sessionFromUrl = routeSessionId && routeSessionId !== 'new' ? routeSessionId : '';
 
@@ -46,6 +148,8 @@ const AIScreen = (): ReactElement => {
     undefined,
   );
   const [initialExtras, setInitialExtras] = useState<ComposerContext | undefined>(undefined);
+  /** Which affordance on the landing composer sent `initialQuery` (analytics only). */
+  const [initialTrigger, setInitialTrigger] = useState<XyneAiSendTrigger | undefined>(undefined);
   const [chatKey, setChatKey] = useState(0);
   const [isDragging, setIsDragging] = useState(false);
   const dropZoneRef = useRef<HTMLDivElement | null>(null);
@@ -119,6 +223,47 @@ const AIScreen = (): ReactElement => {
     xyneAIStreamManager.setOnAIPage(true);
     return () => {
       xyneAIStreamManager.setOnAIPage(false);
+    };
+  }, []);
+
+  // XYNE_AI_OPENED for the full page. Once per mount: switching threads inside
+  // the page is SELECT_CONVERSATION / NEW_CHAT, not a new open. `source` comes
+  // from the navigating surface's `state.trackSource`; back/forward reports
+  // history_pop and a pasted link reports direct (see readTrackSource).
+  // The open is a single moment, so the effect has no reactive inputs: it
+  // reads the arrival attribution off a per-render snapshot ref instead of
+  // depending on it, which would re-report an open on every thread switch.
+  const pageOpenSnapshotRef = useRef({
+    locationState: location.state as unknown,
+    locationKey: location.key,
+    navigationType,
+    sessionFromUrl,
+    effectiveAgentSlug,
+  });
+  pageOpenSnapshotRef.current = {
+    locationState: location.state as unknown,
+    locationKey: location.key,
+    navigationType,
+    sessionFromUrl,
+    effectiveAgentSlug,
+  };
+  useEffect(() => {
+    const snap = pageOpenSnapshotRef.current;
+    const source = readTrackSource(snap.locationState, snap.navigationType, snap.locationKey);
+    const openedAt = Date.now();
+    globalClickTracker.trackManualEvent('XyneAI', 'XYNE_AI_OPENED', undefined, {
+      surface: 'page',
+      source,
+      contextType: 'general',
+      resumedConversation: !!snap.sessionFromUrl,
+      agentSlug: snap.effectiveAgentSlug ?? 'ask-ai',
+    });
+    return () => {
+      globalClickTracker.trackManualEvent('XyneAI', 'XYNE_AI_CLOSED', undefined, {
+        surface: 'page',
+        source,
+        msOpen: Date.now() - openedAt,
+      });
     };
   }, []);
 
@@ -224,12 +369,23 @@ const AIScreen = (): ReactElement => {
   const handleInitialQueryConsumed = useCallback((): void => {
     setInitialQuery('');
     setInitialAttachments(undefined);
+    setInitialTrigger(undefined);
   }, []);
 
+  // `trigger` rides along with the query: the thread's first turn is submitted
+  // by the thread, but it is the landing composer's button or Enter that sent
+  // it. Without this the thread reports `auto_send` and a button send counts
+  // twice (the button's own click row plus the manual SEND_MESSAGE).
   const handleComposerSubmit = useCallback(
-    (text: string, attachments?: AIComposerAttachment[], context?: ComposerContext): void => {
+    (
+      text: string,
+      attachments?: AIComposerAttachment[],
+      context?: ComposerContext,
+      trigger?: XyneAiSendTrigger,
+    ): void => {
       setInitialQuery(text);
       setInitialAttachments(attachments);
+      setInitialTrigger(trigger);
       setInitialExtras(context);
       setActiveSessionId('');
       setChatKey(prev => prev + 1);
@@ -246,6 +402,7 @@ const AIScreen = (): ReactElement => {
   const handleAgentChange = useCallback((_slug: string | null, context: ComposerContext): void => {
     setInitialQuery('');
     setInitialAttachments(undefined);
+    setInitialTrigger(undefined);
     setInitialExtras(context);
     setActiveSessionId('');
     setChatKey(prev => prev + 1);
@@ -329,13 +486,31 @@ const AIScreen = (): ReactElement => {
   // made entry a coin flip. The scan still runs, for clearing on thread switch
   // and for the freshness signal, but it is no longer on the entry path.
   const { open: openAppMode } = appMode;
+  const workspaceControlsRef = useRef<WorkspacePanelControls | null>(null);
+  const [shownAppId, setShownAppId] = useState<string | null>(null);
+  const [workspaceOverride, setWorkspaceOverride] = useState<boolean | null>(null);
+  useEffect(() => {
+    setWorkspaceOverride(null);
+  }, [activeSessionId]);
+  const { artifacts: conversationArtifacts } = useConversationArtifacts(activeSessionId || null);
+  const hasArtifacts = conversationArtifacts.length > 0;
+  const [workspaceRequest, setWorkspaceRequest] = useState<WorkspaceOpenRequest>({
+    seq: 0,
+    tab: 'artifacts',
+  });
+  const requestWorkspace = useCallback((request: Omit<WorkspaceOpenRequest, 'seq'>) => {
+    setWorkspaceRequest(prev => ({ ...request, seq: prev.seq + 1 }));
+    setWorkspaceOverride(true);
+    workspaceControlsRef.current?.expand();
+  }, []);
   const enterForApp = useCallback(
     (id: string, versionId: string | null) => {
       setAppId(id);
       if (versionId) setLatestVersionId(versionId);
       openAppMode();
+      requestWorkspace({ tab: 'artifacts', openAppId: id });
     },
-    [openAppMode],
+    [openAppMode, requestWorkspace],
   );
   // Routed through the thread's handle rather than a composer ref of its own:
   // the thread owns submit (draft recovery, branch parenting), so a fix request
@@ -350,6 +525,7 @@ const AIScreen = (): ReactElement => {
     () => ({
       active: appMode.active,
       appId: appMode.appId,
+      shownAppId,
       viewingVersionId: appMode.viewingVersionId,
       headVersionId: appMode.headVersionId,
       icon: appMode.icon,
@@ -363,6 +539,7 @@ const AIScreen = (): ReactElement => {
     [
       appMode.active,
       appMode.appId,
+      shownAppId,
       appMode.viewingVersionId,
       appMode.headVersionId,
       appMode.icon,
@@ -377,90 +554,132 @@ const AIScreen = (): ReactElement => {
   // Likewise a fresh element remounts the pane's subtree each render.
   const appPane = useMemo(() => <ArtifactAppPane mode={appMode} />, [appMode]);
 
+  const openWorkspaceTab = useCallback(
+    (tab: WorkspaceOpenRequest['tab'], artifactId?: string) =>
+      requestWorkspace({ tab, ...(artifactId ? { openArtifactId: artifactId } : {}) }),
+    [requestWorkspace],
+  );
+  const collapseWorkspace = useCallback(() => {
+    setWorkspaceOverride(false);
+    workspaceControlsRef.current?.collapse();
+  }, []);
+  const openSourcesInWorkspace = useCallback(
+    () => requestWorkspace({ tab: 'sources' }),
+    [requestWorkspace],
+  );
+  const workspaceAppMode = useMemo<WorkspaceAppMode>(
+    () => ({
+      active: appMode.active,
+      hasApp: appMode.hasApp,
+      appId: appMode.appId,
+      open: appMode.open,
+      exit: appMode.exit,
+    }),
+    [appMode.active, appMode.hasApp, appMode.appId, appMode.open, appMode.exit],
+  );
+
+  const workspaceOpen = showChatView && (workspaceOverride ?? hasArtifacts);
+  const workspaceWasOpen = useRef(workspaceOpen);
+  useEffect(() => {
+    if (workspaceOpen && !workspaceWasOpen.current) {
+      workspaceControlsRef.current?.expand();
+    }
+    workspaceWasOpen.current = workspaceOpen;
+  }, [workspaceOpen]);
+  const workspacePane = useMemo(
+    () => (
+      <WorkspacePane
+        conversationId={activeSessionId || null}
+        appPane={appPane}
+        openRequest={workspaceRequest}
+        appMode={workspaceAppMode}
+        onCollapse={collapseWorkspace}
+        onShownAppChange={setShownAppId}
+      />
+    ),
+    [activeSessionId, appPane, workspaceRequest, workspaceAppMode, collapseWorkspace],
+  );
+
   return (
     <CitationDocsProvider>
-      <AppCreationModeProvider value={appModeSignal}>
-        <AIShell
-          activeSessionId={activeSessionId}
-          onCreateChat={handleCreateChat}
-          onSelectSession={handleSelectSession}
-          onAccount={handleAccount}
-          mobileOpen={mobileSidebarOpen}
-          onMobileOpenChange={setMobileSidebarOpen}
-          mainRef={dropZoneRef}
-          collapseSignal={collapseSignal}
-          onSidebarCollapsedChange={setSidebarCollapsed}
-          sidebarToggleRef={sidebarToggleRef}
-          {...(appMode.active ? { rightPanel: appPane } : {})}
-        >
-          {isDragging && !showChatView && (
-            <div className='pointer-events-none absolute inset-0 z-50 flex flex-col items-center justify-center rounded-xl border-2 border-dashed border-primary/50 bg-background/95 backdrop-blur-sm'>
-              <div className='flex flex-col items-center gap-3'>
-                <div className='rounded-full bg-primary/10 p-4'>
-                  <Upload className='h-8 w-8 text-primary' />
-                </div>
-                <div className='text-center'>
-                  <p className='text-lg font-medium text-foreground'>Drop files to attach</p>
-                  <p className='text-sm text-muted-foreground'>
-                    Images, PDF, text, office documents, or data files
-                  </p>
-                </div>
-              </div>
-            </div>
-          )}
-          {appMode.hasApp && !appMode.active && showChatView && (
-            <button
-              type='button'
-              onClick={appMode.open}
-              className='absolute right-4 top-3 z-40 flex items-center gap-1.5 rounded-full border border-border bg-background/95 px-3 py-1.5 text-xs font-medium text-muted-foreground shadow-sm backdrop-blur-sm transition-colors hover:bg-accent hover:text-foreground'
-              title='Reopen the app panel'
-              data-track-category='AskAI'
-              data-track-name='ArtifactAppPaneReopen'
+      <DesignStudioProvider>
+        <PageSelectionProvider submitPrompt={submitPrompt}>
+          <CitationWorkspaceOpener onOpenSources={openSourcesInWorkspace} />
+          <WorkspaceAutoOpener artifacts={conversationArtifacts} onOpen={openWorkspaceTab} />
+          <AppCreationModeProvider value={appModeSignal}>
+            <AIShell
+              activeSessionId={activeSessionId}
+              onCreateChat={handleCreateChat}
+              onSelectSession={handleSelectSession}
+              onAccount={handleAccount}
+              mobileOpen={mobileSidebarOpen}
+              onMobileOpenChange={setMobileSidebarOpen}
+              mainRef={dropZoneRef}
+              collapseSignal={collapseSignal}
+              onSidebarCollapsedChange={setSidebarCollapsed}
+              sidebarToggleRef={sidebarToggleRef}
+              workspacePanel={workspacePane}
+              workspaceOpen={workspaceOpen}
+              onExpandWorkspace={() => setWorkspaceOverride(true)}
+              onCloseWorkspace={() => setWorkspaceOverride(false)}
+              workspaceControlsRef={workspaceControlsRef}
             >
-              <PanelRightOpen className='h-3.5 w-3.5' aria-hidden='true' />
-              Open app
-            </button>
-          )}
-          {showChatView ? (
-            <ChatWithCitationDocs>
-              <AIChatThread
-                ref={chatThreadRef}
-                key={chatKey}
-                sessionId={activeSessionId || undefined}
-                initialQuery={initialQuery}
-                initialAttachments={initialAttachments}
-                initialExtras={initialExtras}
-                onSetMobileSidebarOpen={setMobileSidebarOpen}
-                onConversationChange={handleConversationChange}
-                onAppChange={handleAppChange}
-                onToggleSidebar={handleToggleSidebar}
-                sidebarCollapsed={sidebarCollapsed}
-                onAgentChange={handleAgentChange}
-                onContextChange={handleContextChange}
-                onInitialQueryConsumed={handleInitialQueryConsumed}
-              />
-            </ChatWithCitationDocs>
-          ) : (
-            /* Landing page – centred greeting + composer */
-            <main className='flex h-full flex-1 items-center justify-center px-6 py-8'>
-              <div className='flex w-full max-w-2xl flex-col'>
-                <AIEmptyState />
-                <div className='mt-6'>
-                  <AIComposer
-                    ref={landingComposerRef}
-                    autoFocus
-                    onSubmit={handleComposerSubmit}
-                    onAgentChange={handleAgentChange}
-                    showAgentSelector={isV2}
-                    onContextChange={handleContextChange}
-                    hideDisclaimer
-                  />
+              {isDragging && !showChatView && (
+                <div className='pointer-events-none absolute inset-0 z-50 flex flex-col items-center justify-center rounded-xl border-2 border-dashed border-primary/50 bg-background/95 backdrop-blur-sm'>
+                  <div className='flex flex-col items-center gap-3'>
+                    <div className='rounded-full bg-primary/10 p-4'>
+                      <Upload className='h-8 w-8 text-primary' />
+                    </div>
+                    <div className='text-center'>
+                      <p className='text-lg font-medium text-foreground'>Drop files to attach</p>
+                      <p className='text-sm text-muted-foreground'>
+                        Images, PDF, text, office documents, or data files
+                      </p>
+                    </div>
+                  </div>
                 </div>
-              </div>
-            </main>
-          )}
-        </AIShell>
-      </AppCreationModeProvider>
+              )}
+              {showChatView ? (
+                <AIChatThread
+                  ref={chatThreadRef}
+                  key={chatKey}
+                  sessionId={activeSessionId || undefined}
+                  initialQuery={initialQuery}
+                  initialAttachments={initialAttachments}
+                  initialExtras={initialExtras}
+                  initialTrigger={initialTrigger}
+                  onSetMobileSidebarOpen={setMobileSidebarOpen}
+                  onConversationChange={handleConversationChange}
+                  onAppChange={handleAppChange}
+                  onToggleSidebar={handleToggleSidebar}
+                  sidebarCollapsed={sidebarCollapsed}
+                  onAgentChange={handleAgentChange}
+                  onContextChange={handleContextChange}
+                  onInitialQueryConsumed={handleInitialQueryConsumed}
+                />
+              ) : (
+                /* Landing page – centred greeting + composer */
+                <main className='flex h-full flex-1 items-center justify-center px-6 py-8'>
+                  <div className='flex w-full max-w-3xl flex-col'>
+                    <AIEmptyState />
+                    <div className='mt-6'>
+                      <AIComposer
+                        ref={landingComposerRef}
+                        autoFocus
+                        onSubmit={handleComposerSubmit}
+                        onAgentChange={handleAgentChange}
+                        showAgentSelector={isV2}
+                        onContextChange={handleContextChange}
+                        hideDisclaimer
+                      />
+                    </div>
+                  </div>
+                </main>
+              )}
+            </AIShell>
+          </AppCreationModeProvider>
+        </PageSelectionProvider>
+      </DesignStudioProvider>
     </CitationDocsProvider>
   );
 };

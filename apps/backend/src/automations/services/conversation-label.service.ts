@@ -31,6 +31,23 @@ interface ArchiveConversationMailboxInput {
 
 type LabelDatabaseClient = typeof db | Prisma.TransactionClient;
 
+/**
+ * Failures that mean "this thread is no longer labelable" rather than "the apply
+ * broke". Callers skip the row and keep going. Shared by the automation step and
+ * the backfill so a rule replayed over history behaves like the live rule did.
+ */
+export const SKIPPABLE_LABEL_ERROR_CODES = new Set([
+  'channel_not_found',
+  'label_not_found',
+  'label_id_mismatch',
+  'conversation_not_found',
+  'conversation_channel_mismatch',
+  'conversation_workspace_mismatch',
+  'ticket_not_found',
+  'ticket_channel_mismatch',
+  'ticket_workspace_mismatch',
+]);
+
 export async function archiveConversationMailbox(
   input: ArchiveConversationMailboxInput,
   client: LabelDatabaseClient = db,
@@ -92,7 +109,7 @@ export async function applyConversationLabel(
 
   const channel = await client.channel.findUnique({
     where: { id: channelId },
-    select: { id: true, projectId: true, workspaceId: true },
+    select: { id: true, workspaceId: true },
   });
   if (!channel) {
     throw Object.assign(new Error('Channel not found'), { code: 'channel_not_found' as const });
@@ -166,7 +183,8 @@ export async function applyConversationLabel(
       name: labelName,
       ...(input.color ? { color: input.color } : {}),
       channelId,
-      projectId: channel.projectId,
+      // projectId intentionally omitted — conversationLabel.projectId is nullable
+      // (channel.projectId is being decoupled); labels are scoped by channel.
       workspaceId: channel.workspaceId,
       createdBy: createdById,
       createdAt: now,

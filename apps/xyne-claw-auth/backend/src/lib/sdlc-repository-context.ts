@@ -26,7 +26,7 @@ export async function resolveSdlcRepositoryForUser(
   conversationId: string,
 ): Promise<SdlcRepositoryResolution> {
   if (researchContext?.type !== "repository" || typeof researchContext.id !== "string" || !researchContext.id.trim()) {
-    return { ok: false, status: 400, error: "Select an SDLC repository before messaging the SDLC Assistant" };
+    return { ok: true };
   }
 
   const auth = await getSpacesAuthForUser(userId, "agent-chat");
@@ -83,4 +83,43 @@ export async function resolveSdlcRepositoryForUser(
           : "Unable to resolve the SDLC repository",
     };
   }
+}
+
+export async function resolveSdlcHubContextForUser(
+  userId: string,
+  channelId: string | undefined,
+  conversationId: string | undefined,
+): Promise<Record<string, unknown> | undefined> {
+  if (!channelId || !conversationId) return undefined;
+  const auth = await getSpacesAuthForUser(userId, "agent-chat");
+  if (!auth) return undefined;
+  try {
+    const response = (await spacesFetch(
+      `/api/sdlc/channels/${encodeURIComponent(channelId)}/context?conversationId=${encodeURIComponent(conversationId)}`,
+      // Runs at the start of every channel run, which the 30 s default would stall.
+      { signal: AbortSignal.timeout(5_000) },
+      { ...auth, baseUrl: CONFIG.spacesInternalUrl },
+    )) as { context?: Record<string, unknown> | null };
+    return response.context ?? undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export async function loadSdlcHubKnowledge(channelId: string, userId: string): Promise<string | undefined> {
+  const s2sKey = process.env["INTERNAL_S2S_KEY"] ?? process.env["XYNE_CLAW_S2S_KEY"] ?? "";
+  if (!s2sKey) return undefined;
+  const response = (await spacesFetch(
+    "/api/internal/sdlc/agent/hub-knowledge",
+    // Runs at every SDLC run start, which the 30 s default would stall.
+    { method: "POST", body: JSON.stringify({ channelId, actorUserId: userId }), signal: AbortSignal.timeout(5_000) },
+    { s2sKey, baseUrl: CONFIG.spacesInternalUrl },
+  )) as { documents?: Array<{ title: string; markdown: string }> };
+  const documents = response.documents ?? [];
+  if (documents.length === 0) return undefined;
+  return [
+    "# Hub Knowledge",
+    "Standing context for this SDLC hub, generated from its repositories. It can lag the code, so check the code before relying on a detail.",
+    ...documents.map((document) => `## ${document.title}\n\n${document.markdown}`),
+  ].join("\n\n");
 }

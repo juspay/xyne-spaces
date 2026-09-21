@@ -170,6 +170,7 @@ dist
 
 # Gatsby files
 .cache/
+.venv/
 
 # Storybook build outputs
 .out
@@ -239,3 +240,6 @@ security-reports/
 /vespa-core/generated
 #vespa models
 /vespa-core/vespa/models/*
+
+# Build exports (make export-dashboard-bundle)
+out/

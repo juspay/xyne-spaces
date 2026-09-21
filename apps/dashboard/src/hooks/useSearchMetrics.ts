@@ -30,7 +30,7 @@ import {
 } from '../utils/searchFilterParser';
 import { sudoQueryService } from '../services/hyperAnalytics/sudoQueryService';
 import { affinityService } from '../services/affinityService';
-import { useCmdkDefaultRankProfiles } from './useCmdkSearchConfig';
+import { useCmdkDefaultRankProfiles, useCmdkFlatAllRankProfiles } from './useCmdkSearchConfig';
 import type { StructuredSearchFilters } from './useSearchResultsScreen';
 import { resolveDateKeyword } from '../search/filterModel';
 import { unwrapExactSearchQuery } from '../utils/exactSearch';
@@ -124,15 +124,21 @@ export const CMDK_USER_LIMIT = 25;
  * (`status:todo`, `board:…`) keeps working; an explicit pick from the results page's
  * Filters popover wins for that field.
  */
+type ResolvedTextFilters = ReturnType<typeof parseSearchFilters> & {
+  /** Chip-only — never parsed from the query. See parseSearchFilters. */
+  entity: string | undefined;
+};
+
 function resolveTextFilters(
   query: string,
   overrides: StructuredSearchFilters,
-): ReturnType<typeof parseSearchFilters> {
+): ResolvedTextFilters {
   const parsed = parseSearchFilters(query);
   return {
     ...parsed,
     board: overrides.board || parsed.board,
     tags: overrides.tags || parsed.tags,
+    entity: overrides.entity,
     status: overrides.status || parsed.status,
     before: overrides.before || parsed.before,
     after: overrides.after || parsed.after,
@@ -149,6 +155,12 @@ function resolveTextFilters(
 function boardFilterFromChips(mentions: SelectedMention[]): StructuredSearchFilters {
   const boards = mentions.filter(m => m.type === ChipType.BOARD).map(m => m.id);
   return boards.length > 0 ? { board: boards.join(',') } : {};
+}
+
+/** Entity chips carry the name the backend matches, so they travel as-is. */
+function entityFilterFromChips(mentions: SelectedMention[]): StructuredSearchFilters {
+  const entities = mentions.filter(m => m.type === ChipType.ENTITY).map(m => m.id);
+  return entities.length > 0 ? { entity: entities.join(',') } : {};
 }
 
 function dateFiltersFromChips(mentions: SelectedMention[]): StructuredSearchFilters {
@@ -176,6 +188,14 @@ function dateFiltersFromChips(mentions: SelectedMention[]): StructuredSearchFilt
 export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
   const context = useAuthContextValues();
   const defaultRankProfileFor = useCmdkDefaultRankProfiles();
+  // CAC-driven: which rank profiles render the ALL tab as one flat, score-ordered list.
+  const flatAllRankProfiles = useCmdkFlatAllRankProfiles();
+  // Stable identity for dep arrays / the duplicate-search guard: the CAC value arrives
+  // asynchronously, so a search that ran before it landed has to be re-dispatched.
+  const flatAllRankProfilesKey = useMemo(
+    () => [...flatAllRankProfiles].sort().join(','),
+    [flatAllRankProfiles],
+  );
 
   useEffect(() => {
     void affinityService.prefetch();
@@ -531,6 +551,9 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
       if (selectedMentions.some(m => m.type === ChipType.PRIORITY)) {
         sessionFiltersRef.current.add('priority');
       }
+      if (selectedMentions.some(m => m.type === ChipType.ENTITY)) {
+        sessionFiltersRef.current.add('entity');
+      }
       if (parsedFiltersForImpression.board) sessionFiltersRef.current.add('board');
       if (parsedFiltersForImpression.tags) sessionFiltersRef.current.add('tags');
       if (parsedFiltersForImpression.before) sessionFiltersRef.current.add('before');
@@ -806,6 +829,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
         searchText,
         board: boardFilter,
         tags: tagsFilter,
+        entity: entityFilter,
         before: beforeFilter,
         after: afterFilter,
         on: onFilter,
@@ -817,6 +841,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
         ...structuredFilters,
         ...dateFiltersFromChips(selectedMentions),
         ...boardFilterFromChips(selectedMentions),
+        ...entityFilterFromChips(selectedMentions),
       });
 
       // Priority is chip-only: value comes solely from the chip; raw `priority:` text
@@ -841,6 +866,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
         priorityFilter ||
         boardFilter ||
         tagsFilter ||
+        entityFilter ||
         beforeFilter ||
         afterFilter ||
         onFilter ||
@@ -947,6 +973,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
               ...(priorityFilter && { priority: priorityFilter }),
               ...(boardFilter && { board: boardFilter }),
               ...(tagsFilter && { tags: tagsFilter }),
+              ...(entityFilter && { entity: entityFilter }),
               ...(beforeFilter && { before: beforeFilter }),
               ...(afterFilter && { after: afterFilter }),
               ...(onFilter && { on: onFilter }),
@@ -1124,8 +1151,10 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
               const vespaResponse = await searchService.vespaSearch(
                 {
                   ...searchFilters,
-                  //unified rank profile filters
-                  ...(effectiveRankProfile === 'unified'
+                  // Flat (score-ordered) ALL tab for cross-schema-comparable rank profiles.
+                  // Mail is left out so page 1 matches the load-more continuation below,
+                  // which is pinned to chat/ticket/file (XYNE-54288).
+                  ...(flatAllRankProfiles.has(effectiveRankProfile)
                     ? {
                         groupBy: '',
                         apps: `${VespaApps.CHAT},${VespaApps.TICKET},${VespaApps.FILE}`,
@@ -1255,6 +1284,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
       exactMatch,
       rankProfile,
       allDefaultRankProfile,
+      flatAllRankProfiles,
       includeDebugInfo,
       structuredFilters,
     ],
@@ -1270,6 +1300,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
     exactMatch: boolean;
     rankProfile: string;
     allDefaultRankProfile: string;
+    flatAllRankProfilesKey: string;
     includeDebugInfo: boolean;
     structuredFiltersKey: string;
   }>({
@@ -1281,6 +1312,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
     exactMatch: false,
     rankProfile: '',
     allDefaultRankProfile,
+    flatAllRankProfilesKey: '',
     includeDebugInfo: false,
     structuredFiltersKey: '{}',
   });
@@ -1316,6 +1348,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
       currentMentionsKey === lastSearchedParamsRef.current.mentionsKey &&
       rankProfile === lastSearchedParamsRef.current.rankProfile &&
       allDefaultRankProfile === lastSearchedParamsRef.current.allDefaultRankProfile &&
+      flatAllRankProfilesKey === lastSearchedParamsRef.current.flatAllRankProfilesKey &&
       includeDebugInfo === lastSearchedParamsRef.current.includeDebugInfo &&
       structuredFiltersKey === lastSearchedParamsRef.current.structuredFiltersKey &&
       normalizedText !== ''
@@ -1338,6 +1371,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
         exactMatch,
         rankProfile,
         allDefaultRankProfile,
+        flatAllRankProfilesKey,
         includeDebugInfo,
         structuredFiltersKey,
         mentionsKey: currentMentionsKey,
@@ -1382,6 +1416,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
     exactMatch,
     rankProfile,
     allDefaultRankProfile,
+    flatAllRankProfilesKey,
     includeDebugInfo,
     structuredFiltersKey,
   ]);
@@ -1394,6 +1429,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
       searchText,
       board: boardFilter,
       tags: tagsFilter,
+      entity: entityFilter,
       before: beforeFilter,
       after: afterFilter,
       on: onFilter,
@@ -1405,6 +1441,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
       ...structuredFilters,
       ...dateFiltersFromChips(selectedMentions),
       ...boardFilterFromChips(selectedMentions),
+      ...entityFilterFromChips(selectedMentions),
     });
 
     // Mirror performSearch: priority is chip-only (value from the chip, not text).
@@ -1414,6 +1451,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
       priorityFilter ||
       boardFilter ||
       tagsFilter ||
+      entityFilter ||
       beforeFilter ||
       afterFilter ||
       onFilter ||
@@ -1463,6 +1501,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
           ...(priorityFilter && { priority: priorityFilter }),
           ...(boardFilter && { board: boardFilter }),
           ...(tagsFilter && { tags: tagsFilter }),
+          ...(entityFilter && { entity: entityFilter }),
           ...(beforeFilter && { before: beforeFilter }),
           ...(afterFilter && { after: afterFilter }),
           ...(onFilter && { on: onFilter }),

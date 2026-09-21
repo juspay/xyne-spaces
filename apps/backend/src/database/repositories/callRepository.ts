@@ -261,7 +261,7 @@ export class CallRepository {
   }
 
   /**
-   * HEADLESS recordings whose detailed summary has sat in 'pending' since
+   * All calls whose detailed summary has sat in 'pending' since
    * before `staleBefore` with no row activity. Summary generation runs
    * in-process in the API, so a backend restart mid-run leaves the row
    * 'pending' forever — this is the query the validation worker sweeps.
@@ -272,7 +272,6 @@ export class CallRepository {
   async findStalePendingSummaryCalls(take: number, staleBefore: Date): Promise<Call[]> {
     return DatabaseClient.getInstance().call.findMany({
       where: {
-        callType: CallType.HEADLESS,
         endedAt: { lt: staleBefore },
         updatedAt: { lt: staleBefore },
         metadata: { path: ['detailedSummaryStatus'], equals: 'pending' },
@@ -1003,6 +1002,53 @@ export class CallRepository {
   }
 
   /**
+   * Mark a call's ACCEPTED participants as LEFT. Returns the number of rows updated.
+   */
+  async markStrandedParticipantsAsLeft(callId: string, leftAt: Date): Promise<number> {
+    const { count } = await DatabaseClient.getInstance().callParticipant.updateMany({
+      where: {
+        callId,
+        response: InvitationResponse.ACCEPTED,
+      },
+      data: {
+        response: InvitationResponse.LEFT,
+        leftAt,
+      },
+    });
+
+    if (count > 0) {
+      queueCallVespaFeed(callId, { source: CallVespaFeedSource.CallRepositoryMarkParticipantAsLeft });
+    }
+
+    return count;
+  }
+
+  /**
+   * Find calls that are no longer live but still have ACCEPTED participants.
+   */
+  async findCallsWithStrandedParticipants(
+    take: number,
+  ): Promise<Array<{ id: string; endedAt: Date | null }>> {
+    const stranded = await DatabaseClient.getInstance().callParticipant.findMany({
+      where: {
+        response: InvitationResponse.ACCEPTED,
+        call: { status: { notIn: [CallStatus.ACTIVE, CallStatus.IN_PROGRESS] } },
+      },
+      select: { callId: true },
+      distinct: ['callId'],
+      take,
+    });
+
+    if (stranded.length === 0) return [];
+
+    return await DatabaseClient.getInstance().call.findMany({
+      where: { id: { in: stranded.map((p) => p.callId) } },
+      select: { id: true, endedAt: true },
+      orderBy: { endedAt: 'asc' },
+    });
+  }
+
+  /**
    * Update participant response and joinedAt timestamp
    * Requires a transaction client for atomic operations
    */
@@ -1270,15 +1316,17 @@ export class CallRepository {
         await this.syncArtifactLifecycle(tx, call, MessageArtifactStatus.COMPLETED, endedAt);
       }
 
-      // Clear conversation.callId when call ends (for conversation calls)
+      // Clear conversation.callId when call ends (for conversation calls). Only if it
+      // still points at this room: room_finished for a stale room can land after a
+      // newer call has already started in the same conversation.
       const callMetadata = call.metadata as CallMetadata | null;
       if (callMetadata?.conversationId) {
         try {
-          await tx.conversation.update({
-            where: { conversationId: callMetadata.conversationId },
+          const { count } = await tx.conversation.updateMany({
+            where: { conversationId: callMetadata.conversationId, callId: callExternalId },
             data: { callId: null },
           });
-          logger.info(`[handleRoomFinished] Cleared conversation.callId for conversation ${callMetadata.conversationId}`);
+          if (count > 0) logger.info(`[handleRoomFinished] Cleared conversation.callId for conversation ${callMetadata.conversationId}`);
         } catch (err) {
           logger.error(`[handleRoomFinished] Failed to clear conversation.callId for conversation ${callMetadata.conversationId}`, err);
         }

@@ -56,10 +56,33 @@ type PrismaTransaction = Omit<
   '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'
 >;
 
+async function upsertTicketDescription(
+  db: PrismaTransaction | typeof prisma,
+  ticketId: string,
+  workspaceId: string,
+  channelId: string,
+  description: string,
+  createdAt: Date,
+): Promise<void> {
+  await db.ticketDescription.upsert({
+    where: { ticketId },
+    update: { description, updatedAt: createdAt },
+    create: {
+      ticketId,
+      workspaceId,
+      channelId,
+      description,
+      createdAt,
+      updatedAt: createdAt,
+    },
+  });
+}
+
 const makeFallbackCountsSnapshot = (ticket: {
   id: string;
   workspaceId: string;
   boardId: string | null;
+  channelId: string | null;
   projectId: string | null;
   stageName: string;
   statusV2: TicketStatusV2;
@@ -68,6 +91,7 @@ const makeFallbackCountsSnapshot = (ticket: {
   createdBy: string;
   userGroupId: string | null;
   ticketType: string | null;
+  merchantId?: string | null;
   isStageOverdue?: boolean | null;
   eta: Date | null;
   createdAt: Date;
@@ -75,6 +99,7 @@ const makeFallbackCountsSnapshot = (ticket: {
   id: ticket.id,
   workspaceId: ticket.workspaceId,
   boardId: ticket.boardId,
+  channelId: ticket.channelId,
   projectId: ticket.projectId,
   stageName: ticket.stageName,
   statusV2: ticket.statusV2,
@@ -83,6 +108,7 @@ const makeFallbackCountsSnapshot = (ticket: {
   createdBy: ticket.createdBy,
   userGroupId: ticket.userGroupId,
   ticketType: ticket.ticketType,
+  merchantId: ticket.merchantId ?? null,
   isStageOverdue: ticket.isStageOverdue ?? false,
   eta: ticket.eta?.getTime() ?? null,
   createdAt: ticket.createdAt.getTime(),
@@ -309,6 +335,8 @@ export class TicketRepository {
       : await prisma.$transaction((innerTx) => runCreate(innerTx));
     const ticket = createResult.finalTicket;
 
+    await upsertTicketDescription(db, ticket.id, ticket.workspaceId, ticket.channelId, data.description, new Date());
+
     // Post-commit notification dispatch - best-effort, must never affect the already-
     // committed response. suppressed if the ticket was created already paused.
     if (ticket.statusV2 !== TicketStatusV2.PAUSED) {
@@ -342,6 +370,10 @@ export class TicketRepository {
       operation: 'insert',
       ticket: createdSnapshot,
     });
+    if (createdSnapshot.channelId) {
+      // Desk label unread badges: a new ticket can enter filtered label views.
+      websocketService.broadcastLabelUnreadCountsUpdate(createdSnapshot.channelId);
+    }
 
 
     void (async (): Promise<void> => {
@@ -411,6 +443,7 @@ export class TicketRepository {
         createdBy: true,
         userGroupId: true,
         ticketType: true,
+        merchantId: true,
         eta: true,
         createdAt: true,
         metadata: true,
@@ -891,6 +924,9 @@ export class TicketRepository {
         assignedTo: currentTicket.assignedTo,
       },
     });
+    if (updatedSnapshot.channelId) {
+      websocketService.broadcastLabelUnreadCountsUpdate(updatedSnapshot.channelId);
+    }
 
     // Thread system message for the status change (activity rows for PR/STAGE_NAME/STATUS/ETA
     // were already written inside the transaction above). Messages are posted post-commit,
@@ -1140,6 +1176,10 @@ export class TicketRepository {
         assignedTo: previousAssigneeId,
       },
     });
+    if (assigneeSnapshot.channelId) {
+      // Desk payloads filter on assignedTo, so label badges invalidate on reassign.
+      websocketService.broadcastLabelUnreadCountsUpdate(assigneeSnapshot.channelId);
+    }
   }
 
   async assignUserGroupToTicket(ticketId: string, groupId: string, updatedBy: string): Promise<void> {
@@ -1170,6 +1210,49 @@ export class TicketRepository {
       });
     }
   } 
+
+  // Claims the release-insights in-flight flag. Read + write run in one SERIALIZABLE
+  // transaction (same pattern as the sharing services): a concurrent claimer's commit
+  // fails ours with P2034, and the retry re-reads the flag it just set. No raw SQL — the
+  // tenant extensions must see this write. Returns false when another generation holds
+  // the flag and it isn't older than `staleBefore`.
+  async claimReleaseInsightsGeneration(ticketId: string, staleBefore: Date): Promise<boolean> {
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      try {
+        return await prisma.$transaction(
+          async (tx) => {
+            const ticket = await tx.ticket.findUnique({
+              where: { id: ticketId },
+              select: { metadata: true },
+            });
+            if (!ticket) return false;
+            const current = (ticket.metadata as Record<string, unknown> | null) ?? {};
+            if (current.isGeneratingReleaseInsights === true) {
+              const startedAt = current.insightsGenerationStartedAt;
+              const started = typeof startedAt === 'string' ? Date.parse(startedAt) : NaN;
+              if (Number.isFinite(started) && started >= staleBefore.getTime()) return false;
+            }
+            await tx.ticket.update({
+              where: { id: ticketId },
+              data: {
+                metadata: {
+                  ...current,
+                  isGeneratingReleaseInsights: true,
+                  insightsGenerationStartedAt: new Date().toISOString(),
+                } as Prisma.InputJsonObject,
+              },
+            });
+            return true;
+          },
+          { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
+        );
+      } catch (error) {
+        const isWriteConflict = (error as { code?: string } | null)?.code === 'P2034';
+        if (!isWriteConflict || attempt === 3) throw error;
+      }
+    }
+    return false;
+  }
 
   async updateTicketMetadata(ticketId: string, metadata: Record<string, any>): Promise<void> {
     const ticket = await prisma.ticket.findUnique({
@@ -1209,6 +1292,7 @@ export class TicketRepository {
       closedAt?: Date | null;
       closedBy?: string | null;
       aiPriority?: string;
+      merchantId?: string | null;
     },
     updatedBy: string,
     options: { cascadeFlow?: boolean } = {},
@@ -1224,6 +1308,7 @@ export class TicketRepository {
     if (fields.closedAt !== undefined) data.closedAt = fields.closedAt;
     if (fields.closedBy !== undefined) data.closedBy = fields.closedBy;
     if (fields.aiPriority !== undefined) data.aiPriority = fields.aiPriority;
+    if (fields.merchantId !== undefined) data.merchantId = fields.merchantId;
 
     if (Object.keys(data).length <= 2) {
       return;
@@ -1274,7 +1359,26 @@ export class TicketRepository {
     }
     const previousStatus: TicketStatusV2 | null = prevSnapshot?.statusV2 ?? null;
 
+    // Same as createTicket: make sure the merchant row exists before linking to it.
+    if (fields.merchantId) {
+      await prisma.merchant.upsert({
+        where: { mid: fields.merchantId },
+        update: {},
+        create: { mid: fields.merchantId },
+      });
+    }
+
     const updatedTicket = await prisma.ticket.update({ where: { id: ticketId }, data });
+    if (fields.description !== undefined) {
+      await upsertTicketDescription(
+        prisma,
+        updatedTicket.id,
+        updatedTicket.workspaceId,
+        updatedTicket.channelId,
+        fields.description,
+        updatedTicket.updatedAt,
+      );
+    }
 
     if (
       fields.statusV2 !== undefined
@@ -1435,6 +1539,9 @@ export class TicketRepository {
           priority: prevSnapshot.priority,
         },
       });
+      if (metadataSnapshot.channelId) {
+        websocketService.broadcastLabelUnreadCountsUpdate(metadataSnapshot.channelId);
+      }
     }
   }
 

@@ -6,6 +6,7 @@ import type { TicketCustomFormData } from '@/database/repositories/formsReposito
 export enum ChatEventType {
     MESSAGE_POSTED = 'MESSAGE_POSTED',
     MESSAGE_UPDATED = 'MESSAGE_UPDATED',
+    MESSAGE_DELETED = 'MESSAGE_DELETED',
 }
 
 /**
@@ -294,7 +295,9 @@ export interface ChannelsResponse {
     type: string;
     scopeType: string;
     visibility: string;
-    projectId: string;
+    // Nullable: a channel may have no project (channel.projectId is being decoupled).
+    // Passthrough — present → same value, else null.
+    projectId: string | null;
     createdBy: string;
     createdAt: Date;
     participantCount: number;
@@ -309,7 +312,9 @@ export interface ChannelListItem {
     description?: string;
     scopeType: string;
     visibility?: string;
-    projectId: string;
+    // Nullable: a channel may have no project (channel.projectId is being decoupled).
+    // Passthrough — present → same value, else null.
+    projectId: string | null;
     createdBy: string;
     createdAt: Date;
 }
@@ -386,6 +391,7 @@ export interface MerchantTicketListItem {
   channelId: string;
   boardId?: string | null;
   projectId?: string;
+  merchantId?: string | null;
   senderEmail?: string;
   senderName?: string;
   customFormData?: TicketCustomFormData | null;
@@ -407,6 +413,7 @@ export interface UserResponse {
     statusEmoji: string | null;
     statusContent: string | null;
     statusExpiryAt: Date | null;
+    activityStatus: string | null;
 }
 
 /**

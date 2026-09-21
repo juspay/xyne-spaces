@@ -203,6 +203,13 @@ export class CallService {
   }
 
   /**
+   * Rewrite the call's detailed summary with the chosen summary template.
+   */
+  async regenerateSummary(callId: string, summaryTemplateId: string): Promise<void> {
+    await apiInstance.post(`/calls/${callId}/generate-summary`, { summaryTemplateId });
+  }
+
+  /**
    * Share a call with people, groups or channels, optionally with a note. Each
    * target also gets a card posted into the channel (or a DM, for a user target).
    */
@@ -420,6 +427,21 @@ export class CallService {
       // Swallow: late-joiner sync is best-effort.
     }
   }
+  /**
+   * Get or lazily create the call's collaborative notes canvas.
+   * Every occurrence of a recurring series resolves to the same canvas.
+   */
+  async getOrCreateNotesCanvas(
+    callId: string,
+  ): Promise<{ canvasId: string; isSeriesCanvas: boolean }> {
+    const response = await apiInstance.post<{
+      success: boolean;
+      canvasId: string;
+      isSeriesCanvas: boolean;
+    }>(`/calls/${callId}/notes-canvas`);
+    return { canvasId: response.data.canvasId, isSeriesCanvas: response.data.isSeriesCanvas };
+  }
+
   /**
    * Mute all participants (host only)
    * Mutes the audio tracks of all participants except the host

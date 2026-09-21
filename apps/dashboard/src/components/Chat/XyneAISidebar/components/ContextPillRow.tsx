@@ -10,6 +10,7 @@ import {
   type ReactNode,
 } from 'react';
 import {
+  Automation,
   ChevronBigDown,
   ChevronBigUp,
   FileText,
@@ -27,7 +28,12 @@ import { motion } from 'framer-motion';
 import Avatar from '../../../ui/Avatar/Avatar';
 import useMeasure from '../../../../hooks/useMeasure';
 import { ContextPicker } from './ContextPicker';
-import type { ThreadInfo, CanvasInfo, SelectionInfo } from '../../../../machines/xyneAIMachine';
+import type {
+  ThreadInfo,
+  CanvasInfo,
+  SelectionInfo,
+  WorkflowInfo,
+} from '../../../../machines/xyneAIMachine';
 import type { UserActivity } from '../../../../hooks/useUserActivity';
 import type { Attachment, BrowserContext } from './XyneAIInputBox';
 import type {
@@ -148,6 +154,8 @@ export interface ContextPillRowProps {
   onCloseContextPicker?: () => void;
   /** Toggle a channel into/out of the attached context. */
   onPickerToggleChannel?: ComponentProps<typeof ContextPicker>['onToggleChannel'];
+  /** Attach several stream channels at once ("Attach all N"). */
+  onPickerAttachChannels?: ComponentProps<typeof ContextPicker>['onAttachChannels'];
   /** Toggle a backend result into/out of the attached context. */
   onPickerToggleResult?: ComponentProps<typeof ContextPicker>['onToggleResult'];
 
@@ -158,6 +166,9 @@ export interface ContextPillRowProps {
   canvasInfo: CanvasInfo | null;
   onCanvasInfoClick: () => void;
   onRemoveCanvasInfo: (e: React.MouseEvent) => void;
+
+  workflowInfo: WorkflowInfo | null;
+  onRemoveWorkflowInfo: (e: React.MouseEvent) => void;
 
   selectionInfos: SelectionInfo[];
   onSelectionClick: (selection: SelectionInfo) => void;
@@ -231,6 +242,7 @@ export const ContextPillRow = ({
   showContextPicker = false,
   onCloseContextPicker,
   onPickerToggleChannel,
+  onPickerAttachChannels,
   onPickerToggleResult,
   threadInfo,
   onThreadClick,
@@ -238,6 +250,8 @@ export const ContextPillRow = ({
   canvasInfo,
   onCanvasInfoClick,
   onRemoveCanvasInfo,
+  workflowInfo,
+  onRemoveWorkflowInfo,
   selectionInfos,
   onSelectionClick,
   onRemoveSelection,
@@ -377,6 +391,36 @@ export const ContextPillRow = ({
             data-track-category='XyneAI'
             data-track-name='RemoveCanvasContext'
             data-track-metadata={JSON.stringify({ canvasId: canvasInfo.canvasId })}
+          >
+            <MultipleCrossCancelDefault className='w-3 h-3' />
+          </button>
+        </div>
+      ),
+    });
+  }
+
+  if (workflowInfo) {
+    pills.push({
+      key: 'workflow-info',
+      node: (
+        <div className={CONTEXT_PILL_CLASS}>
+          {/* Static, not a trigger: the workflow is already the screen behind the panel,
+              so there is nowhere to navigate to. */}
+          <div className={CONTEXT_PILL_TRIGGER_CLASS}>
+            <Automation className={CONTEXT_PILL_ICON_CLASS} />
+            <span className={`${CONTEXT_PILL_LABEL_CLASS} max-w-[200px] truncate`}>
+              {workflowInfo.title || 'This workflow'}
+              {workflowInfo.executionId ? ' · run' : ''}
+            </span>
+          </div>
+          <button
+            type='button'
+            onClick={onRemoveWorkflowInfo}
+            className={CONTEXT_PILL_REMOVE_CLASS}
+            aria-label='Remove workflow context'
+            data-track-category='XyneAI'
+            data-track-name='RemoveWorkflowContext'
+            data-track-metadata={JSON.stringify({ workflowId: workflowInfo.workflowId })}
           >
             <MultipleCrossCancelDefault className='w-3 h-3' />
           </button>
@@ -950,6 +994,7 @@ export const ContextPillRow = ({
                 recordings: new Set(rowRecordings.map(r => r.id)),
               }}
               {...(onPickerToggleChannel && { onToggleChannel: onPickerToggleChannel })}
+              {...(onPickerAttachChannels && { onAttachChannels: onPickerAttachChannels })}
               {...(onPickerToggleResult && { onToggleResult: onPickerToggleResult })}
               {...(onCloseContextPicker && { onClose: onCloseContextPicker })}
             />

@@ -33,6 +33,10 @@ import {
   type CustomFieldWritePayload,
 } from '../services/ticketCustomFieldService';
 import { buildCreationFormFieldChanges } from '../services/ticketCustomFieldService';
+import {
+  resolveFormFieldDefinitionsForForm,
+  type ResolvedFormFieldDefinition,
+} from '@/utils/fieldDefinition';
 import type { FormFieldChanges } from '@/automations/triggers/ticket-updated.trigger';
 import type { BoardMetadata } from '@xyne/shared';
 import { syncConversationTicketMdFromPrismaTicket } from '../utils/ticketMd';
@@ -43,6 +47,7 @@ import { config } from '../config/env';
 import { superpositionClient } from '@/services/superpositionClient';
 import { randomUUID } from 'crypto';
 import { linkCreatedEntities, resolveInheritedOwner } from '@/sdlc/entityLinkService';
+import { activityService } from '@/services/activity/activityService';
 import { entityLinkOwnerSchema, type EntityLinkOwner } from '@xyne/shared';
 import { vespaQueue } from '@/queues/vespaQueue';
 import { messageClassificationQueue } from '@/queues/messageClassificationQueue';
@@ -687,25 +692,6 @@ export class TicketController {
         }
       }
 
-      // Unlimited nesting is reserved for FLOW run graphs. Normal boards keep
-      // the existing one-level sub-ticket contract.
-      if (parentTicketId) {
-        const parent = await prisma.ticket.findUnique({
-          where: { id: parentTicketId },
-          select: { board: { select: { boardType: true } } },
-        });
-        if (parent?.board.boardType !== BoardType.FLOW) {
-          const parentAsSubTicket = await prisma.subTicket.findFirst({
-            where: { mappedTicketId: parentTicketId },
-            select: { id: true },
-          });
-          if (parentAsSubTicket) {
-            res.status(400).json({ error: 'Cannot create a sub-ticket under a sub-ticket.' });
-            return;
-          }
-        }
-      }
-
       // Determine the actual channel to check its type
       let actualChannelId = channelId;
       if (!actualChannelId && sourceConversationId) {
@@ -873,16 +859,14 @@ export class TicketController {
       }
 
       let formMapping: Awaited<ReturnType<typeof prisma.formContextMapping.findFirst>> | null = null;
-      let formFields: Awaited<ReturnType<typeof prisma.formFields.findMany>> = [];
+      let formFields: ResolvedFormFieldDefinition[] = [];
       if (Object.keys(dynamicFields as Record<string, string>).length > 0) {
         try {
           formMapping = await prisma.formContextMapping.findFirst({
             where: { contextId: boardId, contextType: FormContextType.BOARD, entityType: FormEntityType.TICKET },
           });
           if (formMapping) {
-            formFields = await prisma.formFields.findMany({
-              where: { formId: formMapping.formId },
-            });
+            formFields = await resolveFormFieldDefinitionsForForm(prisma, formMapping.formId);
           }
         } catch (err) {
           logger.error('[Ticket Creation] Error resolving form mapping/fields:', err);
@@ -1301,6 +1285,10 @@ export class TicketController {
       // Post-commit + fire-and-forget so it can't delay or fail ticket creation.
       if (ticket.stageName) {
         void maybeCreateEntryApprovalRequest(ticket.id, ticket.createdBy, ticket.stageName);
+      }
+
+      if (sourceConversationId) {
+        void activityService.fillSdlcOwner(sourceConversationId, validatedConversation.channelId);
       }
 
       const ticketChannelId = sourceConversationId ? validatedConversation.channelId : channelId;

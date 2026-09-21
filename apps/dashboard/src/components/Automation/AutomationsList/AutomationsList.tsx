@@ -56,7 +56,6 @@ import { workflowToAutomation } from '../automation.adapter';
 import type { AutomationsListProps } from './AutomationsList.types';
 import {
   automationTriggerIconName,
-  DEFAULT_AUTOMATION_SORT,
   formatRelative,
   sortAutomations,
   statusPillClasses,
@@ -67,10 +66,12 @@ import {
 } from './AutomationsList.utils';
 import { AutomationFiltersBar } from './AutomationFiltersBar/AutomationFiltersBar';
 import {
-  DEFAULT_AUTOMATION_FILTERS,
+  automationViewKey,
   filterAutomations,
   hasActiveFilters,
   isVisibleToUser,
+  loadAutomationView,
+  saveAutomationView,
   type AutomationFilters,
 } from './AutomationFiltersBar/filters';
 
@@ -82,22 +83,25 @@ export function AutomationsList({
   onClone,
   onEditFork,
 }: AutomationsListProps): React.ReactElement {
-  const [query, setQuery] = useState('');
+  const { workspaceId } = useAuthContextValues();
+  // Desk settings shares the workspace's saved view and only pins the channel on top of it.
+  const deskChannelIds = initialChannelIds?.length ? initialChannelIds : null;
+  const isDesk = deskChannelIds !== null;
+  const storeKey = automationViewKey(workspaceId);
+  const [saved] = useState(() => loadAutomationView(storeKey));
+  const [query, setQuery] = useState(saved.query);
   const [filters, setFilters] = useState<AutomationFilters>(() =>
-    initialChannelIds?.length
-      ? { ...DEFAULT_AUTOMATION_FILTERS, channelIds: initialChannelIds }
-      : DEFAULT_AUTOMATION_FILTERS,
+    deskChannelIds ? { ...saved.filters, channelIds: deskChannelIds } : saved.filters,
   );
-  const [sort, setSort] = useState<AutomationSort>(DEFAULT_AUTOMATION_SORT);
+  const [sort, setSort] = useState<AutomationSort>(saved.sort);
   const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(100);
+  const [pageSize, setPageSize] = useState(saved.pageSize);
   const [pendingDelete, setPendingDelete] = useState<Automation | null>(null);
   const [pendingDisable, setPendingDisable] = useState<Automation | null>(null);
   const me = useSelf();
   const zero = useZero();
   const navigate = useNavigate();
   const isAutomationsAdmin = useIsAutomationsAdmin();
-  const { workspaceId } = useAuthContextValues();
 
   const triggerCatalogQuery = useQuery({
     queryKey: ['automations', 'schema', 'triggers'],
@@ -202,6 +206,11 @@ export function AutomationsList({
   );
 
   useEffect(() => setPage(1), [query, filters, sort]);
+  useEffect(() => {
+    // The desk's pinned channel is not the user's channel filter — leave that one as stored.
+    const channelIds = isDesk ? saved.filters.channelIds : filters.channelIds;
+    saveAutomationView(storeKey, { query, filters: { ...filters, channelIds }, sort, pageSize });
+  }, [storeKey, isDesk, saved, query, filters, sort, pageSize]);
   const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
   const pageItems = useMemo(
     () => filtered.slice((page - 1) * pageSize, page * pageSize),
@@ -251,7 +260,9 @@ export function AutomationsList({
             <AutomationFiltersBar
               query={query}
               filters={filters}
-              onChange={setFilters}
+              onChange={next =>
+                setFilters(deskChannelIds ? { ...next, channelIds: deskChannelIds } : next)
+              }
               onClearQuery={() => setQuery('')}
               items={visibleItems}
             />
@@ -700,7 +711,7 @@ function AutomationRow({
               e.stopPropagation();
               onOpen();
             }}
-            aria-label={`${automation.name}, ${automation.status.toLowerCase()}. ${summary}. Press Enter to edit.`}
+            aria-label={`${automation.name}, ${automation.status.toLowerCase()}.${automation.priority ? ' Priority.' : ''} ${summary}. Press Enter to edit.`}
             data-track-category='automations-list'
             data-track-name='row-title-open'
             className={cn(
@@ -723,6 +734,13 @@ function AutomationRow({
               >
                 {automation.status}
               </span>
+              {/* Violet on purpose — no status badge uses it, so priority stands out
+                  as its own thing rather than looking like another status. */}
+              {automation.priority && (
+                <span className='rounded-md border border-violet-500/30 bg-violet-500/10 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-violet-700 dark:border-violet-500/40 dark:text-violet-400'>
+                  Priority
+                </span>
+              )}
             </div>
             <p className='line-clamp-2 text-xs text-muted-foreground' title={summary}>
               {summary}

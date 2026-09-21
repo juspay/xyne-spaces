@@ -21,6 +21,7 @@ import { errMsg } from "./errors.js";
 import { decrypt, encrypt } from "../crypto.js";
 import { CONFIG } from "../config.js";
 import { GATEWAY_KEY_PREFIX, parseGatewayCatalogSource } from "../mcpgateway/key-format.js";
+import { AMBIENT_USER_CREDENTIAL_SERVER_TYPES } from "./credentials-loader.js";
 
 const DEFAULT_GATEWAY_TENANT = process.env.ALLOWED_TENANTS
   ?.split(",")
@@ -142,13 +143,8 @@ export async function executeWriteAction(action: SignedWriteAction): Promise<Wri
       return { ok: false, content: "", error: `No adapter for server type: ${serverType}` };
     }
 
-    // For xyne-spaces: resolve credentials from the Spaces DB directly, same as
-    // the MCP runner does in getOrCreateSession(). The userMcpConnection table
-    // may not have a row (user hasn't gone through dashboard connection flow),
-    // but their Spaces session still exists in workflow.user_sessions. Without
-    // this, all write-action approvals fail with "No xyne-spaces connection".
     let credentials: Record<string, unknown>;
-    if (serverType === "xyne-spaces") {
+    if (AMBIENT_USER_CREDENTIAL_SERVER_TYPES.has(serverType)) {
       const { getSpacesAuthForUser } = await import("../lib/spaces-db.js");
       const live = await getSpacesAuthForUser(userId, "write-action");
       if (live) {
@@ -160,7 +156,7 @@ export async function executeWriteAction(action: SignedWriteAction): Promise<Wri
           userId,
         };
       } else {
-        return { ok: false, content: "", error: `No xyne-spaces connection for this user.` };
+        return { ok: false, content: "", error: `No ${serverType} connection for this user.` };
       }
     } else {
       const connection = await prisma.userMcpConnection.findFirst({

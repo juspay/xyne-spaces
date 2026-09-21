@@ -76,7 +76,7 @@ tags: quarantine
 * clicking apply link button
 * verifying link is created with correct url
 * verifying link url contains "https://example.com"
-* clicking on link in editor
+* selecting all text in editor
 * clicking link toolbar button
 * typing "updated.com" in link url input
 * clicking update link button

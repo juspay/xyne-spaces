@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useSelector } from '@xstate/react';
 import { cn } from '../../../utils/classNames';
 import { ParticipantTile } from '../ParticipantTile/ParticipantTile';
+import { FloatingSelfView } from './FloatingSelfView';
 import { useGridLayout } from './useGridLayout';
 import { usePagination } from './usePagination';
 import { sortParticipants } from './sortParticipants';
@@ -9,7 +10,7 @@ import { PaginationIndicator } from './PaginationIndicator';
 import { PaginationControls } from './PaginationControls';
 import type { ParticipantInfo } from '../../../machines/roomMachine';
 import { roomActor } from '../../../machines/roomMachine';
-import { isTranscriptionAgentIdentity } from '../../../utils/livekitAgent';
+import { filterAgentTiles } from '../../../utils/livekitAgent';
 import { SpotlightView } from '../SpotlightView';
 
 interface ParticipantGridProps {
@@ -32,7 +33,7 @@ export function ParticipantGrid({
   onToggleHandRaise,
 }: ParticipantGridProps): React.ReactElement {
   // Derive AI enablement from aiController presence — same pattern as Lotus ParticipantsGrid
-  const isAIAssistantEnabled = aiController !== null;
+  const isAIAssistantEnabled = !!aiController;
   // Max 4 tiles (2x2) for compact view, 16 tiles (4x4) for full view
   const maxTiles = compact ? 4 : 16;
   // Grid gap in px, matched to the container's Tailwind gap classes below
@@ -40,33 +41,42 @@ export function ParticipantGrid({
   // solver's target since it only needs to be a close approximation).
   const gridGap = compact ? 6 : 12;
 
-  // Host kill-switch: when transcription is off the agent stays in the room but
-  // its tile is hidden (mirrors the participants-sidebar filter) so the call looks
-  // agent-free while capture is paused.
+  // The agent tile is hidden until someone invokes it via the AI button, and always
+  // while the host kill-switch has transcription off.
   const isTranscriptionEnabled = useSelector(
     roomActor,
     state => state.context.isTranscriptionEnabled,
   );
   const visibleParticipants = useMemo(
+    () => filterAgentTiles(participants, isTranscriptionEnabled && isAIAssistantEnabled),
+    [participants, isTranscriptionEnabled, isAIAssistantEnabled],
+  );
+
+  // One-on-one call (full view): like Meet, the other person fills the stage and
+  // your own camera floats as a small picture-in-picture in the corner, instead
+  // of splitting the screen into two equal halves.
+  const floatingSelf = useMemo(() => {
+    if (compact || visibleParticipants.length !== 2) return null;
+    return visibleParticipants.find(p => p.isLocal) ?? null;
+  }, [compact, visibleParticipants]);
+  const gridParticipants = useMemo(
     () =>
-      isTranscriptionEnabled
-        ? participants
-        : participants.filter(p => !isTranscriptionAgentIdentity(p.identity)),
-    [participants, isTranscriptionEnabled],
+      floatingSelf ? visibleParticipants.filter(p => p !== floatingSelf) : visibleParticipants,
+    [floatingSelf, visibleParticipants],
   );
 
   // Compute layout first using raw participant count — layout.maxTiles is the true
   // per-page capacity determined by container size, not just the cap.
-  const { containerRef, layout } = useGridLayout(visibleParticipants.length, maxTiles, gridGap);
+  const { containerRef, layout } = useGridLayout(gridParticipants.length, maxTiles, gridGap);
 
   // Pagination is active when participants spill onto a second page.
   // This is the canonical signal that sorting matters (so users can find
   // the most-engaged participants on page 0).
-  const isPaginating = visibleParticipants.length > layout.maxTiles;
+  const isPaginating = gridParticipants.length > layout.maxTiles;
   const displayParticipants = useMemo(() => {
-    if (!isPaginating) return visibleParticipants;
-    return sortParticipants(visibleParticipants, isAIAssistantEnabled);
-  }, [visibleParticipants, isPaginating, isAIAssistantEnabled]);
+    if (!isPaginating) return gridParticipants;
+    return sortParticipants(gridParticipants, isAIAssistantEnabled);
+  }, [gridParticipants, isPaginating, isAIAssistantEnabled]);
 
   const pagination = usePagination(layout.maxTiles, displayParticipants);
 
@@ -131,7 +141,7 @@ export function ParticipantGrid({
             <ParticipantTile
               key={participant.identity}
               participant={participant}
-              avatarSize={compact ? 'medium' : 'large'}
+              avatarSize={compact ? 'small' : 'large'}
               compact={compact}
               aiController={aiController ?? null}
               requestedAiController={requestedAiController ?? false}
@@ -141,6 +151,19 @@ export function ParticipantGrid({
             />
           ))}
         </div>
+      )}
+
+      {floatingSelf && !spotlightParticipant && (
+        <FloatingSelfView
+          key={floatingSelf.identity}
+          participant={floatingSelf}
+          containerRef={containerRef}
+          aiController={aiController ?? null}
+          requestedAiController={requestedAiController ?? false}
+          isHandRaised={raisedHands.includes(floatingSelf.identity)}
+          onToggleHandRaise={onToggleHandRaise}
+          onPin={() => setSpotlightIdentity(floatingSelf.identity)}
+        />
       )}
 
       {/* Pagination Controls */}

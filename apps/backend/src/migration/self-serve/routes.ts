@@ -1,4 +1,5 @@
 import { NextFunction, Request, Response, Router } from 'express';
+import { logger } from '@/utils/logger';
 import { slackMigrationLimiter } from '@/middleware/rateLimiters';
 import { Actor, HttpError, SlackMigrationService } from './service';
 import { QueueName } from './types';
@@ -63,15 +64,18 @@ export function buildRouter(service: SlackMigrationService): Router {
     res.json(ok(await service.ingestionStatus(actorOf(req).userId)));
   }));
   router.post('/ingestion/start', wrap(async (req, res) => {
-    res.json(ok(await service.startIngestion(actorOf(req).userId)));
+    res.json(ok(await service.startIngestion(actorOf(req))));
   }));
   router.post('/ingestion/stop', wrap(async (req, res) => {
-    res.json(ok(await service.stopIngestion(actorOf(req).userId)));
+    res.json(ok(await service.stopIngestion(actorOf(req))));
   }));
 
   router.post('/migration-jobs/:id/approve', admin, wrap(async (req, res) => { res.json(ok(await service.approve(req.params.id, actorOf(req)))); }));
+  router.post('/migration-jobs/:id/refresh', admin, wrap(async (req, res) => { res.json(ok(await service.refresh(req.params.id, actorOf(req)))); }));
   router.post('/migration-jobs/:id/stop', admin, wrap(async (req, res) => { res.json(ok(await service.stop(req.params.id, actorOf(req)))); }));
   router.post('/migration-jobs/:id/resume', admin, wrap(async (req, res) => { res.json(ok(await service.resume(req.params.id, actorOf(req)))); }));
+  // Recover a wiped/finished channel: reset it to AWAITING_APPROVAL so Approve re-ingests from the existing GCS dump (no re-collect).
+  router.post('/migration-jobs/:id/reingest', admin, wrap(async (req, res) => { res.json(ok(await service.reingest(req.params.id, actorOf(req)))); }));
   router.delete('/migration-jobs/:id', admin, wrap(async (req, res) => { await service.remove(req.params.id, actorOf(req)); res.json(ok({ deleted: true })); }));
   router.post('/queues/:queue/pause', admin, wrap(async (req, res) => {
     await service.pauseQueue(req.params.queue as QueueName); res.json(ok({ paused: req.params.queue }));
@@ -81,8 +85,14 @@ export function buildRouter(service: SlackMigrationService): Router {
   }));
 
   // Scoped error handler → consistent envelope
-  router.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
+  router.use((err: unknown, req: Request, res: Response, _next: NextFunction) => {
     if (err instanceof HttpError) return res.status(err.statusCode).json(fail(err.code, err.message));
+    // Log the real cause of an otherwise-opaque 500 so it isn't swallowed by the generic envelope.
+    logger.error('[SlackMigration] unhandled route error', {
+      method: req.method, path: req.path,
+      error: err instanceof Error ? err.message : String(err),
+      stack: err instanceof Error ? err.stack : undefined,
+    });
     return res.status(500).json(fail('INTERNAL_ERROR', 'Something went wrong'));
   });
 

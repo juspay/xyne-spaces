@@ -15,15 +15,35 @@ interface FuzzyFallbackResult {
   fuzzyCount: number;
 }
 
+/** Synthetic nodes Vespa's grouping inserts, as opposed to real document hits. */
+const isGroupingNode = (node: any): boolean =>
+  typeof node?.id === 'string' &&
+  (node.id.startsWith('group:') || node.id.startsWith('grouplist:') || node.id.startsWith('hitlist:'));
+
+/**
+ * Flatten a response to its document hits.
+ *
+ * With `| all(group(...))` the documents sit several levels below root.children, whose entries
+ * are grouping nodes. Reading root.children directly saw ONE node per response, and its id
+ * ("group:root:0") is identical in the exact and fuzzy responses -- so the dedupe below
+ * discarded the entire fuzzy result set on every grouped search.
+ */
+const collectHits = (node: any): any[] => {
+  if (!node) return [];
+  const children = node.children as any[] | undefined;
+  if (children?.length) return children.flatMap(collectHits);
+  return isGroupingNode(node) ? [] : [node];
+};
+
+/** Stable identity for a hit, preferring the document id over Vespa's internal id. */
+const hitId = (hit: any): string =>
+  hit?.fields?.docId || hit?.fields?.messageId || hit?.id || '';
+
 /**
  * Get unique document IDs from a Vespa response
  */
 const getDocIds = (response: VespaSearchResponse): Set<string> => {
-  return new Set(
-    response.root?.children?.map((child: any) =>
-      child.fields?.docId || child.fields?.messageId || child.id
-    ).filter(Boolean) || []
-  );
+  return new Set(collectHits(response.root).map(hitId).filter(Boolean));
 };
 
 /**
@@ -34,7 +54,7 @@ const getUniqueResults = (
   exactDocIds: Set<string>
 ): any[] => {
   return fuzzyChildren.filter((child: any) => {
-    const docId = child.fields?.docId || child.fields?.messageId || child.id;
+    const docId = hitId(child);
     return docId && !exactDocIds.has(docId);
   });
 };
@@ -58,9 +78,25 @@ const markAsFuzzyResults = (results: any[]): any[] => {
 const mergeResults = (
   exactResponse: VespaSearchResponse,
   fuzzyResults: any[],
+  fuzzyResponse?: VespaSearchResponse,
 ): VespaSearchResponse => {
   if (fuzzyResults.length === 0) {
     return exactResponse;
+  }
+
+  // Exact found nothing but still returned a grouped shell (`group:root:0` with no documents).
+  // Appending hits at root there is invisible: the reader in vespaSearch/index.ts sees a
+  // grouping node, switches to group parsing, and never looks at root-level hits. Return the
+  // fuzzy response's own grouped tree instead, with the kept hits marked in place.
+  const exactHasGrouping = (exactResponse.root?.children ?? []).some(isGroupingNode);
+  if (exactHasGrouping && collectHits(exactResponse.root).length === 0 && fuzzyResponse?.root) {
+    const keptIds = new Set(fuzzyResults.map(hitId).filter(Boolean));
+    const markKept = (node: any): any => {
+      if (node?.children?.length) return { ...node, children: node.children.map(markKept) };
+      if (isGroupingNode(node) || !keptIds.has(hitId(node))) return node;
+      return { ...node, fields: { ...node.fields, _isFuzzyMatch: true } };
+    };
+    return { ...exactResponse, root: markKept(fuzzyResponse.root) };
   }
   const updatedRoot: any = {
       ...exactResponse.root,
@@ -119,7 +155,8 @@ export const executeFuzzyFallback = async (
   }
 
   // Get unique fuzzy results
-  const fuzzyChildren = fuzzyResponse.root?.children || [];
+  // Document hits, not the grouping nodes sitting at root.children.
+  const fuzzyChildren = collectHits(fuzzyResponse.root);
   const uniqueFuzzyResults = getUniqueResults(fuzzyChildren, exactDocIds);
   const markedFuzzyResults = markAsFuzzyResults(uniqueFuzzyResults);
 
@@ -128,7 +165,7 @@ export const executeFuzzyFallback = async (
   );
 
   // Merge results
-  const mergedResponse = mergeResults(exactResponse, markedFuzzyResults);
+  const mergedResponse = mergeResults(exactResponse, markedFuzzyResults, fuzzyResponse);
 
   return {
     mergedResponse,

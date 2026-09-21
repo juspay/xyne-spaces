@@ -9,6 +9,12 @@ import {
 } from '@xyne/shared';
 import { DEFAULT_RECORDING_SUMMARY_TEMPLATE } from './recordingSummaryTemplates';
 import { summaryTemplateAiService } from './summaryTemplateAiService';
+import { summaryTemplatePublicationService } from './summaryTemplatePublicationService';
+import {
+  getDisabledMandatorySummarySectionIds,
+  getEnabledSummaryTemplateSections,
+  hasDisabledNonMandatorySummarySection,
+} from './summaryTemplateSections';
 
 export type SummaryTemplateCreateInput = Pick<
   Prisma.SummaryTemplateUncheckedCreateInput,
@@ -29,7 +35,7 @@ const DEFAULT_TEMPLATE_CREATED_AT = new Date(0);
 export class SummaryTemplateError extends Error {
   constructor(
     message: string,
-    readonly statusCode: 403 | 404 | 502
+    readonly statusCode: 400 | 403 | 404 | 502
   ) {
     super(message);
     this.name = 'SummaryTemplateError';
@@ -38,7 +44,9 @@ export class SummaryTemplateError extends Error {
 
 function toPromptSections(value: unknown): Array<{ title: string; description: string }> {
   if (!Array.isArray(value)) return [];
-  return value.flatMap((section) => {
+  const enabled = getEnabledSummaryTemplateSections(value as Prisma.JsonValue);
+  if (!Array.isArray(enabled)) return [];
+  return enabled.flatMap((section) => {
     if (
       typeof section !== 'object' ||
       section === null ||
@@ -90,6 +98,43 @@ export class SummaryTemplateService {
       createdAt: DEFAULT_TEMPLATE_CREATED_AT,
       visibility: SummaryTemplateVisibility.PRIVATE,
     };
+  }
+
+  /**
+   * The Decisions / Action Items sections can only be switched off (or back on) by a
+   * Scribe admin, and only those two reserved sections may carry the flag at all.
+   * Non-admins may still save a template that already has a section disabled, as
+   * long as they leave that state untouched.
+   */
+  private async assertMandatorySectionChangesAllowed(
+    sections: unknown,
+    existingSections: Prisma.JsonValue | null,
+    workspaceId: string,
+    actorUserId: string
+  ): Promise<void> {
+    if (sections === undefined) return;
+    const next = sections as Prisma.JsonValue;
+    if (hasDisabledNonMandatorySummarySection(next)) {
+      throw new SummaryTemplateError(
+        'Only the Decisions and Action Items sections can be disabled',
+        400
+      );
+    }
+
+    const nextDisabled = getDisabledMandatorySummarySectionIds(next);
+    const previousDisabled = getDisabledMandatorySummarySectionIds(existingSections);
+    const changed =
+      nextDisabled.size !== previousDisabled.size ||
+      [...nextDisabled].some((id) => !previousDisabled.has(id));
+    if (!changed) return;
+
+    const isAdmin = await summaryTemplatePublicationService.isAdmin(workspaceId, actorUserId);
+    if (!isAdmin) {
+      throw new SummaryTemplateError(
+        'Only a Scribe admin can enable or disable the Decisions and Action Items sections',
+        403
+      );
+    }
   }
 
   private isDefaultTemplateId(templateId: string, workspaceId: string): boolean {
@@ -211,6 +256,8 @@ export class SummaryTemplateService {
     createdBy: string,
     input: SummaryTemplateCreateInput
   ): Promise<SummaryTemplateView> {
+    await this.assertMandatorySectionChangesAllowed(input.sections, null, workspaceId, createdBy);
+
     const systemPrompt =
       input.systemPrompt?.trim() ||
       (await summaryTemplateAiService.generateSystemPrompt(
@@ -253,6 +300,12 @@ export class SummaryTemplateService {
     if (existing.createdBy !== actorUserId || existing.createdBy === SYSTEM_TEMPLATE_CREATOR) {
       throw new SummaryTemplateError('Only the template creator can update it', 403);
     }
+    await this.assertMandatorySectionChangesAllowed(
+      input.sections,
+      existing.sections,
+      workspaceId,
+      actorUserId
+    );
 
     const { systemPrompt: requestedSystemPrompt, ...updates } = input;
     const promptSourceChanged =

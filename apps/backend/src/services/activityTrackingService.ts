@@ -35,6 +35,13 @@ class ActivityTrackingService {
         // Carries the channel for DB_MUTATION events, whose url is 'backend'.
         // Click events get it from the url instead and rarely set this key.
         ...(typeof meta.channelId === 'string' && { channelId: meta.channelId }),
+        // Channel usage dimensions from the dashboard's channelTrackingMetadata
+        // (CHANNEL_VIEWED, SEND_MESSAGE, ADD/REMOVE_REACTION, join/leave). The
+        // name is denormalized so reports survive renames; DM rows carry none.
+        ...(typeof meta.channelName === 'string' && { channelName: meta.channelName }),
+        ...(typeof meta.scopeType === 'string' && { scopeType: meta.scopeType }),
+        ...(typeof meta.isThreadReply === 'boolean' && { isThreadReply: meta.isThreadReply }),
+        ...(typeof meta.emojiName === 'string' && { emojiName: meta.emojiName }),
         ...(typeof meta.path === 'string' && { path: meta.path }),
         // Target URL on ELECTRON_NAVIGATE events.
         ...(typeof meta.to === 'string' && { to: meta.to }),

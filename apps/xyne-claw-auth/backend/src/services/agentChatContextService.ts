@@ -128,15 +128,15 @@ export function normalizeAttachedContext(input: unknown): { items: AttachedConte
 
   const items: AttachedContextRef[] = [];
   const seen = new Set<string>();
-  const perTypeCounts: Record<Exclude<ContextType, "activity">, number> = {
-    channel: 0,
-    ticket: 0,
-    canvas: 0,
-    call: 0,
-    collection: 0,
-    file: 0,
-    folder: 0,
-  };
+  const perTypeCounts = new Map<Exclude<ContextType, "activity">, number>([
+    ["channel", 0],
+    ["ticket", 0],
+    ["canvas", 0],
+    ["call", 0],
+    ["collection", 0],
+    ["file", 0],
+    ["folder", 0],
+  ]);
 
   for (const raw of input) {
     if (!raw || typeof raw !== "object") return { items: [], error: "attachedContext contains invalid entries" };
@@ -153,7 +153,7 @@ export function normalizeAttachedContext(input: unknown): { items: AttachedConte
     }
 
     // Only apply per-type limit for non-activity types
-    if (type !== "activity" && perTypeCounts[type] >= PER_TYPE_LIMIT) {
+    if (type !== "activity" && (perTypeCounts.get(type) ?? 0) >= PER_TYPE_LIMIT) {
       return { items: [], error: `attachedContext exceeds ${PER_TYPE_LIMIT} items for type ${type}` };
     }
 
@@ -161,7 +161,7 @@ export function normalizeAttachedContext(input: unknown): { items: AttachedConte
     if (seen.has(key)) continue;
     seen.add(key);
     if (type !== "activity") {
-      perTypeCounts[type] += 1;
+      perTypeCounts.set(type, (perTypeCounts.get(type) ?? 0) + 1);
     }
     
     // Build item with all activity-specific fields if applicable
@@ -223,11 +223,26 @@ export async function searchContextItems(type: ContextSearchType, q: string, lim
 export async function buildAttachedContextPayload(
   items: AttachedContextRef[],
   auth?: SpacesAuthContext,
-  opts?: { threadConversationId?: string; canvasViewAccessId?: string },
+  opts?: {
+    threadConversationId?: string;
+    canvasViewAccessId?: string;
+    workflowId?: string;
+    workflowExecutionId?: string;
+  },
 ): Promise<{ promptPrefix?: string; contextFiles: ContextFile[] }> {
   const threadConversationId = opts?.threadConversationId;
   const canvasViewAccessId = opts?.canvasViewAccessId;
-  if (items.length === 0 && !threadConversationId && !canvasViewAccessId) return { contextFiles: [] };
+  const workflowId = opts?.workflowId;
+  const workflowExecutionId = opts?.workflowExecutionId;
+  if (
+    items.length === 0 &&
+    !threadConversationId &&
+    !canvasViewAccessId &&
+    !workflowId &&
+    !workflowExecutionId
+  ) {
+    return { contextFiles: [] };
+  }
 
   const sections = await Promise.all(items.map(async (item) => {
     try {
@@ -277,6 +292,10 @@ export async function buildAttachedContextPayload(
         inlineText: `Unable to resolve canvas: ${message}. Read it with \`spaces-read-canvas\` (viewAccessId=${canvasViewAccessId}).`,
       });
     }
+  }
+
+  if (workflowId || workflowExecutionId) {
+    sections.unshift(buildWorkflowScopeSection(workflowId, workflowExecutionId));
   }
 
   const lines: string[] = [
@@ -599,6 +618,33 @@ async function resolveActivitySection(item: AttachedContextRef): Promise<Resolve
 /** A Spaces thread/conversation the user opened the assistant from. It arrives
  *  as agentConfig.SPACES_CONVERSATION_ID (NOT via the attachedContext array),
  *  so it's resolved here and folded into the same "# Attached context" block. */
+function buildWorkflowScopeSection(
+  workflowId?: string,
+  workflowExecutionId?: string,
+): ResolvedContextSection {
+  if (workflowExecutionId) {
+    return {
+      header: `Workflow run (executionId=${workflowExecutionId})`,
+      inlineText: [
+        "The user is looking at this run in the workflow viewer, and is almost certainly",
+        "asking about it. Your `workflow_*` tools are already scoped to it — call",
+        "`workflow_run_get` with no id to read its status, steps and errors, and",
+        "`workflow_step_events` for a step that failed. Do not call `workflow_run_list` to",
+        "find it; it is already in scope.",
+      ].join(" "),
+    };
+  }
+  return {
+    header: `Workflow (id=${workflowId})`,
+    inlineText: [
+      "The user is looking at this workflow in the builder, and is almost certainly asking",
+      "about it — read \"this workflow\" as this one. Your `workflow_*` tools are already",
+      "scoped to it: call `workflow_get` with no id to read its current definition. Do not",
+      "call `workflow_list` to work out which workflow is meant.",
+    ].join(" "),
+  };
+}
+
 async function resolveThreadSection(conversationId: string, auth?: SpacesAuthContext): Promise<ResolvedContextSection> {
   const header = `Spaces thread (conversationId=${conversationId})`;
   const rows = (await interact({

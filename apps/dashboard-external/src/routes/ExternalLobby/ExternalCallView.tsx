@@ -194,7 +194,6 @@ export function ExternalCallView({
         raisedHands={raisedHands}
         onToggleHandRaise={toggleHandRaise}
         externalActiveRecording={recordingStateQuery.data?.activeRecording}
-        privacyReminderEnabled={recordingStateQuery.isFetched || recordingStateQuery.isError}
       />
     </>
   );

@@ -1,95 +1,43 @@
 import React from 'react';
+import { TicketStatusV2 } from '@xyne/shared';
 import { cn } from '../../../utils/classNames';
+import { getStageStatusMeta } from '../../../utils/board/stageStatusIcon';
+import { StatusIndicator } from '../../Board/StatusIndicator';
 
-interface TicketStatusIconProps {
-  progressPercentage: number;
-  size?: number;
-}
-
-const getStatusColor = (progressPercentage: number, zeroColor: string): string => {
-  if (progressPercentage === 100) return 'var(--status-success)';
-  if (progressPercentage > 0) return 'var(--status-scheduled)';
-  return zeroColor;
-};
-
-export const TicketStatusIcon: React.FC<TicketStatusIconProps> = ({
-  progressPercentage,
-  size = 16,
-}) => {
-  const center = size / 2;
-  const radius = size / 2 - 1;
-
-  const polarToCartesian = (cx: number, cy: number, r: number, angle: number) => {
-    const rad = (angle - 90) * (Math.PI / 180);
-    return {
-      x: cx + r * Math.cos(rad),
-      y: cy + r * Math.sin(rad),
-    };
-  };
-
-  const describeArc = (cx: number, cy: number, r: number, percent: number) => {
-    if (percent <= 0) return '';
-
-    const endAngle = (percent / 100) * 360;
-    const start = polarToCartesian(cx, cy, r, 0);
-    const end = polarToCartesian(cx, cy, r, endAngle);
-
-    const largeArcFlag = endAngle > 180 ? 1 : 0;
-
-    return `
-      M ${cx} ${cy}
-      L ${start.x} ${start.y}
-      A ${r} ${r} 0 ${largeArcFlag} 1 ${end.x} ${end.y}
-      Z
-    `;
-  };
-
-  const color = getStatusColor(progressPercentage, 'transparent');
-  const innerRadius = radius - 2;
-
-  return (
-    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
-      {/* Outer border */}
-      <circle cx={center} cy={center} r={radius} fill='none' stroke={color} strokeWidth='2' />
-
-      {/* Progress sector */}
-      {progressPercentage > 0 && (
-        <path d={describeArc(center, center, innerRadius, progressPercentage)} fill={color} />
-      )}
-    </svg>
-  );
-};
-
-// calculate progress based on stages
-// handles progress calculation
 interface TicketStatusWithStagesProps {
   currentStageName: string | null;
+  /**
+   * The ticket's status snapshot. Cards render outside any board-stage query, so
+   * the indicator falls back to a status-only fill here instead of the board
+   * definition's position-based one — see StageIndicator for the exact form.
+   */
+  statusV2?: string | null | undefined;
   showLeadingDot?: boolean;
   iconOnly?: boolean;
   className?: string;
-  iconClassName?: string;
   labelClassName?: string;
 }
 
-const STAGE_PROGRESS = 25;
-
 export const TicketStatusWithStages: React.FC<TicketStatusWithStagesProps> = ({
   currentStageName,
+  statusV2,
   showLeadingDot = true,
   iconOnly = false,
   className,
   labelClassName,
 }) => {
+  const status = (statusV2 as TicketStatusV2) ?? TicketStatusV2.TODO;
+
   if (iconOnly) {
-    return <TicketStatusIcon progressPercentage={STAGE_PROGRESS} size={12} />;
+    return <StatusIndicator status={status} size={12} />;
   }
   return (
     <div className={cn('flex items-center gap-1.5', className)}>
       {showLeadingDot && <div className='rounded-full h-1 w-1 bg-muted-foreground'></div>}
-      <TicketStatusIcon progressPercentage={STAGE_PROGRESS} size={12} />
+      <StatusIndicator status={status} size={12} />
       <span
         className={cn('text-xs line-clamp-1 break-all', labelClassName)}
-        style={{ color: getStatusColor(STAGE_PROGRESS, 'hsl(var(--muted-foreground))') }}
+        style={{ color: getStageStatusMeta(statusV2).cssVar }}
       >
         {currentStageName || 'Not Started'}
       </span>

@@ -7,6 +7,7 @@ import { repositories } from '@/database/repositories';
 import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
 import { extractGroupMentions, extractUserMentions } from '@/utils/mentionParser';
+import { toReadableMessageContent } from '@/utils/flowJson';
 import type { MessageReceivedEventPayload } from '../types/automation-events';
 
 export const MESSAGE_RECEIVED_EVENT = 'MESSAGE_RECEIVED';
@@ -38,12 +39,19 @@ const MessageReceivedConfigSchema = z.object({
     .array(z.string())
     .optional()
     .describe('Only fire when at least one of these user groups is mentioned. Empty matches any group mention; omit entirely to not filter on group mentions.'),
+  fireOnEdit: z
+    .boolean()
+    .default(false)
+    .describe(
+      'Also fire when an edit turns a non-matching message into a match. Only that transition fires. Needs a Content Contains value.',
+    ),
 });
 
 export const MessageReceivedOutputSchema = z.object({
   message: z.object({
     id: z.string(),
     content: z.string().nullable(),
+    rawContent: z.string().nullable(),
     conversationId: z.string(),
     channelId: z.string(),
     createdAt: z.coerce.date(),
@@ -60,6 +68,8 @@ export const MessageReceivedOutputSchema = z.object({
   conversationId: z.string(),
   msgType: z.nativeEnum(MessageType),
   deleted: z.boolean(),
+  isEdit: z.boolean().optional(),
+  previousContentMatched: z.boolean().optional(),
   mentionedUsers: z
     .array(
       z.object({
@@ -104,6 +114,36 @@ export class MessageReceivedTrigger extends BaseTrigger<typeof MessageReceivedCo
     return hydrateMessageReceivedPayload(payload as unknown as MessageReceivedEventPayload);
   }
 
+  /**
+   * Drop the pre-edit body and keep only whether it already satisfied this
+   * automation's content filter. The body itself is never persisted or logged.
+   */
+  override projectPayload(
+    config: Record<string, unknown>,
+    payload: Record<string, unknown>,
+  ): Record<string, unknown> | null {
+    const { _transient, ...rest } = payload as {
+      isEdit?: boolean;
+      _transient?: { previousContent?: string };
+    };
+    // Edits only matter to automations that opted in. Dropping here — rather than
+    // in matchFilters — keeps an in-place rewrite from spawning one SKIPPED
+    // execution, state row and queue job per automation in the workspace.
+    const cfg = this.configSchema.parse(config);
+    if (rest.isEdit && !cfg.fireOnEdit) return null;
+
+    const previousContent = _transient?.previousContent;
+    if (previousContent === undefined) return rest;
+    const needle = cfg.contentContains;
+    // Mirror matchFilters: test decoded + raw so an encoded-card needle can't read as a non-match.
+    const prevTexts = [previousContent, toReadableMessageContent(previousContent)];
+    return {
+      ...rest,
+      previousContentMatched:
+        !!needle && prevTexts.some(text => !!text && text.toLowerCase().includes(needle.toLowerCase())),
+    };
+  }
+
   override matchFilters(
     filter: Record<string, unknown>,
     payload: Record<string, unknown>,
@@ -113,6 +153,8 @@ export class MessageReceivedTrigger extends BaseTrigger<typeof MessageReceivedCo
 
     // The message was deleted before we got to run — nothing to act on.
     if (p.deleted) return false;
+    // Edits reach every candidate; only automations that opted in act on them.
+    if (p.isEdit && !cfg.fireOnEdit) return false;
     if (cfg.messageTypes && cfg.messageTypes.length > 0) {
       if (!cfg.messageTypes.includes(p.msgType)) return false;
     }
@@ -141,7 +183,14 @@ export class MessageReceivedTrigger extends BaseTrigger<typeof MessageReceivedCo
       const matchResults: boolean[] = [];
 
       if (contentFilterConfigured) {
-        const contentPasses = !!(p.message.content && p.message.content.toLowerCase().includes(cfg.contentContains!.toLowerCase()));
+        // Decoded text and the stored blob: a filter written against a FlowJSON
+        // card title or button label must keep firing after the decode.
+        const needle = cfg.contentContains!.toLowerCase();
+        const nowMatches = [p.message.content, p.message.rawContent]
+          .some(text => !!text && text.toLowerCase().includes(needle));
+        // On an edit only the transition counts — an edit that leaves an
+        // already-matching message still matching must not re-run the automation.
+        const contentPasses = p.isEdit ? nowMatches && !p.previousContentMatched : nowMatches;
         matchResults.push(contentPasses);
       }
 
@@ -193,6 +242,8 @@ interface ReceivedMessage {
   channelId: string;
   msgType?: MessageType | undefined;
   userId: string;
+  isEdit?: boolean;
+  previousContent?: string;
 }
 
 /**
@@ -218,6 +269,10 @@ export async function emitMessageReceived(message: ReceivedMessage): Promise<voi
           channelId: message.channelId,
           authorId: message.userId,
           msgType: message.msgType ?? MessageType.USER,
+          ...(message.isEdit ? { isEdit: true } : {}),
+          ...(message.previousContent !== undefined
+            ? { _transient: { previousContent: message.previousContent } }
+            : {}),
         },
       },
       channel.workspaceId,
@@ -294,7 +349,8 @@ async function hydrateMessageReceivedPayload(
     ...payload,
     message: {
       id: messageId,
-      content: messageRow?.content ?? null,
+      content: toReadableMessageContent(messageRow?.content),
+      rawContent: messageRow?.content ?? null,
       conversationId,
       channelId,
       createdAt: messageRow?.createdAt ?? new Date(),

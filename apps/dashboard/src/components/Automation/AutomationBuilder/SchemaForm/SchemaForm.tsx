@@ -327,6 +327,28 @@ function Field({
     );
   }
 
+  // Booleans read as one statement, so the checkbox sits inline to the LEFT of its
+  // label + description instead of under a FieldHeader. Keeping the description out
+  // of the Checkbox's own label is what stops it rendering twice.
+  if (kind === 'boolean') {
+    return (
+      <div className='flex flex-col gap-1'>
+        <div className='flex items-start gap-2'>
+          <span className='flex h-[18px] items-center'>
+            <Checkbox
+              checked={value === true}
+              onChange={checked => onChange(checked === true)}
+              label=''
+              ariaLabel={label}
+            />
+          </span>
+          <FieldHeader label={labelText} description={description} />
+        </div>
+        {hasError && <FieldError message={errorMessage} />}
+      </div>
+    );
+  }
+
   if (kind === 'string' || kind === 'textarea') {
     if (entityKind) {
       const isRef = isVariableRefValue(value);
@@ -441,6 +463,7 @@ function Field({
           <ChipArrayField
             value={arrayValue}
             onChange={next => onChange(next)}
+            mode={isTokenChipField(fieldKey) ? 'token' : 'phrase'}
             placeholder={
               fieldKey === 'fromDomains'
                 ? 'e.g. acme.com — Enter to add'
@@ -529,6 +552,14 @@ function Field({
   );
 }
 
+function isTokenChipField(fieldKey: string): boolean {
+  return (
+    /email|domain|address|recipient|url/i.test(fieldKey) ||
+    /ids?$/i.test(fieldKey) ||
+    /^(to|cc|bcc)$/i.test(fieldKey)
+  );
+}
+
 function FieldHeader({
   label,
   description,
@@ -600,9 +631,8 @@ function RawInput({
       <Checkbox
         checked={value === true}
         onChange={checked => onChange(checked === true)}
-        label={
-          schema.description ? (sanitiseDescription(schema.description) ?? 'Enabled') : 'Enabled'
-        }
+        label=''
+        ariaLabel={typeof schema.title === 'string' ? schema.title : 'Toggle'}
       />
     );
   }

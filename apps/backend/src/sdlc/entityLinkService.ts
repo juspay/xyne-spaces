@@ -1,5 +1,5 @@
 import { Prisma, type PrismaClient } from '@prisma/client';
-import type { EntityLinkOwner } from '@xyne/shared';
+import { SDLC_TRACK_FLAT_RELATION, type EntityLinkOwner } from '@xyne/shared';
 import { logger } from '@/utils/logger';
 import { isCanvasInChannel, isTrackInChannel } from './sdlcChannelMembership';
 
@@ -31,14 +31,48 @@ export async function ensureLink(
   return { created: result.count > 0 };
 }
 
+/**
+ * The track an item belongs to, read off the flat edge every track item carries.
+ * One lookup whatever the item is and however deep it is filed, because the flat
+ * edge does not move when containment does.
+ */
+export async function resolveItemTrackId(
+  db: Db,
+  targetType: string,
+  targetId: string
+): Promise<string | null> {
+  const edge = await db.sdlcEntityLink.findFirst({
+    where: {
+      sourceType: 'TRACK',
+      targetType,
+      targetId,
+      relationType: SDLC_TRACK_FLAT_RELATION,
+    },
+    select: { sourceId: true },
+  });
+  return edge?.sourceId ?? null;
+}
+
+export const resolveFolderTrackId = (db: Db, folderId: string): Promise<string | null> =>
+  resolveItemTrackId(db, 'FOLDER', folderId);
+
 export async function validateOwnerInChannel(
   db: Db,
   owner: EntityLinkOwner,
   channelId: string
 ): Promise<boolean> {
-  return owner.sourceType === 'TRACK'
-    ? isTrackInChannel(db, owner.sourceId, channelId)
-    : isCanvasInChannel(db, owner.sourceId, channelId);
+  if (owner.sourceType === 'TRACK') {
+    return isTrackInChannel(db, owner.sourceId, channelId);
+  }
+  if (
+    owner.sourceType === 'FOLDER' ||
+    owner.sourceType === 'ATTACHMENT' ||
+    owner.sourceType === 'LINK'
+  ) {
+    const trackId = await resolveItemTrackId(db, owner.sourceType, owner.sourceId);
+    return trackId ? isTrackInChannel(db, trackId, channelId) : false;
+  }
+  return isCanvasInChannel(db, owner.sourceId, channelId);
 }
 
 export async function resolveInheritedOwner(
@@ -53,7 +87,12 @@ export async function resolveInheritedOwner(
     },
     select: { sourceType: true, sourceId: true },
   });
-  return link && (link.sourceType === 'CANVAS' || link.sourceType === 'TRACK')
+  return link &&
+    (link.sourceType === 'CANVAS' ||
+      link.sourceType === 'TRACK' ||
+      link.sourceType === 'FOLDER' ||
+      link.sourceType === 'ATTACHMENT' ||
+      link.sourceType === 'LINK')
     ? { sourceType: link.sourceType, sourceId: link.sourceId }
     : null;
 }
@@ -126,7 +165,7 @@ export async function linkCreatedEntities(
           sourceType: 'TRACK',
           targetType: 'CANVAS',
           targetId: owner.sourceId,
-          relationType: 'TRACK_ITEM',
+          relationType: SDLC_TRACK_FLAT_RELATION,
         },
         select: { sourceId: true },
       });
@@ -145,18 +184,40 @@ export async function linkCreatedEntities(
         );
       }
     } else {
-      await ensureLink(
-        db,
-        {
-          channelId,
-          sourceType: 'TRACK',
-          sourceId: owner.sourceId,
-          targetType: 'TICKET',
-          targetId: ticketId,
-          relationType: 'TRACK_ITEM',
-        },
-        actor
-      );
+      // A folder, a file or a link owns the ticket it spawned, the same way an
+      // artifact does; only a track has no edge of its own to add.
+      if (owner.sourceType !== 'TRACK') {
+        await ensureLink(
+          db,
+          {
+            channelId,
+            sourceType: owner.sourceType,
+            sourceId: owner.sourceId,
+            targetType: 'TICKET',
+            targetId: ticketId,
+            relationType: 'TICKET',
+          },
+          actor
+        );
+      }
+      const trackId =
+        owner.sourceType === 'TRACK'
+          ? owner.sourceId
+          : await resolveItemTrackId(db, owner.sourceType, owner.sourceId);
+      if (trackId) {
+        await ensureLink(
+          db,
+          {
+            channelId,
+            sourceType: 'TRACK',
+            sourceId: trackId,
+            targetType: 'TICKET',
+            targetId: ticketId,
+            relationType: 'TRACK_ITEM',
+          },
+          actor
+        );
+      }
     }
   }
 }
