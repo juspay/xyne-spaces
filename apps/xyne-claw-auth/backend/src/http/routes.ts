@@ -54,6 +54,7 @@ import { attioOAuthRouter, attioCallbackRouter } from "../routes/attio-oauth.js"
 import { mailerliteOAuthRouter, mailerliteCallbackRouter } from "../routes/mailerlite-oauth.js";
 import { honeycombOAuthRouter, honeycombCallbackRouter } from "../routes/honeycomb-oauth.js";
 import { customerioOAuthRouter, customerioCallbackRouter } from "../routes/customerio-oauth.js";
+import { notionRemoteOAuthRouter, notionRemoteCallbackRouter } from "../routes/notion-remote-oauth.js";
 import { oauthTokenRouter } from "../routes/oauth-token.js";
 import { rapidApiLinkedInRouter } from "../routes/rapidapi-linkedin.js";
 import { scheduledJobsRouter } from "../routes/scheduled-jobs.js";
@@ -227,6 +228,8 @@ function mountOAuthProviders(app: Express): void {
   app.use(BASE, honeycombCallbackRouter);
   app.use(`${BASE}/users`, requireAuth, requireNoAccessToken, customerioOAuthRouter);
   app.use(BASE, customerioCallbackRouter);
+  app.use(`${BASE}/users`, requireAuth, requireNoAccessToken, notionRemoteOAuthRouter);
+  app.use(BASE, notionRemoteCallbackRouter);
   app.use(`${BASE}/users`, requireAuth, requireNoAccessToken, rapidApiLinkedInRouter);
 }
 

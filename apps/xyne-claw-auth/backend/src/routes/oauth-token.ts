@@ -25,6 +25,7 @@ import { mailerliteOAuthProvider } from "./mailerlite-oauth.js";
 import { attioOAuthProvider } from "./attio-oauth.js";
 import { honeycombOAuthProvider } from "./honeycomb-oauth.js";
 import { customerioOAuthProvider } from "./customerio-oauth.js";
+import { notionRemoteOAuthProvider } from "./notion-remote-oauth.js";
 
 const ALL_OAUTH_PROVIDERS: OAuthTokenProvider[] = [
   googleOAuthProvider,
@@ -40,6 +41,7 @@ const ALL_OAUTH_PROVIDERS: OAuthTokenProvider[] = [
   attioOAuthProvider,
   honeycombOAuthProvider,
   customerioOAuthProvider,
+  notionRemoteOAuthProvider,
 ];
 
 const PROVIDERS_BY_TYPE = new Map(ALL_OAUTH_PROVIDERS.map((p) => [p.serverType, p]));

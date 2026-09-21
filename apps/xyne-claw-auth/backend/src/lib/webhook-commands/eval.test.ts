@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from "vitest";
 import { parseSlashCommand } from "../parseSlashCommand.js";
 import { renderEvalHtml } from "./eval.js";
 import type { EvalResult } from "../eval-run.js";
+import { traceTiming, type DebugTraceRun } from "../debug-trace-html.js";
+import type { EvalTrace } from "./eval.js";
 
 function result(provider: string, over: Partial<EvalResult> = {}): EvalResult {
   return {
@@ -9,6 +11,9 @@ function result(provider: string, over: Partial<EvalResult> = {}): EvalResult {
     useOverride: true,
     model: `${provider}-model`,
     sessionId: `s-${provider}`,
+    sessionKey: `conv-eval-t1-${provider}`,
+    traceId: `t1-${provider}`,
+    answer: `${provider} says hello`,
     status: "completed",
     totalMs: 1000,
     llmTotalMs: 800,
@@ -52,7 +57,7 @@ describe("eval comparison report", () => {
   it("marks the fastest completed provider and scales bars to the slowest", () => {
     const html = renderEvalHtml("q", [result("fast", { totalMs: 1000 }), result("slow", { totalMs: 4000 })], started);
     expect(html).toContain("fastest");
-    expect(html.indexOf('"p">fast')).toBeLessThan(html.indexOf('"p">slow'));
+    expect(html.indexOf('#arm-s-fast"')).toBeLessThan(html.indexOf('#arm-s-slow"'));
     expect(html).toContain("4.0×");
   });
 
@@ -139,6 +144,69 @@ describe("eval fallback honesty", () => {
   it("says nothing about fallback when the run honoured its pin", () => {
     const html = renderEvalHtml("q", [result("codex")], started);
     expect(html).not.toContain("fell back");
+  });
+});
+
+describe("eval full sessions", () => {
+  const started = new Date("2026-09-20T10:00:00.000Z");
+  const base = Date.parse("2026-09-20T10:00:00.000Z");
+  const at = (offsetMs: number): string => new Date(base + offsetMs).toISOString();
+
+  /** Twenty 4s tool calls fired together: 4s of wall clock, 80s if summed. */
+  function fanOutTrace(): DebugTraceRun {
+    const events: Array<Record<string, unknown>> = [
+      { kind: "session_prompt", at: at(0), llmCall: 1 },
+      { kind: "assistant_turn_end", at: at(1000), llmCall: 1, turn: 1, data: { ttftMs: 400 } },
+    ];
+    for (let i = 0; i < 20; i += 1) {
+      events.push({ kind: "tool_execution_start", at: at(1000), toolCallId: `t${i}` });
+      events.push({
+        kind: "tool_execution_end",
+        at: at(5000),
+        toolCallId: `t${i}`,
+        data: { toolName: `tool_${i}`, durationMs: 4000 },
+      });
+    }
+    return { agentSlug: "xyne", startedAt: at(0), events } as unknown as DebugTraceRun;
+  }
+
+  function traceMap(sessionId: string): Map<string, EvalTrace> {
+    const run = fanOutTrace();
+    return new Map([[sessionId, { run, timing: traceTiming(run) }]]);
+  }
+
+  it("embeds each provider's answer and full trace, not just a summary row", () => {
+    const html = renderEvalHtml(
+      "q",
+      [result("codex", { answer: "the channel discussed rollout" })],
+      started,
+      traceMap("s-codex"),
+      "xyne",
+    );
+    expect(html).toContain("Full sessions");
+    expect(html).toContain("Provider: codex");
+    expect(html).toContain("the channel discussed rollout");
+    expect(html).toContain("Where the time went");
+    expect(html).toContain("tool_0");
+  });
+
+  it("reports tool time as merged wall clock, not the inflated sum", () => {
+    const html = renderEvalHtml("q", [result("codex")], started, traceMap("s-codex"), "xyne");
+    expect(html).toContain("across 20 calls");
+    expect(html).toContain("up to 20 at once");
+    // 4.0 s of wall clock, not the 80.0 s the stored sum would claim.
+    expect(html).toContain("4.0 s");
+    expect(html).not.toMatch(/<td class="n">80\.0 s/);
+  });
+
+  it("says so plainly when an arm has no checkpointed trace", () => {
+    const html = renderEvalHtml("q", [result("codex")], started, new Map(), "xyne");
+    expect(html).toContain("No execution trace was checkpointed");
+  });
+
+  it("still renders when nothing but the summary is available", () => {
+    const html = renderEvalHtml("q", [result("codex", { answer: null })], started);
+    expect(html).toContain("No answer recorded");
   });
 });
 

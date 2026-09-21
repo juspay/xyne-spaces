@@ -27,10 +27,17 @@ const AGENT_CRED_PROVIDERS = ["litellm", "spaces"] as const;
 
 export interface EvalDispatch extends EvalTarget {
   sessionId: string;
+  /** piSessionConversationId for this arm — the debug store is keyed by it. */
+  sessionKey: string;
+  traceId: string;
 }
 
 export interface EvalResult extends EvalTarget {
   sessionId: string;
+  sessionKey: string;
+  traceId: string;
+  /** The answer the arm produced, for side-by-side reading. */
+  answer: string | null;
   /** Set when the run did not execute on the provider it was pinned to. */
   requested?: string | undefined;
   status: string;
@@ -188,6 +195,7 @@ export async function dispatchEvalRun(args: {
   senderName?: string;
   traceId: string;
 }): Promise<EvalDispatch> {
+  const sessionKey = evalSessionKey(args.conversationId, args.traceId);
   const res = await fetch(`${CONFIG.internalUrl}/claw/api/v1/internal/run`, {
     method: "POST",
     headers: {
@@ -203,7 +211,7 @@ export async function dispatchEvalRun(args: {
       // (three of four died with session_locked) and any that did run would
       // read the others' answers. Delivery still targets the real thread —
       // only the session identity is split.
-      piSessionConversationId: evalSessionKey(args.conversationId, args.traceId),
+      piSessionConversationId: sessionKey,
       agentSlug: args.agentSlug,
       orgId: args.orgId,
       eventType: "APP_MENTIONED",
@@ -249,14 +257,14 @@ export async function dispatchEvalRun(args: {
     { skipConversationIndex: true },
   );
 
-  return { ...args.target, sessionId: body.sessionId };
+  return { ...args.target, sessionId: body.sessionId, sessionKey, traceId: args.traceId };
 }
 
 export async function readEvalResults(dispatches: EvalDispatch[]): Promise<EvalResult[]> {
   const rows = await prisma.agentRun.findMany({
     where: { sessionId: { in: dispatches.map((d) => d.sessionId) } },
     select: {
-      sessionId: true, status: true, provider: true, model: true, error: true,
+      sessionId: true, status: true, provider: true, model: true, error: true, result: true,
       totalMs: true, llmTotalMs: true, toolMs: true, ttftMs: true,
       tokensIn: true, tokensOut: true, tokensCacheRead: true, tokensPerSec: true,
     },
@@ -275,6 +283,9 @@ export async function readEvalResults(dispatches: EvalDispatch[]): Promise<EvalR
       useOverride: d.useOverride,
       model: row?.model ?? d.model,
       sessionId: d.sessionId,
+      sessionKey: d.sessionKey,
+      traceId: d.traceId,
+      answer: row?.result ?? null,
       status: row?.status ?? "pending",
       totalMs: row?.totalMs ?? null,
       llmTotalMs: row?.llmTotalMs ?? null,

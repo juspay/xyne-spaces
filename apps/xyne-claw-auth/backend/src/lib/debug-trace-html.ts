@@ -150,7 +150,7 @@ function row(cells: { offset: string; badge: string; kindClass: string; title: s
   );
 }
 
-interface TraceParts {
+export interface TraceParts {
   agentSlug: string;
   /** "N tool calls · N LLM turns · N compactions · N events" */
   headline: string;
@@ -244,13 +244,102 @@ function collectSpans(all: DebugTraceEvent[], startBase: number | null): Span[] 
   return spans.sort((a, b) => a.startMs - b.startMs);
 }
 
+
+/** Wall-clock union of spans. Tool calls run concurrently, so summing their
+ *  durations over-counts — twenty 4s calls fired together are 4s of wall time,
+ *  not 80s. `sumMs` keeps the fan-out signal; `wallMs` is what a clock saw. */
+function mergedMs(spans: Span[]): number {
+  const ranges = spans
+    .map((s) => [s.startMs, s.startMs + s.durationMs] as const)
+    .sort((a, b) => a[0] - b[0]);
+  let total = 0;
+  let openStart: number | null = null;
+  let openEnd = 0;
+  for (const [start, end] of ranges) {
+    if (openStart === null) {
+      openStart = start;
+      openEnd = end;
+      continue;
+    }
+    if (start > openEnd) {
+      total += openEnd - openStart;
+      openStart = start;
+      openEnd = end;
+      continue;
+    }
+    if (end > openEnd) openEnd = end;
+  }
+  if (openStart !== null) total += openEnd - openStart;
+  return total;
+}
+
+export interface TraceTiming {
+  wallMs: number;
+  llmWallMs: number;
+  toolWallMs: number;
+  /** Sum over invocations — the number agent.ts records as toolMs. */
+  toolSumMs: number;
+  compactionWallMs: number;
+  unaccountedMs: number;
+  toolCalls: number;
+  llmTurns: number;
+  /** Highest number of tool calls in flight at once. >1 means toolSumMs lies. */
+  peakToolConcurrency: number;
+}
+
+/** Timing derived from the trace itself, so the eval table can report wall
+ *  clock instead of the fan-out-weighted sum stored on the run row. */
+export function traceTiming(run: DebugTraceRun): TraceTiming | null {
+  const startedAt = str(run.startedAt);
+  const startMs = startedAt ? Date.parse(startedAt) : NaN;
+  if (Number.isNaN(startMs)) return null;
+  const spans = collectSpans(events(run), startMs);
+  if (spans.length === 0) return null;
+
+  const tools = spans.filter((s) => s.kind === "tool");
+  const llm = spans.filter((s) => s.kind === "llm");
+  const compaction = spans.filter((s) => s.kind === "compaction");
+  const wallMs = Math.max(...spans.map((s) => s.startMs + s.durationMs), 0);
+
+  let peak = 0;
+  const edges = tools
+    .flatMap((s) => [
+      { at: s.startMs, delta: 1 },
+      { at: s.startMs + s.durationMs, delta: -1 },
+    ])
+    .sort((a, b) => a.at - b.at || a.delta - b.delta);
+  let open = 0;
+  for (const edge of edges) {
+    open += edge.delta;
+    if (open > peak) peak = open;
+  }
+
+  const toolWallMs = mergedMs(tools);
+  const llmWallMs = mergedMs(llm);
+  const compactionWallMs = mergedMs(compaction);
+  return {
+    wallMs,
+    llmWallMs,
+    toolWallMs,
+    toolSumMs: tools.reduce((n, s) => n + s.durationMs, 0),
+    compactionWallMs,
+    unaccountedMs: Math.max(0, wallMs - mergedMs(spans)),
+    toolCalls: tools.length,
+    llmTurns: llm.length,
+    peakToolConcurrency: peak,
+  };
+}
+
 function renderWaterfall(spans: Span[], totalMs: number): string {
   if (spans.length === 0 || totalMs <= 0) return "";
   const pct = (value: number): number => Math.max(0, Math.min(100, (value / totalMs) * 100));
 
-  const covered = spans.reduce((sum, sp) => sum + sp.durationMs, 0);
-  const llmMs = spans.filter((s) => s.kind === "llm").reduce((n, s) => n + s.durationMs, 0);
-  const toolMs = spans.filter((s) => s.kind === "tool").reduce((n, s) => n + s.durationMs, 0);
+  const toolSpans = spans.filter((s) => s.kind === "tool");
+  const covered = mergedMs(spans);
+  const llmMs = mergedMs(spans.filter((s) => s.kind === "llm"));
+  const toolMs = mergedMs(toolSpans);
+  const toolSum = toolSpans.reduce((n, s) => n + s.durationMs, 0);
+  const concurrent = toolSum > toolMs * 1.15 && toolSpans.length > 1;
   const gap = Math.max(0, totalMs - covered);
 
   const bars = spans
@@ -274,7 +363,7 @@ function renderWaterfall(spans: Span[], totalMs: number): string {
     `<h2>Where the time went</h2>`,
     `<div class="wf-legend">`,
     `<span><i class="wf-llm"></i>model ${ms(llmMs)}</span>`,
-    `<span><i class="wf-tool"></i>tools ${ms(toolMs)}</span>`,
+    `<span><i class="wf-tool"></i>tools ${ms(toolMs)}${concurrent ? ` <em>(${ms(toolSum)} across ${toolSpans.length} calls, overlapping)</em>` : ""}</span>`,
     `<span><i class="wf-gapc"></i>unaccounted ${ms(gap)}</span>`,
     `<span class="wf-total">wall ${ms(totalMs)}</span>`,
     `</div>`,
@@ -282,7 +371,7 @@ function renderWaterfall(spans: Span[], totalMs: number): string {
   ].join("\n");
 }
 
-function buildTraceParts(run: DebugTraceRun): TraceParts {
+export function buildTraceParts(run: DebugTraceRun): TraceParts {
   const all = events(run);
   const startedAt = str(run.startedAt);
   const startMs = startedAt ? Date.parse(startedAt) : NaN;
@@ -603,12 +692,7 @@ const TRACE_FOOT =
   `<p class="foot">Tool arguments are reduced to a short summary and tool results are never included. ` +
   `Secrets are scrubbed. The final answer body is not part of this trace.</p>`;
 
-function shell(title: string, body: string): string {
-  return `<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>${title}</title>
-<style>
-.wf{display:flex;flex-direction:column;gap:3px;margin:10px 0 4px}
+export const TRACE_STYLE = `.wf{display:flex;flex-direction:column;gap:3px;margin:10px 0 4px}
 .wf-row{display:grid;grid-template-columns:minmax(120px,190px) 1fr minmax(96px,auto);gap:10px;align-items:center;font-size:12px}
 .wf-label{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;opacity:.85}
 .wf-err{color:#e2704a}
@@ -666,6 +750,14 @@ details summary { cursor:pointer; color:var(--accent); font-size:12.5px; }
 .sess > summary::before { content:"▸"; color:var(--muted); font-weight:400; }
 .sess[open] > summary::before { content:"▾"; }
 .sess > summary .sub { font-weight:400; font-size:12.5px; color:var(--muted); }
+`;
+
+function shell(title: string, body: string): string {
+  return `<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${title}</title>
+<style>
+${TRACE_STYLE}
 </style></head>
 <body>
 ${body}
