@@ -27,6 +27,7 @@ export type KanbanViewMode = 'project' | 'board' | 'my-tickets';
 export type KanbanPageGroupBy =
   | 'none'
   | 'assignee'
+  | 'createdBy'
   | 'status'
   | 'priority'
   | {
@@ -193,6 +194,9 @@ const canRepresentGroupInVespa = (
   }
   if (groupBy === 'priority') {
     return Boolean(groupKey) && groupKey !== 'No Priority';
+  }
+  if (groupBy === 'createdBy') {
+    return Boolean(groupKey) && groupKey !== 'Unknown';
   }
   if (groupBy === 'status') {
     return Boolean(groupKey);
@@ -435,7 +439,12 @@ export const useKanbanTicketsPage = (
 
   // Compute group-specific filter for Vespa based on groupBy/groupKey
   // This ensures search results are filtered to only show in the correct group
-  const vespaGroupFilter: { priority?: string; assignee?: string; status?: string } = (() => {
+  const vespaGroupFilter: {
+    priority?: string;
+    assignee?: string;
+    createdBy?: string;
+    status?: string;
+  } = (() => {
     if (!options.groupBy || options.groupBy === 'none' || !options.groupKey) {
       return {};
     }
@@ -450,6 +459,10 @@ export const useKanbanTicketsPage = (
       // Send bare ID - the backend expands to all identity forms for Vespa matching.
       const bareId = options.groupKey.replace(/^(user:|group:|userGroup:)/, '');
       return { assignee: bareId };
+    }
+    if (options.groupBy === 'createdBy') {
+      if (options.groupKey === 'Unknown') return {};
+      return { createdBy: options.groupKey.replace(/^(user:|group:|userGroup:)/, '') };
     }
     if (options.groupBy === 'status') {
       // Filter by the group's status value
@@ -611,6 +624,11 @@ export const useKanbanTicketsPage = (
             if (ticket.priority) return false;
           } else {
             if ((ticket.priority as string) !== options.groupKey) return false;
+          }
+        }
+        if (options.groupBy === 'createdBy' && options.groupKey) {
+          if (normalizeIdentity(ticket.createdBy) !== normalizeIdentity(options.groupKey)) {
+            return false;
           }
         }
         if (options.groupBy === 'status' && options.groupKey) {
