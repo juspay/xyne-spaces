@@ -151,6 +151,7 @@ export function AgentCreateChatPanel({
           ...(context ? toStreamOverrides(context) : {}),
           ...(trigger ? { trigger } : {}),
           instant: true,
+          thinkingLevel: 'off',
         },
       );
     },

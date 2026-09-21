@@ -5105,6 +5105,10 @@ router.post("/generate-prompt", validateS2SKey, async (req, res: Response) => {
         ],
         max_tokens: 2000,
         temperature: 0.7,
+        // kimi-latest otherwise spends the 30s budget on reasoning_content
+        // and generate-prompt returns empty / times out.
+        reasoning_effort: "none",
+        thinking: { type: "disabled" },
       }),
       signal: AbortSignal.timeout(30_000),
     });
