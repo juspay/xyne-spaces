@@ -52,6 +52,7 @@ type TicketCountsSnapshot = {
   createdBy: string | null;
   userGroupId: string | null;
   ticketType: string | null;
+  merchantId?: string | null;
   isStageOverdue: boolean;
   eta: number | null;
   createdAt: number;
@@ -78,6 +79,7 @@ const sortUniqueValues = <T extends string>(values?: readonly T[]): T[] | undefi
 const SUPPORT_TICKET_TYPE = BaseTicketType.Support;
 const ALL_TICKETS_GROUP = 'All Tickets';
 const UNASSIGNED_GROUP = 'Unassigned';
+const UNKNOWN_CREATOR_GROUP = 'Unknown';
 
 const normalizeIdentity = (value: string | null | undefined): string | null => {
   if (!value) return null;
@@ -149,6 +151,8 @@ const getGroupKeys = (
 ): string[] => {
   if (!groupBy || groupBy === 'none') return [ALL_TICKETS_GROUP];
   if (groupBy === 'assignee') return [normalizeIdentity(snapshot.assignedTo) ?? UNASSIGNED_GROUP];
+  if (groupBy === 'createdBy')
+    return [normalizeIdentity(snapshot.createdBy) ?? UNKNOWN_CREATOR_GROUP];
   if (groupBy === 'status') return [snapshot.statusV2 ?? ''];
   if (groupBy === 'priority') return [snapshot.priority ?? ''];
   if (typeof groupBy === 'object' && groupBy.type === 'formField') {
@@ -260,6 +264,8 @@ const matchesRequest = (
     return false;
   if (filters.stages?.length && !filters.stages.includes(snapshot.stageName ?? '')) return false;
   if (filters.ticketTypes?.length && !filters.ticketTypes.includes(snapshot.ticketType ?? ''))
+    return false;
+  if (filters.merchantIds?.length && !filters.merchantIds.includes(snapshot.merchantId ?? ''))
     return false;
   if (filters.assigned !== undefined) {
     const isAssigned = Boolean(snapshot.assignedTo);
@@ -526,6 +532,9 @@ const normalizeFilters = (filters?: TicketFilters): KanbanCountsFilters | undefi
 
   const ticketTypes = sortUniqueValues(filters.ticketTypes);
   if (ticketTypes) normalized.ticketTypes = ticketTypes;
+
+  const merchantIds = sortUniqueValues(filters.merchantIds);
+  if (merchantIds) normalized.merchantIds = merchantIds;
 
   const dynamicFields = normalizeDynamicFields(filters.dynamicFields);
   if (dynamicFields) normalized.dynamicFields = dynamicFields;

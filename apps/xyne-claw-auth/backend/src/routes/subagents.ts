@@ -21,6 +21,8 @@ import { prisma } from "../db.js";
 import { encrypt } from "../crypto.js";
 import { CONFIG } from "../config.js";
 import { writeAuditLog } from "../lib/audit.js";
+import { verifyMcpCredentials } from "../lib/mcp-credential-verify.js";
+import { validateCredentials } from "../validation.js";
 import {
   subagentDefinitionRepository,
   subagentShareRepository,
@@ -495,6 +497,19 @@ router.post("/:name/mcp/connections", asyncHandler(async (req: Request, res: Res
   }
   const server = await prisma.mcpServer.findUnique({ where: { type: mcpServerType } });
   if (!server) throw notFound(`Unknown mcpServerType: ${mcpServerType}`);
+
+  const shape = await validateCredentials(server.type, credentials as Record<string, unknown>);
+  if (!shape.valid) throw badRequest(shape.error);
+
+  const verification = await verifyMcpCredentials({
+    sessionKey: `subagent:${subagent.id}:${instanceSlug}`,
+    serverType: server.type,
+    serverName: server.name,
+    credentials: credentials as Record<string, unknown>,
+  });
+  if (!verification.ok) {
+    throw new HttpError(verification.kind === "rejected" ? 400 : 502, verification.message);
+  }
 
   const { ciphertext, iv, authTag } = encrypt(JSON.stringify(credentials), CONFIG.encryptionKey);
   const cleanDisplayName = typeof displayName === "string" && displayName.trim().length > 0

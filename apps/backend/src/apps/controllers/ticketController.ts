@@ -212,6 +212,8 @@ const TicketFiltersSchema = z
     createdBy: toArrayFilter(z.string().trim().min(1)).optional(),
     userGroupId: toArrayFilter(z.string().trim().min(1)).optional(),
     tags: toArrayFilter(z.string().trim().min(1)).optional(),
+    merchantId: toArrayFilter(z.string().trim().min(1)).optional(),
+    hasMerchantId: z.boolean().optional(),
     isArchived: z.boolean().optional(),
     createdAfter: z.string().datetime({ message: 'createdAfter must be an ISO 8601 date string' }).optional(),
     createdBefore: z.string().datetime({ message: 'createdBefore must be an ISO 8601 date string' }).optional(),
@@ -234,11 +236,16 @@ const SearchTicketsBodySchema = z.object({
   const hasChannel = typeof data.channelId === 'string' && data.channelId.length > 0;
   const hasBoards = Array.isArray(data.boardIds) && data.boardIds.length > 0;
   const hasProject = typeof data.projectId === 'string' && data.projectId.length > 0;
-  if (!hasChannel && !hasBoards && !hasProject) {
+  // A merchant filter is a narrow, indexed predicate, so it may stand in for a scope and
+  // search the whole workspace (still bounded by the workspaceId backstop in the handler).
+  const hasMerchantScope =
+    (Array.isArray(data.filters?.merchantId) && data.filters.merchantId.length > 0) ||
+    data.filters?.hasMerchantId === true;
+  if (!hasChannel && !hasBoards && !hasProject && !hasMerchantScope) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
       path: ['channelId'],
-      message: 'At least one of channelId, boardIds, or projectId is required',
+      message: 'At least one of channelId, boardIds, projectId, filters.merchantId, or filters.hasMerchantId: true is required',
     });
   }
   // customFields is an expensive post-filter — require a board/project scope to bound it.
@@ -1418,6 +1425,8 @@ export class TicketController {
           createdBy: filters.createdBy,
           userGroupId: filters.userGroupId,
           tags: filters.tags,
+          merchantId: filters.merchantId,
+          hasMerchantId: filters.hasMerchantId,
           isArchived: filters.isArchived,
           createdAfter: filters.createdAfter ? new Date(filters.createdAfter) : undefined,
           createdBefore: filters.createdBefore ? new Date(filters.createdBefore) : undefined,
@@ -1450,6 +1459,7 @@ export class TicketController {
         channelId: true,
         boardId: true,
         projectId: true,
+        merchantId: true,
       } as const;
 
       const hasCustomFieldFilters = !!(customFields && Object.keys(customFields).length > 0);
@@ -1544,6 +1554,7 @@ export class TicketController {
           channelId: ticket.channelId,
           boardId: ticket.boardId,
           projectId: ticket.projectId,
+          merchantId: ticket.merchantId,
           ...(includeCustomFields ? { customFormData: customFormDataByTicketId.get(ticket.id) ?? null } : {}),
         };
       });

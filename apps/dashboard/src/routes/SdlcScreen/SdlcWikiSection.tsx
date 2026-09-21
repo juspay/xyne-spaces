@@ -430,11 +430,7 @@ function WikiScopeGrid(props: {
               </span>
               <span className='mt-4 truncate font-medium'>{scope.name}</span>
               <span className='mt-1 text-xs text-muted-foreground'>
-                {scope.hub
-                  ? 'How the repositories in this hub connect'
-                  : scope.removed
-                    ? 'Removed from this hub'
-                    : 'Repository Wiki'}
+                {scope.hub ? 'How the repositories in this hub connect' : 'Repository Wiki'}
               </span>
               <span className='mt-auto flex items-center justify-between pt-4 text-xs text-muted-foreground'>
                 <span className='tabular-nums'>
@@ -499,7 +495,7 @@ export function SdlcWikiSection(props: {
                     data-track-name='WikiScopeSelected'
                     data-track-metadata={JSON.stringify({ hub: scope.hub })}
                   >
-                    {scope.removed ? `${scope.name} (removed from hub)` : scope.name}
+                    {scope.name}
                   </SelectItem>
                 ))}
               </SelectContent>

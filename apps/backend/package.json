@@ -1,6 +1,6 @@
 {
   "name": "xyne-spaces-backend",
-  "version": "1.342.3",
+  "version": "1.351.1",
   "description": "Backend server for Xyne Spaces application",
   "main": "dist/index.js",
   "type": "module",
@@ -95,7 +95,7 @@
     "@xyne/shared": "workspace:*",
     "@xyne/storage": "workspace:*",
     "@xyne/vespa-ts": "1.6.0",
-    "@xyne/workflow-sdk": "3.2.41",
+    "@xyne/workflow-sdk": "3.2.44",
     "@y-sweet/sdk": "^0.9.1",
     "agentic-framework": "workspace:*",
     "archiver": "^7.0.1",

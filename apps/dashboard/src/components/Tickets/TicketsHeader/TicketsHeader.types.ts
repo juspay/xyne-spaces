@@ -7,6 +7,7 @@ export type HeaderLayoutView = 'kanban' | 'table' | 'calendar' | 'flow';
 export interface HeaderGroupingOption {
   value:
     | 'assignee'
+    | 'createdBy'
     | 'status'
     | 'priority'
     | { type: 'formField'; fieldId: string; fieldName: string };
