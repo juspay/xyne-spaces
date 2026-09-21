@@ -12,6 +12,7 @@
     "#zero-internal/sql": "./node_modules/@rocicorp/zero/out/z2s/src/sql.js"
   },
   "scripts": {
+    "prebuild": "bash ../../scripts/validate-no-acl-bypass.sh",
     "build": "tsc",
     "build:watch": "tsc -w",
     "start": "tsx dist/index.js",

@@ -19,8 +19,7 @@
 import Bull from 'bull';
 import { redisService } from '@/services/redisService';
 import { logger } from '@/utils/logger';
-import { repositories } from '@/database/repositories';
-import { runAsSystem } from '@/database/tenant/context';
+import { findCallCalendarPushRevision } from '@/bypassAcl/callServices';
 import { syncCallToGoogleCalendar } from '@/services/callCalendarPushService';
 
 const TAG = '[CALENDAR_PUSH][QUEUE]';
@@ -105,9 +104,7 @@ class CallCalendarPushQueue {
       // let a steadily-edited call re-enqueue itself indefinitely.
       if (isFollowUp) return;
 
-      const current = await runAsSystem(() =>
-        repositories.calls.findCalendarPushRevision(callId),
-      );
+      const current = await findCallCalendarPushRevision(callId);
       if (!current || current.getTime() === reconciledAt.getTime()) return;
 
       logger.info(`${TAG} Call changed while pushing; scheduling follow-up`, { callId });

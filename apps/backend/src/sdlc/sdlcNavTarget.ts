@@ -1,7 +1,7 @@
 import { ChannelType } from '@xyne/shared';
 import { sdlcSectionForCanvas, type SdlcNavTarget, type SdlcSection } from '@xyne/shared/sdlc';
 import { db } from '@/database/client';
-import { runAsSystem } from '@/database/tenant/context';
+import { memoizeAsSystem as memoize } from '@/bypassAcl/tenantUtils';
 import { resolveFolderTrackId, resolveItemTrackId, resolveInheritedOwner } from './entityLinkService';
 import { isTrackInChannel } from './sdlcChannelMembership';
 
@@ -24,41 +24,6 @@ interface SdlcLocation {
   discussionId?: string;
 }
 
-/** Raised once per recipient, so a 200-member hub would otherwise pay 200 identical lookups. */
-const TTL_MS = 60_000;
-const MAX_ENTRIES = 5_000;
-
-/**
- * Keyed on the entity id alone, so every load runs as system: under a caller's own
- * scope the same id answers differently per user, and one of those answers would be
- * served to everyone. A null is dropped rather than cached — it usually means a row
- * that has not been written yet, and a write-time stamp is permanent.
- */
-function memoize<A, T>(
-  keyOf: (arg: A) => string,
-  load: (arg: A) => Promise<T>,
-): (arg: A) => Promise<T> {
-  const entries = new Map<string, { at: number; value: Promise<T> }>();
-  return arg => {
-    const key = keyOf(arg);
-    const hit = entries.get(key);
-    if (hit && Date.now() - hit.at <= TTL_MS) return hit.value;
-    if (entries.size >= MAX_ENTRIES) entries.clear();
-    const value = runAsSystem(() => load(arg)).then(
-      resolved => {
-        if (resolved == null) entries.delete(key);
-        return resolved;
-      },
-      (error: unknown) => {
-        entries.delete(key);
-        throw error;
-      },
-    );
-    entries.set(key, { at: Date.now(), value });
-    return value;
-  };
-}
-
 interface CanvasInfo {
   channelId: string | null;
   section: SdlcSection;
@@ -66,6 +31,8 @@ interface CanvasInfo {
 }
 
 export const isSdlcChannel = memoize(
+  ['Channel'],
+  'keyed on entity id alone — same id must answer identically for every caller, not per-user',
   (channelId: string) => channelId,
   async (channelId: string): Promise<boolean> => {
     const channel = await db.channel.findUnique({
@@ -77,6 +44,8 @@ export const isSdlcChannel = memoize(
 );
 
 const canvasInfo = memoize(
+  ['Canvas'],
+  'keyed on entity id alone — same id must answer identically for every caller, not per-user',
   (canvasId: string) => canvasId,
   async (canvasId: string): Promise<CanvasInfo | null> => {
     const canvas = await db.canvas.findUnique({
@@ -99,22 +68,30 @@ async function canvasLocation(canvasId: string): Promise<SdlcLocation | null> {
 }
 
 export const sdlcConversationOwner = memoize(
+  ['SdlcEntityLink'],
+  'keyed on entity id alone — same id must answer identically for every caller, not per-user',
   (conversationId: string) => conversationId,
   (conversationId: string) => resolveInheritedOwner(db, conversationId),
 );
 
 export const sdlcFolderTrackId = memoize(
+  ['SdlcEntityLink'],
+  'keyed on entity id alone — same id must answer identically for every caller, not per-user',
   (folderId: string) => folderId,
   (folderId: string) => resolveFolderTrackId(db, folderId),
 );
 
 export const sdlcConversationTicket = memoize(
+  ['Ticket'],
+  'keyed on entity id alone — same id must answer identically for every caller, not per-user',
   (conversationId: string) => conversationId,
   async (conversationId: string): Promise<string | null> =>
     (await db.ticket.findFirst({ where: { conversationId }, select: { id: true } }))?.id ?? null,
 );
 
 export const sdlcTicketConversation = memoize(
+  ['Ticket'],
+  'keyed on entity id alone — same id must answer identically for every caller, not per-user',
   (ticketId: string) => ticketId,
   async (ticketId: string): Promise<string | null> =>
     (await db.ticket.findUnique({ where: { id: ticketId }, select: { conversationId: true } }))
@@ -151,6 +128,8 @@ async function ticketLocation(ticketId: string): Promise<SdlcLocation> {
 }
 
 const locationOf = memoize(
+  ['Canvas', 'SdlcEntityLink', 'Ticket'],
+  'composes canvasLocation/conversationLocation/ticketLocation, keyed on entity id alone',
   (ids: SdlcNavIds) =>
     `${ids.canvasId ?? ''}|${ids.ticketId ?? ''}|${ids.conversationId ?? ''}`,
   async (ids: SdlcNavIds): Promise<SdlcLocation | null> =>
