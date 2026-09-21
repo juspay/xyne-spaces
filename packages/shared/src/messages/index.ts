@@ -46,8 +46,6 @@ export {
   dedupeAndSortConversations,
   mergeCachedConversations,
   mergeConversationsWithLatest,
-  mergeServerAndPendingConversations,
-  mergeServerAndPendingThreadMessages,
   reconcileConversationWindow,
 } from './channelMessageMerge.js';
 

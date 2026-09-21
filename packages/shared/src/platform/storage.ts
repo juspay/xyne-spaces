@@ -41,11 +41,12 @@ export interface StorageAdapter {
   // synchronous storage omit them and keep the async path.
   readChannelConversationsSync?(channelId: string): unknown[] | null;
   readChatEntitySync?(kind: ChatCacheEntityKind, id: string): unknown | null;
-  loadContextPropertySync?(key: string): unknown;
 
   // Optional bounded per-entity chat storage. Implement all three or none:
-  // a partial implementation keeps the legacy single-blob path, which is the
-  // only way hydration and deletion stay consistent.
+  // a partial implementation keeps the legacy single-blob path for both
+  // persistence and hydration. loadChatEntities() returns each kind in
+  // most-recent-first order so the shared actor can restore its oldest-first
+  // insertion-order LRU without platform-specific assumptions.
   loadChatEntities?(): Promise<ChatCacheEntity[]>;
   writeChatEntity?(
     kind: ChatCacheEntityKind,

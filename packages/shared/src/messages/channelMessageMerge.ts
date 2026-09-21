@@ -35,14 +35,15 @@ const compareThreadMessages = (
 const dedupeAndSortThreadMessages = (
   current: readonly ThreadMessage[],
   incoming: readonly ThreadMessage[],
+  rootMessageId?: string | null,
 ): ThreadMessage[] => {
   const byMessageId = new Map<string, ThreadMessage>();
   for (const message of current) byMessageId.set(message.messageId, message);
   for (const message of incoming) byMessageId.set(message.messageId, message);
 
-  const rootMessageId = incoming[0]?.messageId ?? current[0]?.messageId;
+  const resolvedRootMessageId = rootMessageId ?? incoming[0]?.messageId ?? current[0]?.messageId;
   return Array.from(byMessageId.values()).sort((left, right) =>
-    compareThreadMessages(rootMessageId, left, right),
+    compareThreadMessages(resolvedRootMessageId, left, right),
   );
 };
 
@@ -80,19 +81,26 @@ export const mergeServerAndPendingConversations = (
 export const mergeServerAndPendingThreadMessages = (
   serverRows: readonly ThreadMessage[],
   pendingRows: readonly ThreadMessage[],
+  rootMessageId?: string | null,
 ): ThreadMessage[] => {
-  const serverMessageIds = new Set(serverRows.map(message => message.messageId));
-  const renderablePendingRows = pendingRows.filter(
-    message => !serverMessageIds.has(message.messageId),
-  );
+  return dedupeAndSortThreadMessages(pendingRows, serverRows, rootMessageId);
+};
 
-  return dedupeAndSortThreadMessages(renderablePendingRows, serverRows);
+export type ConversationWindowReconcileOptions = {
+  /** Lower createdAt boundary supplied by a cursor. */
+  lowerBound?: number;
+  /** Cursor queries are exclusive unless the query explicitly says otherwise. */
+  lowerBoundInclusive?: boolean;
+  /** An anchor is removable only when the query includes it in its result. */
+  anchorConversationId?: string;
+  anchorIncludesResult?: boolean;
 };
 
 /** Replaces one live viewport window without disturbing rows outside that window. */
 export const reconcileConversationWindow = (
   current: Conversation[],
   incomingWindow: Conversation[],
+  options: ConversationWindowReconcileOptions = {},
 ): Conversation[] => {
   if (incomingWindow.length === 0) return current;
 
@@ -104,16 +112,39 @@ export const reconcileConversationWindow = (
   const last = incoming[incoming.length - 1];
   if (!first || !last) return current;
 
-  const reconciled = current
-    .filter(
-      conversation =>
-        conversation.createdAt < first.createdAt ||
-        conversation.createdAt > last.createdAt ||
-        incomingById.has(conversation.conversationId),
-    )
+  // The live query is a bounded window, not a complete channel snapshot.
+  // Replace rows inside the timestamp range represented by this emission and
+  // retain rows outside it. Using the returned timestamps (rather than waiting
+  // for the last returned id) is important when the boundary row is new and
+  // therefore does not exist in `current`.
+  const lowerBound = options.lowerBound ?? first.createdAt;
+  const lowerBoundInclusive = options.lowerBoundInclusive ?? true;
+  const itemsToDelete = new Set<string>();
+  for (const conversation of current) {
+    const afterLowerBound = lowerBoundInclusive
+      ? conversation.createdAt >= lowerBound
+      : conversation.createdAt > lowerBound;
+    const insideWindow = afterLowerBound && conversation.createdAt <= last.createdAt;
+    if (insideWindow && !incomingById.has(conversation.conversationId)) {
+      itemsToDelete.add(conversation.conversationId);
+    }
+  }
+  // Forward cursor queries include their anchor. If it disappears, remove it;
+  // backward queries are exclusive and must retain an absent anchor because
+  // absence is normal rather than evidence of deletion.
+  if (
+    options.anchorIncludesResult &&
+    options.anchorConversationId &&
+    !incomingById.has(options.anchorConversationId)
+  ) {
+    itemsToDelete.add(options.anchorConversationId);
+  }
+
+  const replaced = current
+    .filter(conversation => !itemsToDelete.has(conversation.conversationId))
     .map(conversation => incomingById.get(conversation.conversationId) ?? conversation);
 
-  return dedupeAndSortConversations(reconciled, incoming);
+  return dedupeAndSortConversations(replaced, incoming);
 };
 
 /**
