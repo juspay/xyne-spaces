@@ -6,6 +6,7 @@ import {
   type AttachmentRef,
 } from '../../../machines/attachmentViewerMachine';
 import { createPreviewUrl } from '../../../services/clients/fileFetchService';
+import { isHeicAttachment } from '../../../services/heicAttachmentService';
 import { getFileExtension } from '../../Chat/MessageAttachment/utils';
 
 export type PanelAttachmentRow = {
@@ -129,17 +130,20 @@ function getFileThumbMeta(mimeType: string): FileThumbMeta {
 function PanelAuthImageThumb({
   attachmentId,
   mimeType,
+  fileName,
   thumbnailUrl,
   className,
 }: {
   attachmentId: string;
   mimeType: string;
+  fileName?: string;
   thumbnailUrl?: string | null;
   className?: string;
 }): ReactElement {
   const [blobUrl, setBlobUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const isVideo = isVideoMime(mimeType);
+  const isHeic = fileName !== undefined && isHeicAttachment(mimeType, fileName);
 
   useEffect(() => {
     let objectUrl: string | null = null;
@@ -148,8 +152,14 @@ function PanelAuthImageThumb({
     const load = async (): Promise<void> => {
       setLoading(true);
       try {
+        // HEIC originals cannot render in most browsers; the thumbnail
+        // endpoint serves the server-generated WebP rendition instead.
         const source =
-          isVideo && thumbnailUrl ? `/attachments/${attachmentId}/thumbnail` : attachmentId;
+          isVideo && thumbnailUrl
+            ? `/attachments/${attachmentId}/thumbnail`
+            : isHeic
+              ? `/attachments/${attachmentId}/thumbnail`
+              : attachmentId;
         const blob = await createPreviewUrl(source);
         if (cancelled) {
           return;
@@ -175,7 +185,7 @@ function PanelAuthImageThumb({
         URL.revokeObjectURL(objectUrl);
       }
     };
-  }, [attachmentId, mimeType, isVideo, thumbnailUrl]);
+  }, [attachmentId, mimeType, isVideo, isHeic, thumbnailUrl]);
 
   if (loading) {
     return <div className={cn('bg-muted animate-pulse', className)} aria-hidden />;
@@ -234,7 +244,7 @@ export function MessageCardAttachmentThumbnails({
       data-track-name='MESSAGE_CARD_ATTACHMENTS_STRIP'
     >
       {attachments.map(att => {
-        if (isImageMime(att.mimetype)) {
+        if (isImageMime(att.mimetype) || isHeicAttachment(att.mimetype, att.originalFilename)) {
           return (
             <button
               key={att.id}
@@ -254,6 +264,7 @@ export function MessageCardAttachmentThumbnails({
               <PanelAuthImageThumb
                 attachmentId={att.id}
                 mimeType={att.mimetype}
+                fileName={att.originalFilename}
                 thumbnailUrl={att.thumbnailUrl ?? null}
                 className='h-full w-full'
               />
@@ -281,6 +292,7 @@ export function MessageCardAttachmentThumbnails({
                 <PanelAuthImageThumb
                   attachmentId={att.id}
                   mimeType={att.mimetype}
+                  fileName={att.originalFilename}
                   thumbnailUrl={att.thumbnailUrl}
                   className='absolute inset-0 h-full w-full'
                 />
