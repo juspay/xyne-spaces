@@ -94,6 +94,30 @@ export async function resolveClawUserIdForSpacesIdentity(
 }
 
 /**
+ * Every id form a user's rows may be keyed by: the input id, the canonical
+ * Claw id it resolves to (identity ladder), and every ACTIVE workspace-scoped
+ * Spaces identity linked to that canonical user. Falls back to the input id
+ * alone on any DB hiccup (fail-open = narrower result set, never a 500).
+ *
+ * Use for admin/cross-user FILTERS (runs, scheduled jobs) — matching rows
+ * written before canonicalization requires the full form set, not one id.
+ */
+export async function userIdAliasesFor(userId: string): Promise<string[]> {
+  const id = userId.trim();
+  if (!id) return [];
+  try {
+    const canonical = (await resolveClawUserIdForSpacesIdentity(id)) ?? id;
+    const rows = await prisma.userSurfaceIdentity.findMany({
+      where: { surfaceId: "spaces", userId: canonical, status: "ACTIVE" },
+      select: { surfaceUserId: true },
+    });
+    return [...new Set([id, canonical, ...rows.map((row) => row.surfaceUserId)])];
+  } catch {
+    return [id];
+  }
+}
+
+/**
  * "Id-or-alias → canonical Claw user id, else the input unchanged": the shared
  * one-liner for admin routes that accept either Claw ids or Spaces workspace
  * aliases. Resolution failures degrade to the input id (fail-open) so a

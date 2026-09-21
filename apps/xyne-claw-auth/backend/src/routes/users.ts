@@ -185,6 +185,9 @@ router.post("/", asyncHandler(async (req: Request, res: Response) => {
   const spacesSession = spacesSessionFromRequest(req);
   const token = (typeof spacesToken === "string" && spacesToken) || spacesSession.token;
   if (token) {
+    // `id.trim()` is the raw, workspace-scoped Spaces id from the request body
+    // (the user's own id — matchesAuthenticatedUserId enforced above): the
+    // workspace lookup needs the Spaces-side key, never the canonical Claw id.
     autoConfigureSpaces(user.id, id.trim(), token, spacesSession.sessionId).catch((err) => {
       log.error("[users] auto-configure xyne-spaces failed:", err);
     });
@@ -394,16 +397,14 @@ router.get("/:id", asyncHandler(async (req: Request<{ id: string }>, res: Respon
     throw badRequest("orgId is required");
   }
 
-  const user = await prisma.user.findFirst({
-    where: { id: req.params.id, orgId },
-    select: { id: true, email: true, name: true },
-  });
-
-  if (!user) {
+  // `:id` may be a canonical Claw id or a Spaces workspace-scoped alias —
+  // resolve through the identity/exact-id ladder before scoping by org.
+  const resolved = await findUserByAnyId(req.params.id);
+  if (!resolved || resolved.orgId !== orgId) {
     throw notFound("User not found");
   }
 
-  ok(res, user);
+  ok(res, { id: resolved.id, email: resolved.email, name: resolved.name });
 }));
 
 export { router as usersRouter };
