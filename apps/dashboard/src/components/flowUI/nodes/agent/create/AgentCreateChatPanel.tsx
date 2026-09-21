@@ -221,8 +221,9 @@ function ScriptedAgentCreateChatPanel({
   const pending = scriptedPlaying && !scriptedTyping;
 
   useEffect(() => {
+    if (scriptedDraft === '' && !scriptedPlaying && !scriptedTyping) return;
     composerRef.current?.setPrompt(scriptedDraft);
-  }, [scriptedDraft]);
+  }, [scriptedDraft, scriptedPlaying, scriptedTyping]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ block: 'end' });

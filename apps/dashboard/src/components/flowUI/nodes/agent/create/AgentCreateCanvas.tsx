@@ -1,4 +1,4 @@
-import { useMemo, type ReactElement, type ReactNode } from 'react';
+import { useMemo, useRef, type ReactElement, type ReactNode } from 'react';
 import { AtMark, PencilEditLine } from '@xyne/icons';
 import { Loader2 } from 'lucide-react';
 import { Skeleton } from '@/components/ui/Skeleton';
@@ -11,6 +11,7 @@ import { SkillsCapabilityRow } from '@/routes/AIScreen/library/shared/pickers/sk
 import { SubagentCapabilityRow } from '@/routes/AIScreen/library/shared/pickers/subagent/SubagentCapabilityRow';
 import { slugify } from '@/routes/ClawAgentsScreen/create/wizardState';
 import { ChatFillHighlight } from './ChatFillHighlight';
+import { WritingFieldPointer } from './WritingFieldPointer';
 import type {
   AgentCreateConflict,
   AgentCreateField,
@@ -39,7 +40,7 @@ interface AgentCreateCanvasProps {
   onClose?: () => void;
   /** First empty-canvas describe only: skeleton identity + instructions, Hub rows stay. */
   skeletonIdentity?: boolean;
-  /** Field currently being written by chat. Drives the in-field caret. */
+  /** Field currently being written by chat. Drives the traveling write pointer. */
   writingField?: AgentCreateField | null;
 }
 
@@ -143,6 +144,7 @@ export function AgentCreateCanvas({
     );
   };
 
+  const columnRef = useRef<HTMLDivElement | null>(null);
   const showIdentitySkeleton = Boolean(skeletonIdentity);
   const isWriting = (field: AgentCreateField): boolean =>
     writingField === field || highlights.has(field);
@@ -175,13 +177,13 @@ export function AgentCreateCanvas({
         ) : null}
       </div>
       <div className='flex-1 overflow-y-auto px-6 py-6'>
-        <div className='mx-auto flex w-full max-w-3xl flex-col gap-10'>
+        <div ref={columnRef} className='relative mx-auto flex w-full max-w-3xl flex-col gap-10'>
           {showIdentitySkeleton ? (
             <IdentitySkeleton />
           ) : (
             <>
               <div className='flex min-w-0 flex-col gap-2'>
-                <ChatFillHighlight active={isWriting('name')} placement='inline'>
+                <ChatFillHighlight active={isWriting('name')} placement='inline' field='name'>
                   <div className='flex w-full items-center gap-2'>
                     <AutoWidthInput
                       id='agent-create-name'
@@ -205,7 +207,7 @@ export function AgentCreateCanvas({
                   </div>
                 </ChatFillHighlight>
 
-                <ChatFillHighlight active={isWriting('slug')} placement='inline'>
+                <ChatFillHighlight active={isWriting('slug')} placement='inline' field='slug'>
                   <div className='flex items-center gap-1.5'>
                     <div className='flex items-center gap-0.5 py-0.5'>
                       <AtMark className='size-4 shrink-0 text-muted-foreground' aria-hidden />
@@ -251,7 +253,11 @@ export function AgentCreateCanvas({
                 {renderConflict('slug')}
               </div>
 
-              <ChatFillHighlight active={isWriting('description')} placement='block'>
+              <ChatFillHighlight
+                active={isWriting('description')}
+                placement='block'
+                field='description'
+              >
                 <div className='flex w-full flex-col gap-1'>
                   <label
                     htmlFor='agent-create-description'
@@ -275,7 +281,11 @@ export function AgentCreateCanvas({
                 </div>
               </ChatFillHighlight>
 
-              <ChatFillHighlight active={isWriting('systemPrompt')} placement='block'>
+              <ChatFillHighlight
+                active={isWriting('systemPrompt')}
+                placement='block'
+                field='systemPrompt'
+              >
                 <div className='flex w-full flex-col gap-1'>
                   <label
                     htmlFor='agent-create-instructions'
@@ -303,7 +313,7 @@ export function AgentCreateCanvas({
           )}
 
           <>
-            <ChatFillHighlight active={isWriting('tools')}>
+            <ChatFillHighlight active={isWriting('tools')} field='tools'>
               <div
                 className={cn('flex flex-col gap-8', disabled && 'pointer-events-none opacity-60')}
                 onFocus={() => onFieldFocus('tools')}
@@ -340,7 +350,7 @@ export function AgentCreateCanvas({
               </div>
             </ChatFillHighlight>
 
-            <ChatFillHighlight active={isWriting('skills')}>
+            <ChatFillHighlight active={isWriting('skills')} field='skills'>
               <div
                 className={cn(disabled && 'pointer-events-none opacity-60')}
                 onFocus={() => onFieldFocus('skills')}
@@ -354,7 +364,7 @@ export function AgentCreateCanvas({
               </div>
             </ChatFillHighlight>
 
-            <ChatFillHighlight active={isWriting('knowledge')}>
+            <ChatFillHighlight active={isWriting('knowledge')} field='knowledge'>
               <div
                 className={cn(disabled && 'pointer-events-none opacity-60')}
                 onFocus={() => onFieldFocus('knowledge')}
@@ -372,6 +382,7 @@ export function AgentCreateCanvas({
 
             {note ? <p className='text-sm leading-5 text-muted-foreground'>{note}</p> : null}
           </>
+          <WritingFieldPointer field={writingField} originRef={columnRef} />
         </div>
       </div>
       {footer ? (

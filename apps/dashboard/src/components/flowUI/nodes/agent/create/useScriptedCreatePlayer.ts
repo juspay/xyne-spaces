@@ -179,6 +179,12 @@ export function useScriptedCreatePlayer({
         });
         if (!changed.includes(field)) continue;
         current.setWritingField(field);
+        const writing = document.querySelector('[data-agent-writing="true"]');
+        writing?.scrollIntoView({
+          block: 'center',
+          inline: 'nearest',
+          behavior: prefersReducedScriptedMotion() ? 'auto' : 'smooth',
+        });
         if (onField) {
           await onField(field);
         } else {
