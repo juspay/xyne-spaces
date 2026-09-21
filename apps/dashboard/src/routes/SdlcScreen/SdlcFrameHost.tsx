@@ -5,6 +5,7 @@ import { SDLC_APP_BASE_PATH } from '../../config';
 import { useCallJoinOrInitiate } from '../../hooks/useCallJoinOrInitiate';
 import { useSdlcFrame } from './SdlcFrameContext';
 import { isSdlcPath, parseSdlcFrameMessage, SDLC_FRAME_MESSAGE } from './sdlcFrameMessages';
+import { getLastSdlcLocation, setLastSdlcLocation, sdlcHubIdOf } from './lastSdlcLocation';
 import { openLink } from '../../utils/openLink';
 import { SdlcEmbeddedWebview } from './SdlcEmbeddedWebview';
 
@@ -60,7 +61,13 @@ const SdlcFrameHost = (): ReactElement | null => {
   // :workspaceId, so at mount the location is usually a different screen.
   useEffect(() => {
     if (!viewport || initialSrcRef.current || !workspaceId) return;
-    initialSrcRef.current = `${SDLC_APP_BASE_PATH}${location.pathname}${location.search}${location.hash}`;
+    // Bare /sdlc after a reload: resume the durable last-visited page.
+    const root = `/${workspaceId}/sdlc`;
+    const stored =
+      location.pathname === root || location.pathname === `${root}/`
+        ? getLastSdlcLocation(workspaceId)
+        : null;
+    initialSrcRef.current = `${SDLC_APP_BASE_PATH}${stored ?? `${location.pathname}${location.search}${location.hash}`}`;
     setHasActivated(true);
   }, [viewport, workspaceId, location.pathname, location.search, location.hash]);
 
@@ -97,10 +104,13 @@ const SdlcFrameHost = (): ReactElement | null => {
       }
 
       if (message.type === SDLC_FRAME_MESSAGE.reset) {
-        // Timestamp forces a fresh document rather than a cached one. JS cannot
-        // request a true cache-bypassing reload.
-        const root = `/${workspaceId}/sdlc`;
-        initialSrcRef.current = `${SDLC_APP_BASE_PATH}${root}?_reset=${Date.now()}`;
+        // Timestamp forces a fresh document rather than a cached one. Stay on the
+        // frame's current page instead of dropping to the hub root.
+        const frameLocation = frameLocationRef.current;
+        const root =
+          frameLocation && sdlcHubIdOf(frameLocation) ? frameLocation : `/${workspaceId}/sdlc`;
+        const separator = root.includes('?') ? '&' : '?';
+        initialSrcRef.current = `${SDLC_APP_BASE_PATH}${root}${separator}_reset=${Date.now()}`;
         frameLocationRef.current = null;
         setIsReady(false);
         setResetCount(count => count + 1);
@@ -111,6 +121,7 @@ const SdlcFrameHost = (): ReactElement | null => {
       if (message.type !== SDLC_FRAME_MESSAGE.route) return;
 
       frameLocationRef.current = message.path;
+      if (workspaceId) setLastSdlcLocation(workspaceId, message.path);
       // Only while on screen — a hidden frame must not move the address bar.
       const current = `${location.pathname}${location.search}${location.hash}`;
       if (viewport && isSdlcPath(message.path) && message.path !== current) {
