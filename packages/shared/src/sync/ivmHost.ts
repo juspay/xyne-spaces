@@ -337,6 +337,27 @@ export class IvmHost {
   }
 
   /**
+   * Parity with Zero's own `defaultOptionalFieldsToNull` (zero-client crud-impl.ts): a `set`
+   * row entering the hosted source must be schema-complete — absent columns become explicit
+   * `null`, exactly what Postgres/the wire always delivers — so connection predicates
+   * (e.g. `doNotPostToChannel IS NULL`) evaluate identically for optimistic and confirmed
+   * rows. Without this, a mutator row missing an optional column is silently dropped by every
+   * pipeline's pushed-down filter (`undefined !== null`) and becomes an invisible ghost.
+   */
+  #normalizeSetRow(table: string, row: Row): Row {
+    const t = tables[table];
+    if (!t) return row;
+    let rv = row;
+    for (const name in t.columns) {
+      if (rv[name] === undefined) {
+        if (rv === row) rv = { ...row };
+        (rv as Record<string, ReadonlyJSONValue | null>)[name] = null;
+      }
+    }
+    return rv;
+  }
+
+  /**
    * Record (or REPLACE) a mutation's optimistic ops and fold them into the source. Replacing
    * handles Zero's re-invocation of the same mutation on optimistic→rebase identically. Only
    * ops on hosted tables reach here; the caller filters.
@@ -351,8 +372,10 @@ export class IvmHost {
       }
     }
     const resolved: OverlayOp[] = ops.map((op) => {
-      const refKey = this.#refKey(op.table, this.#pkKey(op.table, op.row));
-      return { kind: op.kind, table: op.table, refKey, pk: this.#pkOf(op.table, op.row), row: op.row };
+      // `set` rows are normalized to schema shape; `patch`/`delete` stay partial by design.
+      const row = op.kind === 'set' ? this.#normalizeSetRow(op.table, op.row) : op.row;
+      const refKey = this.#refKey(op.table, this.#pkKey(op.table, row));
+      return { kind: op.kind, table: op.table, refKey, pk: this.#pkOf(op.table, row), row };
     });
     if (resolved.length > 0) this.#ledger.set(mutationID, resolved);
     else this.#ledger.delete(mutationID);
