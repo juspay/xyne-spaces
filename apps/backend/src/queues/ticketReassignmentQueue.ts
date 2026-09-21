@@ -1,10 +1,7 @@
 import Bull from 'bull';
 import { logger } from '@/utils/logger';
 import { DatabaseClient } from '@/database/client';
-import { repositories } from '@/database/repositories';
-import { evaluateAssignmentRule, AssignmentType } from '@/utils/assignmentEngine';
-import { handleTicketAssignmentChange } from '@/utils/workloadUtils';
-import { getAutomationsBotUserId } from '@/automations/steps/automations-bot';
+import { reassignTicketAwayFrom } from '@/utils/ticketReassignment';
 import { TicketStatusV2 } from '@xyne/shared';
 
 const prisma = DatabaseClient.getInstance();
@@ -158,34 +155,15 @@ class TicketReassignmentQueue {
         for (const ticket of tickets) {
           scanned++;
           try {
-            const result = await evaluateAssignmentRule(
-              userGroupId,
-              ticket.boardId,
-              AssignmentType.TICKET_ASSIGNEE,
-              userId,
-              ticket.projectId,
-              ticket.channelId,
-            );
-
-            // No eligible replacement (e.g. no other on-call/active member) - leave the
+            // No eligible replacement (e.g. no other on-call/active member) leaves the
             // ticket assigned to the now-unavailable user rather than nulling it out.
-            if (!result.assignedUserId) {
-              logger.info(
-                `[TICKET-REASSIGNMENT] No eligible replacement for ticket ${ticket.id} (${result.reason}); leaving assignee unchanged`
-              );
-              continue;
-            }
-
-            const systemActorId = await getAutomationsBotUserId(ticket.workspaceId);
-            await repositories.tickets.updateTicketAssignee(ticket.id, result.assignedUserId, systemActorId);
-            await handleTicketAssignmentChange(
-              result.assignedUserId,
+            const newAssigneeId = await reassignTicketAwayFrom(
+              { ...ticket, userGroupId },
               userId,
-              userGroupId,
-              ticket.boardId,
-              systemActorId,
             );
-            reassigned++;
+            if (newAssigneeId) {
+              reassigned++;
+            }
           } catch (error) {
             logger.error(`❌ [TICKET-REASSIGNMENT] Failed to reassign ticket ${ticket.id}:`, error);
           }
