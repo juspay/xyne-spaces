@@ -226,9 +226,16 @@ export class SyncClient {
     } catch {
       // best-effort — subscribe fresh (snapshot) on failure
     }
+    // Only now may a send carry this key — #onReady skips unprepared keys and relies on
+    // this tail, so a boot-time `sync:ready` that beats the IDB read can't emit an
+    // offset-less subscribe (which forces a full snapshot where a resume would do).
+    this.#prepared.add(key);
     if (this.#connectionReady && this.#subs.has(key)) this.#send(key);
     this.#seedDone.set(key, this.#seedFromStore(key));
   }
+
+  /** Keys whose resume-offset load has settled — the gate for #onReady's re-send. */
+  readonly #prepared = new Set<string>();
 
   /**
    * subKey → completion of the in-flight IDB seed (resolves even on failure/skip). The
@@ -293,6 +300,7 @@ export class SyncClient {
     this.#subs.delete(key);
     this.#hydrated.delete(key);
     this.#seedDone.delete(key);
+    this.#prepared.delete(key);
     obsEmit('client-ws', { dir: 'up', event: 'unsubscribe', queryName, instanceKey: entry.instanceKey });
     this.#transport.emit<SubscribePayload>(EVT.unsubscribe, { queryName, args });
     // Everything (host rows, offset) is keyed by subKey; the seed may have populated the
@@ -337,7 +345,15 @@ export class SyncClient {
     // (a reconnect can carry a changed role). Shared queries re-engage the engine on re-render.
     this.#setUnavailable(false);
     obsEmit('client-ws', { dir: 'down', event: 'ready', resent: this.#subs.size });
-    for (const key of this.#subs.keys()) this.#send(key);
+    // Only PREPARED keys re-send here. At boot, `sync:ready` regularly beats the IDB
+    // offset load (localhost socket vs cold IndexedDB); sending then would omit
+    // `sinceOffset` and force a full snapshot where a resume would do. An unprepared
+    // key's in-flight #hydrateAndSend sends it the moment its offset load settles
+    // (connectionReady is now true). On a mid-session reconnect every live key is
+    // already prepared, so all of them re-send immediately as before.
+    for (const key of this.#subs.keys()) {
+      if (this.#prepared.has(key)) this.#send(key);
+    }
   };
 
   /**

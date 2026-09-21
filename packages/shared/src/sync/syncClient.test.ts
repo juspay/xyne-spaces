@@ -171,3 +171,46 @@ test('unsubscribe while sync:current awaits the seed: no late flip', async () =>
   await settle();
   assert.equal(hydratedCb, 0, 'a dead subscription must not flip hydrated');
 });
+
+test('boot: sync:ready before the offset load must not emit an offset-less subscribe', async () => {
+  const handlers = new Map<string, (payload: unknown) => void>();
+  const sent: { event: string; payload: Record<string, unknown> }[] = [];
+  const offsetGate = deferred<void>();
+  const transport: SyncTransport = {
+    emit: <P, A = void>(event: string, payload: P, ack?: (response: A) => void) => {
+      sent.push({ event, payload: payload as Record<string, unknown> });
+      if (event === 'sync:subscribe') {
+        (ack as ((r: { instanceKey: string }) => void) | undefined)?.({ instanceKey: 'I1' });
+      }
+    },
+    on: <P>(event: string, handler: (payload: P) => void) =>
+      handlers.set(event, handler as (p: unknown) => void),
+    off: (event: string) => handlers.delete(event),
+  };
+  const host = { applySeed: () => {}, dropInstance: () => {} } as unknown as IvmHost;
+  const store = {
+    loadOffset: async () => {
+      await offsetGate.promise; // cold IDB, slower than the socket
+      return 'off-42';
+    },
+    loadInstance: async () => null,
+  } as unknown as SyncStore;
+  const client = new SyncClient(host, transport, store);
+  client.start();
+  const settle = () => new Promise((r) => setTimeout(r, 0));
+
+  client.subscribe('q', [null]); // boot-time subscribe, socket not ready yet
+  handlers.get('sync:ready')?.(undefined); // the socket wins the race
+  await settle();
+  assert.deepEqual(
+    sent.filter((s) => s.event === 'sync:subscribe'),
+    [],
+    'no subscribe may be emitted before the resume offset is known',
+  );
+
+  offsetGate.resolve(); // the IDB read completes
+  await settle();
+  const subs = sent.filter((s) => s.event === 'sync:subscribe');
+  assert.equal(subs.length, 1, 'exactly one subscribe after the offset load (no double-send)');
+  assert.equal(subs[0].payload.sinceOffset, 'off-42', 'the subscribe carries the resume offset');
+});
