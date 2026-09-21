@@ -1,60 +1,60 @@
 dependencies:
 - name: xyne-backend
   repository: file://../xyne-backend
-  version: 0.1.0-app.1.356.0
+  version: 0.1.0-app.1.359.0
 - name: xyne-worker
   repository: file://../xyne-worker
-  version: 0.1.0-app.1.356.0
+  version: 0.1.0-app.1.359.0
 - name: xyne-dashboard
   repository: file://../xyne-dashboard
-  version: 0.1.0-app.1.356.0
+  version: 0.1.0-app.1.359.0
 - name: xyne-dashboard-external
   repository: file://../xyne-dashboard-external
-  version: 0.1.0-app.1.356.0
+  version: 0.1.0-app.1.359.0
 - name: xyne-dashboard-edge
   repository: file://../xyne-dashboard-edge
-  version: 0.1.0-app.1.356.0
+  version: 0.1.0-app.1.359.0
 - name: xyne-zero
   repository: file://../xyne-zero
-  version: 0.1.0-app.1.356.0
+  version: 0.1.0-app.1.359.0
 - name: xyne-zero
   repository: file://../xyne-zero
-  version: 0.1.0-app.1.356.0
+  version: 0.1.0-app.1.359.0
 - name: xyne-ysweet
   repository: file://../xyne-ysweet
-  version: 0.1.0-app.1.356.0
+  version: 0.1.0-app.1.359.0
 - name: xyne-claw
   repository: file://../xyne-claw
-  version: 0.1.0-app.1.356.0
+  version: 0.1.0-app.1.359.0
 - name: xyne-claw-auth
   repository: file://../xyne-claw-auth
-  version: 0.1.0-app.1.356.0
+  version: 0.1.0-app.1.359.0
 - name: xyne-claw-auth-frontend
   repository: file://../xyne-claw-auth-frontend
-  version: 0.1.0-app.1.356.0
+  version: 0.1.0-app.1.359.0
 - name: xyne-transcription-agent
   repository: file://../xyne-transcription-agent
-  version: 0.1.0-app.1.356.0
+  version: 0.1.0-app.1.359.0
 - name: xyne-lighton-ocr
   repository: file://../xyne-lighton-ocr
-  version: 0.1.0-app.1.356.0
+  version: 0.1.0-app.1.359.0
 - name: xyne-vespa
   repository: file://../xyne-vespa
-  version: 0.1.0-app.1.356.0
+  version: 0.1.0-app.1.359.0
 - name: xyne-vespa
   repository: file://../xyne-vespa
-  version: 0.1.0-app.1.356.0
+  version: 0.1.0-app.1.359.0
 - name: xyne-vespa
   repository: file://../xyne-vespa
-  version: 0.1.0-app.1.356.0
+  version: 0.1.0-app.1.359.0
 - name: xyne-vespa
   repository: file://../xyne-vespa
-  version: 0.1.0-app.1.356.0
+  version: 0.1.0-app.1.359.0
 - name: xyne-vespa-embedder
   repository: file://../xyne-vespa-embedder
-  version: 0.1.0-app.1.356.0
+  version: 0.1.0-app.1.359.0
 - name: xyne-tei-batch-proxy
   repository: file://../xyne-tei-batch-proxy
-  version: 0.1.0-app.1.356.0
-digest: sha256:53393395cf176584aa3a1e97ae2d392e12189a5bff9cd5bf94f7923c2fc8cb4e
-generated: "2026-09-21T13:55:46.177416336Z"
+  version: 0.1.0-app.1.359.0
+digest: sha256:4c7f31a4b4c70bd5adc897b1847c728eb6f1268fc05540aeb112a455a94bd95a
+generated: "2026-09-21T15:52:07.438268662Z"
