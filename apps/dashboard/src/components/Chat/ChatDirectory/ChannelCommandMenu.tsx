@@ -26,15 +26,7 @@ import {
 import * as Tabs from '@radix-ui/react-tabs';
 import * as DialogPrimitive from '@radix-ui/react-dialog';
 import { Channel, ChannelVisibility, isDeskChannelType, TicketPriority } from '@xyne/shared';
-import {
-  ChannelChipIcon,
-  ChipIcon,
-  chipLabelText,
-  chipPrefixText,
-  isSelfMentionChip,
-  resolveChipName,
-  PRIORITY_ICON_COLOR,
-} from './FilterChipNode';
+import { ChannelChipIcon, resolveChipName, PRIORITY_ICON_COLOR } from './FilterChipNode';
 import {
   isDMChannel,
   isGroupDMChannel,
@@ -47,6 +39,7 @@ import {
 } from './ChatDirectory.utils';
 import { useChannelDisplayName } from '../../../hooks/useChannelDisplayName';
 import { Tooltip } from '../../ui/Tooltip/Tooltip';
+import { useAuthContextValues } from '../../../hooks/useAuth';
 import Avatar from '../../ui/Avatar/Avatar';
 import ChannelIcon from '../ChannelIcon/ChannelIcon';
 import Badge from '../../ui/Badge';
@@ -72,12 +65,14 @@ import {
 type PalettePayload = PaletteRestore;
 import type { ChannelTriggerType, UserTriggerType } from './MentionPlugin';
 import { loadRecents } from '../../../utils/contextPickerRecents';
+import { RecentSearches, useRecentSearches, type RecentSearchEntry } from './RecentSearches';
+import { QueryFilterChips } from './QueryFilterChips';
 import ThreadContextPanel from '../ThreadContextPanel/ThreadContextPanel';
 import {
   buildContextItemFromResult,
   buildContextItemFromChannel,
 } from '../ThreadContextPanel/contextItem.utils';
-import { ChannelCategory } from './ChatDirectory.types';
+import { ChannelCategory, NON_STARRED_CATEGORIES } from './ChatDirectory.types';
 import {
   navigateToSearchResult,
   navigateToUser,
@@ -418,6 +413,9 @@ const SeeMoreItem = ({
   </Command.Item>
 );
 
+/** The only sections whose "See more" expands in place — the valid keys for expandedCategories and toggleCategoryExpansion. */
+type ExpandableCategory = ChannelCategory | 'users' | typeof MERGED_CATEGORY;
+
 const ChannelCommandMenu = ({
   channels,
   starred,
@@ -445,6 +443,7 @@ const ChannelCommandMenu = ({
 }: ChannelCommandMenuProps): ReactElement | null => {
   const navigate = useNavigate();
   const channelData = useAllChannels();
+  const { workspaceId } = useAuthContextValues(); // Per-user, per-workspace key for recents
   const commandRef = useRef<HTMLDivElement | null>(null);
   // MutationObserver (owned by attachCommandRef) that recomputes the ⌥↵ hint when cmdk adds/removes rows.
   const rowListObserverRef = useRef<MutationObserver | null>(null);
@@ -500,8 +499,9 @@ const ChannelCommandMenu = ({
   const [seedCommandMode, setSeedCommandMode] = useState(
     () => initialQuery?.text === '/' && initialQuery?.mentions.length === 0,
   );
-  // The search the user left behind when the palette sent them to the results page, handed
-  // back by the history hook so pressing back reopens cmd+K exactly as they typed it.
+  // A query to re-seed the palette with: its text + chips are replayed into the Lexical editor
+  // through the initial-query seed pipeline. Set when back-navigation restores the search the palette
+  // sent to the results page, and when replaying a recent; null when nothing is being restored.
   const [restoredQuery, setRestoredQuery] = useState<InitialQueryData | null>(null);
   // Which of on:/after:/before: opened the date list — it decides what a pick means.
   const [dateTrigger, setDateTrigger] = useState<'on:' | 'after:' | 'before:'>('on:');
@@ -737,7 +737,7 @@ const ChannelCommandMenu = ({
   const search = cleanedSearchText;
   const setSearch = setSearchText;
 
-  const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
+  const [expandedCategories, setExpandedCategories] = useState<Set<ExpandableCategory>>(new Set());
   const isFlatAllView = activeTab === TabType.ALL && !isGrouped;
 
   // type:channels shows grouped local channels (same as CHANNELS tab) — used by the
@@ -1301,6 +1301,7 @@ const ChannelCommandMenu = ({
     } catch {
       // Swallowed on purpose — a broken log line must not block the results page.
     }
+    recentSearches.save();
 
     onOpenChange(false);
     // Land on the tab the user was already filtering by — Messages stays on Messages,
@@ -1315,6 +1316,7 @@ const ChannelCommandMenu = ({
   // Navigate to the full results page with a specific section's tab pre-selected
   // (from the screen-mode "See N more" links).
   const handleSeeMoreNavigate = (tab: SearchResultsDocType): void => {
+    recentSearches.save();
     onOpenChange(false);
     void navigate(
       `/search-results?${buildSearchParams(searchText, selectedMentions, usersById, allChannels, tab).toString()}`,
@@ -1351,6 +1353,22 @@ const ChannelCommandMenu = ({
   >(new Map());
   const [showMergeDialog, setShowMergeDialog] = useState(false);
 
+  // Only the real search palette keeps history — not the context picker or desk-merge mode.
+  const recentSearchesEnabled = !contextSelectionMode && !deskMergeMode;
+  const recentSearches = useRecentSearches({
+    open,
+    enabled: recentSearchesEnabled,
+    workspaceId,
+    userId: currentUserID,
+    query: {
+      text: searchText,
+      filterChips: selectedMentions as ChipData[],
+      tab: activeTab,
+      onlyMyChannels,
+      includeBotMessages,
+    },
+  });
+
   // Extract ticketId from a desk email result for merge
   const getDeskTicketId = (result: DisplaySearchResult): string | null => {
     if (result.type === 'conversation' && result.searchContext?.subApp === 'DESK') {
@@ -1385,6 +1403,7 @@ const ChannelCommandMenu = ({
   }, []);
 
   const DISPLAY_LIMIT = 5;
+  const RECENTS_STARRED_CAP = 3; // Starred caps at 3 while Recents shows, to fit both sections
 
   // Suppress hover highlights when dialog first opens to prevent dual-highlight
   // (CSS :hover on one item + aria-selected on another) when mouse is already resting in the dialog area
@@ -1734,7 +1753,7 @@ const ChannelCommandMenu = ({
   // In a Desk channel, `from:`/`to:` instead surface synced mailbox contacts
   // (id = email) so the chip carries an address for the mail from/to filter.
   const availableUsers = useMemo<
-    Array<{ id: string; name: string; status?: string; email?: string }>
+    Array<{ id: string; name: string; status?: string; email?: string; displayName?: string }>
   >(() => {
     if (isDeskPeopleTrigger) {
       const raw = mentionSearchQuery.trim();
@@ -1787,6 +1806,7 @@ const ChannelCommandMenu = ({
         id: user.id,
         name: user.name,
         status: user.status,
+        ...(user.displayName && { displayName: user.displayName }),
         ...(user.email && { email: user.email }),
       }),
     );
@@ -2242,7 +2262,7 @@ const ChannelCommandMenu = ({
     }
   }, [open, searchSessionId, onClose, onOpen, resetSearchState, inline, initialTab]);
 
-  const toggleCategoryExpansion = (category: string): void => {
+  const toggleCategoryExpansion = (category: ExpandableCategory): void => {
     setExpandedCategories(prev => {
       const newSet = new Set(prev);
       if (newSet.has(category)) {
@@ -2260,6 +2280,14 @@ const ChannelCommandMenu = ({
     return modifier && !isMobile;
   };
 
+  // Restore the recent's tab, scope, and query so it re-runs with the same results.
+  const handleRecentSearchSelect = (entry: RecentSearchEntry): void => {
+    setActiveTab(entry.tab);
+    setOnlyMyChannels(entry.toggles?.onlyMyChannels ?? true);
+    setIncludeBotMessages(entry.toggles?.includeBotMessages ?? false);
+    setRestoredQuery({ text: entry.text, mentions: entry.filterChips });
+  };
+
   const handleChannelSelect = async (
     channel: Channel,
     displayName: string,
@@ -2269,7 +2297,7 @@ const ChannelCommandMenu = ({
       onContextItemToggle(buildContextItemFromChannel(channel, displayName));
       return;
     }
-
+    recentSearches.save();
     const route = `/chat/dir/${channel.id}`;
 
     // Track click on channel if metrics available
@@ -2315,6 +2343,7 @@ const ChannelCommandMenu = ({
     if (searchText.trim()) {
       onResultClick(result, rankPosition, result.searchContext?.channelId);
     }
+    recentSearches.save();
 
     const useModifier = consumeModifier();
 
@@ -2492,7 +2521,7 @@ const ChannelCommandMenu = ({
 
   // Group local channels by category
   const groupedChannels = useMemo(() => {
-    const groups: Record<string, typeof filteredLocalChannels> = {};
+    const groups: Partial<Record<ChannelCategory, typeof filteredLocalChannels>> = {};
     filteredLocalChannels.forEach(item => {
       if (!groups[item.category]) {
         groups[item.category] = [];
@@ -2503,7 +2532,7 @@ const ChannelCommandMenu = ({
   }, [filteredLocalChannels]);
 
   const localGroupDMs =
-    groupedChannels['direct-messages']?.filter(({ channel }) =>
+    groupedChannels[ChannelCategory.DIRECT_MESSAGES]?.filter(({ channel }) =>
       isGroupDMChannel(channel.scopeType),
     ) ?? [];
 
@@ -2520,6 +2549,9 @@ const ChannelCommandMenu = ({
     { id: TabType.RECORDING, label: 'Recordings', icon: <MicOn size={iconSize} /> },
     { id: TabType.DESK, label: 'Desk', icon: <EnvelopeDefault size={iconSize} /> },
   ];
+
+  const resolveTabLabel = (tab: TabType): string =>
+    allTabDefinitions.find(t => t.id === tab)?.label ?? '';
 
   // Tabs the active filters could fill — `in:#general` scopes to content within a channel,
   // so People and Channels can only come back empty. Not named `enabledTabs`: that's a prop,
@@ -2940,7 +2972,8 @@ const ChannelCommandMenu = ({
           const displayCount =
             activeTab === TabType.ALL ? items.length : paginationState[activeTab].cumulativeCount;
           const isUserType = type === 'user';
-          const isExpanded = expandedCategories.has(type);
+          // Only the users section expands here; other backend types route to the results page.
+          const isExpanded = isUserType && expandedCategories.has('users');
           const hasMore = items.length > DISPLAY_LIMIT;
           const displayItems =
             isUserType && !isExpanded && hasMore ? items.slice(0, DISPLAY_LIMIT) : items;
@@ -2971,7 +3004,7 @@ const ChannelCommandMenu = ({
                   <SeeMoreItem
                     value={`__see-more-default-${type}__`}
                     label={isExpanded ? 'See less' : `See ${hiddenCount} more`}
-                    onSelect={() => toggleCategoryExpansion(type)}
+                    onSelect={() => toggleCategoryExpansion('users')}
                     hoverable={!isMobile}
                     trackCategory='CHANNEL_SEARCH'
                     trackName='TOGGLE_BACKEND_USER_EXPANSION'
@@ -3033,7 +3066,7 @@ const ChannelCommandMenu = ({
           const totalItemsCount = allItems.length;
           const displayCount = totalItemsCount;
 
-          const isExpanded = expandedCategories.has('user');
+          const isExpanded = expandedCategories.has('users');
           // Full-screen (screen) mode: "See more" routes to the results page for ANY tab
           // (not just ALL); popup mode keeps the inline expand/collapse.
           const routeSeeMore = searchMode === 'screen';
@@ -3062,12 +3095,14 @@ const ChannelCommandMenu = ({
                   value='__see-more-local-user__'
                   label={!routeSeeMore && isExpanded ? 'See less' : `See ${hiddenCount} more`}
                   onSelect={() =>
-                    routeSeeMore ? handleSeeMoreNavigate('people') : toggleCategoryExpansion('user')
+                    routeSeeMore
+                      ? handleSeeMoreNavigate('people')
+                      : toggleCategoryExpansion('users')
                   }
                   hoverable={!isMobile}
                   trackCategory={routeSeeMore ? 'SEARCH' : 'CHANNEL_SEARCH'}
                   trackName={routeSeeMore ? 'SEE_MORE_SECTION' : 'TOGGLE_CATEGORY_EXPANSION'}
-                  trackMetadata={JSON.stringify({ category: 'user', isExpanded })}
+                  trackMetadata={JSON.stringify({ category: 'users', isExpanded })}
                 />
               )}
             </Command.Group>
@@ -3082,11 +3117,10 @@ const ChannelCommandMenu = ({
   const renderSearchChannelsSection = () =>
     (activeTab === TabType.ALL || activeTab === TabType.CHANNELS) &&
     showGroupedLocalResults &&
-    groupedChannels['channels'] &&
-    groupedChannels['channels'].length > 0 ? (
+    (groupedChannels[ChannelCategory.CHANNELS]?.length ?? 0) > 0 ? (
       <div className='mb-4'>
         {(() => {
-          const items = groupedChannels['channels'];
+          const items = groupedChannels[ChannelCategory.CHANNELS] ?? [];
           const category = ChannelCategory.CHANNELS;
           const isExpanded = expandedCategories.has(category);
           const routeSeeMore = searchMode === 'screen';
@@ -3146,11 +3180,10 @@ const ChannelCommandMenu = ({
   const renderSearchStarredSection = () =>
     (activeTab === TabType.ALL || activeTab === TabType.CHANNELS) &&
     showGroupedLocalResults &&
-    groupedChannels['starred'] &&
-    groupedChannels['starred'].length > 0 ? (
+    (groupedChannels[ChannelCategory.STARRED]?.length ?? 0) > 0 ? (
       <div className='mb-4'>
         {(() => {
-          const items = groupedChannels['starred'];
+          const items = groupedChannels[ChannelCategory.STARRED] ?? [];
           const category = ChannelCategory.STARRED;
           const isExpanded = expandedCategories.has(category);
           const routeSeeMore = searchMode === 'screen';
@@ -3280,78 +3313,70 @@ const ChannelCommandMenu = ({
     </>
   );
 
-  // Render the local channels for the browse branch (no search text)
-  /**
-   * @param onlyCategories  Render just these categories. The merged ALL view passes
-   *   [STARRED] so starred keeps its own section while users and channels come from the
-   *   merged list; omitted elsewhere, which renders every category as before.
-   */
-  const renderBrowseLocalChannels = () => (
-    <>
-      {showGroupedLocalResults &&
-        (activeTab === TabType.ALL || activeTab === TabType.CHANNELS || isChannelsType) &&
-        filteredLocalChannels.length > 0 && (
-          <>
-            {Object.entries(groupedChannels)
-              // ALL clubs channels and DMs into the merged list below; only STARRED keeps
-              // a group of its own.
-              .filter(([category]) =>
-                activeTab === TabType.ALL ? category === ChannelCategory.STARRED : true,
-              )
-              .map(([category, items]) => {
-                const typedCategory = category as ChannelCategory;
-                const isExpanded = expandedCategories.has(category);
-                const shouldLimit = !search.trim();
-                const hasMore = items.length > DISPLAY_LIMIT;
-                const displayItems =
-                  shouldLimit && !isExpanded && hasMore ? items.slice(0, DISPLAY_LIMIT) : items;
-                const hiddenCount = items.length - DISPLAY_LIMIT;
+  // One browse category group. Starred caps at 3 while Recents shows (so all three sections fit
+  // above the fold); other categories, and Starred without Recents, use the default cap.
+  const renderBrowseCategoryGroup = (category: ChannelCategory): ReactElement | null => {
+    const items = groupedChannels[category] ?? [];
+    if (items.length === 0) return null;
+    const limit =
+      category === ChannelCategory.STARRED && recentSearches.isVisible
+        ? RECENTS_STARRED_CAP
+        : DISPLAY_LIMIT;
+    const isExpanded = expandedCategories.has(category);
+    const shouldLimit = !search.trim();
+    const hasMore = items.length > limit;
+    const displayItems = shouldLimit && !isExpanded && hasMore ? items.slice(0, limit) : items;
+    const hiddenCount = items.length - limit;
 
-                return (
-                  <div key={category} className='mb-4'>
-                    <Command.Group
-                      heading={getCategoryLabel(typedCategory)}
-                      className='[&_[cmdk-group-heading]]:px-2  [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-["Geist_Mono"]'
-                    >
-                      {displayItems.map(({ channel }, index) => {
-                        const unreadCount = unreadCounts[channel.id] ?? 0;
-                        return (
-                          <ChannelCommandItem
-                            key={channel.id}
-                            channel={channel}
-                            currentUserID={currentUserID}
-                            unreadCount={unreadCount}
-                            onSelect={displayName => {
-                              void handleChannelSelect(channel, displayName, index + 1);
-                            }}
-                            onItemMouseDown={handleItemMouseDown}
-                            getChannelIcon={getChannelIcon}
-                            selectionVariant={selectionVariant}
-                            isSelected={contextItems.some(c => c.id === `channel-${channel.id}`)}
-                          />
-                        );
-                      })}
-                      {shouldLimit && hasMore && (
-                        <SeeMoreItem
-                          value={`__see-more-browse-${category}__`}
-                          label={isExpanded ? 'See less' : `See ${hiddenCount} more`}
-                          onSelect={() => toggleCategoryExpansion(category)}
-                          hoverable={!isMobile}
-                          trackCategory='CHANNEL_SEARCH'
-                          trackName='TOGGLE_LOCAL_CHANNEL_EXPANSION'
-                          trackMetadata={JSON.stringify({ category, isExpanded })}
-                        />
-                      )}
-                    </Command.Group>
-                  </div>
-                );
-              })}
-          </>
-        )}
-      {/* STARRED renders above as its own group; the rest is clubbed. */}
-      {activeTab === TabType.ALL && renderMergedLocalResults()}
-    </>
-  );
+    return (
+      <div key={category} className='mb-4'>
+        <Command.Group
+          heading={getCategoryLabel(category)}
+          className='[&_[cmdk-group-heading]]:px-2  [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-["Geist_Mono"]'
+        >
+          {displayItems.map(({ channel }, index) => {
+            const unreadCount = unreadCounts[channel.id] ?? 0;
+            return (
+              <ChannelCommandItem
+                key={channel.id}
+                channel={channel}
+                currentUserID={currentUserID}
+                unreadCount={unreadCount}
+                onSelect={displayName => {
+                  void handleChannelSelect(channel, displayName, index + 1);
+                }}
+                onItemMouseDown={handleItemMouseDown}
+                getChannelIcon={getChannelIcon}
+                selectionVariant={selectionVariant}
+                isSelected={contextItems.some(c => c.id === `channel-${channel.id}`)}
+              />
+            );
+          })}
+          {shouldLimit && hasMore && (
+            <SeeMoreItem
+              value={`__see-more-browse-${category}__`}
+              label={isExpanded ? 'See less' : `See ${hiddenCount} more`}
+              onSelect={() => toggleCategoryExpansion(category)}
+              hoverable={!isMobile}
+              trackCategory='CHANNEL_SEARCH'
+              trackName='TOGGLE_LOCAL_CHANNEL_EXPANSION'
+              trackMetadata={JSON.stringify({ category, isExpanded })}
+            />
+          )}
+        </Command.Group>
+      </div>
+    );
+  };
+
+  const canShowLocalBrowse =
+    showGroupedLocalResults &&
+    (activeTab === TabType.ALL || activeTab === TabType.CHANNELS || isChannelsType) &&
+    filteredLocalChannels.length > 0;
+
+  const renderBrowseChannels = (categories: ChannelCategory[]): ReactElement | null => {
+    if (!canShowLocalBrowse) return null;
+    return <>{categories.map(renderBrowseCategoryGroup)}</>;
+  };
 
   // Shared confirmation for a `/call` on a channel. Rendered from every return branch
   // (below) so it survives the Cmd+K close — the menu unmounts its dialog, this stays.
@@ -3954,6 +3979,17 @@ const ChannelCommandMenu = ({
     enterTarget?.click();
   };
 
+  // Word a chip via its own helpers + live lookups, so this row and the pill in the box above
+  // can't render the same filter differently.
+  const resolveChipDisplayName = (chip: ChipData): string =>
+    resolveChipName(chip, {
+      userName: id => getUserDisplayName(usersById.get(id) ?? { displayName: id, email: '' }),
+      channelName: id => {
+        const found = allChannels.find(c => c.channel.id === id);
+        return found ? resolveChannelLabel(found.channel, currentUserID, allUsers) : undefined;
+      },
+    });
+
   // "Show results for: <chips> <query>" — the row that leaves the palette for the
   // full-screen results page. Rendered in both palettes; where it sits in the list is
   // decided at the call sites below. Never in the inline/context-selection palettes
@@ -3982,45 +4018,11 @@ const ChannelCommandMenu = ({
         <SearchDefault size={14} className='text-muted-foreground shrink-0' />
         <span className='flex items-center flex-wrap gap-1'>
           <span className='text-sm'>Show detailed results for:</span>
-          {selectedMentions.map(m => {
-            // The surface supplies the lookups; everything after that — which prefix,
-            // how the value reads, whether it's you — comes from the chip's own helpers,
-            // so this row and the pill in the box above can't word a filter differently.
-            const chip: ChipData = {
-              ...m,
-              name: resolveChipName(m as ChipData, {
-                userName: id =>
-                  getUserDisplayName(usersById.get(id) ?? { displayName: id, email: '' }),
-                channelName: id => {
-                  const found = allChannels.find(c => c.channel.id === id);
-                  return found
-                    ? resolveChannelLabel(found.channel, currentUserID, allUsers)
-                    : undefined;
-                },
-              }),
-            } as ChipData;
-            const prefix = chipPrefixText(chip);
-            const name = chipLabelText(chip);
-
-            return (
-              <span
-                key={`${m.prefix}-${m.id}`}
-                // The same `.filter-chip` the search box renders, so a filter looks
-                // identical whether it's a chip you're editing above or a value being
-                // summarised here — including the self-mention tint for your own user.
-                className={cn(
-                  'filter-chip h-6 px-1.5',
-                  isSelfMentionChip(chip, currentUserID) && 'filter-chip--self-mention',
-                )}
-              >
-                {/* prefix → icon → value, the order `$createFilterChip` appends them in,
-                    so this reads identically to the chip in the box above. */}
-                <span className='leading-tight'>{prefix}</span>
-                <ChipIcon mentionData={m as ChipData} />
-                <span className='leading-tight'>{name}</span>
-              </span>
-            );
-          })}
+          <QueryFilterChips
+            mentions={selectedMentions as ChipData[]}
+            currentUserID={currentUserID}
+            resolveName={resolveChipDisplayName}
+          />
           {searchText.trim() && <span className='font-semibold text-sm'>{searchText.trim()}</span>}
         </span>
       </Command.Item>
@@ -5108,11 +5110,37 @@ const ChannelCommandMenu = ({
                             {activeTab !== TabType.CHANNELS &&
                               backendResults.length > 0 &&
                               renderDefaultBackendResults()}
-                            {renderBrowseLocalChannels()}
+                            {renderBrowseChannels([
+                              ChannelCategory.STARRED,
+                              ...NON_STARRED_CATEGORIES,
+                            ])}
                           </>
                         ) : (
                           <>
-                            {renderBrowseLocalChannels()}
+                            {activeTab === TabType.ALL ? (
+                              <>
+                                {/* ALL-tab empty state, in order: Starred (capped while recents
+                                    show), then recents, then the merged People & channels list. */}
+                                {canShowLocalBrowse &&
+                                  renderBrowseCategoryGroup(ChannelCategory.STARRED)}
+                                {recentSearches.isVisible && (
+                                  <RecentSearches
+                                    recents={recentSearches.recents}
+                                    currentUserID={currentUserID}
+                                    getTabLabel={resolveTabLabel}
+                                    onSelect={handleRecentSearchSelect}
+                                    onRemove={recentSearches.remove}
+                                    onItemMouseDown={handleItemMouseDown}
+                                  />
+                                )}
+                                {renderMergedLocalResults()}
+                              </>
+                            ) : (
+                              renderBrowseChannels([
+                                ChannelCategory.STARRED,
+                                ...NON_STARRED_CATEGORIES,
+                              ])
+                            )}
                             {/* People tab browse: rank by affinity (rankUsersWithMfu) like the
                                 search branch, instead of the raw, unranked backend user list. */}
                             {activeTab === TabType.USERS

@@ -18,4 +18,7 @@ export const SearchResultsContext = createContext<{
     conversationCreatedAt?: number,
     matchedMessageId?: string | null,
   ) => void;
+  // Fires when a result opens through a path with no pane handler (the jump-to-home
+  // button), so the parent can still record it as a recent search.
+  onResultOpen?: () => void;
 }>({});
