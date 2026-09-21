@@ -252,9 +252,7 @@ export const WorkspaceSwitcher: React.FC = () => {
   // from the UI alone.
   const hasOtherWorkspaceUnread =
     totalUnread === 0 &&
-    Object.entries(activityCounts).some(
-      ([id, count]) => id !== workspaceId && count > 0
-    );
+    Object.entries(activityCounts).some(([id, count]) => id !== workspaceId && count > 0);
   const createLabel = 'Create enterprise workspace';
 
   return (

@@ -2,11 +2,7 @@ import { useSelector } from '@xstate/react';
 import { stateMachineActor, UnreadCounts } from '../machines/stateMachine';
 import { useMemo } from 'react';
 import { ActivityClassification, ChannelScopeType } from '@xyne/shared';
-import {
-  countDmShelfMentionRows,
-  isDmShelfScopeType,
-  isBellCountedActivity,
-} from '@xyne/shared';
+import { countDmShelfMentionRows, isDmShelfScopeType, isBellCountedActivity } from '@xyne/shared';
 
 export const useAllUnreadCount = (): UnreadCounts => {
   const userChannelStatuses = useSelector(

@@ -38,10 +38,7 @@ export const useElectronBadge = (): void => {
     if (DOCK_BADGE_POLL_SOURCE) {
       total = totalAllWorkspaces;
     } else {
-      total = Object.values(unreadCounts).reduce(
-        (sum, count) => sum + (count > 0 ? count : 0),
-        0,
-      );
+      total = Object.values(unreadCounts).reduce((sum, count) => sum + (count > 0 ? count : 0), 0);
     }
 
     api.setBadgeCount(total);
