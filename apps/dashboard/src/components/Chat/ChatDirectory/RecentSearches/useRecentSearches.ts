@@ -43,20 +43,21 @@ export interface UseRecentSearches {
 }
 
 /**
- * The whole Cmd+K recent-search feature: display state, localStorage, and name resolution. Exposes
- * save() for the caller to invoke when it judges a query worth keeping — the hook persists the
- * current query and owns the list, but not the decision of when to save.
+ * The Cmd+K palette's recent-search feature: display state, localStorage, and live name
+ * resolution. Exposes save() for the caller to invoke when it judges a query worth keeping —
+ * the hook persists the current query and owns the list, but not the decision of when to save.
  *
  * Storage holds chip identity only; the display name is resolved live here (by id) so a rename
  * never shows a stale label, and the container is decoupled from name resolution entirely.
+ *
+ * @remarks
+ * Use this hook only on a surface that DISPLAYS and replays recents (the palette empty state).
+ * A surface that only needs to record a recent — with no list to render — skips the hook and
+ * calls {@link saveCurrentSearchQuery} directly, as the full-screen results page (SearchResults)
+ * does; the hook's list-ownership and name-resolution machinery would be dead weight there.
  */
-export function useRecentSearches({
-  open,
-  enabled,
-  workspaceId,
-  userId,
-  query,
-}: UseRecentSearchesParams): UseRecentSearches {
+export function useRecentSearches(params: UseRecentSearchesParams): UseRecentSearches {
+  const { open, enabled, workspaceId, userId, query } = params;
   const [storedRecents, setStoredRecents] = useState<StoredRecentSearch[]>([]);
 
   // Shared, in-memory reads off the same XState store the container uses — no extra fetch.

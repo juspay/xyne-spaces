@@ -727,8 +727,8 @@ const SearchResults = (): ReactElement => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fullSearchKey]);
 
-  // The save lives on these three handlers, not the card's click, because every message-open
-  // affordance (body, keyboard, reply button, avatar) converges here — the card click sees only one.
+  // The save lives on the two message-open handlers (thread + message context), not the card
+  // click, because every message-open affordance (body, keyboard, reply button) converges here.
   const handleSelectThread = useCallback(
     (thread: SearchResultsThread) => {
       saveCurrentSearchAsRecent();
@@ -736,14 +736,10 @@ const SearchResults = (): ReactElement => {
     },
     [saveCurrentSearchAsRecent],
   );
-  const handleSelectUser = useCallback(
-    (userId: string) => {
-      saveCurrentSearchAsRecent();
-      setSelectedPanel({ kind: 'profile', userId });
-    },
-    [saveCurrentSearchAsRecent],
-  );
-  const handleSelectChannelContext = useCallback(
+  const handleSelectUser = useCallback((userId: string) => {
+    setSelectedPanel({ kind: 'profile', userId });
+  }, []);
+  const handleSelectMessageContext = useCallback(
     (
       channelId: string,
       conversationId: string,
@@ -783,7 +779,8 @@ const SearchResults = (): ReactElement => {
     (result: DisplaySearchResult): void => {
       const action = resolveResultClick(result, allChannelsForNav);
       if (!action) return;
-      saveCurrentSearchAsRecent();
+      // Recents capture content searches — opening a person or channel is navigation, not a query to replay.
+      if (result.type !== 'user' && result.type !== 'channel') saveCurrentSearchAsRecent();
       switch (action.kind) {
         case 'panel':
           setSelectedPanel(action.panel);
@@ -806,10 +803,10 @@ const SearchResults = (): ReactElement => {
     () => ({
       onSelectThread: handleSelectThread,
       onSelectUser: handleSelectUser,
-      onSelectChannelContext: handleSelectChannelContext,
+      onSelectMessageContext: handleSelectMessageContext,
       onResultOpen: saveCurrentSearchAsRecent,
     }),
-    [handleSelectThread, handleSelectUser, handleSelectChannelContext, saveCurrentSearchAsRecent],
+    [handleSelectThread, handleSelectUser, handleSelectMessageContext, saveCurrentSearchAsRecent],
   );
 
   const currentTab = docTypeToTabType(filters.docType);

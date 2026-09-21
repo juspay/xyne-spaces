@@ -100,11 +100,14 @@ export function saveRecentSearch(
  *
  * @remarks
  * Called on these product triggers — each a "user acted on this search" signal:
- * - Cmd+K palette: opening any result (channel, message, ticket, file, user), pressing
- *   "Show results for…", or a section's "See more".
- * - Full-screen results page: opening any result (side pane) or jumping to a message in home.
+ * - Cmd+K palette: opening a message, ticket, or file result, pressing "Show results for…",
+ *   or a section's "See more".
+ * - Full-screen results page: opening a message/ticket/file result (side pane) or jumping to
+ *   a message in home.
  *
- * No-op on an empty query. Not called on browsing, inline "See more" expand, or dismissal.
+ * NOT on opening a user or channel result — navigating to a person or channel is navigation,
+ * not a query worth replaying. No-op on an empty query, browsing, inline "See more" expand, or
+ * dismissal.
  * Repeat triggers for the same query bump the existing entry rather than duplicating it.
  */
 export function saveCurrentSearchQuery(

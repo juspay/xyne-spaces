@@ -66,7 +66,7 @@ export const SearchResultMessageCard = memo(function SearchResultMessageCard({
   onCardClick,
   searchThread,
 }: SearchResultMessageCardProps): ReactElement | null {
-  const { onSelectThread, onSelectUser, onSelectChannelContext, onResultOpen } =
+  const { onSelectThread, onSelectUser, onSelectMessageContext, onResultOpen } =
     useContext(SearchResultsContext);
   const channel = useChannel(channelId);
   const navigate = useNavigate();
@@ -257,7 +257,7 @@ export const SearchResultMessageCard = memo(function SearchResultMessageCard({
     if (replyCount > 0) {
       onSelectThread?.({ channelId, conversationId, matchedMessageId });
     } else {
-      onSelectChannelContext?.(channelId, conversationId, undefined, matchedMessageId);
+      onSelectMessageContext?.(channelId, conversationId, undefined, matchedMessageId);
     }
   };
 

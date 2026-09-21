@@ -724,6 +724,7 @@ const ChannelCommandMenu = ({
     // Clipboard tracking callbacks
     onPasteDetected,
     onManualKeystroke,
+    markRecentReplay,
   } = useSearchMetrics({
     allChannels,
     mentionSearchType,
@@ -2282,6 +2283,8 @@ const ChannelCommandMenu = ({
 
   // Restore the recent's tab, scope, and query so it re-runs with the same results.
   const handleRecentSearchSelect = (entry: RecentSearchEntry): void => {
+    // Tag this search's origin so its impression + session-end carry query_source='RECENT'.
+    markRecentReplay();
     setActiveTab(entry.tab);
     setOnlyMyChannels(entry.toggles?.onlyMyChannels ?? true);
     setIncludeBotMessages(entry.toggles?.includeBotMessages ?? false);
@@ -2297,7 +2300,6 @@ const ChannelCommandMenu = ({
       onContextItemToggle(buildContextItemFromChannel(channel, displayName));
       return;
     }
-    recentSearches.save();
     const route = `/chat/dir/${channel.id}`;
 
     // Track click on channel if metrics available
@@ -2343,7 +2345,8 @@ const ChannelCommandMenu = ({
     if (searchText.trim()) {
       onResultClick(result, rankPosition, result.searchContext?.channelId);
     }
-    recentSearches.save();
+    // Skip user/channel opens — recents capture content searches, not navigation to a person/channel.
+    if (result.type !== 'user' && result.type !== 'channel') recentSearches.save();
 
     const useModifier = consumeModifier();
 

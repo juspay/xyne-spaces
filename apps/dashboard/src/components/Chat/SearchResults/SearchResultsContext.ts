@@ -12,7 +12,7 @@ export type SearchResultsThread = {
 export const SearchResultsContext = createContext<{
   onSelectThread?: (thread: SearchResultsThread) => void;
   onSelectUser?: (userId: string) => void;
-  onSelectChannelContext?: (
+  onSelectMessageContext?: (
     channelId: string,
     conversationId: string,
     conversationCreatedAt?: number,

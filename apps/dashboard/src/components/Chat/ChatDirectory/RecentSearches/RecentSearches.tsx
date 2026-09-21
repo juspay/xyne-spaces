@@ -19,14 +19,8 @@ export interface RecentSearchesProps {
 const RECENTS_DISPLAY_LIMIT = 3; // rows shown before "See more"
 
 /** Cmd+K empty-state recents: rows + inline "See more" and per-row hover-×. */
-export function RecentSearches({
-  recents,
-  currentUserID,
-  getTabLabel,
-  onSelect,
-  onRemove,
-  onItemMouseDown,
-}: RecentSearchesProps): ReactElement | null {
+export function RecentSearches(props: RecentSearchesProps): ReactElement | null {
+  const { recents, currentUserID, getTabLabel, onSelect, onRemove, onItemMouseDown } = props;
   const { isMobile } = usePlatform();
   // "See more" is ephemeral UI state of this widget — owned here, resets when it remounts.
   const [isExpanded, setIsExpanded] = useState(false);
