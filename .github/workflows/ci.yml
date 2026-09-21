@@ -105,10 +105,11 @@ jobs:
         uses: actions/cache@v4
         with:
           path: apps/dashboard/node_modules/.tmp/tsconfig.app.tsbuildinfo
-          key: dashboard-tsbuildinfo-${{ runner.os }}-${{ github.sha }}
-          restore-keys: |
-            dashboard-tsbuildinfo-${{ runner.os }}-
-
+          # Content-keyed, exact-hit only. No cross-branch restore-keys prefix:
+          # restoring a tsbuildinfo saved against a different tree makes
+          # tsc --incremental nondeterministic (reproducible branch-correlated
+          # typecheck failures). A cache miss just means a cold typecheck.
+          key: dashboard-tsbuildinfo-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml', 'apps/dashboard/tsconfig.json', 'apps/dashboard/tsconfig.app.json', 'apps/dashboard/tsconfig.node.json') }}
       - name: Typecheck
         if: matrix.task == 'typecheck'
         run: pnpm --filter xyne-spaces-dashboard run typecheck
