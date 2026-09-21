@@ -85,17 +85,19 @@ export const BoardFieldsPanel: React.FC<BoardFieldsPanelProps> = ({
   const [requiredOnly, setRequiredOnly] = useState(false);
 
   const ordered = useMemo(() => orderFieldsRequiredFirst(fields), [fields]);
-  const shown = useMemo(
-    () => applyFilters(ordered, query, requiredOnly),
-    [ordered, query, requiredOnly],
-  );
   const requiredCount = useMemo(() => fields.filter(isRequired).length, [fields]);
+  const showRequiredOnly = requiredOnly && requiredCount > 0;
+  const shown = useMemo(
+    () => applyFilters(ordered, query, showRequiredOnly),
+    [ordered, query, showRequiredOnly],
+  );
   const segment = (label: string, active: boolean, onClick: () => void): React.ReactElement => (
     <button
       type='button'
       onClick={onClick}
       data-track-category='Tickets'
       data-track-name='FILTER_BOARD_FIELDS'
+      data-track-metadata={JSON.stringify({ filter: label })}
       className={cn(
         'flex h-[22px] items-center whitespace-nowrap rounded-full px-[11px] text-[11px] font-semibold transition-colors',
         active
@@ -118,8 +120,8 @@ export const BoardFieldsPanel: React.FC<BoardFieldsPanelProps> = ({
           <div className='flex-1' />
           {requiredCount > 0 && (
             <div className='flex items-center gap-0.5 rounded-full bg-muted p-0.5'>
-              {segment('All', !requiredOnly, () => setRequiredOnly(false))}
-              {segment('Required', requiredOnly, () => setRequiredOnly(true))}
+              {segment('All', !showRequiredOnly, () => setRequiredOnly(false))}
+              {segment('Required', showRequiredOnly, () => setRequiredOnly(true))}
             </div>
           )}
         </div>

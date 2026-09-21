@@ -108,7 +108,8 @@ const DynamicFieldInputBase: React.FC<DynamicFieldInputProps> = ({
     case FormFieldType.SINGLE_SELECT:
       return (
         <SingleSelect
-          label={`${fieldName}${required ? ' *' : ''}`}
+          label={fieldName}
+          required={required}
           placeholder={`Select ${fieldName.toLowerCase()}`}
           items={[{ items: toSelectOptions(field.fieldEnum) }]}
           selected={stringValue}
@@ -123,14 +124,15 @@ const DynamicFieldInputBase: React.FC<DynamicFieldInputProps> = ({
 
     case FormFieldType.MULTI_SELECT:
       return (
-        <MultiSelect
-          label={`${fieldName}${required ? ' *' : ''}`}
-          placeholder={`Select ${fieldName.toLowerCase()}`}
-          options={toSelectOptions(field.fieldEnum)}
-          selectedValues={arrayValue}
-          onChange={next => set((next ?? []).filter(v => !!v && v.trim().length > 0))}
-          error={error || ''}
-        />
+        <Field label={fieldName} required={required} className='gap-[5px]'>
+          <MultiSelect
+            placeholder={`Select ${fieldName.toLowerCase()}`}
+            options={toSelectOptions(field.fieldEnum)}
+            selectedValues={arrayValue}
+            onChange={next => set((next ?? []).filter(v => !!v && v.trim().length > 0))}
+            error={error || ''}
+          />
+        </Field>
       );
 
     case FormFieldType.USER:
