@@ -1,3 +1,10 @@
+## [1.351.0](https://github.com/juspay/xyne-spaces/compare/v1.350.0...v1.351.0) (2026-09-21)
+
+
+### Features
+
+* add Created By grouping to tickets kanban and table ([#2091](https://github.com/juspay/xyne-spaces/issues/2091)) ([2c2bcc4](https://github.com/juspay/xyne-spaces/commit/2c2bcc4aebc96970318d6ef8144fb27fde2e851b))
+
 ## [1.350.0](https://github.com/juspay/xyne-spaces/compare/v1.349.0...v1.350.0) (2026-09-21)
 
 
