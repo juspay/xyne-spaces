@@ -946,6 +946,7 @@ export const mapCanvas = async (args: InsertValue<CanvasesSchema>, workspaceId?:
     }
   } catch (error) {
     logger.error(`[Mapper] Failed to extract text from canvas ${args.id}:`, error);
+    if (args.isCollaborative) throw error;
   }
 
   // Denormalized ACL: direct users + members of every channel/group the canvas is shared to.
