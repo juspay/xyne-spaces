@@ -1,20 +1,41 @@
 import { App } from './app.js';
-import { describeRejection, logger } from '@/utils/logger';
+import { logger } from '@/utils/logger';
 import { configureJAF } from '@juspay-jaf/jaf';
 import { warnIfNoGoogleClientsConfigured } from '@/services/googleOAuthClients';
 
 configureJAF({ verbose: false });
 
 process.on('unhandledRejection', (reason: unknown, _promise: Promise<unknown>) => {
-  logger.error('UNHANDLED REJECTION', {
-    error: describeRejection(reason),
-  });
+  try {
+    // Safely extract error message without causing "Invalid string length" crash
+    let errorMsg = 'Unknown error';
+    if (reason instanceof Error) {
+      errorMsg = reason.message;
+    } else if (typeof reason === 'string') {
+      errorMsg = reason;
+    } else {
+      errorMsg = String(reason).substring(0, 500);
+    }
+
+    logger.error('UNHANDLED REJECTION', {
+      message: errorMsg,
+      type: reason instanceof Error ? reason.constructor.name : typeof reason,
+    });
+  } catch (loggingError) {
+    console.error('Failed to log unhandled rejection:', loggingError);
+  }
 });
 
 process.on('uncaughtException', (error: Error) => {
-  logger.error('UNCAUGHT EXCEPTION', {
-    error,
-  });
+  try {
+    logger.error('UNCAUGHT EXCEPTION', {
+      message: error.message,
+      name: error.name,
+      stack: error.stack?.substring(0, 1000),
+    });
+  } catch (loggingError) {
+    console.error('Failed to log uncaught exception:', loggingError);
+  }
 });
 
 

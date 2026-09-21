@@ -181,6 +181,7 @@ import { scheduledMessageQueue } from '@/queues/scheduledMessageQueue';
 import { conversationIngestQueue } from '@/queues/conversationIngestQueue';
 import { documentIngestQueue } from '@/queues/documentIngestQueue';
 import { commitAnalysisQueue } from '@/queues/commitAnalysisQueue';
+import { commitAnalysisWorker } from '@/workers/commitAnalysisWorker';
 import { teamIntelligenceQueue } from '@/team-intelligence/queue';
 import { emailClassificationQueue } from '@/queues/emailClassificationQueue';
 import { autoDraftQueue } from '@/queues/autoDraftQueue';
@@ -962,7 +963,7 @@ export class App {
 
     if (config.enableCommitAnalysisWorker) {
       logger.info('Starting commit analysis queue worker (consumer)...');
-      await commitAnalysisQueue.startWorker();
+      commitAnalysisWorker.start();
     } else {
       logger.info('Commit analysis worker disabled (ENABLE_COMMIT_ANALYSIS_WORKER=false) - producer only');
     }
