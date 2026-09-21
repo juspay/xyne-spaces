@@ -177,7 +177,6 @@ export class ACLFactory {
     case 'commit':
       return new CommitsACL(ctx, prisma)
     case 'entityAccess':
-      // Carries workspaceId, so the base clause ({ workspaceId }) is the whole rule.
       return new BaseQueryACL(ctx, prisma)
     case 'summaryTemplate':
       return new BaseQueryACL(ctx, prisma)

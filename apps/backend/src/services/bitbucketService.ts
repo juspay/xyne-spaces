@@ -592,7 +592,7 @@ export class BitbucketService {
     repositorySlug: string,
     username: string
   ): Promise<{ success: boolean; error?: string }> {
-    const endpoint = `/projects/${projectKey}/repos/${repositorySlug}/permissions/users?name=${encodeURIComponent(username)}&permission=REPO_WRITE`;
+    const endpoint = `/rest/api/latest/projects/${projectKey}/repos/${repositorySlug}/permissions/users?name=${encodeURIComponent(username)}&permission=REPO_WRITE`;
     const url = `${this.config.baseUrl}${endpoint}`;
 
     try {
