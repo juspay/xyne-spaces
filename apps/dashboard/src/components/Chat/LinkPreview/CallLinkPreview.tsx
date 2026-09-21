@@ -35,7 +35,7 @@ const STATUS_PRESENTATION: Record<CallStatus, StatusPresentation> = {
   },
   [CallStatus.SCHEDULED]: {
     label: 'Scheduled',
-    className: 'bg-muted text-muted-foreground',
+    className: 'bg-blue-500/10 text-status-scheduled',
   },
   [CallStatus.ENDED]: {
     label: 'Ended',
@@ -43,7 +43,7 @@ const STATUS_PRESENTATION: Record<CallStatus, StatusPresentation> = {
   },
   [CallStatus.CANCELLED]: {
     label: 'Cancelled',
-    className: 'bg-muted text-muted-foreground line-through',
+    className: 'bg-stage-cancelled text-status-failure line-through',
   },
 };
 
