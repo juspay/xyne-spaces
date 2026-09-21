@@ -614,7 +614,7 @@ export const TicketCard: React.FC<TicketCardProps> = ({
           onClick={e => onClick?.(e)}
           data-testid={`ticket-card-${ticket.id}`}
           className={cn(
-            `flex items-center gap-3 text-left ${releaseBoardBgColor} rounded-md border w-full px-3 py-1.5 hover:shadow-sm transition-all cursor-pointer group shadow-sm`,
+            `flex items-center gap-3 text-left ${releaseBoardBgColor} rounded-md border w-full px-3 py-1.5 hover:shadow-sm transition-shadow cursor-pointer group shadow-sm`,
           )}
           data-track-category='Tickets'
           data-track-name='OpenTicketCard'
@@ -660,7 +660,7 @@ export const TicketCard: React.FC<TicketCardProps> = ({
       data-testid={`ticket-card-${ticket.id}`}
       className={cn(
         width,
-        `text-left ${releaseBoardBgColor} rounded-xl border w-full max-w-lg hover:shadow-sm transition-all cursor-pointer group shadow-sm relative container-type-inline overflow-hidden`,
+        `text-left ${releaseBoardBgColor} rounded-xl border w-full max-w-lg hover:shadow-sm transition-shadow cursor-pointer group shadow-sm relative container-type-inline overflow-hidden`,
         isCompact ? 'p-3' : 'p-0',
         isCompact && isEmailRead && 'email-read-card shadow-none',
       )}
