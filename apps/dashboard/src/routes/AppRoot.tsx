@@ -138,10 +138,7 @@ import { useRecordingVersion } from '../hooks/useRecordingVersion';
 import { useWorkspacePageTools } from '../components/AIScreen/Workspace';
 import { stopRecordingForTeardown } from '../hooks/useRecordingStore';
 import { isElectronApp } from '../utils/electronApp';
-import {
-  confirmRecordingInterrupt,
-  isRecordingInterruptible,
-} from '../components/Recording/RecordingInterruptGuard/RecordingInterruptGuard';
+import { confirmInterrupt, isInterruptible } from '../components/InterruptGuard/InterruptGuard';
 import { NoteTakerOverlayHost } from './RecordingsV2Screen/components/NoteTakerOverlayHost';
 import FormScreen from './FormScreen/FormScreen';
 import ScheduledMessageScreen from './ScheduledMessageScreen/ScheduledMessageScreen';
@@ -408,7 +405,7 @@ const AppRoot = (): ReactElement => {
   useEffect(() => {
     const warnBeforeUnload = (event: BeforeUnloadEvent): void => {
       if (isElectronApp()) return;
-      if (!isRecordingInterruptible()) return;
+      if (!isInterruptible()) return;
       event.preventDefault();
     };
     window.addEventListener('beforeunload', warnBeforeUnload);
@@ -422,9 +419,9 @@ const AppRoot = (): ReactElement => {
       if (isElectronApp()) return;
       const isReloadCombo = (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'r';
       if (!isReloadCombo && event.key !== 'F5') return;
-      if (!isRecordingInterruptible()) return;
+      if (!isInterruptible()) return;
       event.preventDefault();
-      void confirmRecordingInterrupt('reload').then(proceed => {
+      void confirmInterrupt('reload').then(proceed => {
         if (proceed) window.location.reload();
       });
     };
