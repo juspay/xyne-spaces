@@ -4,6 +4,7 @@ import { logger } from '@/utils/logger';
 export interface SlackFile {
   id: string; name?: string; title?: string; filetype?: string; mode?: string;
   is_external?: boolean; external_url?: string; url_private?: string; url_private_download?: string; user?: string;
+  created?: number; updated?: number; // unix seconds — original create / last-edit time
 }
 
 const CANVAS_FILETYPES = new Set(['quip', 'canvas']);
