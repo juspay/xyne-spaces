@@ -219,6 +219,7 @@ function mapVespaCallResultToCall(result: DisplaySearchResult, workspaceId: stri
         displayName: displayName || null,
         email: email || null,
         isExternal,
+        ringStatus: null,
       };
     }),
   } as Call;

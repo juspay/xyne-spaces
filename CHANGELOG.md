@@ -1,3 +1,45 @@
+## [1.360.0](https://github.com/juspay/xyne-spaces/compare/v1.359.0...v1.360.0) (2026-09-21)
+
+
+### Features
+
+* Helm Charts for OSS ([#2136](https://github.com/juspay/xyne-spaces/issues/2136)) ([3c56f0b](https://github.com/juspay/xyne-spaces/commit/3c56f0be8b66520bee3456011898452c03efeccd))
+* ringing status ([#2129](https://github.com/juspay/xyne-spaces/issues/2129)) ([4a6e8cc](https://github.com/juspay/xyne-spaces/commit/4a6e8cc07a651d410e6ec5c5a5d062e19f72ff15))
+
+## [1.359.0](https://github.com/juspay/xyne-spaces/compare/v1.358.0...v1.359.0) (2026-09-21)
+
+
+### Features
+
+* add Frequently Used emoji section to the reaction picker ([#2089](https://github.com/juspay/xyne-spaces/issues/2089)) ([3cc2ee2](https://github.com/juspay/xyne-spaces/commit/3cc2ee29a8022db66adf8a606d4d7a427726a30b))
+* added-agents-and-apps-tab-to-channel-info ([#2124](https://github.com/juspay/xyne-spaces/issues/2124)) ([4a1e00e](https://github.com/juspay/xyne-spaces/commit/4a1e00e9504bc030b5f1239bd6ea0fc0b6c7effc))
+* redesign create ticket modal to write-left, classify-right ([#2127](https://github.com/juspay/xyne-spaces/issues/2127)) ([eb4514e](https://github.com/juspay/xyne-spaces/commit/eb4514e6a2f113bd80605150eec454c488a72636))
+
+
+### Bug Fixes
+
+* dm call indicator remove ([#2122](https://github.com/juspay/xyne-spaces/issues/2122)) ([008cb2f](https://github.com/juspay/xyne-spaces/commit/008cb2f7f9a249f9e52b98a4caa62cc8375dee9e))
+* thread -d fix ([#2080](https://github.com/juspay/xyne-spaces/issues/2080)) ([251caeb](https://github.com/juspay/xyne-spaces/commit/251caebbf04526bc4923833ed99019b3f70999f5))
+
+## [1.358.0](https://github.com/juspay/xyne-spaces/compare/v1.357.0...v1.358.0) (2026-09-21)
+
+
+### Features
+
+* allow users to tag themselves in chat mentions ([#1986](https://github.com/juspay/xyne-spaces/issues/1986)) ([8755740](https://github.com/juspay/xyne-spaces/commit/875574085c2714bfb9d9e8fe662af10d551d34b2))
+
+
+### Bug Fixes
+
+* merchantId addition in Kanban ([#2101](https://github.com/juspay/xyne-spaces/issues/2101)) ([8b81426](https://github.com/juspay/xyne-spaces/commit/8b8142639d763d03b3dd6879d25e9e66b57cc374))
+
+## [1.357.0](https://github.com/juspay/xyne-spaces/compare/v1.356.0...v1.357.0) (2026-09-21)
+
+
+### Features
+
+* Helm Charts for OSS ([#2123](https://github.com/juspay/xyne-spaces/issues/2123)) ([b517ae9](https://github.com/juspay/xyne-spaces/commit/b517ae96de9c6819666bfeab956139b3abb39dc5))
+
 ## [1.356.0](https://github.com/juspay/xyne-spaces/compare/v1.355.2...v1.356.0) (2026-09-21)
 
 

@@ -20,7 +20,7 @@ import type { Participant } from 'livekit-client';
 import { roomActor, type ParticipantInfo } from '../../../machines/roomMachine';
 import { useUser } from '../../../hooks/useUsers';
 import { useAuth } from '../../../hooks/useAuth';
-import { InvitationResponse, type CallParticipantMetadata } from '@xyne/shared';
+import { InvitationResponse, RingStatus, type CallParticipantMetadata } from '@xyne/shared';
 import Avatar from '../../ui/Avatar/Avatar';
 import { Popover } from '../../ui/Popover/Popover';
 import {
@@ -41,6 +41,7 @@ import { callService } from '../../../services/Call/callService';
 import { getUserDisplayName, isUserDeactivated } from '../../../utils/userDisplayName';
 import { cn } from '../../../utils/classNames';
 import { logger, Event } from '../../../utils/logger';
+import { getRingStatusLabel, useIsBroadcastChannelCall } from '../ringStatus.utils';
 
 function matchesSearch(name: string, query: string): boolean {
   const q = query.trim().toLowerCase();
@@ -85,11 +86,14 @@ interface CallParticipant {
   metadata: unknown;
   displayName?: string | null | undefined;
   isExternal?: boolean | undefined;
+  ringStatus?: string | null | undefined;
 }
 
 interface ActiveCall {
   externalId: string;
   createdByUserId?: string;
+  channelId?: string | null;
+  callOrigin?: string | null;
   participants?: CallParticipant[];
 }
 
@@ -162,6 +166,8 @@ interface ParticipantItemProps {
   onMuteParticipant: (participantUserId: string) => void | Promise<void>;
   onRemoveParticipant: (participantUserId: string, name: string) => void | Promise<void>;
   searchQuery: string;
+  /** Channel broadcast calls never ring anyone, so invitees read "Invited". */
+  isBroadcastChannelCall: boolean;
 }
 
 // ParticipantItem component that uses useUser hook internally
@@ -179,6 +185,7 @@ function ParticipantItem({
   onMuteParticipant,
   onRemoveParticipant,
   searchQuery,
+  isBroadcastChannelCall,
 }: ParticipantItemProps): React.ReactElement | null {
   const { response, userId, displayName } = participant;
   const wasRemovedByHost =
@@ -228,7 +235,16 @@ function ParticipantItem({
   ) : response === InvitationResponse.LEFT ? (
     'Left the call'
   ) : response === InvitationResponse.INVITED ? (
-    'Invited'
+    // Neither external guests nor channel broadcast invitees are ever rung.
+    isExternal || isBroadcastChannelCall ? (
+      'Invited'
+    ) : (
+      <span className={participant.ringStatus === RingStatus.BUSY ? 'text-amber-600' : undefined}>
+        {getRingStatusLabel(participant.ringStatus)}
+      </span>
+    )
+  ) : response === InvitationResponse.MISSED ? (
+    'No answer'
   ) : response === InvitationResponse.DECLINED ? (
     <span className='text-red-500'>Declined</span>
   ) : response === InvitationResponse.REQUESTED ? (
@@ -479,6 +495,11 @@ export function ParticipantsSidebar({
     [activeCalls, callId],
   );
 
+  const isBroadcastChannelCall = useIsBroadcastChannelCall(
+    currentCall?.channelId,
+    currentCall?.callOrigin,
+  );
+
   // Get LiveKit participants from room state (for speaking detection)
   const livekitParticipants = useSelector(roomActor, state => state.context.participants);
 
@@ -676,6 +697,7 @@ export function ParticipantsSidebar({
 
   // Props every participant row shares, whichever section it's listed in.
   const participantItemProps = {
+    isBroadcastChannelCall,
     showMuteButton: isHost,
     currentUserId: resolvedCurrentUserId,
     callId,
