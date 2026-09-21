@@ -5,7 +5,12 @@ import { SDLC_APP_BASE_PATH } from '../../config';
 import { useCallJoinOrInitiate } from '../../hooks/useCallJoinOrInitiate';
 import { useSdlcFrame } from './SdlcFrameContext';
 import { isSdlcPath, parseSdlcFrameMessage, SDLC_FRAME_MESSAGE } from './sdlcFrameMessages';
-import { getLastSdlcLocation, setLastSdlcLocation, sdlcHubIdOf } from './lastSdlcLocation';
+import {
+  getLastSdlcLocation,
+  setLastSdlcLocation,
+  sdlcHubIdOf,
+  withoutResetParam,
+} from './lastSdlcLocation';
 import { openLink } from '../../utils/openLink';
 import { SdlcEmbeddedWebview } from './SdlcEmbeddedWebview';
 
@@ -120,12 +125,13 @@ const SdlcFrameHost = (): ReactElement | null => {
 
       if (message.type !== SDLC_FRAME_MESSAGE.route) return;
 
-      frameLocationRef.current = message.path;
-      if (workspaceId) setLastSdlcLocation(workspaceId, message.path);
+      const reported = withoutResetParam(message.path);
+      frameLocationRef.current = reported;
+      if (workspaceId) setLastSdlcLocation(workspaceId, reported);
       // Only while on screen — a hidden frame must not move the address bar.
       const current = `${location.pathname}${location.search}${location.hash}`;
-      if (viewport && isSdlcPath(message.path) && message.path !== current) {
-        void navigate(message.path, { replace: true });
+      if (viewport && isSdlcPath(reported) && reported !== current) {
+        void navigate(reported, { replace: true });
       }
     };
 
