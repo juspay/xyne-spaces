@@ -1,7 +1,7 @@
 name: RCA-check
 
 # Fix PRs must carry a Root Cause Analysis in the description. This job reads the
-# PR body and fails when a required RCA heading is missing or empty.
+# PR body and fails when the Root Cause heading is missing or too thin.
 #
 # Two details matter if this is made a required status check:
 #   * `types: [edited]` — otherwise fixing the description never clears the red check.
@@ -25,6 +25,12 @@ on:
 permissions:
   contents: read
 
+# `edited` fires on every description save. Without this, a stale run can report
+# after the newer passing one and put the check back to red.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   rca:
     name: rca
@@ -35,6 +41,8 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
+            const MIN_CHARS = 100;
+
             const pr     = context.payload.pull_request;
             const body   = pr.body || '';
             const title  = pr.title || '';
@@ -58,27 +66,45 @@ jobs:
               return;
             }
 
-            const required = ['Root Cause', 'Missed Scenario', 'Impact', 'Fix', 'Prevention'];
             // Drop template comments so an untouched template does not count as filled in.
             const stripped = body.replace(/<!--[\s\S]*?-->/g, '');
-            const missing = [];
 
-            for (const heading of required) {
-              const re = new RegExp(
-                `^#{2,4}\\s*${heading}\\s*$([\\s\\S]*?)(?=^#{2,4}\\s|$(?![\\s\\S]))`,
-                'im',
+            // Blank out `#` inside fenced blocks so a code comment cannot look like a
+            // heading. Same length, so offsets below still line up with `stripped`.
+            const masked = stripped.replace(/```[\s\S]*?```/g, b => b.replace(/#/g, ' '));
+
+            // Trailing text on the heading line is allowed, so "### Root Cause: stale
+            // cursor" still matches.
+            const headingRe = /^(#{1,6})[ \t]*Root Cause\b[^\n]*$/im;
+            const match = masked.match(headingRe);
+
+            if (!match) {
+              core.setFailed(
+                'This is a fix PR, so an RCA is mandatory. No "Root Cause" heading found — ' +
+                'add one to the PR description. This check re-runs on every edit.',
               );
-              const match = stripped.match(re);
-              const content = (match?.[1] || '').replace(/[-*\s>]/g, '');
-              if (content.length < 10) missing.push(heading);
+              return;
             }
 
-            if (missing.length) {
+            // The section ends at the next heading of the same or higher level, so the
+            // author's own sub-headings and fenced blocks stay part of it.
+            const level = match[1].length;
+            const from  = match.index + match[0].length;
+            const end   = masked.slice(from).search(new RegExp(`^#{1,${level}}[ \\t]`, 'm'));
+            const section = end === -1 ? stripped.slice(from) : stripped.slice(from, from + end);
+
+            // Strip leading list markers only, then whitespace, so a bulleted answer is
+            // measured on its text rather than its punctuation.
+            const content = section
+              .replace(/^[ \t]*([-*>]|\d+[.)])[ \t]+/gm, '')
+              .replace(/\s/g, '');
+
+            if (content.length < MIN_CHARS) {
               core.setFailed(
-                'This is a fix PR, so the RCA section is mandatory. ' +
-                `Missing or empty: ${missing.join(', ')}. ` +
-                'Fill them in the PR description — this check re-runs on every edit.',
+                'This is a fix PR, so an RCA is mandatory. The "Root Cause" section has ' +
+                `${content.length} characters, needs at least ${MIN_CHARS}. Explain what ` +
+                'actually broke in the PR description — this check re-runs on every edit.',
               );
             } else {
-              core.info('RCA section present.');
+              core.info(`Root Cause section present (${content.length} characters).`);
             }

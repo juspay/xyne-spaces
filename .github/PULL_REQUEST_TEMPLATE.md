@@ -13,26 +13,12 @@
 
 
 ## RCA — required for Bugfix PRs
-<!-- Delete this whole section only if this is NOT a bugfix. Keep every heading below;
-     CI checks that each one has real content. -->
+<!-- Delete this whole section only if this is NOT a bugfix. CI checks that Root Cause
+     has real content (at least 100 characters). -->
 
 ### Root Cause
-<!-- The exact defect. Which commit/PR/behaviour introduced it, if known. -->
-
-### Missed Scenario
-<!-- Why dev, review, and QA did not catch it. Be specific: no test, test existed but
-     asserted the wrong thing, env-only path, race, data shape not covered, review gap. -->
-
-### Impact
-<!-- Which user flow broke, which actors (member/admin/app user/worker), which
-     environments, and for how long. -->
-
-### Fix
-<!-- What this change does and why it is the minimal correct fix. -->
-
-### Prevention
-<!-- A concrete artifact: test added in this PR, automation ticket ID, alert, guardrail,
-     lint/CI rule. "Be more careful" is not prevention. -->
+<!-- The exact defect, and why it happened. Which commit/PR/behaviour introduced it,
+     if known. Not what the fix does — what actually broke. -->
 
 ## Areas Touched
 
