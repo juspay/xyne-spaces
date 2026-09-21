@@ -1,3 +1,10 @@
+## [1.348.0](https://github.com/juspay/xyne-spaces/compare/v1.347.0...v1.348.0) (2026-09-21)
+
+
+### Features
+
+* merge people and channels into one Cmd+K list ([#2075](https://github.com/juspay/xyne-spaces/issues/2075)) ([0e1e464](https://github.com/juspay/xyne-spaces/commit/0e1e4642b5225d526869f627be5e2bf64bbb3324))
+
 ## [1.347.0](https://github.com/juspay/xyne-spaces/compare/v1.346.0...v1.347.0) (2026-09-19)
 
 
