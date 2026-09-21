@@ -1,3 +1,15 @@
+## [1.358.0](https://github.com/juspay/xyne-spaces/compare/v1.357.0...v1.358.0) (2026-09-21)
+
+
+### Features
+
+* allow users to tag themselves in chat mentions ([#1986](https://github.com/juspay/xyne-spaces/issues/1986)) ([8755740](https://github.com/juspay/xyne-spaces/commit/875574085c2714bfb9d9e8fe662af10d551d34b2))
+
+
+### Bug Fixes
+
+* merchantId addition in Kanban ([#2101](https://github.com/juspay/xyne-spaces/issues/2101)) ([8b81426](https://github.com/juspay/xyne-spaces/commit/8b8142639d763d03b3dd6879d25e9e66b57cc374))
+
 ## [1.357.0](https://github.com/juspay/xyne-spaces/compare/v1.356.0...v1.357.0) (2026-09-21)
 
 
