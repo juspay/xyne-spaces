@@ -1,3 +1,10 @@
+## [1.361.0](https://github.com/juspay/xyne-spaces/compare/v1.360.1...v1.361.0) (2026-09-21)
+
+
+### Features
+
+* fix label ids ([#2137](https://github.com/juspay/xyne-spaces/issues/2137)) ([ba5811f](https://github.com/juspay/xyne-spaces/commit/ba5811f33797dbd4c2611ab3965c309ec23a1a74))
+
 ## [1.360.1](https://github.com/juspay/xyne-spaces/compare/v1.360.0...v1.360.1) (2026-09-21)
 
 
