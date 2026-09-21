@@ -28,6 +28,9 @@ const EVT = {
   unsubscribe: 'sync:unsubscribe',
   snapshot: 'sync:snapshot',
   delta: 'sync:delta',
+  /** Resume-complete marker: the client has been replayed up to the server's current version (sent
+   *  even when zero deltas were missed). Flips a resumed instance to `complete`. */
+  current: 'sync:current',
   revoke: 'sync:revoke',
   /**
    * Server → client, emitted once the backend's sync handlers are attached on a
@@ -184,6 +187,7 @@ export class SyncClient {
     this.#started = true;
     this.#transport.on<SnapshotMsg>(EVT.snapshot, this.#onSnapshot);
     this.#transport.on<DeltaMsg>(EVT.delta, this.#onDelta);
+    this.#transport.on<{ instanceKey: string }>(EVT.current, this.#onCurrent);
     this.#transport.on<RevokeMsg>(EVT.revoke, this.#onRevoke);
     this.#transport.on<void>(EVT.ready, this.#onReady);
     this.#transport.on<{ reason?: string }>(EVT.unavailable, this.#onUnavailable);
@@ -224,23 +228,35 @@ export class SyncClient {
     void this.#seedFromStore(key);
   }
 
-  /** Load an instance's persisted rows + offset into the IVM and mark it hydrated (paint). */
+  /** Load an instance's persisted rows + offset into the IVM (a fast local PAINT only). Does NOT mark
+   *  the instance hydrated: `complete` must mean "caught up to the server's current state", and the
+   *  seed is possibly-stale local data (its offset can be ahead of its rows). The instance stays
+   *  `unknown` until the SERVER confirms currency — a `sync:snapshot` (#onSnapshot) or a `sync:current`
+   *  resume-complete marker (#onCurrent). Painting under `unknown` avoids the empty/stale-complete that
+   *  makes consumers (e.g. ChatListV4's "all deleted" branch) wipe the list on a channel switch-return. */
   async #seedFromStore(key: string): Promise<void> {
     try {
       const persisted = await this.#store.loadInstance(key);
       if (!persisted || !this.#subs.has(key)) return;
       if (persisted.rows.length > 0) this.#host.applySeed(key, persisted.rows);
       if (persisted.offset) this.#offsets.set(key, persisted.offset);
-      // Instant paint from the persisted base — this is what flips `complete` on reload,
-      // so a resume (which delivers no snapshot) still hydrates. No `sync:current` needed.
-      if (!this.#hydrated.has(key)) {
-        this.#hydrated.add(key);
-        this.#hydrationListeners.get(key)?.forEach((cb) => cb());
-      }
     } catch {
       // Seed is best-effort; on failure we simply subscribe fresh (server snapshots).
     }
   }
+
+  /** Server → client: the resume is caught up to the current version (sent even for a zero-delta
+   *  resume). This is the resume-path completion signal — snapshots self-announce via #onSnapshot,
+   *  but a resume replays bare deltas with no terminal marker, so without this a switch-return that
+   *  resumes with nothing-missed would sit at `unknown` forever. Flip to hydrated (`complete`). */
+  readonly #onCurrent = (msg: { instanceKey: string }): void => {
+    const key = this.#instToSub.get(msg.instanceKey);
+    if (!key) return;
+    if (!this.#hydrated.has(key)) {
+      this.#hydrated.add(key);
+      this.#hydrationListeners.get(key)?.forEach((cb) => cb());
+    }
+  };
 
   /** Drop a reference; unsubscribes and releases the instance's rows on the last one. */
   unsubscribe(queryName: string, args: ReadonlyJSONValue[]): void {

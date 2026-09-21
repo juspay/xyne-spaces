@@ -10,7 +10,7 @@ import { createBatchViewUpdatesWithMetrics } from '../services/otel';
 import { useSelector } from '@xstate/react';
 import { stateMachineActor } from '../machines/stateMachine';
 import { useEncryptionBootstrap } from '@xyne/shared/hooks';
-import { startSyncEngineClient } from '../services/syncEngineClient';
+import { startSyncEngineClient, connectSyncEngineSocket } from '../services/syncEngineClient';
 
 interface ZeroProviderProps {
   children: ReactNode;
@@ -36,6 +36,11 @@ const ZeroProvider: React.FC<ZeroProviderProps> = ({ children }): ReactElement |
     if (!user || !encryptionReady) {
       return;
     }
+
+    // Open the sync engine's socket here, alongside Zero's own connect below — BEFORE InitialStateLoader
+    // gates on sync-routed queries. Otherwise the socket only opens via post-gate feature components and
+    // the boot gate deadlocks (gate → sync → socket → gate). No-op if the engine is disabled.
+    connectSyncEngineSocket();
 
     const authFunction = undefined;
 

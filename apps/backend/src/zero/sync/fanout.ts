@@ -461,6 +461,12 @@ export class Fanout {
             });
           }
           client.socket.join(roomFor(instanceKey)); // now live → future deltas via the room broadcast
+          // Resume-complete marker: the client is now caught up to the current version. Snapshots
+          // self-announce (the client flips `complete` on `sync:snapshot`), but a resume replays bare
+          // deltas with no terminal signal — and a ZERO-delta resume (nothing missed) sends nothing —
+          // so without this the client sits at `unknown` after a switch-return. `complete` must mean
+          // "synced to server", not "painted a local seed", so this is the resume's completion signal.
+          this.#emit(client, 'sync:current', { instanceKey });
           obsEmit('fanout', { event: 'sync:resume', socketId: client.id, instanceKey, deltas: diffs.length });
           return;
         }
@@ -802,6 +808,9 @@ export class Fanout {
         version: p.version,
       });
     }
+    // Resume-complete marker (see the gate #hydrate resume): flip the client to `complete` even when
+    // zero deltas were projected — a resume has no other terminal signal.
+    this.#emitRowLevel(client, 'sync:current', { instanceKey });
     obsEmit('fanout', { event: 'sync:resume', socketId: client.id, instanceKey, deltas: projected.length });
     return true;
   }

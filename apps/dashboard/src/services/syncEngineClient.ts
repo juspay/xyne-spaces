@@ -43,3 +43,20 @@ export function startSyncEngineClient(): void {
 
   initSyncEngine(transport, idbSyncStore);
 }
+
+/**
+ * Open the app socket the sync engine rides on — EARLY, alongside Zero's own connect (in ZeroProvider's
+ * user-ready effect), so the sync engine can serve InitialStateLoader's gate queries (getUsersV2,
+ * userBookmarks) instead of deadlocking: those gate on sync, sync needs this socket, and the socket
+ * would otherwise only open via feature components that mount AFTER the gate. Idempotent (connect() is a
+ * no-op if already connected) and a no-op when the engine is disabled — other features keep opening it
+ * lazily as before. Native Zero remains the fallback (a shared query whose sync path is unavailable
+ * routes to Zero via the `serving` flag).
+ */
+export function connectSyncEngineSocket(): void {
+  if (!ENABLED) return;
+  void websocketService.connect().catch(() => {
+    // Best-effort: feature components retry the connect lazily, and the client
+    // falls back to native Zero while the engine is unreachable.
+  });
+}
