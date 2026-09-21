@@ -24,16 +24,11 @@ export type KanbanFormFieldGroup = {
 };
 
 export type KanbanGroupBy =
-  |
   | 'none'
- 
   | 'assignee'
   | 'createdBy'
- 
   | 'status'
- 
   | 'priority'
- 
   | 'merchantId'
   | KanbanFormFieldGroup;
 

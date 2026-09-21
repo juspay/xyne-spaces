@@ -631,8 +631,8 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
               : criterion === 'status'
                 ? ticket.statusV2
                 : criterion === 'merchantId'
-                ? (ticket.merchantId ?? NO_MERCHANT_GROUP)
-                : (ticket.priority ?? 'No Priority');
+                  ? (ticket.merchantId ?? NO_MERCHANT_GROUP)
+                  : (ticket.priority ?? 'No Priority');
 
         (acc[key] ??= []).push(ticket);
         return acc;
