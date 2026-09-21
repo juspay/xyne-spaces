@@ -1,7 +1,7 @@
 ---
 description: |
   **AUTO-TRIGGER** when user mentions:
-  - Jenkins URLs (https://jenkins.*.juspay.net/*)
+  - Jenkins URLs (https://jenkins.<your-org>/*)
   - Build numbers with failure context ("failed", "broken", "automation")
   - Phrases: "what happened in this build", "why did automation fail",
     "investigate build failure", "run automation tests locally"

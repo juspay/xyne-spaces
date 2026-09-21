@@ -114,7 +114,7 @@ The ref holds the payload (no re-render), the count state drives the menu label.
 The `.md` renderer (in `ExportMemoriesMenu.tsx`, ~40 lines):
 
 ```md
-# Digital Twin memories — pradeesh.s@juspay.in
+# Digital Twin memories — user@example.com
 Exported 19 Aug 2026 · 412 of 5,880 memories (filtered: subsystem=projects, from 2026-01-01)
 
 > Read-only. To restore memories into your Twin, use the .json archive.
