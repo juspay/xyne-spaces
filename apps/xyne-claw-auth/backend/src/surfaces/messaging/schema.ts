@@ -78,6 +78,9 @@ export const accountConfigSchema = accountPolicySchema.extend({
   /** Observed transport state, written by the owning pod. */
   connState: z.enum(CONN_STATES).default("disconnected"),
   selfId: z.string().optional(),
+  /** The account's LID, when the transport has one. Not read by the runtime —
+   *  identity is resolved from the live socket (see selfOf in the plugin) —
+   *  but stored so an operator can tell which LID a number answers to. */
   selfAltId: z.string().optional(),
   displayId: z.string().optional(),
   lastConnectedAt: z.string().optional(),

@@ -3,9 +3,15 @@
  * entry in CHANNELS). Talks to /claw/api/v1/surfaces/:channel.
  *
  * Rendered in two places, selected by `scope`: user-scoped channels on a
- * person's own Settings page, org-scoped ones on the organisation page. Flow is
- * the same either way — pick the agent, connect (a QR dialog for a linked
- * device, a token form for a business number), then the per-account settings.
+ * person's own Settings page, org-scoped ones on the organisation page — which
+ * already renders it only for an org OWNER/ADMIN, the same gate the API
+ * applies. This component adds no gate of its own: an earlier backstop here
+ * checked platform CLAW_ADMIN instead, which is stricter than the API and made
+ * the card vanish for the org owners it is meant for.
+ *
+ * Flow is the same either way — pick the agent, connect (a QR dialog for a
+ * linked device, a token form for a business number), then the per-account
+ * settings.
  */
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { ArrowsClockwiseIcon, CaretDownIcon, CaretUpIcon, DeviceMobileIcon, SealCheckIcon, CopyIcon } from "@phosphor-icons/react";
@@ -29,7 +35,6 @@ import { Button } from "./ui/Button";
 import { ConfirmDialog } from "./ui/ConfirmDialog";
 import { Dialog } from "./ui/Dialog";
 import { SelectField } from "./ui/SelectField";
-import { useAdminStatus } from "../hooks/useAdminStatus";
 import { Switch } from "./ui/Switch";
 import { TextField } from "./ui/TextField";
 import { useSnackbar } from "./ui/Snackbar";
@@ -107,8 +112,6 @@ export function MessagingChannelsCard({
   /** Org-scoped channels only; a personal account uses the session's org. */
   orgId?: string;
 }) {
-  const { isAdmin } = useAdminStatus();
-  if (scope === "org" && !isAdmin) return null;
   return (
     <>
       {CHANNELS.filter((channel) => channel.scope === scope).map((channel) => (

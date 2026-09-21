@@ -77,3 +77,24 @@ describe("toInbound: what it says", () => {
     expect(toInbound(wa({}, {}), self)).toBeNull();
   });
 });
+
+describe("LID addressing", () => {
+  // WhatsApp increasingly addresses chats by LID rather than phone JID. The
+  // owner's own chat arriving as <ownLid>@lid must still read as self chat —
+  // missing it makes their notes to self look like a stranger's DM.
+  it("recognises the owner's own chat when it arrives as a LID", () => {
+    const msg = toInbound(wa({ remoteJid: self.lid!, id: "NOTE", fromMe: true }), self);
+    expect(msg).toMatchObject({ selfChat: true, fromOwner: true, isGroup: false });
+  });
+
+  it("does not mistake somebody else's LID chat for the owner's", () => {
+    const msg = toInbound(wa({ remoteJid: "25606746030208@lid", id: "DM", fromMe: false }), self);
+    expect(msg?.selfChat).toBeUndefined();
+  });
+
+  it("still recognises the own chat by phone JID, for sessions with no LID", () => {
+    const noLid = { jid: self.jid };
+    const msg = toInbound(wa({ remoteJid: self.jid, id: "NOTE", fromMe: true }), noLid);
+    expect(msg?.selfChat).toBe(true);
+  });
+});

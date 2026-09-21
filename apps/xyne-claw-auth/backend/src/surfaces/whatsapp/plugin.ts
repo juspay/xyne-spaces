@@ -54,7 +54,6 @@ const TYPING_MAX_MS = 5 * 60 * 1_000;
 export interface WhatsAppHandle {
   ctx: AccountRuntimeContext;
   sock: WASocket | null;
-  self: SelfIdentity | null;
   stopped: boolean;
   attempt: number;
   reconnectTimer: NodeJS.Timeout | null;
@@ -96,6 +95,24 @@ function disconnectCode(error: unknown): number | undefined {
   return typeof code === "number" ? code : undefined;
 }
 
+/**
+ * Who this connection is, read from the socket EVERY time rather than captured
+ * when it opened.
+ *
+ * `sock.user` is `authState.creds.me`, and Baileys fills in the account's LID
+ * on a creds.update emitted around the same moment as connection open — so a
+ * snapshot taken on "open" can miss it permanently. Missing the LID is not
+ * cosmetic: WhatsApp now addresses the owner's own chat as `<lid>@lid`, so
+ * without it the owner's notes to self look like a DM from a stranger and are
+ * refused by dmPolicy.
+ */
+function selfOf(handle: WhatsAppHandle): SelfIdentity | null {
+  const me = handle.sock?.user;
+  if (!me?.id) return null;
+  const jid = jidNormalizedUser(me.id);
+  return { jid, ...(me.lid ? { lid: me.lid } : {}) };
+}
+
 function channelConfigOf(ctx: AccountRuntimeContext): WhatsAppChannelConfig {
   const parsed = whatsappChannelConfigSchema.safeParse(ctx.account.channelConfig ?? {});
   return parsed.success ? parsed.data : whatsappChannelConfigSchema.parse({});
@@ -133,8 +150,6 @@ async function connect(handle: WhatsAppHandle): Promise<void> {
         handle.attempt = 0;
         const me = sock.user;
         const jid = me?.id ? jidNormalizedUser(me.id) : "";
-        const self: SelfIdentity = { jid, ...(me?.lid ? { lid: me.lid } : {}) };
-        handle.self = self;
         const phone = phoneFromJid(jid);
         await ctx.setState({
           connState: "connected",
@@ -143,7 +158,7 @@ async function connect(handle: WhatsAppHandle): Promise<void> {
           ...(me?.lid ? { selfAltId: me.lid } : {}),
           ...(phone ? { displayId: `+${phone}` } : {}),
         });
-        ctx.logger.info(`[whatsapp] connected account=${ctx.account.id} as ${jid}`);
+        ctx.logger.info(`[whatsapp] connected account=${ctx.account.id} as ${jid} lid=${me?.lid ?? "(none yet)"}`);
       }
       if (update.connection === "close") {
         const code = disconnectCode(update.lastDisconnect?.error);
@@ -166,10 +181,11 @@ async function connect(handle: WhatsAppHandle): Promise<void> {
   });
 
   sock.ev.on("messages.upsert", ({ messages, type }) => {
-    if (type !== "notify" || !handle.self) return;
+    const self = selfOf(handle);
+    if (type !== "notify" || !self) return;
     const selfChat = channelConfigOf(ctx).selfChat;
     for (const message of messages) {
-      const inbound = toInbound(message, handle.self, { sentIds: handle.sentIds });
+      const inbound = toInbound(message, self, { sentIds: handle.sentIds });
       if (!inbound) continue;
       // "My own chat: off" means silence, not "fall through to the DM rules" —
       // otherwise a number that answers other people's DMs would answer the
@@ -270,7 +286,6 @@ export const whatsappPlugin: ChannelPlugin<WhatsAppHandle, WhatsAppChannelConfig
     const handle: WhatsAppHandle = {
       ctx,
       sock: null,
-      self: null,
       stopped: false,
       attempt: 0,
       reconnectTimer: null,
