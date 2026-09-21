@@ -1559,7 +1559,34 @@ export const queries: AnyQueryRegistry = defineQueries({
       }
 
       if (assignedTo && assignedTo.length > 0) {
-        query = query.where('assignedTo', 'IN', assignedTo);
+        // Desk tickets store a raw user id in assignedTo (no user:/group: prefixing).
+        // The shared 'Unassigned' sentinel filters tickets with no assignee
+        // (zero stores nullable strings, so unassigned = IS null OR '').
+        const { inverted, includeUnassigned, ids } = parseAssigneeFilter(assignedTo);
+        if (!inverted) {
+          query = query.where(({ or, cmp }) =>
+            or(
+              ...(ids.length ? [cmp('assignedTo', 'IN', ids)] : []),
+              ...(includeUnassigned ? [cmp('assignedTo', 'IS', null), cmp('assignedTo', '')] : []),
+            ),
+          );
+        } else if (includeUnassigned) {
+          query = query.where(({ and, cmp }) =>
+            and(
+              ...(ids.length ? [cmp('assignedTo', 'NOT IN', ids)] : []),
+              cmp('assignedTo', 'IS NOT', null),
+              cmp('assignedTo', '!=', ''),
+            ),
+          );
+        } else {
+          query = query.where(({ or, cmp }) =>
+            or(
+              cmp('assignedTo', 'NOT IN', ids),
+              cmp('assignedTo', 'IS', null),
+              cmp('assignedTo', ''),
+            ),
+          );
+        }
       }
 
       if (createdBy && createdBy.length > 0) {
@@ -2112,7 +2139,34 @@ export const queries: AnyQueryRegistry = defineQueries({
       query = query.where('isArchived', false);
 
       if (assignedTo && assignedTo.length > 0) {
-        query = query.where('assignedTo', 'IN', assignedTo);
+        // Desk tickets store a raw user id in assignedTo (no user:/group: prefixing).
+        // The shared 'Unassigned' sentinel filters tickets with no assignee
+        // (zero stores nullable strings, so unassigned = IS null OR '').
+        const { inverted, includeUnassigned, ids } = parseAssigneeFilter(assignedTo);
+        if (!inverted) {
+          query = query.where(({ or, cmp }) =>
+            or(
+              ...(ids.length ? [cmp('assignedTo', 'IN', ids)] : []),
+              ...(includeUnassigned ? [cmp('assignedTo', 'IS', null), cmp('assignedTo', '')] : []),
+            ),
+          );
+        } else if (includeUnassigned) {
+          query = query.where(({ and, cmp }) =>
+            and(
+              ...(ids.length ? [cmp('assignedTo', 'NOT IN', ids)] : []),
+              cmp('assignedTo', 'IS NOT', null),
+              cmp('assignedTo', '!=', ''),
+            ),
+          );
+        } else {
+          query = query.where(({ or, cmp }) =>
+            or(
+              cmp('assignedTo', 'NOT IN', ids),
+              cmp('assignedTo', 'IS', null),
+              cmp('assignedTo', ''),
+            ),
+          );
+        }
       }
 
       if (createdBy && createdBy.length > 0) {
