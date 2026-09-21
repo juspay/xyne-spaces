@@ -252,14 +252,15 @@ export const findOrCreateApp = async (
   // (permissions, webhooks, commands) are cleanly isolated.
   const xyneUser = await db.user.findFirst({ where: { email: 'john.doe@gmail.com' } });
   let creatorUser = xyneUser;
-  // The app row only needs a valid createdBy, so fall back to any user in the TARGET workspace (all envs). Don't
-  // hard-depend on the john.doe@gmail.com seed — it isn't present in prod, and without this fallback every bot/app
-  // message throws here, so an alert/webhook channel (≈all bot messages) migrates almost nothing.
-  if (!creatorUser && workspaceId) {
-    creatorUser = await db.user.findFirst({ where: { workspaceId } });
+  if (!creatorUser) {
+    if (config.env === 'development' && workspaceId) {
+      creatorUser = await db.user.findFirst({ where: { workspaceId } });
+    } else {
+      throw new Error('[findOrCreateApp] Creator user john.doe@gmail.com not found');
+    }
   }
   if (!creatorUser) {
-    throw new Error('[findOrCreateApp] No creator user found for the target workspace');
+    throw new Error('[findOrCreateApp] No fallback workspace user found for local migration');
   }
 
   // Build a unique app name so bots with identical display names (e.g. two

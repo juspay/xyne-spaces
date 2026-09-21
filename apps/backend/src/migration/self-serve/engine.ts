@@ -305,15 +305,6 @@ export class SlackMigrationEngine {
     let oldestTs = Infinity;
     let cursor: string | undefined;
     let page = 0;
-    // Throttled progress signal used DURING a page (attachment downloads / thread fetches) so a page heavy with
-    // attachments keeps advancing progressAt and the stall watchdog doesn't fire mid-download. ~5s cadence keeps
-    // Redis writes light while staying well under the stall window.
-    let lastTouch = 0;
-    const touch = async (): Promise<void> => {
-      if (!onProgress || Date.now() - lastTouch < 5_000) return;
-      lastTouch = Date.now();
-      await onProgress({ messages: count, newestTs, oldestTs: oldestTs === Infinity ? 0 : oldestTs });
-    };
     logger.debug('[SlackMigration] collecting conversation', { convId: conv.id, isMpim: conv.isMpim, members: conv.members.length });
     try {
       do {
@@ -328,9 +319,9 @@ export class SlackMigrationEngine {
           const isNew = ts > sinceTs;                                  // full mode (sinceTs=0): everything is "new"
           const hasNewReplies = replyCount > 0 && latestReply > sinceTs;
           if (sinceTs > 0 && !isNew && !hasNewReplies) continue;       // delta: unchanged message → skip entirely
-          if (isNew) await this.prefetchFiles(token, m, gcsPrefix, touch); // only new top-level content pulls attachments
+          if (isNew) await this.prefetchFiles(token, m, gcsPrefix);    // only new top-level content pulls attachments
           if (replyCount > 0 && (m as { ts?: string }).ts) {
-            const replies = await this.fetchReplies(token, conv.id, (m as { ts: string }).ts, gcsPrefix, sinceTs, touch);
+            const replies = await this.fetchReplies(token, conv.id, (m as { ts: string }).ts, gcsPrefix, sinceTs);
             if (replies.length) (m as { _replies?: unknown[] })._replies = replies;
             else if (sinceTs > 0 && !isNew) continue;                  // old thread but no NEW replies after filtering → nothing to write
           }
@@ -454,10 +445,8 @@ export class SlackMigrationEngine {
     return cached?.channels ?? channels;
   }
 
-  /** Stream every Slack-hosted file on a message (top-level or reply) → storage, in bounded-concurrency batches.
-   *  `touch` fires after each batch so a message with many/slow attachments still signals forward progress
-   *  (the stall watchdog only counts progressAt, which is otherwise bumped once per history page). */
-  private async prefetchFiles(token: string, m: unknown, gcsPrefix: string, touch?: () => Promise<void>): Promise<void> {
+  /** Stream every Slack-hosted file on a message (top-level or reply) → storage, in bounded-concurrency batches. */
+  private async prefetchFiles(token: string, m: unknown, gcsPrefix: string): Promise<void> {
     const cfg = await getMigrationRuntimeConfig();
     const files = collectRawFiles(m).filter((f) => isDownloadableSlackFile(f));
     for (let i = 0; i < files.length; i += cfg.fileConcurrency) {
@@ -467,13 +456,11 @@ export class SlackMigrationEngine {
           if (uri) f.prefetchedStoragePath = uri;
         }),
       );
-      await touch?.();
     }
   }
 
-  /** Fetch a thread's replies (excluding the parent) and prefetch their files. sinceTs>0 keeps only replies newer than it.
-   *  `touch` signals progress per replies-page / per attachment batch so a huge thread doesn't look stalled. */
-  private async fetchReplies(token: string, channelId: string, ts: string, gcsPrefix: string, sinceTs = 0, touch?: () => Promise<void>): Promise<unknown[]> {
+  /** Fetch a thread's replies (excluding the parent) and prefetch their files. sinceTs>0 keeps only replies newer than it. */
+  private async fetchReplies(token: string, channelId: string, ts: string, gcsPrefix: string, sinceTs = 0): Promise<unknown[]> {
     const cfg = await getMigrationRuntimeConfig();
     const client = slackClient(token, cfg.requestTimeoutMs);
     const replies: unknown[] = [];
@@ -484,10 +471,9 @@ export class SlackMigrationEngine {
       for (const m of r.messages ?? []) {
         if ((m as { ts?: string }).ts === ts) continue; // conversations.replies includes the parent first
         if (sinceTs > 0 && parseFloat((m as { ts?: string }).ts ?? '0') <= sinceTs) continue; // delta: skip already-collected replies
-        await this.prefetchFiles(token, m, gcsPrefix, touch);
+        await this.prefetchFiles(token, m, gcsPrefix);
         replies.push(m);
       }
-      await touch?.();
       cursor = (r.response_metadata as { next_cursor?: string })?.next_cursor || undefined;
       if (cursor && cfg.pageDelayMs > 0) await sleep(cfg.pageDelayMs);
     } while (cursor);
