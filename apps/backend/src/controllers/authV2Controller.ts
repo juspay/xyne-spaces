@@ -8,7 +8,6 @@ import { jwtService } from '../services/jwtService';
 import { oauthStateServiceV2 } from '../services/oauthStateServiceV2';
 import { pkceServiceV2 } from '../services/pkceServiceV2';
 import { MicrosoftAuthController } from './microsoftAuthController';
-import { channelService } from '../services/channelService';
 import { WorkspaceJoinPolicy, WorkspaceType, AuthProvider, UserStatus, OrgRole } from '@xyne/shared';
 import type { WorkspaceJoinPolicy as WorkspaceJoinPolicyValue, WorkspaceType as WorkspaceTypeValue } from '@xyne/shared';
 
@@ -16,7 +15,7 @@ import '../types/express';
 import { config } from '@/config/env';
 import { isRefreshAllowed } from '@/services/sessionRefreshValidator';
 import { DatabaseClient } from '@/database/client';
-import { runAsSystem } from '@/database/tenant/context';
+import { switchWorkspaceData, ensurePresenceAndSelfDm } from '@/bypassAcl/authServices';
 import { getEncryptionProvider } from '@/services/encryption';
 import { getFrontendUrl, resolveConfiguredOAuthRedirectUrl } from '@/utils/publicUrls';
 import {
@@ -112,20 +111,6 @@ export class AuthV2Controller {
       return this.googleClientNew;
     }
     return this.googleClient;
-  }
-
-  private async ensureSelfDmForUser(
-    userId: string,
-    workspaceId: string
-  ): Promise<string | null> {
-    try {
-      const selfDmChannelId = await channelService.ensureSelfDmExists(userId, workspaceId);
-      logger.info(`[ensureSelfDmForUser] Self-DM ensured for user ${userId}: ${selfDmChannelId}`);
-      return selfDmChannelId;
-    } catch (error) {
-      logger.error(`[ensureSelfDmForUser] Failed to ensure self-DM for user ${userId}:`, error);
-      return null;
-    }
   }
 
   /**
@@ -1654,9 +1639,8 @@ export class AuthV2Controller {
         return;
       }
 
-      // Ensure user presence for workspace-scoped user
-      await this.userService.ensureUserPresence(workspaceUser.id, workspaceId);
-      const selfDmChannelId = await this.ensureSelfDmForUser(workspaceUser.id, workspaceId);
+      // Ensure user presence for workspace-scoped user — runs before req.user exists yet
+      const selfDmChannelId = await ensurePresenceAndSelfDm(workspaceUser.id, workspaceId);
 
       const workspace = await this.prisma.workspace.findUnique({
         where: { id: workspaceId },
@@ -1837,9 +1821,8 @@ export class AuthV2Controller {
         return;
       }
 
-      // Ensure user presence for workspace-scoped user
-      await this.userService.ensureUserPresence(workspaceUser.id, workspace.id);
-      const selfDmChannelId = await this.ensureSelfDmForUser(workspaceUser.id, workspace.id);
+      // Ensure user presence for workspace-scoped user — runs before req.user exists yet
+      const selfDmChannelId = await ensurePresenceAndSelfDm(workspaceUser.id, workspace.id);
 
       const workspaceRecord = await this.prisma.workspace.findUnique({
         where: { id: workspace.id },
@@ -2019,90 +2002,80 @@ export class AuthV2Controller {
       // be satisfied by definition. Safe to bypass because every lookup here is keyed off
       // `currentUser.email` (the caller's own verified session), never attacker-supplied —
       // this can only ever act on the caller's own identity in the target workspace.
-      await runAsSystem(async () => {
-        // Find the User record scoped to the target workspace
-        const targetUser = await this.userService.findUserByEmail(currentUser.email, workspaceId);
-        if (!targetUser) {
-          res.status(403).json({
-            error: 'Forbidden',
-            message: 'You do not have access to this workspace',
-          });
-          return;
-        }
-
-        await this.userService.ensureUserPresence(targetUser.id, workspaceId);
-        const selfDmChannelId = await this.ensureSelfDmForUser(targetUser.id, workspaceId);
-
-        const workspace = await this.prisma.workspace.findUnique({
-          where: { id: workspaceId },
-          select: { landingChannelId: true },
+      const data = await switchWorkspaceData(currentUser.email, workspaceId);
+      if (!data) {
+        res.status(403).json({
+          error: 'Forbidden',
+          message: 'You do not have access to this workspace',
         });
+        return;
+      }
+      const { targetUser, selfDmChannelId, workspace } = data;
 
-        // Get existing session from global session cookie
-        // We reuse the same session across workspaces (session belongs to user, not workspace)
-        const sessionId = req.cookies?.user_session_id;
+      // Get existing session from global session cookie
+      // We reuse the same session across workspaces (session belongs to user, not workspace)
+      const sessionId = req.cookies?.user_session_id;
 
-        // Verify session exists and is valid
-        let validSessionId: string | null = null;
-        let sessionRefreshExpiry: Date | null = null;
-        if (sessionId) {
-          const currentSession = await this.userSessionService.getSessionById(sessionId);
-          if (currentSession && currentSession.status === 'ACTIVE') {
-            validSessionId = currentSession.id;
-            // Reusing the session (fixed window): the DB refreshTokenExpiry is NOT
-            // extended on switch, so the cookies must reflect its remaining life,
-            // never a fresh now+expiryDays (which would outlive the DB record).
-            sessionRefreshExpiry = currentSession.refreshTokenExpiry;
-            logger.info(`[SWITCH-WORKSPACE] Reusing existing session: ${validSessionId}`);
-          }
+      // Verify session exists and is valid
+      let validSessionId: string | null = null;
+      let sessionRefreshExpiry: Date | null = null;
+      if (sessionId) {
+        const currentSession = await this.userSessionService.getSessionById(sessionId);
+        if (currentSession && currentSession.status === 'ACTIVE') {
+          validSessionId = currentSession.id;
+          // Reusing the session (fixed window): the DB refreshTokenExpiry is NOT
+          // extended on switch, so the cookies must reflect its remaining life,
+          // never a fresh now+expiryDays (which would outlive the DB record).
+          sessionRefreshExpiry = currentSession.refreshTokenExpiry;
+          logger.info(`[SWITCH-WORKSPACE] Reusing existing session: ${validSessionId}`);
         }
+      }
 
-        if (!validSessionId) {
-          logger.warn(`[SWITCH-WORKSPACE] No valid session found for workspace switch`);
-        }
+      if (!validSessionId) {
+        logger.warn(`[SWITCH-WORKSPACE] No valid session found for workspace switch`);
+      }
 
-        // Session-scoped cookie lifetime: exact remaining validity of the reused
-        // session so user_session_id (and the pointer) match the DB row.
-        const sessionCookieMaxAge = sessionRefreshExpiry
-          ? sessionRefreshExpiry.getTime() - Date.now()
-          : config.session.expiryDays * 24 * 60 * 60 * 1000;
+      // Session-scoped cookie lifetime: exact remaining validity of the reused
+      // session so user_session_id (and the pointer) match the DB row.
+      const sessionCookieMaxAge = sessionRefreshExpiry
+        ? sessionRefreshExpiry.getTime() - Date.now()
+        : config.session.expiryDays * 24 * 60 * 60 * 1000;
 
-        const token = jwtService.generateToken({
-          sub: targetUser.id,
+      const token = jwtService.generateToken({
+        sub: targetUser.id,
+        email: targetUser.email,
+        name: targetUser.name,
+        picture: targetUser.picture || undefined,
+        workspaceId: targetUser.workspaceId ?? undefined,
+        memberId: targetUser.orgMemberId,
+      });
+
+      const isProduction = process.env.NODE_ENV === 'production';
+      const cookieBase = { httpOnly: true, secure: isProduction, sameSite: 'strict' as const, path: '/' };
+
+      // Set workspace-specific cookies
+      res.cookie(`xyne_ws_${workspaceId}_token`, token, { ...cookieBase, maxAge: config.jwt.expirationSeconds * 1000 });
+      res.cookie('xyne_last_workspace', workspaceId, { ...cookieBase, maxAge: sessionCookieMaxAge });
+
+      // Set global session cookie (reusing existing session)
+      if (validSessionId) {
+        res.cookie('user_session_id', validSessionId, { ...cookieBase, maxAge: sessionCookieMaxAge });
+      }
+
+      logger.info(`[SWITCH-WORKSPACE] User ${currentUser.email} switched to workspace ${workspaceId}`);
+
+      res.status(200).json({
+        user: {
+          id: targetUser.id,
           email: targetUser.email,
           name: targetUser.name,
-          picture: targetUser.picture || undefined,
-          workspaceId: targetUser.workspaceId ?? undefined,
+          picture: targetUser.picture,
+          workspaceId: targetUser.workspaceId,
+          role: targetUser.role,
           memberId: targetUser.orgMemberId,
-        });
-
-        const isProduction = process.env.NODE_ENV === 'production';
-        const cookieBase = { httpOnly: true, secure: isProduction, sameSite: 'strict' as const, path: '/' };
-
-        // Set workspace-specific cookies
-        res.cookie(`xyne_ws_${workspaceId}_token`, token, { ...cookieBase, maxAge: config.jwt.expirationSeconds * 1000 });
-        res.cookie('xyne_last_workspace', workspaceId, { ...cookieBase, maxAge: sessionCookieMaxAge });
-
-        // Set global session cookie (reusing existing session)
-        if (validSessionId) {
-          res.cookie('user_session_id', validSessionId, { ...cookieBase, maxAge: sessionCookieMaxAge });
-        }
-
-        logger.info(`[SWITCH-WORKSPACE] User ${currentUser.email} switched to workspace ${workspaceId}`);
-
-        res.status(200).json({
-          user: {
-            id: targetUser.id,
-            email: targetUser.email,
-            name: targetUser.name,
-            picture: targetUser.picture,
-            workspaceId: targetUser.workspaceId,
-            role: targetUser.role,
-            memberId: targetUser.orgMemberId,
-          },
-          selfDmChannelId,
-          landingChannelId: workspace?.landingChannelId ?? null,
-        });
+        },
+        selfDmChannelId,
+        landingChannelId: workspace?.landingChannelId ?? null,
       });
     } catch (error) {
       logger.error('Error switching workspace:', error);
@@ -2221,8 +2194,7 @@ export class AuthV2Controller {
           },
         );
 
-        await this.userService.ensureUserPresence(workspaceUser.id, workspace.id);
-        const selfDmChannelId = await this.ensureSelfDmForUser(workspaceUser.id, workspace.id);
+        const selfDmChannelId = await ensurePresenceAndSelfDm(workspaceUser.id, workspace.id);
 
         const workspaceRecord = await this.prisma.workspace.findUnique({
           where: { id: workspace.id },
@@ -2380,8 +2352,7 @@ export class AuthV2Controller {
         },
       );
 
-      await this.userService.ensureUserPresence(workspaceUser.id, workspace.id);
-      const selfDmChannelId = await this.ensureSelfDmForUser(workspaceUser.id, workspace.id);
+      const selfDmChannelId = await ensurePresenceAndSelfDm(workspaceUser.id, workspace.id);
 
       const workspaceRecord = await this.prisma.workspace.findUnique({
         where: { id: workspace.id },

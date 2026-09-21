@@ -15,3 +15,15 @@ export function findCallForCalendarPush(
     () => repositories.calls.findForCalendarPush(callId),
   );
 }
+
+/**
+ * Relocated from queues/callCalendarPushQueue.ts's sync-call processor: the job carries only a
+ * callId, same as findCallForCalendarPush above — resolved cross-workspace before anything else.
+ */
+export function findCallCalendarPushRevision(callId: string): Promise<Date | null> {
+  return asSystem(
+    ['Call'],
+    'calendar push queue job carries only a callId, resolved cross-workspace like the sync itself',
+    () => repositories.calls.findCalendarPushRevision(callId),
+  );
+}
