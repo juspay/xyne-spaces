@@ -186,11 +186,14 @@ export class ChannelRepository extends BaseRepository<Channel, CreateChannelInpu
   }): Promise<Channel[]> {
     const { where = {}, limit, cursor } = options;
 
+    // (createdAt DESC, id DESC): the id tiebreaker keeps the cursor stable when
+    // several channels share the same createdAt — without it rows can be skipped
+    // or repeated across pages.
     return await this.db.channel.findMany({
       where,
       take: limit,
       ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}),
-      orderBy: { createdAt: 'desc' },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
     });
   }
 

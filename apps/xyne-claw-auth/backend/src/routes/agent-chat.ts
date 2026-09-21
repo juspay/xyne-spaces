@@ -69,10 +69,6 @@ function withXyneChatSurfacePrimer(systemPrompt: string | null | undefined): str
   return base ? `${XYNE_CHAT_SURFACE_PRIMER}\n\n${base}` : XYNE_CHAT_SURFACE_PRIMER;
 }
 
-function sanitizeForLog(value: unknown): string {
-  return String(value).replace(/[\r\n]+/g, " ");
-}
-
 function withoutFollowUpRecorderInvocations(value: unknown[]): unknown[] {
   return value.filter((item) => {
     if (!item || typeof item !== "object") return true;

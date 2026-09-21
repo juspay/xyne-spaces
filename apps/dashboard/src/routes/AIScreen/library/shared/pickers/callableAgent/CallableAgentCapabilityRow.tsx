@@ -21,6 +21,7 @@ export function CallableAgentCapabilityRow({
   onSelectedChange,
 }: CallableAgentCapabilityRowProps): ReactElement {
   const [browseOpen, setBrowseOpen] = useState(false);
+  const [browseSlug, setBrowseSlug] = useState<string | null>(null);
   const callable = useCallableAgents({
     agentSlug,
     agentOwnerUserId,
@@ -53,7 +54,10 @@ export function CallableAgentCapabilityRow({
 
         <button
           type='button'
-          onClick={() => setBrowseOpen(true)}
+          onClick={() => {
+            setBrowseSlug(null);
+            setBrowseOpen(true);
+          }}
           aria-label='Browse agents'
           data-track-category='Claw Agents'
           data-track-name='Create agent v2: browse callable agents'
@@ -72,6 +76,10 @@ export function CallableAgentCapabilityRow({
               key={entry.slug}
               label={entry.status === 'pending' ? `${entry.name} · pending` : entry.name}
               selected
+              onOpen={() => {
+                setBrowseSlug(entry.slug);
+                setBrowseOpen(true);
+              }}
               onToggle={() => callable.remove(entry.slug)}
             />
           ))}
@@ -80,7 +88,11 @@ export function CallableAgentCapabilityRow({
 
       <BrowseCallableAgentsDialog
         open={browseOpen}
-        onOpenChange={setBrowseOpen}
+        onOpenChange={next => {
+          setBrowseOpen(next);
+          if (!next) setBrowseSlug(null);
+        }}
+        initialSlug={browseSlug}
         catalog={callable.catalog}
         loading={callable.loading}
         isError={callable.isError}
