@@ -133,6 +133,28 @@ test('optimistic set of NEW conv, then confirming delta', () => {
   assert.equal(cur.length, 25);
 });
 
+test('lmid watermark + echo-gated sweep: no premature drop, retire after echo', () => {
+  const { host, ids } = setup();
+  const snap = Array.from({ length: 25 }, (_, k) => conv(k + 1));
+  host.applySnapshot('inst1', snap.map(wire), '01');
+  const newest = conv(26);
+  host.applyOptimistic(7, [{ kind: 'set', table: 'conversations', row: newest }]);
+  assert.ok(ids().includes('c0026'));
+
+  // watermark advances via the poke (noteLmid) BEFORE the fan-out echo — sweep must NOT
+  // drop the overlay yet (no confirmed row → the send would vanish)
+  host.noteLmid(7);
+  host.reconcileConfirmed();
+  assert.ok(ids().includes('c0026'), 'settled-but-unechoed overlay must not drop');
+
+  // echo lands → sweep retires flicker-free (row now confirmed-backed)
+  host.applyDelta('inst1', [wire(conv(26))], [delKey(conv(1))], '02');
+  host.reconcileConfirmed();
+  const cur = ids();
+  assert.ok(cur.includes('c0026'), 'row remains after retirement');
+  assert.equal(cur.length, 25);
+});
+
 test('rejected mutation reverts immediately via noteMutationSettled(false)', () => {
   const { host, ids } = setup();
   const snap = Array.from({ length: 25 }, (_, k) => conv(k + 1));
@@ -142,6 +164,100 @@ test('rejected mutation reverts immediately via noteMutationSettled(false)', () 
   host.noteMutationSettled(9, false);
   assert.ok(!ids().includes('c0027'), 'rejected overlay must revert');
   assert.equal(ids().length, 25, 'window refills from source');
+});
+
+test('echo-before-ack retires at ack (event-driven), no sweep needed', async () => {
+  const { host, ids, rows } = setup();
+  const snap = Array.from({ length: 25 }, (_, k) => conv(k + 1));
+  host.applySnapshot('inst1', snap.map(wire), '01');
+  const md26 = () => rows().find((r) => r.conversationId === 'c0026')?.initial_message_md;
+
+  host.applyOptimistic(7, [
+    { kind: 'set', table: 'conversations', row: conv(26, { initial_message_md: 'CLIENT-md-unsent' }) },
+  ]);
+  assert.equal(md26(), 'CLIENT-md-unsent');
+
+  // ECHO first (the wire row already carries server truth: coalesced insert+flip)…
+  host.applyDelta('inst1', [wire(conv(26, { initial_message_md: 'SERVER-md-sent' }))], [delKey(conv(1))], '02');
+  // …overlay still masks (mutation not yet settled) — by design
+  assert.equal(md26(), 'CLIENT-md-unsent');
+
+  // the ack arrives ~60ms later (the live ordering) — retirement must happen NOW, not at a sweep
+  host.noteMutationSettled(7, true);
+  await new Promise((r) => setTimeout(r, 0)); // let the scheduled reconcile microtask run
+  assert.equal(md26(), 'SERVER-md-sent', 'overlay must retire at ack (event-driven), exposing server truth');
+  assert.equal(ids().length, 25);
+});
+
+test('watermark-only settle (noteLmid) also retires at ack after echo', async () => {
+  const { host, ids, rows } = setup();
+  const snap = Array.from({ length: 25 }, (_, k) => conv(k + 1));
+  host.applySnapshot('inst1', snap.map(wire), '01');
+  host.applyOptimistic(8, [
+    { kind: 'set', table: 'conversations', row: conv(26, { initial_message_md: 'CLIENT' }) },
+  ]);
+  host.applyDelta('inst1', [wire(conv(26, { initial_message_md: 'SERVER' }))], [delKey(conv(1))], '02');
+  host.noteLmid(8);
+  await new Promise((r) => setTimeout(r, 0));
+  const row26 = rows().find((r) => r.conversationId === 'c0026');
+  assert.equal(row26?.initial_message_md, 'SERVER', 'watermark advance alone must retire the echoed overlay');
+  assert.ok(ids().includes('c0026'));
+});
+
+test('INVARIANT: late rebase replay after retirement must NOT re-mask the confirmed row', async () => {
+  // Zero's rebase replays and the confirmation watermark ride different pipelines; with
+  // rapid sends a replay from an EARLIER poke can land AFTER the ack retired this
+  // mutation's overlay. Re-recording would re-mask the confirmed row with the
+  // client-built (by-construction staler) version — the "clock icon flap".
+  const { host, rows } = setup();
+  const snap = Array.from({ length: 25 }, (_, k) => conv(k + 1));
+  host.applySnapshot('inst1', snap.map(wire), '01');
+
+  // record every md value the view ever emits for c0026 — catches even one-flush flaps
+  const mdHistory: unknown[] = [];
+  const record = () => {
+    const md = rows().find((r) => r.conversationId === 'c0026')?.initial_message_md;
+    if (md !== undefined && md !== mdHistory[mdHistory.length - 1]) mdHistory.push(md);
+  };
+
+  const clientOp = { kind: 'set' as const, table: 'conversations', row: conv(26, { initial_message_md: 'CLIENT' }) };
+  host.applyOptimistic(7, [clientOp]);
+  record();
+  host.applyDelta('inst1', [wire(conv(26, { initial_message_md: 'SERVER' }))], [delKey(conv(1))], '02');
+  record();
+  host.noteMutationSettled(7, true); // ack → event-driven retirement
+  await new Promise((r) => setTimeout(r, 0));
+  record();
+  assert.equal(mdHistory[mdHistory.length - 1], 'SERVER', 'retired at ack');
+
+  // THE RACE: a rebase replay from an earlier poke lands AFTER retirement and re-records
+  host.applyOptimistic(7, [clientOp]);
+  record();
+  assert.equal(
+    rows().find((r) => r.conversationId === 'c0026')?.initial_message_md,
+    'SERVER',
+    'late replay of a settled+echoed mutation must be dropped, not re-recorded',
+  );
+  assert.ok(
+    !mdHistory.slice(mdHistory.indexOf('SERVER')).includes('CLIENT'),
+    `no CLIENT flap after SERVER truth; history=${JSON.stringify(mdHistory)}`,
+  );
+});
+
+test('INVARIANT: settled-but-UNECHOED replay still records (new-message flicker protection)', () => {
+  const { host, rows } = setup();
+  const snap = Array.from({ length: 25 }, (_, k) => conv(k + 1));
+  host.applySnapshot('inst1', snap.map(wire), '01');
+  // ack arrives BEFORE the echo (slow fan-out): overlay must stay so the new message doesn't vanish
+  host.applyOptimistic(9, [{ kind: 'set', table: 'conversations', row: conv(27, { initial_message_md: 'CLIENT' }) }]);
+  host.noteMutationSettled(9, true);
+  // late replay before echo — must still be recorded (row would otherwise disappear)
+  host.applyOptimistic(9, [{ kind: 'set', table: 'conversations', row: conv(27, { initial_message_md: 'CLIENT' }) }]);
+  assert.equal(
+    rows().find((r) => r.conversationId === 'c0027')?.initial_message_md,
+    'CLIENT',
+    'unechoed settled overlay must survive until the echo lands',
+  );
 });
 
 test('switch-return: seed 25 then resume-replay of recent put-deltas', () => {

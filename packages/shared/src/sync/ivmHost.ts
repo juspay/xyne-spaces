@@ -23,6 +23,7 @@ import { buildPipeline } from '#zql/builder/builder.js';
 import { ArrayView } from '#zql/ivm/array-view.js';
 import { makeSourceChangeAdd, makeSourceChangeEdit, makeSourceChangeRemove } from '#zql/ivm/source.js';
 import { consume } from '#zql/ivm/stream.js';
+import { obsEmit } from './obs.js';
 import { MemoryStorage } from '#zql/ivm/memory-storage.js';
 import type { ReadonlyJSONValue } from '@rocicorp/zero';
 import { schema } from '../zero/schema.js';
@@ -134,6 +135,11 @@ export class IvmHost {
    */
   #confirmedLmid = 0;
   #sweepTimer?: ReturnType<typeof setInterval>;
+  /** mutationID → Date.now() when its overlay was (last) recorded — drives the un-echoed
+   *  retirement backstop and the confirmation-liveness watchdog. */
+  readonly #ledgerAt = new Map<number, number>();
+  /** mutationIDs already watchdog-warned (warn once per mutation). */
+  readonly #warned = new Set<number>();
 
   /** Start the periodic confirmed-overlay sweep (the fallback for effects that never echo through a
    *  subscribed instance). Confirmation itself is driven by `noteMutationSettled`, not a poll. */
@@ -155,6 +161,43 @@ export class IvmHost {
   noteMutationSettled(mutationID: number, ok: boolean): void {
     if (!ok) this.dropOptimistic(mutationID);
     if (mutationID > this.#confirmedLmid) this.#confirmedLmid = mutationID;
+    if (ok) this.#scheduleReconcile();
+  }
+
+  #reconcileScheduled = false;
+  /**
+   * Event-driven retirement: run the (echo-gated) reconcile as soon as a settle/watermark
+   * advance lands, instead of waiting for the periodic sweep. The echo regularly beats the
+   * ack by ~tens of ms, so #retireEchoed skips and the timer used to leave the overlay
+   * masking an already-correct confirmed row for up to a sweep interval — visible as own
+   * messages flapping back to "sending" on any re-render. Deferred a microtask so a
+   * reconcile (flush → React setState) never runs inside the tracker/poke call stack.
+   */
+  #scheduleReconcile(): void {
+    if (this.#reconcileScheduled) return;
+    this.#reconcileScheduled = true;
+    queueMicrotask(() => {
+      this.#reconcileScheduled = false;
+      try {
+        this.reconcileConfirmed();
+      } catch {
+        /* periodic sweep remains the fallback */
+      }
+    });
+  }
+
+  /**
+   * SERVER lmid watermark observed directly from the tracker (`lmidAdvanced` / `onConnected`) —
+   * state, not a per-mutation event, so it also covers mutations replayed from IDB after a
+   * reload that were never individually tracked. Only advances the watermark: retirement stays
+   * with the echo path / sweep so an overlay never drops before its confirmed row is present
+   * (flicker-free), with the sweep's age backstop covering rejected/never-echoing mutations.
+   */
+  noteLmid(lastMutationID: number): void {
+    if (lastMutationID > this.#confirmedLmid) {
+      this.#confirmedLmid = lastMutationID;
+      this.#scheduleReconcile();
+    }
   }
 
   /** The (lazily created) MemorySource for a table, built from the shared schema. */
@@ -377,8 +420,24 @@ export class IvmHost {
       const refKey = this.#refKey(op.table, this.#pkKey(op.table, row));
       return { kind: op.kind, table: op.table, refKey, pk: this.#pkOf(op.table, row), row };
     });
-    if (resolved.length > 0) this.#ledger.set(mutationID, resolved);
-    else this.#ledger.delete(mutationID);
+    // INVARIANT: an overlay may exist only for a mutation not yet (settled AND echoed) — the
+    // same predicate retirement uses. Zero's rebase replays and the confirmation watermark ride
+    // different pipelines, so a replay from an EARLIER poke can land AFTER the ack retired this
+    // mutation's overlay; re-recording would re-mask the already-confirmed row with the
+    // client-built (by-construction staler) version until the next sweep — a visible flap.
+    // The confirmed row IS this mutation's server outcome, so dropping the late replay is
+    // strictly correct, not a heuristic.
+    if (mutationID <= this.#confirmedLmid && this.#echoed(resolved)) {
+      if (this.#ledger.has(mutationID)) this.dropOptimistic(mutationID); // defensive: clear any leftover
+      return;
+    }
+    if (resolved.length > 0) {
+      this.#ledger.set(mutationID, resolved);
+      this.#ledgerAt.set(mutationID, Date.now());
+    } else {
+      this.#ledger.delete(mutationID);
+      this.#ledgerAt.delete(mutationID);
+    }
     for (const op of resolved) {
       affected.set(op.refKey, op.pk);
       const s = this.#overlayByPK.get(op.refKey) ?? new Set<number>();
@@ -391,14 +450,50 @@ export class IvmHost {
     this.flushAll();
   }
 
-  /** Retire every confirmed overlay (`#confirmedLmid >= mutationID`). The periodic fallback that
-   *  catches effects that never echo through a subscribed instance (rejects revert eagerly in
-   *  noteMutationSettled). No-op until a mutation is server-confirmed (watermark starts at 0). */
+  /** A settled overlay may drop without flicker only once the fan-out has delivered its PKs'
+   *  confirmed state (else a new row's overlay would vanish until the echo lands — the lmid
+   *  watermark from Zero's pokes usually BEATS our fan-out by a beat). */
+  #echoed(ops: readonly OverlayOp[]): boolean {
+    for (const op of ops) {
+      const has = this.#confirmed.has(op.refKey);
+      if (op.kind === 'delete' ? has : !has) return false;
+    }
+    return true;
+  }
+
+  /** Un-echoed settled overlays retire anyway after this long — the backstop for rejected
+   *  mutations (whose effect never echoes) and effects outside every subscribed window. */
+  static readonly #STALE_RETIRE_MS = 15_000;
+  /** An overlay STILL unsettled after this long means confirmation delivery is broken
+   *  (the watermark isn't advancing) — exactly the failure mode that silently masked rows
+   *  for weeks. Warn loudly, once per mutation. */
+  static readonly #WATCHDOG_MS = 20_000;
+
+  /**
+   * Periodic sweep: retire settled overlays (`mutationID <= #confirmedLmid`) — immediately if
+   * their effect has echoed through the fan-out, after `#STALE_RETIRE_MS` otherwise. Rejects
+   * still revert eagerly in noteMutationSettled. Also the confirmation-liveness watchdog.
+   */
   reconcileConfirmed(): void {
     const lmid = this.#confirmedLmid;
-    if (lmid === 0) return;
+    const now = Date.now();
     const done: number[] = [];
-    for (const mutationID of this.#ledger.keys()) if (mutationID <= lmid) done.push(mutationID);
+    for (const [mutationID, ops] of this.#ledger) {
+      const at = this.#ledgerAt.get(mutationID) ?? 0;
+      if (mutationID > lmid) {
+        if (now - at > IvmHost.#WATCHDOG_MS && !this.#warned.has(mutationID)) {
+          this.#warned.add(mutationID);
+          // eslint-disable-next-line no-console
+          console.warn(
+            `[sync] optimistic overlay for mutation ${mutationID} unconfirmed after ` +
+              `${Math.round((now - at) / 1000)}s (watermark=${lmid}) — confirmation delivery looks broken`,
+          );
+          obsEmit('overlay-watchdog', { mutationID, lmid, ageMs: now - at });
+        }
+        continue;
+      }
+      if (this.#echoed(ops) || now - at > IvmHost.#STALE_RETIRE_MS) done.push(mutationID);
+    }
     for (const mutationID of done) this.dropOptimistic(mutationID);
   }
 
@@ -423,6 +518,8 @@ export class IvmHost {
     const ops = this.#ledger.get(mutationID);
     if (!ops) return;
     this.#ledger.delete(mutationID);
+    this.#ledgerAt.delete(mutationID);
+    this.#warned.delete(mutationID);
     for (const op of ops) {
       const s = this.#overlayByPK.get(op.refKey);
       s?.delete(mutationID);

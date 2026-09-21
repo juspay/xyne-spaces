@@ -35,6 +35,26 @@ export function hookMutationTrackerPrototype(proto: any, host: IvmHost): void {
   }
   proto[PATCHED] = true;
 
+  // WATERMARK feed (primary): `lmidAdvanced` is Zero's own confirmation state — driven by every
+  // poke's lastMutationIDChanges AND re-synced by `onConnected` on every (re)connect (which calls
+  // lmidAdvanced internally, so wrapping this one method covers both). State, not an event: it
+  // survives disconnects, and after a reload it covers mutations replayed from IDB that were never
+  // individually tracked (trackMutation only fires for zero.mutate calls made this session). The
+  // per-mutation promise wraps below remain for the one thing the watermark can't express:
+  // immediate revert on an explicit server REJECT.
+  if (typeof proto.lmidAdvanced === 'function') {
+    const origLmidAdvanced = proto.lmidAdvanced as (lmid: number) => void;
+    proto.lmidAdvanced = function (this: any, lastMutationID: number) {
+      const r = origLmidAdvanced.call(this, lastMutationID);
+      try {
+        host.noteLmid(lastMutationID);
+      } catch {
+        /* never break the tracker */
+      }
+      return r;
+    };
+  }
+
   // Per-tracker (WeakMap keyed by the tracker instance ⇒ multiple Zero clients stay isolated):
   // ephemeralID → the mutation's serverPromise, captured at trackMutation, consumed at id-assignment.
   const pending = new WeakMap<object, Map<unknown, Promise<any>>>();
