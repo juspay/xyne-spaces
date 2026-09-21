@@ -23,6 +23,7 @@ import { findPresentationParticipant } from '../ParticipantGrid/sortParticipants
 import { ScreenShareView } from '../ScreenShareView/ScreenShareView';
 import { ControlRequestDialog } from '../CallModals/ControlRequestDialog';
 import { ParticipantsSidebar } from '../ParticipantsSidebar/ParticipantsSidebar';
+import { getRingingInvitees, useIsDmCall } from '../ringStatus.utils';
 import { useCallChatNotifications } from '../hooks/useCallChatNotifications';
 import { isScreenShareActive } from '../../../utils/livekitScreenShare';
 import { isTranscriptionAgentIdentity } from '../../../utils/livekitAgent';
@@ -76,6 +77,7 @@ interface MiniCallViewProps {
         readonly metadata: unknown;
         readonly displayName?: string | null | undefined;
         readonly isExternal?: boolean | undefined;
+        readonly ringStatus?: string | null | undefined;
       }>
     | undefined;
   isHost?: boolean | undefined;
@@ -132,6 +134,20 @@ export function MiniCallView({
   const participantCount = participants.filter(
     p => !isTranscriptionAgentIdentity(p.identity),
   ).length;
+
+  // Ring tiles are DM-only; elsewhere the sidebar carries ring status.
+  const isDmCall = useIsDmCall(channelId);
+  const ringingInvitees = useMemo(
+    () =>
+      isDmCall
+        ? getRingingInvitees(
+            callParticipants,
+            new Set(participants.map(p => p.identity)),
+            currentUserId !== undefined ? currentUserId : user?.id,
+          )
+        : [],
+    [isDmCall, callParticipants, participants, currentUserId, user?.id],
+  );
   const containerRef = useRef<HTMLDivElement>(null);
   const [overlayMode, setOverlayMode] = useState<'mini' | 'line'>('mini');
   const [miniLeft, setMiniLeft] = useState(20);
@@ -609,6 +625,7 @@ export function MiniCallView({
                     <div className='h-full'>
                       <ParticipantGrid
                         participants={participants}
+                        ringingInvitees={ringingInvitees}
                         compact={true}
                         aiController={aiController}
                         requestedAiController={requestedAiController}

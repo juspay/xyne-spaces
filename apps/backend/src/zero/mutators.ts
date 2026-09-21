@@ -11,6 +11,7 @@ import {
   RecurringCallSeriesStatus,
   CallOrigin,
   InvitationResponse,
+  RingStatus,
   MeetingStatus,
   NotificationLevel,
   Schema,
@@ -4766,6 +4767,7 @@ export function createMutators(
                   invitedBy: authData.sub,
                   invitedAt: now,
                   response: InvitationResponse.INVITED,
+                  ringStatus: RingStatus.CALLING,
                   respondedAt: null,
                   joinedAt: null,
                   leftAt: null,
@@ -4791,6 +4793,7 @@ export function createMutators(
                   invitedAt: now,
                   isExternal: false,
                   response: InvitationResponse.INVITED,
+                  ringStatus: RingStatus.CALLING,
                   respondedAt: null,
                   joinedAt: null,
                   leftAt: null,
@@ -5065,6 +5068,25 @@ export function createMutators(
           }
         },
       ),
+      updateRingStatus: defineMutator(
+        z.object({ callId: z.string(), ringStatus: z.enum([RingStatus.RINGING, RingStatus.BUSY]) }),
+        async ({ tx, args: { callId, ringStatus } }) => {
+          const call = await tx.run(zql.calls.where('externalId', callId).one());
+          if (!call) return;
+
+          const participant = await tx.run(zql.call_participants
+            .where('callId', call.id)
+            .where('userId', authData.sub)
+            .one());
+          if (!participant || participant.response !== InvitationResponse.INVITED) return;
+
+          if (participant.ringStatus === ringStatus) return;
+          // BUSY is sticky: an idle second device reporting RINGING must not undo it.
+          if (participant.ringStatus === RingStatus.BUSY) return;
+
+          await tx.mutate.call_participants.update({ id: participant.id, ringStatus });
+        },
+      ),
       invite: defineMutator(
         z.object({ callId: z.string(), userIds: z.array(z.string()), timestamp: z.number(), participantIds: z.record(z.string(), z.string()) }),
         async ({ tx, args: { callId, userIds, timestamp, participantIds = {} } }) => {
@@ -5089,6 +5111,7 @@ export function createMutators(
                 await tx.mutate.call_participants.update({
                   id: existingParticipant.id,
                   response: InvitationResponse.INVITED,
+                  ringStatus: RingStatus.CALLING,
                   invitedBy: authData.sub,
                   invitedAt: now,
                   respondedAt: null,
@@ -5110,6 +5133,7 @@ export function createMutators(
                 invitedBy: authData.sub,
                 invitedAt: now,
                 response: InvitationResponse.INVITED,
+                ringStatus: RingStatus.CALLING,
                 respondedAt: null,
                 joinedAt: null,
                 leftAt: null,

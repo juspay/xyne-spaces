@@ -75,6 +75,7 @@ import {
   RCAStatus,
   RecapEntityType,
   RecurringCallSeriesStatus,
+  RingStatus,
   ReenterMode,
   ReleaseEventType,
   ReleaseTrackingMode,
@@ -1254,6 +1255,7 @@ export const callParticipantTable = table('call_participants')
     displayName: string().optional(),
     email: string().optional(),
     isExternal: boolean(),
+    ringStatus: enumeration<RingStatus>().optional(),
   })
   .primaryKey('id');
 
