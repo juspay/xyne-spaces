@@ -77,8 +77,6 @@ export class MessageAttachmentsACL extends BaseQueryACL<'message_attachments'> {
     // conversation's channel is in the caller's workspace and is either PUBLIC or one the
     // caller participates in. Attachments the caller uploaded stay visible regardless, so a
     // draft/in-flight attachment that is not yet linked to a conversation is not hidden.
-    // The conversation arm covers sent content only. Rows belonging to an unsent message are
-    // reached through the ownership arm instead, keeping them consistent with draft_messages.
     return query
       .where('workspaceId', '=', this.ctx.workspaceId)
       .where(({ or, and, cmp, exists }) =>
