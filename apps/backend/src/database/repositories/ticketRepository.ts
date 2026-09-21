@@ -117,6 +117,34 @@ const makeFallbackCountsSnapshot = (ticket: {
   roleAssignments: [],
 });
 
+/**
+ * Publish TICKET_CREATED. Must run *after* the creating transaction commits:
+ * the automation worker re-reads the ticket on another connection, and an
+ * uncommitted row is invisible to it, which makes every configured
+ * board/project/channel filter fail closed and the run get SKIPPED.
+ */
+export async function emitTicketCreated(
+  ticket: { id: string; workspaceId: string },
+  formFieldChanges: FormFieldChanges | undefined,
+  createdBy: string,
+): Promise<void> {
+  try {
+    await eventRouter.emit(
+      {
+        type: TICKET_CREATED_EVENT,
+        payload: {
+          ticketId: ticket.id,
+          formFieldChanges,
+          performedBy: { id: createdBy },
+        },
+      },
+      ticket.workspaceId,
+    );
+  } catch (err) {
+    logger.error(`[automations] TICKET_CREATED emit failed for ticket ${ticket.id}:`, err);
+  }
+}
+
 export class TicketRepository {
 
   /**
@@ -376,23 +404,13 @@ export class TicketRepository {
     }
 
 
-    void (async (): Promise<void> => {
-      try {
-        await eventRouter.emit(
-          {
-            type: TICKET_CREATED_EVENT,
-            payload: {
-              ticketId: ticket.id,
-              formFieldChanges: data.formFieldChanges,
-              performedBy: { id: data.createdBy },
-            },
-          },
-          ticket.workspaceId,
-        );
-      } catch (err) {
-        logger.error(`[automations] TICKET_CREATED emit failed for ticket ${ticket.id}:`, err);
-      }
-    })();
+    // Automations read the ticket back on their own connection, so the event may
+    // only be published once the row is committed. When `tx` was supplied the
+    // caller still owns the transaction and nothing is committed yet — that
+    // caller emits after its transaction resolves (see emitTicketCreated).
+    if (!tx) {
+      void emitTicketCreated(ticket, data.formFieldChanges, data.createdBy);
+    }
 
     return ticket;
   }
