@@ -1,7 +1,7 @@
 /**
  * Test Release Server for OTA Update Development
  * 
- * Mimics the production release server structure at airborne.juspay.in
+ * Mimics the production release server structure (deployment-specific; see RELEASE_CONFIG_URL)
  * 
  * Usage:
  *   npm run test-release-server        # Start the server
