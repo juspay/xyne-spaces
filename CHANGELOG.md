@@ -1,3 +1,15 @@
+## [1.348.0-release-20260921.1](https://github.com/juspay/xyne-spaces/compare/v1.347.0...v1.348.0-release-20260921.1) (2026-09-21)
+
+
+### Features
+
+* added tooltip in include channel calls ([#2105](https://github.com/juspay/xyne-spaces/issues/2105)) ([2074d4d](https://github.com/juspay/xyne-spaces/commit/2074d4d4c1e092862e921f0532bcfdb556b1dd78))
+
+
+### Bug Fixes
+
+* sdlc rel 21 ([#2098](https://github.com/juspay/xyne-spaces/issues/2098)) ([00dc241](https://github.com/juspay/xyne-spaces/commit/00dc24151cfcbb60ca04410875e1727766a52728)), closes [#2005](https://github.com/juspay/xyne-spaces/issues/2005) [#2027](https://github.com/juspay/xyne-spaces/issues/2027) [#1945](https://github.com/juspay/xyne-spaces/issues/1945) [#1945](https://github.com/juspay/xyne-spaces/issues/1945) [#1959](https://github.com/juspay/xyne-spaces/issues/1959)
+
 ## [1.347.0](https://github.com/juspay/xyne-spaces/compare/v1.346.0...v1.347.0) (2026-09-19)
 
 
