@@ -1,3 +1,10 @@
+## [1.355.0](https://github.com/juspay/xyne-spaces/compare/v1.354.1...v1.355.0) (2026-09-21)
+
+
+### Features
+
+* Add board.createdby variable to automation ([#2118](https://github.com/juspay/xyne-spaces/issues/2118)) ([07e5908](https://github.com/juspay/xyne-spaces/commit/07e590849581dc3aacf664b43776b8cea13923fe))
+
 ## [1.354.1](https://github.com/juspay/xyne-spaces/compare/v1.354.0...v1.354.1) (2026-09-21)
 
 
