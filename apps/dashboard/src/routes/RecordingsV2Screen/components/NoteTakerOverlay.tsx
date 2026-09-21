@@ -20,6 +20,7 @@ import { useEditableRecordingTitle } from '../../RecordingDetailV2Screen/useEdit
 import { EditableTitleInput } from '../../RecordingDetailV2Screen/components/RecordingDetailV2Header';
 import { RecordingVisualizer } from '../../RecordingDetailV2Screen/components/LiveRecordingControlBar';
 import type { MarkedMoment, RecordingState, TranscriptEntry } from '../../../stores/recordingStore';
+import { RECORDING_NOTES_PLACEHOLDER } from '../../../constants/recording';
 import { cn } from '../../../utils/classNames';
 import { calculateRecordingElapsedMs, formatElapsedTime } from '../../../utils/recordingUtils';
 import {
@@ -669,7 +670,7 @@ const NotesTab = ({ notesCanvasId, channelId }: NotesTabProps): ReactElement => 
         channelId={channelId ?? undefined}
         editable
         autoFocus
-        placeholder='Add your notes here, you can view the transcript live in the transcript tab'
+        placeholder={RECORDING_NOTES_PLACEHOLDER}
         blockPlaceholder=''
         onFileUpload={handleFileUpload}
         className='floating-recording-notes h-full w-full

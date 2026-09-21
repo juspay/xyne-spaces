@@ -111,6 +111,10 @@ const RECORDING_SUMMARY_TEXT_BLOCK_TYPES = new Set([
  *    already has content.
  * Assigning one string to both makes an onboarding hint reappear on every new
  * line, so the two slots are configured independently.
+ *
+ * A caller that passes only `placeholder` keeps the historical behaviour of one
+ * string in both slots; `blockPlaceholder` has to be passed explicitly (`''` to
+ * show nothing) to opt into the split.
  */
 const buildCanvasDictionary = (emptyDocument: string, blockPlaceholder: string): typeof en => ({
   ...en,
@@ -136,6 +140,7 @@ interface CollaborativeCanvasEditorProps {
   /**
    * Hint shown on a focused empty block once the canvas already has content.
    * Pass an empty string to show nothing after the user has typed anything.
+   * Defaults to `placeholder` when omitted, so existing callers are unchanged.
    */
   blockPlaceholder?: string;
   className?: string;
@@ -255,7 +260,7 @@ export const CollaborativeCanvasEditor = forwardRef<
           ? canvasDictionary
           : buildCanvasDictionary(
               placeholder ?? DEFAULT_CANVAS_PLACEHOLDER,
-              blockPlaceholder ?? DEFAULT_CANVAS_PLACEHOLDER,
+              blockPlaceholder ?? placeholder ?? DEFAULT_CANVAS_PLACEHOLDER,
             ),
       [placeholder, blockPlaceholder],
     );

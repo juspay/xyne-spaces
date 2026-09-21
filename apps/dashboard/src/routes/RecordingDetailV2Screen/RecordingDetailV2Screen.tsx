@@ -104,6 +104,7 @@ import { getUserDisplayName } from '../../utils/userDisplayName';
 import { SummaryTemplatesModal, getTemplateIcon } from './components/SummaryTemplatesModal';
 import { useSummaryTemplates } from '../../hooks/useSummaryTemplates';
 import { useSummaryModelPreference } from '../../hooks/useSummaryModelPreference';
+import { RECORDING_NOTES_PLACEHOLDER } from '../../constants/recording';
 
 const EMPTY_LABEL_SUGGESTIONS: string[] = [];
 
@@ -1693,7 +1694,7 @@ function NotesCanvas({ canvasId }: { canvasId: string }): ReactElement {
       channelId={canvas.channelId || undefined}
       title={canvas.title}
       editable={true}
-      placeholder='Add your notes here, you can view the transcript live in the transcript tab'
+      placeholder={RECORDING_NOTES_PLACEHOLDER}
       blockPlaceholder=''
       className={`min-h-0 w-full flex-1 ${CANVAS_POPOVER_LAYER_CLASS}
         [&_.bn-side-menu]:!hidden

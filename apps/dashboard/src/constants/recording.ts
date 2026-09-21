@@ -12,3 +12,11 @@ export const WAVEFORM_DEFAULTS = {
 } as const;
 
 export type WaveformVariant = keyof typeof WAVEFORM_DEFAULTS;
+
+/**
+ * Hint shown in the recording notes canvas while it is still empty. Shared by
+ * the live NoteTakerOverlay and the recording detail Notes tab so the two
+ * surfaces cannot drift apart.
+ */
+export const RECORDING_NOTES_PLACEHOLDER =
+  'Add your notes here, you can view the transcript live in the transcript tab';
