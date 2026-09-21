@@ -8,6 +8,7 @@ import {
   trackMembershipRowsFor,
   type LegacySdlcHub,
 } from '@/sdlc/sdlcMembershipRows';
+import { stampLegacyLinks } from '@/bypassAcl/sdlcServices';
 
 /**
  * One-off data migration for SDLC multi-repo channels.
@@ -79,12 +80,6 @@ function countLegacyLinks(repoId: string): Promise<number> {
     .then(rows => Number(rows[0]?.count ?? 0));
 }
 
-function stampLegacyLinks(repoId: string, channelId: string): Promise<number> {
-  return db.$executeRaw`
-    UPDATE "public"."sdlc_entity_links" SET "channelId" = ${channelId}
-    WHERE "repoId" = ${repoId} AND "channelId" IS NULL
-  `;
-}
 
 /** A hub's tracks, by the repository column they were scoped by. */
 function readTracks(repoId: string) {
