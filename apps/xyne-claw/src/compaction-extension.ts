@@ -25,6 +25,7 @@
 import type { ExtensionFactory } from "@earendil-works/pi-coding-agent";
 import { compact, estimateTokens } from "@earendil-works/pi-coding-agent";
 import { buildJevCompaction } from "./jev-compaction.js";
+import { recordJudgeOutcome } from "./judge-backend.js";
 import { metric } from "./metrics.js";
 
 import { createLogger } from "./logger.js";
@@ -199,6 +200,19 @@ export const compactionExtension: ExtensionFactory = (pi) => {
           `${jev.scoredCalls} scored (${jev.unscoredCalls} over cap), ` +
           `${jev.charsBefore} → ${jev.charsAfter} chars ` +
           `(${keptCount} msgs ~${keptTokens} tok est).`,
+        );
+        recordJudgeOutcome(
+          "compaction",
+          `kept ${jev.keptCalls} calls / ${jev.keptResults} verbatim results · dropped ${jev.droppedCalls} of ${jev.scoredCalls} scored · ${jev.charsBefore} → ${jev.charsAfter} chars`,
+          {
+            keptCalls: jev.keptCalls,
+            keptResults: jev.keptResults,
+            droppedCalls: jev.droppedCalls,
+            scoredCalls: jev.scoredCalls,
+            unscoredCalls: jev.unscoredCalls,
+            charsBefore: jev.charsBefore,
+            charsAfter: jev.charsAfter,
+          },
         );
         return {
           compaction: {

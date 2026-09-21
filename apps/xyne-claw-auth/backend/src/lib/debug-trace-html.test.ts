@@ -398,3 +398,76 @@ describe("waterfall", () => {
     expect(html).toContain("ttft 2.0 s");
   });
 });
+
+describe("judge visibility", () => {
+  const base = Date.parse("2026-09-21T10:00:00.000Z");
+  const at = (ms: number): string => new Date(base + ms).toISOString();
+
+  function judgedRun(): DebugTraceRun {
+    return {
+      agentSlug: "xyne",
+      startedAt: at(0),
+      finishedAt: at(20_000),
+      judge: {
+        backend: "jev",
+        calls: 3,
+        failed: 1,
+        questions: 280,
+        totalMs: 2600,
+        byPurpose: { "tool-search": { calls: 2, failed: 1, totalMs: 1700 }, "answer-completeness": { calls: 1, failed: 0, totalMs: 900 } },
+        shadows: [],
+      },
+      answerAssessment: { verdict: "partial", answered: 0.41, finished: 0.2, intent: 0.1 },
+      events: [
+        { kind: "judge_call", at: at(1850), data: { backend: "jev", purpose: "tool-search", questions: 140, ms: 850, ok: true } },
+        { kind: "judge_call", at: at(1900), data: { backend: "jev", purpose: "tool-search", questions: 140, ms: 900, ok: false } },
+        {
+          kind: "judge_outcome",
+          at: at(1910),
+          data: {
+            backend: "jev",
+            purpose: "tool-search",
+            summary: "scored 140 of 273 tools · keyword hits 2 · added 1 at ≥0.4",
+            detail: JSON.stringify({ query: "first response time", added: [{ name: "spaces-desk-metrics", score: 0.91 }] }),
+          },
+        },
+        { kind: "auto_continue", at: at(15_000), data: { attempt: 1, maxAttempts: 1, verdict: "partial", answered: 0.41, finished: 0.2, intent: 0.1 } },
+      ],
+    } as unknown as DebugTraceRun;
+  }
+
+  it("summarises the judge and the answer check in the run header", () => {
+    const html = renderDebugTraceHtml(judgedRun());
+    expect(html).toContain("<th>Judge</th>");
+    expect(html).toContain("3 calls");
+    expect(html).toContain("1 failed");
+    expect(html).toContain("tool-search ×2");
+    expect(html).toContain("<th>Answer check</th>");
+    expect(html).toContain("verdict partial");
+    expect(html).toContain("auto-continued 1×");
+  });
+
+  it("shows each judge call, what it decided, and any auto-continue in the timeline", () => {
+    const html = renderDebugTraceHtml(judgedRun());
+    expect(html).toContain("Judge call");
+    expect(html).toContain("FAILED — caller fell back");
+    expect(html).toContain("Judge decided");
+    expect(html).toContain("added 1 at ≥0.4");
+    expect(html).toContain("spaces-desk-metrics");
+    expect(html).toContain("Auto-continue 1/1");
+    expect(html).toContain("costs one extra model turn");
+  });
+
+  it("draws judge time as its own bars in the waterfall", () => {
+    const html = renderDebugTraceHtml(judgedRun());
+    expect(html).toContain("wf-bar wf-judge");
+    expect(html).toContain("jev · tool-search");
+    expect(html).toMatch(/judge [\d.]+ ?m?s <em>\(2 calls\)<\/em>/);
+  });
+
+  it("renders nothing judge-related for a run that never called one", () => {
+    const html = renderDebugTraceHtml({ agentSlug: "xyne", startedAt: at(0), events: [] } as unknown as DebugTraceRun);
+    expect(html).not.toContain("<th>Judge</th>");
+    expect(html).not.toContain("<th>Answer check</th>");
+  });
+});

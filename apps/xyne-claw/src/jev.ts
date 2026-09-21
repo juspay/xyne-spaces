@@ -14,6 +14,14 @@
 
 import { createLogger } from "./logger.js";
 import { metric } from "./metrics.js";
+import {
+  activeJudgeBackend,
+  recordJudgeCall,
+  recordJudgeShadow,
+  shadowJudgeBackends,
+  type JudgeBackendName,
+} from "./judge-backend.js";
+import { llmJudgeConfig, llmJudgePost } from "./judge-llm.js";
 
 const log = createLogger("jev");
 
@@ -43,8 +51,34 @@ export interface JevOptions {
   purpose?: string;
 }
 
+interface SystemOneConfig {
+  url: string;
+  key: string;
+  model: string;
+}
+
+function systemOneConfig(backend: "jev" | "ourjev"): SystemOneConfig {
+  if (backend === "ourjev") {
+    return {
+      url: process.env["OUR_JEV_URL"]?.trim() ?? "",
+      key: process.env["OUR_JEV_API_KEY"]?.trim() ?? "",
+      model: process.env["OUR_JEV_MODEL"]?.trim() || MODEL,
+    };
+  }
+  return { url: ENDPOINT, key: process.env["JEV_API_KEY"]?.trim() ?? "", model: MODEL };
+}
+
+export function judgeBackendConfigured(backend: JudgeBackendName): boolean {
+  if (backend === "llm") {
+    const cfg = llmJudgeConfig();
+    return Boolean(cfg.url && cfg.key && cfg.model);
+  }
+  const cfg = systemOneConfig(backend);
+  return Boolean(cfg.url && cfg.key);
+}
+
 export function jevEnabled(): boolean {
-  return Boolean(process.env["JEV_API_KEY"]?.trim());
+  return judgeBackendConfigured(activeJudgeBackend());
 }
 
 /** Read an env threshold, so each call site can be tuned without a deploy. */
@@ -54,23 +88,76 @@ export function jevThreshold(name: string, fallback: number): number {
 }
 
 async function post(
+  backend: JudgeBackendName,
   state: string,
   questions: Record<string, JevQuestion>,
-  opts: JevOptions,
   signal: AbortSignal,
 ): Promise<Record<string, JevAnswer>> {
-  const res = await fetch(ENDPOINT, {
+  if (backend === "llm") return llmJudgePost(state, questions, signal);
+  const cfg = systemOneConfig(backend);
+  const res = await fetch(cfg.url, {
     method: "POST",
     signal,
     headers: {
-      Authorization: `Bearer ${process.env["JEV_API_KEY"]}`,
+      Authorization: `Bearer ${cfg.key}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ state, model: MODEL, questions }),
+    body: JSON.stringify({ state, model: cfg.model, questions }),
   });
-  if (!res.ok) throw new Error(`jev ${res.status}`);
+  if (!res.ok) throw new Error(`${backend} ${res.status}`);
   const body = (await res.json()) as { answers?: Record<string, JevAnswer> };
   return body.answers ?? {};
+}
+
+function backendTimeoutMs(backend: JudgeBackendName, requested: number | undefined): number {
+  if (backend === "llm") return llmJudgeConfig().timeoutMs;
+  return requested ?? DEFAULT_TIMEOUT_MS;
+}
+
+function answerValue(answer: JevAnswer | undefined): number | string | undefined {
+  if (!answer) return undefined;
+  return answer.noul ?? answer.score ?? answer.choice;
+}
+
+async function runShadow(
+  primary: JudgeBackendName,
+  shadow: JudgeBackendName,
+  state: string,
+  questions: Record<string, JevQuestion>,
+  primaryAnswers: Record<string, JevAnswer>,
+  primaryMs: number,
+  purpose: string,
+): Promise<void> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), backendTimeoutMs(shadow, undefined));
+  const started = Date.now();
+  try {
+    const answers = await post(shadow, state, questions, controller.signal);
+    const shadowMs = Date.now() - started;
+    let compared = 0;
+    let agreed = 0;
+    let diffSum = 0;
+    for (const id of Object.keys(questions)) {
+      const a = answerValue(primaryAnswers[id]);
+      const b = answerValue(answers[id]);
+      if (a === undefined || b === undefined) continue;
+      compared += 1;
+      if (typeof a === "number" && typeof b === "number") {
+        diffSum += Math.abs(a - b);
+        if (a >= 0.5 === b >= 0.5) agreed += 1;
+      } else if (a === b) {
+        agreed += 1;
+      }
+    }
+    const meanAbsDiff = compared > 0 ? diffSum / compared : 0;
+    recordJudgeShadow({ primary, shadow, purpose, questions: compared, agreed, meanAbsDiff, primaryMs, shadowMs });
+    metric.observe("judge_shadow_ms", shadowMs, { purpose, primary, shadow });
+    metric.observe("judge_shadow_agreement", compared > 0 ? agreed / compared : 0, { purpose, primary, shadow, questions: compared });
+  } catch {
+    metric.count("judge_shadow_failed", { purpose, primary, shadow });
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /**
@@ -81,21 +168,39 @@ export async function jevAsk(
   questions: Record<string, JevQuestion>,
   opts: JevOptions = {},
 ): Promise<Record<string, JevAnswer> | null> {
-  if (!jevEnabled() || !state.trim() || Object.keys(questions).length === 0) return null;
+  return jevAskOn(activeJudgeBackend(), state, questions, opts);
+}
+
+export async function jevAskOn(
+  backend: JudgeBackendName,
+  state: string,
+  questions: Record<string, JevQuestion>,
+  opts: JevOptions = {},
+): Promise<Record<string, JevAnswer> | null> {
+  if (!judgeBackendConfigured(backend) || !state.trim() || Object.keys(questions).length === 0) return null;
   const purpose = opts.purpose ?? "ask";
+  const count = Object.keys(questions).length;
   const started = Date.now();
   const controller = new AbortController();
   const onAbort = (): void => controller.abort();
   opts.signal?.addEventListener("abort", onAbort, { once: true });
-  const timer = setTimeout(() => controller.abort(), opts.timeoutMs ?? DEFAULT_TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), backendTimeoutMs(backend, opts.timeoutMs));
   try {
-    const answers = await post(state, questions, opts, controller.signal);
-    metric.observe("jev_ms", Date.now() - started, { purpose, result: "ok", questions: Object.keys(questions).length });
+    const answers = await post(backend, state, questions, controller.signal);
+    const elapsed = Date.now() - started;
+    metric.observe("jev_ms", elapsed, { purpose, backend, result: "ok", questions: count });
+    recordJudgeCall({ backend, purpose, ms: elapsed, questions: count, ok: true });
+    for (const shadow of shadowJudgeBackends(backend)) {
+      if (!judgeBackendConfigured(shadow)) continue;
+      void runShadow(backend, shadow, state, questions, answers, elapsed, purpose);
+    }
     return answers;
   } catch (err) {
-    metric.count("jev_failed", { purpose, reason: controller.signal.aborted ? "timeout" : "error" });
+    const elapsed = Date.now() - started;
+    metric.count("jev_failed", { purpose, backend, reason: controller.signal.aborted ? "timeout" : "error" });
+    recordJudgeCall({ backend, purpose, ms: elapsed, questions: count, ok: false });
     log.warn(
-      `[jev] ${purpose} unavailable after ${Date.now() - started}ms — caller falls back:`,
+      `[jev] ${purpose} via ${backend} unavailable after ${elapsed}ms — caller falls back:`,
       err instanceof Error ? err.message : String(err),
     );
     return null;

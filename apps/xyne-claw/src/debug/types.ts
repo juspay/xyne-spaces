@@ -18,10 +18,11 @@
 
 import type { Citation } from "xyne-claw-shared";
 import type { AnswerAssessment } from "../jev-completeness.js";
+import type { JudgeRunSummary } from "../judge-backend.js";
 
 // Re-exported so the rest of `debug/` imports it from the contract module
 // like every other type here, rather than reaching into jev-completeness.
-export type { AnswerAssessment };
+export type { AnswerAssessment, JudgeRunSummary };
 
 // ── Shared value types (moved verbatim from agent.ts) ───────────────────────
 
@@ -222,6 +223,7 @@ export interface RunHeader {
   /** jev's verdict on whether the final answer actually answered the task.
    *  Stamped at finish; absent when jev is off or it declined to score. */
   answerAssessment?: AnswerAssessment;
+  judge?: JudgeRunSummary;
 }
 
 export function emptyTokenUsage(): TokenUsage {
@@ -286,6 +288,7 @@ export interface DebugSessionSnapshot {
   lastAssistantText: string;
   /** jev's completeness verdict for this run's answer (see RunHeader). */
   answerAssessment?: AnswerAssessment;
+  judge?: JudgeRunSummary;
   events: DebugEventRecord[];
   /** Additive: non-fatal problems hit while reading this run (dropped torn
    *  line, unreadable blob log, GCS miss). Surfaced in the UI so a partial

@@ -60,6 +60,8 @@ import { dispatchRun } from "./dispatch-run.js";
 import { createLogger } from "../logger.js";
 import type { SessionContext } from "../routes/webhook.js";
 
+const JUDGE_BACKENDS = new Set(["jev", "ourjev", "llm"]);
+
 const log = createLogger("run");
 
 const SDLC_AGENT_TOOL_PROFILE = sdlcAgentToolProfile(
@@ -530,7 +532,7 @@ export async function prepareRun(
   const serviceToken = caller.serviceToken;
   const isServiceTokenCaller = serviceToken?.client === "service";
   {
-    const { task, context, conversationId, piSessionConversationId, agentSlug, callbackUrl, callbackSecret, channelId, deliverTo, projectId, projectName, cwd, eventType, triggerSource, slackDelivery, channelDelivery, traceId, provider, providerOrder, providerOverride, subagentProviders, subagentProviderMode, providerConfigs, progressUrl, attachments, recordingRefs, contextFiles, skills: bodySkills, attachedContext, ticketIds, canvasIds, callIds, idempotencyKey: requestedIdempotencyKey, isRegenerate, detached, fastMode, resumedFromHandoff, generateFollowUpSuggestions } = body as {
+    const { task, context, conversationId, piSessionConversationId, agentSlug, callbackUrl, callbackSecret, channelId, deliverTo, projectId, projectName, cwd, eventType, triggerSource, slackDelivery, channelDelivery, traceId, provider, providerOrder, providerOverride, subagentProviders, subagentProviderMode, providerConfigs, progressUrl, attachments, recordingRefs, contextFiles, skills: bodySkills, attachedContext, ticketIds, canvasIds, callIds, idempotencyKey: requestedIdempotencyKey, isRegenerate, detached, fastMode, resumedFromHandoff, judgeBackend, generateFollowUpSuggestions } = body as {
       task?: string;
       context?: string;
       conversationId?: string;
@@ -585,6 +587,7 @@ export async function prepareRun(
       detached?: boolean;
       fastMode?: boolean;
       resumedFromHandoff?: boolean;
+      judgeBackend?: string;
       generateFollowUpSuggestions?: boolean;
       /** Branching: when true, claw branches the PI session at the last user
        *  entry so the new assistant turn is a sibling of the previous one. */
@@ -1443,6 +1446,7 @@ export async function prepareRun(
       ...(detached === true ? { detached: true } : {}),
       fastMode: effectiveFastMode,
       ...(resumedFromHandoff === true ? { resumedFromHandoff: true } : {}),
+      ...(typeof judgeBackend === "string" && JUDGE_BACKENDS.has(judgeBackend) ? { judgeBackend } : {}),
       // Plan/auto mode gate. This forwardBody is an explicit allowlist, so these
       // MUST be threaded here or claw never sees them and plan mode is inert.
       // 'plan' is set by the webhook mention dispatch (planMode agents, non-twin);

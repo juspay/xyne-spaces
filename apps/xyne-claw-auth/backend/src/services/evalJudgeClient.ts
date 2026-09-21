@@ -86,21 +86,29 @@ export async function extractEvalPairs(
   }
 }
 
-export async function listEvalModels(): Promise<{ models: string[]; defaultModel: string }> {
-  if (!CONFIG.xyneClawS2sKey) return { models: [], defaultModel: "" };
+export async function listEvalModels(): Promise<{ models: string[]; defaultModel: string; judgeBackends: string[] }> {
+  if (!CONFIG.xyneClawS2sKey) return { models: [], defaultModel: "", judgeBackends: [] };
   const url = `${CONFIG.xyneClawUrl.replace(/\/$/, "")}/eval-models`;
   try {
     const res = await fetch(url, {
       headers: { "x-s2s-key": CONFIG.xyneClawS2sKey },
       signal: AbortSignal.timeout(15_000),
     });
-    if (!res.ok) return { models: [], defaultModel: "" };
-    const data = (await res.json()) as { success?: boolean; models?: string[]; defaultModel?: string };
+    if (!res.ok) return { models: [], defaultModel: "", judgeBackends: [] };
+    const data = (await res.json()) as {
+      success?: boolean;
+      models?: string[];
+      defaultModel?: string;
+      judgeBackends?: string[];
+    };
     return {
       models: Array.isArray(data.models) ? data.models : [],
       defaultModel: typeof data.defaultModel === "string" ? data.defaultModel : "",
+      judgeBackends: Array.isArray(data.judgeBackends)
+        ? data.judgeBackends.filter((b): b is string => typeof b === "string")
+        : [],
     };
   } catch {
-    return { models: [], defaultModel: "" };
+    return { models: [], defaultModel: "", judgeBackends: [] };
   }
 }

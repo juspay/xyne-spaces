@@ -46,6 +46,7 @@ import {
 } from "./session-store.js";
 import { acquireSessionLock, refreshSessionLock, releaseSessionLock, startSessionLockHeartbeat, SessionLockedError } from "./session-lock.js";
 import { kickOffPrReviewRoom, registerLivePrRunContext, unregisterLivePrRunContext } from "./pr-review-room.js";
+import { judgeRunSummary, recordJudgeOutcome, setJudgeDebugSink } from "./judge-backend.js";
 import { assessAnswer, type AnswerAssessment } from "./jev-completeness.js";
 import { gcsUploadDebugRunWithRetries, gcsUploadDebugObject, gcsPutDebugIndex } from "./storage.js";
 import {
@@ -2621,6 +2622,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
   const pushDebugEvent = (kind: DebugEventKind, data: Record<string, unknown> = {}, extras?: Partial<DebugEventRecord>): void => {
     recorder?.record(kind, data, extras);
   };
+  setJudgeDebugSink((kind, data) => pushDebugEvent(kind, data));
 
   /**
    * The single terminal path for a run's trace. Idempotent — the success path
@@ -2656,12 +2658,20 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
       ...(latency.streamTextChars ? { streamTextChars: latency.streamTextChars } : {}),
       toolMs: toolInvocations.reduce((sum, inv) => sum + (inv.durationMs ?? 0), 0),
     };
+    const judgeSummary = judgeRunSummary();
+    if (judgeSummary && judgeSummary.calls > 0) {
+      log.info(
+        `[judge] backend=${judgeSummary.backend} calls=${judgeSummary.calls} failed=${judgeSummary.failed} ` +
+        `questions=${judgeSummary.questions} total=${judgeSummary.totalMs}ms`,
+      );
+    }
     try {
       await capture.finish(status, {
         text: finalText,
         tokenUsage: { ...tokenUsage },
         latency: finalLatency,
         ...(assessment ? { answerAssessment: assessment } : {}),
+        ...(judgeSummary && judgeSummary.calls > 0 ? { judge: judgeSummary } : {}),
       });
     } catch (err) {
       log.warn(`[agent] debug finish failed: ${err instanceof Error ? err.message : String(err)}`);
@@ -3894,10 +3904,25 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
       toolCalls: toolInvocations.length,
     }).catch(() => null);
 
+    if (answerAssessment) {
+      recordJudgeOutcome(
+        "answer-completeness",
+        `verdict ${answerAssessment.verdict} · answered ${answerAssessment.answered.toFixed(2)} · finished ${answerAssessment.finished.toFixed(2)} · intent-only ${answerAssessment.intent.toFixed(2)}`,
+        { ...answerAssessment, attempt },
+      );
+    }
     if (!continuable || !answerAssessment) break;
     if (answerAssessment.verdict === "complete") break;
     if (attempt >= maxContinuations || abortSignal?.aborted) break;
 
+    pushDebugEvent("auto_continue", {
+      attempt: attempt + 1,
+      maxAttempts: maxContinuations,
+      verdict: answerAssessment.verdict,
+      answered: answerAssessment.answered,
+      finished: answerAssessment.finished,
+      intent: answerAssessment.intent,
+    });
     metric.count("agent_auto_continue", {
       verdict: answerAssessment.verdict,
       attempt: attempt + 1,

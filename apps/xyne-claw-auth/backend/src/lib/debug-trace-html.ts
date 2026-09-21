@@ -180,6 +180,14 @@ function jsonText(value: unknown): string {
   }
 }
 
+function parseJsonOr(text: string): unknown {
+  try {
+    return JSON.parse(text) as unknown;
+  } catch {
+    return text;
+  }
+}
+
 function payloadBlock(p: Payload, max: number): string {
   if (p.value !== undefined && p.value !== null) {
     const body = cleanBlock(jsonText(p.value), max);
@@ -349,7 +357,7 @@ interface Span {
   startMs: number;
   durationMs: number;
   waitMs: number;
-  kind: "llm" | "tool" | "compaction";
+  kind: "llm" | "tool" | "compaction" | "judge";
   isError: boolean;
 }
 
@@ -410,6 +418,20 @@ function collectSpans(all: DebugTraceEvent[], startBase: number | null): Span[] 
         waitMs: Math.min(ttft, duration),
         kind: "llm",
         isError: Boolean(data["errorMessage"]),
+      });
+      continue;
+    }
+    if (kind === "judge_call") {
+      const duration = num(data["ms"]) ?? 0;
+      if (duration <= 0) continue;
+      spans.push({
+        label: clean(`${str(data["backend"]) ?? "judge"} · ${str(data["purpose"]) ?? "ask"}`, 44),
+        detail: `${ms(duration)} · ${num(data["questions"]) ?? 0} q`,
+        startMs: atMs - duration - startBase,
+        durationMs: duration,
+        waitMs: 0,
+        kind: "judge",
+        isError: data["ok"] === false,
       });
       continue;
     }
@@ -520,6 +542,7 @@ function renderWaterfall(spans: Span[], totalMs: number): string {
   const pct = (value: number): number => Math.max(0, Math.min(100, (value / totalMs) * 100));
 
   const toolSpans = spans.filter((s) => s.kind === "tool");
+  const judgeSpans = spans.filter((s) => s.kind === "judge");
   const covered = mergedMs(spans);
   const llmMs = mergedMs(spans.filter((s) => s.kind === "llm"));
   const toolMs = mergedMs(toolSpans);
@@ -549,11 +572,57 @@ function renderWaterfall(spans: Span[], totalMs: number): string {
     `<div class="wf-legend">`,
     `<span><i class="wf-llm"></i>model ${ms(llmMs)}</span>`,
     `<span><i class="wf-tool"></i>tools ${ms(toolMs)}${concurrent ? ` <em>(${ms(toolSum)} across ${toolSpans.length} calls, overlapping)</em>` : ""}</span>`,
+    ...(judgeSpans.length > 0
+      ? [`<span><i class="wf-judge"></i>judge ${ms(mergedMs(judgeSpans))} <em>(${judgeSpans.length} calls)</em></span>`]
+      : []),
     `<span><i class="wf-gapc"></i>unaccounted ${ms(gap)}</span>`,
     `<span class="wf-total">wall ${ms(totalMs)}</span>`,
     `</div>`,
     `<div class="wf">${bars}</div>`,
   ].join("\n");
+}
+
+
+function judgeHeaderRows(
+  run: DebugTraceRun,
+  judgeCalls: number,
+  judgeFailed: number,
+  autoContinues: number,
+): Array<[string, string]> {
+  const out: Array<[string, string]> = [];
+  const judge = rec((run as unknown as Record<string, unknown>)["judge"]);
+  const calls = num(judge["calls"]) ?? judgeCalls;
+  if (calls > 0) {
+    const failed = num(judge["failed"]) ?? judgeFailed;
+    const purposes = Object.entries(rec(judge["byPurpose"]))
+      .map(([purpose, stats]) => `${clean(purpose, 30)} ×${num(rec(stats)["calls"]) ?? 0}`)
+      .join(", ");
+    out.push([
+      "Judge",
+      [
+        clean(judge["backend"], 20) || "jev",
+        `${calls} calls`,
+        num(judge["questions"]) !== null ? `${num(judge["questions"])} questions` : "",
+        num(judge["totalMs"]) !== null ? ms(judge["totalMs"]) : "",
+        failed > 0 ? `<span class="err-count">${failed} failed</span>` : "",
+        purposes,
+      ].filter(Boolean).join(" · "),
+    ]);
+  }
+  const assessment = rec((run as unknown as Record<string, unknown>)["answerAssessment"]);
+  if (str(assessment["verdict"])) {
+    out.push([
+      "Answer check",
+      [
+        `verdict ${clean(assessment["verdict"], 20)}`,
+        num(assessment["answered"]) !== null ? `answered ${(num(assessment["answered"]) ?? 0).toFixed(2)}` : "",
+        num(assessment["finished"]) !== null ? `finished ${(num(assessment["finished"]) ?? 0).toFixed(2)}` : "",
+        num(assessment["intent"]) !== null ? `intent-only ${(num(assessment["intent"]) ?? 0).toFixed(2)}` : "",
+        autoContinues > 0 ? `auto-continued ${autoContinues}×` : "",
+      ].filter(Boolean).join(" · "),
+    ]);
+  }
+  return out;
 }
 
 export function buildTraceParts(run: DebugTraceRun): TraceParts {
@@ -597,6 +666,9 @@ export function buildTraceParts(run: DebugTraceRun): TraceParts {
   let toolCalls = 0;
   let llmTurns = 0;
   let compactions = 0;
+  let judgeCalls = 0;
+  let judgeFailed = 0;
+  let autoContinues = 0;
 
   for (const event of all) {
     const kind = event.kind ?? "";
@@ -746,6 +818,50 @@ export function buildTraceParts(run: DebugTraceRun): TraceParts {
         meta: [
           num(data["attempt"]) !== null ? `attempt ${num(data["attempt"])}` : "",
           data["reason"] ? `reason ${clean(data["reason"], 120)}` : "",
+        ].filter(Boolean).join(" · "),
+      });
+    } else if (kind === "judge_call") {
+      judgeCalls += 1;
+      if (data["ok"] === false) judgeFailed += 1;
+      rendered = row({
+        offset: off,
+        badge: clean(data["backend"], 12) || "judge",
+        kindClass: data["ok"] === false ? "k-judge err" : "k-judge",
+        title: `Judge call <span class="lbl">${clean(data["purpose"], 40) || "ask"}</span>`,
+        meta: [
+          num(data["questions"]) !== null ? `${num(data["questions"])} questions` : "",
+          num(data["ms"]) !== null ? ms(data["ms"]) : "",
+          data["ok"] === false ? "FAILED — caller fell back to its previous path" : "",
+        ].filter(Boolean).join(" · "),
+      });
+    } else if (kind === "judge_outcome") {
+      const detailPayload = payload(data, "detail");
+      const detail = payloadBlock(
+        typeof detailPayload.value === "string"
+          ? { ...detailPayload, value: parseJsonOr(detailPayload.value) }
+          : detailPayload,
+        4000,
+      );
+      rendered = row({
+        offset: off,
+        badge: clean(data["backend"], 12) || "judge",
+        kindClass: "k-judge",
+        title: `Judge decided <span class="lbl">${clean(data["purpose"], 40) || ""}</span>`,
+        meta: clean(data["summary"], 300),
+        ...(detail ? { body: `<details><summary>what it scored</summary><pre>${detail}</pre></details>` } : {}),
+      });
+    } else if (kind === "auto_continue") {
+      autoContinues += 1;
+      rendered = row({
+        offset: off,
+        badge: "continue",
+        kindClass: "k-retry",
+        title: `Auto-continue ${num(data["attempt"]) ?? "?"}/${num(data["maxAttempts"]) ?? "?"} — answer judged ${clean(data["verdict"], 20) || "incomplete"}`,
+        meta: [
+          num(data["answered"]) !== null ? `answered ${(num(data["answered"]) ?? 0).toFixed(2)}` : "",
+          num(data["finished"]) !== null ? `finished ${(num(data["finished"]) ?? 0).toFixed(2)}` : "",
+          num(data["intent"]) !== null ? `intent-only ${(num(data["intent"]) ?? 0).toFixed(2)}` : "",
+          "costs one extra model turn",
         ].filter(Boolean).join(" · "),
       });
     } else if (kind === "delegation") {
@@ -947,6 +1063,7 @@ export function buildTraceParts(run: DebugTraceRun): TraceParts {
         num(latency["llmRetries"]) ? `${num(latency["llmRetries"])} retries` : "",
       ].filter(Boolean).join(" · ") || "—",
     ],
+    ...judgeHeaderRows(run, judgeCalls, judgeFailed, autoContinues),
   ]
     .map(([label, value]) => `<tr><th>${label}</th><td>${value}</td></tr>`)
     .join("");
@@ -992,6 +1109,7 @@ export const TRACE_STYLE = `.wf{display:flex;flex-direction:column;gap:3px;margi
 .wf-llm{background:#6b74e0}
 .wf-tool{background:#2fa38d}
 .wf-compaction{background:#c98b2a}
+.wf-judge{background:#b06ad1}
 .wf-bad{background:#c8503a}
 .wf-wait{position:absolute;left:0;top:0;bottom:0;background:rgba(255,255,255,.34);border-right:1px solid rgba(255,255,255,.5)}
 .wf-time{text-align:right;font-variant-numeric:tabular-nums;opacity:.75;white-space:nowrap}
@@ -1031,6 +1149,7 @@ details summary { cursor:pointer; color:var(--accent); font-size:12.5px; }
 .k-retry { border-left-color:var(--err); }
 .k-session { border-left-color:var(--fg); }
 .k-sub { border-left-color:#2c9c7a; }
+.k-judge { border-left-color:#b06ad1; }
 .err-count { color:var(--err); font-weight:600; }
 .notice { color:var(--warn); font-size:13px; }
 .foot { color:var(--muted); font-size:12px; margin-top:28px; }

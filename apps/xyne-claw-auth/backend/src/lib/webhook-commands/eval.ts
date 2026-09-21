@@ -7,6 +7,8 @@ import {
   readEvalResults,
   saveEvalState,
   resolveEvalTargets,
+  armKey,
+  armLabel,
   type EvalDispatch,
   type EvalResult,
   type EvalState,
@@ -89,6 +91,67 @@ export async function loadEvalTraces(
   return traces;
 }
 
+
+interface JudgeStats {
+  backend: string;
+  calls: number;
+  failed: number;
+  questions: number;
+  totalMs: number;
+  shadows: Array<{ shadow: string; questions: number; agreed: number; meanAbsDiff: number; shadowMs: number; primaryMs: number }>;
+}
+
+function judgeStats(trace: EvalTrace | undefined): JudgeStats | null {
+  const raw = (trace?.run as unknown as Record<string, unknown> | undefined)?.["judge"];
+  if (!raw || typeof raw !== "object") return null;
+  const j = raw as Record<string, unknown>;
+  const n = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) ? v : 0);
+  return {
+    backend: typeof j["backend"] === "string" ? j["backend"] : "?",
+    calls: n(j["calls"]),
+    failed: n(j["failed"]),
+    questions: n(j["questions"]),
+    totalMs: n(j["totalMs"]),
+    shadows: Array.isArray(j["shadows"])
+      ? (j["shadows"] as Array<Record<string, unknown>>).map((x) => ({
+          shadow: typeof x["shadow"] === "string" ? x["shadow"] : "?",
+          questions: n(x["questions"]),
+          agreed: n(x["agreed"]),
+          meanAbsDiff: n(x["meanAbsDiff"]),
+          shadowMs: n(x["shadowMs"]),
+          primaryMs: n(x["primaryMs"]),
+        }))
+      : [],
+  };
+}
+
+function judgeCell(r: EvalResult, trace: EvalTrace | undefined): string {
+  const stats = judgeStats(trace);
+  if (!stats) return r.judge ? `${esc(r.judge)}<div class="m">no judge calls recorded</div>` : "—";
+  const drift = r.judge && stats.backend !== r.judge ? ` · asked ${esc(r.judge)}` : "";
+  return `${esc(stats.backend)}${drift}<div class="m">${stats.calls} calls · ${stats.questions} q · ${ms(stats.totalMs)}${stats.failed ? ` · ${stats.failed} failed` : ""}</div>`;
+}
+
+function shadowBlock(trace: EvalTrace | undefined): string {
+  const stats = judgeStats(trace);
+  if (!stats || stats.shadows.length === 0) return "";
+  const by = new Map<string, { q: number; agreed: number; diff: number; ms: number; primaryMs: number; n: number }>();
+  for (const sh of stats.shadows) {
+    const slot = by.get(sh.shadow) ?? { q: 0, agreed: 0, diff: 0, ms: 0, primaryMs: 0, n: 0 };
+    slot.q += sh.questions;
+    slot.agreed += sh.agreed;
+    slot.diff += sh.meanAbsDiff * sh.questions;
+    slot.ms += sh.shadowMs;
+    slot.primaryMs += sh.primaryMs;
+    slot.n += 1;
+    by.set(sh.shadow, slot);
+  }
+  const rows = [...by.entries()]
+    .map(([name, v]) => `<tr><td>${esc(name)}</td><td class="n">${v.q}</td><td class="n">${v.q ? Math.round((v.agreed / v.q) * 100) : 0}%</td><td class="n">${v.q ? (v.diff / v.q).toFixed(3) : "—"}</td><td class="n">${ms(Math.round(v.ms / v.n))}</td><td class="n">${ms(Math.round(v.primaryMs / v.n))}</td></tr>`)
+    .join("");
+  return `<h2>Judge agreement (shadow, same questions)</h2><table class="cmp"><thead><tr><th>Shadow judge</th><th class="n">Questions</th><th class="n">Agrees with ${esc(stats.backend)}</th><th class="n">Mean |Δ|</th><th class="n">Avg ms</th><th class="n">${esc(stats.backend)} avg ms</th></tr></thead><tbody>${rows}</tbody></table>`;
+}
+
 export function renderEvalHtml(
   question: string,
   results: EvalResult[],
@@ -124,16 +187,17 @@ export function renderEvalHtml(
         r.status === "completed" ? "ok" : r.status === "pending" ? "pending" : "fail";
       const win = r.totalMs !== null && r.totalMs === fastest && r.status === "completed";
       return `<tr>
-  <td class="p"><a href="#arm-${esc(r.sessionId)}">${esc(r.provider)}</a>${win ? ' <span class="win">fastest</span>' : ""}<div class="m">${esc(r.model ?? "default")}${r.requested ? ` · fell back from ${esc(r.requested)}` : ""}${r.useOverride ? "" : " · agent default"}</div></td>
+  <td class="p"><a href="#arm-${esc(r.sessionId)}">${esc(armLabel(r))}</a>${win ? ' <span class="win">fastest</span>' : ""}<div class="m">${esc(r.model ?? "default")}${r.requested ? ` · fell back from ${esc(r.requested)}` : ""}${r.useOverride ? "" : " · agent default"}</div></td>
   <td><span class="b ${badge}">${esc(r.status)}</span></td>
   <td class="n bar"><div class="track"><span style="width:${width}%"></span></div>${ms(r.totalMs)}</td>
   <td class="n">${ms(r.llmTotalMs)}</td>
   <td class="n">${toolCell(r)}</td>
+  <td class="n">${judgeCell(r, traces.get(r.sessionId))}</td>
   <td class="n">${ms(r.ttftMs)}</td>
   <td class="n">${num(r.tokensIn)}</td>
   <td class="n">${num(r.tokensOut)}</td>
   <td class="n">${num(r.tokensPerSec)}</td>
-</tr>${r.error ? `<tr class="err"><td colspan="9">${esc(r.error.slice(0, 400))}</td></tr>` : ""}`;
+</tr>${r.error ? `<tr class="err"><td colspan="10">${esc(r.error.slice(0, 400))}</td></tr>` : ""}`;
     })
     .join("\n");
 
@@ -146,12 +210,13 @@ export function renderEvalHtml(
       const parts = trace ? buildTraceParts(trace.run) : null;
       const answer = r.answer?.trim();
       const head =
-        `<span class="arm-p">Provider: ${esc(r.provider)}</span>` +
+        `<span class="arm-p">Provider: ${esc(armLabel(r))}</span>` +
         `<span class="sub">${esc(r.model ?? "default")}${r.requested ? ` · fell back from ${esc(r.requested)}` : ""} · ${ms(r.totalMs)} · ${esc(r.status)}</span>`;
       const body = [
         answer
           ? `<h2>Answer</h2><pre class="ans">${esc(answer)}</pre>`
           : `<p class="notice">No answer recorded for this arm${r.error ? " — see the error above" : ""}.</p>`,
+        shadowBlock(trace),
         parts
           ? parts.inner
           : `<p class="notice">No execution trace was checkpointed for this arm, so its timeline is unavailable.</p>`,
@@ -201,7 +266,7 @@ footer{color:var(--mut);font-size:12px;margin-top:18px}
 <div class="top">${results.length} provider${results.length === 1 ? "" : "s"} · started ${esc(startedAt.toISOString())}${spread ? ` · slowest was ${spread}× the fastest` : ""}</div>
 <div class="q">${esc(question)}</div>
 <table class="cmp">
-<thead><tr><th>Provider</th><th>Status</th><th class="n">Total</th><th class="n">LLM</th><th class="n">Tools</th><th class="n">TTFT</th><th class="n">Tok in</th><th class="n">Tok out</th><th class="n">Tok/s</th></tr></thead>
+<thead><tr><th>Provider</th><th>Status</th><th class="n">Total</th><th class="n">LLM</th><th class="n">Tools</th><th class="n">Judge</th><th class="n">TTFT</th><th class="n">Tok in</th><th class="n">Tok out</th><th class="n">Tok/s</th></tr></thead>
 <tbody>
 ${rows}
 </tbody></table>
@@ -213,10 +278,15 @@ ${sections}
 </body></html>`;
 }
 
-export async function handleEval(ctx: WebhookCommandCtx, question: string, requested: string[]): Promise<void> {
+export async function handleEval(
+  ctx: WebhookCommandCtx,
+  question: string,
+  requested: string[],
+  judges: string[] = [],
+): Promise<void> {
   const trimmed = question.trim();
   if (!trimmed) {
-    await ctx.reply("`/eval <question>` — runs the question on every configured provider and posts a comparison.", REPLY_LABEL);
+    await ctx.reply("`/eval <question>` — runs the question on every configured provider and posts a comparison. Add `judges=llm,jev,ourjev` to compare judge backends on one provider.", REPLY_LABEL);
     return;
   }
 
@@ -234,6 +304,7 @@ export async function handleEval(ctx: WebhookCommandCtx, question: string, reque
     agentRow,
     conversationId,
     ...(requested.length ? { requested } : {}),
+    ...(judges.length ? { judges } : {}),
   });
 
   if (targets.length === 0) {
@@ -257,7 +328,7 @@ export async function handleEval(ctx: WebhookCommandCtx, question: string, reque
         spacesAppToken: ctx.agent.appToken,
         spacesAppId: ctx.agent.spacesAppId,
         spacesAppUserId: ctx.agent.spacesAppUserId,
-        traceId: `${traceId}-${target.provider}`,
+        traceId: `${traceId}-${armKey(target)}`,
       }),
     ),
   );
@@ -269,7 +340,7 @@ export async function handleEval(ctx: WebhookCommandCtx, question: string, reque
       dispatched.push(outcome.value);
       return;
     }
-    const provider = targets[i]?.provider ?? "unknown";
+    const provider = targets[i] ? armLabel(targets[i]) : "unknown";
     const reason = errMsg(outcome.reason);
     const short = /no .* credentials/i.test(reason)
       ? "not connected"
@@ -285,7 +356,7 @@ export async function handleEval(ctx: WebhookCommandCtx, question: string, reque
 
   await ctx.reply(
     `⚖️ **Eval** — running on ${dispatched.length} provider${dispatched.length === 1 ? "" : "s"}: ` +
-    `${dispatched.map((d) => `\`${d.provider}\``).join(", ")}` +
+    `${dispatched.map((d) => `\`${armLabel(d)}\``).join(", ")}` +
     `${failed.length ? ` · could not start: ${failed.join(", ")}` : ""}` +
     `\nEach answers in this thread; the comparison lands here when they finish.`,
     REPLY_LABEL,

@@ -18,11 +18,11 @@ const router = Router();
 // + what an empty model resolves to (shown as "Default (kimi-latest)" in the UI).
 router.get("/models", async (_req: Request, res: Response) => {
   try {
-    const { models, defaultModel } = await listEvalModels();
-    res.json({ success: true, models, defaultModel });
+    const { models, defaultModel, judgeBackends } = await listEvalModels();
+    res.json({ success: true, models, defaultModel, judgeBackends });
   } catch (err) {
     log.error("[evals] listModels error:", err);
-    res.json({ success: true, models: [], defaultModel: "" });
+    res.json({ success: true, models: [], defaultModel: "", judgeBackends: [] });
   }
 });
 
@@ -38,7 +38,7 @@ router.get("/gen-models", async (req: Request, res: Response) => {
   try {
     const [creds, litellmInfo] = await Promise.all([
       userProviderCredentialsRepository.listByUser(userId).catch(() => []),
-      listEvalModels().catch(() => ({ models: [] as string[], defaultModel: "" })),
+      listEvalModels().catch(() => ({ models: [] as string[], defaultModel: "", judgeBackends: [] as string[] })),
     ]);
     const providers = creds
       .filter((c) => c.encryptedKey) // configured = has a stored key

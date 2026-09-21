@@ -29,6 +29,7 @@ import { readRun, type RunStore } from "./store.js";
 import {
   isCaptureLevel,
   type AnswerAssessment,
+  type JudgeRunSummary,
   type CaptureLevel,
   type LatencyMetrics,
   type RunHeader,
@@ -74,6 +75,7 @@ export interface CaptureHandles {
       tokenUsage: TokenUsage;
       latency: LatencyMetrics;
       answerAssessment?: AnswerAssessment;
+      judge?: JudgeRunSummary;
     },
   ): Promise<void>;
 }
@@ -148,6 +150,7 @@ export function startCapture(o: StartCaptureOpts): CaptureHandles {
           latency: final.latency,
           ...(textRef !== undefined ? { lastAssistantTextRef: textRef } : {}),
           ...(final.answerAssessment ? { answerAssessment: final.answerAssessment } : {}),
+          ...(final.judge ? { judge: final.judge } : {}),
         };
         store?.writeHeader(header);
         await store?.flush();

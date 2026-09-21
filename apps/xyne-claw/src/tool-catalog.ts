@@ -1,4 +1,5 @@
 import { jevEnabled, jevScoreItems, jevThreshold } from "./jev.js";
+import { recordJudgeOutcome } from "./judge-backend.js";
 import { metric } from "./metrics.js";
 import { Type } from "@sinclair/typebox";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
@@ -427,6 +428,16 @@ async function matchScopedSifted(
   if (added.length > 0) {
     metric.count("tool_search_sift_added", { added: added.length, keyword: keyword.length });
   }
+  recordJudgeOutcome(
+    "tool-search",
+    `scored ${scores.size} of ${entries.length} tools · keyword hits ${keyword.length} · added ${added.length} at ≥${threshold}`,
+    {
+      query,
+      threshold,
+      added: added.slice(0, 25).map((e) => ({ name: e.name, score: Number((scores.get(e.name) ?? 0).toFixed(3)) })),
+      keywordHits: keyword.slice(0, 25).map((e) => ({ name: e.name, score: Number((scores.get(e.name) ?? 0).toFixed(3)) })),
+    },
+  );
   return [...keyword, ...added];
 }
 

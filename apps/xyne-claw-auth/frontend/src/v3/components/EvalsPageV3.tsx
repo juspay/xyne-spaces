@@ -469,10 +469,12 @@ export function EvalsPageV3({ userId }: { userId: string }) {
   // What an empty/"default" model resolves to (e.g. "kimi-latest") — shown in
   // brackets next to "Default" so it's never a mystery or a duplicate entry.
   const [defaultModelName, setDefaultModelName] = useState("");
+  const [judgeBackends, setJudgeBackends] = useState<string[]>([]);
   const loadModels = useCallback(async () => {
     const r = await listEvalModels();
     setModels(r.models);
     setDefaultModelName(r.defaultModel);
+    setJudgeBackends(r.judgeBackends);
   }, []);
   // The user's connected Copilot provider (if any) — surfaces their configured
   // model as "gpt-4o (copilot)" in the extraction/judge model dropdowns.
@@ -2276,6 +2278,10 @@ export function EvalsPageV3({ userId }: { userId: string }) {
                   options={[
                     { value: DEFAULT_OPT, label: `Default model${defaultModelName ? ` (${defaultModelName})` : ""}` },
                     ...(copilotOptionLabel ? [{ value: "prov:copilot", label: copilotOptionLabel }] : []),
+                    ...judgeBackends.map((b) => ({
+                      value: b,
+                      label: b === "ourjev" ? "Our Jev (typed evaluator)" : "Jev (typed evaluator)",
+                    })),
                     ...models.map((m) => ({ value: m, label: m })),
                   ]}
                 />

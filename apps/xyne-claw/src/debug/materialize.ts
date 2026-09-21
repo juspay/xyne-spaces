@@ -717,6 +717,7 @@ export function toV1Snapshot(run: ReadRun): DebugSessionSnapshot {
     latency,
     lastAssistantText,
     ...(h.answerAssessment ? { answerAssessment: h.answerAssessment } : {}),
+    ...(h.judge ? { judge: h.judge } : {}),
     events: built.events,
     ...(latency.streamChars !== undefined ? { streamChars: latency.streamChars } : {}),
     ...(latency.streamCharsPerSec !== undefined

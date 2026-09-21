@@ -34,16 +34,17 @@ describe("/eval parsing", () => {
       kind: "eval",
       question: "how many tickets are open?",
       providers: [],
+      judges: [],
     });
   });
 
   it("extracts a providers filter without leaving it in the question", () => {
     const parsed = parseSlashCommand("/eval providers=claude,codex summarize the channel");
-    expect(parsed).toEqual({ kind: "eval", question: "summarize the channel", providers: ["claude", "codex"] });
+    expect(parsed).toEqual({ kind: "eval", question: "summarize the channel", providers: ["claude", "codex"], judges: [] });
   });
 
   it("treats a bare /eval as a usage request", () => {
-    expect(parseSlashCommand("/eval")).toEqual({ kind: "eval", question: "", providers: [] });
+    expect(parseSlashCommand("/eval")).toEqual({ kind: "eval", question: "", providers: [], judges: [] });
   });
 
   it("does not claim commands that merely start with eval", () => {
@@ -207,6 +208,64 @@ describe("eval full sessions", () => {
   it("still renders when nothing but the summary is available", () => {
     const html = renderEvalHtml("q", [result("codex", { answer: null })], started);
     expect(html).toContain("No answer recorded");
+  });
+});
+
+describe("eval judge arms", () => {
+  const started = new Date("2026-09-20T10:00:00.000Z");
+
+  it("parses judges= without leaving it in the question", () => {
+    expect(parseSlashCommand("/eval judges=llm,jev,ourjev summarize the channel")).toEqual({
+      kind: "eval",
+      question: "summarize the channel",
+      providers: [],
+      judges: ["llm", "jev", "ourjev"],
+    });
+  });
+
+  it("expands aliases and all, and ignores unknown judges", async () => {
+    const { normalizeJudges, armKey, armLabel } = await import("../eval-run.js");
+    expect(normalizeJudges(["all"])).toEqual(["llm", "jev", "ourjev"]);
+    expect(normalizeJudges(["ours", "jev", "bogus", "jev"])).toEqual(["ourjev", "jev"]);
+    expect(normalizeJudges([])).toEqual([]);
+    expect(armKey({ provider: "claude", useOverride: true, judge: "jev" })).toBe("claude-jev");
+    expect(armLabel({ provider: "claude", judge: "ourjev" })).toBe("claude + ourjev");
+  });
+
+  it("labels arms as llm + judge and reports the judge's cost and agreement", () => {
+    const run = {
+      agentSlug: "xyne",
+      startedAt: started.toISOString(),
+      events: [],
+      judge: {
+        backend: "jev",
+        calls: 6,
+        failed: 1,
+        questions: 140,
+        totalMs: 900,
+        byPurpose: {},
+        shadows: [
+          { primary: "jev", shadow: "llm", purpose: "sift", questions: 10, agreed: 8, meanAbsDiff: 0.2, primaryMs: 150, shadowMs: 4000 },
+        ],
+      },
+    } as unknown as DebugTraceRun;
+    const traces = new Map<string, EvalTrace>([["s-claude", { run, timing: null }]]);
+    const html = renderEvalHtml("q", [result("claude", { judge: "jev" })], started, traces, "xyne");
+    expect(html).toContain("claude + jev");
+    expect(html).toContain("6 calls · 140 q");
+    expect(html).toContain("1 failed");
+    expect(html).toContain("Judge agreement");
+    expect(html).toContain("80%");
+  });
+
+  it("flags a run whose judge was not the one the arm asked for", () => {
+    const run = {
+      agentSlug: "xyne", startedAt: started.toISOString(), events: [],
+      judge: { backend: "jev", calls: 1, failed: 0, questions: 1, totalMs: 5, byPurpose: {}, shadows: [] },
+    } as unknown as DebugTraceRun;
+    const traces = new Map<string, EvalTrace>([["s-claude", { run, timing: null }]]);
+    const html = renderEvalHtml("q", [result("claude", { judge: "ourjev" })], started, traces, "xyne");
+    expect(html).toContain("asked ourjev");
   });
 });
 

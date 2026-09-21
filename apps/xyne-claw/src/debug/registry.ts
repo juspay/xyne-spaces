@@ -250,6 +250,15 @@ export const EVENTS = defineEvents({
   provider_fallback: {
     fields: { fromProvider: plain(), toProvider: plain(), attempt: plain(), reason: plain() },
   },
+  judge_call: {
+    fields: { backend: plain(), purpose: plain(), questions: plain(), ms: plain(), ok: plain() },
+  },
+  judge_outcome: {
+    fields: { backend: plain(), purpose: plain(), summary: plain(), detail: ref(4_000) },
+  },
+  auto_continue: {
+    fields: { attempt: plain(), maxAttempts: plain(), verdict: plain(), answered: plain(), finished: plain(), intent: plain() },
+  },
 
   // ── Delegation ──────────────────────────────────────────────────────────
   subagent_start: {

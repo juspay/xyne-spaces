@@ -16,10 +16,35 @@ const TERMINAL = new Set(["completed", "failed", "cancelled"]);
 
 export const PLATFORM_DEFAULT_PROVIDER = process.env["EVAL_DEFAULT_PROVIDER"] ?? "litellm";
 
+export const EVAL_JUDGES = ["llm", "jev", "ourjev"] as const;
+export type EvalJudge = (typeof EVAL_JUDGES)[number];
+
 export interface EvalTarget {
   provider: string;
   model?: string | undefined;
   useOverride: boolean;
+  /** Judge backend for sift/compaction/completeness on this arm. */
+  judge?: EvalJudge | undefined;
+}
+
+export function normalizeJudges(requested: string[] | undefined): EvalJudge[] {
+  if (!requested?.length) return [];
+  if (requested.includes("all")) return [...EVAL_JUDGES];
+  const alias: Record<string, EvalJudge> = { llm: "llm", jev: "jev", ourjev: "ourjev", "our-jev": "ourjev", ours: "ourjev" };
+  const out: EvalJudge[] = [];
+  for (const raw of requested) {
+    const judge = alias[raw];
+    if (judge && !out.includes(judge)) out.push(judge);
+  }
+  return out;
+}
+
+export function armKey(target: EvalTarget): string {
+  return target.judge ? `${target.provider}-${target.judge}` : target.provider;
+}
+
+export function armLabel(target: { provider: string; judge?: string | undefined }): string {
+  return target.judge ? `${target.provider} + ${target.judge}` : target.provider;
 }
 
 const PERSONAL_CRED_PROVIDERS = ["claude", "codex", "copilot"] as const;
@@ -115,6 +140,7 @@ export async function resolveEvalTargets(input: {
   agentRow?: { id?: string; config?: unknown } | null;
   conversationId?: string | undefined;
   requested?: string[];
+  judges?: string[];
 }): Promise<EvalTarget[]> {
   const resolution = await resolveProvidersForDispatch({
     targetUserId: input.userId,
@@ -162,16 +188,22 @@ export async function resolveEvalTargets(input: {
     targets.push({ provider, useOverride: true, ...(model ? { model } : {}) });
   }
 
-  const wanted = input.requested?.length
+  const judges = normalizeJudges(input.judges);
+  const byProvider = input.requested?.length
     ? targets.filter((t) => input.requested?.includes(t.provider))
-    : targets;
+    : judges.length > 0
+      ? targets.slice(0, 1)
+      : targets;
+  const wanted = judges.length > 0
+    ? byProvider.flatMap((t) => judges.map((judge) => ({ ...t, judge })))
+    : byProvider;
   return wanted.slice(0, EVAL_MAX_PROVIDERS);
 }
 
 export function evalReplyPrefix(target: EvalTarget): string {
   // Placeholders, not literals: the delivery path fills them from the run's
   // actual provider/model, so a fallback is visible here too.
-  return `**Provider: {provider}**{model} · _pinned to ${target.provider}_`;
+  return `**Provider: {provider}**{model} · _pinned to ${target.provider}_${target.judge ? ` · judge: ${target.judge}` : ""}`;
 }
 
 /** Per-arm session key: safe id characters only, so the sandbox store and the
@@ -219,6 +251,7 @@ export async function dispatchEvalRun(args: {
       callbackUrl: `${CONFIG.internalUrl}/claw/api/v1/webhook/result`,
       progressUrl: `${CONFIG.internalUrl}/claw/api/v1/webhook/progress`,
       channelId: args.channelId,
+      ...(args.target.judge ? { judgeBackend: args.target.judge } : {}),
       ...(args.target.useOverride
         ? {
             providerOverride: {
@@ -279,6 +312,7 @@ export async function readEvalResults(dispatches: EvalDispatch[]): Promise<EvalR
     const actual = row?.provider ?? undefined;
     return {
       provider: actual ?? d.provider,
+      judge: d.judge,
       requested: actual && actual !== d.provider ? d.provider : undefined,
       useOverride: d.useOverride,
       model: row?.model ?? d.model,

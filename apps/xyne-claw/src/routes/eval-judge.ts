@@ -10,6 +10,7 @@ import { Router, type Request, type Response } from "express";
 import { validateS2SKey } from "../middleware/auth.js";
 import { judgeSemanticMatch, listJudgeModels } from "../eval-judge.js";
 import { LITELLM } from "../config.js";
+import { judgeBackendConfigured } from "../jev.js";
 
 const router = Router();
 
@@ -45,8 +46,9 @@ router.post("/eval-judge", validateS2SKey, async (req: Request, res: Response): 
 
 router.get("/eval-models", validateS2SKey, async (_req: Request, res: Response): Promise<void> => {
   const models = await listJudgeModels();
+  const judgeBackends = (["jev", "ourjev"] as const).filter((b) => judgeBackendConfigured(b));
   // defaultModel = what an empty model resolves to (judge + extraction fallback).
-  res.json({ success: true, models, defaultModel: LITELLM.fastModel });
+  res.json({ success: true, models, defaultModel: LITELLM.fastModel, judgeBackends });
 });
 
 export { router as evalJudgeRouter };

@@ -38,7 +38,7 @@ export type SlashCommand =
   | { kind: "status" }
   // `/eval <question>` — run the question once on every configured provider,
   // each answering in this thread, then attach a timing comparison.
-  | { kind: "eval"; question: string; providers: string[] }
+  | { kind: "eval"; question: string; providers: string[]; judges: string[] }
   // `/debug` — attach one HTML file with the latest run's execution trace.
   // `/debug all` — every checkpointed session in the thread, newest first,
   // each expandable, so an issue can be traced across runs.
@@ -102,13 +102,20 @@ function parseFromSlash(trimmed: string): SlashCommand | null {
   if (lower === "/eval" || lower.startsWith("/eval ")) {
     const rest = trimmed.slice("/eval".length).trim();
     const providers: string[] = [];
+    const judges: string[] = [];
     const question = rest
       .replace(/(?:^|\s)providers?=([\w,\-]+)/gi, (_m, list: string) => {
         for (const p of list.split(",").map((x) => x.trim().toLowerCase()).filter(Boolean)) providers.push(p);
         return " ";
       })
+      .replace(/(?:^|\s)judges?=([\w,\-]+)/gi, (_m, list: string) => {
+        for (const j of list.split(",").map((x) => x.trim().toLowerCase()).filter(Boolean)) {
+          judges.push(j === "all" ? "all" : j);
+        }
+        return " ";
+      })
       .trim();
-    return { kind: "eval", question, providers };
+    return { kind: "eval", question, providers, judges };
   }
   if (lower === "/debug") {
     return { kind: "debug" };
