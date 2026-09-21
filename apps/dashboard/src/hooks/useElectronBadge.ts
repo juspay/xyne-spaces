@@ -1,30 +1,32 @@
 import { useEffect } from 'react';
 import { useAllUnreadCount } from './useUnreadCount';
+import { useWorkspaceUnreadCounts } from './useWorkspaceUnreadCounts';
+import { DOCK_BADGE_POLL_SOURCE } from '../config';
 
 /**
- * Syncs the total unread message count to the native desktop app-icon badge
- * (macOS Dock badge / Windows taskbar overlay) when running inside the Electron
+ * Syncs the total unread count to the native desktop app-icon badge (macOS
+ * Dock badge / Windows taskbar overlay) when running inside the Electron
  * desktop app.
  *
- * The unread source of truth is {@link useAllUnreadCount}, the same hook that
- * drives the in-app sidebar badges and the Unreads Inbox, so the dock badge
- * always matches what the user sees inside the app. The total is the sum of the
- * per-channel unread counts (channels + DMs/GROUP_DMs) for the active
- * workspace.
+ * Two sources, selected by the DOCK_BADGE_POLL_SOURCE flag:
+ *
+ * - Flag on (new): `useWorkspaceUnreadCounts` — the cross-workspace poll
+ *   (GET /activity/workspace-counts). The badge reflects the unread badge
+ *   invariant (dm + bell + call summed over every workspace the member
+ *   belongs to), matching the workspace switcher exactly. Updates on the
+ *   30s poll, tab-visible, and the unread:refetch event fired after read
+ *   mutations.
+ * - Flag off (default, legacy): `useAllUnreadCount` — the Zero-synced
+ *   per-channel counts of the active workspace only, summed.
  *
  * This is a no-op in the browser and in SSR: `window.electronAPI.setBadgeCount`
  * is only exposed by the Electron main preload (`electron/src/preload.ts`),
  * which forwards to `app.setBadgeCount()` in the main process
  * (`electron/src/ipc/handlers.ts`). Passing `0` clears the badge.
- *
- * NOTE (known limitation / follow-up): the count reflects the *currently active
- * workspace* only, because `useAllUnreadCount` reads from the per-workspace
- * state machine. Cross-workspace aggregation would require polling
- * `GET /activity/workspace-counts` (see WorkspaceSwitcher) and is intentionally
- * left out of this first version to keep the change scoped and network-free.
  */
 export const useElectronBadge = (): void => {
   const unreadCounts = useAllUnreadCount();
+  const { totalAllWorkspaces } = useWorkspaceUnreadCounts();
 
   useEffect(() => {
     const api = typeof window !== 'undefined' ? window.electronAPI : undefined;
@@ -32,11 +34,13 @@ export const useElectronBadge = (): void => {
       return;
     }
 
-    const total = Object.values(unreadCounts).reduce(
-      (sum, count) => sum + (count > 0 ? count : 0),
-      0,
-    );
+    let total: number;
+    if (DOCK_BADGE_POLL_SOURCE) {
+      total = totalAllWorkspaces;
+    } else {
+      total = Object.values(unreadCounts).reduce((sum, count) => sum + (count > 0 ? count : 0), 0);
+    }
 
     api.setBadgeCount(total);
-  }, [unreadCounts]);
+  }, [unreadCounts, totalAllWorkspaces]);
 };

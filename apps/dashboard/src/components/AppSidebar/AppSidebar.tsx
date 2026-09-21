@@ -41,10 +41,10 @@ import { UpdateStatusModal } from './UpdateStatusModal';
 import { StatusIndicator } from '../ui/StatusIndicator';
 import { useMissedCallCount } from '../../hooks/useMissedCallCount';
 import { useUnreadActivitiesCount } from '../../hooks/useUnreadActivitiesCount';
+import { useDmUnreadCount, useHasUnreadDmReactions } from '../../hooks/useDmUnreadCount';
+import { useHasUnreadBellReactions } from '../../hooks/useBellReactions';
 import { useRecapUnreadCount } from '../../hooks/useRecapData';
 import { usePlatform } from '../../hooks/usePlatform';
-import { useAllVisibleChannels } from '../../hooks/useChannels';
-import { useAllUnreadCount } from '../../hooks/useUnreadCount';
 import { reactNativeBridge } from '../../utils/reactNativeBridge';
 import { useVisibleNavigationItems } from '../../hooks/useVisibleNavigationItems';
 import { AppIcon } from '../AppIcon/AppIcon';
@@ -67,7 +67,6 @@ import { cn } from '../../utils/classNames';
 import { APP_DRAG_STYLE, isElectronApp, openInAppWindow } from '../../utils/electronApp';
 import { toast } from 'sonner';
 import { ErrorReportModal } from '../ErrorReportModal/ErrorReportModal';
-import { isDMChannel } from '../Chat/ChatDirectory/ChatDirectory.utils';
 import { SupportRail } from './SupportRail';
 import { WorkspaceSwitcher } from './WorkspaceSwitcher';
 import { ZeroConnectionStatus } from '../ZeroConnectionStatus/ZeroConnectionStatus';
@@ -185,10 +184,11 @@ const AppSidebar = (): ReactElement => {
   const missedCallCount = useMissedCallCount();
   const hasOngoingCall = useRailActiveCalls().length > 0;
   const unreadActivityCount = useUnreadActivitiesCount();
+  const dmUnreadCount = useDmUnreadCount();
+  const hasUnreadDmReactions = useHasUnreadDmReactions();
+  const hasUnreadBellReactions = useHasUnreadBellReactions();
   const { unreadCount: recapUnreadCount } = useRecapUnreadCount();
   const { isMobile } = usePlatform();
-  const visibleChannels = useAllVisibleChannels();
-  const unreadCounts = useAllUnreadCount();
   const [workspace] = useCachedQuery(queries.getWorkspaceById({ workspaceId: workspaceId || '' }), {
     enabled: !!workspaceId,
   });
@@ -349,11 +349,10 @@ const AppSidebar = (): ReactElement => {
     );
   };
 
-  const hasPendingDirectMessages = useMemo(() => {
-    return visibleChannels.some(
-      channel => isDMChannel(channel.scopeType) && (unreadCounts[channel.id] ?? 0) > 0,
-    );
-  }, [visibleChannels, unreadCounts]);
+  // Reactions render a dot (never a number): on the DM rail and the bell rail
+  // only when the respective numeric badge is 0. Cleared on view.
+  const showDmReactionDot = hasUnreadDmReactions && dmUnreadCount === 0;
+  const showBellReactionDot = hasUnreadBellReactions && unreadActivityCount === 0;
 
   const handleNavigationClick = (_label: string, _openedInNewWindow = false): void => {};
 
@@ -484,7 +483,8 @@ const AppSidebar = (): ReactElement => {
                   const showMissedCallBadge = item.path === '/calls' && missedCallCount > 0;
                   const showOngoingCallDot =
                     item.path === '/calls' && hasOngoingCall && !showMissedCallBadge;
-                  const showPendingDmDot = item.path === '/chat/dm' && hasPendingDirectMessages;
+                  const showDmBadge = item.path === '/chat/dm' && dmUnreadCount > 0;
+                  const showPendingDmDot = item.path === '/chat/dm' && showDmReactionDot;
                   const showActivityBadge =
                     item.path === '/chat/activity' && unreadActivityCount > 0;
                   const Icon = item.icon;
@@ -535,10 +535,21 @@ const AppSidebar = (): ReactElement => {
                           className='absolute top-1 right-1 size-[9px] rounded-full bg-sidebar-primary border border-sidebar-accent-ring'
                         />
                       )}
+                      {showDmBadge && (
+                        <span className='absolute -top-1 -right-1 flex items-center justify-center min-w-[18px] h-[18px] px-[4px] rounded-full bg-sidebar-primary border border-sidebar-accent-ring text-sidebar-primary-foreground text-[11px] font-semibold'>
+                          {dmUnreadCount > 99 ? '99+' : dmUnreadCount}
+                        </span>
+                      )}
                       {showMissedCallBadge && (
                         <span className='absolute -top-1 -right-1 flex items-center justify-center min-w-[18px] h-[18px] px-[4px] rounded-full bg-sidebar-primary border border-sidebar-accent-ring text-sidebar-primary-foreground text-[11px] font-semibold'>
                           {missedCallCount > 99 ? '99+' : missedCallCount}
                         </span>
+                      )}
+                      {item.path === '/chat/activity' && showBellReactionDot && (
+                        <span
+                          aria-hidden='true'
+                          className='absolute top-1 right-1 size-[9px] rounded-full bg-sidebar-primary border border-sidebar-accent-ring'
+                        />
                       )}
                       {showActivityBadge && (
                         <span className='absolute -top-1 -right-1 flex items-center justify-center min-w-[18px] h-[18px] px-[4px] rounded-full bg-sidebar-primary border border-sidebar-accent-ring text-sidebar-primary-foreground text-[11px] font-semibold'>
