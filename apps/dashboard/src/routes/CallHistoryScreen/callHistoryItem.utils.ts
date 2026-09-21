@@ -155,6 +155,7 @@ export function mapVespaCallResultToCall(result: DisplaySearchResult, workspaceI
         invitedAt: startedAt,
         response: (participantResponses[index] as InvitationResponse | undefined) || null,
         meetingStatus: MeetingStatus.PENDING,
+        ringStatus: null,
         respondedAt: null,
         joinedAt: null,
         leftAt: null,

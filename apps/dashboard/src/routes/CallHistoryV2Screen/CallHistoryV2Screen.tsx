@@ -683,7 +683,7 @@ const CallHistoryV2Screen = (): ReactElement => {
                   htmlFor='channel-calls-toggle'
                   className='cursor-pointer select-none whitespace-nowrap text-sm font-medium text-muted-foreground'
                 >
-                  All channel calls
+                  See thread calls
                 </label>
                 <Switch
                   id='channel-calls-toggle'
