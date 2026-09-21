@@ -8,7 +8,7 @@ import type {
   Query,
   HumanReadable,
 } from '@rocicorp/zero';
-import { createContext, useContext } from 'react';
+import { createContext, useContext, useMemo } from 'react';
 import type { Logger, MetricsRecorder } from '../logger/index.js';
 import { noopLogger, noopMetrics } from '../logger/index.js';
 import { Event } from '../logger/events.js';
@@ -383,9 +383,13 @@ export function useZero(): Zero {
           }
         };
       }
-      return Reflect.get(target, prop) as never;
+      const value = Reflect.get(target, prop, target);
+      return (typeof value === 'function' ? value.bind(target) : value) as never;
     },
   };
 
-  return new Proxy(originalZero, handler);
+  return useMemo(
+    () => new Proxy(originalZero, handler),
+    [originalZero, logger, metrics, encryptionKey, clientEncryptionEnabled],
+  );
 }

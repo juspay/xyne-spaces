@@ -1,5 +1,8 @@
-const isElectronBundled = typeof window !== 'undefined' ? window.location.protocol.startsWith('xyne-spaces') : false;
-const hostname = typeof window !== 'undefined' ? window.location.hostname : '';
+const runtimeLocation =
+  typeof window !== 'undefined' && window.location ? window.location : undefined;
+const runtimeProtocol = typeof runtimeLocation?.protocol === 'string' ? runtimeLocation.protocol : '';
+const hostname = typeof runtimeLocation?.hostname === 'string' ? runtimeLocation.hostname : '';
+const isElectronBundled = runtimeProtocol.startsWith('xyne-spaces');
 const isLocalhost = hostname === 'localhost' || hostname === '127.0.0.1';
 const isSandboxLocal = hostname.endsWith('.localhost');
 const isTestEnv = hostname === 'dashboard' || isSandboxLocal;

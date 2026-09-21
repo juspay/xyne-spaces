@@ -30,6 +30,8 @@ import {
   dedupeAndSortConversations,
   mergeCachedConversations,
   mergeConversationsWithLatest,
+  mergeServerAndPendingConversations,
+  mergeServerAndPendingThreadMessages,
   reconcileConversationWindow,
 } from './channelMessageMerge.js';
 import {
@@ -41,6 +43,13 @@ import { usePendingForChannel, usePendingForThread } from './usePending.js';
 export type UseMessagesOptions = {
   channelPageSize?: number;
   channelLatestLimit?: number;
+  /**
+   * Opt-in: render the latest tail as a provisional first window while the
+   * complete page resolves, instead of holding an empty list. Only applies to
+   * unanchored opens; anchored opens always wait for their own window.
+   * Off by default, so dashboard/electron keep complete-page behavior.
+   */
+  promoteLatestTailOnColdOpen?: boolean;
   enabled?: boolean;
   linkedConversationId?: string | null | undefined;
   linkedItemCreatedAt?: { createdAt: number } | null | undefined;
@@ -63,6 +72,10 @@ export type InViewAnchor = {
 export type UseChannelMessagesResult = {
   messages: Conversation[];
   latestConversationsList: Conversation[];
+  /** Serialized failure of the initial load, or null. Cleared on retry. */
+  initialLoadError: string | null;
+  /** Re-runs the initial load after `initialLoadError`. */
+  retryInitialLoad: () => void;
   loadOlder: () => void;
   loadNewer: () => void;
   setInViewAnchor: (anchor: InViewAnchor | null) => void;
@@ -121,6 +134,7 @@ function useChannelMessagesImpl(
   const isMember = ref.isMember ?? true;
   const pageSize = opts.channelPageSize ?? DEFAULT_CHANNEL_PAGE_SIZE;
   const latestLimit = opts.channelLatestLimit ?? Math.max(1, Math.floor(pageSize / 2));
+  const promoteLatestTailOnColdOpen = opts.promoteLatestTailOnColdOpen ?? false;
   const { channelId } = ref;
   const key = refKey(ref);
   const linkedConversationId = opts.linkedConversationId ?? null;
@@ -181,8 +195,13 @@ function useChannelMessagesImpl(
 
   const [latestConversationsList, setLatestConversationsList] = useState<Conversation[]>([]);
   const latestConversationsListRef = useRef<Conversation[]>([]);
+  // A cold open may temporarily render the latest tail. Remember that, so the
+  // complete page extends the visible window instead of replacing it.
+  const hasProvisionalWindowRef = useRef(false);
 
   const [isInitialLoadComplete, setIsInitialLoadComplete] = useState(false);
+  const [initialLoadError, setInitialLoadError] = useState<string | null>(null);
+  const [initialLoadAttempt, setInitialLoadAttempt] = useState(0);
   const isFetchingRef = useRef(false);
   const isFetchingOlderRef = useRef(false);
   const hasReachedChannelStartRef = useRef(false);
@@ -190,6 +209,23 @@ function useChannelMessagesImpl(
 
   const shouldUseCutoffQuery =
     conversationSeenCutoffAt !== null && isMember && !linkedConversationId;
+  // Latest-tail promotion is safe only for a genuinely recent, unanchored
+  // open. Unread, activity, cutoff, and deep-link opens have a deliberate
+  // position; promoting the tail there can hide the requested message.
+  const hasNavigationAnchor =
+    linkedConversationId !== null ||
+    linkedItemCreatedAt !== null ||
+    linkedCutoffCreatedAt !== null ||
+    conversationSeenCutoffAt !== null ||
+    lastViewedAt !== null ||
+    lastActivityAt !== null;
+  const allowProvisionalPromotion = promoteLatestTailOnColdOpen && !hasNavigationAnchor;
+
+  const retryInitialLoad = useCallback((): void => {
+    if (!enabled || !channelId || shouldUseCutoffQuery) return;
+    setInitialLoadError(null);
+    setInitialLoadAttempt(attempt => attempt + 1);
+  }, [channelId, enabled, shouldUseCutoffQuery]);
 
   const activityCutoffCreatedAt = linkedCutoffCreatedAt?.createdAt ?? null;
   const channelSeenCutoffCreatedAt = !linkedConversationId
@@ -238,6 +274,10 @@ function useChannelMessagesImpl(
   useEffect(() => {
     if (!enabled || !channelId) return;
     if (shouldUseCutoffQuery) return;
+    // A resolution that lands after the channel changed (or after a retry
+    // superseded this attempt) must not write into the new window.
+    let cancelled = false;
+    setInitialLoadError(null);
 
     Promise.all([
       zero.run(
@@ -264,9 +304,16 @@ function useChannelMessagesImpl(
         : Promise.resolve<Conversation[] | null>(null),
     ])
       .then(([older, newerNullable]) => {
+        if (cancelled) return;
         const newer = newerNullable ?? [];
         const fetched = dedupeAndSortConversations(older, newer);
-        const mergedWithCached = mergeCachedConversations(conversationsRef.current, fetched);
+        const cachedWindow = conversationsRef.current;
+        const hadProvisionalWindow = hasProvisionalWindowRef.current;
+        const provisionalTail = latestConversationsListRef.current;
+        // Treat a provisional tail as a warm cache, not as an adjacent page.
+        // If it is disjoint from the authoritative window, keep it queued as
+        // the latest tail instead of unioning two windows with an unknown gap.
+        const mergedWithCached = mergeCachedConversations(cachedWindow, fetched);
         const { merged, latestClear } = mergeConversationsWithLatest(
           mergedWithCached,
           latestConversationsListRef.current,
@@ -281,16 +328,35 @@ function useChannelMessagesImpl(
           setLatestConversationsList([]);
           latestConversationsListRef.current = [];
           setNewConversationsAnchor(null);
+        } else if (hadProvisionalWindow && provisionalTail.length > 0) {
+          // The provisional tail was visible while the initial window was in
+          // flight. If the authoritative window is disjoint, expose the tail
+          // as a queued range now that it is no longer rendered in the main
+          // list; the intermediate history remains fetchable.
+          setLatestConversationsList(provisionalTail);
+          if (merged.length > 0) {
+            setNewConversationsAnchor({ createdAt: merged[merged.length - 1]!.createdAt });
+          }
         } else if (merged.length > 0) {
           setNewConversationsAnchor({ createdAt: merged[merged.length - 1]!.createdAt });
         }
 
         setConversationsState(merged);
+        hasProvisionalWindowRef.current = false;
+        setInitialLoadError(null);
         setIsInitialLoadComplete(true);
       })
-      .catch(() => {});
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        // Surfaced so callers can offer a retry; the list keeps whatever warm
+        // rows it already has.
+        setInitialLoadError(serializeInitialLoadError(err));
+      });
+    return (): void => {
+      cancelled = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key]);
+  }, [key, initialLoadAttempt]);
 
   useEffect(() => {
     if (!enabled) return;
@@ -341,7 +407,14 @@ function useChannelMessagesImpl(
     );
 
     setConversationsState(prev => {
-      const merged = reconcileConversationWindow(prev, sortedCutoffConversations);
+      const merged = reconcileConversationWindow(
+        prev,
+        sortedCutoffConversations,
+        {
+          lowerBound: cutoffAnchor?.createdAt,
+          lowerBoundInclusive: false,
+        },
+      );
       if (isSameConversationList(prev, merged)) return prev;
       return merged;
     });
@@ -352,6 +425,7 @@ function useChannelMessagesImpl(
     cutoffConversationsDetails.type,
     isInitialLoadComplete,
     setConversationsState,
+    cutoffAnchor?.createdAt,
   ]);
 
   const loadOlder = useCallback(() => {
@@ -456,56 +530,23 @@ function useChannelMessagesImpl(
     if (shouldUseCutoffQuery) return;
     if (updatedConversationsDetails.type !== 'complete' || !isInitialLoadComplete) return;
 
-    const itemsToDelete: Conversation[] = [];
-    let fromMessage = updatedConversations[0];
-    let tillMessage = updatedConversations[updatedConversations.length - 1];
-    if (fromMessage && tillMessage) {
-      const tempMessage = { ...fromMessage };
-      fromMessage =
-        fromMessage.createdAt < tillMessage.createdAt ? fromMessage : tillMessage;
-      tillMessage =
-        tillMessage.createdAt > tempMessage.createdAt ? tillMessage : tempMessage;
-      let flag = 0;
-      for (const conv of conversationsRef.current) {
-        if (fromMessage?.conversationId === conv.conversationId) {
-          flag = 1;
-        }
-        if (
-          flag === 1 &&
-          updatedConversations.find(v => v.conversationId === conv.conversationId) === undefined
-        ) {
-          itemsToDelete.push(conv);
-        }
-        if (tillMessage.conversationId === conv.conversationId) {
-          flag = inViewAnchor === null ? 1 : 0;
-        }
-      }
-    } else if (updatedConversations.length === 0) {
-      itemsToDelete.push(...conversationsRef.current);
-    }
-    const anchorConversation =
-      inViewAnchor?.conversationId &&
-      updatedConversations.find(v => v.conversationId === inViewAnchor.conversationId);
-    if (inViewAnchor?.conversationId && !anchorConversation) {
-      const found = conversationsRef.current.find(
-        v => v.conversationId === inViewAnchor.conversationId,
+    // Replace exactly the key range the emission covers, leaving rows outside
+    // that window untouched. Zero re-emits this query on many upstream deltas
+    // (e.g. an optimistic insert elsewhere in the channel) even when the window
+    // itself is unchanged, and a complete-but-empty emission is not evidence
+    // that the channel is empty — so it must never clear a warm window.
+    // Comparing before setState also keeps `messagesWithPending` stable.
+    setConversationsState(prev => {
+      const reconciled = reconcileConversationWindow(
+        prev,
+        updatedConversations,
+        {
+          anchorConversationId: inViewAnchor?.conversationId,
+          anchorIncludesResult: inViewAnchor?.direction === 'forward',
+        },
       );
-      if (found) itemsToDelete.push(found);
-    }
-    const updated = conversationsRef.current
-      .filter(conv => !itemsToDelete.some(v => v.conversationId === conv.conversationId))
-      .map(conv => {
-        const item = updatedConversations.find(v => v.conversationId === conv.conversationId);
-        if (item) return item;
-        return conv;
-      });
-    // Zero re-emits the paginated conversations query on many upstream deltas
-    // (e.g. optimistic message inserts elsewhere in the channel) even when the
-    // window itself is unchanged. Comparing before setState keeps `conversations`
-    // reference stable so `messagesWithPending` doesn't churn.
-    setConversationsState(prev =>
-      isSameConversationList(prev, updated) ? prev : updated,
-    );
+      return isSameConversationList(prev, reconciled) ? prev : reconciled;
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     channelId,
@@ -513,24 +554,50 @@ function useChannelMessagesImpl(
     updatedConversationsDetails.type,
     isInitialLoadComplete,
     shouldUseCutoffQuery,
+    inViewAnchor?.conversationId,
   ]);
 
   useEffect(() => {
     if (!enabled) return;
     if (latestConversationsDetails.type !== 'complete') return;
     if (latestConversations.length === 0) {
-      if (isInitialLoadComplete) {
+      // Do not let a transient empty latest-tail emission erase a provisional
+      // cold-open window. Once the authoritative initial load has completed,
+      // an empty tail still clears the list so a final conversation deletion is
+      // reflected in the UI.
+      if (isInitialLoadComplete && !hasProvisionalWindowRef.current) {
         setConversationsState(prev => (prev.length > 0 ? [] : prev));
       }
       return;
     }
     const sortedLatest = [...latestConversations].sort((a, b) => a.createdAt - b.createdAt);
 
+    // Use a functional state update: a viewport reconciliation and a latest
+    // emission can be batched in the same React commit. Computing `merged`
+    // from the closure/ref and writing it directly can resurrect a row that
+    // the reconciliation update just removed.
+    const currentWindow = conversationsRef.current;
+    const { latestClear: latestClearForSideEffects } = mergeConversationsWithLatest(
+      currentWindow,
+      sortedLatest,
+      isInitialLoadComplete,
+      allowProvisionalPromotion,
+    );
+    if (
+      latestClearForSideEffects &&
+      allowProvisionalPromotion &&
+      !isInitialLoadComplete &&
+      currentWindow.length === 0
+    ) {
+      hasProvisionalWindowRef.current = true;
+    }
+
     setConversationsState(prev => {
       const { merged, latestClear } = mergeConversationsWithLatest(
         prev,
         sortedLatest,
         isInitialLoadComplete,
+        allowProvisionalPromotion,
       );
       if (latestClear) {
         return isSameConversationList(prev, merged) ? prev : merged;
@@ -538,13 +605,18 @@ function useChannelMessagesImpl(
       return prev;
     });
 
-    const { latestClear: latestClearForSideEffects } = mergeConversationsWithLatest(
-      conversationsRef.current,
-      sortedLatest,
-      isInitialLoadComplete,
-    );
-
-    if (latestClearForSideEffects) {
+    const wasProvisionalPromotion =
+      latestClearForSideEffects &&
+      allowProvisionalPromotion &&
+      !isInitialLoadComplete &&
+      currentWindow.length === 0;
+    if (wasProvisionalPromotion) {
+      // Keep the tail in the ref for the authoritative initial-load merge, but
+      // do not show a duplicate "new conversations" queue while it is already
+      // rendered provisionally.
+      latestConversationsListRef.current = sortedLatest;
+      setLatestConversationsList([]);
+    } else if (latestClearForSideEffects) {
       setLatestConversationsList([]);
       latestConversationsListRef.current = [];
       setNewConversationsAnchor(null);
@@ -558,26 +630,23 @@ function useChannelMessagesImpl(
     latestConversations,
     latestConversationsDetails.type,
     isInitialLoadComplete,
+    allowProvisionalPromotion,
   ]);
 
   const pendingForChannel = usePendingForChannel(channelId);
   const messagesWithPending = useMemo(() => {
     if (pendingForChannel.length === 0) return conversations;
-    const pendingByMessageId = new Map(
-      pendingForChannel.map(p => [p.messageId, p]),
-    );
-    const filtered = conversations.filter(
-      c => !pendingByMessageId.has(c.initialMessageId ?? ''),
-    );
     const pendingRows = [...pendingForChannel]
       .sort((a, b) => a.timestamp - b.timestamp)
       .map(buildPendingChannelConversation);
-    return [...filtered, ...pendingRows];
+    return mergeServerAndPendingConversations(conversations, pendingRows);
   }, [conversations, pendingForChannel]);
 
   return {
     messages: messagesWithPending,
     latestConversationsList,
+    initialLoadError,
+    retryInitialLoad,
     loadOlder,
     loadNewer,
     setInViewAnchor,
@@ -624,18 +693,12 @@ function useThreadMessagesImpl(
   return useMemo(() => {
     if (!base) return null;
     if (pendingForThread.length === 0) return base;
-    const pendingByMessageId = new Map(
-      pendingForThread.map(p => [p.messageId, p]),
-    );
-    const filtered = base.messages.filter(
-      m => !pendingByMessageId.has(m.messageId),
-    );
     const pendingRows = [...pendingForThread]
       .sort((a, b) => a.timestamp - b.timestamp)
       .map(buildPendingThreadMessage);
     return {
       ...base,
-      messages: [...filtered, ...pendingRows],
+      messages: mergeServerAndPendingThreadMessages(base.messages, pendingRows, base.initialMessageId),
     } as ThreadConversation;
   }, [base, pendingForThread]);
 }
