@@ -1228,6 +1228,7 @@ const SupportScreen = (): ReactElement => {
             selectedUsers={filters.assignee || []}
             onChange={(users: string[]) => handleFilterChange('assignee', users)}
             label='Assignee'
+            includeUnassigned
           />
         );
       case 'priority':
@@ -3485,6 +3486,7 @@ const SupportScreen = (): ReactElement => {
                                     handleFilterChange('assignee', users)
                                   }
                                   label='Assignee'
+                                  includeUnassigned
                                 />
                               </Popover.Content>
                             </Popover.Root>
