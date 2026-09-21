@@ -1,3 +1,31 @@
+## [1.353.0](https://github.com/juspay/xyne-spaces/compare/v1.352.1...v1.353.0) (2026-09-21)
+
+
+### Features
+
+* extend the interrupt guard to active calls ([#2108](https://github.com/juspay/xyne-spaces/issues/2108)) ([b03a7a8](https://github.com/juspay/xyne-spaces/commit/b03a7a890d4b98d41c71e50316d39679264b19be))
+
+## [1.352.1](https://github.com/juspay/xyne-spaces/compare/v1.352.0...v1.352.1) (2026-09-21)
+
+
+### Bug Fixes
+
+* slash cmd UI fixes - @ mentions ([#2097](https://github.com/juspay/xyne-spaces/issues/2097)) ([5d927c9](https://github.com/juspay/xyne-spaces/commit/5d927c9f6b7176ab2c14ac99aad7a79772cbbebb))
+
+## [1.352.0](https://github.com/juspay/xyne-spaces/compare/v1.351.2...v1.352.0) (2026-09-21)
+
+
+### Features
+
+* added tooltip in include channel calls ([#2103](https://github.com/juspay/xyne-spaces/issues/2103)) ([0b5d946](https://github.com/juspay/xyne-spaces/commit/0b5d946b53e78ba6a1d7c4ac8fd9099a351bb6c0))
+
+## [1.351.2](https://github.com/juspay/xyne-spaces/compare/v1.351.1...v1.351.2) (2026-09-21)
+
+
+### Bug Fixes
+
+* tighten and align ticket detail header ([#2100](https://github.com/juspay/xyne-spaces/issues/2100)) ([6eee112](https://github.com/juspay/xyne-spaces/commit/6eee112d3c850e9e0ee18300ad183da7ad592832))
+
 ## [1.351.1](https://github.com/juspay/xyne-spaces/compare/v1.351.0...v1.351.1) (2026-09-21)
 
 
