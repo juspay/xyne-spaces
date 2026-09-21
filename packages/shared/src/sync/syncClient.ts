@@ -212,10 +212,12 @@ export class SyncClient {
   /**
    * Look up the resume offset (fast, a single `meta` read) and send `sinceOffset` — the
    * send needs only the offset, not the rows, so a channel-switch (already connected)
-   * resumes instead of snapshotting. Row seeding runs in PARALLEL for instant paint; the
-   * local seed completes well before the network resume deltas arrive, so they apply on
-   * top of the seeded base. On a fresh reload the connection isn't ready yet, so the send
-   * happens on `sync:ready` — by then both the offset and the seed have run.
+   * resumes instead of snapshotting. Row seeding runs in PARALLEL for instant paint, and
+   * the resume deltas apply on top of the seeded base in either completion order: the
+   * seed promise is recorded in `#seedDone` so the resume's `sync:current` cannot flip
+   * `complete` before the local base is applied (see #onCurrent). On a fresh reload the
+   * connection isn't ready yet, so the send happens on `sync:ready` — by then both the
+   * offset and the seed have run.
    */
   async #hydrateAndSend(key: string): Promise<void> {
     try {
@@ -225,8 +227,18 @@ export class SyncClient {
       // best-effort — subscribe fresh (snapshot) on failure
     }
     if (this.#connectionReady && this.#subs.has(key)) this.#send(key);
-    void this.#seedFromStore(key);
+    this.#seedDone.set(key, this.#seedFromStore(key));
   }
+
+  /**
+   * subKey → completion of the in-flight IDB seed (resolves even on failure/skip). The
+   * resume path's `complete` gate: a zero-delta resume answers in a network round-trip
+   * (~ms) and regularly BEATS the IDB read, and flipping `complete` before the seeded
+   * base is applied shows `complete` with an empty/partial view — consumers treating
+   * that as truth wipe their lists (the switch-return flicker). `complete` must mean:
+   * server-confirmed current AND the local base fully applied.
+   */
+  readonly #seedDone = new Map<string, Promise<void>>();
 
   /** Load an instance's persisted rows + offset into the IVM (a fast local PAINT only). Does NOT mark
    *  the instance hydrated: `complete` must mean "caught up to the server's current state", and the
@@ -238,6 +250,11 @@ export class SyncClient {
     try {
       const persisted = await this.#store.loadInstance(key);
       if (!persisted || !this.#subs.has(key)) return;
+      // An authoritative snapshot (or a completed resume) landed while the IDB read was in
+      // flight — its state supersedes the persisted base. Applying the seed now could only
+      // re-add rows deleted-while-away (the version guard can't catch PKs the snapshot no
+      // longer contains). Discard it.
+      if (this.#hydrated.has(key)) return;
       if (persisted.rows.length > 0) this.#host.applySeed(key, persisted.rows);
       if (persisted.offset) this.#offsets.set(key, persisted.offset);
     } catch {
@@ -248,15 +265,23 @@ export class SyncClient {
   /** Server → client: the resume is caught up to the current version (sent even for a zero-delta
    *  resume). This is the resume-path completion signal — snapshots self-announce via #onSnapshot,
    *  but a resume replays bare deltas with no terminal marker, so without this a switch-return that
-   *  resumes with nothing-missed would sit at `unknown` forever. Flip to hydrated (`complete`). */
+   *  resumes with nothing-missed would sit at `unknown` forever. Flip to hydrated (`complete`) —
+   *  but only once the parallel IDB seed has been applied: the resume deltas are RELATIVE to the
+   *  seeded base, so before the seed lands the view is partial and must stay `unknown`. */
   readonly #onCurrent = (msg: { instanceKey: string }): void => {
     const key = this.#instToSub.get(msg.instanceKey);
     if (!key) return;
-    if (!this.#hydrated.has(key)) {
-      this.#hydrated.add(key);
-      this.#hydrationListeners.get(key)?.forEach((cb) => cb());
-    }
+    const seed = this.#seedDone.get(key);
+    if (seed) void seed.then(() => this.#markHydrated(key));
+    else this.#markHydrated(key);
   };
+
+  /** Flip a subscription to hydrated (`complete`) — only if it is still live and not already. */
+  #markHydrated(key: string): void {
+    if (!this.#subs.has(key) || this.#hydrated.has(key)) return;
+    this.#hydrated.add(key);
+    this.#hydrationListeners.get(key)?.forEach((cb) => cb());
+  }
 
   /** Drop a reference; unsubscribes and releases the instance's rows on the last one. */
   unsubscribe(queryName: string, args: ReadonlyJSONValue[]): void {
@@ -267,6 +292,7 @@ export class SyncClient {
     if (entry.refs > 0) return;
     this.#subs.delete(key);
     this.#hydrated.delete(key);
+    this.#seedDone.delete(key);
     obsEmit('client-ws', { dir: 'up', event: 'unsubscribe', queryName, instanceKey: entry.instanceKey });
     this.#transport.emit<SubscribePayload>(EVT.unsubscribe, { queryName, args });
     // Everything (host rows, offset) is keyed by subKey; the seed may have populated the
@@ -356,10 +382,9 @@ export class SyncClient {
       .applySnapshot(key, rows.map((r) => this.#host.rowPut(r)), msg.offset, version)
       .catch(() => {});
     if (msg.offset) this.#offsets.set(key, msg.offset);
-    if (!this.#hydrated.has(key)) {
-      this.#hydrated.add(key);
-      this.#hydrationListeners.get(key)?.forEach((cb) => cb());
-    }
+    // Authoritative (clear-then-apply): hydrated immediately, no seed dependency — a still
+    // in-flight seed is discarded by #seedFromStore's hydrated guard.
+    this.#markHydrated(key);
   };
 
   readonly #onDelta = (msg: DeltaMsg): void => {
@@ -389,6 +414,7 @@ export class SyncClient {
     const key = this.#instToSub.get(msg.instanceKey);
     if (!key) return;
     this.#offsets.delete(key);
+    this.#seedDone.delete(key);
     this.#host.dropInstance(key);
     // Access lost → drop the persisted copy too (the one place disk is evicted).
     void this.#store.dropInstance(key).catch(() => {});

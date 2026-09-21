@@ -70,3 +70,104 @@ test('sync:error is handled without throwing (SWR handoff is the actual fallback
   assert.doesNotThrow(() => fire('sync:error', { queryName: 'q', message: 'nope' }));
   assert.equal(client.isUnavailable(), false, 'a per-query error does not mark the whole connection unavailable');
 });
+
+/**
+ * Hydration-completeness gate: `complete` must mean "server-confirmed current AND the local
+ * seeded base fully applied" — never an empty/partial view. The zero-delta resume answers in
+ * a network round-trip and regularly beats the IDB seed read; flipping early made consumers
+ * (ChatListV4 complete+empty branch) wipe on channel switch-return.
+ */
+
+function deferred<T>() {
+  let resolve!: (v: T) => void;
+  const promise = new Promise<T>((r) => (resolve = r));
+  return { promise, resolve };
+}
+
+function makeHydrationHarness(seedRows: { tableName: string; row: Record<string, unknown>; version?: string }[]) {
+  const handlers = new Map<string, (payload: unknown) => void>();
+  const seedGate = deferred<void>();
+  const applied: string[] = [];
+  const transport: SyncTransport = {
+    emit: <P, A = void>(event: string, _payload: P, ack?: (response: A) => void) => {
+      if (event === 'sync:subscribe') {
+        (ack as ((r: { instanceKey: string }) => void) | undefined)?.({ instanceKey: 'I1' });
+      }
+    },
+    on: <P>(event: string, handler: (payload: P) => void) =>
+      handlers.set(event, handler as (p: unknown) => void),
+    off: (event: string) => handlers.delete(event),
+  };
+  const host = {
+    applySeed: () => applied.push('seed'),
+    applySnapshot: () => applied.push('snapshot'),
+    applyDelta: () => applied.push('delta'),
+    dropInstance: () => {},
+    rowPut: (w: { tableName: string; row: Record<string, unknown> }) => ({ table: w.tableName, pk: 'p', row: w.row }),
+    keyRef: () => null,
+  } as unknown as IvmHost;
+  const store = {
+    loadOffset: async () => 'off-1',
+    loadInstance: async () => {
+      await seedGate.promise; // the slow IDB read, released by the test
+      return { rows: seedRows, offset: 'off-1' };
+    },
+    applySnapshot: async () => {},
+    applyDelta: async () => {},
+    dropInstance: async () => {},
+  } as unknown as SyncStore;
+  const client = new SyncClient(host, transport, store);
+  client.start();
+  handlers.get('sync:ready')?.(undefined);
+  const fire = (event: string, payload?: unknown) => handlers.get(event)?.(payload);
+  const settle = () => new Promise((r) => setTimeout(r, 0));
+  return { client, fire, seedGate, applied, settle };
+}
+
+const SEED_ROWS = [{ tableName: 'conversations', row: { conversationId: 'c1' }, version: '01' }];
+
+test('sync:current before the seed lands: complete waits for the seed', async () => {
+  const { client, fire, seedGate, applied, settle } = makeHydrationHarness(SEED_ROWS);
+  let hydratedCb = 0;
+  client.onHydration('q', [null], () => { hydratedCb += 1; });
+  client.subscribe('q', [null]);
+  await settle(); // loadOffset resolves; subscribe acked (instanceKey I1); seed still pending
+
+  fire('sync:current', { instanceKey: 'I1' }); // zero-delta resume beat the IDB read
+  await settle();
+  assert.equal(client.isHydrated('q', [null]), false, 'must NOT be complete before the seeded base is applied');
+  assert.equal(hydratedCb, 0);
+
+  seedGate.resolve(); // the IDB read completes
+  await settle();
+  assert.deepEqual(applied, ['seed'], 'seed applied');
+  assert.equal(client.isHydrated('q', [null]), true, 'complete once server-current AND base applied');
+  assert.equal(hydratedCb, 1);
+});
+
+test('late seed after an authoritative snapshot is discarded (no resurrection)', async () => {
+  const { client, fire, seedGate, applied, settle } = makeHydrationHarness(SEED_ROWS);
+  client.subscribe('q', [null]);
+  await settle();
+
+  fire('sync:snapshot', { instanceKey: 'I1', rows: [], offset: 'off-2', version: 'v2' });
+  assert.equal(client.isHydrated('q', [null]), true, 'snapshot is authoritative — complete immediately');
+
+  seedGate.resolve(); // the stale IDB read completes AFTER the snapshot
+  await settle();
+  assert.deepEqual(applied, ['snapshot'], 'late seed must not be applied over authoritative state');
+});
+
+test('unsubscribe while sync:current awaits the seed: no late flip', async () => {
+  const { client, fire, seedGate, settle } = makeHydrationHarness(SEED_ROWS);
+  let hydratedCb = 0;
+  client.onHydration('q', [null], () => { hydratedCb += 1; });
+  client.subscribe('q', [null]);
+  await settle();
+
+  fire('sync:current', { instanceKey: 'I1' });
+  client.unsubscribe('q', [null]); // switch away before the seed lands
+  seedGate.resolve();
+  await settle();
+  assert.equal(hydratedCb, 0, 'a dead subscription must not flip hydrated');
+});
