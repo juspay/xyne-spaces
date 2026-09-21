@@ -740,17 +740,6 @@ const ChannelCommandMenu = ({
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
   const isFlatAllView = activeTab === TabType.ALL && !isGrouped;
 
-  /**
-   * Whether the LOCAL results render as one merged people+channel list instead of separate
-   * STARRED / PEOPLE / CHANNELS sections.
-   *
-   * Deliberately NOT tied to `isFlatAllView`: that flag reports how the BACKEND chose to
-   * group ITS results (flat only under the `unified` rank profile). How we order locally
-   * synced people and channels is an independent decision, so the merged list is the default
-   * on the ALL tab whatever rank profile is in play. Per-entity tabs keep their own section.
-   */
-  const useMergedLocalResults = activeTab === TabType.ALL;
-
   // type:channels shows grouped local channels (same as CHANNELS tab) — used by the
   // no-search channel browse further down.
   const types = parseTypeFilter(typeFilter);
@@ -813,7 +802,7 @@ const ChannelCommandMenu = ({
 
   const mergedLocalResults = useMemo<MergedCandidate[]>(() => {
     void affinityVersion;
-    if (!useMergedLocalResults) return [];
+    if (activeTab !== TabType.ALL) return [];
 
     // BROWSE (nothing typed): one list of every conversation, ordered by affinity — there is
     // no query for tiers to describe, so `tierOf` puts them all on the top rung and affinity
@@ -857,13 +846,7 @@ const ChannelCommandMenu = ({
       ],
       MERGED_CANDIDATE_LIMIT,
     );
-  }, [
-    useMergedLocalResults,
-    cleanedSearchText,
-    rankedLocalUsers,
-    filteredLocalChannels,
-    affinityVersion,
-  ]);
+  }, [activeTab, cleanedSearchText, rankedLocalUsers, filteredLocalChannels, affinityVersion]);
 
   // Slack-style strong user match: when the top-ranked user's full name
   // prefix-matches the query, the USERS section renders ABOVE the "Show
@@ -871,20 +854,6 @@ const ChannelCommandMenu = ({
   // Only applies to plain search (no from:/in:/with: chips, USERS section
   // shown and non-empty) — filter-chip ordering otherwise wins.
   //
-  // The full-name-prefix test is intentionally the SAME rule `rankUsers` uses
-  // for its top tier (key 1, `name.startsWith(q)`); gating on rankUsers'
-  // own top-tier signal keeps ranking and the Enter target from drifting
-  // apart. A user surfaced to #0 only by DM recency (keys 3–4, no name match)
-  // therefore does NOT steal the default Enter target — Enter targets the user
-  // only when the query is clearly naming them.
-  const hasStrongUserMatch = useMemo(() => {
-    if (hasFromOrInFilter || !showGroupedUsers) return false;
-    const topUser = rankedLocalUsers[0];
-    if (!topUser) return false;
-    const q = cleanedSearchText.toLowerCase().trim();
-    if (!q) return false;
-    return topUser.name.toLowerCase().startsWith(q);
-  }, [hasFromOrInFilter, showGroupedUsers, rankedLocalUsers, cleanedSearchText]);
 
   // Which trigger opened the channel typeahead: '#' acts like Slack's quick
   // switcher (navigate on select, show only regular channels); 'in:' creates a
@@ -2538,47 +2507,6 @@ const ChannelCommandMenu = ({
       isGroupDMChannel(channel.scopeType),
     ) ?? [];
 
-  // Slack-style strong channel match: when the top-ranked regular channel's
-  // name prefix-matches the query, the CHANNELS section renders ABOVE the
-  // "Show results for" row and the default Enter target becomes that channel.
-  // Mirrors `hasStrongUserMatch` exactly — only applies to plain search (no
-  // from:/in:/with: chips, CHANNELS section shown and non-empty) and only when
-  // a strong USER match does NOT already win (users take precedence).
-  //
-  // `name.startsWith(q)` is the SAME full-name-prefix signal `searchChannels`
-  // boosts to the top tier, so the ranking and the Enter target stay aligned.
-  const hasStrongChannelMatch = useMemo(() => {
-    if (hasStrongUserMatch) return false;
-    if (hasFromOrInFilter || !showGroupedLocalResults) return false;
-    const topChannel = groupedChannels['channels']?.[0]?.channel;
-    if (!topChannel) return false;
-    const q = cleanedSearchText.toLowerCase().trim();
-    if (!q) return false;
-    return topChannel.name.toLowerCase().startsWith(q);
-  }, [
-    hasStrongUserMatch,
-    hasFromOrInFilter,
-    showGroupedLocalResults,
-    groupedChannels,
-    cleanedSearchText,
-  ]);
-
-  // Slack-style strong starred match: the Starred section only LEADS (hoists above People/Channels)
-  // when a starred item's displayed name prefix-matches the query. Without this, ANY query hoisted
-  // Starred, so a weak fuzzy hit on a starred DM (e.g. "venkatesan" matching a starred
-  // "…Venkattaramanujam" DM shown as "Mamtha") jumped above the exact "Venkatesan S" user. Checks
-  // every matched starred item (not just the top, which affinity may hold), mirroring the prefix
-  // rule hasStrongUserMatch/hasStrongChannelMatch use.
-  const hasStrongStarredMatch = useMemo(() => {
-    if (hasFromOrInFilter) return false;
-    const q = cleanedSearchText.toLowerCase().trim();
-    if (!q) return false;
-    const starredMatches = groupedChannels[ChannelCategory.STARRED] ?? [];
-    return starredMatches.some(item =>
-      (item.searchableNames ?? []).some(name => name.toLowerCase().startsWith(q)),
-    );
-  }, [hasFromOrInFilter, groupedChannels, cleanedSearchText]);
-
   const iconSize = 14;
 
   const allTabDefinitions: TabDefinition[] = [
@@ -3276,20 +3204,14 @@ const ChannelCommandMenu = ({
       </div>
     ) : null;
 
-  // Render the local sections (Starred, Users, Group DMs, Channels) for the search branch.
-  // Each `include*` flag is false when that section is pinned to the top of the
-  // list (hoistStarred / hoistUser / hoistChannel) — avoids a double-render.
-  const renderSearchLocalSections = (
-    includeStarred = true,
-    includeUsers = true,
-    includeChannels = true,
-  ) => (
+  const renderSearchLocalSections = () => (
     <>
       {/* 0. Starred (from local channels) */}
-      {includeStarred && renderSearchStarredSection()}
+      {renderSearchStarredSection()}
 
-      {/* 1. Users (from local) */}
-      {includeUsers && renderSearchUsersSection()}
+      {/* 1. Users + channels. On ALL they are ONE clubbed list; every other tab keeps them
+             as separate sections (the dedicated channels section below is skipped on ALL). */}
+      {activeTab === TabType.ALL ? renderMergedLocalResults() : renderSearchUsersSection()}
 
       {/* 2. Group DMs (from local channels) */}
       {(activeTab === TabType.ALL || activeTab === TabType.CHANNELS) &&
@@ -3354,7 +3276,7 @@ const ChannelCommandMenu = ({
         })()}
 
       {/* 3. Channels (from local channels) */}
-      {includeChannels && renderSearchChannelsSection()}
+      {activeTab !== TabType.ALL && renderSearchChannelsSection()}
     </>
   );
 
@@ -3364,15 +3286,17 @@ const ChannelCommandMenu = ({
    *   [STARRED] so starred keeps its own section while users and channels come from the
    *   merged list; omitted elsewhere, which renders every category as before.
    */
-  const renderBrowseLocalChannels = (onlyCategories?: ChannelCategory[]) => (
+  const renderBrowseLocalChannels = () => (
     <>
       {showGroupedLocalResults &&
         (activeTab === TabType.ALL || activeTab === TabType.CHANNELS || isChannelsType) &&
         filteredLocalChannels.length > 0 && (
           <>
             {Object.entries(groupedChannels)
+              // ALL clubs channels and DMs into the merged list below; only STARRED keeps
+              // a group of its own.
               .filter(([category]) =>
-                onlyCategories ? onlyCategories.includes(category as ChannelCategory) : true,
+                activeTab === TabType.ALL ? category === ChannelCategory.STARRED : true,
               )
               .map(([category, items]) => {
                 const typedCategory = category as ChannelCategory;
@@ -3424,22 +3348,10 @@ const ChannelCommandMenu = ({
               })}
           </>
         )}
+      {/* STARRED renders above as its own group; the rest is clubbed. */}
+      {activeTab === TabType.ALL && renderMergedLocalResults()}
     </>
   );
-
-  // Hoist the best local matches to the top of the list — applies in BOTH the
-  // popup and the screen search bar. Only in the combined ALL view (a single-type
-  // tab has nothing to reorder) and not while a mention typeahead is open.
-  // Starred always leads; a strong user/channel match then becomes the default
-  // Enter target. `hasStrongUserMatch`/`hasStrongChannelMatch` already exclude
-  // from:/in:/with: chips, where backend results lead instead.
-  // Hoisting lifts a strongly-matching SECTION above the others; with the merged list there
-  // are no competing sections to lift it over, and rendering a hoisted copy as well would
-  // duplicate rows the merged list already shows.
-  const canHoist = activeTab === TabType.ALL && !useMergedLocalResults && !mentionSearchType;
-  const hoistStarred = canHoist && hasStrongStarredMatch;
-  const hoistUser = canHoist && hasStrongUserMatch;
-  const hoistChannel = canHoist && hasStrongChannelMatch;
 
   // Shared confirmation for a `/call` on a channel. Rendered from every return branch
   // (below) so it survives the Cmd+K close — the menu unmounts its dialog, this stays.
@@ -4474,9 +4386,6 @@ const ChannelCommandMenu = ({
                     screen. Starred leads; the strong-matched user/channel then becomes
                     the default Enter target (Slack-style). In screen mode these sit
                     above the "Show results for" row below. */}
-                {hoistStarred && renderSearchStarredSection()}
-                {hoistUser && renderSearchUsersSection()}
-                {hoistChannel && renderSearchChannelsSection()}
 
                 {/* Screen palette: the row stays below the hoisted best matches, which
                     own the Enter target there. */}
@@ -5181,39 +5090,13 @@ const ChannelCommandMenu = ({
                                 people/DM/channel list — rendering both would repeat every row.
                                 It renders unconditionally: it is local, so it must survive a
                                 Vespa failure or an empty backend response. */}
-                            {useMergedLocalResults ? (
-                              <>
-                                {/* Starred first, as it was before the merge — pinned
-                                    channels lead. Then the merged users+channels list, then
-                                    Group DMs. renderSearchLocalSections(true,...) cannot be
-                                    reused for starred here: it emits Group DMs in the same
-                                    call, which would lift those above the merged list too. */}
-                                {renderSearchStarredSection()}
-                                {renderMergedLocalResults()}
-                                {renderSearchLocalSections(false, false, false)}
-                              </>
-                            ) : (
-                              renderSearchLocalSections()
-                            )}
+                            {renderSearchLocalSections()}
                           </>
                         ) : (
                           <>
                             {/* A section pinned to the top (above) is skipped here to
                             avoid a double-render. */}
-                            {useMergedLocalResults ? (
-                              <>
-                                {/* Starred first, as it was before the merge — pinned
-                                    channels lead. Then the merged users+channels list, then
-                                    Group DMs. renderSearchLocalSections(true,...) cannot be
-                                    reused for starred here: it emits Group DMs in the same
-                                    call, which would lift those above the merged list too. */}
-                                {renderSearchStarredSection()}
-                                {renderMergedLocalResults()}
-                                {renderSearchLocalSections(false, false, false)}
-                              </>
-                            ) : (
-                              renderSearchLocalSections(!hoistStarred, !hoistUser, !hoistChannel)
-                            )}
+                            {renderSearchLocalSections()}
                             {backendResults.length > 0 && renderSearchBackendResults()}
                           </>
                         )}
@@ -5229,14 +5112,7 @@ const ChannelCommandMenu = ({
                           </>
                         ) : (
                           <>
-                            {useMergedLocalResults ? (
-                              <>
-                                {renderBrowseLocalChannels([ChannelCategory.STARRED])}
-                                {renderMergedLocalResults()}
-                              </>
-                            ) : (
-                              renderBrowseLocalChannels()
-                            )}
+                            {renderBrowseLocalChannels()}
                             {/* People tab browse: rank by affinity (rankUsersWithMfu) like the
                                 search branch, instead of the raw, unranked backend user list. */}
                             {activeTab === TabType.USERS
