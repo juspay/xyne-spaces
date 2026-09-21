@@ -187,6 +187,14 @@ export const TicketListRow: React.FC<TicketListRowProps> = ({
           </HoverCard>
         )}
 
+        {visibleColumns.has('merchantId') && ticket.merchantId && (
+          <Tooltip content={`Merchant ID: ${ticket.merchantId}`}>
+            <span className='max-w-[140px] truncate rounded-full border border-border px-2 py-0.5 text-xs text-muted-foreground'>
+              {ticket.merchantId}
+            </span>
+          </Tooltip>
+        )}
+
         {ageDays !== null && ageDays > 0 && (
           <Tooltip content={`Age: ${ageDays} day${ageDays === 1 ? '' : 's'} since created`}>
             <span className='text-xs text-muted-foreground'>{ageDays}d</span>

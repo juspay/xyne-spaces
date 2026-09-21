@@ -98,7 +98,7 @@ const kanbanTicketsPageArgsSchema = z.object({
     .nullable(),
   groupBy: z
     .union([
-      z.enum(['none', 'assignee', 'createdBy', 'status', 'priority']),
+      z.enum(['none', 'assignee', 'createdBy', 'status', 'priority', 'merchantId']),
       z.object({
         type: z.literal('formField'),
         fieldId: z.string(),
@@ -495,6 +495,13 @@ const applyKanbanTicketPageConditions = (
     query = query.where('statusV2', groupKey as TicketStatusV2);
   } else if (groupBy === 'priority' && groupKey) {
     query = query.where('priority', groupKey as TicketPriority);
+  } else if (groupBy === 'merchantId' && groupKey) {
+    // merchantId is nullable, so the catch-all bucket maps to IS NULL rather
+    // than an equality match — same shape as the 'Unassigned' assignee bucket.
+    query =
+      groupKey === 'No Merchant'
+        ? query.where('merchantId', 'IS', null)
+        : query.where('merchantId', groupKey);
   } else if (typeof groupBy === 'object' && groupBy.type === 'formField' && formFieldValue !== undefined) {
     query = query.whereExists('formEntityValues', (formEntityValue: any) =>
       formEntityValue

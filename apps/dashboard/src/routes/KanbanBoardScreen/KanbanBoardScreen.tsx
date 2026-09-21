@@ -411,6 +411,10 @@ function uniqueProjectIds(boards: readonly { projectId?: string | null }[]): str
   return Array.from(ids);
 }
 
+// Bucket for tickets with no merchant link when grouping by Merchant ID.
+// Mirrors the backend's NO_MERCHANT_GROUP in services/tickets/kanbanCountsService.ts.
+const NO_MERCHANT_GROUP = 'No Merchant';
+
 const availableColumns = [
   { key: 'assignee', label: 'Assignee', icon: <User className='h-4 w-4' /> },
   { key: 'dueDate', label: 'Due Date', icon: <Calendar className='h-4 w-4' /> },
@@ -423,6 +427,7 @@ const availableColumns = [
   { key: 'board', label: 'Board', icon: <SquareKanban className='h-4 w-4' /> },
   { key: 'channel', label: 'Channel', icon: <Hashtag className='h-4 w-4' /> },
   { key: 'type', label: 'Type', icon: <LayersTo className='h-4 w-4' /> },
+  { key: 'merchantId', label: 'Merchant ID', icon: <Hashtag className='h-4 w-4' /> },
 ];
 
 const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
@@ -615,7 +620,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
       return groupTicketsByFormField(tickets, criterion, formValuesByTicketId, userNamesById);
     }
 
-    // Original logic for assignee, status, priority
+    // Original logic for assignee, status, priority (+ merchantId)
     return tickets.reduce(
       (acc, ticket) => {
         const key =
@@ -625,6 +630,8 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
               ? ticket.createdBy || 'Unknown'
               : criterion === 'status'
                 ? ticket.statusV2
+                : criterion === 'merchantId'
+                ? (ticket.merchantId ?? NO_MERCHANT_GROUP)
                 : (ticket.priority ?? 'No Priority');
 
         (acc[key] ??= []).push(ticket);
@@ -1506,6 +1513,11 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
         value: 'priority' as const,
         label: 'Group by: Priority',
         icon: <Vote className='h-4 w-4' />,
+      },
+      {
+        value: 'merchantId' as const,
+        label: 'Group by: Merchant ID',
+        icon: <Hashtag className='h-4 w-4' />,
       },
     ];
 
@@ -3914,6 +3926,10 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
       } else if (groupBy === 'priority' && groupName !== 'No Priority') {
         priority = groupName as TicketPriority;
         displayName = groupName.charAt(0).toUpperCase() + groupName.slice(1).toLowerCase();
+      } else if (groupBy === 'merchantId') {
+        // A MID is an opaque identifier — show it exactly as stored, with no
+        // prefix stripping or case normalization.
+        displayName = groupName;
       } else if (
         isFormFieldGroup(groupBy) &&
         groupBy.fieldType === FormFieldType.USER &&
@@ -3926,7 +3942,8 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
           .replace('group:', '')
           .replace('Unassigned', 'Unassigned');
       }
-      const isSpecialMissingGroup = groupName === 'No Value' || groupName === 'Unassigned';
+      const isSpecialMissingGroup =
+        groupName === 'No Value' || groupName === 'Unassigned' || groupName === NO_MERCHANT_GROUP;
       const fallbackCount = isSpecialMissingGroup ? 0 : groupTickets.length;
       const count = hasSearchTerm
         ? groupTickets.length
@@ -3953,6 +3970,14 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
       const isUnassigned = (key: string): boolean => key === 'Unassigned' || key === 'Unknown';
       mapped.sort((a, b) => {
         if (isUnassigned(a.key) !== isUnassigned(b.key)) return isUnassigned(a.key) ? 1 : -1;
+        return a.displayName.localeCompare(b.displayName, undefined, { sensitivity: 'base' });
+      });
+    }
+
+    if (groupBy === 'merchantId') {
+      const isNoMerchant = (key: string): boolean => key === NO_MERCHANT_GROUP;
+      mapped.sort((a, b) => {
+        if (isNoMerchant(a.key) !== isNoMerchant(b.key)) return isNoMerchant(a.key) ? 1 : -1;
         return a.displayName.localeCompare(b.displayName, undefined, { sensitivity: 'base' });
       });
     }
@@ -5065,7 +5090,12 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                             {getPriorityIcon(group.priority)}
                           </div>
                         )}
-                        <h3 className='font-semibold text-foreground capitalize  text-sm'>
+                        <h3
+                          className={cn(
+                            'font-semibold text-foreground text-sm',
+                            groupBy !== 'merchantId' && 'capitalize',
+                          )}
+                        >
                           {group.displayName}
                         </h3>
                       </div>
@@ -5206,7 +5236,12 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                                 {getPriorityIcon(group.priority)}
                               </div>
                             )}
-                            <h3 className='font-semibold text-foreground capitalize  text-sm'>
+                            <h3
+                              className={cn(
+                                'font-semibold text-foreground text-sm',
+                                groupBy !== 'merchantId' && 'capitalize',
+                              )}
+                            >
                               {group.displayName}
                             </h3>
                           </div>
