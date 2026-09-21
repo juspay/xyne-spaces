@@ -226,6 +226,7 @@ export function buildToolCatalog(params: {
    * always-active names back out of the catalog.
    */
   catalogUnwrapped?: boolean;
+  catalogUnwrappedWrites?: boolean;
 }): ToolCatalogItem[] {
   const items: ToolCatalogItem[] = [];
   const seen = new Set<string>();
@@ -281,7 +282,7 @@ export function buildToolCatalog(params: {
       if (findSubagentDefinitionForServer(group.serverType)) continue;
       const writeSet = new Set(group.writeTools.map(String));
       for (const tool of group.tools) {
-        if (writeSet.has(extractRuntimeToolName(tool.name))) continue;
+        if (!params.catalogUnwrappedWrites && writeSet.has(extractRuntimeToolName(tool.name))) continue;
         addUnique(items, seen, tool, `server:${group.serverType}`, group.serverType);
       }
     }
@@ -292,7 +293,7 @@ export function buildToolCatalog(params: {
     for (const tool of params.customTools ?? []) {
       const source = customToolSource(tool);
       if (!source || isPresentationToolSource(source)) continue;
-      if (isCustomWriteTool(tool)) continue;
+      if (!params.catalogUnwrappedWrites && isCustomWriteTool(tool)) continue;
       addUnique(items, seen, tool, source);
     }
   }

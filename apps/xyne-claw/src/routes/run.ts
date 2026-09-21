@@ -57,7 +57,7 @@ import { packSdlcRunMeta, SDLC_META_KEYS, trustedSdlcToolBindings } from "xyne-c
 import { loadCustomTools } from "../custom-tools.js";
 import { buildCopilotTool } from "../copilot.js";
 import { pinRunJudgeBackend } from "../judge-backend.js";
-import { pinRunOptimizations } from "../optimizations.js";
+import { optEnabled, pinRunOptimizations } from "../optimizations.js";
 import { buildExperimentTools, buildExperimentReviewTools, type ExperimentContext } from "../experiment.js";
 import {
   executeRunFromPayload,
@@ -1887,7 +1887,8 @@ export async function processTask(
       const subagents = Array.isArray(toolsObj["subagents"])
         ? (toolsObj["subagents"] as unknown[]).filter((value): value is string => typeof value === "string")
         : [];
-      if (!subagents.includes("spaces")) {
+      const wrapperRedundant = optEnabled("lean_palette") && openPaletteModeFromTools(toolsObj) === "all";
+      if (!subagents.includes("spaces") && !wrapperRedundant) {
         effectiveConfig["tools"] = { ...toolsObj, subagents: [...subagents, "spaces"] };
       }
     }
@@ -2218,6 +2219,7 @@ export async function processTask(
       // admitted straight into the always-active set instead of the catalog —
       // bigger prompt, not wider reach.
       catalogUnwrapped: paletteMode !== "off",
+      catalogUnwrappedWrites: paletteMode !== "off" && optEnabled("lean_palette"),
     });
     const fastCatalogCandidateByName = new Map(fastCatalogCandidateItems.map((item) => [item.entry.name, item]));
     let fastCatalogItems: ToolCatalogItem[] = [];

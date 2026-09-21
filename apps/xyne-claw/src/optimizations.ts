@@ -22,6 +22,10 @@ export const OPTIMIZATIONS = {
     summary: "auto-continue only when the reply is intent-only or reads as unfinished, not merely 'did not answer'",
     defaultOn: false,
   },
+  lean_palette: {
+    summary: "with the open palette on, tools it admitted (not ones the agent was granted) stay hidden in the catalog — including write tools — and under a reads+writes palette the forced `spaces` wrapper is dropped since its tools are loadable directly",
+    defaultOn: false,
+  },
 } as const satisfies Record<string, OptimizationSpec>;
 
 export type OptimizationKey = keyof typeof OPTIMIZATIONS;
