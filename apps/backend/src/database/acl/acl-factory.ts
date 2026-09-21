@@ -188,6 +188,10 @@ export class ACLFactory {
       return new BaseQueryACL(ctx, prisma)
     case 'executionRunLog':
       return new BaseQueryACL(ctx, prisma)
+    // Rules are per user, and every read is already scoped to (workspaceId,
+    // userId) by radarRuleStore — there is no route that reads anyone else's.
+    case 'radarRule':
+      return new BaseQueryACL(ctx, prisma)
     case 'channel':
       return new ChannelsACL(ctx, prisma)
     case 'channelBoardMapping':
@@ -297,6 +301,8 @@ export class ACLFactory {
     case 'sdlcTrack':
       return new BaseQueryACL(ctx, prisma)
     case 'sdlcFolder':
+      return new BaseQueryACL(ctx, prisma)
+    case 'sdlcItemComment':
       return new BaseQueryACL(ctx, prisma)
     case 'role':
       return new RolesACL(ctx, prisma)

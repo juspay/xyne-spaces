@@ -7,13 +7,14 @@ import {
   CaretDownIcon,
   ArrowCounterClockwiseIcon,
 } from "@phosphor-icons/react";
-import { listAgentShares, removeAgentShare, addAgentShare, searchUsers } from "../../../../lib/api";
+import { listAgentShares, removeAgentShare, addAgentShare, searchUsers, transferAgentOwnership, getAgentDetail } from "../../../../lib/api";
 import type { Agent } from "../../../../lib/types";
 import type { AgentPermissions } from "../../../lib/agentPermissions";
 import { Avatar } from "../../ui/Avatar";
 import { Badge } from "../../ui/Badge";
 import { Button } from "../../ui/Button";
 import { Menu, MenuItem } from "../../ui/Menu";
+import { ConfirmDialog } from "../../ui/ConfirmDialog";
 import { Skeleton } from "../../ui/Skeleton";
 import { useSnackbar } from "../../ui/Snackbar";
 
@@ -30,6 +31,8 @@ interface Props {
   agent: Agent;
   userId: string;
   permissions: AgentPermissions;
+  /** Called with the re-read agent after ownership transfer. */
+  onAgentUpdated?: ((agent: Agent) => void) | undefined;
 }
 
 interface ShareRow {
@@ -52,7 +55,7 @@ function RoleBadge({ role }: { role: string }) {
   return <Badge as="span" label={label} variant={variant} size="sm" />;
 }
 
-export function ContributorsTab({ agent, userId, permissions }: Props) {
+export function ContributorsTab({ agent, userId, permissions, onAgentUpdated }: Props) {
   const { show: showSnackbar } = useSnackbar();
   const [shares, setShares] = useState<ShareRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -151,6 +154,43 @@ export function ContributorsTab({ agent, userId, permissions }: Props) {
     [refreshPending]
   );
 
+  // ── Ownership transfer ────────────────────────────────────────────
+  // Owner-only, immediate, no acceptance step. Transfer targets someone who is
+  // ALREADY a contributor, which keeps this to one click on an existing row —
+  // to hand the agent to someone new, add them first, then make them owner.
+  const [transferTarget, setTransferTarget] = useState<ShareRow | null>(null);
+  const [transferring, setTransferring] = useState(false);
+
+  const handleTransfer = useCallback(
+    async (target: ShareRow) => {
+      if (transferring) return;
+      setTransferring(true);
+      try {
+        await transferAgentOwnership(agent.slug, userId, target.userId);
+        showSnackbar({
+          variant: "success",
+          title: `${target.user.name} is now the owner`,
+          description: "You keep editor access to this agent.",
+        });
+        const updated = await listAgentShares(agent.slug, userId);
+        setShares(updated);
+        // Re-read the agent so the owner row (and the page's permissions)
+        // reflect the new owner without a reload.
+        const refreshed = await getAgentDetail(agent.slug).catch(() => null);
+        if (refreshed) onAgentUpdated?.(refreshed);
+      } catch (err) {
+        showSnackbar({
+          variant: "error",
+          title: "Failed to transfer ownership",
+          description: err instanceof Error ? err.message : undefined,
+        });
+      } finally {
+        setTransferring(false);
+      }
+    },
+    [agent.slug, userId, transferring, showSnackbar, onAgentUpdated],
+  );
+
   const handleAdd = useCallback(async () => {
     // Prefer the picked directory user; fall back to raw typed text (id/email).
     const target = (selected?.id ?? query).trim();
@@ -229,6 +269,16 @@ export function ContributorsTab({ agent, userId, permissions }: Props) {
                 </span>
               </div>
               <RoleBadge role={share.role} />
+              {permissions.canShare && (
+                <button
+                  onClick={() => setTransferTarget(share)}
+                  disabled={transferring}
+                  className="shrink-0 rounded-md px-2 py-1 text-[12px] font-medium text-xyne-fg-secondary transition-colors hover:bg-xyne-surface-subtle hover:text-xyne-fg-primary disabled:opacity-50"
+                  title="Make this person the owner of the agent"
+                >
+                  Make owner
+                </button>
+              )}
               {permissions.canShare && (
                 <button
                   onClick={() => handleRemove(share.userId)}
@@ -358,6 +408,21 @@ export function ContributorsTab({ agent, userId, permissions }: Props) {
           </div>
         </div>
       )}
-    </div>
+          <ConfirmDialog
+        open={transferTarget !== null}
+        onOpenChange={(open) => { if (!open) setTransferTarget(null); }}
+        title={`Make ${transferTarget?.user.name ?? ""} the owner?`}
+        description={
+          "This takes effect immediately — they do not have to accept. They inherit the agent's stored provider credentials and MCP connections, " +
+          "and can manage who it is shared with. You stay on as an editor. The agent keeps its installs, webhooks and schedules."
+        }
+        confirmLabel="Transfer ownership"
+        onConfirm={() => {
+          const target = transferTarget;
+          setTransferTarget(null);
+          if (target) void handleTransfer(target);
+        }}
+      />
+</div>
   );
 }

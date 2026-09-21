@@ -5,6 +5,9 @@ export interface HarnessRunContext {
   binaryPath: string;
   mcpConfig: Record<string, unknown>;
   mcpServerName: string;
+  toolCount: number;
+  workspaceDir: string;
+  attachmentPaths?: Array<{ path: string; fileName: string; mimeType: string }>;
   resumeSessionId?: string | undefined;
   onProgress: (event: LocalHarnessProgressEvent) => void;
   signal: AbortSignal;
@@ -12,6 +15,7 @@ export interface HarnessRunContext {
 
 export interface HarnessRunOutcome extends LocalHarnessRunResult {
   harnessSessionId?: string;
+  partialText?: string;
 }
 
 export interface HarnessAdapter {

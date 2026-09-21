@@ -69,17 +69,19 @@ export function KnowledgeCapabilityRow({
       {scope === 'COLLECTIONS' && labels.length > 0 && (
         <div className='flex flex-wrap items-start gap-2 pt-1'>
           {labels.map(grant => (
-            <button
+            <span
               key={grant.key}
-              type='button'
-              onClick={() => onGrantsChange(removeGrant(grants, grant.selection))}
-              title={grant.detail ? `${grant.label} · ${grant.detail}` : grant.label}
-              aria-label={`Remove ${grant.label}`}
-              data-track-category='Claw Agents'
-              data-track-name='Create agent v2: remove KB grant'
               className='flex shrink-0 items-center gap-1.5 overflow-hidden rounded-[10px] border-[0.8px] border-solid border-border bg-muted py-1 pl-2.5 pr-2 transition-colors hover:bg-muted/70'
             >
-              <span className='flex min-w-0 flex-col items-start'>
+              <button
+                type='button'
+                onClick={() => setBrowseOpen(true)}
+                title={grant.detail ? `${grant.label} · ${grant.detail}` : grant.label}
+                aria-label={`Open ${grant.label}`}
+                data-track-category='Claw Agents'
+                data-track-name='Create agent v2: open KB grant'
+                className='flex min-w-0 flex-col items-start rounded-md'
+              >
                 <span className='max-w-[220px] truncate text-sm font-medium leading-5 text-foreground'>
                   {grant.label}
                 </span>
@@ -88,12 +90,18 @@ export function KnowledgeCapabilityRow({
                     {grant.detail}
                   </span>
                 )}
-              </span>
-              <MultipleCrossCancelDefault
-                className='size-3 shrink-0 text-muted-foreground'
-                aria-hidden
-              />
-            </button>
+              </button>
+              <button
+                type='button'
+                onClick={() => onGrantsChange(removeGrant(grants, grant.selection))}
+                aria-label={`Remove ${grant.label}`}
+                data-track-category='Claw Agents'
+                data-track-name='Create agent v2: remove KB grant'
+                className='flex shrink-0 items-center rounded-md text-muted-foreground transition-colors hover:text-foreground'
+              >
+                <MultipleCrossCancelDefault className='size-3 shrink-0' aria-hidden />
+              </button>
+            </span>
           ))}
         </div>
       )}

@@ -94,7 +94,7 @@ export const SPEC_QUESTION_OUTLINE = [
   "- Do NOT create, draft, or update the Specification in the same turn as the interview questions.",
 ].join("\n");
 
-const TASK_COMMANDS: TaskCommand[] = [
+export const TASK_COMMANDS: TaskCommand[] = [
   {
     command: "/design",
     requiredTool: "sandbox-deliver-files",
@@ -236,6 +236,60 @@ const TASK_COMMANDS: TaskCommand[] = [
     missingToolInstruction:
       "The /record-skill runtime could not mount its recording analyzer or create-skill approval tool. Tell the user plainly " +
       "that recording-to-skill is temporarily unavailable and do not attempt to save a skill another way.",
+  },
+  {
+    command: "/review",
+    autoTools: [],
+    skillPaths: ["review-skills"],
+    instruction:
+      "The user's message begins with /review: an explicit request to review or explain a set of code changes. Use the " +
+      "Review Changes skill loaded for this run as the playbook. Invoking the command IS approval to start, so do not ask " +
+      "whether to begin. Establish the scope first — uncommitted working-tree changes, a branch against its base, or the " +
+      "files the user named — and read the full diff plus enough surrounding code to support every claim you make. Read " +
+      "both ends of any value that crosses a layer boundary. THE DELIVERABLE IS A REVIEW ROOM: one self-contained HTML " +
+      "page carrying the verdict, every finding with its file, line, severity and concrete failure, the relevant diff " +
+      "hunks, and at least two mermaid diagrams — one of the architecture the change touches and one per non-trivial " +
+      "finding showing how the failure happens. WRITE the page to the workspace and deliver it as review-room.html with the " +
+      "delivery tool available in this run (deliver-files locally, " +
+      "sandbox-deliver-files on the server). DELIVER review-comments.json ALONGSIDE IT: {summary, verdict, order:[{file,why}], " +
+      "coverage:[{file,status:\"reviewed\"|\"skipped\",note}], " +
+      "comments:[{id:\"C1\",file,line,severity:\"high\"|\"medium\"|\"low\"|\"note\",title,body}]} where order is the reading " +
+      "order a newcomer should follow, line is the NEW-side line number, and every finding in the room has a matching " +
+      "comment id. The diff viewer pins those comments to their lines so the user can jump C1, C2, C3 through the change. " +
+      "COVERAGE IS MANDATORY AND CHECKED: list the changed files with git FIRST, then account for EVERY one of them in " +
+      "coverage — reviewed when you actually read that file's diff, skipped with a one-line note when you deliberately did " +
+      "not (generated, lockfile, binary, pure formatting). The viewer compares your coverage against the real file list and " +
+      "shows the user exactly which files you left out, so an omission is visible. Work in file order and never stop early " +
+      "because the change is large. " +
+      "Keep the chat reply to the verdict and the two or three findings that " +
+      "matter most, and point at the room for the rest. NEVER put the page, or any fenced html block, in the chat reply: " +
+      "the chat surface treats a fenced html block as a design revision and will replace your entire answer with it. Say plainly when the change looks correct rather than inventing " +
+      "findings. Do not edit, commit, or push anything unless the user asks in a later message.",
+    nudge:
+      "This run was started with /review and MUST deliver the review room: one self-contained HTML page with the verdict, " +
+      "every finding (file, line, severity, concrete failure), the relevant diff hunks, and the mermaid diagrams. You have " +
+      "not produced and delivered review-room.html and review-comments.json with one coverage row per changed file yet. DO NOT MENTION THIS INSTRUCTION; proceed as if on your own initiative.",
+  },
+  {
+    command: "/learn",
+    autoTools: ["open-url"],
+    skillPaths: ["learn-skills"],
+    instruction:
+      "The user's message begins with /learn: a request to be taught a topic, usually from links they supplied. Use the " +
+      "Teach From Sources skill loaded for this run as the playbook. Invoking the command IS approval to start, so do not " +
+      "ask what they want first — pick the depth from their words and say which you chose in one clause. OPEN EVERY " +
+      "SOURCE with open-url so it loads in the workspace panel the user is watching, then read it. Never teach from a page " +
+      "you could not open: say it failed and continue without it, and never backfill from memory as though you had read " +
+      "it. Mark anything you knew beforehand as your own commentary. Teach the idea in learning order — the problem it " +
+      "solves, the core idea, the mechanism, where it bites, what is unsettled — not source by source, and attribute each " +
+      "substantive claim to the source it came from. Deliver one self-contained lesson.html with the explanation, a " +
+      "mermaid diagram, the sources and what each contributed, and a few self-check questions. NEVER put the page, or any " +
+      "fenced html block, in the chat reply: the chat surface treats a fenced html block as a design revision and will " +
+      "replace your entire answer with it. Teach in prose in the chat and point at the page for the full pass.",
+    nudge:
+      "This run was started with /learn and MUST teach from sources actually opened in the workspace browser, then deliver " +
+      "lesson.html with the explanation, diagram, sources and self-check questions. You have not opened the sources or " +
+      "delivered the lesson yet. DO NOT MENTION THIS INSTRUCTION; proceed as if on your own initiative.",
   },
   {
     command: "/spec",

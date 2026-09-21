@@ -194,11 +194,22 @@ export const resolveShortcut = (
     return activeScopes.lastIndexOf(scope);
   };
 
+  // A modal owns the keyboard while it is open: a shortcut belonging to the
+  // surface underneath it must not fire, or a bare letter typed with a dialog
+  // focused reaches the page behind it — pressing `e` in the create-ticket
+  // dialog started editing the message it was raised from. Scopes pushed after
+  // the modal (a palette opened from inside it) still win, and `global` is left
+  // alone because every global shortcut carries a modifier.
+  const modalRank = activeScopes.lastIndexOf('modal');
+
   // Build candidates with cached scope ranks in a single pass
   const candidates: Array<{ entry: ShortcutEntry; rank: number }> = [];
   for (const entry of entries.values()) {
     const rank = scopeRank(entry.scope);
     if (entry.scope !== '*' && rank === -1) continue;
+    if (modalRank !== -1 && entry.scope !== '*' && entry.scope !== 'global' && rank < modalRank) {
+      continue;
+    }
     if (!entry.allowInInputs && isEditableTarget(event.target)) continue;
     if (entry.when && !entry.when(event)) continue;
     candidates.push({ entry, rank });

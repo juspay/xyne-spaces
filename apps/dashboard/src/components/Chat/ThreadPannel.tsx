@@ -67,7 +67,6 @@ import {
   ChannelScopeType,
   ChannelType,
   BaseTicketType,
-  isDeskChannelType,
   parseTicketMd,
 } from '@xyne/shared';
 import { RCAPanelView } from '../Tickets/RCAPanelView';
@@ -111,7 +110,8 @@ import { sendRecordingEvent, useRecordingStore } from '../../hooks/useRecordingS
 import { getRecordingDefaultLayout } from '../../hooks/useRecordingDefaultLayout';
 import { ConversationTabContext } from './ConversationTabContext';
 
-type TabType = 'thread' | 'details' | 'files' | 'rca' | 'subtickets' | 'release';
+const VALID_TABS = ['thread', 'details', 'files', 'rca', 'relationships', 'release'] as const;
+type TabType = (typeof VALID_TABS)[number];
 type UnderTicketTabType = 'replies' | 'rca';
 
 interface ThreadMessagesProps {
@@ -211,10 +211,9 @@ export const ThreadMessages = ({
 
   const [searchParams, setSearchParams] = useSearchParams();
   const selectedTabParam = searchParams.get('selectedTab');
-  const validTabs: TabType[] = ['thread', 'details', 'files', 'rca', 'release'];
   const selectedTab: TabType =
     defaultTab ??
-    (validTabs.includes(selectedTabParam as TabType) ? (selectedTabParam as TabType) : 'thread');
+    (VALID_TABS.includes(selectedTabParam as TabType) ? (selectedTabParam as TabType) : 'thread');
 
   const isFocusedThread = searchParams.get('focusThread') === '1';
   const skipInputAutoFocus = propSkipInputAutoFocus || searchParams.get('nofocus') === '1';
@@ -809,7 +808,7 @@ export const ThreadMessages = ({
     setUnderTicketActiveTab('replies');
   }, [underTicketView, selectedTab, isFixTicket, hideTabBar]);
 
-  const showSubTicketsTab = isDeskChannelType(channel?.type);
+  const showRelationshipsTab = Boolean(derivedTicketId);
   // The panel is reused across threads, so this tab can vanish while still selected.
   // A tab can be selected and then vanish, because the panel is reused across
   // threads: subtickets when the channel type changes, release when the next
@@ -818,7 +817,7 @@ export const ThreadMessages = ({
   // fall back to the one tab every thread has.
   const ticketOnlyTab = activeTab === 'details' || activeTab === 'rca' || activeTab === 'release';
   const currentTab =
-    (!showSubTicketsTab && activeTab === 'subtickets') ||
+    (!showRelationshipsTab && activeTab === 'relationships') ||
     (!isReleaseDevTicket && activeTab === 'release') ||
     (!derivedTicketId && ticketOnlyTab)
       ? 'thread'
@@ -834,8 +833,14 @@ export const ThreadMessages = ({
         count: files.length,
         icon: <FolderDefault size={14} />,
       },
-      ...(showSubTicketsTab
-        ? [{ value: 'subtickets' as const, label: 'Sub-tickets', icon: <GitBranch size={14} /> }]
+      ...(showRelationshipsTab
+        ? [
+            {
+              value: 'relationships' as const,
+              label: 'Relationships',
+              icon: <GitBranch size={14} />,
+            },
+          ]
         : []),
       ...(isFixTicket
         ? [{ value: 'rca' as const, label: 'RCA', icon: <ClipboardCheckIcon size={14} /> }]
@@ -847,7 +852,14 @@ export const ThreadMessages = ({
 
     // Filter out Details tab when ticketId doesn't exist
     return !derivedTicketId ? allTabs.filter(tab => tab.value !== 'details') : allTabs;
-  }, [files.length, ticketId, derivedTicketId, isFixTicket, showSubTicketsTab, isReleaseDevTicket]);
+  }, [
+    files.length,
+    ticketId,
+    derivedTicketId,
+    isFixTicket,
+    showRelationshipsTab,
+    isReleaseDevTicket,
+  ]);
 
   const handleCreateTicket = (): void => {
     setIsCreateTicketModalOpen(true);
@@ -1809,17 +1821,21 @@ export const ThreadMessages = ({
                 value='details'
                 className='flex-1 min-h-0 bg-background overflow-hidden data-[state=inactive]:hidden'
               >
-                <TicketDetails ticketId={derivedTicketId} onFillRCA={() => setActiveTab('rca')} />
+                <TicketDetails
+                  ticketId={derivedTicketId}
+                  hideRelationships
+                  onFillRCA={() => setActiveTab('rca')}
+                />
               </Tabs.Content>
             )}
 
-            {/* Sub-tickets Tab Content */}
-            {showSubTicketsTab && (
+            {/* Relationships Tab Content */}
+            {showRelationshipsTab && (
               <Tabs.Content
-                value='subtickets'
+                value='relationships'
                 className='flex-1 min-h-0 bg-background overflow-hidden data-[state=inactive]:hidden'
               >
-                <TicketDetails ticketId={derivedTicketId} subTicketsOnly />
+                <TicketDetails ticketId={derivedTicketId} relationshipsOnly />
               </Tabs.Content>
             )}
 

@@ -5,7 +5,7 @@
   "description": "Multi-tenant agent orchestration server",
   "type": "module",
   "scripts": {
-    "dev": "tsx --env-file=.env --watch src/main.ts",
+    "dev": "tsx watch --exclude \"**/node_modules/**\" --exclude \"**/dist/**\" --exclude \"**/.git/**\" --env-file=.env src/main.ts",
     "start": "node --import tsx/esm src/main.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",

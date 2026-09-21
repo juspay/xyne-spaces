@@ -45,6 +45,8 @@ import {
   type RecordingSummaryMarkedItem,
 } from './recordingSummaryMarkedItems';
 import { summaryTemplateService } from './summaryTemplateService';
+import { callNotesCanvasService } from './callNotesCanvasService';
+import { isRecording } from '@/utils/callTypeUtils';
 
 // PRD Document structure
 interface PRDDocument {
@@ -1142,6 +1144,13 @@ export class CallDocumentService {
       })
       .join('\n');
 
+    // Participants' shared notes canvas (series-wide for recurring calls) is extra
+    // context for the summary. Recordings keep their own summary inputs.
+    const notesMarkdown = call && !isRecording(call)
+      ? await callNotesCanvasService.getNotesMarkdown(call)
+      : null;
+    const sanitizedNotes = notesMarkdown ? sanitizeInput(notesMarkdown) : '';
+
     const sanitizedTranscript = sanitizeInput(transcript);
     const sanitizedCustomPrompt = customPrompt ? sanitizeInput(customPrompt) : '';
     const sanitizedFields = summaryFields?.trim() ? sanitizeInput(summaryFields) : '';
@@ -1161,6 +1170,10 @@ MANDATORY OUTPUT CONTRACT:
         participants: participantList || '- No participants found',
         transcript: sanitizedTranscript,
       });
+
+      if (sanitizedNotes) {
+        prompt += `\n\nPARTICIPANT NOTES:\nNotes written by participants in the shared notes canvas${call?.recurringSeriesId ? ' for this recurring meeting series (may include notes from earlier sessions)' : ''}. Use them as additional context: honour agenda items, decisions, and action items captured here, but treat the transcript as the source of truth for what was said in this session. Do not cite notes as transcript segments.\n"""\n${sanitizedNotes}\n"""\n`;
+      }
 
       if (sanitizedCustomPrompt) {
         prompt += `\n\nADDITIONAL USER INSTRUCTIONS:\nThe user has provided specific instructions for this summary. Please prioritize these instructions:\n"${sanitizedCustomPrompt}"\n`;
@@ -1856,7 +1869,8 @@ A Product Requirements Document has been generated from this call discussion.
     conversationId: string,
     callId: string,
     canvasUrl: string,
-    workspaceId: string
+    workspaceId: string,
+    subject: 'recording' | 'call' = 'recording',
   ): Promise<void> {
     try {
       // Idempotent: the automatic summary pipeline may run more than once per call
@@ -1871,9 +1885,10 @@ A Product Requirements Document has been generated from this call discussion.
         throw new Error('Xyne Automatic bot not found');
       }
 
-      const messageContent = `## 📝 Recording Notes
+      const subjectLabel = subject === 'recording' ? 'Recording' : 'Call';
+      const messageContent = `## 📝 ${subjectLabel} Notes
 
-Notes taken during this recording:
+Notes taken during this ${subject}:
 
 [📄 View Notes Canvas](${canvasUrl})`;
 
