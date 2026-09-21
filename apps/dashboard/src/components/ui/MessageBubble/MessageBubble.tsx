@@ -1243,11 +1243,10 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
             )}
 
           {/* ================== MESSAGE CONTENT ================== */}
-          {isScheduledCallPill && metadata?.callId && channelId && !message.isDeleted ? (
+          {isScheduledCallPill && metadata?.callId && !message.isDeleted ? (
             <ScheduledCallPill
               message={{ messageId: message.messageId, metadata }}
               callId={metadata.callId}
-              channelId={channelId}
             />
           ) : isCallShareMessage && !isForwardedMessage && !message.isDeleted ? (
             <CallShareBubble message={{ content: message.content, metadata }} />

@@ -11,6 +11,7 @@ import type { CallParticipantMetadata } from '@xyne/shared';
 import { normalizeEmailList } from '@/utils/email';
 import { CallVespaFeedSource, queueCallVespaDelete, queueCallVespaFeed } from '@/services/callVespaQueue';
 import { refreshCallParticipantPreview } from '@/utils/callParticipantCountUtils';
+import { queueScheduledCallPillSync } from '@/services/scheduledCallPillSync';
 import {
   setSlashCommandArtifactLifecycle,
   type MessageArtifactLifecycleStatus,
@@ -21,15 +22,37 @@ export type { Call, CallParticipant };
 // Shorter channel calls skip post-call AI outputs (see getPostCallAiSkipReason).
 const MIN_CALL_DURATION_FOR_AI_SECONDS = 30;
 
-/**
- * Body text for the scheduled-call pill. The rendered card reads everything it shows
- * from the live `calls` row, so this string only surfaces as the channel-list preview
- * (`conversation.initial_message_md`) and in plain-text fallbacks — the card itself
- * renders a live description. Carries no title or time, so editing the call still
- * requires no write to the message.
- */
+/** Preview text only — the card itself renders from the metadata below. */
 const scheduledCallPillContent = (senderName: string): string =>
   `${senderName} scheduled a call`;
+
+/** The call fields a pill card renders. Kept on the message, refreshed on every change. */
+interface ScheduledCallPillSnapshot {
+  id: string;
+  title: string | null;
+  startsAt: Date | null;
+  endsAt: Date | null;
+  status: string;
+  channelId: string | null;
+}
+
+const scheduledCallPillMetadata = (
+  callExternalId: string,
+  snapshot: ScheduledCallPillSnapshot,
+): Prisma.InputJsonObject => ({
+  isScheduledCallPill: true,
+  callId: callExternalId,
+  operation: 'call_scheduled',
+  call: {
+    // Internal id: the Calls screen and the summary route both key on it, not externalId.
+    id: snapshot.id,
+    title: snapshot.title,
+    startsAt: snapshot.startsAt ? snapshot.startsAt.getTime() : null,
+    endsAt: snapshot.endsAt ? snapshot.endsAt.getTime() : null,
+    status: snapshot.status,
+    channelId: snapshot.channelId,
+  },
+});
 
 function parseRecordingParticipantIds(stored: string | null): string[] {
   if (!stored) return [];
@@ -73,14 +96,8 @@ export interface CallMetadata {
   conversationId?: string;
   artifactMessageId?: string;
   googleCalendarPush?: GoogleCalendarPushState;
-  /**
-   * Message that carries this call's read-only "upcoming call" pill in its channel.
-   * Deliberately separate from `systemMessageId`, which belongs to the activation
-   * state machine in `activateScheduledCall` — see createScheduledCallPill.
-   */
+  /** The call's channel pill. Separate from `systemMessageId`, which activation owns. */
   channelPillMessageId?: string;
-  /** True when that pill lives inside a thread rather than at the channel root. */
-  channelPillInThread?: boolean;
 }
 
 const getArtifactMessageId = (metadata: Prisma.JsonValue | null): string | undefined =>
@@ -315,6 +332,7 @@ export class CallRepository {
       );
     }
     queueCallVespaFeed(result.id, { source: CallVespaFeedSource.CallRepositoryUpdate });
+    queueScheduledCallPillSync(result.id, 'callRepository.update');
     return result;
   }
 
@@ -1185,6 +1203,7 @@ export class CallRepository {
     await refreshCallParticipantPreview(tx, callId);
     await this.syncArtifactLifecycle(tx, call, MessageArtifactStatus.COMPLETED, endedAt);
     queueCallVespaFeed(callId, { source: CallVespaFeedSource.CallRepositoryEndCall });
+    queueScheduledCallPillSync(callId, 'callRepository.endCall');
   }
 
   /**
@@ -1269,6 +1288,9 @@ export class CallRepository {
       return { shouldEndCall, messageUpdated, call };
     });
     queueCallVespaFeed(result.call?.id, { source: CallVespaFeedSource.CallRepositoryHandleParticipantLeaving });
+    if (result.call) {
+      queueScheduledCallPillSync(result.call.id, 'callRepository.handleParticipantLeave');
+    }
     return result;
   }
 
@@ -1354,6 +1376,9 @@ export class CallRepository {
       return { shouldEndCall, messageUpdated, call };
     });
     queueCallVespaFeed(result.call?.id, { source: CallVespaFeedSource.CallRepositoryHandleRoomFinished });
+    if (result.call) {
+      queueScheduledCallPillSync(result.call.id, 'callRepository.handleRoomFinished');
+    }
     return result;
   }
 
@@ -1590,24 +1615,17 @@ export class CallRepository {
       await messageMetadataService.syncInitialMessageMd(activatedCallMeta.conversationId);
     }
     queueCallVespaFeed(callParam.id, { source: CallVespaFeedSource.CallRepositoryActivateScheduledCall });
+    queueScheduledCallPillSync(callParam.id, 'callRepository.activateScheduledCall');
   }
 
   /**
-   * Post the read-only "upcoming call" pill into the channel a call was scheduled in.
+   * Post the read-only "upcoming call" pill into the call's channel.
    *
-   * The message is only an anchor. It carries no status of its own, so cancelling or
-   * editing the call needs no write here — the card re-renders from the live `calls`
-   * row. That matters because `mutators.calls.cancel` never reaches the backend, so
-   * there would otherwise be no server moment in which to rewrite the message.
+   * A plain Prisma write, not a Zero mutator, so scheduling does not mark the channel
+   * unread for everyone — same as the existing call system message.
    *
-   * Deliberately a plain Prisma write rather than a Zero mutator, matching the existing
-   * call system message: scheduling must not mark the channel unread for every member on
-   * top of the CALL_SCHEDULED notification participants already receive. zero-cache still
-   * replicates the row, so the pill appears for open clients immediately.
-   *
-   * Never writes `metadata.systemMessageId` — that key belongs to `activateScheduledCall`,
-   * and stamping it here would make the call look already-activated, so the live
-   * "X started a call" message would never post.
+   * Never writes `metadata.systemMessageId`: that belongs to `activateScheduledCall`,
+   * and stamping it would stop the live "X started a call" message from posting.
    */
   async createScheduledCallPill(
     tx: Prisma.TransactionClient,
@@ -1616,29 +1634,44 @@ export class CallRepository {
       callExternalId: string;  // public id the card resolves the call by
       channelId: string;
       workspaceId: string;
-      /**
-       * The organizer. The pill is attributed to them rather than to `system`, the
-       * way a ticket-creation message is, so the channel shows who booked the call.
-       */
+      /** The organizer — the pill is attributed to them, like a ticket-creation message. */
       senderId: string;
       /** Organizer's display name, for the stored preview text. */
       senderName: string;
-      /**
-       * Set when the call was scheduled from a thread (`callOrigin: CONVERSATION`).
-       * The pill lives inside that thread; no new conversation is created.
-       */
+      /** Set for a thread-scheduled call; the pill goes in that thread, not a new one. */
       threadConversationId?: string | undefined;
     },
-  ): Promise<{ messageId: string; conversationId: string }> {
+  ): Promise<{ messageId: string; conversationId: string } | null> {
     const { callId, callExternalId, channelId, workspaceId, senderId, senderName, threadConversationId } =
       params;
     const messageId = uuidv4();
     const conversationId = threadConversationId ?? uuidv4();
 
+    const snapshot = await tx.call.findUniqueOrThrow({
+      where: { id: callId },
+      select: {
+        id: true,
+        title: true,
+        startsAt: true,
+        endsAt: true,
+        status: true,
+        channelId: true,
+        isRecurring: true,
+        recurringSeriesId: true,
+        callType: true,
+      },
+    });
+
+    // A series is materialized 60 days ahead and replenished forever, so a pill per
+    // instance would drip cards into the channel indefinitely. Note-taker recordings
+    // are not meetings anyone joins. Enforced here rather than at the call sites: this
+    // is the single choke point, and it already has the row.
+    if (snapshot.isRecurring || snapshot.recurringSeriesId) return null;
+    if (snapshot.callType === CallType.HEADLESS) return null;
+
     if (!threadConversationId) {
-      // Channel-scoped call: its own conversation, so the pill is that conversation's
-      // initialMessage and renders as a channel entry (channelConversationsPaginated
-      // reads conversations + initialMessage and does not filter on showInChannel).
+      // Its own conversation, so the pill is the initialMessage and renders as a
+      // channel entry.
       await tx.conversation.create({
         data: {
           conversationId,
@@ -1659,16 +1692,11 @@ export class CallRepository {
         content: scheduledCallPillContent(senderName),
         msgType: MessageType.SYSTEM,
         showInChannel: false,
-        metadata: {
-          isScheduledCallPill: true,
-          callId: callExternalId,
-          operation: 'call_scheduled',
-        },
+        metadata: scheduledCallPillMetadata(callExternalId, snapshot),
       },
     });
 
-    // Re-read inside the transaction and merge, so calendar-derived fields and the
-    // activation state machine's own keys survive the stamp.
+    // Merge, so calendar fields and the activation keys survive the stamp.
     const current = await tx.call.findUnique({
       where: { id: callId },
       select: { metadata: true },
@@ -1680,10 +1708,6 @@ export class CallRepository {
         metadata: {
           ...((current?.metadata as Prisma.InputJsonObject) ?? {}),
           channelPillMessageId: messageId,
-          // Recorded explicitly rather than inferred from `conversationId`: that key is
-          // also stamped by activateScheduledCall, so a call that went live and bounced
-          // back to SCHEDULED would otherwise look thread-scheduled.
-          channelPillInThread: !!threadConversationId,
         },
       },
     });
@@ -1692,12 +1716,50 @@ export class CallRepository {
   }
 
   /**
-   * Permanently retire a pill whose call has moved to another channel.
+   * Rewrite a call's pill message with its current title, time and status.
    *
-   * "Moved" is the one state that is not derivable: moving the call back would make
-   * `call.channelId` match this pill's channel again and revive it. Stamping the
-   * message once makes it a dead card — the UI never updates it again, and a move
-   * back posts a brand-new pill instead.
+   * Every path that changes one of those has to call this, or the card goes stale —
+   * see queueScheduledCallPillSync for the fire-and-forget wrapper most callers use.
+   * No-ops for a call with no pill, and for a pill retired by a channel move.
+   */
+  async syncScheduledCallPillMessage(callId: string): Promise<void> {
+    const db = DatabaseClient.getInstance();
+
+    const call = await db.call.findUnique({
+      where: { id: callId },
+      select: {
+        id: true,
+        externalId: true,
+        title: true,
+        startsAt: true,
+        endsAt: true,
+        status: true,
+        channelId: true,
+        metadata: true,
+      },
+    });
+    const messageId = (call?.metadata as CallMetadata | null)?.channelPillMessageId;
+    if (!call || !messageId) return;
+
+    const message = await db.message.findUnique({
+      where: { messageId },
+      select: { conversationId: true, metadata: true },
+    });
+    if (!message) return;
+    // A retired pill is a dead card: the move stamped it and it is never revived.
+    if ((message.metadata as { retired?: boolean } | null)?.retired) return;
+
+    await db.message.update({
+      where: { messageId },
+      data: { metadata: scheduledCallPillMetadata(call.externalId, call) },
+    });
+    // Mandatory: the channel timeline renders from the denormalized blob, not the row.
+    await messageMetadataService.syncInitialMessageMd(message.conversationId);
+  }
+
+  /**
+   * Permanently retire a pill whose call moved channels. "Moved" is the one state the
+   * card cannot derive, since moving back would make `call.channelId` match again.
    */
   async retireScheduledCallPill(
     tx: Prisma.TransactionClient,
@@ -1722,6 +1784,64 @@ export class CallRepository {
         },
       },
     });
+  }
+
+  /**
+   * An edit moved the call: retire the old pill and post a fresh one in the destination.
+   *
+   * A pill that is not its conversation's initialMessage sits inside a thread, which
+   * does not travel with the call's channel — leave it alone.
+   */
+  async moveScheduledCallPill(params: {
+    callId: string;
+    callExternalId: string;
+    callTitle: string | null;
+    newChannelId: string;
+    workspaceId: string;
+    senderId: string;
+    senderName: string;
+  }): Promise<void> {
+    const { callId, callExternalId, callTitle, newChannelId, workspaceId, senderId, senderName } =
+      params;
+
+    const conversationId = await DatabaseClient.getInstance().$transaction(async (tx) => {
+      // Re-read inside the transaction: the caller's snapshot predates the update, and
+      // a concurrent channel edit would otherwise have its new pill orphaned.
+      const current = await tx.call.findUnique({
+        where: { id: callId },
+        select: { metadata: true },
+      });
+      const existingPillId = (current?.metadata as CallMetadata | null)?.channelPillMessageId;
+
+      if (existingPillId) {
+        const pill = await tx.message.findUnique({
+          where: { messageId: existingPillId },
+          select: { conversation: { select: { initialMessageId: true } } },
+        });
+        if (pill && pill.conversation?.initialMessageId !== existingPillId) return null;
+
+        await this.retireScheduledCallPill(tx, {
+          messageId: existingPillId,
+          callExternalId,
+          movedToChannelId: newChannelId,
+          callTitle,
+        });
+      }
+
+      const created = await this.createScheduledCallPill(tx, {
+        callId,
+        callExternalId,
+        channelId: newChannelId,
+        workspaceId,
+        senderId,
+        senderName,
+      });
+      return created?.conversationId ?? null;
+    });
+
+    if (conversationId) {
+      await messageMetadataService.syncInitialMessageMd(conversationId);
+    }
   }
 
   /**
@@ -2136,6 +2256,7 @@ export class CallRepository {
     });
 
     queueCallVespaFeed(callId, { source: CallVespaFeedSource.CallRepositoryUpdateScheduledCall });
+    queueScheduledCallPillSync(callId, 'callRepository.updateScheduledCall');
     return updatedCall;
   }
 
