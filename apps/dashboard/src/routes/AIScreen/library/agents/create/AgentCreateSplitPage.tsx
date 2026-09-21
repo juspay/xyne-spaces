@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState, type ReactElement } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ReactElement } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { Panel, ResizableGroup, Separator } from '@/components/ui/Resizable/Resizable';
 import { useAuth } from '@/hooks/useAuth';
@@ -38,6 +38,11 @@ import {
   type AgentCreatePhase,
 } from '@/components/flowUI/nodes/agent/create/types';
 import { useAgentCreateForm } from '@/components/flowUI/nodes/agent/create/useAgentCreateForm';
+import {
+  seedScriptedHubCatalog,
+  watchScriptedHubCatalog,
+} from '@/components/flowUI/nodes/agent/create/scriptedHubCatalog';
+import { useScriptedCreatePlayer } from '@/components/flowUI/nodes/agent/create/useScriptedCreatePlayer';
 
 const WRITE_MS = 1100;
 const FIELD_ORDER: AgentCreateField[] = [
@@ -68,7 +73,9 @@ function pickPatch(patch: AgentCreateChatPatch, fields: CreateTurnField[]): Agen
   return next;
 }
 
-export function AgentCreateSplitPage(): ReactElement {
+export function AgentCreateSplitPage({
+  scripted = false,
+}: { scripted?: boolean } = {}): ReactElement {
   const { user } = useAuth();
   const { isMobile } = usePlatform();
   const queryClient = useQueryClient();
@@ -91,14 +98,37 @@ export function AgentCreateSplitPage(): ReactElement {
     : nameCheck.nameError;
   const builtBy = user?.name ?? user?.email ?? 'you';
 
+  const seedHub = useCallback((): void => {
+    seedScriptedHubCatalog(queryClient, user?.id);
+  }, [queryClient, user?.id]);
+
+  useEffect(() => {
+    if (!scripted) return undefined;
+    return watchScriptedHubCatalog(queryClient, user?.id);
+  }, [queryClient, scripted, user?.id]);
+
+  const scriptedPlayer = useScriptedCreatePlayer({
+    enabled: scripted,
+    emptyForm: EMPTY_CREATE_FORM,
+    form: {
+      applyChatPatch: createForm.applyChatPatch,
+      setWritingField: createForm.setWritingField,
+      clearHighlights: createForm.clearHighlights,
+      patchForm: createForm.patchForm,
+      resetFrom: createForm.resetFrom,
+      resolveConflict: createForm.resolveConflict,
+    },
+    setPhase,
+    setSkeletonIdentity,
+    seedHub,
+  });
+
   const canCreate =
     phase !== 'created' &&
     createForm.form.name.trim().length > 0 &&
     slug.length > 0 &&
     createForm.form.systemPrompt.trim().length > 0 &&
-    !nameCheck.checking &&
-    nameCheck.nameValid &&
-    createForm.conflicts.length === 0;
+    (scripted || (!nameCheck.checking && nameCheck.nameValid && createForm.conflicts.length === 0));
 
   const canvasSnapshot: CreateCanvasSnapshot = {
     empty: canvasIsEmpty(createForm.form),
@@ -110,6 +140,7 @@ export function AgentCreateSplitPage(): ReactElement {
 
   const onTurnComplete = useCallback(
     async (turn: CreateChatTurn): Promise<void> => {
+      if (scripted) return;
       const canvasEmpty = canvasIsEmpty(createForm.form);
       const userText = turn.userText;
 
@@ -223,11 +254,11 @@ export function AgentCreateSplitPage(): ReactElement {
         createForm.setWritingField(null);
       }
     },
-    [createForm],
+    [createForm, scripted],
   );
 
   const persist = useCallback(async (): Promise<void> => {
-    if (!canCreate || creating) return;
+    if (scripted || !canCreate || creating) return;
     setCreating(true);
     setCreateError(null);
     const form = { ...createForm.form, slug };
@@ -295,7 +326,7 @@ export function AgentCreateSplitPage(): ReactElement {
     } finally {
       setCreating(false);
     }
-  }, [canCreate, createForm.form, creating, queryClient, slug, user?.id]);
+  }, [canCreate, createForm.form, creating, queryClient, scripted, slug, user?.id]);
 
   const canvasDirty = createForm.canvasDirty;
   const resetFrom = createForm.resetFrom;
@@ -317,13 +348,16 @@ export function AgentCreateSplitPage(): ReactElement {
         canCreate={canCreate}
         creating={creating}
         discarding={false}
-        onCreate={() => void persist()}
+        onCreate={() => {
+          if (scripted) return;
+          void persist();
+        }}
         onDiscard={requestDiscard}
         {...(createdSlug ? { createdSlug } : {})}
         createError={createError}
       />
     ),
-    [canCreate, createError, createdSlug, creating, persist, phase, requestDiscard],
+    [canCreate, createError, createdSlug, creating, persist, phase, requestDiscard, scripted],
   );
 
   const canvas = (
@@ -344,12 +378,22 @@ export function AgentCreateSplitPage(): ReactElement {
       handleError={handleError}
       checkingHandle={nameCheck.checking}
       footer={footer}
-      readOnly={phase === 'created'}
+      readOnly={phase === 'created' || (scripted && scriptedPlayer.playing)}
     />
   );
 
   return (
-    <div className='flex h-full min-h-0 w-full' data-component='AgentCreateSplitPage'>
+    <div
+      className='flex h-full min-h-0 w-full'
+      data-component='AgentCreateSplitPage'
+      {...(scripted
+        ? {
+            'data-scripted': 'true',
+            'data-scripted-step': scriptedPlayer.step,
+            'data-scripted-ready': scriptedPlayer.ready ? 'true' : 'false',
+          }
+        : {})}
+    >
       {isMobile ? (
         canvas
       ) : (
@@ -364,6 +408,18 @@ export function AgentCreateSplitPage(): ReactElement {
               canvas={canvasSnapshot}
               onTurnComplete={onTurnComplete}
               disabled={phase === 'created'}
+              {...(scripted
+                ? {
+                    scripted: true,
+                    scriptedMessages: scriptedPlayer.messages,
+                    scriptedDraft: scriptedPlayer.draft,
+                    scriptedPlaying: scriptedPlayer.playing,
+                    scriptedTyping: scriptedPlayer.typing,
+                    scriptedDone: scriptedPlayer.step === 'done',
+                    onScriptedEngage: scriptedPlayer.engageComposer,
+                    onScriptedReplay: scriptedPlayer.replay,
+                  }
+                : {})}
             />
           </Panel>
           <Separator className='w-[2px] cursor-col-resize'>

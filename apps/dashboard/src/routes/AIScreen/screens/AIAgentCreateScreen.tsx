@@ -3,16 +3,16 @@ import { AIShell } from '../../../components/AIScreen/AIShell';
 import { AgentCreateSplitPage } from '../library/agents/create/AgentCreateSplitPage';
 import { useAIChatHandoff } from '../useAIChatHandoff';
 
-const AIAgentCreateScreen = (): ReactElement => {
+const AIAgentCreateScreen = ({ scripted = false }: { scripted?: boolean } = {}): ReactElement => {
   const { onCreateChat, onSelectSession } = useAIChatHandoff();
 
   return (
     <AIShell onCreateChat={onCreateChat} onSelectSession={onSelectSession}>
       <main
-        data-id='ai-agent-create-view'
+        data-id={scripted ? 'ai-agent-create-script-view' : 'ai-agent-create-view'}
         className='relative flex h-full flex-1 flex-col overflow-hidden'
       >
-        <AgentCreateSplitPage />
+        <AgentCreateSplitPage scripted={scripted} />
       </main>
     </AIShell>
   );

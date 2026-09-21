@@ -1,6 +1,20 @@
-import { useCallback, useEffect, useRef, useState, type ReactElement } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ClipboardEvent,
+  type KeyboardEvent,
+  type ReactElement,
+  type Ref,
+  type RefObject,
+} from 'react';
 import { Loader2 } from 'lucide-react';
-import { AIComposer, type AIComposerAttachment } from '@/components/AIScreen/AIComposer';
+import {
+  AIComposer,
+  type AIComposerAttachment,
+  type AIComposerHandle,
+} from '@/components/AIScreen/AIComposer';
 import { AIEmptyState } from '@/components/AIScreen/AIEmptyState';
 import { type ComposerContext, toStreamOverrides } from '@/components/AIScreen/composerContext';
 import type { Message, MessageAttachment } from '@/components/Chat/XyneAISidebar/utils/XyneAITypes';
@@ -33,9 +47,24 @@ interface AgentCreateChatPanelProps {
   canvas: CreateCanvasSnapshot;
   onTurnComplete: (turn: CreateChatTurn) => Promise<void>;
   disabled?: boolean;
+  scripted?: boolean;
+  scriptedMessages?: Message[];
+  scriptedDraft?: string;
+  scriptedPlaying?: boolean;
+  scriptedTyping?: boolean;
+  scriptedDone?: boolean;
+  onScriptedEngage?: () => void;
+  onScriptedReplay?: () => void;
 }
 
-export function AgentCreateChatPanel({
+export function AgentCreateChatPanel(props: AgentCreateChatPanelProps): ReactElement {
+  if (props.scripted) {
+    return <ScriptedAgentCreateChatPanel {...props} />;
+  }
+  return <LiveAgentCreateChatPanel {...props} />;
+}
+
+function LiveAgentCreateChatPanel({
   canvas,
   onTurnComplete,
   disabled,
@@ -96,7 +125,7 @@ export function AgentCreateChatPanel({
     if (!lastBot?.errorInfo) {
       usesDraftStreamKeyRef.current = false;
     }
-  }, [messages, conversationId, streamThreadKey]);
+  }, [conversationId, messages, streamThreadKey]);
 
   useEffect(() => {
     if (streaming) return;
@@ -161,14 +190,133 @@ export function AgentCreateChatPanel({
   const empty = messages.length === 0 && !streaming && !canvasError;
 
   return (
+    <CreateChatLayout
+      empty={empty}
+      canvasError={canvasError}
+      messages={messages}
+      bottomRef={bottomRef}
+      pending={streaming || Boolean(disabled)}
+      {...(streaming ? { onStop: abortCurrentRequest } : {})}
+      onSubmit={(text, attachments, context, trigger) => {
+        void handleSubmit(text, attachments, context, trigger);
+      }}
+    />
+  );
+}
+
+function ScriptedAgentCreateChatPanel({
+  scriptedMessages,
+  scriptedDraft = '',
+  scriptedPlaying = false,
+  scriptedTyping = false,
+  scriptedDone = false,
+  onScriptedEngage,
+  onScriptedReplay,
+}: AgentCreateChatPanelProps): ReactElement {
+  const composerRef = useRef<AIComposerHandle>(null);
+  const bottomRef = useRef<HTMLDivElement | null>(null);
+  const messages = scriptedMessages ?? [];
+  const streaming = messages.some(message => message.isStreaming);
+  const empty = messages.length === 0 && !streaming;
+  const pending = scriptedPlaying && !scriptedTyping;
+
+  useEffect(() => {
+    composerRef.current?.setPrompt(scriptedDraft);
+  }, [scriptedDraft]);
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ block: 'end' });
+  }, [messages, scriptedDraft]);
+
+  const engage = useCallback((): void => {
+    onScriptedEngage?.();
+  }, [onScriptedEngage]);
+
+  return (
+    <CreateChatLayout
+      empty={empty}
+      canvasError={null}
+      messages={messages}
+      bottomRef={bottomRef}
+      pending={pending}
+      autoFocus={false}
+      composerRef={composerRef}
+      scripted
+      scriptedDone={scriptedDone && !scriptedPlaying}
+      locked={scriptedPlaying}
+      onEngage={engage}
+      {...(onScriptedReplay ? { onReplay: onScriptedReplay } : {})}
+      {...(pending ? { onStop: () => undefined } : {})}
+      onSubmit={() => {
+        if (!scriptedPlaying) engage();
+      }}
+    />
+  );
+}
+
+function CreateChatLayout({
+  empty,
+  canvasError,
+  messages,
+  bottomRef,
+  pending,
+  onStop,
+  onSubmit,
+  autoFocus = true,
+  composerRef,
+  scripted = false,
+  scriptedDone = false,
+  locked = false,
+  onReplay,
+  onEngage,
+}: {
+  empty: boolean;
+  canvasError: string | null;
+  messages: Message[];
+  bottomRef: RefObject<HTMLDivElement | null>;
+  pending: boolean;
+  onStop?: () => void;
+  onSubmit: (
+    text: string,
+    attachments?: AIComposerAttachment[],
+    context?: ComposerContext,
+    trigger?: 'button' | 'enter' | 'programmatic',
+  ) => void;
+  autoFocus?: boolean;
+  composerRef?: Ref<AIComposerHandle>;
+  scripted?: boolean;
+  scriptedDone?: boolean;
+  locked?: boolean;
+  onReplay?: () => void;
+  onEngage?: () => void;
+}): ReactElement {
+  return (
     <div
       className='flex h-full min-w-0 flex-col bg-background'
       data-component='AgentCreateChatPanel'
+      {...(scripted
+        ? {
+            'data-scripted': 'true',
+            'data-testid': 'scripted-create-player',
+          }
+        : {})}
     >
-      <div className='flex h-11 flex-shrink-0 items-center px-5'>
+      <div className='flex h-11 flex-shrink-0 items-center justify-between gap-3 px-5'>
         <span className='text-[11px] font-medium uppercase tracking-[0.16em] text-muted-foreground'>
           Chat
         </span>
+        {scriptedDone ? (
+          <button
+            type='button'
+            onClick={onReplay}
+            className='text-[11px] font-medium text-foreground underline-offset-2 hover:underline'
+            data-testid='scripted-create-replay'
+            data-track-category='AGENT_ARTIFACT'
+            data-track-name='SCRIPTED_CREATE_REPLAY'
+          >
+            Replay
+          </button>
+        ) : null}
       </div>
       <div className='flex-1 overflow-y-auto'>
         {empty ? (
@@ -249,17 +397,37 @@ export function AgentCreateChatPanel({
           </p>
         ) : null}
       </div>
-      <div className='flex-shrink-0 px-3 pb-3 pt-1'>
+      <div
+        className='flex-shrink-0 px-3 pb-3 pt-1'
+        {...(scripted
+          ? {
+              onPointerDownCapture: onEngage,
+              onFocusCapture: onEngage,
+            }
+          : {})}
+        {...(locked
+          ? {
+              onKeyDownCapture: (event: KeyboardEvent<HTMLDivElement>) => {
+                if (event.key === 'Tab') return;
+                event.preventDefault();
+                event.stopPropagation();
+              },
+              onPasteCapture: (event: ClipboardEvent<HTMLDivElement>) => {
+                event.preventDefault();
+                event.stopPropagation();
+              },
+            }
+          : {})}
+      >
         <AIComposer
-          autoFocus
+          ref={composerRef}
+          autoFocus={autoFocus}
           placeholder='Ask anything'
           hideDisclaimer
           showAgentSelector={false}
-          pending={streaming || Boolean(disabled)}
-          {...(streaming ? { onStop: abortCurrentRequest } : {})}
-          onSubmit={(text, attachments, context, trigger) => {
-            void handleSubmit(text, attachments, context, trigger);
-          }}
+          pending={pending}
+          {...(onStop ? { onStop } : {})}
+          onSubmit={onSubmit}
         />
       </div>
     </div>
