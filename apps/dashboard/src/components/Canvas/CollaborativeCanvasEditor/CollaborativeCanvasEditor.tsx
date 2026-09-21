@@ -91,8 +91,8 @@ import { CanvasFilePanel } from '../CanvasFilePanel/CanvasFilePanel';
 import { useCanvasCommentEditorBridge } from '../useCanvasCommentEditorBridge';
 import { useCanvasTicketEditorBridge } from '../useCanvasTicketEditorBridge';
 import { CanvasTicketCreationFlow } from '../CanvasTicketCreationFlow/CanvasTicketCreationFlow';
+import { resolveCanvasPlaceholders, type CanvasPlaceholderSlots } from './canvasPlaceholders';
 
-const DEFAULT_CANVAS_PLACEHOLDER = "Write something, or press '/' for commands";
 const RECORDING_SUMMARY_EDITED_TEXT_COLOR = 'recording-summary-edited';
 const RECORDING_SUMMARY_TEXT_BLOCK_TYPES = new Set([
   'paragraph',
@@ -104,31 +104,16 @@ const RECORDING_SUMMARY_TEXT_BLOCK_TYPES = new Set([
   'heading',
 ]);
 
-/**
- * BlockNote exposes two distinct placeholder slots:
- *  - `emptyDocument` renders only while the document is a single empty block.
- *  - `default` renders on ANY focused empty block, including after the document
- *    already has content.
- * Assigning one string to both makes an onboarding hint reappear on every new
- * line, so the two slots are configured independently.
- *
- * A caller that passes only `placeholder` keeps the historical behaviour of one
- * string in both slots; `blockPlaceholder` has to be passed explicitly (`''` to
- * show nothing) to opt into the split.
- */
-const buildCanvasDictionary = (emptyDocument: string, blockPlaceholder: string): typeof en => ({
+const buildCanvasDictionary = (slots: CanvasPlaceholderSlots): typeof en => ({
   ...en,
   placeholders: {
     ...en.placeholders,
-    default: blockPlaceholder,
-    emptyDocument,
+    default: slots.default,
+    emptyDocument: slots.emptyDocument,
   },
 });
 
-const canvasDictionary = buildCanvasDictionary(
-  DEFAULT_CANVAS_PLACEHOLDER,
-  DEFAULT_CANVAS_PLACEHOLDER,
-);
+const canvasDictionary = buildCanvasDictionary(resolveCanvasPlaceholders());
 
 interface CollaborativeCanvasEditorProps {
   canvasId: string;
@@ -258,10 +243,7 @@ export const CollaborativeCanvasEditor = forwardRef<
       () =>
         placeholder === undefined && blockPlaceholder === undefined
           ? canvasDictionary
-          : buildCanvasDictionary(
-              placeholder ?? DEFAULT_CANVAS_PLACEHOLDER,
-              blockPlaceholder ?? placeholder ?? DEFAULT_CANVAS_PLACEHOLDER,
-            ),
+          : buildCanvasDictionary(resolveCanvasPlaceholders(placeholder, blockPlaceholder)),
       [placeholder, blockPlaceholder],
     );
 
