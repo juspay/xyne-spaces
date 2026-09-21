@@ -22,6 +22,10 @@ export const OPTIMIZATIONS = {
     summary: "auto-continue only when the reply is intent-only or reads as unfinished, not merely 'did not answer'",
     defaultOn: false,
   },
+  jev_result_sift: {
+    summary: "large list-shaped results from retrieval tools are relevance-filtered against the user's request before reaching the model; the full result is always saved to a file first",
+    defaultOn: false,
+  },
   lean_palette: {
     summary: "with the open palette on, tools it admitted (not ones the agent was granted) stay hidden in the catalog — including write tools — and under a reads+writes palette the forced `spaces` wrapper is dropped since its tools are loadable directly",
     defaultOn: false,

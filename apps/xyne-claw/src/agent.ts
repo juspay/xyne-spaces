@@ -49,6 +49,7 @@ import { kickOffPrReviewRoom, registerLivePrRunContext, unregisterLivePrRunConte
 import { judgeRunSummary, recordJudgeOutcome, setJudgeDebugSink } from "./judge-backend.js";
 import { effectiveOptimizations, optEnabled } from "./optimizations.js";
 import { jevThreshold } from "./jev.js";
+import { pinRunTask } from "./run-context.js";
 import { assessAnswer, type AnswerAssessment } from "./jev-completeness.js";
 import { gcsUploadDebugRunWithRetries, gcsUploadDebugObject, gcsPutDebugIndex } from "./storage.js";
 import {
@@ -2625,6 +2626,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
     recorder?.record(kind, data, extras);
   };
   setJudgeDebugSink((kind, data) => pushDebugEvent(kind, data));
+  pinRunTask(task);
 
   /**
    * The single terminal path for a run's trace. Idempotent — the success path
