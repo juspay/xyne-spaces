@@ -2308,7 +2308,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                     }}
                     className={cn(
                       'rounded-[10px] border px-0 py-1 focus-visible:ring-0 min-h-[150px] transition-colors duration-150',
-                      'max-h-[280px] text-[14px] leading-[1.6] font-normal text-foreground',
+                      'max-h-[280px] text-[14px] !leading-[22.4px] font-normal text-foreground',
                       field.state.meta.errors.length > 0
                         ? '!border-destructive bg-destructive/5 px-2'
                         : '!border-transparent',

@@ -5379,5 +5379,5 @@ img.inline-emoji,
    trigger is h-7 (28px) for the rest of the product. */
 [data-ticket-context-row] button,
 [data-ticket-context-row] [role="button"] {
-  height: 34px;
+  height: 34px !important;
 }
