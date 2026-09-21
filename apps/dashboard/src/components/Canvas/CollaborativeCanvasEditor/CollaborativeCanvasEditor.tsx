@@ -104,23 +104,40 @@ const RECORDING_SUMMARY_TEXT_BLOCK_TYPES = new Set([
   'heading',
 ]);
 
-const buildCanvasDictionary = (placeholder: string): typeof en => ({
+/**
+ * BlockNote exposes two distinct placeholder slots:
+ *  - `emptyDocument` renders only while the document is a single empty block.
+ *  - `default` renders on ANY focused empty block, including after the document
+ *    already has content.
+ * Assigning one string to both makes an onboarding hint reappear on every new
+ * line, so the two slots are configured independently.
+ */
+const buildCanvasDictionary = (emptyDocument: string, blockPlaceholder: string): typeof en => ({
   ...en,
   placeholders: {
     ...en.placeholders,
-    default: placeholder,
-    emptyDocument: placeholder,
+    default: blockPlaceholder,
+    emptyDocument,
   },
 });
 
-const canvasDictionary = buildCanvasDictionary(DEFAULT_CANVAS_PLACEHOLDER);
+const canvasDictionary = buildCanvasDictionary(
+  DEFAULT_CANVAS_PLACEHOLDER,
+  DEFAULT_CANVAS_PLACEHOLDER,
+);
 
 interface CollaborativeCanvasEditorProps {
   canvasId: string;
   channelId?: string | undefined;
   title?: string | undefined;
   editable?: boolean;
+  /** Hint shown only while the canvas is still completely empty. */
   placeholder?: string;
+  /**
+   * Hint shown on a focused empty block once the canvas already has content.
+   * Pass an empty string to show nothing after the user has typed anything.
+   */
+  blockPlaceholder?: string;
   className?: string;
   onFileUpload?: (file: File) => Promise<string>;
   onChange?: (blocks: PartialBlock[]) => void;
@@ -158,6 +175,7 @@ export const CollaborativeCanvasEditor = forwardRef<
       title,
       editable = true,
       placeholder,
+      blockPlaceholder,
       className = '',
       onFileUpload,
       onChange,
@@ -232,8 +250,14 @@ export const CollaborativeCanvasEditor = forwardRef<
     const canMountEditor = shouldUseCollaboration && !!provider && !!fragment;
 
     const dictionary = useMemo(
-      () => (placeholder ? buildCanvasDictionary(placeholder) : canvasDictionary),
-      [placeholder],
+      () =>
+        placeholder === undefined && blockPlaceholder === undefined
+          ? canvasDictionary
+          : buildCanvasDictionary(
+              placeholder ?? DEFAULT_CANVAS_PLACEHOLDER,
+              blockPlaceholder ?? DEFAULT_CANVAS_PLACEHOLDER,
+            ),
+      [placeholder, blockPlaceholder],
     );
 
     const baseEditorOptions = {

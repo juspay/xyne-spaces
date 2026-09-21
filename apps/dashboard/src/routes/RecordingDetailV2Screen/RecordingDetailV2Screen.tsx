@@ -1694,6 +1694,7 @@ function NotesCanvas({ canvasId }: { canvasId: string }): ReactElement {
       title={canvas.title}
       editable={true}
       placeholder='Add your notes here, you can view the transcript live in the transcript tab'
+      blockPlaceholder=''
       className={`min-h-0 w-full flex-1 ${CANVAS_POPOVER_LAYER_CLASS}
         [&_.bn-side-menu]:!hidden
         [&_.thin-scrollbar]:!pt-2
@@ -1730,6 +1731,7 @@ function DetailedSummaryCanvas({ canvasId }: { canvasId: string }): ReactElement
       title={canvas.title}
       editable={true}
       placeholder='Detailed summary'
+      blockPlaceholder=''
       autoFocus={false}
       trackEditedRecordingSummaryBlocks={true}
       className={`w-full ${CANVAS_POPOVER_LAYER_CLASS}
