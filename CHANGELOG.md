@@ -1,3 +1,10 @@
+## [1.337.0-release-20260918.13](https://github.com/juspay/xyne-spaces/compare/v1.337.0-release-20260918.12...v1.337.0-release-20260918.13) (2026-09-21)
+
+
+### Features
+
+* added tooltip in include channel calls ([#2104](https://github.com/juspay/xyne-spaces/issues/2104)) ([782447e](https://github.com/juspay/xyne-spaces/commit/782447e62753b7534f2aa7cd65fe50ba4f37fbdc))
+
 ## [1.337.0-release-20260918.12](https://github.com/juspay/xyne-spaces/compare/v1.337.0-release-20260918.11...v1.337.0-release-20260918.12) (2026-09-20)
 
 
