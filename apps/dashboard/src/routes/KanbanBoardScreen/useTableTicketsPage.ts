@@ -54,6 +54,7 @@ const rowMatchesGroup = (
   if (groupBy === 'assignee') {
     return groupKey === 'Unassigned' ? !row.assignedTo : row.assignedTo === groupKey;
   }
+  if (groupBy === 'createdBy') return row.createdBy === groupKey;
   if (groupBy === 'status') return (row.statusV2 as string) === groupKey;
   if (groupBy === 'priority') return (row.priority as string) === groupKey;
   return true;
