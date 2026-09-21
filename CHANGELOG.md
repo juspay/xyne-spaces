@@ -1,3 +1,18 @@
+## [1.359.0](https://github.com/juspay/xyne-spaces/compare/v1.358.0...v1.359.0) (2026-09-21)
+
+
+### Features
+
+* add Frequently Used emoji section to the reaction picker ([#2089](https://github.com/juspay/xyne-spaces/issues/2089)) ([3cc2ee2](https://github.com/juspay/xyne-spaces/commit/3cc2ee29a8022db66adf8a606d4d7a427726a30b))
+* added-agents-and-apps-tab-to-channel-info ([#2124](https://github.com/juspay/xyne-spaces/issues/2124)) ([4a1e00e](https://github.com/juspay/xyne-spaces/commit/4a1e00e9504bc030b5f1239bd6ea0fc0b6c7effc))
+* redesign create ticket modal to write-left, classify-right ([#2127](https://github.com/juspay/xyne-spaces/issues/2127)) ([eb4514e](https://github.com/juspay/xyne-spaces/commit/eb4514e6a2f113bd80605150eec454c488a72636))
+
+
+### Bug Fixes
+
+* dm call indicator remove ([#2122](https://github.com/juspay/xyne-spaces/issues/2122)) ([008cb2f](https://github.com/juspay/xyne-spaces/commit/008cb2f7f9a249f9e52b98a4caa62cc8375dee9e))
+* thread -d fix ([#2080](https://github.com/juspay/xyne-spaces/issues/2080)) ([251caeb](https://github.com/juspay/xyne-spaces/commit/251caebbf04526bc4923833ed99019b3f70999f5))
+
 ## [1.358.0](https://github.com/juspay/xyne-spaces/compare/v1.357.0...v1.358.0) (2026-09-21)
 
 
