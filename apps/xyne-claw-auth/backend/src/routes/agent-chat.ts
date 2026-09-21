@@ -2764,7 +2764,7 @@ router.get("/:slug/chat/:convId/messages", async (req: Request<{ slug: string; c
     // Fetch agent runs for this conversation to get tool invocations. Already
     // user-scoped via listByUser (admins use the conversation-wide view).
     const agentRuns = crossUser
-      ? await agentRunRepository.listByConversation(req.params.convId, userId)
+      ? await agentRunRepository.listByConversation(req.params.convId, callerMessageIds)
       : await agentRunRepository.listByUser(callerMessageIds, { conversationId: req.params.convId });
 
     // Strip internal GCS paths from attachment metadata before sending to client.
@@ -2998,7 +2998,7 @@ router.get("/:slug/chat/:convId/live", async (req: Request<{ slug: string; convI
     const messages = await chatMessageRepository.findByConversationAndAgent(convId, slug);
     const visible = crossUser ? messages : messages.filter((m) => liveUserAliases.includes(m.userId));
     const agentRuns = crossUser
-      ? await agentRunRepository.listByConversation(convId, userId)
+      ? await agentRunRepository.listByConversation(convId, liveUserAliases)
       : await agentRunRepository.listByUser(liveUserAliases, { conversationId: convId });
 
     // Pair completed runs to assistant messages by chronological index — same
@@ -3223,7 +3223,7 @@ router.get("/:slug/chat/:convId/debug", async (req: Request<{ slug: string; conv
       // (past + live) instead of 404 until completion. Flows through the SAME
       // per-user ACL/redaction below via each synth run's data.userId.
       const inProgressRuns = hasElevatedDebugAccess
-        ? await agentRunRepository.listByConversation(req.params.convId, requesterId)
+        ? await agentRunRepository.listByConversation(req.params.convId, requesterAliases)
         : await agentRunRepository.listByUser(requesterAliases, { conversationId: req.params.convId, agentSlug: req.params.slug });
       const active = inProgressRuns.filter((r) => !r.completedAt && Array.isArray(r.toolInvocations));
       if (active.length === 0) {
@@ -3359,7 +3359,7 @@ router.get("/:slug/chat/:convId/debug", async (req: Request<{ slug: string; conv
     }
     if (body.data) {
       const diagnosticRuns = hasElevatedDebugAccess
-        ? await agentRunRepository.listByConversation(req.params.convId, requesterId, { limit: 100 })
+        ? await agentRunRepository.listByConversation(req.params.convId, requesterAliases, { limit: 100 })
         : await agentRunRepository.listByUser(requesterAliases, {
             conversationId: req.params.convId,
             agentSlug: req.params.slug,
@@ -3623,7 +3623,7 @@ router.post("/:slug/chat/approve-action", async (req: Request<{ slug: string }>,
       ?? (typeof bodyConversationId === "string" && bodyConversationId ? bodyConversationId : null);
     const { userOwnsConversation } = await import("../lib/conversation-artifacts.js");
     const conversationOwned = approvedConversationId
-      ? (harnessRun ? true : await userOwnsConversation(approvedConversationId, callerUserId))
+      ? (harnessRun ? true : await userOwnsConversation(approvedConversationId, getRequesterAliases(req)))
       : false;
     const persistResolution = (resolution: "approved" | "declined") => {
       if (!approvedConversationId || !conversationOwned) return;

@@ -71,6 +71,9 @@ vi.mock("../services/storageService.js", () => ({
 
 vi.mock("../lib/spaces-db.js", () => ({
   getWorkspaceIdForUser: vi.fn(async (userId: string) => state.workspaces.get(userId) ?? null),
+  // artifact-apps.ts imports this for workspace-hinted identity resolution;
+  // the test has no workspace header semantics to exercise.
+  requestWorkspaceHint: vi.fn(() => undefined),
 }));
 
 vi.mock("../repositories/index.js", () => ({

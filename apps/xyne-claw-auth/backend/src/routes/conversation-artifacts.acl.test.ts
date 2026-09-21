@@ -28,9 +28,10 @@ vi.mock("../db.js", () => ({
       }),
     },
     chatMessage: {
-      findFirst: vi.fn(async (args: { where: { conversationId: string; userId: string } }) => {
+      findFirst: vi.fn(async (args: { where: { conversationId: string; userId: string | { in: string[] } } }) => {
+        const candidates = typeof args.where.userId === "string" ? [args.where.userId] : args.where.userId.in;
         const hit = state.messages.find(
-          (m) => m.conversationId === args.where.conversationId && m.userId === args.where.userId,
+          (m) => m.conversationId === args.where.conversationId && candidates.includes(m.userId),
         );
         return hit ? { id: "msg-1" } : null;
       }),

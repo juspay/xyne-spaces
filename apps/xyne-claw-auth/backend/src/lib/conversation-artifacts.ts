@@ -226,24 +226,28 @@ export async function setArtifactVersionRef(args: {
 
 export async function listConversationArtifacts(
   conversationId: string,
-  userId: string,
+  userIds: string | string[],
 ): Promise<ConversationArtifact[]> {
-  if (!conversationId || !userId) return [];
-  const owns = await userOwnsConversation(conversationId, userId);
+  const ids = Array.isArray(userIds) ? userIds : [userIds];
+  if (!conversationId || ids.length === 0 || ids.every((id) => !id)) return [];
+  const owns = await userOwnsConversation(conversationId, ids);
   return prisma.conversationArtifact.findMany({
     where: {
       conversationId,
       status: { not: "DELETED" },
-      ...(owns ? {} : { createdByUserId: userId }),
+      // Artifact/ownership rows may be keyed by EITHER id form of the user
+      // (canonical Claw id or the raw Spaces alias) — match all.
+      ...(owns ? {} : { createdByUserId: { in: ids } }),
     },
     orderBy: [{ pinned: "desc" }, { createdAt: "desc" }],
   });
 }
 
-export async function userOwnsConversation(conversationId: string, userId: string): Promise<boolean> {
-  if (!conversationId || !userId) return false;
+export async function userOwnsConversation(conversationId: string, userIds: string | string[]): Promise<boolean> {
+  const ids = Array.isArray(userIds) ? userIds : [userIds];
+  if (!conversationId || ids.length === 0 || ids.every((id) => !id)) return false;
   const message = await prisma.chatMessage.findFirst({
-    where: { conversationId, userId },
+    where: { conversationId, userId: { in: ids } },
     select: { id: true },
   });
   return message !== null;

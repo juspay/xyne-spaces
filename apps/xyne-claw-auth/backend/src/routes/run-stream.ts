@@ -4,6 +4,8 @@ import { randomUUID } from "node:crypto";
 import { CONFIG } from "../config.js";
 import { requireAuth, requireNoAccessToken, requireResultToken } from "../middleware/require-auth.js";
 import { matchesAuthenticatedUserId } from "../middleware/pin-user-id-param.js";
+import { resolveCanonicalUserIdOrSelf } from "../lib/users-jit.js";
+import { requestWorkspaceHint } from "../lib/spaces-db.js";
 import { getRequesterId, getAgentEditAccess, isClawAdmin } from "../middleware/agent-acl.js";
 import { prisma } from "../db.js";
 import { chatMessageRepository, agentRunRepository, chatAttachmentRepository, userAgentConfigRepository } from "../repositories/index.js";
@@ -414,7 +416,6 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
 
   try {
     const {
-      userId,
       userName,
       userEmail,
       task,
@@ -472,10 +473,14 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
       return;
     }
 
-    if (!userId || typeof userId !== "string") {
+    // Declared separately (typed `string`) so the canonicalization below can
+    // reassign it: a destructured `unknown` binding would lose its narrowing.
+    const rawUserId = (req.body as Record<string, unknown>)["userId"];
+    if (!rawUserId || typeof rawUserId !== "string") {
       res.status(400).json({ success: false, error: "userId is required" });
       return;
     }
+    let userId: string = rawUserId;
 
     if (studioMode !== undefined && studioMode !== "design") {
       res.status(400).json({ success: false, error: "Unknown studioMode" });
@@ -618,6 +623,15 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
       res.status(403).json({ success: false, error: "Body userId does not match authenticated session" });
       return;
     }
+    // Canonicalize once: everything downstream — ACL checks (isClawAdmin,
+    // getAgentEditAccess), user-agent config, local-harness device lookup and
+    // session-token minting, and every persisted chat/run/attachment row —
+    // keys on Claw's canonical user id. The verified session header already
+    // carries it; an S2S caller that pinned only the raw alias is resolved
+    // through the identity ladder (fail-open to the supplied id).
+    userId = typeof sessionUserId === "string" && sessionUserId
+      ? sessionUserId
+      : await resolveCanonicalUserIdOrSelf(userId, requestWorkspaceHint(req));
 
     const slug = typeof agentSlug === "string" && agentSlug ? agentSlug : "assistant";
     const convId = typeof conversationId === "string" && conversationId ? conversationId : `chat-${randomUUID()}`;
