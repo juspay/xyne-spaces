@@ -1,3 +1,10 @@
+## [1.360.1](https://github.com/juspay/xyne-spaces/compare/v1.360.0...v1.360.1) (2026-09-21)
+
+
+### Bug Fixes
+
+* app ACL fix ([#1542](https://github.com/juspay/xyne-spaces/issues/1542)) ([a4982df](https://github.com/juspay/xyne-spaces/commit/a4982dfd9be69f7176c9dbbe6c4164adfdc3735e))
+
 ## [1.360.0](https://github.com/juspay/xyne-spaces/compare/v1.359.0...v1.360.0) (2026-09-21)
 
 
