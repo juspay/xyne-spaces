@@ -98,7 +98,7 @@ const kanbanTicketsPageArgsSchema = z.object({
     .nullable(),
   groupBy: z
     .union([
-      z.enum(['none', 'assignee', 'status', 'priority']),
+      z.enum(['none', 'assignee', 'createdBy', 'status', 'priority']),
       z.object({
         type: z.literal('formField'),
         fieldId: z.string(),
@@ -489,6 +489,8 @@ const applyKanbanTicketPageConditions = (
       groupKey === 'Unassigned'
         ? query.where('assignedTo', 'IS', null)
         : query.where('assignedTo', groupKey);
+  } else if (groupBy === 'createdBy' && groupKey) {
+    query = query.where('createdBy', groupKey);
   } else if (groupBy === 'status' && groupKey) {
     query = query.where('statusV2', groupKey as TicketStatusV2);
   } else if (groupBy === 'priority' && groupKey) {
@@ -2421,6 +2423,7 @@ export const queries: AnyQueryRegistry = defineQueries({
   ticketByIdV2: defineQuery(z.object({ ticketId: z.string() }), ({ args: { ticketId } }) => {
     return zql.tickets
       .where('id', ticketId)
+      .related('ticketDescription')
       .related('project')
       .related('tagMappings')
       .related('assignments', a => a.related('role'))
@@ -2451,6 +2454,7 @@ export const queries: AnyQueryRegistry = defineQueries({
   ticketDetailsByIdV2: defineQuery(z.object({ ticketId: z.string() }), ({ args: { ticketId } }) => {
     return zql.tickets
       .where('id', ticketId)
+      .related('ticketDescription')
       .related('project')
       .related('tagMappings')
       .related('assignments', a => a.related('role'))
@@ -2492,6 +2496,7 @@ export const queries: AnyQueryRegistry = defineQueries({
     return zql.tickets
       .where('xyneId', xyneId)
       .where('workspaceId', workspaceId)
+      .related('ticketDescription')
       .related('project')
       .related('tagMappings')
       .related('referencesOut', (ref) => ref.related('targetTicket'))

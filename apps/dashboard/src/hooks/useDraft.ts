@@ -11,7 +11,11 @@ import {
   generateDocumentThumbnail,
   isPreviewableDocument,
 } from '../services/documentThumbnailService';
-import { isHeicAttachment, sniffHeicFile } from '../services/heicAttachmentService';
+import {
+  convertHeicFileWithDimensions,
+  isHeicAttachment,
+  sniffHeicFile,
+} from '../services/heicAttachmentService';
 import type { UploadedFile } from '../components/ui/files/Files.types';
 import { logger, Event } from '../utils/logger';
 
@@ -164,9 +168,16 @@ export function useDraftAttachments() {
           }
         }
         // Get dimensions for image files
-        else if (file.type.startsWith('image/')) {
+        else if (file.type.startsWith('image/') || isHeicAttachment(file.type, file.name)) {
           try {
-            const dims = await getImageDimensions(file);
+            let dims = await getImageDimensions(file);
+            if (!dims) {
+              const sniffed = await sniffHeicFile(file);
+              if (sniffed ?? isHeicAttachment(file.type, file.name)) {
+                const converted = await convertHeicFileWithDimensions(file);
+                dims = { width: converted.width, height: converted.height };
+              }
+            }
             if (dims) {
               width = dims.width;
               height = dims.height;

@@ -35,6 +35,7 @@ export type KanbanCountsViewMode = 'project' | 'board' | 'my-tickets';
 export type KanbanCountsGroupBy =
   | 'none'
   | 'assignee'
+  | 'createdBy'
   | 'status'
   | 'priority'
   | {

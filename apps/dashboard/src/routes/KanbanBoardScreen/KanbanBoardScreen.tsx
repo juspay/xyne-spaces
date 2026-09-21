@@ -621,9 +621,11 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
         const key =
           criterion === 'assignee'
             ? (ticket.assignedTo ?? 'Unassigned')
-            : criterion === 'status'
-              ? ticket.statusV2
-              : (ticket.priority ?? 'No Priority');
+            : criterion === 'createdBy'
+              ? ticket.createdBy || 'Unknown'
+              : criterion === 'status'
+                ? ticket.statusV2
+                : (ticket.priority ?? 'No Priority');
 
         (acc[key] ??= []).push(ticket);
         return acc;
@@ -1488,6 +1490,11 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
       {
         value: 'assignee' as const,
         label: 'Group by: Assignee',
+        icon: <User className='h-4 w-4' />,
+      },
+      {
+        value: 'createdBy' as const,
+        label: 'Group by: Created By',
         icon: <User className='h-4 w-4' />,
       },
       {
@@ -3899,6 +3906,11 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
           entityId = normalizedId;
           displayName = userNamesById.get(normalizedId) || displayName;
         }
+      } else if (groupBy === 'createdBy' && groupName !== 'Unknown') {
+        const normalizedId = groupName.replace(/^user:/, '');
+        entityType = 'user';
+        entityId = normalizedId;
+        displayName = userNamesById.get(normalizedId) || displayName;
       } else if (groupBy === 'priority' && groupName !== 'No Priority') {
         priority = groupName as TicketPriority;
         displayName = groupName.charAt(0).toUpperCase() + groupName.slice(1).toLowerCase();
@@ -3935,9 +3947,10 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
 
     const isAssigneeGrouping =
       groupBy === 'assignee' ||
+      groupBy === 'createdBy' ||
       (isFormFieldGroup(groupBy) && groupBy.fieldType === FormFieldType.USER);
     if (isAssigneeGrouping) {
-      const isUnassigned = (key: string): boolean => key === 'Unassigned';
+      const isUnassigned = (key: string): boolean => key === 'Unassigned' || key === 'Unknown';
       mapped.sort((a, b) => {
         if (isUnassigned(a.key) !== isUnassigned(b.key)) return isUnassigned(a.key) ? 1 : -1;
         return a.displayName.localeCompare(b.displayName, undefined, { sensitivity: 'base' });
@@ -5085,6 +5098,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                     pageSize={groupBy === 'none' ? 50 : 20}
                     totalCount={group.count}
                     internalScroll={groupBy !== 'none'}
+                    onTicketOpen={ticket => handleTicketClick({} as React.MouseEvent, ticket)}
                     scrollElement={tableScrollElement}
                     visibleColumns={tableVisibleColumns}
                     isComfortView={isComfortView}
@@ -5252,7 +5266,9 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                                     status: col.status,
                                     stageName: col.stageName,
                                     assignee:
-                                      group.entityType === 'user' && group.entityId
+                                      groupBy !== 'createdBy' &&
+                                      group.entityType === 'user' &&
+                                      group.entityId
                                         ? { type: 'assigneeTo', value: group.entityId }
                                         : group.entityType === 'group' && group.entityId
                                           ? { type: 'userGroup', value: group.entityId }

@@ -4,7 +4,6 @@ import { QueryOptions } from '@/types/database';
 import { vespaQueue } from '@/queues/vespaQueue';
 import { messageSchema } from '@/vespa/src/types';
 import { logger } from '@/utils/logger';
-import { websocketService } from '@/services/websocketService';
 
 export interface CreateConversationInput {
   conversationId?: string; // Optional - for custom IDs (e.g., showInChannel child conversations)
@@ -549,11 +548,8 @@ export class ConversationRepository extends BaseRepository<Conversation, CreateC
       })
     ]);
 
-    if (movedConversations.count > 0) {
-      websocketService.broadcastLabelUnreadCountsUpdate(sourceChannelId);
-      websocketService.broadcastLabelUnreadCountsUpdate(targetChannelId);
-    }
-
+    // Note: the label-unread broadcast lives in the service layer (groupDmParticipantService), not here — a
+    // repository must not depend on websocketService (that inverted dependency created a module-load cycle).
     return movedConversations.count;
   }
 
