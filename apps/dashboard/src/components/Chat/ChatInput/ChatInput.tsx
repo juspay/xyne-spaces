@@ -1399,7 +1399,10 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
                         if (drafts.length >= 2) {
                           setBulkParentTitle(drafts[0]?.title ?? '');
                           setBulkSubTitles(drafts.slice(1).map(d => d.title));
-                          setBulkDescriptions(drafts.map(d => d.description));
+                          setBulkDescriptions([
+                            description || '',
+                            ...drafts.slice(1).map(d => d.description),
+                          ]);
                           // The composer keeps its content until the tickets
                           // actually exist: handleTicketCreated clears it, so
                           // cancelling the modal leaves the draft untouched.

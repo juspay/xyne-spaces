@@ -605,16 +605,21 @@ export const BulkCreateTicketsModal: React.FC<BulkCreateTicketsModalProps> = ({
                       )}
                     </div>
 
-                    {/* Description */}
-                    <div className='px-2 min-w-0'>
-                      <input
+                    {/* Description — a textarea, not an input: an input strips
+                        line breaks from its value, so a multi-line description
+                        would both render as one run-on line and lose its
+                        blank lines the moment the field was edited. */}
+                    <div className='px-2 min-w-0 py-1'>
+                      <textarea
                         value={row.description}
                         onChange={e => updateRow(row.id, { description: e.target.value })}
                         placeholder='Description'
+                        rows={1}
                         data-track-category='Tickets'
                         data-track-name='BulkTicketDescription'
                         className={cn(
-                          'w-full min-w-0 h-[34px] bg-transparent border-none outline-none px-2 text-[12.5px]',
+                          'w-full min-w-0 min-h-[34px] max-h-[140px] resize-y overflow-auto',
+                          'bg-transparent border-none outline-none px-2 py-[7px] text-[12.5px] leading-[20px]',
                           'text-muted-foreground placeholder:text-muted-foreground/60 rounded-md',
                           'focus:bg-accent/40 focus:ring-1 focus:ring-primary/30',
                           isMain && 'font-medium',
