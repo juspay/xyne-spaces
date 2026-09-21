@@ -2,7 +2,7 @@ import { DatabaseClient } from '../client';
 import { resolveWorkspaceIdFromModel } from '@/database/tenant/workspace-utils';
 import { v4 as uuidv4 } from 'uuid';
 import { Prisma, type Call, type CallParticipant } from '@prisma/client';
-import { CallOrigin, CallStatus, CallType, InvitationResponse, MeetingStatus, MessageType, MessageArtifactStatus, TagMethod } from '@xyne/shared';
+import { CallOrigin, CallStatus, CallType, InvitationResponse, MeetingStatus, RingStatus, MessageType, MessageArtifactStatus, TagMethod } from '@xyne/shared';
 import { updateCallSystemMessageIfNeeded } from '@/zero/utils/systemMessagesUtils';
 import { repositories } from './index';
 import { logger } from '@/utils/logger';
@@ -76,6 +76,7 @@ export interface CreateCallParticipantInput {
   invitedBy: string;
   invitedAt: Date;
   response: InvitationResponse;
+  ringStatus?: RingStatus | null;
   meetingStatus?: MeetingStatus;
   respondedAt?: Date | null;
   joinedAt?: Date | null;
@@ -1670,6 +1671,7 @@ export class CallRepository {
             invitedBy: createdBy,
             invitedAt: now,
             response: isJoiningUser ? InvitationResponse.ACCEPTED : InvitationResponse.INVITED,
+            ringStatus: isJoiningUser ? null : RingStatus.CALLING,
             joinedAt: isJoiningUser ? now : null,
           },
         });

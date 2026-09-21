@@ -2964,6 +2964,7 @@ model CallParticipant {
   displayName  String?             // Name for external users
   email        String?             // Email for external invitees
   isExternal   Boolean             @default(false)  // True for external lobby users
+  ringStatus   String?             // CALLING | RINGING | BUSY — ring delivery state, only meaningful while response = INVITED
 
   // Relations
   call Call @relation(fields: [callId], references: [id])
