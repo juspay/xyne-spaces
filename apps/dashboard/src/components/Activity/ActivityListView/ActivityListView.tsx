@@ -13,6 +13,14 @@ import { useZero } from '../../../hooks/useZero';
 import { ActivityItem } from '../ActivityItem';
 import { isCanvasActivity } from '../isCanvasActivity';
 import { NofocusRefProvider } from '../ActivityItemCard';
+import { CodeBlockRenderContext } from '../../Chat/RenderMessageWithHTML/RenderMessageWithHTML';
+import { ExpandableMessageDisabledContext } from '../../Chat/ExpandableMessage/ExpandableMessage';
+
+const ACTIVITY_CODE_BLOCK_OPTIONS = {
+  collapseThreshold: 10,
+  previewLines: 10,
+  showExpandToggle: true,
+};
 import { GroupedTicketActivity } from '../GroupedTicketActivity';
 import * as Tabs from '@radix-ui/react-tabs';
 import * as Switch from '@radix-ui/react-switch';
@@ -899,13 +907,19 @@ const ActivityListView = (): ReactElement => {
                 // px wraps each row (not the scroller) and pb creates the 8px
                 // row gap — padding is used instead of margin so Virtuoso's
                 // item measurement includes it.
+                const row =
+                  item.type === 'single' ? (
+                    <ActivityItem activity={item.activity} isExpanded={isExpanded} />
+                  ) : (
+                    <GroupedTicketActivity activities={item.activities} isExpanded={isExpanded} />
+                  );
                 return (
                   <div className='px-3 pb-1.5'>
-                    {item.type === 'single' ? (
-                      <ActivityItem activity={item.activity} isExpanded={isExpanded} />
-                    ) : (
-                      <GroupedTicketActivity activities={item.activities} isExpanded={isExpanded} />
-                    )}
+                    <ExpandableMessageDisabledContext.Provider value={true}>
+                      <CodeBlockRenderContext.Provider value={ACTIVITY_CODE_BLOCK_OPTIONS}>
+                        {row}
+                      </CodeBlockRenderContext.Provider>
+                    </ExpandableMessageDisabledContext.Provider>
                   </div>
                 );
               }}
