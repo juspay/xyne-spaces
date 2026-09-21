@@ -1,3 +1,11 @@
+## [1.356.0](https://github.com/juspay/xyne-spaces/compare/v1.355.2...v1.356.0) (2026-09-21)
+
+
+### Features
+
+* added unassigned filter in desk filters ([#2110](https://github.com/juspay/xyne-spaces/issues/2110)) ([97d2875](https://github.com/juspay/xyne-spaces/commit/97d2875b665c534b30c733dce300feb5619894a1))
+* XYNE-RCA make RCA mandatory in fix PR descriptions ([#2019](https://github.com/juspay/xyne-spaces/issues/2019)) ([03ca0da](https://github.com/juspay/xyne-spaces/commit/03ca0dada33169570220820a8f4d75e6b6db96b0))
+
 ## [1.355.2](https://github.com/juspay/xyne-spaces/compare/v1.355.1...v1.355.2) (2026-09-21)
 
 
