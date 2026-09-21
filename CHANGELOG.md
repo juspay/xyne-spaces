@@ -1,3 +1,11 @@
+## [1.355.2](https://github.com/juspay/xyne-spaces/compare/v1.355.1...v1.355.2) (2026-09-21)
+
+
+### Bug Fixes
+
+* moving automation test tases behing merge queue only ([#2040](https://github.com/juspay/xyne-spaces/issues/2040)) ([7d5500d](https://github.com/juspay/xyne-spaces/commit/7d5500d3fed71fc8a241aa4abc5709b9be483e23))
+* Store Released Canvas Content in GCS ([#2009](https://github.com/juspay/xyne-spaces/issues/2009)) ([2605cb1](https://github.com/juspay/xyne-spaces/commit/2605cb10a8243030e695199d8f35474c8e51007f))
+
 ## [1.355.1](https://github.com/juspay/xyne-spaces/compare/v1.355.0...v1.355.1) (2026-09-21)
 
 
