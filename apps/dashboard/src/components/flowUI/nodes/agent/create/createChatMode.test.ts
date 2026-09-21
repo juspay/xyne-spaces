@@ -1,12 +1,25 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
+  createModeQuery,
   decideCreateCanvasAction,
   parseCreateChatAction,
   stripCreateMarkers,
 } from './createChatMode.ts';
 
 void describe('parseCreateChatAction', () => {
+  void it('puts the user text first so recents are not the system prompt', () => {
+    const q = createModeQuery('fdaas', {
+      empty: true,
+      name: '',
+      slug: '',
+      description: '',
+      instructions: '',
+    });
+    assert.equal(q.startsWith('fdaas\n'), true);
+    assert.match(q, /XYNE_CREATE_DRAFT/);
+  });
+
   void it('strips draft markers from the visible reply', () => {
     const parsed = parseCreateChatAction(
       'I will fill the canvas now.\nXYNE_CREATE_DRAFT: standup scribe that posts Slack summaries',

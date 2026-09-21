@@ -71,7 +71,7 @@ Rules:
 }
 
 export function createModeQuery(userText: string, snapshot: CreateCanvasSnapshot): string {
-  return `${buildCreateModeInstructions(snapshot)}\n\nUser message:\n${userText}`;
+  return `${userText}\n\n---\n${buildCreateModeInstructions(snapshot)}`;
 }
 
 export function stripCreateMarkers(text: string, streaming = false): string {

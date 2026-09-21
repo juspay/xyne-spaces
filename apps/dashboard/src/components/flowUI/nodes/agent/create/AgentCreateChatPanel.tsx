@@ -147,9 +147,11 @@ export function AgentCreateChatPanel({
         undefined,
         undefined,
         undefined,
-        context || trigger
-          ? { ...(context ? toStreamOverrides(context) : {}), ...(trigger && { trigger }) }
-          : undefined,
+        {
+          ...(context ? toStreamOverrides(context) : {}),
+          ...(trigger ? { trigger } : {}),
+          instant: true,
+        },
       );
     },
     [disabled, messages, streaming, submitQuery],
