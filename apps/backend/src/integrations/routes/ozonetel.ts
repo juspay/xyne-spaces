@@ -40,7 +40,7 @@ const saveConfigSchema = z.object({
     createTicketOnProgressive: z.boolean().optional(),
     createTicketOnPredictive: z.boolean().optional(),
     ticketSubjectTemplate: z.string().optional(),
-    customerPhoneFieldName: z.string().optional(),
+    phoneFieldNames: z.array(z.string()).optional(),
   }).optional(),
 });
 
@@ -182,7 +182,7 @@ router.get('/toolbar', supportReadAuth, async (req: Request, res: Response): Pro
   res.json({
     configured: !!cfg,
     toolbarUrl: cfg?.toolbarUrl ?? null,
-    customerPhoneFieldName: cfg?.ticketRules?.customerPhoneFieldName ?? null,
+    phoneFieldNames: cfg?.ticketRules?.phoneFieldNames ?? [],
   });
 });
 
