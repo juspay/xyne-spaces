@@ -28,6 +28,7 @@ import { signOAuthState, verifyOAuthState, OAuthStateError } from "../lib/oauth-
 import { defaultOAuthReturn, resolveOAuthReturn, withOAuthResult } from "../lib/oauth-return.js";
 import { oauthLimiter } from "../middleware/rate-limiters.js";
 import { pinUserIdParam } from "../middleware/pin-user-id-param.js";
+import { resolveCanonicalUserIdOrSelf } from "../lib/users-jit.js";
 import { type OAuthTokenProvider, TokenRefreshError } from "../lib/oauth-token-endpoint.js";
 import { asyncHandler, ok, badRequest, forbidden, HttpError } from "../lib/http.js";
 
@@ -168,8 +169,12 @@ router.post("/:userId/oauth/egnyte/authorize", oauthLimiter, asyncHandler(async 
   const { clientId } = getEgnyteCredentials();
   const callbackUri = redirectUri ?? defaultCallbackUri();
 
+  // Sign the CANONICAL Claw id into the state: connection rows are keyed by
+  // it, while the URL param may carry the user's raw Spaces alias.
+  const canonicalUserId = await resolveCanonicalUserIdOrSelf(userId);
+
   // Encode the domain into the signed state so the callback can use it.
-  const state = signOAuthState(userId, { domain: normalizedDomain, redirectUri: callbackUri, returnTo: resolveOAuthReturn(returnTo) });
+  const state = signOAuthState(canonicalUserId, { domain: normalizedDomain, redirectUri: callbackUri, returnTo: resolveOAuthReturn(returnTo) });
 
   const authUrl = new URL(egnyteAuthUrl(normalizedDomain));
   authUrl.searchParams.set("client_id", clientId);
@@ -202,7 +207,11 @@ router.post("/:userId/oauth/egnyte/callback", asyncHandler(async (req: Request<{
     throw badRequest(`Invalid state (${reason})`);
   }
 
-  if (verified.userId !== userId) {
+  // Both sides canonical: the state was signed with the canonical Claw id
+  // (older states may carry the raw alias); the URL param may be either form.
+  const canonicalUserId = await resolveCanonicalUserIdOrSelf(userId);
+  const stateUserId = await resolveCanonicalUserIdOrSelf(verified.userId);
+  if (stateUserId !== canonicalUserId) {
     throw forbidden("State userId mismatch");
   }
 
@@ -213,7 +222,7 @@ router.post("/:userId/oauth/egnyte/callback", asyncHandler(async (req: Request<{
     throw badRequest("domain missing from state");
   }
 
-  const result = await exchangeAndStore(userId, code, domain, redirectUri);
+  const result = await exchangeAndStore(canonicalUserId, code, domain, redirectUri);
   if (!result.ok) {
     throw new HttpError(result.status, result.error);
   }
@@ -262,7 +271,6 @@ egnyteCallbackRouter.get("/egnyte/callback", async (req: Request, res: Response)
       return;
     }
 
-    const userId = verified.userId;
     frontendUrl = resolveOAuthReturn(verified.extra?.["returnTo"]);
     const domain = verified.extra?.["domain"] as string | undefined;
     const redirectUri = (verified.extra?.["redirectUri"] as string | undefined) ?? defaultCallbackUri();
@@ -271,6 +279,10 @@ egnyteCallbackRouter.get("/egnyte/callback", async (req: Request, res: Response)
       res.redirect(withOAuthResult(frontendUrl, "egnyte_error", "missing_domain_in_state"));
       return;
     }
+
+    // Older states may carry the raw Spaces alias — resolve so the user
+    // check and the token row both key on the canonical Claw id.
+    const userId = await resolveCanonicalUserIdOrSelf(verified.userId);
 
     const user = await prisma.user.findUnique({ where: { id: userId } });
     if (!user) {

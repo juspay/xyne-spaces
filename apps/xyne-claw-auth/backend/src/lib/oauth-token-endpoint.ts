@@ -22,6 +22,7 @@ import { encrypt, decrypt } from "../crypto.js";
 import { CONFIG } from "../config.js";
 import { pinUserIdParam } from "../middleware/pin-user-id-param.js";
 import { requireSessionTokenForUserParam } from "../middleware/require-session-token.js";
+import { resolveCanonicalUserIdOrSelf } from "./users-jit.js";
 import { createLogger } from "../logger.js";
 import { agentRunRepository } from "../repositories/index.js";
 
@@ -148,6 +149,16 @@ export function buildOAuthTokenRouter(providers: OAuthTokenProvider[]): Router {
             return;
           }
           throw err;
+        }
+
+        // The URL param is pinned and session-token-verified, but may be the
+        // caller's raw Spaces alias while the connection row is keyed by the
+        // canonical Claw id — resolve and retry once (fail-open to verbatim).
+        if (!creds) {
+          const canonicalId = await resolveCanonicalUserIdOrSelf(userId).catch(() => userId);
+          if (canonicalId !== userId) {
+            creds = await resolveFreshOAuthCreds(provider, canonicalId);
+          }
         }
 
         if (!creds) {

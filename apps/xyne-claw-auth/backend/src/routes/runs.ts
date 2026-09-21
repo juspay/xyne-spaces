@@ -2,6 +2,8 @@ import { Router, type Request, type Response } from "express";
 import { errMsg } from "../lib/errors.js";
 import { agentRunRepository, agentRepository } from "../repositories/index.js";
 import { getRequesterId, getOrgId, getAgentEditAccess, isClawAdmin , requireRequester} from "../middleware/agent-acl.js";
+import { getRequesterAliases, matchesAuthenticatedUserId } from "../middleware/pin-user-id-param.js";
+import { userIdAliasesFor } from "../lib/users-jit.js";
 import { requireS2S } from "../middleware/require-auth.js";
 import { renderClaudeCodeJsonl, renderMarkdown, renderClaudeProjectZip, type SessionExportRun } from "../lib/session-export.js";
 import { prisma } from "../db.js";
@@ -60,7 +62,7 @@ router.get("/", asyncHandler(async (req: Request, res: Response) => {
       log.warn(`[runs/all] denied userId=${userId} agentSlug=${agentSlug} orgId=${orgId}`);
       throw forbidden("Only admins, the owner, or contributors can view all runs for this agent");
     }
-    const allRuns = await agentRunRepository.listAllForAgent(agentSlug, access.agent.orgId, userId, {
+    const allRuns = await agentRunRepository.listAllForAgent(agentSlug, access.agent.orgId, getRequesterAliases(req), {
       ...(status ? { status } : {}),
       ...(conversationId ? { conversationId } : {}),
       limit,
@@ -69,7 +71,9 @@ router.get("/", asyncHandler(async (req: Request, res: Response) => {
     return;
   }
 
-  const runs = await agentRunRepository.listByUser(userId, {
+  // Rows may be keyed by either verified id form of this caller (canonical
+  // Claw id or the workspace's raw Spaces id) — match both.
+  const runs = await agentRunRepository.listByUser(getRequesterAliases(req), {
     ...(status ? { status } : {}),
     ...(conversationId ? { conversationId } : {}),
     ...(agentSlug ? { agentSlug } : {}),
@@ -103,7 +107,7 @@ router.get("/light", asyncHandler(async (req: Request, res: Response) => {
   const status = typeof req.query["status"] === "string" ? req.query["status"] : undefined;
   const agentSlug = typeof req.query["agentSlug"] === "string" ? req.query["agentSlug"] : undefined;
   const conversationId = typeof req.query["conversationId"] === "string" ? req.query["conversationId"] : undefined;
-  const runs = await agentRunRepository.listByUserLight(userId, {
+  const runs = await agentRunRepository.listByUserLight(getRequesterAliases(req), {
     since,
     limit,
     ...(status ? { status } : {}),
@@ -138,7 +142,7 @@ router.get("/search", asyncHandler(async (req: Request, res: Response) => {
   const limit = typeof req.query["limit"] === "string"
     ? Math.min(Math.max(parseInt(req.query["limit"], 10) || 20, 1), 50)
     : 20;
-  const rows = await agentRunRepository.searchByUser(userId, q, {
+  const rows = await agentRunRepository.searchByUser(getRequesterAliases(req), q, {
     ...(agentSlug ? { agentSlug } : {}),
     limit,
   });
@@ -314,11 +318,14 @@ router.get("/paged", asyncHandler(async (req: Request, res: Response) => {
   // the same ACL) live in the repository's shared buildRunListWhere, so the two
   // queries below cannot disagree about who may see what.
   const filter = {
-    requesterId,
+    requesterIds: getRequesterAliases(req),
     scope,
     ...(orgId ? { orgId } : {}),
     ...(agentSlug ? { agentSlug } : {}),
-    ...(userIdFilter ? { userId: userIdFilter } : {}),
+    // The admin's target-user filter must match rows keyed by ANY of that
+    // user's id forms (canonical + raw workspace aliases), not just the form
+    // the admin typed.
+    ...(userIdFilter ? { userIds: await userIdAliasesFor(userIdFilter) } : {}),
     ...(status ? { status } : {}),
     ...(sessionIdPrefix ? { sessionIdPrefix } : {}),
     ...(admin ? { admin: true } : {}),
@@ -438,7 +445,7 @@ router.get("/session/export", async (req: Request, res: Response) => {
     }
 
     // Fetch all runs in the session, oldest first. listByUser already enforces userId ownership.
-    const runs = await agentRunRepository.listByUser(userId, { conversationId, agentSlug, limit: 200 });
+    const runs = await agentRunRepository.listByUser(getRequesterAliases(req), { conversationId, agentSlug, limit: 200 });
     if (runs.length === 0) {
       res.status(404).json({ success: false, error: "No runs found for this session" });
       return;
@@ -538,7 +545,8 @@ router.get("/:sessionId", async (req: Request<{ sessionId: string }>, res: Respo
       res.status(404).json({ success: false, error: "Run not found" });
       return;
     }
-    if (run.userId !== userId) {
+    // The row may be keyed by either verified id form of this caller.
+    if (!matchesAuthenticatedUserId(req, run.userId)) {
       res.status(403).json({ success: false, error: "Forbidden" });
       return;
     }
@@ -564,7 +572,7 @@ router.post("/:sessionId/share", async (req: Request<{ sessionId: string }>, res
       res.status(404).json({ success: false, error: "Run not found" });
       return;
     }
-    if (run.userId !== requesterId) {
+    if (!matchesAuthenticatedUserId(req, run.userId)) {
       res.status(403).json({ success: false, error: "Forbidden" });
       return;
     }
@@ -711,7 +719,7 @@ router.post(
       }
       const result = await agentRunRepository.rateByChatMessageId(
         req.params.chatMessageId,
-        userId,
+        getRequesterAliases(req),
         rating,
         comment ?? null,
       );
@@ -745,11 +753,11 @@ router.post("/:sessionId/rate", async (req: Request<{ sessionId: string }>, res:
       res.status(404).json({ success: false, error: "Run not found" });
       return;
     }
-    if (run.userId !== userId) {
+    if (!matchesAuthenticatedUserId(req, run.userId)) {
       res.status(403).json({ success: false, error: "Forbidden" });
       return;
     }
-    await agentRunRepository.rate(req.params.sessionId, userId, rating, comment ?? null);
+    await agentRunRepository.rate(req.params.sessionId, getRequesterAliases(req), rating, comment ?? null);
     res.json({ success: true });
   } catch (err) {
     log.error("[runs] rate error:", err);
