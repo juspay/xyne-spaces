@@ -3712,8 +3712,8 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
   return (
     <div className='mx-auto px-[20px] pb-[72px] h-full overflow-auto no-scrollbar bg-background'>
       {expandedView && (
-        <div className='flex items-center justify-between pt-[20px] mb-6'>
-          <div className='flex items-center gap-x-1/2'>
+        <div className='flex items-center justify-between pt-[4px]'>
+          <div className='-ml-[6px] flex items-center gap-x-0.5'>
             {!hideBackNav && (
               <>
                 <button
@@ -3945,7 +3945,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
         )}
 
         {/* Title Section */}
-        <div className='flex items-start gap-3 pt-[22px]'>
+        <div className={cn('flex items-start gap-3', expandedView ? 'pt-[8px]' : 'pt-[24px]')}>
           {editingTitle ? (
             <div className='flex-1 flex items-center gap-2'>
               <input
@@ -3987,7 +3987,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
           )}
         </div>
 
-        <div className='mt-[14px] -mx-[5px] flex flex-wrap items-center gap-2 text-[13.5px] text-muted-foreground'>
+        <div className='mt-[6px] -mx-[5px] flex flex-wrap items-center gap-2 text-[13.5px] text-muted-foreground'>
           <span className='px-[5px]'>
             Created {formatTimestamp(ticket.createdAt)} by{' '}
             {getUserDisplayName(createdByUser) || 'Merchant User'}
@@ -4037,7 +4037,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
           )}
         </div>
         {/* Ticket MetaData Key Value */}
-        <div className='mt-[14px] mb-[18px] flex w-full flex-wrap items-center gap-2'>
+        <div className='mt-[6px] mb-[8px] flex w-full flex-wrap items-center gap-2'>
           <DetailChip
             className='pl-2 pr-[11px]'
             data-testid='ticket-detail-status-selector'
