@@ -1292,13 +1292,59 @@ const BoardEditScreen = ({
       });
 
       // Get custom fields
-      const customFields = fields.filter(f => !DEFAULT_TICKET_FIELDS.some(df => df.id === f.id));
+      let customFields = fields
+        .filter(f => !DEFAULT_TICKET_FIELDS.some(df => df.id === f.id))
+        .map(f => ({ ...f }));
 
       // Get existing metadata
       const existingMetadata = boardMetadata;
 
       let nextCustomFieldsFormId = customFieldsFormId;
-      const existingFormId = customFieldsFormId;
+      let existingFormId = customFieldsFormId;
+
+      // Release boards all share ONE seeded, workspace-wide form, so editing custom
+      // fields here would otherwise change every other release board's fields too.
+      // Ask the server to give this board its own copy first; it is a no-op (and returns
+      // the same id) for a board whose form is already private.
+      if (existingFormId && boardId) {
+        try {
+          const detachResponse = await apiInstance.post<{
+            formId: string | null;
+            detached: boolean;
+            fields?: Array<{ fieldName: string; fieldId: string; membershipId: string | null }>;
+          }>(`/boards/${boardId}/custom-fields/detach-shared-form`, {});
+          const detachedFormId = detachResponse.data?.formId;
+          if (detachedFormId) {
+            existingFormId = detachedFormId;
+            nextCustomFieldsFormId = detachedFormId;
+          }
+          // The ids being edited belong to the shared form; after a fork they mean nothing
+          // on the board's own form, so re-key every carried-over field by name. Fields the
+          // user just added aren't on the fork and keep their freshly generated ids.
+          if (detachResponse.data?.detached && detachResponse.data.fields?.length) {
+            const forkedByName = new Map(
+              detachResponse.data.fields.map(field => [field.fieldName, field]),
+            );
+            customFields = customFields.map(field => {
+              const forked = forkedByName.get(field.name);
+              if (!forked) return field;
+              const { membershipId: _previousMembershipId, ...rest } = field;
+              return {
+                ...rest,
+                id: forked.fieldId,
+                ...(forked.membershipId ? { membershipId: forked.membershipId } : {}),
+              };
+            });
+          }
+        } catch {
+          toast.error('Failed to isolate this board\u2019s custom fields', {
+            description:
+              'These fields are shared with other boards, so the change was not saved. Please retry.',
+            duration: 5000,
+          });
+          return;
+        }
+      }
 
       // Create or update form for custom fields
       // Update if there are custom fields OR if there's an existing form (to handle deletions)
