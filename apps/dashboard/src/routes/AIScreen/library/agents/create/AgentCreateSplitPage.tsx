@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState, type ReactElement } from 'react';
+import { useCallback, useMemo, useState, type ReactElement } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { Panel, ResizableGroup, Separator } from '@/components/ui/Resizable/Resizable';
 import { useAuth } from '@/hooks/useAuth';
@@ -24,10 +24,7 @@ import {
   nameFromGeneratedPrompt,
   nameFromIntent,
 } from '@/components/flowUI/nodes/agent/create/canvasFromIdentity';
-import {
-  planDescribe,
-  type CreateTurnField,
-} from '@/components/flowUI/nodes/agent/create/classifyCreateTurn';
+import { type CreateTurnField } from '@/components/flowUI/nodes/agent/create/classifyCreateTurn';
 import {
   decideCreateCanvasAction,
   type CreateCanvasSnapshot,
@@ -82,7 +79,6 @@ export function AgentCreateSplitPage(): ReactElement {
   const [discardOpen, setDiscardOpen] = useState(false);
   const [createdSlug, setCreatedSlug] = useState<string | null>(null);
   const [skeletonIdentity, setSkeletonIdentity] = useState(false);
-  const intakeRef = useRef<{ seed: string; rounds: number } | null>(null);
 
   const slug = effectiveSlug({
     name: createForm.form.name,
@@ -115,33 +111,21 @@ export function AgentCreateSplitPage(): ReactElement {
   const onTurnComplete = useCallback(
     async (turn: CreateChatTurn): Promise<void> => {
       const canvasEmpty = canvasIsEmpty(createForm.form);
-      const pending = intakeRef.current;
-      let userText = turn.userText;
-      if (pending && canvasEmpty) {
-        userText = `${pending.seed}\n${turn.userText}`.trim();
-      }
+      const userText = turn.userText;
 
       const action = decideCreateCanvasAction({
         userText,
         canvasEmpty,
-        intakePending: Boolean(pending && canvasEmpty),
         marker: turn.marker,
       });
 
       if (action.type === 'idle') {
-        if (canvasEmpty && (planDescribe(turn.userText) === 'ask' || pending)) {
-          intakeRef.current = {
-            seed: pending ? `${pending.seed}\n${turn.userText}`.trim() : turn.userText,
-            rounds: pending ? pending.rounds + 1 : 1,
-          };
-        }
         createForm.clearHighlights();
         createForm.setWritingField(null);
         setSkeletonIdentity(false);
         return;
       }
 
-      intakeRef.current = null;
       setCreateError(null);
       createForm.clearHighlights();
 
@@ -324,7 +308,6 @@ export function AgentCreateSplitPage(): ReactElement {
     setPhase('empty');
     setCreateError(null);
     setSkeletonIdentity(false);
-    intakeRef.current = null;
   }, [canvasDirty, resetFrom]);
 
   const footer = useMemo(
@@ -349,7 +332,6 @@ export function AgentCreateSplitPage(): ReactElement {
       onFormChange={patch => {
         createForm.patchForm(patch);
         if (phase === 'empty') setPhase('draft');
-        intakeRef.current = null;
       }}
       onFieldFocus={createForm.onFieldFocus}
       highlights={createForm.highlights}
@@ -401,7 +383,6 @@ export function AgentCreateSplitPage(): ReactElement {
           setPhase('empty');
           setCreateError(null);
           setSkeletonIdentity(false);
-          intakeRef.current = null;
         }}
       />
     </div>

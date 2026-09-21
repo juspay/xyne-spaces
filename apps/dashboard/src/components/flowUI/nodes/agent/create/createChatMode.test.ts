@@ -18,6 +18,8 @@ void describe('parseCreateChatAction', () => {
     });
     assert.equal(q.startsWith('fdaas\n'), true);
     assert.match(q, /XYNE_CREATE_DRAFT/);
+    assert.match(q, /standup bot/);
+    assert.match(q, /XYNE_CREATE_ASK/);
   });
 
   void it('strips draft markers from the visible reply', () => {
@@ -27,21 +29,27 @@ void describe('parseCreateChatAction', () => {
     assert.equal(parsed.visible, 'I will fill the canvas now.');
     assert.equal(parsed.draftIntent, 'standup scribe that posts Slack summaries');
     assert.equal(parsed.idle, false);
+    assert.equal(parsed.ask, false);
   });
 
   void it('treats gibberish without a marker as idle', () => {
     const parsed = parseCreateChatAction('Not sure what that means — want to describe an agent?');
     assert.equal(parsed.draftIntent, null);
     assert.equal(parsed.idle, false);
+    assert.equal(parsed.ask, false);
     assert.equal(stripCreateMarkers('fdaas').trim(), 'fdaas');
   });
 
-  void it('parses rename and idle markers', () => {
+  void it('parses rename, idle, and ask markers', () => {
     assert.equal(
       parseCreateChatAction('XYNE_CREATE_RENAME: Pulse Digest').renameTo,
       'Pulse Digest',
     );
     assert.equal(parseCreateChatAction('Sure.\nXYNE_CREATE_IDLE').idle, true);
+    const ask = parseCreateChatAction('Which tracker — Jira or Linear?\nXYNE_CREATE_ASK');
+    assert.equal(ask.ask, true);
+    assert.equal(ask.idle, true);
+    assert.equal(ask.draftIntent, null);
   });
 });
 
@@ -50,7 +58,6 @@ void describe('decideCreateCanvasAction', () => {
     const garbage = decideCreateCanvasAction({
       userText: 'fdaas',
       canvasEmpty: true,
-      intakePending: false,
       marker: parseCreateChatAction('Should I draft this?'),
     });
     assert.equal(garbage.type, 'idle');
@@ -58,51 +65,72 @@ void describe('decideCreateCanvasAction', () => {
     const hi = decideCreateCanvasAction({
       userText: 'hi',
       canvasEmpty: true,
-      intakePending: false,
       marker: parseCreateChatAction('Hi — the canvas on the right is the agent.\nXYNE_CREATE_IDLE'),
     });
     assert.equal(hi.type, 'idle');
   });
 
-  void it('keeps a thin describe idle unless the model emits a draft marker', () => {
-    const thin = decideCreateCanvasAction({
-      userText: 'make an agent',
+  void it('keeps ask-only turns idle so Create is not gated', () => {
+    const ask = decideCreateCanvasAction({
+      userText: 'build something that either files Jira or Linear tickets',
       canvasEmpty: true,
-      intakePending: false,
-      marker: parseCreateChatAction('Who is this for?\nXYNE_CREATE_IDLE'),
+      marker: parseCreateChatAction('Which tracker should it write to?\nXYNE_CREATE_ASK'),
     });
-    assert.equal(thin.type, 'idle');
-
-    const richNoMarker = decideCreateCanvasAction({
-      userText: 'Build a standup scribe that posts a Slack summary every morning.',
-      canvasEmpty: true,
-      intakePending: false,
-      marker: parseCreateChatAction('A few questions first: who is this for?'),
-    });
-    assert.equal(richNoMarker.type, 'idle');
+    assert.equal(ask.type, 'idle');
   });
 
-  void it('drafts when the model emits XYNE_CREATE_DRAFT', () => {
+  void it('drafts a thin job when the model emits XYNE_CREATE_DRAFT', () => {
     const action = decideCreateCanvasAction({
-      userText: 'Build a standup scribe that posts a Slack summary every morning.',
+      userText: 'standup bot',
       canvasEmpty: true,
-      intakePending: false,
       marker: parseCreateChatAction(
-        'Filling the canvas.\nXYNE_CREATE_DRAFT: standup scribe that posts a Slack summary every morning',
+        'Drafting a standup bot with reasonable defaults.\nXYNE_CREATE_DRAFT: standup bot',
       ),
     });
     assert.equal(action.type, 'draft');
     if (action.type === 'draft') {
-      assert.match(action.intent, /standup scribe/i);
-      assert.ok(action.fields.includes('systemPrompt'));
+      assert.equal(action.intent, 'standup bot');
+      assert.deepEqual(action.fields, ['name', 'slug', 'description', 'systemPrompt']);
     }
+  });
+
+  void it('does not fill tools unless the user named them', () => {
+    const unnamed = decideCreateCanvasAction({
+      userText: 'I wanna do A',
+      canvasEmpty: true,
+      marker: parseCreateChatAction('Drafting an agent for A.\nXYNE_CREATE_DRAFT: I wanna do A'),
+    });
+    assert.equal(unnamed.type, 'draft');
+    if (unnamed.type === 'draft') {
+      assert.deepEqual(unnamed.fields, ['name', 'slug', 'description', 'systemPrompt']);
+    }
+
+    const named = decideCreateCanvasAction({
+      userText: 'Build a standup scribe that posts a Slack summary every morning.',
+      canvasEmpty: true,
+      marker: parseCreateChatAction(
+        'Filling the canvas.\nXYNE_CREATE_DRAFT: standup scribe that posts a Slack summary every morning',
+      ),
+    });
+    assert.equal(named.type, 'draft');
+    if (named.type === 'draft') {
+      assert.deepEqual(named.fields, ['name', 'slug', 'description', 'systemPrompt', 'tools']);
+    }
+  });
+
+  void it('leaves an empty-canvas job idle unless the model emits a draft marker', () => {
+    const noMarker = decideCreateCanvasAction({
+      userText: 'standup bot',
+      canvasEmpty: true,
+      marker: parseCreateChatAction('A standup bot that collects updates.'),
+    });
+    assert.equal(noMarker.type, 'idle');
   });
 
   void it('renames from a marker or a local rename without generate-prompt', () => {
     const marked = decideCreateCanvasAction({
       userText: 'call it Pulse',
       canvasEmpty: false,
-      intakePending: false,
       marker: parseCreateChatAction('Renamed.\nXYNE_CREATE_RENAME: Pulse Digest'),
     });
     assert.deepEqual(marked, { type: 'rename', name: 'Pulse Digest' });
@@ -110,27 +138,20 @@ void describe('decideCreateCanvasAction', () => {
     const local = decideCreateCanvasAction({
       userText: 'rename it Pulse Digest',
       canvasEmpty: false,
-      intakePending: false,
       marker: parseCreateChatAction('Done.'),
     });
     assert.deepEqual(local, { type: 'rename', name: 'Pulse Digest' });
   });
 
-  void it('drafts intake skip/answers without a marker', () => {
-    const skip = decideCreateCanvasAction({
-      userText: 'skip',
-      canvasEmpty: true,
-      intakePending: true,
-      marker: parseCreateChatAction('Filling it from what we have.'),
+  void it('patches instructions on a filled canvas without a marker', () => {
+    const action = decideCreateCanvasAction({
+      userText: 'make the instructions shorter',
+      canvasEmpty: false,
+      marker: parseCreateChatAction('Tightening the instructions.'),
     });
-    assert.equal(skip.type, 'draft');
-
-    const answer = decideCreateCanvasAction({
-      userText: 'for the design team, 5 bullets in Slack, never mention private channels',
-      canvasEmpty: true,
-      intakePending: true,
-      marker: parseCreateChatAction('Got it — drafting now.'),
-    });
-    assert.equal(answer.type, 'draft');
+    assert.equal(action.type, 'draft');
+    if (action.type === 'draft') {
+      assert.deepEqual(action.fields, ['systemPrompt']);
+    }
   });
 });

@@ -19,13 +19,29 @@ export interface CreateTurnClassification {
   askAfter?: boolean;
 }
 
-export const FIRST_DESCRIBE_FIELDS: CreateTurnField[] = [
-  'name',
-  'slug',
-  'description',
-  'systemPrompt',
-  'tools',
-];
+export const IDENTITY_FIELDS: CreateTurnField[] = ['name', 'slug', 'description', 'systemPrompt'];
+
+/** First-draft identity only. Tools/MCP/skills/knowledge stay empty unless named. */
+export const FIRST_DESCRIBE_FIELDS: CreateTurnField[] = IDENTITY_FIELDS;
+
+export function namedCapabilityFields(text: string): CreateTurnField[] {
+  const lower = text.toLowerCase();
+  const extra: CreateTurnField[] = [];
+  if (/\bskills?\b/.test(lower)) extra.push('skills');
+  if (
+    /\b(mcp|tools?|integrations?|servers?|slack|github|jira|notion|linear|gmail|calendars?)\b/.test(
+      lower,
+    )
+  ) {
+    extra.push('tools');
+  }
+  if (/\bknowledge(?:\s+base)?\b|\bkb\b/.test(lower)) extra.push('knowledge');
+  return extra;
+}
+
+export function firstDraftFields(text: string): CreateTurnField[] {
+  return [...IDENTITY_FIELDS, ...namedCapabilityFields(text)];
+}
 
 const GREETING =
   /^(hi|hello|hey|yo|sup|howdy|thanks|thank you|thx|ok|okay|cool|great|nice|cheers)[\s!.]*$/i;
@@ -218,7 +234,7 @@ export function classifyCreateTurn(
   }
   if (options?.intakePending && canvasEmpty) {
     if (isSkipIntake(trimmed) || /^(ok|okay|sure|yep|yes)[\s!.]*$/i.test(trimmed)) {
-      return { kind: 'edit', fields: FIRST_DESCRIBE_FIELDS };
+      return { kind: 'edit', fields: firstDraftFields(trimmed) };
     }
     if (GREETING.test(trimmed) || isHelpQuestion(trimmed)) {
       return { kind: 'reply', fields: [] };
@@ -229,7 +245,7 @@ export function classifyCreateTurn(
     if (isCanvasEditImperative(trimmed.toLowerCase())) {
       return { kind: 'edit', fields: fieldsForExplicitEdit(trimmed) };
     }
-    return { kind: 'edit', fields: FIRST_DESCRIBE_FIELDS };
+    return { kind: 'edit', fields: firstDraftFields(trimmed) };
   }
   if (GREETING.test(trimmed)) {
     return { kind: 'reply', fields: [] };
@@ -244,31 +260,14 @@ export function classifyCreateTurn(
     return { kind: 'edit', fields: fieldsForExplicitEdit(trimmed) };
   }
   if (isFirstDescribe(trimmed) || (canvasEmpty && planDescribe(trimmed) !== 'none')) {
-    const plan = planDescribe(trimmed);
-    if (plan === 'ask') {
-      return { kind: 'intake', fields: [] };
-    }
-    if (plan === 'draft-then-ask') {
-      return { kind: 'edit', fields: FIRST_DESCRIBE_FIELDS, askAfter: true };
-    }
-    if (plan === 'draft') {
-      return { kind: 'edit', fields: FIRST_DESCRIBE_FIELDS };
-    }
+    return { kind: 'edit', fields: firstDraftFields(trimmed) };
   }
   const words = trimmed.split(/\s+/).filter(Boolean);
   if (words.length <= 6) {
     return { kind: 'clarify', fields: [] };
   }
   if (canvasEmpty) {
-    const plan = planDescribe(trimmed);
-    if (plan === 'ask') {
-      return { kind: 'intake', fields: [] };
-    }
-    return {
-      kind: 'edit',
-      fields: FIRST_DESCRIBE_FIELDS,
-      ...(plan === 'draft-then-ask' ? { askAfter: true } : {}),
-    };
+    return { kind: 'edit', fields: firstDraftFields(trimmed) };
   }
   return { kind: 'clarify', fields: [] };
 }

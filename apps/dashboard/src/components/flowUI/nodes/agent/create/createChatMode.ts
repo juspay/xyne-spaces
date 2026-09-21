@@ -1,6 +1,6 @@
 import {
   classifyCreateTurn,
-  FIRST_DESCRIBE_FIELDS,
+  firstDraftFields,
   parseLocalRename,
   shouldGeneratePrompt,
   type CreateTurnField,
@@ -19,6 +19,7 @@ export interface ParsedCreateChatAction {
   draftIntent: string | null;
   renameTo: string | null;
   idle: boolean;
+  ask: boolean;
 }
 
 export type CreateCanvasAction =
@@ -28,16 +29,16 @@ export type CreateCanvasAction =
       type: 'draft';
       intent: string;
       fields: CreateTurnField[];
-      askAfter?: boolean;
     };
 
 const DRAFT_RE = /^\s*XYNE_CREATE_DRAFT:\s*(.+?)\s*$/im;
 const RENAME_RE = /^\s*XYNE_CREATE_RENAME:\s*(.+?)\s*$/im;
 const IDLE_RE = /^\s*XYNE_CREATE_IDLE\b/im;
+const ASK_RE = /^\s*XYNE_CREATE_ASK\b/im;
 const PARTIAL_MARKER_TAIL = /\n?\s*XYNE_CREATE_[A-Z]*\s*:?\s*[^\n]*$/i;
 
 function markerLineRe(): RegExp {
-  return /^\s*XYNE_CREATE_(?:DRAFT|RENAME|IDLE)\s*(?::\s*.+)?\s*$/gim;
+  return /^\s*XYNE_CREATE_(?:DRAFT|RENAME|IDLE|ASK)\s*(?::\s*.+)?\s*$/gim;
 }
 
 export function buildCreateModeInstructions(snapshot: CreateCanvasSnapshot): string {
@@ -60,14 +61,16 @@ Left pane is this conversation. The canvas on the right is the agent spec (name,
 
 ${canvas}
 
+Default to a usable draft. The user can discover and edit the rest on the canvas.
+
 Rules:
-1. Greetings, UI questions, explanations, and nonsense (random characters, gibberish): reply in chat only. Do not draft.
-2. Thin or ambiguous agent requests ("make an agent", "build a standup agent"): ask 1–3 short follow-up questions. Do not draft yet. The user can skip and type on the canvas.
-3. When you actually have enough to draft (a real job, skip/just draft, or an explicit canvas edit), say so briefly, then emit exactly one marker on its own last line:
-   XYNE_CREATE_DRAFT: <one-line intent the canvas should be filled from>
+1. Greetings, UI questions, explanations, and nonsense (random characters, gibberish): reply in chat only. End with XYNE_CREATE_IDLE. Do not draft.
+2. A job, even a thin one ("standup bot", "I wanna do A", "make an agent that …"): draft a usable agent from reasonable defaults. Say what you filled, briefly. Then emit XYNE_CREATE_DRAFT: <one-line intent>. Do not interview first.
+3. Ask 1–3 short questions only when a draft would be wrong without the answer (two contradictory jobs, which of two systems). Then emit XYNE_CREATE_ASK and do not draft. Unanswered questions never block Create.
+4. First drafts fill name, handle, description, and instructions only. Leave MCP, tools, skills, and knowledge empty unless the user named them.
+5. Canvas edits (rename, shorter instructions, add Slack): emit DRAFT or RENAME as appropriate.
    Rename-only: XYNE_CREATE_RENAME: <new name>
-   Not drafting: XYNE_CREATE_IDLE
-4. Never mention these markers to the user. Never claim the canvas is filled unless you emitted DRAFT or RENAME.`;
+6. Never mention these markers to the user. Never claim the canvas is filled unless you emitted DRAFT or RENAME.`;
 }
 
 export function createModeQuery(userText: string, snapshot: CreateCanvasSnapshot): string {
@@ -89,11 +92,13 @@ export function parseCreateChatAction(text: string): ParsedCreateChatAction {
     draftRaw && !/^(none|idle|n\/a|-)$/i.test(draftRaw) ? draftRaw.slice(0, 500) : null;
   const renameTo =
     renameRaw && !/^(none|idle|n\/a|-)$/i.test(renameRaw) ? renameRaw.slice(0, 80) : null;
+  const ask = ASK_RE.test(text) && !draftIntent && !renameTo;
   return {
     visible: stripCreateMarkers(text).trim(),
     draftIntent,
     renameTo,
-    idle: IDLE_RE.test(text) && !draftIntent && !renameTo,
+    idle: (IDLE_RE.test(text) || ask) && !draftIntent && !renameTo,
+    ask,
   };
 }
 
@@ -102,45 +107,36 @@ export function visibleCreateReply(text: string, streaming: boolean): string {
   return streaming ? stripped : stripped.trim();
 }
 
-function fieldsForDraft(
-  userText: string,
-  canvasEmpty: boolean,
-  intakePending: boolean,
-): { fields: CreateTurnField[]; askAfter?: boolean } {
-  const classification = classifyCreateTurn(userText, canvasEmpty, {
-    ...(intakePending && canvasEmpty ? { intakePending: true } : {}),
-  });
-  if (classification.kind === 'edit' && classification.fields.length > 0) {
-    return {
-      fields: classification.fields,
-      ...(classification.askAfter ? { askAfter: true } : {}),
-    };
+function fieldsForDraft(userText: string, canvasEmpty: boolean): CreateTurnField[] {
+  if (canvasEmpty) {
+    return firstDraftFields(userText);
   }
-  return { fields: canvasEmpty ? FIRST_DESCRIBE_FIELDS : ['systemPrompt'] };
+  const classification = classifyCreateTurn(userText, canvasEmpty);
+  if (classification.kind === 'edit' && classification.fields.length > 0) {
+    return classification.fields;
+  }
+  return ['systemPrompt'];
 }
 
 /**
  * Canvas writes are gated here. The chat reply is always the streamed model.
- * Marker is the source of truth. Classifier is only a fallback for skip/intake
- * answers and follow-up edits — never for greetings, Q&A, or gibberish.
+ * The model chooses reply / ask / edit via markers. Classifier only maps
+ * which fields to write — never whether to interview before drafting.
  */
 export function decideCreateCanvasAction(args: {
   userText: string;
   canvasEmpty: boolean;
-  intakePending: boolean;
   marker: ParsedCreateChatAction;
 }): CreateCanvasAction {
-  const { userText, canvasEmpty, intakePending, marker } = args;
+  const { userText, canvasEmpty, marker } = args;
   const localRename = parseLocalRename(userText);
   const renameTo = marker.renameTo?.trim() || localRename;
 
   if (marker.draftIntent) {
-    const planned = fieldsForDraft(userText, canvasEmpty, intakePending);
     return {
       type: 'draft',
       intent: marker.draftIntent,
-      fields: planned.fields,
-      ...(planned.askAfter ? { askAfter: true } : {}),
+      fields: fieldsForDraft(userText, canvasEmpty),
     };
   }
 
@@ -148,13 +144,11 @@ export function decideCreateCanvasAction(args: {
     return { type: 'rename', name: renameTo };
   }
 
-  if (marker.idle) {
+  if (marker.idle || marker.ask) {
     return { type: 'idle' };
   }
 
-  const classification = classifyCreateTurn(userText, canvasEmpty, {
-    ...(intakePending && canvasEmpty ? { intakePending: true } : {}),
-  });
+  const classification = classifyCreateTurn(userText, canvasEmpty);
 
   if (classification.kind !== 'edit') {
     return { type: 'idle' };
@@ -168,9 +162,9 @@ export function decideCreateCanvasAction(args: {
     return { type: 'idle' };
   }
 
-  // First describe on an empty canvas requires a draft marker. Follow-up edits
-  // and intake skip/answers may fill without one.
-  if (canvasEmpty && !intakePending) {
+  // Empty-canvas first jobs require a draft marker so greetings and
+  // gibberish cannot fill the spec. Follow-up edits on a filled canvas may.
+  if (canvasEmpty) {
     return { type: 'idle' };
   }
 
@@ -178,6 +172,5 @@ export function decideCreateCanvasAction(args: {
     type: 'draft',
     intent: userText,
     fields: classification.fields,
-    ...(classification.askAfter ? { askAfter: true } : {}),
   };
 }
