@@ -41,7 +41,7 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
-            const MIN_CHARS = 100;
+            const MIN_CHARS = 150;  // ~50 of these are the template's own bullet labels.
 
             const pr     = context.payload.pull_request;
             const body   = pr.body || '';
