@@ -33,6 +33,9 @@ export const clawErrorText = (error: unknown, fallback: string): string => {
   if (error instanceof ClawApiError && error.status === 403) {
     return 'You don’t have permission to do that';
   }
+  if (error instanceof ClawApiError && error.status === 401) {
+    return 'The model rejected the request (401).';
+  }
   const raw = error instanceof Error ? error.message : '';
   const status = error instanceof ClawApiError ? error.status : 0;
   if (isRateLimited(status, raw)) {

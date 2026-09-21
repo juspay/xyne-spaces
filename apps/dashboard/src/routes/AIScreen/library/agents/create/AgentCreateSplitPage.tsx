@@ -13,7 +13,10 @@ import {
 import { getAvailableTools, suggestTools } from '@/services/claw/clawToolsService';
 import { effectiveSlug, slugify } from '@/routes/ClawAgentsScreen/create/wizardState';
 import { AgentCreateCanvas } from '@/components/flowUI/nodes/agent/create/AgentCreateCanvas';
-import { AgentCreateChatPanel } from '@/components/flowUI/nodes/agent/create/AgentCreateChatPanel';
+import {
+  AgentCreateChatPanel,
+  type CreateChatTurn,
+} from '@/components/flowUI/nodes/agent/create/AgentCreateChatPanel';
 import { AgentCreateFooter } from '@/components/flowUI/nodes/agent/create/AgentCreateFooter';
 import { DiscardDraftDialog } from '@/components/flowUI/nodes/agent/create/DiscardDraftDialog';
 import {
@@ -22,26 +25,14 @@ import {
   nameFromIntent,
 } from '@/components/flowUI/nodes/agent/create/canvasFromIdentity';
 import {
-  classifyCreateTurn,
-  detectIntakeGaps,
-  isSkipIntake,
-  isIntakeProceed,
-  parseLocalRename,
   planDescribe,
-  shouldGeneratePrompt,
-  FIRST_DESCRIBE_FIELDS,
-  type CreateTurnClassification,
   type CreateTurnField,
 } from '@/components/flowUI/nodes/agent/create/classifyCreateTurn';
-import { slicePatch } from '@/components/flowUI/nodes/agent/create/mergeChatPatch';
 import {
-  CLARIFY_REPLY,
-  draftThenAskReply,
-  intakeQuestionsReply,
-  replyForCreateTurn,
-  SKIP_INTAKE_ACK,
-  SKILLS_ROW_REPLY,
-} from '@/components/flowUI/nodes/agent/create/replyForCreateTurn';
+  decideCreateCanvasAction,
+  type CreateCanvasSnapshot,
+} from '@/components/flowUI/nodes/agent/create/createChatMode';
+import { slicePatch } from '@/components/flowUI/nodes/agent/create/mergeChatPatch';
 import { toolboxFromSuggestion } from '@/components/flowUI/nodes/agent/create/toolboxFromSuggestion';
 import {
   EMPTY_CREATE_FORM,
@@ -86,14 +77,12 @@ export function AgentCreateSplitPage(): ReactElement {
   const queryClient = useQueryClient();
   const createForm = useAgentCreateForm(EMPTY_CREATE_FORM);
   const [phase, setPhase] = useState<AgentCreatePhase>('empty');
-  const [sending, setSending] = useState(false);
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
   const [discardOpen, setDiscardOpen] = useState(false);
   const [createdSlug, setCreatedSlug] = useState<string | null>(null);
   const [skeletonIdentity, setSkeletonIdentity] = useState(false);
   const intakeRef = useRef<{ seed: string; rounds: number } | null>(null);
-  const afterDraftRef = useRef<string | null>(null);
 
   const slug = effectiveSlug({
     name: createForm.form.name,
@@ -115,116 +104,105 @@ export function AgentCreateSplitPage(): ReactElement {
     nameCheck.nameValid &&
     createForm.conflicts.length === 0;
 
-  const onSend = useCallback(
-    async (text: string): Promise<string> => {
-      setSending(true);
+  const canvasSnapshot: CreateCanvasSnapshot = {
+    empty: canvasIsEmpty(createForm.form),
+    name: createForm.form.name,
+    slug: createForm.form.slug,
+    description: createForm.form.description,
+    instructions: createForm.form.systemPrompt,
+  };
+
+  const onTurnComplete = useCallback(
+    async (turn: CreateChatTurn): Promise<void> => {
+      const canvasEmpty = canvasIsEmpty(createForm.form);
+      const pending = intakeRef.current;
+      let userText = turn.userText;
+      if (pending && canvasEmpty) {
+        userText = `${pending.seed}\n${turn.userText}`.trim();
+      }
+
+      const action = decideCreateCanvasAction({
+        userText,
+        canvasEmpty,
+        intakePending: Boolean(pending && canvasEmpty),
+        marker: turn.marker,
+      });
+
+      if (action.type === 'idle') {
+        if (canvasEmpty && (planDescribe(turn.userText) === 'ask' || pending)) {
+          intakeRef.current = {
+            seed: pending ? `${pending.seed}\n${turn.userText}`.trim() : turn.userText,
+            rounds: pending ? pending.rounds + 1 : 1,
+          };
+        }
+        createForm.clearHighlights();
+        createForm.setWritingField(null);
+        setSkeletonIdentity(false);
+        return;
+      }
+
+      intakeRef.current = null;
       setCreateError(null);
       createForm.clearHighlights();
+
+      if (action.type === 'rename') {
+        try {
+          const changed = createForm.applyChatPatch(
+            `hub-rename-${Date.now()}`,
+            {
+              name: action.name,
+              slug: slugify(action.name),
+            },
+            { highlight: false },
+          );
+          if (changed.includes('name')) {
+            createForm.setWritingField('name');
+            await sleep(WRITE_MS);
+          }
+          createForm.setWritingField(null);
+          setPhase('draft');
+        } finally {
+          createForm.setWritingField(null);
+        }
+        return;
+      }
+
+      const firstDescribe = canvasEmpty;
+      if (firstDescribe) {
+        setSkeletonIdentity(true);
+      }
+
       try {
-        const canvasEmpty = canvasIsEmpty(createForm.form);
-        const pending = intakeRef.current;
-        let intent = text;
-        let classification: CreateTurnClassification = classifyCreateTurn(text, canvasEmpty, {
-          ...(pending && canvasEmpty ? { intakePending: true } : {}),
-        });
-
-        if (pending && canvasEmpty) {
-          if (classification.kind === 'reply') {
-            return replyForCreateTurn(text, createForm.form, canvasEmpty);
-          }
-          if (isIntakeProceed(text)) {
-            intent = pending.seed;
-            classification = { kind: 'edit', fields: FIRST_DESCRIBE_FIELDS };
-            intakeRef.current = null;
-          } else if (
-            classification.kind === 'edit' &&
-            classification.fields.length === FIRST_DESCRIBE_FIELDS.length
-          ) {
-            const combined = `${pending.seed}\n${text}`.trim();
-            if (planDescribe(combined) === 'ask' && pending.rounds < 2) {
-              intakeRef.current = { seed: combined, rounds: pending.rounds + 1 };
-              return intakeQuestionsReply(combined);
-            }
-            intent = combined;
-            classification = {
-              kind: 'edit',
-              fields: FIRST_DESCRIBE_FIELDS,
-              askAfter: planDescribe(combined) === 'draft-then-ask',
-            };
-            intakeRef.current = null;
-          } else {
-            intakeRef.current = null;
-          }
-        } else if (afterDraftRef.current && !canvasEmpty && classification.kind !== 'reply') {
-          if (isSkipIntake(text)) {
-            afterDraftRef.current = null;
-            return SKIP_INTAKE_ACK;
-          }
-          if (classification.kind === 'clarify' || classification.fields.length === 0) {
-            intent = `${afterDraftRef.current}\n${text}`.trim();
-            classification = { kind: 'edit', fields: ['systemPrompt'] };
-            afterDraftRef.current = null;
-          } else {
-            afterDraftRef.current = null;
-          }
-        }
-
-        if (classification.kind === 'reply') {
-          return replyForCreateTurn(text, createForm.form, canvasEmpty);
-        }
-        if (classification.kind === 'intake') {
-          intakeRef.current = { seed: text, rounds: 1 };
-          return intakeQuestionsReply(text);
-        }
-        if (classification.kind === 'clarify') {
-          return CLARIFY_REPLY;
-        }
-        if (classification.fields.every(field => field === 'skills')) {
-          return SKILLS_ROW_REPLY;
-        }
-
-        const renameTo = parseLocalRename(text);
-        const generate = shouldGeneratePrompt(classification, canvasEmpty, text);
-        const firstDescribe = canvasEmpty && generate;
-
-        if (firstDescribe) {
-          setSkeletonIdentity(true);
-        }
-
         const incoming: AgentCreateChatPatch = {};
-
-        if (renameTo) {
-          incoming.name = renameTo;
-          incoming.slug = slugify(renameTo);
-        }
+        const generate = action.fields.includes('systemPrompt') || firstDescribe;
 
         if (generate) {
           const prompt = await generateAgentPrompt({
-            intent,
+            intent: action.intent,
             ...(createForm.form.systemPrompt.trim()
               ? { existingPrompt: createForm.form.systemPrompt.trim() }
               : {}),
           });
-          if (classification.fields.includes('systemPrompt')) {
+          if (action.fields.includes('systemPrompt')) {
             incoming.systemPrompt = prompt;
           }
-          if (classification.fields.includes('name') && !renameTo) {
-            incoming.name = nameFromGeneratedPrompt(prompt) || nameFromIntent(intent);
+          if (action.fields.includes('name')) {
+            incoming.name = nameFromGeneratedPrompt(prompt) || nameFromIntent(action.intent);
           }
-          if (classification.fields.includes('slug') && incoming.name) {
+          if (action.fields.includes('slug') && incoming.name) {
             incoming.slug = slugify(incoming.name);
           }
-          if (classification.fields.includes('description') && canvasEmpty) {
-            incoming.description = descriptionFromIntent(intent);
+          if (action.fields.includes('description') && canvasEmpty) {
+            incoming.description = descriptionFromIntent(action.intent);
           }
         }
 
-        if (classification.fields.includes('tools')) {
+        if (action.fields.includes('tools')) {
           try {
             const [suggestion, catalog] = await Promise.all([
               suggestTools({
                 systemPrompt: incoming.systemPrompt || createForm.form.systemPrompt || undefined,
-                description: intent,
+                description: action.intent,
               }),
               getAvailableTools().catch(() => null),
             ]);
@@ -234,11 +212,10 @@ export function AgentCreateSplitPage(): ReactElement {
           }
         }
 
-        const patch = pickPatch(incoming, classification.fields);
+        const patch = pickPatch(incoming, action.fields);
         setSkeletonIdentity(false);
-        setSending(false);
         const sourceId = `hub-${Date.now()}`;
-        const reveal = FIELD_ORDER.filter(field => classification.fields.includes(field));
+        const reveal = FIELD_ORDER.filter(field => action.fields.includes(field));
         for (const field of reveal) {
           const slice = slicePatch(patch, field);
           if (Object.keys(slice).length === 0) continue;
@@ -253,24 +230,13 @@ export function AgentCreateSplitPage(): ReactElement {
         }
         createForm.setWritingField(null);
         setPhase('draft');
-        if (renameTo) {
-          return `Renamed to ${renameTo}. The rest of the canvas is unchanged.`;
-        }
-        if (classification.fields.length === 1 && classification.fields[0] === 'systemPrompt') {
-          return 'Updated instructions. Everything else is unchanged.';
-        }
-        if (classification.askAfter) {
-          afterDraftRef.current = intent;
-          return draftThenAskReply(detectIntakeGaps(intent));
-        }
-        return 'Filled the canvas. Edit anything, then Create Agent.';
       } catch (err) {
         createForm.clearHighlights();
         setSkeletonIdentity(false);
         setPhase(canvasIsEmpty(createForm.form) ? 'empty' : 'draft');
         throw err;
       } finally {
-        setSending(false);
+        createForm.setWritingField(null);
       }
     },
     [createForm],
@@ -359,7 +325,6 @@ export function AgentCreateSplitPage(): ReactElement {
     setCreateError(null);
     setSkeletonIdentity(false);
     intakeRef.current = null;
-    afterDraftRef.current = null;
   }, [canvasDirty, resetFrom]);
 
   const footer = useMemo(
@@ -414,8 +379,8 @@ export function AgentCreateSplitPage(): ReactElement {
         >
           <Panel id='agent-create-hub-chat' defaultSize='50%' minSize='30%'>
             <AgentCreateChatPanel
-              sending={sending}
-              onSend={onSend}
+              canvas={canvasSnapshot}
+              onTurnComplete={onTurnComplete}
               disabled={phase === 'created'}
             />
           </Panel>
@@ -437,7 +402,6 @@ export function AgentCreateSplitPage(): ReactElement {
           setCreateError(null);
           setSkeletonIdentity(false);
           intakeRef.current = null;
-          afterDraftRef.current = null;
         }}
       />
     </div>

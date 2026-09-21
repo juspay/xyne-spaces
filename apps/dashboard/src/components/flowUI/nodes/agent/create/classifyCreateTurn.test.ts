@@ -94,4 +94,12 @@ void describe('classifyCreateTurn', () => {
     assert.equal(result.kind, 'clarify');
     assert.equal(shouldGeneratePrompt(result, true, 'maybe later'), false);
   });
+
+  void it('does not draft from gibberish', () => {
+    for (const text of ['fdaas', 'dasdsad', 'asdasdsa']) {
+      const result = classifyCreateTurn(text, true);
+      assert.equal(result.kind, 'clarify');
+      assert.equal(shouldGeneratePrompt(result, true, text), false);
+    }
+  });
 });
