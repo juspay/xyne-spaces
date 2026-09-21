@@ -18,13 +18,34 @@ process.on('uncaughtException', (error: Error) => {
 });
 
 
+/**
+ * Upper bound on the whole shutdown. If a queue or database close hangs, the
+ * process still exits on its own instead of riding the grace period out to a
+ * SIGKILL — which would drop whatever the drain had already finished.
+ */
+const SHUTDOWN_HARD_EXIT_MS = 25_000;
+
+let shuttingDown = false;
+
 const gracefulShutdown = async (signal: string) => {
+  if (shuttingDown) {
+    logger.warn(`Received ${signal} while already shutting down, ignoring`);
+    return;
+  }
+  shuttingDown = true;
   logger.info(`Received ${signal}, shutting down gracefully`);
+
+  const hardExit = setTimeout(() => {
+    logger.error('Shutdown exceeded hard deadline, exiting now');
+    process.exit(1);
+  }, SHUTDOWN_HARD_EXIT_MS);
+  hardExit.unref();
 
   if (app) {
     await app.shutdown();
   }
 
+  logger.info('Graceful shutdown complete');
   process.exit(0);
 };
 
