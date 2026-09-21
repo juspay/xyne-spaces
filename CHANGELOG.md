@@ -1,3 +1,11 @@
+## [1.351.1](https://github.com/juspay/xyne-spaces/compare/v1.351.0...v1.351.1) (2026-09-21)
+
+
+### Bug Fixes
+
+* move label-unread broadcast to service layer (remove repo->websocketService cycle) ([#2092](https://github.com/juspay/xyne-spaces/issues/2092)) ([55b16ba](https://github.com/juspay/xyne-spaces/commit/55b16ba777f0a2c9263b5ec02448b047e742fd9e)), closes [#1711](https://github.com/juspay/xyne-spaces/issues/1711)
+* rel main ([#2057](https://github.com/juspay/xyne-spaces/issues/2057)) ([1bb13fa](https://github.com/juspay/xyne-spaces/commit/1bb13fa1ee8fd77ee4a2309ae9feba860c3bba45)), closes [#2027](https://github.com/juspay/xyne-spaces/issues/2027) [#1945](https://github.com/juspay/xyne-spaces/issues/1945) [#1945](https://github.com/juspay/xyne-spaces/issues/1945) [#1959](https://github.com/juspay/xyne-spaces/issues/1959)
+
 ## [1.351.0](https://github.com/juspay/xyne-spaces/compare/v1.350.0...v1.351.0) (2026-09-21)
 
 
