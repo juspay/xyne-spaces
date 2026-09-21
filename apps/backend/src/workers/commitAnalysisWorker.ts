@@ -1,5 +1,4 @@
 import { logger } from '@/utils/logger';
-import { runAsServiceActor } from '@/database/tenant/context';
 import { commitAnalysisQueue } from '@/queues/commitAnalysisQueue';
 
 const TAG = '[CommitAnalysisWorker]';
@@ -19,12 +18,7 @@ class CommitAnalysisWorker {
 
     const queue = commitAnalysisQueue.getQueue();
 
-    // Register processor with workspace context
-    queue.process(async (job) =>
-      runAsServiceActor('commit-analysis-worker', job.data.workspaceId, () =>
-        commitAnalysisQueue.processJob(job),
-      ),
-    );
+    queue.process(async (job) => commitAnalysisQueue.processJob(job));
 
     this.isStarted = true;
     logger.info(`${TAG} Started, ready to process jobs`);

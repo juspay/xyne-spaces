@@ -22,9 +22,9 @@ export class CommitsACL extends BaseQueryACL<
   }
 
   /**
-   * Commits are server-written only - block all mutations
+   * Allow creates when workspaceId matches context
    */
-  async canCreate(_data: Prisma.CommitUncheckedCreateInput): Promise<boolean> {
-    return false; // Commits are synced from VCS only
+  async canCreate(data: Prisma.CommitUncheckedCreateInput): Promise<boolean> {
+    return data.workspaceId === this.ctx.workspaceId;
   }
 }
