@@ -934,6 +934,33 @@ export class MicrosoftAuthController {
       // This mirrors Google's exchangeElectronCode which always sets google_access_token (line 842).
       if (workspaces.length === 0 && !userExistsButRemoved && !stateData.invitationId && !bodyInvitationId) {
         logger.info(`${tag()} Microsoft OAuth login succeeded (platform=electron, outcome=no_workspace, count=0) — no workspaces/invitation, returning no-access`);
+
+        // Domain-conflict detection, mirroring handleCallback. Without it the client receives
+        // workspaces: [] for a user whose email domain already maps to an enterprise org and
+        // offers "create an organization" instead of the request-to-join UI.
+        let domainConflict = null;
+        let domainConflictError = null;
+        let publicEmailError = null;
+
+        if (stateData.enterpriseLogin) {
+          try {
+            await organizationDomainService.assertCanCreateOrgForEmail(email);
+          } catch (error) {
+            if (error instanceof PublicEmailDomainError) {
+              publicEmailError = error;
+            } else if (error instanceof OrganizationDomainConflictError) {
+              domainConflictError = error;
+            }
+          }
+        }
+
+        if (!domainConflictError && !publicEmailError) {
+          domainConflict = await organizationDomainService.findEnterpriseWorkspaceByEmailDomain(email);
+          domainConflictError = domainConflict
+            ? new OrganizationDomainConflictError(domainConflict.domain, domainConflict)
+            : null;
+        }
+
         const tokenKey = await this.storePendingOAuthTokens(
           token.refresh_token as string | undefined,
           accessToken,
@@ -961,6 +988,10 @@ export class MicrosoftAuthController {
           email,
           name: profile.displayName,
           picture: undefined,
+          ...(domainConflictError ? { domainConflictError: domainConflictError.message } : {}),
+          ...(domainConflict ? { enterpriseJoinOrgName: domainConflict.name } : {}),
+          ...(domainConflict ? { enterpriseJoinWorkspaces: JSON.stringify(domainConflict.workspaces) } : {}),
+          ...(publicEmailError ? { publicEmailDomainError: publicEmailError.message } : {}),
         });
         return;
       }
