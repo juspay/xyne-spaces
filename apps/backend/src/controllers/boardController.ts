@@ -8,6 +8,7 @@ import {
   type FlowPlan,
 } from '@xyne/shared';
 import { validateFlowDecisionFieldsWithPrisma } from '@/services/flowDecisionFieldValidator';
+import { boardCustomFieldsService } from '@/services/boardCustomFieldsService';
 import { BoardRepository } from '../database/repositories/boardRepository';
 import { ProjectRepository } from '../database/repositories/projectRepository';
 import { logger } from '@/utils/logger';
@@ -149,6 +150,49 @@ export class BoardController {
         return;
       }
 
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  };
+
+  /**
+   * Forks the shared, workspace-wide release form into a board-owned copy before the board
+   * editor writes custom-field changes to it. Without this, editing custom fields on one
+   * release board edits them for every release board bound to the same seeded form.
+   *
+   * Idempotent: a board whose form is already private returns that same form id and nothing
+   * is written.
+   */
+  detachSharedCustomFieldsForm = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const userId = req.user?.id;
+      const workspaceId = req.user?.workspaceId;
+      if (!userId || !workspaceId) {
+        res.status(401).json({ error: 'Unauthorized' });
+        return;
+      }
+
+      const boardId = String(req.params['boardId'] ?? '').trim();
+      if (!boardId) {
+        res.status(400).json({ error: 'boardId is required' });
+        return;
+      }
+
+      const board = await this.boardRepository.findById(boardId);
+      if (!board || board.workspaceId !== workspaceId) {
+        res.status(404).json({ error: 'Board not found' });
+        return;
+      }
+
+      const result = await boardCustomFieldsService.detachSharedBoardTicketForm(boardId, userId);
+      if (!result) {
+        // No form bound to this board yet — the caller creates a board-owned one itself.
+        res.status(200).json({ formId: null, detached: false, repointedValues: 0 });
+        return;
+      }
+
+      res.status(200).json(result);
+    } catch (error) {
+      logger.error('Error detaching shared board custom-fields form:', error);
       res.status(500).json({ error: 'Internal server error' });
     }
   };

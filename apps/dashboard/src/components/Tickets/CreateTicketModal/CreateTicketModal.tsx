@@ -602,6 +602,16 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
     [formMapping?.formFields, formMapping?.formId],
   );
 
+  // Fields this board actually asks for. A field hidden on this board must never block
+  // submission — otherwise the user is stopped by a required field they cannot see
+  // (which is exactly what happens when several boards share one form).
+  const boardVisibleFormFields = useMemo((): ResolvedDisplayFormField[] => {
+    const visibilityMap = (selectedBoard?.metadata as BoardMetadata | null)
+      ?.customFieldVisibility;
+    if (!visibilityMap) return resolvedFormFields;
+    return resolvedFormFields.filter(field => visibilityMap[field.id] !== false);
+  }, [resolvedFormFields, selectedBoard]);
+
   // Reset dynamic fields when board changes
   useEffect(() => {
     if (ticketKind === 'release') return;
@@ -1132,7 +1142,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
       getMissingMandatoryFieldMessage({
         formValues,
         boards,
-        formMapping: { formFields: resolvedFormFields },
+        formMapping: { formFields: boardVisibleFormFields },
         showUserGroupsOnly,
         showAssignee,
         showTodo,
@@ -1153,7 +1163,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
     [
       formValues,
       boards,
-      resolvedFormFields,
+      boardVisibleFormFields,
       ticketKind,
       showUserGroupsOnly,
       showAssignee,
@@ -1308,9 +1318,10 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
         return;
       }
 
-      // Validate dynamic fields if form mapping exists
-      if (resolvedFormFields.length > 0) {
-        const allFields = resolvedFormFields;
+      // Validate dynamic fields if form mapping exists. Scoped to the fields this board
+      // shows — a field hidden here was never asked for, so it cannot be required here.
+      if (boardVisibleFormFields.length > 0) {
+        const allFields = boardVisibleFormFields;
         const getFieldEffectiveValue = (fieldId: string): string | undefined => {
           const parentField = allFields.find(f => f.id === fieldId);
           const parentRaw = parentField
@@ -1981,15 +1992,11 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
   }, [availableTags, newTags, initialTags, formValues.tags]);
 
   const requiredDynamicFields = useMemo(() => {
-    const visibilityMap = boardMetadata?.customFieldVisibility;
-    const allFields = visibilityMap
-      ? resolvedFormFields.filter(f => visibilityMap[f.id] !== false)
-      : resolvedFormFields;
-    const bySequence = [...allFields].sort(
+    const bySequence = [...boardVisibleFormFields].sort(
       (a, b) => (a.sequenceNumber ?? 0) - (b.sequenceNumber ?? 0),
     );
     return orderFieldsWithBranchChildrenAfterParent(bySequence);
-  }, [resolvedFormFields, boardMetadata]);
+  }, [boardVisibleFormFields]);
 
   // Of those, only the ones currently active given the parent values selected so far.
   const activeDynamicFields = useMemo(() => {
