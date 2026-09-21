@@ -23,6 +23,7 @@ packages:
   - packages/framework
   - packages/kata-sdk
   - packages/litellm-client
+  - packages/cache
   - packages/xyne-claw-shared
   - packages/xyne-claw-mcp
   - packages/xyne-claw-pi-plugin
