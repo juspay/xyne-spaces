@@ -821,7 +821,12 @@ const ChannelCommandMenu = ({
     // rows for them to duplicate, and a DM is the thing you navigate to.
     if (!cleanedSearchText.trim()) {
       return mergeRankedCandidates<User | ChannelSearchItem>(
-        [toChannelCandidates(filteredLocalChannels, '')],
+        [
+          toChannelCandidates(
+            filteredLocalChannels.filter(({ category }) => category !== ChannelCategory.STARRED),
+            '',
+          ),
+        ],
         MERGED_CANDIDATE_LIMIT,
       );
     }
@@ -835,8 +840,14 @@ const ChannelCommandMenu = ({
     // Group DMs are out for a different reason: they keep their own GROUP DMS section,
     // rendered separately below. Their match quality is borrowed from a participant, so
     // mixing them in means a dozen group chats crowding out the person you actually typed.
+    //
+    // Starred is out too, for the same reason — it keeps its own section. It is a category,
+    // not a scopeType, so it has to be filtered by category: a starred GROUP DM carries
+    // category STARRED rather than DIRECT_MESSAGES, which is how it fell through both the
+    // merged list and the GROUP DMS section and disappeared entirely.
     const mergeableChannels = filteredLocalChannels.filter(
-      ({ channel }) => !isDMChannel(channel.scopeType),
+      ({ channel, category }) =>
+        !isDMChannel(channel.scopeType) && category !== ChannelCategory.STARRED,
     );
 
     return mergeRankedCandidates<User | ChannelSearchItem>(
@@ -3348,60 +3359,69 @@ const ChannelCommandMenu = ({
   );
 
   // Render the local channels for the browse branch (no search text)
-  const renderBrowseLocalChannels = () => (
+  /**
+   * @param onlyCategories  Render just these categories. The merged ALL view passes
+   *   [STARRED] so starred keeps its own section while users and channels come from the
+   *   merged list; omitted elsewhere, which renders every category as before.
+   */
+  const renderBrowseLocalChannels = (onlyCategories?: ChannelCategory[]) => (
     <>
       {showGroupedLocalResults &&
         (activeTab === TabType.ALL || activeTab === TabType.CHANNELS || isChannelsType) &&
         filteredLocalChannels.length > 0 && (
           <>
-            {Object.entries(groupedChannels).map(([category, items]) => {
-              const typedCategory = category as ChannelCategory;
-              const isExpanded = expandedCategories.has(category);
-              const shouldLimit = !search.trim();
-              const hasMore = items.length > DISPLAY_LIMIT;
-              const displayItems =
-                shouldLimit && !isExpanded && hasMore ? items.slice(0, DISPLAY_LIMIT) : items;
-              const hiddenCount = items.length - DISPLAY_LIMIT;
+            {Object.entries(groupedChannels)
+              .filter(([category]) =>
+                onlyCategories ? onlyCategories.includes(category as ChannelCategory) : true,
+              )
+              .map(([category, items]) => {
+                const typedCategory = category as ChannelCategory;
+                const isExpanded = expandedCategories.has(category);
+                const shouldLimit = !search.trim();
+                const hasMore = items.length > DISPLAY_LIMIT;
+                const displayItems =
+                  shouldLimit && !isExpanded && hasMore ? items.slice(0, DISPLAY_LIMIT) : items;
+                const hiddenCount = items.length - DISPLAY_LIMIT;
 
-              return (
-                <div key={category} className='mb-4'>
-                  <Command.Group
-                    heading={getCategoryLabel(typedCategory)}
-                    className='[&_[cmdk-group-heading]]:px-2  [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-["Geist_Mono"]'
-                  >
-                    {displayItems.map(({ channel }, index) => {
-                      const unreadCount = unreadCounts[channel.id] ?? 0;
-                      return (
-                        <ChannelCommandItem
-                          key={channel.id}
-                          channel={channel}
-                          currentUserID={currentUserID}
-                          unreadCount={unreadCount}
-                          onSelect={displayName => {
-                            void handleChannelSelect(channel, displayName, index + 1);
-                          }}
-                          onItemMouseDown={handleItemMouseDown}
-                          getChannelIcon={getChannelIcon}
-                          selectionVariant={selectionVariant}
-                          isSelected={contextItems.some(c => c.id === `channel-${channel.id}`)}
+                return (
+                  <div key={category} className='mb-4'>
+                    <Command.Group
+                      heading={getCategoryLabel(typedCategory)}
+                      className='[&_[cmdk-group-heading]]:px-2  [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-["Geist_Mono"]'
+                    >
+                      {displayItems.map(({ channel }, index) => {
+                        const unreadCount = unreadCounts[channel.id] ?? 0;
+                        return (
+                          <ChannelCommandItem
+                            key={channel.id}
+                            channel={channel}
+                            currentUserID={currentUserID}
+                            unreadCount={unreadCount}
+                            onSelect={displayName => {
+                              void handleChannelSelect(channel, displayName, index + 1);
+                            }}
+                            onItemMouseDown={handleItemMouseDown}
+                            getChannelIcon={getChannelIcon}
+                            selectionVariant={selectionVariant}
+                            isSelected={contextItems.some(c => c.id === `channel-${channel.id}`)}
+                          />
+                        );
+                      })}
+                      {shouldLimit && hasMore && (
+                        <SeeMoreItem
+                          value={`__see-more-browse-${category}__`}
+                          label={isExpanded ? 'See less' : `See ${hiddenCount} more`}
+                          onSelect={() => toggleCategoryExpansion(category)}
+                          hoverable={!isMobile}
+                          trackCategory='CHANNEL_SEARCH'
+                          trackName='TOGGLE_LOCAL_CHANNEL_EXPANSION'
+                          trackMetadata={JSON.stringify({ category, isExpanded })}
                         />
-                      );
-                    })}
-                    {shouldLimit && hasMore && (
-                      <SeeMoreItem
-                        value={`__see-more-browse-${category}__`}
-                        label={isExpanded ? 'See less' : `See ${hiddenCount} more`}
-                        onSelect={() => toggleCategoryExpansion(category)}
-                        hoverable={!isMobile}
-                        trackCategory='CHANNEL_SEARCH'
-                        trackName='TOGGLE_LOCAL_CHANNEL_EXPANSION'
-                        trackMetadata={JSON.stringify({ category, isExpanded })}
-                      />
-                    )}
-                  </Command.Group>
-                </div>
-              );
-            })}
+                      )}
+                    </Command.Group>
+                  </div>
+                );
+              })}
           </>
         )}
     </>
@@ -5163,9 +5183,13 @@ const ChannelCommandMenu = ({
                                 Vespa failure or an empty backend response. */}
                             {useMergedLocalResults ? (
                               <>
+                                {/* Starred first, as it was before the merge — pinned
+                                    channels lead. Then the merged users+channels list, then
+                                    Group DMs. renderSearchLocalSections(true,...) cannot be
+                                    reused for starred here: it emits Group DMs in the same
+                                    call, which would lift those above the merged list too. */}
+                                {renderSearchStarredSection()}
                                 {renderMergedLocalResults()}
-                                {/* Group DMs keep their own section: (false,false,false)
-                                    renders that block alone. */}
                                 {renderSearchLocalSections(false, false, false)}
                               </>
                             ) : (
@@ -5178,9 +5202,13 @@ const ChannelCommandMenu = ({
                             avoid a double-render. */}
                             {useMergedLocalResults ? (
                               <>
+                                {/* Starred first, as it was before the merge — pinned
+                                    channels lead. Then the merged users+channels list, then
+                                    Group DMs. renderSearchLocalSections(true,...) cannot be
+                                    reused for starred here: it emits Group DMs in the same
+                                    call, which would lift those above the merged list too. */}
+                                {renderSearchStarredSection()}
                                 {renderMergedLocalResults()}
-                                {/* Group DMs keep their own section: (false,false,false)
-                                    renders that block alone. */}
                                 {renderSearchLocalSections(false, false, false)}
                               </>
                             ) : (
@@ -5201,9 +5229,14 @@ const ChannelCommandMenu = ({
                           </>
                         ) : (
                           <>
-                            {useMergedLocalResults
-                              ? renderMergedLocalResults()
-                              : renderBrowseLocalChannels()}
+                            {useMergedLocalResults ? (
+                              <>
+                                {renderBrowseLocalChannels([ChannelCategory.STARRED])}
+                                {renderMergedLocalResults()}
+                              </>
+                            ) : (
+                              renderBrowseLocalChannels()
+                            )}
                             {/* People tab browse: rank by affinity (rankUsersWithMfu) like the
                                 search branch, instead of the raw, unranked backend user list. */}
                             {activeTab === TabType.USERS
