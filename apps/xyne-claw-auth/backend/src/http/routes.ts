@@ -20,6 +20,7 @@ import { spacesRouter } from "../routes/spaces.js";
 import { toolsRouter } from "../routes/tools.js";
 import { researchAgentRouter } from "../routes/research-agent.js";
 import { skillsRouter } from "../routes/skills.js";
+import { gatewayRegistryUiRouter } from "../routes/gateway-registry-ui.js";
 import { knowledgeBaseRouter } from "../routes/knowledge-base.js";
 import subagentsRouter from "../routes/subagents.js";
 import sandboxRouter from "../routes/sandbox.js";
@@ -160,6 +161,10 @@ function mountCoreApi(app: Express): void {
   app.use(`${BASE}/spaces`, requireAuth, requireNoAccessToken, spacesRouter);
   app.use(`${BASE}/tools`, requireAuth, requireNoAccessToken, toolsRouter);
   app.use(`${BASE}/skills`, requireAuth, allowScopedAccessToken({ write: "skills:write" }), skillsRouter);
+  // Session-authed UI surface over the MCP Gateway registry (secret x-s2s-key
+  // stays server-side; see routes/gateway-registry-ui.ts). Distinct from the
+  // s2s `${BASE}/gateway` router below, which external services still call.
+  app.use(`${BASE}/gateway-registry`, requireAuth, requireNoAccessToken, gatewayRegistryUiRouter);
   app.use(`${BASE}/knowledge-base`, requireAuth, requireNoAccessToken, knowledgeBaseRouter);
   app.use(`${BASE}/subagents`, requireAuth, allowScopedAccessToken({ write: "subagents:write" }), subagentsRouter);
   app.use(`${BASE}/sandbox`, requireAuth, requireNoAccessToken, sandboxRouter);
