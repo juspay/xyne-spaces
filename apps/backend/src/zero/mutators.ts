@@ -167,6 +167,11 @@ import { vespaQueue } from '@/queues/vespaQueue';
 import { ticketReassignmentQueue } from '@/queues/ticketReassignmentQueue';
 import { userAssignmentStateService } from '@/services/userAssignmentStateService';
 import { notificationService } from '@/services/notificationService';
+import { extractPlainTextFromHtml } from '@/utils/contentUtils';
+import {
+  resolveMentionReplayRecipients,
+  replayMentionForAddedUsers,
+} from '@/utils/mentionReplayUtils';
 import { sendAddAndRemoveParticipantsSystemMessage, sendCallSystemMessage, updateCallSystemMessageOnEnd } from '@/zero/utils/systemMessagesUtils';
 import { addChannelParticipant, removeChannelParticipant } from '@/zero/utils/channelParticipantUtils';
 import { convert } from 'html-to-text';
@@ -856,6 +861,10 @@ async function createNonParticipantSystemMessages(
   isThreadReply: boolean,
   scopeType: string,
   workspaceId: string,
+  // Id of the message that carried the mention. Persisted on the banner so that
+  // adding the mentioned user later can replay the mention notification they
+  // were filtered out of at send time.
+  sourceMessageId?: string,
 ): Promise<void> {
   try {
     if (mentionedUserIds.length === 0 && mentionedGroupIds.length === 0) {
@@ -961,6 +970,7 @@ async function createNonParticipantSystemMessages(
           })),
           channelId,
           canAddUsers: !cannotAddUsers,
+          sourceMessageId,
         } as unknown as ReadonlyJSONValue,
       });
 
@@ -1008,6 +1018,7 @@ async function createNonParticipantSystemMessages(
           })),
           channelId,
           canAddUsers: !cannotAddUsers,
+          sourceMessageId,
         } as unknown as ReadonlyJSONValue,
       });
 
@@ -2875,6 +2886,7 @@ export function createMutators(
             false, // isThreadReply = false for initial channel messages
             channel.scopeType,
             authData.workspaceId,
+            messageId,
           );
 
 
@@ -3738,6 +3750,7 @@ export function createMutators(
             true, // isThreadReply = true for thread messages
             channel.scopeType,
             authData.workspaceId,
+            messageId,
           );
 
 
@@ -4284,6 +4297,78 @@ export function createMutators(
                   authData,
                   operationType: 'participants_added',
                 });
+              }
+            }
+
+            // Mention replay. A user tagged while outside the channel is filtered
+            // out of the mention pipeline at send time (MessagesSideEffectHandler
+            // gates both the activity record and the mention notification on
+            // channel participation), so without this they would only ever get the
+            // generic "added you to #channel" notification and would never learn
+            // they were tagged. Runs post-commit so the participant and
+            // channel_user_status rows exist before the notification filter reads
+            // them. resolveMentionReplayRecipients enforces the guards: the source
+            // message must belong to THIS channel, must not be deleted, and only
+            // users it genuinely mentions are notified.
+            const bannerSourceMessageId =
+              typeof metadata?.sourceMessageId === 'string' ? metadata.sourceMessageId : undefined;
+
+            if (validUsers.length > 0 && bannerSourceMessageId) {
+              const sourceMessage = await tx.run(
+                zql.messages.where('messageId', bannerSourceMessageId).one(),
+              );
+              const sourceConversation = sourceMessage
+                ? await tx.run(
+                    zql.conversations.where('conversationId', sourceMessage.conversationId).one(),
+                  )
+                : null;
+
+              if (sourceMessage && sourceConversation) {
+                const replaySource = {
+                  messageId: sourceMessage.messageId,
+                  conversationId: sourceConversation.conversationId,
+                  channelId: sourceConversation.channelId,
+                  senderId: sourceMessage.senderId,
+                  isDeleted: sourceMessage.isDeleted,
+                  isThreadMessage:
+                    sourceConversation.initialMessageId !== sourceMessage.messageId,
+                };
+
+                const sourceMentions = extractAllMentions(sourceMessage.content ?? '');
+                const mentionedUserIds = await resolveMentionParticipantUserIds(
+                  tx,
+                  sourceMentions.userIds,
+                  sourceMentions.groupIds,
+                );
+
+                const recipientUserIds = resolveMentionReplayRecipients({
+                  channelId,
+                  source: replaySource,
+                  addedUserIds: validUsers.map(u => u.userId),
+                  mentionedUserIds,
+                });
+
+                if (recipientUserIds.length > 0) {
+                  const mentionActor = await tx.run(
+                    zql.users.where('id', sourceMessage.senderId).one(),
+                  );
+                  const preview = extractPlainTextFromHtml(sourceMessage.content ?? '')
+                    .replace(/\s+/g, ' ')
+                    .trim();
+
+                  asyncTasks.push(() =>
+                    replayMentionForAddedUsers({
+                      recipientUserIds,
+                      channelId,
+                      channelName: channel.name ?? channelId,
+                      workspaceId: authData.workspaceId,
+                      source: replaySource,
+                      actorName: mentionActor?.displayName || mentionActor?.name || 'Someone',
+                      actorPicture: mentionActor?.picture ?? '',
+                      preview,
+                    }),
+                  );
+                }
               }
             }
           }

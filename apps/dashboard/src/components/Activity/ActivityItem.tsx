@@ -23,6 +23,7 @@ import { StageApprovalActivity } from './StageApprovalActivity';
 import { KbIngestionActivity } from './KbIngestionActivity';
 import { SlashCommandArtifactActivity } from './SlashCommandArtifactActivity';
 import { MaxWorkloadActivity } from './MaxWorkloadActivity';
+import { ChannelAddedActivity } from './ChannelAddedActivity';
 
 interface ActivityItemProps {
   activity: ActivityWithRelated;
@@ -151,6 +152,9 @@ export const ActivityItem = memo(function ActivityItem({
 
     case 'max_workload_reached':
       return <MaxWorkloadActivity activity={activity} isExpanded={isExpanded} />;
+
+    case 'channel_added':
+      return <ChannelAddedActivity activity={activity} isExpanded={isExpanded} />;
 
     default:
       return null;
