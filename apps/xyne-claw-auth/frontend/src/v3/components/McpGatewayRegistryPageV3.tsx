@@ -14,10 +14,11 @@ import {
   listGatewayServices,
   getGatewayService,
   deregisterGatewayService,
+  listMyGatewayRequests,
   type RegisterGatewayServiceInput,
   type GatewayToolInput,
 } from "../../lib/api";
-import type { GatewayServiceRow } from "../../lib/types";
+import type { GatewayServiceRow, GatewayServiceRequest } from "../../lib/types";
 
 const METHOD_OPTIONS = [
   { value: "POST", label: "POST" },
@@ -93,7 +94,7 @@ function ErrorBanner({ message }: { message: string }) {
   );
 }
 
-export function McpGatewayRegistryPageV3() {
+export function McpGatewayRegistryPageV3({ isAdmin = false }: { isAdmin?: boolean }) {
   const { show: showSnackbar } = useSnackbar();
 
   // Form state
@@ -131,9 +132,21 @@ export function McpGatewayRegistryPageV3() {
     }
   }, []);
 
+  // Requester-facing: the caller's own submissions (status shown in "Your requests").
+  const [myRequests, setMyRequests] = useState<GatewayServiceRequest[]>([]);
+
+  const reloadRequests = useCallback(async () => {
+    try {
+      setMyRequests(await listMyGatewayRequests());
+    } catch {
+      setMyRequests([]);
+    }
+  }, []);
+
   useEffect(() => {
     void reloadServices();
-  }, [reloadServices]);
+    void reloadRequests();
+  }, [reloadServices, reloadRequests]);
 
   const filtered = useMemo(() => {
     const q = search.toLowerCase().trim();
@@ -307,11 +320,12 @@ export function McpGatewayRegistryPageV3() {
     setSubmitting(true);
     try {
       const result = await registerGatewayService(payload);
-      showSnackbar({ variant: "success", title: result.message || "Service registered" });
+      showSnackbar({ variant: "success", title: result.message || "Submitted for approval" });
       setShowForm(false);
       setEditing(false);
       resetForm();
       await reloadServices();
+      await reloadRequests();
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       setFormError(msg);
@@ -415,12 +429,35 @@ export function McpGatewayRegistryPageV3() {
                 <Button variant="secondary" size="sm" leadingIcon={<PencilSimpleIcon size={14} />} onClick={() => void openEdit(s)}>
                   Edit
                 </Button>
-                <Button variant="ghost" size="sm" leadingIcon={<TrashIcon size={14} />} onClick={() => setDeleteTarget(s)}>
-                  Deregister
-                </Button>
+                {isAdmin && (
+                  <Button variant="ghost" size="sm" leadingIcon={<TrashIcon size={14} />} onClick={() => setDeleteTarget(s)}>
+                    Deregister
+                  </Button>
+                )}
               </div>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* Your requests (approval status) */}
+      {myRequests.length > 0 && (
+        <div className="flex flex-col gap-3">
+          <h2 className="text-[14px] font-semibold text-xyne-fg-primary">Your requests</h2>
+          <div className="flex flex-col gap-2">
+            {myRequests.map((r) => (
+              <div key={r.id} className="flex items-center justify-between rounded-lg border border-xyne-border bg-xyne-surface px-4 py-3">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="truncate text-[14px] font-medium text-xyne-fg-primary">{r.serviceName}</span>
+                    <Badge label={r.status} />
+                    <Badge label={`${r.toolCount} tool${r.toolCount === 1 ? "" : "s"}`} />
+                  </div>
+                  <p className="truncate text-[12px] text-xyne-fg-secondary">{r.backendId} · {r.backendUrl}</p>
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 

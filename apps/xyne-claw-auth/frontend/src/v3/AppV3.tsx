@@ -189,7 +189,7 @@ export function AppV3() {
             } />
             <Route path="/v3/gateway-registry" element={
               <div className="flex flex-1 flex-col overflow-hidden rounded-xl bg-xyne-surface shadow-sm">
-                <McpGatewayRegistryPageV3 />
+                <McpGatewayRegistryPageV3 isAdmin={isAdmin} />
               </div>
             } />
             <Route path="/v3/settings" element={

@@ -1,4 +1,4 @@
-import type { User, McpServer, UserConnection, HealthResult, CredentialField, Gateway, GatewayIdentity, GatewayServiceRow, Agent, AgentLight, ScheduledJob, ScheduledJobRun } from "./types";
+import type { User, McpServer, UserConnection, HealthResult, CredentialField, Gateway, GatewayIdentity, GatewayServiceRow, GatewayServiceRequest, Agent, AgentLight, ScheduledJob, ScheduledJobRun } from "./types";
 
 import { frontendConfig } from "./config";
 
@@ -7615,15 +7615,47 @@ export interface RegisterGatewayServiceInput {
   tools: GatewayToolInput[];
 }
 
-/** Register (upsert) an MCP-gateway service for the workspace tenant. */
+/** Submit an MCP-gateway service registration for admin approval (does not go live). */
 export async function registerGatewayService(
   input: RegisterGatewayServiceInput,
-): Promise<{ success: boolean; message: string }> {
-  const data = await request<{ success: boolean; data: { success: boolean; message: string } }>(
+): Promise<{ success: boolean; message: string; status?: string; requestId?: string }> {
+  const data = await request<{ success: boolean; data: { success: boolean; message: string; status?: string; requestId?: string } }>(
     `${AUTH_API_URL}/api/v1/gateway-registry`,
     { method: "POST", body: JSON.stringify(input) },
   );
   return data.data;
+}
+
+/** The caller's own registration requests (pending/approved/rejected). */
+export async function listMyGatewayRequests(): Promise<GatewayServiceRequest[]> {
+  const data = await request<{ success: boolean; data: GatewayServiceRequest[] }>(
+    `${AUTH_API_URL}/api/v1/gateway-registry/my-requests`,
+  );
+  return data.data;
+}
+
+/** Pending registration requests awaiting review (admin only). */
+export async function listGatewayRequests(): Promise<GatewayServiceRequest[]> {
+  const data = await request<{ success: boolean; data: GatewayServiceRequest[] }>(
+    `${AUTH_API_URL}/api/v1/gateway-registry/requests`,
+  );
+  return data.data;
+}
+
+/** Approve a pending request → registers it live (admin only). */
+export async function approveGatewayRequest(id: string): Promise<void> {
+  await request<{ success: boolean }>(
+    `${AUTH_API_URL}/api/v1/gateway-registry/requests/${encodeURIComponent(id)}/approve`,
+    { method: "POST", body: JSON.stringify({}) },
+  );
+}
+
+/** Reject a pending request (admin only). */
+export async function rejectGatewayRequest(id: string): Promise<void> {
+  await request<{ success: boolean }>(
+    `${AUTH_API_URL}/api/v1/gateway-registry/requests/${encodeURIComponent(id)}/reject`,
+    { method: "POST", body: JSON.stringify({}) },
+  );
 }
 
 export interface GatewayServiceDetail {
