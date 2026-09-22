@@ -48,6 +48,7 @@ import { validateKbGrants } from "../lib/spaces-kb.js";
 import { ORG_SCOPED_SLUGS } from "../lib/org-scoped-slugs.js";
 import { getAdminOrgScope, getOrgNameMap, withOrgLabel } from "../lib/admin-org-scope.js";
 import { asyncHandler, ok, badRequest, unauthorized, forbidden, notFound, conflict, HttpError } from "../lib/http.js";
+import { MAX_BASE_URL_CHARS, trimTrailingSlashes } from "../lib/provider-credential-verify.js";
 
 import { createLogger } from "../logger.js";
 const log = createLogger("agents");
@@ -4331,6 +4332,10 @@ router.post(
 
       let apiKey = typedKey;
       let baseUrl = (body.baseUrl ?? "").trim();
+      if (baseUrl.length > MAX_BASE_URL_CHARS) {
+        res.status(400).json({ success: false, error: "baseUrl is too long" });
+        return;
+      }
       if (!apiKey) {
         // No key in the body → list against the already-saved credential.
         const cred = await agentProviderCredentialsRepository.findByAgentAndProvider(agent.id, "litellm");
@@ -4342,7 +4347,7 @@ router.post(
         if (!baseUrl) baseUrl = cred.baseUrl ?? "";
       }
 
-      const root = (baseUrl || CONFIG.litellmBaseUrl).replace(/\/+$/, "");
+      const root = trimTrailingSlashes(baseUrl || CONFIG.litellmBaseUrl);
       log.info(`[agents] litellm/models fetching ${root}/v1/models (keyLen=${apiKey.length}, source=${typedKey ? "typed" : "saved-cred"})`);
       await assertSafeOutboundUrl(`${root}/v1/models`);
       const upstream = await fetch(`${root}/v1/models`, {

@@ -102,7 +102,10 @@ function providerLabel(provider: string): string {
   }
 }
 
-function trimTrailingSlashes(value: string): string {
+/** Longest provider base URL accepted from a request body. */
+export const MAX_BASE_URL_CHARS = 2048;
+
+export function trimTrailingSlashes(value: string): string {
   let end = value.length;
   while (end > 0 && value.charCodeAt(end - 1) === 47) end -= 1;
   return value.slice(0, end);
