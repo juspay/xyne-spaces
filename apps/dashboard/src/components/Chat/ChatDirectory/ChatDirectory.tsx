@@ -1538,6 +1538,7 @@ const ChatDirectory = ({
       </Dialog>
 
       <ChannelCommandMenu
+        aiOverview
         channels={channels}
         starred={starred}
         directMessages={directMessages}

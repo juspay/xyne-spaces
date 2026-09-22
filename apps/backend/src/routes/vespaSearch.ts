@@ -1,8 +1,13 @@
 import { Router } from 'express';
 import { searchHandler } from '../services/vespaSearch';
 import { validateQuery, validateSearchFilters } from '../middleware/validation';
-import { vespaSearchQuerySchema, vespaSchemaQuerySchema } from '../validators/vespaSearchValidator';
+import {
+  vespaSearchQuerySchema,
+  vespaSchemaQuerySchema,
+  queryIntentQuerySchema,
+} from '../validators/vespaSearchValidator';
 import { schemaHandler } from '../services/vespaSearch/schemaHandler';
+import { queryIntentHandler } from '../services/queryIntent/handler';
 
 const router = Router();
 
@@ -46,5 +51,16 @@ router.get('/', validateQuery(vespaSearchQuerySchema), validateSearchFilters(), 
  *                          ticket, user, file, sam_transcript, mail, mail_attachment, project, memory
  */
 router.get('/schema', validateQuery(vespaSchemaQuerySchema), schemaHandler);
+
+/**
+ * @route GET /api/vespaSearch/intent
+ * @desc Classifies a cmd+K query as a keyword lookup ('lexical') or a question that needs
+ *       AI ('ai'). Called alongside search, never inside it, so a slow classifier can't
+ *       delay results. `data` is null when there is no verdict (feature off, clearly
+ *       lexical, or the classifier failed); the client treats that as lexical.
+ * @access Private
+ * @param {string} q - The query text (required)
+ */
+router.get('/intent', validateQuery(queryIntentQuerySchema), queryIntentHandler);
 
 export default router;

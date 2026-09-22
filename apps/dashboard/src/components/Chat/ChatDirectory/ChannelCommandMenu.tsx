@@ -142,6 +142,7 @@ import { apiInstance } from '../../../services/clients/apiClient';
 import { MergeTicketsDialog } from '../../Tickets/MergeTicketsDialog/MergeTicketsDialog';
 import { toast } from 'sonner';
 import Button from '../../ui/Button';
+import { AiAnswerCard } from './AiAnswerCard';
 
 type SearchResultsDocType = SearchResultsFilters['docType'];
 
@@ -436,6 +437,7 @@ const ChannelCommandMenu = ({
   initialToggles,
   restoreFromLastSearch,
   enabledTabs,
+  aiOverview = false,
   inline = false,
   compactTabs = false,
   onTabChange,
@@ -706,6 +708,7 @@ const ChannelCommandMenu = ({
     text: searchText,
     setText: setSearchText,
     inputRef,
+    isAiQuery,
     // New hookstate
     activeTab,
     setActiveTab,
@@ -731,6 +734,9 @@ const ChannelCommandMenu = ({
     // unless we're restoring a search that ran at a different scope.
     defaultOnlyMyChannels: initialToggles?.onlyMyChannels ?? true,
     defaultIncludeBotMessages: initialToggles?.includeBotMessages ?? false,
+    // Classifying costs a request per settled query, so only surfaces that can show the
+    // overview ask for it (the backend gates the feature itself on cmdk_ai_overview_enabled).
+    classifyIntent: aiOverview,
   });
 
   // Aliases to match old usage if needed or just use new names
@@ -4377,6 +4383,17 @@ const ChannelCommandMenu = ({
               <SlashCommandPalette command={slash} onItemMouseDown={handleItemMouseDown} />
             ) : (
               <>
+                {/* AI answer above the current tab's results when the query needs AI
+                    (Google "AI Overview" style). Not a cmdk item, so the results below
+                    keep arrow keys and the Enter target. */}
+                {aiOverview && (
+                  <AiAnswerCard
+                    query={searchText}
+                    tab={activeTab}
+                    active={isAiQuery && !mentionSearchType}
+                  />
+                )}
+
                 {/* Popup palette: the row is pinned here, directly under the tabs, so it
                     sits in the same place no matter what matched. It is skipped by the
                     first-row auto-select, so the top result keeps the Enter target. */}
