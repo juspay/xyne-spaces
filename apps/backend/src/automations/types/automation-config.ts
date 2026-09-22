@@ -5,6 +5,7 @@ import { ControlFlowStepType } from './known-types';
 import { ConditionOperator, ConditionOperatorSchema } from './operators';
 import { TAG_FORMAT_REGEX } from '@xyne/shared';
 import { calculateETADeadline } from '@/utils/etaCalculation';
+import { addBusinessTime, BusinessHoursSchema, parseBusinessHours } from '../util/business-hours';
 
 function isValidHasTagValue(value: unknown): boolean {
   if (typeof value !== 'string') return false;
@@ -138,6 +139,7 @@ export const ScheduledScheduleSchema = z.object({
   field: z.string().min(1),
   offset: ScheduleOffsetSchema,
   businessHoursOnly: z.boolean().default(false).describe('Business Hours Only'),
+  businessHours: BusinessHoursSchema.optional(),
 });
 
 export const ScheduleConfigSchema = z.discriminatedUnion('type', [
@@ -193,6 +195,11 @@ export function computeScheduleRunAt(
   const offsetMs = scheduleOffsetMs(schedule.offset);
   if (!schedule.businessHoursOnly) {
     return fieldDate.getTime() + offsetMs;
+  }
+
+  const configuredHours = parseBusinessHours(schedule.businessHours);
+  if (configuredHours) {
+    return addBusinessTime(fieldDate, offsetMs, configuredHours).getTime();
   }
 
   const seconds = Math.floor(offsetMs / 1000);

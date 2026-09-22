@@ -187,9 +187,21 @@ export interface ScheduleOffset {
   unit: ScheduleOffsetUnit;
 }
 
+export interface BusinessHours {
+  days: number[];
+  startTime: string;
+  endTime: string;
+}
+
 export type ScheduleConfig =
   | { type: 'IMMEDIATE' }
-  | { type: 'SCHEDULED'; field: string; offset: ScheduleOffset; businessHoursOnly?: boolean };
+  | {
+      type: 'SCHEDULED';
+      field: string;
+      offset: ScheduleOffset;
+      businessHoursOnly?: boolean;
+      businessHours?: BusinessHours;
+    };
 
 export const MAX_SCHEDULE_OFFSET_MINUTES = 30 * 24 * 60;
 

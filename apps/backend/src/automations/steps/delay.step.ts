@@ -8,6 +8,14 @@ import { automationContextStorage } from '../engine/automation-context-storage';
 import { automationScheduleQueue } from '../queue/automation-schedule.queue';
 import { logger } from '@/utils/logger';
 import { calculateETADeadline } from '@/utils/etaCalculation';
+import {
+  addBusinessTime,
+  type BusinessHours,
+  BusinessHoursSchema,
+  formatCalendarSpan,
+  isValidBusinessHoursRange,
+  maxBusinessWaitCalendarMs,
+} from '../util/business-hours';
 import { triggerRegistry } from '../triggers/trigger-registry';
 
 const MAX_DELAY_SECONDS = 30 * 24 * 60 * 60;
@@ -19,8 +27,16 @@ const DelayConfigSchema = z
     amount: variableRef(z.number().positive().describe('How long to wait')),
     unit: DelayUnitSchema.default('seconds').describe('Unit for "amount". Default seconds.'),
     businessHoursOnly: z.boolean().default(false).describe('Business Hours Only'),
+    businessHours: BusinessHoursSchema.optional(),
   })
   .superRefine((data, ctx) => {
+    if (data.businessHours && !isValidBusinessHoursRange(data.businessHours)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['businessHours', 'endTime'],
+        message: 'business hours end time must be after the start time',
+      });
+    }
     if (typeof data.amount !== 'number') {
       return;
     }
@@ -31,6 +47,21 @@ const DelayConfigSchema = z
         path: ['amount'],
         message: `requested delay of ${seconds}s exceeds the maximum of ${MAX_DELAY_SECONDS}s (30 days)`,
       });
+      return;
+    }
+    if (
+      data.businessHoursOnly &&
+      data.businessHours &&
+      isValidBusinessHoursRange(data.businessHours)
+    ) {
+      const worstMs = maxBusinessWaitCalendarMs(seconds * 1000, data.businessHours);
+      if (worstMs > MAX_DELAY_SECONDS * 1000) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['amount'],
+          message: `with these business hours this delay can take up to ${formatCalendarSpan(worstMs)}, which exceeds the maximum of 30 calendar days`,
+        });
+      }
     }
   });
 
@@ -50,9 +81,14 @@ export function calculateDelayUntil(
   start: Date,
   seconds: number,
   businessHoursOnly: boolean,
+  businessHours?: BusinessHours,
 ): Date {
   if (!businessHoursOnly) {
     return new Date(start.getTime() + seconds * 1000);
+  }
+
+  if (businessHours) {
+    return addBusinessTime(start, seconds * 1000, businessHours);
   }
 
   const roundedMinutes = Math.ceil(seconds / 60);
@@ -90,8 +126,13 @@ export class DelayStep extends BaseActionStep<typeof DelayConfigSchema, DelayOut
     }
 
     const now = new Date();
-    const resumeAt = calculateDelayUntil(now, seconds, config.businessHoursOnly);
+    const resumeAt = calculateDelayUntil(now, seconds, config.businessHoursOnly, config.businessHours);
     const delayMs = Math.max(0, resumeAt.getTime() - now.getTime());
+    if (config.businessHoursOnly && config.businessHours && delayMs > MAX_DELAY_SECONDS * 1000) {
+      throw new Error(
+        `[DELAY] business-hours delay of ${seconds}s resolves to ${formatCalendarSpan(delayMs)}, exceeding the maximum of 30 calendar days`,
+      );
+    }
     const delayedUntil = resumeAt.toISOString();
 
     const stepCount = Object.keys(context.steps).length;

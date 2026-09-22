@@ -8,6 +8,7 @@ export type {
   SwitchCaseEntry,
   AutomationRun,
   AutomationRunSummary,
+  BusinessHours,
   Condition,
   LeafCondition,
   JsonSchema,

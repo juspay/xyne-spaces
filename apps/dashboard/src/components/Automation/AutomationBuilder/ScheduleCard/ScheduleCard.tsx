@@ -4,6 +4,10 @@ import { cn } from '../../../../utils/classNames';
 import Input from '../../../ui/Input/Input';
 import { Checkbox } from '../../../ui/Checkbox/Checkbox';
 import {
+  BusinessHoursFields,
+  DEFAULT_BUSINESS_HOURS,
+} from '../BusinessHoursFields/BusinessHoursFields';
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -215,9 +219,24 @@ export function ScheduleCard({
             <Checkbox
               label='Business hours only'
               checked={sched.businessHoursOnly ?? false}
-              onChange={checked => onChange({ ...sched, businessHoursOnly: checked })}
+              onChange={checked =>
+                onChange({
+                  ...sched,
+                  businessHoursOnly: checked,
+                  ...(checked && !sched.businessHours
+                    ? { businessHours: DEFAULT_BUSINESS_HOURS }
+                    : {}),
+                })
+              }
               size='sm'
             />
+
+            {sched.businessHoursOnly && (
+              <BusinessHoursFields
+                value={sched.businessHours}
+                onChange={businessHours => onChange({ ...sched, businessHours })}
+              />
+            )}
 
             {overMax && (
               <p className='text-[11px] text-destructive'>
