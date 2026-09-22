@@ -5,7 +5,7 @@ import {
   shouldGeneratePrompt,
   type CreateTurnField,
 } from './classifyCreateTurn.ts';
-import { buildDraftCanvasPatch } from './canvasFromIdentity.ts';
+import { buildDraftCanvasPatch, draftFromModelReply } from './canvasFromIdentity.ts';
 import type { AgentCreateChatPatch, AgentCreateField } from './types.ts';
 import { slicePatch } from './mergeChatPatch.ts';
 
@@ -229,6 +229,23 @@ export function decideCreateCanvasAction(args: {
     };
   }
 
+  if (canvasEmpty && !marker.ask) {
+    const stated = draftFromModelReply(marker.visible);
+    const statedName = stated.name?.trim() ?? '';
+    const statedSpec = Boolean(stated.description?.trim() || stated.systemPrompt?.trim());
+    if (
+      statedName &&
+      (statedSpec || (!marker.idle && /\bdraft\b/i.test(marker.visible)))
+    ) {
+      return {
+        type: 'draft',
+        intent: userText.trim().slice(0, 500) || statedName,
+        visibleReply: marker.visible,
+        fields: fieldsForDraft(userText, canvasEmpty),
+      };
+    }
+  }
+
   if (renameTo) {
     return { type: 'rename', name: renameTo };
   }
@@ -286,10 +303,38 @@ export async function applyCreateHubDraft(args: {
   fillTools?: (incoming: AgentCreateChatPatch) => Promise<void>;
 }): Promise<void> {
   const { action, canvasEmpty } = args;
-  const generate = action.fields.includes('systemPrompt') || canvasEmpty;
+  const generateInstructions = action.fields.includes('systemPrompt') || canvasEmpty;
+  const preludeFields = CREATE_REVEAL_FIELD_ORDER.filter(
+    field =>
+      action.fields.includes(field) &&
+      field !== 'systemPrompt' &&
+      field !== 'tools' &&
+      field !== 'skills' &&
+      field !== 'knowledge',
+  );
+
+  if (preludeFields.length > 0) {
+    const preludePatch = incomingPatchForCreateDraft({
+      visibleReply: action.visibleReply,
+      intent: action.intent,
+      generatedPrompt: '',
+      fields: preludeFields,
+      canvasEmpty,
+    });
+    await revealCreatePatchFields({
+      fields: preludeFields,
+      incoming: preludePatch,
+      sourceId: args.sourceId,
+      writeMs: args.writeMs,
+      setWritingField: args.setWritingField,
+      applyChatPatch: args.applyChatPatch,
+      sleep: args.sleep,
+    });
+  }
+
   const incoming: AgentCreateChatPatch = {};
 
-  if (generate) {
+  if (generateInstructions) {
     const generatedPrompt = await args.generateAgentPrompt(
       action.intent,
       args.existingSystemPrompt.trim() ? args.existingSystemPrompt.trim() : undefined,
@@ -310,8 +355,17 @@ export async function applyCreateHubDraft(args: {
     await args.fillTools(incoming);
   }
 
+  const tailFields = CREATE_REVEAL_FIELD_ORDER.filter(
+    field =>
+      action.fields.includes(field) &&
+      (field === 'systemPrompt' ||
+        field === 'tools' ||
+        field === 'skills' ||
+        field === 'knowledge'),
+  );
+
   await revealCreatePatchFields({
-    fields: action.fields,
+    fields: tailFields,
     incoming,
     sourceId: args.sourceId,
     writeMs: args.writeMs,

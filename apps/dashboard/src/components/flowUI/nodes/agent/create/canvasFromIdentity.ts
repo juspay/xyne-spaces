@@ -97,6 +97,14 @@ export function draftIdentityFromModelReply(visibleReply: string): ParsedDraftId
     }
   }
 
+  const titledDraft = text.match(/\byour\s+\*\*([^*]+)\*\*\s+draft\b/i);
+  if (titledDraft?.[1]) {
+    const name = cleanDraftLine(titledDraft[1], 80);
+    if (name.length > 0) {
+      return { name, slug: slugify(name) };
+    }
+  }
+
   return null;
 }
 
