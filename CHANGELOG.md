@@ -1,3 +1,10 @@
+## [1.361.1-release-20260922.1](https://github.com/juspay/xyne-spaces/compare/v1.361.0...v1.361.1-release-20260922.1) (2026-09-22)
+
+
+### Bug Fixes
+
+* address review findings and collapse label chips ([#2145](https://github.com/juspay/xyne-spaces/issues/2145)) ([e88e03f](https://github.com/juspay/xyne-spaces/commit/e88e03ffbd1c9378612723571c0e222030212193))
+
 ## [1.361.0](https://github.com/juspay/xyne-spaces/compare/v1.360.1...v1.361.0) (2026-09-21)
 
 
