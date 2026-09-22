@@ -1,3 +1,15 @@
+## [1.364.0](https://github.com/juspay/xyne-spaces/compare/v1.363.0...v1.364.0) (2026-09-22)
+
+
+### Features
+
+* add search to board selection in the create ticket modal ([#2148](https://github.com/juspay/xyne-spaces/issues/2148)) ([1a3c824](https://github.com/juspay/xyne-spaces/commit/1a3c824ad5a6dd5c0dce5cbdef13fe936da4b41b))
+
+
+### Bug Fixes
+
+* clear tickets search when leaving the tickets module ([#2147](https://github.com/juspay/xyne-spaces/issues/2147)) ([2a1b85c](https://github.com/juspay/xyne-spaces/commit/2a1b85c2fc2c55dc66f1224cbbf34eb92da8a83f))
+
 ## [1.363.0](https://github.com/juspay/xyne-spaces/compare/v1.362.0...v1.363.0) (2026-09-22)
 
 
