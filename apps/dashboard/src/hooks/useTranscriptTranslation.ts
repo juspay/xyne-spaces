@@ -4,11 +4,12 @@ import type { TranscriptTranslation } from '@xyne/shared';
 import { recordingService } from '../services/Recording/recordingService';
 import { logRecordingError } from '../utils/recordingUtils';
 
+const TRANSLATION_POLL_INTERVAL_MS = 3000;
+const TRANSLATION_POLL_MAX_ATTEMPTS = 40; // ~2 minutes
+
 export interface UseTranscriptTranslationOptions {
   externalId: string | undefined;
   language: string;
-  /** Prefer the speaker-identified transcript for `original` (headless recordings only). */
-  variant?: 'identified' | undefined;
   enabled: boolean;
 }
 
@@ -16,7 +17,6 @@ export interface UseTranscriptTranslationResult {
   /** Last successfully loaded text — sticky across language switches so the panel
    *  keeps showing the previous language while the next one loads. */
   text: string | undefined;
-  partial: boolean;
   isLoading: boolean;
   isTranslating: boolean;
   error: string | undefined;
@@ -25,65 +25,85 @@ export interface UseTranscriptTranslationResult {
 
 /**
  * Lazily fetches transcript text per language via the translate-transcript endpoint
- * (`original` is a no-LLM passthrough). Local state, deliberately not synced through
- * Zero — Postgres never carries transcript text (see calls.metadata.translations).
+ * (`original` is a no-LLM passthrough). Any other language runs asynchronously on the
+ * backend — a 'pending' response is polled until 'ready'. Local state, deliberately not
+ * synced through Zero — Postgres never carries transcript text.
  */
 export function useTranscriptTranslation({
   externalId,
   language,
-  variant,
   enabled,
 }: UseTranscriptTranslationOptions): UseTranscriptTranslationResult {
-  const [cache, setCache] = useState<Record<string, TranscriptTranslation>>({});
+  const cacheRef = useRef<Record<string, TranscriptTranslation>>({});
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [translatingLanguage, setTranslatingLanguage] = useState<string | null>(null);
   const [displayed, setDisplayed] = useState<TranscriptTranslation | undefined>(undefined);
 
-  // Guards late responses from a call navigated away from before they resolved.
-  const externalIdRef = useRef(externalId);
-  externalIdRef.current = externalId;
-
   useEffect(() => {
-    setCache({});
+    cacheRef.current = {};
     setErrors({});
     setTranslatingLanguage(null);
     setDisplayed(undefined);
   }, [externalId]);
 
+  // A failed language never auto-retries — retry() clears the error, which refires this effect.
+  const currentError = errors[language];
+
   useEffect(() => {
     if (!enabled || !externalId) return;
-    const existing = cache[language];
-    if (existing?.status === 'ready' && existing.text !== undefined) return;
-    // A failed language never auto-retries — retry() clears the error, which refires this effect.
-    if (errors[language] !== undefined) return;
-    if (translatingLanguage === language) return;
 
-    setTranslatingLanguage(language);
-    void recordingService
-      .translateTranscript(externalId, language, variant)
-      .then(result => {
-        if (externalIdRef.current !== externalId) return;
-        setCache(current => ({ ...current, [language]: result }));
-      })
-      .catch((err: unknown) => {
-        logRecordingError('useTranscriptTranslation', err);
-        if (externalIdRef.current !== externalId) return;
-        const message = axios.isAxiosError(err)
-          ? (err.response?.data as { error?: string } | undefined)?.error
-          : undefined;
-        setErrors(current => ({ ...current, [language]: message ?? 'Please try again.' }));
-      })
-      .finally(() => {
-        setTranslatingLanguage(current => (current === language ? null : current));
-      });
-  }, [enabled, language, externalId, variant, cache, errors, translatingLanguage]);
-
-  const active = cache[language];
-  useEffect(() => {
-    if (active?.status === 'ready' && active.text !== undefined) {
-      setDisplayed(active);
+    const cached = cacheRef.current[language];
+    if (cached?.status === 'ready' && cached.text !== undefined) {
+      setDisplayed(cached);
+      return;
     }
-  }, [active]);
+    if (currentError !== undefined) return;
+
+    let cancelled = false;
+    let attempts = 0;
+    setTranslatingLanguage(language);
+
+    const poll = (): void => {
+      void recordingService
+        .translateTranscript(externalId, language)
+        .then(result => {
+          if (cancelled) return;
+          cacheRef.current = { ...cacheRef.current, [language]: result };
+
+          if (result.status === 'pending') {
+            attempts += 1;
+            if (attempts > TRANSLATION_POLL_MAX_ATTEMPTS) {
+              setErrors(current => ({
+                ...current,
+                [language]: 'Translation is taking longer than expected.',
+              }));
+              setTranslatingLanguage(current => (current === language ? null : current));
+              return;
+            }
+            window.setTimeout(poll, TRANSLATION_POLL_INTERVAL_MS);
+            return;
+          }
+
+          setDisplayed(result);
+          setTranslatingLanguage(current => (current === language ? null : current));
+        })
+        .catch((err: unknown) => {
+          if (cancelled) return;
+          logRecordingError('useTranscriptTranslation', err);
+          const message = axios.isAxiosError(err)
+            ? (err.response?.data as { error?: string } | undefined)?.error
+            : undefined;
+          setErrors(current => ({ ...current, [language]: message ?? 'Please try again.' }));
+          setTranslatingLanguage(current => (current === language ? null : current));
+        });
+    };
+
+    poll();
+
+    return (): void => {
+      cancelled = true;
+    };
+  }, [enabled, externalId, language, currentError]);
 
   const retry = useCallback((): void => {
     setErrors(current => {
@@ -93,13 +113,12 @@ export function useTranscriptTranslation({
     });
   }, [language]);
 
-  const error = errors[language];
   return {
     text: displayed?.text,
-    partial: !!displayed?.partial,
-    isLoading: enabled && !!externalId && displayed?.text === undefined && error === undefined,
+    isLoading:
+      enabled && !!externalId && displayed?.text === undefined && currentError === undefined,
     isTranslating: translatingLanguage === language,
-    error,
+    error: currentError,
     retry,
   };
 }

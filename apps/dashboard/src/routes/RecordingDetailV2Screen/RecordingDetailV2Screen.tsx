@@ -7,7 +7,6 @@ import { type ReactElement, useState, useEffect, useCallback, useMemo, useRef } 
 import { AnimatePresence, motion } from 'framer-motion';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import axios from 'axios';
-import { ORIGINAL_TRANSCRIPT_LANGUAGE } from '@xyne/shared';
 import {
   recordingService,
   type RecordingDetail,
@@ -39,7 +38,6 @@ import {
 import AppNavigator from '../../components/AppNavigator/AppNavigator';
 import { usePlatform } from '../../hooks/usePlatform';
 import { useTranscriptTranslation } from '../../hooks/useTranscriptTranslation';
-import { useSpeakerIdentificationEnabled } from '../../components/SpeakerIdentification/useSpeakerIdentificationEnabled';
 import {
   Spinner,
   Flag,
@@ -99,6 +97,7 @@ import {
   TranscriptSidePanel,
   type TranscriptPanelTarget,
 } from '../../components/Chat/TranscriptCitationModal/TranscriptSidePanel';
+import { ORIGINAL_TRANSCRIPT_LANGUAGE } from '@xyne/shared';
 import { transcriptCitationStore } from '../../components/Chat/TranscriptCitationModal';
 import { parseMarkedItems, type MarkedItem } from '../../components/CallTimeline/markedItems';
 import type { Canvas } from '../../components/Canvas/Canvas.types';
@@ -221,7 +220,6 @@ export default function RecordingDetailV2Screen({
   const capturedTranscript =
     navState?.hasTranscript === true &&
     (stoppedAtMs === null || Date.now() - stoppedAtMs < NO_TRANSCRIPT_AFTER_MS);
-  const speakerIdentificationEnabled = useSpeakerIdentificationEnabled();
   const currentUser = useSelf();
   const { summaryModelPreference, setSummaryModelPreference } = useSummaryModelPreference();
 
@@ -716,8 +714,6 @@ export default function RecordingDetailV2Screen({
               ? {
                   ...current,
                   hasRecording: fresh.hasRecording,
-                  recordingType: fresh.recordingType ?? current.recordingType ?? null,
-                  attachmentId: fresh.attachmentId ?? current.attachmentId ?? null,
                   durationMs: fresh.durationMs ?? current.durationMs,
                 }
               : current,
@@ -975,16 +971,9 @@ export default function RecordingDetailV2Screen({
     [recordingId],
   );
 
-  const transcriptVariant =
-    selectedTranscriptLanguage === ORIGINAL_TRANSCRIPT_LANGUAGE &&
-    speakerIdentificationEnabled &&
-    recording?.hasIdentifiedTranscript
-      ? ('identified' as const)
-      : undefined;
   const transcript = useTranscriptTranslation({
     externalId: recording?.externalId,
     language: selectedTranscriptLanguage,
-    variant: transcriptVariant,
     // Fetch only once the panel is actually opened, not on page load — mirrors
     // getRecordingDetail no longer embedding the transcript body.
     enabled: showTranscriptPanel,
@@ -1672,7 +1661,6 @@ export default function RecordingDetailV2Screen({
             selectedLanguage={selectedTranscriptLanguage}
             onLanguageChange={setSelectedTranscriptLanguage}
             isTranslating={transcript.isTranslating}
-            translatePartial={transcript.partial}
             onClose={() => {
               setShowTranscriptPanel(false);
               setCitationRef(null);

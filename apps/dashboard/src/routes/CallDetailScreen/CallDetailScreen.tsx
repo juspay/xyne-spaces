@@ -4,7 +4,13 @@ import { useNavigate, useLocation, useParams } from 'react-router-dom';
 import { AnimatePresence } from 'framer-motion';
 import { ChevronLeft, ChevronRight, ChevronDown, Loader2, FileText } from 'lucide-react';
 import { ORIGINAL_TRANSCRIPT_LANGUAGE } from '@xyne/shared';
-import { SidebarRightClose, SidebarRightOpen,  Hashtag, EnvelopeDefault, File02Text } from '@xyne/icons';
+import {
+  SidebarRightClose,
+  SidebarRightOpen,
+  Hashtag,
+  EnvelopeDefault,
+  File02Text,
+} from '@xyne/icons';
 import { toast } from 'sonner';
 import { recordingService } from '../../services/Recording/recordingService';
 import { useCallPRD } from '../../hooks/useCallPRD';
@@ -918,7 +924,6 @@ export default function CallDetailScreen(): ReactElement {
             selectedLanguage={selectedTranscriptLanguage}
             onLanguageChange={setSelectedTranscriptLanguage}
             isTranslating={transcript.isTranslating}
-            translatePartial={transcript.partial}
             onClose={(): void => {
               setShowTranscriptPanel(false);
               setCitationRef(null);
