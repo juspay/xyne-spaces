@@ -6,6 +6,7 @@ import { handleHelp } from "./help.js";
 import { handleStatus } from "./status.js";
 import { handleEval } from "./eval.js";
 import { handleDebug } from "./debug.js";
+import { handleChainDebug } from "./chain-debug.js";
 import { applyFastTaskCommand, handleFastModeToggle, handleFastModeUsage } from "./fast-mode.js";
 import { handleClear } from "./clear.js";
 import { handleStop } from "./stop.js";
@@ -49,7 +50,11 @@ export async function handleWebhookCommands(ctx: WebhookCommandCtx): Promise<Com
   }
 
   if (slash?.kind === "debug") {
-    await handleDebug(ctx, slash.scope ?? "latest");
+    if (slash.scope === "chain") {
+      await handleChainDebug(ctx);
+    } else {
+      await handleDebug(ctx, slash.scope ?? "latest");
+    }
     return { kind: "handled" };
   }
 
