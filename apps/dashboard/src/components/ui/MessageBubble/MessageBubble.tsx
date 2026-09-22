@@ -719,9 +719,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   const hasFailedToSend = pendingStatus === 'failed';
 
   const shouldShowPending = useMemo(() => {
-    return (
-      hasFailedToSend || (debugSettings.showSendIndicators && isMe && !message.isSent)
-    );
+    return hasFailedToSend || (debugSettings.showSendIndicators && isMe && !message.isSent);
   }, [hasFailedToSend, debugSettings.showSendIndicators, isMe, message.isSent]);
 
   // Claw agent citations baked into the reply metadata (by claw-auth at

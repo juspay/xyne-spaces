@@ -132,9 +132,11 @@ export function getPendingForChannel(channelId: string): PendingMessage[] {
 }
 
 export function getPendingForThread(conversationId: string): PendingMessage[] {
-  return getAllPending().filter(
-    e => e.kind === 'thread' && e.conversationId === conversationId,
-  );
+  // Deliberately kind-agnostic. A top-level channel send CREATES the
+  // conversation, so its entry is kind:'channel' while still being that
+  // thread's root message. Matching on kind would leave a failed root invisible
+  // once the thread is opened — only its replies would carry a pending row.
+  return getAllPending().filter(e => e.conversationId === conversationId);
 }
 
 export function subscribePending(cb: () => void): () => void {
