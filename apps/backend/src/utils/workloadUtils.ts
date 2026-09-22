@@ -118,10 +118,11 @@ async function resolveUserRoleIds(
  * of any board in the project. `activeTasks` further restricts to
  * statusV2 IN (TODO, STARTED).
  *
- * Query count is fixed regardless of pool size (board, project roles, role
- * assignments, user roles, tickets, existing rows), and rows whose counts did not
- * change are left untouched — so refreshing on the assignment hot path does not
- * produce no-op writes or no-op Zero pokes.
+ * Query count is fixed regardless of pool size, and the directly-assigned counts are
+ * aggregated by the database rather than transferred row by row — this runs on the
+ * assignment hot path, so the volume it reads must not scale with board history.
+ * Rows whose counts did not change are left untouched, and a candidate with no work
+ * gets no row at all, so a refresh over a settled pool writes nothing.
  */
 export async function syncWorkloadForUsers(
   userIds: string[],
@@ -142,16 +143,20 @@ export async function syncWorkloadForUsers(
     return;
   }
 
-  // Nothing here depends on anything else here, so it all goes in one round
-  // trip. Only the role-assignment read below needs a result from it.
-  const [projectAssignmentRoleIds, roleIdsByUserId, tickets, existingRows] = await Promise.all([
+  // Nothing here depends on anything else here, so it all goes in one round trip.
+  // Only the role-assignment read below needs a result from it.
+  //
+  // The directly-assigned side is counted by the database, not in Node. This runs on
+  // the assignment hot path (every evaluate* call refreshes its candidate pool), so
+  // materialising a board's whole ticket set here would put an unbounded transfer in
+  // front of every ticket creation.
+  const [projectAssignmentRoleIds, roleIdsByUserId, directCounts, existingRows] = await Promise.all([
     getProjectAssignmentRoleIds(board.projectId),
     resolveUserRoleIds(uniqueUserIds, userRoleIdsByUserId),
-    // Counted in memory so the OR between "assigned to me" and "matches my role"
-    // dedupes per ticket exactly like the previous per-user COUNT queries did.
-    db.ticket.findMany({
-      where: { boardId, userGroupId },
-      select: { id: true, assignedTo: true, statusV2: true },
+    db.ticket.groupBy({
+      by: ['assignedTo', 'statusV2'],
+      where: { boardId, userGroupId, assignedTo: { in: uniqueUserIds } },
+      _count: { _all: true },
     }),
     withWorkspaceScope(() =>
       repositories.userWorkloadMapping.findMany({
@@ -160,16 +165,67 @@ export async function syncWorkloadForUsers(
     ),
   ]);
 
-  const ticketIdsByRoleId = new Map<string, Set<string>>();
+  const isActiveStatus = (statusV2: string): boolean =>
+    statusV2 === TicketStatusV2.TODO || statusV2 === TicketStatusV2.STARTED;
+
+  type Counts = { activeTasks: number; totalTasks: number };
+  const countsByUserId = new Map<string, Counts>(
+    uniqueUserIds.map(id => [id, { activeTasks: 0, totalTasks: 0 }]),
+  );
+  for (const row of directCounts) {
+    if (!row.assignedTo) continue;
+    const counts = countsByUserId.get(row.assignedTo);
+    if (!counts) continue;
+    const n = row._count._all;
+    counts.totalTasks += n;
+    if (isActiveStatus(row.statusV2)) counts.activeTasks += n;
+  }
+
+  // Role-matched tickets are added on top. Scoped to this board through the relation
+  // filter — the old per-user COUNT reached the same set because its ticket predicate
+  // carried boardId/userGroupId, so narrowing here preserves the semantics while
+  // keeping the scan proportional to role-assigned tickets rather than all of them.
   if (projectAssignmentRoleIds.length > 0) {
     const roleAssignments = await db.ticketAssignment.findMany({
-      where: { roleId: { in: projectAssignmentRoleIds } },
+      where: {
+        roleId: { in: projectAssignmentRoleIds },
+        ticket: { boardId, userGroupId },
+      },
       select: { ticketId: true, roleId: true },
     });
-    for (const assignment of roleAssignments) {
-      if (!assignment.roleId) continue;
-      if (!ticketIdsByRoleId.has(assignment.roleId)) ticketIdsByRoleId.set(assignment.roleId, new Set());
-      ticketIdsByRoleId.get(assignment.roleId)!.add(assignment.ticketId);
+
+    if (roleAssignments.length > 0) {
+      const roleTickets = await db.ticket.findMany({
+        where: { id: { in: Array.from(new Set(roleAssignments.map(a => a.ticketId))) } },
+        select: { id: true, assignedTo: true, statusV2: true },
+      });
+      const roleTicketById = new Map(roleTickets.map(t => [t.id, t]));
+
+      const ticketIdsByRoleId = new Map<string, Set<string>>();
+      for (const assignment of roleAssignments) {
+        if (!assignment.roleId) continue;
+        if (!ticketIdsByRoleId.has(assignment.roleId)) ticketIdsByRoleId.set(assignment.roleId, new Set());
+        ticketIdsByRoleId.get(assignment.roleId)!.add(assignment.ticketId);
+      }
+
+      for (const userId of uniqueUserIds) {
+        const userRoleIds = roleIdsByUserId.get(userId) ?? [];
+        const counts = countsByUserId.get(userId)!;
+        const seen = new Set<string>();
+        for (const roleId of projectAssignmentRoleIds) {
+          if (!userRoleIds.includes(roleId)) continue;
+          for (const ticketId of ticketIdsByRoleId.get(roleId) ?? []) {
+            if (seen.has(ticketId)) continue;
+            seen.add(ticketId);
+            const ticket = roleTicketById.get(ticketId);
+            // Already counted on the directly-assigned side; the original OR
+            // counted such a ticket once, so it must not be added twice.
+            if (!ticket || ticket.assignedTo === userId) continue;
+            counts.totalTasks += 1;
+            if (isActiveStatus(ticket.statusV2)) counts.activeTasks += 1;
+          }
+        }
+      }
     }
   }
 
@@ -177,27 +233,20 @@ export async function syncWorkloadForUsers(
 
   const changed: Array<{ userId: string; activeTasks: number; totalTasks: number }> = [];
   for (const userId of uniqueUserIds) {
-    const userRoleIds = roleIdsByUserId.get(userId) ?? [];
-    const workloadRoleIds = projectAssignmentRoleIds.filter(id => userRoleIds.includes(id));
-    const roleMatchedTicketIds = new Set<string>();
-    for (const roleId of workloadRoleIds) {
-      for (const ticketId of ticketIdsByRoleId.get(roleId) ?? []) roleMatchedTicketIds.add(ticketId);
-    }
-
-    let activeTasks = 0;
-    let totalTasks = 0;
-    for (const ticket of tickets) {
-      if (ticket.assignedTo !== userId && !roleMatchedTicketIds.has(ticket.id)) continue;
-      totalTasks += 1;
-      if (ticket.statusV2 === TicketStatusV2.TODO || ticket.statusV2 === TicketStatusV2.STARTED) {
-        activeTasks += 1;
-      }
-    }
-
+    const { activeTasks, totalTasks } = countsByUserId.get(userId)!;
     const existing = existingByUserId.get(userId);
-    if (existing && existing.activeTasks === activeTasks && existing.totalTasks === totalTasks) {
+
+    if (existing) {
+      if (existing.activeTasks === activeTasks && existing.totalTasks === totalTasks) continue;
+    } else if (activeTasks === 0 && totalTasks === 0) {
+      // Never create an empty row. Beyond saving a pointless write and Zero poke, the
+      // absence of a row is load-bearing: resolveStartOffsets treats "has no workload
+      // row" as "new to this group" and gives that member a starting offset so they
+      // are not flooded to catch up with established peers. Creating 0/0 rows for
+      // every candidate at evaluation time would erase that signal permanently.
       continue;
     }
+
     changed.push({ userId, activeTasks, totalTasks });
   }
 
@@ -270,6 +319,10 @@ export async function syncUserWorkloadAllBoards(
 /**
  * Handle ticket assignment/reassignment change
  * Syncs workload for both old and new assignees
+ *
+ * Both sides go through one bulk sync rather than a call each. The reassignment
+ * queue invokes this once per ticket across a departing member's whole backlog, so
+ * a second pass here doubled the per-ticket query cost for no benefit.
  */
 export async function handleTicketAssignmentChange(
   newAssignedTo: string | null,
@@ -278,24 +331,18 @@ export async function handleTicketAssignmentChange(
   boardId: string,
   updatedBy: string
 ): Promise<void> {
-  // Sync workload for old assignee (if exists)
-  if (oldAssignedTo && oldAssignedTo !== newAssignedTo) {
-    try {
-      await syncUserWorkload(oldAssignedTo, userGroupId, boardId, updatedBy);
-      logger.info(`[Workload Sync] Updated workload for old assignee ${oldAssignedTo}`);
-    } catch (error) {
-      logger.error(`[Workload Sync] Error syncing workload for old assignee:`, error);
-    }
-  }
+  if (oldAssignedTo === newAssignedTo) return;
 
-  // Sync workload for new assignee (if exists)
-  if (newAssignedTo && newAssignedTo !== oldAssignedTo) {
-    try {
-      await syncUserWorkload(newAssignedTo, userGroupId, boardId, updatedBy);
-      logger.info(`[Workload Sync] Updated workload for new assignee ${newAssignedTo}`);
-    } catch (error) {
-      logger.error(`[Workload Sync] Error syncing workload for new assignee:`, error);
-    }
+  const affectedUserIds = [oldAssignedTo, newAssignedTo].filter(
+    (id): id is string => Boolean(id),
+  );
+  if (affectedUserIds.length === 0) return;
+
+  try {
+    await syncWorkloadForUsers(affectedUserIds, userGroupId, boardId, updatedBy);
+    logger.info(`[Workload Sync] Updated workload for ${affectedUserIds.join(', ')}`);
+  } catch (error) {
+    logger.error(`[Workload Sync] Error syncing workload after assignment change:`, error);
   }
 }
 

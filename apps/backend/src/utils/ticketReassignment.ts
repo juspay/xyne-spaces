@@ -3,6 +3,7 @@ import { DatabaseClient } from '@/database/client';
 import { evaluateAssignmentRule, AssignmentType } from '@/utils/assignmentEngine';
 import { handleTicketAssignmentChange } from '@/utils/workloadUtils';
 import { getAutomationsBotUserId } from '@/automations/steps/automations-bot';
+import { redisService } from '@/services/redisService';
 import { UserStatus } from '@xyne/shared';
 import { logger } from './logger';
 import type { TicketLike } from '@/automations/triggers/ticket-context';
@@ -14,6 +15,13 @@ import {
 } from '@/automations/triggers/ticket-updated.trigger';
 
 const prisma = DatabaseClient.getInstance();
+
+/**
+ * Long enough to cover one evaluate + write, short enough that a crashed holder
+ * does not block the ticket for long. The lock is an optimisation against double
+ * work, not a correctness boundary.
+ */
+const LOCK_TTL_SECONDS = 30;
 
 /**
  * The ticket fields needed to pick a replacement assignee. Kept to a narrow shape
@@ -48,33 +56,59 @@ export async function reassignTicketAwayFrom(
   ticket: ReassignableTicket,
   excludeUserId: string,
 ): Promise<string | null> {
-  const result = await evaluateAssignmentRule(
-    ticket.userGroupId,
-    ticket.boardId,
-    AssignmentType.TICKET_ASSIGNEE,
-    excludeUserId,
-    ticket.projectId,
-    ticket.channelId,
-  );
+  // Two writers can reach the same ticket: the departure queue walking a backlog, and
+  // the reopen hook firing on a status flip. Without this, both evaluate, both write an
+  // assignee, and the loser has already emitted an activity and a workload sync for an
+  // assignment that no longer holds. Whoever loses the lock skips — the ticket is being
+  // handled either way.
+  const lockKey = `reassign-lock:${ticket.id}`;
+  let lockAcquired = false;
+  try {
+    lockAcquired = await redisService.set(lockKey, '1', LOCK_TTL_SECONDS, true);
+  } catch (error) {
+    // Redis unavailable: proceed unlocked rather than stall reassignment entirely.
+    logger.warn(`[TICKET-REASSIGNMENT] Lock unavailable for ticket ${ticket.id}; proceeding:`, error);
+    lockAcquired = true;
+  }
 
-  if (!result.assignedUserId) {
-    logger.info(
-      `[TICKET-REASSIGNMENT] No eligible replacement for ticket ${ticket.id} (${result.reason}); leaving assignee unchanged`,
-    );
+  if (!lockAcquired) {
+    logger.info(`[TICKET-REASSIGNMENT] Ticket ${ticket.id} already being reassigned; skipping`);
     return null;
   }
 
-  const systemActorId = await getAutomationsBotUserId(ticket.workspaceId);
-  await repositories.tickets.updateTicketAssignee(ticket.id, result.assignedUserId, systemActorId);
-  await handleTicketAssignmentChange(
-    result.assignedUserId,
-    excludeUserId,
-    ticket.userGroupId,
-    ticket.boardId,
-    systemActorId,
-  );
+  try {
+    const result = await evaluateAssignmentRule(
+      ticket.userGroupId,
+      ticket.boardId,
+      AssignmentType.TICKET_ASSIGNEE,
+      excludeUserId,
+      ticket.projectId,
+      ticket.channelId,
+    );
 
-  return result.assignedUserId;
+    if (!result.assignedUserId) {
+      logger.info(
+        `[TICKET-REASSIGNMENT] No eligible replacement for ticket ${ticket.id} (${result.reason}); leaving assignee unchanged`,
+      );
+      return null;
+    }
+
+    const systemActorId = await getAutomationsBotUserId(ticket.workspaceId);
+    await repositories.tickets.updateTicketAssignee(ticket.id, result.assignedUserId, systemActorId);
+    await handleTicketAssignmentChange(
+      result.assignedUserId,
+      excludeUserId,
+      ticket.userGroupId,
+      ticket.boardId,
+      systemActorId,
+    );
+
+    return result.assignedUserId;
+  } finally {
+    await redisService.del(lockKey).catch(() => {
+      // TTL will expire it; a failed release is not worth surfacing.
+    });
+  }
 }
 
 /**

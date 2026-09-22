@@ -185,9 +185,6 @@ async function filterMappingsToChannelParticipants(
  * - The system picks the second-lowest score candidate if the lowest is the excluded user
  * - If no other candidates exist after exclusion, returns { reason: 'EXCLUDED_USER_ONLY_CANDIDATE' }
  *
- * Returns: { assignedUserId } or { reason: "NO_ON_CALL_USERS" | "EXCLUDED_USER_ONLY_CANDIDATE" }
- * @param projectId - Optional project ID to scope workload calculation to boards in the same project only
- */
 /**
  * Recorded as `createdBy` on workload rows the engine creates itself: the refresh
  * below is driven by the assignment decision, not by any one user's action.
@@ -227,6 +224,37 @@ async function loadWorkloadMappings(
   );
 }
 
+/**
+ * Auto-assignment system that selects the most suitable user for a board or ticket.
+ * Uses existing database tables only - no expression-based rules or configuration.
+ *
+ * Eligibility Flow (Filtering Phase):
+ * 1. Fetch all users in the group
+ * 2. Filter by responsibility based on assignment type:
+ *    - TICKET_ASSIGNEE: Everyone except QA (MANAGER, TEAM_LEAD, MEMBER, PR_REVIEWER)
+ *    - PR_REVIEWER: Only users with PR_REVIEWER responsibility
+ *    - QA: Only users with QA responsibility
+ * 3. Filter users where isActiveForAssignment = true AND onCall = true
+ * 4. If no users found → Fallback to users where isActiveForAssignment = true (ignore onCall)
+ * 5. If still no users → STOP (no auto-assignment)
+ * 6. If board has expertise mappings: keep only users with expertise for the board
+ *
+ * Scoring Strategy (Ranking Phase):
+ * For each user, calculate weighted workload across ALL boards:
+ *   weightedActiveTasks = sum(activeTasks * boardWeight) for all boards
+ * finalScore = weightedActiveTasks - expertiseBonus
+ * expertiseBonus = 10 if user has expertise else 0
+ *
+ * Lower score = higher priority (fewer active tasks = more available).
+ *
+ * Exclusion rule:
+ * - If excludeUserId is provided, that user cannot be selected for the assignment
+ * - The system picks the second-lowest score candidate if the lowest is the excluded user
+ * - If no other candidates exist after exclusion, returns { reason: 'EXCLUDED_USER_ONLY_CANDIDATE' }
+ *
+ * Returns: { assignedUserId } or { reason: "NO_ON_CALL_USERS" | "EXCLUDED_USER_ONLY_CANDIDATE" }
+ * @param projectId - Optional project ID to scope workload calculation to boards in the same project only
+ */
 export async function evaluateAssignmentRule(
   userGroupId: string,
   boardId: string,
