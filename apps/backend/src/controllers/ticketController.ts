@@ -472,11 +472,10 @@ export class TicketController {
    * The batch is written set-based and synchronously, so the caller gets the
    * created tickets — or the reason none were created — in this response. There
    * is deliberately no partial success: the whole batch commits or none of it
-   * does.
+   * does, which is what makes retrying a failed request safe.
    *
-   * `idempotencyKey` (client-supplied, stable across retries of the same
-   * submission) is what makes a double-submit safe: row ids are derived from
-   * it, so replaying a batch that already committed inserts nothing.
+   * Submitting the same batch twice creates it twice, exactly as single-ticket
+   * creation does — there is no idempotency key.
    */
   createBulkTicket = async (req: Request, res: Response): Promise<void> => {
     try {
@@ -510,7 +509,6 @@ export class TicketController {
         tickets?: Array<Record<string, unknown>>;
         subTickets?: Array<Record<string, unknown>>;
         existingParentTicketId?: string;
-        idempotencyKey?: string;
         projectId?: string;
         channelId?: string;
         boardId?: string;
@@ -652,13 +650,9 @@ export class TicketController {
         }
       }
 
-      // Stable across retries of the same submission, so a double-submit
-      // re-derives the same row ids and inserts nothing the second time.
-      const batchKey = body.idempotencyKey?.trim() || randomUUID();
       const batchCtx = {
         createdBy: userId,
         workspaceId,
-        batchKey,
         fromTicketsTab: body.fromTicketsTab === true,
       };
 
