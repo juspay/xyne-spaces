@@ -73,6 +73,9 @@ interface DuplicateSourceStage {
   prStatusMappings?: readonly {
     prStatus: PRStatusEvent;
   }[];
+  releaseStatusMappings?: readonly {
+    releaseStatus: TicketStatusV2;
+  }[];
   approvers?: readonly {
     userId?: string | null;
   }[];

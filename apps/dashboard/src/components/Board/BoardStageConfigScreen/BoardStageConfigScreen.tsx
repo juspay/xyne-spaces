@@ -535,6 +535,12 @@ const BoardStageConfigScreen = ({
         readonly prStatus: PRStatusEvent;
         readonly createdAt: number;
       }[];
+      readonly releaseStatusMappings?: readonly {
+        readonly id: string;
+        readonly stageId: string;
+        readonly releaseStatus: TicketStatusV2;
+        readonly createdAt: number;
+      }[];
       readonly approvers?: readonly {
         readonly id: string;
         readonly userId: string | null;
