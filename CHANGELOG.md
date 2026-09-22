@@ -1,3 +1,10 @@
+## [1.371.0](https://github.com/juspay/xyne-spaces/compare/v1.370.0...v1.371.0) (2026-09-22)
+
+
+### Features
+
+* added multiple phone number fields ([#2128](https://github.com/juspay/xyne-spaces/issues/2128)) ([78ed277](https://github.com/juspay/xyne-spaces/commit/78ed277260611d22a548cca3c5e38621c961b784))
+
 ## [1.370.0](https://github.com/juspay/xyne-spaces/compare/v1.369.0...v1.370.0) (2026-09-22)
 
 
