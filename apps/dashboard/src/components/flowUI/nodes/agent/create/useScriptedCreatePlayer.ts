@@ -35,7 +35,7 @@ function timings() {
   return {
     typeMs: reduce ? 8 : 26,
     pauseBeforeSendMs: reduce ? 80 : 280,
-    thinkMs: reduce ? 180 : 920,
+    thinkMs: reduce ? 180 : 1800,
     tokenMs: reduce ? 10 : 34,
     writeMs: reduce ? 260 : 1250,
     identityCaretMs: reduce ? 400 : 2000,

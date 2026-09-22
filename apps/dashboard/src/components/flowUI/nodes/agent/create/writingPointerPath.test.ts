@@ -6,6 +6,8 @@ import {
   mouseTravelPath,
   mouseTravelTimes,
   pointerEntryPoint,
+  pointerParkPoint,
+  pointerWanderStops,
 } from './writingPointerPath.ts';
 
 void describe('mouseTravelPath', () => {
@@ -53,18 +55,44 @@ void describe('mouseTravelPath', () => {
     assert.ok(from.y < target.y);
   });
 
+  void it('wanders left and right instead of a linear left-to-right pass', () => {
+    const box = { left: 0, top: 0, width: 240, height: 32, inline: true };
+    const stops = pointerWanderStops(box);
+    assert.ok(stops.length >= 4);
+    const xs = stops.map(stop => stop.x);
+    let reversals = 0;
+    for (let i = 2; i < xs.length; i += 1) {
+      const prev = (xs[i - 1] ?? 0) - (xs[i - 2] ?? 0);
+      const curr = (xs[i] ?? 0) - (xs[i - 1] ?? 0);
+      if (prev * curr < 0) reversals += 1;
+    }
+    assert.ok(reversals >= 2, `expected direction changes, got ${reversals}`);
+    const park = pointerParkPoint(box);
+    assert.ok(park.x > box.left + 20);
+    assert.ok((stops[0]?.x ?? 0) > box.left + 20);
+  });
+
   void it('drives the canvas pointer with Motion, not CSS or GSAP', () => {
     const pointer = readFileSync(new URL('./WritingFieldPointer.tsx', import.meta.url), 'utf8');
     const highlight = readFileSync(new URL('./ChatFillHighlight.tsx', import.meta.url), 'utf8');
+    const chat = readFileSync(new URL('./AgentCreateChatPanel.tsx', import.meta.url), 'utf8');
     assert.match(pointer, /from 'motion\/react'/);
     assert.match(pointer, /animate\(/);
     assert.match(pointer, /useMotionValue/);
+    assert.match(pointer, /pointerWanderStops/);
     assert.equal(/from 'framer-motion'/.test(pointer), false);
     assert.equal(/gsap/i.test(pointer), false);
-    assert.equal(/requestAnimationFrame\(run\)/.test(pointer), true);
-    assert.equal(/function tick|while \(true\)/.test(pointer), false);
     assert.match(highlight, /from 'motion\/react'/);
+    assert.match(highlight, /animate\(/);
+    assert.equal(/ring-2/.test(highlight), false);
     assert.equal(/from 'framer-motion'/.test(highlight), false);
+    assert.match(chat, /from '@\/components\/AIScreen\/ReasoningLoader'/);
+    assert.match(chat, /BrailleLoader/);
+    assert.equal(/from '@\/components\/AIScreen\/AIChatThread'/.test(chat), false);
+    assert.equal(
+      /useXyneAIStream/.test(chat.split('function ScriptedAgentCreateChatPanel')[1] ?? ''),
+      false,
+    );
   });
 
   void it('does not embed Figma MCP asset URLs', () => {

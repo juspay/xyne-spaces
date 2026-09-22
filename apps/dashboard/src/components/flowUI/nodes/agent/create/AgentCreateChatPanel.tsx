@@ -16,6 +16,7 @@ import {
   type AIComposerHandle,
 } from '@/components/AIScreen/AIComposer';
 import { AIEmptyState } from '@/components/AIScreen/AIEmptyState';
+import { AnimatedLabel, BrailleLoader } from '@/components/AIScreen/ReasoningLoader';
 import { type ComposerContext, toStreamOverrides } from '@/components/AIScreen/composerContext';
 import type { Message, MessageAttachment } from '@/components/Chat/XyneAISidebar/utils/XyneAITypes';
 import { useXyneAIStream } from '@/hooks/useXyneAIStream';
@@ -341,6 +342,10 @@ function CreateChatLayout({
                 message.type === 'bot' &&
                 Boolean(message.isStreaming) &&
                 streamingText.trim().length === 0;
+              const thinkLabel =
+                typeof message.statusMessage === 'string' && message.statusMessage.trim().length > 0
+                  ? message.statusMessage
+                  : 'Thinking…';
               return (
                 <li
                   key={message.stableKey ?? message.id}
@@ -355,13 +360,39 @@ function CreateChatLayout({
                         <p className='whitespace-pre-wrap'>{message.content}</p>
                       </div>
                     </div>
+                  ) : scripted ? (
+                    <div className='flex min-w-0 flex-col gap-2'>
+                      {thinking || message.isStreaming ? (
+                        <div
+                          className='-ml-1 inline-flex items-center gap-1.5 rounded-md px-1.5 py-1 text-xs text-muted-foreground'
+                          data-testid='agent-create-chat-thinking'
+                        >
+                          <BrailleLoader />
+                          <span className='select-none'>
+                            <AnimatedLabel text={thinkLabel} />
+                          </span>
+                        </div>
+                      ) : null}
+                      {message.errorInfo ? (
+                        <p className='text-sm leading-5 text-destructive' role='alert'>
+                          {message.errorInfo.message || message.errorInfo.title}
+                        </p>
+                      ) : streamingText.trim().length > 0 ? (
+                        <p
+                          className='bot-markdown-content xyne-ai-markdown whitespace-pre-wrap text-sm font-normal leading-7 text-foreground'
+                          data-testid='agent-create-chat-reply'
+                        >
+                          {streamingText}
+                        </p>
+                      ) : null}
+                    </div>
                   ) : thinking ? (
                     <div
                       className='flex items-center gap-2 text-sm text-muted-foreground'
                       data-testid='agent-create-chat-thinking'
                     >
                       <Loader2 className='size-4 animate-spin' aria-hidden />
-                      <span>{message.statusMessage || 'Thinking…'}</span>
+                      <span>{thinkLabel}</span>
                     </div>
                   ) : (
                     <div>

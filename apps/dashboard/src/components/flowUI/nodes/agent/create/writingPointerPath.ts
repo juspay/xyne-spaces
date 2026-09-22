@@ -63,3 +63,41 @@ export function mouseTravelTimes(pointCount: number): number[] {
 export function pointerEntryPoint(target: PointerPoint): PointerPoint {
   return { x: target.x - 52, y: target.y - 18 };
 }
+
+export interface FieldBox {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+  inline: boolean;
+}
+
+/** Mid-field rest for prefers-reduced-motion — never the title’s left edge. */
+export function pointerParkPoint(box: FieldBox): PointerPoint {
+  return {
+    x: box.left + Math.max(28, box.width * 0.38),
+    y: box.top + (box.inline ? 4 : 22),
+  };
+}
+
+/**
+ * Zigzag stops across the field. Direction reverses; not a left-to-right pass
+ * and not a single park on the title’s left.
+ */
+export function pointerWanderStops(box: FieldBox): PointerPoint[] {
+  const padL = box.inline ? 20 : 14;
+  const padR = 40;
+  const padT = box.inline ? 3 : 20;
+  const usableW = Math.max(56, box.width - padL - padR);
+  const usableH = Math.max(6, Math.min(box.inline ? 10 : 28, box.height - padT - 10));
+  const fracs = [0.34, 0.72, 0.18, 0.61, 0.41, 0.84, 0.27, 0.55];
+  return fracs.map((frac, index) => ({
+    x: box.left + padL + usableW * frac,
+    y: box.top + padT + usableH * (index % 3 === 0 ? 0.2 : index % 3 === 1 ? 0.75 : 0.45),
+  }));
+}
+
+export function wanderHopDurationMs(from: PointerPoint, to: PointerPoint): number {
+  const dist = Math.hypot(to.x - from.x, to.y - from.y);
+  return Math.min(520, Math.max(240, 180 + dist * 0.7));
+}

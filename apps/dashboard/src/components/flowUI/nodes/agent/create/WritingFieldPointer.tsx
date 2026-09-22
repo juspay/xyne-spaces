@@ -7,6 +7,10 @@ import {
   mouseTravelPath,
   mouseTravelTimes,
   pointerEntryPoint,
+  pointerParkPoint,
+  pointerWanderStops,
+  wanderHopDurationMs,
+  type FieldBox,
   type PointerPoint,
 } from './writingPointerPath';
 
@@ -16,16 +20,31 @@ const SIZE = 20;
 const TRAVEL_EASE = [0.42, 0, 0.2, 1] as const;
 const FADE_SECONDS = 0.16;
 
-function measureField(origin: HTMLElement, field: AgentCreateField): PointerPoint | null {
+function measureBox(origin: HTMLElement, field: AgentCreateField): FieldBox | null {
   const host = origin.querySelector(`[data-create-field="${field}"]`);
   if (!host) return null;
   const box = host.getBoundingClientRect();
   const root = origin.getBoundingClientRect();
-  const inline = field === 'name' || field === 'slug';
   return {
-    x: box.left - root.left + (inline ? 6 : 4),
-    y: box.top - root.top + (inline ? 4 : 22),
+    left: box.left - root.left,
+    top: box.top - root.top,
+    width: box.width,
+    height: box.height,
+    inline: field === 'name' || field === 'slug',
   };
+}
+
+function pathArrays(from: PointerPoint, to: PointerPoint): { xs: number[]; ys: number[] } {
+  const path = mouseTravelPath(from, to);
+  const xs: number[] = [];
+  const ys: number[] = [];
+  for (let i = 0; i < path.length; i += 1) {
+    const point = path[i];
+    if (!point) continue;
+    xs.push(point.x);
+    ys.push(point.y);
+  }
+  return { xs, ys };
 }
 
 interface WritingFieldPointerProps {
@@ -34,8 +53,8 @@ interface WritingFieldPointerProps {
 }
 
 /**
- * Canvas overlay pointer. Motion `animate()` drives x/y/opacity motion values
- * along a curved human-like path. Visible only while `writingField` is set.
+ * Figma write pointer. Travels into the field, then wanders left and right
+ * across it with Motion `animate()` — never parks on the title’s left edge.
  */
 export function WritingFieldPointer({
   field,
@@ -47,8 +66,9 @@ export function WritingFieldPointer({
   const y = useMotionValue(0);
   const opacity = useMotionValue(0);
   const lastPointRef = useRef<PointerPoint | null>(null);
+  const hopRef = useRef(0);
   const [shown, setShown] = useState(false);
-  const [settled, setSettled] = useState(false);
+  const [wandering, setWandering] = useState(false);
 
   useEffect(() => {
     const origin = originRef.current;
@@ -62,7 +82,8 @@ export function WritingFieldPointer({
     };
 
     if (!field || !origin) {
-      setSettled(false);
+      setWandering(false);
+      hopRef.current = 0;
       if (lastPointRef.current === null) {
         opacity.set(0);
         setShown(false);
@@ -89,53 +110,75 @@ export function WritingFieldPointer({
     }
 
     setShown(true);
-    setSettled(false);
+    setWandering(false);
 
-    const run = (): void => {
-      if (cancelled) return;
-      const target = measureField(origin, field);
-      if (!target) {
-        frame = window.requestAnimationFrame(run);
-        return;
-      }
-      const from = lastPointRef.current ?? pointerEntryPoint(target);
-      lastPointRef.current = target;
-      stopTravel();
-      if (reduceMotion) {
-        x.set(target.x);
-        y.set(target.y);
-        opacity.set(1);
-        setSettled(true);
-        return;
-      }
-      const path = mouseTravelPath(from, target);
-      const xs: number[] = [];
-      const ys: number[] = [];
-      for (let i = 0; i < path.length; i += 1) {
-        const point = path[i];
-        if (!point) continue;
-        xs.push(point.x);
-        ys.push(point.y);
-      }
-      const duration = mouseTravelDurationMs(from, target) / 1000;
+    const moveTo = (
+      from: PointerPoint,
+      to: PointerPoint,
+      duration: number,
+      onDone: () => void,
+    ): void => {
+      const { xs, ys } = pathArrays(from, to);
       const times = mouseTravelTimes(xs.length);
-      x.set(from.x);
-      y.set(from.y);
+      lastPointRef.current = to;
       animate(x, xs, {
         duration,
         ease: TRAVEL_EASE,
         times,
         onComplete: (): void => {
           if (!cancelled) {
-            setSettled(true);
+            onDone();
           }
         },
       });
       animate(y, ys, { duration, ease: TRAVEL_EASE, times });
-      animate(opacity, 1, { duration: FADE_SECONDS, ease: 'easeOut' });
     };
 
-    frame = window.requestAnimationFrame(run);
+    const wander = (): void => {
+      if (cancelled) return;
+      const box = measureBox(origin, field);
+      if (!box) {
+        frame = window.requestAnimationFrame(wander);
+        return;
+      }
+      const stops = pointerWanderStops(box);
+      if (stops.length === 0) return;
+      hopRef.current += 1;
+      const next = stops[hopRef.current % stops.length];
+      if (!next) return;
+      const from = lastPointRef.current ?? next;
+      moveTo(from, next, wanderHopDurationMs(from, next) / 1000, wander);
+    };
+
+    const arrive = (): void => {
+      if (cancelled) return;
+      const box = measureBox(origin, field);
+      if (!box) {
+        frame = window.requestAnimationFrame(arrive);
+        return;
+      }
+      stopTravel();
+      const park = pointerParkPoint(box);
+      const first = pointerWanderStops(box)[0] ?? park;
+      const from = lastPointRef.current ?? pointerEntryPoint(first);
+      if (reduceMotion) {
+        x.set(park.x);
+        y.set(park.y);
+        opacity.set(1);
+        lastPointRef.current = park;
+        setWandering(true);
+        return;
+      }
+      x.set(from.x);
+      y.set(from.y);
+      animate(opacity, 1, { duration: FADE_SECONDS, ease: 'easeOut' });
+      moveTo(from, first, mouseTravelDurationMs(from, first) / 1000, (): void => {
+        setWandering(true);
+        wander();
+      });
+    };
+
+    frame = window.requestAnimationFrame(arrive);
     return (): void => {
       cancelled = true;
       window.cancelAnimationFrame(frame);
@@ -156,13 +199,14 @@ export function WritingFieldPointer({
       aria-hidden
       draggable={false}
       {...(field ? { 'data-testid': 'chat-fill-caret' } : {})}
-      data-pointer-settled={settled && Boolean(field) ? 'true' : 'false'}
+      data-pointer-wandering={wandering && Boolean(field) ? 'true' : 'false'}
+      data-pointer-settled={wandering && Boolean(field) ? 'true' : 'false'}
       className='pointer-events-none absolute top-0 left-0 z-20'
       style={{
         x,
         y,
         opacity,
-        willChange: settled || !field ? 'auto' : 'transform',
+        willChange: field ? 'transform' : 'auto',
       }}
     />
   );
