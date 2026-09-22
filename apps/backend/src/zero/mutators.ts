@@ -856,6 +856,7 @@ async function createNonParticipantSystemMessages(
   isThreadReply: boolean,
   scopeType: string,
   workspaceId: string,
+  sourceMessageId: string,
 ): Promise<void> {
   try {
     if (mentionedUserIds.length === 0 && mentionedGroupIds.length === 0) {
@@ -961,6 +962,7 @@ async function createNonParticipantSystemMessages(
           })),
           channelId,
           canAddUsers: !cannotAddUsers,
+          sourceMessageId,
         } as unknown as ReadonlyJSONValue,
       });
 
@@ -1008,6 +1010,7 @@ async function createNonParticipantSystemMessages(
           })),
           channelId,
           canAddUsers: !cannotAddUsers,
+          sourceMessageId,
         } as unknown as ReadonlyJSONValue,
       });
 
@@ -2875,6 +2878,7 @@ export function createMutators(
             false, // isThreadReply = false for initial channel messages
             channel.scopeType,
             authData.workspaceId,
+            message.messageId,
           );
 
 
@@ -3738,6 +3742,7 @@ export function createMutators(
             true, // isThreadReply = true for thread messages
             channel.scopeType,
             authData.workspaceId,
+            message.messageId,
           );
 
 

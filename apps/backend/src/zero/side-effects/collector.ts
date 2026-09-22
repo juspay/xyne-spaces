@@ -55,6 +55,7 @@ export async function collectSideEffectJobs(
         isDeleted: message.isDeleted,
         channelId: conversation?.channelId ?? undefined,
         isThreadReply: !!conversation && conversation.initialMessageId !== message.messageId,
+        metadata: message.metadata,
       };
     }
   }
