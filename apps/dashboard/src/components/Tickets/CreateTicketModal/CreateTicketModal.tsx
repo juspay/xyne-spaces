@@ -595,13 +595,16 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
     { enabled: !!formValues.boardId },
   );
 
-  const resolvedFormFields = useMemo(
-    (): ResolvedDisplayFormField[] =>
-      formMapping?.formFields
-        ? resolveDisplayFormFields(formMapping.formId, [...formMapping.formFields])
-        : [],
-    [formMapping?.formFields, formMapping?.formId],
-  );
+  const resolvedFormFields = useMemo((): ResolvedDisplayFormField[] => {
+    const fields = formMapping?.formFields
+      ? resolveDisplayFormFields(formMapping.formId, [...formMapping.formFields])
+      : [];
+    // Hidden on this board => never mandatory on it; the user has no way to fill it.
+    const visibility = boardMetadata?.customFieldVisibility;
+    return visibility
+      ? fields.map(f => (visibility[f.id] === false ? { ...f, isOptional: true } : f))
+      : fields;
+  }, [formMapping?.formFields, formMapping?.formId, boardMetadata]);
 
   // Reset dynamic fields when board changes
   useEffect(() => {
