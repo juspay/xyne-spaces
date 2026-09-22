@@ -1,3 +1,16 @@
+## [1.369.0](https://github.com/juspay/xyne-spaces/compare/v1.368.0...v1.369.0) (2026-09-22)
+
+
+### Features
+
+* combine Metrics, Topics Explorer and Desk Report under on… ([#1970](https://github.com/juspay/xyne-spaces/issues/1970)) ([c87f9af](https://github.com/juspay/xyne-spaces/commit/c87f9afd7f8847b8acf036b2fa97bc019c36df75))
+
+
+### Bug Fixes
+
+* default desk report scheduler to off ([#2158](https://github.com/juspay/xyne-spaces/issues/2158)) ([7509f72](https://github.com/juspay/xyne-spaces/commit/7509f72b46583ace95242e3dcaeaab2db2d8d118))
+* release manager commit range, self-referential sub-ticket, boards tab scoping, date format and multi-repo canvas attribution ([#1983](https://github.com/juspay/xyne-spaces/issues/1983)) ([95cc2df](https://github.com/juspay/xyne-spaces/commit/95cc2dfc18a86b56c77d1296fdc211ea73450d1c))
+
 ## [1.368.0](https://github.com/juspay/xyne-spaces/compare/v1.367.0...v1.368.0) (2026-09-22)
 
 
