@@ -1,3 +1,17 @@
+## [1.370.0](https://github.com/juspay/xyne-spaces/compare/v1.369.0...v1.370.0) (2026-09-22)
+
+
+### Features
+
+* added queries for agent and apps also added search ([#2191](https://github.com/juspay/xyne-spaces/issues/2191)) ([60d2e9b](https://github.com/juspay/xyne-spaces/commit/60d2e9bb7040a953037219906fe6022862ac874d))
+* always show the Sub-tickets and Linked group headers ([#2185](https://github.com/juspay/xyne-spaces/issues/2185)) ([6b641d5](https://github.com/juspay/xyne-spaces/commit/6b641d5060eaa1eb59d71f93aaa1c0bd00e7a57f))
+* mobile shared  ([#2115](https://github.com/juspay/xyne-spaces/issues/2115)) ([f71d896](https://github.com/juspay/xyne-spaces/commit/f71d8966260194b9f670140e9510cec6827d1d46))
+
+
+### Bug Fixes
+
+* sync user workload inside the assignment engine ([#1855](https://github.com/juspay/xyne-spaces/issues/1855)) ([8f57995](https://github.com/juspay/xyne-spaces/commit/8f5799511176f6b83356986ffc49bc3f9baec010))
+
 ## [1.369.0](https://github.com/juspay/xyne-spaces/compare/v1.368.0...v1.369.0) (2026-09-22)
 
 
