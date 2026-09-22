@@ -91,6 +91,7 @@ import {
 import { useChannelBoards } from '../../hooks/useChannelBoards';
 import { useCanLinkChannelBoards } from '../../hooks/useCanLinkChannelBoards';
 import { LinkBoardsDialog } from '../../components/Chat/ChannelInformation/LinkBoardsDialog';
+import { ChannelNoBoardsEmptyState } from '../../components/Chat/ChannelInformation/ChannelNoBoardsEmptyState';
 import { getUserDisplayName } from '../../utils/userDisplayName';
 import { queries } from '../../zero/queries';
 import { mutators } from '../../zero/mutators';
@@ -1360,8 +1361,17 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   // A create-ticket modal can be seeded from this view only when there is a live
   // channel AND something to source boards from: the route's project, or the
   // channel's own linked boards.
+  // isSynced matters: on a cold load hasBoards is false until the mappings arrive,
+  // and this value decides WHICH CreateTicketModal instance renders. Flipping it
+  // mid-session swaps one instance for the other, and React discards whatever the
+  // user had typed. channelContextReady below holds the modal shut until then.
   const hasSeedableChannelContext =
-    !!channel && !channel.isArchived && (!!effectiveProjectId || channelBoards.hasBoards);
+    !!channel &&
+    !channel.isArchived &&
+    (!!effectiveProjectId || (channelBoards.isSynced && channelBoards.hasBoards));
+
+  // A channel's modal must not open before its boards are known, for the same reason.
+  const channelContextReady = !channelId || channelBoards.isSynced;
 
   // Get all boards for the project (needed for channel stage view and create ticket modal)
   // In my-tickets, fetch ALL boards (no project filter) since tickets can span projects
@@ -2098,8 +2108,12 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   ]);
 
   // For my-tickets and workspace views, always use multi-project query
-  // This ensures proper tag fetching across all selected boards/projects
-  const shouldUseMultiProjectQuery = isMyTicketsView || isWorkspaceView;
+  // This ensures proper tag fetching across all selected boards/projects.
+  // A channel also lands here once its linked boards cross projects — otherwise it
+  // would satisfy neither branch (multi is view-gated, single needs exactly one)
+  // and the Tags filter would come back permanently empty.
+  const shouldUseMultiProjectQuery =
+    isMyTicketsView || isWorkspaceView || tagsProjectIds.length > 1;
   const shouldUseSingleProjectQuery = !shouldUseMultiProjectQuery && tagsProjectIds.length === 1;
 
   // State for tag search query (debounced value passed to Vespa)
@@ -2182,9 +2196,13 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     }
   }, [hasMoreZeroTags, tagsSearchQuery, accumulatedTags]);
 
-  // Fetch tags via Vespa search (only when there's a search query)
+  // Fetch tags via Vespa search (only when there's a search query).
+  // projectId is singular, so a channel whose linked boards cross projects scopes by
+  // those boards instead — otherwise tag search silently covers one project out of N.
   const { tags: vespaTags } = useVespaTagSearch({
-    projectId: tagsProjectIds[0],
+    ...(channelId && tagsProjectIds.length > 1
+      ? { boardIds: channelBoards.boardIds }
+      : { projectId: tagsProjectIds[0] }),
     searchQuery: tagsSearchQuery,
     enabled: tagsProjectIds.length > 0 && !!tagsSearchQuery.trim(),
     limit: 20,
@@ -4354,6 +4372,15 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
       }
     : null;
 
+  // A channel with no linked boards has nothing to scope a ticket query by, so
+  // channelScopeReady never flips and every query stays disabled. ChannelTicketsTab
+  // catches this before mounting us, but Streams surfaces (Surfaces.tsx) and the SDLC
+  // screen mount this component with a channelId directly — without this they would
+  // render a permanent loading state with no empty state and no way to link a board.
+  if (channelId && channelBoards.isSynced && !channelBoards.hasBoards) {
+    return <ChannelNoBoardsEmptyState channelId={channelId} />;
+  }
+
   // scopedProjectId, not effectiveProjectId: a channel no longer carries a project
   // of its own, so the report's locked project comes from the board in view.
   if (showTicketReport && channelId && scopedProjectId) {
@@ -5466,7 +5493,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
       )}
 
       {/* Create Ticket Modal */}
-      {hasSeedableChannelContext && channel && isCreateModalOpen && (
+      {channelContextReady && hasSeedableChannelContext && channel && isCreateModalOpen && (
         <CreateTicketModal
           isOpen={isCreateModalOpen}
           enableUrlSync
@@ -5490,7 +5517,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
 
       {/* Create Ticket Modal — no usable channel context (my-tickets, workspace views,
           archived channel, channel with no linked boards); the user picks channel + board */}
-      {!hasSeedableChannelContext && isCreateModalOpen && (
+      {channelContextReady && !hasSeedableChannelContext && isCreateModalOpen && (
         <CreateTicketModal
           isOpen={isCreateModalOpen}
           onClose={() => {

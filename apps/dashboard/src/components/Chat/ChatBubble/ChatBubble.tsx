@@ -60,7 +60,6 @@ import {
 } from '../ChatList/ChatListUtils';
 import { useUserBookmarks } from '../../../hooks/useUserBookmarks';
 import { useChannel } from '../../../hooks/useChannels';
-import { useChannelBoards } from '../../../hooks/useChannelBoards';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { logger, Event } from '../../../utils/logger';
 import { MessageActionsDrawer } from '../MessageActionsDrawer/MessageActionsDrawer';
@@ -187,12 +186,11 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   const location = useLocation();
   const { conversationId } = useParams<{ conversationId?: string }>();
   const { isEditingMessage, requestEdit, stopEditing } = useMessageEdit();
-  const { setSkipMarkAsRead } = React.useContext(ConversationTabContext);
+  // channelHasBoards rides on the context rather than a per-bubble query: it is
+  // constant per channel and this component renders once per message.
+  const { setSkipMarkAsRead, channelHasBoards } = React.useContext(ConversationTabContext);
   const { isMobile } = usePlatform();
   const channel = useChannel(channelId);
-  // Tickets need a board to land on, and a channel's boards come from
-  // channel_board_mappings — a channel with none can't create one.
-  const { hasBoards: channelHasBoards } = useChannelBoards(channelId);
   // Get sender info from useUser hook
   const sender = useUser(message.senderId);
 

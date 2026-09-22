@@ -7,8 +7,7 @@ import {
   useGetChannelUserStatus,
 } from '../../../hooks/useChannels';
 import { useChannelBoards } from '../../../hooks/useChannelBoards';
-import { useCanLinkChannelBoards } from '../../../hooks/useCanLinkChannelBoards';
-import { LinkBoardsDialog } from '../ChannelInformation/LinkBoardsDialog';
+import { ChannelNoBoardsEmptyState } from '../ChannelInformation/ChannelNoBoardsEmptyState';
 import { useDragAndDropAreaRef } from '../../../hooks/useDragAndDropAreaRef';
 import { useConversationTabs } from './ConversationPannel.utils';
 import { useChannelSubscription } from '../../../hooks/useChannelSubscription';
@@ -34,8 +33,6 @@ import { TicketDetails } from '../../Tickets/TicketDetails/TicketDetails';
 import ChatListV4 from '../ChatList/ChatListV4';
 import LinksTab from '../LinksTab/LinksTab';
 import { Archive } from 'lucide-react';
-import { LayerTwo as Layers } from '@xyne/icons';
-import Button from '../../ui/Button';
 import { useUser } from '../../../hooks/useUsers';
 import { useAuthContextValues } from '../../../hooks/useAuth';
 import { isUserDeactivated } from '../../../utils/userDisplayName';
@@ -94,51 +91,11 @@ const DeactivatedDmArchiveBanner = (): ReactElement => {
 // that does have boards.
 const ChannelTicketsTab = ({ channelId }: { channelId: string }): ReactElement => {
   const { isSynced, hasBoards } = useChannelBoards(channelId);
-  const channel = useChannel(channelId);
-  const canLinkBoards = useCanLinkChannelBoards(channelId);
-  const [isLinkBoardsOpen, setIsLinkBoardsOpen] = useState(false);
 
+  // KanbanBoardScreen renders the same empty state for hosts that mount it with a
+  // channelId directly; this short-circuit just avoids mounting the whole screen.
   if (isSynced && !hasBoards) {
-    // The kanban header's Link Boards button lives inside the board view, which
-    // this channel never reaches — so the empty state has to carry its own way
-    // out, or a boardless channel can never get a board.
-    return (
-      <div className='flex h-full flex-col items-center justify-center gap-1 p-8 text-center'>
-        <p className='text-sm font-medium text-foreground'>
-          No boards are configured for this channel
-        </p>
-        <p className='text-sm text-muted-foreground'>
-          {canLinkBoards
-            ? 'Link a board to this channel to start creating and tracking tickets.'
-            : 'Ask a channel admin or a workspace admin to link one, to start creating and tracking tickets.'}
-        </p>
-        {canLinkBoards && (
-          <>
-            <Button
-              size='sm'
-              className='mt-3'
-              onClick={() => setIsLinkBoardsOpen(true)}
-              data-testid='channel-tickets-empty-link-boards-button'
-              data-track-event='BUTTON_CLICK'
-              data-track-category='Channel'
-              data-track-name='OPEN_LINK_BOARDS'
-              data-track-metadata={JSON.stringify({ channelId, source: 'tickets_empty_state' })}
-            >
-              <Layers className='w-3 h-3' />
-              <span className='font-semibold'>Link Boards</span>
-            </Button>
-            {isLinkBoardsOpen && (
-              <LinkBoardsDialog
-                channelId={channelId}
-                channelName={channel?.name}
-                open={isLinkBoardsOpen}
-                onOpenChange={setIsLinkBoardsOpen}
-              />
-            )}
-          </>
-        )}
-      </div>
-    );
+    return <ChannelNoBoardsEmptyState channelId={channelId} />;
   }
   return <KanbanBoardScreen channelId={channelId} />;
 };
@@ -208,6 +165,13 @@ const ConversationPanelV2 = ({
 }): ReactElement => {
   const { baseRoute } = useRouteContext();
   const channel = useChannel(channelId);
+  // Resolved once here and handed down through ConversationTabContext: it is
+  // constant per channel, and ChatBubble renders once per message, so subscribing
+  // per bubble would put hundreds of identical queries on a long conversation.
+  // Only DEFAULT channels can create tickets, so DMs skip the query entirely.
+  const { hasBoards: channelHasBoards } = useChannelBoards(
+    channel?.scopeType === ChannelScopeType.DEFAULT ? channelId : undefined,
+  );
   const channelParticipation = useGetChannelUserStatus(channelId);
   const { dragAndDropAreaRef, inputRef, isDragging } = useDragAndDropAreaRef(channelId);
 
@@ -334,8 +298,13 @@ const ConversationPanelV2 = ({
   );
 
   const conversationTabContextValue = useMemo(
-    () => ({ setActiveTab: handleTabChange, setSkipMarkAsRead, skipMarkAsReadRef }),
-    [handleTabChange, setSkipMarkAsRead],
+    () => ({
+      setActiveTab: handleTabChange,
+      setSkipMarkAsRead,
+      skipMarkAsReadRef,
+      channelHasBoards,
+    }),
+    [handleTabChange, setSkipMarkAsRead, channelHasBoards],
   );
 
   return (

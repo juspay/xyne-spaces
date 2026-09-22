@@ -3916,9 +3916,14 @@ export const queries: AnyQueryRegistry = defineQueries({
   boardsByChannel: defineQuery(
     z.object({ channelId: z.string() }),
     ({ args: { channelId } }) => {
+      // isDefault first, then oldest link — identical to the server-side resolver
+      // resolveChannelDefaultBoard (channelDefaultBoard.ts). Consumers treat the
+      // first row as the channel's default board, so the two must agree or the UI
+      // opens on a different board than inbound email/Slack flows write to.
       return zql.channel_board_mappings
         .where('channelId', channelId)
         .related('board')
+        .orderBy('isDefault', 'desc')
         .orderBy('createdAt', 'asc');
     },
   ),

@@ -636,6 +636,9 @@ export const ThreadMessages = ({
       setActiveTab: (): void => undefined,
       setSkipMarkAsRead: setSkipMarkAsReadThread,
       skipMarkAsReadRef: skipMarkAsReadThreadRef,
+      // Thread bubbles render with context 'thread', where the create-ticket
+      // action is never offered, so this value is not read on this path.
+      channelHasBoards: false,
     }),
     [setSkipMarkAsReadThread],
   );
