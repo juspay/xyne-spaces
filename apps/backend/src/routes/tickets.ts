@@ -34,7 +34,13 @@ router.get('/my-board-ids', ticketController.getMyTicketBoardIds);
 // Create a new ticket
 router.post('/', uploadMultiple, ticketController.createTicket);
 // Create many tickets in one request (session identity; per-item access checked)
-router.post('/bulk-from-message', uploadMultiple, validate(bulkTicketSchemaValidator), ticketController.createBulkTicket);
+// JSON only — no multipart consumer, and uploadMultiple would break array validation.
+router.post(
+  '/bulk-from-message',
+  authorize('TICKETS', AccessType.WRITE),
+  validate(bulkTicketSchemaValidator),
+  ticketController.createBulkTicket,
+);
 router.post(
   '/:ticketId/flow-groups/:groupId/backlog',
   authorize('TICKETS', AccessType.WRITE),

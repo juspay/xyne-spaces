@@ -1,5 +1,6 @@
 import React, { useCallback, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
+import { logger, Event } from '../../../utils/logger';
 import { Star, Trash2, ArrowDownToLine, Loader2 } from 'lucide-react';
 import {
   BaseTicketType,
@@ -118,6 +119,7 @@ export const BulkCreateTicketsModal: React.FC<BulkCreateTicketsModalProps> = ({
   const userGroups = useUserGroups();
 
   const [rows, setRows] = useState<BulkRow[]>([]);
+  const idempotencyKeyRef = useRef<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const parentChannelId = rows[0]?.channelId ?? propChannelId ?? '';
@@ -345,9 +347,11 @@ export const BulkCreateTicketsModal: React.FC<BulkCreateTicketsModalProps> = ({
   const handleSubmit = async (): Promise<void> => {
     if (!allValid || !user || filledRows.length === 0) return;
     setIsSubmitting(true);
-    // Stable for this submission: if the request is retried (by the user or a
-    // proxy) the server re-derives the same row ids and creates nothing twice.
-    const idempotencyKey = crypto.randomUUID();
+    // Held across retries of the same draft, not minted per click: a request that
+    // succeeded but whose response was lost would otherwise be recreated in full
+    // when the user presses Create again. Cleared only once a batch succeeds.
+    idempotencyKeyRef.current ??= crypto.randomUUID();
+    const idempotencyKey = idempotencyKeyRef.current;
     try {
       const completeRows = filledRows.filter(r => r.description.trim().length > 0);
       const resolveAssignee = (
@@ -385,6 +389,7 @@ export const BulkCreateTicketsModal: React.FC<BulkCreateTicketsModalProps> = ({
         const res = await apiInstance.post('/tickets/bulk-from-message', body);
         const data = res.data as CreateBulkTicketResponse;
         const count = data.createdTickets.length;
+        idempotencyKeyRef.current = null;
         toast.success(`Created ${count} ticket${count !== 1 ? 's' : ''}`);
         onClose();
         return;
@@ -417,6 +422,7 @@ export const BulkCreateTicketsModal: React.FC<BulkCreateTicketsModalProps> = ({
         const res = await apiInstance.post('/tickets/bulk-from-message', body);
         const data = res.data as CreateBulkTicketResponse;
         const subCount = data.createdTickets.length;
+        idempotencyKeyRef.current = null;
         toast.success(`Created ${subCount} sub-ticket${subCount !== 1 ? 's' : ''}`);
         // The parent is the one the caller handed us, so these are real values.
         onTicketCreated?.({
@@ -481,11 +487,16 @@ export const BulkCreateTicketsModal: React.FC<BulkCreateTicketsModalProps> = ({
       const res = await apiInstance.post('/tickets/bulk-from-message', body);
       const data = res.data as CreateBulkTicketResponse;
       const subCount = data.createdTickets.length;
+      idempotencyKeyRef.current = null;
       toast.success(`Created 1 ticket and ${subCount} sub-ticket${subCount !== 1 ? 's' : ''}`);
       // The parent exists now, so the caller gets the real ticket to navigate to.
       onTicketCreated?.(data.parentTicketId ? { id: data.parentTicketId } : undefined);
       onClose();
-    } catch {
+    } catch (error) {
+      logger.error(Event.API_CALL_FAILED, {
+        message: 'Bulk ticket creation failed',
+        error,
+      });
       toast.error('Failed to create tickets', {
         description: 'Please try again or contact support.',
       });

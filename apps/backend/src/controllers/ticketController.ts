@@ -48,6 +48,7 @@ import { superpositionClient } from '@/services/superpositionClient';
 import { validateChannelAccess } from '@/utils/channelAccess';
 import {
   createBulkTicketBatch,
+  MAX_BULK_TICKETS,
   type BatchTicketInput,
 } from '@/services/tickets/bulkTicketBatchService';
 import { BulkTicketCreationInput, BulkTicketMode, CreateBulkTicketResponse } from '@/types/bulkTicket';
@@ -527,9 +528,6 @@ export class TicketController {
         return;
       }
 
-      // Each batch is one transaction held open for the life of the request,
-      // so the cap is about request duration and pool pressure, not payload size.
-      const MAX_BULK_TICKETS = 20;
       if (rawChildren.length > MAX_BULK_TICKETS) {
         res.status(400).json({ error: `Cannot create more than ${MAX_BULK_TICKETS} tickets in one request` });
         return;
@@ -593,16 +591,32 @@ export class TicketController {
         allChannelIds.add(body.parent.channelId);
       }
 
-      for (const chId of allChannelIds) {
-        const access = await validateChannelAccess(chId, userId, workspaceId);
-        if (!access.hasAccess) {
-          res.status(403).json({ error: access.reason ?? 'Access denied', code: 'CHANNEL_ACCESS_DENIED' });
-          return;
-        }
+      const accessResults = await Promise.all(
+        Array.from(allChannelIds).map(async (chId) => ({
+          chId,
+          access: await validateChannelAccess(chId, userId, workspaceId),
+        })),
+      );
+      const denied = accessResults.find((r) => !r.access.hasAccess);
+      if (denied) {
+        res
+          .status(403)
+          .json({ error: denied.access.reason ?? 'Access denied', code: 'CHANNEL_ACCESS_DENIED' });
+        return;
       }
 
       const parentTicketId: string | null = body.existingParentTicketId ?? null;
       let parentToCreate: BulkTicketCreationInput | undefined;
+
+      // The parent checks below live inside the parent-sub branch, so the field
+      // must not survive into any other mode — it would reach the service
+      // unvalidated and come back echoed in the response.
+      if (mode !== BulkTicketMode.PARENT_SUB && parentTicketId) {
+        res
+          .status(400)
+          .json({ error: 'existingParentTicketId is only valid in parent-sub mode' });
+        return;
+      }
 
       if (mode === BulkTicketMode.PARENT_SUB) {
         if (parentTicketId) {
@@ -643,6 +657,7 @@ export class TicketController {
       const batchKey = body.idempotencyKey?.trim() || randomUUID();
       const batchCtx = {
         createdBy: userId,
+        workspaceId,
         batchKey,
         fromTicketsTab: body.fromTicketsTab === true,
       };
@@ -674,10 +689,7 @@ export class TicketController {
       logger.error('[Bulk Ticket] createBulkTicket failed:', error);
       // The whole request is one transaction, so a failure here means nothing
       // was written and the caller can safely retry the same payload.
-      res.status(500).json({
-        error: error instanceof Error ? error.message : 'Failed to create tickets',
-        code: 'BULK_CREATE_FAILED',
-      });
+      res.status(500).json({ error: 'Failed to create tickets', code: 'BULK_CREATE_FAILED' });
     }
   };
 
