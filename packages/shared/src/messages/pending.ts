@@ -10,6 +10,13 @@ import { subscribeSendLifecycle } from './mutationLifecycle.js';
 
 const PENDING_STORAGE_KEY = 'pendingMessages';
 
+/**
+ * How long after the mutator fired before a `complete` reconcile carrying no
+ * `isSent` row is treated as a failure. Covers the window where the query can
+ * answer before the server has processed the mutation.
+ */
+export const SEND_CONFIRMATION_GRACE_MS = 60_000;
+
 export type ZeroStateName =
   | 'connected'
   | 'connecting'
@@ -49,6 +56,12 @@ export type PendingMessage = {
   zeroStateAtSend: ZeroStateName;
   mutatorFired: boolean;
   mutatorAppError: boolean;
+  /**
+   * Set by the pending queue when the server has authoritatively answered
+   * (reconcile `complete`) without an `isSent` row for this message, and the
+   * grace window has passed. See `usePendingQueue`.
+   */
+  sendFailed?: boolean;
 };
 
 export type PendingStatus = 'connecting' | 'failed';
@@ -132,8 +145,13 @@ export function subscribePending(cb: () => void): () => void {
 }
 
 export function getStatus(entry: PendingMessage): PendingStatus | null {
-  // Anything from a previous session or with a mutator app-error is failed.
-  if (entry.sessionId !== currentSessionId || entry.mutatorAppError) {
+  // Failed: carried over from a previous session, rejected by the mutator, or
+  // the server answered without an `isSent` row once the grace window passed.
+  if (
+    entry.sessionId !== currentSessionId ||
+    entry.mutatorAppError ||
+    entry.sendFailed
+  ) {
     return 'failed';
   }
   switch (entry.zeroStateAtSend) {
@@ -160,6 +178,7 @@ export function firePendingMutator(zero: Zero, entry: PendingMessage): void {
   updatePending(entry.messageId, {
     mutatorFired: true,
     mutatorAppError: false,
+    sendFailed: false,
     timestamp: fireTimestamp,
     sessionId: currentSessionId,
     zeroStateAtSend: zero.connection.state.current.name as ZeroStateName,
@@ -206,17 +225,11 @@ export function firePendingMutator(zero: Zero, entry: PendingMessage): void {
     );
   }
 
-  subscribeSendLifecycle(
-    mutation,
-    () => {
-      updatePending(entry.messageId, { mutatorAppError: true });
-    },
-    outcome => {
-      if (outcome === 'ok') {
-        removePending(entry.messageId);
-      }
-    },
-  );
+  // No success callback: an entry leaves the queue only when the `isSent`
+  // reconcile in usePendingQueue sees the server's row.
+  subscribeSendLifecycle(mutation, () => {
+    updatePending(entry.messageId, { mutatorAppError: true });
+  });
 }
 
 export function isAutoRetryEligible(entry: PendingMessage): boolean {

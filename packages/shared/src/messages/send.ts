@@ -10,7 +10,6 @@ import { subscribeSendLifecycle } from './mutationLifecycle.js';
 import {
   addPending,
   getCurrentSessionId,
-  removePending,
   updatePending,
   type PendingAttachment,
   type ZeroStateName,
@@ -146,13 +145,12 @@ export function sendMessage(
       updatePending(messageId, { mutatorAppError: true });
     },
     outcome => {
-      if (outcome === 'ok') {
-        removePending(messageId);
+      if (outcome === 'client-applied') {
         emitMessageSent({
           ref,
           messageId,
           conversationId,
-          isServerConfirmed: true,
+          isClientApplied: true,
           ...(payload.alsoSendToChannel !== undefined && {
             showInChannel: payload.alsoSendToChannel,
           }),
