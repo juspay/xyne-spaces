@@ -48,10 +48,14 @@ import { superpositionClient } from '@/services/superpositionClient';
 import { validateChannelAccess } from '@/utils/channelAccess';
 import {
   createBulkTicketBatch,
-  MAX_BULK_TICKETS,
   type BatchTicketInput,
 } from '@/services/tickets/bulkTicketBatchService';
-import { BulkTicketCreationInput, BulkTicketMode, CreateBulkTicketResponse } from '@/types/bulkTicket';
+import {
+  BulkTicketCreationInput,
+  BulkTicketMode,
+  CreateBulkTicketResponse,
+  MAX_BULK_TICKETS,
+} from '@/types/bulkTicket';
 import { randomUUID } from 'crypto';
 import { linkCreatedEntities, resolveInheritedOwner } from '@/sdlc/entityLinkService';
 import { activityService } from '@/services/activity/activityService';
@@ -546,10 +550,8 @@ export class TicketController {
         priority: item.priority != null ? String(item.priority) : undefined,
         statusV2: item.statusV2 != null ? String(item.statusV2) : undefined,
         eta: item.eta != null ? new Date(item.eta as string | number | Date) : undefined,
-        tags: Array.isArray(item.tags) ? item.tags.map(String) : undefined,
         ticketType: item.ticketType != null ? String(item.ticketType) : undefined,
         stageName: item.stageName != null ? String(item.stageName) : undefined,
-        dynamicFields: item.dynamicFields as Record<string, string> | undefined,
         merchantId: item.merchantId != null ? String(item.merchantId) : undefined,
         clientRowId: item.clientRowId != null ? String(item.clientRowId) : undefined,
         createdBy: userId,

@@ -64,6 +64,16 @@ export interface CreateBulkTicketRequest {
 }
 
 /**
+ * Rows a single bulk-ticket request may carry.
+ *
+ * The batch is written in one transaction held open for the life of the
+ * request, so this bounds request duration and connection-pool pressure rather
+ * than payload size. Enforced by the controller and the Joi validator, and
+ * mirrored by the dashboard so the UI blocks before submitting.
+ */
+export const MAX_BULK_TICKETS = 20;
+
+/**
  * Backend → dashboard response for a completed batch.
  *
  * The tickets exist by the time this is sent: the endpoint creates them

@@ -1,5 +1,5 @@
 import Joi from 'joi';
-import { MAX_BULK_TICKETS } from '@/services/tickets/bulkTicketBatchService';
+import { MAX_BULK_TICKETS } from '@/types/bulkTicket';
 
 const etaSchema = Joi.date().allow(null).messages({
   'date.base': 'ETA must be a valid date',
@@ -17,10 +17,8 @@ const subTicketSchema = Joi.object({
   projectId: Joi.string().optional(),
   assignedTo: Joi.string().allow(null).optional(),
   userGroupId: Joi.string().allow(null).optional(),
-  tags: Joi.array().items(Joi.string()).optional(),
   ticketType: Joi.string().optional(),
   stageName: Joi.string().optional(),
-  dynamicFields: Joi.object().unknown().optional(),
   merchantId: Joi.string().optional(),
   clientRowId: Joi.string().optional(),
 });
@@ -36,10 +34,8 @@ const bulkTicketSchema = Joi.object({
   eta: etaSchema.optional(),
   assignedTo: Joi.string().allow(null).optional(),
   userGroupId: Joi.string().allow(null).optional(),
-  tags: Joi.array().items(Joi.string()).optional(),
   ticketType: Joi.string().optional(),
   stageName: Joi.string().optional(),
-  dynamicFields: Joi.object().unknown().optional(),
   merchantId: Joi.string().optional(),
   clientRowId: Joi.string().optional(),
 });
