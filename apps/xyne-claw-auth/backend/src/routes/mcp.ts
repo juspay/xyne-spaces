@@ -11,6 +11,7 @@ import type { McpToolInfo, McpServerTools } from "../mcp/types.js";
 import { hasConnectorDefinition, resolveConnectorDefinition } from "../mcp/connector-definitions.js";
 import { BITBUCKET_CUSTOM_TOOLS, handleUploadPrScreenshot, handleGetPrComments, handleGetPrTemplate, handleListPullRequests, buildUpstreamBitbucketCitation } from "../mcp/adapters/bitbucket.js";
 import { GITHUB_CUSTOM_TOOLS, handleUploadPrAttachment } from "../mcp/adapters/github.js";
+import { GITHUB_INSIGHTS_TOOLS, isGithubInsightsTool, handleGithubInsightsTool } from "../mcp/adapters/github-insights.js";
 import { GRAFANA_CUSTOM_TOOLS, handleGrafanaQueryLogs, handleGrafanaListMetrics, handleGrafanaQueryMetrics, handleGrafanaQueryDatabase, buildUpstreamGrafanaCitation, prefixChunk } from "../mcp/adapters/grafana.js";
 import { type Citation } from "xyne-claw-shared";
 import { SLACK_CUSTOM_TOOLS, handleSlackFindChannel } from "../mcp/adapters/slack.js";
@@ -658,9 +659,10 @@ const CUSTOM_TOOL_INJECTIONS: ReadonlyArray<{
   createIfMissing: boolean;
 }> = [
   { match: (t) => t === "bitbucket", tools: BITBUCKET_CUSTOM_TOOLS, createIfMissing: false },
-  // upload-pr-attachment hits GitHub's REST + uploads API directly, so it works
-  // even when the upstream github MCP server fails to spawn.
-  { match: (t) => t === "github", tools: GITHUB_CUSTOM_TOOLS, createIfMissing: true },
+  // upload-pr-attachment and the growth tools hit GitHub's REST/GraphQL APIs
+  // directly, so they work even when the upstream github MCP server fails to
+  // spawn.
+  { match: (t) => t === "github", tools: [...GITHUB_CUSTOM_TOOLS, ...GITHUB_INSIGHTS_TOOLS], createIfMissing: true },
   { match: (t) => t === "postman", tools: POSTMAN_CUSTOM_TOOLS, createIfMissing: false },
   { match: (t) => t === "slack", tools: SLACK_CUSTOM_TOOLS, createIfMissing: true },
   // Messaging channels (WhatsApp over Baileys, WhatsApp Cloud API, …): fully
@@ -1948,6 +1950,16 @@ router.post("/:sessionId/mcp/call", async (req: Request<{ sessionId: string }>, 
     // is decrypted server-side and never leaves this process.
     if (serverType === "github" && tool === "upload-pr-attachment") {
       const result = await handleUploadPrAttachment(credentials, params ?? {});
+      res.json({ success: true, data: result });
+      return;
+    }
+
+    // GitHub growth & audience tools (stargazers, star history, traffic,
+    // forks, releases, contributor activity, community pulse). All read-only,
+    // all served here against the connection's PAT — the upstream github MCP
+    // server exposes none of these.
+    if (serverType === "github" && isGithubInsightsTool(tool)) {
+      const result = await handleGithubInsightsTool(tool, credentials, params ?? {});
       res.json({ success: true, data: result });
       return;
     }
