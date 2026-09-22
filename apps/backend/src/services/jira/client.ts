@@ -19,7 +19,7 @@ export const buildProjectJql = (projectKey: string, dateFrom?: string, issueKeys
   }
 
   if (issueKeys && issueKeys.length > 0) {
-    const escapedIssueKeys = issueKeys.map(key => `"${key.replace(/"/g, '\\"')}"`);
+    const escapedIssueKeys = issueKeys.map(key => `"${escapeJqlString(key)}"`);
     clauses.push(`issuekey IN (${escapedIssueKeys.join(', ')})`);
   }
 

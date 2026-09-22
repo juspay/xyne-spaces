@@ -37,7 +37,7 @@ jobs:
           fetch-tags: true
           ssh-key: ${{ secrets.SEMANTIC_RELEASE_SSH_KEY }}
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
 
       - uses: actions/setup-node@v5
         with:
