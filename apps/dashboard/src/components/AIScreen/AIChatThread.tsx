@@ -1,3 +1,4 @@
+import type { XyneAiSendTrigger } from '../../services/Analytics/xyneAiTracking';
 import { logger, Event as LogEvent } from '../../utils/logger';
 import {
   useContext,
@@ -25,16 +26,24 @@ import {
   Upload,
   Pencil,
   RefreshCw,
+  Check,
+  X,
+  Clock,
+  MoreHorizontal,
+  Quote,
 } from 'lucide-react';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkBreaks from 'remark-breaks';
+import { useQueryClient } from '@tanstack/react-query';
+import { conversationArtifactsQueryKey } from '../../services/XyneAI/XyneAIArtifactsService';
 import { Link } from 'react-router-dom';
 import { useXyneAIStream } from '../../hooks/useXyneAIStream';
 import { useSelectedAgent } from '../../hooks/useSelectedAgent';
 import { useAskAIVersion } from '../../hooks/useAskAIVersion';
 import type {
   Message,
+  PlanTodo,
   MessageAttachment,
   ToolInvocation as ToolInvocationType,
   ClawCitation,
@@ -46,7 +55,21 @@ import { AskAiRatingButtons } from './AskAiRatingButtons';
 import { AIComposer, type AIComposerAttachment, type AIComposerHandle } from './AIComposer';
 import { ReadonlyContextPills } from './ReadonlyContextPills';
 import { type ComposerContext, toStreamOverrides } from './composerContext';
+import {
+  anchorFromArgs,
+  documentIdFromArgs,
+  isDocEditTool,
+  revealDocEdit,
+} from './Workspace/revealDocEdit';
+import {
+  designChatContent,
+  hasDesignHtml,
+  htmlToBase64,
+  useDesignStudio,
+  usePageSelection,
+} from './Workspace';
 import { fetchV2ConversationMessages } from '../../services/XyneAI/XyneAISessionsV2Service';
+import { lengthBucket } from '../../services/Analytics/trackSource';
 import { xyneAIStreamManager } from '../../services/XyneAI/XyneAIStreamManager';
 import { BASE_URL } from '../../services/clients/apiClient';
 import { BrailleLoader, AnimatedLabel, useStableLabel } from './ReasoningLoader';
@@ -72,6 +95,7 @@ import { CitationLink } from '../Chat/XyneAISidebar/components/CitationLink';
 
 import { useCitationDocs, panelDocFromCitation } from './citationDocs';
 import { MessageReactArtifacts, toArtifactRef } from './ReactArtifact';
+import { OpenUrlActions } from './OpenUrlActions';
 import { ArtifactRestoreNotice } from './ReactArtifact/ArtifactRestoreNotice';
 import { PromptMarkerRail, type PromptMarker } from './PromptMarkerRail';
 import type { ArtifactAppRestoreEvent } from '../../services/claw/artifactAppsService';
@@ -85,6 +109,8 @@ import {
   processNodeForUserTags,
 } from '../Chat/XyneAISidebar/components/MessageItem';
 import { ToolInvocationList } from '../Chat/XyneAISidebar/components/ToolInvocationList';
+import { PendingActionBlock } from '../Chat/XyneAISidebar/components/PendingActionBlock';
+import { respondToPendingAction } from '../../services/XyneAI/XyneAIPendingActionService';
 import {
   ActivityStatusChip,
   LiveReasoning,
@@ -113,6 +139,9 @@ interface AIChatThreadProps {
   /** Context/toggles chosen on the landing composer — applied to the first
    *  auto-submitted turn and used to seed the chat composer. */
   initialExtras?: ComposerContext | undefined;
+  /** Which affordance sent `initialQuery` on the landing composer. Absent means
+   *  a true auto-send (an entry point set the query without a composer). */
+  initialTrigger?: XyneAiSendTrigger | undefined;
   onSetMobileSidebarOpen?: ((open: boolean) => void) | undefined;
   /** Desktop sidebar toggle for the header; state drives which icon shows. */
   onToggleSidebar?: (() => void) | undefined;
@@ -715,6 +744,57 @@ const ANSWER_REHYPE_PLUGINS = [rehypeStreamWordFade];
 // intercept it.
 const preserveUrlTransform = (url: string): string => url;
 
+const PLAN_STATUS_CLASSES: Record<PlanTodo['status'], string> = {
+  pending: 'text-muted-foreground',
+  in_progress: 'text-primary',
+  completed: 'text-emerald-600 dark:text-emerald-400',
+  failed: 'text-destructive',
+};
+
+function PlanStatusIcon({ status }: { status: PlanTodo['status'] }): ReactElement {
+  if (status === 'completed') return <Check className='h-3.5 w-3.5' aria-hidden='true' />;
+  if (status === 'failed') return <X className='h-3.5 w-3.5' aria-hidden='true' />;
+  if (status === 'in_progress') return <Clock className='h-3.5 w-3.5' aria-hidden='true' />;
+  return <MoreHorizontal className='h-3.5 w-3.5' aria-hidden='true' />;
+}
+
+function PlanCard({
+  todos,
+  title,
+}: {
+  todos: PlanTodo[];
+  title?: string | undefined;
+}): ReactElement {
+  const done = todos.filter(todo => todo.status === 'completed').length;
+  const failed = todos.filter(todo => todo.status === 'failed').length;
+  return (
+    <div className='w-full max-w-[520px] rounded-lg border border-border bg-card px-3 py-2.5 text-[13px] text-foreground'>
+      <div className='mb-2 flex items-center justify-between gap-3'>
+        <span className='truncate font-medium'>{title || 'Plan'}</span>
+        <span className='shrink-0 text-[11px] text-muted-foreground'>
+          {done}/{todos.length} done{failed ? `, ${failed} failed` : ''}
+        </span>
+      </div>
+      <div className='space-y-1.5'>
+        {todos.map((todo, index) => (
+          <div key={todo.id || index} className='flex min-w-0 items-start gap-2'>
+            <span
+              className={`mt-0.5 inline-flex h-4 w-4 shrink-0 items-center justify-center ${PLAN_STATUS_CLASSES[todo.status]}`}
+            >
+              <PlanStatusIcon status={todo.status} />
+            </span>
+            <span
+              className={`min-w-0 break-words leading-snug ${todo.status === 'in_progress' ? 'font-medium' : ''}`}
+            >
+              {todo.title}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function ChatMessageBubble({
   message,
   onCopy,
@@ -729,8 +809,15 @@ function ChatMessageBubble({
   onBranchNavigate,
   isV2,
   onRatingChange,
+  trackContext,
+  agentSlug,
+  onPendingActionResolved,
 }: {
   message: Message;
+  /** Run dimensions merged into every act-on-answer click (joins to the run). */
+  trackContext?: Record<string, unknown> | undefined;
+  agentSlug?: string | undefined;
+  onPendingActionResolved?: (() => void) | undefined;
   onCopy?: () => void;
   onFeedback?: (messageId: string, feedbackType: 'LIKE' | 'DISLIKE') => void;
   feedbackValue?: FeedbackValue;
@@ -881,7 +968,9 @@ function ChatMessageBubble({
     const stripped = stripCitationMarks(linkified);
     const nonClfStripped = stripNonClfCitationTokens(stripped);
     const cleaned = stripUnknownCiteLinks(nonClfStripped, validCitationKeys);
-    return message.isStreaming ? cleaned + '\n' : cleaned;
+    const designed =
+      message.type === 'bot' && hasDesignHtml(cleaned) ? designChatContent(cleaned) : cleaned;
+    return message.isStreaming ? designed + '\n' : designed;
   }, [
     message.type,
     message.content,
@@ -1067,6 +1156,7 @@ function ChatMessageBubble({
   );
   const hasAttachedContext =
     isUser && !!message.attachedContext && message.attachedContext.length > 0;
+  const passage = isUser ? message.pageSelection : undefined;
   if (isUser && !hasUserContent && !hasUserAttachments) {
     return null as unknown as ReactElement;
   }
@@ -1192,6 +1282,18 @@ function ChatMessageBubble({
           {/* Read-only context pills the user attached to this turn — persisted
               per message so they survive a reload (see ReadonlyContextPills).
               Rendered BELOW the message bubble. */}
+          {passage && !isEditing && (
+            <div className='mt-1 flex justify-end'>
+              <div
+                className='flex max-w-[28rem] items-center gap-1.5 rounded-md border border-border bg-secondary/40 px-2 py-1 text-[11px] text-muted-foreground'
+                title={`From ${passage.title}:\n\n${passage.text.slice(0, 600)}`}
+              >
+                <Quote className='h-3 w-3 shrink-0' aria-hidden='true' />
+                <span className='min-w-0 truncate italic'>{passage.text}</span>
+                <span className='shrink-0 opacity-70'>{passage.title}</span>
+              </div>
+            </div>
+          )}
           {hasAttachedContext && !isEditing && (
             <ReadonlyContextPills items={message.attachedContext!} />
           )}
@@ -1239,7 +1341,27 @@ function ChatMessageBubble({
             </div>
           )}
 
+          {!isUser && message.planTodos && message.planTodos.length > 0 && (
+            <PlanCard todos={message.planTodos} title={message.planTitle} />
+          )}
+
+          {!isUser && message.pendingActions && message.pendingActions.length > 0 && (
+            <PendingActionBlock
+              actions={message.pendingActions}
+              onApprove={async (action, index) => {
+                await respondToPendingAction(message, action, index, true, agentSlug || 'ask-ai');
+                onPendingActionResolved?.();
+              }}
+              onDecline={async (action, index) => {
+                await respondToPendingAction(message, action, index, false, agentSlug || 'ask-ai');
+                onPendingActionResolved?.();
+              }}
+            />
+          )}
+
           {!isUser && <MessageReactArtifacts message={message} />}
+
+          {!isUser && <OpenUrlActions toolInvocations={message.toolInvocations} />}
 
           {/* Bot Message Attachments (e.g., generated PDFs from artifacts tool).
               React artifacts are excluded: MessageReactArtifacts above already
@@ -1263,7 +1385,7 @@ function ChatMessageBubble({
           onFollowUpSuggestionClick &&
           message.followUpSuggestions?.length ? (
             <div className='mt-1 flex flex-wrap gap-2' data-testid='ask-ai-follow-ups'>
-              {message.followUpSuggestions.map(suggestion => (
+              {message.followUpSuggestions.map((suggestion, suggestionIndex) => (
                 <button
                   key={suggestion}
                   type='button'
@@ -1271,7 +1393,12 @@ function ChatMessageBubble({
                   className='rounded-full border border-border bg-card px-3 py-1.5 text-left text-xs font-medium leading-5 text-muted-foreground transition-colors hover:bg-accent'
                   data-track-category='AskAI'
                   data-track-name='FollowUpSuggestion'
-                  data-track-metadata={JSON.stringify({ suggestion })}
+                  data-track-metadata={JSON.stringify({
+                    ...trackContext,
+                    messageId: message.id,
+                    index: suggestionIndex,
+                    lengthBucket: lengthBucket(suggestion.length),
+                  })}
                 >
                   {suggestion}
                 </button>
@@ -1302,6 +1429,7 @@ function ChatMessageBubble({
                 className='inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground'
                 data-track-category='XyneAI'
                 data-track-name='COPY_MESSAGE'
+                data-track-metadata={JSON.stringify({ ...trackContext, messageId: message.id })}
               >
                 <Copy className='h-3.5 w-3.5' aria-hidden strokeWidth={1.75} />
               </button>
@@ -1313,6 +1441,7 @@ function ChatMessageBubble({
                   feedback={message.feedback}
                   comment={message.ratingComment}
                   onChange={(fb, c): void => onRatingChange?.(message.id, fb, c)}
+                  trackMetadata={trackContext}
                 />
               ) : (
                 <>
@@ -1326,6 +1455,7 @@ function ChatMessageBubble({
                     )}
                     data-track-category='XyneAI'
                     data-track-name='LIKE_MESSAGE'
+                    data-track-metadata={JSON.stringify({ ...trackContext, messageId: message.id })}
                   >
                     <ThumbsUp
                       className='h-3.5 w-3.5'
@@ -1345,6 +1475,7 @@ function ChatMessageBubble({
                     )}
                     data-track-category='XyneAI'
                     data-track-name='DISLIKE_MESSAGE'
+                    data-track-metadata={JSON.stringify({ ...trackContext, messageId: message.id })}
                   >
                     <ThumbsDown
                       className='h-3.5 w-3.5'
@@ -1367,6 +1498,7 @@ function ChatMessageBubble({
                   className='inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground'
                   data-track-category='XyneAI'
                   data-track-name='REGENERATE_MESSAGE'
+                  data-track-metadata={JSON.stringify({ ...trackContext, messageId: message.id })}
                 >
                   <RefreshCw className='h-3.5 w-3.5' aria-hidden strokeWidth={1.75} />
                 </button>
@@ -1397,6 +1529,7 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
     initialQuery,
     initialAttachments,
     initialExtras,
+    initialTrigger,
     onSetMobileSidebarOpen,
     onToggleSidebar,
     sidebarCollapsed,
@@ -1577,7 +1710,18 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
     setDebugArtifactsReadyVersion,
     isV2,
     agentSlug: effectiveAgentSlug,
+    surface: 'page',
   });
+
+  // Dimensions every act-on-answer click carries (see ChatMessageBubble).
+  const messageTrackContext = useMemo(
+    () => ({
+      surface: 'page',
+      ...(conversationId && { conversationId }),
+      agentSlug: effectiveAgentSlug ?? 'ask-ai',
+    }),
+    [conversationId, effectiveAgentSlug],
+  );
 
   // ── Branching: resolve the visible path from the full message tree ────────────
   // Mirrors XyneAISidebar. `messages` is the full tree (siblings share a
@@ -1587,6 +1731,32 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
     () => resolveActivePath(messages, branchSelections),
     [messages, branchSelections],
   );
+
+  const queryClient = useQueryClient();
+  const designStudio = useDesignStudio();
+  const revealedEditsRef = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    for (const message of displayMessages) {
+      for (const invocation of message.toolInvocations ?? []) {
+        if (invocation.status !== 'completed' || invocation.isError) continue;
+        if (!isDocEditTool(invocation.toolName)) continue;
+        const key = invocation.toolCallId ?? `${message.id}:${invocation.toolName}`;
+        if (revealedEditsRef.current.has(key)) continue;
+        revealedEditsRef.current.add(key);
+        const args = invocation.args ?? {};
+        const anchor = anchorFromArgs(args);
+        if (!anchor) continue;
+        void revealDocEdit(documentIdFromArgs(args), anchor);
+      }
+    }
+  }, [displayMessages]);
+  const pageSelection = usePageSelection();
+  const publishDesignMessages = designStudio?.publishMessages;
+  useEffect(() => {
+    publishDesignMessages?.(displayMessages);
+    return () => publishDesignMessages?.([]);
+  }, [publishDesignMessages, displayMessages]);
 
   const isActiveSessionStreaming = useMemo(() => messages.some(m => m.isStreaming), [messages]);
 
@@ -1766,8 +1936,18 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
       // last-turn context, and CLEAR it when that turn had none — so a chat's
       // context never leaks into another chat.
       const seedComposerFromLastUserTurn = (msgs: Message[]): void => {
-        const lastUser = [...msgs].reverse().find(m => m.type === 'user');
-        composerRef.current?.setContext(lastUser?.attachedContext ?? []);
+        const reversed = [...msgs].reverse();
+        const lastUser = reversed.find(m => m.type === 'user');
+        const items = lastUser?.attachedContext ?? [];
+        if (items.some(item => item.type === 'local-folder')) {
+          composerRef.current?.setContext(items);
+          return;
+        }
+        const stickyFolder = reversed
+          .filter(m => m.type === 'user')
+          .flatMap(m => m.attachedContext ?? [])
+          .find(item => item.type === 'local-folder');
+        composerRef.current?.setContext(stickyFolder ? [...items, stickyFolder] : items);
       };
       // Clear stale branch selections from any previously-viewed session; the
       // freshly-loaded tree defaults to its latest branch via resolveActivePath.
@@ -1889,13 +2069,25 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
         undefined,
         undefined,
         undefined,
-        initialExtras ? toStreamOverrides(initialExtras) : undefined,
+        {
+          ...(initialExtras ? toStreamOverrides(initialExtras) : {}),
+          // The landing composer's button / Enter is the real trigger; a button
+          // send already has its own click row and must not also emit here.
+          trigger: initialTrigger ?? 'auto_send',
+        },
       );
       // After the call, so "consumed" means "actually submitted" and the
       // attachments above are read before the parent drops them.
       onInitialQueryConsumed?.();
     }
-  }, [initialQuery, initialAttachments, initialExtras, submitQuery, onInitialQueryConsumed]);
+  }, [
+    initialQuery,
+    initialAttachments,
+    initialExtras,
+    initialTrigger,
+    submitQuery,
+    onInitialQueryConsumed,
+  ]);
 
   // Notify parent when conversationId changes (draft -> real session)
   useEffect(() => {
@@ -2056,6 +2248,7 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
       text: string,
       attachments?: AIComposerAttachment[],
       context?: ComposerContext,
+      trigger?: XyneAiSendTrigger,
     ): Promise<void> => {
       const hasAttachments = (attachments?.length ?? 0) > 0;
       if (!text.trim() && !hasAttachments) return;
@@ -2092,9 +2285,20 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
         parentMessageId = displayMessages[displayMessages.length - 1]?.id;
       }
 
+      const pendingDesignEdit = designStudio?.readPendingEdit() ?? null;
+      const messageAttachments = toMessageAttachments(attachments ?? []);
+      if (pendingDesignEdit?.html) {
+        messageAttachments.push({
+          mimeType: 'text/html',
+          filename: pendingDesignEdit.fileName,
+          originalFilename: pendingDesignEdit.fileName,
+          data: htmlToBase64(pendingDesignEdit.html),
+        });
+      }
+
       await submitQuery(
         text,
-        toMessageAttachments(attachments ?? []),
+        messageAttachments,
         undefined,
         undefined,
         undefined,
@@ -2103,10 +2307,27 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
         undefined,
         undefined,
         undefined,
-        context ? toStreamOverrides(context) : undefined,
+        {
+          ...(context ? toStreamOverrides(context) : {}),
+          ...(trigger && { trigger }),
+          ...(pendingDesignEdit || (designStudio?.designMode.active && !/^\s*\//.test(text))
+            ? {
+                studioMode: 'design' as const,
+                ...(pendingDesignEdit?.selection
+                  ? { designSelection: pendingDesignEdit.selection }
+                  : {}),
+              }
+            : {}),
+          ...(pageSelection?.readSelection()
+            ? { pageSelection: pageSelection.readSelection()! }
+            : {}),
+        },
       );
+
+      pendingDesignEdit?.clear();
+      pageSelection?.clearSelection();
     },
-    [submitQuery, isLegacyConversation, displayMessages, messages],
+    [submitQuery, isLegacyConversation, displayMessages, messages, designStudio, pageSelection],
   );
 
   const handleStop = useCallback((): void => {
@@ -2340,7 +2561,30 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
                     // section's transitions).
                     <Fragment key={message.stableKey ?? message.id}>
                       <ChatMessageBubble
+                        trackContext={messageTrackContext}
                         message={message}
+                        agentSlug={effectiveAgentSlug ?? undefined}
+                        onPendingActionResolved={() => {
+                          if (!conversationId) return;
+                          const refreshArtifacts = (): void => {
+                            void queryClient.invalidateQueries({
+                              queryKey: conversationArtifactsQueryKey(conversationId),
+                            });
+                          };
+                          refreshArtifacts();
+                          window.setTimeout(refreshArtifacts, 4000);
+                          window.setTimeout(refreshArtifacts, 12000);
+                          liveViewerRef.current?.detach();
+                          liveViewerRef.current = {
+                            sessionId: conversationId,
+                            detach: xyneAIStreamManager.attachLiveViewer(
+                              threadId,
+                              conversationId,
+                              effectiveAgentSlug || 'ask-ai',
+                              xyneAIStreamManager.getActiveStream(threadId)?.messages ?? messages,
+                            ),
+                          };
+                        }}
                         onCopy={() => {
                           void navigator.clipboard.writeText(
                             message.content || message.streamingContent || '',
@@ -2435,8 +2679,8 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
             <AIComposer
               ref={composerRef}
               autoFocus
-              onSubmit={(text, attachments, context): void => {
-                void handleSubmit(text, attachments, context);
+              onSubmit={(text, attachments, context, trigger): void => {
+                void handleSubmit(text, attachments, context, trigger);
               }}
               onAgentChange={onAgentChange}
               showAgentSelector={isV2}

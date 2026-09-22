@@ -34,9 +34,14 @@ export function workspacePath(sessionId: string): string {
  *
  * The cwd becomes the agent's working directory AND the root that
  * contextFiles/attachments are written under, so accepting it verbatim is an
- * arbitrary-host-write primitive for anyone holding the S2S key. Only allow
- * paths under the workspaces root, or under a root explicitly allowlisted via
- * XYNE_CLAW_ALLOWED_CWD_ROOTS (comma-separated absolute paths).
+ * arbitrary-host-write primitive for anyone holding the S2S key. Only roots
+ * explicitly allowlisted via XYNE_CLAW_ALLOWED_CWD_ROOTS (comma-separated
+ * absolute paths) are accepted.
+ *
+ * The ephemeral workspaces root is deliberately NOT allowed: every session's
+ * own workspace is a sibling under it, so accepting a path there would let one
+ * run read and write another session's files. Sessions get their workspace
+ * from workspacePath(), never from a caller-supplied cwd.
  */
 const ALLOWED_CWD_ROOTS: readonly string[] = (process.env["XYNE_CLAW_ALLOWED_CWD_ROOTS"] ?? "")
   .split(",")
@@ -47,7 +52,7 @@ const ALLOWED_CWD_ROOTS: readonly string[] = (process.env["XYNE_CLAW_ALLOWED_CWD
 export function isAllowedCwd(raw: string): boolean {
   if (!path.isAbsolute(raw)) return false;
   const resolved = path.resolve(raw);
-  for (const root of [path.resolve(workspacesRoot()), ...ALLOWED_CWD_ROOTS]) {
+  for (const root of ALLOWED_CWD_ROOTS) {
     if (resolved === root || resolved.startsWith(`${root}${path.sep}`)) return true;
   }
   return false;

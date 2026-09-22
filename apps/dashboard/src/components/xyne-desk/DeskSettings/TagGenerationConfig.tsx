@@ -615,6 +615,15 @@ export const TagGenerationConfig: React.FC<TagGenerationConfigProps> = ({
                 disabled={fieldDisabled}
                 data-track-category='DeskSettings'
                 data-track-name='SaveTagCategory'
+                data-track-metadata={JSON.stringify({
+                  categoryCount: Object.keys(categories).length,
+                  isNewCategory: editingName === '__new__',
+                  method: form.method,
+                  maxTags: form.count.trim() ? Number(form.count) : null,
+                  allowNewTags: form.isNewTagAllowed,
+                  allowedTagCount: form.tags.length,
+                  blacklistCount: form.blacklist.length,
+                })}
               >
                 Save
               </button>

@@ -1,6 +1,12 @@
 import { Router, type Request, type RequestHandler, type Response } from "express";
 import { errMsg } from "../lib/errors.js";
 import { assertSafeOutboundUrl } from "../mcpgateway/services/http-client.js";
+import {
+  extractProviderMessage,
+  modelServedBy,
+  providerNeedsKey,
+  verifyProviderCredential,
+} from "../lib/provider-credential-verify.js";
 import multer from "multer";
 import crypto from "node:crypto";
 import { Prisma } from "@prisma/client";
@@ -14,6 +20,8 @@ import { prisma } from "../db.js";
 import { CONFIG } from "../config.js";
 import { encrypt, decrypt } from "../crypto.js";
 import { checkHealth } from "../health.js";
+import { verifyMcpCredentials } from "../lib/mcp-credential-verify.js";
+import { validateCredentials } from "../validation.js";
 import { fetchAndStoreSigningSecretFromSpacesApi } from "../lib/spaces-app-secret.js";
 import { extractCodexBearer } from "../lib/codex-creds.js";
 import { extractClaudeBearer } from "../lib/claude-creds.js";
@@ -34,6 +42,7 @@ import { writeAuditLog } from "../lib/audit.js";
 import { buildAvailableToolsCatalog } from "./tools.js";
 import { validateAgentModelConfig, validateAwakeningConfig } from "../lib/agent-config-validation.js";
 import { syncAwakeningState } from "../awakening/lifecycle.js";
+import { removeAgentFromIndex, syncAgentToIndexBestEffort } from "../services/agent-index/index.js";
 import { auditModelSettingsChange } from "../lib/model-settings-audit.js";
 import { validateKbGrants } from "../lib/spaces-kb.js";
 import { ORG_SCOPED_SLUGS } from "../lib/org-scoped-slugs.js";
@@ -812,6 +821,10 @@ router.put("/:slug", async (req: Request<{ slug: string }>, res: Response) => {
 
     const agent = await agentRepository.update(req.params.slug, existing.orgId, data);
 
+    // Refresh the routing index so discovery reflects this edit. Same
+    // best-effort contract as the awakening sync below.
+    syncAgentToIndexBestEffort(agent.id, existing.orgId, existing.slug);
+
     // Create/park the scheduler state row so the awakening tick starts or
     // stops seeing this agent. Best-effort: a failure here must not fail the
     // config write — the next write, or a manual re-enable, reconciles it.
@@ -1459,6 +1472,12 @@ router.delete("/:slug", requireAgentOwnerOrAdmin, async (req: Request<{ slug: st
     }
 
     await agentRepository.delete(req.params.slug, agent.orgId);
+
+    // An index that still answers for a deleted agent is worse than one missing
+    // it — the orchestrator would route to a slug that cannot resolve.
+    void removeAgentFromIndex(req.params.slug, agent.orgId).catch((e) =>
+      log.warn(`[agents] agent index removal failed for ${req.params.slug}:`, e instanceof Error ? e.message : e),
+    );
 
     await writeAuditLog({
       actorUserId: requesterId,
@@ -2193,6 +2212,125 @@ router.get("/:slug/shares", requireAgentOwnerContributorOrAdmin, async (req: Req
   }
 });
 
+// ── Ownership transfer ───────────────────────────────────────────────
+//
+// POST /agents/:slug/transfer-ownership — move `ownerUserId` to another user.
+//
+// Immediate and unilateral: there is deliberately NO acceptance step, so the
+// transfer lands the moment the owner confirms. Owner (or CLAW_ADMIN) only,
+// same-org target only — the same cross-org guard POST /:slug/shares applies.
+//
+// Why a transfer and not a clone: `cloneAgentForUser` intentionally does NOT
+// copy the Spaces app identity (`spacesAppId`/`spacesAppToken`/`signingSecret`),
+// shares, provider credentials or prompt history, so a clone is a NEW agent that
+// every channel has to re-install. Moving `ownerUserId` keeps the agent row —
+// and therefore every existing install, webhook and schedule — intact. Nothing
+// on the dispatch path reads the owner (providers resolve from the invoking user
+// + agent-scoped rows in lib/provider-resolution.ts), so runtime behaviour is
+// unchanged by the flip.
+//
+// What the flip DOES change is visibility: `ownerUserId` feeds the
+// "agents I can see" filters (agentRepository.listVisible, agentCatalogService,
+// callable-agent-resolver). On a personal-scope agent the outgoing owner would
+// lose the agent entirely, so we demote them to an EDITOR share in the SAME
+// transaction. That is correctness, not courtesy.
+//
+// SECURITY: agent-scoped provider credentials and MCP connections are keyed by
+// agentId and therefore follow the agent. The new owner inherits key material
+// the previous owner pasted. With no acceptance gate, the audit record is the
+// only durable trace — hence AGENT_OWNERSHIP_TRANSFERRED with both user ids.
+router.post(
+  "/:slug/transfer-ownership",
+  requireAgentOwnerOrAdmin,
+  asyncHandler(async (req: Request<{ slug: string }>, res: Response) => {
+    const ctx = (req as Request & { agentContext: import("../middleware/agent-acl.js").AgentContext }).agentContext;
+    const agent = ctx.agent;
+    const actorId = requireRequester(req);
+
+    const { newOwnerUserId, keepPreviousOwnerAsEditor = true } = (req.body ?? {}) as {
+      newOwnerUserId?: string;
+      keepPreviousOwnerAsEditor?: boolean;
+    };
+
+    if (!newOwnerUserId || typeof newOwnerUserId !== "string") {
+      throw badRequest("newOwnerUserId is required");
+    }
+    if (newOwnerUserId === agent.ownerUserId) {
+      throw badRequest("That user already owns this agent");
+    }
+
+    const target = await userRepository.findById(newOwnerUserId);
+    if (!target) throw notFound("Target user not found");
+
+    // Cross-org transfer would hand an agent to someone who cannot even see it
+    // (every read path is org-scoped). Mirrors the guard on POST /:slug/shares.
+    if (agent.orgId && target.orgId !== agent.orgId) {
+      throw forbidden("Cannot transfer an agent to a user in a different organization");
+    }
+
+    const previousOwnerId = agent.ownerUserId;
+
+    await prisma.$transaction(async (tx) => {
+      await tx.agent.update({
+        where: { id: agent.id },
+        data: { ownerUserId: newOwnerUserId },
+      });
+
+      // The owner is represented by `ownerUserId`, never by a share row — see
+      // getAgentEditAccess, which treats the two as distinct states. If the new
+      // owner previously held a share, drop it so the agent does not end up in a
+      // state the ACL helper does not model.
+      await tx.agentShare.deleteMany({
+        where: { agentId: agent.id, userId: newOwnerUserId },
+      });
+
+      // Keep the outgoing owner able to see and edit the agent. Without this the
+      // agent disappears from their list on a personal-scope agent.
+      if (previousOwnerId && keepPreviousOwnerAsEditor) {
+        await tx.agentShare.upsert({
+          where: { agentId_userId: { agentId: agent.id, userId: previousOwnerId } },
+          create: {
+            agentId: agent.id,
+            userId: previousOwnerId,
+            role: "EDITOR",
+            sharedBy: actorId,
+          },
+          update: { role: "EDITOR" },
+        });
+      }
+    });
+
+    await writeAuditLog({
+      actorUserId: actorId,
+      eventType: "AGENT_OWNERSHIP_TRANSFERRED",
+      targetId: agent.id,
+      description: `Ownership of agent "${agent.name}" transferred to ${target.email}`,
+      metadata: {
+        agentSlug: agent.slug,
+        previousOwnerUserId: previousOwnerId,
+        newOwnerUserId,
+        keepPreviousOwnerAsEditor,
+        byAdmin: ctx.isAdmin && !ctx.isOwner,
+      },
+    });
+
+    // Ownership is part of the indexed agent document's visibility, so refresh
+    // it best-effort. A stale index entry must never fail the transfer itself.
+    syncAgentToIndexBestEffort(agent.id, agent.orgId, agent.slug);
+
+    log.info(
+      `[agents] ownership transferred slug=${agent.slug} from=${previousOwnerId ?? "none"} to=${newOwnerUserId} by=${actorId}`,
+    );
+
+    ok(res, {
+      slug: agent.slug,
+      ownerUserId: newOwnerUserId,
+      previousOwnerUserId: previousOwnerId,
+      previousOwnerRole: previousOwnerId && keepPreviousOwnerAsEditor ? "EDITOR" : null,
+    });
+  }),
+);
+
 // ── Tool attach/detach ───────────────────────────────────────────────
 
 router.post("/:slug/tools", requireAgentOwnerOrAdmin, async (req: Request<{ slug: string }>, res: Response) => {
@@ -2872,7 +3010,8 @@ export async function fetchAnthropicModels(apiKey: string, baseUrl?: string, aut
 
   if (!res.ok) {
     const text = await res.text().catch(() => "");
-    throw new Error(`Anthropic API ${res.status}: ${text.slice(0, 200)}`);
+    const detail = extractProviderMessage(text);
+    throw new Error(detail ? `Anthropic: ${detail}` : `Anthropic API ${res.status}`);
   }
 
   const body = (await res.json()) as {
@@ -3201,6 +3340,24 @@ router.post("/:slug/mcp/connections", requireAgentOwnerContributorOrAdmin, async
     const server = await prisma.mcpServer.findUnique({ where: { type: mcpServerType } });
     if (!server) {
       res.status(404).json({ success: false, error: `Unknown mcpServerType: ${mcpServerType}` });
+      return;
+    }
+
+    const shape = await validateCredentials(server.type, credentials as Record<string, unknown>);
+    if (!shape.valid) {
+      res.status(400).json({ success: false, error: shape.error });
+      return;
+    }
+
+    const verifySessionKey = `agent:${agent.id}:${instanceSlug}`;
+    const verification = await verifyMcpCredentials({
+      sessionKey: verifySessionKey,
+      serverType: server.type,
+      serverName: server.name,
+      credentials: credentials as Record<string, unknown>,
+    });
+    if (!verification.ok) {
+      res.status(verification.kind === "rejected" ? 400 : 502).json({ success: false, error: verification.message });
       return;
     }
 
@@ -4463,6 +4620,31 @@ router.post(
         return;
       }
 
+      if (apiKey && providerNeedsKey(provider)) {
+        const verification = await verifyProviderCredential(
+          {
+            provider,
+            apiKey,
+            baseUrl: baseUrl ?? existing?.baseUrl ?? null,
+            authType: authType ?? existing?.authType ?? null,
+          },
+          CONFIG.litellmBaseUrl,
+        );
+        if (!verification.ok) {
+          res
+            .status(verification.kind === "rejected" ? 400 : 502)
+            .json({ success: false, error: verification.message });
+          return;
+        }
+        if (!modelServedBy(verification.models, model ?? existing?.model ?? null)) {
+          res.status(400).json({
+            success: false,
+            error: `This key cannot serve the model "${model ?? existing?.model}". Pick one it has access to.`,
+          });
+          return;
+        }
+      }
+
       if (apiKey) {
         const { ciphertext, iv, authTag } = encrypt(apiKey, CONFIG.encryptionKey);
         await agentProviderCredentialsRepository.upsert(agent.id, provider, {
@@ -4511,6 +4693,63 @@ router.post(
       });
     } catch (err) {
       log.error("[agents] set provider-credentials error:", err);
+      res.status(500).json({ success: false, error: "Internal server error" });
+    }
+  },
+);
+
+router.post(
+  "/:slug/provider-credentials/:provider/verify",
+  requireAgentOwnerContributorOrAdmin,
+  async (req: Request<{ slug: string; provider: string }>, res: Response) => {
+    try {
+      const agent = req.agentContext!.agent;
+      const provider = req.params.provider;
+      if (!ALLOWED_PROVIDERS.has(provider)) {
+        res.status(400).json({ success: false, error: "invalid provider" });
+        return;
+      }
+
+      const cred = await agentProviderCredentialsRepository.findByAgentAndProvider(agent.id, provider);
+      if (!cred?.encryptedKey || !cred.iv || !cred.authTag) {
+        res.json({ success: true, data: { provider, status: "missing", message: "No key saved for this provider." } });
+        return;
+      }
+
+      const stored = decrypt(cred.encryptedKey, cred.iv, cred.authTag, CONFIG.encryptionKey);
+      const apiKey =
+        provider === "claude" ? extractClaudeBearer(stored) :
+        provider === "codex" ? extractCodexBearer(stored) :
+        stored;
+      const verification = await verifyProviderCredential(
+        { provider, apiKey, baseUrl: cred.baseUrl, authType: cred.authType },
+        CONFIG.litellmBaseUrl,
+      );
+
+      if (!verification.ok) {
+        res.json({
+          success: true,
+          data: {
+            provider,
+            status: verification.kind === "rejected" ? "invalid" : "unknown",
+            message: verification.message,
+          },
+        });
+        return;
+      }
+
+      const servesModel = modelServedBy(verification.models, cred.model);
+      res.json({
+        success: true,
+        data: {
+          provider,
+          status: servesModel ? "ok" : "model-unavailable",
+          models: verification.models.length,
+          ...(servesModel ? {} : { message: `This key cannot serve "${cred.model}".` }),
+        },
+      });
+    } catch (err) {
+      log.error("[agents] verify provider-credentials error:", err);
       res.status(500).json({ success: false, error: "Internal server error" });
     }
   },

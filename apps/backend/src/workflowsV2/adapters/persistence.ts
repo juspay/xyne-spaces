@@ -31,6 +31,7 @@ import type {
   CredentialListItem,
   CredentialStatus,
   CredentialSummary,
+  ExecutionOrigin,
   ExecutionPauseType,
   ExecutionRecord,
   ExecutionStateRecord,
@@ -310,6 +311,8 @@ export class PrismaPersistenceAdapter implements PersistenceAdapter<XyneFilter> 
     status: string;
     context: string;
     sourceExecutionId?: string;
+    fireAt?: Date;
+    origin?: ExecutionOrigin;
     attributes: ResourceAttributes<'workflow'>;
   }): Promise<string> {
     const workspaceId = requireWorkspaceId(data.attributes, 'createExecution');
@@ -333,6 +336,8 @@ export class PrismaPersistenceAdapter implements PersistenceAdapter<XyneFilter> 
           workspaceId,
           context: data.context,
           currentStepIndex: 0,
+          ...(data.fireAt !== undefined ? { fireAt: data.fireAt } : {}),
+          ...(data.origin !== undefined ? { origin: JSON.stringify(data.origin) } : {}),
         },
       });
 
@@ -342,10 +347,15 @@ export class PrismaPersistenceAdapter implements PersistenceAdapter<XyneFilter> 
     return row.id;
   }
 
-  async updateExecutionStatus(executionId: string, status: string): Promise<void> {
-    await db.workflowExecution.updateMany({
+  async updateExecutionStatus(executionId: string, status: string, reason?: string): Promise<void> {
+    const updated = await db.workflowExecution.updateMany({
       where: { id: executionId, ...WORKFLOWS_SCOPE },
       data: { status },
+    });
+    if (reason === undefined || updated.count === 0) return;
+    await db.workflowExecutionState.updateMany({
+      where: { workflowExecutionId: executionId },
+      data: { endReason: reason },
     });
   }
 
@@ -359,9 +369,13 @@ export class PrismaPersistenceAdapter implements PersistenceAdapter<XyneFilter> 
     return runAsSystem(async () => {
       const row = await db.workflowExecution.findFirst({
         where: { id: executionId, ...WORKFLOWS_SCOPE },
-        include: { workflow: { select: { metadata: true } } },
+        include: {
+          workflow: { select: { metadata: true } },
+          workflowExecutionState: { select: { fireAt: true, origin: true, endReason: true } },
+        },
       });
-      return row ? toExecutionRecord(row, row.workflow?.metadata ?? null) : null;
+      if (!row) return null;
+      return toExecutionRecord(row, row.workflow?.metadata ?? null, row.workflowExecutionState);
     });
   }
 
@@ -393,7 +407,10 @@ export class PrismaPersistenceAdapter implements PersistenceAdapter<XyneFilter> 
         ...(params.status !== undefined ? { status: params.status } : {}),
         ...(params.cursor !== undefined ? { createdAt: { lt: decodeCursor(params.cursor) } } : {}),
       },
-      include: { workflow: { select: { metadata: true } } },
+      include: {
+        workflow: { select: { metadata: true } },
+        workflowExecutionState: { select: { fireAt: true, origin: true, endReason: true } },
+      },
       orderBy: { createdAt: 'desc' },
       // One extra row is the cheapest way to answer "is there another page?".
       ...(limit !== undefined ? { take: limit + 1 } : {}),
@@ -401,7 +418,9 @@ export class PrismaPersistenceAdapter implements PersistenceAdapter<XyneFilter> 
 
     const hasMore = limit !== undefined && rows.length > limit;
     const page = hasMore ? rows.slice(0, limit) : rows;
-    const items = page.map((r) => toExecutionRecord(r, r.workflow?.metadata ?? null));
+    const items = page.map((r) =>
+      toExecutionRecord(r, r.workflow?.metadata ?? null, r.workflowExecutionState),
+    );
     const last = page[page.length - 1];
 
     return hasMore && last

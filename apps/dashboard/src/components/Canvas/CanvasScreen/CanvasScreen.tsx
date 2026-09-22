@@ -25,6 +25,7 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuSubContent,
 } from '../../ui/dropdown-menu';
+import { AddToStreamMenuItem } from '../../Streams/components/AddToStreamMenu/AddToStreamMenu';
 import { Dialog } from '../../ui/Dialog';
 import { Popover } from '../../ui/Popover';
 import Input from '../../ui/Input';
@@ -74,7 +75,12 @@ import { PRESENTATION_THEMES } from 'blocknote-layout-extensions';
 import { useAuth } from '../../../hooks/useAuth';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { useZero } from '../../../hooks/useZero';
-import { MessageType, CanvasVisibility, CanvasRole } from '@xyne/shared';
+import {
+  MessageType,
+  CanvasVisibility,
+  CanvasRole,
+  isHubKnowledgeArtifactType,
+} from '@xyne/shared';
 import { queries } from '../../../zero/queries';
 import { v4 as uuidv4 } from 'uuid';
 import type { ReadonlyJSONValue } from '@rocicorp/zero';
@@ -104,15 +110,8 @@ import {
   useCanvasVersionSave,
 } from '../../../utils/canvasVersioning';
 import { useCanvasArchiveToggle } from '../useCanvasArchiveToggle';
-import { CanvasEditorHeader } from '../CanvasEditorHeader';
 import { CanvasLabelManager } from '../CanvasLabelManager';
 import { useScope } from '../../../shortcuts';
-import {
-  buildCanvasTitleWithIcon,
-  getCanvasDisplayTitle,
-  getCanvasTitleIcon,
-  setOptimisticCanvasTitleIcon,
-} from '../canvasTitleIcon';
 
 interface LocationState {
   mode?: 'edit-message' | 'create-message';
@@ -130,7 +129,6 @@ interface CanvasScreenProps {
   onToggleFullscreen?: () => void;
   showAskAiAction?: boolean;
   /** Off where the document opens with its own title, as SDLC pages do. */
-  showPageTitle?: boolean;
 }
 
 // Latency thresholds (ms) above which a canvas load/save is flagged slow.
@@ -169,7 +167,6 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
   isFullscreen = false,
   onToggleFullscreen,
   showAskAiAction = true,
-  showPageTitle = true,
 }): ReactElement => {
   const { canvasId: paramsCanvasId } = useParams<{ canvasId?: string }>();
   const canvasId = propCanvasId || paramsCanvasId;
@@ -230,7 +227,6 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
     setOpenCommentCount(0);
   }, [selectedCanvas?.id]);
   const [isCreating, setIsCreating] = useState(false);
-  const [currentTitleIcon, setCurrentTitleIcon] = useState<string | null>(null);
   const [currentTitle, setCurrentTitle] = useState('Untitled Canvas');
   const [currentContent, setCurrentContent] = useState<PartialBlock[] | undefined>(undefined);
   const [isSaving, setIsSaving] = useState(false);
@@ -300,13 +296,6 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
   const queueTitleAutoFocus = useCallback((targetCanvasId: string): void => {
     if (titleAutoFocusConsumedCanvasIdRef.current === targetCanvasId) return;
     titleAutoFocusCanvasIdRef.current = targetCanvasId;
-  }, []);
-
-  const handleTitleAutoFocused = useCallback((): void => {
-    if (titleAutoFocusCanvasIdRef.current) {
-      titleAutoFocusConsumedCanvasIdRef.current = titleAutoFocusCanvasIdRef.current;
-    }
-    titleAutoFocusCanvasIdRef.current = null;
   }, []);
 
   useEffect(() => {
@@ -379,11 +368,8 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
       }
       setSelectedCanvas(canvasFromState);
       if (isNewCanvas) {
-        const titleIcon = getCanvasTitleIcon(canvasFromState.title);
-        const displayTitle = getCanvasDisplayTitle(canvasFromState.title, titleIcon);
-        setCurrentTitleIcon(titleIcon);
-        setCurrentTitle(displayTitle);
-        titleRef.current = displayTitle;
+        setCurrentTitle(canvasFromState.title);
+        titleRef.current = canvasFromState.title;
         setCurrentContent(canvasFromState.content);
         latestContentRef.current = canvasFromState.content;
         lastSavedContentRef.current = JSON.stringify(canvasFromState.content || []);
@@ -419,7 +405,7 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
       const userParticipant = resolvedCanvasData.participants?.find(p => p.userId === user?.id);
       let accessLevel = userParticipant?.role;
       const isAdminEditableHubKnowledge =
-        canvasData.sdlcArtifact?.artifactType === 'HUB_KNOWLEDGE' &&
+        isHubKnowledgeArtifactType(canvasData.sdlcArtifact?.artifactType) &&
         Boolean(canvasData.channelId && adminChannelIds.has(canvasData.channelId));
 
       if (isAdminEditableHubKnowledge) accessLevel = CanvasRole.EDITOR;
@@ -467,11 +453,8 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
 
       const isNewCanvas = initializedCanvasIdRef.current !== canvas.id;
       if (isNewCanvas) {
-        const titleIcon = getCanvasTitleIcon(canvas.title);
-        const displayTitle = getCanvasDisplayTitle(canvas.title, titleIcon);
-        setCurrentTitleIcon(titleIcon);
-        setCurrentTitle(displayTitle);
-        titleRef.current = displayTitle;
+        setCurrentTitle(canvas.title);
+        titleRef.current = canvas.title;
         setCurrentContent(canvas.content);
         latestContentRef.current = canvas.content;
         lastSavedContentRef.current = JSON.stringify(canvas.content || []);
@@ -603,7 +586,6 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
 
           queueTitleAutoFocus(newCanvasId);
           setSelectedCanvas(newCanvas);
-          setCurrentTitleIcon(null);
           setCurrentTitle(title);
           titleRef.current = title;
           setCurrentContent(content);
@@ -663,7 +645,6 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
   const handleCreateCanvas = (): void => {
     setIsCreating(true);
     setSelectedCanvas(null);
-    setCurrentTitleIcon(null);
     setCurrentTitle('Untitled Canvas');
     setCurrentContent(undefined);
     latestContentRef.current = undefined;
@@ -811,7 +792,7 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
       isSavingRef.current = true;
 
       // Always read the latest title from ref to prevent stale state
-      const titleToSave = buildCanvasTitleWithIcon(titleRef.current, currentTitleIcon);
+      const titleToSave = titleRef.current;
       const saveStartedAt = performance.now();
 
       logger.info(Event.CANVAS_SAVE_STARTED, {
@@ -875,7 +856,7 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
         }
       }
     },
-    [canvasId, currentTitleIcon, z],
+    [z],
   );
 
   const getDefaultVersionCanvas = useCallback(() => selectedCanvasRef.current, []);
@@ -903,37 +884,17 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
   );
 
   const handleTitleSave = useCallback((): void => {
-    if (!selectedCanvas?.id || !canEdit) return;
-
-    const titleToSave = buildCanvasTitleWithIcon(titleRef.current, currentTitleIcon);
-    if (titleToSave === selectedCanvas.title) return;
+    if (!selectedCanvas?.id || !canEdit || currentTitle === selectedCanvas.title) return;
 
     logger.info(Event.CANVAS_TITLE_SAVED, { canvasId: selectedCanvas.id });
     z.mutate(
       mutators.canvas.update({
         id: selectedCanvas.id,
-        title: titleToSave,
+        title: titleRef.current,
         timestamp: Date.now(),
       }),
     );
-  }, [canEdit, currentTitleIcon, selectedCanvas, z]);
-
-  const handleTitleIconChange = useCallback(
-    (icon: string): void => {
-      if (!selectedCanvas?.id || !canEdit) return;
-
-      setCurrentTitleIcon(icon);
-      setOptimisticCanvasTitleIcon(selectedCanvas.id, icon);
-      z.mutate(
-        mutators.canvas.update({
-          id: selectedCanvas.id,
-          title: buildCanvasTitleWithIcon(titleRef.current, icon),
-          timestamp: Date.now(),
-        }),
-      );
-    },
-    [canEdit, selectedCanvas?.id, z],
-  );
+  }, [canEdit, currentTitle, selectedCanvas, z]);
 
   const persistCanvasExitContent = useCallback(
     (content: PartialBlock[], canvasToSave: Canvas): void => {
@@ -1185,11 +1146,6 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
         minute: '2-digit',
       })
     : null;
-  const shouldFocusCanvasTitleOnMount = Boolean(
-    selectedCanvas?.id &&
-    titleAutoFocusCanvasIdRef.current === selectedCanvas.id &&
-    !previewVersion,
-  );
 
   // Handle Ask AI - Open XyneAI with canvas context using canvas id
   const handleAskAI = (): void => {
@@ -1205,6 +1161,7 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
     // Open XyneAI with canvas context
     xyneAIActor.send({
       type: 'OPEN',
+      trackSource: 'canvas_screen',
       canvasInfo,
     });
   };
@@ -1314,22 +1271,9 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
     return rows;
   }, [allUsers, selectedCanvas, user?.id, user?.name, visibleChannels]);
 
-  const canvasTitleHeader = !selectedCanvas?.id ? null : showPageTitle ? (
-    <div className='canvas-editor-title-column pb-8 pt-2 md:pt-4'>
-      <CanvasEditorHeader
-        canvas={selectedCanvas}
-        workspaceId={user?.workspaceId}
-        canEdit={canEdit && !previewVersion}
-        title={currentTitle}
-        focusTitleOnMount={shouldFocusCanvasTitleOnMount}
-        onTitleChange={handleCanvasTitleChange}
-        onTitleSave={handleTitleSave}
-        onTitleAutoFocused={handleTitleAutoFocused}
-        titleIcon={currentTitleIcon}
-        onTitleIconChange={handleTitleIconChange}
-      />
-    </div>
-  ) : (
+  // A canvas carries no title above its content: the name lives in the chrome
+  // around it.
+  const canvasTitleHeader = !selectedCanvas?.id ? null : (
     <div className='canvas-block-row group/canvas-editor-title'>
       <CanvasLabelManager
         canvas={selectedCanvas}
@@ -1380,9 +1324,6 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
                     <div className='flex min-w-0 flex-1 items-center gap-2 px-3 py-1'>
                       {canvasPanelContext?.leftHeaderSlot}
                       <FileText size={16} className='shrink-0 text-foreground' />
-                      {currentTitleIcon && (
-                        <span className='shrink-0 text-sm leading-none'>{currentTitleIcon}</span>
-                      )}
                       <Input
                         type='text'
                         aria-label='Canvas title'
@@ -1574,6 +1515,9 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
                               </button>
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align='end' className='min-w-[180px]'>
+                              {canvasId && (
+                                <AddToStreamMenuItem source={{ kind: 'document', canvasId }} />
+                              )}
                               <DropdownMenuItem
                                 className='gap-2'
                                 onClick={() => setShowVersionHistory(true)}
@@ -1846,7 +1790,7 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
                     initialBlockIdToFocus={blockIdFromUrl}
                     initialCommentThreadId={commentThreadIdFromUrl}
                     onOpenCommentCountChange={setOpenCommentCount}
-                    autoFocus={!skipAutoFocus && !shouldFocusCanvasTitleOnMount}
+                    autoFocus={!skipAutoFocus}
                     canvasParticipants={canvasParticipants}
                     canvasCreatedBy={selectedCanvas.createdBy}
                     currentUserRole={selectedCanvas.accessLevel ?? null}
@@ -1869,7 +1813,7 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
                     initialBlockIdToFocus={blockIdFromUrl}
                     initialCommentThreadId={commentThreadIdFromUrl}
                     onOpenCommentCountChange={setOpenCommentCount}
-                    autoFocus={!skipAutoFocus && !shouldFocusCanvasTitleOnMount}
+                    autoFocus={!skipAutoFocus}
                     canvasParticipants={canvasParticipants}
                     canvasCreatedBy={selectedCanvas?.createdBy}
                     currentUserRole={selectedCanvas?.accessLevel ?? null}

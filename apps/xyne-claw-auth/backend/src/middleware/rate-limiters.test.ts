@@ -31,9 +31,19 @@ vi.mock("../logger.js", () => ({
 let server: Server;
 let baseUrl: string;
 
-async function startApp(max: number): Promise<void> {
+async function startApp(max: number, stripUserId = false): Promise<void> {
   const { createRequesterLimiter } = await import("./rate-limiters.js");
   const app = express();
+  // http/routes.ts deletes an inbound x-user-id for every non-S2S caller, and
+  // the limiter is mounted before any auth middleware puts it back. Tests that
+  // set the header directly cannot see that, which is how the key silently
+  // degraded to per IP in production.
+  if (stripUserId) {
+    app.use((req, _res, next) => {
+      delete req.headers["x-user-id"];
+      next();
+    });
+  }
   app.use(createRequesterLimiter({ windowMs: 60_000, max }));
   app.get("/ping", (_req, res) => {
     res.json({ ok: true });
@@ -94,6 +104,29 @@ describe("createRequesterLimiter", () => {
     expect(exhausted.status).toBe(429);
   });
 
+
+  it("keys on the session cookie once x-user-id has been stripped", async () => {
+    await startApp(2, true);
+    const hit = (cookie: string): Promise<number> =>
+      fetch(`${baseUrl}/ping`, {
+        headers: { "x-user-id": "ignored-because-stripped", cookie },
+      }).then((r) => r.status);
+
+    const alice = "GCLB=z; user_session_id=sess_alice";
+    const bob = "GCLB=z; user_session_id=sess_bob";
+
+    expect(await hit(alice)).toBe(200);
+    expect(await hit(alice)).toBe(200);
+    expect(await hit(alice)).toBe(429);
+    // Same address, different session: must not inherit alice's exhausted budget.
+    expect(await hit(bob)).toBe(200);
+  });
+
+  it("falls back to the address when there is no session cookie", async () => {
+    await startApp(1, true);
+    expect((await fetch(`${baseUrl}/ping`)).status).toBe(200);
+    expect((await fetch(`${baseUrl}/ping`)).status).toBe(429);
+  });
   it("emits standard RateLimit headers and no legacy X-RateLimit headers", async () => {
     await startApp(5);
     const res = await fetch(`${baseUrl}/ping`);

@@ -14,10 +14,16 @@ export const hubspotAdapter: StdioMcpAdapter = {
     "hubspot-update-property",
   ],
   credentialFields: [
-    { name: "hubspotPersonalAccessToken", label: "HubSpot Private App Access Token", type: "password", placeholder: "pat-..." },
+    {
+      name: "privateAppAccessToken",
+      label: "HubSpot Private App Access Token",
+      type: "password",
+      placeholder: "pat-...",
+    },
   ],
   buildCommand(credentials) {
-    const token = credentials["hubspotPersonalAccessToken"] as string;
+    const token = (credentials["privateAppAccessToken"] ??
+      credentials["hubspotPersonalAccessToken"]) as string;
     return {
       cmd: "npx",
       args: ["-y", "@hubspot/mcp-server@0.4.0"],

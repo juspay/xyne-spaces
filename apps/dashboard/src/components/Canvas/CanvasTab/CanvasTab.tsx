@@ -26,7 +26,7 @@ import {
   CanvasVersionHistory,
   type CanvasVersionRecord,
 } from '../CanvasVersionHistory';
-import { CanvasRole, CanvasVisibility } from '@xyne/shared';
+import { isHubKnowledgeArtifactType, CanvasRole, CanvasVisibility } from '@xyne/shared';
 import {
   AudioLines,
   ArrowLeft,
@@ -58,7 +58,6 @@ import {
 } from '../canvasFilters';
 import { usePersistedCanvasPreferences } from '../../../hooks/usePersistedCanvasPreferences';
 import { Switch } from '@/components/ui/Switch';
-import { CanvasEditorHeader } from '../CanvasEditorHeader';
 import {
   createCanvasContentTextDiff,
   isVisibleCanvasContentDiffPart,
@@ -73,12 +72,6 @@ import {
 } from '../../../utils/canvasVersioning';
 import { useNavigate } from '../../../hooks/useWorkspaceNavigate';
 import { useCanvasArchiveToggle } from '../useCanvasArchiveToggle';
-import {
-  buildCanvasTitleWithIcon,
-  getCanvasDisplayTitle,
-  getCanvasTitleIcon,
-  setOptimisticCanvasTitleIcon,
-} from '../canvasTitleIcon';
 
 interface CanvasTabProps {
   channelId: string;
@@ -179,7 +172,6 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
   useEffect(() => {
     setOpenCommentCount(0);
   }, [canvas?.id]);
-  const [currentTitleIcon, setCurrentTitleIcon] = useState<string | null>(null);
   const [currentTitle, setCurrentTitle] = useState('Untitled Canvas');
   const titleRef = useRef('Untitled Canvas'); // Track title synchronously to avoid race conditions
   const titleAutoFocusCanvasIdRef = useRef<string | null>(null);
@@ -216,7 +208,7 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
 
       const participants =
         (targetCanvas as Canvas & { participants?: CanvasParticipant[] }).participants ?? [];
-      if (isChannelAdmin && targetCanvas.sdlcArtifact?.artifactType === 'HUB_KNOWLEDGE') {
+      if (isChannelAdmin && isHubKnowledgeArtifactType(targetCanvas.sdlcArtifact?.artifactType)) {
         return CanvasRole.EDITOR;
       }
       const inheritedRoles = participants
@@ -236,7 +228,6 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
   // Reset state when channelId changes
   useEffect(() => {
     setCanvas(null);
-    setCurrentTitleIcon(null);
     setCurrentTitle('Untitled Canvas');
     setCurrentContent(undefined);
     setView('list');
@@ -264,13 +255,6 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
   const queueTitleAutoFocus = useCallback((targetCanvasId: string): void => {
     if (titleAutoFocusConsumedCanvasIdRef.current === targetCanvasId) return;
     titleAutoFocusCanvasIdRef.current = targetCanvasId;
-  }, []);
-
-  const handleTitleAutoFocused = useCallback((): void => {
-    if (titleAutoFocusCanvasIdRef.current) {
-      titleAutoFocusConsumedCanvasIdRef.current = titleAutoFocusCanvasIdRef.current;
-    }
-    titleAutoFocusCanvasIdRef.current = null;
   }, []);
 
   const handleFileUpload = useCallback(
@@ -343,14 +327,14 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
       z.mutate(
         mutators.canvas.update({
           id: canvasToSave.id,
-          title: buildCanvasTitleWithIcon(titleRef.current, currentTitleIcon),
+          title: titleRef.current,
           content: sanitizedBlocks,
           timestamp: Date.now(),
         }),
       );
       lastSavedContentRef.current = JSON.stringify(content);
     },
-    [currentTitleIcon, z],
+    [z],
   );
   const saveCanvasExitSnapshot = useCanvasExitSnapshot<Canvas, PartialBlock[]>({
     canvasRef,
@@ -519,7 +503,6 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
 
       queueTitleAutoFocus(newCanvasId);
       setCanvas(newCanvas);
-      setCurrentTitleIcon(null);
       setCurrentTitle(newCanvas.title);
       titleRef.current = newCanvas.title;
       setCurrentContent([]);
@@ -593,7 +576,6 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
 
       queueTitleAutoFocus(newCanvasId);
       setCanvas(newCanvas);
-      setCurrentTitleIcon(null);
       setCurrentTitle(newCanvas.title);
       titleRef.current = newCanvas.title;
       setCurrentContent([]);
@@ -645,11 +627,8 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
       : selected;
 
     setCanvas(selectedCanvas);
-    const titleIcon = getCanvasTitleIcon(selectedCanvas.title);
-    const displayTitle = getCanvasDisplayTitle(selectedCanvas.title, titleIcon);
-    setCurrentTitleIcon(titleIcon);
-    setCurrentTitle(displayTitle);
-    titleRef.current = displayTitle;
+    setCurrentTitle(selectedCanvas.title);
+    titleRef.current = selectedCanvas.title;
     setCurrentContent(selectedCanvas.content);
     latestContentRef.current = selectedCanvas.content;
     lastSavedContentRef.current = JSON.stringify(selectedCanvas.content || []);
@@ -726,7 +705,7 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
         z.mutate(
           mutators.canvas.update({
             id: canvas.id,
-            title: buildCanvasTitleWithIcon(titleRef.current, currentTitleIcon),
+            title: titleRef.current,
             content: sanitizedBlocks,
             timestamp: Date.now(),
           }),
@@ -745,35 +724,16 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
   };
 
   const handleTitleSave = useCallback((): void => {
-    if (!canvas || !canEdit) return;
-    const titleToSave = buildCanvasTitleWithIcon(titleRef.current, currentTitleIcon);
-    if (titleToSave === canvas.title) return;
+    if (!canvas || !canEdit || currentTitle === canvas.title) return;
 
     z.mutate(
       mutators.canvas.update({
         id: canvas.id,
-        title: titleToSave,
+        title: titleRef.current,
         timestamp: Date.now(),
       }),
     );
-  }, [canEdit, canvas, currentTitleIcon, z]);
-
-  const handleTitleIconChange = useCallback(
-    (icon: string): void => {
-      if (!canvas?.id || !canEdit) return;
-
-      setCurrentTitleIcon(icon);
-      setOptimisticCanvasTitleIcon(canvas.id, icon);
-      z.mutate(
-        mutators.canvas.update({
-          id: canvas.id,
-          title: buildCanvasTitleWithIcon(titleRef.current, icon),
-          timestamp: Date.now(),
-        }),
-      );
-    },
-    [canEdit, canvas?.id, z],
-  );
+  }, [canEdit, canvas, currentTitle, z]);
 
   const handlePreviewVersion = (version: CanvasVersionRecord): void => {
     if (!previewVersionRef.current) {
@@ -1051,25 +1011,8 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
         minute: '2-digit',
       })
     : null;
-  const shouldFocusCanvasTitleOnMount = Boolean(
-    canvas?.id && titleAutoFocusCanvasIdRef.current === canvas.id && !previewVersion,
-  );
-  const canvasTitleHeader = canvas?.id ? (
-    <div className='canvas-editor-title-column pb-6 pt-0 md:pt-2'>
-      <CanvasEditorHeader
-        canvas={canvas}
-        workspaceId={user?.workspaceId}
-        canEdit={canEdit && !isChannelArchived && !previewVersion}
-        title={currentTitle}
-        focusTitleOnMount={shouldFocusCanvasTitleOnMount}
-        onTitleChange={handleCanvasTitleChange}
-        onTitleSave={handleTitleSave}
-        onTitleAutoFocused={handleTitleAutoFocused}
-        titleIcon={currentTitleIcon}
-        onTitleIconChange={handleTitleIconChange}
-      />
-    </div>
-  ) : null;
+  // No title above the document — see the note in CanvasScreen.
+  const canvasTitleHeader = null;
 
   return (
     <div className='relative flex h-full bg-background'>
@@ -1087,9 +1030,6 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
           >
             <ArrowLeft size={16} />
           </Button>
-          {currentTitleIcon && (
-            <span className='shrink-0 text-sm leading-none'>{currentTitleIcon}</span>
-          )}
           <Input
             type='text'
             value={currentTitle}
@@ -1310,7 +1250,7 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
                 onFileUpload={handleFileUpload}
                 onChange={handleCollaborativeContentChange}
                 onOpenCommentCountChange={setOpenCommentCount}
-                autoFocus={!shouldFocusCanvasTitleOnMount}
+                autoFocus
                 header={canvasTitleHeader}
               />
             ) : (
@@ -1326,7 +1266,7 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
                 canvasId={canvas?.id}
                 canvasTitle={currentTitle}
                 onOpenCommentCountChange={setOpenCommentCount}
-                autoFocus={!shouldFocusCanvasTitleOnMount}
+                autoFocus
                 header={canvasTitleHeader}
               />
             )}

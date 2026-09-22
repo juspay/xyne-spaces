@@ -38,6 +38,13 @@ let focusRequestTimer: ReturnType<typeof setTimeout> | null = null;
 let active = false;
 let startingRecording = false;
 let callActive = false;
+const callListeners = new Set<() => void>();
+
+function updateCallActive(next: boolean): void {
+  if (callActive === next) return;
+  callActive = next;
+  for (const listener of callListeners) listener();
+}
 let startingRecordingExpiry: ReturnType<typeof setTimeout> | null = null;
 let startTime: number | null = null;
 let paused = false;
@@ -90,14 +97,14 @@ function watchRendererLifecycle(win: BrowserWindow): void {
     // A reload tears down the LiveKit connection, so any call is over; the
     // remounted renderer resends call state either way. Without this a renderer
     // that hangs mid-reload would strand the flag true and mute detection.
-    callActive = false;
+    updateCallActive(false);
   });
   win.webContents.on('render-process-gone', () => {
     rendererReady = false;
     // syncRecordingState early-returns on inactive -> inactive, so a crash
     // mid-start would strand the flag.
     setRecordingStarting(false);
-    callActive = false;
+    updateCallActive(false);
     syncRecordingState(false);
   });
 }
@@ -408,7 +415,40 @@ export function isRecordingInProgress(): boolean {
 // treat both as ours. The renderer reports call state on every transition and on
 // mount; the lifecycle hooks above clear it when the renderer reloads or dies.
 export function setCallActive(next: boolean): void {
-  callActive = next;
+  updateCallActive(next);
+}
+
+export function isCallActive(): boolean {
+  return callActive;
+}
+
+export function onCallStateChange(listener: () => void): () => void {
+  callListeners.add(listener);
+  return () => callListeners.delete(listener);
+}
+
+export async function stopCallForReload(timeoutMs = 3000): Promise<void> {
+  if (!callActive) return;
+
+  const mainWindow = getMainWindow();
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+
+  mainWindow.webContents.send('call:stop-for-teardown');
+  log.info('[RecordingController] Call disconnect requested before reload');
+
+  await new Promise<void>(resolve => {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let unsubscribe: (() => void) | null = null;
+    const finish = (): void => {
+      if (timer) clearTimeout(timer);
+      unsubscribe?.();
+      resolve();
+    };
+    unsubscribe = onCallStateChange(() => {
+      if (!callActive) finish();
+    });
+    timer = setTimeout(finish, timeoutMs);
+  });
 }
 
 export function isMicOwnedByXyne(): boolean {

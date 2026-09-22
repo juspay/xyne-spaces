@@ -47,7 +47,7 @@ const ProjectsScreen = (): ReactElement => {
             onClick={toggleSidebar}
             aria-label='Expand sidebar'
             aria-controls='projects-sidebar-region'
-            className='flex size-8 shrink-0 items-center justify-center rounded-[10px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring'
+            className='-ml-1 flex size-[30px] shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring'
             data-track-category='Projects'
             data-track-name='ToggleProjectsSidebar'
           >
@@ -72,7 +72,13 @@ const ProjectsScreen = (): ReactElement => {
     if (redirectTo) return;
     setEntryRedirect(null);
     if (!ticketId) {
-      localStorage.setItem(lastTicketsPathKey, `${location.pathname}${location.search}`);
+      const params = new URLSearchParams(location.search);
+      params.delete('search');
+      const query = params.toString();
+      localStorage.setItem(
+        lastTicketsPathKey,
+        query ? `${location.pathname}?${query}` : location.pathname,
+      );
     }
   }, [redirectTo, ticketId, lastTicketsPathKey, location.pathname, location.search]);
 

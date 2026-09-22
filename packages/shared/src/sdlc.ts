@@ -85,6 +85,7 @@ export const SDLC_ENTITY_TYPES = [
   "WORKFLOW",
   "TRACK",
   "FOLDER",
+  "LINK",
 ] as const;
 
 export const sdlcEntityTypeSchema = z.enum(SDLC_ENTITY_TYPES);
@@ -162,7 +163,12 @@ export function sdlcHubWikiFolderId(channelId: string): string {
  * but belong to their own section, so the tree filters rather than assuming
  * everything a track holds is a tree node.
  */
-export const SDLC_TREE_TARGET_TYPES = ["FOLDER", "CANVAS"] as const;
+export const SDLC_TREE_TARGET_TYPES = [
+  "FOLDER",
+  "CANVAS",
+  "ATTACHMENT",
+  "LINK",
+] as const;
 
 /**
  * A TRACK -> item edge kept alongside the containment edge, so "everything in
@@ -223,8 +229,14 @@ export type SdlcRelationType = z.infer<typeof sdlcRelationTypeSchema>;
 
 export const sdlcDiscussionSchema = z
   .object({
-    repoId: z.string().min(1),
-    ownerType: z.enum(["CANVAS", "TRACK", "FOLDER"]),
+    repoId: z.string().min(1).optional(),
+    ownerType: z.enum([
+      "CANVAS",
+      "TRACK",
+      "FOLDER",
+      "ATTACHMENT",
+      "LINK",
+    ]),
     ownerId: z.string().min(1),
     surfaceType: z.enum(["CANVAS", "TICKET", "PULL_REQUEST"]).optional(),
     surfaceId: z.string().min(1).optional(),
@@ -244,7 +256,13 @@ export const sdlcDiscussionSchema = z
 export type SdlcDiscussion = z.infer<typeof sdlcDiscussionSchema>;
 
 export const entityLinkContextSchema = z.object({
-  sourceType: z.enum(["CANVAS", "TRACK", "FOLDER"]),
+  sourceType: z.enum([
+    "CANVAS",
+    "TRACK",
+    "FOLDER",
+    "ATTACHMENT",
+    "LINK",
+  ]),
   sourceId: z.string().min(1),
   linkId: z.string().min(1),
   /**
@@ -274,7 +292,13 @@ export const sdlcTrackStatusSchema = z.enum(SDLC_TRACK_STATUSES);
  * OWNER -> CALL [CALL] and OWNER -> CONVERSATION [DISCUSSION] links.
  */
 export const sdlcCallLinkSchema = z.object({
-  ownerType: z.enum(["CANVAS", "TRACK"]),
+  ownerType: z.enum([
+    "CANVAS",
+    "TRACK",
+    "FOLDER",
+    "LINK",
+    "ATTACHMENT",
+  ]),
   ownerId: z.string().min(1),
 });
 export type SdlcCallLink = z.infer<typeof sdlcCallLinkSchema>;
@@ -282,8 +306,7 @@ export type SdlcCallLink = z.infer<typeof sdlcCallLinkSchema>;
 export const createSdlcChannelSchema = z.object({
   projectId: z.string().min(1),
   name: z.string().trim().min(1).max(120),
-  // At least one: a hub with no repositories has no screen to render.
-  repoIds: z.array(z.string().min(1)).min(1).max(100),
+  repoIds: z.array(z.string().min(1)).max(100).default([]),
 });
 export type CreateSdlcChannelInput = z.infer<typeof createSdlcChannelSchema>;
 
@@ -298,29 +321,83 @@ export const attachSdlcRepositorySchema = z.object({
   projectId: z.string().min(1),
   name: z.string().trim().min(1).max(120).optional(),
   url: z.string().trim().min(1).max(2048),
-  baseBranch: z.string().trim().min(1).max(255).default("main"),
+  // Omitted: the Provider's default branch, or main when it cannot be read.
+  baseBranch: z.string().trim().min(1).max(255).optional(),
+  // Required only when more than one credential serves the link's host.
+  credentialId: z.string().min(1).optional(),
 });
 export type AttachSdlcRepositoryInput = z.infer<
   typeof attachSdlcRepositorySchema
 >;
 
-export const SDLC_VCS_PROVIDERS = ["GITHUB"] as const;
+export const resolveSdlcRepositoryLinkSchema = z.object({
+  projectId: z.string().min(1),
+  url: z.string().trim().min(1).max(2048),
+});
+export type ResolveSdlcRepositoryLinkInput = z.infer<
+  typeof resolveSdlcRepositoryLinkSchema
+>;
+
+export const SDLC_VCS_PROVIDERS = ["GITHUB", "BITBUCKET_SERVER"] as const;
 export const sdlcVcsProviderSchema = z.enum(SDLC_VCS_PROVIDERS);
 export type SdlcVcsProvider = z.infer<typeof sdlcVcsProviderSchema>;
 
-export const configureSdlcVcsCredentialSchema = z.object({
-  token: z
-    .string()
-    .trim()
-    .min(20)
-    .max(512)
-    .regex(
-      /^github_pat_[A-Za-z0-9_]+$/,
-      "Enter a GitHub fine-grained personal access token",
-    ),
-});
-export type ConfigureSdlcVcsCredentialInput = z.infer<
-  typeof configureSdlcVcsCredentialSchema
+export const SDLC_GITHUB_HOST = "github.com";
+
+const sdlcCredentialNameSchema = z.string().trim().min(1).max(80);
+const sdlcGithubTokenSchema = z
+  .string()
+  .trim()
+  .min(20)
+  .max(512)
+  .regex(
+    /^github_pat_[A-Za-z0-9_]+$/,
+    "Enter a GitHub fine-grained personal access token",
+  );
+const sdlcBitbucketTokenSchema = z
+  .string()
+  .trim()
+  .min(20)
+  .max(512)
+  .regex(/^[A-Za-z0-9+/=_-]+$/, "Enter a Bitbucket personal HTTP access token");
+const sdlcBitbucketHostSchema = z
+  .string()
+  .trim()
+  .toLowerCase()
+  .regex(/^[a-z0-9][a-z0-9.-]*[a-z0-9]$/, "Enter a host name such as bitbucket.example.com")
+  .refine((host) => host !== SDLC_GITHUB_HOST, "Use the GitHub provider for github.com");
+
+export function sdlcTokenSchemaFor(provider: SdlcVcsProvider) {
+  return provider === "GITHUB" ? sdlcGithubTokenSchema : sdlcBitbucketTokenSchema;
+}
+
+export const createSdlcVcsCredentialSchema = z.discriminatedUnion("provider", [
+  z.object({
+    provider: z.literal("GITHUB"),
+    name: sdlcCredentialNameSchema,
+    token: sdlcGithubTokenSchema,
+  }),
+  z.object({
+    provider: z.literal("BITBUCKET_SERVER"),
+    name: sdlcCredentialNameSchema,
+    host: sdlcBitbucketHostSchema,
+    token: sdlcBitbucketTokenSchema,
+  }),
+]);
+export type CreateSdlcVcsCredentialInput = z.infer<
+  typeof createSdlcVcsCredentialSchema
+>;
+
+export const updateSdlcVcsCredentialSchema = z
+  .object({
+    name: sdlcCredentialNameSchema.optional(),
+    token: z.string().trim().min(20).max(512).optional(),
+  })
+  .refine((value) => value.name !== undefined || value.token !== undefined, {
+    message: "Provide a name or a token",
+  });
+export type UpdateSdlcVcsCredentialInput = z.infer<
+  typeof updateSdlcVcsCredentialSchema
 >;
 
 export const checkSdlcRepositoryAccessSchema = z.object({
@@ -414,10 +491,26 @@ export const writeSdlcWikiPageSchema = sdlcWikiScopeSchema.extend({
 });
 export type WriteSdlcWikiPageInput = z.infer<typeof writeSdlcWikiPageSchema>;
 
-const sdlcRunAuthoritySchema = z.object({
-  interactiveGrant: z.string().min(1),
-  conversationId: z.string().min(1),
-});
+/** The Actor pair is current; the grant pair is what the older claw still sends, removed once it is gone. */
+const sdlcRunAuthorityFields = {
+  workspaceId: z.string().min(1).optional(),
+  actorUserId: z.string().min(1).optional(),
+  interactiveGrant: z.string().min(1).optional(),
+  conversationId: z.string().min(1).optional(),
+};
+
+function hasRunAuthority(value: {
+  workspaceId?: string | undefined;
+  actorUserId?: string | undefined;
+  interactiveGrant?: string | undefined;
+  conversationId?: string | undefined;
+}): boolean {
+  return Boolean(
+    (value.workspaceId && value.actorUserId) || (value.interactiveGrant && value.conversationId),
+  );
+}
+
+const SDLC_RUN_AUTHORITY_MESSAGE = "workspaceId and actorUserId are required";
 
 export const createSdlcPullRequestSchema = z
   .object({
@@ -430,8 +523,10 @@ export const createSdlcPullRequestSchema = z
       .string()
       .trim()
       .regex(/^[0-9a-f]{40}$/i),
+    draft: z.boolean().default(true),
+    ...sdlcRunAuthorityFields,
   })
-  .and(sdlcRunAuthoritySchema);
+  .refine(hasRunAuthority, { message: SDLC_RUN_AUTHORITY_MESSAGE });
 export type CreateSdlcPullRequestInput = z.infer<
   typeof createSdlcPullRequestSchema
 >;
@@ -451,16 +546,37 @@ export type ResolveSdlcAgentRepositoryInput = z.infer<
 
 export const bootstrapSdlcRuntimeCredentialSchema = z
   .object({
-    agentSlug: z.literal(SDLC_AGENT_SLUG),
+    agentSlug: z.literal(SDLC_AGENT_SLUG).optional(),
     repoId: z.string().min(1),
-    operation: z.literal("INTERACTIVE"),
+    operation: z.literal("INTERACTIVE").optional(),
     sandboxId: z.string().min(1).max(256),
     sandboxPublicKey: z.string().min(32).max(1024),
+    ...sdlcRunAuthorityFields,
   })
-  .and(sdlcRunAuthoritySchema);
+  .refine(hasRunAuthority, { message: SDLC_RUN_AUTHORITY_MESSAGE });
 export type BootstrapSdlcRuntimeCredentialInput = z.infer<
   typeof bootstrapSdlcRuntimeCredentialSchema
 >;
+
+export interface SdlcSandboxGitCredential {
+  provider: SdlcVcsProvider;
+  host: string;
+  cloneUrl: string;
+  username: string;
+  password: string;
+  accountName: string;
+  accountEmail: string;
+}
+
+export const listSdlcEntityLinksSchema = z.object({
+  channelId: z.string().min(1),
+  entityType: sdlcEntityTypeSchema,
+  entityId: z.string().min(1),
+  relationType: z.string().min(1).optional(),
+  otherType: sdlcEntityTypeSchema.optional(),
+  limit: z.number().int().min(1).max(200).default(100),
+});
+export type ListSdlcEntityLinksInput = z.infer<typeof listSdlcEntityLinksSchema>;
 
 export const sdlcRepoIdsSchema = z.array(z.string().min(1)).max(50).optional();
 
@@ -646,7 +762,94 @@ export const sdlcAgentContextSchema = z.object({
     })
     .optional(),
   execution: z.object({ conversationId: z.string().min(1) }),
-  interactiveGrant: z.string().min(1),
+  // Only the claw deployed before Actor-based access reads this.
+  interactiveGrant: z.string().min(1).optional(),
   generationCommit: nullableNonEmpty.optional(),
 });
 export type SdlcAgentContext = z.infer<typeof sdlcAgentContextSchema>;
+
+/**
+ * What a hub file is allowed to be. Documents, media and the office formats
+ * people actually file into a track — not archives or executables, which are
+ * payloads rather than things anyone reads in place.
+ *
+ * The extension is the primary gate and the mime type only confirms it: a
+ * browser hands us `application/octet-stream` (or nothing at all) for .md and
+ * for the office formats often enough that trusting the mime type alone would
+ * reject files the user can plainly see are documents.
+ */
+export const SDLC_UPLOAD_EXTENSIONS = [
+  // documents
+  "pdf",
+  "md",
+  "markdown",
+  "txt",
+  "rtf",
+  "doc",
+  "docx",
+  "odt",
+  "html",
+  "htm",
+  // spreadsheets
+  "csv",
+  "tsv",
+  "xls",
+  "xlsx",
+  "xlsm",
+  "ods",
+  // presentations
+  "ppt",
+  "pptx",
+  "odp",
+  // images
+  "png",
+  "jpg",
+  "jpeg",
+  "gif",
+  "webp",
+  "avif",
+  "bmp",
+  "tif",
+  "tiff",
+  "heic",
+  "heif",
+  // video
+  "mp4",
+  "mov",
+  "webm",
+  "m4v",
+  "avi",
+  "mkv",
+] as const;
+
+/** `accept` for a file input, so the picker offers only what will be taken. */
+export const SDLC_UPLOAD_ACCEPT = SDLC_UPLOAD_EXTENSIONS.map(
+  (extension) => `.${extension}`,
+).join(",");
+
+/**
+ * Active-content formats (html, and svg were it listed) are safe to accept only
+ * because the attachment stream refuses to serve them inline — see
+ * SAFE_INLINE_MIME_TYPES in safeAttachmentDownload.ts, which forces a download
+ * and never echoes a client-supplied Content-Type. Opening one saves the file
+ * rather than rendering it in our origin.
+ */
+export function isAllowedSdlcUpload(
+  filename: string,
+  mimetype: string,
+): boolean {
+  const extension = filename.includes(".")
+    ? (filename.split(".").pop() ?? "").trim().toLowerCase()
+    : "";
+  if (!extension) return false;
+  if (!(SDLC_UPLOAD_EXTENSIONS as readonly string[]).includes(extension)) {
+    return false;
+  }
+  // The extension carries the decision, but an explicit archive or executable
+  // mime type overrides it: that pairing is a rename, not a document.
+  const mime = mimetype.split(";")[0]?.trim().toLowerCase() ?? "";
+  if (/zip|x-tar|gzip|x-7z|x-rar|x-msdownload|x-executable|x-mach-binary/.test(mime)) {
+    return false;
+  }
+  return true;
+}

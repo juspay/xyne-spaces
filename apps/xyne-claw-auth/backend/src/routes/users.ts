@@ -1,10 +1,11 @@
 import { Router, type Request, type Response } from "express";
 import { asyncHandler, ok, badRequest, forbidden, notFound, HttpError } from "../lib/http.js";
 import { prisma } from "../db.js";
-import { encrypt } from "../crypto.js";
+import { decrypt, encrypt } from "../crypto.js";
 import { CONFIG } from "../config.js";
 import { hasConnectorDefinition } from "../mcp/connector-definitions.js";
 import { syncToolsForServer } from "../tool-sync.js";
+import { evictSession } from "../mcp/runner.js";
 import { getDefaultOrgId, ensureOrgMembership, ensureUserExists } from "../lib/users-jit.js";
 import { getOrgId, getRequesterId } from "../middleware/agent-acl.js";
 import { getWorkspaceIdForUser } from "../lib/spaces-db.js";
@@ -115,17 +116,74 @@ router.post("/", asyncHandler(async (req: Request, res: Response) => {
     await ensureOrgMembership(user.id, orgId);
   }
 
-  // Auto-configure xyne-spaces MCP connection if token provided
-  if (spacesToken && typeof spacesToken === "string") {
-    autoConfigureSpaces(user.id, spacesToken).catch((err) => {
+  // Spaces is not an optional integration: every claw surface reads through it,
+  // so login is where the connection gets established rather than the
+  // Connections page, which a user may never open.
+  //
+  // The body token is a best effort from the SPA and is usually absent, because
+  // the workspace cookie is httpOnly and `getGoogleToken()` reads cookies from
+  // JavaScript. The server has the same cookie on this very request, so read it
+  // here instead of depending on the client to forward it.
+  const spacesSession = spacesSessionFromRequest(req);
+  const token = (typeof spacesToken === "string" && spacesToken) || spacesSession.token;
+  if (token) {
+    autoConfigureSpaces(user.id, token, spacesSession.sessionId).catch((err) => {
       log.error("[users] auto-configure xyne-spaces failed:", err);
     });
+  } else {
+    log.warn(`[users] no Spaces token on login for ${user.id}; xyne-spaces left as-is`);
   }
 
   ok(res, user);
 }));
 
-async function autoConfigureSpaces(userId: string, token: string): Promise<void> {
+/**
+ * The Spaces credentials carried by this request's own cookies.
+ *
+ * `sessionId` matters as much as the token: Spaces' auth middleware only
+ * refreshes an expired JWT when the session id is present, so a connection
+ * stored without it starts 401ing the moment the 24h token lapses.
+ */
+function spacesSessionFromRequest(req: Request): { token?: string; sessionId?: string } {
+  const header = req.headers.cookie;
+  if (!header) return {};
+  const read = (name: string): string | undefined => {
+    const prefix = `${name}=`;
+    for (const part of header.split(";")) {
+      const cookie = part.trim();
+      if (cookie.startsWith(prefix)) {
+        return cookie.slice(prefix.length).trim() || undefined;
+      }
+    }
+    return undefined;
+  };
+  const workspace = read("xyne_last_workspace");
+  const workspaceToken = workspace ? read(`xyne_ws_${workspace}_token`) : undefined;
+  const legacy = read("google_access_token");
+  return {
+    ...((workspaceToken ?? (legacy && legacy.split(".").length === 3 ? legacy : undefined))
+      ? { token: workspaceToken ?? legacy! }
+      : {}),
+    ...(read("user_session_id") ? { sessionId: read("user_session_id")! } : {}),
+  };
+}
+
+/** True when the stored blob already holds exactly these credentials. */
+function sameCredentials(
+  row: { encryptedCreds: string; iv: string; authTag: string },
+  next: Record<string, string>,
+): boolean {
+  try {
+    const current = JSON.parse(decrypt(row.encryptedCreds, row.iv, row.authTag, CONFIG.encryptionKey)) as Record<string, string>;
+    const keys = new Set([...Object.keys(current), ...Object.keys(next)]);
+    return [...keys].every((k) => current[k] === next[k]);
+  } catch {
+    // Undecryptable means a key rotation or a corrupt row; rewriting is the fix.
+    return false;
+  }
+}
+
+async function autoConfigureSpaces(userId: string, token: string, sessionId?: string): Promise<void> {
   const serverType = "xyne-spaces";
 
   // Find or create the xyne-spaces MCP server
@@ -146,11 +204,23 @@ async function autoConfigureSpaces(userId: string, token: string): Promise<void>
   const credentials = {
     url: spacesUrl,
     token,
+    ...(sessionId ? { sessionId } : {}),
     ...(workspaceId ? { workspaceId } : {}),
   };
   if (workspaceId) {
     log.info(`[users] Auto-configured xyne-spaces workspaceId=${workspaceId} for user ${userId}`);
   }
+  // Login happens often and these credentials rarely change, so stop here when
+  // nothing moved. Rewriting them would evict the running MCP child and kick off
+  // a full tool re-sync on every page load.
+  const existing = await prisma.userMcpConnection.findUnique({
+    where: { userId_mcpServerId: { userId, mcpServerId: server.id } },
+    select: { encryptedCreds: true, iv: true, authTag: true },
+  });
+  if (existing && sameCredentials(existing, credentials)) {
+    return;
+  }
+
   const encrypted = encrypt(JSON.stringify(credentials), CONFIG.encryptionKey);
 
   await prisma.userMcpConnection.upsert({
@@ -167,6 +237,12 @@ async function autoConfigureSpaces(userId: string, token: string): Promise<void>
       iv: encrypted.iv,
       authTag: encrypted.authTag,
     },
+  });
+
+  // The cached MCP child bakes these credentials into its env at spawn time, so
+  // a refreshed token only takes effect once the child is dropped.
+  await evictSession(userId, serverType).catch((err) => {
+    log.error(`[users] evictSession failed for ${serverType}:`, err);
   });
 
   // Sync tools

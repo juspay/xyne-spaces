@@ -81,6 +81,7 @@ export const WorkspaceOzonetelCard = (): ReactElement => {
   const [ticketSubjectTemplate, setTicketSubjectTemplate] = useState(
     '{callType} call from {callerId} ({monitorUcid})',
   );
+  const [customerPhoneFieldName, setCustomerPhoneFieldName] = useState('');
   const [ticketRules, setTicketRules] = useState<OzonetelTicketRules>({});
   const [defaultChannelId, setDefaultChannelId] = useState('');
   const [campaignRoutes, setCampaignRoutes] = useState<
@@ -100,6 +101,7 @@ export const WorkspaceOzonetelCard = (): ReactElement => {
     setTicketSubjectTemplate(
       data.ticketRules?.ticketSubjectTemplate ?? '{callType} call from {callerId} ({monitorUcid})',
     );
+    setCustomerPhoneFieldName(data.ticketRules?.customerPhoneFieldName ?? '');
     setTicketRules(data.ticketRules ?? {});
     setDefaultChannelId(data.ticketRules?.defaultChannelId ?? '');
     setCampaignRoutes(
@@ -193,6 +195,9 @@ export const WorkspaceOzonetelCard = (): ReactElement => {
         defaultChannelId,
         campaignRouting,
         ...(ticketSubjectTemplate ? { ticketSubjectTemplate } : {}),
+        ...(customerPhoneFieldName.trim()
+          ? { customerPhoneFieldName: customerPhoneFieldName.trim() }
+          : {}),
       },
     });
   };
@@ -439,6 +444,20 @@ export const WorkspaceOzonetelCard = (): ReactElement => {
                           ))}
                         </SelectContent>
                       </Select>
+                    </Field>
+
+                    <Field
+                      label='Customer Phone Field'
+                      help='Ticket custom field holding the customer number. On app desks, a toolbar call to that number is logged on the open ticket.'
+                    >
+                      <input
+                        value={customerPhoneFieldName}
+                        onChange={e => setCustomerPhoneFieldName(e.target.value)}
+                        placeholder='Customer Phone'
+                        data-track-category='workspace-ozonetel'
+                        data-track-name='EditCustomerPhoneField'
+                        className={inputClass}
+                      />
                     </Field>
 
                     <Field

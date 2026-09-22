@@ -57,6 +57,10 @@ import {
 import { useShortcutById } from '../../../shortcuts';
 import { isTestEnv } from '../../../config';
 import { createTicket, CreateTicketRequest } from '../../../services/ticketService';
+import {
+  trackTicketCreateFailed,
+  trackTicketCreateSucceeded,
+} from '../../../services/Analytics/ticketTracking';
 import { renderEmoji } from '../../../utils/customEmojiUtils';
 import { useUser } from '../../../hooks/useUsers';
 import { isDMChannel } from '../ChatDirectory/ChatDirectory.utils';
@@ -309,6 +313,8 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
     const [typingUsers, setTypingUsers] = useState<Array<{ userId: string; username: string }>>([]);
     const [alsoSendToChannel, setAlsoSendToChannel] = useState(false);
     const [isCreateTicketModalOpen, setIsCreateTicketModalOpen] = useState(false);
+    // Which surface opened the create form (composer button vs intent toast).
+    const [createTicketSource, setCreateTicketSource] = useState('chat_composer');
     const [scheduleCallOpen, setScheduleCallOpen] = useState(false);
     const [addPeopleOpen, setAddPeopleOpen] = useState(false);
     // On-device intent detections surface as a toast; its action opens the modal below.
@@ -316,7 +322,10 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
     // suggestion opens exactly the same modal the toolbar does.
     useIntentSuggestionToast({
       openScheduleCall: () => setScheduleCallOpen(true),
-      openCreateTicket: () => setIsCreateTicketModalOpen(true),
+      openCreateTicket: () => {
+        setCreateTicketSource('intent_toast');
+        setIsCreateTicketModalOpen(true);
+      },
       openAddPeople: () => setAddPeopleOpen(true),
     });
     const [ticketDescription, setTicketDescription] = useState('');
@@ -328,6 +337,7 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
       searchMentions,
     } = useMentionSearch(channelId, threadParticipantIds, conversationId, {
       includeSpecialMentions: !conversationId || allowThreadBroadcastMentions,
+      excludeSelf: false,
     });
     const channel = useChannel(channelId);
     const isSupportChannel = channel?.type === ChannelType.SUPPORT;
@@ -1217,7 +1227,19 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
                             ...(conversationId && { sourceConversationId: conversationId }),
                           };
 
-                          await createTicket(ticketPayload);
+                          const created = await createTicket(ticketPayload);
+                          // No modal on this path, so the create outcome is reported here.
+                          if (created?.id) {
+                            trackTicketCreateSucceeded(
+                              { id: created.id, ticketType: BaseTicketType.Support, channelId },
+                              {
+                                source: 'chat_composer',
+                                fromSourceMessage: false,
+                                hasAssignee: false,
+                                attachmentsCount: 0,
+                              },
+                            );
+                          }
 
                           inputBoxRef.current?.clearContent();
                           toast.success('Support Ticket Created', {
@@ -1233,9 +1255,11 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
                           toast.error('Failed to create ticket', {
                             description: 'Please try again or contact support.',
                           });
+                          trackTicketCreateFailed(error, { source: 'chat_composer' });
                         }
                       } else {
                         setTicketDescription(description || '');
+                        setCreateTicketSource('chat_composer');
                         setIsCreateTicketModalOpen(true);
                       }
                     })();
@@ -1291,6 +1315,7 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
             }}
             channelId={channelId}
             projectId={(channel.projectId as string | null) || ''}
+            trackSource={createTicketSource}
             initialDescription={ticketDescription}
             sourceConversation={conversation ?? undefined}
             onTicketCreated={handleTicketCreated}

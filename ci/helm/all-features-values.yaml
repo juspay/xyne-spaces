@@ -1,0 +1,18 @@
+versionedName: true
+autoscaling:
+  enabled: true
+pdb:
+  enabled: true
+ingress:
+  enabled: true
+istio:
+  virtualService:
+    enabled: true
+  destinationRule:
+    enabled: true
+networkPolicy:
+  enabled: true
+serviceMonitor:
+  enabled: true
+persistence:
+  enabled: true

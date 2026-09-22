@@ -18,9 +18,11 @@ const PlanConfigSchema = z.object({
   channelId: z.string().min(1).describe('SDLC hub whose repositories this plans'),
   commitsPerRun: z.number().int().min(1).max(100).default(10)
     .describe('Commits one Generator run covers'),
+  // Wiki workflows seeded before the text form send a repository@commit array.
   overrides: variableRef(
-    z.array(z.string()).describe('Start commits for this run, as repository@commit. An override wins over where the repository last ended.')
-  ).default([]),
+    z.union([z.string(), z.array(z.string())])
+      .describe('One per line: repository id, commit. An override wins over where the repository last ended.')
+  ).default(''),
 });
 
 type PlanConfig = z.infer<typeof PlanConfigSchema>;
@@ -71,11 +73,13 @@ interface WrittenCommit {
 async function wikiHistory(
   workflowId: string
 ): Promise<{ written: Map<string, WrittenCommit[]>; hubSeenAt: Date | null }> {
+  // Execution ids, not the workflowExecution relation filter: that let Postgres scan every workflow's steps.
+  const executions = await db.workflowExecution.findMany({ where: { workflowId }, select: { id: true } });
   const rows = await db.workflowStep.findMany({
     where: {
+      workflowExecutionId: { in: executions.map((execution) => execution.id) },
       status: 'COMPLETED',
       data: { contains: SDLC_AGENT_STEP_TYPE },
-      workflowExecution: { workflowId },
     },
     orderBy: { updatedAt: 'asc' },
     select: { data: true, stepName: true, updatedAt: true },
@@ -106,13 +110,9 @@ async function wikiHistory(
 }
 
 function parseOverride(value: string): { repository: string; commit: string } {
-  const at = value.lastIndexOf('@');
-  const repository = value.slice(0, at).trim();
-  const commit = value.slice(at + 1).trim().toLowerCase();
-  if (at < 1 || !/^[0-9a-f]{7,40}$/.test(commit)) {
-    throw new Error(`Start commit "${value}" must look like repository@commit`);
-  }
-  return { repository, commit };
+  const match = /^(.+?)[\s,@]+([0-9a-f]{7,40})$/i.exec(value);
+  if (!match) throw new Error(`Start commit "${value}" must look like: repository id, commit`);
+  return { repository: match[1]!.trim(), commit: match[2]!.toLowerCase() };
 }
 
 export class SdlcWikiPlanStep extends BaseActionStep<typeof PlanConfigSchema, PlanOutput> {
@@ -165,7 +165,10 @@ export class SdlcWikiPlanStep extends BaseActionStep<typeof PlanConfigSchema, Pl
       select: { id: true, name: true },
     });
     const byId = new Map(repositories.map((repository) => [repository.id, repository]));
-    const overrides = (Array.isArray(config.overrides) ? config.overrides : []).map(parseOverride);
+    const overrides = (Array.isArray(config.overrides) ? config.overrides : (config.overrides ?? '').split('\n'))
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .map(parseOverride);
     for (const override of overrides) {
       const matches = repositories.filter(
         (repository) => repository.id === override.repository || repository.name === override.repository

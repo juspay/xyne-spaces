@@ -756,7 +756,7 @@ export const TicketListView = function TicketListView({
       }}
       className={cn('h-full w-full outline-none')}
       initialTopMostItemIndex={0}
-      increaseViewportBy={{ top: 0, bottom: 200 }}
+      increaseViewportBy={{ top: 1200, bottom: 1200 }}
       totalListHeightChanged={setBodyContentHeight}
       itemContent={(index, row) => {
         const ticketIdValue = row?.xyneId || row?.id || '';

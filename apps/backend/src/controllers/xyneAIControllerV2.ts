@@ -16,6 +16,12 @@ import {
   cancelClawAgentRun,
   listClawConversations,
   getClawConversationMessages,
+  listClawConversationArtifacts,
+  getClawConversationArtifact,
+  updateClawConversationArtifact,
+  clawArtifactComments,
+  addClawArtifactComment,
+  resolveClawArtifactComment,
   rateClawRun,
   streamClawConversationLive,
   getClawDebugArtifacts,
@@ -62,10 +68,20 @@ const SelectionContextSchema = z
   );
 
 // Attached context item schema - for Add Context feature.
-// `collection` and `file` are appended below from top-level `collection_ids`
-// and `file_ids` so the dashboard can keep its existing payload shape.
+// `collection`/`folder`/`file` items all arrive as ordinary entries in this
+// list — the dashboard already knows each one's cuid + name client-side.
 const AttachedContextItemSchema = z.object({
-  type: z.enum(['channel', 'ticket', 'canvas', 'call', 'activity', 'collection', 'file']),
+  type: z.enum([
+    'channel',
+    'ticket',
+    'canvas',
+    'call',
+    'activity',
+    'collection',
+    'file',
+    'folder',
+    'local-folder',
+  ]),
   id: z.string().min(1),
   title: z.string().min(1),
   threadId: z.string().optional(),
@@ -116,6 +132,12 @@ const XyneAIRequestSchemaV2 = z.object({
   // Per-run thinking level from the composer's dropdown. Absent = the agent's
   // configured default (modelSettings.thinkingLevel or provider default).
   thinkingLevel: z.enum(['off', 'minimal', 'low', 'medium', 'high']).optional(),
+  studioMode: z.literal('design').optional(),
+  sandboxMode: z.enum(['local', 'remote', 'container']).optional(),
+  designArtifactAttachmentId: z.string().min(1).max(200).optional(),
+  designSelection: z.unknown().optional(),
+  pageSelection: z.unknown().optional(),
+  openItems: z.unknown().optional(),
   researchContext: ResearchContextSchema.optional().nullable(),
   research_context: ResearchContextSchema.optional().nullable(),
   attachments: z
@@ -169,23 +191,6 @@ const XyneAIRequestSchemaV2 = z.object({
   ticket_ids: z.array(z.string().min(1)).optional(),
   callIds: z.array(z.string().min(1)).optional(),
   call_ids: z.array(z.string().min(1)).optional(),
-  // KB context. The dashboard sends these at the top level (legacy shape);
-  // we convert them into attached_context items of type 'collection' / 'file'
-  // below so the agent's prompt-prefix mechanism picks them up uniformly.
-  // `fileIds` arrive as stable CollectionItem.fileId UUIDs (the dashboard's
-  // Vespa identifier); we resolve them to CollectionItem.id (cuid) before
-  // forwarding because that's what claw-auth's KB tools expect.
-  collectionIds: z.array(z.string().min(1)).optional(),
-  collection_ids: z.array(z.string().min(1)).optional(),
-  fileIds: z.array(z.string().min(1)).optional(),
-  file_ids: z.array(z.string().min(1)).optional(),
-  // A folder scope from the composer picker. Forwarded to claw-auth as a
-  // single 'folder' attached_context pointer (like collectionIds is) — NOT
-  // expanded to individual file ids here. claw-auth resolves it to files
-  // itself at Vespa-query time; expanding it here could blow up to
-  // thousands of ids for one folder.
-  folderIds: z.array(z.string().min(1)).optional(),
-  folder_ids: z.array(z.string().min(1)).optional(),
   attachedContext: AttachedContextSchema,
   attached_context: AttachedContextSchema,
   displayQuery: z.string().optional(),
@@ -201,7 +206,7 @@ const XyneAIRequestSchemaV2 = z.object({
    *  LiteLLM credential, "spaces" = the keyless platform provider (the models
    *  endpoint's pinProvider says which). Defaults to "litellm" for old
    *  clients. */
-  modelProvider: z.enum(['litellm', 'spaces']).optional(),
+  modelProvider: z.enum(['litellm', 'spaces', 'local-harness']).optional(),
   agentSlug: z.string().optional().default('ask-ai'),
 });
 
@@ -267,6 +272,12 @@ export class XyneAIControllerV2 {
       deep_research_enabled: deepResearchEnabledSC,
       instant,
       thinkingLevel,
+      studioMode,
+      sandboxMode,
+      designArtifactAttachmentId,
+      designSelection,
+      pageSelection,
+      openItems,
       researchContext,
       research_context,
       attachments,
@@ -287,12 +298,6 @@ export class XyneAIControllerV2 {
       ticket_ids,
       callIds,
       call_ids,
-      collectionIds,
-      collection_ids,
-      fileIds,
-      file_ids,
-      folderIds,
-      folder_ids,
       attachedContext,
       attached_context,
       draftMode,
@@ -319,9 +324,6 @@ export class XyneAIControllerV2 {
     const effectiveCanvasIds = canvasIds?.length ? canvasIds : canvas_ids;
     const effectiveTicketIds = ticketIds?.length ? ticketIds : ticket_ids;
     const effectiveCallIds = callIds?.length ? callIds : call_ids;
-    const effectiveCollectionIds = collectionIds?.length ? collectionIds : collection_ids;
-    const effectiveFileIds = fileIds?.length ? fileIds : file_ids;
-    const effectiveFolderIds = folderIds?.length ? folderIds : folder_ids;
     // Same snake-case fallback rationale for branching params — the worker
     // sends snake_case; HTTP callers may use either.
     const effectiveParentMessageId = parentMessageIdCC || parentMessageIdSC;
@@ -500,61 +502,6 @@ export class XyneAIControllerV2 {
         agentSlug,
       });
 
-      // Resolve KB context (collections + folders + files) → attached_context
-      // items so claw-auth's existing prompt-prefix mechanism surfaces them
-      // in the agent's prompt. We translate:
-      //   • Collection.id (cuid)         → 'collection' attached_context item
-      //   • Collection.id (cuid, folder) → 'folder' attached_context item
-      //   • CollectionItem.fileId (UUID) → CollectionItem.id (cuid) +
-      //                                    'file' attached_context item
-      // The cuid is what the agent's kb-* tools expect as fileId — see the
-      // KB-tools handlers and the validateKbGrants files-set in claw-auth.
-      // A folder is deliberately sent as ONE pointer, not expanded to its
-      // (potentially thousands of) files here — attachedContext is a small,
-      // model-facing prompt list (claw-auth caps it at 20 items total), not a
-      // bulk id manifest. claw-auth resolves the folder to files itself, at
-      // Vespa-query time (buildVespaScope in kb-handlers.ts), from the KB
-      // tree it already fetches for permission checks.
-      const kbAttachedContextItems: Array<{
-        type: 'collection' | 'folder' | 'file';
-        id: string;
-        title: string;
-      }> = [];
-      if (effectiveCollectionIds && effectiveCollectionIds.length > 0) {
-        const rows = await db.collection.findMany({
-          where: { id: { in: effectiveCollectionIds }, deletedAt: null },
-          select: { id: true, name: true },
-        });
-        for (const row of rows) {
-          kbAttachedContextItems.push({ type: 'collection', id: row.id, title: row.name });
-        }
-      }
-      if (effectiveFolderIds && effectiveFolderIds.length > 0) {
-        const rows = await db.collection.findMany({
-          where: { id: { in: effectiveFolderIds }, deletedAt: null },
-          select: { id: true, name: true },
-        });
-        for (const row of rows) {
-          kbAttachedContextItems.push({ type: 'folder', id: row.id, title: row.name });
-        }
-      }
-      if (effectiveFileIds && effectiveFileIds.length > 0) {
-        // The dashboard sends the stable `fileId` UUID, but the agent's
-        // kb-read-file expects CollectionItem.id (cuid). Resolve UUIDs to
-        // latest-version row ids in a single query.
-        const items = await db.collectionItem.findMany({
-          where: { fileId: { in: effectiveFileIds }, isLatest: true, deletedAt: null },
-          select: { id: true, name: true },
-        });
-        for (const it of items) {
-          kbAttachedContextItems.push({ type: 'file', id: it.id, title: it.name });
-        }
-      }
-      const mergedAttachedContext = [
-        ...(effectiveAttachedContext ?? []),
-        ...kbAttachedContextItems,
-      ];
-
       try {
         // Build the ClawRunRequest
         const runReq: ClawRunRequest = {
@@ -577,13 +524,19 @@ export class XyneAIControllerV2 {
           callIds: effectiveCallIds,
           ...(effectiveCanvasId && { canvasId: effectiveCanvasId }),
           ...(workflowContext && { workflowContext }),
-          attachedContext: mergedAttachedContext,
+          attachedContext: effectiveAttachedContext ?? [],
           attachments,
           messageAttachmentIds,
           webSearchEnabled,
           deepResearchEnabled,
           instant,
           ...(thinkingLevel ? { thinkingLevel } : {}),
+          ...(studioMode ? { studioMode } : {}),
+          ...(sandboxMode ? { sandboxMode } : {}),
+          ...(designArtifactAttachmentId ? { designArtifactAttachmentId } : {}),
+          ...(designSelection !== undefined ? { designSelection } : {}),
+          ...(pageSelection !== undefined ? { pageSelection } : {}),
+          ...(openItems !== undefined ? { openItems } : {}),
           researchContext: effectiveResearchContext,
           ...(sdlcDashboardContext && { dashboardContext: sdlcDashboardContext }),
           createCanvasEnabled,
@@ -919,6 +872,145 @@ export class XyneAIControllerV2 {
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Internal server error';
       logger.error('[XyneAIv2] getMessages error:', error);
+      res.status(503).json({ success: false, error: message });
+    }
+  };
+
+  listConversationArtifacts = async (req: Request, res: Response): Promise<void> => {
+    const userId = (req as any).user?.id;
+    if (!userId) {
+      res.status(401).json({ success: false, error: 'Authentication required' });
+      return;
+    }
+
+    const { convId } = req.params;
+    if (!convId) {
+      res.status(400).json({ success: false, error: 'convId is required' });
+      return;
+    }
+
+    try {
+      const result = await listClawConversationArtifacts({ headers: req.headers, userId }, convId);
+      res.json(result);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Internal server error';
+      logger.error('[XyneAIv2] listConversationArtifacts error:', error);
+      res.status(503).json({ success: false, error: message });
+    }
+  };
+
+  getConversationArtifact = async (req: Request, res: Response): Promise<void> => {
+    const userId = (req as any).user?.id;
+    if (!userId) {
+      res.status(401).json({ success: false, error: 'Authentication required' });
+      return;
+    }
+
+    const { id } = req.params;
+    if (!id) {
+      res.status(400).json({ success: false, error: 'id is required' });
+      return;
+    }
+
+    try {
+      const result = await getClawConversationArtifact({ headers: req.headers, userId }, id);
+      res.json(result);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Internal server error';
+      logger.error('[XyneAIv2] getConversationArtifact error:', error);
+      res.status(503).json({ success: false, error: message });
+    }
+  };
+
+  listArtifactComments = async (req: Request, res: Response): Promise<void> => {
+    const userId = (req as any).user?.id;
+    if (!userId) {
+      res.status(401).json({ success: false, error: 'Authentication required' });
+      return;
+    }
+    const { id } = req.params;
+    if (!id) {
+      res.status(400).json({ success: false, error: 'id is required' });
+      return;
+    }
+    try {
+      res.json(await clawArtifactComments({ headers: req.headers, userId }, id));
+    } catch (error) {
+      logger.error('[XyneAIV2] listArtifactComments failed', error);
+      res.status(500).json({ success: false, error: 'Failed to list comments' });
+    }
+  };
+
+  addArtifactComment = async (req: Request, res: Response): Promise<void> => {
+    const userId = (req as any).user?.id;
+    if (!userId) {
+      res.status(401).json({ success: false, error: 'Authentication required' });
+      return;
+    }
+    const { id } = req.params;
+    const { body, anchor } = req.body as { body?: string; anchor?: unknown };
+    if (!id || !body?.trim()) {
+      res.status(400).json({ success: false, error: 'id and body are required' });
+      return;
+    }
+    try {
+      const payload = { body, ...(anchor === undefined ? {} : { anchor }) };
+      res.status(201).json(await addClawArtifactComment({ headers: req.headers, userId }, id, payload));
+    } catch (error) {
+      logger.error('[XyneAIV2] addArtifactComment failed', error);
+      res.status(500).json({ success: false, error: 'Failed to add the comment' });
+    }
+  };
+
+  resolveArtifactComment = async (req: Request, res: Response): Promise<void> => {
+    const userId = (req as any).user?.id;
+    if (!userId) {
+      res.status(401).json({ success: false, error: 'Authentication required' });
+      return;
+    }
+    const { id, commentId } = req.params;
+    if (!id || !commentId) {
+      res.status(400).json({ success: false, error: 'id and commentId are required' });
+      return;
+    }
+    try {
+      const resolved = (req.body as { resolved?: unknown })?.resolved === true;
+      res.json(await resolveClawArtifactComment({ headers: req.headers, userId }, id, commentId, resolved));
+    } catch (error) {
+      logger.error('[XyneAIV2] resolveArtifactComment failed', error);
+      res.status(500).json({ success: false, error: 'Failed to update the comment' });
+    }
+  };
+
+  updateConversationArtifact = async (req: Request, res: Response): Promise<void> => {
+    const userId = (req as any).user?.id;
+    if (!userId) {
+      res.status(401).json({ success: false, error: 'Authentication required' });
+      return;
+    }
+
+    const { id } = req.params;
+    if (!id) {
+      res.status(400).json({ success: false, error: 'id is required' });
+      return;
+    }
+
+    const { title, pinned, status } = req.body as {
+      title?: string;
+      pinned?: boolean;
+      status?: string;
+    };
+
+    try {
+      const result = await updateClawConversationArtifact({ headers: req.headers, userId }, id, {
+        ...(typeof title === 'string' ? { title } : {}),
+        ...(typeof pinned === 'boolean' ? { pinned } : {}),
+        ...(typeof status === 'string' ? { status } : {}),
+      });
+      res.json(result);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Internal server error';
+      logger.error('[XyneAIv2] updateConversationArtifact error:', error);
       res.status(503).json({ success: false, error: message });
     }
   };
