@@ -6,7 +6,8 @@ import { config } from '@/config/env';
 import { Agent, createUserMessage } from '@framework';
 import { extractAgentContent } from '@/utils/agentUtils';
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service.js';
-import { MessageType, OrgLLMServiceAccountPurpose, AttachmentEntityType, CallOrigin, CallType, TicketPriority } from '@xyne/shared';
+import { MessageType, OrgLLMServiceAccountPurpose, AttachmentEntityType, CallOrigin, CallType, TicketPriority, NotificationType } from '@xyne/shared';
+import { notificationService } from '@/services/notificationService';
 import { db } from '@/database/client';
 import { randomUUID } from 'crypto';
 import * as yaml from 'js-yaml';
@@ -296,7 +297,6 @@ export interface TicketSuggestion {
 
 export class TranscriptService {
   private transcriptStorage: StorageService;
-  private inFlightTranslations = new Map<string, Promise<void>>();
 
   constructor() {
     this.transcriptStorage = getStorageService(config.gcs.transcriptionBucketName);
@@ -823,30 +823,13 @@ export class TranscriptService {
    * @returns Formatted transcript text or null if not found
    */
   async getTranscriptContent(callId: string): Promise<string | null> {
-    return (await this.getTranscriptContentWithGeneration(callId))?.text ?? null;
-  }
-
-  // Same as getTranscriptContent, plus the formatted object's GCS `generation` (null if unavailable).
-  async getTranscriptContentWithGeneration(
-    callId: string,
-  ): Promise<{ text: string; generation: string | null } | null> {
     try {
       const formattedPath = `attachments/${callId}_formatted.txt`;
       const formattedExists = await this.transcriptStorage.fileExists(formattedPath);
 
       if (formattedExists) {
-        const [buffer, metadata] = await Promise.all([
-          this.transcriptStorage.getFileBuffer(formattedPath),
-          this.transcriptStorage.getFileMetadata(formattedPath).catch(() => null),
-        ]);
-        const generation = (metadata as Record<string, unknown> | null)?.['generation'];
-        return {
-          text: buffer.toString('utf-8'),
-          generation:
-            typeof generation === 'string' || typeof generation === 'number'
-              ? String(generation)
-              : null,
-        };
+        const buffer = await this.transcriptStorage.getFileBuffer(formattedPath);
+        return buffer.toString('utf-8');
       }
 
       const rawContent = await this.retrieveTranscript(callId);
@@ -855,36 +838,27 @@ export class TranscriptService {
       const entries = this.parseTranscriptEntries(rawContent);
       if (entries.length === 0) return null;
 
-      return { text: this.formatTranscript(entries, callId), generation: null };
+      return this.formatTranscript(entries, callId);
     } catch (error) {
-      logger.error(`Failed to get transcript content with generation for ${callId}:`, error);
+      logger.error(`Failed to get transcript content for ${callId}:`, error);
       return null;
     }
   }
 
-  private translatedTranscriptPath(callId: string, language: string, generation: string | null): string {
-    return `attachments/${callId}_translated_${language}_${generation ?? 'unversioned'}.txt`;
+  private translatedTranscriptPath(callId: string, language: string): string {
+    return `attachments/${callId}_translated_${language}.txt`;
   }
 
-  async uploadTranslatedTranscript(
-    callId: string,
-    language: string,
-    generation: string | null,
-    text: string,
-  ): Promise<void> {
+  async uploadTranslatedTranscript(callId: string, language: string, text: string): Promise<void> {
     await this.transcriptStorage.uploadFileV2(Buffer.from(text, 'utf-8'), {
-      path: this.translatedTranscriptPath(callId, language, generation),
+      path: this.translatedTranscriptPath(callId, language),
       contentType: 'text/plain',
       metadata: { callId, type: 'translated_transcript', language },
     });
   }
 
-  async getTranslatedTranscript(
-    callId: string,
-    language: string,
-    generation: string | null,
-  ): Promise<string | null> {
-    const path = this.translatedTranscriptPath(callId, language, generation);
+  async getTranslatedTranscript(callId: string, language: string): Promise<string | null> {
+    const path = this.translatedTranscriptPath(callId, language);
     const exists = await this.transcriptStorage.fileExists(path);
     if (!exists) return null;
     const buffer = await this.transcriptStorage.getFileBuffer(path);
@@ -1065,30 +1039,28 @@ Output ONLY the processed transcript, nothing else.`;
     const systemInstructions = TRANSCRIPT_TRANSLATION_PROMPT.replace('{targetLanguage}', targetLanguageName);
     return this.runChunkedTranslation(transcript, systemInstructions, 'transcript_translation_user_language', callId);
   }
-
-  // Kicks off translateTranscript + GCS upload in the background and returns immediately —
-  // callers poll getTranslatedTranscript() for the result. Dedupes on `key` (see
-  // inFlightTranslations) so repeated polls while a job is running don't start a second one.
-  ensureTranslationInFlight(
-    key: string,
+  translateTranscriptInBackground(
     callId: string,
     languageCode: string,
-    generation: string | null,
     transcript: string,
     targetLanguageName: string,
+    notifyUserId: string,
   ): void {
-    if (this.inFlightTranslations.has(key)) return;
-
-    const job = this.translateTranscript(transcript, targetLanguageName, callId)
-      .then((text) => this.uploadTranslatedTranscript(callId, languageCode, generation, text))
+    void this.translateTranscript(transcript, targetLanguageName, callId)
+      .then((text) => this.uploadTranslatedTranscript(callId, languageCode, text))
+      .then(() =>
+        notificationService.createNotification(notifyUserId, {
+          type: NotificationType.TRANSCRIPT_TRANSLATION_READY,
+          title: 'Translation ready',
+          message: `The ${targetLanguageName} translation is ready to view`,
+          relatedEntityType: 'call',
+          relatedEntityId: callId,
+          metadata: { callExternalId: callId, language: languageCode },
+        }),
+      )
       .catch((error) => {
         logger.error(`[${callId}] translate_transcript_job_failed`, { language: languageCode, error });
-      })
-      .finally(() => {
-        this.inFlightTranslations.delete(key);
       });
-
-    this.inFlightTranslations.set(key, job);
   }
 
   // Shared chunking/streaming core for postProcessTranscript and translateTranscript.

@@ -1,11 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import axios from 'axios';
-import type { TranscriptTranslation } from '@xyne/shared';
+import { NotificationType, type TranscriptTranslation } from '@xyne/shared';
 import { recordingService } from '../services/Recording/recordingService';
+import { websocketService } from '../services/clients/socketClient';
 import { logRecordingError } from '../utils/recordingUtils';
 
-const TRANSLATION_POLL_INTERVAL_MS = 3000;
-const TRANSLATION_POLL_MAX_ATTEMPTS = 40; // ~2 minutes
+interface TranslationReadyEvent {
+  notification: {
+    type: NotificationType;
+    metadata?: { callExternalId?: string; language?: string };
+    data?: { callExternalId?: string; language?: string };
+  };
+}
 
 export interface UseTranscriptTranslationOptions {
   externalId: string | undefined;
@@ -14,8 +20,6 @@ export interface UseTranscriptTranslationOptions {
 }
 
 export interface UseTranscriptTranslationResult {
-  /** Last successfully loaded text — sticky across language switches so the panel
-   *  keeps showing the previous language while the next one loads. */
   text: string | undefined;
   isLoading: boolean;
   isTranslating: boolean;
@@ -24,10 +28,10 @@ export interface UseTranscriptTranslationResult {
 }
 
 /**
- * Lazily fetches transcript text per language via the translate-transcript endpoint
- * (`original` is a no-LLM passthrough). Any other language runs asynchronously on the
- * backend — a 'pending' response is polled until 'ready'. Local state, deliberately not
- * synced through Zero — Postgres never carries transcript text.
+ * Fetches a call's transcript text in the selected language for display (e.g. in
+ * TranscriptSidePanel). `original` returns the stored transcript as-is; any other
+ * language is translated server-side, and the hook refetches once notified it's ready.
+ * Local state only — transcript text is never synced through Zero.
  */
 export function useTranscriptTranslation({
   externalId,
@@ -60,10 +64,8 @@ export function useTranscriptTranslation({
     if (currentError !== undefined) return;
 
     let cancelled = false;
-    let attempts = 0;
-    setTranslatingLanguage(language);
 
-    const poll = (): void => {
+    const fetchOnce = (): void => {
       void recordingService
         .translateTranscript(externalId, language)
         .then(result => {
@@ -71,16 +73,7 @@ export function useTranscriptTranslation({
           cacheRef.current = { ...cacheRef.current, [language]: result };
 
           if (result.status === 'pending') {
-            attempts += 1;
-            if (attempts > TRANSLATION_POLL_MAX_ATTEMPTS) {
-              setErrors(current => ({
-                ...current,
-                [language]: 'Translation is taking longer than expected.',
-              }));
-              setTranslatingLanguage(current => (current === language ? null : current));
-              return;
-            }
-            window.setTimeout(poll, TRANSLATION_POLL_INTERVAL_MS);
+            setTranslatingLanguage(language);
             return;
           }
 
@@ -98,10 +91,19 @@ export function useTranscriptTranslation({
         });
     };
 
-    poll();
+    fetchOnce();
+
+    const onNotification = (event: TranslationReadyEvent): void => {
+      if (event.notification.type !== NotificationType.TRANSCRIPT_TRANSLATION_READY) return;
+      const ids = { ...event.notification.metadata, ...event.notification.data };
+      if (ids.callExternalId !== externalId || ids.language !== language) return;
+      fetchOnce();
+    };
+    websocketService.on('notification_received', onNotification);
 
     return (): void => {
       cancelled = true;
+      websocketService.removeListener('notification_received', onNotification);
     };
   }, [enabled, externalId, language, currentError]);
 
