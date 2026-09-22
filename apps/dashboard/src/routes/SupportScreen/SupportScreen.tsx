@@ -1869,8 +1869,18 @@ const SupportScreen = (): ReactElement => {
   // (e.g. ?metrics=open with metrics off) doesn't leave the button looking active.
   const openInsights = { metrics: isMetricsOpen, topics: isTopicsOpen, report: isReportOpen };
   const activeInsightsSection = insightsSections.find(s => openInsights[s]) ?? null;
-  const closeInsights = (): void =>
-    void navigate(`${supportBase}/${selectedChannelId}`, { replace: true });
+  // Swaps only the section param, so the ticket filters kept in the URL survive.
+  const showInsights = (section: DeskInsightsSection | null, replace = true): void => {
+    const params = new URLSearchParams(searchParams);
+    params.delete('metrics');
+    params.delete('topics');
+    params.delete('report');
+    if (section) params.set(section, 'open');
+    const qs = params.toString();
+    const path = `${supportBase}/${selectedChannelId}`;
+    void navigate(qs ? `${path}?${qs}` : path, { replace });
+  };
+  const closeInsights = (): void => showInsights(null);
 
   // Only desks the caller manages belong in the comparison picker: the
   // aggregate route skips anything else as 'forbidden', which read as silently
@@ -3195,9 +3205,8 @@ const SupportScreen = (): ReactElement => {
                           <button
                             type='button'
                             onClick={() => {
-                              const base = `${supportBase}/${selectedChannelId}`;
                               if (activeInsightsSection) closeInsights();
-                              else void navigate(`${base}?${insightsSections[0]}=open`);
+                              else showInsights(insightsSections[0] ?? null, false);
                             }}
                             className={cn(
                               'p-1.5 rounded transition-colors',
@@ -3974,11 +3983,7 @@ const SupportScreen = (): ReactElement => {
                   onClose={closeInsights}
                   activeSection={activeInsightsSection}
                   availableSections={insightsSections}
-                  onSectionChange={section =>
-                    void navigate(`${supportBase}/${selectedChannelId}?${section}=open`, {
-                      replace: true,
-                    })
-                  }
+                  onSectionChange={section => showInsights(section)}
                 >
                   {activeInsightsSection === 'metrics' && (
                     <DeskMetricsDashboard
