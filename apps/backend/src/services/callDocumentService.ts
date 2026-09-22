@@ -31,17 +31,21 @@ import {
   parseSelectedSummaryTemplate,
   type SummaryTemplateCandidate,
 } from './summaryTemplateSelection';
+import { getMandatorySummarySectionState } from './summaryTemplateSections';
 import {
   DEFAULT_RECORDING_SUMMARY_TEMPLATE,
   DEFAULT_RECORDING_SUMMARY_FIELDS,
-  RECORDING_DETAILED_SUMMARY_PROMPT,
+  buildRecordingDetailedSummaryPrompt,
 } from './recordingSummaryTemplates';
 import {
   extractMarkedItemsFromRecordingSummary,
+  mergeRecordingSummaryMarkedItems,
   stripRecordingSummaryMarkedItemAnnotations,
   type RecordingSummaryMarkedItem,
 } from './recordingSummaryMarkedItems';
 import { summaryTemplateService } from './summaryTemplateService';
+import { callNotesCanvasService } from './callNotesCanvasService';
+import { isRecording } from '@/utils/callTypeUtils';
 
 // PRD Document structure
 interface PRDDocument {
@@ -480,6 +484,16 @@ MARKDOWN TEMPLATE:
 - For very short calls, the "Consolidated Outcomes" section may be the most valuable part
 - In Action Items: Use @ before FULL NAMES for participants in the call (e.g., @Mayank Bansal)
 - In Action Items: For people NOT in the participant list, write their name plainly with "(not in channel)" notation
+
+**MARKED DECISIONS AND ACTIONS:**
+- Prefix every concrete decision bullet with the exact private annotation \`[xyne-decision]\` immediately after the bullet marker.
+- Prefix every concrete action-item bullet with the exact private annotation \`[xyne-action]\` immediately after the bullet marker.
+- Every annotated bullet MUST end with at least one supporting transcript citation. The first citation must identify the moment most closely associated with that decision or action.
+- Never use these annotations for takeaways, discussion points, open questions, blockers, or other bullets.
+- The annotations are internal metadata and will be removed before the summary is displayed.
+- Examples:
+  - \`- [xyne-decision] The team approved the consolidated pipeline [clf-12]\`
+  - \`- [xyne-action] @Mayank Bansal will update the backend [clf-18]\`
 
 **CITATIONS (ACCURACY IS CRITICAL):**
 - Each transcript line is prefixed with a segment number in square brackets, e.g. "[12] [03:24] Alice: ...". The number 12 is that line's segment id.
@@ -1052,13 +1066,16 @@ export class CallDocumentService {
       return null;
     }
 
+    // A Scribe admin may have switched off Decisions / Action Items on this template;
+    // the prompt must then stop asking for those sections and their annotations.
+    const mandatorySections = getMandatorySummarySectionState(template.sections);
     const rawSummary = await this.generateDetailedSummary(
       transcript,
       callId,
       template.autoTriggerPrompt ?? undefined,
       formatSummaryTemplateSections(template.sections),
       template.systemPrompt,
-      RECORDING_DETAILED_SUMMARY_PROMPT,
+      buildRecordingDetailedSummaryPrompt(mandatorySections),
       DEFAULT_RECORDING_SUMMARY_FIELDS,
       onDelta
         ? accumulated => onDelta(
@@ -1073,9 +1090,13 @@ export class CallDocumentService {
     if (!rawSummary) return null;
 
     const normalizedSummary = normalizeDetailedSummaryMarkdown(rawSummary);
-    const markedItems = citationSegments
-      ? extractMarkedItemsFromRecordingSummary(normalizedSummary, citationSegments)
-      : [];
+    const markedItems = (
+      citationSegments
+        ? extractMarkedItemsFromRecordingSummary(normalizedSummary, citationSegments)
+        : []
+    ).filter((item) =>
+      item.type === 'decision' ? mandatorySections.decisions : mandatorySections.actionItems,
+    );
     const summary = stripRecordingSummaryMarkedItemAnnotations(normalizedSummary);
 
     return { summary, template, markedItems };
@@ -1122,6 +1143,13 @@ export class CallDocumentService {
       })
       .join('\n');
 
+    // Participants' shared notes canvas (series-wide for recurring calls) is extra
+    // context for the summary. Recordings keep their own summary inputs.
+    const notesMarkdown = call && !isRecording(call)
+      ? await callNotesCanvasService.getNotesMarkdown(call)
+      : null;
+    const sanitizedNotes = notesMarkdown ? sanitizeInput(notesMarkdown) : '';
+
     const sanitizedTranscript = sanitizeInput(transcript);
     const sanitizedCustomPrompt = customPrompt ? sanitizeInput(customPrompt) : '';
     const sanitizedFields = summaryFields?.trim() ? sanitizeInput(summaryFields) : '';
@@ -1141,6 +1169,10 @@ MANDATORY OUTPUT CONTRACT:
         participants: participantList || '- No participants found',
         transcript: sanitizedTranscript,
       });
+
+      if (sanitizedNotes) {
+        prompt += `\n\nPARTICIPANT NOTES:\nNotes written by participants in the shared notes canvas${call?.recurringSeriesId ? ' for this recurring meeting series (may include notes from earlier sessions)' : ''}. Use them as additional context: honour agenda items, decisions, and action items captured here, but treat the transcript as the source of truth for what was said in this session. Do not cite notes as transcript segments.\n"""\n${sanitizedNotes}\n"""\n`;
+      }
 
       if (sanitizedCustomPrompt) {
         prompt += `\n\nADDITIONAL USER INSTRUCTIONS:\nThe user has provided specific instructions for this summary. Please prioritize these instructions:\n"${sanitizedCustomPrompt}"\n`;
@@ -1818,7 +1850,8 @@ A Product Requirements Document has been generated from this call discussion.
     conversationId: string,
     callId: string,
     canvasUrl: string,
-    workspaceId: string
+    workspaceId: string,
+    subject: 'recording' | 'call' = 'recording',
   ): Promise<void> {
     try {
       // Idempotent: the automatic summary pipeline may run more than once per call
@@ -1833,9 +1866,10 @@ A Product Requirements Document has been generated from this call discussion.
         throw new Error('Xyne Automatic bot not found');
       }
 
-      const messageContent = `## 📝 Recording Notes
+      const subjectLabel = subject === 'recording' ? 'Recording' : 'Call';
+      const messageContent = `## 📝 ${subjectLabel} Notes
 
-Notes taken during this recording:
+Notes taken during this ${subject}:
 
 [📄 View Notes Canvas](${canvasUrl})`;
 
@@ -2167,6 +2201,40 @@ A comprehensive detailed summary has been generated from this call.
   }
 
   /**
+   * Persist a summary's annotated decisions and actions as timeline markers.
+   *
+   * The merge keeps the moments the user flagged mid-call, which share the column —
+   * a regenerated summary must not drop them. Timestamps come from the segment map
+   * the citations resolve against, so an unresolvable bullet is dropped, not guessed.
+   *
+   * Best-effort: the summary is the deliverable, so a failure here is swallowed.
+   */
+  private async persistCallMarkedItems(
+    callId: string,
+    annotatedMarkdown: string,
+    segments: CitationContext['segments'],
+  ): Promise<void> {
+    try {
+      const generated = extractMarkedItemsFromRecordingSummary(annotatedMarkdown, segments);
+      const call = await repositories.calls.findByExternalId(callId);
+      if (!call) return;
+
+      const merged = mergeRecordingSummaryMarkedItems(call.markedItems, generated);
+      await repositories.calls.update(call.id, {
+        markedItems: merged as Prisma.InputJsonValue[],
+      });
+      logger.info(`[${callId}] call_marked_items_persisted`, {
+        generated_count: generated.length,
+        total_count: merged.length,
+      });
+    } catch (error) {
+      logger.warn(`[${callId}] call_marked_items_persist_failed`, {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  /**
    * Generate and post detailed summary to conversation
    */
   async generateAndPostDetailedSummary(
@@ -2261,16 +2329,20 @@ A comprehensive detailed summary has been generated from this call.
       const existingCanvas = await findExistingDetailedSummaryCanvas(callId);
 
       if (existingCanvas) {
-        const detailedSummaryMarkdown = await this.generateDetailedSummary(
+        const annotatedMarkdown = await this.generateDetailedSummary(
           numberedTranscript,
           callId,
           customPrompt,
           channel.callSummaryPrompt ?? undefined,
         );
-        if (!detailedSummaryMarkdown) {
+        if (!annotatedMarkdown) {
           logDetailedSummaryFailed(callId, 'generation_failed');
           return { success: false, error: 'Failed to generate detailed summary' };
         }
+
+        await this.persistCallMarkedItems(callId, annotatedMarkdown, citationCtx.segments);
+        const detailedSummaryMarkdown =
+          stripRecordingSummaryMarkedItemAnnotations(annotatedMarkdown);
 
         // A rerun keeps its existing title; only wait on concurrent title
         // generation when the call has no title yet, so a present title does
@@ -2446,8 +2518,11 @@ A comprehensive detailed summary has been generated from this call.
           DETAILED_SUMMARY_PROMPT,
           DEFAULT_SUMMARY_FIELDS,
           async (accumulated: string) => {
-            latestMarkdown = accumulated;
-            await ensureStreamingCanvas(accumulated);
+            // Stripped from every delta, partial ones included, so `[xyne-action]`
+            // is never briefly visible mid-stream.
+            const visibleMarkdown = stripRecordingSummaryMarkedItemAnnotations(accumulated);
+            latestMarkdown = visibleMarkdown;
+            await ensureStreamingCanvas(visibleMarkdown);
           },
         );
       } finally {
@@ -2470,6 +2545,10 @@ A comprehensive detailed summary has been generated from this call.
         }
         return { success: false, error: 'Failed to generate detailed summary' };
       }
+
+      // Markers come off the ANNOTATED copy; everything downstream renders stripped.
+      await this.persistCallMarkedItems(callId, detailedSummaryMarkdown, citationCtx.segments);
+      detailedSummaryMarkdown = stripRecordingSummaryMarkedItemAnnotations(detailedSummaryMarkdown);
 
       // Defensive fallback for providers that return final content without any
       // content delta. The response is already complete, so initialize the

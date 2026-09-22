@@ -13,7 +13,7 @@ import {
 } from '../../machines/authMachine';
 import { queryClient } from '../../services/clients/queryClient';
 import { useCanCreateWorkspace } from '../../hooks/usePermissions';
-import { confirmRecordingInterrupt } from '../Recording/RecordingInterruptGuard/RecordingInterruptGuard';
+import { confirmInterrupt } from '../InterruptGuard/InterruptGuard';
 
 type CreateWorkspaceType = (typeof WorkspaceType)[keyof typeof WorkspaceType];
 
@@ -193,7 +193,7 @@ export const WorkspaceSwitcher: React.FC = () => {
       setIsOpen(false);
       return;
     }
-    if (!(await confirmRecordingInterrupt('workspaceSwitch'))) return;
+    if (!(await confirmInterrupt('workspaceSwitch'))) return;
     setSwitching(targetWorkspaceId);
     try {
       // NEW: Call switch-workspace API instead of logout
@@ -231,7 +231,7 @@ export const WorkspaceSwitcher: React.FC = () => {
   const handleCreate = async (e: React.FormEvent): Promise<void> => {
     e.preventDefault();
     if (!workspaceName.trim()) return;
-    if (!(await confirmRecordingInterrupt('workspaceSwitch'))) return;
+    if (!(await confirmInterrupt('workspaceSwitch'))) return;
     setCreating(true);
     setError(null);
     try {

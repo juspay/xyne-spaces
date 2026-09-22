@@ -210,7 +210,11 @@ const CreateCollectionModal = ({
           >
             <Radio
               value='public'
-              subtext='Anyone in the workspace can view — editing requires an invite'
+              subtext={
+                selectedChannelId
+                  ? 'Anyone in the channel can view — editing requires an invite'
+                  : 'Anyone in the workspace can view — editing requires an invite'
+              }
             >
               Public
             </Radio>

@@ -129,12 +129,14 @@ export interface VespaSearchFilters {
   priority?: string; // HIGH, MEDIUM, LOW, CRITICAL
   board?: string; // Board name/ID
   tags?: string; // Comma-separated tags — ticket labels and message tags alike
+  entity?: string; // Comma-separated entity names — AND-ed across messages and tickets
   before?: string; // Created before date (multiple formats)
   after?: string; // Created after date (multiple formats)
   on?: string; // Created on specific date (multiple formats)
   range?: string; // Time keyword (today, yesterday, this week, last 7 days, etc.)
   stage?: string; // Ticket stage
   assignee?: string; // Assigned user ID
+  userGroup?: string; // User group ID(s) - comma-separated
   dynamicFieldValues?: string | string[]; // Comma-separated or array of fieldId::value tokens
   dynamicFieldDateRanges?: Record<string, { start?: number; end?: number }>;
   subApp?: string; // Comma-separated sub-apps: 'canvas', 'transcript', 'RCA'

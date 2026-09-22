@@ -102,6 +102,7 @@ export interface ToolDefinition {
   configSchema?: Record<string, ConfigField>;
   /** Mark as write tool — always requires user approval before execution */
   isWriteTool?: boolean;
+  harness?: "local";
   /** The actual implementation — runs inside xyne-claw */
   execute: (params: Record<string, unknown>, context?: ToolExecutionContext) => Promise<string>;
   /**

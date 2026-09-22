@@ -262,6 +262,8 @@ export const workflowTable = table("workflows")
     eventType: string(),
     automationSeriesId: string().optional(),
     scheduledAt: number().optional(),
+    folderId: string().optional(),
+    summary: string().optional(),
     createdAt: number(),
     updatedAt: number(),
   })
@@ -296,6 +298,11 @@ export const workflowExecutionStateTable = table("workflow_execution_states")
     context: string().optional(),
     output: string().optional(),
     currentStepIndex: number(),
+    pausePath: string().optional(),
+    pauseType: string().optional(),
+    fireAt: number().optional(),
+    origin: string().optional(),
+    endReason: string().optional(),
   })
   .primaryKey("id");
 
@@ -520,6 +527,7 @@ export const userTable = table("users")
     notificationsPausedUntil: number().optional(),
     assignmentUnavailableUntil: number().optional(),
     calendarVisibility: string(),
+    activityStatus: string().optional(),
   })
   .primaryKey("id");
 
@@ -1253,6 +1261,7 @@ export const emailReadTable = table("email_reads")
     userId: string(),
     lastReadEmailId: string(),
     lastReadEmailAt: number(),
+    hasNewEmail: boolean().optional(),
     createdAt: number(),
     updatedAt: number(),
   })
@@ -1346,9 +1355,11 @@ export const emailChannelPreferenceTable = table("email_channel_preferences")
     autoDraftAgentSlug: string().optional(),
     deskType: string(),
     dlEmail: string().optional(),
+    dlAliases: string().optional(),
     workspaceId: string(),
     metricsEnabled: boolean().optional(),
     frtStageNames: string().optional(),
+    metricsGuestVisibility: string().optional(),
     appWebhookDeliveryEnabled: boolean(),
     deskReportEnabled: boolean().optional(),
     deskReportAgentSlug: string().optional(),
@@ -1607,8 +1618,6 @@ export const notificationTable = table("notifications")
     id: string(),
     userId: string(),
     type: string(),
-    title: string().optional(),
-    message: string().optional(),
     status: string(),
     deliveryMethods: json<string[]>(),
     metadata: json().optional(),
@@ -1762,6 +1771,7 @@ export const callRecordingTable = table("call_recordings")
     storagePath: string().optional(),
     segmentPrefix: string().optional(),
     messageId: string().optional(),
+    attachmentId: string().optional(),
     startedAt: number(),
     endedAt: number().optional(),
     createdAt: number(),
@@ -1870,6 +1880,7 @@ export const canvasVersionTable = table("canvas_versions")
 export const canvasCommentThreadTable = table("canvas_comment_threads")
   .columns({
     id: string(),
+    workspaceId: string().optional(),
     canvasId: string(),
     blockId: string(),
     anchorText: string().optional(),
@@ -1886,6 +1897,7 @@ export const canvasCommentThreadTable = table("canvas_comment_threads")
 export const canvasCommentTable = table("canvas_comments")
   .columns({
     id: string(),
+    workspaceId: string().optional(),
     threadId: string(),
     canvasId: string(),
     body: string(),
@@ -1998,6 +2010,7 @@ export const repoTable = table("repos")
     channelId: string().optional(),
     sdlcSetupExecutionId: string().optional(),
     accessCapabilities: json().optional(),
+    vcsCredentialId: string().optional(),
   })
   .primaryKey("id");
 
@@ -2017,6 +2030,24 @@ export const sdlcEntityLinkTable = table("sdlc_entity_links")
   })
   .primaryKey("id");
 
+export const sdlcItemCommentTable = table("sdlc_item_comments")
+  .columns({
+    id: string(),
+    workspaceId: string(),
+    entityType: string(),
+    entityId: string(),
+    body: string(),
+    anchorQuote: string().optional(),
+    anchorSelector: string().optional(),
+    resolved: boolean(),
+    resolvedBy: string().optional(),
+    resolvedAt: number().optional(),
+    createdBy: string(),
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey("id");
+
 export const sdlcArtifactTable = table("sdlc_artifacts")
   .columns({
     workspaceId: string(),
@@ -2033,6 +2064,17 @@ export const sdlcArtifactTable = table("sdlc_artifacts")
     updatedAt: number(),
   })
   .primaryKey("artifactId");
+
+export const sdlcFolderTable = table("sdlc_folders")
+  .columns({
+    workspaceId: string(),
+    id: string(),
+    name: string(),
+    createdBy: string(),
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey("id");
 
 export const sdlcTrackTable = table("sdlc_tracks")
   .columns({
@@ -2637,6 +2679,18 @@ export const savedUserConfigurationValueTable = table("saved_user_configuration_
   })
   .primaryKey("id");
 
+export const viewAccessTable = table("view_access")
+  .columns({
+    workspaceId: string(),
+    id: string(),
+    viewId: string(),
+    entityType: string(),
+    entityId: string(),
+    sharedBy: string(),
+    createdAt: number(),
+  })
+  .primaryKey("id");
+
 export const delayedMessageTable = table("delayed_messages")
   .columns({
     workspaceId: string(),
@@ -2969,6 +3023,7 @@ export const executionItemTable = table("execution_items")
     status: string(),
     requestedBy: json<string[]>(),
     pendingOn: json<string[]>(),
+    mentionedGroupIds: json<string[]>(),
     createdAt: number(),
     updatedAt: number(),
     resolvedAt: number().optional(),
@@ -3021,13 +3076,12 @@ export const executionRunLogTable = table("execution_run_logs")
   })
   .primaryKey("id");
 
-export const radarTeamTable = table("radar_teams")
+export const radarRuleTable = table("radar_rules")
   .columns({
     workspaceId: string(),
     id: string(),
-    ownerId: string(),
-    name: string(),
-    memberIds: json<string[]>(),
+    userId: string(),
+    conditions: json(),
     createdAt: number(),
     updatedAt: number(),
   })
@@ -3183,6 +3237,16 @@ export const ticketTableRelationships = relationships(ticketTable, ({ one, many 
     sourceField: ["id"],
     destField: ["ticketId"],
     destSchema: ticketAssignmentTable,
+  }),
+  conversation: one({
+    sourceField: ["conversationId"],
+    destField: ["conversationId"],
+    destSchema: conversationTable,
+  }),
+  emailReads: many({
+    sourceField: ["id"],
+    destField: ["ticketId"],
+    destSchema: emailReadTable,
   })
 }));
 
@@ -3347,6 +3411,11 @@ export const workflowExecutionTableRelationships = relationships(workflowExecuti
     destField: ["workflowExecutionId"],
     destSchema: workflowExecutionLockTable,
   }),
+  workflowExecutionState: one({
+    sourceField: ["id"],
+    destField: ["workflowExecutionId"],
+    destSchema: workflowExecutionStateTable,
+  }),
   externalStepResponses: many({
     sourceField: ["id"],
     destField: ["workflowExecutionId"],
@@ -3361,6 +3430,14 @@ export const workflowExecutionTableRelationships = relationships(workflowExecuti
     sourceField: ["id"],
     destField: ["sdlcSetupExecutionId"],
     destSchema: repoTable,
+  })
+}));
+
+export const workflowExecutionStateTableRelationships = relationships(workflowExecutionStateTable, ({ one }) => ({
+  workflowExecution: one({
+    sourceField: ["workflowExecutionId"],
+    destField: ["id"],
+    destSchema: workflowExecutionTable,
   })
 }));
 
@@ -4263,6 +4340,21 @@ export const conversationTableRelationships = relationships(conversationTable, (
     sourceField: ["conversationId"],
     destField: ["conversationId"],
     destSchema: messageAttachmentTable,
+  }),
+  tickets: many({
+    sourceField: ["conversationId"],
+    destField: ["conversationId"],
+    destSchema: ticketTable,
+  }),
+  labelMappings: many({
+    sourceField: ["conversationId"],
+    destField: ["conversationId"],
+    destSchema: conversationLabelMappingTable,
+  }),
+  emailDrafts: many({
+    sourceField: ["conversationId"],
+    destField: ["conversationId"],
+    destSchema: emailDraftTable,
   })
 }));
 
@@ -4292,11 +4384,35 @@ export const emailTableRelationships = relationships(emailTable, ({ one }) => ({
   })
 }));
 
+export const emailDraftTableRelationships = relationships(emailDraftTable, ({ one }) => ({
+  conversation: one({
+    sourceField: ["conversationId"],
+    destField: ["conversationId"],
+    destSchema: conversationTable,
+  })
+}));
+
+export const emailReadTableRelationships = relationships(emailReadTable, ({ one }) => ({
+  ticket: one({
+    sourceField: ["ticketId"],
+    destField: ["id"],
+    destSchema: ticketTable,
+  })
+}));
+
 export const conversationLabelTableRelationships = relationships(conversationLabelTable, ({ many }) => ({
   deskAutoLabelRuleReferences: many({
     sourceField: ["id"],
     destField: ["labelId"],
     destSchema: deskAutoLabelRuleReferenceTable,
+  })
+}));
+
+export const conversationLabelMappingTableRelationships = relationships(conversationLabelMappingTable, ({ one }) => ({
+  conversation: one({
+    sourceField: ["conversationId"],
+    destField: ["conversationId"],
+    destSchema: conversationTable,
   })
 }));
 
@@ -4853,12 +4969,25 @@ export const savedUserConfigurationTableRelationships = relationships(savedUserC
     sourceField: ["id"],
     destField: ["configId"],
     destSchema: savedUserConfigurationValueTable,
+  }),
+  viewAccess: many({
+    sourceField: ["id"],
+    destField: ["viewId"],
+    destSchema: viewAccessTable,
   })
 }));
 
 export const savedUserConfigurationValueTableRelationships = relationships(savedUserConfigurationValueTable, ({ one }) => ({
   config: one({
     sourceField: ["configId"],
+    destField: ["id"],
+    destSchema: savedUserConfigurationTable,
+  })
+}));
+
+export const viewAccessTableRelationships = relationships(viewAccessTable, ({ one }) => ({
+  view: one({
+    sourceField: ["viewId"],
     destField: ["id"],
     destSchema: savedUserConfigurationTable,
   })
@@ -5162,7 +5291,9 @@ export const schema = createSchema(
       vespaInsertionLogsTable,
       repoTable,
       sdlcEntityLinkTable,
+      sdlcItemCommentTable,
       sdlcArtifactTable,
+      sdlcFolderTable,
       sdlcTrackTable,
       lookupValueTable,
       formTable,
@@ -5204,6 +5335,7 @@ export const schema = createSchema(
       appCommandTable,
       savedUserConfigurationTable,
       savedUserConfigurationValueTable,
+      viewAccessTable,
       delayedMessageTable,
       dataSourceTable,
       dataSourceTableTable,
@@ -5228,7 +5360,7 @@ export const schema = createSchema(
       executionThreadStateTable,
       executionItemMutationTable,
       executionRunLogTable,
-      radarTeamTable,
+      radarRuleTable,
     ],
     relationships: [
       agentTableRelationships,
@@ -5247,6 +5379,7 @@ export const schema = createSchema(
       ticketStageEtaTableRelationships,
       workflowTableRelationships,
       workflowExecutionTableRelationships,
+      workflowExecutionStateTableRelationships,
       workflowExecutionLockTableRelationships,
       workflowStepTableRelationships,
       agentStepTableRelationships,
@@ -5288,7 +5421,10 @@ export const schema = createSchema(
       conversationTableRelationships,
       conversationParticipantTableRelationships,
       emailTableRelationships,
+      emailDraftTableRelationships,
+      emailReadTableRelationships,
       conversationLabelTableRelationships,
+      conversationLabelMappingTableRelationships,
       deskAutoLabelRuleReferenceTableRelationships,
       messageTableRelationships,
       messageAttachmentTableRelationships,
@@ -5327,6 +5463,7 @@ export const schema = createSchema(
       appCommandTableRelationships,
       savedUserConfigurationTableRelationships,
       savedUserConfigurationValueTableRelationships,
+      viewAccessTableRelationships,
       dataSourceTableRelationships,
       dataSourceTableTableRelationships,
       dataSourceColumnTableRelationships,
@@ -5466,7 +5603,9 @@ export type LinkAccess = Row<typeof schema.tables.link_access>;
 export type VespaInsertionLogs = Row<typeof schema.tables.vespa_insertion_logs>;
 export type Repo = Row<typeof schema.tables.repos>;
 export type SdlcEntityLink = Row<typeof schema.tables.sdlc_entity_links>;
+export type SdlcItemComment = Row<typeof schema.tables.sdlc_item_comments>;
 export type SdlcArtifact = Row<typeof schema.tables.sdlc_artifacts>;
+export type SdlcFolder = Row<typeof schema.tables.sdlc_folders>;
 export type SdlcTrack = Row<typeof schema.tables.sdlc_tracks>;
 export type LookupValue = Row<typeof schema.tables.lookup_values>;
 export type Form = Row<typeof schema.tables.forms>;
@@ -5508,6 +5647,7 @@ export type AppIncomingWebhook = Row<typeof schema.tables.app_incoming_webhooks>
 export type AppCommand = Row<typeof schema.tables.app_commands>;
 export type SavedUserConfiguration = Row<typeof schema.tables.saved_user_configurations>;
 export type SavedUserConfigurationValue = Row<typeof schema.tables.saved_user_configuration_values>;
+export type ViewAccess = Row<typeof schema.tables.view_access>;
 export type DelayedMessage = Row<typeof schema.tables.delayed_messages>;
 export type DataSource = Row<typeof schema.tables.data_sources>;
 export type DataSourceTable = Row<typeof schema.tables.data_source_tables>;
@@ -5532,4 +5672,4 @@ export type ExecutionItem = Row<typeof schema.tables.execution_items>;
 export type ExecutionThreadState = Row<typeof schema.tables.execution_thread_states>;
 export type ExecutionItemMutation = Row<typeof schema.tables.execution_item_mutations>;
 export type ExecutionRunLog = Row<typeof schema.tables.execution_run_logs>;
-export type RadarTeam = Row<typeof schema.tables.radar_teams>;
+export type RadarRule = Row<typeof schema.tables.radar_rules>;

@@ -1,4 +1,5 @@
 import { apiInstance } from '../services/clients/apiClient';
+import type { RadarRule, RadarRuleCondition } from '@xyne/shared';
 
 interface SuccessEnvelope<T> {
   success: true;
@@ -16,9 +17,16 @@ export interface RadarFeedItem {
   pendingOn: string[];
   createdAt: string;
   updatedAt: string;
+  /** True when one of THIS viewer's rules mutes it. Decided per read, so
+   *  editing a rule re-answers for every item, and it is this viewer's answer
+   *  alone — the same item reaches somebody else by their own rules. */
+  muted: boolean;
 }
 
 export interface RadarThreadCard {
+  /** A thread, or a whole DM. Bulk actions address the card through this. */
+  scopeKey: string;
+  /** Representative conversation only — open an item by its own conversationId. */
   conversationId: string;
   channelId: string;
   threadPreview: string | null;
@@ -68,6 +76,15 @@ export function fetchRadarWaitingOn(): Promise<RadarThreadCard[]> {
   ).then(d => d.threads);
 }
 
+/** Open items held by anyone but the viewer, whoever asked — the "All" half of
+ *  the Others filter. Waiting On is the same feed narrowed to the viewer's own
+ *  asks, so the two are never fetched together. */
+export function fetchRadarPendingOthers(): Promise<RadarThreadCard[]> {
+  return unwrap(
+    apiInstance.get<SuccessEnvelope<{ threads: RadarThreadCard[] }>>('/radar/feed/pending-others'),
+  ).then(d => d.threads);
+}
+
 export interface RadarItemMutation {
   id: string;
   itemId: string;
@@ -92,6 +109,9 @@ export interface RadarItemTrail {
   sourceMessages: Record<string, RadarTrailMessage>;
   threadState: { watermarkCreatedAt: string; watermarkMsgId: string; updatedAt: string } | null;
   latestMessage: { messageId: string; createdAt: string } | null;
+  /** The ASKING viewer's answer and the rules behind it — somebody else opening
+   *  the same trail gets their own, since rules are per reader. */
+  rules: { muted: boolean; matched: RadarRule[] };
 }
 
 export function fetchRadarItemTrail(itemId: string): Promise<RadarItemTrail> {
@@ -133,10 +153,10 @@ export function resolveRadarItem(itemId: string): Promise<RadarApplyResult> {
   );
 }
 
-export function resolveAllRadarItems(conversationId: string): Promise<RadarApplyResult> {
+export function resolveAllRadarItems(scopeKey: string): Promise<RadarApplyResult> {
   return unwrap(
     apiInstance.post<SuccessEnvelope<RadarApplyResult>>(
-      `/radar/threads/${encodeURIComponent(conversationId)}/resolve-all`,
+      `/radar/threads/${encodeURIComponent(scopeKey)}/resolve-all`,
     ),
   );
 }
@@ -150,10 +170,39 @@ export function dismissRadarItem(itemId: string): Promise<RadarApplyResult> {
   );
 }
 
-export function dismissAllRadarItems(conversationId: string): Promise<RadarApplyResult> {
+export function dismissAllRadarItems(scopeKey: string): Promise<RadarApplyResult> {
   return unwrap(
     apiInstance.post<SuccessEnvelope<RadarApplyResult>>(
-      `/radar/threads/${encodeURIComponent(conversationId)}/dismiss-all`,
+      `/radar/threads/${encodeURIComponent(scopeKey)}/dismiss-all`,
     ),
   );
+}
+
+/** A reader's own rules. Always the caller's — the API has no route that reads
+ *  anyone else's, so there is no id to pass here. */
+export function fetchRadarRules(): Promise<RadarRule[]> {
+  return unwrap(apiInstance.get<SuccessEnvelope<{ rules: RadarRule[] }>>('/radar/rules')).then(
+    d => d.rules,
+  );
+}
+
+export function createRadarRule(conditions: RadarRuleCondition[]): Promise<RadarRule> {
+  return unwrap(
+    apiInstance.post<SuccessEnvelope<{ rule: RadarRule }>>('/radar/rules', { conditions }),
+  ).then(d => d.rule);
+}
+
+export function updateRadarRule(id: string, conditions: RadarRuleCondition[]): Promise<RadarRule> {
+  return unwrap(
+    apiInstance.patch<SuccessEnvelope<{ rule: RadarRule }>>(
+      `/radar/rules/${encodeURIComponent(id)}`,
+      { conditions },
+    ),
+  ).then(d => d.rule);
+}
+
+export function deleteRadarRule(id: string): Promise<void> {
+  return unwrap(
+    apiInstance.delete<SuccessEnvelope<{ id: string }>>(`/radar/rules/${encodeURIComponent(id)}`),
+  ).then(() => undefined);
 }

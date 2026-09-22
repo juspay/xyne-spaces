@@ -67,6 +67,7 @@ export async function revokeDesignArtifactShare(shareId: string): Promise<void> 
 
 export async function getPublicDesignArtifact(token: string): Promise<PublicDesignArtifact> {
   const response = await fetch(`${AUTH_API_URL}/api/v1/public/design-shares/metadata`, {
+    credentials: "include",
     headers: { "x-design-share-token": token },
   });
   if (!response.ok) {
@@ -79,6 +80,7 @@ export async function getPublicDesignArtifact(token: string): Promise<PublicDesi
 
 export async function getPublicDesignArtifactHtml(token: string): Promise<Blob> {
   const response = await fetch(`${AUTH_API_URL}/api/v1/public/design-shares/content`, {
+    credentials: "include",
     headers: { "x-design-share-token": token },
   });
   if (!response.ok) {
@@ -1025,9 +1027,11 @@ export interface ChainWorkflowEdge {
   id: string;
   fromNodeId: string;
   toNodeId: string;
-  mode?: "always" | "tools" | "judge";
+  mode?: "always" | "tools" | "judge" | "commands";
   toolsMustInclude?: string[];
   toolsMustExclude?: string[];
+  commandsMustMatch?: string[];
+  commandsMustNotMatch?: string[];
   judgeContext?: string;
   taskTemplate?: string;
 }
@@ -2633,6 +2637,33 @@ export async function removeAgentShare(slug: string, requesterId: string, target
 }
 
 /**
+ * Transfer agent ownership to another user. Immediate — there is no acceptance
+ * step — and owner/admin-only, same-org only (enforced server side).
+ *
+ * The agent row itself is kept, so the Spaces app identity, every channel
+ * install and all existing schedules survive the transfer. By default the
+ * outgoing owner is kept on as an EDITOR; without that they would lose sight of
+ * a personal-scope agent entirely, since visibility is derived from ownership
+ * OR a share row.
+ */
+export async function transferAgentOwnership(
+  slug: string,
+  requesterId: string,
+  newOwnerUserId: string,
+  keepPreviousOwnerAsEditor = true,
+): Promise<{ ownerUserId: string; previousOwnerUserId: string | null }> {
+  const data = await request<{ success: boolean; data: { ownerUserId: string; previousOwnerUserId: string | null } }>(
+    `${AUTH_API_URL}/api/v1/agents/${slug}/transfer-ownership`,
+    {
+      method: "POST",
+      headers: { "x-user-id": requesterId, "Content-Type": "application/json" },
+      body: JSON.stringify({ newOwnerUserId, keepPreviousOwnerAsEditor }),
+    },
+  );
+  return data.data;
+}
+
+/**
  * Health-check a single agent-pinned MCP instance. Hits the agent-scoped
  * health route (mirrors checkConnectionHealth for global connections) so the
  * agent MCP tab can show a real reachability status instead of a hardcoded
@@ -2713,6 +2744,66 @@ export async function deleteAgentMcpConnection(
 ): Promise<void> {
   await request<{ success: boolean }>(
     `${AUTH_API_URL}/api/v1/agents/${slug}/mcp/connections/${encodeURIComponent(mcpServerType)}/${encodeURIComponent(instanceSlug)}`,
+    { method: "DELETE", headers: { "x-user-id": requesterId } },
+  );
+}
+
+export interface SubagentMcpConnectionMeta {
+  id: string;
+  mcpServerId: string;
+  mcpServerType: string;
+  mcpServerName: string;
+  slug: string;
+  displayName: string;
+  nonOverridable: boolean;
+  createdByUserId: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export async function listSubagentMcpConnections(
+  name: string,
+  requesterId: string,
+): Promise<SubagentMcpConnectionMeta[]> {
+  const data = await request<{ success: boolean; data: SubagentMcpConnectionMeta[] }>(
+    `${AUTH_API_URL}/api/v1/subagents/${encodeURIComponent(name)}/mcp/connections`,
+    { headers: { "x-user-id": requesterId } },
+  );
+  return data.data;
+}
+
+export async function upsertSubagentMcpConnection(
+  name: string,
+  requesterId: string,
+  mcpServerType: string,
+  credentials: Record<string, string>,
+  opts?: { slug?: string; displayName?: string; nonOverridable?: boolean },
+): Promise<SubagentMcpConnectionMeta> {
+  const data = await request<{ success: boolean; data: SubagentMcpConnectionMeta }>(
+    `${AUTH_API_URL}/api/v1/subagents/${encodeURIComponent(name)}/mcp/connections`,
+    {
+      method: "POST",
+      headers: { "x-user-id": requesterId, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        mcpServerType,
+        credentials,
+        ...(opts?.slug ? { slug: opts.slug } : {}),
+        ...(opts?.displayName ? { displayName: opts.displayName } : {}),
+        ...(opts?.nonOverridable !== undefined ? { nonOverridable: opts.nonOverridable } : {}),
+      }),
+    },
+  );
+  return data.data;
+}
+
+export async function deleteSubagentMcpConnection(
+  name: string,
+  requesterId: string,
+  mcpServerType: string,
+  instanceSlug = "default",
+): Promise<void> {
+  await request<{ success: boolean }>(
+    `${AUTH_API_URL}/api/v1/subagents/${encodeURIComponent(name)}/mcp/connections/${encodeURIComponent(mcpServerType)}/${encodeURIComponent(instanceSlug)}`,
     { method: "DELETE", headers: { "x-user-id": requesterId } },
   );
 }
@@ -3983,6 +4074,127 @@ export async function getRun(userId: string, sessionId: string): Promise<AgentRu
     { headers: { "x-user-id": userId } },
   );
   return data.data;
+}
+
+// ── Paged run listing (GET /runs/paged) ──────────────────────────────
+
+/**
+ * One row of the paged listing. A deliberate light projection: no
+ * `toolInvocations` (JSON, often hundreds of KB per row), no `result`/`error`,
+ * no latency block — nothing a list row renders. Use `getRun` when the heavy
+ * fields are actually needed.
+ *
+ * The field set is a structural SUBSET of `AgentRun`, so a full `AgentRun` is
+ * assignable to it. That is what lets one shared `RunRow` component render
+ * rows from `listRuns`, `listRunsPaged`, and `getRun` alike.
+ */
+export interface AgentRunListItem {
+  id: string;
+  sessionId: string;
+  userId: string;
+  agentSlug: string;
+  triggerSource: AgentRun["triggerSource"];
+  status: AgentRun["status"];
+  /** Capped at 2000 chars server-side — long enough that the UI-only task
+   *  search isn't lying about what it matched. */
+  task: string;
+  conversationId: string | null;
+  channelId: string | null;
+  startedAt: string;
+  completedAt: string | null;
+  tokensIn: number | null;
+  tokensOut: number | null;
+  rating: "up" | "down" | null;
+  /** Hydrated only by scope=all — null/absent otherwise. */
+  userName?: string | null;
+  userEmail?: string | null;
+}
+
+export interface RunAgentFacet {
+  agentSlug: string;
+  count: number;
+}
+
+export interface RunUserFacet {
+  userId: string;
+  name: string | null;
+  email: string | null;
+  count: number;
+}
+
+export interface AgentRunListPage {
+  rows: AgentRunListItem[];
+  total: number;
+  limit: number;
+  offset: number;
+  /** Present only when the caller asked for `facets`. `users` is always `[]`
+   *  under scope=own — the server never ships an org's roster to a caller that
+   *  passed no elevation check. */
+  facets?: { agents: RunAgentFacet[]; users: RunUserFacet[] };
+}
+
+export interface AgentRunListQuery {
+  scope?: "own" | "all";
+  /** Omit for a CROSS-AGENT listing (scope=all + no slug requires CLAW_ADMIN). */
+  agentSlug?: string;
+  /** scope=all only — sending it with scope=own is a 400, not a silent ignore. */
+  userId?: string;
+  status?: string;
+  /** Case-insensitive sessionId PREFIX, min 4 chars. Setting it makes the
+   *  server IGNORE from/to — an id names one run, so intersecting it with a
+   *  date window just hides the run the caller already identified. Scope and
+   *  org ACL still apply. */
+  sessionId?: string;
+  /** ISO datetimes. Server defaults to the last 30 days and rejects a range
+   *  wider than 366 days. Ignored when `sessionId` is set. */
+  from?: string;
+  to?: string;
+  limit?: number;
+  offset?: number;
+  facets?: boolean;
+}
+
+/**
+ * Offset-paged run listing with an exact `total`, backing both the agent
+ * Activity tab and the admin Runs page.
+ *
+ * The wire shape is FLAT — `{ success, data: rows, total, limit, offset,
+ * facets? }`, with `total` a SIBLING of `data` rather than nested inside it —
+ * the same envelope `listAuditLogsPaged` parses. Do NOT copy
+ * `listAdminScheduledJobs`' nested `data.rows` parser here: against this
+ * endpoint it yields `undefined` rows.
+ */
+export async function listRunsPaged(requesterId: string, q: AgentRunListQuery): Promise<AgentRunListPage> {
+  const qs = new URLSearchParams();
+  if (q.scope) qs.set("scope", q.scope);
+  if (q.agentSlug) qs.set("agentSlug", q.agentSlug);
+  if (q.userId) qs.set("userId", q.userId);
+  if (q.status) qs.set("status", q.status);
+  if (q.sessionId) qs.set("sessionId", q.sessionId);
+  if (q.from) qs.set("from", q.from);
+  if (q.to) qs.set("to", q.to);
+  if (q.limit != null) qs.set("limit", String(q.limit));
+  if (q.offset != null) qs.set("offset", String(q.offset));
+  if (q.facets) qs.set("facets", "1");
+  const suffix = qs.toString() ? `?${qs.toString()}` : "";
+  const data = await request<{
+    success: boolean;
+    data: AgentRunListItem[];
+    total: number;
+    limit: number;
+    offset: number;
+    facets?: { agents: RunAgentFacet[]; users: RunUserFacet[] };
+  }>(
+    `${AUTH_API_URL}/api/v1/runs/paged${suffix}`,
+    { headers: { "x-user-id": requesterId } },
+  );
+  return {
+    rows: data.data,
+    total: data.total,
+    limit: data.limit,
+    offset: data.offset,
+    ...(data.facets ? { facets: data.facets } : {}),
+  };
 }
 
 // ── Subagents (admin) ────────────────────────────────────────────────
@@ -6908,4 +7120,162 @@ export async function resyncChannelEntityTypes(
     `${AUTH_API_URL}/api/v1/entity-extraction/channels/${channelId}/resync-types`,
     { method: "POST", headers: { "x-user-id": userId } },
   );
+}
+
+// ── Agent index ────────────────────────────────────────────────────────────
+// The per-org Hindsight bank holding one searchable document per agent.
+
+export type AgentIndexKind = "identity" | "persona" | "usage";
+
+export interface AgentIndexStatus {
+  slug: string;
+  name: string;
+  agentId: string;
+  indexed: AgentIndexKind[];
+  missing: AgentIndexKind[];
+  stale: boolean;
+  liveUpdatedAt: string;
+  indexedUpdatedAt: string | null;
+  promptVersion: number | null;
+  indexedPromptVersion: number | null;
+  chars: number;
+}
+
+/** One stored document. The provider splits long content into chunks; `chunks`
+ *  reports how many it took, and `text` is the reassembled whole. */
+export interface AgentIndexDocument {
+  kind: AgentIndexKind | "unknown";
+  slug: string;
+  contentHash: string | null;
+  text: string;
+  chars: number;
+  chunks: number;
+  indexedAt: string | null;
+}
+
+export interface AgentIndexOverview {
+  agents: AgentIndexStatus[];
+  indexed: number;
+  total: number;
+  stale: number;
+  entries: number;
+  chars: number;
+  bankId: string;
+  bankConfig: Record<string, unknown>;
+}
+
+export interface AgentIndexMatch {
+  slug: string;
+  agentId: string | null;
+  score: number;
+  matchedKinds: AgentIndexKind[];
+  evidence: string;
+}
+
+export async function getAgentIndexOverview(): Promise<AgentIndexOverview> {
+  const data = await request<{ success: boolean; data: AgentIndexOverview }>(
+    `${AUTH_API_URL}/api/v1/agent-index/overview`,
+  );
+  return data.data;
+}
+
+export async function getAgentIndexDetail(
+  slug: string,
+): Promise<{ status: AgentIndexStatus; documents: AgentIndexDocument[] }> {
+  const data = await request<{
+    success: boolean;
+    data: { status: AgentIndexStatus; documents: AgentIndexDocument[] };
+  }>(`${AUTH_API_URL}/api/v1/agent-index/agents/${encodeURIComponent(slug)}`);
+  return data.data;
+}
+
+export async function syncAgentIndex(slug: string): Promise<void> {
+  await request(`${AUTH_API_URL}/api/v1/agent-index/agents/${encodeURIComponent(slug)}/sync`, {
+    method: "POST",
+  });
+}
+
+export async function rebuildAgentIndex(): Promise<{ synced: number; failed: number; purged: number }> {
+  const data = await request<{
+    success: boolean;
+    data: { synced: number; failed: number; purged: number };
+  }>(`${AUTH_API_URL}/api/v1/agent-index/rebuild`, { method: "POST" });
+  return data.data;
+}
+
+export async function searchAgentIndex(need: string, limit = 10): Promise<AgentIndexMatch[]> {
+  const data = await request<{ success: boolean; data: { matches: AgentIndexMatch[] } }>(
+    `${AUTH_API_URL}/api/v1/agent-index/search`,
+    { method: "POST", body: JSON.stringify({ need, limit }) },
+  );
+  return data.data.matches;
+}
+
+export interface UsagePatternFile {
+  content: string;
+  updatedBy: string | null;
+  updatedAt: string;
+  chars: number;
+  /** Server-owned: it is the same flag the synthesizer checks before it writes,
+   *  so the UI cannot promise a protection the backend will not honour. */
+  humanEdited: boolean;
+}
+
+export interface UsagePatternSynthesis {
+  slug: string;
+  runCount: number;
+  distinctUsers: number;
+  patternsWritten: number;
+  skipped?: string;
+  chars: number;
+  window: { start: string; end: string };
+}
+
+/** Synthesis runs longer than a gateway will hold a connection, so the POST
+ *  starts a pass and returns immediately. Poll {@link getUsagePatternJob}. */
+export type UsagePatternJob =
+  | { status: "running"; startedAt: string }
+  | { status: "busy"; running: number }
+  | { status: "done"; startedAt: string; finishedAt: string; outcome: Omit<UsagePatternSynthesis, "window"> }
+  | { status: "error"; startedAt: string; finishedAt: string; error: string };
+
+export async function triggerUsagePatternSynthesis(
+  slug: string,
+  start?: string,
+  end?: string,
+): Promise<{ job: UsagePatternJob; window: { start: string; end: string } }> {
+  const data = await request<{
+    success: boolean;
+    data: { job: UsagePatternJob; window: { start: string; end: string } };
+  }>(
+    `${AUTH_API_URL}/api/v1/agent-index/agents/${encodeURIComponent(slug)}/usage-patterns`,
+    { method: "POST", body: JSON.stringify({ start, end }) },
+  );
+  return data.data;
+}
+
+export async function getUsagePatternFile(slug: string): Promise<UsagePatternFile | null> {
+  const data = await request<{ success: boolean; data: UsagePatternFile | null }>(
+    `${AUTH_API_URL}/api/v1/agent-index/agents/${encodeURIComponent(slug)}/usage-patterns`,
+  );
+  return data.data;
+}
+
+/** Progress of a pass started on the server this request lands on. Null when
+ *  nothing ran there, which includes a poll reaching a different replica. */
+export async function getUsagePatternJob(slug: string): Promise<UsagePatternJob | null> {
+  const data = await request<{ success: boolean; job: UsagePatternJob | null }>(
+    `${AUTH_API_URL}/api/v1/agent-index/agents/${encodeURIComponent(slug)}/usage-patterns`,
+  );
+  return data.job ?? null;
+}
+
+/** Hand-edit the shared usage-pattern file. Marks it human-written, which stops
+ *  the synthesizer overwriting it. Admin only. */
+export async function writeUsagePatternFile(slug: string, content: string): Promise<UsagePatternFile | null> {
+  const data = await request<{ success: boolean; data: UsagePatternFile | null }>(
+    `${AUTH_API_URL}/api/v1/agent-index/agents/${encodeURIComponent(slug)}/usage-patterns`,
+    { method: "PUT", body: JSON.stringify({ content }) },
+  );
+  return data.data;
 }

@@ -21,12 +21,6 @@ import { Agent } from 'undici';
 // real clock. Mirrors streamDispatcher in claw-auth's consume-claw-stream.ts.
 const briefStreamDispatcher = new Agent({ headersTimeout: 0, bodyTimeout: 0, connectTimeout: 10_000 });
 
-export interface ChannelClawAgent {
-  id: string;
-  name: string;
-  agentSlug: string;
-  description: string | null;
-}
 
 export interface ClawRunRequest {
   userId: string;
@@ -96,6 +90,11 @@ export interface ClawRunRequest {
   dataSourceId?: string;
   draftId?: string;
   focusedComponentId?: string;
+  workflowContext?: {
+    workflowId?: string | null;
+    executionId?: string | null;
+    stepId?: string | null;
+  };
   /** Generate contextual next-question chips for this response. Ask AI v2
    *  enables this explicitly for every agent slug. */
   generateFollowUpSuggestions?: boolean;
@@ -121,6 +120,12 @@ export interface ClawRunRequest {
    *  /run/stream, which merges it over the agent's modelSettings for this run.
    *  Absent = agent default. */
   thinkingLevel?: 'off' | 'minimal' | 'low' | 'medium' | 'high';
+  studioMode?: 'design';
+  sandboxMode?: 'local' | 'remote' | 'container';
+  designArtifactAttachmentId?: string;
+  designSelection?: unknown;
+  pageSelection?: unknown;
+  openItems?: unknown;
 }
 
 export interface ClawRunStreamResult {
@@ -134,6 +139,10 @@ export interface ClawRunStreamResult {
 export interface ClawAgentModel {
   id: string;
   name: string;
+  provider?: 'local-harness';
+  harness?: string;
+  deviceName?: string;
+  recommended?: boolean;
 }
 
 export interface AccessibleClawAgent {
@@ -204,6 +213,15 @@ export interface ClawDebugArtifactBundle {
   runs: Array<{ fileName: string; data: Record<string, unknown> }>;
   subagents: Array<{ fileName: string; data: Record<string, unknown> }>;
   followUpDiagnostics?: FollowUpDiagnostic[];
+  /** Runs in the whole conversation vs. the runs on this page — xyne-claw caps
+   *  the page (default 25) and claw-auth restates both after its per-user ACL,
+   *  so the debugger can say "showing N of M" and page with `before`. */
+  totalRuns?: number;
+  truncated?: boolean;
+  /** Non-fatal read problems (evicted PVC dir, unreadable GCS object, ignored
+   *  cursor). Surfaced so a partial trace never reads as "the agent did
+   *  nothing". Passed through verbatim — never summarised or dropped here. */
+  warnings?: string[];
 }
 
 export interface FollowUpDiagnostic {
@@ -279,15 +297,6 @@ export interface S2SRunAgentRequest {
   context?: string;
   workspaceId?: string;
   executionProfile?: 'sdlc';
-  sdlcOperation?: 'baseline' | 'work' | 'wiki';
-  sdlcWikiRole?:
-    | 'BOOTSTRAP_SURVEY'
-    | 'BOOTSTRAP_PAGE'
-    | 'BOOTSTRAP_EDITOR'
-    | 'BOOTSTRAP'
-    | 'GENERATOR'
-    | 'ARCHITECTURE_VALIDATOR'
-    | 'CORRECTOR';
   sdlcContext?: Record<string, unknown>;
   allowWriteInReadOnlyJob?: boolean;
 }
@@ -333,6 +342,37 @@ function getS2SWebhookUrl(spacesAppId: string): string {
 function getS2SHeaders(): Record<string, string> {
   const s2sKey = config.xyneClaw.s2sKey;
   return s2sKey ? { 'x-s2s-key': s2sKey } : {};
+}
+
+export interface SynthesizedSpeechResult {
+  audioBase64: string;
+  mimeType: string;
+}
+
+export async function synthesizeSpeech(payload: {
+  text: string;
+  voice?: string;
+}): Promise<SynthesizedSpeechResult> {
+  const url = `${getClawBaseUrl()}/claw/api/v1/internal/tts`;
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getS2SHeaders() },
+    body: JSON.stringify({ text: payload.text, ...(payload.voice ? { voice: payload.voice } : {}) }),
+  });
+  if (!response.ok) {
+    const errorText = await response.text();
+    logger.error(`[ClawAgentService] tts failed: ${response.status} ${errorText}`);
+    throw new Error('TTS synthesis failed');
+  }
+  const json = (await response.json()) as {
+    success: boolean;
+    data?: SynthesizedSpeechResult;
+    error?: string;
+  };
+  if (!json.success || !json.data) {
+    throw new Error(json.error || 'TTS synthesis failed');
+  }
+  return json.data;
 }
 
 function inferMimeType(filename: string | undefined, existingMimeType: string): string {
@@ -384,99 +424,6 @@ function extractUserIdHeader(userId: string, workspaceId?: string): Record<strin
 // Channel agent listing
 // ============================================================================
 
-/**
- * List claw agents installed in a channel by inspecting the
- * channel participants that have claw-app installations.
- */
-export async function listClawAgentsInChannel(channelId: string): Promise<ChannelClawAgent[]> {
-  const clawPrefix = `${getClawBaseUrl()}/claw/`;
-
-  // Find all installed apps with claw webhook URLs
-  const installedApps = await db.installedApps.findMany({
-    where: {
-      webhookUrl: { startsWith: clawPrefix },
-    },
-    select: {
-      userId: true,
-      webhookUrl: true,
-    },
-  });
-
-  if (!installedApps.length) return [];
-
-  // Check which of these users are participants in the channel
-  const channelParticipants = await db.channelParticipant.findMany({
-    where: {
-      channelId,
-      userId: { in: installedApps.map((app) => app.userId) },
-    },
-    select: {
-      userId: true,
-    },
-  });
-
-  const participantUserIds = new Set(channelParticipants.map((p) => p.userId));
-
-  // Get user details for participants
-  const users = await db.user.findMany({
-    where: {
-      id: { in: Array.from(participantUserIds) },
-    },
-    select: {
-      id: true,
-      name: true,
-    },
-  });
-
-  const userMap = new Map(users.map((u) => [u.id, u]));
-
-  // Extract agent slugs from webhook URLs
-  // Production URL format: https://spaces.xyne.juspay.net/claw/api/v1/webhook/{agent-slug}
-  // The agent slug is the last segment of the URL path after /webhook/
-  const agentSlugsFromApps: Array<{ userId: string; agentSlug: string }> = [];
-  for (const app of installedApps) {
-    if (!participantUserIds.has(app.userId)) continue;
-
-    const url = app.webhookUrl;
-    if (!url) continue;
-
-    // Extract agent slug from the webhook URL
-    // Try to match /webhook/{agent-slug} pattern first (production format)
-    // Fallback to extracting the last path segment
-    let agentSlug: string | null = null;
-
-    const webhookMatch = url.match(/\/webhook\/([^/?#]+)/);
-    if (webhookMatch) {
-      agentSlug = webhookMatch[1] ?? null;
-    } else {
-      // Fallback: extract the last path segment after /claw/
-      const pathAfterClaw = url.split('/claw/')[1];
-      if (pathAfterClaw) {
-        const segments = pathAfterClaw.split('/').filter((s) => s.length > 0);
-        agentSlug = segments[segments.length - 1] ?? null;
-      }
-    }
-
-    if (!agentSlug) continue;
-
-    agentSlugsFromApps.push({ userId: app.userId, agentSlug });
-  }
-
-  const result: ChannelClawAgent[] = [];
-  for (const { userId, agentSlug } of agentSlugsFromApps) {
-    const user = userMap.get(userId);
-    if (!user) continue;
-
-    result.push({
-      id: user.id,
-      name: user.name,
-      agentSlug,
-      description: null,
-    });
-  }
-
-  return result;
-}
 
 // ============================================================================
 // Run / stream
@@ -622,6 +569,14 @@ export async function runClawAgentStream(
     ...(request.instant && { instant: true }),
     ...(request.researchContext && { researchContext: request.researchContext }),
     ...(request.thinkingLevel && { thinkingLevel: request.thinkingLevel }),
+    ...(request.studioMode && { studioMode: request.studioMode }),
+    ...(request.sandboxMode && { sandboxMode: request.sandboxMode }),
+    ...(request.designArtifactAttachmentId && {
+      designArtifactAttachmentId: request.designArtifactAttachmentId,
+    }),
+    ...(request.designSelection !== undefined && { designSelection: request.designSelection }),
+    ...(request.pageSelection !== undefined && { pageSelection: request.pageSelection }),
+    ...(request.openItems !== undefined && { openItems: request.openItems }),
     agentConfig: {
       webSearchEnabled: String(request.webSearchEnabled),
       deepResearchEnabled: String(request.deepResearchEnabled),
@@ -632,6 +587,15 @@ export async function runClawAgentStream(
       ...(request.draftId && { SPACES_DASHBOARD_DRAFT_ID: request.draftId }),
       ...(request.focusedComponentId && {
         SPACES_FOCUSED_COMPONENT_ID: request.focusedComponentId,
+      }),
+      ...(request.workflowContext?.workflowId && {
+        SPACES_WORKFLOW_ID: request.workflowContext.workflowId,
+      }),
+      ...(request.workflowContext?.executionId && {
+        SPACES_WORKFLOW_EXECUTION_ID: request.workflowContext.executionId,
+      }),
+      ...(request.workflowContext?.stepId && {
+        SPACES_WORKFLOW_STEP_ID: request.workflowContext.stepId,
       }),
     },
     ...(additionalInstructions && { additionalInstructions }),
@@ -754,6 +718,15 @@ export async function runClawAgentStream(
                 `data: ${JSON.stringify({
                   type: 'tool_invocation',
                   toolInvocation: parsed,
+                })}\n\n`
+              );
+              if (typeof (res as any).flush === 'function') (res as any).flush();
+            } else if (eventType === 'plan') {
+              res.write(
+                `data: ${JSON.stringify({
+                  type: 'plan',
+                  todos: parsed.todos,
+                  ...(parsed.title ? { title: parsed.title } : {}),
                 })}\n\n`
               );
               if (typeof (res as any).flush === 'function') (res as any).flush();
@@ -1040,6 +1013,7 @@ export async function listClawAgentModels(
   data: ClawAgentModel[];
   defaultModel: string | null;
   pinProvider: 'litellm' | 'spaces';
+  recommendedId?: string;
 }> {
   const slug = agentSlug || 'ask-ai';
   const url = `${getClawBaseUrl()}/claw/api/v1/agent-chat/${encodeURIComponent(slug)}/litellm-models`;
@@ -1057,6 +1031,7 @@ export async function listClawAgentModels(
         data: ClawAgentModel[];
         defaultModel?: string | null;
         pinProvider?: 'litellm' | 'spaces';
+        recommendedId?: string;
       };
       if (result.success && (result.data ?? []).length > 0) {
         return {
@@ -1068,6 +1043,7 @@ export async function listClawAgentModels(
           // back to the platform allowed list. Old claw-auth omits the field
           // and only ever served the credential list — default "litellm".
           pinProvider: result.pinProvider ?? 'litellm',
+          ...(result.recommendedId ? { recommendedId: result.recommendedId } : {}),
         };
       }
       if (result.success) {
@@ -1173,6 +1149,136 @@ export async function getClawConversationMessages(
   }
 
   return (await response.json()) as ClawMessagesResponse;
+}
+
+export async function listClawConversationArtifacts(
+  req: { headers?: { cookie?: string }; userId: string },
+  convId: string
+): Promise<{ success: boolean; artifacts: unknown[] }> {
+  const url = `${getClawBaseUrl()}/claw/api/v1/conversation-artifacts?conversationId=${encodeURIComponent(convId)}`;
+  const response = await fetch(url, {
+    headers: {
+      ...extractUserIdHeader(req.userId),
+      ...extractCookieHeader(req),
+    },
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    logger.error(`[ClawAgentService] listConversationArtifacts failed: ${response.status} ${errorText}`);
+    throw new Error('Failed to fetch conversation artifacts');
+  }
+
+  return (await response.json()) as { success: boolean; artifacts: unknown[] };
+}
+
+export async function getClawConversationArtifact(
+  req: { headers?: { cookie?: string }; userId: string },
+  artifactId: string
+): Promise<{ success: boolean; artifact: unknown }> {
+  const url = `${getClawBaseUrl()}/claw/api/v1/conversation-artifacts/${encodeURIComponent(artifactId)}`;
+  const response = await fetch(url, {
+    headers: {
+      ...extractUserIdHeader(req.userId),
+      ...extractCookieHeader(req),
+    },
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    logger.error(`[ClawAgentService] getConversationArtifact failed: ${response.status} ${errorText}`);
+    throw new Error('Failed to fetch artifact');
+  }
+
+  return (await response.json()) as { success: boolean; artifact: unknown };
+}
+
+export async function clawArtifactComments(
+  req: { headers?: { cookie?: string }; userId: string },
+  artifactId: string,
+): Promise<unknown> {
+  const url = `${getClawBaseUrl()}/claw/api/v1/conversation-artifacts/${encodeURIComponent(artifactId)}/comments`;
+  const response = await fetch(url, {
+    headers: { ...extractUserIdHeader(req.userId), ...extractCookieHeader(req) },
+  });
+  if (!response.ok) {
+    const errorText = await response.text();
+    logger.error(`[ClawAgentService] artifactComments failed: ${response.status} ${errorText}`);
+    throw new Error('Failed to list artifact comments');
+  }
+  return response.json();
+}
+
+export async function addClawArtifactComment(
+  req: { headers?: { cookie?: string }; userId: string },
+  artifactId: string,
+  payload: { body: string; anchor?: unknown },
+): Promise<unknown> {
+  const url = `${getClawBaseUrl()}/claw/api/v1/conversation-artifacts/${encodeURIComponent(artifactId)}/comments`;
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...extractUserIdHeader(req.userId),
+      ...extractCookieHeader(req),
+    },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) {
+    const errorText = await response.text();
+    logger.error(`[ClawAgentService] addArtifactComment failed: ${response.status} ${errorText}`);
+    throw new Error('Failed to add the comment');
+  }
+  return response.json();
+}
+
+export async function resolveClawArtifactComment(
+  req: { headers?: { cookie?: string }; userId: string },
+  artifactId: string,
+  commentId: string,
+  resolved: boolean,
+): Promise<unknown> {
+  const url = `${getClawBaseUrl()}/claw/api/v1/conversation-artifacts/${encodeURIComponent(artifactId)}/comments/${encodeURIComponent(commentId)}`;
+  const response = await fetch(url, {
+    method: 'PATCH',
+    headers: {
+      'Content-Type': 'application/json',
+      ...extractUserIdHeader(req.userId),
+      ...extractCookieHeader(req),
+    },
+    body: JSON.stringify({ resolved }),
+  });
+  if (!response.ok) {
+    const errorText = await response.text();
+    logger.error(`[ClawAgentService] resolveArtifactComment failed: ${response.status} ${errorText}`);
+    throw new Error('Failed to update the comment');
+  }
+  return response.json();
+}
+
+export async function updateClawConversationArtifact(
+  req: { headers?: { cookie?: string }; userId: string },
+  artifactId: string,
+  patch: { title?: string; pinned?: boolean; status?: string }
+): Promise<{ success: boolean; artifact: unknown }> {
+  const url = `${getClawBaseUrl()}/claw/api/v1/conversation-artifacts/${encodeURIComponent(artifactId)}`;
+  const response = await fetch(url, {
+    method: 'PATCH',
+    headers: {
+      'Content-Type': 'application/json',
+      ...extractUserIdHeader(req.userId),
+      ...extractCookieHeader(req),
+    },
+    body: JSON.stringify(patch),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    logger.error(`[ClawAgentService] updateConversationArtifact failed: ${response.status} ${errorText}`);
+    throw new Error('Failed to update artifact');
+  }
+
+  return (await response.json()) as { success: boolean; artifact: unknown };
 }
 
 /**
@@ -1285,20 +1391,54 @@ export async function deleteClawConversation(
   return (await response.json()) as { success: boolean; data: { deleted: number } };
 }
 
+/**
+ * Ceiling for the debug-bundle proxy hop. claw-auth already bounds its own hop
+ * to xyne-claw at 45s, so anything slower than this is a stalled connection,
+ * not a slow read — and without a signal here a stall pinned the request (and
+ * the dashboard's spinner) forever, since the browser client sets no timeout.
+ */
+const DEBUG_BUNDLE_TIMEOUT_MS = (() => {
+  const override = Number(process.env['CLAW_DEBUG_PROXY_TIMEOUT_MS']);
+  // A non-numeric override would make AbortSignal.timeout throw on every call,
+  // so an unusable value falls back rather than breaking the endpoint.
+  return Number.isFinite(override) && override > 0 ? override : 60_000;
+})();
+
 export async function getClawDebugArtifacts(
   req: { headers?: { cookie?: string }; userId: string },
   convId: string,
-  agentSlug?: string
+  agentSlug?: string,
+  // xyne-claw caps the run page and pages it with a `before` runId cursor;
+  // claw-auth forwards both. Forward them here too, otherwise `truncated`
+  // reaches the debugger with no way to ask for the withheld runs.
+  paging?: { limit?: string; before?: string }
 ): Promise<{ success: boolean; data: ClawDebugArtifactBundle }> {
   const slug = agentSlug || 'ask-ai';
-  const url = `${getClawBaseUrl()}/claw/api/v1/agent-chat/${encodeURIComponent(slug)}/chat/${encodeURIComponent(convId)}/debug`;
-  const response = await fetch(url, {
-    headers: {
-      ...getS2SHeaders(),
-      ...extractUserIdHeader(req.userId),
-      ...extractCookieHeader(req),
-    },
-  });
+  const query = new URLSearchParams();
+  if (paging?.limit) query.set('limit', paging.limit);
+  if (paging?.before) query.set('before', paging.before);
+  const queryString = query.toString();
+  const suffix = queryString ? `?${queryString}` : '';
+  const url = `${getClawBaseUrl()}/claw/api/v1/agent-chat/${encodeURIComponent(slug)}/chat/${encodeURIComponent(convId)}/debug${suffix}`;
+  // Qualified: bare `Response` resolves to express's in this module.
+  let response: globalThis.Response;
+  try {
+    response = await fetch(url, {
+      headers: {
+        ...getS2SHeaders(),
+        ...extractUserIdHeader(req.userId),
+        ...extractCookieHeader(req),
+      },
+      signal: AbortSignal.timeout(DEBUG_BUNDLE_TIMEOUT_MS),
+    });
+  } catch (error) {
+    // An abort surfaces as a DOMException whose message ("The operation was
+    // aborted due to timeout") tells the debugger nothing about which hop died.
+    logger.error(
+      `[ClawAgentService] getDebugArtifacts fetch failed: ${error instanceof Error ? error.message : String(error)}`
+    );
+    throw new Error('Failed to fetch debug artifacts');
+  }
 
   if (!response.ok) {
     const errorText = await response.text();
@@ -1308,6 +1448,11 @@ export async function getClawDebugArtifacts(
     );
   }
 
+  // Deliberately an unfiltered pass-through: the bundle's event payloads carry
+  // fields this service has no schema for (blob refs, `<field>UnchangedFromSeq`
+  // back-references, folded llm_request/llm_response params). Re-mapping keys
+  // here would silently blank panels in the debugger every time claw's trace
+  // format grows a field.
   return (await response.json()) as { success: boolean; data: ClawDebugArtifactBundle };
 }
 
@@ -1327,10 +1472,6 @@ export async function approveClawAction(
     signature?: string;
   }
 ): Promise<ClawActionApprovalResult> {
-  if (!payload.approved) {
-    return { success: true, data: { content: '' } };
-  }
-
   const url = `${getClawBaseUrl()}/claw/api/v1/agent-chat/ask-ai/chat/approve-action`;
   const pendingAction: Record<string, unknown> = {
     serverType: payload.serverType || 'xyne-spaces',
@@ -1347,7 +1488,7 @@ export async function approveClawAction(
       ...extractUserIdHeader(req.userId),
       ...extractCookieHeader(req),
     },
-    body: JSON.stringify({ pendingAction }),
+    body: JSON.stringify({ pendingAction, conversationId: payload.sessionId, approved: payload.approved !== false }),
   });
 
   if (!response.ok) {
@@ -1404,6 +1545,24 @@ export async function downloadClawAttachment(
     contentDisposition: response.headers.get('content-disposition'),
     contentLength: response.headers.get('content-length'),
   };
+}
+
+/**
+ * Extract the agent slug from an installed Claw app's webhook URL. Modern URLs
+ * carry `/webhook/<slug>`; older installs only have the slug as the last
+ * `/claw/` path segment, so both forms must resolve or a legacy agent goes
+ * missing from whichever caller checks only one.
+ */
+export function agentSlugFromWebhookUrl(url: string | null | undefined): string | null {
+  if (!url) return null;
+  const webhookMatch = url.match(/\/webhook\/([^/?#]+)/);
+  if (webhookMatch) return webhookMatch[1] ?? null;
+  const pathAfterClaw = url.split('/claw/')[1];
+  if (pathAfterClaw) {
+    const segments = pathAfterClaw.split('/').filter((s) => s.length > 0);
+    return segments[segments.length - 1] ?? null;
+  }
+  return null;
 }
 
 /** List enabled Claw agents via S2S (used by email auto-draft agent picker). */
@@ -1598,8 +1757,6 @@ async function dispatchClawAgent(
     ...(req.context ? { context: req.context } : {}),
     ...(req.workspaceId ? { workspaceId: req.workspaceId } : {}),
     ...(req.executionProfile ? { executionProfile: req.executionProfile } : {}),
-    ...(req.sdlcOperation ? { sdlcOperation: req.sdlcOperation } : {}),
-    ...(req.sdlcWikiRole ? { sdlcWikiRole: req.sdlcWikiRole } : {}),
     ...(req.sdlcContext ? { sdlcContext: req.sdlcContext } : {}),
     ...(req.allowWriteInReadOnlyJob ? { allowWriteInReadOnlyJob: true } : {}),
   });

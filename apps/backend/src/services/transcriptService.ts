@@ -22,6 +22,8 @@ import { callRecordingService } from '@/services/callRecordingService';
 import { callLabelService } from '@/services/callLabelService';
 import { TagMethod } from '@xyne/shared';
 import { callDocumentService } from '@/services/callDocumentService';
+import { callNotesCanvasService } from '@/services/callNotesCanvasService';
+import { callSubject } from '@/utils/callTypeUtils';
 import { logDetailedSummaryFailed } from '@/services/detailedSummaryFailureLog';
 import { RECORDING_TITLE_PROMPT } from '@/services/recordingSummaryTemplates';
 import { acquireLock, releaseLock } from '@/utils/distributedLock';
@@ -1411,10 +1413,10 @@ export class TranscriptService {
   private async postNotesCanvasReplyIfPresent(conversationId: string, callId: string): Promise<void> {
     try {
       const call = await repositories.calls.findByExternalId(callId);
-      const notesCanvasId = (call?.metadata as Record<string, unknown> | null)
-        ?.notesCanvasId;
+      // Recurring series keep one shared canvas on the series, not on each occurrence.
+      const notesCanvasId = call ? await callNotesCanvasService.resolveNotesCanvasId(call) : null;
 
-      if (typeof notesCanvasId !== 'string' || !notesCanvasId) {
+      if (!notesCanvasId) {
         return;
       }
 
@@ -1436,6 +1438,7 @@ export class TranscriptService {
         callId,
         getCanvasUrl(notesCanvasId),
         channel.workspaceId,
+        callSubject(call),
       );
     } catch (notesError) {
       logger.warn(`[postNotesCanvasReplyIfPresent] Failed to post notes canvas for callId: ${callId}`, notesError);

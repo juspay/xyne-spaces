@@ -170,6 +170,9 @@ export const ChipType = {
   // Value filter: a board. `id` is the boardId the backend matches on, `name` the label —
   // typing a board's name would match nothing, so it has to be picked.
   BOARD: 'board',
+  // Value filter: an entity name ("Big Basket"). Unlike BOARD there is no candidate list —
+  // the backend matches the name itself, so `id` and `name` are both the typed text.
+  ENTITY: 'entity',
 } as const;
 
 export type ChipType = (typeof ChipType)[keyof typeof ChipType];
@@ -269,6 +272,19 @@ export interface ChannelCommandMenuProps {
   hideTabs?: boolean;
   /** When true, enables desk ticket merge UI (only set when opened via the support screen search button) */
   deskMergeEnabled?: boolean;
+  /**
+   * How a chosen row is marked — a solid brand tick (`filled`, the default) or a
+   * bordered one (`outline`). Pick `outline` where the mark states a fact about
+   * a row you cannot act on, rather than offering a choice.
+   */
+  selectionVariant?: 'filled' | 'outline';
+  /**
+   * Collapse the tab strip to icons, showing only the active tab's label.
+   *
+   * For hosts that give the strip a column's width rather than a dialog's. Off
+   * by default: every existing caller keeps the full-label row it had.
+   */
+  compactTabs?: boolean;
 }
 
 /* ------------------------------------------------------------------------- *
@@ -292,6 +308,7 @@ export type FilterKind =
   | 'stage'
   | 'board'
   | 'tags'
+  | 'entity'
   | 'date'
   | 'mention' // bare @user
   | 'channelMention'; // bare #channel
@@ -326,6 +343,8 @@ export const FILTER_RELEVANCE: Record<FilterKind, TabType[]> = {
   stage: [TabType.TICKETS],
   board: [TabType.TICKETS],
   tags: [TabType.TICKETS],
+  // Entity annotations are ingested onto chat messages and tickets alike.
+  entity: [TabType.MESSAGES, TabType.TICKETS],
   // Desk omitted: the Cmd+K path never populates mail date params (backend wires date to
   // slack/ticket/file only). Add DESK once options.mail.createdBefore/After/On/Range is set.
   date: [
@@ -404,6 +423,7 @@ const PREFIX_TO_KIND: Record<ChipPrefix, FilterKind> = {
   'assignee:': 'assignee',
   'priority:': 'priority',
   'board:': 'board',
+  'entity:': 'entity',
   'on:': 'date',
   'after:': 'date',
   'before:': 'date',

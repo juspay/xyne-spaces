@@ -5,9 +5,11 @@ import { StepCategory } from '../types/categories';
 import type { AutomationContext } from '../types/context';
 import { variableRef } from '../engine/variable-ref';
 import { logger } from '@/utils/logger';
+import { websocketService } from '@/services/websocketService';
 import {
   applyConversationLabel,
   archiveConversationMailbox,
+  SKIPPABLE_LABEL_ERROR_CODES,
 } from '../services/conversation-label.service';
 
 const ApplyConversationLabelConfigSchema = z.object({
@@ -41,18 +43,6 @@ const ApplyConversationLabelOutputSchema = z.object({
   skipped: z.boolean(),
   skipReason: z.string().nullable(),
 });
-
-const SKIPPABLE_LABEL_ERROR_CODES = new Set([
-  'channel_not_found',
-  'label_not_found',
-  'label_id_mismatch',
-  'conversation_not_found',
-  'conversation_channel_mismatch',
-  'conversation_workspace_mismatch',
-  'ticket_not_found',
-  'ticket_channel_mismatch',
-  'ticket_workspace_mismatch',
-]);
 
 interface ApplyConversationLabelOutput extends Record<string, unknown> {
   conversationId: string | null;
@@ -129,6 +119,10 @@ export class ApplyConversationLabelStep extends BaseActionStep<
         }
         return applied;
       });
+      // Broadcast only after commit so refetched label unread counts see the new mapping.
+      if (result.applied) {
+        websocketService.broadcastLabelUnreadCountsUpdate(channelId);
+      }
       logger.info(
         `[automations] APPLY_CONVERSATION_LABEL conversationId=${conversationId} label=${labelName} applied=${result.applied} alreadyPresent=${result.alreadyPresent}`,
       );

@@ -12,6 +12,7 @@ import {
   TicketTag,
   TicketStatusV2,
   addSlaHours,
+  resolveTicketDescription,
 } from '@xyne/shared';
 import { getPriorityIcon, formatEta, isEtaUrgent, isStageOverdue } from './TicketCard.utils';
 import { cn } from '../../../utils/classNames';
@@ -22,6 +23,7 @@ import { RenderMessageWithHTML } from '../../Chat/RenderMessageWithHTML/RenderMe
 import { useZero } from '../../../hooks/useZero';
 import { mutators } from '../../../zero/mutators';
 import { surfaceMutationError } from '../../../utils/zeroMutationToast';
+import { trackTicketOutcome } from '../../../services/Analytics/ticketTracking';
 import { TagSelector } from '../TicketTable/TagSelector';
 import Avatar from '../../ui/Avatar/Avatar';
 import { useUserGroupById, useUserGroups } from '../../../hooks/useUserGroup';
@@ -192,21 +194,27 @@ const AssigneeEditor: React.FC<{
 
 interface TicketCardProps {
   ticket: Ticket;
-  tags?: TicketTag[];
-  availableTags?: string[];
-  onClick?: (e: React.MouseEvent | KeyboardEvent) => void;
-  width?: string;
-  isCompact?: boolean;
+  tags?: TicketTag[] | undefined;
+  availableTags?: string[] | undefined;
+  /** Callback to load more tags */
+  onLoadMoreTags?: (() => void) | undefined;
+  /** Whether there are more tags to load */
+  hasMoreTags?: boolean | undefined;
+  /** Callback for server-side tag search */
+  onSearchTags?: ((query: string) => void) | undefined;
+  onClick?: ((e: React.MouseEvent | KeyboardEvent) => void) | undefined;
+  width?: string | undefined;
+  isCompact?: boolean | undefined;
   visibleColumns?: Set<string> | undefined;
-  isConversation?: boolean;
-  activeTicketId?: string;
+  isConversation?: boolean | undefined;
+  activeTicketId?: string | undefined;
   /** Only true for email-type desks; hides the email unread indicator everywhere else. */
-  showEmailReads?: boolean;
+  showEmailReads?: boolean | undefined;
   /**
    * SLA policies pre-fetched by the parent for the whole board.
    * When omitted, SLA badges are not shown — no per-card fetch is performed.
    */
-  slaPolicies?: BoardSlaPolicy[];
+  slaPolicies?: BoardSlaPolicy[] | undefined;
 }
 
 export const TicketCard: React.FC<TicketCardProps> = ({
@@ -215,6 +223,9 @@ export const TicketCard: React.FC<TicketCardProps> = ({
   width = 'w-full',
   tags,
   availableTags = [],
+  onLoadMoreTags,
+  hasMoreTags = false,
+  onSearchTags,
   isCompact = false,
   visibleColumns = DEFAULT_VISIBLE_COLUMNS,
   isConversation = false,
@@ -260,6 +271,7 @@ export const TicketCard: React.FC<TicketCardProps> = ({
   const showTags = isVisible('tags');
   const showCreatedAt = isVisible('createdAt');
   const showCreatedBy = isVisible('createdBy');
+  const showMerchantId = isVisible('merchantId');
 
   // A user assignee (assignedTo) wins over a group; groups live in
   // userGroupId, with legacy rows still holding `group:<id>` in assignedTo.
@@ -299,7 +311,8 @@ export const TicketCard: React.FC<TicketCardProps> = ({
   const selectedTagNames = tags?.map(t => t.name) || [];
 
   // Check if any compact metadata should be shown
-  const hasCompactMetadata = isCompact && (showSubStatus || showCreatedAt || showCreatedBy);
+  const hasCompactMetadata =
+    isCompact && (showSubStatus || showCreatedAt || showCreatedBy || showMerchantId);
 
   // Check if ticket is from a release
   const releaseBoardBgColor =
@@ -338,6 +351,14 @@ export const TicketCard: React.FC<TicketCardProps> = ({
         );
       }
     });
+    if (toAdd.length > 0 || toRemove.length > 0) {
+      trackTicketOutcome('TICKET_FIELD_UPDATED', ticket, {
+        surface: 'kanban_card',
+        field: 'tags',
+        addedCount: toAdd.length,
+        removedCount: toRemove.length,
+      });
+    }
   };
 
   const handleAssigneeChange = (value: string | null) => {
@@ -363,7 +384,15 @@ export const TicketCard: React.FC<TicketCardProps> = ({
         }),
       ),
       'Failed to update assignee',
-    );
+    ).then(ok => {
+      if (ok) {
+        trackTicketOutcome('TICKET_ASSIGNED', ticket, {
+          surface: 'kanban_card',
+          unassigned: !updates.assignedTo && !('userGroupId' in updates && updates.userGroupId),
+          toGroup: 'userGroupId' in updates && !!updates.userGroupId,
+        });
+      }
+    });
     setIsEditingAssignee(false);
   };
 
@@ -377,7 +406,15 @@ export const TicketCard: React.FC<TicketCardProps> = ({
         }),
       ),
       'Failed to update priority',
-    );
+    ).then(ok => {
+      if (ok) {
+        trackTicketOutcome('TICKET_PRIORITY_CHANGED', ticket, {
+          surface: 'kanban_card',
+          to: value,
+          previous: ticket.priority ?? null,
+        });
+      }
+    });
     setIsEditingPriority(false);
   };
 
@@ -605,6 +642,7 @@ export const TicketCard: React.FC<TicketCardProps> = ({
           <div className='flex items-center gap-2.5 shrink-0'>
             <TicketStatusWithStages
               currentStageName={ticket.stageName}
+              statusV2={ticket.statusV2}
               showLeadingDot={false}
               labelClassName='max-w-[120px] truncate'
             />
@@ -653,17 +691,34 @@ export const TicketCard: React.FC<TicketCardProps> = ({
                 <span className='text-xs font-medium text-muted-foreground font-mono'>
                   {ticket.xyneId}
                 </span>
-                {!isCompact && <TicketStatusWithStages currentStageName={ticket.stageName} />}
+                {!isCompact && (
+                  <TicketStatusWithStages
+                    currentStageName={ticket.stageName}
+                    statusV2={ticket.statusV2}
+                  />
+                )}
                 {isCompact && (
                   <StagePicker
                     ticketId={ticket.id}
                     stageName={ticket.stageName}
                     stageLabel={ticket.stageName || 'To Do'}
+                    statusV2={ticket.statusV2}
                     boardId={ticket.boardId}
                   />
                 )}
               </div>
               <div className={cn('flex items-center', isCompact ? 'gap-0' : 'gap-[15px]')}>
+                {/* Merchant ID — compact cards show it in the metadata grid below */}
+                {showMerchantId && ticket.merchantId && (
+                  <div className={cn(isCompact ? 'hidden' : 'hidden md:block')}>
+                    <Tooltip content={`Merchant ID: ${ticket.merchantId}`}>
+                      <span className='block max-w-[140px] truncate rounded-md border border-border bg-muted px-2 py-1 text-xs text-muted-foreground'>
+                        {ticket.merchantId}
+                      </span>
+                    </Tooltip>
+                  </div>
+                )}
+
                 {/*due date*/}
                 <div className={cn(isCompact ? 'hidden' : 'hidden md:block')}>
                   {showDueDate &&
@@ -813,7 +868,10 @@ export const TicketCard: React.FC<TicketCardProps> = ({
                     'whitespace-pre-wrap overflow-hidden text-muted-foreground text-clip line-clamp-1 sm:line-clamp-2 break-all text-[13px]',
                   )}
                 >
-                  <RenderMessageWithHTML message={ticket.description || ''} breakLongLinks={true} />
+                  <RenderMessageWithHTML
+                    message={resolveTicketDescription(ticket) || ''}
+                    breakLongLinks={true}
+                  />
                 </p>
               </div>
             )}
@@ -858,6 +916,9 @@ export const TicketCard: React.FC<TicketCardProps> = ({
                           selectedTags={selectedTagNames}
                           onTagsChange={handleTagsChange}
                           stopEditing={() => setIsEditingTags(false)}
+                          onLoadMore={onLoadMoreTags}
+                          hasMore={hasMoreTags}
+                          onSearch={onSearchTags}
                         />
                       </div>
                     ) : hasTags ? (
@@ -945,6 +1006,7 @@ export const TicketCard: React.FC<TicketCardProps> = ({
                     <div className='flex items-center gap-2'>
                       <TicketStatusWithStages
                         currentStageName={ticket.stageName}
+                        statusV2={ticket.statusV2}
                         showLeadingDot={false}
                         iconOnly
                       />
@@ -968,6 +1030,22 @@ export const TicketCard: React.FC<TicketCardProps> = ({
                         {formatCreatedDate(ticket.createdAt)}
                       </span>
                     </Tooltip>
+                  </div>
+                )}
+
+                {/* Merchant ID — read-only; set at creation or via the app API */}
+                {showMerchantId && (
+                  <div className='flex flex-col gap-0.5'>
+                    <span className='text-xs text-muted-foreground'>Merchant ID</span>
+                    {ticket.merchantId ? (
+                      <TruncatedTooltip content={ticket.merchantId}>
+                        <span className='text-xs text-foreground truncate'>
+                          {ticket.merchantId}
+                        </span>
+                      </TruncatedTooltip>
+                    ) : (
+                      <span className='text-xs text-muted-foreground'>Not set</span>
+                    )}
                   </div>
                 )}
 

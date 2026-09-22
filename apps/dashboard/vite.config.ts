@@ -3,7 +3,7 @@ import react from '@vitejs/plugin-react';
 import path from 'path';
 import { viteStaticCopy } from 'vite-plugin-static-copy';
 import packageJson from './package.json';
-import { readFileSync } from 'fs';
+import { existsSync, readFileSync } from 'fs';
 import { createRequire } from 'module';
 
 const pkg = JSON.parse(readFileSync(path.resolve(__dirname, 'package.json'), 'utf-8'));
@@ -15,7 +15,7 @@ const ortDistDir = path.dirname(
   })
 );
 
-export default defineConfig(({ mode }) => {
+export default defineConfig(({ command, mode }) => {
   // Vite puts .env values on import.meta.env, not process.env, so this file
   // cannot see them without loading explicitly. process.env last so a shell value
   // still wins and existing invocations are unchanged.
@@ -28,6 +28,9 @@ export default defineConfig(({ mode }) => {
   const appBasePath = env.VITE_APP_BASE_PATH || '/';
   const isSdlcSurface = env.VITE_XYNE_SURFACE === 'sdlc';
   const devPort = Number(env.VITE_DEV_PORT) || (isSdlcSurface ? 5175 : 5173);
+
+  const sharedSrc = path.resolve(__dirname, '../../packages/shared/src');
+  const isDev = command === 'serve';
 
   // Dev only: the main server stands in for the edge, so the iframe is same-origin
   // exactly as in prod. No rewriting, mirroring the deployed setup.
@@ -62,6 +65,25 @@ export default defineConfig(({ mode }) => {
     ...(isSdlcSurface ? { cacheDir: 'node_modules/.vite-sdlc' } : {}),
     plugins: [
       react(),
+      ...(isDev
+        ? [
+            {
+              name: 'xyne-shared-source-specifiers',
+              enforce: 'pre' as const,
+              resolveId(source: string, importer: string | undefined): string | null {
+                if (!importer || !source.startsWith('.') || !source.endsWith('.js')) {
+                  return null;
+                }
+                if (!importer.startsWith(sharedSrc)) return null;
+                const base = path.resolve(path.dirname(importer), source.slice(0, -3));
+                for (const candidate of [`${base}.ts`, `${base}.tsx`, `${base}/index.ts`]) {
+                  if (existsSync(candidate)) return candidate;
+                }
+                return null;
+              },
+            },
+          ]
+        : []),
       {
         name: 'version-file',
         // Emit version.json through Rollup so Vite writes it into the build's outDir itself.
@@ -174,6 +196,7 @@ export default defineConfig(({ mode }) => {
     },
     resolve: {
       alias: {
+        ...(isDev ? { '@xyne/shared': sharedSrc } : {}),
         '@': path.resolve(__dirname, './src'),
         '@/lib': path.resolve(__dirname, './src/shared/lib'),
         '@/components': path.resolve(__dirname, './src/shared/components'),

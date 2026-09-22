@@ -1,6 +1,3 @@
-import { isBaselineCanvasType } from '@xyne/shared';
-import type { WikiFreshnessContext } from './wiki/wikiFreshness';
-import { wikiAskAiFreshnessInstruction } from './wiki/wikiFreshness';
 import {
   buildSdlcTicketLifecycleInstruction,
   buildSdlcWorkDeliveryInstruction,
@@ -9,7 +6,7 @@ import {
 export interface SdlcAskAiSelectedArtifact {
   canvasId: string;
   title: string;
-  artifactKind: 'ARTIFACT' | 'WIKI' | 'BASELINE';
+  artifactKind: 'ARTIFACT' | 'WIKI';
 }
 
 export function resolveSdlcAskAiArtifactKind(
@@ -17,7 +14,7 @@ export function resolveSdlcAskAiArtifactKind(
 ): SdlcAskAiSelectedArtifact['artifactKind'] | undefined {
   if (!artifactType) return undefined;
   if (artifactType === 'WIKI') return 'WIKI';
-  return isBaselineCanvasType(artifactType) ? 'BASELINE' : 'ARTIFACT';
+  return 'ARTIFACT';
 }
 
 export function resolveSdlcAskAiSelectedArtifact(
@@ -38,16 +35,14 @@ interface SdlcAskAiContextInput {
   channelId: string;
   /** The hub's other repositories. Named so the agent knows they exist; only `repo` is sandboxed. */
   otherRepos?: Array<{ id: string; name: string; url: string }>;
-  baselineDocuments: Array<{ title: string; content: string }>;
   linkedContext: string[];
-  wikiFreshness?: WikiFreshnessContext;
   selectedArtifact?: SdlcAskAiSelectedArtifact;
 }
 
 export function buildSdlcAskAiContext(input: SdlcAskAiContextInput): string {
   const repositoryAccessInstruction =
-    'SDLC repository setup is uniformly write-capable; call sandbox-repo-setup with write:true when live code is required. Capability does not authorize mutation. For questions, PRDs, Tech Docs, reviews, and other non-implementation requests, inspect only: do not modify files, run builds or services, create commits, push, or create pull requests. Mutate the repository only when the user explicitly requests implementation work.';
-  const implementationInstruction = `For an explicit implementation request, follow the approved repository conventions, create a safe non-default branch, and make only the requested changes. ${buildSdlcWorkDeliveryInstruction()} After remote push succeeds, call spaces-sdlc-create-pull-request exactly once. The backend must create and verify a draft pull request; never use a generic GitHub tool. ${buildSdlcTicketLifecycleInstruction()}`;
+    'SDLC repository access is uniformly write-capable; when live code is required, call sandbox-create, then sdlc-repository-access with the repository id, and clone with the exact cloneUrl it returns. Capability does not authorize mutation. For questions, PRDs, Tech Docs, reviews, and other non-implementation requests, inspect only: do not modify files, run builds or services, create commits, push, or create pull requests. Mutate the repository only when the user explicitly requests implementation work.';
+  const implementationInstruction = `For an explicit implementation request, follow the approved repository conventions, create a safe non-default branch, and make only the requested changes. ${buildSdlcWorkDeliveryInstruction()} After remote push succeeds, call spaces-sdlc-create-pull-request exactly once. The backend creates and verifies the pull request, as a draft unless every check passed and the change is ready for review; never use a generic GitHub or Bitbucket tool. ${buildSdlcTicketLifecycleInstruction()}`;
   const selectedArtifactInstruction = input.selectedArtifact
     ? [
         '# Selected SDLC artifact',
@@ -70,12 +65,10 @@ export function buildSdlcAskAiContext(input: SdlcAskAiContextInput): string {
     '3. If those canvases fully and consistently support the requested answer or artifact, use them directly without opening a repository sandbox.',
     '4. If evidence is missing, incomplete, ambiguous, stale, or inconsistent, inspect the pinned repository using the uniform write-capable sandbox while obeying the non-mutation rule above. Current code is authoritative when it conflicts with Wiki or other canvases.',
     '5. If search returns no relevant canvas, say that explicitly and continue with repository inspection.',
-    '6. Call sandbox-repo-setup at most once with write:true. If setup times out or fails, do not create another sandbox, clone through a raw provider URL, or repeatedly retry setup. Use complete and consistent Wiki or Repo Knowledge evidence when it is sufficient.',
+    '6. Call sdlc-repository-access at most once per repository. If it times out or fails, do not create another sandbox, clone through any other URL, or repeatedly retry. Use complete and consistent Wiki or Hub Knowledge evidence when it is sufficient.',
     '7. If that evidence is insufficient, report that live code is unavailable and stop instead of guessing. Include the useful Wiki findings, the exact paths, symbols, or implementation questions you intended to inspect in code, and which claims remain unverified.',
     'Do not answer a substantive repository question without this preflight. Do not guess when repository knowledge is insufficient.',
-    input.wikiFreshness
-      ? wikiAskAiFreshnessInstruction(input.wikiFreshness)
-      : 'Wiki freshness is unknown. Still read relevant existing Wiki pages as orientation, warn that they may be partial, stale, or inconsistent, inspect live code before factual repository claims, and disclose the freshness limitation.',
+    'Wiki pages may be outdated. Use them for orientation, then check the live code before stating how something works; when the Wiki and the code disagree, the code wins.',
   ].join('\n');
 
   return [
@@ -96,14 +89,8 @@ export function buildSdlcAskAiContext(input: SdlcAskAiContextInput): string {
     'When creating an implementation ticket for an artifact, call spaces-create-ticket with both sdlcRepoId set to this SDLC repository ID and sourceCanvasId set to the artifact canvas ID. The ticket is not complete until the tool confirms the SDLC link; never create an unlinked fallback or a duplicate ticket.',
     canvasPreflight,
     'Use relevant repository Tickets, conversations, explicitly linked context, and repository-channel history as supporting evidence. Inspect the live pinned codebase only when the preflight rules require it. Keep every lookup subject to its existing authorization.',
-    'The approved baseline documents below are already loaded into this session. Use them directly; do not spend tool calls rediscovering their canvas IDs.',
     'Use repository tools for live code rather than Vespa. For code answers, show the smallest relevant code excerpt first, then explain it and cite the exact repository-relative path, symbol, and line range. Do not claim code was indexed in Vespa and do not invent provider links.',
     'Claims drawn from Wiki, PRD, Tech Doc, Ticket, or conversation tools must retain the exact inline citation tokens returned by those tools. If sources disagree or a source category has no useful evidence, say so plainly.',
-    input.baselineDocuments.length > 0
-      ? input.baselineDocuments
-          .map((memory) => `## ${memory.title}\n${memory.content}`)
-          .join('\n\n')
-      : 'No approved baseline memory is available yet.',
     '# Explicitly linked context',
     input.linkedContext.join('\n\n') || 'No accessible linked context is available.',
   ].join('\n\n');

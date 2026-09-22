@@ -7,6 +7,7 @@ import { appDeskService } from '@/services/appDeskService';
 import { resolveAppDeskInstalledAppId } from '@/integrations/core/deskSources';
 import { ExternalSourceRepository } from '@/database/repositories/externalSourceRepository';
 import { ChannelParticipantRepository } from '@/database/repositories/channelParticipantRepository';
+import { isDeskOwnerOrChannelAdmin } from '@/utils/channelMembership';
 import { validateZod } from '@/middleware/validation';
 import { z } from 'zod';
 
@@ -45,7 +46,7 @@ async function authorizeAppDeskManager(
       where: { channelId },
       select: { ownerUserId: true },
     });
-    if (pref?.ownerUserId !== userId) {
+    if (!(await isDeskOwnerOrChannelAdmin(channelId, userId, pref?.ownerUserId))) {
       res.status(403).json({ error: 'Only the desk owner can manage this integration' });
       return null;
     }

@@ -3,6 +3,8 @@ import { BaseQueryACL, ACLContext } from './base-acl'
 import {
   ActivitiesACL,
   AppsACL,
+  AppCommandACL,
+  AppPermissionACL,
   InstalledAppsACL,
   AgentsACL,
   AgentStepsACL,
@@ -86,6 +88,7 @@ import {
   TicketEntityMappingsACL,
   TicketReferenceMappingsACL,
   TicketsACL,
+  TicketDescriptionsACL,
   TicketStageEtaACL,
   TicketSubTicketMappingsACL,
   TicketTagsACL,
@@ -143,6 +146,8 @@ export class ACLFactory {
       return new ActivitiesACL(ctx, prisma)
     case 'agent':
       return new AgentsACL(ctx, prisma)
+    case 'agentConversationShare':
+      return new BaseQueryACL(ctx, prisma)
     case 'agentStep':
       return new AgentStepsACL(ctx, prisma)
     case 'agentToolsMapping':
@@ -186,7 +191,9 @@ export class ACLFactory {
       return new BaseQueryACL(ctx, prisma)
     case 'executionRunLog':
       return new BaseQueryACL(ctx, prisma)
-    case 'radarTeam':
+    // Rules are per user, and every read is already scoped to (workspaceId,
+    // userId) by radarRuleStore — there is no route that reads anyone else's.
+    case 'radarRule':
       return new BaseQueryACL(ctx, prisma)
     case 'channel':
       return new ChannelsACL(ctx, prisma)
@@ -296,6 +303,10 @@ export class ACLFactory {
       return new BaseQueryACL(ctx, prisma)
     case 'sdlcTrack':
       return new BaseQueryACL(ctx, prisma)
+    case 'sdlcFolder':
+      return new BaseQueryACL(ctx, prisma)
+    case 'sdlcItemComment':
+      return new BaseQueryACL(ctx, prisma)
     case 'role':
       return new RolesACL(ctx, prisma)
     case 'savedUserConfiguration':
@@ -318,6 +329,8 @@ export class ACLFactory {
       return new SurfaceNudgeCountsACL(ctx, prisma)
     case 'ticket':
       return new TicketsACL(ctx, prisma)
+    case 'ticketDescription':
+      return new TicketDescriptionsACL(ctx, prisma)
     case 'ticketActivity':
       return new TicketActivitiesACL(ctx, prisma)
     case 'ticketAssignment':
@@ -373,11 +386,11 @@ export class ACLFactory {
     case 'apiKey':
       return new BaseQueryACL(ctx, prisma)
     case 'appCommand':
-      return new BaseQueryACL(ctx, prisma)
+      return new AppCommandACL(ctx, prisma)
     case 'appIncomingWebhook':
       return new BaseQueryACL(ctx, prisma)
     case 'appPermission':
-      return new BaseQueryACL(ctx, prisma)
+      return new AppPermissionACL(ctx, prisma)
     case 'apps':
       return new AppsACL(ctx, prisma)
     case 'availableAppPermission':

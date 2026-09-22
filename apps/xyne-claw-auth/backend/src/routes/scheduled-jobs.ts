@@ -15,7 +15,7 @@ import { CONFIG } from "../config.js";
 import { decrypt } from "../crypto.js";
 import { agentRunRepository, chatMessageRepository } from "../repositories/index.js";
 import { spacesAppFetch, spacesAppFetchMultipart } from "../lib/spaces-api.js";
-import { getRequesterId, getOrgId, isClawAdmin } from "../middleware/agent-acl.js";
+import { getRequesterId, getOrgId, isClawAdmin, getAgentEditAccess } from "../middleware/agent-acl.js";
 import { assertCanControlScheduledJob } from "./scheduled-jobs-auth.js";
 import { requireStrictS2S } from "../middleware/require-auth.js";
 import { getSpacesAuthForUser, getWorkspaceIdForUser } from "../lib/spaces-db.js";
@@ -28,9 +28,10 @@ import {
   cancelCronJob,
   type ScheduledJobData,
 } from "../queue/scheduled-jobs-queue.js";
-import { handleRunCompletion, handleRunHandoff } from "../queue/run-recovery-worker.js";
+import { handleRunCompletion } from "../queue/run-recovery-worker.js";
 import { isDashboardTask, refreshScheduledDashboardShare } from "../services/dashboardShareRefreshService.js";
 import { designShareUrl } from "./design-shares.js";
+import { buildScheduledJobApprovalFlow } from "xyne-claw-shared";
 // cron-parser v4 is CJS (`module.exports = CronParser`). Node's native ESM
 // loader can't statically detect named exports from that pattern, so a
 // `import { parseExpression } from "cron-parser"` throws at runtime even
@@ -117,6 +118,27 @@ function validateCronExpression(
  *   Admins may pass `?userId=<other>` to look at someone else's jobs.
  * - S2S requests (no requesterId set): no implicit filter; the caller decides.
  */
+/**
+ * READ-ONLY visibility over every schedule configured on an agent.
+ *
+ * A ScheduledJob is keyed by its CREATING user, and resolveScopedUserId below
+ * clamps every list to the requester. That is right for "my schedules", but it
+ * meant an agent editor opening the agent's Schedules tab saw an empty list —
+ * the tab is rendered for anyone with canEdit (frontend agentPermissions), while
+ * the data was scoped to self. This grants the same set the UI assumes: owner,
+ * EDITOR/CONTRIBUTOR share, or CLAW_ADMIN.
+ *
+ * Deliberately READ-only. Mutations (pause/resume/patch/delete) still go through
+ * assertCanControlScheduledJob, because a scheduled run executes under its
+ * creator's identity and credentials — letting any editor re-point someone
+ * else's cron would run work as that person.
+ */
+async function canViewAgentSchedules(req: Request, agentSlug: string, requesterId: string): Promise<boolean> {
+  if (await isClawAdmin(requesterId)) return true;
+  const access = await getAgentEditAccess(requesterId, agentSlug, getOrgId(req)).catch(() => null);
+  return Boolean(access?.canEdit);
+}
+
 async function resolveScopedUserId(
   req: Request,
   explicitUserId?: string,
@@ -228,6 +250,73 @@ async function postScheduledFailureNotice(row: {
     userId: spacesAppUserId,
     workspaceId: effectiveWorkspaceId,
     metadata: { contentFormat: "markdown" },
+  }, appToken);
+}
+
+function withSpacesAppIdFlow<T extends { data?: Record<string, unknown> }>(flow: T, spacesAppId?: string | null): T {
+  if (!spacesAppId) return flow;
+  return { ...flow, data: { ...(flow.data ?? {}), spacesAppId } };
+}
+
+/**
+ * Post the channel-broadcast approval card for a `pending_approval` scheduled
+ * job to the thread the request came from (falling back to a DM to the creator
+ * when there is no origin thread). The job stays inert until the creator taps
+ * Approve, which the flow-action handler turns into an `active` + enqueued job.
+ * Fail-soft: any post failure leaves the pending row in place — the creator can
+ * still see/cancel it in the Scheduled Jobs UI — and is surfaced to the caller.
+ */
+async function postScheduledJobApprovalCard(opts: {
+  row: { id: string; userId: string; agentSlug: string; orgId: string; channelId: string | null; conversationId: string | null; workspaceId: string | null; label: string | null; task: string };
+  targetChannelId: string;
+  scheduleSummary: string;
+}): Promise<void> {
+  const { row, targetChannelId, scheduleSummary } = opts;
+  const agent = await prisma.agent.findFirst({ where: { slug: row.agentSlug, orgId: row.orgId } });
+  if (!agent?.spacesAppToken || !agent.spacesAppId) {
+    log.error(`[scheduled-jobs/approval] Agent ${row.agentSlug} has no Spaces app credentials — cannot post approval card for job ${row.id}`);
+    throw new Error("Agent has no Spaces app credentials to post the approval card");
+  }
+  let workspaceId = row.workspaceId;
+  if (!workspaceId) workspaceId = await getWorkspaceIdForUser(row.userId, "scheduled-job").catch(() => null);
+  if (!workspaceId) {
+    log.error(`[scheduled-jobs/approval] Job ${row.id}: missing workspaceId — cannot post approval card`);
+    throw new Error("Missing workspaceId to post the approval card");
+  }
+
+  const appToken = decryptStoredField(agent.spacesAppToken);
+  const spacesAppUserId = agent.spacesAppUserId ?? "";
+
+  const flow = withSpacesAppIdFlow(buildScheduledJobApprovalFlow({
+    scheduledJobId: row.id,
+    creatorUserId: row.userId,
+    scheduleSummary,
+    task: row.task,
+    targetChannelId,
+    ...(row.label ? { label: row.label } : {}),
+    agentSlug: row.agentSlug,
+  }), agent.spacesAppId);
+
+  // Prefer the origin thread so the creator sees the card in context; otherwise DM them.
+  if (row.channelId && row.conversationId) {
+    await spacesAppFetch("/chat/postMessage", {
+      channelId: row.channelId,
+      conversationId: row.conversationId,
+      flow,
+      userId: spacesAppUserId,
+      workspaceId,
+    }, appToken);
+    return;
+  }
+  const dmResult = (await spacesAppFetch("/channel/openDm", {
+    targetUserId: row.userId,
+    workspaceId,
+  }, appToken)) as { channelId: string };
+  await spacesAppFetch("/chat/postMessage", {
+    channelId: dmResult.channelId,
+    flow,
+    userId: spacesAppUserId,
+    workspaceId,
   }, appToken);
 }
 
@@ -353,6 +442,12 @@ router.post("/", asyncHandler(async (req: Request, res: Response) => {
 
   const nextRunAt = type === "once" ? new Date(Date.now() + delayMs!) : null;
 
+  // A channel-targeted result (`replyMode === "channel"`) is a broadcast into a
+  // shared channel. It must never be armed silently — gate it behind an explicit
+  // approval card. When there is no channel to post into, there is nothing to
+  // broadcast, so the normal (thread/DM) path applies.
+  const isChannelBroadcast = (replyMode === "channel") && !!channelId;
+
   // Create Prisma row
   const row = await prisma.scheduledJob.create({
     data: {
@@ -370,6 +465,9 @@ router.post("/", asyncHandler(async (req: Request, res: Response) => {
       label: label ?? null,
       workspaceId: workspaceId ?? null,
       replyMode: replyMode ?? "thread",
+      // A channel broadcast is armed only AFTER the creator approves the card
+      // posted below; until then it sits inert (the worker skips non-active rows).
+      ...(isChannelBroadcast ? { status: "pending_approval" } : {}),
       orgId: agent.orgId,
     },
   });
@@ -383,6 +481,34 @@ router.post("/", asyncHandler(async (req: Request, res: Response) => {
     channelId: channelId ?? undefined,
     conversationId: conversationId ?? undefined,
   };
+
+  // Channel broadcast: DO NOT enqueue. Persist as pending_approval and post the
+  // approval card to the origin thread. Approve → flow-action arms + enqueues it.
+  if (isChannelBroadcast) {
+    const scheduleSummary = type === "once"
+      ? (nextRunAt ? `Once — runs ${nextRunAt.toISOString()}` : "Once")
+      : `Recurring — ${normalizedCron} (Asia/Kolkata)`;
+    try {
+      await postScheduledJobApprovalCard({
+        row: { ...row, task },
+        targetChannelId: channelId!,
+        scheduleSummary,
+      });
+    } catch (err) {
+      log.error(`[scheduled-jobs] Failed to post approval card for channel job ${row.id}: ${errMsg(err)}`);
+    }
+    log.info(`[scheduled-jobs] Created ${type} channel job ${row.id} for agent ${agentSlug} as pending_approval (awaiting creator approval)`);
+    ok(res, {
+      id: row.id,
+      type: row.type,
+      status: "pending_approval",
+      requiresApproval: true,
+      nextRunAt: nextRunAt?.toISOString(),
+      cronExpression: row.cronExpression,
+      label: row.label,
+    });
+    return;
+  }
 
   // Enqueue in BullMQ
   if (type === "once") {
@@ -416,7 +542,12 @@ router.post("/", asyncHandler(async (req: Request, res: Response) => {
 
 router.get("/", asyncHandler(async (req: Request, res: Response) => {
   const { userId: qUserId, status, agentSlug } = req.query as { userId?: string; status?: string; agentSlug?: string };
-  const userId = await resolveScopedUserId(req, qUserId);
+  const requesterId = getRequesterId(req);
+  // Asking for ONE agent's schedules as a maintainer of that agent => show the
+  // agent's full set. Otherwise fall back to the self-scoped view.
+  const agentScoped =
+    Boolean(agentSlug) && Boolean(requesterId) && (await canViewAgentSchedules(req, agentSlug!, requesterId!));
+  const userId = agentScoped ? undefined : await resolveScopedUserId(req, qUserId);
   const where: Record<string, unknown> = {};
   if (userId) where["userId"] = userId;
   if (status) where["status"] = status;
@@ -442,7 +573,9 @@ router.get("/runs", asyncHandler(async (req: Request, res: Response) => {
     throw badRequest("agentSlug is required");
   }
 
-  const userId = await resolveScopedUserId(req, qUserId);
+  const requesterId = getRequesterId(req);
+  const agentScoped = Boolean(requesterId) && (await canViewAgentSchedules(req, agentSlug, requesterId!));
+  const userId = agentScoped ? undefined : await resolveScopedUserId(req, qUserId);
   const jobWhere: Record<string, unknown> = { agentSlug };
   if (userId) jobWhere["userId"] = userId;
 
@@ -482,7 +615,12 @@ router.get("/:id", asyncHandler(async (req: Request<{ id: string }>, res: Respon
   if (!requesterId) {
     throw unauthorized("Authentication required");
   }
-  if (row.userId !== requesterId && !(await isClawAdmin(requesterId))) {
+  // Own job, CLAW_ADMIN, or a maintainer of the agent the job belongs to.
+  if (
+    row.userId !== requesterId &&
+    !(await isClawAdmin(requesterId)) &&
+    !(await canViewAgentSchedules(req, row.agentSlug, requesterId))
+  ) {
     throw notFound("Not found");
   }
   ok(res, { ...row, delayMs: row.delayMs != null ? Number(row.delayMs) : null });
@@ -983,22 +1121,6 @@ router.post("/:id/result", requireStrictS2S, async (req: Request<{ id: string }>
   log.info(`[scheduled-jobs/result] Job ${id}: status=${payload.status}`);
   res.json({ success: true });
   let resultChatMessageId: string | null = null;
-
-  if (payload.status === "handoff") {
-    log.info(`[scheduled-jobs/result] Job ${id}: handoff callback session=${payload.sessionId ?? ""} lastTurn=${payload.lastTurn ?? "unknown"}`);
-    if (payload.sessionId) {
-      const handoff = await handleRunHandoff(payload.sessionId).catch((err) => {
-        log.warn(`[scheduled-jobs/result] handoff re-dispatch failed for ${payload.sessionId}:`, errMsg(err));
-        return null;
-      });
-      if (handoff) {
-        log.info(`[scheduled-jobs/result] Job ${id}: handoff re-dispatched root=${handoff.rootSessionId} newSession=${handoff.newSessionId}`);
-      } else {
-        log.warn(`[scheduled-jobs/result] Job ${id}: handoff callback had no recovery state session=${payload.sessionId}`);
-      }
-    }
-    return;
-  }
 
   // Finalize AgentRun + save assistant ChatMessage (fire-and-forget)
   if (payload.sessionId) {

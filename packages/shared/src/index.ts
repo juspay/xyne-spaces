@@ -23,6 +23,7 @@ export * from './utils/formFieldOptions';
 export * from './utils/slaCalculator';
 export * from './utils/project';
 export * from './utils/activityMetadataParser';
+export * from './utils/radarRules';
 export * from './utils/canvasHierarchy';
 export * from './utils/canvasDestinationAccess';
 export * from './utils/canvasFolderNameConflict';
@@ -30,7 +31,9 @@ export * from './utils/origins';
 export * from './utils/linkPreviewParser';
 export * from './utils/messageContent';
 export * from './utils/ticketMetadata';
+export * from './utils/ticketDescription';
 export * from './utils/fileTypes';
+export * from './utils/heic';
 export * from './utils/channel';
 export * from './utils/socialMedia';
 export * from './utils/csv';
@@ -44,6 +47,8 @@ export {
   parseSubTicketsMd,
   serializeSubTicketsMd,
   SUB_TICKETS_MD_LIMIT,
+} from './utils/activityMetadataParser';
+export type {
   TicketCardSummary,
   SubTicketsMdData,
 } from './utils/activityMetadataParser';
@@ -54,6 +59,7 @@ export * from './crypto/index.js';
 export * from './templates/callInvitation';
 export * from './templates/callInvitationIcs';
 export * from './templates/callSummary';
+export * from './templates/summaryTemplateSections';
 export * from './types/flowUI';
 export * from './validation/flowSchema';
 export * from './sdlc';

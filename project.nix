@@ -205,8 +205,8 @@
       port = 7880;
       rtcPortRangeStart = 50000;
       rtcPortRangeEnd = 60000;
-      apiKey = "devkey";
-      apiSecret = "devsecret";
+      apiKey = "localdevkey";
+      apiSecret = "localdevsecret";
       configFile = ./docker/livekit.yaml;
       devMode = true;
       logLevel = "debug";
@@ -336,8 +336,8 @@
         
         # Set environment variables
         export LIVEKIT_URL="ws://127.0.0.1:7880"
-        export LIVEKIT_API_KEY="devkey"
-        export LIVEKIT_API_SECRET="devsecret"
+        export LIVEKIT_API_KEY="localdevkey"
+        export LIVEKIT_API_SECRET="localdevsecret"
         export BACKEND_URL="http://127.0.0.1:3001"
         export REDIS_URL="redis://127.0.0.1:6379"
         export REDIS_HOST="127.0.0.1"

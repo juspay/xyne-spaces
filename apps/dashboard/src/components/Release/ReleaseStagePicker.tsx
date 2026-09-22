@@ -19,6 +19,7 @@ export interface ReleaseStageOption {
 interface ReleaseStagePickerProps {
   ticketId: string;
   stageName: string | null | undefined;
+  statusV2?: string | null | undefined;
   // Stages sourced from the ticket's board (queries.stagesByBoards). Pass
   // an empty array if the board has no stages configured yet.
   stages: readonly ReleaseStageOption[];
@@ -43,6 +44,7 @@ interface ReleaseStagePickerProps {
 export function ReleaseStagePicker({
   ticketId,
   stageName,
+  statusV2,
   stages,
   boardId,
   onAfterChange,
@@ -59,6 +61,7 @@ export function ReleaseStagePicker({
         ticketId={ticketId}
         stageName={stageName}
         stageLabel={stageName ?? '—'}
+        statusV2={statusV2}
         boardId={boardId}
         onAfterStageChange={onAfterChange}
       />

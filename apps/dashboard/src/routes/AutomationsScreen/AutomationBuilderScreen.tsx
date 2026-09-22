@@ -125,6 +125,7 @@ export default function AutomationBuilderScreen(): ReactElement {
                 initialConfig: forkSource.config,
                 initialName: isClone ? `${forkSource.name.slice(0, 72)} - Clone` : forkSource.name,
                 ...(forkSource.description ? { initialDescription: forkSource.description } : {}),
+                initialPriority: forkSource.priority,
                 // Clones start an independent lineage — forks stay pinned to the source.
                 ...(forkFromId && !isClone
                   ? {

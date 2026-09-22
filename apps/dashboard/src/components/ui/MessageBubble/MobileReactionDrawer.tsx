@@ -6,7 +6,7 @@ import { useAuth } from '../../../hooks/useAuth';
 import { useUsers } from '../../../hooks/useUsers';
 import Avatar from '../Avatar/Avatar';
 import { renderEmoji } from '../../../utils/customEmojiUtils';
-import { isStatusExpired } from '../../../utils/statusUtils';
+import { resolveUserStatus } from '../../../utils/statusUtils';
 import { AnimatePresence, motion, Variants } from 'framer-motion';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
@@ -291,13 +291,11 @@ export default function MobileReactionDrawer({
                               <Avatar userId={user.userId} size='sm' showActiveStatus={false} />
                               <span className='text-sm text-foreground truncate flex items-center gap-1'>
                                 {user.name}
-                                {user.user?.statusEmoji &&
-                                  (!user.user.statusExpiryAt ||
-                                    !isStatusExpired(user.user.statusExpiryAt)) && (
-                                    <span className='inline-flex'>
-                                      {renderEmoji(user.user.statusEmoji)}
-                                    </span>
-                                  )}
+                                {resolveUserStatus(user.user).hasStatus && (
+                                  <span className='inline-flex'>
+                                    {renderEmoji(resolveUserStatus(user.user).emoji)}
+                                  </span>
+                                )}
                                 {currentUser && user.userId === currentUser.id && (
                                   <span className='text-muted-foreground'>(you)</span>
                                 )}
