@@ -24,6 +24,9 @@ const listeners = new Set<() => void>();
 let cachedRaw: string | null | undefined;
 let cachedMap: AppSnapshots = {};
 
+/** Keys that would reach `Object.prototype` rather than the map itself. */
+const UNSAFE_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+
 const isSnapshot = (value: unknown): value is AppSnapshot =>
   !!value &&
   typeof value === 'object' &&
@@ -40,17 +43,18 @@ const getSnapshot = (): AppSnapshots => {
   if (raw === cachedRaw) return cachedMap;
   cachedRaw = raw;
 
-  let next: Record<string, AppSnapshot> = {};
+  let next: Record<string, AppSnapshot> = Object.create(null) as Record<string, AppSnapshot>;
   if (raw) {
     try {
       const parsed: unknown = JSON.parse(raw);
       if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
         for (const [id, value] of Object.entries(parsed as Record<string, unknown>)) {
+          if (UNSAFE_KEYS.has(id)) continue;
           if (isSnapshot(value)) next[id] = { title: value.title, icon: value.icon };
         }
       }
     } catch {
-      next = {};
+      next = Object.create(null) as Record<string, AppSnapshot>;
     }
   }
   cachedMap = next;
@@ -79,9 +83,16 @@ export const useAppSnapshots = (): AppSnapshots =>
 
 export const getAppSnapshots = getSnapshot;
 
+const withEntry = (base: AppSnapshots, appId: string, snapshot: AppSnapshot): AppSnapshots => {
+  const next = Object.create(null) as Record<string, AppSnapshot>;
+  for (const [id, value] of Object.entries(base)) next[id] = value;
+  if (!UNSAFE_KEYS.has(appId)) next[appId] = snapshot;
+  return next;
+};
+
 /** Records (or replaces) an app's snapshot. */
 export const setAppSnapshot = (appId: string, snapshot: AppSnapshot): void => {
-  write({ ...getSnapshot(), [appId]: { title: snapshot.title, icon: snapshot.icon } });
+  write(withEntry(getSnapshot(), appId, { title: snapshot.title, icon: snapshot.icon }));
 };
 
 /** Patches an existing snapshot; no-op when the app was never recorded. */
@@ -89,5 +100,5 @@ export const updateAppSnapshot = (appId: string, patch: Partial<AppSnapshot>): v
   const current = getSnapshot();
   const existing = current[appId];
   if (!existing) return;
-  write({ ...current, [appId]: { ...existing, ...patch } });
+  write(withEntry(current, appId, { ...existing, ...patch }));
 };
