@@ -46,7 +46,10 @@ import { uploadFiles, UploadedFileResult } from '../services/fileUploadService';
 import { config } from '../config/env';
 import { superpositionClient } from '@/services/superpositionClient';
 import { validateChannelAccess } from '@/utils/channelAccess';
-import { bulkTicketCreationQueue, BULK_TICKET_JOB_NAME_SUB, BULK_TICKET_JOB_NAME_BULK } from '@/queues/bulkTicketCreationQueue';
+import {
+  createBulkTicketBatch,
+  type BatchTicketInput,
+} from '@/services/tickets/bulkTicketBatchService';
 import { BulkTicketCreationInput, BulkTicketMode, CreateBulkTicketResponse } from '@/types/bulkTicket';
 import { randomUUID } from 'crypto';
 import { linkCreatedEntities, resolveInheritedOwner } from '@/sdlc/entityLinkService';
@@ -112,6 +115,28 @@ type MyTicketBoardOption = {
   name: string;
   projectId?: string;
 };
+
+/**
+ * Bulk request item -> batch row. `createdBy`/`updatedBy` are dropped here
+ * deliberately: the batch takes identity from its context, which comes from the
+ * session, so a body-supplied creator can never take effect.
+ */
+const toBatchTicketInput = (item: BulkTicketCreationInput): BatchTicketInput => ({
+  title: item.title,
+  description: item.description,
+  channelId: item.channelId,
+  projectId: item.projectId,
+  boardId: item.boardId,
+  assignedTo: item.assignedTo,
+  userGroupId: item.userGroupId,
+  eta: item.eta,
+  ticketType: item.ticketType,
+  stageName: item.stageName,
+  priority: item.priority,
+  statusV2: item.statusV2,
+  merchantId: item.merchantId,
+  clientRowId: item.clientRowId,
+});
 
 export class TicketController {
   private ticketRepository: TicketRepository;
@@ -436,118 +461,21 @@ export class TicketController {
   }
 
   /**
-   * Create one ticket for a bulk batch: opens a fresh conversation, then reuses
-   * createTicketWithConversation so bulk items follow the exact same
-   * transactional creation path as single tickets. The conversation's
-   * `initialMessageId` is handed down as the creation message's id, so the
-   * thread has one system message — the ticket card — exactly like a single
-   * ticket does.
-   *
-   * The conversation is written before the ticket's transaction, so a failure
-   * afterwards would leave a "Ticket created in …" thread with no ticket behind
-   * it — {@link discardBulkConversation} takes that back out.
-   */
-  async createBulkTicketItem(item: {
-    title: string;
-    description?: string;
-    channelId: string;
-    projectId: string;
-    boardId: string;
-    assignedTo?: string;
-    userGroupId?: string;
-    eta?: Date;
-    tags?: string[];
-    ticketType?: string;
-    stageName?: string;
-    priority?: string;
-    statusV2?: string;
-  }, createdBy: string, options?: { fromTicketsTab?: boolean }): Promise<Ticket> {
-    const initialMessageId = randomUUID();
-    let doNotPostToChannel = false;
-    if (options?.fromTicketsTab) {
-      const channelSetting = await prisma.channel.findUnique({
-        where: { id: item.channelId },
-        select: { showTicketsTabTicketsInChat: true },
-      });
-      doNotPostToChannel = channelSetting?.showTicketsTabTicketsInChat === false;
-    }
-
-    const conversation = await this.conversationRepository.create({
-      channelId: item.channelId,
-      createdBy,
-      initialMessageId,
-      doNotPostToChannel,
-    });
-
-    const board = item.boardId ? await this.boardRepository.findBoardById(item.boardId) : null;
-    const creationText = `Ticket created in ${board?.name || 'Unknown Board'}: ${item.title}`;
-
-    let ticket: Ticket;
-    try {
-      ticket = await this.createTicketWithConversation({
-        title: item.title,
-        description: item.description ?? '',
-        createdBy,
-        updatedBy: createdBy,
-        conversationId: conversation.conversationId,
-        projectId: item.projectId,
-        boardId: item.boardId,
-        assignedTo: item.assignedTo,
-        userGroupId: item.userGroupId,
-        eta: item.eta,
-        ticketType: item.ticketType,
-        stageName: item.stageName,
-        priority: item.priority,
-        statusV2: item.statusV2,
-        messageContent: creationText,
-        messageSubtype: 'bulk_ticket',
-        creationMessageId: initialMessageId,
-      });
-    } catch (error) {
-      await this.discardBulkConversation(conversation.conversationId);
-      throw error;
-    }
-    try {
-      await messageMetadataService.syncInitialMessageMd(conversation.conversationId);
-    } catch (error) {
-      logger.error('[Bulk Ticket] Failed to sync initial message md for a created ticket', {
-        ticketId: ticket.id,
-        conversationId: conversation.conversationId,
-        error,
-      });
-    }
-
-    return ticket;
-  }
-
-  /**
-   * Remove the conversation a failed bulk item had already opened, head message
-   * and all. Best effort: if the cleanup itself fails the orphan is logged by
-   * id rather than left silent.
-   */
-  private async discardBulkConversation(conversationId: string): Promise<void> {
-    try {
-      await prisma.$transaction([
-        prisma.message.deleteMany({ where: { conversationId } }),
-        prisma.conversation.delete({ where: { conversationId } }),
-      ]);
-    } catch (error) {
-      logger.error('[Bulk Ticket] Orphan conversation left behind by a failed ticket', {
-        conversationId,
-        error,
-      });
-    }
-  }
-
-  /**
    * POST /api/tickets/bulk-from-message
    *
    * Create many tickets in one request. Identity is taken from the session
    * (never the body). Every target channel — including each item's own
    * channelId — is access-checked up front; the batch is rejected as a whole if
-   * any channel is unreachable. The parent (parent-sub mode) is created
-   * synchronously so the caller gets a parentTicketId immediately; the rest are
-   * handed to the bulk worker.
+   * any channel is unreachable.
+   *
+   * The batch is written set-based and synchronously, so the caller gets the
+   * created tickets — or the reason none were created — in this response. There
+   * is deliberately no partial success: the whole batch commits or none of it
+   * does.
+   *
+   * `idempotencyKey` (client-supplied, stable across retries of the same
+   * submission) is what makes a double-submit safe: row ids are derived from
+   * it, so replaying a batch that already committed inserts nothing.
    */
   createBulkTicket = async (req: Request, res: Response): Promise<void> => {
     try {
@@ -581,8 +509,7 @@ export class TicketController {
         tickets?: Array<Record<string, unknown>>;
         subTickets?: Array<Record<string, unknown>>;
         existingParentTicketId?: string;
-        sourceConversationId?: string;
-        sourceMessageId?: string;
+        idempotencyKey?: string;
         projectId?: string;
         channelId?: string;
         boardId?: string;
@@ -600,7 +527,9 @@ export class TicketController {
         return;
       }
 
-      const MAX_BULK_TICKETS = 100;
+      // Each batch is one transaction held open for the life of the request,
+      // so the cap is about request duration and pool pressure, not payload size.
+      const MAX_BULK_TICKETS = 20;
       if (rawChildren.length > MAX_BULK_TICKETS) {
         res.status(400).json({ error: `Cannot create more than ${MAX_BULK_TICKETS} tickets in one request` });
         return;
@@ -709,35 +638,46 @@ export class TicketController {
         }
       }
 
-      const jobName = mode === BulkTicketMode.ALL_PARENTS
-        ? BULK_TICKET_JOB_NAME_BULK
-        : BULK_TICKET_JOB_NAME_SUB;
-
-      await bulkTicketCreationQueue.enqueue(jobName, {
-        mode,
-        userId,
-        parentWorkspaceId: workspaceId,
-        parentTicketId,
-        ...(parentToCreate ? { parent: parentToCreate } : {}),
-        subTickets: children,
-        sourceMessageId: body.sourceMessageId,
-        sourceConversationId: body.sourceConversationId,
-        sourceType: 'MESSAGE',
+      // Stable across retries of the same submission, so a double-submit
+      // re-derives the same row ids and inserts nothing the second time.
+      const batchKey = body.idempotencyKey?.trim() || randomUUID();
+      const batchCtx = {
+        createdBy: userId,
+        batchKey,
         fromTicketsTab: body.fromTicketsTab === true,
-        channelId: topChannelId ?? children[0]?.channelId,
-        // Board-derived, not body-supplied: this is what the retry nudge files under.
-        projectId: children[0]?.projectId ?? topProjectId,
-      });
-
-      const response: CreateBulkTicketResponse = {
-        parentTicketId: parentTicketId ?? undefined,
-        enqueuedSubTickets: children.length,
       };
 
-      res.status(202).json(response);
+      // One transaction for the whole request: parent, children, sub-ticket
+      // links and the parent's rebuilt card all commit together or not at all.
+      const batch = await createBulkTicketBatch(
+        {
+          mode,
+          ...(parentToCreate ? { parent: toBatchTicketInput(parentToCreate) } : {}),
+          ...(parentTicketId ? { existingParentTicketId: parentTicketId } : {}),
+          children: children.map(toBatchTicketInput),
+        },
+        batchCtx
+      );
+
+      const response: CreateBulkTicketResponse = {
+        parentTicketId: batch.parentTicketId ?? undefined,
+        createdTickets: batch.tickets.map((ticket) => ({
+          id: ticket.id,
+          xyneId: ticket.xyneId,
+          title: ticket.title,
+          conversationId: ticket.conversationId,
+        })),
+      };
+
+      res.status(201).json(response);
     } catch (error) {
       logger.error('[Bulk Ticket] createBulkTicket failed:', error);
-      res.status(500).json({ error: 'Failed to enqueue bulk ticket creation' });
+      // The whole request is one transaction, so a failure here means nothing
+      // was written and the caller can safely retry the same payload.
+      res.status(500).json({
+        error: error instanceof Error ? error.message : 'Failed to create tickets',
+        code: 'BULK_CREATE_FAILED',
+      });
     }
   };
 

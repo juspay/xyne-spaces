@@ -236,9 +236,6 @@ export const TicketSuggestions: React.FC<TicketSuggestionsProps> = ({
           sourceConversationId={existingParentTicket ? undefined : conversationId}
           onTicketCreated={() => {
             setIsBulkModalOpen(false);
-            toast.success('Tickets queued', {
-              description: 'Tickets will be created shortly.',
-            });
           }}
         />
       )}

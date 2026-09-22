@@ -45,9 +45,9 @@ export interface BulkCreateTicketsModalProps {
   sourceMessageId?: string | undefined;
   sourceConversationId?: string | undefined;
   /**
-   * Called once the batch is accepted. The ticket is passed only when one
-   * exists already — a batch that creates its own parent is still queued at
-   * this point, so there is no id to hand over.
+   * Called once the batch has been created. The parent is passed whenever there
+   * is one — it exists by the time the response lands, whether this batch made
+   * it or the caller supplied it.
    */
   onTicketCreated?: (ticket?: { id: string; conversationId?: string; xyneId?: string }) => void;
 }
@@ -321,6 +321,8 @@ export const BulkCreateTicketsModal: React.FC<BulkCreateTicketsModalProps> = ({
   };
 
   const filledRows = rows.filter(r => r.title.trim().length > 0);
+  // Server writes the batch in one transaction and rejects anything larger.
+  const MAX_BULK_TICKETS = 20;
   const validCount = filledRows.filter(r => r.description.trim().length > 0).length;
   const minimumRows = isAllParentsMode || hasExistingParent ? 1 : 2;
   const blockingReason = ((): string | null => {
@@ -329,6 +331,9 @@ export const BulkCreateTicketsModal: React.FC<BulkCreateTicketsModalProps> = ({
       return minimumRows === 1
         ? 'Add at least one ticket'
         : 'Add at least one sub-ticket under the main ticket';
+    }
+    if (filledRows.length > MAX_BULK_TICKETS) {
+      return `Create at most ${MAX_BULK_TICKETS} tickets at a time`;
     }
     if (filledRows.some(r => !r.description.trim())) return 'Every ticket needs a description';
     if (filledRows.some(r => !r.channelId)) return 'Every ticket needs a channel';
@@ -340,6 +345,9 @@ export const BulkCreateTicketsModal: React.FC<BulkCreateTicketsModalProps> = ({
   const handleSubmit = async (): Promise<void> => {
     if (!allValid || !user || filledRows.length === 0) return;
     setIsSubmitting(true);
+    // Stable for this submission: if the request is retried (by the user or a
+    // proxy) the server re-derives the same row ids and creates nothing twice.
+    const idempotencyKey = crypto.randomUUID();
     try {
       const completeRows = filledRows.filter(r => r.description.trim().length > 0);
       const resolveAssignee = (
@@ -371,13 +379,13 @@ export const BulkCreateTicketsModal: React.FC<BulkCreateTicketsModalProps> = ({
           tickets,
           projectId,
           channelId: propChannelId,
+          idempotencyKey,
           ...(fromTicketsTab ? { fromTicketsTab: true } : {}),
         };
         const res = await apiInstance.post('/tickets/bulk-from-message', body);
         const data = res.data as CreateBulkTicketResponse;
-        toast.success('Tickets will be created shortly', {
-          description: `${data.enqueuedSubTickets} ticket${data.enqueuedSubTickets !== 1 ? 's' : ''} queued.`,
-        });
+        const count = data.createdTickets.length;
+        toast.success(`Created ${count} ticket${count !== 1 ? 's' : ''}`);
         onClose();
         return;
       }
@@ -402,16 +410,15 @@ export const BulkCreateTicketsModal: React.FC<BulkCreateTicketsModalProps> = ({
           channelId: propChannelId,
           projectId,
           subTickets,
+          idempotencyKey,
           ...(sourceMessageId ? { sourceMessageId } : {}),
           ...(fromTicketsTab ? { fromTicketsTab: true } : {}),
         };
         const res = await apiInstance.post('/tickets/bulk-from-message', body);
         const data = res.data as CreateBulkTicketResponse;
-        toast.success('Sub-tickets will be created shortly', {
-          description: `${data.enqueuedSubTickets} sub-ticket${data.enqueuedSubTickets !== 1 ? 's' : ''} queued.`,
-        });
-        // The parent is the one the caller handed us, so these are real values
-        // rather than anything the 202 could have carried.
+        const subCount = data.createdTickets.length;
+        toast.success(`Created ${subCount} sub-ticket${subCount !== 1 ? 's' : ''}`);
+        // The parent is the one the caller handed us, so these are real values.
         onTicketCreated?.({
           id: existingParentTicket.id,
           conversationId: existingParentTicket.conversationId,
@@ -444,6 +451,7 @@ export const BulkCreateTicketsModal: React.FC<BulkCreateTicketsModalProps> = ({
         boardId?: string;
         subTickets: unknown[];
         sourceConversationId?: string;
+        idempotencyKey?: string;
         fromTicketsTab?: boolean;
       } = {
         mode: BulkTicketMode.PARENT_SUB,
@@ -464,6 +472,7 @@ export const BulkCreateTicketsModal: React.FC<BulkCreateTicketsModalProps> = ({
           ticketType: parent.ticketType,
         },
         subTickets,
+        idempotencyKey,
         ...(fromTicketsTab ? { fromTicketsTab: true } : {}),
       };
       if (sourceConversationId) {
@@ -471,12 +480,10 @@ export const BulkCreateTicketsModal: React.FC<BulkCreateTicketsModalProps> = ({
       }
       const res = await apiInstance.post('/tickets/bulk-from-message', body);
       const data = res.data as CreateBulkTicketResponse;
-      toast.success('Tickets will be created shortly', {
-        description: `${data.enqueuedSubTickets} sub-ticket${data.enqueuedSubTickets !== 1 ? 's' : ''} queued.`,
-      });
-      // Parent and sub-tickets are both still queued, so there is no ticket to
-      // report — the callback fires to say the batch was accepted.
-      onTicketCreated?.();
+      const subCount = data.createdTickets.length;
+      toast.success(`Created 1 ticket and ${subCount} sub-ticket${subCount !== 1 ? 's' : ''}`);
+      // The parent exists now, so the caller gets the real ticket to navigate to.
+      onTicketCreated?.(data.parentTicketId ? { id: data.parentTicketId } : undefined);
       onClose();
     } catch {
       toast.error('Failed to create tickets', {

@@ -55,9 +55,12 @@ export const bulkTicketSchemaValidator = Joi.object({
   existingParentTicketId: Joi.string().optional(),
   sourceConversationId: Joi.string().optional(),
   sourceMessageId: Joi.string().optional(),
+  /** Client-supplied and stable across retries; makes a double-submit a no-op. */
+  idempotencyKey: Joi.string().max(200).optional(),
   parent: parentSchema.optional(),
-  subTickets: Joi.array().items(subTicketSchema).max(100).optional(),
-  tickets: Joi.array().items(bulkTicketSchema).max(100).optional(),
+  // Matches MAX_BULK_TICKETS in the controller: one transaction per request.
+  subTickets: Joi.array().items(subTicketSchema).max(20).optional(),
+  tickets: Joi.array().items(bulkTicketSchema).max(20).optional(),
   projectId: Joi.string().optional(),
   channelId: Joi.string().optional(),
   boardId: Joi.string().optional(),
