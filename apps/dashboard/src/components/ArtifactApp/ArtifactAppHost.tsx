@@ -16,6 +16,15 @@ import { clawErrorText } from '../../services/claw/clawRequest';
 interface ArtifactAppHostProps {
   appId: string;
   /**
+   * Show the payload's own title inside the runner's header.
+   *
+   * Off in the bars: this component's header already names the app, so the
+   * inner one repeats it. On in the Agent Hub, where the build's title is worth
+   * seeing next to the version controls — it can legitimately differ from the
+   * app's name once a later build renames itself.
+   */
+  showPayloadTitle?: boolean;
+  /**
    * Renders a back arrow in the header. Only the Agent Hub's own app page has
    * somewhere to go back to; a bar-hosted app (rail, Inbox, channel tab) is
    * already where the user asked for it and gets no back control.
@@ -31,7 +40,11 @@ interface ArtifactAppHostProps {
  * Fills whatever box it is given, so the same host serves the full-screen
  * route, the Inbox's `chat-main` panel and a channel tab.
  */
-export const ArtifactAppHost = ({ appId, onBack }: ArtifactAppHostProps): ReactElement => {
+export const ArtifactAppHost = ({
+  appId,
+  onBack,
+  showPayloadTitle = false,
+}: ArtifactAppHostProps): ReactElement => {
   const queryClient = useQueryClient();
   const [error, setError] = useState<string | null>(null);
 
@@ -174,6 +187,7 @@ export const ArtifactAppHost = ({ appId, onBack }: ArtifactAppHostProps): ReactE
         <ReactArtifactView
           artifact={artifact}
           fill
+          hideTitle={!showPayloadTitle}
           settingsSlot={
             <ArtifactAppSettings
               app={app}
