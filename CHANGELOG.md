@@ -1,3 +1,10 @@
+## [1.362.0-release-20260922.3](https://github.com/juspay/xyne-spaces/compare/v1.362.0-release-20260922.2...v1.362.0-release-20260922.3) (2026-09-22)
+
+
+### Features
+
+* dm-search-optimization-added-debounce-and-cache ([#2151](https://github.com/juspay/xyne-spaces/issues/2151)) ([f3e5f63](https://github.com/juspay/xyne-spaces/commit/f3e5f63dc8a6f58e8b0c6ce7659fc53347795f5d))
+
 ## [1.362.0-release-20260922.2](https://github.com/juspay/xyne-spaces/compare/v1.362.0-release-20260922.1...v1.362.0-release-20260922.2) (2026-09-22)
 
 
