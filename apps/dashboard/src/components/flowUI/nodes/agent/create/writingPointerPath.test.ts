@@ -2,11 +2,13 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { describe, it } from 'node:test';
 import {
+  fieldTransitionPath,
   mouseTravelDurationMs,
   mouseTravelPath,
   mouseTravelTimes,
   pointerEntryPoint,
   pointerParkPoint,
+  pointerSettlePath,
   pointerWanderStops,
 } from './writingPointerPath.ts';
 
@@ -43,8 +45,8 @@ void describe('mouseTravelPath', () => {
   void it('scales duration with distance and stays in a human range', () => {
     const short = mouseTravelDurationMs({ x: 0, y: 0 }, { x: 10, y: 10 });
     const long = mouseTravelDurationMs({ x: 0, y: 0 }, { x: 400, y: 400 });
-    assert.ok(short >= 420);
-    assert.ok(long <= 780);
+    assert.ok(short >= 440);
+    assert.ok(long <= 820);
     assert.ok(long > short);
   });
 
@@ -53,6 +55,34 @@ void describe('mouseTravelPath', () => {
     const from = pointerEntryPoint(target);
     assert.ok(from.x < target.x);
     assert.ok(from.y < target.y);
+  });
+
+  void it('arcs downward between fields instead of a straight drop', () => {
+    const from = { x: 180, y: 40 };
+    const to = { x: 200, y: 120 };
+    const path = fieldTransitionPath(from, to);
+    const mid = path[Math.floor(path.length / 2)];
+    assert.ok(mid);
+    const straightX = (from.x + to.x) / 2;
+    const offLine = Math.abs(mid.x - straightX);
+    assert.ok(offLine > 10, `expected a sideways arc, got deviation ${offLine}`);
+    assert.equal(path[path.length - 1]?.x, to.x);
+    assert.equal(path[path.length - 1]?.y, to.y);
+  });
+
+  void it('settles with a tiny hover wiggle', () => {
+    const at = { x: 50, y: 50 };
+    const path = pointerSettlePath(at);
+    assert.equal(path[0]?.x, at.x);
+    assert.equal(path[path.length - 1]?.x, at.x);
+    assert.ok(path.length >= 4);
+  });
+
+  void it('uses a short two-point path for reduced motion', () => {
+    const path = mouseTravelPath({ x: 0, y: 0 }, { x: 80, y: 40 }, 'reduced');
+    assert.equal(path.length, 2);
+    const duration = mouseTravelDurationMs({ x: 0, y: 0 }, { x: 80, y: 40 }, 'reduced');
+    assert.ok(duration <= 220);
   });
 
   void it('wanders left and right instead of a linear left-to-right pass', () => {
@@ -80,6 +110,8 @@ void describe('mouseTravelPath', () => {
     assert.match(pointer, /animate\(/);
     assert.match(pointer, /useMotionValue/);
     assert.match(pointer, /pointerWanderStops/);
+    assert.match(pointer, /pointerSettlePath/);
+    assert.match(pointer, /field-down/);
     assert.equal(/from 'framer-motion'/.test(pointer), false);
     assert.equal(/gsap/i.test(pointer), false);
     assert.match(highlight, /from 'motion\/react'/);

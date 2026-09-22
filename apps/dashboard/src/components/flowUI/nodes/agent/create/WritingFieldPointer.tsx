@@ -4,20 +4,23 @@ import { useTheme } from '@/hooks/useTheme';
 import type { AgentCreateField } from './types';
 import {
   mouseTravelDurationMs,
-  mouseTravelPath,
   mouseTravelTimes,
+  pickTravelPath,
   pointerEntryPoint,
+  pointerLandingPoint,
   pointerParkPoint,
+  pointerSettlePath,
   pointerWanderStops,
-  wanderHopDurationMs,
   type FieldBox,
   type PointerPoint,
+  type TravelKind,
 } from './writingPointerPath';
 
 const LIGHT_SRC = '/svgs/icons/pointer-cursor-light.svg';
 const DARK_SRC = '/svgs/icons/pointer-cursor-dark.svg';
 const SIZE = 20;
 const TRAVEL_EASE = [0.42, 0, 0.2, 1] as const;
+const HOVER_EASE = [0.33, 0, 0.2, 1] as const;
 const FADE_SECONDS = 0.16;
 
 function measureBox(origin: HTMLElement, field: AgentCreateField): FieldBox | null {
@@ -34,8 +37,12 @@ function measureBox(origin: HTMLElement, field: AgentCreateField): FieldBox | nu
   };
 }
 
-function pathArrays(from: PointerPoint, to: PointerPoint): { xs: number[]; ys: number[] } {
-  const path = mouseTravelPath(from, to);
+function pathArrays(
+  from: PointerPoint,
+  to: PointerPoint,
+  kind: TravelKind,
+): { xs: number[]; ys: number[] } {
+  const path = pickTravelPath(from, to, kind);
   const xs: number[] = [];
   const ys: number[] = [];
   for (let i = 0; i < path.length; i += 1) {
@@ -53,8 +60,8 @@ interface WritingFieldPointerProps {
 }
 
 /**
- * Figma write pointer. Travels into the field, then wanders left and right
- * across it with Motion `animate()` — never parks on the title’s left edge.
+ * Figma write pointer. Swishes onto field text, settles, hovers while typing,
+ * then arcs down to the next field via Motion `animate()` on motion values.
  */
 export function WritingFieldPointer({
   field,
@@ -66,6 +73,7 @@ export function WritingFieldPointer({
   const y = useMotionValue(0);
   const opacity = useMotionValue(0);
   const lastPointRef = useRef<PointerPoint | null>(null);
+  const prevFieldRef = useRef<AgentCreateField | null>(null);
   const hopRef = useRef(0);
   const [shown, setShown] = useState(false);
   const [wandering, setWandering] = useState(false);
@@ -84,6 +92,7 @@ export function WritingFieldPointer({
     if (!field || !origin) {
       setWandering(false);
       hopRef.current = 0;
+      prevFieldRef.current = field;
       if (lastPointRef.current === null) {
         opacity.set(0);
         setShown(false);
@@ -112,18 +121,31 @@ export function WritingFieldPointer({
     setShown(true);
     setWandering(false);
 
-    const moveTo = (
-      from: PointerPoint,
-      to: PointerPoint,
+    const travelKind = (): TravelKind => {
+      if (reduceMotion) return 'reduced';
+      const prev = prevFieldRef.current;
+      if (prev && prev !== field && lastPointRef.current) return 'field-down';
+      if (!lastPointRef.current) return 'entry';
+      return 'field-down';
+    };
+
+    const moveAlong = (
+      xs: number[],
+      ys: number[],
       duration: number,
+      kind: TravelKind,
       onDone: () => void,
     ): void => {
-      const { xs, ys } = pathArrays(from, to);
-      const times = mouseTravelTimes(xs.length);
-      lastPointRef.current = to;
+      const times = mouseTravelTimes(xs.length, kind);
+      const ease = kind === 'wander' || kind === 'settle' ? HOVER_EASE : TRAVEL_EASE;
+      const lastX = xs[xs.length - 1];
+      const lastY = ys[ys.length - 1];
+      if (lastX !== undefined && lastY !== undefined) {
+        lastPointRef.current = { x: lastX, y: lastY };
+      }
       animate(x, xs, {
         duration,
-        ease: TRAVEL_EASE,
+        ease,
         times,
         onComplete: (): void => {
           if (!cancelled) {
@@ -131,14 +153,24 @@ export function WritingFieldPointer({
           }
         },
       });
-      animate(y, ys, { duration, ease: TRAVEL_EASE, times });
+      animate(y, ys, { duration, ease, times });
     };
 
-    const wander = (): void => {
-      if (cancelled) return;
+    const moveTo = (
+      from: PointerPoint,
+      to: PointerPoint,
+      kind: TravelKind,
+      onDone: () => void,
+    ): void => {
+      const { xs, ys } = pathArrays(from, to, kind);
+      moveAlong(xs, ys, mouseTravelDurationMs(from, to, kind) / 1000, kind, onDone);
+    };
+
+    const hover = (): void => {
+      if (cancelled || reduceMotion) return;
       const box = measureBox(origin, field);
       if (!box) {
-        frame = window.requestAnimationFrame(wander);
+        frame = window.requestAnimationFrame(hover);
         return;
       }
       const stops = pointerWanderStops(box);
@@ -147,7 +179,26 @@ export function WritingFieldPointer({
       const next = stops[hopRef.current % stops.length];
       if (!next) return;
       const from = lastPointRef.current ?? next;
-      moveTo(from, next, wanderHopDurationMs(from, next) / 1000, wander);
+      moveTo(from, next, 'wander', hover);
+    };
+
+    const settle = (at: PointerPoint): void => {
+      if (cancelled) return;
+      if (reduceMotion) {
+        setWandering(true);
+        return;
+      }
+      const wiggle = pointerSettlePath(at);
+      moveAlong(
+        wiggle.map(p => p.x),
+        wiggle.map(p => p.y),
+        mouseTravelDurationMs(at, at, 'settle') / 1000,
+        'settle',
+        (): void => {
+          setWandering(true);
+          hover();
+        },
+      );
     };
 
     const arrive = (): void => {
@@ -158,23 +209,32 @@ export function WritingFieldPointer({
         return;
       }
       stopTravel();
-      const park = pointerParkPoint(box);
-      const first = pointerWanderStops(box)[0] ?? park;
-      const from = lastPointRef.current ?? pointerEntryPoint(first);
+      const landing = pointerLandingPoint(box);
+      const kind = travelKind();
+      const from =
+        kind === 'entry' || !lastPointRef.current
+          ? pointerEntryPoint(landing)
+          : lastPointRef.current;
+
       if (reduceMotion) {
+        const park = pointerParkPoint(box);
         x.set(park.x);
         y.set(park.y);
         opacity.set(1);
         lastPointRef.current = park;
+        prevFieldRef.current = field;
         setWandering(true);
         return;
       }
-      x.set(from.x);
-      y.set(from.y);
+
+      if (kind === 'entry' || !lastPointRef.current) {
+        x.set(from.x);
+        y.set(from.y);
+      }
       animate(opacity, 1, { duration: FADE_SECONDS, ease: 'easeOut' });
-      moveTo(from, first, mouseTravelDurationMs(from, first) / 1000, (): void => {
-        setWandering(true);
-        wander();
+      moveTo(from, landing, kind, (): void => {
+        prevFieldRef.current = field;
+        settle(landing);
       });
     };
 
