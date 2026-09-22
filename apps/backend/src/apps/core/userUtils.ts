@@ -1,9 +1,7 @@
 import { logger } from '@/utils/logger';
 import { repositories } from '@/database/repositories';
 import { UserResponse } from '../types';
-import { db } from '@/database/client';
 import { withWorkspaceScope } from '@/database/tenant/context';
-import { UserPresenceStatus } from '@xyne/shared';
 
 /**
  * Get user data by user ID
@@ -94,43 +92,15 @@ async function writeStatus(
   const now = new Date();
 
   const updatedUser = await withWorkspaceScope(async () => {
-    const user = await db.user.update({
-      where: { id: userId },
-      data: {
-        statusEmoji: data.statusEmoji,
-        statusContent: data.statusContent,
-        statusExpiryAt: data.statusExpiryAt,
-        updatedAt: now,
-      },
-      select: {
-        id: true,
-        statusEmoji: true,
-        statusContent: true,
-        statusExpiryAt: true,
-      },
+    const user = await repositories.users.update(userId, {
+      statusEmoji: data.statusEmoji,
+      statusContent: data.statusContent,
+      statusExpiryAt: data.statusExpiryAt,
+      updatedAt: now,
     });
 
     // Keep the deprecated presence mirror in sync with the users row.
-    await db.userPresence.upsert({
-      where: { userId },
-      update: {
-        statusEmoji: data.statusEmoji,
-        statusContent: data.statusContent,
-        statusExpiryAt: data.statusExpiryAt,
-        updatedAt: now,
-      },
-      create: {
-        userId,
-        workspaceId,
-        status: UserPresenceStatus.OFFLINE,
-        lastActiveAt: now,
-        lastSeenAt: now,
-        isManual: false,
-        statusEmoji: data.statusEmoji,
-        statusContent: data.statusContent,
-        statusExpiryAt: data.statusExpiryAt,
-      },
-    });
+    await repositories.userPresence.upsertStatusByUserId(userId, workspaceId, data, now);
 
     return user;
   });

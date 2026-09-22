@@ -22,6 +22,7 @@ export { AgentStepRepository } from './agentSteps';
 export { ExternalStepResponseRepository } from './externalStepResponses';
 export { UserGroupRepository } from './userGroups';
 export { UserRepository } from './users';
+export { UserPresenceRepository } from './userPresenceRepository';
 export { ResourceRepository } from './resources';
 export { ResourceAccessRepository } from './resourceAccess';
 export { ACLAuditLogRepository } from './aclAuditLogs';
@@ -90,6 +91,7 @@ import { AgentStepRepository } from './agentSteps';
 import { ExternalStepResponseRepository } from './externalStepResponses';
 import { UserGroupRepository } from './userGroups';
 import { UserRepository } from './users';
+import { UserPresenceRepository } from './userPresenceRepository';
 import { ResourceRepository } from './resources';
 import { ResourceAccessRepository } from './resourceAccess';
 import { ACLAuditLogRepository } from './aclAuditLogs';
@@ -155,6 +157,7 @@ export class RepositoryContainer {
   public userGroups: UserGroupRepository;
   
   public users: UserRepository;
+  public userPresence: UserPresenceRepository;
   public resources: ResourceRepository;
   public resourceAccess: ResourceAccessRepository;
   public aclAuditLogs: ACLAuditLogRepository;
@@ -214,6 +217,7 @@ export class RepositoryContainer {
     this.externalStepResponses = new ExternalStepResponseRepository();
     this.userGroups = new UserGroupRepository();
     this.users = new UserRepository();
+    this.userPresence = new UserPresenceRepository();
     this.resources = new ResourceRepository();
     this.resourceAccess = new ResourceAccessRepository();
     this.aclAuditLogs = new ACLAuditLogRepository();
