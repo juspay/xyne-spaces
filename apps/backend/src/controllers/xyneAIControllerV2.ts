@@ -546,7 +546,8 @@ export class XyneAIControllerV2 {
           researchContext: effectiveResearchContext,
           ...(sdlcDashboardContext && { dashboardContext: sdlcDashboardContext }),
           createCanvasEnabled,
-          generateFollowUpSuggestions: true,
+          // cmd+K shows one answer and takes no reply, so follow-up chips are never drawn.
+          generateFollowUpSuggestions: agentSlug !== CMDK_ANSWER_AGENT_SLUG,
           sessionId: effectiveSessionId,
           // Branching: forward intent + tree position to claw-auth. The
           // `parentMessageId` is the JAF/v1-shared name; here it doubles as
