@@ -160,6 +160,7 @@ export interface SlackFilters {
   // or reference a channel (channelMentions field). Both are exact attribute membership filters.
   mentionedUserIds?: string[];
   mentionedChannelIds?: string[];
+  mentionedGroupIds?: string[];
   // Thread classification. threadType lives ONLY on a thread's root message, so filtering it
   // yields one hit per matching thread — "show me the ISSUE threads". messageActs lives on
   // each message the classifier cited as evidence, so filtering that yields the individual
@@ -944,6 +945,14 @@ export class YqlBuilder {
         .map((id) => `channelMentions contains ${params.bind('mentionedChannelId', id.trim())}`)
         .join(' or ');
       conditions.push(`(${mentionedChannels})`);
+    }
+
+    // Group-mention filter - messages that mention these user-group(s)
+    if (filters.mentionedGroupIds && filters.mentionedGroupIds.length > 0) {
+      const mentionedGroups = filters.mentionedGroupIds
+        .map((id) => `groupMentions contains ${params.bind('mentionedGroupId', id.trim())}`)
+        .join(' and ');
+      conditions.push(`(${mentionedGroups})`);
     }
 
     // Thread-type filter - the root messages of threads carrying these types.
