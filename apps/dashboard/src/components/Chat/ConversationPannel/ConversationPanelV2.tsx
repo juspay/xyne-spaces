@@ -8,6 +8,8 @@ import {
 } from '../../../hooks/useChannels';
 import { useDragAndDropAreaRef } from '../../../hooks/useDragAndDropAreaRef';
 import { useConversationTabs } from './ConversationPannel.utils';
+import { appIdOf } from '../../../hooks/barItems';
+import { ArtifactAppHost } from '../../ArtifactApp/ArtifactAppHost';
 import { useChannelSubscription } from '../../../hooks/useChannelSubscription';
 import { useScope, useShortcutById } from '../../../shortcuts';
 import { ChannelVisibility, ChannelScopeType } from '@xyne/shared';
@@ -350,6 +352,12 @@ const ConversationPanelV2 = ({
           {tab === 'canvas' &&
             (canvasId ? <CanvasScreen canvasId={canvasId} /> : <CanvasTab channelId={channelId} />)}
           {tab === 'links' && <LinksTab channelId={channelId} />}
+          {appIdOf(tab) !== null && (
+            // An artifact app the user added as a tab. Keyed on the app so
+            // switching between two app tabs boots a fresh sandbox instead of
+            // handing one app's iframe another app's payload.
+            <ArtifactAppHost key={tab} appId={appIdOf(tab) ?? ''} />
+          )}
         </div>
       </div>
     </ConversationTabContext.Provider>

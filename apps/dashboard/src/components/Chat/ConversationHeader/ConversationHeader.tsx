@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, JSX, cloneElement } from 'react';
+import { useState, useEffect, useMemo, useRef, JSX, cloneElement } from 'react';
 import { useAuthContextValues } from '../../../hooks/useAuth';
 import { useZero } from '../../../hooks/useZero';
 import {
@@ -32,6 +32,14 @@ import Info, { ChannelTab } from '../Info/Info';
 import ConversationHeaderMobile from '../ConversationHeaderMobile/ConversationHeaderMobile';
 import ChannelIcon from '../ChannelIcon/ChannelIcon';
 import { ConversationTabListType } from '../ConversationPannel/ConversationPannel.utils';
+import { channelTabsStore } from '../../../hooks/barItems';
+import {
+  BarAddMenu,
+  BarRemoveButton,
+  SortableBar,
+  SortableBarItem,
+  useChannelTabBuiltIns,
+} from '../../BarCustomize';
 import { Button } from '../../ui/Button';
 import { CallTriggerModal } from '../../Call/CallTriggerModal/CallTriggerModal';
 import { getTargetUserIdForCall } from './ConversationHeader.utils';
@@ -45,7 +53,7 @@ import { standaloneNavigate, APP_DRAG_STYLE, APP_NO_DRAG_STYLE } from '../../../
 import { usePlatform } from '../../../hooks/usePlatform';
 import { XyneAIStar } from '../../icons/xyne-ai';
 import { invokeShortcut } from '../../../shortcuts';
-import { CalendarEvent } from '@xyne/icons';
+import { CalendarEvent, PlusDefault } from '@xyne/icons';
 import { xyneCalendarActor } from '../../../machines/xyneCalendarMachine';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { queries } from '../../../zero/queries';
@@ -85,6 +93,8 @@ const ConversationHeader = ({
   const context = useAuthContextValues();
   const zero = useZero();
   const channel = useVisibleChannel(channelId);
+  const channelTabBuiltIns = useChannelTabBuiltIns(channel?.scopeType);
+  const channelTabIds = useMemo(() => (channelTabs ?? []).map(tab => tab.value), [channelTabs]);
   const channelUserStatus = useGetChannelUserStatus(channelId);
   useCallAutoJoin({ channelId, isMember: !!channelUserStatus });
   const { displayName, avatarUserId } = useChannelDisplayName(channel, context.userID);
@@ -540,43 +550,86 @@ const ConversationHeader = ({
           className='flex items-center justify-start gap-0.5 px-0.5 overflow-x-auto no-scrollbar'
           style={APP_NO_DRAG_STYLE}
         >
-          {channelTabs?.map(tab => {
-            const trigger = (
-              <Tabs.Trigger key={tab.value} value={tab.value} asChild>
-                <button
-                  data-testid={`channel-tab-${tab.value}`}
-                  data-track-category='CHANNELS'
-                  data-track-name='SWITCH_TAB'
-                  data-track-metadata={JSON.stringify({ tabValue: tab.value })}
-                  onClick={e => setActiveTab?.(tab.value || '', e)}
-                  className={cn(
-                    'flex items-center justify-center gap-2 px-2.5 py-1.5 rounded-lg transition-colors duration-100 cursor-pointer',
-                    activeTab === tab.value
-                      ? 'bg-muted text-foreground'
-                      : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground',
-                  )}
+          <SortableBar store={channelTabsStore} ids={channelTabIds} direction='horizontal'>
+            {channelTabs?.map(tab => {
+              const removable = !channelTabsStore.locked.includes(tab.value);
+              const trigger = (
+                <Tabs.Trigger key={tab.value} value={tab.value} asChild>
+                  <button
+                    data-testid={`channel-tab-${tab.value}`}
+                    data-track-category='CHANNELS'
+                    data-track-name='SWITCH_TAB'
+                    data-track-metadata={JSON.stringify({ tabValue: tab.value })}
+                    onClick={e => setActiveTab?.(tab.value || '', e)}
+                    className={cn(
+                      'flex items-center justify-center gap-2 px-2.5 py-1.5 rounded-lg transition-colors duration-100 cursor-pointer',
+                      // Room for the hover "×" without the label jumping under it.
+                      removable && 'group-hover:pr-7',
+                      activeTab === tab.value
+                        ? 'bg-muted text-foreground'
+                        : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground',
+                    )}
+                  >
+                    <span className='shrink-0'>
+                      {cloneElement(tab.icon, { color: 'currentColor' } as { color: string })}
+                    </span>
+                    <span className={cn('text-sm font-medium tracking-[-0.28px]')}>
+                      {tab.label}
+                    </span>
+                  </button>
+                </Tabs.Trigger>
+              );
+
+              const withTooltip =
+                tab.value !== 'canvas' ? (
+                  trigger
+                ) : (
+                  <ShortcutTooltip label={tab.label} shortcut='global.openCanvasTab' side='bottom'>
+                    {trigger}
+                  </ShortcutTooltip>
+                );
+
+              // `group` wrapper so the "×" appears only while this tab is
+              // pointed at. Kept inside the strip's box (not offset outside it)
+              // because the list clips overflow for horizontal scrolling.
+              return (
+                <SortableBarItem
+                  key={tab.value}
+                  id={tab.value}
+                  as='span'
+                  className='group relative inline-flex shrink-0'
                 >
-                  <span className='shrink-0'>
-                    {cloneElement(tab.icon, { color: 'currentColor' } as { color: string })}
-                  </span>
-                  <span className={cn('text-sm font-medium tracking-[-0.28px]')}>{tab.label}</span>
-                </button>
-              </Tabs.Trigger>
-            );
-
-            if (tab.value !== 'canvas') return trigger;
-
-            return (
-              <ShortcutTooltip
-                key={tab.value}
-                label={tab.label}
-                shortcut='global.openCanvasTab'
-                side='bottom'
+                  {withTooltip}
+                  <BarRemoveButton
+                    store={channelTabsStore}
+                    id={tab.value}
+                    label={tab.label.trim()}
+                    trackCategory='CHANNELS'
+                    className='right-1.5 top-1/2 size-4 -translate-y-1/2'
+                  />
+                </SortableBarItem>
+              );
+            })}
+          </SortableBar>
+          <BarAddMenu
+            store={channelTabsStore}
+            builtIns={channelTabBuiltIns}
+            trackCategory='CHANNELS'
+            side='bottom'
+            align='start'
+            trigger={
+              <button
+                type='button'
+                aria-label='Add a tab'
+                data-testid='channel-tab-add'
+                data-track-category='CHANNELS'
+                data-track-name='OPEN_ADD_TAB_MENU'
+                className='flex size-7 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground'
               >
-                {trigger}
-              </ShortcutTooltip>
-            );
-          })}
+                <PlusDefault size={14} />
+              </button>
+            }
+          />
         </Tabs.List>
       </Tabs.Root>
 

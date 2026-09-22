@@ -17,6 +17,8 @@ import {
   Monitor,
   Smartphone,
   LayoutGrid,
+  Inbox,
+  PanelTop,
   Shield,
   Eye,
   EyeOff,
@@ -72,9 +74,15 @@ import {
   type CallMediaQuality,
 } from '../../../hooks/useCallMediaQualitySettings';
 import { useMaxCameraHeight, filterQualityOptionsByMax } from '../../../hooks/useMaxCameraQuality';
-import { useVisibleNavigationItems } from '../../../hooks/useVisibleNavigationItems';
-import { useToolbarItems } from '../../../hooks/useToolbarItems';
 import { AI_TOOLBAR_PATH, useAiLaunchPreference } from '../../../hooks/useAiLaunchPreference';
+import {
+  toolbarItemsStore,
+  inboxItemsStore,
+  channelTabsStore,
+  type BarItemsStore,
+} from '../../../hooks/barItems';
+import { useToolbarBuiltIns, useInboxBuiltIns, useChannelTabBuiltIns } from '../../BarCustomize';
+import { BarCustomizer } from './BarCustomizer';
 import type { PreferenceSection, PreferencesProps, NavItem } from '.';
 import { disconnectCalendar } from '../../../services/clients/calendarApi';
 import { toast } from 'sonner';
@@ -98,6 +106,13 @@ const NAV_ITEMS: NavItem[] = [
     id: 'toolbar',
     label: 'Toolbar',
     icon: <LayoutGrid className='size-4' />,
+    desktopOnly: true,
+  },
+  { id: 'inbox', label: 'Inbox', icon: <Inbox className='size-4' />, desktopOnly: true },
+  {
+    id: 'channelTabs',
+    label: 'Channel tabs',
+    icon: <PanelTop className='size-4' />,
     desktopOnly: true,
   },
   { id: 'calendar', label: 'Calendar', icon: <Calendar className='size-4' /> },
@@ -1067,51 +1082,63 @@ const DeveloperSection: FC<{ state: PreferencesState }> = ({ state }) => {
   );
 };
 
-// ─── Toolbar ────────────────────────────────────────────────────────────────
+// ─── Bars: toolbar, Inbox menubar, channel tabs ─────────────────────────────
+// Three bars, one customizer. Each section only decides which store and which
+// built-ins the user is choosing from; ordering, removal and adding apps are
+// the same everywhere.
 const ToolbarSection: FC<{ state: PreferencesState }> = () => {
-  const items = useVisibleNavigationItems();
-  const { toolbarPaths, setInToolbar } = useToolbarItems();
   const { setAiInToolbar } = useAiLaunchPreference();
+  const builtIns = useToolbarBuiltIns();
+
+  // Xyne AI is not quite like the other rail items: "Open AI on launch" must
+  // not outlive hiding it, or the user lands on a screen they just removed.
+  // That pairing lives in useAiLaunchPreference and the item store knows
+  // nothing about it, so this section routes the AI path through the hook and
+  // leaves every other id to the store untouched.
+  const store: BarItemsStore = {
+    ...toolbarItemsStore,
+    add: (id, at) => {
+      if (id !== AI_TOOLBAR_PATH) return toolbarItemsStore.add(id, at);
+      // Showing AI again deliberately does NOT opt the user back into landing
+      // on it — same one-directional rule the hook documents.
+      setAiInToolbar(true);
+    },
+    remove: id => {
+      if (id !== AI_TOOLBAR_PATH) return toolbarItemsStore.remove(id);
+      setAiInToolbar(false);
+    },
+  };
 
   return (
-    <div className='space-y-4'>
-      <SectionHeader
-        title='Toolbar'
-        subtitle='Choose which items appear in your sidebar. Hidden items stay available under “More”.'
-      />
-      <div className='flex flex-col gap-1.5'>
-        {items.map(item => {
-          const Icon = item.icon;
-          const checked = toolbarPaths.has(item.path);
-          return (
-            <div
-              key={item.path}
-              className='flex items-center justify-between gap-4 p-3 rounded-lg border border-border bg-muted/30'
-            >
-              <div className='flex items-center gap-3 min-w-0'>
-                <div className='flex items-center justify-center size-8 rounded-md bg-muted border border-border shrink-0 text-muted-foreground'>
-                  <Icon className='size-4' />
-                </div>
-                <p className='text-sm font-medium text-foreground truncate'>{item.label}</p>
-              </div>
-              <div className='flex items-center gap-2.5 shrink-0'>
-                <Switch
-                  aria-label={`Show ${item.label} in toolbar`}
-                  checked={checked}
-                  onCheckedChange={value =>
-                    item.path === AI_TOOLBAR_PATH
-                      ? setAiInToolbar(value)
-                      : setInToolbar(item.path, value)
-                  }
-                />
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    </div>
+    <BarCustomizer
+      title='Toolbar'
+      subtitle='Choose what appears in your sidebar and in what order. Hidden items stay available under “More”.'
+      store={store}
+      builtIns={builtIns}
+      trackCategory='PREFERENCES_TOOLBAR'
+    />
   );
 };
+
+const InboxSection: FC<{ state: PreferencesState }> = () => (
+  <BarCustomizer
+    title='Inbox'
+    subtitle='The shortcuts above your channel list in Chat.'
+    store={inboxItemsStore}
+    builtIns={useInboxBuiltIns()}
+    trackCategory='PREFERENCES_INBOX'
+  />
+);
+
+const ChannelTabsSection: FC<{ state: PreferencesState }> = () => (
+  <BarCustomizer
+    title='Channel tabs'
+    subtitle='The tabs at the top of every channel. Tickets only shows in channels where you can read tickets.'
+    store={channelTabsStore}
+    builtIns={useChannelTabBuiltIns()}
+    trackCategory='PREFERENCES_CHANNEL_TABS'
+  />
+);
 
 // ─── Section registry ───────────────────────────────────────────────────────
 const SECTIONS: Record<PreferenceSection, FC<{ state: PreferencesState }>> = {
@@ -1124,6 +1151,8 @@ const SECTIONS: Record<PreferenceSection, FC<{ state: PreferencesState }>> = {
   messaging: MessagingSection,
   launch: LaunchSection,
   toolbar: ToolbarSection,
+  inbox: InboxSection,
+  channelTabs: ChannelTabsSection,
   calendar: CalendarSection,
   password: PasswordSection as FC<{ state: PreferencesState }>,
   developer: DeveloperSection,
