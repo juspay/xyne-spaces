@@ -75,6 +75,16 @@ export interface ReactArtifactViewProps {
    */
   titleSlot?: ReactNode;
   /**
+   * Drops the payload title from the header entirely.
+   *
+   * For hosts that already name the app above this row — a bar (toolbar, Inbox,
+   * channel tab) renders ArtifactAppHost's own header with the app's name,
+   * visibility and publish control, so repeating `payload.title` here reads as
+   * the same app titled twice. Distinct from `titleSlot`, which REPLACES the
+   * title; this removes it and leaves the actions in place.
+   */
+  hideTitle?: boolean;
+  /**
    * Contents of the Settings tab. Supplied by the caller rather than built
    * here: settings are properties of the APP (its icon, later its name and
    * visibility), which this view knows nothing about — it renders a payload.
