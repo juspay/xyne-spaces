@@ -17,23 +17,25 @@ export type GmailWatchSource = {
 export async function stopGmailWatchBeforeDeactivation(
   source: GmailWatchSource | null | undefined,
   tag: string,
-): Promise<void> {
+): Promise<boolean> {
   if (
     !source
     || source.sourceType !== ExternalSourcePlatform.GOOGLE
     || typeof source.credentials !== 'string'
     || !source.credentials
   ) {
-    return;
+    return true;
   }
 
   try {
     const svc = GoogleService.fromEncryptedCredentials(source.credentials, source.id);
     await svc.stopGmailWatch();
+    return true;
   } catch (err) {
     logger.warn(`${tag} Best-effort Gmail watch stop failed`, {
       sourceId: source.id,
       error: err instanceof Error ? err.message : String(err),
     });
+    return false;
   }
 }

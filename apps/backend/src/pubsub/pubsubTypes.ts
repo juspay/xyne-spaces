@@ -19,6 +19,8 @@ export interface SubscriptionRecord {
   email: string;
 }
 
+export class WatchSkipped extends Error {}
+
 export abstract class BaseWatchProvider {
   abstract readonly name: string;
   abstract readonly platform: Platform;

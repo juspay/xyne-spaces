@@ -5,7 +5,7 @@
  * Single entry point for setup, renew, stop, and bulk renewal operations.
  */
 
-import { BaseWatchProvider, WatchResult, SubscriptionRecord } from './pubsubTypes';
+import { BaseWatchProvider, WatchResult, SubscriptionRecord, WatchSkipped } from './pubsubTypes';
 import { logger } from '@/utils/logger';
 
 const TAG = '[PubSubWatchService]';
@@ -133,7 +133,7 @@ export class PubSubWatchService {
   async renewAllExpiring(
     type: string,
     withinMs: number
-  ): Promise<{ renewed: number; failed: number; deactivated: number }> {
+  ): Promise<{ renewed: number; failed: number; deactivated: number; skipped: number }> {
     const provider = this.getProvider(type);
     const cutoff = new Date(Date.now() + withinMs);
 
@@ -143,6 +143,7 @@ export class PubSubWatchService {
     let renewed = 0;
     let failed = 0;
     let deactivated = 0;
+    let skipped = 0;
 
     const renewOne = async (sub: SubscriptionRecord): Promise<void> => {
       try {
@@ -150,6 +151,16 @@ export class PubSubWatchService {
         renewed++;
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
+
+        if (err instanceof WatchSkipped) {
+          skipped++;
+          logger.info(`${watchTag(type)} Renewal skipped`, {
+            type,
+            email: sub.email,
+            reason: message,
+          });
+          return;
+        }
 
         if (provider.isPermanentAuthError(err as Error)) {
           try {
@@ -189,9 +200,10 @@ export class PubSubWatchService {
       renewed,
       failed,
       deactivated,
+      skipped,
     });
 
-    return { renewed, failed, deactivated };
+    return { renewed, failed, deactivated, skipped };
   }
 
   getRegisteredTypes(): string[] {

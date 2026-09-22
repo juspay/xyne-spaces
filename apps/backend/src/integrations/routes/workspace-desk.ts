@@ -105,11 +105,16 @@ router.post(
       }
 
       // Must run BEFORE the OAuth revoke below, since stop() needs a valid token.
-      await stopGmailWatchBeforeDeactivation(source, TAG);
+      const watchStopped = await stopGmailWatchBeforeDeactivation(source, TAG);
 
       // Best-effort token revocation at the provider.
       try {
-        if (source.sourceType === 'google') {
+        if (!watchStopped) {
+          logger.warn(
+            `${TAG} Skipping OAuth revoke - Gmail watch still active; keeping credentials so the stop can be retried`,
+            { sourceId: source.id },
+          );
+        } else if (source.sourceType === 'google') {
           const creds = JSON.parse(decrypt(source.credentials)) as {
             refreshToken?: string;
             accessToken?: string;

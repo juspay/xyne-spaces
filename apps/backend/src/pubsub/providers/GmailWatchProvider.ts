@@ -9,7 +9,7 @@
  * service and the existing Gmail infrastructure without changing any logic.
  */
 
-import { BaseWatchProvider, WatchResult, SubscriptionRecord } from '../pubsubTypes';
+import { BaseWatchProvider, WatchResult, SubscriptionRecord, WatchSkipped } from '../pubsubTypes';
 import { GoogleService } from '@/services/googleService';
 import { ExternalSourceRepository } from '@/database/repositories/externalSourceRepository';
 import { ExternalSourcePlatform } from '@/integrations/core/types';
@@ -33,6 +33,10 @@ export class GmailWatchProvider extends BaseWatchProvider {
       source.sourceType !== 'google-channel-email'
     ) {
       throw new Error(`Source ${source.name} is not a Gmail source`);
+    }
+
+    if (!source.isActive) {
+      throw new WatchSkipped(`Source ${source.name} was disconnected during the renewal cycle`);
     }
 
     const result = await this.renewSource(source);
