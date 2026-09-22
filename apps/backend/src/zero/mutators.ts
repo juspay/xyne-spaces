@@ -7808,7 +7808,17 @@ export function createMutators(
             if (existingMapping) {
               // Skip the no-op write: an unchanged mapping would still be
               // replicated to every client subscribed to forms_context_mapping.
-              if (existingMapping.formId !== targetReleaseFormId) {
+              if (existingMapping.formId === targetReleaseFormId) return;
+              // Repoint only a board sitting on the OTHER mode's template — the one case
+              // a mode switch has to fix. Matching on id instead would also move a board
+              // off its own forked copy (losing its custom fields) or between duplicate
+              // seeded templates, and either strands the values already saved against it.
+              const boundForm = await tx.run(zql.forms.where('id', existingMapping.formId).one());
+              const previousModeFormName =
+                targetReleaseFormName === releaseCommitFormName
+                  ? releaseVersionFormName
+                  : releaseCommitFormName;
+              if (boundForm?.formName === previousModeFormName) {
                 await tx.mutate.forms_context_mapping.update({
                   id: existingMapping.id,
                   formId: targetReleaseFormId,
