@@ -6,7 +6,7 @@ import { mutators } from '../zero/mutators.js';
 import type { ConversationRef } from './conversationRef.js';
 import { clearDraft } from './draft.js';
 import { emitMessageSent } from './events.js';
-import { subscribeSendLifecycle } from './mutationLifecycle.js';
+import { subscribeMutationOutcome, subscribeSendLifecycle } from './mutationLifecycle.js';
 import {
   addPending,
   getCurrentSessionId,
@@ -26,6 +26,11 @@ export type SendPayload = {
   timestamp?: number;
   attachments?: PendingAttachment[];
   entityLinkContext?: EntityLinkContextInput;
+  /**
+   * Fires once after the send mutator's client and server halves settle.
+   * Not called when Zero is offline and the mutator is not fired.
+   */
+  onMutationSettled?: (outcome: 'ok' | 'app-error') => void;
 };
 
 export type SendResult = {
@@ -161,6 +166,10 @@ export function sendMessage(
       }
     },
   );
+
+  if (payload.onMutationSettled) {
+    subscribeMutationOutcome(mutation, payload.onMutationSettled);
+  }
 
   return { messageId, conversationId };
 }
