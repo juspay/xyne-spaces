@@ -55,9 +55,9 @@ done
 
 if [ "$violations" -gt 0 ]; then
   echo "runAsSystem is a way to reach the database without going through the Prisma tenant ACL"
-  echo "extension (apps/backend/src/database/tenant/acl-extension.ts). (runAsServiceActor,"
-  echo "\$queryRaw/\$executeRaw, and .\$transaction( are tracked separately and not checked by"
-  echo "this script for now.)"
+  echo "extension (apps/backend/src/database/tenant/acl-extension.ts). (runAsServiceActor, raw"
+  echo "query/execute calls, and .\$transaction( are tracked separately and not checked by this"
+  echo "script for now.)"
   echo "Every call site must live in apps/backend/src/bypassAcl/, importable from elsewhere —"
   echo "see /ACL_BYPASS_AUDIT.md at the repo root for why, and /BYPASS_ACL_EXAMPLES.md for the"
   echo "relocation pattern."
