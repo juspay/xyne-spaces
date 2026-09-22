@@ -1,5 +1,4 @@
 import {
-  getStorageAdapter,
   queryCacheActor,
   type Conversation,
   type ThreadConversation,
@@ -9,36 +8,24 @@ import type { ChannelRef, ConversationRef, ThreadRef } from './conversationRef.j
 /**
  * Sync cache snapshot for a channel. Returns [] when the channel has never
  * been cached (cold start on this device / evicted by LRU).
- *
- * A cold open triggered by a notification renders before hydration resolves,
- * so an adapter with synchronous storage is asked directly on an actor miss.
  */
 export function getChannelSnapshot(ref: ChannelRef): Conversation[] {
-  const fromActor =
-    queryCacheActor.getSnapshot().context.channelConversations[ref.channelId];
-  if (fromActor) return fromActor;
-
-  const fromStorage = getStorageAdapter()?.readChannelConversationsSync?.(
-    ref.channelId,
-  ) as Conversation[] | null | undefined;
-  return fromStorage ?? [];
+  return (
+    queryCacheActor.getSnapshot().context.channelConversations[ref.channelId] ??
+    []
+  );
 }
 
 /**
  * Sync cache snapshot for a thread. Returns null when the thread has never
- * been cached. Falls back to synchronous storage exactly like the channel
- * snapshot above.
+ * been cached.
  */
 export function getThreadSnapshot(ref: ThreadRef): ThreadConversation | null {
-  const fromActor =
-    queryCacheActor.getSnapshot().context.threadConversations[ref.conversationId];
-  if (fromActor) return fromActor;
-
-  const fromStorage = getStorageAdapter()?.readChatEntitySync?.(
-    'thread',
-    ref.conversationId,
-  ) as ThreadConversation | null | undefined;
-  return fromStorage ?? null;
+  return (
+    queryCacheActor.getSnapshot().context.threadConversations[
+      ref.conversationId
+    ] ?? null
+  );
 }
 
 export type MessagesSnapshot<Ref extends ConversationRef> = Ref extends ChannelRef
