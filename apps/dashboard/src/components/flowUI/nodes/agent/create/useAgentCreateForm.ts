@@ -52,6 +52,14 @@ export function useAgentCreateForm(initial: AgentCreateFormState = EMPTY_CREATE_
     setWritingHubRowState(null);
   }, []);
 
+  const clearHighlightMarks = useCallback(() => {
+    if (highlightTimer.current !== null) {
+      window.clearTimeout(highlightTimer.current);
+      highlightTimer.current = null;
+    }
+    setHighlights(new Set());
+  }, []);
+
   const setWritingField = useCallback(
     (field: AgentCreateField | null, hubRow: AgentCreateHubRow | null = null) => {
       if (highlightTimer.current !== null) {
@@ -174,6 +182,6 @@ export function useAgentCreateForm(initial: AgentCreateFormState = EMPTY_CREATE_
     setForm,
     markHighlights,
     clearHighlights,
+    clearHighlightMarks,
     setWritingField,
   };
-}

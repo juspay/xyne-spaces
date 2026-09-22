@@ -131,14 +131,31 @@ export function WritingFieldPointer({
     }
 
     setShown(true);
+
+    const sameTarget =
+      activeFieldRef.current === field && activeHubRowRef.current === hubRow && lastPointRef.current;
+    if (sameTarget) {
+      const box = measureBox(origin, field, hubRow);
+      if (box) {
+        const target = hubRow
+          ? pointerHubRowPoint(box)
+          : pointerCaretPoint(fieldControl(origin, field), box, fieldControl(origin, field)?.value ?? '');
+        x.set(target.x);
+        y.set(target.y);
+        opacity.set(1);
+        lastPointRef.current = target;
+        setSettled(true);
+        return (): void => {
+          cancelled = true;
+        };
+      }
+    }
+
     setSettled(false);
 
     const travelKind = (): TravelKind => {
       if (reduceMotion) return 'reduced';
-      const sameField = activeFieldRef.current === field;
-      const sameRow = activeHubRowRef.current === hubRow;
       if (!lastPointRef.current) return 'entry';
-      if (sameField && sameRow) return 'entry';
       return 'field-down';
     };
 

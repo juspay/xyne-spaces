@@ -65,7 +65,7 @@ export function ChatFillHighlight({
   return (
     <div
       ref={hostRef}
-      className={cn('relative', active && !reduceMotion && SHIMMER_TEXT, className)}
+      className={cn('relative', active && SHIMMER_TEXT, className)}
       data-agent-writing={active ? 'true' : 'false'}
       data-create-placement={placement}
       data-create-shimmer={active ? 'true' : 'false'}

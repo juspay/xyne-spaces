@@ -135,7 +135,7 @@ export function AgentCreateSplitPage({
       }
 
       setCreateError(null);
-      createForm.clearHighlights();
+      createForm.clearHighlightMarks();
 
       if (action.type === 'rename') {
         const sourceId = `hub-rename-${Date.now()}`;
@@ -177,6 +177,9 @@ export function AgentCreateSplitPage({
 
       try {
         const sourceId = `hub-${Date.now()}`;
+        if (firstDescribe) {
+          setSkeletonIdentity(false);
+        }
         await applyCreateHubDraft({
           action,
           canvasEmpty,
@@ -215,6 +218,8 @@ export function AgentCreateSplitPage({
               }
             : {}),
         });
+        await sleep(WRITE_MS * 2);
+        createForm.setWritingField(null);
         setSkeletonIdentity(false);
         setPhase('draft');
       } catch (err) {
@@ -222,8 +227,6 @@ export function AgentCreateSplitPage({
         setSkeletonIdentity(false);
         setPhase(canvasIsEmpty(createForm.form) ? 'empty' : 'draft');
         throw err;
-      } finally {
-        createForm.setWritingField(null);
       }
     },
     [createForm, scripted],

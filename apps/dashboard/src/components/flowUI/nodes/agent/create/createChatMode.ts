@@ -318,10 +318,6 @@ export async function applyCreateHubDraft(args: {
   );
 
   if (preludeFields.length > 0) {
-    if (preludeFields.includes('name')) {
-      args.setWritingField('name', null);
-      await args.sleep(48);
-    }
     const preludePatch = incomingPatchForCreateDraft({
       visibleReply: action.visibleReply,
       intent: action.intent,
@@ -329,15 +325,28 @@ export async function applyCreateHubDraft(args: {
       fields: preludeFields,
       canvasEmpty,
     });
-    await revealCreatePatchFields({
-      fields: preludeFields,
+    const revealArgs = {
       incoming: preludePatch,
       sourceId: args.sourceId,
       writeMs: args.writeMs,
       setWritingField: args.setWritingField,
       applyChatPatch: args.applyChatPatch,
       sleep: args.sleep,
-    });
+    };
+    if (preludeFields.includes('name')) {
+      await revealCreatePatchFields({
+        fields: ['name'],
+        ...revealArgs,
+      });
+      await args.sleep(args.writeMs * 2);
+    }
+    const restPrelude = preludeFields.filter(field => field !== 'name');
+    if (restPrelude.length > 0) {
+      await revealCreatePatchFields({
+        fields: restPrelude,
+        ...revealArgs,
+      });
+    }
   }
 
   const incoming: AgentCreateChatPatch = {};
