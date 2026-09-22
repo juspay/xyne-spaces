@@ -652,7 +652,7 @@ export class App {
       handleDeskReportCallback,
     );
     this.app.post(
-      '/api/internal/onboarding/grade-callback/:channelId/:attemptId/:index',
+      '/api/internal/onboarding/grade-callback/:channelId/:attemptId/:index/:runId?',
       validateS2SKey,
       handleOnboardingGradeCallback,
     );

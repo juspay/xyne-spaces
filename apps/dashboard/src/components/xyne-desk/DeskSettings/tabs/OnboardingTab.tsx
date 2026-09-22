@@ -411,7 +411,12 @@ const AttemptRow: React.FC<{
         <span
           className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-semibold tabular-nums ${scoreToneClass(percent)}`}
         >
-          {graded ? `${attempt.totalScore}/${attempt.maxScore}` : STATUS[attempt.status]}
+          {graded
+            ? `${attempt.totalScore}/${attempt.maxScore}`
+            : // A failed attempt keeps its partial total; failed answers count as zero until a retry.
+              attempt.status === 'FAILED' && attempt.totalScore !== null
+              ? `${attempt.totalScore}/${attempt.maxScore} · ${STATUS.FAILED}`
+              : STATUS[attempt.status]}
           {percent !== null && ` · ${Math.round(percent)}%`}
         </span>
       </summary>

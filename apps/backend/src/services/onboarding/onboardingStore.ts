@@ -47,6 +47,8 @@ const attemptSchema = stored({
   submittedAt: nstr,
   /** When the latest grading round was dispatched: submit, or an admin's Retry grading. */
   gradingStartedAt: nstr,
+  /** Identifies that grading round; a callback from an earlier round is ignored. */
+  gradingRunId: nstr,
   durationSeconds: nnum,
   totalScore: nnum,
   maxScore: nnum,

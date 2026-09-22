@@ -199,6 +199,7 @@ export async function startOrResumeAttempt(actor: OnboardingActor, topicId: stri
       startedAt: nowIso(),
       submittedAt: null,
       gradingStartedAt: null,
+      gradingRunId: null,
       durationSeconds: null,
       totalScore: null,
       maxScore: null,
@@ -244,6 +245,7 @@ export async function submitAttempt(actor: OnboardingActor, attemptId: string, r
     attempt.status = 'GRADING';
     attempt.submittedAt = new Date(now).toISOString();
     attempt.gradingStartedAt = attempt.submittedAt;
+    attempt.gradingRunId = randomUUID();
     attempt.durationSeconds = Math.max(0, Math.round((now - Date.parse(attempt.startedAt)) / 1000));
     attempt.answers.forEach((answer, i) => {
       answer.replyText = replies[i] ?? answer.replyText;
@@ -287,6 +289,7 @@ export async function retryGrading(actor: OnboardingActor, attemptId: string) {
     }
     attempt.status = 'GRADING';
     attempt.gradingStartedAt = nowIso();
+    attempt.gradingRunId = randomUUID();
     for (const answer of attempt.answers) answer.error = null;
     return { next: state, result: true };
   });
@@ -382,22 +385,24 @@ async function record(
   workspaceId: string,
   attemptId: string,
   index: number,
+  runId: string | null,
   outcome: { score?: number; reasoning?: string; error?: string }
 ): Promise<boolean> {
   const saved = await updateAttempts(channelId, workspaceId, (state) => {
     const attempt = state.attempts.find((a) => a.id === attemptId);
     const answer = attempt?.answers[index];
     if (!attempt || !answer || attempt.status !== 'GRADING') return null;
-    // Only an answer still waiting on its grade takes one, so a late result from an earlier run
-    // (say, an error arriving after a retry already scored it) can't overwrite a settled answer.
+    // A result from an earlier grading round (one a retry has since replaced) is dropped, and so is
+    // any result for an answer that is already settled.
+    if (runId !== (attempt.gradingRunId ?? null)) return null;
     if (answer.score !== null || answer.error !== null) return null;
     answer.score = outcome.score ?? null;
     answer.reasoning = outcome.reasoning ?? null;
     answer.error = outcome.error ?? null;
     if (!attempt.answers.some((a) => a.score === null && !a.error)) {
-      const failed = attempt.answers.some((a) => a.error);
-      attempt.status = failed ? 'FAILED' : 'GRADED';
-      attempt.totalScore = failed ? null : attempt.answers.reduce((s, a) => s + (a.score ?? 0), 0);
+      attempt.status = attempt.answers.some((a) => a.error) ? 'FAILED' : 'GRADED';
+      // A failed attempt keeps what was graded; its failed answers count as zero until a retry.
+      attempt.totalScore = attempt.answers.reduce((s, a) => s + (a.score ?? 0), 0);
       attempt.maxScore = attempt.answers.length * MAX_SCORE_PER_ANSWER;
     }
     return { next: state, result: true };
@@ -418,6 +423,7 @@ export async function dispatchGrading(
     return {
       next: null,
       result: {
+        runId: attempt.gradingRunId ?? null,
         agentSlug: topic?.graderAgentSlug || DEFAULT_GRADER_SLUG,
         pending: attempt.answers.flatMap((a, index) =>
           a.score === null && !a.error ? [{ index, ticketId: a.ticketId, reply: a.replyText }] : []
@@ -450,7 +456,7 @@ export async function dispatchGrading(
         conversationId: `onboarding-grade-${sessionId}`,
         channelId,
         workspaceId,
-        callbackUrl: `${callbackBase}/${answer.index}`,
+        callbackUrl: `${callbackBase}/${answer.index}${claim.runId ? `/${encodeURIComponent(claim.runId)}` : ''}`,
       });
     } catch (err) {
       logger.warn('[Onboarding] grading dispatch failed', {
@@ -459,7 +465,7 @@ export async function dispatchGrading(
         index: answer.index,
         cause: err instanceof Error ? err.message : String(err),
       });
-      await record(channelId, workspaceId, attemptId, answer.index, {
+      await record(channelId, workspaceId, attemptId, answer.index, claim.runId, {
         error: errorMessage(err, claim.agentSlug),
       });
     }
@@ -485,6 +491,7 @@ export async function recordGradeCallback(
   channelId: string,
   attemptId: string,
   index: number,
+  runId: string | null,
   payload: Record<string, unknown>
 ): Promise<boolean> {
   const channel = await runAsSystem(() =>
@@ -507,6 +514,6 @@ export async function recordGradeCallback(
   }
 
   return runAsServiceActor('onboarding-grade-callback', workspaceId, () =>
-    record(channelId, workspaceId, attemptId, index, outcome)
+    record(channelId, workspaceId, attemptId, index, runId, outcome)
   );
 }

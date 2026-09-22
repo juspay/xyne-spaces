@@ -91,14 +91,18 @@ export const onboardingController = {
   retry: withActor((req, actor) => retryGrading(actor, p(req, 'attemptId'))),
 };
 
-/** POST /api/internal/onboarding/grade-callback/:channelId/:attemptId/:index — S2S agent result. */
+/**
+ * POST /api/internal/onboarding/grade-callback/:channelId/:attemptId/:index/:runId? — S2S agent
+ * result. `runId` is the grading round the run belongs to; runs dispatched before it existed omit it.
+ */
 export async function handleOnboardingGradeCallback(req: Request, res: Response): Promise<void> {
-  const { channelId = '', attemptId = '', index = '' } = req.params;
+  const { channelId = '', attemptId = '', index = '', runId } = req.params;
   try {
     const persisted = await recordGradeCallback(
       channelId,
       attemptId,
       Number(index),
+      runId || null,
       (req.body ?? {}) as Record<string, unknown>
     );
     res.json({ success: true, persisted });
