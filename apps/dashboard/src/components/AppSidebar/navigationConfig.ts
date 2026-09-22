@@ -27,7 +27,6 @@ import {
   LightningThunderElectricOn,
   Atom,
   ChatChatting,
-  Bot,
   RocketShip,
   GitBranch,
   LayoutGridTwoVertical,
@@ -239,7 +238,6 @@ export const NAVIGATION_ITEMS: NavigationItem[] = [
     popout: true,
   },
   { path: '/team-intelligence', label: 'Team Intelligence', icon: Atom, popout: true },
-  { path: '/claw-agents', label: 'Claw Agents', icon: Bot, popout: true },
 ];
 
 // Paths shown in the toolbar by default (before any user customization).
@@ -275,7 +273,6 @@ export const TOOLBAR_ITEM_DESCRIPTIONS: Record<string, string> = {
   '/knowledge-base': 'File and folder knowledge base for Ask AI',
   '/memory': 'Saved context and memory for AI',
   '/releaseManager': 'Release and deployment tracking',
-  '/claw-agents': 'Claw AI agents dashboard',
 };
 
 type Permissions = ReturnType<typeof usePermissions>;

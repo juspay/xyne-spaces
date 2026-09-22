@@ -101,7 +101,6 @@ jobs:
     name: Publish ${{ matrix.name }}
     needs: prepare
     runs-on: ubuntu-latest
-    environment: release-publish
     permissions:
       contents: read
       packages: write

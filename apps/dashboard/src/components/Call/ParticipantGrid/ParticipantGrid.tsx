@@ -12,6 +12,8 @@ import type { ParticipantInfo } from '../../../machines/roomMachine';
 import { roomActor } from '../../../machines/roomMachine';
 import { filterAgentTiles } from '../../../utils/livekitAgent';
 import { SpotlightView } from '../SpotlightView';
+import { RingingParticipantTile } from '../RingingParticipantTile/RingingParticipantTile';
+import type { RingingInvitee } from '../ringStatus.utils';
 
 interface ParticipantGridProps {
   participants: ParticipantInfo[];
@@ -21,6 +23,8 @@ interface ParticipantGridProps {
   requestedAiController?: boolean;
   raisedHands?: string[];
   onToggleHandRaise?: (() => void) | undefined;
+  /** Invitees who haven't joined yet — rendered as faded tiles after the real ones */
+  ringingInvitees?: RingingInvitee[] | undefined;
 }
 
 export function ParticipantGrid({
@@ -31,6 +35,7 @@ export function ParticipantGrid({
   requestedAiController,
   raisedHands = [],
   onToggleHandRaise,
+  ringingInvitees = [],
 }: ParticipantGridProps): React.ReactElement {
   // Derive AI enablement from aiController presence — same pattern as Lotus ParticipantsGrid
   const isAIAssistantEnabled = !!aiController;
@@ -55,10 +60,12 @@ export function ParticipantGrid({
   // One-on-one call (full view): like Meet, the other person fills the stage and
   // your own camera floats as a small picture-in-picture in the corner, instead
   // of splitting the screen into two equal halves.
+  // A still-ringing invitee occupies the stage exactly as a joined one does.
+  const stageOccupantCount = visibleParticipants.length + ringingInvitees.length;
   const floatingSelf = useMemo(() => {
-    if (compact || visibleParticipants.length !== 2) return null;
+    if (compact || stageOccupantCount !== 2) return null;
     return visibleParticipants.find(p => p.isLocal) ?? null;
-  }, [compact, visibleParticipants]);
+  }, [compact, stageOccupantCount, visibleParticipants]);
   const gridParticipants = useMemo(
     () =>
       floatingSelf ? visibleParticipants.filter(p => p !== floatingSelf) : visibleParticipants,
@@ -67,7 +74,13 @@ export function ParticipantGrid({
 
   // Compute layout first using raw participant count — layout.maxTiles is the true
   // per-page capacity determined by container size, not just the cap.
-  const { containerRef, layout } = useGridLayout(gridParticipants.length, maxTiles, gridGap);
+  // Ringing tiles share the grid but never push a real participant onto another page:
+  // they only take cells left over on a single page.
+  const { containerRef, layout } = useGridLayout(
+    Math.min(gridParticipants.length + ringingInvitees.length, maxTiles),
+    maxTiles,
+    gridGap,
+  );
 
   // Pagination is active when participants spill onto a second page.
   // This is the canonical signal that sorting matters (so users can find
@@ -79,6 +92,9 @@ export function ParticipantGrid({
   }, [gridParticipants, isPaginating, isAIAssistantEnabled]);
 
   const pagination = usePagination(layout.maxTiles, displayParticipants);
+  const visibleRingingInvitees = isPaginating
+    ? []
+    : ringingInvitees.slice(0, Math.max(0, layout.maxTiles - gridParticipants.length));
 
   // Two-stage expand, matching how the screen-share view already behaves:
   // clicking a tile's expand button "spotlights" it (big main tile + scrollable
@@ -148,6 +164,15 @@ export function ParticipantGrid({
               isHandRaised={raisedHands.includes(participant.identity)}
               onToggleHandRaise={onToggleHandRaise}
               onExpand={() => setSpotlightIdentity(participant.identity)}
+            />
+          ))}
+          {visibleRingingInvitees.map(invitee => (
+            <RingingParticipantTile
+              key={`ringing-${invitee.userId}`}
+              userId={invitee.userId}
+              ringStatus={invitee.ringStatus}
+              avatarSize={compact ? 'medium' : 'large'}
+              compact={compact}
             />
           ))}
         </div>
