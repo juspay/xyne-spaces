@@ -863,7 +863,6 @@ export class DeskMetricsRepository {
         status_v2: string;
         assignee_id: string | null;
         assignee_name: string | null;
-        ai_category: string | null;
         frt_seconds: number | null;
         rt_seconds: number | null;
         csat_value: { rating?: string; score?: number | string | null } | null;
@@ -922,7 +921,6 @@ export class DeskMetricsRepository {
           t."statusV2"::text AS status_v2,
           t."assignedTo" AS assignee_id,
           COALESCE(u."displayName", u.name) AS assignee_name,
-          t."aiCategory" AS ai_category,
           EXTRACT(EPOCH FROM (${frtStopSql} - c.created_at))::float AS frt_seconds,
           EXTRACT(EPOCH FROM (${resolvedAtSql} - c.created_at))::float AS rt_seconds,
           (SELECT ta.value FROM "public"."ticket_activities" ta
@@ -952,7 +950,6 @@ export class DeskMetricsRepository {
         statusV2: r.status_v2,
         assigneeId: r.assignee_id,
         assigneeName: r.assignee_name,
-        aiCategory: r.ai_category,
         frtSeconds: r.frt_seconds !== null && r.frt_seconds >= 0 ? r.frt_seconds : null,
         rtSeconds: r.rt_seconds !== null && r.rt_seconds >= 0 ? r.rt_seconds : null,
         csatScore: typeof score === 'number' && Number.isFinite(score) ? score : null,
