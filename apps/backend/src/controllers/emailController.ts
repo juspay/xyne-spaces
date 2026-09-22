@@ -995,29 +995,31 @@ export class EmailController {
       // Mock Desk short-circuit (test/dev only) — mirror the reply path. Capture
       // the composed mail into the in-memory mock mailbox instead of calling the
       // real provider when the source carries mock credentials and the flag is on.
+      const mockCapture = captureMockDeskSentMail(externalSource.credentials, {
+        kind: 'compose',
+        channelId,
+        from: fromEmail,
+        to: [...new Set(to)],
+        cc: [...new Set(cc)],
+        bcc: [...new Set(bcc)],
+        subject: safeSubject,
+        body: outboundBody,
+        attachmentCount: fileAttachments.length,
+      });
+
       const sendResult =
-        captureMockDeskSentMail(externalSource.credentials, {
-          kind: 'compose',
-          channelId,
-          from: fromEmail,
+        mockCapture ??
+        (await adapter.sendMailNew({
+          encryptedCredentials: externalSource.credentials,
+          sourceId: externalSource.id,
+          subject: safeSubject,
+          body: outboundBody,
           to: [...new Set(to)],
           cc: [...new Set(cc)],
           bcc: [...new Set(bcc)],
-          subject: safeSubject,
-          body: outboundBody,
-          attachmentCount: fileAttachments.length,
-        }) ??
-        (await adapter.sendMailNew({
-            encryptedCredentials: externalSource.credentials,
-            sourceId: externalSource.id,
-            subject: safeSubject,
-            body: outboundBody,
-            to: [...new Set(to)],
-            cc: [...new Set(cc)],
-            bcc: [...new Set(bcc)],
-            ...(fromEmail && { fromEmailAddress: fromEmail }),
-            ...(fileAttachments.length > 0 && { fileAttachments }),
-          }));
+          ...(fromEmail && { fromEmailAddress: fromEmail }),
+          ...(fileAttachments.length > 0 && { fileAttachments }),
+        }));
 
       const externalMessageId = sendResult.messageId || sendResult.threadId;
 
