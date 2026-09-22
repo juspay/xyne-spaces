@@ -56,6 +56,8 @@ import { loadMcpToolsForUser,
 import { packSdlcRunMeta, SDLC_META_KEYS, trustedSdlcToolBindings } from "xyne-claw-shared";
 import { loadCustomTools } from "../custom-tools.js";
 import { buildCopilotTool } from "../copilot.js";
+import { pinRunJudgeBackend } from "../judge-backend.js";
+import { optEnabled, pinRunOptimizations } from "../optimizations.js";
 import { buildExperimentTools, buildExperimentReviewTools, type ExperimentContext } from "../experiment.js";
 import {
   executeRunFromPayload,
@@ -542,6 +544,8 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
     detached,
     fastMode,
     resumedFromHandoff,
+    judgeBackend,
+    optimizations,
     memoryBankId,
     twinDestinations,
     senderName,
@@ -554,6 +558,8 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
   } = req.body as InternalRunPayload;
 
   const experiment = normalizeExperimentContext(rawExperiment);
+  pinRunJudgeBackend(judgeBackend);
+  pinRunOptimizations(optimizations);
 
   // [AUTODBG] claw-side receipt of every /run forward (esp. automations). Confirms
   // the request crossed claw-auth → claw and which session id it arrived under
@@ -1881,7 +1887,8 @@ export async function processTask(
       const subagents = Array.isArray(toolsObj["subagents"])
         ? (toolsObj["subagents"] as unknown[]).filter((value): value is string => typeof value === "string")
         : [];
-      if (!subagents.includes("spaces")) {
+      const wrapperRedundant = optEnabled("lean_palette") && openPaletteModeFromTools(toolsObj) === "all";
+      if (!subagents.includes("spaces") && !wrapperRedundant) {
         effectiveConfig["tools"] = { ...toolsObj, subagents: [...subagents, "spaces"] };
       }
     }
@@ -2187,6 +2194,9 @@ export async function processTask(
     // runTask (opts), so a detached spawn registered inside a tool's execute()
     // is drained by runTask after the model loop settles. See agent.ts.
     const backgroundSubagentRegistry: import("../subagent-tools.js").BackgroundSubagentRegistry = new Map();
+    // Filled in by runTask once this run's trace is open; the subagent tools
+    // below only close over the object.
+    const parentDebugHandle: import("../subagent-tools.js").ParentDebugHandle = {};
 
     const fastModeEnabled = effectiveFastMode(fastMode, agentConfig);
     const fastToolController: FastToolRuntimeController = {};
@@ -2209,6 +2219,7 @@ export async function processTask(
       // admitted straight into the always-active set instead of the catalog —
       // bigger prompt, not wider reach.
       catalogUnwrapped: paletteMode !== "off",
+      catalogUnwrappedWrites: paletteMode !== "off" && optEnabled("lean_palette"),
     });
     const fastCatalogCandidateByName = new Map(fastCatalogCandidateItems.map((item) => [item.entry.name, item]));
     let fastCatalogItems: ToolCatalogItem[] = [];
@@ -2254,6 +2265,7 @@ export async function processTask(
             // the result back to a parent that's already thrown RunCancelledError.
             ...(abortSignal ? { abortSignal } : {}),
             backgroundRegistry: backgroundSubagentRegistry,
+            parentDebug: parentDebugHandle,
           },
           undefined, // bonusToolsBySubagent — removed with the sandbox subagent
           customSubagents,
@@ -2421,6 +2433,7 @@ export async function processTask(
             : "spaces";
         const calleeDirectPickSuffixes = calleeToolsConfig?.direct ?? [];
         const calleeInnerTools: string[] = [];
+        const calleeDebugHandle: import("../subagent-tools.js").ParentDebugHandle = {};
         const calleeSubagents = buildSubagentTools(
           calleeGroups,
           calleeCustom.tools,
@@ -2448,6 +2461,7 @@ export async function processTask(
               userId,
             },
             ...(signal ? { abortSignal: signal } : {}),
+            parentDebug: calleeDebugHandle,
           },
           undefined,
           spec.customSubagents as import("../subagent-tools.js").CustomSubagentSpec[] | undefined,
@@ -2490,6 +2504,7 @@ export async function processTask(
           sessionId: `${sessionId}-a2a-${spec.slug}`,
           skills: spec.skills,
           abortSignal: signal,
+          parentDebug: calleeDebugHandle,
           progressMeta: {
             ...(conversationId ? { conversationId } : {}),
             agentSlug: spec.slug,
@@ -3943,6 +3958,7 @@ export async function processTask(
         finalAnswerMaxTurns: channelId ? 2 : undefined,
         ...(isRegenerate ? { isRegenerate: true } : {}),
         backgroundRegistry: backgroundSubagentRegistry,
+        parentDebug: parentDebugHandle,
         fastMode: fastModeEnabled,
         ...(catalogActive ? { fastToolCatalogNames: fastCatalogNames } : {}),
         ...(catalogActive ? { fastToolController } : {}),

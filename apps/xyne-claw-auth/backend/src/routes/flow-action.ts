@@ -24,7 +24,7 @@ import { verifySpacesSignature } from "../middleware/verify-spaces-signature.js"
 import { agentRunRepository } from "../repositories/index.js";
 import { recordTwinApprovalOutcome } from "../services/twinResponseFeedback.js";
 import type { FlowDefinition } from "xyne-claw-shared";
-import { mdToMrkdwn, buildWriteResultFlow, buildPlanFlow, buildUserQuestionFlow, buildTicketFlow, buildAgentCardFlow, userQuestionOptionLabel, PLAN_COMPONENT_ID, AGENT_COMPONENT_ID } from "xyne-claw-shared";
+import { mdToMrkdwn, buildWriteResultFlow, buildPlanFlow, buildUserQuestionFlow, buildTicketFlow, buildAgentCardFlow, userQuestionOptionLabel, PLAN_COMPONENT_ID, AGENT_COMPONENT_ID, AGENT_EDITS_STATE_KEY } from "xyne-claw-shared";
 import {
   clearActivePlanCard,
   getActivePlanCard,
@@ -1873,13 +1873,15 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
         ? (values[AGENT_COMPONENT_ID] as unknown[]).filter((v): v is string => typeof v === "string")
         : undefined;
 
-      const { resolveAgentDraft } = await import("../lib/agent-card.js");
+      const { resolveAgentDraft, parseAgentDraftEdits } = await import("../lib/agent-card.js");
+      const edits = parseAgentDraftEdits(values[AGENT_EDITS_STATE_KEY]);
       const result = await resolveAgentDraft(
         requestId,
         callerUserId,
         decision,
         keptCapabilityIds,
         cardAgentSlug,
+        edits,
       );
 
       if (!result.ok) {
@@ -1923,6 +1925,7 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
             variant: "draft",
             phase,
             agent: result.identity,
+            toolSelection: result.toolSelection,
             ...(result.note ? { note: result.note } : {}),
             ...(deciderName ? { decidedBy: deciderName } : {}),
             ...(decidedNow ? { decidedById: callerUserId } : {}),

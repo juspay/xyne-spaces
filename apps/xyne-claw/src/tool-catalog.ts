@@ -1,3 +1,7 @@
+import { jevEnabled, jevScoreItems, jevThreshold } from "./jev.js";
+import { recordJudgeOutcome } from "./judge-backend.js";
+import { optEnabled } from "./optimizations.js";
+import { metric } from "./metrics.js";
 import { Type } from "@sinclair/typebox";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import {
@@ -188,6 +192,15 @@ function resolveCustomSubagentTools(
   return out;
 }
 
+// Writes were skipped here so they could never be lazily loaded. With the
+// parent-level force unwrap gone they would otherwise be unreachable, and
+// prompt-residency was never the safety mechanism: every write queues a signed
+// pendingAction that a human approves in claw-auth before it executes. Set
+// XYNE_CATALOG_EXCLUDE_WRITES=1 to restore the old exclusion.
+function excludeWritesFromCatalog(): boolean {
+  return process.env["XYNE_CATALOG_EXCLUDE_WRITES"] === "1";
+}
+
 export function buildToolCatalog(params: {
   groups: McpToolGroup[];
   customTools?: ToolDefinition[];
@@ -213,6 +226,7 @@ export function buildToolCatalog(params: {
    * always-active names back out of the catalog.
    */
   catalogUnwrapped?: boolean;
+  catalogUnwrappedWrites?: boolean;
 }): ToolCatalogItem[] {
   const items: ToolCatalogItem[] = [];
   const seen = new Set<string>();
@@ -224,7 +238,7 @@ export function buildToolCatalog(params: {
       if (!def) continue;
       const writeSet = new Set(group.writeTools.map(String));
       for (const tool of group.tools) {
-        if (writeSet.has(extractRuntimeToolName(tool.name))) continue;
+        if (excludeWritesFromCatalog() && writeSet.has(extractRuntimeToolName(tool.name))) continue;
         addUnique(items, seen, tool, `subagent:${def.name}`, group.serverType);
       }
     }
@@ -233,7 +247,7 @@ export function buildToolCatalog(params: {
       for (const def of SUBAGENT_DEFINITIONS) {
         const matched = params.customTools.filter((tool) => customToolSource(tool) === def.serverType);
         for (const tool of matched) {
-          if (isCustomWriteTool(tool)) continue;
+          if (excludeWritesFromCatalog() && isCustomWriteTool(tool)) continue;
           addUnique(items, seen, tool, `subagent:${def.name}`, def.serverType);
         }
       }
@@ -268,7 +282,7 @@ export function buildToolCatalog(params: {
       if (findSubagentDefinitionForServer(group.serverType)) continue;
       const writeSet = new Set(group.writeTools.map(String));
       for (const tool of group.tools) {
-        if (writeSet.has(extractRuntimeToolName(tool.name))) continue;
+        if (!params.catalogUnwrappedWrites && writeSet.has(extractRuntimeToolName(tool.name))) continue;
         addUnique(items, seen, tool, `server:${group.serverType}`, group.serverType);
       }
     }
@@ -279,7 +293,7 @@ export function buildToolCatalog(params: {
     for (const tool of params.customTools ?? []) {
       const source = customToolSource(tool);
       if (!source || isPresentationToolSource(source)) continue;
-      if (isCustomWriteTool(tool)) continue;
+      if (!params.catalogUnwrappedWrites && isCustomWriteTool(tool)) continue;
       addUnique(items, seen, tool, source);
     }
   }
@@ -383,6 +397,50 @@ function matchScoped(entries: ToolCatalogEntry[], query: string): ToolCatalogEnt
     .filter((s) => s.hits > 0)
     .sort((a, b) => b.hits - a.hits || a.entry.name.localeCompare(b.entry.name))
     .map((s) => s.entry);
+}
+
+/**
+ * Keyword hits first, then anything Jev scores as relevant that the keywords
+ * missed. The union is deliberate: substring matching finds nothing for
+ * "average first response time" against `spaces-desk-metrics`, but dropping
+ * what it does catch would be a regression for the phrasings it handles.
+ */
+async function matchScopedSifted(
+  entries: ToolCatalogEntry[],
+  query: string,
+): Promise<ToolCatalogEntry[]> {
+  const keyword = matchScoped(entries, query);
+  if (!optEnabled("jev_tool_sift") || !jevEnabled()) return keyword;
+
+  const already = new Set(keyword.map((e) => e.name));
+  const scores = await jevScoreItems(query, entries, {
+    purpose: "tool-search",
+    key: (e) => e.name,
+    instructions: (e) =>
+      `Would calling this tool help with the request? \`${e.name}\`: ` +
+      `${e.oneLineDescription.slice(0, 300)}`,
+  });
+  if (!scores) return keyword;
+
+  const threshold = jevThreshold("JEV_TOOL_THRESHOLD", 0.4);
+  const added = entries
+    .filter((e) => !already.has(e.name) && (scores.get(e.name) ?? 0) >= threshold)
+    .sort((a, b) => (scores.get(b.name) ?? 0) - (scores.get(a.name) ?? 0));
+
+  if (added.length > 0) {
+    metric.count("tool_search_sift_added", { added: added.length, keyword: keyword.length });
+  }
+  recordJudgeOutcome(
+    "tool-search",
+    `scored ${scores.size} of ${entries.length} tools · keyword hits ${keyword.length} · added ${added.length} at ≥${threshold}`,
+    {
+      query,
+      threshold,
+      added: added.slice(0, 25).map((e) => ({ name: e.name, score: Number((scores.get(e.name) ?? 0).toFixed(3)) })),
+      keywordHits: keyword.slice(0, 25).map((e) => ({ name: e.name, score: Number((scores.get(e.name) ?? 0).toFixed(3)) })),
+    },
+  );
+  return [...keyword, ...added];
 }
 
 /**
@@ -702,7 +760,7 @@ export function buildFastModeMetaTools(options: {
 
         const allowed = maxRisk ? new Set(riskAtOrBelow(maxRisk as "read" | "write" | "destructive")) : null;
         const risked = allowed ? byServer.filter((e) => allowed.has(entryRisk(e))) : byServer;
-        const matched = query ? matchScoped(risked, query) : risked;
+        const matched = query ? await matchScopedSifted(risked, query) : risked;
         if (matched.length === 0) {
           return text(
             `No tool in this agent's catalog matches ${JSON.stringify(query)}. ` +

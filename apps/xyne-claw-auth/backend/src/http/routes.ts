@@ -4,6 +4,7 @@ import { errorMiddleware } from "../lib/http.js";
 import { serversRouter } from "../routes/servers.js";
 import { connectionsRouter } from "../routes/connections.js";
 import { mcpRouter } from "../routes/mcp.js";
+import { sdlcRuntimeCredentialsRouter } from "../routes/sdlc-runtime-credentials.js";
 import { awakeningRouter } from "../routes/awakening.js";
 import { runRouter } from "../routes/run.js";
 import { runStreamRouter, runStreamInternalRouter } from "../routes/run-stream.js";
@@ -29,6 +30,7 @@ import { organizationsRouter } from "../routes/organizations.js";
 // TEMPORARY — delete after backfill of agents.signingSecret is complete.
 import { adminBackfillSigningSecretsRouter } from "../routes/admin-backfill-signing-secrets.js";
 import { dashboardRouter } from "../routes/dashboard.js";
+import { messagingRouter } from "../surfaces/messaging/routes/index.js";
 import { agentChatRouter, agentChatInternalRouter } from "../routes/agent-chat.js";
 import { artifactAppsRouter } from "../routes/artifact-apps.js";
 import { artifactAppAgentsRouter } from "../routes/artifact-app-agents.js";
@@ -54,6 +56,7 @@ import { attioOAuthRouter, attioCallbackRouter } from "../routes/attio-oauth.js"
 import { mailerliteOAuthRouter, mailerliteCallbackRouter } from "../routes/mailerlite-oauth.js";
 import { honeycombOAuthRouter, honeycombCallbackRouter } from "../routes/honeycomb-oauth.js";
 import { customerioOAuthRouter, customerioCallbackRouter } from "../routes/customerio-oauth.js";
+import { notionRemoteOAuthRouter, notionRemoteCallbackRouter } from "../routes/notion-remote-oauth.js";
 import { oauthTokenRouter } from "../routes/oauth-token.js";
 import { rapidApiLinkedInRouter } from "../routes/rapidapi-linkedin.js";
 import { scheduledJobsRouter } from "../routes/scheduled-jobs.js";
@@ -75,7 +78,7 @@ import { entityExtractionRouter } from "../routes/entity-extraction.js";
 import { cliAuthRouter } from "../routes/cli-auth.js";
 import { slackRouter } from "../surfaces/slack/routes/index.js";
 import { mcpGatewayRouter } from "../mcpgateway/index.js";
-import { requireAuth, requireNoAccessToken, allowReadAccessToken, requireStrictS2S, requireInternalS2S, requireUserAuth, optionalAuth, s2sKeyMatches } from "../middleware/require-auth.js";
+import { requireAuth, requireNoAccessToken, allowReadAccessToken, allowScopedAccessToken, requireStrictS2S, requireInternalS2S, requireUserAuth, optionalAuth, s2sKeyMatches } from "../middleware/require-auth.js";
 import { requireClawAdmin, requireSearchEvalAccess } from "../middleware/agent-acl.js";
 import { apiLimiter } from "../middleware/rate-limiters.js";
 
@@ -138,11 +141,12 @@ function mountCoreApi(app: Express): void {
   // credential, not a user identity. Do NOT add requireAuth here expecting the
   // access-token barrier to apply; add the guard inside the router instead.
   app.use(`${BASE}/sessions`, mcpRouter);
+  app.use(`${BASE}/sessions`, sdlcRuntimeCredentialsRouter);
   app.use(`${BASE}/gateways`, requireAuth, requireNoAccessToken, requireClawAdmin, gatewaysRouter);
   // allowReadAccessToken (NOT the hard barrier): device-flow CLI tokens are
   // minted with agents:read (routes/cli-auth.ts) so the CLI can list agents.
   // Reads (GET/HEAD) pass with that scope; token writes are still rejected.
-  app.use(`${BASE}/agents`, requireAuth, allowReadAccessToken("agents:read"), agentsRouter);
+  app.use(`${BASE}/agents`, requireAuth, allowScopedAccessToken({ read: "agents:read", write: "agents:write" }), agentsRouter);
   // NOT behind requireAuth (so requireNoAccessToken never runs here): the device
   // -flow endpoints must be reachable pre-authentication, and each route carries
   // its own guard (requireCliTokensEnabled / requireApproveAuth — routes/cli-auth.ts).
@@ -150,12 +154,15 @@ function mountCoreApi(app: Express): void {
   app.use(`${BASE}/cli`, cliAuthRouter);
   // Public Slack ingress; authenticates itself with the per-install HMAC secret.
   app.use(`${BASE}/surfaces/slack`, slackRouter);
+  // Messaging channels (WhatsApp, Telegram, …): admin API is user-authed inside
+  // the router; the per-account webhook ingress self-authenticates per plugin.
+  app.use(`${BASE}/surfaces/:channel`, messagingRouter);
   app.use(`${BASE}/chain-workflows`, requireAuth, requireNoAccessToken, chainWorkflowsRouter);
   app.use(`${BASE}/spaces`, requireAuth, requireNoAccessToken, spacesRouter);
   app.use(`${BASE}/tools`, requireAuth, requireNoAccessToken, toolsRouter);
-  app.use(`${BASE}/skills`, requireAuth, requireNoAccessToken, skillsRouter);
+  app.use(`${BASE}/skills`, requireAuth, allowScopedAccessToken({ write: "skills:write" }), skillsRouter);
   app.use(`${BASE}/knowledge-base`, requireAuth, requireNoAccessToken, knowledgeBaseRouter);
-  app.use(`${BASE}/subagents`, requireAuth, requireNoAccessToken, subagentsRouter);
+  app.use(`${BASE}/subagents`, requireAuth, allowScopedAccessToken({ write: "subagents:write" }), subagentsRouter);
   app.use(`${BASE}/sandbox`, requireAuth, requireNoAccessToken, sandboxRouter);
   app.use(`${BASE}/organizations`, requireAuth, requireNoAccessToken, organizationsRouter);
   app.use(`${BASE}/admin/digital-twin`, requireAuth, requireNoAccessToken, requireClawAdmin, adminDigitalTwinRouter);
@@ -230,6 +237,8 @@ function mountOAuthProviders(app: Express): void {
   app.use(BASE, honeycombCallbackRouter);
   app.use(`${BASE}/users`, requireAuth, requireNoAccessToken, customerioOAuthRouter);
   app.use(BASE, customerioCallbackRouter);
+  app.use(`${BASE}/users`, requireAuth, requireNoAccessToken, notionRemoteOAuthRouter);
+  app.use(BASE, notionRemoteCallbackRouter);
   app.use(`${BASE}/users`, requireAuth, requireNoAccessToken, rapidApiLinkedInRouter);
 }
 
