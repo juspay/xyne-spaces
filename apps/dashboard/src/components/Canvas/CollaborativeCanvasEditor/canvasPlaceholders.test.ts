@@ -28,19 +28,13 @@ describe('resolveCanvasPlaceholders', () => {
     });
   });
 
-  it('keeps the two slots independent when both props are passed', () => {
+  it('keeps the two slots independent, treating an empty blockPlaceholder as "render nothing"', () => {
+    // The regression this fix addresses: `''` must NOT fall back to the
+    // placeholder, otherwise the notes hint reappears on every new line.
     expect(resolveCanvasPlaceholders(NOTES_HINT, '')).toEqual({
       default: '',
       emptyDocument: NOTES_HINT,
     });
-  });
-
-  it('treats an empty blockPlaceholder as "render nothing", not as absent', () => {
-    // The regression this fix addresses: `''` must NOT fall back to the
-    // placeholder, otherwise the notes hint reappears on every new line.
-    const { default: blockSlot } = resolveCanvasPlaceholders(NOTES_HINT, '');
-    expect(blockSlot).toBe('');
-    expect(blockSlot).not.toBe(NOTES_HINT);
   });
 
   it('treats an empty placeholder as an explicit empty document hint', () => {

@@ -115,6 +115,17 @@ export const ticketTable = table("tickets")
   })
   .primaryKey("id");
 
+export const ticketDescriptionTable = table("ticket_descriptions")
+  .columns({
+    ticketId: string(),
+    workspaceId: string(),
+    channelId: string(),
+    description: string(),
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey("ticketId");
+
 export const subTicketTable = table("sub_tickets")
   .columns({
     id: string(),
@@ -3247,6 +3258,24 @@ export const ticketTableRelationships = relationships(ticketTable, ({ one, many 
     sourceField: ["id"],
     destField: ["ticketId"],
     destSchema: emailReadTable,
+  }),
+  ticketDescription: one({
+    sourceField: ["id"],
+    destField: ["ticketId"],
+    destSchema: ticketDescriptionTable,
+  })
+}));
+
+export const ticketDescriptionTableRelationships = relationships(ticketDescriptionTable, ({ one }) => ({
+  ticket: one({
+    sourceField: ["ticketId"],
+    destField: ["id"],
+    destSchema: ticketTable,
+  }),
+  channel: one({
+    sourceField: ["channelId"],
+    destField: ["id"],
+    destSchema: channelTable,
   })
 }));
 
@@ -4265,6 +4294,11 @@ export const channelTableRelationships = relationships(channelTable, ({ one, man
     sourceField: ["id"],
     destField: ["channelId"],
     destSchema: collectionPermissionTable,
+  }),
+  ticketDescriptions: many({
+    sourceField: ["id"],
+    destField: ["channelId"],
+    destSchema: ticketDescriptionTable,
   })
 }));
 
@@ -5178,6 +5212,7 @@ export const schema = createSchema(
       toolTable,
       agentToolsMappingTable,
       ticketTable,
+      ticketDescriptionTable,
       subTicketTable,
       ticketSubTicketMappingTable,
       ticketAssignmentTable,
@@ -5368,6 +5403,7 @@ export const schema = createSchema(
       toolTableRelationships,
       agentToolsMappingTableRelationships,
       ticketTableRelationships,
+      ticketDescriptionTableRelationships,
       subTicketTableRelationships,
       ticketSubTicketMappingTableRelationships,
       ticketAssignmentTableRelationships,
@@ -5490,6 +5526,7 @@ export type Model = Row<typeof schema.tables.models>;
 export type Tool = Row<typeof schema.tables.tools>;
 export type AgentToolsMapping = Row<typeof schema.tables.agent_tools_mappings>;
 export type Ticket = Row<typeof schema.tables.tickets>;
+export type TicketDescription = Row<typeof schema.tables.ticket_descriptions>;
 export type SubTicket = Row<typeof schema.tables.sub_tickets>;
 export type TicketSubTicketMapping = Row<typeof schema.tables.ticket_sub_ticket_mappings>;
 export type TicketAssignment = Row<typeof schema.tables.ticket_assignments>;

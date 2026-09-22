@@ -69,7 +69,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        task: [lint, typecheck, build]
+        task: [lint, typecheck, build, unit-test]
     env:
       NODE_OPTIONS: "--max-old-space-size=8192"
     steps:
@@ -116,6 +116,12 @@ jobs:
       - name: Build
         if: matrix.task == 'build'
         run: pnpm --filter xyne-spaces-dashboard run build
+
+      # --- unit-test leg ----------------------------------------------------
+      # Pure-node vitest suite (no jsdom / BlockNote / React rendering).
+      - name: Unit tests
+        if: matrix.task == 'unit-test'
+        run: pnpm --filter xyne-spaces-dashboard run test
 
   test:
     name: Automation tests
