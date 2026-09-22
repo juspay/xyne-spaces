@@ -23,3 +23,6 @@
 /packages/shared/src/zero/mutators.ts @juspay/xyne-acl-guardians
 /apps/backend/src/zero/formsMutatorHelpers.ts @juspay/xyne-acl-guardians
 /packages/shared/src/zero/formsMutatorHelpers.ts @juspay/xyne-acl-guardians
+
+# bypassAcl framework — the sole sanctioned location for the ACL-bypass primitives
+/apps/backend/src/bypassAcl/ @juspay/xyne-bypass-acl-guardians
