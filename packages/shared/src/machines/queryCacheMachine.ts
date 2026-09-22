@@ -652,12 +652,6 @@ export const getRecordingsQueryHash = (): string => {
 // would never fire before the page dies).
 let persistNow: (() => void) | null = null;
 
-// The actor subscription driving debounced persistence, and the setup that
-// owns it. Each setup replaces both, so a user/workspace switch cannot leave
-// the previous persister running alongside the new one.
-let persistenceSubscription: { unsubscribe(): void } | null = null;
-let activeSetup: object | null = null;
-
 /**
  * Setup persistence middleware for query cache.
  * Accepts a StorageAdapter for platform-agnostic persistence.
@@ -668,16 +662,6 @@ export const setupQueryCachePersistence = (
   schemaVersion: string,
 ): void => {
   setStorageAdapter(storage);
-
-  persistenceSubscription?.unsubscribe();
-  persistenceSubscription = null;
-  persistNow = null;
-  if (persistTimeout) {
-    clearTimeout(persistTimeout);
-    persistTimeout = null;
-  }
-  const thisSetup = {};
-  activeSetup = thisSetup;
 
   const doPersist = (): void => {
     // Read the LATEST snapshot at flush time (not the one that scheduled
@@ -780,11 +764,8 @@ export const setupQueryCachePersistence = (
   storage
     .init(userId, schemaVersion)
     .then(() => {
-      // A newer setup started while this storage was initialising; it owns
-      // persistence now.
-      if (activeSetup !== thisSetup) return;
       persistNow = doPersist;
-      persistenceSubscription = queryCacheActor.subscribe(() => {
+      queryCacheActor.subscribe(() => {
         if (persistTimeout) {
           clearTimeout(persistTimeout);
         }
