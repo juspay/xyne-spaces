@@ -18,10 +18,6 @@ class UserActivityTrackingService {
     try {
       const event = {
         user_id: params.userId,
-        // Always a per-tab id, like every other event (useActivityTracking.ts,
-        // globalClickTracker.ts) — a real UserSession.id belongs in
-        // contextMetadata, not here, or it mixes two unrelated id spaces
-        // under one column (see trackLogin/trackLogout below).
         session_id: uuidv4(),
         event_category: params.eventCategory,
         event_name: params.eventName,

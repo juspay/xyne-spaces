@@ -1689,7 +1689,6 @@ export class AuthV2Controller {
             accessTokenExpiry: pendingAccessTokenExpiry,
             deviceInfo,
             ipAddress: req.ip || req.connection.remoteAddress || undefined,
-            platform,
             loginMethod: isAutoLogin ? 'AUTO_LOGIN' : undefined,
           });
 
@@ -1873,7 +1872,6 @@ export class AuthV2Controller {
             refreshTokenExpiry,
             deviceInfo,
             ipAddress: req.ip || req.connection.remoteAddress || undefined,
-            platform: this.detectPlatform(req),
           });
 
           sessionId = session.id;
@@ -2254,7 +2252,6 @@ export class AuthV2Controller {
               refreshTokenExpiry,
               deviceInfo,
               ipAddress: req.ip || req.connection.remoteAddress || undefined,
-              platform: this.detectPlatform(req),
             });
             sessionId = session.id;
           } catch (sessionError) {
@@ -2417,7 +2414,6 @@ export class AuthV2Controller {
             ipAddress: req.ip || req.connection.remoteAddress || undefined,
             // Already signed in — a session for the workspace they just created.
             loginMethod: 'WORKSPACE_CREATED',
-            platform: this.detectPlatform(req),
           });
           newSessionId = newSession.id;
         } catch (sessionError) {

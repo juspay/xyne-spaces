@@ -33,12 +33,8 @@ export interface CreateSessionData {
   deviceId?: string;
   fcmToken?: string;
   ipAddress?: string;
-  // Reported on the AUTH/LOGIN activity event. loginMethod defaults to the
-  // user's authProvider; platform is merged into deviceInfo so LOGIN and the
-  // eventual LOGOUT agree on it (deviceInfo is the only place platform is
-  // ever persisted — there is no dedicated column).
+  // Reported on the AUTH/LOGIN activity event; defaults to the user's authProvider.
   loginMethod?: LoginMethod;
-  platform?: string;
 }
 
 export interface UpdateSessionData {
@@ -67,21 +63,6 @@ function resolveSessionPlatform(deviceInfo?: string | null): Platform {
   if (hint === 'electron' || userAgent.includes('electron')) return Platform.ELECTRON;
   if (hint === 'mobile' || userAgent.includes('mobile')) return Platform.MOBILE;
   return Platform.WEB;
-}
-
-// Folds an explicit platform hint into deviceInfo's JSON so it survives to
-// logout time — deviceInfo is the only persisted place platform lives.
-// Leaves deviceInfo untouched if it already carries a platform key, isn't
-// JSON, or no explicit hint was given.
-function mergePlatformIntoDeviceInfo(deviceInfo: string | undefined, platform: string | undefined): string | undefined {
-  if (!platform) return deviceInfo;
-  try {
-    const parsed = deviceInfo ? (JSON.parse(deviceInfo) as Record<string, unknown>) : {};
-    if (typeof parsed.platform === 'string') return deviceInfo;
-    return JSON.stringify({ ...parsed, platform });
-  } catch {
-    return deviceInfo;
-  }
 }
 
 type SessionCandidate = Pick<UserSession, 'id' | 'userId' | 'deviceInfo' | 'createdAt'>;
@@ -113,13 +94,13 @@ export class UserSessionService {
   async createSession(sessionData: CreateSessionData): Promise<UserSession> {
     const sessionCreateId = `SESSION_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
     const startTime = Date.now();
-
+    
     try {
       logger.info(`🔍 [${sessionCreateId}] === Session Creation Started ===`);
       logger.info(`🔍 [${sessionCreateId}] UserId: ${sessionData.userId}`);
       logger.info(`🔍 [${sessionCreateId}] IP: ${sessionData.ipAddress}`);
       logger.info(`🔍 [${sessionCreateId}] Device: ${sessionData.deviceInfo?.substring(0, 100)}...`);
-
+      
       // Check for existing active sessions first
       logger.info(`🔍 [${sessionCreateId}] 🔍 Checking existing active sessions...`);
       const existingActiveSessions = await this.prisma.userSession.count({
@@ -132,7 +113,7 @@ export class UserSessionService {
         }
       });
       logger.info(`🔍 [${sessionCreateId}] Found ${existingActiveSessions} existing active sessions`);
-
+      
       logger.info(`🔍 [${sessionCreateId}] 💾 Creating session in database...`);
       const sessionUser = await this.prisma.user.findUnique({
         where: { id: sessionData.userId },
@@ -141,7 +122,6 @@ export class UserSessionService {
       if (!sessionUser) {
         throw new Error(`workspaceId required: user ${sessionData.userId} not found`);
       }
-      const deviceInfo = mergePlatformIntoDeviceInfo(sessionData.deviceInfo, sessionData.platform);
       const session = await this.prisma.userSession.create({
         data: {
           userId: sessionData.userId,
@@ -150,7 +130,7 @@ export class UserSessionService {
           refreshTokenExpiry: sessionData.refreshTokenExpiry,
           accessToken: sessionData.accessToken,
           accessTokenExpiry: sessionData.accessTokenExpiry,
-          deviceInfo,
+          deviceInfo: sessionData.deviceInfo,
           deviceId: sessionData.deviceId,
           fcmToken: sessionData.fcmToken,
           ipAddress: sessionData.ipAddress,
@@ -165,7 +145,7 @@ export class UserSessionService {
       const endTime = Date.now();
       logger.info(`✅ [${sessionCreateId}] Session created successfully in ${endTime - startTime}ms`);
       logger.info(`✅ [${sessionCreateId}] === Session Creation Complete ===`);
-
+      
       logger.info(`Created new session for user: ${session.userId}`);
 
       const loginMethod = sessionData.loginMethod ?? (session.user.authProvider as LoginMethod);
@@ -183,7 +163,7 @@ export class UserSessionService {
       logger.info(`❌ [${sessionCreateId}] Error after ${endTime - startTime}ms:`, error);
       logger.info(`❌ [${sessionCreateId}] Error message: ${error instanceof Error ? error.message : 'Unknown error'}`);
       logger.info(`❌ [${sessionCreateId}] Error stack:`, error instanceof Error ? error.stack : 'No stack trace');
-
+      
       logger.error('Error creating user session:', error);
       throw new Error('Failed to create user session');
     }
