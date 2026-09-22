@@ -318,7 +318,7 @@ const AppSidebar = (): ReactElement => {
     for (const id of toolbarIds) {
       const appId = appIdOf(id);
       if (appId) {
-        const snapshot = appSnapshots[appId];
+        const snapshot = appSnapshots.get(appId);
         if (snapshot) {
           entries.push({ kind: 'app', appId, title: snapshot.title, icon: snapshot.icon });
         }

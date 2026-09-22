@@ -62,7 +62,7 @@ export const BarCustomizer = ({
     () =>
       ids.filter(id => {
         const appId = appIdOf(id);
-        return appId ? Boolean(snapshots[appId]) : builtInById.has(id);
+        return appId ? snapshots.has(appId) : builtInById.has(id);
       }),
     [ids, snapshots, builtInById],
   );
@@ -91,7 +91,7 @@ export const BarCustomizer = ({
   const rowFor = (id: string): { icon: ReactNode; label: string; hint?: string } | null => {
     const appId = appIdOf(id);
     if (appId) {
-      const snapshot = snapshots[appId];
+      const snapshot = snapshots.get(appId);
       if (!snapshot) return null;
       return {
         icon: <AppIcon name={snapshot.icon} size={16} aria-hidden='true' />,
