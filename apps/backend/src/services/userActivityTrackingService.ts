@@ -13,14 +13,16 @@ class UserActivityTrackingService {
     url?: string;
     triggerType: TriggerType;
     platform?: Platform;
-    // Real UserSession.id when the event belongs to one; a random id otherwise.
-    sessionId?: string;
     contextMetadata?: Record<string, unknown>;
   }): Promise<void> {
     try {
       const event = {
         user_id: params.userId,
-        session_id: params.sessionId || uuidv4(),
+        // Always a per-tab id, like every other event (useActivityTracking.ts,
+        // globalClickTracker.ts) — a real UserSession.id belongs in
+        // contextMetadata, not here, or it mixes two unrelated id spaces
+        // under one column (see trackLogin/trackLogout below).
+        session_id: uuidv4(),
         event_category: params.eventCategory,
         event_name: params.eventName,
         event_label: params.eventLabel,
@@ -62,9 +64,10 @@ class UserActivityTrackingService {
 
   // ==================== Specific Auth Operations ====================
 
-  // LOGIN and LOGOUT share the UserSession.id as sessionId so the two rows pair
-  // up. eventLabel carries the login method / logout reason so daily reports can
-  // group on a plain column.
+  // LOGIN and LOGOUT carry the same UserSession.id in contextMetadata.userSessionId
+  // so the two rows pair up — the top-level session_id stays a per-tab id like
+  // every other event (see the comment in trackActivity). eventLabel carries the
+  // login method / logout reason so daily reports can group on a plain column.
   async trackLogin(
     userId: string,
     params: { sessionId: string; method: string; platform: Platform; metadata?: Record<string, unknown> },
@@ -76,8 +79,7 @@ class UserActivityTrackingService {
       eventLabel: params.method,
       triggerType: TriggerType.DB_MUTATION,
       platform: params.platform,
-      sessionId: params.sessionId,
-      contextMetadata: { method: params.method, ...params.metadata },
+      contextMetadata: { method: params.method, userSessionId: params.sessionId, ...params.metadata },
     });
   }
 
@@ -92,8 +94,7 @@ class UserActivityTrackingService {
       eventLabel: params.reason,
       triggerType: TriggerType.DB_MUTATION,
       platform: params.platform,
-      sessionId: params.sessionId,
-      contextMetadata: { reason: params.reason, ...params.metadata },
+      contextMetadata: { reason: params.reason, userSessionId: params.sessionId, ...params.metadata },
     });
   }
 

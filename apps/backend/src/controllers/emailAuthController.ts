@@ -451,7 +451,7 @@ export class EmailAuthController {
           }),
           ipAddress: req.ip || req.connection.remoteAddress || undefined,
           // The user row may still say GOOGLE/MICROSOFT for an SSO account that set a password.
-          loginMethod: 'EMAIL',
+          loginMethod: AuthProvider.EMAIL,
         });
 
         const jwtToken = jwtService.generateToken({

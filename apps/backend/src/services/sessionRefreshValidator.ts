@@ -228,15 +228,17 @@ export async function isRefreshAllowed(session: LoadedSession | null): Promise<b
   // 401. Ending the session records the LOGOUT once; later requests with the
   // same cookie hit status_EXPIRED / status_REVOKED above and record nothing.
   // provider_revoked is recorded by the deactivation cleanup below.
-  if (session) {
+  //
+  // org_member_left / workspace_user_left are deliberately NOT ended here: the
+  // session row is left ACTIVE (matching pre-existing behavior), because
+  // re-invite only clears leftAt (invitationService.ts, zero/mutators.ts) —
+  // it does not know which sessions this code revoked, so flipping them to a
+  // terminal REVOKED here would permanently lock out any other still-open
+  // device/tab after reinstatement. Revisit once sessions can record an
+  // endedReason that reinstatement can selectively undo.
+  if (session && verdict.reason === 'refresh_token_expired') {
     const sessionId = session.id;
-    const endSession =
-      verdict.reason === 'refresh_token_expired'
-        ? userSessionService.expireSession(sessionId)
-        : verdict.reason === 'org_member_left' || verdict.reason === 'workspace_user_left'
-          ? userSessionService.revokeSession(sessionId, 'MEMBER_LEFT')
-          : null;
-    void endSession?.catch((err) => logger.error('[Refresh-Validate] Failed to end denied session', {
+    void userSessionService.expireSession(sessionId).catch((err) => logger.error('[Refresh-Validate] Failed to end denied session', {
       sessionId,
       error: err instanceof Error ? err.message : String(err),
     }));

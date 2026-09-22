@@ -1,4 +1,5 @@
 import { Request, Response } from 'express';
+import { randomUUID } from 'crypto';
 import jwt from 'jsonwebtoken';
 import {
   CommunityJoinResultStatus,
@@ -370,7 +371,13 @@ export class CommunityWorkspaceController {
 
       const session = await this.userSessionService.createSession({
         userId,
-        refreshToken: pendingAuth.refreshToken,
+        // refreshToken is globally @unique. When resolvePendingAuth sourced
+        // this from an existing session (its `sessionId` branch), that token
+        // is still held by the original row — reusing it verbatim here would
+        // throw P2002 (same defect as authV2Controller's createWorkspaceAuth).
+        // Mint a fresh one; this workspace-scoped session doesn't need to
+        // share the literal token value.
+        refreshToken: randomUUID(),
         refreshTokenExpiry,
         accessToken: pendingAuth.accessToken,
         accessTokenExpiry: pendingAuth.accessTokenExpiry,
@@ -381,6 +388,8 @@ export class CommunityWorkspaceController {
           appVersion: req.headers['x-app-version'],
         }),
         ipAddress: req.ip || req.connection.remoteAddress || undefined,
+        // Already signed in — a session for the community workspace they just joined.
+        loginMethod: 'WORKSPACE_JOINED',
       });
 
       return session.id;
