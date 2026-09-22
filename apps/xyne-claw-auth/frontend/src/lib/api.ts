@@ -7626,6 +7626,24 @@ export async function registerGatewayService(
   return data.data;
 }
 
+export interface GatewayServiceDetail {
+  serviceName: string;
+  backendId: string;
+  backendUrl: string;
+  xAuthHeaderName: string | null;
+  tokenEndpointUrl: string | null;
+  tools: GatewayToolInput[];
+}
+
+/** Fetch one registered service with its full tool definitions (for editing). */
+export async function getGatewayService(serviceName: string, backendId?: string): Promise<GatewayServiceDetail> {
+  const q = backendId ? `?backendId=${encodeURIComponent(backendId)}` : "";
+  const data = await request<{ success: boolean; data: GatewayServiceDetail }>(
+    `${AUTH_API_URL}/api/v1/gateway-registry/${encodeURIComponent(serviceName)}${q}`,
+  );
+  return data.data;
+}
+
 /** List MCP-gateway services registered for the workspace tenant. */
 export async function listGatewayServices(): Promise<GatewayServiceRow[]> {
   const data = await request<{ success: boolean; data: GatewayServiceRow[] }>(

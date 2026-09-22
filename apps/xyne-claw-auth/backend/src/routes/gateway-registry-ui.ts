@@ -11,11 +11,12 @@
  * business logic (so no validation is duplicated).
  */
 import { Router, type Request, type Response } from "express";
-import { asyncHandler, ok, badRequest } from "../lib/http.js";
+import { asyncHandler, ok, badRequest, notFound } from "../lib/http.js";
 import { requireRequester } from "../middleware/agent-acl.js";
 import {
   registerService,
   listServices,
+  getService,
   deregisterService,
 } from "../mcpgateway/services/registration.js";
 import { SECURITY } from "../mcpgateway/config/index.js";
@@ -131,6 +132,29 @@ router.get("/", asyncHandler(async (req: Request, res: Response) => {
     tokenEndpointUrl: s.tokenEndpointUrl ?? null,
     toolCount: Array.isArray(s.tools) ? s.tools.length : 0,
   })));
+}));
+
+/**
+ * GET /:serviceName — full record (incl. tool definitions) for the Edit flow.
+ * Pass ?backendId= to disambiguate when a service has multiple backends.
+ */
+router.get("/:serviceName", asyncHandler(async (req: Request<{ serviceName: string }>, res: Response) => {
+  requireRequester(req);
+  const tenant = resolveTenant();
+  const serviceName = requireNonEmptyString(req.params.serviceName, "serviceName");
+  const backendId = typeof req.query["backendId"] === "string" ? (req.query["backendId"] as string) : undefined;
+  const service = await getService(tenant, serviceName, backendId);
+  if (!service) {
+    throw notFound("Service not found");
+  }
+  ok(res, {
+    serviceName: service.serviceName,
+    backendId: service.backendId,
+    backendUrl: service.backendUrl,
+    xAuthHeaderName: service.xAuthHeaderName ?? null,
+    tokenEndpointUrl: service.tokenEndpointUrl ?? null,
+    tools: Array.isArray(service.tools) ? service.tools : [],
+  });
 }));
 
 /**
