@@ -274,7 +274,8 @@ export class ConfigValidator {
         issues.push({
           path: 'schedule.businessHours',
           code: ValidationIssueCode.SHAPE,
-          message: 'Business hours need a working day and an end time after the start, and the wait must fit within 30 calendar days.',
+          message:
+            'Business hours need a working day and an end time after the start, and the wait must fit within 30 calendar days.',
         });
       }
     }

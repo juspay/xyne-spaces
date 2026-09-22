@@ -8,7 +8,12 @@ import { automationContextStorage } from '../engine/automation-context-storage';
 import { automationScheduleQueue } from '../queue/automation-schedule.queue';
 import { logger } from '@/utils/logger';
 import { calculateETADeadline } from '@/utils/etaCalculation';
-import { addBusinessTime, type BusinessHours, BusinessHoursSchema, fitsWithinMaxWait } from '../util/business-hours';
+import {
+  addBusinessTime,
+  type BusinessHours,
+  BusinessHoursSchema,
+  fitsWithinMaxWait,
+} from '../util/business-hours';
 import { triggerRegistry } from '../triggers/trigger-registry';
 
 const MAX_DELAY_SECONDS = 30 * 24 * 60 * 60;
@@ -33,7 +38,11 @@ const DelayConfigSchema = z
         path: ['amount'],
         message: `requested delay of ${seconds}s exceeds the maximum of ${MAX_DELAY_SECONDS}s (30 days)`,
       });
-    } else if (data.businessHoursOnly && data.businessHours && !fitsWithinMaxWait(seconds * 1000, data.businessHours)) {
+    } else if (
+      data.businessHoursOnly &&
+      data.businessHours &&
+      !fitsWithinMaxWait(seconds * 1000, data.businessHours)
+    ) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ['amount'],
@@ -105,7 +114,12 @@ export class DelayStep extends BaseActionStep<typeof DelayConfigSchema, DelayOut
     }
 
     const now = new Date();
-    const resumeAt = calculateDelayUntil(now, seconds, config.businessHoursOnly, config.businessHours);
+    const resumeAt = calculateDelayUntil(
+      now,
+      seconds,
+      config.businessHoursOnly,
+      config.businessHours
+    );
     const delayMs = Math.max(0, resumeAt.getTime() - now.getTime());
     const delayedUntil = resumeAt.toISOString();
 

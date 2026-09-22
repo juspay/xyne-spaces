@@ -11,7 +11,10 @@ export const BusinessHoursSchema = z
     startTime: z.string().regex(TIME_REGEX),
     endTime: z.string().regex(TIME_REGEX),
   })
-  .refine(h => h.endTime > h.startTime, { path: ['endTime'], message: 'must be after startTime' });
+  .refine((h) => h.endTime > h.startTime, {
+    path: ['endTime'],
+    message: 'must be after startTime',
+  });
 export type BusinessHours = z.infer<typeof BusinessHoursSchema>;
 
 function timeMs(time: string): number {
@@ -19,7 +22,11 @@ function timeMs(time: string): number {
   return (hours * 60 + minutes) * 60 * 1000;
 }
 
-export function addBusinessTime(start: Date, durationMs: number, hours: BusinessHours): Date | null {
+export function addBusinessTime(
+  start: Date,
+  durationMs: number,
+  hours: BusinessHours
+): Date | null {
   const limit = start.getTime() + IST_OFFSET_MS + MAX_WAIT_MS;
   let cursor = start.getTime() + IST_OFFSET_MS;
   let remaining = durationMs;
@@ -40,7 +47,7 @@ export function addBusinessTime(start: Date, durationMs: number, hours: Business
 
 export function fitsWithinMaxWait(durationMs: number, hours: BusinessHours): boolean {
   const referenceMonday = Date.UTC(2024, 0, 1) - IST_OFFSET_MS;
-  return hours.days.every(day => {
+  return hours.days.every((day) => {
     const windowClose = referenceMonday + ((day + 6) % 7) * DAY_MS + timeMs(hours.endTime);
     return addBusinessTime(new Date(windowClose), durationMs, hours) !== null;
   });
