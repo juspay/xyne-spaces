@@ -2378,28 +2378,6 @@ export const queries = defineQueries({
       return query.limit(limit);
     },
   ),
-  // Paginated app/bot participants of a channel — mirrors the human paginated
-  // query so the Agents & Apps tab can page-load the same way.
-  channelAppParticipantsPaginated: defineQuery(
-    z.object({
-      channelId: z.string(),
-      limit: z.number(),
-      start: z.object({ role: z.nativeEnum(ChannelRole), userId: z.string() }).nullable(),
-    }),
-    ({ args: { channelId, limit, start } }) => {
-      let query = zql.channel_participants
-        .where('channelId', channelId)
-        .whereExists('user', u => u.where('userType', 'IN', [UserType.APP, UserType.BOT]))
-        .orderBy('role', 'asc')
-        .orderBy('userId', 'asc');
-
-      if (start) {
-        query = query.start({ role: start.role, userId: start.userId }, { inclusive: false });
-      }
-
-      return query.limit(limit);
-    },
-  ),
   channelParticipantsPaginated: defineQuery(
     z.object({
       channelId: z.string(),

@@ -9,7 +9,6 @@ import {
   Channel,
 } from '@xyne/shared';
 import { useZero } from '../../../hooks/useZero';
-import { useQuery } from '../../../hooks/useQuery';
 import { QueryResultType } from '@rocicorp/zero';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 
@@ -786,34 +785,59 @@ const ChannelMembers = ({
     return () => cancelAnimationFrame(rafId);
   }, [isMobile]);
 
-  // Simplified pagination state
-  const [accumulatedParticipants, setAccumulatedParticipants] = useState<
-    QueryResultType<typeof queries.channelParticipantsPaginated>
+  // Paginated humans-only list for the Members tab. Skipped for the Agents &
+  // Apps tab (which reads directly from appParticipants) and while searching
+  // (which filters the parent's already-loaded allParticipants).
+  const [humanPage, setHumanPage] = useState<
+    QueryResultType<typeof queries.channelHumanParticipantsPaginated>
   >([]);
-  const [currentCursor, setCurrentCursor] = useState<{ role: ChannelRole; userId: string } | null>(
+  const [humanCursor, setHumanCursor] = useState<{ role: ChannelRole; userId: string } | null>(
     null,
   );
-  const [hasMore, setHasMore] = useState(true);
+  const [humanHasMore, setHumanHasMore] = useState(true);
 
-  // Paginated fetch — humans for the Members tab, apps for the Agents & Apps
-  // tab. Both queries filter by users.userType server-side; the client never
-  // needs to re-check membership.
-  const paginatedQueryArgs = {
-    channelId: channel.id,
-    limit: PAGE_SIZE,
-    start: currentCursor,
-  };
-  const [participants] = useQuery(
-    filterMode === 'agents-apps'
-      ? queries.channelAppParticipantsPaginated(paginatedQueryArgs)
-      : queries.channelHumanParticipantsPaginated(paginatedQueryArgs),
+  const paginationEnabled = filterMode === 'members' && !searchQuery.trim();
+
+  const [paginatedHumans] = useCachedQuery(
+    queries.channelHumanParticipantsPaginated({
+      channelId: channel.id,
+      limit: PAGE_SIZE,
+      start: humanCursor,
+    }),
+    { enabled: paginationEnabled },
   );
 
+  useEffect(() => {
+    if (!paginationEnabled) return;
+    if (!paginatedHumans || paginatedHumans.length === 0) {
+      if (humanCursor !== null) setHumanHasMore(false);
+      return;
+    }
+    setHumanPage(prev => {
+      if (humanCursor === null) return paginatedHumans;
+      const combined = [...prev, ...paginatedHumans];
+      return Array.from(
+        combined
+          .reduce(
+            (map, item) => map.set(item.userId, item),
+            new Map<string, (typeof combined)[number]>(),
+          )
+          .values(),
+      );
+    });
+    setHumanHasMore(paginatedHumans.length >= PAGE_SIZE);
+  }, [paginatedHumans, humanCursor, paginationEnabled]);
+
+  const loadMoreHumans = useCallback(() => {
+    if (!humanHasMore || humanPage.length === 0) return;
+    const last = humanPage[humanPage.length - 1];
+    if (!last) return;
+    setHumanCursor({ role: last.role, userId: last.userId });
+  }, [humanHasMore, humanPage]);
+
   const currentUserParticipant = useMemo(
-    () =>
-      accumulatedParticipants.find(c => c.userId === context.userID) ??
-      participants.find(c => c.userId === context.userID),
-    [accumulatedParticipants, participants, context.userID],
+    () => allParticipants.find(c => c.userId === context.userID),
+    [allParticipants, context.userID],
   );
 
   const allUsers = useUsers();
@@ -885,49 +909,6 @@ const ChannelMembers = ({
     setRemoveDialogOpen(true);
   };
 
-  // Simplified useEffect - accumulate participants data
-  useEffect(() => {
-    if (!participants || participants.length === 0) {
-      if (currentCursor !== null) {
-        // We tried to load more but got no results
-        setHasMore(false);
-      }
-      return;
-    }
-
-    setAccumulatedParticipants(prev => {
-      // Initial load (no cursor set yet)
-      if (currentCursor === null) {
-        return participants;
-      }
-
-      // Loading more - append and deduplicate
-      const combined = [...prev, ...participants];
-      const unique = Array.from(
-        combined
-          .reduce(
-            (map, item) => map.set(item.userId, item),
-            new Map<string, QueryResultType<typeof queries.channelParticipantsPaginated>[number]>(),
-          )
-          .values(),
-      );
-      return unique;
-    });
-
-    // Update hasMore based on result size
-    setHasMore(participants.length >= PAGE_SIZE);
-  }, [participants, currentCursor]);
-
-  // Simplified load more function
-  const loadMore = useCallback(() => {
-    if (!hasMore || accumulatedParticipants.length === 0) return;
-
-    const lastParticipant = accumulatedParticipants[accumulatedParticipants.length - 1];
-    if (!lastParticipant) return;
-
-    setCurrentCursor({ role: lastParticipant.role, userId: lastParticipant.userId });
-  }, [hasMore, accumulatedParticipants]);
-
   const isChannelCreator = channel.createdBy === context.userID;
   const currentUserIsAdmin = currentUserParticipant?.role === ChannelRole.ADMIN;
 
@@ -956,37 +937,41 @@ const ChannelMembers = ({
     };
 
     const trimmedQuery = searchQuery.trim();
+    const queryLower = trimmedQuery.toLowerCase();
 
-    // Search runs client-side over the parent's fully-loaded participant list.
-    // app/human classification uses the server-filtered appUserIdSet so it
-    // doesn't depend on usersById.userType being hydrated.
-    if (trimmedQuery) {
-      const queryLower = trimmedQuery.toLowerCase();
-      return allParticipants
-        .filter(p => {
-          const isApp = appUserIdSet.has(p.userId);
-          if (filterMode === 'agents-apps' ? !isApp : isApp) return false;
-          const user = usersById.get(p.userId);
-          if (!user) return false;
-          const display = getUserDisplayName(user).toLowerCase();
-          const rawName = (user.name ?? '').toLowerCase();
-          return display.includes(queryLower) || rawName.includes(queryLower);
-        })
-        .sort((a, b) => {
-          const displayA = getUserDisplayName(usersById.get(a.userId));
-          const displayB = getUserDisplayName(usersById.get(b.userId));
+    // Members tab, idle: render the paginated page (server-filtered by
+    // userType = USER).
+    if (filterMode === 'members' && !trimmedQuery) {
+      return humanPage;
+    }
+
+    // Everything else — Agents & Apps (any state) or Members search — filters
+    // the parent's fully-loaded participant list client-side. The
+    // server-filtered appUserIdSet buckets app-vs-human without depending on
+    // usersById.userType being hydrated.
+    return allParticipants
+      .filter(p => {
+        const isApp = appUserIdSet.has(p.userId);
+        if (filterMode === 'agents-apps' ? !isApp : isApp) return false;
+        if (!trimmedQuery) return true;
+        const user = usersById.get(p.userId);
+        if (!user) return false;
+        const display = getUserDisplayName(user).toLowerCase();
+        const rawName = (user.name ?? '').toLowerCase();
+        return display.includes(queryLower) || rawName.includes(queryLower);
+      })
+      .sort((a, b) => {
+        const displayA = getUserDisplayName(usersById.get(a.userId));
+        const displayB = getUserDisplayName(usersById.get(b.userId));
+        if (trimmedQuery) {
           const aStartsWith = nameStartsWith(displayA, searchQuery);
           const bStartsWith = nameStartsWith(displayB, searchQuery);
           if (aStartsWith && !bStartsWith) return -1;
           if (!aStartsWith && bStartsWith) return 1;
-          return displayA.localeCompare(displayB);
-        });
-    }
-
-    // No search — render the paginated page (already server-filtered by
-    // userType for the current tab).
-    return accumulatedParticipants;
-  }, [accumulatedParticipants, allParticipants, appUserIdSet, filterMode, searchQuery, usersById]);
+        }
+        return displayA.localeCompare(displayB);
+      });
+  }, [allParticipants, appUserIdSet, filterMode, humanPage, searchQuery, usersById]);
 
   return (
     <div className='relative h-full min-h-0 flex flex-col'>
@@ -1008,9 +993,9 @@ const ChannelMembers = ({
         className='flex-1 min-h-0 thin-scrollbar'
         style={{ height: '100%' }}
         data={filteredParticipants}
-        {...(!searchQuery &&
-          hasMore && {
-            endReached: loadMore,
+        {...(paginationEnabled &&
+          humanHasMore && {
+            endReached: loadMoreHumans,
           })}
         overscan={10}
         itemContent={(_, participant) => (
