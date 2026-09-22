@@ -1,10 +1,12 @@
 import { UserService } from '@/services/userService';
+import { UserSessionService } from '@/services/userSessionService';
 import { channelService } from '@/services/channelService';
 import { DatabaseClient } from '@/database/client';
 import { logger } from '@/utils/logger';
 import { asSystem } from './base';
 
 const userService = new UserService();
+const userSessionService = new UserSessionService();
 const prisma = DatabaseClient.getInstance();
 
 /** Used only by switchWorkspaceData below — same logic as authV2Controller.ts's private
@@ -24,6 +26,7 @@ export interface SwitchWorkspaceData {
   targetUser: NonNullable<Awaited<ReturnType<UserService['findUserByEmail']>>>;
   selfDmChannelId: string | null;
   workspace: { landingChannelId: string | null } | null;
+  currentSession: Awaited<ReturnType<UserSessionService['getSessionById']>>;
 }
 
 /**
@@ -35,14 +38,21 @@ export interface SwitchWorkspaceData {
  * attacker-supplied — this can only ever act on the caller's own identity in the target
  * workspace. Returns null when the target user has no access to the workspace (403 case) — the
  * caller decides how to respond, this only resolves data.
+ *
+ * The session lookup lives in here too, not back in the controller: UserSession.workspaceId is
+ * stamped once at login and never updated, while a session is deliberately reused across
+ * workspace switches — so by the second switch the ambient (old) workspace no longer matches the
+ * session row's workspaceId and an ACL-scoped lookup would wrongly come back null.
  */
 export function switchWorkspaceData(
   currentUserEmail: string,
   workspaceId: string,
+  sessionId: string | undefined,
 ): Promise<SwitchWorkspaceData | null> {
   return asSystem(
-    ['User', 'Channel', 'ChannelParticipant', 'Workspace'],
-    'switch-workspace: acts on target workspace, keyed off caller-verified email only',
+    ['User', 'Channel', 'ChannelParticipant', 'Workspace', 'UserSession'],
+    'switch-workspace: acts on target workspace, keyed off caller-verified email only; ' +
+      'session lookup included since UserSession.workspaceId is stale for a reused session',
     async () => {
       const targetUser = await userService.findUserByEmail(currentUserEmail, workspaceId);
       if (!targetUser) return null;
@@ -55,7 +65,9 @@ export function switchWorkspaceData(
         select: { landingChannelId: true },
       });
 
-      return { targetUser, selfDmChannelId, workspace };
+      const currentSession = sessionId ? await userSessionService.getSessionById(sessionId) : null;
+
+      return { targetUser, selfDmChannelId, workspace, currentSession };
     },
   );
 }
