@@ -37,6 +37,7 @@ import {
   readRun,
   resolveCaptureLevel,
   safeRunToken,
+  childRunIdFor,
   startCapture,
   toV1Snapshot,
   type CaptureLevel,
@@ -54,6 +55,7 @@ import { writeSessionSkills, deleteSessionSkills } from "./session-skills.js";
 import { installLlmCallMetrics } from "./llm-call-metrics.js";
 import { installToolBudget, type ToolBudgetTracker } from "./tool-budget.js";
 import { metric } from "./metrics.js";
+import { track, type ChildTaskRegistry } from "./child-tasks.js";
 import crypto from "node:crypto";
 import { dirname, isAbsolute, join } from "node:path";
 
@@ -392,31 +394,6 @@ function pushChildLabel(progressUrl: ProgressDest, sessionId: string, toolLabel:
  * conditions (`toolsMustInclude`) can match against nested tools like
  * `Bitbucket__create_pull_request`, not just the wrapper name `bitbucket`.
  */
-/** A subagent spawned with `run_in_background`: its DETACHED execution promise
- *  plus lifecycle state. The parent's model loop gets an immediate ack and keeps
- *  working; runTask (agent.ts) drains this registry after the loop settles and
- *  injects each completed result back into the parent session. Keyed by the
- *  spawning tool_call_id — which is also the `parentToolCallId` of the child's
- *  nested tool rows, so the wrapper invocation and its children line up. */
-export interface BackgroundSubagentTask {
-  /** == the spawning tool_call_id. */
-  taskId: string;
-  subagentName: string;
-  question: string;
-  startedAt: number;
-  status: "running" | "completed" | "error";
-  /** The detached doExecute() promise. Its rejection is swallowed by an attached
-   *  handler that records status/error — the drain loop reads these, never the
-   *  raw promise result. */
-  promise: Promise<SubagentExecResult>;
-  /** Child answer text, filled on completion. */
-  result?: string;
-  error?: string;
-  /** True once runTask has injected this back into the parent session. */
-  delivered: boolean;
-}
-export type BackgroundSubagentRegistry = Map<string, BackgroundSubagentTask>;
-
 export interface SubagentProgressCtx {
   progressUrl?: ProgressDest;
   parentSessionId: string;
@@ -439,7 +416,7 @@ export interface SubagentProgressCtx {
    *  an immediate ack instead of blocking; runTask drains it after the model
    *  loop settles. Absent (e.g. nested contexts) ⇒ `run_in_background` is not
    *  exposed and every call runs blocking, as before. */
-  backgroundRegistry?: BackgroundSubagentRegistry;
+  backgroundRegistry?: ChildTaskRegistry;
   /** The parent run's trace handles. Subagent tools are built (routes/run.ts)
    *  before the parent opens its trace (agent.ts), so this is a slot the parent
    *  fills in once its recorder exists — the same shared-object trick
@@ -643,6 +620,12 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
         log.warn(`[${def.name}] Ignoring malformed session_id handle — starting a fresh session`);
       }
       const execStartedAt = Date.now();
+      // The parent's signal stops every child; this one stops only this call,
+      // so `task-stop` unwinds one slow child and leaves its siblings running.
+      const callAbort = new AbortController();
+      const parentAbortSignal = progressCtx?.abortSignal;
+      if (parentAbortSignal?.aborted) callAbort.abort();
+      else parentAbortSignal?.addEventListener("abort", () => callAbort.abort(), { once: true });
       log.info(`[${def.name}] Subagent start t=${execStartedAt} call=${_toolCallId.slice(0,8)}: ${question.slice(0, 100)}`);
 
       // ── Background (non-blocking) spawn. If the parent asked for
@@ -653,30 +636,15 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
       // (agent.ts). Deliberately BYPASSES memoization — a background spawn is an
       // explicit, intentional fan-out, not a dedupe candidate.
       if ((params as Record<string, unknown>)["run_in_background"] === true && progressCtx?.backgroundRegistry) {
-        const promise = doExecute();
-        const task: BackgroundSubagentTask = {
+        track(progressCtx.backgroundRegistry, {
           taskId: _toolCallId,
-          subagentName: def.name,
+          kind: "subagent",
+          name: def.name,
           question,
           startedAt: execStartedAt,
-          status: "running",
-          promise,
-          delivered: false,
-        };
-        // Record terminal status off the detached promise; the attached handler
-        // also prevents an unhandled-rejection crash (the drain loop reads
-        // task.result/task.error, never the raw promise).
-        promise.then(
-          (r) => {
-            task.status = "completed";
-            task.result = (r.content?.[0] as { text?: string } | undefined)?.text ?? "";
-          },
-          (err) => {
-            task.status = "error";
-            task.error = err instanceof Error ? err.message : String(err);
-          },
-        );
-        progressCtx.backgroundRegistry.set(_toolCallId, task);
+          promise: doExecute(),
+          cancel: () => callAbort.abort(),
+        });
         log.info(`[${def.name}] Spawned in background (task=${_toolCallId.slice(0, 8)})`);
         return {
           content: [{
@@ -778,7 +746,7 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
       // below; `progressCtx` is a parameter and re-widens inside them.
       const debugCtx = progressCtx;
       const parentDebug = debugCtx?.parentDebug;
-      const childRunId = `${execStartedAt}-${safeRunToken(def.name)}-${safeRunToken(_toolCallId)}`;
+      const childRunId = childRunIdFor(execStartedAt, def.name, _toolCallId);
       // Prefer the key the parent's own run was written under. Without the
       // handle (nested / A2A contexts) fall back to the key the legacy child
       // artifact has always used, so both land in one directory either way.
@@ -840,6 +808,7 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
         ...(parentDebug?.runId ? { parentRunId: parentDebug.runId } : {}),
         parentToolCallId: _toolCallId,
         subagentName: def.name,
+        childKind: "subagent",
         question,
         counts: { events: 0, blobs: 0, messages: 0, toolCalls: 0 },
         tokenUsage: emptyTokenUsage(),
@@ -862,6 +831,7 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
         "subagent_start",
         {
           subagentName: def.name,
+          childKind: "subagent",
           childRunId,
           question,
           questionChars: question.length,
@@ -922,7 +892,7 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
        * child's store.
        */
       const recordSubagentEnd = (data: Record<string, unknown>): void => {
-        const payload = { subagentName: def.name, childRunId, ...data };
+        const payload = { subagentName: def.name, childKind: "subagent", childRunId, ...data };
         pushDebugEvent("subagent_end", payload, _toolCallId);
         if (parentDebug?.isFinished?.() === true) {
           log.info(`[${def.name}] parent trace already finished — subagent_end kept in child run ${childRunId} only`);
@@ -1489,7 +1459,7 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
         // any inner MCP/customTool call short-circuits at its next await
         // point. Without this, child sessions keep running past parent
         // cancel — burning tokens, spawning more inner tool calls.
-        const subagentAbortSignal = progressCtx?.abortSignal;
+        const subagentAbortSignal = callAbort.signal;
         if (subagentAbortSignal?.aborted) {
           try {
             await (session as { abort?: () => Promise<void> | void }).abort?.();
@@ -1629,7 +1599,7 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
         const failedDurationMs = Date.now() - execStartedAt;
         // A parent-cancelled child is not a failure — it stopped on purpose,
         // and a trace that calls it an error sends readers hunting a bug.
-        const failedStatus: RunStatus = debugCtx?.abortSignal?.aborted ? "cancelled" : "error";
+        const failedStatus: RunStatus = callAbort.signal.aborted ? "cancelled" : "error";
         pushDebugEvent("session_error", { error: msg, atMs: failedDurationMs });
         recordSubagentEnd({
           status: failedStatus,

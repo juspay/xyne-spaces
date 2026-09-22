@@ -105,6 +105,16 @@ export function runIdFor(startedAtMs: number, sessionId: string | undefined): st
 }
 
 /**
+ * `<startedAtMs>-<name>-<toolCallId>` — the run id for a child spawned from
+ * inside a parent turn, by a subagent tool or an A2A delegation. Keyed on the
+ * spawning tool call so the child's run and the parent's tool row line up, and
+ * so two concurrent children of the same name never collide.
+ */
+export function childRunIdFor(startedAtMs: number, name: string, toolCallId: string): string {
+  return `${startedAtMs}-${safeRunToken(name)}-${safeRunToken(toolCallId)}`;
+}
+
+/**
  * Legacy v1 artifact name. Preserved EXACTLY — `routes/debug.ts`, the webhook
  * `/debug` command, the claw-auth proxy and the loop-watchdog tests all parse
  * this pattern.
