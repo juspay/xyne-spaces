@@ -18,6 +18,7 @@ import { errMsg } from "../../lib/errors.js";
 import { executeApprovedWrite, type SignedWriteAction } from "../../lib/approved-write.js";
 import { newCardToken, parkOptions, type ParkedOption } from "./cards.js";
 import { enqueueOutbound } from "./delivery.js";
+import { chatMessageRepository } from "../../repositories/index.js";
 import { resolveIdentity } from "./identity.js";
 import type { ChannelAccount, ChannelDeliveryTarget, InteractiveCard } from "./plugin.js";
 
@@ -152,6 +153,36 @@ export async function enqueueApprovalCards(input: {
 }
 
 /**
+ * Write the tap and its outcome into the conversation the run used.
+ *
+ * Without this the approval is invisible to the agent: the card is executed
+ * outside any run, so the next turn loads a history whose last word is the
+ * model asking for permission, and it tells the person they never approved
+ * something they already did. Best-effort — the write already happened, and
+ * losing the note must not turn a success into an error.
+ */
+async function recordOutcome(
+  option: ParkedOption,
+  orgId: string,
+  decision: string,
+  outcome: string,
+): Promise<void> {
+  if (!option.conversationId) return;
+  const common = {
+    conversationId: option.conversationId,
+    agentSlug: option.agentSlug || "assistant",
+    userId: option.userId,
+    orgId,
+  };
+  try {
+    await chatMessageRepository.create({ ...common, role: "user", content: decision });
+    await chatMessageRepository.create({ ...common, role: "assistant", content: outcome, status: "completed" });
+  } catch (err) {
+    log.warn(`[approvals] could not record outcome in ${option.conversationId}: ${errMsg(err)}`);
+  }
+}
+
+/**
  * Redeem a tapped (or typed) approval option. The token has already been
  * consumed by the caller, so every path here must reply with something.
  */
@@ -166,6 +197,7 @@ export async function redeemApproval(input: {
 
   if (option.action.kind === "decline-write") {
     await reply("Declined — nothing was done.");
+    await recordOutcome(option, account.orgId, `Declined: ${option.action.label}`, "Declined — nothing was done.");
     return;
   }
   if (option.action.kind !== "approve-write" || !option.write) {
@@ -179,7 +211,6 @@ export async function redeemApproval(input: {
   // parked userId is a record of the past, not a live permission.
   const liveUserId = await resolveIdentity({
     surfaceId: account.surfaceId,
-    accountKey: account.accountKey,
     senderId: input.senderId,
     orgId: account.orgId,
   });
@@ -201,6 +232,7 @@ export async function redeemApproval(input: {
       ...(option.conversationId ? { conversationId: option.conversationId } : {}),
     });
     await reply(outcome.ok ? `✅ ${outcome.message}` : `⚠️ ${outcome.message}`);
+    await recordOutcome(option, account.orgId, `Approved: ${option.action.label}`, outcome.message);
   } catch (err) {
     log.error(`[approvals] execution threw for ${option.action.label}: ${errMsg(err)}`);
     await reply("Something went wrong running that. Please try again from Xyne Spaces.");

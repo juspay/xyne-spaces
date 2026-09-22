@@ -4413,8 +4413,20 @@ export async function processTask(
       pendingResponses.length === 0 &&
       pendingActions.length === 0 &&
       pendingQuestions.length === 0;
-    const emptyReason =
-      finalProducedNothing && providerFellBack ? "provider_capacity" : undefined;
+    // Reaching the success path having produced NOTHING — no text, no
+    // attachment, no pending anything — is an anomaly, not an outcome. A user
+    // stop is caught above (userCancelled) and a handoff throws, so the
+    // remaining cause is a turn that ended without writing: an aborted or
+    // stalled LLM request whose stopReason the loop treats as benign. Naming
+    // it here means the surfaces stop guessing why the answer was blank.
+    const emptyReason = finalProducedNothing
+      ? providerFellBack
+        ? "provider_capacity"
+        : "no_output"
+      : undefined;
+    if (emptyReason === "no_output") {
+      logErr(`[run] completed with no output at all session=${sessionId} agentSlug=${agentSlug ?? ""}`);
+    }
     const emptyReasonDetail =
       emptyReason && lastFallbackUnderlying
         ? lastFallbackUnderlying

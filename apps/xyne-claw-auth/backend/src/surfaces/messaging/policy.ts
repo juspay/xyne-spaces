@@ -73,6 +73,24 @@ function addressed(input: PolicyInput): boolean {
   return input.mentionedSelf || input.replyToSelf || input.namedInText === true;
 }
 
+/**
+ * Could this account ever answer in this chat, whoever spoke?
+ *
+ * The chat-level half of the policy, split out because it needs no sender —
+ * which lets a caller skip the work of working out who the sender *is* for a
+ * group it ignores entirely.
+ */
+export function chatIsAnswerable(
+  policy: AccountPolicy,
+  input: { isGroup: boolean; chatId: string; selfChat?: boolean },
+): boolean {
+  if (input.selfChat) return true;
+  if (!input.isGroup) return policy.dmPolicy !== "disabled";
+  if (policy.groupPolicy === "disabled") return false;
+  if (policy.groupPolicy === "allowlist") return idInList(input.chatId, policy.groupAllowlist);
+  return true;
+}
+
 export function evaluatePolicy(policy: AccountPolicy, input: PolicyInput): PolicyDecision {
   if (input.selfChat) {
     return policy.requireMention && !addressed(input)
@@ -102,12 +120,15 @@ export function evaluatePolicy(policy: AccountPolicy, input: PolicyInput): Polic
     case "disabled":
       return { action: "ignore", reason: "dms disabled" };
     case "linked":
-      if (!input.hasIdentity) return { action: "unlinked", reason: "unknown sender" };
       // requireMention is not a group-only rule: a one-to-one chat is still a
       // conversation the person may be having with themselves, and answering
-      // every line of it is noise.
-      return policy.requireMention && !addressed(input)
-        ? { action: "ignore", reason: "not addressed" }
-        : { action: "dispatch", reason: "sender linked" };
+      // every line of it is noise. It gates the unlinked notice too — a
+      // stranger's plain "hi" is not addressed to the agent, and replying to
+      // it would send an unprompted message from somebody's own number.
+      if (policy.requireMention && !addressed(input)) {
+        return { action: "ignore", reason: "not addressed" };
+      }
+      if (!input.hasIdentity) return { action: "unlinked", reason: "unknown sender" };
+      return { action: "dispatch", reason: "sender linked" };
   }
 }

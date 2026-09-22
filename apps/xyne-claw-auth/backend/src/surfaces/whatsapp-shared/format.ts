@@ -1,5 +1,8 @@
 /**
- * Markdown → WhatsApp dialect, shared by both WhatsApp transports. WhatsApp
+ * Markdown → WhatsApp dialect, shared by both WhatsApp transports — which is
+ * why it lives here rather than in either one's folder: the Cloud plugin
+ * reaching into the Baileys plugin for it coupled two transports that have
+ * nothing else in common. WhatsApp
  * renders *bold*, _italic_, ~strike~, `mono` and ```fenced``` blocks, nothing
  * else; headings, links and list markers must become plain text that still
  * reads well on a phone.

@@ -10,28 +10,31 @@
  */
 import { createLogger } from "../../logger.js";
 import { prisma } from "../../db.js";
-import type { AnyChannelPlugin, ChannelAccount } from "./plugin.js";
-import { findIdentityBySender, linkSenderToUser } from "./store.js";
+import type { AnyChannelPlugin } from "./plugin.js";
+import { linkSenderToUser, listOrgAccounts, toChannelAccount } from "./store.js";
 
 const log = createLogger("channel-identity");
 
 export async function resolveIdentity(input: {
   surfaceId: string;
-  accountKey: string;
   senderId: string;
   orgId: string;
 }): Promise<string | null> {
-  const identity = await prisma.userSurfaceIdentity.findUnique({
+  // A number belongs to a person, not to one assistant: whichever account on
+  // this channel they message, it is the same them. Rows written before that
+  // (keyed to one account) still count.
+  const identity = await prisma.userSurfaceIdentity.findFirst({
     where: {
-      surfaceId_surfaceWorkspaceId_surfaceUserId: {
-        surfaceId: input.surfaceId,
-        surfaceWorkspaceId: input.accountKey,
-        surfaceUserId: input.senderId,
-      },
+      surfaceId: input.surfaceId,
+      surfaceUserId: input.senderId,
+      orgId: input.orgId,
+      status: "ACTIVE",
+      userId: { not: null },
     },
-    select: { id: true, userId: true, orgId: true, status: true },
+    orderBy: { linkedAt: "desc" },
+    select: { id: true, userId: true },
   });
-  if (!identity?.userId || identity.orgId !== input.orgId || identity.status !== "ACTIVE") return null;
+  if (!identity?.userId) return null;
   void prisma.userSurfaceIdentity
     .update({ where: { id: identity.id }, data: { lastSeenAt: new Date() } })
     .catch(() => undefined);
@@ -49,9 +52,7 @@ export class LinkError extends Error {
 
 export interface LinkedNumber {
   senderId: string;
-  accountId: string;
-  accountLabel: string;
-  /** The number to message, once the account knows its own. */
+  /** The number to message, when the org has exactly one to offer. */
   sendTo: string | null;
   linkedAt: Date;
 }
@@ -64,8 +65,9 @@ export interface LinkedNumber {
  * existing link from being taken over and leaves unlinking to an admin.
  */
 export async function linkNumber(input: {
-  account: ChannelAccount;
   plugin: AnyChannelPlugin;
+  surfaceId: string;
+  orgId: string;
   phone: string;
   userId: string;
 }): Promise<LinkedNumber> {
@@ -74,30 +76,37 @@ export async function linkNumber(input: {
     throw new LinkError(400, "That doesn't look like a phone number this channel can reach.");
   }
 
-  const existing = await findIdentityBySender({
-    surfaceId: input.account.surfaceId,
-    accountKey: input.account.accountKey,
-    senderId,
+  const taken = await prisma.userSurfaceIdentity.findFirst({
+    where: {
+      surfaceId: input.surfaceId,
+      surfaceUserId: senderId,
+      orgId: input.orgId,
+      status: "ACTIVE",
+      userId: { not: input.userId },
+    },
+    select: { id: true },
   });
-  if (existing?.status === "ACTIVE" && existing.userId !== input.userId) {
+  if (taken) {
     // Deliberately does not say to whom.
     throw new LinkError(409, "That number is already linked to someone else. An admin has to unlink it first.");
   }
 
   const linkedAt = await linkSenderToUser({
-    surfaceId: input.account.surfaceId,
-    accountKey: input.account.accountKey,
+    surfaceId: input.surfaceId,
     senderId,
-    orgId: input.account.orgId,
+    orgId: input.orgId,
     userId: input.userId,
   });
-  log.info(`[identity] number linked account=${input.account.id} sender=${senderId} user=${input.userId}`);
+  log.info(`[identity] number linked channel=${input.plugin.key} sender=${senderId} user=${input.userId}`);
 
-  return {
-    senderId,
-    accountId: input.account.id,
-    accountLabel: input.account.config.label,
-    sendTo: input.account.config.displayId ?? null,
-    linkedAt,
-  };
+  // A business number is one everybody messages, so say which; a personal
+  // number is somebody else's phone and is never handed out.
+  let sendTo: string | null = null;
+  if (input.plugin.accountScope === "org") {
+    const numbers = (await listOrgAccounts(input.plugin.key, input.orgId))
+      .map((row) => toChannelAccount(row).config.displayId)
+      .filter((id): id is string => !!id);
+    if (numbers.length === 1) sendTo = numbers[0]!;
+  }
+  return { senderId, sendTo, linkedAt };
 }

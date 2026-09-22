@@ -78,6 +78,9 @@ export const accountConfigSchema = accountPolicySchema.extend({
   /** Observed transport state, written by the owning pod. */
   connState: z.enum(CONN_STATES).default("disconnected"),
   selfId: z.string().optional(),
+  /** The account's second address, when the transport has one (WhatsApp's
+   *  LID). Durable: the socket can come back from a login without it, and the
+   *  owner's own chat is unrecognisable without it. */
   selfAltId: z.string().optional(),
   displayId: z.string().optional(),
   lastConnectedAt: z.string().optional(),
@@ -150,7 +153,6 @@ export const loginBodySchema = z.object({
  *  for shape here and turned into a channel sender id by the plugin. */
 export const linkNumberBodySchema = z.object({
   phone: z.string().trim().min(6).max(24),
-  accountId: z.string().trim().min(1).optional(),
 });
 
 /** Conversation ids flow into filesystem paths in claw; keep them to the safe

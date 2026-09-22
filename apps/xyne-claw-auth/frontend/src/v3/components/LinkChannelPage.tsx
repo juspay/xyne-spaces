@@ -18,14 +18,16 @@ const CHANNEL_NAMES: Record<string, string> = {
 
 export function LinkChannelPage({ userEmail }: { userEmail: string }) {
   const [params] = useSearchParams();
-  const requested = (params.get("channel") ?? "").trim();
-  // The org-level business number is what people link themselves to; a
-  // personal WhatsApp is connected by scanning a QR, not by typing a number.
-  const channel = (requested || "whatsapp-cloud") as MessagingChannelKey;
+  const requested = (params.get("channel") ?? "").trim() as MessagingChannelKey;
+  // Without an explicit channel, offer both WhatsApp transports: the person
+  // arriving here was told to register a number and has no idea whether the
+  // agent that messaged them runs on a business number or a colleague's own.
+  const channels: MessagingChannelKey[] = requested ? [requested] : ["whatsapp-cloud", "whatsapp"];
+  const name = (requested && CHANNEL_NAMES[requested]) || "WhatsApp";
 
   return (
     <div className="mx-auto max-w-md py-10">
-      <LinkNumberPanel channel={channel} channelName={CHANNEL_NAMES[channel] ?? "WhatsApp"} userEmail={userEmail} />
+      <LinkNumberPanel channel={channels} channelName={name} userEmail={userEmail} />
     </div>
   );
 }

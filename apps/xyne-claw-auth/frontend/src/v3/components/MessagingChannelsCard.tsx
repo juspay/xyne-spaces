@@ -3,9 +3,15 @@
  * entry in CHANNELS). Talks to /claw/api/v1/surfaces/:channel.
  *
  * Rendered in two places, selected by `scope`: user-scoped channels on a
- * person's own Settings page, org-scoped ones on the organisation page. Flow is
- * the same either way — pick the agent, connect (a QR dialog for a linked
- * device, a token form for a business number), then the per-account settings.
+ * person's own Settings page, org-scoped ones on the organisation page — which
+ * already renders it only for an org OWNER/ADMIN, the same gate the API
+ * applies. This component adds no gate of its own: an earlier backstop here
+ * checked platform CLAW_ADMIN instead, which is stricter than the API and made
+ * the card vanish for the org owners it is meant for.
+ *
+ * Flow is the same either way — pick the agent, connect (a QR dialog for a
+ * linked device, a token form for a business number), then the per-account
+ * settings.
  */
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { ArrowsClockwiseIcon, CaretDownIcon, CaretUpIcon, DeviceMobileIcon, SealCheckIcon, CopyIcon } from "@phosphor-icons/react";
@@ -29,7 +35,6 @@ import { Button } from "./ui/Button";
 import { ConfirmDialog } from "./ui/ConfirmDialog";
 import { Dialog } from "./ui/Dialog";
 import { SelectField } from "./ui/SelectField";
-import { useAdminStatus } from "../hooks/useAdminStatus";
 import { Switch } from "./ui/Switch";
 import { TextField } from "./ui/TextField";
 import { useSnackbar } from "./ui/Snackbar";
@@ -107,8 +112,6 @@ export function MessagingChannelsCard({
   /** Org-scoped channels only; a personal account uses the session's org. */
   orgId?: string;
 }) {
-  const { isAdmin } = useAdminStatus();
-  if (scope === "org" && !isAdmin) return null;
   return (
     <>
       {CHANNELS.filter((channel) => channel.scope === scope).map((channel) => (
@@ -122,6 +125,7 @@ function ChannelSection({ channel, userId, orgId }: { channel: ChannelMeta; user
   const { show } = useSnackbar();
   const [accounts, setAccounts] = useState<ChannelAccountView[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadFailed, setLoadFailed] = useState(false);
   const [agents, setAgents] = useState<Array<{ slug: string; name: string }>>([]);
   const [newAgent, setNewAgent] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
@@ -135,8 +139,14 @@ function ChannelSection({ channel, userId, orgId }: { channel: ChannelMeta; user
       if (!silent) setLoading(true);
       try {
         setAccounts(await listChannelAccounts(channel.key, orgId));
+        setLoadFailed(false);
       } catch (error) {
-        if (!silent) show({ variant: "error", title: errorMessage(error, `Failed to load ${channel.name} accounts`) });
+        // A failed load must not read as "you have none" — that invites
+        // someone to add a second number they already have.
+        if (!silent) {
+          setLoadFailed(true);
+          show({ variant: "error", title: errorMessage(error, `Failed to load ${channel.name} accounts`) });
+        }
       } finally {
         if (!silent) setLoading(false);
       }
@@ -248,6 +258,13 @@ function ChannelSection({ channel, userId, orgId }: { channel: ChannelMeta; user
       <div className="mt-4 rounded-lg border border-xyne-border-subtle">
         {loading ? (
           <p className="px-4 py-3 text-[13px] text-xyne-fg-muted">Loading…</p>
+        ) : loadFailed ? (
+          <p className="px-4 py-3 text-[13px] text-xyne-fg-muted">
+            Couldn't load your {channel.name} {channel.noun}s.{" "}
+            <button type="button" className="underline hover:text-xyne-fg-primary" onClick={() => void load()}>
+              Try again
+            </button>
+          </p>
         ) : accounts.length === 0 ? (
           <p className="px-4 py-3 text-[13px] text-xyne-fg-muted">No {channel.name} {channel.noun}s yet.</p>
         ) : (
@@ -422,7 +439,6 @@ function PolicyEditor({
   const [groupAllowlist, setGroupAllowlist] = useState(account.groupAllowlist.join("\n"));
   const [requireMention, setRequireMention] = useState(account.requireMention);
   const [groupHistoryLimit, setGroupHistoryLimit] = useState(String(account.groupHistoryLimit));
-  const [ackReaction, setAckReaction] = useState(account.ackReaction ?? "\u{1F440}");
   const residue = (account.channelConfig ?? {}) as { selfChat?: boolean; agentActions?: { sendToOtherChats?: boolean; reactions?: boolean; listGroups?: boolean } };
   const [selfChat, setSelfChat] = useState(residue.selfChat ?? true);
   const [agentSend, setAgentSend] = useState(residue.agentActions?.sendToOtherChats ?? false);
@@ -438,7 +454,6 @@ function PolicyEditor({
         groupAllowlist: splitList(groupAllowlist),
         requireMention,
         ...(Number.isFinite(Number(groupHistoryLimit)) ? { groupHistoryLimit: Number(groupHistoryLimit) } : {}),
-        ackReaction: ackReaction.trim(),
         channel: {
           ...(account.channelConfig ?? {}),
           ...(channel.scope === "user"
@@ -472,16 +487,6 @@ function PolicyEditor({
       )}
       <div className="mt-3 grid gap-3 md:grid-cols-2 md:items-start">
         <SelectField label="Default agent" options={agentOptions} value={agentSlug ?? undefined} onValueChange={setAgentSlug} />
-        {account.capabilities.reactions && (
-          <TextField
-            label="Ack reaction"
-            hint="Dropped on a message the moment a run starts, so the sender knows it landed. Clear the box for none."
-            placeholder="👀"
-            value={ackReaction}
-            onChange={(event) => setAckReaction(event.target.value)}
-          />
-        )}
-
         {channel.scope === "user" && (
         <div className="grid gap-2 rounded-md border border-xyne-border-subtle p-3 md:col-span-2">
           <p className="text-[12px] font-semibold text-xyne-fg-primary">What this {channel.noun} does</p>
@@ -501,7 +506,7 @@ function PolicyEditor({
           {account.capabilities.groups && (
             <ToggleRow
               label="Groups"
-              hint="Only the groups ticked below, and only when the agent is addressed."
+              hint="Only the groups ticked below."
               checked={answerGroups}
               onChange={setAnswerGroups}
             />
@@ -515,6 +520,15 @@ function PolicyEditor({
         </div>
         )}
 
+        <div className="md:col-span-2">
+          <ToggleRow
+            label="Only answer when addressed"
+            hint="An @mention, a reply to the agent, or a message starting with /agent-name. Applies everywhere — your own chat, direct messages and groups. Off, it answers every message it can see."
+            checked={requireMention}
+            onChange={setRequireMention}
+          />
+        </div>
+
         {account.capabilities.groups && answerGroups && (
           <>
             <div className="md:col-span-2">
@@ -524,15 +538,6 @@ function PolicyEditor({
                 selected={splitList(groupAllowlist)}
                 onChange={(ids) => setGroupAllowlist(ids.join("\n"))}
               />
-            </div>
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <p className="text-[12px] text-xyne-fg-primary">Only answer when addressed</p>
-                <p className="text-[11px] text-xyne-fg-muted">
-                  An @mention, a reply to the agent, or a message starting with /agent-name. Off = answer everything.
-                </p>
-              </div>
-              <Switch checked={requireMention} onChange={setRequireMention} ariaLabel="Require mention" />
             </div>
             <TextField
               label="Group context carried forward"

@@ -14,7 +14,8 @@ import { redisService } from "../../redis.js";
 import { createLogger } from "../../logger.js";
 import { errMsg } from "../../lib/errors.js";
 import { LEASE_RENEW_MS, LEASE_TTL_MS, LOGIN_ARTIFACT_TTL_S, OUTBOX_POP_TIMEOUT_S, REDIS_PREFIX, SWEEP_MS } from "./const.js";
-import { outboxKey, postOutboxReply, sendOutbound, type OutboxRequest } from "./delivery.js";
+import { outboxKey, PartialSendError, postOutboxReply, sendOutbound, type OutboxRequest } from "./delivery.js";
+import { runSerialized } from "./serialize.js";
 import { handleInbound } from "./inbound.js";
 import {
   acquireLease,
@@ -31,6 +32,7 @@ import {
   type AccountStatePatch,
   type AnyChannelPlugin,
   type ChannelAccount,
+  type ClosedInfo,
   type StopReason,
 } from "./plugin.js";
 import { listRunnableAccounts, authStateFor, updateAccountConfig } from "./store.js";
@@ -219,22 +221,30 @@ class AccountManager {
     }
 
     runtime.renewTimer = setInterval(() => {
-      void renewLease(account.id).then((ok) => {
+      void renewLease(account.id).then((outcome) => {
         if (runtime.stopping) return;
-        if (ok) {
+        if (outcome === "renewed") {
           runtime.lastRenewOk = Date.now();
           return;
         }
-        // Give up only once the key must have expired anyway. Stopping on the
-        // first failure caused a self-inflicted outage: we dropped a healthy
-        // socket while our own (still valid) key blocked the re-acquire, so
-        // the account stayed down until the TTL ran out.
-        const staleFor = Date.now() - runtime.lastRenewOk;
-        if (staleFor < LEASE_TTL_MS) {
-          log.warn(`[channels] lease renewal failed for account=${account.id} (stale ${staleFor}ms); retrying`);
+        if (outcome === "lost") {
+          // Redis answered: somebody else owns this account now. Waiting out
+          // the TTL here would mean two pods holding a socket for the same
+          // number, which WhatsApp resolves by closing one of them.
+          log.warn(`[channels] lease taken over for account=${account.id}; stopping locally`);
+          void this.stopRuntime(account.id, "lease_lost");
           return;
         }
-        log.warn(`[channels] lease lost for account=${account.id} (stale ${staleFor}ms); stopping locally`);
+        // Could not reach Redis, which says nothing about who holds the lease.
+        // Give up only once our key must have expired anyway: stopping on the
+        // first failure caused a self-inflicted outage, because we dropped a
+        // healthy socket while our own still-valid key blocked the re-acquire.
+        const staleFor = Date.now() - runtime.lastRenewOk;
+        if (staleFor < LEASE_TTL_MS) {
+          log.warn(`[channels] lease renewal unreachable for account=${account.id} (stale ${staleFor}ms); retrying`);
+          return;
+        }
+        log.warn(`[channels] lease presumed lost for account=${account.id} (stale ${staleFor}ms); stopping locally`);
         void this.stopRuntime(account.id, "lease_lost");
       });
     }, LEASE_RENEW_MS);
@@ -270,7 +280,7 @@ class AccountManager {
     log.info(`[channels] stopped account=${accountId} reason=${reason}`);
   }
 
-  private async onPluginClosed(runtime: Runtime, info: { loggedOut: boolean; reason?: string; code?: number }): Promise<void> {
+  private async onPluginClosed(runtime: Runtime, info: ClosedInfo): Promise<void> {
     const accountId = runtime.account.id;
     if (info.loggedOut) {
       log.warn(`[channels] account=${accountId} logged out by the messenger (${info.reason ?? "no reason"})`);
@@ -282,10 +292,14 @@ class AccountManager {
       await this.stopRuntime(accountId, "logout");
       return;
     }
-    await updateAccountConfig(accountId, {
+    const config = await updateAccountConfig(accountId, {
       connState: "disconnected",
+      ...(info.stop ? { desiredState: "stopped" as const } : {}),
       lastDisconnect: { ...(info.code !== undefined ? { code: info.code } : {}), ...(info.reason ? { reason: info.reason } : {}), at: new Date().toISOString() },
     }).catch(() => undefined);
+    // stopRuntime writes connState back from runtime.account, so it must see
+    // this write rather than the pre-close snapshot.
+    if (config) runtime.account = { ...runtime.account, config, channelConfig: config.channel ?? null };
     await this.stopRuntime(accountId, "shutdown");
   }
 
@@ -328,35 +342,53 @@ class AccountManager {
       if (!popped) continue;
       const [key, payload] = popped;
       const accountId = key.slice(`${REDIS_PREFIX}:outbox:`.length);
-      const runtime = this.runtimes.get(accountId);
-      let item: (OutboxRequest & { __attempts?: number }) | null = null;
+      let item: OutboxRequest | null = null;
       try {
-        item = JSON.parse(payload) as OutboxRequest & { __attempts?: number };
+        item = JSON.parse(payload) as OutboxRequest;
       } catch {
         log.warn(`[channels] dropping malformed outbox item account=${accountId}`);
         continue;
       }
+      // Dispatch without blocking the pop. One loop serves every account on
+      // this pod, so sending inline means a 64 MB upload — or a retry sleep —
+      // stalls every other account's replies behind it. Per-account chains
+      // keep each account's own items strictly in order.
+      void runSerialized(`outbox:${accountId}`, () => this.deliver(accountId, key, payload, item!));
+    }
+  }
+
+  /**
+   * Retries stay inside the account's chain: re-queueing a failed item would
+   * put it behind everything already popped, so a reply could land after the
+   * approval card that follows it. Hand-backs use the shared connection —
+   * outboxConn is parked in BRPOP and would hold a push for up to its timeout.
+   */
+  private async deliver(accountId: string, key: string, payload: string, item: OutboxRequest): Promise<void> {
+    let progress = item.__progress;
+    for (let attempt = 1; ; attempt++) {
+      const runtime = this.runtimes.get(accountId);
       if (!runtime || runtime.stopping) {
-        // Lost ownership between pop and send: hand it back for the new owner.
-        await this.outboxConn.rpush(key, payload).catch(() => undefined);
-        continue;
+        // Lost ownership: hand it back for the new owner, carrying how far the
+        // send got so it resumes rather than repeating delivered chunks.
+        const handBack = progress ? JSON.stringify({ ...item, __progress: progress }) : payload;
+        await redisService.getConnection().rpush(key, handBack).catch(() => undefined);
+        return;
       }
       try {
-        const reply = await sendOutbound(runtime.plugin, runtime.handle, item);
+        const reply = await sendOutbound(runtime.plugin, runtime.handle, item, progress);
         log.info(`[channels] sent kind=${item.kind} account=${accountId}${"chatId" in item ? ` chat=${item.chatId}` : ""} ok=${reply.ok}`);
         if (item.replyKey) await postOutboxReply(item.replyKey, reply).catch(() => undefined);
+        return;
       } catch (err) {
-        const attempts = (item.__attempts ?? 0) + 1;
-        log.warn(`[channels] send failed account=${accountId} kind=${item.kind} attempt=${attempts}: ${errMsg(err)}`);
+        log.warn(`[channels] send failed account=${accountId} kind=${item.kind} attempt=${attempt}: ${errMsg(err)}`);
         if (item.replyKey) {
           // A waiting caller gets the failure now rather than a silent retry.
           await postOutboxReply(item.replyKey, { ok: false, error: errMsg(err) }).catch(() => undefined);
-          continue;
+          return;
         }
-        if (attempts < MAX_SEND_ATTEMPTS) {
-          await sleep(500 * attempts);
-          await this.outboxConn.rpush(key, JSON.stringify({ ...item, __attempts: attempts })).catch(() => undefined);
-        }
+        if (attempt >= MAX_SEND_ATTEMPTS) return;
+        if (err instanceof PartialSendError) progress = err.progress;
+        await sleep(500 * attempt);
       }
     }
   }

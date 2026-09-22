@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { evaluatePolicy, idInList } from "./policy.js";
+import { chatIsAnswerable, evaluatePolicy, idInList } from "./policy.js";
 import { parseAccountConfig, policyOf } from "./schema.js";
 
 const policy = (over: Record<string, unknown> = {}) => policyOf(parseAccountConfig(over));
@@ -30,8 +30,15 @@ describe("direct messages", () => {
     expect(evaluatePolicy(policy({ dmPolicy: "disabled" }), input()).action).toBe("ignore");
   });
 
-  it("tells an unknown sender to link their number", () => {
-    expect(evaluatePolicy(policy(), input({ hasIdentity: false })).action).toBe("unlinked");
+  it("tells an unknown sender to link their number once they address the agent", () => {
+    expect(evaluatePolicy(policy(), input({ hasIdentity: false, namedInText: true })).action).toBe("unlinked");
+    expect(evaluatePolicy(policy({ requireMention: false }), input({ hasIdentity: false })).action).toBe("unlinked");
+  });
+
+  it("stays silent to a stranger who never addressed the agent", () => {
+    // The number belongs to a person. An unprompted reply to a passing "hi"
+    // is a message sent as them, to someone they did not choose to answer.
+    expect(evaluatePolicy(policy(), input({ hasIdentity: false })).action).toBe("ignore");
   });
 
   it("dispatches for a linked sender once requireMention is off", () => {
@@ -92,3 +99,22 @@ describe("self chat", () => {
   });
 });
 
+
+describe("chatIsAnswerable", () => {
+  it("lets a group the account ignores skip the sender lookup entirely", () => {
+    const p = policy({ groupPolicy: "allowlist", groupAllowlist: ["120@g.us"] });
+    expect(chatIsAnswerable(p, { isGroup: true, chatId: "999@g.us" })).toBe(false);
+    expect(chatIsAnswerable(p, { isGroup: true, chatId: "120@g.us" })).toBe(true);
+    expect(chatIsAnswerable(policy({ groupPolicy: "disabled" }), { isGroup: true, chatId: "120@g.us" })).toBe(false);
+  });
+
+  it("follows dmPolicy for one-to-one chats", () => {
+    expect(chatIsAnswerable(policy({ dmPolicy: "disabled" }), { isGroup: false, chatId: "91@s.whatsapp.net" })).toBe(false);
+    expect(chatIsAnswerable(policy(), { isGroup: false, chatId: "91@s.whatsapp.net" })).toBe(true);
+  });
+
+  it("always answers the owner's own chat, whatever the dm setting", () => {
+    const p = policy({ dmPolicy: "disabled" });
+    expect(chatIsAnswerable(p, { isGroup: false, chatId: "self", selfChat: true })).toBe(true);
+  });
+});

@@ -14,9 +14,12 @@
  */
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { fetch as httpFetch, FormData } from "undici";
-import type { ChannelPlugin, InteractiveCard, OutboundFile, AuthStateStore } from "../messaging/plugin.js";
-import { formatForWhatsApp } from "../whatsapp/format.js";
-import { parseCloudWebhook } from "./messages.js";
+import { MAX_INBOUND_BYTES, TYPING_MAX_MS } from "../messaging/const.js";
+import { createLogger } from "../../logger.js";
+import { errMsg } from "../../lib/errors.js";
+import type { ChannelPlugin, InboundAttachment, InteractiveCard, OutboundFile, AuthStateStore } from "../messaging/plugin.js";
+import { formatForWhatsApp } from "../whatsapp-shared/format.js";
+import { parseCloudWebhook, type CloudMediaRef } from "./messages.js";
 import {
   GRAPH_ORIGIN,
   GRAPH_VERSION,
@@ -29,13 +32,12 @@ import {
   type WhatsAppCloudConfig,
 } from "./schema.js";
 
+const log = createLogger("whatsapp-cloud");
+
 const MAX_TEXT_CHARS = 4096;
 /** Meta dismisses the indicator after 25s, or when we reply. Refresh inside
  *  that window so a long run does not look like it stalled. */
 const TYPING_REFRESH_MS = 20_000;
-/** Stop refreshing eventually: a run that never finishes must not leave a
- *  timer typing into someone's chat forever. */
-const TYPING_MAX_REFRESHES = 10;
 /** Meta's media caps: images are far smaller than documents. */
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 const MAX_FILE_BYTES = 100 * 1024 * 1024;
@@ -93,6 +95,50 @@ async function requiredSecret(store: AuthStateStore, key: string, label: string)
   const value = await store.get(key, "");
   if (!value) throw new Error(`${label} is not configured for this account`);
   return value;
+}
+
+/**
+ * Two authenticated calls, because Meta hands out a media id rather than a
+ * URL: GET /<id> answers with a short-lived signed `url` plus the size, and
+ * that url needs the same bearer token to read. The size comes back before
+ * the bytes do, which is what lets an oversized file be refused without ever
+ * downloading it.
+ */
+async function fetchCloudMedia(
+  authState: AuthStateStore,
+  media: CloudMediaRef,
+): Promise<InboundAttachment | null> {
+  const token = await authState.get(SECRET_ACCESS_TOKEN, "");
+  if (!token) {
+    log.warn(`[whatsapp-cloud] no access token stored; cannot fetch media ${media.mediaId}`);
+    return null;
+  }
+  const auth = { Authorization: `Bearer ${token}` };
+  try {
+    const metaRes = await httpFetch(`${GRAPH_ORIGIN}/${GRAPH_VERSION}/${media.mediaId}`, { headers: auth });
+    if (!metaRes.ok) {
+      log.warn(`[whatsapp-cloud] media lookup failed ${media.mediaId}: HTTP ${metaRes.status}`);
+      return null;
+    }
+    const info = (await metaRes.json()) as { url?: string; mime_type?: string; file_size?: number };
+    if (!info.url) return null;
+    if (typeof info.file_size === "number" && info.file_size > MAX_INBOUND_BYTES) {
+      log.info(`[whatsapp-cloud] media too large (${info.file_size} bytes) id=${media.mediaId}`);
+      return null;
+    }
+    const fileRes = await httpFetch(info.url, { headers: auth });
+    if (!fileRes.ok) {
+      log.warn(`[whatsapp-cloud] media download failed ${media.mediaId}: HTTP ${fileRes.status}`);
+      return null;
+    }
+    const data = Buffer.from(await fileRes.arrayBuffer());
+    // file_size is absent often enough that the cap has to hold here too.
+    if (data.length === 0 || data.length > MAX_INBOUND_BYTES) return null;
+    return { fileName: media.fileName, mimeType: info.mime_type || media.mimeType, data };
+  } catch (err) {
+    log.warn(`[whatsapp-cloud] media fetch threw ${media.mediaId}: ${errMsg(err)}`);
+    return null;
+  }
 }
 
 export const whatsappCloudPlugin: ChannelPlugin<CloudHandle, WhatsAppCloudConfig> = {
@@ -197,8 +243,20 @@ export const whatsappCloudPlugin: ChannelPlugin<CloudHandle, WhatsAppCloudConfig
     return a.length === b.length && timingSafeEqual(a, b);
   },
 
-  parseInbound(payload) {
-    return parseCloudWebhook(payload);
+  parseInbound(_payload, _account, authState) {
+    const messages = parseCloudWebhook(_payload);
+    for (const message of messages) {
+      const media = message.media;
+      if (!media) continue;
+      // The core calls this only once the message has passed policy, so a
+      // chat the account ignores never costs two Graph round trips.
+      message.mediaKind = media.kind;
+      message.loadAttachments = async () => {
+        const file = await fetchCloudMedia(authState, media);
+        return file ? [file] : [];
+      };
+    }
+    return messages;
   },
 
   async sendText(handle, chatId, text, opts) {
@@ -236,9 +294,9 @@ export const whatsappCloudPlugin: ChannelPlugin<CloudHandle, WhatsAppCloudConfig
     if (!messageId) return;
 
     await postTyping(handle, messageId);
-    let refreshes = 0;
+    const startedAt = Date.now();
     const timer = setInterval(() => {
-      if (++refreshes > TYPING_MAX_REFRESHES) {
+      if (Date.now() - startedAt > TYPING_MAX_MS) {
         clearInterval(timer);
         typingTimers.delete(key);
         return;

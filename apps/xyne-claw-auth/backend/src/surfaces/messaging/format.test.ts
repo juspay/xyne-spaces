@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { chunkText } from "./format.js";
-import { formatForWhatsApp } from "../whatsapp/format.js";
+import { formatForWhatsApp } from "../whatsapp-shared/format.js";
 
 describe("chunkText", () => {
   it("leaves a short reply as one piece", () => {

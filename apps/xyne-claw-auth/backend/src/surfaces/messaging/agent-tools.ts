@@ -14,6 +14,7 @@
  */
 import type { McpToolInfo } from "../../mcp/types.js";
 import { enqueueAndWait } from "./delivery.js";
+import { readGroupContext } from "./group-context.js";
 import { getChannel, type ChannelDeliveryTarget, type MessagingChannelKey } from "./plugin.js";
 import { agentActionsSchema, type AgentActionGates } from "./schema.js";
 import { getAccount, toChannelAccount } from "./store.js";
@@ -94,6 +95,18 @@ export function channelAgentTools(channel: MessagingChannelKey): McpToolInfo[] {
       ? [{
       name: `${prefix}_list_groups`,
       description: `List the ${label} groups this account is a member of (id, name, participant count).`,
+      inputSchema: { type: "object", properties: {}, required: [] },
+    }]
+      : []),
+    ...(groups
+      ? [{
+      name: `${prefix}_read_recent`,
+      description:
+        `Read what has been said recently in the ${label} group this conversation is happening in — the messages ` +
+        `nobody addressed the agent in, which it would otherwise never see. Use this when asked to summarise or ` +
+        `catch up on "this group" / "this chat". Bounded: only what arrived since the agent last replied here, ` +
+        `and only from the last 12 hours. Returns [] in a one-to-one chat, or when there is nothing buffered — ` +
+        `say so plainly rather than guessing, and do NOT substitute a Spaces conversation.`,
       inputSchema: { type: "object", properties: {}, required: [] },
     }]
       : []),
@@ -203,6 +216,28 @@ export async function handleChannelAgentTool(input: {
       if (!gates.listGroups) return JSON.stringify({ ok: false, error: `Group listing is disabled for this ${channel} account.` });
       const reply = await enqueueAndWait(accountId, { kind: "list-groups" });
       return JSON.stringify(reply.ok ? { ok: true, groups: reply.groups ?? [] } : { ok: false, error: reply.error });
+    }
+
+    case `${prefix}_read_recent`: {
+      if (!target.isGroup) {
+        return JSON.stringify({ ok: true, messages: [], note: "This is a one-to-one chat; its history is the conversation you already have." });
+      }
+      // Read, never consume: this is the agent looking, not a run quoting the
+      // lines into its task. Draining here would rob the next reply of the
+      // context it was buffered for.
+      const buffered = await readGroupContext(accountId, target.chatId);
+      return JSON.stringify({
+        ok: true,
+        messages: buffered.map((m) => ({
+          from: m.senderName?.trim() || `+${m.senderId.replace(/@.*$/, "")}`,
+          text: m.text,
+          at: new Date(m.at).toISOString(),
+        })),
+        note:
+          buffered.length === 0
+            ? "Nothing buffered for this group. Only messages that did not address the agent are kept, for 12 hours — say that rather than looking somewhere else."
+            : undefined,
+      });
     }
 
     case `${prefix}_resolve_target`: {

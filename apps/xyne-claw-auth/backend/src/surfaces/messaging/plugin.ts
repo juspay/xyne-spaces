@@ -148,6 +148,20 @@ export interface InboundMessage {
    *  to download still arrives, carrying its caption, so the agent answers
    *  about what it can see rather than silently ignoring the person. */
   attachments?: InboundAttachment[];
+  /** Fetch the message's files on demand. Set instead of `attachments` by
+   *  plugins whose media costs a network round trip and a decrypt: the core
+   *  calls it only once the message has passed policy, so a chat the account
+   *  ignores never pays to download the photos sent in it. */
+  loadAttachments?: () => Promise<InboundAttachment[]>;
+  /** What kind of file is waiting, so the core can say "a video that could
+   *  not be read" without knowing anything about the channel's media model. */
+  mediaKind?: string;
+  /** Work out who really sent this, when the channel's cheap answer is not
+   *  the one identities are keyed by (WhatsApp addresses group members by
+   *  LID). Called by the core inside the per-chat queue and only for a chat
+   *  the account might answer in, so ordering holds and an ignored group
+   *  costs nothing. Returns null to keep the id the plugin already set. */
+  resolveSenderId?: () => Promise<string | null>;
   /** The person tapped a button or list row on a card WE sent; this is that
    *  option's `id`. Set only by plugins with native cards — a text fallback
    *  comes back as ordinary text and is matched by cards.ts instead. */
@@ -209,6 +223,16 @@ export interface AccountStatePatch {
   lastDisconnect?: { code?: number; reason?: string; at: string };
 }
 
+export interface ClosedInfo {
+  loggedOut: boolean;
+  /** Retrying cannot help (QR never scanned, broken session): park the
+   *  account until the admin logs in again, rather than letting the next
+   *  sweep restart it. */
+  stop?: boolean;
+  reason?: string;
+  code?: number;
+}
+
 /** What the core hands a connection plugin when it starts an account. */
 export interface AccountRuntimeContext {
   /** Live, not a snapshot: re-read it per message so a config change lands
@@ -219,7 +243,7 @@ export interface AccountRuntimeContext {
   /** The plugin's transport ended for good (logged out / unrecoverable). The
    *  core stops the account; the plugin must NOT reconnect after this. Normal
    *  reconnects are the plugin's own business while it is running. */
-  onClosed(info: { loggedOut: boolean; reason?: string; code?: number }): void;
+  onClosed(info: ClosedInfo): void;
   authState: AuthStateStore;
   logger: Logger;
 }
@@ -257,7 +281,10 @@ export interface ChannelPlugin<Handle = unknown, ChannelConfig = unknown> {
     account: ChannelAccount,
     authState: AuthStateStore,
   ): Promise<boolean> | boolean;
-  parseInbound?(payload: unknown, account: ChannelAccount): InboundMessage[];
+  /** `authState` is handed over because a webhook payload names its media by
+   *  id, not by URL: fetching the bytes needs the account's own credentials,
+   *  and the webhook can land on any pod, including one holding no handle. */
+  parseInbound?(payload: unknown, account: ChannelAccount, authState: AuthStateStore): InboundMessage[];
   /** Provider handshake that proves we own the endpoint (Meta's GET with
    *  hub.verify_token). Return true to echo the challenge back. */
   verifyChallenge?(account: ChannelAccount, authState: AuthStateStore, token: string): Promise<boolean>;
@@ -309,6 +336,10 @@ export interface ChannelDeliveryTarget {
   senderId: string;
   isGroup: boolean;
   quoted?: MessageRef;
+  /** Replace the ack reaction on the triggering message when the run ends.
+   *  Carried on the target because the result comes back on a pod that has
+   *  no idea what this account's reaction settings are. */
+  statusReactions?: boolean;
 }
 
 // ── registry ──
