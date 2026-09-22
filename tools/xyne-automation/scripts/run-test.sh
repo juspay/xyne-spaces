@@ -12,5 +12,8 @@ if [ -z "$TERM" ] || [ "$TERM" = "dumb" ]; then
   export OUTPUT_MODE=plain
 fi
 
+# Silence node's experimental EnvHttpProxyAgent (UNDICI-EHPA) notice — noise for this harness.
+export NODE_OPTIONS="${NODE_OPTIONS:+$NODE_OPTIONS }--disable-warning=UNDICI-EHPA"
+
 # ts-node by path (not `pnpm exec`): keeps cwd at PROJECT_ROOT, which the runner uses to place artifacts.
 exec "$AUTOMATION_DIR/node_modules/.bin/ts-node" --project "$AUTOMATION_DIR/tsconfig.json" "$AUTOMATION_DIR/scripts/runner/index.ts" "$@"

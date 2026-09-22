@@ -1,4 +1,4 @@
-import { CommitAnalysisService, CommitAnalysisResult, AnalyzeCommitsRequest } from '@/services/commitAnalysisService';
+import { CommitAnalysisService, CommitAnalysisResult, AnalyzeCommitsRequest, countDistinctMigrationFiles } from '@/services/commitAnalysisService';
 import { ApplicationRepository } from '@/database/repositories/applicationRepository';
 import { TicketRepository } from '@/database/repositories/ticketRepository';
 import { logger } from '@/utils/logger';
@@ -322,15 +322,16 @@ export class ReleaseService {
 			);
 		}
 
+		const migrationFileCount = countDistinctMigrationFiles(summaryMigrationLinks);
 		emitEvent(
 			ReleaseEventType.RELEASE,
 			'COMMIT_ANALYSIS_COMPLETED',
-			`Analysis complete: ${affectedApplications.length} app${affectedApplications.length === 1 ? '' : 's'} affected, ${summaryEnvChanges.length} env change${summaryEnvChanges.length === 1 ? '' : 's'}, ${summaryMigrationLinks.length} migration${summaryMigrationLinks.length === 1 ? '' : 's'}`,
+			`Analysis complete: ${affectedApplications.length} app${affectedApplications.length === 1 ? '' : 's'} affected, ${summaryEnvChanges.length} env change${summaryEnvChanges.length === 1 ? '' : 's'}, ${migrationFileCount} migration${migrationFileCount === 1 ? '' : 's'}`,
 			undefined,
 			{
 				affectedAppCount: affectedApplications.length,
 				envChangeCount: summaryEnvChanges.length,
-				migrationCount: summaryMigrationLinks.length,
+				migrationCount: migrationFileCount,
 			} as Prisma.InputJsonValue,
 		);
 

@@ -1,15 +1,4 @@
 export type SdlcChatTab = 'conversations' | 'ai';
-export type SdlcRightPanelMode = 'closed' | 'chat' | 'debugger';
-
-export const sdlcRightPanelMode = (input: {
-  chatOpen: boolean;
-  debuggerOpen: boolean;
-}): SdlcRightPanelMode => {
-  if (input.debuggerOpen) return 'debugger';
-  if (input.chatOpen) return 'chat';
-  return 'closed';
-};
-
 export const shouldUseInlineAssistantDebugger = (embeddedInSdlc: boolean): boolean =>
   !embeddedInSdlc;
 
@@ -19,8 +8,8 @@ export const SDLC_CHAT_PANEL_ID = 'sdlc-chat';
 const SDLC_CLOSED_PANEL_IDS = [SDLC_MAIN_PANEL_ID];
 const SDLC_OPEN_PANEL_IDS = [SDLC_MAIN_PANEL_ID, SDLC_CHAT_PANEL_ID];
 
-export const sdlcRightPanelIds = (mode: SdlcRightPanelMode): string[] =>
-  mode === 'closed' ? SDLC_CLOSED_PANEL_IDS : SDLC_OPEN_PANEL_IDS;
+export const sdlcRightPanelIds = (open: boolean): string[] =>
+  open ? SDLC_OPEN_PANEL_IDS : SDLC_CLOSED_PANEL_IDS;
 
 export const sdlcChatLayout = (input: {
   chatParam: string | null;
@@ -31,7 +20,12 @@ export const sdlcChatLayout = (input: {
   // no longer opens the SDLC panel — SdlcScreen migrates old ?chat=ai links by
   // opening the sidebar once and stripping the param.
   const activeTab: SdlcChatTab = input.chatParam === 'ai' ? 'ai' : 'conversations';
-  const panelOpen = input.discussionParam === '1';
+  // Open unless the reader closed it. Every surface that can hold a discussion —
+  // a track, a folder, an artifact, a link, a file — shows it by default, so the
+  // absence of the param means open and only an explicit '0' closes. What the
+  // panel is scoped to, and whether there is anything to scope it to at all, is
+  // still decided by the screen.
+  const panelOpen = input.discussionParam !== '0';
   return {
     activeTab,
     panelOpen,
@@ -51,8 +45,11 @@ export const sdlcChatNavigationSearch = (input: {
   });
 
   if (!currentLayout.panelOpen) {
-    const search = destination.toString();
-    return search ? `?${search}` : '';
+    // Closed carries — but a destination that asks for the panel outranks it, so
+    // opening a track, folder or artifact still brings its conversations back
+    // after the reader has closed the panel somewhere else.
+    if (!destination.has('discussion')) destination.set('discussion', '0');
+    return `?${destination.toString()}`;
   }
 
   destination.delete('conversation');
@@ -77,7 +74,7 @@ export const shouldStartFreshSdlcAssistant = (input: {
   actorChannelId: string | null;
   repositoryChannelId: string;
   actorRepositoryId: string | null;
-  repositoryId: string;
+  repositoryId: string | null;
 }): boolean =>
   !input.actorOpen ||
   input.selectedAgentSlug !== 'sdlc-agent' ||

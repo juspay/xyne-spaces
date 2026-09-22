@@ -75,6 +75,7 @@ import {
   RCAStatus,
   RecapEntityType,
   RecurringCallSeriesStatus,
+  RingStatus,
   ReenterMode,
   ReleaseEventType,
   ReleaseTrackingMode,
@@ -91,6 +92,7 @@ import {
   TicketStageRequestStatus,
   TicketStatus,
   TicketStatusV2,
+  UserActivityStatus,
   UserPresenceStatus,
   UserResponsibility,
   UserStatus,
@@ -200,6 +202,17 @@ export const ticketTable = table('tickets')
     emailReplyEnabled: boolean(),
   })
   .primaryKey('id');
+
+export const ticketDescriptionTable = table('ticket_descriptions')
+  .columns({
+    ticketId: string(),
+    workspaceId: string(),
+    channelId: string(),
+    description: string(),
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey('ticketId');
 
 export const subTicketTable = table('sub_tickets')
   .columns({
@@ -549,6 +562,7 @@ export const userTable = table('users')
     /** Assignment availability promoted from user_presence for query performance (dual-written) */
     assignmentUnavailableUntil: number().optional(),
     calendarVisibility: enumeration<CalendarVisibility>(),
+    activityStatus: enumeration<UserActivityStatus>().optional(),
   })
   .primaryKey('id');
 
@@ -1241,6 +1255,7 @@ export const callParticipantTable = table('call_participants')
     displayName: string().optional(),
     email: string().optional(),
     isExternal: boolean(),
+    ringStatus: enumeration<RingStatus>().optional(),
   })
   .primaryKey('id');
 
@@ -1507,6 +1522,24 @@ export const sdlcFolderTable = table('sdlc_folders')
   })
   .primaryKey('id');
 
+export const sdlcItemCommentTable = table('sdlc_item_comments')
+  .columns({
+    id: string(),
+    workspaceId: string(),
+    entityType: string(),
+    entityId: string(),
+    body: string(),
+    anchorQuote: string().optional(),
+    anchorSelector: string().optional(),
+    resolved: boolean(),
+    resolvedBy: string().optional(),
+    resolvedAt: number().optional(),
+    createdBy: string(),
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey('id');
+
 export const sdlcTrackTable = table('sdlc_tracks')
   .columns({
     workspaceId: string(),
@@ -1632,6 +1665,9 @@ export const emailReadTable = table('email_reads') // Prisma model: EmailRead
     userId: string(),
     lastReadEmailId: string(),
     lastReadEmailAt: number(),
+    // True once tickets.lastEmailAt moves past lastReadEmailAt (see Prisma EmailRead.hasNewEmail).
+    // Nullable with no DB default; mutators always write it explicitly.
+    hasNewEmail: boolean().optional(),
     createdAt: number(),
     updatedAt: number(),
   })
@@ -1657,10 +1693,12 @@ export const emailChannelPreferenceTable = table('email_channel_preferences')
     autoDraftMode: enumeration<AutoDraftMode>().optional(),
     deskType: enumeration<DeskType>(),
     dlEmail: string().optional(),
+    dlAliases: string().optional(),
     workspaceId: string(),
     autoDraftAgentSlug: string().optional(),
     metricsEnabled: boolean().optional(),
     frtStageNames: string().optional(),
+    metricsGuestVisibility: string().optional(),
     appWebhookDeliveryEnabled: boolean().optional(),
     deskReportEnabled: boolean().optional(),
     deskReportAgentSlug: string().optional(),
@@ -2491,6 +2529,24 @@ export const ticketTableRelationships = relationships(ticketTable, ({ one, many 
     sourceField: ['id'],
     destField: ['ticketId'],
     destSchema: ticketTagMappingTable,
+  }),
+  ticketDescription: one({
+    sourceField: ['id'],
+    destField: ['ticketId'],
+    destSchema: ticketDescriptionTable,
+  }),
+}));
+
+export const ticketDescriptionTableRelationships = relationships(ticketDescriptionTable, ({ one }) => ({
+  ticket: one({
+    sourceField: ['ticketId'],
+    destField: ['id'],
+    destSchema: ticketTable,
+  }),
+  channel: one({
+    sourceField: ['channelId'],
+    destField: ['id'],
+    destSchema: channelTable,
   }),
 }));
 
@@ -3391,7 +3447,26 @@ export const sdlcEntityLinkTableRelationships = relationships(sdlcEntityLinkTabl
     destField: ['id'],
     destSchema: channelTable,
   }),
+  workflow: one({
+    sourceField: ['targetId'],
+    destField: ['id'],
+    destSchema: workflowTable,
+  }),
 }));
+
+export const sdlcItemCommentTableRelationships = relationships(
+  sdlcItemCommentTable,
+  ({ many }) => ({
+    // The commented entity is placed in a hub by an edge, so the hub is reached
+    // the way a folder reaches it: through the edges pointing at the same id.
+    // targetId is polymorphic, so readers filter by relationType.
+    sdlcEntityLinks: many({
+      sourceField: ['entityId'],
+      destField: ['targetId'],
+      destSchema: sdlcEntityLinkTable,
+    }),
+  }),
+);
 
 export const sdlcArtifactTableRelationships = relationships(sdlcArtifactTable, ({ one }) => ({
   repo: one({
@@ -3438,6 +3513,14 @@ export const attachementTableRelationShips = relationships(messageAttachmentTabl
     sourceField: ["conversationId"],
     destField: ["conversationId"],
     destSchema: conversationTable
+  }),
+  // entityId is polymorphic, so this resolves only for the rows whose owning
+  // feature puts a channel there — SDLC hub files, which have no conversation to
+  // be authorised through. Same shape as sdlcEntityLinks.repo.
+  hubChannel: one({
+    sourceField: ["entityId"],
+    destField: ["id"],
+    destSchema: channelTable
   })
 }))
 
@@ -4611,6 +4694,12 @@ export const savedUserConfigurationTableRelationships = relationships(
       destField: ['viewId'],
       destSchema: viewAccessTable,
     }),
+    // Used only for DESK_TICKET configs where contextId holds a channelId.
+    contextChannel: one({
+      sourceField: ['contextId'],
+      destField: ['id'],
+      destSchema: channelTable,
+    }),
   }),
 );
 
@@ -4736,6 +4825,7 @@ export const schema = createSchema({
     toolTable,
     agentToolsMappingTable,
     ticketTable,
+    ticketDescriptionTable,
     subTicketTable,
     ticketSubTicketMappingTable,
     ticketAssignmentTable,
@@ -4814,6 +4904,7 @@ export const schema = createSchema({
     sdlcEntityLinkTable,
     sdlcArtifactTable,
     sdlcFolderTable,
+    sdlcItemCommentTable,
     sdlcTrackTable,
     emailTable,
     emailDraftTable,
@@ -4874,6 +4965,7 @@ export const schema = createSchema({
     toolTableRelationships,
     agentToolsMappingTableRelationships,
     ticketTableRelationships,
+    ticketDescriptionTableRelationships,
     subTicketTableRelationships,
     ticketSubTicketMappingTableRelationships,
     ticketAssignmentTableRelationships,
@@ -4914,6 +5006,7 @@ export const schema = createSchema({
     sdlcEntityLinkTableRelationships,
     sdlcArtifactTableRelationships,
     sdlcFolderTableRelationships,
+    sdlcItemCommentTableRelationships,
     sdlcTrackTableRelationships,
     messageTableRelationships,
     messageArtifactTableRelationships,
@@ -5086,6 +5179,7 @@ export type Repo = Row<typeof schema.tables.repos>;
 export type SdlcEntityLink = Row<typeof schema.tables.sdlc_entity_links>;
 export type SdlcArtifact = Row<typeof schema.tables.sdlc_artifacts>;
 export type SdlcFolder = Row<typeof schema.tables.sdlc_folders>;
+export type SdlcItemComment = Row<typeof schema.tables.sdlc_item_comments>;
 export type SdlcTrack = Row<typeof schema.tables.sdlc_tracks>;
 export type EmailDraft = Row<typeof schema.tables.email_drafts>;
 export type ConversationLabel = Row<typeof schema.tables.conversation_labels>;

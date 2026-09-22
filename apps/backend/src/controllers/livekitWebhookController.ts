@@ -23,8 +23,19 @@ import { ParticipantInfo_Kind } from '@livekit/protocol';
 import { emitCallEnded, emitCallStarted } from '@/automations/triggers/call.trigger';
 import { noteTakerWebhookController } from '@/controllers/noteTakerWebhookController';
 import { buildCallInviteUrl } from '@/utils/urlUtils';
-import { isTrackInChannel } from '@/sdlc/sdlcChannelMembership';
+import { validateOwnerInChannel, resolveItemTrackId } from '@/sdlc/entityLinkService';
+import { SDLC_TRACK_FLAT_RELATION, type EntityLinkOwner } from '@xyne/shared/sdlc';
+
+/** The owners a call may be filed against; mirrors sdlcCallLinkSchema. */
+const SDLC_CALL_OWNER_TYPES: readonly string[] = [
+  'CANVAS',
+  'TRACK',
+  'FOLDER',
+  'LINK',
+  'ATTACHMENT',
+];
 import { activityService } from '@/services/activity/activityService';
+import { userActivityStatusService } from '@/services/userActivityStatusService';
 
 class LiveKitWebhookController {
   private receiver: WebhookReceiver;
@@ -279,6 +290,8 @@ class LiveKitWebhookController {
       if (result.shouldEndCall) {
         logger.info(`[LiveKit Webhook] Marked call ${callId} as ENDED`);
 
+        void userActivityStatusService.clearInCallForEndedCall(result.call.id);
+
         await this.emitCallEndedAutomation(result.call, now, 'room_finished');
 
         // Track call metrics (count + duration) as a side effect
@@ -520,23 +533,24 @@ class LiveKitWebhookController {
         // and its conversation exist, record the entity mapping. Owner is a
         // canvas or a track — either way the same two links are written:
         //   OWNER -> CALL (relation CALL) and OWNER -> CONVERSATION (DISCUSSION).
-        const sdlcLink = (roomMetadata as {
-          sdlcLink?: { ownerType?: string; ownerId?: string };
-        }).sdlcLink;
+        const sdlcLink = (
+          roomMetadata as {
+            sdlcLink?: { ownerType?: string; ownerId?: string };
+          }
+        ).sdlcLink;
         if (sdlcLink?.ownerType && sdlcLink.ownerId) {
           try {
             const linkWorkspaceId = channelRecord?.workspaceId ?? null;
-            const ownerValid =
-              sdlcLink.ownerType === 'CANVAS'
-                ? Boolean(
-                    await this.db.canvas.findFirst({
-                      where: { id: sdlcLink.ownerId, channelId },
-                      select: { id: true },
-                    }),
-                  )
-                : sdlcLink.ownerType === 'TRACK'
-                  ? await isTrackInChannel(this.db, sdlcLink.ownerId, channelId)
-                  : false;
+            const ownerValid = SDLC_CALL_OWNER_TYPES.includes(sdlcLink.ownerType)
+              ? await validateOwnerInChannel(
+                  this.db,
+                  {
+                    sourceType: sdlcLink.ownerType as EntityLinkOwner['sourceType'],
+                    sourceId: sdlcLink.ownerId,
+                  },
+                  channelId
+                )
+              : false;
             if (linkWorkspaceId && ownerValid) {
               await this.db.sdlcEntityLink.createMany({
                 data: [
@@ -563,6 +577,38 @@ class LiveKitWebhookController {
                 ],
                 skipDuplicates: true,
               });
+              // A conversation filed against an item is also filed against the
+              // item's track, the way a message-started one is through
+              // entityLinkContext.trackRollUp. Without this edge the call's
+              // conversation exists but never appears in the track's list.
+              if (
+                sdlcLink.ownerType === 'FOLDER' ||
+                sdlcLink.ownerType === 'ATTACHMENT' ||
+                sdlcLink.ownerType === 'LINK'
+              ) {
+                const rollUpTrackId = await resolveItemTrackId(
+                  this.db,
+                  sdlcLink.ownerType,
+                  sdlcLink.ownerId
+                );
+                if (rollUpTrackId) {
+                  await this.db.sdlcEntityLink.createMany({
+                    data: [
+                      {
+                        workspaceId: linkWorkspaceId,
+                        channelId,
+                        sourceType: 'TRACK',
+                        sourceId: rollUpTrackId,
+                        targetType: 'CONVERSATION',
+                        targetId: conversationId,
+                        relationType: SDLC_TRACK_FLAT_RELATION,
+                        createdBy,
+                      },
+                    ],
+                    skipDuplicates: true,
+                  });
+                }
+              }
               if (existingConversationId) {
                 await activityService.fillSdlcOwner(conversationId, channelId);
               }
@@ -705,6 +751,8 @@ class LiveKitWebhookController {
           }
         }
       }
+      void userActivityStatusService.markInCall(participant.identity);
+
       // Notify all connected clients that participants changed
       if (roomName) {
         await callHostControlService.applyHostControlsToParticipant(
@@ -809,6 +857,8 @@ class LiveKitWebhookController {
       }
 
       logger.info(`[LiveKit Webhook] Marked participant ${participant.identity} as left for call ${callId}`);
+
+      void userActivityStatusService.clearInCall(participant.identity);
 
       if (result.shouldEndCall) {
         logger.info(`[LiveKit Webhook] No active participants remaining for call ${callId}. Call ended.`);

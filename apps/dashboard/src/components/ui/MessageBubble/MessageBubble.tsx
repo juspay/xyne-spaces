@@ -121,6 +121,8 @@ interface AttachmentsBlockProps {
   parentMessage?: AttachmentRef['parentMessage'];
 }
 
+const FILE_PILL_GRID_COLUMNS = 'repeat(auto-fill, minmax(min(240px, 100%), 1fr))';
+
 /**
  * Check if attachment has a document thumbnail (PDF with preview)
  */
@@ -195,7 +197,7 @@ const AttachmentsBlock: React.FC<AttachmentsBlockProps> = ({
   const nonPreviewableFiles = fileAttachments.filter(a => !hasDocumentThumbnail(a));
 
   // Check if we need to use FilePill for all files (mixed types)
-  const useFilePillForAllFiles = nonPreviewableFiles.length > 0;
+  const useFilePillForAllFiles = nonPreviewableFiles.length > 0 || fileAttachments.length > 1;
 
   const handleFileClick = (attachment: AttachmentType) => {
     // Build attachment refs for the viewer (same order as rendered)
@@ -361,13 +363,13 @@ const AttachmentsBlock: React.FC<AttachmentsBlockProps> = ({
           {/* Non-previewable files - use FilePill component */}
           {/* If useFilePillForAllFiles is true, show ALL files in FilePill format */}
           {(useFilePillForAllFiles ? fileAttachments : nonPreviewableFiles).length > 0 && (
-            <div className='flex flex-col gap-2'>
+            <div className='grid gap-2' style={{ gridTemplateColumns: FILE_PILL_GRID_COLUMNS }}>
               {(useFilePillForAllFiles ? fileAttachments : nonPreviewableFiles).map(attachment => (
                 <FilePill
                   key={attachment.id}
+                  className='max-w-none'
                   fileName={attachment.originalFilename}
                   mimeType={attachment.mimetype}
-                  fileSize={attachment.size}
                   fileId={attachment.id}
                   uploadedByUserId={attachment.uploadedByUserId}
                   onClick={() => handleFileClick(attachment)}
@@ -609,6 +611,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   const isMentionUserAddition = metadata?.messageSubtype === 'user_not_in_channel';
   const isTicketNudge = metadata?.messageSubtype === 'ticket_nudge';
   const isPrivateSystemNotice = isMentionUserAddition || isTicketNudge;
+  const isEphemeralNotice = metadata?.['__xyneEphemeral'] === true;
   // Detect any message with markdown content format (call_summary, call_prd, etc.)
   const isMarkdownContent = metadata?.['contentFormat'] === 'markdown';
   const hasSuggestedTickets = metadata?.['hasSuggestedTickets'] === true;
@@ -748,9 +751,15 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
     [message.messageId, clawCitationCtx],
   );
 
-  if (!message) {
-    return null;
-  }
+  // Memoize the emoji font-size decision for the main message body. It was
+  // called inline in JSX on every render and internally builds a DOMParser
+  // Document (via isEmojiOnly -> htmlToPlainText); keying it on message.content
+  // keeps it from re-running on unrelated re-renders. Declared before the early
+  // returns below so the hook runs unconditionally on every render.
+  const emojiFontSizeClass = useMemo(
+    () => getEmojiFontSizeClass(message.content),
+    [message.content],
+  );
 
   // For mobile "my" messages, use the specialized mobile component
   const isSlashCommandArtifact = isSlashCommandArtifactMessage(message.content);
@@ -819,6 +828,16 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
           svgBgColor='hsl(var(--muted))'
           icon='visibility'
           text='Only Visible to you'
+          backgroundColor='bg-muted'
+          textColor='text-foreground'
+        />
+      )}
+
+      {isEphemeralNotice && !isPrivateSystemNotice && (
+        <MessageHeader
+          svgBgColor='hsl(var(--muted))'
+          icon='visibility'
+          text='Only visible to you · disappears on reload'
           backgroundColor='bg-muted'
           textColor='text-foreground'
         />
@@ -1100,6 +1119,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                       statusEmoji={sender?.statusEmoji}
                       statusContent={sender?.statusContent}
                       statusExpiryAt={sender?.statusExpiryAt}
+                      activityStatus={sender?.activityStatus}
                       size='sm'
                       showOnHover={true}
                     />
@@ -1126,6 +1146,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                       statusEmoji={sender?.statusEmoji}
                       statusContent={sender?.statusContent}
                       statusExpiryAt={sender?.statusExpiryAt}
+                      activityStatus={sender?.activityStatus}
                       size='sm'
                       showOnHover={true}
                     />
@@ -1274,13 +1295,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                     <div
                       className={`jp-message-html whitespace-pre-wrap break-all-words inline-block ${getEmojiFontSizeClass(metadata['shareNote'])}`}
                     >
-                      {isMobile ? (
-                        <ExpandableMessage
-                          message={metadata['shareNote']}
-                          showEdited={message.edited}
-                          maxHeight={500}
-                        />
-                      ) : (
+                      <ExpandableMessage maxHeight={500}>
                         <div className='jp-message-html inline-block'>
                           <RenderMessageWithHTML
                             message={DOMPurify.sanitize(metadata['shareNote'])}
@@ -1288,7 +1303,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                             preserveThreadRoute={context === 'thread'}
                           />
                         </div>
-                      )}
+                      </ExpandableMessage>
                     </div>
                   ) : null}
                   <SharedTranscriptCard
@@ -1395,13 +1410,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                     <div
                       className={`jp-message-html whitespace-pre-wrap break-all-words inline-block ${getEmojiFontSizeClass(forwardedMessageData.optionalText)}`}
                     >
-                      {isMobile ? (
-                        <ExpandableMessage
-                          message={forwardedMessageData.optionalText}
-                          showEdited={message.edited}
-                          maxHeight={500}
-                        />
-                      ) : (
+                      <ExpandableMessage maxHeight={500}>
                         <div className='jp-message-html inline-block'>
                           <RenderMessageWithHTML
                             disableLinks={disableLinks}
@@ -1410,7 +1419,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                             preserveThreadRoute={context === 'thread'}
                           />
                         </div>
-                      )}
+                      </ExpandableMessage>
                     </div>
                   )}
                   {/* Forwarded message content with left border */}
@@ -1459,20 +1468,14 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                           <div
                             className={`jp-message-html whitespace-pre-wrap break-all-words inline-block text-muted-foreground ${getEmojiFontSizeClass(noteHtml)}`}
                           >
-                            {isMobile ? (
-                              <ExpandableMessage
-                                message={noteHtml}
-                                showEdited={false}
-                                maxHeight={500}
-                              />
-                            ) : (
+                            <ExpandableMessage maxHeight={500}>
                               <RenderMessageWithHTML
                                 disableLinks={disableLinks}
                                 message={noteHtml}
                                 showEdited={false}
                                 preserveThreadRoute={context === 'thread'}
                               />
-                            )}
+                            </ExpandableMessage>
                           </div>
                         )}
                       />
@@ -1499,13 +1502,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                         <div
                           className={`jp-message-html whitespace-pre-wrap break-all-words inline-block text-muted-foreground ${getEmojiFontSizeClass(resolvedForwardedContent)}`}
                         >
-                          {isMobile ? (
-                            <ExpandableMessage
-                              message={resolvedForwardedContent}
-                              showEdited={false}
-                              maxHeight={500}
-                            />
-                          ) : (
+                          <ExpandableMessage maxHeight={500}>
                             <div className='jp-message-html inline-block'>
                               <RenderMessageWithHTML
                                 disableLinks={disableLinks}
@@ -1514,7 +1511,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                                 preserveThreadRoute={context === 'thread'}
                               />
                             </div>
-                          )}
+                          </ExpandableMessage>
                         </div>
                         {/* Attachments inside the forwarded message border */}
                         <AttachmentsBlock
@@ -1547,25 +1544,10 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                 <>
                   {hasMessageContent(message.content) && (
                     <div
-                      className={`jp-message-html whitespace-pre-wrap break-all-words inline-block ${getEmojiFontSizeClass(message.content)}`}
+                      className={`jp-message-html whitespace-pre-wrap break-all-words inline-block ${emojiFontSizeClass}`}
                       style={isSystemMessage ? systemMessageStyles : undefined}
                     >
-                      {isMobile ? (
-                        <ExpandableMessage
-                          message={isWorkflowMessage ? 'Workflow created' : message.content}
-                          showEdited={message.edited}
-                          maxHeight={500}
-                          isSystemMessage={isSystemMessage}
-                          messageId={message.messageId}
-                          conversationId={message.conversationId}
-                          slashCommandArtifactContext={{
-                            ...(channelId && { channelId }),
-                            senderId: message.senderId,
-                            createdAt: message.createdAt,
-                            surface: context === 'thread' ? 'thread' : 'channel',
-                          }}
-                        />
-                      ) : (
+                      <ExpandableMessage maxHeight={500}>
                         <div className='jp-message-html inline-block'>
                           <RenderMessageWithHTML
                             disableLinks={disableLinks}
@@ -1583,7 +1565,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                             }}
                           />
                         </div>
-                      )}
+                      </ExpandableMessage>
                       {afterTextContent}
                     </div>
                   )}
@@ -1881,6 +1863,11 @@ export const ReactionView = ({
                 }}
                 data-track-category='MESSAGE'
                 data-track-name='TOGGLE_REACTION'
+                data-track-metadata={JSON.stringify({
+                  messageId,
+                  emojiName: reaction.emojiName,
+                  hadReacted: reaction.userHasReacted,
+                })}
                 onTouchStart={e => {
                   if (isMobile) {
                     e.stopPropagation();
@@ -1943,6 +1930,10 @@ export const ReactionView = ({
                 onClick={e => e.stopPropagation()}
                 data-track-category='MESSAGE'
                 data-track-name='OPEN_EMOJI_PICKER'
+                data-track-metadata={JSON.stringify({
+                  messageId,
+                  source: 'message_bubble',
+                })}
               >
                 <span className='text-sm font-medium'>+</span>
               </button>

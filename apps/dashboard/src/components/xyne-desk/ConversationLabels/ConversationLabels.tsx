@@ -6,6 +6,7 @@ import { useZero } from '../../../hooks/useZero';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { queries } from '../../../zero/queries';
 import { mutators } from '../../../zero/mutators';
+import { trackDeskOutcome } from '../../../services/Analytics/deskTracking';
 import { Popover } from '../../ui/Popover/Popover';
 
 import { cn } from '../../../utils/classNames';
@@ -88,10 +89,11 @@ export const ConversationLabels = ({
   }, [search, catalog]);
 
   const applyLabel = async (labelName: string, color: string, labelId?: string): Promise<void> => {
+    const resolvedLabelId = labelId ?? uuidv4();
     try {
       const result = await zero.mutate(
         mutators.conversationLabel.applyLabel({
-          labelId: labelId ?? uuidv4(),
+          labelId: resolvedLabelId,
           labelName,
           color,
           conversationId,
@@ -103,6 +105,20 @@ export const ConversationLabels = ({
       if (result.type === 'error') {
         throw new Error(result.error.message || 'Failed to apply label');
       }
+      // Label id only — the name is user content.
+      trackDeskOutcome(
+        'LABEL_APPLIED',
+        null,
+        {},
+        {
+          conversationId,
+          channelId,
+          labelId: resolvedLabelId,
+          isNewLabel: !labelId,
+          surface: 'picker',
+          labelCount: appliedMappings.length + 1,
+        },
+      );
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to apply label');
     }
@@ -116,6 +132,18 @@ export const ConversationLabels = ({
       if (result.type === 'error') {
         throw new Error(result.error.message || 'Failed to remove label');
       }
+      trackDeskOutcome(
+        'LABEL_REMOVED',
+        null,
+        {},
+        {
+          conversationId,
+          channelId,
+          labelId,
+          surface: 'picker',
+          labelCount: Math.max(0, appliedMappings.length - 1),
+        },
+      );
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to remove label');
     }

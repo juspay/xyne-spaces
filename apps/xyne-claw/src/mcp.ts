@@ -100,6 +100,8 @@ export function applyTrustedMcpBindings(
   return bindings ? { ...params, ...bindings } : params;
 }
 
+import type { DeploymentToolMatch } from "./tool-catalog.js";
+
 export class McpAuthServiceError extends Error {
   readonly status: number;
   constructor(message: string, status: number) {
@@ -283,6 +285,31 @@ function isCredentialRejection(status: number): boolean {
   return status === 401 || status === 403;
 }
 
+/**
+ * Search the deployment-wide tool catalog through claw-auth.
+ *
+ * Session-scoped: org comes from the run, not an argument, so a call cannot
+ * widen its own scope. Errors degrade `scope:"claw"` to a message rather than
+ * failing the turn.
+ */
+export async function searchDeploymentTools(
+  sessionId: string,
+  sessionToken: string,
+  params: { query: string; integration?: string; maxRisk?: string; limit: number },
+): Promise<DeploymentToolMatch[]> {
+  const qs = new URLSearchParams();
+  if (params.query) qs.set("q", params.query);
+  if (params.integration) qs.set("integrations", params.integration);
+  if (params.maxRisk) qs.set("maxRisk", params.maxRisk);
+  qs.set("limit", String(params.limit));
+
+  const { matches } = await authFetch<{ mode: string; matches: DeploymentToolMatch[] }>(
+    `/claw/api/v1/sessions/${encodeURIComponent(sessionId)}/mcp/tools/search?${qs.toString()}`,
+    sessionToken,
+  );
+  return matches ?? [];
+}
+
 export async function loadMcpToolsForUser(
   sessionId: string,
   sessionToken: string,
@@ -356,7 +383,7 @@ export async function loadMcpToolsForUser(
         description:
           (acceptsFiles ? baseDescription + FILE_INPUT_HINT : baseDescription) +
           (trustedBindings
-            ? " Trusted SDLC identity is bound by the server; do not supply repository, execution, workspace, or actor identity fields."
+            ? ` Trusted SDLC fields (${Object.keys(trustedBindings).join(", ")}) are bound by the server; do not supply them.`
             : ""),
         parameters: Type.Unsafe(schemaWithTrustedMcpBindings(mcpTool.inputSchema, trustedBindings)),
         async execute(_toolCallId, params) {

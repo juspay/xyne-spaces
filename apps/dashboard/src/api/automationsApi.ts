@@ -230,6 +230,7 @@ export interface Automation {
   updatedAt: string;
   automationSeriesId: string | null;
   eventType: WorkflowEventType;
+  priority?: boolean;
 }
 
 export interface DeskLabelRulesPayload {

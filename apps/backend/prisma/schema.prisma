@@ -146,7 +146,7 @@ model Ticket {
   ticketType       String?
   isArchived       Boolean           @default(false)
   kanbanPosition   String?
-  lastEmailAt      DateTime          // Timestamp of most recent email in the ticket's conversation; powers Gmail-style ordering. No @default(now()) because Zero needs every write to flow through the application — every ticket-create call site sets this explicitly.
+  lastEmailAt      DateTime          // Timestamp of most recent email in the ticket's conversation; powers Gmail-style ordering. No @default(now()) because Zero needs every write to flow through the application — every ticket-create call site sets this explicitly. Any UPDATE must go through advanceLastEmailAt (src/database/ticketLastEmailAt.ts), which also flags email_reads.hasNewEmail — otherwise label unread badges go stale.
   emailCount       Int?              // Denormalized count of emails in the conversation; lets the list row show the count badge without fetching the emails relation. Nullable until backfilled.
   classificationData   Json?             // Full AI classification output (rawOutput, resolvedGroupId, isManualOverride, classifiedAt)
   aiCategory           String?           // Top-level category from AI classification (indexed for querying)
@@ -172,6 +172,11 @@ model Ticket {
   workflows          Workflow[]
   stageEtaEntries    TicketStageEta[]
   assignments        TicketAssignment[]
+  // App-level relations (relationMode="prisma", no DB FK). Prisma Client still emulates
+  // onDelete: deleting a conversation that has a ticket throws P2014 (Restrict).
+  conversation       Conversation           @relation("TicketConversation", fields: [conversationId], references: [conversationId])
+  emailReads         EmailRead[]
+  ticketDescription TicketDescription?
 
   @@index([status])
   @@index([assignedTo, status])
@@ -204,6 +209,22 @@ model Ticket {
   @@index([xyneId])
   @@unique([workspaceId, xyneId])
   @@map("tickets")
+  @@schema("public")
+}
+
+model TicketDescription {
+  ticketId    String @id
+  workspaceId String
+  channelId   String
+  description String
+  createdAt   DateTime
+  updatedAt   DateTime
+
+  // Relations
+  ticket      Ticket  @relation(fields: [ticketId], references: [id])
+  channel     Channel @relation(fields: [channelId], references: [id])
+
+  @@map("ticket_descriptions")
   @@schema("public")
 }
 
@@ -486,8 +507,10 @@ model WorkflowExecution {
   workflowSteps           WorkflowStep[]
   // @deprecated - lock table replaced by Redis-based expiry (workflow:lock:{id})
   workflowExecutionLock   WorkflowExecutionLock?
+  workflowExecutionState  WorkflowExecutionState?
   externalStepResponses   ExternalStepResponse[]
   pullRequests            PullRequests[]
+  /// @deprecated -> back-relation of the legacy repos.sdlcSetupExecutionId
   sdlcRepo                Repo?                  @relation("RepoSetupExecution")
 
   @@index([workflowId])
@@ -506,8 +529,14 @@ model WorkflowExecutionState {
   currentStepIndex    Int     @default(0)
   pausePath           String?
   pauseType           String?
+  fireAt              DateTime?
+  origin              String?
+  endReason           String?
+
+  workflowExecution WorkflowExecution @relation(fields: [workflowExecutionId], references: [id], onDelete: Cascade)
 
   @@index([workflowExecutionId])
+  @@index([fireAt])
   @@map("workflow_execution_states")
   @@schema("workflow")
 }
@@ -629,7 +658,8 @@ model WorkflowCredential {
   workspaceId String // denormalized tenant key (stamped on insert)
   id          String @id @default(cuid())
   name        String
-  credType    String // bearer | basic | custom_header | oauth2_client_credentials
+  credType    String // the connector's credential type, e.g. BUILTIN_BEARER
+  authType    String // stored value shape: bearer | basic | custom_header | oauth2_client_credentials | secret
   data        String // ENCRYPTED JSON — auth values
   status      String // ACTIVE | REVOKED — set explicitly, see WorkflowFolder
   createdAt   DateTime
@@ -866,6 +896,7 @@ model User {
   notificationsPausedUntil DateTime? // @see user_presence.notificationsPausedUntil
   assignmentUnavailableUntil DateTime? // @see user_presence.assignmentUnavailableUntil
   calendarVisibility String             @default("PUBLIC")
+  activityStatus String?
 
   // Relations
   workspace                 Workspace             @relation(fields: [workspaceId], references: [id])
@@ -914,6 +945,7 @@ model User {
   @@index([providerUserId])
 
   @@index([workspaceId, id])
+  @@index([activityStatus])
   @@map("users")
   @@schema("public")
 }
@@ -1840,6 +1872,7 @@ model Channel {
   // SDLC channel membership: the CHANNEL -> REPOSITORY edges in sdlcEntityLinks.
   sdlcEntityLinks    SdlcEntityLink[] @relation("SdlcChannelLink")
   collectionPermissions CollectionPermission[]
+  ticketDescriptions    TicketDescription[]
 
   @@index([projectId])
   @@index([workspaceId, visibility, id]) // ACL workspace filtering + visibility
@@ -1885,6 +1918,10 @@ model ChannelStats {
   channel          Channel               @relation(fields: [channelId], references: [id])
 
   @@index([channelId])
+  // Recency-ordered pagination (dmChannelsLatestMessagesPaginated and friends):
+  // lets ORDER BY lastActivityAt DESC walk the index so take(N) bounds the scan
+  // instead of a full-table temp-sort on every hydration.
+  @@index([workspaceId, lastActivityAt(sort: Desc), channelId(sort: Desc)])
   @@map("channel_stats")
   @@schema("public")
 }
@@ -2034,6 +2071,9 @@ model Conversation {
   createdByUser   User                     @relation("ConversationCreatedBy", fields: [createdBy], references: [id])
   participants    ConversationParticipant[]
   messageAttachments MessageAttachment[]
+  tickets         Ticket[]                 @relation("TicketConversation")
+  labelMappings   ConversationLabelMapping[]
+  emailDrafts     EmailDraft[]
 
   @@index([channelId, lastActivityAt])
   @@index([workspaceId]) // ACL workspace filtering
@@ -2132,6 +2172,10 @@ model EmailDraft {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  // App-level relation (relationMode="prisma", no DB FK). Cascade, not the optional-relation
+  // default SetNull: nulling conversationId would turn a reply draft into a compose draft.
+  conversation Conversation? @relation(fields: [conversationId], references: [conversationId], onDelete: Cascade)
+
   @@unique([userId, conversationId])
   @@index([userId, conversationId, id])
   @@index([conversationId])
@@ -2147,8 +2191,15 @@ model EmailRead {
   userId          String
   lastReadEmailId String
   lastReadEmailAt DateTime
+  // Denormalized unread signal: true once tickets.lastEmailAt moves past lastReadEmailAt.
+  // Set by advanceLastEmailAt (src/database/ticketLastEmailAt.ts) whenever lastEmailAt
+  // changes; cleared by the emailRead.markAsRead / bulkMarkAsRead Zero mutators.
+  hasNewEmail     Boolean?
   createdAt       DateTime
   updatedAt       DateTime @updatedAt
+
+  // App-level relation (relationMode="prisma", no DB FK); Restrict: delete read rows before the ticket.
+  ticket          Ticket   @relation(fields: [ticketId], references: [id])
 
   @@unique([ticketId, userId])
   @@index([userId])
@@ -2189,6 +2240,10 @@ model ConversationLabelMapping {
   workspaceId    String
   createdBy      String   // Owner — the agent who applied the label (no FK constraint)
   createdAt      DateTime @default(now())
+
+  // App-level relation (relationMode="prisma", no DB FK). Cascade: a mapping is meaningless
+  // once its conversation is gone, so it must not block the conversation delete.
+  conversation   Conversation @relation(fields: [conversationId], references: [conversationId], onDelete: Cascade)
 
   // The unique's conversationId prefix also serves the per-thread chips read.
   @@unique([conversationId, labelId]) // A label can only be applied once per conversation
@@ -2278,9 +2333,11 @@ model EmailChannelPreference {
   autoDraftAgentSlug     String?
   deskType               String   @default("EMAIL")
   dlEmail                String?
+  dlAliases              String?  // JSON-serialised string[] of extra addresses that route into this desk
   workspaceId            String
   metricsEnabled         Boolean? // Gates the desk metrics dashboard
   frtStageNames          String?  // JSON-serialised string[] of stage names whose first entry stops the FRT clock
+  metricsGuestVisibility String?  // JSON DeskMetricsResponse.guestVisibility: what guests see on the metrics dashboard
   appWebhookDeliveryEnabled Boolean @default(true) // APP desks only: off means replies are stored without ever calling the app webhook
   deskReportEnabled      Boolean? @default(false) // Gates the scheduled desk-report cron + sidebar panel
   deskReportAgentSlug    String?
@@ -2373,6 +2430,9 @@ model Message {
   @@index([msgType, createdAt])
 
   @@index([conversationId, createdAt, messageId])
+  // Zero's related-messages source fill runs `WHERE conversationId = ? ORDER BY
+  // messageId` — without this, every thread fetch pays a temp B-tree sort.
+  @@index([conversationId, messageId])
   @@map("messages")
   @@schema("public")
 }
@@ -2519,7 +2579,11 @@ model Activity {
   isRead          Boolean  @default(false)
   isThreadActivity Boolean?  // True when activity is for a message inside a thread (not the initial message)
   createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt  // For tracking when batched activity was last updated
+  // NOT @updatedAt: clients sort, cursor-paginate AND render the row timestamp from
+  // this column (zero/queries.ts userActivitiesPaginatedV2, ActivityItemCard.tsx),
+  // so bumping it is user-visible. Set it explicitly at the few sites that intend to
+  // re-surface a row; bookkeeping writes must leave it alone.
+  updatedAt       DateTime @default(now())
   conversationSeenCutoffAt  DateTime?    // Track createdAt of the 25th most recent conversation from the activity
 
   @@index([userId, createdAt, id]) // for userActivitiesPaginated
@@ -2900,6 +2964,7 @@ model CallParticipant {
   displayName  String?             // Name for external users
   email        String?             // Email for external invitees
   isExternal   Boolean             @default(false)  // True for external lobby users
+  ringStatus   String?             // CALLING | RINGING | BUSY — ring delivery state, only meaningful while response = INVITED
 
   // Relations
   call Call @relation(fields: [callId], references: [id])
@@ -3243,7 +3308,10 @@ model Link {
   createdAt   DateTime       @default(now())
   updatedAt   DateTime       @updatedAt
 
-  @@unique([createdBy, url, channelId]) // No duplicate URLs per user per channel
+  // Deliberately not unique: the same reference is filed in several SDLC folders
+  // as a matter of course. Channel link lists still refuse duplicates, enforced in
+  // the createLink mutator rather than by the database.
+  @@index([createdBy, url, channelId])
   @@index([channelId, visibility]) // Fast lookup of channel links by visibility
   @@index([channelId, createdBy]) // Fast lookup of user's links in channel
   @@map("links")
@@ -3304,12 +3372,16 @@ model Repo {
   projectId            String?
   /// @deprecated -> membership is the CHANNEL -> REPOSITORY edge in sdlc_entity_links; never written since multi-repo
   channelId            String?
+  /// @deprecated -> written only by the removed SDLC worker
   sdlcSetupExecutionId String? @unique
   accessCapabilities   Json?
+  /// Repository Credential (workflow.external_sources.id) this repository uses. No FK: cross-schema.
+  vcsCredentialId      String?
 
   project         Project?           @relation(fields: [projectId], references: [id], onDelete: Cascade)
   /// @deprecated -> navigation for the legacy channelId; SetNull so deleting a channel keeps the repository
   channel         Channel?           @relation("RepoSdlcChannel", fields: [channelId], references: [id], onDelete: SetNull)
+  /// @deprecated -> navigation for the legacy sdlcSetupExecutionId
   setupExecution  WorkflowExecution? @relation("RepoSetupExecution", fields: [sdlcSetupExecutionId], references: [id], onDelete: SetNull)
   /// @deprecated -> back-relation of the legacy sdlc_entity_links.repoId
   sdlcEntityLinks SdlcEntityLink[]
@@ -3323,6 +3395,7 @@ model Repo {
   @@index([name])
   @@index([projectId])
   @@index([workspaceId, projectId])
+  @@index([vcsCredentialId])
   @@map("repos")
   @@schema("public")
 }
@@ -3361,6 +3434,30 @@ model SdlcEntityLink {
   @@index([repoId, sourceType, sourceId]) // deprecated
   @@index([repoId, targetType, targetId]) // deprecated
   @@map("sdlc_entity_links")
+  @@schema("public")
+}
+
+// A comment anchored to a passage inside an SDLC hub item (a canvas, an uploaded
+// file, a linked page). The anchor is stored as the quoted text plus the css
+// selector it was picked from, so a thread survives edits that move the block.
+model SdlcItemComment {
+  id             String    @id @default(cuid())
+  workspaceId    String
+  entityType     String
+  entityId       String
+  body           String
+  anchorQuote    String?
+  anchorSelector String?
+  resolved       Boolean   @default(false)
+  resolvedBy     String?
+  resolvedAt     DateTime?
+  createdBy      String
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@index([entityType, entityId, createdAt])
+  @@index([workspaceId])
+  @@map("sdlc_item_comments")
   @@schema("public")
 }
 
@@ -4193,6 +4290,7 @@ model Apps {
   commands            AppCommand[]
   appPermissions AppPermission[]
 
+  @@unique([orgId, name])
   @@index([name])
   @@index([createdBy])
   @@index([orgId])
@@ -4844,6 +4942,9 @@ model ExecutionItem {
   status          String    @default("OPEN") // OPEN | RESOLVED (String: no new PG enums)
   requestedBy     String[]  @default([]) // who asked (userIds); NOT NULL — see migration
   pendingOn       String[]  @default([]) // whose turn it is; [] = ownerless or resolved
+  // Groups the source message @mentioned, stamped at parse time — denormalized
+  // to keep a messages lookup off every feed read. See radarRuleEvaluator.
+  mentionedGroupIds String[] @default([])
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
   resolvedAt      DateTime?
@@ -4939,6 +5040,24 @@ model ExecutionRunLog {
   // the rightmost leaf.
   @@index([createdAt])
   @@map("execution_run_logs")
+  @@schema("non_zero")
+}
+
+// One reader's standing answer to "keep this out of my way". Per user, not per
+// workspace: the feed applies the asking reader's own rules as it is read.
+model RadarRule {
+  workspaceId String // denormalized tenant key (stamped on insert)
+  id          String   @id @default(cuid())
+  userId      String // whose rule this is (no FK constraint, as elsewhere here)
+  // [{ scope: channel|keyword|mention|sender, values: string[] }]. Json because
+  // nothing queries INTO a condition — a rule is only ever read whole.
+  conditions  Json
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // The only read: every rule belonging to one user.
+  @@index([workspaceId, userId])
+  @@map("radar_rules")
   @@schema("non_zero")
 }
 

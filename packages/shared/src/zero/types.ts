@@ -120,6 +120,7 @@ export enum AttachmentEntityType {
   WORKFLOW_STEPS = 'WORKFLOW_STEPS',
   DESK_REPORT = 'DESK_REPORT',
   RECORDING = 'RECORDING',
+  SDLC_HUB = 'SDLC_HUB',
 }
 
 // @ts-ignore TS1294
@@ -464,6 +465,13 @@ export enum InvitationResponse {
 }
 
 // @ts-ignore TS1294
+export enum RingStatus {
+  CALLING = 'CALLING',
+  RINGING = 'RINGING',
+  BUSY = 'BUSY',
+}
+
+// @ts-ignore TS1294
 export enum MeetingStatus {
   PENDING = 'PENDING',
   ACCEPTED = 'ACCEPTED',
@@ -490,6 +498,11 @@ export enum AuthProvider {
 export enum UserStatus {
   ACTIVE = 'ACTIVE',
   INACTIVE = 'INACTIVE',
+}
+
+// @ts-ignore TS1294
+export enum UserActivityStatus {
+  IN_CALL = 'IN_CALL',
 }
 
 // @ts-ignore TS1294
@@ -791,6 +804,7 @@ export enum FormFieldType {
   MULTI_SELECT = 'MULTI_SELECT',
   USER = 'USER',
   DOC = 'DOC',
+  TICKET = 'TICKET',
 }
 
 // @ts-ignore TS1294
@@ -982,6 +996,7 @@ export enum ProjectType {
 // @ts-ignore TS1294
 export enum SavedConfigContextType {
   BOARD = 'BOARD',
+  DESK_TICKET = 'DESK_TICKET',
 }
 
 // @ts-ignore TS1294
@@ -1065,6 +1080,7 @@ export enum AppPermissionType {
   READ = 'READ',
   WRITE = 'WRITE',
   DELETE = 'DELETE',
+  START = 'START',
 }
 
 // @ts-ignore TS1294
@@ -1200,6 +1216,7 @@ export const ShareableEntityType = {
   NOTE_TAKER: 'NOTE_TAKER',
   SUMMARY_TEMPLATE: 'SUMMARY_TEMPLATE',
   CALL: 'CALL',
+  WORKFLOW: 'WORKFLOW',
 } as const;
 
 export type ShareableEntityType = typeof ShareableEntityType[keyof typeof ShareableEntityType];

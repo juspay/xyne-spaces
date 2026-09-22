@@ -1,3 +1,4 @@
+import { readTrackSource } from '../../../services/Analytics/trackSource';
 import { ReactElement, useRef, useEffect } from 'react';
 import useMeasure from '../../../hooks/useMeasure';
 import { ResizableGroup, Panel, Separator } from '../../ui/Resizable/Resizable';
@@ -7,6 +8,7 @@ import {
   useNavigate,
   useParams,
   useLocation,
+  useNavigationType,
   useOutletContext,
   useSearchParams,
 } from 'react-router-dom';
@@ -37,6 +39,9 @@ const ChatView = (): ReactElement => {
   const chatViewContainerRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
   const location = useLocation();
+  // POP = back/forward. Used to stop CHANNEL_VIEWED's `source` replaying a stale
+  // origin from history state (see the effect below).
+  const navigationType = useNavigationType();
   const { channelId, conversationId, workspaceId } = useParams<{
     channelId: string;
     conversationId?: string;
@@ -95,16 +100,32 @@ const ChatView = (): ReactElement => {
   // (sidebar, search, mention, notification, deep link). Waits for the channel
   // row so the name/scope can ride along, then latches on channelId so
   // re-renders and thread navigation inside the same channel don't refire.
+  //
+  // `source` is the attribution: the navigating surface sets `state.trackSource`
+  // (see useWorkspaceNavigate, which forwards NavigateOptions untouched) and
+  // readTrackSource applies the rules: POP after the first load is the back
+  // button (history_pop) — React Router replays the ORIGINAL state on history
+  // navigation, so without this a back button would re-report whichever surface
+  // the user first arrived from; the router's `default` key marks the first
+  // load itself (deep link, refresh), which is `direct`, not history.
+  //
+  // No event label: for a DM the display name is the other person's name, and
+  // eventLabel is stored verbatim and unmasked. The channel dimensions below
+  // already carry everything reportable (channelTrackingMetadata drops the name
+  // for DM scopes on purpose).
   useEffect(() => {
     if (!channel || !channelId) return;
     if (viewedChannelIdRef.current === channelId) return;
     viewedChannelIdRef.current = channelId;
 
-    globalClickTracker.trackManualEvent('CHANNEL', 'CHANNEL_VIEWED', channelDisplayName, {
+    const source = readTrackSource(location.state, navigationType, location.key);
+
+    globalClickTracker.trackManualEvent('CHANNEL', 'CHANNEL_VIEWED', undefined, {
       ...channelTrackingMetadata(channel),
       openedInThread: !!conversationId,
+      source,
     });
-  }, [channel, channelId, channelDisplayName, conversationId]);
+  }, [channel, channelId, conversationId, location.state, location.key, navigationType]);
 
   // Reopen a closed DM: its status loads async (absent from the channel-status map), so key on channelUserStatus with a per-channel ref rather than the single-shot navigation ref.
   const reopenAttemptedForRef = useRef<string | undefined>(undefined);

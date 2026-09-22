@@ -2874,10 +2874,18 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
   // Debug telemetry: the tool palette this run actually got, plus the mode. Lets
   // the pipeline UI show, at a glance, which tools were available (and, in plan
   // mode, that it's the read-only propose-plan palette).
+  // Report the ACTIVE set, not the registered universe — with a tool catalog,
+  // most registered tools are dormant until load-tools pulls them in.
+  const dormantCatalogToolNames = new Set(
+    [...fastCatalogNameSet].filter((name) => !restoredFastActiveToolSet.includes(name)),
+  );
+  const activeSessionToolNames = customToolNames.filter((name) => !dormantCatalogToolNames.has(name));
   pushDebugEvent("session_tools", {
     mode: mode ?? "auto",
-    toolCount: customToolNames.length,
-    tools: customToolNames,
+    toolCount: activeSessionToolNames.length,
+    tools: activeSessionToolNames,
+    registeredCount: customToolNames.length,
+    loadableCount: customToolNames.length - activeSessionToolNames.length,
   });
 
   // Debug telemetry: this run is the auto-mode execution turn that followed a

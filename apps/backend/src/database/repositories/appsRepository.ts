@@ -71,7 +71,17 @@ export class AppsRepository extends BaseRepository<
       updatedAt: now,
     };
 
-    return await this.create(appData);
+    try {
+      return await this.create(appData);
+    } catch (error) {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2002'
+      ) {
+        throw new Error(`App with name '${data.name}' already exists.`);
+      }
+      throw error;
+    }
   }
 
   async findById(id: string) {

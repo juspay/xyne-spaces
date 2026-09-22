@@ -27,6 +27,10 @@ interface EntityFieldProps {
   value: string | undefined;
   onChange: (next: string | undefined) => void;
   placeholder?: string;
+  /** Project scope for board and channel pickers. Empty means all. */
+  projectIds?: string[];
+  /** Board scope for the channel picker. Empty means all. */
+  boardIds?: string[];
 }
 
 export function EntityField({
@@ -34,6 +38,8 @@ export function EntityField({
   value,
   onChange,
   placeholder,
+  projectIds,
+  boardIds,
 }: EntityFieldProps): React.ReactElement {
   if (kind === EntityKind.USER) {
     return (
@@ -59,6 +65,8 @@ export function EntityField({
         value={value ?? null}
         onChange={onChange}
         placeholder={placeholder ?? 'Pick a channel'}
+        projectIds={projectIds ?? []}
+        boardIds={boardIds ?? []}
       />
     );
   }
@@ -68,6 +76,7 @@ export function EntityField({
         value={value ?? null}
         onChange={onChange}
         placeholder={placeholder ?? 'Pick a board'}
+        projectIds={projectIds ?? []}
       />
     );
   }
@@ -134,6 +143,25 @@ interface FieldProps {
   value: string | null;
   onChange: (next: string | undefined) => void;
   placeholder: string;
+}
+
+/**
+ * Projects a channel picker is limited to. Channels hang off a project, and
+ * boards narrow that further, so picking boards scopes channels to those
+ * boards' projects; otherwise the chosen projects apply. Empty means no limit.
+ */
+function useChannelProjectScope(projectIds: string[], boardIds: string[]): string[] {
+  const [boards] = useCachedQuery(queries.getAllBoardsList(), {
+    enabled: boardIds.length > 0,
+  });
+  return useMemo(() => {
+    if (boardIds.length === 0 || !boards) return projectIds;
+    const scoped = new Set<string>();
+    for (const board of boards) {
+      if (boardIds.includes(board.id)) scoped.add(board.projectId);
+    }
+    return scoped.size > 0 ? [...scoped] : projectIds;
+  }, [boards, boardIds, projectIds]);
 }
 
 function prependSelectedOption<T extends { id: string }>(
@@ -243,22 +271,30 @@ function channelIcon(type: string | null | undefined): React.ReactElement {
   );
 }
 
-function ChannelField({ value, onChange, placeholder }: FieldProps): React.ReactElement {
+function ChannelField({
+  value,
+  onChange,
+  placeholder,
+  projectIds,
+  boardIds,
+}: FieldProps & { projectIds: string[]; boardIds: string[] }): React.ReactElement {
   const [search, setSearch] = useState('');
   const channels = useAllChannels();
   const selectedChannel = useChannel(value ?? '');
+  const scopeProjectIds = useChannelProjectScope(projectIds, boardIds);
 
   const baseOptions: SelectorOption[] = useMemo(() => {
     if (!channels) return [];
     const lower = search.trim().toLowerCase();
     return channels
+      .filter(c => (scopeProjectIds.length > 0 ? scopeProjectIds.includes(c.projectId) : true))
       .filter(c => (lower ? (c.name ?? '').toLowerCase().includes(lower) : true))
       .map(c => ({
         value: c.id,
         label: c.name || '(unnamed channel)',
         icon: channelIcon(c.type),
       }));
-  }, [channels, search]);
+  }, [channels, search, scopeProjectIds]);
 
   const options = useMemo(() => {
     if (!value || !selectedChannel) return baseOptions;
@@ -287,7 +323,12 @@ function ChannelField({ value, onChange, placeholder }: FieldProps): React.React
   );
 }
 
-function BoardField({ value, onChange, placeholder }: FieldProps): React.ReactElement {
+function BoardField({
+  value,
+  onChange,
+  placeholder,
+  projectIds,
+}: FieldProps & { projectIds: string[] }): React.ReactElement {
   const [search, setSearch] = useState('');
   const [boards] = useCachedQuery(queries.getAllBoardsList());
 
@@ -295,13 +336,14 @@ function BoardField({ value, onChange, placeholder }: FieldProps): React.ReactEl
     if (!boards) return [];
     const lower = search.trim().toLowerCase();
     return boards
+      .filter(b => (projectIds.length > 0 ? projectIds.includes(b.projectId) : true))
       .filter(b => (lower ? b.name.toLowerCase().includes(lower) : true))
       .map(b => ({
         value: b.id,
         label: b.name,
         icon: <Layers className='size-4 text-muted-foreground' />,
       }));
-  }, [boards, search]);
+  }, [boards, search, projectIds]);
 
   const options = useMemo(
     () =>
@@ -492,6 +534,10 @@ interface MultiEntityFieldProps {
   value: string[];
   onChange: (next: string[]) => void;
   placeholder?: string;
+  /** Project scope for board and channel pickers. Empty means all. */
+  projectIds?: string[];
+  /** Board scope for the channel picker. Empty means all. */
+  boardIds?: string[];
 }
 
 export function MultiEntityField({
@@ -499,6 +545,8 @@ export function MultiEntityField({
   value,
   onChange,
   placeholder,
+  projectIds,
+  boardIds,
 }: MultiEntityFieldProps): React.ReactElement {
   if (kind === EntityKind.USER) {
     return (
@@ -520,12 +568,19 @@ export function MultiEntityField({
         value={value}
         onChange={onChange}
         placeholder={placeholder ?? 'Pick channels'}
+        projectIds={projectIds ?? []}
+        boardIds={boardIds ?? []}
       />
     );
   }
   if (kind === EntityKind.BOARD) {
     return (
-      <MultiBoards value={value} onChange={onChange} placeholder={placeholder ?? 'Pick boards'} />
+      <MultiBoards
+        value={value}
+        onChange={onChange}
+        placeholder={placeholder ?? 'Pick boards'}
+        projectIds={projectIds ?? []}
+      />
     );
   }
   return (
@@ -592,9 +647,16 @@ function MultiUserGroups({ value, onChange, placeholder }: MultiFieldProps): Rea
   );
 }
 
-function MultiChannels({ value, onChange, placeholder }: MultiFieldProps): React.ReactElement {
+function MultiChannels({
+  value,
+  onChange,
+  placeholder,
+  projectIds,
+  boardIds,
+}: MultiFieldProps & { projectIds: string[]; boardIds: string[] }): React.ReactElement {
   const [search, setSearch] = useState('');
   const channels = useAllChannels();
+  const scopeProjectIds = useChannelProjectScope(projectIds, boardIds);
   const options: SelectorOption[] = useMemo(() => {
     const byId = new Map<
       string,
@@ -602,7 +664,13 @@ function MultiChannels({ value, onChange, placeholder }: MultiFieldProps): React
     >();
     for (const c of channels ?? []) byId.set(c.id, { id: c.id, name: c.name, type: c.type });
     const lower = search.trim().toLowerCase();
+    const inScope = new Set(
+      (channels ?? [])
+        .filter(c => (scopeProjectIds.length > 0 ? scopeProjectIds.includes(c.projectId) : true))
+        .map(c => c.id),
+    );
     const base = Array.from(byId.values())
+      .filter(c => inScope.has(c.id))
       .filter(c => (lower ? (c.name ?? '').toLowerCase().includes(lower) : true))
       .map(c => ({
         value: c.id,
@@ -621,7 +689,7 @@ function MultiChannels({ value, onChange, placeholder }: MultiFieldProps): React
         };
       });
     return [...selectedExtra, ...base];
-  }, [channels, search, value]);
+  }, [channels, search, value, scopeProjectIds]);
   return (
     <EntityMultiSelector
       options={options}
@@ -635,20 +703,37 @@ function MultiChannels({ value, onChange, placeholder }: MultiFieldProps): React
   );
 }
 
-function MultiBoards({ value, onChange, placeholder }: MultiFieldProps): React.ReactElement {
+function MultiBoards({
+  value,
+  onChange,
+  placeholder,
+  projectIds,
+}: MultiFieldProps & { projectIds: string[] }): React.ReactElement {
   const [search, setSearch] = useState('');
   const [boards] = useCachedQuery(queries.getAllBoardsList());
   const options: SelectorOption[] = useMemo(() => {
     if (!boards) return [];
     const lower = search.trim().toLowerCase();
-    return boards
+    const base = boards
+      .filter(b => (projectIds.length > 0 ? projectIds.includes(b.projectId) : true))
       .filter(b => (lower ? b.name.toLowerCase().includes(lower) : true))
       .map(b => ({
         value: b.id,
         label: b.name,
         icon: <Layers className='size-4 text-muted-foreground' />,
       }));
-  }, [boards, search]);
+    // Boards already picked stay listed even when they sit outside the selected
+    // projects, so narrowing the project list can't silently drop a saved board.
+    const present = new Set(base.map(o => o.value));
+    const selectedExtra: SelectorOption[] = value
+      .filter(v => !present.has(v))
+      .map(v => ({
+        value: v,
+        label: boards.find(b => b.id === v)?.name ?? v,
+        icon: <Layers className='size-4 text-muted-foreground' />,
+      }));
+    return [...selectedExtra, ...base];
+  }, [boards, search, projectIds, value]);
   return (
     <EntityMultiSelector
       options={options}

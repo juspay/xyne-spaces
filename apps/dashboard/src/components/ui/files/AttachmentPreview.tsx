@@ -14,6 +14,12 @@ import {
 } from '../utils/files';
 import type { AttachmentPreviewProps, UploadedFile } from './Files.types';
 import { generateWebThumbnail, isVideoFile } from '../../../services/thumbnailService';
+import {
+  convertHeicFileToPreviewBlob,
+  isHeicAttachment,
+  isWebRenderableImageType,
+  sniffHeicFile,
+} from '../../../services/heicAttachmentService';
 import { createPreviewUrl } from '../../../services/clients/fileFetchService';
 import { usePlatform } from '../../../hooks/usePlatform';
 
@@ -62,18 +68,111 @@ export const AttachmentPreview: React.FC<AttachmentPreviewProps> = ({
     };
   }, [videoLightboxUrl]);
 
-  const category = getFileCategory({
-    type: getMimeType(file),
-    name: getFileName(file),
-  });
+  // HEIC can't render from local bytes in most browsers — drafts convert it
+  // client-side, uploaded HEICs use the server-generated WebP thumbnail.
+  // Local Files are classified by their ftyp brand (async 12-byte read): the
+  // browser's type/extension is a guess that mislabels renamed HEICs as .jpg.
+  // The metadata predicate is the initial value and stays authoritative for
+  // UploadedFiles, whose bytes are server-side.
+  const metadataIsHeic = isHeicAttachment(getMimeType(file), getFileName(file));
+  const [sniffedIsHeic, setSniffedIsHeic] = useState<boolean | null>(null);
+  useEffect(() => {
+    setSniffedIsHeic(null);
+    if (!isBrowserFile(file)) return;
+    let cancelled = false;
+    void sniffHeicFile(file).then(result => {
+      // Only the disagreement with the metadata guess needs a re-render.
+      if (!cancelled && result !== null && result !== metadataIsHeic) {
+        setSniffedIsHeic(result);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [file, metadataIsHeic]);
+  const isHeic = sniffedIsHeic ?? metadataIsHeic;
+  const category = isHeic
+    ? 'image'
+    : getFileCategory({
+        type: getMimeType(file),
+        name: getFileName(file),
+      });
   const isTextFile = getMimeType(file) === 'text/plain' || getFileName(file).endsWith('.txt');
   const fileId = getFileId(file);
+
+  // UploadedFile HEIC thumbnails live behind /attachments/:id/thumbnail; the
+  // file is already server-side, but the rendition may still be generating,
+  // so retry briefly before giving up.
+  const fetchHeicThumbnail = async (id: string): Promise<void> => {
+    const cacheKey = `${id}-heic-thumb`;
+    setIsLoadingPreview(true);
+    for (let attempt = 0; attempt < 5; attempt++) {
+      try {
+        const blob = await createPreviewUrl(
+          `/attachments/${id}/thumbnail`,
+          attempt > 0 ? { forceRefresh: true } : undefined,
+        );
+        const url = URL.createObjectURL(blob);
+        previewCacheRef.current.set(cacheKey, url);
+        setImagePreviewUrl(url);
+        return;
+      } catch (err) {
+        // 404 is permanent, stop retrying and try the original bytes once — a renamed
+        // JPEG renders fine, true HEIC bytes cannot and land on the icon.
+        const status = (err as { response?: { status?: number } })?.response?.status;
+        if (status === 404) {
+          try {
+            const blob = await createPreviewUrl(id);
+            if (isWebRenderableImageType(blob.type)) {
+              const url = URL.createObjectURL(blob);
+              previewCacheRef.current.set(cacheKey, url);
+              setImagePreviewUrl(url);
+            } else {
+              setPreviewError(true);
+            }
+          } catch {
+            setPreviewError(true);
+          }
+          return;
+        }
+        if (attempt === 4) {
+          setPreviewError(true);
+        } else {
+          await new Promise(resolve => setTimeout(resolve, 2000));
+        }
+      } finally {
+        setIsLoadingPreview(false);
+      }
+    }
+  };
 
   useEffect((): (() => void) | void => {
     setPreviewError(false);
 
     // Create object URL for images to show actual preview (only for browser File objects)
     if (category === 'image' && isBrowserFile(file)) {
+      if (isHeic) {
+        // Sender's local HEIC: convert client-side so the preview shows right away
+        let cancelled = false;
+        let objectUrl: string | null = null;
+        setIsLoadingPreview(true);
+        void convertHeicFileToPreviewBlob(file)
+          .then(blob => {
+            if (cancelled) return;
+            objectUrl = URL.createObjectURL(blob);
+            setImagePreviewUrl(objectUrl);
+          })
+          .catch(() => {
+            if (!cancelled) setPreviewError(true);
+          })
+          .finally(() => {
+            if (!cancelled) setIsLoadingPreview(false);
+          });
+        return () => {
+          cancelled = true;
+          if (objectUrl) URL.revokeObjectURL(objectUrl);
+        };
+      }
       const url = URL.createObjectURL(file);
       setImagePreviewUrl(url);
       return (): void => URL.revokeObjectURL(url);
@@ -81,6 +180,17 @@ export const AttachmentPreview: React.FC<AttachmentPreviewProps> = ({
 
     // Lazy fetch image for UploadedFile objects (like MessageAttachment.Preview)
     else if (category === 'image' && !isBrowserFile(file) && fileId) {
+      // HEIC renders via the server's WebP thumbnail, not the original bytes
+      if (isHeic) {
+        const cached = previewCacheRef.current.get(`${fileId}-heic-thumb`);
+        if (cached) {
+          setImagePreviewUrl(cached);
+          return undefined;
+        }
+        void fetchHeicThumbnail(fileId);
+        return undefined;
+      }
+
       setIsLoadingPreview(true);
 
       // Check cache first
@@ -189,7 +299,7 @@ export const AttachmentPreview: React.FC<AttachmentPreviewProps> = ({
       reader.readAsText(blob);
     }
     return undefined;
-  }, [file, category, isTextFile, fileId]);
+  }, [file, category, isTextFile, fileId, isHeic]);
 
   const renderPreview = (): React.ReactElement => {
     // Show loading state

@@ -30,10 +30,6 @@ export interface AppConfig {
   RELEASE_CONFIG_URL: string;
   UI_ZIP_URL: string;
   uiUpdateCheckIntervalMs: number;
-  agentInteract: {
-    endpoint: string;
-    method: string;
-  };
   preProdKey: string;
 }
 
@@ -62,10 +58,6 @@ const devConfig: AppConfig = {
   RELEASE_CONFIG_URL: 'http://localhost:3456',
   UI_ZIP_URL: 'http://localhost:8888/releases/dashboard.zip',
   uiUpdateCheckIntervalMs: 60 * 1000, // 1 minute for dev
-  agentInteract: {
-    endpoint: "/api/query",
-    method: "POST"
-  },
   preProdKey: 'preProdFeaturesEnabled'
 };
 
@@ -95,10 +87,6 @@ const prodConfig: AppConfig = {
   RELEASE_CONFIG_URL: 'https://airborne.juspay.in/release/xyne/xyne-mobile',
   UI_ZIP_URL: 'https://app.spaces.xyne.juspay.net/releases/dashboard.zip',
   uiUpdateCheckIntervalMs: 15 * 60 * 1000, // 15 minutes for prod
-  agentInteract: {
-    endpoint: "/api/query",
-    method: "POST"
-  },
   preProdKey: 'preProdFeaturesEnabled',
 };
 
@@ -127,10 +115,6 @@ const sandboxConfig: AppConfig = {
   RELEASE_CONFIG_URL: 'https://airborne.juspay.in/release/xyne/xyne-mobile',
   UI_ZIP_URL: 'https://app.spaces.xyne.juspay.net/releases/dashboard.zip',
   uiUpdateCheckIntervalMs: 15 * 60 * 1000, // 15 minutes for prod
-  agentInteract: {
-    endpoint: "/api/query",
-    method: "POST"
-  },
   preProdKey: 'preProdFeaturesEnabled'
 };
 

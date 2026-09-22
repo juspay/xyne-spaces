@@ -100,6 +100,7 @@ const SlackMessage = ({ email }: { email: SlackEmailMessage }): ReactElement => 
                 statusEmoji={resolvedUser.statusEmoji}
                 statusContent={resolvedUser.statusContent}
                 statusExpiryAt={resolvedUser.statusExpiryAt}
+                activityStatus={resolvedUser.activityStatus}
                 size='sm'
                 showOnHover={true}
               />

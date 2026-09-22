@@ -16,9 +16,10 @@ import {
   type CredentialForm,
 } from './credentialForm';
 import { CredentialOauthFlow } from './CredentialOauthFlow';
+import type { CredentialScope } from './credentialScope';
 
 const FIELD =
-  'h-11 w-full rounded-2xl border border-border bg-card px-4 text-sm leading-5 text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring';
+  'h-11 w-full rounded-lg border border-border bg-card px-4 text-sm leading-5 text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring';
 
 const Field = ({
   label,
@@ -42,7 +43,7 @@ interface CredentialFormFieldsProps {
   form: CredentialForm;
   onChange: (next: CredentialForm) => void;
   editing: boolean;
-  slug: string;
+  scope: CredentialScope;
   onOauthConnected: () => void;
 }
 
@@ -50,7 +51,7 @@ export function CredentialFormFields({
   form,
   onChange,
   editing,
-  slug,
+  scope,
   onOauthConnected,
 }: CredentialFormFieldsProps): ReactElement {
   const set = <K extends keyof CredentialForm>(key: K, value: CredentialForm[K]): void =>
@@ -74,7 +75,7 @@ export function CredentialFormFields({
               aria-label='Auth type'
               data-track-category='Claw Agents'
               data-track-name='Agent detail v2: credential auth type'
-              className='h-11 w-full rounded-2xl'
+              className='h-11 w-full rounded-lg'
             >
               <SelectValue />
             </SelectTrigger>
@@ -90,7 +91,11 @@ export function CredentialFormFields({
       )}
 
       {oauthProvider ? (
-        <CredentialOauthFlow slug={slug} provider={oauthProvider} onConnected={onOauthConnected} />
+        <CredentialOauthFlow
+          scope={scope}
+          provider={oauthProvider}
+          onConnected={onOauthConnected}
+        />
       ) : (
         <Field label='API key' optional={editing}>
           <input
@@ -145,7 +150,7 @@ export function CredentialFormFields({
               aria-label='Reasoning effort'
               data-track-category='Claw Agents'
               data-track-name='Agent detail v2: credential reasoning effort'
-              className='h-11 w-full rounded-2xl'
+              className='h-11 w-full rounded-lg'
             >
               <SelectValue />
             </SelectTrigger>
