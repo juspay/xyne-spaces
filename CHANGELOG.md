@@ -1,3 +1,10 @@
+## [1.365.0](https://github.com/juspay/xyne-spaces/compare/v1.364.0...v1.365.0) (2026-09-22)
+
+
+### Features
+
+* redirect xyne links to electron ([#2146](https://github.com/juspay/xyne-spaces/issues/2146)) ([e5e2406](https://github.com/juspay/xyne-spaces/commit/e5e24060b71f41ae73af823ba91b5eab344044e8))
+
 ## [1.364.0](https://github.com/juspay/xyne-spaces/compare/v1.363.0...v1.364.0) (2026-09-22)
 
 
