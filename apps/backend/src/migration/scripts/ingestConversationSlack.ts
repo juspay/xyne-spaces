@@ -250,14 +250,11 @@ export const findOrCreateApp = async (
   // ── 2. Not found in target workspace — create fresh app + user ───────────
   // Each workspace gets its own apps row so workspace-scoped features
   // (permissions, webhooks, commands) are cleanly isolated.
-  const xyneUser = await db.user.findFirst({ where: { email: 'john.doe@gmail.com' } });
-  let creatorUser = xyneUser;
-  // Fall back to any target-workspace user (all envs); the john.doe seed isn't in prod → else every bot message fails.
-  if (!creatorUser && workspaceId) {
-    creatorUser = await db.user.findFirst({ where: { workspaceId } });
-  }
+  // App createdBy = the configured MIGRATION_APP_CREATOR_EMAIL user (fallback: legacy john.doe seed). Never a random user.
+  const creatorEmail = config.slackMigration.appCreatorEmail || 'john.doe@gmail.com';
+  const creatorUser = await db.user.findFirst({ where: { email: creatorEmail } });
   if (!creatorUser) {
-    throw new Error('[findOrCreateApp] No creator user found for the target workspace');
+    throw new Error(`[findOrCreateApp] App creator not found: ${creatorEmail} — set MIGRATION_APP_CREATOR_EMAIL to an existing user's email.`);
   }
 
   // Build a unique app name so bots with identical display names (e.g. two
