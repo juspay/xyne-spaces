@@ -198,6 +198,7 @@ export const ReactArtifactView = ({
   expandLabel = 'Open full screen',
   onClose,
   titleSlot,
+  hideTitle = false,
   settingsSlot,
   onSave,
   saveState = 'idle',
@@ -297,9 +298,14 @@ export const ReactArtifactView = ({
             : 'border-border py-2'
         }`}
       >
-        {titleSlot ?? (
-          <span className='truncate text-sm font-medium text-foreground'>{payload.title}</span>
-        )}
+        {titleSlot ??
+          (hideTitle ? (
+            // Keeps `justify-between` pushing the actions right now that the
+            // title is gone; without a left child they would centre themselves.
+            <span aria-hidden='true' />
+          ) : (
+            <span className='truncate text-sm font-medium text-foreground'>{payload.title}</span>
+          ))}
 
         {/* One group, so the bar reads as title | actions. Without it,
             justify-between spreads every control evenly across the header. */}
