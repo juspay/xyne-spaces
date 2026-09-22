@@ -7,6 +7,7 @@ import type { AclGate } from './aclGate';
 import { allPkFields } from './clientSchema';
 import { seedRowLevel, routeDelta, projectDeltaForUser, type RowLevelMeta } from './rowLevelRouting';
 import { decryptRowsForEmit } from './rowDecrypt';
+import { BoundedMemo, estimateRowsBytes } from './boundedMemo';
 import { obsEmit } from './obs';
 import { SerialQueue } from './serialQueue';
 
@@ -108,9 +109,14 @@ export class Fanout {
   readonly #rowLevelSubs = new Map<string, Set<RowLevelClient>>();
   /** row-level instanceKey → userId → that user's clients (O(1) per-user delta targeting). */
   readonly #rowLevelByUser = new Map<string, Map<string, Set<RowLevelClient>>>();
-  /** row-level instanceKey → per-user hydration buckets at a stream head (mass-reconnect memo, bounded
-   *  per-instance: one entry, dropped when the instance empties — the P5 snapshot-memo rider). */
-  readonly #rowLevelBuckets = new Map<string, { head: string; buckets: Map<string, CompactedRow[]> }>();
+  /** row-level instanceKey → per-user hydration buckets at a stream head (mass-reconnect memo).
+   *  Byte-bounded LRU (P5 prereq): workspace-sized instances hold every user's rows regrouped per
+   *  owner — strictly larger than the roster for drafts-heavy workspaces — and must not accumulate
+   *  unbounded across instances. Eviction only costs a snapshot re-read. */
+  readonly #rowLevelBuckets = new BoundedMemo<{ head: string; buckets: Map<string, CompactedRow[]> }>(
+    Fanout.#MEMO_MAX_ENTRIES,
+    Fanout.#MEMO_MAX_BYTES,
+  );
   /** dataInstanceKey → userId → that user's ClientSubs on the instance (O(1) per-user targeting). */
   readonly #byUser = new Map<string, Map<string, Set<ClientSub>>>();
   readonly #grantToData = new Map<string, Set<string>>();
@@ -122,8 +128,17 @@ export class Fanout {
    *  Admission DEFERS while a client's grant is absent here (cold at session start, or mid-clear
    *  rehydration): a NOT-EXISTS arm would fail OPEN on an empty cold snapshot. */
   readonly #grantHydrated = new Set<string>();
-  /** dataInstanceKey → its snapshot at a given stream head, reused across a mass re-admit (P5). */
-  readonly #snapshotMemo = new Map<string, { head: string; rows: CompactedRow[] }>();
+  /** Memo bounds (both memos): workspace-sized instances (getUsersV2 ≈ full roster; row-level =
+   *  every draft/bookmark in the workspace) are MBs per instance, and since emit-time decryption
+   *  these rows are PLAINTEXT — the bound caps both RAM and decrypted content held at rest. */
+  static readonly #MEMO_MAX_ENTRIES = 256;
+  static readonly #MEMO_MAX_BYTES = 64 * 1024 * 1024;
+  /** dataInstanceKey → its snapshot at a given stream head, reused across a mass re-admit (P5).
+   *  Byte-bounded LRU (P5 prereq) — eviction only costs a snapshot re-read on the next hydrate. */
+  readonly #snapshotMemo = new BoundedMemo<{ head: string; rows: CompactedRow[] }>(
+    Fanout.#MEMO_MAX_ENTRIES,
+    Fanout.#MEMO_MAX_BYTES,
+  );
   readonly #cursors = new Map<string, string>();
   // Serialize dispatch per stream so grant deltas (join/leave) re-gate in stream order;
   // a `void #dispatch` let a later entry overtake an earlier one → stale admit survived
@@ -490,7 +505,9 @@ export class Fanout {
       memo && memo.head === head
         ? memo.rows
         : ((await decryptRowsForEmit(await this.#store.snapshot(instanceKey))) as CompactedRow[]);
-    if (!memo || memo.head !== head) this.#snapshotMemo.set(instanceKey, { head, rows });
+    if (!memo || memo.head !== head) {
+      this.#snapshotMemo.set(instanceKey, { head, rows }, estimateRowsBytes(rows));
+    }
     client.hydrated = true;
     this.#emit(client, 'sync:snapshot', { instanceKey, rows, offset: head, version });
     client.socket.join(roomFor(instanceKey)); // now live → future deltas via the room broadcast
@@ -773,7 +790,7 @@ export class Fanout {
       const rows = await this.#store.snapshot(instanceKey);
       const seeded = seedRowLevel(rows, inst.meta, PK);
       buckets = seeded.buckets;
-      this.#rowLevelBuckets.set(instanceKey, { head, buckets });
+      this.#rowLevelBuckets.set(instanceKey, { head, buckets }, estimateRowsBytes(rows));
       // First materialization (or post-clear): adopt this snapshot as the live owner map.
       if (!inst.seeded) {
         inst.owner = seeded.ownerMap;

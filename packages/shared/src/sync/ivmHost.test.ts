@@ -260,6 +260,22 @@ test('INVARIANT: settled-but-UNECHOED replay still records (new-message flicker 
   );
 });
 
+test('applySnapshot is REPLACE-ALL: rows absent from the snapshot are dropped', () => {
+  // A snapshot is authoritative (rows deleted while away / during a `cleared` reset window must
+  // not survive). RAM twin of the IDB store's clear-then-apply (syncStore.applySnapshot).
+  const { host, ids } = setup();
+  const first = Array.from({ length: 25 }, (_, k) => conv(k + 1));
+  host.applySnapshot('inst1', first.map(wire), '01');
+  assert.equal(ids().length, 25);
+  // second snapshot: c1..c4 were deleted while away; c26 is new
+  const second = [...Array.from({ length: 21 }, (_, k) => conv(k + 5)), conv(26)];
+  host.applySnapshot('inst1', second.map(wire), '02');
+  const cur = ids();
+  assert.ok(!cur.includes('c0001') && !cur.includes('c0004'), 'absent rows dropped');
+  assert.ok(cur.includes('c0026') && cur.includes('c0005'));
+  assert.equal(cur.length, 22);
+});
+
 test('switch-return: seed 25 then resume-replay of recent put-deltas', () => {
   const { host, ids } = setup();
   const seeds = Array.from({ length: 25 }, (_, k) => ({

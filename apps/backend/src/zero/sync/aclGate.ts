@@ -164,8 +164,10 @@ export function sentinelAclWhere(rootTable: string): Cond | undefined {
  * correctly). A role whose ACL diverges must go native or get a per-role gate, not be silently
  * under/over-served.
  */
-export function sentinelAclWhereForRole(rootTable: string, role: string): Cond | undefined {
-  const ctx = { ...sentinelCtx, role, orgRole: role } as Context;
+export function sentinelAclWhereForRole(rootTable: string, role: string, orgRole = role): Cond | undefined {
+  // `orgRole` varies independently by default-coupled param: an ACL branching on ctx.orgRole while
+  // ctx.role stays MEMBER would be invisible to a coupled sweep (the dd9dfd719 guard rider).
+  const ctx = { ...sentinelCtx, role, orgRole } as Context;
   const acl = QueryACLFactory.getACL(rootTable as never, ctx);
   const query = acl.canSelect((zql as unknown as Record<string, never>)[rootTable]);
   return (query as { ast?: { where?: Cond } }).ast?.where;

@@ -135,8 +135,13 @@ export function attachSyncHandlers(socket: SyncIoSocket): () => void {
     // controlled: this keys + materializes the instance under the socket's OWN workspace, so a client
     // can neither join nor materialize another tenant's instance. Admission within the instance is
     // still the ACL gate below (every member sees all rows → one shared instance, room-broadcast).
+    // NORMALIZED to exactly [{workspaceId}] — spreading client args into the key would let every
+    // junk-arg variant ({x:1, workspaceId:W}, {x:2, …}) materialize a DISTINCT workspace-sized
+    // instance (zero-cache pipeline + Redis snapshot/stream + memo entry each) from one authed
+    // client. Every registry base reads ONLY args.workspaceId, so nothing is lost; a future entry
+    // needing real args must declare them in the registry and whitelist them here.
     if (isWorkspacePartitioned(queryName)) {
-      args = [{ ...((args[0] ?? {}) as Record<string, ReadonlyJSONValue>), workspaceId }];
+      args = [{ workspaceId }];
     }
     const dataInstanceKey = syncEngine.subscribe(queryName, args, connId);
     if (!dataInstanceKey) {
@@ -320,10 +325,8 @@ export function attachSyncHandlers(socket: SyncIoSocket): () => void {
     // the fallback to client args won't match either — intentionally left to disconnect teardown rather
     // than special-cased, since after `ready` the workspace is always present.
     const effectiveArgs: ReadonlyJSONValue[] =
-      isRowLevelQuery(queryName) && socket.workspaceId
-        ? [{ workspaceId: socket.workspaceId }]
-        : isWorkspacePartitioned(queryName) && socket.workspaceId
-        ? [{ ...((args[0] ?? {}) as Record<string, ReadonlyJSONValue>), workspaceId: socket.workspaceId }]
+      (isRowLevelQuery(queryName) || isWorkspacePartitioned(queryName)) && socket.workspaceId
+        ? [{ workspaceId: socket.workspaceId }] // same normalization as subscribe — keys must match
         : args;
     const dataInstanceKey = hashOfNameAndArgs(queryName, effectiveArgs);
     const sub = subs.get(dataInstanceKey);

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { SHARED_BASE_QUERIES, resolveSharedBase } from './baseQueries';
 import { queryMetaFor } from './queryMeta';
 import { deriveAclGate, sentinelAclWhereForRole, NON_GUEST_ROLES } from './aclGate';
+import { ROW_LEVEL_QUERIES } from './rowLevelQueries';
 import { syncContext } from './serviceIdentity';
 
 /**
@@ -47,16 +48,45 @@ test('every SHARED_BASE_QUERY ACL is ROLE-INVARIANT across non-guest roles (memb
   for (const name of SHARED_BASE_QUERIES) {
     const meta = queryMetaFor(name, SAMPLE_ARGS[name]);
     assert.ok(meta, `queryMetaFor('${name}') should resolve a partition`);
-    const rootTable = meta!.rootTable;
-    const memberAst = JSON.stringify(sentinelAclWhereForRole(rootTable, 'MEMBER') ?? null);
-    for (const role of NON_GUEST_ROLES) {
+    assertRoleInvariantAcl(meta!.rootTable, name);
+  }
+});
+
+/** role × orgRole swept INDEPENDENTLY (dd9dfd719 rider): an ACL branching on ctx.orgRole while
+ *  ctx.role stays MEMBER is invisible to a coupled sweep. */
+function assertRoleInvariantAcl(table: string, owner: string): void {
+  const memberAst = JSON.stringify(sentinelAclWhereForRole(table, 'MEMBER', 'MEMBER') ?? null);
+  for (const role of NON_GUEST_ROLES) {
+    for (const orgRole of NON_GUEST_ROLES) {
       assert.equal(
-        JSON.stringify(sentinelAclWhereForRole(rootTable, role) ?? null),
+        JSON.stringify(sentinelAclWhereForRole(table, role, orgRole) ?? null),
         memberAst,
-        `'${name}' (${rootTable}) ACL differs for role '${role}' vs MEMBER — the member-derived gate would ` +
-          `mis-serve '${role}'. Serve it via native Zero or build a per-role gate; do not admit it here.`,
+        `'${owner}' (${table}) ACL differs for role '${role}'/orgRole '${orgRole}' vs MEMBER — the ` +
+          `member-derived gate would mis-serve it. Serve it via native Zero or build a per-role gate; ` +
+          `do not admit it here.`,
       );
     }
+  }
+}
+
+test('every ROW-LEVEL query table (root + related) is ROLE-INVARIANT across non-guest roles', () => {
+  // The row-level plane serves every non-guest role from ONE workspace instance whose admission is
+  // routing (owner == me) — role never re-enters. That is sound only while no served table's ACL
+  // branches by role/orgRole (dd9dfd719 rider: these tables were missing from the guard).
+  const sampleCtx = { ...syncContext('w-guard'), userID: 'u-guard' } as never;
+  for (const [name, spec] of ROW_LEVEL_QUERIES) {
+    const ast = (spec.base({ ctx: sampleCtx, args: { workspaceId: 'w-guard' } }) as { ast?: unknown }).ast;
+    assert.ok(ast, `'${name}': base AST must resolve for the audit`);
+    const tables = new Set<string>();
+    const walk = (node: unknown): void => {
+      if (!node || typeof node !== 'object') return;
+      const n = node as { table?: unknown; related?: unknown[] };
+      if (typeof n.table === 'string') tables.add(n.table);
+      for (const rel of n.related ?? []) walk((rel as { subquery?: unknown })?.subquery);
+    };
+    walk(ast);
+    assert.ok(tables.size > 0, `'${name}': no tables resolved from the base AST`);
+    for (const table of tables) assertRoleInvariantAcl(table, name);
   }
 });
 

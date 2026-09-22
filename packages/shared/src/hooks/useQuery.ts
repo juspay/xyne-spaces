@@ -343,7 +343,9 @@ export function useQuery<
   // client's instance key + local base aligned with the server's. Non-partitioned queries pass through.
   const sharedArgs = useMemo(() => {
     if (!isShared || !isWorkspacePartitioned(query.query.queryName)) return args;
-    return { ...((args as object) ?? {}), workspaceId: zero.context.workspaceId };
+    // Exactly {workspaceId} — mirrors the server's normalization (clientGateway) so the client
+    // hash always matches the server instance key; spreading caller args would fragment keys.
+    return { workspaceId: zero.context.workspaceId };
   }, [isShared, args, query.query.queryName, zero.context.workspaceId]);
   const sharedHash = useMemo(() => {
     if (!isShared) return undefined;
