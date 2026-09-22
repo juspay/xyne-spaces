@@ -2,7 +2,7 @@ import { Router, type Request, type Response } from 'express';
 import { MAX_RULES, MAX_RULE_VALUES, MAX_RULE_VALUE_LENGTH } from '@xyne/shared';
 import { logger } from '@/utils/logger';
 import { RadarActionError, radarManualActions } from '@/services/radar/radarManualActions';
-import { radarFeedService } from '@/services/radar/radarFeedService';
+import { radarFeedService, type PendingOthersPageQuery } from '@/services/radar/radarFeedService';
 import { radarRuleStore } from '@/services/radar/radarRuleStore';
 
 const router = Router();
@@ -189,11 +189,49 @@ router.get('/feed/waiting-on', async (req: Request, res: Response) => {
   }
 });
 
+const MAX_PAGE_SIZE = 50;
+const DEFAULT_PAGE_SIZE = 5;
+
+const intParam = (value: unknown, fallback: number): number => {
+  const n = typeof value === 'string' ? Number.parseInt(value, 10) : Number.NaN;
+  return Number.isFinite(n) && n >= 0 ? n : fallback;
+};
+const listParam = (value: unknown): string[] =>
+  typeof value === 'string'
+    ? value
+        .split(',')
+        .map((v) => v.trim())
+        .filter(Boolean)
+    : [];
+const dateParam = (value: unknown): Date | null => {
+  if (typeof value !== 'string' || !value) return null;
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? null : d;
+};
+
+/** Query string -> a Pending Others page request. Anything malformed falls back
+ *  to "no narrowing" rather than failing the feed. */
+const parsePageQuery = (query: Request['query']): PendingOthersPageQuery => ({
+  page: intParam(query.page, 0),
+  mutedPage: intParam(query.mutedPage, 0),
+  pageSize: Math.min(MAX_PAGE_SIZE, Math.max(1, intParam(query.pageSize, DEFAULT_PAGE_SIZE))),
+  holderIds: listParam(query.holders),
+  channelIds: listParam(query.channels),
+  createdFrom: dateParam(query.createdFrom),
+  createdTo: dateParam(query.createdTo),
+});
+
 router.get('/feed/pending-others', async (req: Request, res: Response) => {
   try {
     const auth = getAuthContext(req);
     if (!auth) {
       sendUnauthorized(res);
+      return;
+    }
+    // Paged when the caller asks for a page; the whole feed otherwise, as before.
+    if (typeof req.query.page === 'string') {
+      const data = await radarFeedService.pendingOthersPage(auth, parsePageQuery(req.query));
+      res.json({ success: true, data });
       return;
     }
     const threads = await radarFeedService.pendingOthers(auth);
@@ -203,7 +241,6 @@ router.get('/feed/pending-others', async (req: Request, res: Response) => {
     res.status(500).json({ success: false, error: 'Failed to load feed' });
   }
 });
-
 
 // ── Rules ───────────────────────────────────────────────────────────────────
 // A reader's own rules. Always scoped to the caller — there is no route here
@@ -266,7 +303,6 @@ function cleanConditions(raw: unknown): CleanResult {
   if (conditions.length > 0) return { conditions };
   return { error: 'A rule needs at least one condition' };
 }
-
 
 router.get('/rules', async (req: Request, res: Response) => {
   try {
