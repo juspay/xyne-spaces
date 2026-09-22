@@ -49,6 +49,8 @@ import {
   CartesianGrid,
   Cell,
   Legend,
+  Line,
+  LineChart,
   Pie,
   PieChart,
   ResponsiveContainer,
@@ -59,14 +61,16 @@ import {
 } from 'recharts';
 import {
   DESK_METRICS_MAX_AGGREGATE_DESKS,
+  DeskType,
   FormFieldType,
   parseFieldOptionValues,
+  TicketStatusV2,
+  UNCLASSIFIED_AI_CATEGORY,
   WorkspaceRole,
   type DeskMetricsAgentRow,
   type DeskMetricsPerDeskRow,
   type DeskMetricsSkippedDesk,
   type DeskMetricsTicketRow,
-  type TicketStatusV2,
 } from '@xyne/shared';
 import type { ResolvedDisplayFormField } from '../../../utils/board/resolveDisplayFormFields';
 import { DeskInsightsShell } from '../DeskInsights/DeskInsightsPanel';
@@ -79,6 +83,7 @@ import { CHART_COLORS as VIZ_CHART_COLORS } from '../../QueryVisualizations/cons
 export interface DeskMetricsSelectableDesk {
   id: string;
   name: string;
+  deskType?: string;
 }
 
 interface DeskMetricsStageOption {
@@ -237,31 +242,271 @@ export const formatDuration = (seconds: number | null): string => {
 const ageInDays = (createdAtMs: number): number =>
   Math.max(0, Math.floor((Date.now() - createdAtMs) / DAY_MS));
 
+const SERIES_CAP = 8;
+const HOUR_S = 3600;
+const DAY_S = 86400;
+// Recharts spaces ticks evenly in seconds, landing on values like 45000 ("1d 13h").
+const DURATION_TICK_STEPS = [
+  60,
+  300,
+  900,
+  1800,
+  HOUR_S,
+  2 * HOUR_S,
+  3 * HOUR_S,
+  6 * HOUR_S,
+  12 * HOUR_S,
+  DAY_S,
+  2 * DAY_S,
+  3 * DAY_S,
+  7 * DAY_S,
+  14 * DAY_S,
+  30 * DAY_S,
+];
+
+/** Drops the zero remainder formatDuration keeps ("1d 0h" → "1d"). */
+const formatDurationTick = (seconds: number): string =>
+  formatDuration(seconds).replace(/ 0[hm]$/, '');
+
+const durationTicks = (maxValue: number): number[] => {
+  const peak = Math.max(maxValue, 1);
+  // Past the ladder (a months-old ticket closed today), round to whole days.
+  const step =
+    DURATION_TICK_STEPS.find(candidate => peak / candidate <= 4) ??
+    Math.ceil(peak / 4 / DAY_S) * DAY_S;
+  const ticks: number[] = [];
+  for (let tick = 0; tick < peak + step; tick += step) ticks.push(tick);
+  return ticks;
+};
+
+/** Thins x-axis labels so dense buckets (e.g. 6h steps across weeks) don't overlap. */
+const tickIntervalFor = (pointCount: number): number => {
+  if (pointCount <= 8) return 0;
+  if (pointCount <= 31) return 4;
+  return Math.floor(pointCount / 6);
+};
+
+const OTHER_SERIES = 'Other';
+/** Charts newer than a desk's saved guest config inherit an existing toggle. */
+const inheritedVisibilityKey = (key: string): string | undefined =>
+  key === 'chart:resolutionByAgent' || key === 'chart:statusByAgent' ? 'chart:assignee' : undefined;
+
+/** 'Other' is a real category the classifier emits, so avoid colliding with it. */
+const overflowLabelFor = (taken: { has: (key: string) => boolean }): string => {
+  let label = OTHER_SERIES;
+  while (taken.has(label)) label = `${label}*`;
+  return label;
+};
+
+// Keyed on deskTypeForChannelType's output, which folds DL desks into EMAIL.
+const DESK_TYPE_GROUPS: ReadonlyArray<{ label: string; types: readonly string[] }> = [
+  { label: 'Email', types: [DeskType.EMAIL] },
+  { label: 'Messaging', types: [DeskType.SLACK, DeskType.APP, DeskType.SOCIAL_MEDIA] },
+  { label: 'Voice', types: [DeskType.CALL] },
+];
+
+interface SeriesChart {
+  rows: Array<Record<string, number | string>>;
+  series: Array<{ name: string; color: string }>;
+}
+
+const EMPTY_SERIES_CHART: SeriesChart = { rows: [], series: [] };
+
+const IST_TZ = 'Asia/Kolkata';
+
+/** 'sixHour' is card-only (see cardGranularity) — the range picker itself stays day-granular. */
+type TrendGranularity = 'hour' | 'sixHour' | 'day';
+
+/** Mirrors the bucket strings trendByDay emits, so both charts share an x axis. */
+const istBucketKey = (epochMs: number, granularity: TrendGranularity): string => {
+  const at = new Date(epochMs);
+  const day = at.toLocaleDateString('en-CA', { timeZone: IST_TZ });
+  if (granularity === 'day') return day;
+  const hour = at
+    .toLocaleTimeString('en-GB', { timeZone: IST_TZ, hour: '2-digit', minute: '2-digit' })
+    .slice(0, 2);
+  if (granularity === 'hour') return `${day} ${hour}:00`;
+  const sixHourStart = String(Math.floor(Number(hour) / 6) * 6).padStart(2, '0');
+  return `${day} ${sixHourStart}:00`;
+};
+
+const SIX_HOUR_MS = 6 * HOUR_MS;
+// IST has a fixed UTC+5:30 offset (no DST), so aligning once and stepping by a
+// constant 6h keeps every step on an IST 00/06/12/18 boundary.
+const IST_OFFSET_MS = 5.5 * HOUR_MS;
+// Past this, 6h buckets are mostly empty flat line — the fixed cards fall back to daily.
+const SIX_HOURLY_MAX_RANGE_MS = 3 * DAY_MS;
+
+/** Client-built skeleton for 6h buckets — trendByDay only emits hourly/daily rows. */
+const sixHourlySkeleton = (startMs: number, endMs: number): Array<{ date: string }> => {
+  if (endMs < startMs) return [];
+  const alignedStart =
+    Math.floor((startMs + IST_OFFSET_MS) / SIX_HOUR_MS) * SIX_HOUR_MS - IST_OFFSET_MS;
+  const points: Array<{ date: string }> = [];
+  for (let t = alignedStart; t <= endMs; t += SIX_HOUR_MS) {
+    points.push({ date: istBucketKey(t, 'sixHour') });
+  }
+  return points;
+};
+
+const agentSeriesOf = (ticket: DeskMetricsTicketRow): string =>
+  ticket.assigneeName?.trim() || 'Unassigned';
+const categorySeriesOf = (ticket: DeskMetricsTicketRow): string =>
+  ticket.aiCategory?.trim() || UNCLASSIFIED_AI_CATEGORY;
+
+/** Rows follow the gap-filled trend buckets so the x axis stays evenly spaced. */
+const buildResolutionChart = (
+  tickets: readonly DeskMetricsTicketRow[],
+  trend: ReadonlyArray<{ date: string }>,
+  granularity: TrendGranularity,
+  seriesOf: (ticket: DeskMetricsTicketRow) => string,
+): SeriesChart => {
+  const byBucket = new Map<string, Map<string, { total: number; count: number }>>();
+  const resolvedBySeries = new Map<string, number>();
+  for (const ticket of tickets) {
+    if (ticket.rtSeconds === null || ticket.rtSeconds < 0) continue;
+    const series = seriesOf(ticket);
+    resolvedBySeries.set(series, (resolvedBySeries.get(series) ?? 0) + 1);
+    const bucket = istBucketKey(ticket.createdAt, granularity);
+    const row = byBucket.get(bucket) ?? new Map<string, { total: number; count: number }>();
+    const cell = row.get(series) ?? { total: 0, count: 0 };
+    cell.total += ticket.rtSeconds;
+    cell.count += 1;
+    row.set(series, cell);
+    byBucket.set(bucket, row);
+  }
+  if (resolvedBySeries.size === 0) return EMPTY_SERIES_CHART;
+
+  const ranked = [...resolvedBySeries.entries()].sort(
+    (a, b) => b[1] - a[1] || a[0].localeCompare(b[0]),
+  );
+  const kept = ranked.slice(0, SERIES_CAP).map(([name]) => name);
+  const keptSet = new Set(kept);
+  const overflowLabel = overflowLabelFor(resolvedBySeries);
+
+  const series = kept.map((name, i) => ({
+    name,
+    color: VIZ_CHART_COLORS.series[i] ?? '#94a3b8',
+  }));
+  if (ranked.length > kept.length) series.push({ name: overflowLabel, color: '#94a3b8' });
+
+  const labels = trendLabels(trend, granularity);
+  const rows = trend.map((point, i) => {
+    const row: Record<string, number | string> = {
+      bucket: labels[i] ?? point.date,
+    };
+    const folded = new Map<string, { total: number; count: number }>();
+    for (const [name, cell] of byBucket.get(point.date) ?? []) {
+      const key = keptSet.has(name) ? name : overflowLabel;
+      const target = folded.get(key) ?? { total: 0, count: 0 };
+      target.total += cell.total;
+      target.count += cell.count;
+      folded.set(key, target);
+    }
+    for (const [name, cell] of folded) row[name] = cell.total / cell.count;
+    return row;
+  });
+  return { rows, series };
+};
+
+/** Same shape as buildResolutionChart, but counts every ticket instead of averaging rtSeconds. */
+const buildVolumeChart = (
+  tickets: readonly DeskMetricsTicketRow[],
+  trend: ReadonlyArray<{ date: string }>,
+  granularity: TrendGranularity,
+  seriesOf: (ticket: DeskMetricsTicketRow) => string,
+): SeriesChart => {
+  const byBucket = new Map<string, Map<string, number>>();
+  const totalBySeries = new Map<string, number>();
+  for (const ticket of tickets) {
+    const series = seriesOf(ticket);
+    totalBySeries.set(series, (totalBySeries.get(series) ?? 0) + 1);
+    const bucket = istBucketKey(ticket.createdAt, granularity);
+    const row = byBucket.get(bucket) ?? new Map<string, number>();
+    row.set(series, (row.get(series) ?? 0) + 1);
+    byBucket.set(bucket, row);
+  }
+  if (totalBySeries.size === 0) return EMPTY_SERIES_CHART;
+
+  const ranked = [...totalBySeries.entries()].sort(
+    (a, b) => b[1] - a[1] || a[0].localeCompare(b[0]),
+  );
+  const kept = ranked.slice(0, SERIES_CAP).map(([name]) => name);
+  const keptSet = new Set(kept);
+  const overflowLabel = overflowLabelFor(totalBySeries);
+
+  const series = kept.map((name, i) => ({
+    name,
+    color: VIZ_CHART_COLORS.series[i] ?? '#94a3b8',
+  }));
+  if (ranked.length > kept.length) series.push({ name: overflowLabel, color: '#94a3b8' });
+
+  const labels = trendLabels(trend, granularity);
+  const rows = trend.map((point, i) => {
+    const row: Record<string, number | string> = {
+      bucket: labels[i] ?? point.date,
+    };
+    // Zero-fill every series first: unlike the resolution charts, a bucket with no
+    // tickets is a real 0, not a gap — connectNulls would otherwise draw straight
+    // through it as if the series had no data there.
+    for (const { name } of series) row[name] = 0;
+    for (const [name, count] of byBucket.get(point.date) ?? []) {
+      const key = keptSet.has(name) ? name : overflowLabel;
+      row[key] = (row[key] as number) + count;
+    }
+    return row;
+  });
+  return { rows, series };
+};
+
 const priorityLabel = (p: string): string =>
   p.charAt(0) + p.slice(1).toLowerCase().replace(/_/g, ' ');
 
-const formatTrendLabel = (dateStr: string, hourly: boolean): string => {
-  if (hourly) {
-    const hour = parseInt(dateStr.slice(11, 13), 10);
-    const suffix = hour >= 12 ? 'pm' : 'am';
-    return `${hour % 12 || 12}${suffix}`;
-  }
-  const [, month, day] = dateStr.split('-').map(Number);
-  const months = [
-    'Jan',
-    'Feb',
-    'Mar',
-    'Apr',
-    'May',
-    'Jun',
-    'Jul',
-    'Aug',
-    'Sep',
-    'Oct',
-    'Nov',
-    'Dec',
-  ];
-  return `${months[(month ?? 1) - 1]} ${day}`;
+const MONTH_NAMES = [
+  'Jan',
+  'Feb',
+  'Mar',
+  'Apr',
+  'May',
+  'Jun',
+  'Jul',
+  'Aug',
+  'Sep',
+  'Oct',
+  'Nov',
+  'Dec',
+];
+
+const formatMonthDay = (dateStr: string): string => {
+  // dateStr may carry a trailing " HH:00" (hour/sixHour buckets) — keep just the date part.
+  const [, month, day] = dateStr.slice(0, 10).split('-').map(Number);
+  return `${MONTH_NAMES[(month ?? 1) - 1]} ${day}`;
+};
+
+const formatTrendLabel = (dateStr: string, granularity: 'day' | 'hour'): string => {
+  if (granularity === 'day') return formatMonthDay(dateStr);
+  const hour = parseInt(dateStr.slice(11, 13), 10);
+  const suffix = hour >= 12 ? 'pm' : 'am';
+  return `${hour % 12 || 12}${suffix}`;
+};
+
+/**
+ * One label per bucket. sixHour buckets show the date only where the day changes
+ * (including the first point) and just the time otherwise, so "Aug 11" isn't
+ * repeated on every tick; hour/day buckets are unchanged.
+ */
+const trendLabels = (
+  points: ReadonlyArray<{ date: string }>,
+  granularity: TrendGranularity,
+): string[] => {
+  if (granularity !== 'sixHour') return points.map(p => formatTrendLabel(p.date, granularity));
+  let lastDay = '';
+  return points.map(p => {
+    const day = p.date.slice(0, 10);
+    const isNewDay = day !== lastDay;
+    lastDay = day;
+    return isNewDay ? formatMonthDay(p.date) : formatTrendLabel(p.date, 'hour');
+  });
 };
 
 const getCustomFieldKeys = (tickets: DeskMetricsTicketRow[]): string[] =>
@@ -987,6 +1232,124 @@ const KpiCard = ({ label, value }: { label: string; value: string }): ReactEleme
   </div>
 );
 
+/** Duration mode averages rtSeconds (resolution charts); count mode sums tickets (volume charts). */
+const SeriesLineChart = ({
+  rows,
+  series,
+  tickInterval,
+  fontSize,
+  valueKind = 'duration',
+}: {
+  rows: Array<Record<string, number | string>>;
+  series: Array<{ name: string; color: string }>;
+  tickInterval: number;
+  fontSize: number;
+  valueKind?: 'duration' | 'count';
+}): ReactElement => {
+  const peak = rows.reduce(
+    (max, row) =>
+      Object.entries(row).reduce(
+        (rowMax, [key, value]) =>
+          key !== 'bucket' && typeof value === 'number' && value > rowMax ? value : rowMax,
+        max,
+      ),
+    0,
+  );
+  const ticks = valueKind === 'duration' ? durationTicks(peak) : undefined;
+  // exactOptionalPropertyTypes rejects passing `undefined` for these props, so
+  // count mode omits them entirely via spread rather than setting them to undefined.
+  const durationAxisProps = ticks
+    ? {
+        ticks,
+        domain: [0, ticks[ticks.length - 1] ?? 0] as [number, number],
+        tickFormatter: formatDurationTick,
+      }
+    : {};
+  const durationTooltipProps = ticks
+    ? { formatter: (v: number, name: string): [string, string] => [formatDuration(v), name] }
+    : {};
+  return (
+    <ResponsiveContainer width='100%' height='100%'>
+      <LineChart data={rows} margin={{ left: 4, right: 8 }}>
+        <CartesianGrid strokeDasharray='3 3' vertical={false} />
+        <XAxis dataKey='bucket' tick={{ fontSize }} interval={tickInterval} />
+        <YAxis
+          tick={{ fontSize }}
+          width={ticks ? 60 : 40}
+          allowDecimals={false}
+          {...durationAxisProps}
+        />
+        <RechartsTooltip {...durationTooltipProps} />
+        <Legend />
+        {series.map(s => (
+          <Line
+            key={s.name}
+            type='monotone'
+            dataKey={s.name}
+            name={s.name}
+            stroke={s.color}
+            strokeWidth={2}
+            dot={{ r: 4, fill: s.color, strokeWidth: 0 }}
+            activeDot={{ r: 5 }}
+            connectNulls
+          />
+        ))}
+      </LineChart>
+    </ResponsiveContainer>
+  );
+};
+
+/** One of the 4 fixed trend cards below the ticket table — always visible, no "Breakdown by" picker. */
+const FixedTrendCard = ({
+  title,
+  chart,
+  emptyLabel,
+  valueKind,
+  tickInterval,
+  onExpand,
+  trackMetadata,
+}: {
+  title: string;
+  chart: SeriesChart;
+  emptyLabel: string;
+  valueKind?: 'duration' | 'count';
+  tickInterval: number;
+  onExpand: () => void;
+  trackMetadata?: string;
+}): ReactElement => (
+  <div className='flex flex-col rounded-[12px] border border-desk-border bg-background p-4 dark:border-border'>
+    <div className='mb-3 flex items-center justify-between gap-3'>
+      <div className='text-sm font-medium text-foreground'>{title}</div>
+      <button
+        type='button'
+        onClick={onExpand}
+        title='Expand'
+        data-track-category='DeskMetrics'
+        data-track-name='ExpandChart'
+        data-track-metadata={trackMetadata}
+        className='flex h-7 w-7 items-center justify-center rounded-[6px] text-muted-foreground hover:bg-accent hover:text-foreground'
+      >
+        <Maximize2 size={13} />
+      </button>
+    </div>
+    {chart.rows.length === 0 ? (
+      <div className='flex h-[220px] items-center justify-center text-xs text-muted-foreground'>
+        {emptyLabel}
+      </div>
+    ) : (
+      <div className='h-[220px]'>
+        <SeriesLineChart
+          rows={chart.rows}
+          series={chart.series}
+          tickInterval={tickInterval}
+          fontSize={11}
+          {...(valueKind ? { valueKind } : {})}
+        />
+      </div>
+    )}
+  </div>
+);
+
 export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
   open,
   onClose,
@@ -1058,6 +1421,34 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
       );
     },
     [channelId, comparedChannelIds, selectedDeskIds.length, setComparedChannelIds],
+  );
+
+  // Adds rather than replaces: comparedChannelIds is persisted, and the primary
+  // is always selected separately, so compared tops out one below the cap.
+  const visibleDesks = useMemo(() => {
+    const query = deskSearch.trim().toLowerCase();
+    return query
+      ? availableDesks.filter(d => d.name.toLowerCase().includes(query))
+      : availableDesks;
+  }, [availableDesks, deskSearch]);
+
+  const selectDeskGroup = useCallback(
+    (types: readonly string[], desks: DeskMetricsSelectableDesk[]) => {
+      const typeSet = new Set(types);
+      const additions = desks
+        .filter(
+          d =>
+            d.id !== channelId &&
+            d.deskType &&
+            typeSet.has(d.deskType) &&
+            !comparedChannelIds.includes(d.id),
+        )
+        .map(d => d.id);
+      setComparedChannelIds(
+        [...comparedChannelIds, ...additions].slice(0, DESK_METRICS_MAX_AGGREGATE_DESKS - 1),
+      );
+    },
+    [channelId, comparedChannelIds, setComparedChannelIds],
   );
 
   const [expandedChart, setExpandedChart] = useState<ChartView | null>(null);
@@ -1192,7 +1583,13 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
   );
 
   // Guests see what the desk owner didn't turn off (Desk Settings → Metrics); others see everything.
-  const canSee = (key: string): boolean => !isGuest || data?.guestVisibility?.[key] !== false;
+  const canSee = (key: string): boolean => {
+    if (!isGuest) return true;
+    const visibility = data?.guestVisibility;
+    if (visibility?.[key] !== undefined) return visibility[key] !== false;
+    const inherited = inheritedVisibilityKey(key);
+    return inherited ? visibility?.[inherited] !== false : true;
+  };
 
   useEffect(() => {
     if (selectedTagCategory === null) {
@@ -1254,6 +1651,7 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
   }, [channelId, channelName, availableDesks]);
 
   // Stage and custom fields differ per board; desk needs several desks; tag:* follows chart:tags.
+  // resolutionBy*/statusBy* live outside this dropdown, as their own fixed cards below the ticket table.
   const chartViewOptions: ChartView[] = [
     ...(['priority', 'trend', 'assignee', 'tags', 'csat'] as const),
     ...(isMultiDesk ? (['status', 'desk'] as const) : (['stage', 'status'] as const)),
@@ -1405,9 +1803,64 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
   }, [data?.tagBreakdown, selectedTagCategory, selectedTagValues]);
 
   const trendData = useMemo(
-    () => (data?.trend ?? []).map(d => ({ ...d, label: formatTrendLabel(d.date, isHourly) })),
+    () =>
+      (data?.trend ?? []).map(d => ({
+        ...d,
+        label: formatTrendLabel(d.date, isHourly ? 'hour' : 'day'),
+      })),
     [data?.trend, isHourly],
   );
+
+  // The 4 fixed cards read finer than the "Breakdown by" charts, but only while the range is
+  // still short enough for 6h buckets to be readable (a 90-day range at 4 points/day is mostly
+  // empty flat line). Past SIX_HOURLY_MAX_RANGE_MS they fall back to the same daily view as
+  // every other chart. trendByDay only emits hourly/daily rows, so the 6h skeleton is client-side.
+  const isSixHourly = !isHourly && rangeEndMs - rangeStartMs <= SIX_HOURLY_MAX_RANGE_MS;
+  const cardGranularity: TrendGranularity = isHourly ? 'hour' : isSixHourly ? 'sixHour' : 'day';
+  const cardGranularityLabel = isHourly ? '(hourly)' : isSixHourly ? '(every 6h)' : '(daily)';
+  const cardTrendSkeleton = useMemo(
+    () => (isSixHourly ? sixHourlySkeleton(rangeStartMs, rangeEndMs) : (data?.trend ?? [])),
+    [isSixHourly, data?.trend, rangeStartMs, rangeEndMs],
+  );
+  // sixHour is capped at 3 days (≤13 short labels) — no thinning needed, and thinning by
+  // index would risk skipping exactly the day-boundary tick that carries trendLabels' date,
+  // leaving orphaned time-only ticks with no date ("6am"/"12pm" with no day in sight).
+  const cardTickInterval = useMemo(
+    () => (isSixHourly ? 0 : tickIntervalFor(cardTrendSkeleton.length)),
+    [isSixHourly, cardTrendSkeleton.length],
+  );
+
+  // Always-on: these 4 render as their own fixed cards below the ticket table, not behind the
+  // "Breakdown by" dropdown, so — unlike breakdownData — all four compute on every render.
+  const resolutionByCategoryChart = useMemo(
+    () =>
+      buildResolutionChart(
+        data?.tickets ?? [],
+        cardTrendSkeleton,
+        cardGranularity,
+        categorySeriesOf,
+      ),
+    [data?.tickets, cardTrendSkeleton, cardGranularity],
+  );
+  const resolutionByAgentChart = useMemo(
+    () =>
+      buildResolutionChart(data?.tickets ?? [], cardTrendSkeleton, cardGranularity, agentSeriesOf),
+    [data?.tickets, cardTrendSkeleton, cardGranularity],
+  );
+  const volumeByAgentChart = useMemo(
+    () => buildVolumeChart(data?.tickets ?? [], cardTrendSkeleton, cardGranularity, agentSeriesOf),
+    [data?.tickets, cardTrendSkeleton, cardGranularity],
+  );
+  const volumeByCategoryChart = useMemo(
+    () =>
+      buildVolumeChart(data?.tickets ?? [], cardTrendSkeleton, cardGranularity, categorySeriesOf),
+    [data?.tickets, cardTrendSkeleton, cardGranularity],
+  );
+  // The expanded overlay is keyed by ChartView, so pick whichever of the 4 it points at.
+  const expandedResolutionChart =
+    expandedChart === 'resolutionByAgent' ? resolutionByAgentChart : resolutionByCategoryChart;
+  const expandedVolumeChart =
+    expandedChart === 'statusByCategory' ? volumeByCategoryChart : volumeByAgentChart;
 
   const assigneeData = useMemo(() => {
     const counts: Record<string, number> = {};
@@ -1469,12 +1922,7 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
     [],
   );
 
-  const tickInterval = useMemo(() => {
-    const pointCount = trendData.length;
-    if (pointCount <= 8) return 0;
-    if (pointCount <= 31) return 4;
-    return Math.floor(pointCount / 6);
-  }, [trendData.length]);
+  const tickInterval = useMemo(() => tickIntervalFor(trendData.length), [trendData.length]);
 
   const isEmpty = !!data && data.tickets.length === 0 && data.counts.stageCounts.length === 0;
 
@@ -1670,23 +2118,46 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                           data-track-name='SearchDesks'
                         />
                       </div>
+                      {visibleDesks.some(d => d.id !== channelId && d.deskType) && (
+                        <div className='flex items-center gap-1 border-b border-border px-2 py-1.5'>
+                          <span className='mr-0.5 text-[10px] uppercase tracking-wide text-muted-foreground'>
+                            All
+                          </span>
+                          {DESK_TYPE_GROUPS.filter(group =>
+                            visibleDesks.some(
+                              d =>
+                                d.id !== channelId &&
+                                d.deskType &&
+                                group.types.includes(d.deskType),
+                            ),
+                          ).map(group => (
+                            <button
+                              key={group.label}
+                              type='button'
+                              onClick={() => selectDeskGroup(group.types, visibleDesks)}
+                              title={`Add every ${group.label.toLowerCase()} desk to the comparison — the desk this dashboard was opened from stays included`}
+                              className='rounded-[6px] border border-desk-border px-2 py-0.5 text-xs text-foreground hover:bg-accent dark:border-border'
+                              data-track-category='DeskMetrics'
+                              data-track-name='SelectDeskGroup'
+                            >
+                              {group.label}
+                            </button>
+                          ))}
+                        </div>
+                      )}
                       <div
                         className='max-h-[260px] overflow-y-auto py-1'
                         onWheel={e => e.stopPropagation()}
                       >
                         {((): ReactElement | ReactElement[] => {
-                          const query = deskSearch.trim().toLowerCase();
-                          const visible = availableDesks.filter(
-                            d => !query || d.name.toLowerCase().includes(query),
-                          );
-                          if (visible.length === 0) {
+                          if (visibleDesks.length === 0) {
                             return (
                               <div className='px-3 py-4 text-center text-sm text-muted-foreground'>
                                 No desks match
                               </div>
                             );
                           }
-                          return visible.map(desk => {
+                          return visibleDesks.map(desk => {
                             const isPrimary = desk.id === channelId;
                             const isSelected = selectedDeskIds.includes(desk.id);
                             const isDisabledByLimit = !isSelected && isDeskSelectionAtLimit;
@@ -2832,6 +3303,61 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                         })()}
                     </div>
 
+                    {/* Fixed trend cards: always shown side by side, not behind the picker above */}
+                    {data.tickets.length > 0 &&
+                      (canSee('chart:resolutionByCategory') ||
+                        canSee('chart:resolutionByAgent') ||
+                        canSee('chart:statusByAgent') ||
+                        canSee('chart:statusByCategory')) && (
+                        <div className='flex flex-col gap-3'>
+                          <span className='text-sm font-medium text-foreground'>Trends</span>
+                          <div className='grid grid-cols-1 gap-3 lg:grid-cols-2'>
+                            {canSee('chart:resolutionByCategory') && (
+                              <FixedTrendCard
+                                title={`Avg full resolution time by category ${cardGranularityLabel}`}
+                                chart={resolutionByCategoryChart}
+                                emptyLabel='No resolved tickets in range'
+                                tickInterval={cardTickInterval}
+                                onExpand={() => setExpandedChart('resolutionByCategory')}
+                                trackMetadata={metricsClickMetadata}
+                              />
+                            )}
+                            {canSee('chart:resolutionByAgent') && (
+                              <FixedTrendCard
+                                title={`Avg full resolution time by agent ${cardGranularityLabel}`}
+                                chart={resolutionByAgentChart}
+                                emptyLabel='No resolved tickets in range'
+                                tickInterval={cardTickInterval}
+                                onExpand={() => setExpandedChart('resolutionByAgent')}
+                                trackMetadata={metricsClickMetadata}
+                              />
+                            )}
+                            {canSee('chart:statusByCategory') && (
+                              <FixedTrendCard
+                                title={`Ticket volume by category ${cardGranularityLabel}`}
+                                chart={volumeByCategoryChart}
+                                emptyLabel='No tickets in range'
+                                valueKind='count'
+                                tickInterval={cardTickInterval}
+                                onExpand={() => setExpandedChart('statusByCategory')}
+                                trackMetadata={metricsClickMetadata}
+                              />
+                            )}
+                            {canSee('chart:statusByAgent') && (
+                              <FixedTrendCard
+                                title={`Ticket volume by agent ${cardGranularityLabel}`}
+                                chart={volumeByAgentChart}
+                                emptyLabel='No tickets in range'
+                                valueKind='count'
+                                tickInterval={cardTickInterval}
+                                onExpand={() => setExpandedChart('statusByAgent')}
+                                trackMetadata={metricsClickMetadata}
+                              />
+                            )}
+                          </div>
+                        </div>
+                      )}
+
                     {/* Ticket table */}
                     {data.tickets.length > 0 && canSee('ticketTable') && (
                       <MetricsTicketTable
@@ -2873,6 +3399,14 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                 {expandedChart === 'priority' && 'Tickets by priority'}
                 {expandedChart === 'trend' &&
                   `Tickets created vs resolved ${isHourly ? '(hourly)' : '(daily)'}`}
+                {expandedChart === 'resolutionByCategory' &&
+                  `Avg full resolution time by category ${cardGranularityLabel}`}
+                {expandedChart === 'resolutionByAgent' &&
+                  `Avg full resolution time by agent ${cardGranularityLabel}`}
+                {expandedChart === 'statusByAgent' &&
+                  `Ticket volume by agent ${cardGranularityLabel}`}
+                {expandedChart === 'statusByCategory' &&
+                  `Ticket volume by category ${cardGranularityLabel}`}
                 {expandedChart === 'assignee' && 'Tickets by assignee'}
                 {expandedChart === 'tags' &&
                   (selectedTagCategory
@@ -2933,6 +3467,34 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                       <Bar dataKey='closed' name='Resolved' fill='#10b981' radius={[4, 4, 0, 0]} />
                     </BarChart>
                   </ResponsiveContainer>
+                ))}
+              {(expandedChart === 'resolutionByCategory' ||
+                expandedChart === 'resolutionByAgent') &&
+                (expandedResolutionChart.rows.length === 0 ? (
+                  <div className='flex h-full items-center justify-center text-sm text-muted-foreground'>
+                    No resolved tickets in range
+                  </div>
+                ) : (
+                  <SeriesLineChart
+                    rows={expandedResolutionChart.rows}
+                    series={expandedResolutionChart.series}
+                    tickInterval={cardTickInterval}
+                    fontSize={12}
+                  />
+                ))}
+              {(expandedChart === 'statusByAgent' || expandedChart === 'statusByCategory') &&
+                (expandedVolumeChart.rows.length === 0 ? (
+                  <div className='flex h-full items-center justify-center text-sm text-muted-foreground'>
+                    No tickets in range
+                  </div>
+                ) : (
+                  <SeriesLineChart
+                    rows={expandedVolumeChart.rows}
+                    series={expandedVolumeChart.series}
+                    tickInterval={cardTickInterval}
+                    fontSize={12}
+                    valueKind='count'
+                  />
                 ))}
               {expandedChart === 'assignee' &&
                 (assigneeData.length === 0 ? (

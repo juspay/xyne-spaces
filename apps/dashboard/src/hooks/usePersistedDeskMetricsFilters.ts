@@ -102,11 +102,15 @@ const isPerKeyValues = (v: unknown): v is Record<string, string[]> =>
 export const CHART_VIEW_LABELS = {
   priority: 'Priority',
   trend: 'Created vs Resolved',
+  resolutionByCategory: 'Avg Resolution by Category',
+  resolutionByAgent: 'Avg Resolution by Agent',
   assignee: 'Assignee',
   tags: 'Tags',
   csat: 'CSAT',
   stage: 'Stage',
   status: 'Status',
+  statusByAgent: 'Ticket Volume by Agent',
+  statusByCategory: 'Ticket Volume by Category',
   desk: 'Desk',
 };
 export type ChartView = keyof typeof CHART_VIEW_LABELS | `field:${string}` | `tag:${string}`;

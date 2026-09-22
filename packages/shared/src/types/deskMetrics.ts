@@ -22,6 +22,7 @@ export interface DeskMetricsTicketRow {
   rtSeconds: number | null;
   csatScore: number | null; // 1..5
   csatRating: string | null; // GOOD | BAD
+  aiCategory: string | null; // top-level AI classification category
   customFields: Record<string, string> | null; // form field name → value; only fields with non-empty values included
   tags: Array<{ tagCategory: string; tag: string }> | null; // desk-email tags from the ticket's conversation
 }

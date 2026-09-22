@@ -162,6 +162,7 @@ import {
   SOCIAL_MEDIA_SOURCE_TYPE,
   TicketPriority,
   parseFieldOptionValues,
+  deskTypeForChannelType,
 } from '@xyne/shared';
 import type { Ticket, FormFields, EmailChannelPreference } from '@xyne/shared';
 import { useShortcut, invokeShortcut } from '../../shortcuts';
@@ -1923,7 +1924,11 @@ const SupportScreen = (): ReactElement => {
     () =>
       sortedEmailChannels
         .filter(c => joinedChannelIds.has(c.id) && myAdminChannelIds.has(c.id))
-        .map(c => ({ id: c.id, name: c.name?.trim() || 'Untitled desk' })),
+        .map(c => ({
+          id: c.id,
+          name: c.name?.trim() || 'Untitled desk',
+          deskType: deskTypeForChannelType(c.type),
+        })),
     [sortedEmailChannels, joinedChannelIds, myAdminChannelIds],
   );
   // A selected channelId that doesn't appear in useEmailChannels() means the
