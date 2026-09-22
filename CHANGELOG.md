@@ -1,3 +1,10 @@
+## [1.366.0](https://github.com/juspay/xyne-spaces/compare/v1.365.1...v1.366.0) (2026-09-22)
+
+
+### Features
+
+* stop using calender view cache in list view ([#2164](https://github.com/juspay/xyne-spaces/issues/2164)) ([4bd5eb6](https://github.com/juspay/xyne-spaces/commit/4bd5eb68b2a73b7f5205559063095cd89e682264))
+
 ## [1.365.1](https://github.com/juspay/xyne-spaces/compare/v1.365.0...v1.365.1) (2026-09-22)
 
 
