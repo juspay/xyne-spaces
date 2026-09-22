@@ -2,7 +2,7 @@ apiVersion: v2
 name: xyne-vespa-embedder
 description: GPU text-embeddings-inference server backing the Vespa embed pipeline
 type: application
-version: 0.1.0-app.1.361.1-release-20260922.1
+version: 0.1.0-app.1.337.0-release-20260918.14
 appVersion: "1.6"
 keywords:
   - xyne

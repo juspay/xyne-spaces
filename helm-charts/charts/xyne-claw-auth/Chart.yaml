@@ -2,8 +2,8 @@ apiVersion: v2
 name: xyne-claw-auth
 description: Xyne Claw auth/control plane (Node.js) - connectors, OAuth, agent config, run dispatch and BullMQ workers in front of xyne-claw
 type: application
-version: 0.1.0-app.1.361.1-release-20260922.1
-appVersion: "1.361.1-release-20260922.1"
+version: 0.1.0-app.1.337.0-release-20260918.14
+appVersion: "1.337.0-release-20260918.14"
 keywords:
   - xyne
   - claw
