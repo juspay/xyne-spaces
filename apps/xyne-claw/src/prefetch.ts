@@ -257,7 +257,7 @@ export function startPrefetchExtraction(task: string): Promise<PrefetchSpec | nu
 }
 
 /** Pull the plain text out of a tool result without assuming the exact envelope. */
-function toolResultText(result: unknown): string {
+export function toolResultText(result: unknown): string {
   const r = result as { content?: Array<{ type?: string; text?: string }> } | undefined;
   if (!r?.content) return "";
   return r.content
@@ -291,14 +291,16 @@ function toolResultText(result: unknown): string {
  * that matched 8 channels showed the model 2, because 6 of its 12 lines were
  * spent on the above.
  */
-export function scrub(text: string): string {
+export function scrub(text: string, opts: { keepCitations?: boolean } = {}): string {
   const out: string[] = [];
   let lastCreatedBy: string | null = null;
   for (const raw of text.split("\n")) {
     if (/^\s*\[Executed YQL/.test(raw)) continue;
     if (/^\s*Found \d+ result\(s\):\s*$/.test(raw)) continue;
 
-    let line = raw.replace(/\[clf-[^\]\s]*#[\d#-]+\]\s*/g, "");
+    // Citation tokens are dead handles unless the caller registers the invocation they
+    // point at (prefetch does not; answer-context does — see buildAnswerContext).
+    let line = opts.keepCitations ? raw : raw.replace(/\[clf-[^\]\s]*#[\d#-]+\]\s*/g, "");
     line = line.replace(/\s*·\s*score:\s*0\.000\s*$/, "");
     if (!line.trim()) continue;
 
@@ -425,7 +427,7 @@ async function runResolver(
 }
 
 /** Tools are mounted under a server-prefixed name (`Xyne_Spaces__spaces-vespa-search`). */
-function findTool(tools: ExecutableTool[], bareName: string): ExecutableTool | undefined {
+export function findTool(tools: ExecutableTool[], bareName: string): ExecutableTool | undefined {
   return tools.find((t) => t.name === bareName || t.name.endsWith(`__${bareName}`));
 }
 
