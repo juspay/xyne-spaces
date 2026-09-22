@@ -111,9 +111,11 @@ test('resume: a retained put-only range replays as a per-user delta (no snapshot
   const sock = fakeSocket();
   await add(f, sock, 'U1', '3-0');
   await f.drainDispatch();
-  assert.equal(sock.sent.length, 1);
+  // replayed delta + the resume-complete marker (a resume has no other terminal signal)
+  assert.equal(sock.sent.length, 2);
   assert.equal(sock.sent[0].event, 'sync:delta');
   assert.deepEqual((sock.sent[0].payload.upserts as Array<{ row: Row }>).map((u) => u.row.id), ['D9']);
+  assert.equal(sock.sent[1].event, 'sync:current');
 });
 
 test('resume: an unroutable delete in the range falls back to a full snapshot', async () => {

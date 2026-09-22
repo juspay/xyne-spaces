@@ -6,6 +6,7 @@ import type { CompactedRow, StreamDiff } from './streamState';
 import type { AclGate } from './aclGate';
 import { allPkFields } from './clientSchema';
 import { seedRowLevel, routeDelta, projectDeltaForUser, type RowLevelMeta } from './rowLevelRouting';
+import { decryptRowsForEmit } from './rowDecrypt';
 import { obsEmit } from './obs';
 import { SerialQueue } from './serialQueue';
 
@@ -451,15 +452,20 @@ export class Fanout {
         // A `cleared` op in the range = a reset — can't resume across it, fall back to snapshot.
         if (!diffs.some((d) => d.diff.cleared)) {
           client.hydrated = true;
-          for (const { id, version, diff } of diffs) {
+          // Decrypt ALL replayed upserts BEFORE the emit loop so the emits stay synchronous
+          // (the invariant above) — no live delta can interleave mid-replay.
+          const replayUpserts = await Promise.all(
+            diffs.map((d) => decryptRowsForEmit(d.diff.upserts)),
+          );
+          diffs.forEach(({ id, version, diff }, i) => {
             this.#emit(client, 'sync:delta', {
               instanceKey,
-              upserts: diff.upserts,
+              upserts: replayUpserts[i],
               deletes: diff.deletes,
               offset: id,
               version,
             });
-          }
+          });
           client.socket.join(roomFor(instanceKey)); // now live → future deltas via the room broadcast
           // Resume-complete marker: the client is now caught up to the current version. Snapshots
           // self-announce (the client flips `complete` on `sync:snapshot`), but a resume replays bare
@@ -478,7 +484,12 @@ export class Fanout {
     // misses and refreshes. headWithVersion is a cheap XREVRANGE-1; only the big snapshot is saved.
     const { id: head, version } = await this.#store.headWithVersion(instanceKey);
     const memo = this.#snapshotMemo.get(instanceKey);
-    const rows = memo && memo.head === head ? memo.rows : await this.#store.snapshot(instanceKey);
+    // The memo holds the DECRYPTED rows (RAM only — Redis keeps ciphertext): decrypt once per
+    // head change, and a reconnect storm reuses it without touching the encryption provider.
+    const rows =
+      memo && memo.head === head
+        ? memo.rows
+        : ((await decryptRowsForEmit(await this.#store.snapshot(instanceKey))) as CompactedRow[]);
     if (!memo || memo.head !== head) this.#snapshotMemo.set(instanceKey, { head, rows });
     client.hydrated = true;
     this.#emit(client, 'sync:snapshot', { instanceKey, rows, offset: head, version });
@@ -546,7 +557,15 @@ export class Fanout {
 
     const dataSubs = this.#dataSubs.get(instanceKey);
     if (dataSubs) {
-      const delta = { instanceKey, upserts: diff?.upserts ?? [], deletes: diff?.deletes ?? [], offset: id, version };
+      // Decrypt once per delta per instance — BEFORE the room broadcast, so the single-encode
+      // optimization is preserved and every recipient shares one decrypt.
+      const delta = {
+        instanceKey,
+        upserts: await decryptRowsForEmit(diff?.upserts ?? []),
+        deletes: diff?.deletes ?? [],
+        offset: id,
+        version,
+      };
       // Broadcast to the room = every currently-LIVE (joined) client, in ONE encode. This runs
       // FIRST, before hydrating the deferred clients below — a deferred client is not in the room
       // yet, and its snapshot (read after this entry landed in Redis) already includes this delta,
