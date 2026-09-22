@@ -2487,6 +2487,18 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
               >
                 {field => {
                   if (ticketKind === 'release') return null;
+                  // A channel with no linked boards would otherwise render an empty
+                  // picker and only explain itself via "Board is required" on submit.
+                  // Guarded on a channel actually being chosen — in the pick-a-channel
+                  // variant there is none yet, and the boards are empty for that reason.
+                  if (effectiveChannelId && boardOptions.length === 0) {
+                    return (
+                      <p className='text-xs text-muted-foreground'>
+                        No boards are configured for this channel. Link a board to it before
+                        creating tickets.
+                      </p>
+                    );
+                  }
                   return (
                     <EntitySelector
                       showSearch={false}
