@@ -1,0 +1,67 @@
+domain: spaces.example.com
+namespace: xyne
+
+gateway:
+  enabled: true
+  namespace: istio-ingress
+  name: xyne-gateway
+  selector:
+    istio: ingressgateway
+  tlsSecret: xyne-gateway-tls
+  httpsRedirect: true
+  tls: acme
+  extraHosts: []
+
+certManager:
+  enabled: true
+  mode: acme
+  email: ""
+  issuer: letsencrypt
+  server: https://acme-v02.api.letsencrypt.org/directory
+  wildcard: false
+  ingressClassName: istio
+  duration: 8760h
+  renewBefore: 720h
+
+peerAuthentication:
+  enabled: true
+  mode: STRICT
+
+storageClass:
+  enabled: false
+  name: gp3
+  provisioner: ebs.csi.aws.com
+  parameters:
+    type: gp3
+  default: true
+  volumeBindingMode: WaitForFirstConsumer
+  allowVolumeExpansion: true
+  reclaimPolicy: Delete
+
+routes:
+  externalDashboard: false
+  clawAuthFrontend: false
+  apiTimeout: 50s
+  health: false
+  healthPath: /healthz/ready
+  extra: []
+
+services:
+  backend:
+    host: xyne-backend
+    port: 80
+  zero:
+    host: xyne-zero
+    port: 80
+  ysweet:
+    host: xyne-ysweet
+    port: 8080
+  externalDashboard:
+    host: xyne-dashboard-external
+    port: 80
+  clawAuthFrontend:
+    host: xyne-claw-auth-frontend
+    port: 80
+  dashboard:
+    host: xyne-dashboard
+    port: 80

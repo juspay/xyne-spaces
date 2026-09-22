@@ -1,0 +1,8 @@
+apiVersion: v2
+name: platform-config
+description: Gateway, certificate issuance, public routes and mesh policy for a Xyne Spaces install
+type: application
+version: 0.1.0
+home: https://github.com/juspay/xyne-spaces
+sources:
+  - https://github.com/juspay/xyne-spaces
