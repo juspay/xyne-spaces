@@ -410,6 +410,16 @@ export const stagePRStatusMappingTable = table('stage_pr_status_mappings')
   })
   .primaryKey('id');
 
+export const stageReleaseStatusMappingTable = table('stage_release_status_mappings')
+  .columns({
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
+    id: string(),
+    stageId: string(),
+    releaseStatus: enumeration<TicketStatusV2>(),
+    createdAt: number(),
+  })
+  .primaryKey('id');
+
 export const userGroupMappingTable = table('user_group_mappings')
   .columns({
     workspaceId: string(), // denormalized tenant key (stamped on insert)
@@ -2850,6 +2860,11 @@ export const stageTableRelationships = relationships(stageTable, ({ one, many })
     destField: ['stageId'],
     destSchema: stagePRStatusMappingTable,
   }),
+  releaseStatusMappings: many({
+    sourceField: ['id'],
+    destField: ['stageId'],
+    destSchema: stageReleaseStatusMappingTable,
+  }),
   approvers: many({
     sourceField: ['id'],
     destField: ['stageId'],
@@ -2869,6 +2884,17 @@ export const stageTableRelationships = relationships(stageTable, ({ one, many })
 
 export const stagePRStatusMappingTableRelationships = relationships(
   stagePRStatusMappingTable,
+  ({ one }) => ({
+    stage: one({
+      sourceField: ['stageId'],
+      destField: ['id'],
+      destSchema: stageTable,
+    }),
+  })
+);
+
+export const stageReleaseStatusMappingTableRelationships = relationships(
+  stageReleaseStatusMappingTable,
   ({ one }) => ({
     stage: one({
       sourceField: ['stageId'],
@@ -4841,6 +4867,7 @@ export const schema = createSchema({
     boardTable,
     stageTable,
     stagePRStatusMappingTable,
+    stageReleaseStatusMappingTable,
     userGroupMappingTable,
     rolesTable,
     userRoleMappingsTable,
@@ -4982,6 +5009,7 @@ export const schema = createSchema({
     boardTableRelationships,
     stageTableRelationships,
     stagePRStatusMappingTableRelationships,
+    stageReleaseStatusMappingTableRelationships,
     userGroupMappingTableRelationships,
     rolesTableRelationships,
     userRoleMappingsTableRelationships,
@@ -5120,6 +5148,7 @@ export type Project = Row<typeof schema.tables.projects>;
 export type Board = Row<typeof schema.tables.boards>;
 export type Stage = Row<typeof schema.tables.stages>;
 export type StagePRStatusMapping = Row<typeof schema.tables.stage_pr_status_mappings>;
+export type StageReleaseStatusMapping = Row<typeof schema.tables.stage_release_status_mappings>;
 export type Workflow = Row<typeof schema.tables.workflows>;
 export type UserGroup = Row<typeof schema.tables.user_groups>;
 export type User = Row<typeof schema.tables.users>;

@@ -55,6 +55,7 @@ export { ResourceAccessACL } from './resource-access-acl';
 export { StagesACL } from './stages-acl';
 export { StageTransitionsACL } from './stage-transitions-acl';
 export { StagePRStatusMappingsACL } from './stage-pr-status-mappings-acl';
+export { StageReleaseStatusMappingsACL } from './stage-release-status-mappings-acl';
 export { SubTicketsACL } from './sub-tickets-acl';
 export { TicketActivitiesACL } from './ticket-activities-acl';
 export { TicketEntityMappingsACL } from './ticket-entity-mappings-acl';

@@ -1,0 +1,120 @@
+import type { DeleteID, InsertValue, Transaction, UpdateValue } from '@rocicorp/zero';
+import {
+  MutationACLError,
+  type TableSchema,
+} from '../core/types';
+import { Schema } from '@xyne/shared';
+import { BaseACL } from '../core/base-acl';
+import { zql } from '../../queries';
+import { assertGuestWriteBlocked } from '../core/guest-access';
+
+export class StageReleaseStatusMappingsACL extends BaseACL<'stage_release_status_mappings'> {
+
+  async canInsert(args: InsertValue<TableSchema<'stage_release_status_mappings'>>, tx: Transaction<Schema>): Promise<void> {
+    assertGuestWriteBlocked(this.ctx, 'stage_release_status_mappings', 'insert', 'Stage release status mapping');
+    // Get the stage with its board to check workspace and creator
+    const stageWithBoard = await tx.run(zql.stages.where('id', args.stageId).related('board').one());
+
+    if (!stageWithBoard || !stageWithBoard.board) {
+      throw new MutationACLError(
+        'Stage release status mapping insert failed: the specified stage does not exist or has no board',
+        'stage_release_status_mappings'
+      );
+    }
+
+    // Direct workspaceId check - no project lookup needed
+    if (stageWithBoard.board.workspaceId !== this.ctx.workspaceId) {
+      throw new MutationACLError(
+        'Stage release status mapping insert failed: workspace ID mismatch',
+        'stage_release_status_mappings'
+      );
+    }
+
+    if (stageWithBoard.board.createdBy !== this.ctx.userID) {
+      throw new MutationACLError(
+        'Stage release status mapping insert failed: only the board creator can add release status mappings',
+        'stage_release_status_mappings'
+      );
+    }
+  }
+
+  async canUpdate(args: UpdateValue<TableSchema<'stage_release_status_mappings'>>, tx: Transaction<Schema>): Promise<void> {
+    assertGuestWriteBlocked(this.ctx, 'stage_release_status_mappings', 'update', 'Stage release status mapping');
+    // Get the mapping with its stage and board to check workspace and creator
+    const mappingWithStageAndBoard = await tx.run(
+      zql.stage_release_status_mappings
+        .where('id', args.id)
+        .related('stage', (stage) => stage.related('board'))
+        .one()
+    );
+
+    if (!mappingWithStageAndBoard || !mappingWithStageAndBoard.stage) {
+      throw new MutationACLError(
+        'Stage release status mapping update failed: the mapping does not exist or has no stage',
+        'stage_release_status_mappings'
+      );
+    }
+
+    if (!mappingWithStageAndBoard.stage.board) {
+      throw new MutationACLError(
+        'Stage release status mapping update failed: the stage has no board',
+        'stage_release_status_mappings'
+      );
+    }
+
+    // Direct workspaceId check - no project lookup needed
+    if (mappingWithStageAndBoard.stage.board.workspaceId !== this.ctx.workspaceId) {
+      throw new MutationACLError(
+        'Stage release status mapping update failed: workspace ID mismatch',
+        'stage_release_status_mappings'
+      );
+    }
+
+    if (mappingWithStageAndBoard.stage.board.createdBy !== this.ctx.userID) {
+      throw new MutationACLError(
+        'Stage release status mapping update failed: only the board creator can modify release status mappings',
+        'stage_release_status_mappings'
+      );
+    }
+  }
+
+  async canDelete(args: DeleteID<TableSchema<'stage_release_status_mappings'>>, tx: Transaction<Schema>): Promise<void> {
+    assertGuestWriteBlocked(this.ctx, 'stage_release_status_mappings', 'delete', 'Stage release status mapping');
+    // Get the mapping with its stage and board to check workspace and creator
+    const mappingWithStageAndBoard = await tx.run(
+      zql.stage_release_status_mappings
+        .where('id', args.id)
+        .related('stage', (stage) => stage.related('board'))
+        .one()
+    );
+
+    if (!mappingWithStageAndBoard || !mappingWithStageAndBoard.stage) {
+      throw new MutationACLError(
+        'Stage release status mapping delete failed: the mapping does not exist or has no stage',
+        'stage_release_status_mappings'
+      );
+    }
+
+    if (!mappingWithStageAndBoard.stage.board) {
+      throw new MutationACLError(
+        'Stage release status mapping delete failed: the stage has no board',
+        'stage_release_status_mappings'
+      );
+    }
+
+    // Direct workspaceId check - no project lookup needed
+    if (mappingWithStageAndBoard.stage.board.workspaceId !== this.ctx.workspaceId) {
+      throw new MutationACLError(
+        'Stage release status mapping delete failed: workspace ID mismatch',
+        'stage_release_status_mappings'
+      );
+    }
+
+    if (mappingWithStageAndBoard.stage.board.createdBy !== this.ctx.userID) {
+      throw new MutationACLError(
+        'Stage release status mapping delete failed: only the board creator can delete release status mappings',
+        'stage_release_status_mappings'
+      );
+    }
+  }
+}

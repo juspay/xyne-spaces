@@ -7846,6 +7846,13 @@ export function createMutators(
                 await tx.mutate.stage_pr_status_mappings.delete({ id: mapping.id });
               }
 
+              const releaseStatusMappings = await tx.run(
+                zql.stage_release_status_mappings.where('stageId', stage.id),
+              );
+              for (const mapping of releaseStatusMappings) {
+                await tx.mutate.stage_release_status_mappings.delete({ id: mapping.id });
+              }
+
               const stageFormMappings = await tx.run(
                 zql.forms_context_mapping
                   .where('contextId', stage.id)
@@ -8392,6 +8399,7 @@ export function createMutators(
                 sequenceNumber: z.number(),
                 defaultTicketStatusV2: z.string().optional(),
                 prStatuses: z.array(z.nativeEnum(PRStatusEvent)).optional(),
+                releaseStatuses: z.array(z.nativeEnum(TicketStatusV2)).optional(),
                 approverIds: z.array(z.string()).optional(),
                 approvers: z
                   .array(
@@ -8409,6 +8417,7 @@ export function createMutators(
           timestamp: z.number(),
           stageIds: z.record(z.string(), z.string()).optional(),
           prStatusMappingIds: z.record(z.string(), z.string()).optional(),
+          releaseStatusMappingIds: z.record(z.string(), z.string()).optional(),
         }),
         async ({
           tx,
@@ -8426,6 +8435,7 @@ export function createMutators(
             timestamp,
             stageIds = {},
             prStatusMappingIds = {},
+            releaseStatusMappingIds = {},
           },
         }) => {
           // Validate board exists
@@ -8731,6 +8741,34 @@ export function createMutators(
                     });
                   }
                 }
+
+                // Sync release status mappings for this stage (mirrors PR statuses)
+                if (stage.releaseStatuses !== undefined) {
+                  const existingReleaseMappings = await tx.run(
+                    zql.stage_release_status_mappings.where('stageId', stageId)
+                  );
+                  const existingReleaseStatuses = new Set(
+                    existingReleaseMappings.map(m => m.releaseStatus)
+                  );
+                  const newReleaseStatuses = new Set(stage.releaseStatuses);
+
+                  for (const mapping of existingReleaseMappings) {
+                    if (!newReleaseStatuses.has(mapping.releaseStatus)) {
+                      await tx.mutate.stage_release_status_mappings.delete({ id: mapping.id });
+                    }
+                  }
+                  for (const releaseStatus of stage.releaseStatuses) {
+                    if (existingReleaseStatuses.has(releaseStatus)) continue;
+                    const mappingKey = `${stage.sequenceNumber}-${releaseStatus}`;
+                    await tx.mutate.stage_release_status_mappings.insert({
+                      workspaceId: authData.workspaceId,
+                      id: releaseStatusMappingIds[mappingKey] ?? uuidv4(),
+                      stageId,
+                      releaseStatus: releaseStatus,
+                      createdAt: now,
+                    });
+                  }
+                }
               } else {
                 // Insert new stage
                 await tx.mutate.stages.insert({
@@ -8762,6 +8800,20 @@ export function createMutators(
                     });
                   }
                 }
+
+                // Create release status mappings for new stage
+                if (stage.releaseStatuses && stage.releaseStatuses.length > 0) {
+                  for (const releaseStatus of stage.releaseStatuses) {
+                    const mappingKey = `${stage.sequenceNumber}-${releaseStatus}`;
+                    await tx.mutate.stage_release_status_mappings.insert({
+                      workspaceId: authData.workspaceId,
+                      id: releaseStatusMappingIds[mappingKey] ?? uuidv4(),
+                      stageId,
+                      releaseStatus: releaseStatus,
+                      createdAt: now,
+                    });
+                  }
+                }
               }
             }
 
@@ -8784,6 +8836,16 @@ export function createMutators(
                 );
                 for (const mapping of existingMappings) {
                   await tx.mutate.stage_pr_status_mappings.delete({
+                    id: mapping.id,
+                  });
+                }
+
+                // Delete release status mappings
+                const existingReleaseMappings = await tx.run(
+                  zql.stage_release_status_mappings.where('stageId', existingStage.id)
+                );
+                for (const mapping of existingReleaseMappings) {
+                  await tx.mutate.stage_release_status_mappings.delete({
                     id: mapping.id,
                   });
                 }

@@ -15,6 +15,7 @@ import {
   type WhenFieldType,
   type ThenFieldType,
   WHEN_FIELD_OPTIONS,
+  RELEASE_STATUS_OPTIONS,
   WHEN_CONDITION_OPTIONS,
   THEN_FIELD_OPTIONS,
   THEN_CONDITION_OPTIONS,
@@ -156,6 +157,10 @@ export const ConditionBuilder = ({
     if (whenField === 'pr_status' && whenValue) {
       return `PR Status - ${whenValue}`;
     }
+    // For Release Status conditions: "Release Status - ${releaseStatus}"
+    if (whenField === 'release_status' && whenValue) {
+      return `Release Status - ${whenValue}`;
+    }
     // For Form conditions: "${formName}"
     if (thenField === 'form' && thenValue) {
       return `Form - ${formMap.get(thenValue) || 'Form'}`;
@@ -254,6 +259,9 @@ export const ConditionBuilder = ({
     }
     if (whenField === 'pr_status') {
       return PR_STATUS_OPTIONS;
+    }
+    if (whenField === 'release_status') {
+      return RELEASE_STATUS_OPTIONS;
     }
     if (whenField === 'form') {
       // Use next stage name - show as dropdown with single option

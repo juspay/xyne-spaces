@@ -3999,6 +3999,7 @@ export const queries = defineQueries({
           .orderBy('sequenceNumber', 'asc')
           .related('approvers')
           .related('prStatusMappings')
+          .related('releaseStatusMappings')
           .related('formContextMappings', fcm => fcm.related('form')),
       )
       .related('formContextMappings', mappingQuery => mappingQuery.related('formFields', q => q.related('globalField')))

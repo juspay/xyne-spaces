@@ -1,7 +1,7 @@
 import { FormFieldType } from '@xyne/shared';
 
 // ─── Condition Builder Field Types ───────────────────────────────────────────
-export type WhenFieldType = 'status' | 'pr_status' | 'form';
+export type WhenFieldType = 'status' | 'pr_status' | 'release_status' | 'form';
 export type ThenFieldType = 'form' | 'status' | 'approver';
 
 export interface WhenFieldOption {

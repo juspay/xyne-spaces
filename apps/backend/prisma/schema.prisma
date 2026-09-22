@@ -1803,6 +1803,22 @@ model StagePRStatusMapping {
   @@schema("public")
 }
 
+// Stage <-> release-status mapping: "when the release carrying a dev ticket
+// moves to <releaseStatus>, move the dev ticket to this stage". Mirrors
+// StagePRStatusMapping; one stage per release status per board (validated in
+// the write paths, like PR statuses).
+model StageReleaseStatusMapping {
+  workspaceId   String // denormalized tenant key (stamped on insert)
+  id            String   @id @default(cuid())
+  stageId       String   // Stage ID (no FK constraint)
+  releaseStatus String   // TicketStatusV2 of the release ticket
+  createdAt     DateTime @default(now())
+
+  @@unique([stageId, releaseStatus])
+  @@map("stage_release_status_mappings")
+  @@schema("public")
+}
+
 // Stage transition table — defines allowed movements and gates for NON_LINEAR boards
 model StageTransition {
   workspaceId String // denormalized tenant key (stamped on insert)
