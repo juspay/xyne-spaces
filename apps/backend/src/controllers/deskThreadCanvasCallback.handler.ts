@@ -9,6 +9,7 @@ import type { CanvasMetadata } from '@/services/deskThreadCanvasService';
 import { randomUUID } from 'crypto';
 
 const FALLBACK_AUTHOR = 'desk-thread-canvas';
+const FAILURE_REASON = 'Unexpected persistence failure';
 
 /** Replaces the "Generating canvas from thread…" placeholder seeded at dispatch. */
 function buildFailureBlocks(reason: string): BlockNoteBlock[] {
@@ -29,11 +30,12 @@ function buildFailureBlocks(reason: string): BlockNoteBlock[] {
   ];
 }
 
-// Mirrors automations/steps/run-agent.step.ts stripJsonFence/parseAgentJson —
-// the agent is asked for {"markdown": "..."} but may wrap it in a fence.
+// The agent is asked for {"markdown": "..."} but may wrap it in a fence. Sliced,
+// not matched: the obvious fence regex backtracks quadratically on agent-
+// controlled input (CodeQL polynomial-ReDoS).
 function stripJsonFence(text: string): string {
-  const fence = /^```(?:json)?\s*([\s\S]*?)\s*```$/i.exec(text);
-  return fence?.[1]?.trim() ?? text;
+  if (text.length < 6 || !text.startsWith('```') || !text.endsWith('```')) return text;
+  return text.slice(3, -3).replace(/^json/i, '').trim();
 }
 
 function extractMarkdown(payload: Record<string, unknown>): string | null {
@@ -153,11 +155,18 @@ export async function handleDeskThreadCanvasCallback(
       await runAsServiceActor('desk-thread-canvas-callback', workspaceId, () =>
         db.canvas.update({
           where: { id: canvasId },
-          data: { metadata: { ...metadata, generationStatus: 'FAILED', error: 'Unexpected persistence failure' } },
+          data: { metadata: { ...metadata, generationStatus: 'FAILED', error: FAILURE_REASON } },
         }),
       );
     } catch (markErr) {
       logger.error('[DeskThreadCanvas] failed even to mark FAILED', { canvasId, error: markErr });
+    }
+    // As fail() does — otherwise the placeholder stands and the run looks stuck.
+    // Uses route params only: `canvas` may not have loaded here.
+    try {
+      await syncToYSweet(canvasId, buildFailureBlocks(FAILURE_REASON), FALLBACK_AUTHOR);
+    } catch (syncErr) {
+      logger.error('[DeskThreadCanvas] failed to write the failure block', { canvasId, error: syncErr });
     }
     res.json({ success: true, persisted: false });
   }

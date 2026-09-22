@@ -89,7 +89,7 @@ import {
   BarchartDefault as BarChart3,
   UserPlus,
   InformationCircle as InfoIcon,
-  FileBarGraph,
+  FileText,
   File02Text,
   File02Plus,
 } from '@xyne/icons';
@@ -3288,7 +3288,7 @@ const SupportScreen = (): ReactElement => {
                               data-track-name='OpenDeskReport'
                               data-track-metadata={JSON.stringify({ channelId: selectedChannelId })}
                             >
-                              <FileBarGraph size={16} />
+                              <FileText size={16} />
                             </button>
                           </Tooltip>
                         )}

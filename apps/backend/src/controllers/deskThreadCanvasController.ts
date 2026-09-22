@@ -10,7 +10,8 @@ const prisma = DatabaseClient.getInstance();
 
 const CreateDeskThreadCanvasSchema = z.object({
   scope: z.enum(['chat', 'email', 'both']),
-  labels: z.array(z.string()).default([]),
+  // Bounded: these reach the agent's prompt (see buildTask).
+  labels: z.array(z.string().max(64)).max(10).default([]),
   includeMerged: z.boolean().default(false),
 });
 
@@ -20,12 +21,12 @@ export class DeskThreadCanvasController {
   createCanvasFromThread = async (req: Request, res: Response): Promise<void> => {
     try {
       const { ticketId } = req.params;
-      const userId = req.user?.id;
-      const workspaceId = req.user?.workspaceId;
-      if (!userId || !workspaceId) {
+      const user = req.user;
+      if (!user?.id || !user.workspaceId) {
         res.status(401).json({ error: 'Unauthorized' });
         return;
       }
+      const { id: userId, workspaceId } = user;
 
       const parsed = CreateDeskThreadCanvasSchema.safeParse(req.body);
       if (!parsed.success) {
@@ -53,7 +54,7 @@ export class DeskThreadCanvasController {
       const { scope, labels, includeMerged } = parsed.data;
       const result = await deskThreadCanvasService.dispatch({
         ticket,
-        user: { id: userId, name: req.user?.name ?? req.user?.displayName ?? null, email: req.user!.email, workspaceId },
+        user: { id: userId, name: user.name ?? user.displayName ?? null, email: user.email, workspaceId },
         scope,
         labels,
         includeMerged,

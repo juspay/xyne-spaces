@@ -28,6 +28,9 @@ interface AddThreadToCanvasDialogProps {
   onSuccess: (canvasId: string) => void;
 }
 
+const MAX_LABELS = 10;
+const MAX_LABEL_LENGTH = 64;
+
 const SCOPE_OPTIONS: Array<{ value: ThreadCanvasScope; label: string }> = [
   { value: 'both', label: 'Chat + Email' },
   { value: 'chat', label: 'Chat thread' },
@@ -90,7 +93,10 @@ export const AddThreadToCanvasDialog = ({
   const addLabel = useCallback((name: string): void => {
     const trimmed = name.trim();
     if (!trimmed) return;
-    setLabels(prev => (prev.includes(trimmed) ? prev : [...prev, trimmed]));
+    // Caps mirror the server's zod schema; over them is a 400.
+    setLabels(prev =>
+      prev.includes(trimmed) || prev.length >= MAX_LABELS ? prev : [...prev, trimmed],
+    );
     setLabelInput('');
   }, []);
 
@@ -196,6 +202,8 @@ export const AddThreadToCanvasDialog = ({
                 addLabel(labelInput);
               }
             }}
+            maxLength={MAX_LABEL_LENGTH}
+            disabled={labels.length >= MAX_LABELS}
             placeholder='Type a label and press Enter'
             className='w-full rounded-[10px] border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground outline-none focus:border-primary'
             data-track-category='Support'
