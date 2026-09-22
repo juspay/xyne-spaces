@@ -269,7 +269,6 @@ export function StepCard({
                   issues={issues ?? null}
                   pathPrefix={pathPrefix}
                   variableSources={variableSources}
-                  readOnly={readOnly}
                 />
               ) : (
                 <SchemaForm

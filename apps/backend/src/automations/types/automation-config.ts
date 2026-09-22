@@ -5,7 +5,7 @@ import { ControlFlowStepType } from './known-types';
 import { ConditionOperator, ConditionOperatorSchema } from './operators';
 import { TAG_FORMAT_REGEX } from '@xyne/shared';
 import { calculateETADeadline } from '@/utils/etaCalculation';
-import { addBusinessTime, BusinessHoursSchema, parseBusinessHours } from '../util/business-hours';
+import { addBusinessTime, BusinessHoursSchema } from '../util/business-hours';
 
 function isValidHasTagValue(value: unknown): boolean {
   if (typeof value !== 'string') return false;
@@ -197,9 +197,9 @@ export function computeScheduleRunAt(
     return fieldDate.getTime() + offsetMs;
   }
 
-  const configuredHours = parseBusinessHours(schedule.businessHours);
-  if (configuredHours) {
-    return addBusinessTime(fieldDate, offsetMs, configuredHours).getTime();
+  const hours = BusinessHoursSchema.safeParse(schedule.businessHours);
+  if (hours.success) {
+    return addBusinessTime(fieldDate, offsetMs, hours.data)?.getTime() ?? null;
   }
 
   const seconds = Math.floor(offsetMs / 1000);

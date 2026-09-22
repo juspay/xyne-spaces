@@ -6,16 +6,8 @@ import type {
   SwitchStepConfig,
   Condition,
 } from '../types/automation-config';
-import {
-  getVariableRefInnerSchema,
-  MAX_SCHEDULE_OFFSET_MS,
-  scheduleOffsetMs,
-} from '../types/automation-config';
-import {
-  formatCalendarSpan,
-  maxBusinessWaitCalendarMs,
-  parseBusinessHours,
-} from '../util/business-hours';
+import { getVariableRefInnerSchema, scheduleOffsetMs } from '../types/automation-config';
+import { BusinessHoursSchema, fitsWithinMaxWait } from '../util/business-hours';
 import { ControlFlowStepType } from '../types/known-types';
 import { ValidationIssueCode } from '../types/validation';
 import type { ValidationIssue, ValidationResult } from '../types/validation';
@@ -275,37 +267,21 @@ export class ConfigValidator {
       }
     }
 
-    this.validateScheduleBusinessHours(config.schedule, issues);
+    const schedule = config.schedule;
+    if (schedule?.type === 'SCHEDULED' && schedule.businessHoursOnly && schedule.businessHours) {
+      const hours = BusinessHoursSchema.safeParse(schedule.businessHours);
+      if (!hours.success || !fitsWithinMaxWait(scheduleOffsetMs(schedule.offset), hours.data)) {
+        issues.push({
+          path: 'schedule.businessHours',
+          code: ValidationIssueCode.SHAPE,
+          message: 'Business hours need a working day and an end time after the start, and the wait must fit within 30 calendar days.',
+        });
+      }
+    }
 
     this.walkSteps(config.steps, 'steps', outputSchemas, issues);
 
     return { valid: issues.length === 0, issues };
-  }
-
-  private validateScheduleBusinessHours(
-    schedule: AutomationConfig['schedule'],
-    issues: ValidationIssue[],
-  ): void {
-    if (schedule?.type !== 'SCHEDULED' || !schedule.businessHoursOnly || !schedule.businessHours) {
-      return;
-    }
-    const hours = parseBusinessHours(schedule.businessHours);
-    if (!hours) {
-      issues.push({
-        path: 'schedule.businessHours',
-        code: ValidationIssueCode.SHAPE,
-        message: 'Business hours need at least one working day and an end time after the start time.',
-      });
-      return;
-    }
-    const worstMs = maxBusinessWaitCalendarMs(scheduleOffsetMs(schedule.offset), hours);
-    if (worstMs > MAX_SCHEDULE_OFFSET_MS) {
-      issues.push({
-        path: 'schedule.offset',
-        code: ValidationIssueCode.SHAPE,
-        message: `With these business hours this wait can take up to ${formatCalendarSpan(worstMs)}, which exceeds the maximum of 30 calendar days.`,
-      });
-    }
   }
 
   private walkSteps(
