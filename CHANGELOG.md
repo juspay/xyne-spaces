@@ -1,3 +1,10 @@
+## [1.365.1](https://github.com/juspay/xyne-spaces/compare/v1.365.0...v1.365.1) (2026-09-22)
+
+
+### Bug Fixes
+
+* keep the SDLC hub and page across reloads and frame resets ([#2125](https://github.com/juspay/xyne-spaces/issues/2125)) ([dc95da9](https://github.com/juspay/xyne-spaces/commit/dc95da97a4441d3b0cd5ddd1ab8968b3c649db84))
+
 ## [1.365.0](https://github.com/juspay/xyne-spaces/compare/v1.364.0...v1.365.0) (2026-09-22)
 
 
