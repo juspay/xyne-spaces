@@ -192,10 +192,6 @@ const toActualFieldValueQueryValue = (
 ): string | number | boolean =>
   typeof value === 'string' ? JSON.stringify(value) : value;
 
-const toDeskActualFieldValueQueryValue = (
-  value: string | number | boolean,
-): string | number | boolean => value;
-
 const supportDynamicFieldFiltersSchema = z
   .array(
     z.object({
@@ -220,7 +216,7 @@ const applySupportDynamicFieldFilters = (
         fevQuery = fevQuery.where((helpers: any) =>
           helpers.or(
             ...values.map((value: string | number | boolean) =>
-              helpers.cmp('actualFieldValue', '=', toDeskActualFieldValueQueryValue(value)),
+              helpers.cmp('actualFieldValue', '=', toActualFieldValueQueryValue(value)),
             ),
           ),
         );
@@ -3962,6 +3958,42 @@ export const queries: AnyQueryRegistry = defineQueries({
             ),
           ),
         );
+    }
+  ),
+
+  // All app/bot participants of a channel — used at the parent for the
+  // Agents & Apps tab count.
+  channelAppParticipants: defineQuery(
+    z.object({ channelId: z.string() }),
+    ({ args: { channelId } }) => {
+      return zql.channel_participants
+        .where('channelId', channelId)
+        .whereExists('user', (u) =>
+          u.where('userType', 'IN', [UserType.APP, UserType.BOT]),
+        );
+    }
+  ),
+
+  // Paginated human members of a channel — excludes apps/bots server-side so
+  // the Members tab never leaks them into its list.
+  channelHumanParticipantsPaginated: defineQuery(
+    z.object({
+      channelId: z.string(),
+      limit: z.number(),
+      start: z.object({ role: z.nativeEnum(ChannelRole), userId: z.string() }).nullable(),
+    }),
+    ({ args: { channelId, limit, start } }) => {
+      let query = zql.channel_participants
+        .where('channelId', channelId)
+        .whereExists('user', (u) => u.where('userType', '=', UserType.USER))
+        .orderBy('role', 'asc')
+        .orderBy('userId', 'asc');
+
+      if (start) {
+        query = query.start({ role: start.role, userId: start.userId }, { inclusive: false });
+      }
+
+      return query.limit(limit);
     }
   ),
 

@@ -1483,7 +1483,7 @@ export class AuthV2Controller {
       
       if (sessionId) {
         logger.info(`[${requestId}] Revoking session for user ${req.user?.email}`);
-        await this.userSessionService.revokeSession(sessionId);
+        await this.userSessionService.revokeSession(sessionId, 'USER_LOGOUT');
       }
 
       if (req.user && sessionId) {
@@ -1623,6 +1623,11 @@ export class AuthV2Controller {
         return;
       }
 
+      // Reaching here without a pending-auth cookie means the existingSessionId
+      // branch above ran (the only other non-early-return path) — the user was
+      // already signed in and this is a workspace pick, not a fresh sign-in.
+      const isAutoLogin = !pendingAuthCookie;
+
       if (!oauthUserData?.email) {
         logger.warn(`[LOGIN-WORKSPACE] Workspace login rejected (platform=${platform}, reason=missing_user_data)`);
         res.status(401).json({
@@ -1684,6 +1689,7 @@ export class AuthV2Controller {
             accessTokenExpiry: pendingAccessTokenExpiry,
             deviceInfo,
             ipAddress: req.ip || req.connection.remoteAddress || undefined,
+            loginMethod: isAutoLogin ? 'AUTO_LOGIN' : undefined,
           });
 
           sessionId = session.id;
@@ -2406,6 +2412,8 @@ export class AuthV2Controller {
             accessToken: currentSession.accessToken ?? undefined,
             deviceInfo: JSON.stringify({ userAgent: req.headers['user-agent'], timestamp: new Date().toISOString(), appVersion: req.headers['x-app-version'] }),
             ipAddress: req.ip || req.connection.remoteAddress || undefined,
+            // Already signed in — a session for the workspace they just created.
+            loginMethod: 'WORKSPACE_CREATED',
           });
           newSessionId = newSession.id;
         } catch (sessionError) {

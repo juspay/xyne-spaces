@@ -5,6 +5,7 @@ import { EmptyState } from '../EmptyState';
 import { DelayedSpinner } from '../../ui/DelayedSpinner';
 import { Button } from '../../ui/Button';
 import { copyTextToClipboard } from '../../../utils/clipboardUtils';
+import { formatDateNumeric } from '../../../utils/dateUtils';
 import { toast } from 'sonner';
 import { getBoardEditLabel } from '../BoardCard';
 import type { BoardWithStages } from '../BoardCard';
@@ -43,6 +44,7 @@ interface BoardsTableProps {
   // True while the boards query is still resolving. Distinguishes
   // "still loading" from "genuinely no boards" so we don't flash the empty state.
   loading?: boolean;
+  showTypeColumn?: boolean;
 }
 
 type RowKind =
@@ -61,6 +63,7 @@ export const BoardsTable = ({
   onBoardClick,
   onWorkflowFields,
   loading = false,
+  showTypeColumn = true,
 }: BoardsTableProps): ReactElement => {
   const [copiedBoardId, setCopiedBoardId] = useState<string | null>(null);
 
@@ -180,9 +183,11 @@ export const BoardsTable = ({
             <th className='px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider'>
               Board Name
             </th>
-            <th className='px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider'>
-              Type
-            </th>
+            {showTypeColumn && (
+              <th className='px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider'>
+                Type
+              </th>
+            )}
             <th className='px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider'>
               Board ID
             </th>
@@ -217,17 +222,19 @@ export const BoardsTable = ({
                       </span>
                     </div>
                   </td>
-                  <td className='px-6 py-3 whitespace-nowrap'>
-                    <span
-                      className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-medium ${
-                        mainBoard.boardType === BoardType.FLOW
-                          ? 'bg-[#6276be]/10 text-[#6276be]'
-                          : 'bg-muted text-muted-foreground'
-                      }`}
-                    >
-                      {BOARD_TYPE_LABELS[mainBoard.boardType] ?? mainBoard.boardType}
-                    </span>
-                  </td>
+                  {showTypeColumn && (
+                    <td className='px-6 py-3 whitespace-nowrap'>
+                      <span
+                        className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-medium ${
+                          mainBoard.boardType === BoardType.FLOW
+                            ? 'bg-[#6276be]/10 text-[#6276be]'
+                            : 'bg-muted text-muted-foreground'
+                        }`}
+                      >
+                        {BOARD_TYPE_LABELS[mainBoard.boardType] ?? mainBoard.boardType}
+                      </span>
+                    </td>
+                  )}
                   <td className='px-6 py-3 whitespace-nowrap'>
                     <div className='flex items-center gap-1'>
                       <code className='text-xs bg-muted px-1.5 py-0.5 rounded font-mono truncate max-w-[140px] inline-block'>
@@ -248,7 +255,7 @@ export const BoardsTable = ({
                   </td>
                   <td className='px-6 py-3 whitespace-nowrap'>
                     <div className='text-sm text-muted-foreground'>
-                      {new Date(mainBoard.createdAt).toLocaleDateString()}
+                      {formatDateNumeric(mainBoard.createdAt)}
                     </div>
                   </td>
                   <td
@@ -282,7 +289,7 @@ export const BoardsTable = ({
             if (row.type === 'orphanReleaseGroupHeader') {
               return (
                 <tr key={`orphan-${row.mainBoardId}`} className='bg-muted/40'>
-                  <td className='px-6 py-3 whitespace-nowrap' colSpan={5}>
+                  <td className='px-6 py-3 whitespace-nowrap' colSpan={showTypeColumn ? 5 : 4}>
                     <div className='flex items-center gap-2'>
                       <Rocket size={14} className='text-muted-foreground' />
                       <span className='text-sm font-medium text-muted-foreground italic'>
@@ -315,17 +322,19 @@ export const BoardsTable = ({
                       </span>
                     </div>
                   </td>
-                  <td className='px-6 py-4 whitespace-nowrap'>
-                    <span
-                      className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-medium ${
-                        board.boardType === BoardType.FLOW
-                          ? 'bg-[#6276be]/10 text-[#6276be]'
-                          : 'bg-muted text-muted-foreground'
-                      }`}
-                    >
-                      {BOARD_TYPE_LABELS[board.boardType] ?? board.boardType}
-                    </span>
-                  </td>
+                  {showTypeColumn && (
+                    <td className='px-6 py-4 whitespace-nowrap'>
+                      <span
+                        className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-medium ${
+                          board.boardType === BoardType.FLOW
+                            ? 'bg-[#6276be]/10 text-[#6276be]'
+                            : 'bg-muted text-muted-foreground'
+                        }`}
+                      >
+                        {BOARD_TYPE_LABELS[board.boardType] ?? board.boardType}
+                      </span>
+                    </td>
+                  )}
                   <td className='px-6 py-4 whitespace-nowrap'>
                     <div className='flex items-center gap-1'>
                       <code className='text-xs bg-muted px-1.5 py-0.5 rounded font-mono truncate max-w-[140px] inline-block'>
@@ -346,7 +355,7 @@ export const BoardsTable = ({
                   </td>
                   <td className='px-6 py-4 whitespace-nowrap'>
                     <div className='text-sm text-muted-foreground'>
-                      {new Date(board.createdAt).toLocaleDateString()}
+                      {formatDateNumeric(board.createdAt)}
                     </div>
                   </td>
                   <td
@@ -390,17 +399,19 @@ export const BoardsTable = ({
                 <td className='px-6 py-4 whitespace-nowrap'>
                   <span className='text-sm font-medium text-muted-foreground'>{board.name}</span>
                 </td>
-                <td className='px-6 py-4 whitespace-nowrap'>
-                  <span
-                    className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-medium ${
-                      board.boardType === BoardType.FLOW
-                        ? 'bg-[#6276be]/10 text-[#6276be]'
-                        : 'bg-muted text-muted-foreground'
-                    }`}
-                  >
-                    {BOARD_TYPE_LABELS[board.boardType] ?? board.boardType}
-                  </span>
-                </td>
+                {showTypeColumn && (
+                  <td className='px-6 py-4 whitespace-nowrap'>
+                    <span
+                      className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-medium ${
+                        board.boardType === BoardType.FLOW
+                          ? 'bg-[#6276be]/10 text-[#6276be]'
+                          : 'bg-muted text-muted-foreground'
+                      }`}
+                    >
+                      {BOARD_TYPE_LABELS[board.boardType] ?? board.boardType}
+                    </span>
+                  </td>
+                )}
                 <td className='px-6 py-4 whitespace-nowrap'>
                   <div className='flex items-center gap-1'>
                     <code className='text-xs bg-muted px-1.5 py-0.5 rounded font-mono truncate max-w-[140px] inline-block'>
@@ -421,7 +432,7 @@ export const BoardsTable = ({
                 </td>
                 <td className='px-6 py-4 whitespace-nowrap'>
                   <div className='text-sm text-muted-foreground'>
-                    {new Date(board.createdAt).toLocaleDateString()}
+                    {formatDateNumeric(board.createdAt)}
                   </div>
                 </td>
                 <td className='px-6 py-4 whitespace-nowrap text-right text-sm font-medium'>

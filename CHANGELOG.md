@@ -1,3 +1,71 @@
+## [1.371.0](https://github.com/juspay/xyne-spaces/compare/v1.370.0...v1.371.0) (2026-09-22)
+
+
+### Features
+
+* added multiple phone number fields ([#2128](https://github.com/juspay/xyne-spaces/issues/2128)) ([78ed277](https://github.com/juspay/xyne-spaces/commit/78ed277260611d22a548cca3c5e38621c961b784))
+
+## [1.370.0](https://github.com/juspay/xyne-spaces/compare/v1.369.0...v1.370.0) (2026-09-22)
+
+
+### Features
+
+* added queries for agent and apps also added search ([#2191](https://github.com/juspay/xyne-spaces/issues/2191)) ([60d2e9b](https://github.com/juspay/xyne-spaces/commit/60d2e9bb7040a953037219906fe6022862ac874d))
+* always show the Sub-tickets and Linked group headers ([#2185](https://github.com/juspay/xyne-spaces/issues/2185)) ([6b641d5](https://github.com/juspay/xyne-spaces/commit/6b641d5060eaa1eb59d71f93aaa1c0bd00e7a57f))
+* mobile shared  ([#2115](https://github.com/juspay/xyne-spaces/issues/2115)) ([f71d896](https://github.com/juspay/xyne-spaces/commit/f71d8966260194b9f670140e9510cec6827d1d46))
+
+
+### Bug Fixes
+
+* sync user workload inside the assignment engine ([#1855](https://github.com/juspay/xyne-spaces/issues/1855)) ([8f57995](https://github.com/juspay/xyne-spaces/commit/8f5799511176f6b83356986ffc49bc3f9baec010))
+
+## [1.369.0](https://github.com/juspay/xyne-spaces/compare/v1.368.0...v1.369.0) (2026-09-22)
+
+
+### Features
+
+* combine Metrics, Topics Explorer and Desk Report under on… ([#1970](https://github.com/juspay/xyne-spaces/issues/1970)) ([c87f9af](https://github.com/juspay/xyne-spaces/commit/c87f9afd7f8847b8acf036b2fa97bc019c36df75))
+
+
+### Bug Fixes
+
+* default desk report scheduler to off ([#2158](https://github.com/juspay/xyne-spaces/issues/2158)) ([7509f72](https://github.com/juspay/xyne-spaces/commit/7509f72b46583ace95242e3dcaeaab2db2d8d118))
+* release manager commit range, self-referential sub-ticket, boards tab scoping, date format and multi-repo canvas attribution ([#1983](https://github.com/juspay/xyne-spaces/issues/1983)) ([95cc2df](https://github.com/juspay/xyne-spaces/commit/95cc2dfc18a86b56c77d1296fdc211ea73450d1c))
+
+## [1.368.0](https://github.com/juspay/xyne-spaces/compare/v1.367.0...v1.368.0) (2026-09-22)
+
+
+### Features
+
+* Log logout reasons and timestamps ([#2119](https://github.com/juspay/xyne-spaces/issues/2119)) ([8303853](https://github.com/juspay/xyne-spaces/commit/8303853ccad6a949278b3bf26e6679e665da7d6d))
+
+## [1.367.0](https://github.com/juspay/xyne-spaces/compare/v1.366.0...v1.367.0) (2026-09-22)
+
+
+### Features
+
+* move parent tickets into the relationships section ([#2168](https://github.com/juspay/xyne-spaces/issues/2168)) ([46fc657](https://github.com/juspay/xyne-spaces/commit/46fc6579ef2f91ed04693b35ccf094c5e7f394dc))
+* show 5 lines of ticket description before Show more ([#2163](https://github.com/juspay/xyne-spaces/issues/2163)) ([e30a2f8](https://github.com/juspay/xyne-spaces/commit/e30a2f8e810b96965c596a7f022149cca30a950b))
+
+
+### Reverts
+
+* Revert "fix: XYNE-63866 Implement API fallback + query for desk loading perf (#2014)" (#2170) ([f243a1a](https://github.com/juspay/xyne-spaces/commit/f243a1a1ea5e64b3feff5ae666c838ccec3e3877)), closes [#2014](https://github.com/juspay/xyne-spaces/issues/2014) [#2170](https://github.com/juspay/xyne-spaces/issues/2170)
+
+## [1.366.0](https://github.com/juspay/xyne-spaces/compare/v1.365.1...v1.366.0) (2026-09-22)
+
+
+### Features
+
+* stop using calender view cache in list view ([#2164](https://github.com/juspay/xyne-spaces/issues/2164)) ([4bd5eb6](https://github.com/juspay/xyne-spaces/commit/4bd5eb68b2a73b7f5205559063095cd89e682264))
+
+## [1.365.1](https://github.com/juspay/xyne-spaces/compare/v1.365.0...v1.365.1) (2026-09-22)
+
+
+### Bug Fixes
+
+* keep the SDLC hub and page across reloads and frame resets ([#2125](https://github.com/juspay/xyne-spaces/issues/2125)) ([dc95da9](https://github.com/juspay/xyne-spaces/commit/dc95da97a4441d3b0cd5ddd1ab8968b3c649db84))
+
 ## [1.365.0](https://github.com/juspay/xyne-spaces/compare/v1.364.0...v1.365.0) (2026-09-22)
 
 
