@@ -93,7 +93,7 @@ export function countDistinctMigrationFiles(
 const seedMigrationTags = (changeLog: string, repoUrl: string | null | undefined): { tags?: string[] } => {
   const tags = suggestMigrationTags(
     changeLog,
-    isZeroBackedRepo(repoUrl) ? { zeroTables: zeroSyncedTableNames() } : {},
+    isZeroBackedRepo(repoUrl) ? zeroSyncedTableNames() : undefined,
   );
   return tags.length > 0 ? { tags } : {};
 };

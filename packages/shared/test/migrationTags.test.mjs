@@ -71,7 +71,7 @@ test('suggestMigrationTags: corpus false positives stay quiet', () => {
 import { analyzeMigrationSql, isZeroBackedRepo } from '../dist/utils/migrationTags.js';
 
 const zeroTables = new Set(['tickets', 'users', 'canvases']);
-const zeroTags = sql => analyzeMigrationSql(sql, { zeroTables }).filter(f => f.tag.startsWith('zero-'));
+const zeroTags = sql => analyzeMigrationSql(sql, zeroTables).filter(f => f.tag.startsWith('zero-'));
 
 test('isZeroBackedRepo only matches the xyne-spaces repos', () => {
   assert.equal(isZeroBackedRepo('https://github.com/juspay/xyne-spaces'), true);

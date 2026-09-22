@@ -440,12 +440,10 @@ const ReleaseDetailScreen = (): ReactElement => {
     { enabled: !!migrationFormId },
   );
   const migrationFieldIds = useMemo(() => {
-    const ids: Record<string, string> = {};
-    for (const ff of migrationFormFields ?? []) {
-      const name = ff.globalField?.fieldName ?? ff.fieldName;
-      if (name === 'tags' || name === 'note') ids[name] = ff.id;
-    }
-    return ids;
+    const byName = new Map(
+      (migrationFormFields ?? []).map(ff => [ff.globalField?.fieldName ?? ff.fieldName, ff.id]),
+    );
+    return { tags: byName.get('tags'), note: byName.get('note') };
   }, [migrationFormFields]);
   const [stages] = useCachedQuery(queries.stagesByBoards({ projectId: projectId ?? '' }), {
     enabled: !!projectId,
@@ -478,19 +476,18 @@ const ReleaseDetailScreen = (): ReactElement => {
   // Written to every commit row of the file; the card reads the union.
   const handleMigrationMetaChange = useCallback(
     (file: RenderableFileGroup, meta: MigrationMeta): void => {
-      const tagsFieldId = migrationFieldIds['tags'];
-      const noteFieldId = migrationFieldIds['note'];
+      const { tags: tagsFieldId, note: noteFieldId } = migrationFieldIds;
       if (!migrationFormId || !tagsFieldId || !noteFieldId || !releaseTicketId) {
         toast.error('Migration tags are not set up on this workspace yet.');
         return;
       }
       const now = Date.now();
-      const writes: Array<{ fieldName: 'tags' | 'note'; fieldId: string; value: string[] }> = [
-        { fieldName: 'tags', fieldId: tagsFieldId, value: meta.tags },
-        { fieldName: 'note', fieldId: noteFieldId, value: meta.note ? [meta.note] : [] },
-      ];
+      const writes = [
+        ['tags', tagsFieldId, meta.tags],
+        ['note', noteFieldId, meta.note ? [meta.note] : []],
+      ] as const;
       for (const change of file.changes) {
-        for (const { fieldName, fieldId, value } of writes) {
+        for (const [fieldName, fieldId, value] of writes) {
           const existingId = migrationValueIds.get(`${change.id}:${fieldName}`);
           if (!existingId && value.length === 0) continue;
           const mutation = existingId

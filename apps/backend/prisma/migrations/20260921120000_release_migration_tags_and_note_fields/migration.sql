@@ -14,10 +14,8 @@ SELECT
   f."id",
   'tags',
   'MULTI_SELECT',
-  to_jsonb(t.values),
-  -- correlated on f."id" so each form gets its own option ids
-  (SELECT json_agg(json_build_object('id', gen_random_uuid()::text, 'value', v))::text
-     FROM unnest(t.values) AS v WHERE f."id" IS NOT NULL),
+  to_jsonb(tag.values),
+  opts."json",
   true,
   COALESCE((SELECT max(ff."sequenceNumber") FROM "public"."form_fields" ff WHERE ff."formId" = f."id"), 0) + 1,
   now(),
@@ -27,7 +25,14 @@ CROSS JOIN (
   SELECT ARRAY['backward-compatible', 'breaking', 'data-backfill', 'downtime',
                'long-running', 'irreversible', 'manual-step',
                'zero-expand', 'zero-contract', 'zero-unsafe']::text[] AS values
-) t
+) tag
+-- Option ids derived from the form id, so they are unique per form (a
+-- parentOptionId elsewhere must never resolve into another form) and stable if
+-- this ever runs twice.
+CROSS JOIN LATERAL (
+  SELECT json_agg(json_build_object('id', md5(f."id" || v)::uuid::text, 'value', v))::text AS "json"
+  FROM unnest(tag.values) AS v
+) opts
 WHERE f."entityType" = 'RELEASE_MIGRATION_FORM'
   AND NOT EXISTS (
     SELECT 1 FROM "public"."form_fields" ff

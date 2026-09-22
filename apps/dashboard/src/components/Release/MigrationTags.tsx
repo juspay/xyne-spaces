@@ -1,4 +1,4 @@
-import { ReactElement, useEffect, useState } from 'react';
+import { ReactElement } from 'react';
 import { Tag } from 'lucide-react';
 import {
   MIGRATION_TAGS,
@@ -23,21 +23,6 @@ const TAG_STYLES = new Map<MigrationTag, string>([
   ['zero-unsafe', 'bg-red-200 text-red-900 dark:bg-red-900/60 dark:text-red-100'],
 ]);
 
-const TAG_ACTIONS = new Map<MigrationTag, string>([
-  ['breaking', 'deploy app and migration together, no old pods left serving'],
-  ['data-backfill', 'watch write load and row counts while it runs'],
-  ['downtime', 'book a maintenance window and announce it'],
-  ['long-running', 'run off-peak; expect it to hold locks for a while'],
-  ['irreversible', 'take a backup / snapshot first — there is no rollback'],
-  ['manual-step', 'read each migration note before deploying'],
-  ['zero-expand', 'DB → wait for zero-cache replication (and backfill) → API → client'],
-  ['zero-contract', 'client → API → DB, or live clients hit onUpdateNeeded'],
-  [
-    'zero-unsafe',
-    'add a primary key or unique index before this ships — zero-cache cannot replicate it',
-  ],
-]);
-
 const tagMeta = (tag: MigrationTag): { label: string; description: string } =>
   MIGRATION_TAGS.find(t => t.value === tag) ?? { label: tag, description: '' };
 
@@ -47,14 +32,17 @@ export const MigrationTagChip = ({
 }: {
   tag: MigrationTag;
   title?: string;
-}): ReactElement => (
-  <span
-    className={cn('text-[11px] px-2 py-0.5 rounded-full whitespace-nowrap', TAG_STYLES.get(tag))}
-    title={title ?? tagMeta(tag).description}
-  >
-    {tagMeta(tag).label}
-  </span>
-);
+}): ReactElement => {
+  const { label, description } = tagMeta(tag);
+  return (
+    <span
+      className={cn('text-[11px] px-2 py-0.5 rounded-full whitespace-nowrap', TAG_STYLES.get(tag))}
+      title={title ?? description}
+    >
+      {label}
+    </span>
+  );
+};
 
 interface MigrationTagsProps {
   tags: MigrationTag[];
@@ -70,8 +58,6 @@ export const MigrationTags = ({
   findings = [],
   onChange,
 }: MigrationTagsProps): ReactElement => {
-  const [draftNote, setDraftNote] = useState(note);
-  useEffect(() => setDraftNote(note), [note]);
   const evidenceFor = (tag: MigrationTag): string | undefined =>
     findings.find(f => f.tag === tag)?.evidence;
 
@@ -133,12 +119,14 @@ export const MigrationTags = ({
           <label className='mt-2 block border-t border-border pt-2 text-xs text-muted-foreground'>
             Deployment note
             <textarea
-              value={draftNote}
+              // Uncontrolled: remounts when the saved note changes, saves on blur.
+              key={note}
+              defaultValue={note}
               data-track-category='Release'
               data-track-name='EDIT_MIGRATION_NOTE'
-              onChange={e => setDraftNote(e.target.value)}
-              onBlur={() => {
-                if (draftNote.trim() !== note) onChange({ tags, note: draftNote.trim() });
+              onBlur={e => {
+                const next = e.target.value.trim();
+                if (next !== note) onChange({ tags, note: next });
               }}
               rows={2}
               placeholder='Why it is risky, what to run first, who to ping…'
@@ -179,7 +167,8 @@ export const MigrationRiskSummary = ({
   const counts = new Map<MigrationTag, number>();
   for (const tags of tagsByFile) for (const t of tags) counts.set(t, (counts.get(t) ?? 0) + 1);
   const untagged = tagsByFile.filter(t => t.length === 0).length;
-  const actions = [...counts.keys()].filter(t => TAG_ACTIONS.has(t));
+  // `backward-compatible` is the one tag that asks nothing of the deployer.
+  const advice = [...counts.keys()].filter(t => t !== 'backward-compatible');
 
   return (
     <div className='rounded-lg border border-border bg-muted/30 px-4 py-3 space-y-2'>
@@ -197,14 +186,16 @@ export const MigrationRiskSummary = ({
           <span className='text-xs text-muted-foreground'>· {untagged} untagged</span>
         )}
       </div>
-      {actions.length > 0 && (
+      {advice.length > 0 && (
         <ul className='space-y-0.5 text-xs text-muted-foreground'>
-          {actions.map(tag => (
-            <li key={tag}>
-              <span className='font-medium text-foreground'>{tagMeta(tag).label}:</span>{' '}
-              {TAG_ACTIONS.get(tag)}
-            </li>
-          ))}
+          {advice.map(tag => {
+            const { label, description } = tagMeta(tag);
+            return (
+              <li key={tag}>
+                <span className='font-medium text-foreground'>{label}:</span> {description}
+              </li>
+            );
+          })}
         </ul>
       )}
     </div>

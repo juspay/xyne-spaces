@@ -231,24 +231,20 @@ const ChangeCard = ({
   const changeCount = f.changes.length;
   // Union of tags / first note across the file's commit rows.
   const { tags, note, findings } = useMemo(() => {
-    const tagSet = new Set<MigrationTag>();
-    const found: MigrationFinding[] = [];
-    let firstNote = '';
-    if (!isEnv) {
-      const zero = isZeroBackedRepo(repoUrl) ? { zeroTables: zeroSyncedTableNames() } : {};
-      for (const c of f.changes) {
-        const bag = valuesByChangeId.get(c.id) ?? {};
-        parseMigrationTags(bag['tags']).forEach(t => tagSet.add(t));
-        if (!firstNote && bag['note']) firstNote = bag['note'];
-        if (bag['changeLog']) {
-          for (const finding of analyzeMigrationSql(bag['changeLog'], zero)) {
-            if (!found.some(x => x.tag === finding.tag && x.evidence === finding.evidence))
-              found.push(finding);
-          }
-        }
-      }
-    }
-    return { tags: [...tagSet], note: firstNote, findings: found };
+    if (isEnv) return { tags: [] as MigrationTag[], note: '', findings: [] as MigrationFinding[] };
+    const bags = f.changes.map(c => valuesByChangeId.get(c.id) ?? {});
+    const zeroTables = isZeroBackedRepo(repoUrl) ? zeroSyncedTableNames() : undefined;
+    const sqls = new Set(bags.flatMap(bag => (bag['changeLog'] ? [bag['changeLog']] : [])));
+    const findingsByKey = new Map(
+      [...sqls]
+        .flatMap(sql => analyzeMigrationSql(sql, zeroTables))
+        .map(finding => [`${finding.tag}:${finding.evidence}`, finding]),
+    );
+    return {
+      tags: [...new Set(bags.flatMap(bag => parseMigrationTags(bag['tags'])))],
+      note: bags.find(bag => bag['note'])?.['note'] ?? '',
+      findings: [...findingsByKey.values()],
+    };
   }, [f.changes, isEnv, repoUrl, valuesByChangeId]);
 
   return (
