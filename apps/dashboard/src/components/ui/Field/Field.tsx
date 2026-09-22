@@ -13,7 +13,7 @@ export const FieldError: React.FC<FieldErrorProps> = ({ error, className }) => (
     aria-live='polite'
     className={cn(
       'overflow-hidden transition-[max-height,opacity] duration-200 ease-out',
-      error ? 'mt-[7px] max-h-10 opacity-100' : 'max-h-0 opacity-0',
+      error ? 'mt-[7px] max-h-10 opacity-100' : 'hidden',
       className,
     )}
   >

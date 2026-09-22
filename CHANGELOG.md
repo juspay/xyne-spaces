@@ -1,3 +1,17 @@
+## [1.361.3](https://github.com/juspay/xyne-spaces/compare/v1.361.2...v1.361.3) (2026-09-22)
+
+
+### Bug Fixes
+
+* address review findings and collapse label chips ([#2144](https://github.com/juspay/xyne-spaces/issues/2144)) ([5988638](https://github.com/juspay/xyne-spaces/commit/5988638515253d4835fec302a7f6d7550770d3e8))
+
+## [1.361.2](https://github.com/juspay/xyne-spaces/compare/v1.361.1...v1.361.2) (2026-09-22)
+
+
+### Bug Fixes
+
+* show starred section in cmd+k search ([#2114](https://github.com/juspay/xyne-spaces/issues/2114)) ([ea0fc27](https://github.com/juspay/xyne-spaces/commit/ea0fc27000526f48d55bcb1a5d4f14e0a0a36573))
+
 ## [1.361.1](https://github.com/juspay/xyne-spaces/compare/v1.361.0...v1.361.1) (2026-09-22)
 
 

@@ -16,6 +16,7 @@ import {
   ChannelScopeType,
   FormContextType,
   FormEntityType,
+  FormFieldType,
   LookupType,
   TicketPriority,
   TicketStatusV2,
@@ -1338,6 +1339,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
         for (const field of allFields) {
           // Only validate required fields (isOptional must be true to skip, otherwise validate)
           if (field.isOptional === true) continue;
+          if (field.fieldType === FormFieldType.DOC) continue;
           // Inactive branch fields were never shown to fill in — same rule the backend uses.
           if (!isFieldActive(field, allFields, getFieldEffectiveValue)) continue;
 
@@ -2061,6 +2063,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
     const missing: Record<string, string> = {};
     for (const field of visibleDynamicFields) {
       if (field.isOptional === true) continue;
+      if (field.fieldType === FormFieldType.DOC) continue;
       const value = values.dynamicFields?.[field.fieldName];
       const empty =
         !value ||
@@ -2071,10 +2074,12 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
     setDynamicFieldErrors(missing);
 
     if (!values.title?.trim()) {
+      void form.validateAllFields('submit');
       titleInputRef.current?.focus();
       return;
     }
     if (!values.description || values.description.trim().length < 5) {
+      void form.validateAllFields('submit');
       descriptionTextareaRef.current?.focus();
       return;
     }
@@ -2916,8 +2921,9 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                     placeholder={`Label${mandatoryLabels ? ' *' : ''}`}
                     searchPlaceholder='Search labels'
                     showSearch={true}
-                    collapseSelectedAfter={2}
-                    collapsedLabel='labels'
+                    collapseSelectedAfter={0}
+                    previewIcons={3}
+                    collapsedLabel='label'
                     inputIcon={<Tag strokeWidth={2.33} className='size-3.5' />}
                   />
                 )}
