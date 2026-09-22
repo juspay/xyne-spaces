@@ -2,8 +2,8 @@ apiVersion: v2
 name: xyne-lighton-ocr
 description: Xyne Spaces LightOn OCR service (Python/FastAPI) - CPU-only OCR wrapper that rasterizes documents and calls an external LightOnOCR model
 type: application
-version: 0.1.0-app.1.348.0-release-20260921.3
-appVersion: "1.348.0-release-20260921.3"
+version: 0.1.0-app.1.361.1-release-20260922.1
+appVersion: "1.361.1-release-20260922.1"
 keywords:
   - xyne
   - ocr

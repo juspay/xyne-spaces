@@ -2,7 +2,7 @@ apiVersion: v2
 name: xyne-vespa
 description: Vespa node - one install per role (configserver, content, feed, search)
 type: application
-version: 0.1.0-app.1.348.0-release-20260921.3
+version: 0.1.0-app.1.361.1-release-20260922.1
 appVersion: "0.0.0"
 keywords:
   - xyne

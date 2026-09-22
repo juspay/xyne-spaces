@@ -2,8 +2,8 @@ apiVersion: v2
 name: xyne-backend
 description: Xyne Spaces backend API (Node.js) - REST API, Zero mutate/query endpoints and in-process workers
 type: application
-version: 0.1.0-app.1.348.0-release-20260921.3
-appVersion: "1.348.0-release-20260921.3"
+version: 0.1.0-app.1.361.1-release-20260922.1
+appVersion: "1.361.1-release-20260922.1"
 keywords:
   - xyne
   - backend
