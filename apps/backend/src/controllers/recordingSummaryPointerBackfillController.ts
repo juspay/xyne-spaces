@@ -38,7 +38,7 @@ import {
  * Idempotent: only rows whose pointer is still absent are selected, so re-running
  * after the pipeline cutover picks up just the stragglers.
  *
- * Runs inside runAsSystem(): `db` is the ACL-wrapped client, and Call/Canvas both
+ * Runs inside bypassAcl's asSystem: `db` is the ACL-wrapped client, and Call/Canvas both
  * carry a workspaceId scalar, so an ordinary request context would silently narrow
  * this to the calling admin's own rows (isRequestContext() applies the per-table
  * user ACL) or at best to their single workspace. This repair spans every

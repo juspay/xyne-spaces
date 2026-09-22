@@ -6,25 +6,8 @@ import {
   trackMembershipRowsFor,
   type LegacySdlcHub,
 } from '@/sdlc/sdlcMembershipRows';
-import { rawQuery, asSystem } from './base';
+import { asSystem } from './base';
 import type { SdlcMultirepoBackfillInput, SdlcMultirepoBackfillResult } from '@/sdlc/cleanup/multirepoBackfill';
-
-/**
- * Relocated from sdlc/cleanup/multirepoBackfill.ts. `channelId` is required in Prisma and
- * nullable only for these legacy, not-yet-migrated rows, so the typed filters can't name them
- * — raw SQL is the only way to reach a column state the schema itself says shouldn't exist.
- */
-export function stampLegacyLinks(repoId: string, channelId: string): Promise<number> {
-  return rawQuery(
-    ['SdlcEntityLink'],
-    'multirepo backfill: legacy rows have a column state the typed filters cannot express',
-    () => db.$executeRaw`
-      UPDATE "public"."sdlc_entity_links" SET "channelId" = ${channelId}
-      WHERE "repoId" = ${repoId} AND "channelId" IS NULL
-    `,
-  );
-}
-
 import { repositoryHost } from '@/sdlc/vcs/repositoryHost';
 import { SDLC_VCS_EXTERNAL_SOURCE_TYPE } from '@/sdlc/vcs/SdlcVcsCredentialStore';
 import { SDLC_GITHUB_HOST } from '@xyne/shared';
@@ -98,17 +81,19 @@ async function readHubs(limit: number, afterId: string | null): Promise<LegacySd
 // Raw because the column is required in Prisma and nullable only for these rows,
 // so the typed filters cannot name them.
 function countLegacyLinks(repoId: string): Promise<number> {
-  return rawQuery(
-    ['SdlcEntityLink'],
-    'multirepo backfill: legacy rows have a column state the typed filters cannot express',
-    () =>
-      db
-        .$queryRaw<Array<{ count: bigint }>>`
+  return db
+    .$queryRaw<Array<{ count: bigint }>>`
       SELECT count(*) FROM "public"."sdlc_entity_links"
       WHERE "repoId" = ${repoId} AND "channelId" IS NULL
     `
-        .then(rows => Number(rows[0]?.count ?? 0)),
-  );
+    .then(rows => Number(rows[0]?.count ?? 0));
+}
+
+function stampLegacyLinks(repoId: string, channelId: string): Promise<number> {
+  return db.$executeRaw`
+    UPDATE "public"."sdlc_entity_links" SET "channelId" = ${channelId}
+    WHERE "repoId" = ${repoId} AND "channelId" IS NULL
+  `;
 }
 
 /** A hub's tracks, by the repository column they were scoped by. */

@@ -24,7 +24,7 @@ import { z } from 'zod';
  * partial pass picks up exactly the stragglers. A dryRun pass reports what a real
  * one would write; all zeros means the migration is complete.
  *
- * The implementation runs inside runAsSystem() — db is the ACL-wrapped client and
+ * The implementation runs inside bypassAcl's asSystem — db is the ACL-wrapped client and
  * every table here carries a workspaceId scalar, so an ordinary request context
  * would silently narrow this to the calling admin's own workspace. This repair
  * spans all of them. See bypassAcl/sdlcServices.ts for backfillSdlcMultirepo.

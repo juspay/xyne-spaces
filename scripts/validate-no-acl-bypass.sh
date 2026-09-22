@@ -14,19 +14,19 @@ else
   RED=''; YELLOW=''; GREEN=''; RESET=''
 fi
 
-# .$transaction( is deliberately NOT checked here — that relocation is tracked in a separate PR.
-# Add it back (label ".\$transaction(", pattern '\.\$transaction\(') once that lands.
+# Only runAsSystem is checked here for now — it's the only category fully relocated into
+# bypassAcl/ so far. runAsServiceActor, $queryRaw/$executeRaw, and .$transaction( are each
+# being done as separate PRs; add each back once its relocation lands:
+#   label "runAsServiceActor(",                    pattern 'runAsServiceActor\('
+#   label "\$queryRaw / \$executeRaw (incl. *Unsafe)", pattern '\$(query|execute)Raw(Unsafe)?'
+#   label ".\$transaction(",                        pattern '\.\$transaction\('
 #
 # Each entry: human label, grep -E pattern.
 declare -a LABELS=(
   "runAsSystem("
-  "runAsServiceActor("
-  "\$queryRaw / \$executeRaw (incl. *Unsafe)"
 )
 declare -a PATTERNS=(
   'runAsSystem\('
-  'runAsServiceActor\('
-  '\$(query|execute)Raw(Unsafe)?'
 )
 
 violations=0
@@ -54,9 +54,10 @@ for i in "${!PATTERNS[@]}"; do
 done
 
 if [ "$violations" -gt 0 ]; then
-  echo "These are ways to reach the database without going through the Prisma tenant ACL"
-  echo "extension (apps/backend/src/database/tenant/acl-extension.ts). (.\$transaction( is"
-  echo "tracked separately and not checked by this script for now.)"
+  echo "runAsSystem is a way to reach the database without going through the Prisma tenant ACL"
+  echo "extension (apps/backend/src/database/tenant/acl-extension.ts). (runAsServiceActor,"
+  echo "\$queryRaw/\$executeRaw, and .\$transaction( are tracked separately and not checked by"
+  echo "this script for now.)"
   echo "Every call site must live in apps/backend/src/bypassAcl/, importable from elsewhere —"
   echo "see /ACL_BYPASS_AUDIT.md at the repo root for why, and /BYPASS_ACL_EXAMPLES.md for the"
   echo "relocation pattern."

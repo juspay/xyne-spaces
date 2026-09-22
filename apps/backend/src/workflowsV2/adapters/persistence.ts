@@ -19,7 +19,7 @@
  * read and stamps it on insert (see `database/tenant/`), and this adapter ALSO pushes
  * `XyneFilter` into its queries because that is the SDK's contract and the surface the
  * authorizer will extend with sharing. Methods that are genuinely cross-tenant say so
- * and wrap themselves in `runAsSystem()` — without it the ambient scope silently
+ * and go through bypassAcl's asSystem — without it the ambient scope silently
  * reduces them to the caller's workspace and they return nothing.
  *
  * @see docs/guidelines/workflows/PERSISTENCE.md
