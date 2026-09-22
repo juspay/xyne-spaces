@@ -1,3 +1,10 @@
+## [1.361.1](https://github.com/juspay/xyne-spaces/compare/v1.361.0...v1.361.1) (2026-09-22)
+
+
+### Bug Fixes
+
+* participant popover fix ([#2143](https://github.com/juspay/xyne-spaces/issues/2143)) ([add4f81](https://github.com/juspay/xyne-spaces/commit/add4f8160242792c16b81d999f4e9faa9f849864))
+
 ## [1.361.0](https://github.com/juspay/xyne-spaces/compare/v1.360.1...v1.361.0) (2026-09-21)
 
 
