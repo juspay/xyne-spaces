@@ -2,7 +2,7 @@ import { logger, Event as LogEvent } from '../../../utils/logger';
 import React, { ReactElement, useEffect, useMemo, useState, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Command } from 'cmdk';
-import { CalendarDays, LayoutGrid, SignalHigh, X } from 'lucide-react';
+import { CalendarDays, LayoutGrid, SignalHigh, X, ChevronDown } from 'lucide-react';
 import {
   ChatDefault,
   UserTwo,
@@ -420,6 +420,37 @@ const SeeMoreItem = ({
     {label}
   </Command.Item>
 );
+
+/**
+ * Expand-only "Show more" for the `@` / `mentions:` typeaheads. A real `<button>` (not a cmdk
+ * `Command.Item`) with `onMouseDown` → `preventDefault`, so clicking it never blurs the Lexical
+ * editor — the arrow-key mention commands are registered on that editor and stop firing the moment
+ * it loses focus. Expand-only: the caller hides it once its section is expanded, so there is no
+ * "See less" toggle.
+ */
+function MentionShowMoreButton({
+  onExpand,
+  trackName,
+}: {
+  onExpand: () => void;
+  trackName: string;
+}): ReactElement {
+  return (
+    <button
+      type='button'
+      onMouseDown={e => e.preventDefault()}
+      onClick={onExpand}
+      className='flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-[13px] text-muted-foreground hover:bg-muted hover:text-foreground'
+      data-track-category='SEARCH'
+      data-track-name={trackName}
+    >
+      <span className='flex h-4 w-5 flex-shrink-0 items-center justify-center'>
+        <ChevronDown size={14} />
+      </span>
+      Show more
+    </button>
+  );
+}
 
 /** The only sections whose "See more" expands in place — the valid keys for expandedCategories and toggleCategoryExpansion. */
 type ExpandableCategory = ChannelCategory | 'users' | typeof MERGED_CATEGORY;
@@ -4852,28 +4883,21 @@ const ChannelCommandMenu = ({
                                   isMobile={isMobile}
                                 />
                               ))}
-                            {userTrigger === '@' && section.total > MENTION_GROUP_PAGE && (
-                              <SeeMoreItem
-                                value={`mention-see-more-${section.stateKey}`}
-                                label={
-                                  expandedMentionGroups[section.stateKey]
-                                    ? 'See less'
-                                    : `See ${Math.min(section.total, MENTION_GROUP_MAX) - MENTION_GROUP_PAGE} more`
-                                }
-                                onSelect={() => {
-                                  setExpandedMentionGroups(prev => ({
-                                    ...prev,
-                                    [section.stateKey]: !prev[section.stateKey],
-                                  }));
-                                  setSelectedMentionIndex(-1);
-                                }}
-                                onMouseEnter={() => setSelectedMentionIndex(-1)}
-                                hoverable
-                                trackCategory='SEARCH'
-                                trackName={section.trackName}
-                                trackMetadata=''
-                              />
-                            )}
+                            {userTrigger === '@' &&
+                              !expandedMentionGroups[section.stateKey] &&
+                              section.total > MENTION_GROUP_PAGE && (
+                                <MentionShowMoreButton
+                                  onExpand={() => {
+                                    setExpandedMentionGroups(prev => ({
+                                      ...prev,
+                                      [section.stateKey]: true,
+                                    }));
+                                    // Expanding shifts later rows' indices, so reset to the top.
+                                    setSelectedMentionIndex(0);
+                                  }}
+                                  trackName={section.trackName}
+                                />
+                              )}
                           </Command.Group>
                         ))}
                     {mentionSearchType === ChipType.USER &&
@@ -4987,29 +5011,20 @@ const ChannelCommandMenu = ({
                                 </div>
                               </Command.Item>
                             ))}
-                            {mentionCandidates[group.key].length > MENTION_GROUP_PAGE && (
-                              <SeeMoreItem
-                                value={`mention-see-more-${group.key}`}
-                                label={
-                                  expandedMentionGroups[group.key]
-                                    ? 'See less'
-                                    : `See ${Math.min(mentionCandidates[group.key].length, MENTION_GROUP_MAX) - MENTION_GROUP_PAGE} more`
-                                }
-                                onSelect={() => {
-                                  setExpandedMentionGroups(prev => ({
-                                    ...prev,
-                                    [group.key]: !prev[group.key],
-                                  }));
-                                  // Clear the highlight — expanding shifts indices; avoids a double grey.
-                                  setSelectedMentionIndex(-1);
-                                }}
-                                onMouseEnter={() => setSelectedMentionIndex(-1)}
-                                hoverable
-                                trackCategory='SEARCH'
-                                trackName={`MENTIONS_SHOW_MORE_${group.key.toUpperCase()}`}
-                                trackMetadata=''
-                              />
-                            )}
+                            {!expandedMentionGroups[group.key] &&
+                              mentionCandidates[group.key].length > MENTION_GROUP_PAGE && (
+                                <MentionShowMoreButton
+                                  onExpand={() => {
+                                    setExpandedMentionGroups(prev => ({
+                                      ...prev,
+                                      [group.key]: true,
+                                    }));
+                                    // Clear the highlight — expanding shifts indices; avoids a double grey.
+                                    setSelectedMentionIndex(0);
+                                  }}
+                                  trackName={`MENTIONS_SHOW_MORE_${group.key.toUpperCase()}`}
+                                />
+                              )}
                           </Command.Group>
                         );
                       })}
