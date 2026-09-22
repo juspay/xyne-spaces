@@ -1038,6 +1038,16 @@ export const stagePrStatusMappingTable = table("stage_pr_status_mappings")
   })
   .primaryKey("id");
 
+export const stageReleaseStatusMappingTable = table("stage_release_status_mappings")
+  .columns({
+    workspaceId: string(),
+    id: string(),
+    stageId: string(),
+    releaseStatus: string(),
+    createdAt: number(),
+  })
+  .primaryKey("id");
+
 export const stageTransitionTable = table("stage_transitions")
   .columns({
     workspaceId: string(),
@@ -5139,6 +5149,7 @@ export const schema = createSchema(
       boardTable,
       stageTable,
       stagePrStatusMappingTable,
+      stageReleaseStatusMappingTable,
       stageTransitionTable,
       channelTable,
       channelBoardMappingTable,
@@ -5445,6 +5456,7 @@ export type Project = Row<typeof schema.tables.projects>;
 export type Board = Row<typeof schema.tables.boards>;
 export type Stage = Row<typeof schema.tables.stages>;
 export type StagePRStatusMapping = Row<typeof schema.tables.stage_pr_status_mappings>;
+export type StageReleaseStatusMapping = Row<typeof schema.tables.stage_release_status_mappings>;
 export type StageTransition = Row<typeof schema.tables.stage_transitions>;
 export type Channel = Row<typeof schema.tables.channels>;
 export type ChannelBoardMapping = Row<typeof schema.tables.channel_board_mappings>;

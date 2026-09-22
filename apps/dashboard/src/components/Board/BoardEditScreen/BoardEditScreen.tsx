@@ -895,12 +895,16 @@ const BoardEditScreen = ({
       const sourceStageIdToNewStageId = new Map<string, string>();
       const stageIds: Record<string, string> = {};
       const prStatusMappingIds: Record<string, string> = {};
+      const releaseStatusMappingIds: Record<string, string> = {};
       sourceStages.forEach(stage => {
         const newStageId = uuidv4();
         sourceStageIdToNewStageId.set(stage.id, newStageId);
         stageIds[String(stage.sequenceNumber)] = newStageId;
         stage.prStatusMappings?.forEach(mapping => {
           prStatusMappingIds[`${stage.sequenceNumber}-${mapping.prStatus}`] = uuidv4();
+        });
+        stage.releaseStatusMappings?.forEach(mapping => {
+          releaseStatusMappingIds[`${stage.sequenceNumber}-${mapping.releaseStatus}`] = uuidv4();
         });
       });
 
@@ -918,6 +922,9 @@ const BoardEditScreen = ({
           sequenceNumber: stage.sequenceNumber,
           defaultTicketStatusV2: stage.defaultTicketStatusV2 ?? TicketStatusV2.STARTED,
           prStatuses: (stage.prStatusMappings ?? []).map(mapping => mapping.prStatus),
+          releaseStatuses: (stage.releaseStatusMappings ?? []).map(
+            mapping => mapping.releaseStatus,
+          ),
           approverIds: (stage.approvers ?? [])
             .map(approver => approver.userId)
             .filter((userId): userId is string => Boolean(userId)),
@@ -987,6 +994,7 @@ const BoardEditScreen = ({
           stageIds,
           stages: stagesData,
           prStatusMappingIds,
+          releaseStatusMappingIds,
         }),
       );
       const updateResponse = await updateResult.server;

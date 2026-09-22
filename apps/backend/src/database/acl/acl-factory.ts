@@ -124,6 +124,7 @@ import {
   RecurringCallParticipantsACL,
   ResourceAccessACL,
   StagePRStatusMappingsACL,
+  StageReleaseStatusMappingsACL,
   StageTransitionsACL,
   TicketStageRequestsACL,
   TicketTagMappingsACL,
@@ -472,6 +473,8 @@ export class ACLFactory {
       return new BaseQueryACL(ctx, prisma)
     case 'stagePRStatusMapping':
       return new StagePRStatusMappingsACL(ctx, prisma)
+    case 'stageReleaseStatusMapping':
+      return new StageReleaseStatusMappingsACL(ctx, prisma)
     case 'stageTransition':
       return new StageTransitionsACL(ctx, prisma)
     case 'tag':
