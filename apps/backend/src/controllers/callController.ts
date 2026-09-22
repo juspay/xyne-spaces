@@ -45,7 +45,6 @@ import {
   AttachmentEntityType,
   SUPPORTED_TRANSCRIPT_LANGUAGES,
   ORIGINAL_TRANSCRIPT_LANGUAGE,
-  type TranscriptTranslation,
 } from '@xyne/shared';
 import { storageService } from '@/services/storage';
 import { CallVespaFeedSource, queueCallVespaFeed } from '@/services/callVespaQueue';
@@ -1968,12 +1967,14 @@ export class CallController {
     }
   };
 
-  // POST /api/calls/:callId/translate-transcript — synchronous: returns the cached text (GCS
-  // hit) or translates now, writes GCS + metadata, and returns the result — always one call.
+  // POST /api/calls/:callId/translate-transcript — only ever the main transcript.
+  // 'original' returns it as-is, synchronously (no LLM). Any other language is async:
+  // this kicks off translation in the background and returns {status:'pending'}; the
+  // client polls the same endpoint again until GCS has the cached result ({status:'ready'}).
   translateTranscript = async (req: Request, res: Response): Promise<void> => {
     const userId = req.user?.id;
     const { callId } = req.params;
-    const { language, variant } = (req.body ?? {}) as { language?: string; variant?: 'identified' };
+    const { language } = (req.body ?? {}) as { language?: string };
 
     if (!userId) {
       res.status(401).json({ success: false, error: 'Unauthorized' });
@@ -2005,7 +2006,7 @@ export class CallController {
         return;
       }
 
-      if (!(await this.isCallAudience(call, userId))) {
+      if (!(await callShareService.isCallAudience(call, userId))) {
         res.status(403).json({ success: false, error: 'You do not have access to this call' });
         return;
       }
@@ -2015,85 +2016,37 @@ export class CallController {
         return;
       }
 
-      if (isOriginal) {
-        let text: string | null;
-        let generation: string | null = null;
-        if (variant === 'identified') {
-          text = await transcriptService.getIdentifiedTranscriptContent(callId);
-        } else {
-          const fetched = await transcriptService.getTranscriptContentWithGeneration(callId);
-          text = fetched?.text ?? null;
-          generation = fetched?.generation ?? null;
-        }
-        if (text === null) {
-          res.status(404).json({ success: false, error: 'Transcript not available for this call' });
-          return;
-        }
-        res.status(200).json({
-          success: true,
-          status: 'ready',
-          text,
-          ...(generation ? { generation } : {}),
-        });
-        return;
-      }
-
-      // Non-null: whitelist check above already returned otherwise.
-      const languageCode = supportedLanguage!.code;
-
       const fetched = await transcriptService.getTranscriptContentWithGeneration(callId);
       if (!fetched) {
         res.status(404).json({ success: false, error: 'Transcript not available for this call' });
         return;
       }
 
-      const callMetadata = call.metadata as { translations?: Record<string, TranscriptTranslation> } | null;
-      const existing = callMetadata?.translations?.[languageCode];
-      const sameGeneration = !!fetched.generation && existing?.generation === fetched.generation;
-
-      const generationField = fetched.generation ? { generation: fetched.generation } : {};
-
-      if (existing?.status === 'ready' && sameGeneration) {
-        const text = await transcriptService.getTranslatedTranscript(
-          callId,
-          languageCode,
-          fetched.generation,
-        );
-        // Metadata says ready but the GCS file is gone — fall through and re-translate.
-        if (text !== null) {
-          res.status(200).json({
-            success: true,
-            status: 'ready',
-            text,
-            partial: existing.partial ?? false,
-            ...generationField,
-          });
-          return;
-        }
+      if (isOriginal) {
+        res.status(200).json({ success: true, status: 'ready', text: fetched.text });
+        return;
       }
 
-      const { text, partial } = await transcriptService.translateTranscript(
+      // Non-null: whitelist check above already returned otherwise.
+      const languageCode = supportedLanguage!.code;
+
+      const cached = await transcriptService.getTranslatedTranscript(callId, languageCode, fetched.generation);
+      if (cached !== null) {
+        res.status(200).json({ success: true, status: 'ready', text: cached });
+        return;
+      }
+
+      const jobKey = `${callId}:${languageCode}:${fetched.generation ?? 'unversioned'}`;
+      transcriptService.ensureTranslationInFlight(
+        jobKey,
+        call.externalId,
+        languageCode,
+        fetched.generation,
         fetched.text,
         supportedLanguage!.label,
-        call.externalId,
       );
-      const finalText = text ?? fetched.text;
-      // partial = LLM failed, don't cache the fallback or an outage permanently poisons this language.
-      if (!partial) {
-        await transcriptService.uploadTranslatedTranscript(
-          call.externalId,
-          languageCode,
-          fetched.generation,
-          finalText,
-        );
-        await repositories.calls.setTranslationStatus(call.id, languageCode, {
-          status: 'ready',
-          partial,
-          ...generationField,
-        });
-      }
 
-      res.status(200).json({ success: true, status: 'ready', text: finalText, partial, ...generationField });
+      res.status(202).json({ success: true, status: 'pending' });
     } catch (error) {
       logger.error(`[${callId}] Failed to translate transcript`, error);
       res.status(500).json({ success: false, error: 'Failed to translate transcript' });

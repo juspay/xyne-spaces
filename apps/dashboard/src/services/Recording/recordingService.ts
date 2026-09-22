@@ -7,11 +7,11 @@ import { apiInstance } from '../clients/apiClient';
 import { AxiosResponse } from 'axios';
 import type {
   DefaultOutlet,
-  GrantableEntityUserAccess, RecordingStatus,
-  RecordingType,
+  GrantableEntityUserAccess,
+  RecordingStatus,
   TranscriptTranslation,
 } from '@xyne/shared';
-import { CallType, CallVisibility } from '@xyne/shared';
+import { CallType, CallVisibility, RecordingType } from '@xyne/shared';
 import { getSummaryModelPreference } from '../../hooks/useSummaryModelPreference';
 
 export interface RecordingSession {
@@ -424,16 +424,9 @@ class RecordingService {
   }
 
   // `language: ORIGINAL_TRANSCRIPT_LANGUAGE` returns the transcript as recorded, no LLM call.
-  async translateTranscript(
-    callId: string,
-    language: string,
-    variant?: 'identified',
-  ): Promise<TranscriptTranslation> {
+  async translateTranscript(callId: string, language: string): Promise<TranscriptTranslation> {
     const response: AxiosResponse<{ success: true } & TranscriptTranslation> =
-      await apiInstance.post(`/calls/${callId}/translate-transcript`, {
-        language,
-        ...(variant ? { variant } : {}),
-      });
+      await apiInstance.post(`/calls/${callId}/translate-transcript`, { language });
     return response.data;
   }
 

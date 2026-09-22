@@ -1,7 +1,6 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, type ReactElement } from 'react';
 import { motion, useReducedMotion } from 'framer-motion';
 import {
-  AlertTriangle,
   ChevronDown,
   ChevronUp,
   CopyDefault,
@@ -88,8 +87,6 @@ export interface TranscriptSidePanelProps {
   selectedLanguage?: string;
   onLanguageChange?: (language: string) => void;
   isTranslating?: boolean;
-  /** Some lines fell back to their original language — surfaced as a notice, not silently mixed in. */
-  translatePartial?: boolean;
 }
 
 export function TranscriptSidePanel({
@@ -106,7 +103,6 @@ export function TranscriptSidePanel({
   selectedLanguage = ORIGINAL_TRANSCRIPT_LANGUAGE,
   onLanguageChange,
   isTranslating = false,
-  translatePartial = false,
 }: TranscriptSidePanelProps): ReactElement {
   const lineRefs = useRef(new Map<number, HTMLDivElement>());
   const lines = useMemo(() => parseTranscript(transcript), [transcript]);
@@ -366,18 +362,6 @@ export function TranscriptSidePanel({
                 This call doesn&apos;t have a transcript to show yet.
               </p>
             </div>
-          </div>
-        ) : null}
-        {!isLoading && !error && translatePartial ? (
-          <div className='mb-3 flex items-center justify-center gap-2 rounded-xl border border-border bg-muted p-2'>
-            <AlertTriangle
-              size={14}
-              className='shrink-0 text-muted-foreground'
-              aria-hidden='true'
-            />
-            <p className='text-xs text-muted-foreground'>
-              Some lines couldn&apos;t be translated and are shown in their original language
-            </p>
           </div>
         ) : null}
         {!isLoading && !error && lines.length > 0 ? (

@@ -6,7 +6,7 @@ import { config } from '@/config/env';
 import { Agent, createUserMessage } from '@framework';
 import { extractAgentContent } from '@/utils/agentUtils';
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service.js';
-import { MessageType, OrgLLMServiceAccountPurpose, AttachmentEntityType, CallOrigin, CallType, TicketPriority, type TranscriptTranslation } from '@xyne/shared';
+import { MessageType, OrgLLMServiceAccountPurpose, AttachmentEntityType, CallOrigin, CallType, TicketPriority } from '@xyne/shared';
 import { db } from '@/database/client';
 import { randomUUID } from 'crypto';
 import * as yaml from 'js-yaml';
@@ -31,8 +31,6 @@ import { orgLLMCredentialService } from '@/services/orgLLMCredentialService';
 import { lockMessageContentAndMetadata } from '@/bypassAcl/rowLockServices';
 
 const SPEAKER_IDENTIFICATION_CAC_KEY = 'speaker_identification_config';
-
-export type TranslateTranscriptResult = Pick<TranscriptTranslation, 'text' | 'partial'>;
 
 export interface TranscriptEntry {
   user: string;
@@ -298,6 +296,7 @@ export interface TicketSuggestion {
 
 export class TranscriptService {
   private transcriptStorage: StorageService;
+  private inFlightTranslations = new Map<string, Promise<void>>();
 
   constructor() {
     this.transcriptStorage = getStorageService(config.gcs.transcriptionBucketName);
@@ -1055,17 +1054,41 @@ BRAND NAME CORRECTION:
 
 Output ONLY the processed transcript, nothing else.`;
 
-    const { text } = await this.runChunkedTranslation(transcript, systemInstructions, 'transcript_translation', callId);
-    return text ?? transcript;
+    return this.runChunkedTranslation(transcript, systemInstructions, 'transcript_translation', callId);
   }
 
   async translateTranscript(
     transcript: string,
     targetLanguageName: string,
     callId?: string,
-  ): Promise<TranslateTranscriptResult> {
+  ): Promise<string> {
     const systemInstructions = TRANSCRIPT_TRANSLATION_PROMPT.replace('{targetLanguage}', targetLanguageName);
     return this.runChunkedTranslation(transcript, systemInstructions, 'transcript_translation_user_language', callId);
+  }
+
+  // Kicks off translateTranscript + GCS upload in the background and returns immediately —
+  // callers poll getTranslatedTranscript() for the result. Dedupes on `key` (see
+  // inFlightTranslations) so repeated polls while a job is running don't start a second one.
+  ensureTranslationInFlight(
+    key: string,
+    callId: string,
+    languageCode: string,
+    generation: string | null,
+    transcript: string,
+    targetLanguageName: string,
+  ): void {
+    if (this.inFlightTranslations.has(key)) return;
+
+    const job = this.translateTranscript(transcript, targetLanguageName, callId)
+      .then((text) => this.uploadTranslatedTranscript(callId, languageCode, generation, text))
+      .catch((error) => {
+        logger.error(`[${callId}] translate_transcript_job_failed`, { language: languageCode, error });
+      })
+      .finally(() => {
+        this.inFlightTranslations.delete(key);
+      });
+
+    this.inFlightTranslations.set(key, job);
   }
 
   // Shared chunking/streaming core for postProcessTranscript and translateTranscript.
@@ -1074,7 +1097,7 @@ Output ONLY the processed transcript, nothing else.`;
     systemInstructions: string,
     operation: string,
     callId?: string,
-  ): Promise<TranslateTranscriptResult> {
+  ): Promise<string> {
     try {
       const lines = transcript.split('\n').filter((l) => l.trim());
       const MAX_LINES_PER_CHUNK = 100;
@@ -1089,11 +1112,11 @@ Output ONLY the processed transcript, nothing else.`;
 
         if (!translated.ok) {
           logger.warn(`${operation}_failed | reason=${translated.reason} | using_original=true`);
-          return { text: transcript, partial: true };
+          return transcript;
         }
 
         logger.info(`Successfully processed transcript via ${operation} (streaming)`);
-        return { text: translated.content, partial: false };
+        return translated.content;
       }
 
       // For long transcripts, process in chunks with LIMITED CONCURRENCY.
@@ -1120,7 +1143,6 @@ Output ONLY the processed transcript, nothing else.`;
       }
 
       const results: string[] = new Array(chunks.length);
-      const chunkFellBack: boolean[] = new Array(chunks.length).fill(false);
       let nextIndex = 0;
 
       const processChunk = async (chunk: typeof chunks[0], index: number): Promise<void> => {
@@ -1139,7 +1161,6 @@ Output ONLY the processed transcript, nothing else.`;
           if (!translated.ok) {
             logger.warn(`${operation}_chunk_failed | chunk=${chunk.chunkIndex}/${totalChunks} | reason=${translated.reason} | using_original=true`);
             results[index] = chunk.chunkText;
-            chunkFellBack[index] = true;
             return;
           }
 
@@ -1148,7 +1169,6 @@ Output ONLY the processed transcript, nothing else.`;
         } catch (error) {
           logger.error(`Error processing chunk ${chunk.chunkIndex}:`, error);
           results[index] = chunk.chunkText;
-          chunkFellBack[index] = true;
         }
       };
 
@@ -1166,15 +1186,11 @@ Output ONLY the processed transcript, nothing else.`;
 
       await Promise.all(workers);
 
-      const text = results.join('\n');
-      const partial = chunkFellBack.some(Boolean);
-      logger.info(
-        `Successfully processed transcript via ${operation} in ${results.length} chunks${partial ? ' (partial)' : ''}`
-      );
-      return { text, partial };
+      logger.info(`Successfully processed transcript via ${operation} in ${results.length} chunks`);
+      return results.join('\n');
     } catch (error) {
       logger.error(`Error during ${operation}:`, error);
-      return { text: transcript, partial: true }; // Fallback to original if processing fails
+      return transcript; // Fallback to original if processing fails
     }
   }
 
