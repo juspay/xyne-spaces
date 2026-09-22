@@ -1,3 +1,10 @@
+## [1.363.0](https://github.com/juspay/xyne-spaces/compare/v1.362.0...v1.363.0) (2026-09-22)
+
+
+### Features
+
+* add Cmd+K recent searches with results-page capture ([#2094](https://github.com/juspay/xyne-spaces/issues/2094)) ([7089f90](https://github.com/juspay/xyne-spaces/commit/7089f90628c89ed8ba7740894d55403ce301d71e))
+
 ## [1.362.0](https://github.com/juspay/xyne-spaces/compare/v1.361.3...v1.362.0) (2026-09-22)
 
 
