@@ -16,26 +16,6 @@ export const dedupeAndSortConversations = (
 };
 
 /**
- * Merges server/live channel rows with optimistic pending rows. A server row
- * wins by render identity (`conversationId`) as well as by `initialMessageId`;
- * matching only the latter renders a pending row beside the server row that
- * replaced it.
- */
-export const mergeServerAndPendingConversations = (
-  serverRows: Conversation[],
-  pendingRows: Conversation[],
-): Conversation[] => {
-  const serverConversationIds = new Set(serverRows.map(row => row.conversationId));
-  const serverMessageIds = new Set(serverRows.map(row => row.initialMessageId));
-  const renderablePendingRows = pendingRows.filter(
-    row =>
-      !serverConversationIds.has(row.conversationId) &&
-      !serverMessageIds.has(row.initialMessageId),
-  );
-  return dedupeAndSortConversations(renderablePendingRows, serverRows);
-};
-
-/**
  * Replaces one live viewport window without disturbing rows outside that window.
  * `includedAnchorId` is the anchor of a cursor query that returns its anchor:
  * when the anchor is missing from the result it was deleted, so it is removed.

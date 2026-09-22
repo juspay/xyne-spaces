@@ -30,7 +30,6 @@ import {
   dedupeAndSortConversations,
   mergeCachedConversations,
   mergeConversationsWithLatest,
-  mergeServerAndPendingConversations,
   reconcileConversationWindow,
 } from './channelMessageMerge.js';
 import {
@@ -612,10 +611,16 @@ function useChannelMessagesImpl(
   const pendingForChannel = usePendingForChannel(channelId);
   const messagesWithPending = useMemo(() => {
     if (pendingForChannel.length === 0) return conversations;
+    const pendingByMessageId = new Map(
+      pendingForChannel.map(p => [p.messageId, p]),
+    );
+    const filtered = conversations.filter(
+      c => !pendingByMessageId.has(c.initialMessageId ?? ''),
+    );
     const pendingRows = [...pendingForChannel]
       .sort((a, b) => a.timestamp - b.timestamp)
       .map(buildPendingChannelConversation);
-    return mergeServerAndPendingConversations(conversations, pendingRows);
+    return [...filtered, ...pendingRows];
   }, [conversations, pendingForChannel]);
 
   return {
