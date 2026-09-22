@@ -8,6 +8,7 @@ import type {
 } from './types';
 import { EMPTY_CREATE_FORM, isFormDirty } from './types';
 import { applyConflictChoice, mergeChatPatch, type FieldLock } from './mergeChatPatch';
+import { sanitizeAgentCanvasName } from './canvasFromIdentity.ts';
 
 export function useAgentCreateForm(initial: AgentCreateFormState = EMPTY_CREATE_FORM) {
   const [form, setForm] = useState<AgentCreateFormState>(initial);

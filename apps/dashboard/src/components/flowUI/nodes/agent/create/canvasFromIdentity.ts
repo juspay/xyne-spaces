@@ -78,7 +78,10 @@ function cleanDraftLine(value: string, max = 500): string {
 export function sanitizeAgentCanvasName(raw: string): string {
   let value = raw.replace(/\*\*/g, '').replace(/\*/g, '').trim();
   value = value.replace(/^[-•]+\s*/, '').trim();
-  value = value.replace(/^(?:name|handle)\s*:\s*/i, '').trim();
+  while (/^\*?\s*name\s*:?\s*/i.test(value)) {
+    value = value.replace(/^\*?\s*name\s*:?\s*/i, '').trim();
+  }
+  value = value.replace(/^handle\s*:?\s*/i, '').trim();
   return cleanDraftLine(value, 80);
 }
 

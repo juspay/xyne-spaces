@@ -111,12 +111,16 @@ export async function revealCreatePatchFields(args: {
     await args.sleep(Math.max(48, Math.min(args.writeMs, 120)));
     const changed = args.applyChatPatch(`${args.sourceId}-${field}`, slice, { highlight: false });
     if (!changed.includes(field)) {
-      args.setWritingField(null);
+      if (field !== 'name') {
+        args.setWritingField(null);
+      }
       continue;
     }
     await args.sleep(args.writeMs);
+    if (field === 'name') {
+      await args.sleep(Math.max(48, Math.min(args.writeMs, 120)));
+    }
   }
-  args.setWritingField(null);
 }
 
 const DRAFT_RE = /^\s*XYNE_CREATE_DRAFT:\s*(.+?)\s*$/im;
@@ -314,6 +318,10 @@ export async function applyCreateHubDraft(args: {
   );
 
   if (preludeFields.length > 0) {
+    if (preludeFields.includes('name')) {
+      args.setWritingField('name', null);
+      await args.sleep(48);
+    }
     const preludePatch = incomingPatchForCreateDraft({
       visibleReply: action.visibleReply,
       intent: action.intent,
