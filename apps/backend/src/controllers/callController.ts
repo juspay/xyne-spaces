@@ -1385,7 +1385,6 @@ export class CallController {
         return;
       }
 
-      // ?scope=status: polled every 10s for hasRecording/durationMs only.
       const scope = req.query.scope as string | undefined;
       if (scope === 'status') {
         const uploadedRecording = await repositories.callRecordings
@@ -2016,34 +2015,32 @@ export class CallController {
         return;
       }
 
-      const fetched = await transcriptService.getTranscriptContentWithGeneration(callId);
-      if (!fetched) {
+      const transcript = await transcriptService.getTranscriptContent(callId);
+      if (transcript === null) {
         res.status(404).json({ success: false, error: 'Transcript not available for this call' });
         return;
       }
 
       if (isOriginal) {
-        res.status(200).json({ success: true, status: 'ready', text: fetched.text });
+        res.status(200).json({ success: true, status: 'ready', text: transcript });
         return;
       }
 
       // Non-null: whitelist check above already returned otherwise.
       const languageCode = supportedLanguage!.code;
 
-      const cached = await transcriptService.getTranslatedTranscript(callId, languageCode, fetched.generation);
+      const cached = await transcriptService.getTranslatedTranscript(callId, languageCode);
       if (cached !== null) {
         res.status(200).json({ success: true, status: 'ready', text: cached });
         return;
       }
 
-      const jobKey = `${callId}:${languageCode}:${fetched.generation ?? 'unversioned'}`;
-      transcriptService.ensureTranslationInFlight(
-        jobKey,
+      transcriptService.translateTranscriptInBackground(
         call.externalId,
         languageCode,
-        fetched.generation,
-        fetched.text,
+        transcript,
         supportedLanguage!.label,
+        userId,
       );
 
       res.status(202).json({ success: true, status: 'pending' });
