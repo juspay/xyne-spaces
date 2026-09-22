@@ -1,8 +1,7 @@
-const runtimeLocation =
-  typeof window !== 'undefined' && window.location ? window.location : undefined;
-const runtimeProtocol = typeof runtimeLocation?.protocol === 'string' ? runtimeLocation.protocol : '';
-const hostname = typeof runtimeLocation?.hostname === 'string' ? runtimeLocation.hostname : '';
-const isElectronBundled = runtimeProtocol.startsWith('xyne-spaces');
+// React Native defines `window` but not `window.location`.
+const runtimeLocation = typeof window !== 'undefined' ? window.location : undefined;
+const isElectronBundled = runtimeLocation?.protocol.startsWith('xyne-spaces') ?? false;
+const hostname = runtimeLocation?.hostname ?? '';
 const isLocalhost = hostname === 'localhost' || hostname === '127.0.0.1';
 const isSandboxLocal = hostname.endsWith('.localhost');
 const isTestEnv = hostname === 'dashboard' || isSandboxLocal;

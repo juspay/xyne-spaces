@@ -383,11 +383,12 @@ export function useZero(): Zero {
           }
         };
       }
-      const value = Reflect.get(target, prop, target);
-      return (typeof value === 'function' ? value.bind(target) : value) as never;
+      return Reflect.get(target, prop) as never;
     },
   };
 
+  // A new Proxy per render would change `zero` identity and re-run every
+  // effect keyed on it. The handler closes over exactly these dependencies.
   return useMemo(
     () => new Proxy(originalZero, handler),
     [originalZero, logger, metrics, encryptionKey, clientEncryptionEnabled],
