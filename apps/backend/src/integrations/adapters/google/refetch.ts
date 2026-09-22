@@ -17,6 +17,7 @@ import { EmailRepository } from '@/database/repositories/emailRepository';
 import { ExternalMessageRepository } from '@/database/repositories/externalMessageRepository';
 import { externalSourceCore } from '../../core/core';
 import { advanceSyncCursor } from '@/services/syncCursorRecovery';
+import { parseDlAliases } from '@/services/dlResolver';
 import { ExternalSourceAdapter } from '../../core/types';
 import { MessageDirection } from '@xyne/shared';
 
@@ -43,9 +44,13 @@ export class GoogleRefetch extends BaseRefetch {
     const google = GoogleService.fromEncryptedCredentials(source.credentials, source.id);
     const preference = await preferenceRepo.findByChannelId(ingestChannelId);
     const userId = preference?.ownerUserId ?? source.displayName;
-    const extraQuery = options.dlEmail
-      ? `(to:${options.dlEmail} OR cc:${options.dlEmail} OR from:${options.dlEmail})`
-      : undefined;
+    const dlAddresses = options.dlEmail
+      ? [options.dlEmail, ...parseDlAliases(preference?.dlAliases)]
+      : [];
+    const extraQuery =
+      dlAddresses.length > 0
+        ? `(${dlAddresses.map(a => `to:${a} OR cc:${a} OR from:${a}`).join(' OR ')})`
+        : undefined;
 
     // Step 1: list messages in the window
     const messages = await google.listMessagesByDateRange({
@@ -121,6 +126,7 @@ export class GoogleRefetch extends BaseRefetch {
               });
               return null;
             }
+            logger.info(`${TAG} fetched new email for channel ${ingestChannelId}`, { messageId: id, threadId });
 
             const parsedEmail = google.parseEmailData(messageData);
             const preDownloadedAttachments = await preDownloadGmailAttachments({
@@ -223,7 +229,10 @@ export class GoogleRefetch extends BaseRefetch {
       }
     }
 
-    logger.info(`${TAG} ${source.name}: processed=${processed} newTickets=${newTickets} skipped=${skipped} errors=${errors.length}`);
+    logger.info(
+      `${TAG} ${source.name}: processed=${processed} newTickets=${newTickets} skipped=${skipped} errors=${errors.length}`,
+      { dlEmail: options.dlEmail, ingestChannelId },
+    );
     return { processed, newTickets, skipped, errors };
   }
 

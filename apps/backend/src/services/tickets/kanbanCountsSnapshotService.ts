@@ -14,6 +14,8 @@ export type KanbanCountsSnapshot = {
   createdBy: string | null;
   userGroupId: string | null;
   ticketType: string | null;
+  merchantId?: string | null;
+  isStageOverdue: boolean;
   eta: number | null;
   createdAt: number;
   tags: string[];
@@ -43,10 +45,21 @@ export const buildKanbanCountsSnapshot = async (
       createdBy: true,
       userGroupId: true,
       ticketType: true,
+      merchantId: true,
+      isStageOverdue: true,
       eta: true,
       createdAt: true,
     },
-  });
+  }) as (KanbanCountsSnapshot & {
+    assignedTo: string | null;
+    createdBy: string | null;
+    userGroupId: string | null;
+    ticketType: string | null;
+    merchantId: string | null;
+    eta: Date | null;
+    createdAt: Date;
+    isStageOverdue?: boolean | null;
+  }) | null;
 
   if (!ticket) return null;
 
@@ -113,6 +126,8 @@ export const buildKanbanCountsSnapshot = async (
     createdBy: ticket.createdBy,
     userGroupId: ticket.userGroupId,
     ticketType: ticket.ticketType,
+    merchantId: ticket.merchantId,
+    isStageOverdue: Boolean(ticket.isStageOverdue),
     eta: toMillis(ticket.eta),
     createdAt: ticket.createdAt.getTime(),
     tags: tags.map(tag => tag.name),

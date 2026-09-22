@@ -1,5 +1,5 @@
 import { ReactElement, ReactNode } from 'react';
-import { ChevronRight } from 'lucide-react';
+import { ChevronRight } from '@xyne/icons';
 import { cn } from '../../../utils/classNames';
 import Badge from '../../ui/Badge';
 

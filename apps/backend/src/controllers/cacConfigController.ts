@@ -10,10 +10,12 @@ export class CacConfigController {
     }
 
     const userEmail = req.user?.email?.trim();
+    const workspaceId = req.user?.workspaceId;
     const isPlayground = req.get('x-route-env')?.trim().toLowerCase() === 'playground';
-    const context = userEmail || isPlayground
+    const context = userEmail || workspaceId || isPlayground
       ? {
           ...(userEmail ? { email: userEmail } : {}),
+          ...(workspaceId ? { workspaceId } : {}),
           ...(isPlayground ? { environment: 'playground' } : {}),
         }
       : undefined;

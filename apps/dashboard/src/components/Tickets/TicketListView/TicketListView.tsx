@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
-import { ChevronLeft, ChevronRight, ChevronDown } from 'lucide-react';
+import { ChevronLeft, ChevronRight, ChevronDown } from '@xyne/icons';
 import { cn } from '../../../utils/classNames';
 import { Skeleton } from '../../ui/Skeleton';
 import { Checkbox } from '../../ui/Checkbox/Checkbox';
@@ -88,7 +88,7 @@ const loadColumnWidths = (): TicketListColumnWidths => {
 };
 
 export type SupportTicketRow = NonNullable<
-  QueryResultType<typeof queries.supportTicketsPageV3>[number]
+  QueryResultType<typeof queries.supportTicketsPageV4>[number]
 >;
 
 type PageCursor = { id: string; lastEmailAt: number };
@@ -103,6 +103,7 @@ interface TicketListViewProps {
     aiCategory?: string[] | undefined;
     conversationIdWhitelist?: string[] | undefined;
     hasAiDraft?: boolean | undefined;
+    hasSubTickets?: boolean | undefined;
     userGroups?: string[] | undefined;
     lastEmailAtStart?: number | undefined;
     lastEmailAtEnd?: number | undefined;
@@ -143,9 +144,13 @@ export interface SelectableRow {
   channelId: string;
   conversationId: string;
   stageName?: string | null;
+  statusV2?: string | null;
   priority?: TicketListItem['priority'];
   assignedTo?: string | null;
   userGroupId?: string | null;
+  // Carried for the bulk bar — see SelectedTicket in SupportScreen.
+  boardId?: string | null;
+  projectId?: string | null;
 }
 
 export const TicketListView = function TicketListView({
@@ -178,6 +183,7 @@ export const TicketListView = function TicketListView({
     aiCategory,
     conversationIdWhitelist,
     hasAiDraft,
+    hasSubTickets,
     userGroups,
     lastEmailAtStart,
     lastEmailAtEnd,
@@ -402,7 +408,7 @@ export const TicketListView = function TicketListView({
 
   const pageStart = pageCursors[pageIndex] ?? null;
   const [firstPage, firstPageDetails] = useCachedQuery(
-    queries.supportTicketsPageV3({
+    queries.supportTicketsPageV4({
       channelId,
       isMember,
       assignedTo,
@@ -414,6 +420,7 @@ export const TicketListView = function TicketListView({
         ? { conversationIds: conversationIdWhitelist }
         : {}),
       hasAiDraft,
+      hasSubTickets,
       lastEmailAtStart,
       lastEmailAtEnd,
       createdAtStart,
@@ -445,6 +452,7 @@ export const TicketListView = function TicketListView({
         ac: aiCategory ?? null,
         ci: conversationIdWhitelist ?? null,
         ad: hasAiDraft ?? null,
+        hst: hasSubTickets ?? null,
         mf: mailboxFolder ?? null,
         g: userGroups ?? null,
         ds: lastEmailAtStart ?? null,
@@ -463,6 +471,7 @@ export const TicketListView = function TicketListView({
       aiCategory,
       conversationIdWhitelist,
       hasAiDraft,
+      hasSubTickets,
       mailboxFolder,
       userGroups,
       lastEmailAtStart,
@@ -747,7 +756,7 @@ export const TicketListView = function TicketListView({
       }}
       className={cn('h-full w-full outline-none')}
       initialTopMostItemIndex={0}
-      increaseViewportBy={{ top: 0, bottom: 200 }}
+      increaseViewportBy={{ top: 1200, bottom: 1200 }}
       totalListHeightChanged={setBodyContentHeight}
       itemContent={(index, row) => {
         const ticketIdValue = row?.xyneId || row?.id || '';
@@ -778,9 +787,12 @@ export const TicketListView = function TicketListView({
                       channelId: row.channelId ?? '',
                       conversationId: row.conversationId ?? '',
                       stageName: row.stageName,
+                      statusV2: row.statusV2,
                       priority: row.priority,
                       assignedTo: row.assignedTo,
                       userGroupId: row.userGroupId,
+                      boardId: row.boardId,
+                      projectId: row.projectId,
                       ...(emailReads ? { emailReads } : {}),
                     });
                   },
@@ -808,9 +820,12 @@ export const TicketListView = function TicketListView({
       channelId: t.channelId ?? '',
       conversationId: t.conversationId ?? '',
       stageName: t.stageName,
+      statusV2: t.statusV2,
       priority: t.priority,
       assignedTo: t.assignedTo,
       userGroupId: t.userGroupId,
+      boardId: t.boardId,
+      projectId: t.projectId,
     };
     const emailReads = t.emailReads as
       | ReadonlyArray<{ userId: string; lastReadEmailAt: number }>

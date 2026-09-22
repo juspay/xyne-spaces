@@ -1,9 +1,11 @@
 import { Router, type Request, type Response } from "express";
+import { asyncHandler, ok, badRequest, forbidden, notFound, HttpError } from "../lib/http.js";
 import { prisma } from "../db.js";
-import { encrypt } from "../crypto.js";
+import { decrypt, encrypt } from "../crypto.js";
 import { CONFIG } from "../config.js";
 import { hasConnectorDefinition } from "../mcp/connector-definitions.js";
 import { syncToolsForServer } from "../tool-sync.js";
+import { evictSession } from "../mcp/runner.js";
 import { getDefaultOrgId, ensureOrgMembership, ensureUserExists } from "../lib/users-jit.js";
 import { getOrgId, getRequesterId } from "../middleware/agent-acl.js";
 import { getWorkspaceIdForUser } from "../lib/spaces-db.js";
@@ -25,122 +27,163 @@ const router = Router();
  *
  * Response: `{ success: true, data: [{ id, email, name }, ...] }`
  */
-router.get("/", async (req: Request, res: Response) => {
-  try {
-    const qRaw = req.query["q"];
-    const q = typeof qRaw === "string" ? qRaw.trim() : "";
-    const requesterId = getRequesterId(req);
-    const orgId = getOrgId(req)
-      ?? (requesterId
-        ? (await prisma.user.findUnique({ where: { id: requesterId }, select: { orgId: true } }))?.orgId
-        : undefined);
-    if (!orgId) {
-      log.error(`[users] orgId is required; refusing global user typeahead requesterId=${requesterId ?? "none"} q=${q || "none"}`);
-      res.status(400).json({ success: false, error: "orgId is required" });
-      return;
-    }
+router.get("/", asyncHandler(async (req: Request, res: Response) => {
+  const qRaw = req.query["q"];
+  const q = typeof qRaw === "string" ? qRaw.trim() : "";
+  const requesterId = getRequesterId(req);
+  const orgId = getOrgId(req)
+    ?? (requesterId
+      ? (await prisma.user.findUnique({ where: { id: requesterId }, select: { orgId: true } }))?.orgId
+      : undefined);
+  if (!orgId) {
+    log.error(`[users] orgId is required; refusing global user typeahead requesterId=${requesterId ?? "none"} q=${q || "none"}`);
+    throw badRequest("orgId is required");
+  }
 
-    const users = await prisma.user.findMany({
-      where: {
-        orgId,
-        ...(q
-          ? {
-              OR: [
-                { email: { contains: q, mode: "insensitive" as const } },
-                { name: { contains: q, mode: "insensitive" as const } },
-              ],
-            }
-          : {}),
-      },
-      select: { id: true, email: true, name: true },
-      orderBy: { name: "asc" },
-      take: 20,
+  const users = await prisma.user.findMany({
+    where: {
+      orgId,
+      ...(q
+        ? {
+            OR: [
+              { email: { contains: q, mode: "insensitive" as const } },
+              { name: { contains: q, mode: "insensitive" as const } },
+            ],
+          }
+        : {}),
+    },
+    select: { id: true, email: true, name: true },
+    orderBy: { name: "asc" },
+    take: 20,
+  });
+
+  ok(res, users);
+}));
+
+router.post("/", asyncHandler(async (req: Request, res: Response) => {
+  const { id, email, name, spacesToken } = req.body as {
+    id?: string;
+    email?: string;
+    name?: string;
+    spacesToken?: string;
+  };
+
+  if (!id || typeof id !== "string" || id.trim().length === 0) {
+    throw badRequest("id is required");
+  }
+
+  if (!email || typeof email !== "string" || email.trim().length === 0) {
+    throw badRequest("email is required");
+  }
+
+  if (!name || typeof name !== "string" || name.trim().length === 0) {
+    throw badRequest("name is required");
+  }
+
+  const sessionUserId = req.headers["x-user-id"];
+  if (typeof sessionUserId === "string" && sessionUserId && sessionUserId !== id.trim()) {
+    throw forbidden("Body id does not match authenticated session");
+  }
+
+  // Org placement (§13): prefer the mapping-aware JIT path so a second-tenant
+  // user lands in the RIGHT org (via SurfaceTenantLink), not the default. It
+  // creates the row (with the mapped org + membership) if new, then we sync the
+  // client-supplied email/name. If JIT can't resolve the Spaces profile
+  // (transient DB miss / user not in Spaces), fall back to creating from the
+  // request body in the default org — preserves this endpoint's resilience.
+  let user;
+  const jitOk = await ensureUserExists(id.trim(), "require-auth");
+  if (jitOk) {
+    user = await prisma.user.update({
+      where: { id: id.trim() },
+      data: { email: email.trim(), name: name.trim() },
     });
-
-    res.json({ success: true, data: users });
-  } catch (err) {
-    log.error("[users] list error:", err);
-    res.status(500).json({ success: false, error: "Internal server error" });
+    // Gap 8: re-assert OrgMembership for a pre-existing user (ensureUserExists
+    // short-circuits without touching it when the row already exists). Idempotent.
+    await ensureOrgMembership(user.id, user.orgId);
+  } else {
+    // orgId is NOT NULL — a new user row must carry it at insert time.
+    const orgId = await getDefaultOrgId();
+    if (!orgId) {
+      log.error(`[users] default org not provisioned — cannot create user ${id.trim()}. Run backfill-default-org.ts.`);
+      throw new HttpError(503, "Default organization not provisioned");
+    }
+    user = await prisma.user.upsert({
+      where: { id: id.trim() },
+      create: { id: id.trim(), email: email.trim(), name: name.trim(), orgId },
+      update: { email: email.trim(), name: name.trim() },
+    });
+    await ensureOrgMembership(user.id, orgId);
   }
-});
 
-router.post("/", async (req: Request, res: Response) => {
-  try {
-    const { id, email, name, spacesToken } = req.body as {
-      id?: string;
-      email?: string;
-      name?: string;
-      spacesToken?: string;
-    };
+  // Spaces is not an optional integration: every claw surface reads through it,
+  // so login is where the connection gets established rather than the
+  // Connections page, which a user may never open.
+  //
+  // The body token is a best effort from the SPA and is usually absent, because
+  // the workspace cookie is httpOnly and `getGoogleToken()` reads cookies from
+  // JavaScript. The server has the same cookie on this very request, so read it
+  // here instead of depending on the client to forward it.
+  const spacesSession = spacesSessionFromRequest(req);
+  const token = (typeof spacesToken === "string" && spacesToken) || spacesSession.token;
+  if (token) {
+    autoConfigureSpaces(user.id, token, spacesSession.sessionId).catch((err) => {
+      log.error("[users] auto-configure xyne-spaces failed:", err);
+    });
+  } else {
+    log.warn(`[users] no Spaces token on login for ${user.id}; xyne-spaces left as-is`);
+  }
 
-    if (!id || typeof id !== "string" || id.trim().length === 0) {
-      res.status(400).json({ success: false, error: "id is required" });
-      return;
-    }
+  ok(res, user);
+}));
 
-    if (!email || typeof email !== "string" || email.trim().length === 0) {
-      res.status(400).json({ success: false, error: "email is required" });
-      return;
-    }
-
-    if (!name || typeof name !== "string" || name.trim().length === 0) {
-      res.status(400).json({ success: false, error: "name is required" });
-      return;
-    }
-
-    const sessionUserId = req.headers["x-user-id"];
-    if (typeof sessionUserId === "string" && sessionUserId && sessionUserId !== id.trim()) {
-      res.status(403).json({ success: false, error: "Body id does not match authenticated session" });
-      return;
-    }
-
-    // Org placement (§13): prefer the mapping-aware JIT path so a second-tenant
-    // user lands in the RIGHT org (via SurfaceTenantLink), not the default. It
-    // creates the row (with the mapped org + membership) if new, then we sync the
-    // client-supplied email/name. If JIT can't resolve the Spaces profile
-    // (transient DB miss / user not in Spaces), fall back to creating from the
-    // request body in the default org — preserves this endpoint's resilience.
-    let user;
-    const jitOk = await ensureUserExists(id.trim(), "require-auth");
-    if (jitOk) {
-      user = await prisma.user.update({
-        where: { id: id.trim() },
-        data: { email: email.trim(), name: name.trim() },
-      });
-      // Gap 8: re-assert OrgMembership for a pre-existing user (ensureUserExists
-      // short-circuits without touching it when the row already exists). Idempotent.
-      await ensureOrgMembership(user.id, user.orgId);
-    } else {
-      // orgId is NOT NULL — a new user row must carry it at insert time.
-      const orgId = await getDefaultOrgId();
-      if (!orgId) {
-        log.error(`[users] default org not provisioned — cannot create user ${id.trim()}. Run backfill-default-org.ts.`);
-        res.status(503).json({ success: false, error: "Default organization not provisioned" });
-        return;
+/**
+ * The Spaces credentials carried by this request's own cookies.
+ *
+ * `sessionId` matters as much as the token: Spaces' auth middleware only
+ * refreshes an expired JWT when the session id is present, so a connection
+ * stored without it starts 401ing the moment the 24h token lapses.
+ */
+function spacesSessionFromRequest(req: Request): { token?: string; sessionId?: string } {
+  const header = req.headers.cookie;
+  if (!header) return {};
+  const read = (name: string): string | undefined => {
+    const prefix = `${name}=`;
+    for (const part of header.split(";")) {
+      const cookie = part.trim();
+      if (cookie.startsWith(prefix)) {
+        return cookie.slice(prefix.length).trim() || undefined;
       }
-      user = await prisma.user.upsert({
-        where: { id: id.trim() },
-        create: { id: id.trim(), email: email.trim(), name: name.trim(), orgId },
-        update: { email: email.trim(), name: name.trim() },
-      });
-      await ensureOrgMembership(user.id, orgId);
     }
+    return undefined;
+  };
+  const workspace = read("xyne_last_workspace");
+  const workspaceToken = workspace ? read(`xyne_ws_${workspace}_token`) : undefined;
+  const legacy = read("google_access_token");
+  return {
+    ...((workspaceToken ?? (legacy && legacy.split(".").length === 3 ? legacy : undefined))
+      ? { token: workspaceToken ?? legacy! }
+      : {}),
+    ...(read("user_session_id") ? { sessionId: read("user_session_id")! } : {}),
+  };
+}
 
-    // Auto-configure xyne-spaces MCP connection if token provided
-    if (spacesToken && typeof spacesToken === "string") {
-      autoConfigureSpaces(user.id, spacesToken).catch((err) => {
-        log.error("[users] auto-configure xyne-spaces failed:", err);
-      });
-    }
-
-    res.json({ success: true, data: user });
-  } catch (err) {
-    log.error("[users] upsert error:", err);
-    res.status(500).json({ success: false, error: "Internal server error" });
+/** True when the stored blob already holds exactly these credentials. */
+function sameCredentials(
+  row: { encryptedCreds: string; iv: string; authTag: string },
+  next: Record<string, string>,
+): boolean {
+  try {
+    const current = JSON.parse(decrypt(row.encryptedCreds, row.iv, row.authTag, CONFIG.encryptionKey)) as Record<string, string>;
+    const keys = new Set([...Object.keys(current), ...Object.keys(next)]);
+    return [...keys].every((k) => current[k] === next[k]);
+  } catch {
+    // Undecryptable means a key rotation or a corrupt row; rewriting is the fix.
+    return false;
   }
-});
+}
 
-async function autoConfigureSpaces(userId: string, token: string): Promise<void> {
+async function autoConfigureSpaces(userId: string, token: string, sessionId?: string): Promise<void> {
   const serverType = "xyne-spaces";
 
   // Find or create the xyne-spaces MCP server
@@ -161,11 +204,23 @@ async function autoConfigureSpaces(userId: string, token: string): Promise<void>
   const credentials = {
     url: spacesUrl,
     token,
+    ...(sessionId ? { sessionId } : {}),
     ...(workspaceId ? { workspaceId } : {}),
   };
   if (workspaceId) {
     log.info(`[users] Auto-configured xyne-spaces workspaceId=${workspaceId} for user ${userId}`);
   }
+  // Login happens often and these credentials rarely change, so stop here when
+  // nothing moved. Rewriting them would evict the running MCP child and kick off
+  // a full tool re-sync on every page load.
+  const existing = await prisma.userMcpConnection.findUnique({
+    where: { userId_mcpServerId: { userId, mcpServerId: server.id } },
+    select: { encryptedCreds: true, iv: true, authTag: true },
+  });
+  if (existing && sameCredentials(existing, credentials)) {
+    return;
+  }
+
   const encrypted = encrypt(JSON.stringify(credentials), CONFIG.encryptionKey);
 
   await prisma.userMcpConnection.upsert({
@@ -182,6 +237,12 @@ async function autoConfigureSpaces(userId: string, token: string): Promise<void>
       iv: encrypted.iv,
       authTag: encrypted.authTag,
     },
+  });
+
+  // The cached MCP child bakes these credentials into its env at spawn time, so
+  // a refreshed token only takes effect once the child is dropped.
+  await evictSession(userId, serverType).catch((err) => {
+    log.error(`[users] evictSession failed for ${serverType}:`, err);
   });
 
   // Sync tools
@@ -263,22 +324,28 @@ async function autoConfigureSpaces(userId: string, token: string): Promise<void>
   }
 }
 
-router.get("/:id", async (req: Request<{ id: string }>, res: Response) => {
-  try {
-    const user = await prisma.user.findUnique({
-      where: { id: req.params.id },
-    });
-
-    if (!user) {
-      res.status(404).json({ success: false, error: "User not found" });
-      return;
-    }
-
-    res.json({ success: true, data: user });
-  } catch (err) {
-    log.error("[users] get error:", err);
-    res.status(500).json({ success: false, error: "Internal server error" });
+router.get("/:id", asyncHandler(async (req: Request<{ id: string }>, res: Response) => {
+  const requesterId = getRequesterId(req);
+  const orgId =
+    getOrgId(req) ??
+    (requesterId
+      ? (await prisma.user.findUnique({ where: { id: requesterId }, select: { orgId: true } }))?.orgId
+      : undefined);
+  if (!orgId) {
+    log.error(`[users] orgId is required; refusing cross-org user lookup requesterId=${requesterId ?? "none"} id=${req.params.id}`);
+    throw badRequest("orgId is required");
   }
-});
+
+  const user = await prisma.user.findFirst({
+    where: { id: req.params.id, orgId },
+    select: { id: true, email: true, name: true },
+  });
+
+  if (!user) {
+    throw notFound("User not found");
+  }
+
+  ok(res, user);
+}));
 
 export { router as usersRouter };

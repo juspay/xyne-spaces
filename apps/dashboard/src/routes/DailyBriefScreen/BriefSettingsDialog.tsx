@@ -184,6 +184,7 @@ export function BriefSettingsDialog({
               disabled={saving}
               data-track-category='DailyBrief'
               data-track-name='daily-brief-settings-cancel'
+              className='rounded-lg'
             >
               Cancel
             </Button>
@@ -194,6 +195,7 @@ export function BriefSettingsDialog({
               disabled={loading || saving || overLimit || busy}
               data-track-category='DailyBrief'
               data-track-name='daily-brief-settings-save-regenerate'
+              className='rounded-lg'
             >
               Save & regenerate
             </Button>
@@ -204,6 +206,7 @@ export function BriefSettingsDialog({
               loading={saving}
               data-track-category='DailyBrief'
               data-track-name='daily-brief-settings-save'
+              className='rounded-lg'
             >
               Save
             </Button>

@@ -9,6 +9,7 @@ import { notificationService } from '@/services/notificationService';
 import { slackService } from '@/services/slackService';
 import { handleUnreadCount } from '@/zero/utils/unreadCountUtlis';
 import { vespaQueue } from '@/queues/vespaQueue';
+import { radarExecutionQueue } from '@/queues/radarExecutionQueue';
 import { fileSchema, SubApp } from '@/vespa/src/types';
 import { isSupportedMimeType } from '@/services/fileProcessor';
 import {
@@ -48,6 +49,13 @@ import { botCatalog } from '@/bots/unified/catalog/bot-catalog';
 import { extractBotMentions, executeBotForMention, CHAT_ENABLED_BOT_IDS } from '@/services/bots';
 import { getSlackRecipientEmails } from '@/utils/notificationHelper';
 import { extractPlainTextFromHtml } from '@/utils/contentUtils';
+import {
+  cleanNotificationText,
+  getFlowJsonContentForNotification,
+  getFlowJsonRawTextForMentions,
+} from '@/utils/flowJson';
+// Re-exported so existing importers (e.g. vespa-injection mapper) keep working.
+export { getFlowJsonContentForNotification };
 import { matchKeywordsForUsers } from '@/utils/keywordMatchUtils';
 import type { BotDefinition } from '@/bots/unified/types/unified-bot';
 import { messageMetadataService } from '@/services/messageMetadataService';
@@ -58,93 +66,6 @@ import { prCheckApprovalService } from '@/services/prCheckApprovalService';
 const messageAttachmentRepository = new MessageAttachmentRepository();
 const channelRepository = new ChannelRepository();
 const installedAppsRepository = new InstalledAppsRepository();
-
-/**
- * Extract plaintext content strings from a FlowJSON payload for notification
- * preview and mention scanning.
- *
- * FlowJSON is stored as `<div data-flow-json="...escaped JSON...">Flow JSON</div>`.
- * The visible text node ("Flow JSON") is meaningless — we need to walk the
- * component tree and collect every text `content` prop, then join them.
- */
-function extractTextFromFlowJson(content: string): string {
-  const attrMatch = content.match(/data-flow-json="([^"]+)"/);
-  if (!attrMatch) return '';
-  try {
-    const json = attrMatch[1]
-      .replace(/&quot;/g, '"')
-      .replace(/&#10;/g, '\n')
-      .replace(/&#13;/g, '\r')
-      .replace(/&lt;/g, '<')
-      .replace(/&gt;/g, '>')
-      .replace(/&amp;/g, '&');
-    const flow = JSON.parse(json) as { components?: unknown[] };
-
-    const texts: string[] = [];
-
-    function walk(components: unknown[]): void {
-      for (const comp of components) {
-        if (!comp || typeof comp !== 'object') continue;
-        const c = comp as Record<string, unknown>;
-        if (c['props'] && typeof c['props'] === 'object') {
-          const p = c['props'] as Record<string, unknown>;
-          if (typeof p['content'] === 'string' && p['content'].trim()) {
-            texts.push(p['content'].trim());
-          }
-        }
-        if (Array.isArray(c['children'])) {
-          walk(c['children'] as unknown[]);
-        }
-      }
-    }
-
-    if (Array.isArray(flow.components)) {
-      walk(flow.components);
-    }
-    return texts.join(' ').replace(/\s+/g, ' ').trim();
-  } catch {
-    return '';
-  }
-}
-
-/**
- * Like extractTextFromFlowJson but strips mrkdwn tokens for display in
- * notification previews (user mentions removed, broadcast → @channel, etc.).
- */
-function extractCleanTextFromFlowJson(content: string): string {
-  const raw = extractTextFromFlowJson(content);
-  return cleanNotificationText(raw);
-}
-
-/** Strip Flow mrkdwn tokens without exposing internal entity identifiers. */
-function cleanNotificationText(raw: string): string {
-  if (!raw) return '';
-  return raw
-    .replace(/<userid:[^>]+>/g, '')
-    .replace(/<channelid:[^>]+>/g, '#channel')
-    .replace(/<broadcast:channel>/gi, '@channel ')
-    .replace(/<broadcast:here>/gi, '@here ')
-    .replace(/<broadcast:([^>]+)>/gi, '@$1')
-    .replace(/<([^|>]+)\|([^>]+)>/g, '$2')
-    .replace(/<(https?:[^>]+)>/g, '$1')
-    .replace(/\s+/g, ' ').trim();
-}
-
-/**
- * For flow JSON messages, returns the extracted plaintext from the FlowJSON
- * component tree (suitable for mention scanning and notification preview).
- * Returns null for non-flow-json content.
- */
-export function getFlowJsonContentForNotification(content: string): string | null {
-  if (!content.includes('data-flow-json')) return null;
-  return extractCleanTextFromFlowJson(content) || null;
-}
-
-/** Returns raw FlowJSON text with tokens intact (for mention scanning). */
-function getFlowJsonRawTextForMentions(content: string): string | null {
-  if (!content.includes('data-flow-json')) return null;
-  return extractTextFromFlowJson(content) || null;
-}
 
 /**
  * Friendly notification label for a flow CARD whose title/content doesn't live
@@ -372,12 +293,28 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
       where: { conversationId: message.conversationId },
       select: {
         channelId: true,
-        initialMessageId: true
+        initialMessageId: true,
+        // Radar keys a DM's window on its channel, and the queue needs that
+        // key at add time — read here rather than costing the message path
+        // a second lookup.
+        channel: { select: { scopeType: true } },
       },
     });
 
+    // Radar execution engine: fire-and-forget signal. enqueueThread never
+    // throws and no-ops unless ENABLE_RADAR_EXECUTION=true, so this can never
+    // block or fail the message path.
+    if (conversation?.channelId) {
+      void radarExecutionQueue.enqueueThread({
+        conversationId: message.conversationId,
+        channelId: conversation.channelId,
+        scopeType: conversation.channel?.scopeType ?? null,
+      });
+    }
+
     userActivityTrackingService.trackMessageSent(this.ctx.userID, {
       messageId,
+      ...(conversation?.channelId && { channelId: conversation.channelId }),
       hasAttachment: message.hasAttachment,
     }).catch(error => {
       logger.error('[UserActivityTracking] Failed to track message sent activity:', {
@@ -406,7 +343,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
     const [channel, sender, channelParticipantsRaw, userPreference] = await Promise.all([
       db.channel.findUnique({
         where: { id: channelId },
-        select: { name: true, scopeType: true, projectId: true }
+        select: { name: true, scopeType: true }
       }),
       db.user.findUnique({
         where: { id: senderId },
@@ -422,13 +359,6 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
         select: { allowThreadBroadcastMentions: true },
       })),
     ]);
-
-    const channelProject = channel?.projectId
-      ? await db.project.findUnique({
-          where: { id: channel.projectId },
-          select: { name: true },
-        })
-      : null;
 
     const participantUserIds = channelParticipantsRaw.map(p => p.userId);
     const users = await db.user.findMany({
@@ -513,7 +443,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
           ? '@here'
           : undefined;
 
-    if (channel?.projectId && !isDMChannel) {
+    if (!isDMChannel) {
       // Emit a synthetic MESSAGE/SENT activity event.
       // This flows through activityTrackingService -> nudge framework.
       // Fires for both parent messages and replies to enable link-paste detection.
@@ -530,7 +460,6 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
           messageId,
           conversationId,
           channelId,
-          projectId: channel.projectId,
           senderId,
         },
       });
@@ -565,7 +494,6 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
               originalMessageId,
               conversationId,
               channelId,
-              projectId: channel.projectId,
               senderId,
             },
           });
@@ -664,8 +592,6 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
         senderName,
         channelId,
         channelName: channel?.name ?? channelId,
-        ...(channel?.projectId ? { projectId: channel.projectId } : {}),
-        ...(channelProject?.name ? { projectName: channelProject.name } : {}),
         ...(attachments.length > 0 && {
           attachments: attachments.map(att => ({
             attachmentId: att.id,
@@ -694,8 +620,6 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
       senderName,
       channelId,
       channelName: channel?.name ?? channelId,
-      ...(channel?.projectId ? { projectId: channel.projectId } : {}),
-      ...(channelProject?.name ? { projectName: channelProject.name } : {}),
       mentionedUserIds: nonAppMentionedUserIds,
     };
 
@@ -2071,12 +1995,6 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
       });
 
       const channelId = conversation?.channelId;
-      const channel = channelId
-        ? await db.channel.findUnique({
-            where: { id: channelId },
-            select: { projectId: true },
-          })
-        : null;
 
       void activityTrackingService.saveActivityEvent({
         user_id: this.ctx.userID,
@@ -2091,7 +2009,6 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
           messageId,
           conversationId: conversation?.conversationId,
           channelId,
-          projectId: channel?.projectId,
         },
       });
     } catch (error) {
@@ -2256,7 +2173,28 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
         previousValue.conversationId,
         previousValue.isThreadReply,
       );
-    } else if (currentMessage.edited && currentMessage.content !== previousValue.content && !currentMessage.isDeleted) {
+    }
+
+    // App/service rewrites never set `edited`, so key the emit off the content diff.
+    if (
+      !currentMessage.isDeleted &&
+      previousValue.content !== undefined &&
+      currentMessage.content !== previousValue.content &&
+      !previousValue.isThreadReply &&
+      previousValue.channelId
+    ) {
+      void emitMessageReceived({
+        messageId: previousValue.messageId,
+        conversationId: previousValue.conversationId,
+        channelId: previousValue.channelId,
+        msgType: previousValue.msgType as MessageType,
+        userId: previousValue.senderId,
+        isEdit: true,
+        previousContent: previousValue.content,
+      });
+    }
+
+    if (currentMessage.edited && currentMessage.content !== previousValue.content && !currentMessage.isDeleted) {
       if (touchesArtifact) await syncMessageArtifact(db, previousValue.messageId);
       await this.sendMessageChangeNotifications(
         NotificationType.MESSAGE_EDITED,

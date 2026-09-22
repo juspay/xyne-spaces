@@ -3,6 +3,9 @@ import type { TicketStatusV2, TicketPriority } from '@xyne/shared';
 
 export type ActiveMenu = 'assignee' | 'status' | 'priority' | 'stage' | 'dueDate' | 'tags' | null;
 
+/** Column-picker key for a board dynamic field (`df:<fieldId>`). */
+export const dynamicColumnKey = (fieldId: string): string => `df:${fieldId}`;
+
 export interface EntityOption {
   value: string;
   label: string;
@@ -13,6 +16,12 @@ export interface EntityOption {
 export interface StatusEntityOption extends EntityOption {
   bgColor: string;
   textColor: string;
+}
+
+export interface StageOptionSource {
+  id: string;
+  name: string;
+  defaultTicketStatusV2?: string | null;
 }
 
 export interface GenericCellEditorProps {
@@ -48,7 +57,8 @@ export interface StageCellEditorProps {
   value: string;
   onValueChange: (value: string) => void;
   stopEditing?: () => void;
-  stages: Array<{ id: string; name: string }>;
+  stages?: StageOptionSource[];
+  data?: { boardId?: string | null } | undefined;
 }
 
 export interface DueDateCellEditorProps {

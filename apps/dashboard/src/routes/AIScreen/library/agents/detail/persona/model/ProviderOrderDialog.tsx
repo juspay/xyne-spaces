@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactElement } from 'react';
 import { ChevronBigDown, ChevronBigUp, MultipleCrossCancelDefault, PlusDefault } from '@xyne/icons';
 import { Button } from '@/components/ui/Button/index';
-import { ALL_PROVIDERS, PROVIDER_DISPLAY } from '@/services/claw/modelProviderConfig';
+import { HOSTED_PROVIDERS, PROVIDER_DISPLAY } from '@/services/claw/modelProviderConfig';
 import { V2Dialog } from '../../../../shared/primitives/V2Dialog';
 
 const ICON_BUTTON =
@@ -28,7 +28,7 @@ export function ProviderOrderDialog({
     if (open) setDraft([...order]);
   }, [open, order]);
 
-  const available = ALL_PROVIDERS.filter(provider => !draft.includes(provider));
+  const available = HOSTED_PROVIDERS.filter(provider => !draft.includes(provider));
 
   const move = (index: number, delta: number): void => {
     const target = index + delta;

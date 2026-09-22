@@ -9,8 +9,23 @@ import type {
 import type { ResearchContext } from '@xyne/shared';
 import type { AttachedContextItem } from '../components/Chat/XyneAISidebar/components/ContextPickerPanel';
 import type { UserActivity } from '../hooks/useUserActivity';
+import type { WorkflowContext } from '../machines/xyneAIMachine';
 import { xyneAIStreamManager, type StreamState } from '../services/XyneAI';
 import { buildXyneAIStreamThreadId } from '../utils/xyneAIStreamThreadId';
+import { globalClickTracker } from '../services/Analytics/globalClickTracker';
+import {
+  aiRunTrackingMetadata,
+  type XyneAiSendTrigger,
+  type XyneAiSurface,
+} from '../services/Analytics/xyneAiTracking';
+import {
+  trackWebSearchQuery,
+  trackDeepResearchQuery,
+  trackCanvasModeQuery,
+  trackAttachmentsAdded,
+} from '../services/otel/xyneAIMetrics';
+import type { DesignSelectionPayload } from '../components/AIScreen/Workspace/design/designStudioContext';
+import type { PageSelectionPayload } from '../components/AIScreen/Workspace/pageSelectionContext';
 
 /**
  * Per-submit overrides for the stream options. When provided, each field takes
@@ -20,19 +35,40 @@ import { buildXyneAIStreamThreadId } from '../utils/xyneAIStreamThreadId';
  */
 export interface StreamOverrides {
   channelIds?: string[];
-  collectionIds?: string[];
-  fileIds?: string[];
   webSearchEnabled?: boolean;
   deepResearchEnabled?: boolean;
   createCanvasEnabled?: boolean;
+  voiceMode?: boolean;
   /** Single search + single answer pass instead of the full agentic tool
    *  loop — see xyne-claw-auth's run-stream.ts POST / instant branch. */
   instant?: boolean;
+  /** Per-run model pin from the composer's model dropdown. Absent = hook-level
+   *  `model` (the sidebar's picker), which itself defaults to the DB-configured
+   *  model. A pick is the source of truth for the run. */
+  model?: string | null;
+  /** Which provider a model pin rides — the models endpoint's pinProvider
+   *  ("litellm" = the agent's shared credential, "spaces" = the keyless
+   *  platform provider). Only sent alongside `model`. */
+  modelProvider?: 'litellm' | 'spaces' | 'local-harness' | null;
+  /** Per-run thinking level. Absent = the agent's configured default. */
+  thinkingLevel?: 'off' | 'minimal' | 'low' | 'medium' | 'high';
   researchContext?: ResearchContext | null;
   ticketIds?: string[];
   canvasIds?: string[];
   callIds?: string[];
   attachedContext?: AttachedContextItem[];
+  /** Display-only richer context set (KB pills incl. titles) to stamp on the
+   *  optimistic user message so it matches the persisted pills after reload.
+   *  Falls back to `attachedContext` when absent. Never sent to the backend. */
+  displayAttachedContext?: AttachedContextItem[];
+  /** What caused this send, for the SEND_MESSAGE event. Regenerate and edit are
+   *  derived from their flags; pass 'auto_send' / 'suggestion' from those paths. */
+  trigger?: XyneAiSendTrigger;
+  sandboxMode?: 'remote' | 'local' | 'container';
+  studioMode?: 'design';
+  designArtifactAttachmentId?: string;
+  designSelection?: DesignSelectionPayload;
+  pageSelection?: PageSelectionPayload;
 }
 
 interface UseXyneAIStreamParams {
@@ -43,15 +79,15 @@ interface UseXyneAIStreamParams {
   threadConversationId?: string | undefined;
   attachmentIds?: string[] | undefined; // Attachment IDs to fetch from GCS on backend
   canvasId?: string | null;
+  workflowContext?: WorkflowContext | null;
   setMessages: React.Dispatch<React.SetStateAction<Message[]>>;
   setConversationId: React.Dispatch<React.SetStateAction<string>>;
   setCurrentTraceId?: React.Dispatch<React.SetStateAction<string | undefined>>;
   webSearchEnabled?: boolean;
   deepResearchEnabled?: boolean;
   researchContext?: ResearchContext | null;
-  collectionIds?: string[];
-  fileIds?: string[];
   createCanvasEnabled?: boolean;
+  voiceMode?: boolean;
   instant?: boolean;
   isV2?: boolean;
   channelId?: string | undefined; // Added for thread ID construction
@@ -59,15 +95,26 @@ interface UseXyneAIStreamParams {
   canvasIds?: string[];
   callIds?: string[];
   attachedContext?: AttachedContextItem[];
+  /** See StreamOverrides.displayAttachedContext — the richer set (with KB pills)
+   *  used only to render the just-sent message's pills. */
+  displayAttachedContext?: AttachedContextItem[];
   activities?: UserActivity[]; // User activities to include as context
   /** Selected claw agent slug. If set, the query is routed to that agent instead of Ask AI. */
   agentSlug?: string | null;
   /** Per-run model pin from the composer's model picker. Null = agent default. */
   model?: string | null;
+  /** pinProvider for the hook-level `model` (see StreamOverrides.modelProvider). */
+  modelProvider?: 'litellm' | 'spaces' | 'local-harness' | null;
+  /** Hook-level thinking pick (the sidebar's menu). Null = agent default. */
+  thinkingLevel?: 'off' | 'minimal' | 'low' | 'medium' | 'high' | null;
   /** Skip the global "response ready" toast for this stream (embedded/preview instances). */
   suppressCompletionToast?: boolean;
   setDebugEvents?: React.Dispatch<React.SetStateAction<DebugEventRecord[]>>;
   setDebugArtifactsReadyVersion?: React.Dispatch<React.SetStateAction<number>>;
+  /** Which UI hosts this conversation — dimension on SEND_MESSAGE. */
+  surface?: XyneAiSurface;
+  /** xyneAIMachine contextType at submit time (panel only). */
+  contextType?: string | null;
 }
 
 /**
@@ -85,6 +132,8 @@ function activitiesToAttachedContext(activities: UserActivity[]): AttachedContex
     relatedData: (activity.relatedData ?? {}) as Record<string, unknown>,
   }));
 }
+
+const VOICE_MODE_INSTRUCTION = `Voice mode: keep your spoken reply concise — 100 words or fewer, in a natural conversational style. You can still use tools, browse, and create artifacts as usual; put any long or detailed output (code, tables, lists, documents) into an artifact instead of the message text, and briefly summarize it in your spoken reply.`;
 
 // Canvas creation instruction appended when createCanvasEnabled is true
 const CANVAS_CREATION_INSTRUCTION = `
@@ -109,14 +158,13 @@ export const useXyneAIStream = ({
   threadConversationId,
   attachmentIds,
   canvasId,
+  workflowContext,
   setMessages,
   setConversationId,
   setCurrentTraceId,
   webSearchEnabled = false,
   deepResearchEnabled = false,
   researchContext,
-  collectionIds,
-  fileIds,
   createCanvasEnabled = false,
   instant = false,
   isV2 = false,
@@ -125,10 +173,15 @@ export const useXyneAIStream = ({
   canvasIds,
   callIds,
   attachedContext,
+  displayAttachedContext,
   activities,
   agentSlug,
   model,
+  modelProvider,
+  thinkingLevel,
   suppressCompletionToast,
+  surface,
+  contextType,
   setDebugEvents,
   setDebugArtifactsReadyVersion,
 }: UseXyneAIStreamParams) => {
@@ -289,16 +342,19 @@ export const useXyneAIStream = ({
         ov && 'deepResearchEnabled' in ov ? !!ov.deepResearchEnabled : deepResearchEnabled;
       const eCreateCanvasEnabled =
         ov && 'createCanvasEnabled' in ov ? !!ov.createCanvasEnabled : createCanvasEnabled;
+      const eVoiceMode = ov && 'voiceMode' in ov ? !!ov.voiceMode : false;
       const eInstant = ov && 'instant' in ov ? !!ov.instant : instant;
+      const eModel = ov && 'model' in ov ? (ov.model ?? null) : model;
+      const eModelProvider = ov && 'model' in ov ? (ov.modelProvider ?? null) : modelProvider;
+      const eThinkingLevel = ov?.thinkingLevel ?? thinkingLevel ?? undefined;
       const eResearchContext =
         ov && 'researchContext' in ov ? (ov.researchContext ?? null) : researchContext;
       const eChannelIds = ov?.channelIds ?? channelIds;
-      const eCollectionIds = ov?.collectionIds ?? collectionIds ?? [];
-      const eFileIds = ov?.fileIds ?? fileIds ?? [];
       const eTicketIds = ov?.ticketIds ?? ticketIds;
       const eCanvasIds = ov?.canvasIds ?? canvasIds;
       const eCallIds = ov?.callIds ?? callIds;
       const eAttachedContext = ov?.attachedContext ?? attachedContext;
+      const eDisplayAttachedContext = ov?.displayAttachedContext ?? displayAttachedContext;
 
       // Build internal query with selection context format
       // Format: from canvas(canvas_id) ```selected_text```
@@ -322,6 +378,10 @@ export const useXyneAIStream = ({
         internalQuery = internalQuery + '\n\n' + CANVAS_CREATION_INSTRUCTION;
       }
 
+      if (eVoiceMode) {
+        internalQuery = internalQuery + '\n\n' + VOICE_MODE_INSTRUCTION;
+      }
+
       // Get current messages synchronously
       // Strip any still-streaming messages — they may not have been cleared yet if abortCurrentRequest
       // was called just before submitQuery (React batches the state update, so prev still shows them).
@@ -339,6 +399,26 @@ export const useXyneAIStream = ({
           : msg,
       );
 
+      // Convert activities to attachedContext for v2 API
+      const activityContext =
+        activities && activities.length > 0 ? activitiesToAttachedContext(activities) : undefined;
+
+      // Merge with existing attachedContext — this is what we SEND to the
+      // backend (channels/tickets/canvases/calls + activities).
+      const combinedAttachedContext = activityContext
+        ? [...(eAttachedContext ?? []), ...activityContext]
+        : eAttachedContext;
+
+      // What we STAMP on the optimistic user message for its pills. Prefer the
+      // richer display set (adds KB collection/folder/file pills with titles)
+      // so the just-sent message matches the persisted pills shown after a
+      // reload; fall back to the sent set when no display set was provided.
+      const displayContextForMessage = eDisplayAttachedContext
+        ? activityContext
+          ? [...eDisplayAttachedContext, ...activityContext]
+          : eDisplayAttachedContext
+        : combinedAttachedContext;
+
       // Add user message (original query without internal formatting, but with selectionContexts for UI)
       // For regenerate: don't create a new user message — reuse the existing one.
       // The bot response branches as a new child of the same user message.
@@ -354,8 +434,12 @@ export const useXyneAIStream = ({
             timestamp: new Date(),
             ...(attachments.length > 0 && { attachments }),
             ...(selectionContexts && selectionContexts.length > 0 && { selectionContexts }),
+            ...(ov?.pageSelection ? { pageSelection: ov.pageSelection } : {}),
             ...(parentMessageId && { parentId: parentMessageId }),
             ...(userTags && Object.keys(userTags).length > 0 && { userTags }),
+            ...(displayContextForMessage && displayContextForMessage.length > 0
+              ? { attachedContext: displayContextForMessage }
+              : {}),
           };
 
       // Create bot message with streaming state
@@ -385,14 +469,63 @@ export const useXyneAIStream = ({
         ? [...currentMessages, userMessage, botMessage]
         : [...currentMessages, botMessage];
 
-      // Convert activities to attachedContext for v2 API
-      const activityContext =
-        activities && activities.length > 0 ? activitiesToAttachedContext(activities) : undefined;
-
-      // Merge with existing attachedContext
-      const combinedAttachedContext = activityContext
-        ? [...(eAttachedContext ?? []), ...activityContext]
-        : eAttachedContext;
+      // SEND_MESSAGE for every send the button cannot see: this is the one
+      // function every submit passes through (Enter, regenerate, edit,
+      // auto-sent initialQuery, suggestion chips) on both the panel and the
+      // /ai page. Fires before the request so a failed run still counts as an
+      // ask; the run's outcome is RESPONSE_* from the stream manager.
+      // A button send is already a click row under the button's own name
+      // (SEND_MESSAGE on the page, SUBMIT_MESSAGE in the panel) with the run
+      // dims baked into its metadata, so it is not repeated here.
+      const trigger: XyneAiSendTrigger = isRegenerate
+        ? 'regenerate'
+        : isEditUserMessage
+          ? 'edit'
+          : (ov?.trigger ?? 'submit');
+      if (trigger !== 'button') {
+        // Files/folders/collections ride in combinedAttachedContext (no
+        // separate id arrays) — count by type for the tracking metadata.
+        const eFileCount = combinedAttachedContext?.filter(i => i.type === 'file').length ?? 0;
+        const eFolderCount = combinedAttachedContext?.filter(i => i.type === 'folder').length ?? 0;
+        const eCollectionCount =
+          combinedAttachedContext?.filter(i => i.type === 'collection').length ?? 0;
+        globalClickTracker.trackManualEvent('XyneAI', 'SEND_MESSAGE', undefined, {
+          ...aiRunTrackingMetadata({
+            surface,
+            contextType,
+            agentSlug,
+            model: eModel,
+            modelProvider: eModelProvider,
+            thinkingLevel: eThinkingLevel,
+            webSearchEnabled: eWebSearchEnabled,
+            deepResearchEnabled: eDeepResearchEnabled,
+            createCanvasEnabled: eCreateCanvasEnabled,
+            instant: eInstant,
+            attachmentsCount: attachments.length,
+            channelCount: eChannelIds.length,
+            fileCount: eFileCount,
+            folderCount: eFolderCount,
+            collectionCount: eCollectionCount,
+            canvasCount: eCanvasIds?.length ?? 0,
+            ticketCount: eTicketIds?.length ?? 0,
+            callCount: eCallIds?.length ?? 0,
+            hasSelectionContext: !!selectionContexts?.length,
+            hasResearchContext: !!eResearchContext,
+            hasWorkflowContext: !!workflowContext,
+            queryLength: query.length,
+            isRegenerate: !!isRegenerate,
+            isEdit: !!isEditUserMessage,
+            conversationId,
+          }),
+          turnIndex: currentMessages.filter(m => m.type === 'user').length,
+          trigger,
+        });
+      }
+      // OpenTelemetry counters ride the same choke point so the /ai page counts too.
+      if (eWebSearchEnabled) trackWebSearchQuery();
+      if (eDeepResearchEnabled) trackDeepResearchQuery();
+      if (eCreateCanvasEnabled) trackCanvasModeQuery();
+      if (attachments.length > 0) trackAttachmentsAdded(attachments.length);
 
       // Start stream via the global stream manager
       // The stream manager will notify subscribers which will update messages with the streaming content
@@ -402,12 +535,11 @@ export const useXyneAIStream = ({
           query: internalQuery,
           displayQuery: displayContent ?? query,
           channelIds: eChannelIds,
-          collectionIds: eCollectionIds,
-          fileIds: eFileIds,
           conversationId,
           threadConversationId,
           attachmentIds,
           canvasId,
+          ...(workflowContext ? { workflowContext } : {}),
           webSearchEnabled: eWebSearchEnabled,
           deepResearchEnabled: eDeepResearchEnabled,
           createCanvasEnabled: eCreateCanvasEnabled,
@@ -427,8 +559,19 @@ export const useXyneAIStream = ({
           agentSlug: agentSlug ?? undefined,
           // v1 resolves its model from env and ignores the pin, so only send it
           // on v2 rather than letting a stale pick ride along invisibly.
-          ...(isV2 && model ? { model } : {}),
+          ...(isV2 && eModel ? { model: eModel } : {}),
+          ...(isV2 && eModel && eModelProvider ? { modelProvider: eModelProvider } : {}),
+          ...(eThinkingLevel ? { thinkingLevel: eThinkingLevel } : {}),
           ...(suppressCompletionToast && { suppressCompletionToast: true }),
+          ...(ov?.sandboxMode && ov.sandboxMode !== 'remote'
+            ? { sandboxMode: ov.sandboxMode }
+            : {}),
+          ...(ov?.studioMode ? { studioMode: ov.studioMode } : {}),
+          ...(ov?.designArtifactAttachmentId
+            ? { designArtifactAttachmentId: ov.designArtifactAttachmentId }
+            : {}),
+          ...(ov?.designSelection ? { designSelection: ov.designSelection } : {}),
+          ...(ov?.pageSelection ? { pageSelection: ov.pageSelection } : {}),
           version: isV2 ? 'v2' : 'v1',
         },
         allMessages,
@@ -439,12 +582,11 @@ export const useXyneAIStream = ({
     [
       threadId,
       channelIds,
-      collectionIds,
       conversationId,
       threadConversationId,
       attachmentIds,
       canvasId,
-      fileIds,
+      workflowContext,
       researchContext,
       webSearchEnabled,
       deepResearchEnabled,
@@ -456,11 +598,16 @@ export const useXyneAIStream = ({
       canvasIds,
       callIds,
       attachedContext,
+      displayAttachedContext,
       activities,
       streamSessionKey,
       agentSlug,
       model,
+      modelProvider,
+      thinkingLevel,
       suppressCompletionToast,
+      surface,
+      contextType,
     ],
   );
 

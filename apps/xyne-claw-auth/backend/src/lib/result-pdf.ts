@@ -18,6 +18,7 @@
  */
 
 import PDFDocument from "pdfkit";
+import { errMsg } from "./errors.js";
 import { marked, type Tokens, type Token } from "marked";
 
 export interface PdfRenderOptions {
@@ -588,7 +589,7 @@ export function renderAttachmentsToPdf(
             });
           } catch (err) {
             doc.fontSize(9).font("Helvetica").fillColor("#a00").text(
-              `[Could not render image: ${err instanceof Error ? err.message : String(err)}]`,
+              `[Could not render image: ${errMsg(err)}]`,
             );
             doc.fillColor("black");
           }

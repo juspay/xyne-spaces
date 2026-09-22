@@ -1,5 +1,6 @@
 /* eslint-disable local-rules/require-tracking-on-click */
-import { CSSProperties, ReactElement, useEffect, useMemo, useState } from 'react';
+import { ReactElement, useEffect, useMemo, useState } from 'react';
+import { toast } from 'sonner';
 import { apiInstance } from '../../../services/clients/apiClient';
 import { Dialog } from '../../ui/Dialog/Dialog';
 import { Button } from '../../ui/Button';
@@ -10,6 +11,7 @@ import {
   ChevronRight,
   GitCommit,
   PlugZap,
+  Sparkles,
   Trash2,
   Users,
   X,
@@ -19,6 +21,7 @@ import { EntitySelector } from '../../ui/EntitySelector/EntitySelector';
 import type { SelectorOption } from '../../ui/EntitySelector/EntitySelector.types';
 import { useUserGroups } from '../../../hooks/useUserGroup';
 import { cn } from '../../../utils/classNames';
+import { getApiErrorMessage } from '../../../utils/apiError';
 import { SearchChannel } from '../../ui/SearchChannel/SearchChannel';
 import { ChannelScopeType } from '@xyne/shared';
 import { useReleaseConfigForm } from './useReleaseConfigForm';
@@ -29,43 +32,22 @@ import {
   type ExistingReleaseConfig,
   type ReleaseTrackingModeValue,
   type ReleaseConfigWizardProps,
-  type VCSProvider,
 } from './ReleaseConfigWizard.types';
 import { queries } from '../../../zero/queries';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
+
+type SuggestedService = {
+  name: string;
+  regex: string;
+  envPaths: string[];
+  migrationPaths: string[];
+};
 
 // ─── Shared style tokens ─────────────────────────────────────────────────────
 const INPUT_CLASS =
   'w-full px-2 py-1.5 border border-input rounded-md bg-background text-foreground text-sm disabled:opacity-60';
 const LABEL_CLASS = 'block text-xs font-medium mb-0.5';
 const HELP_CLASS = 'text-[11px] text-muted-foreground mt-0.5';
-
-// ─── VCS provider options (Step 1) ──────────────────────────────────────────
-const VCS_PROVIDERS: Array<{
-  value: VCSProvider;
-  label: string;
-  description: string;
-  enabled: boolean;
-}> = [
-  {
-    value: 'BITBUCKET_SERVER',
-    label: 'Bitbucket Server',
-    description: 'Self-hosted Bitbucket (Data Center)',
-    enabled: true,
-  },
-  {
-    value: 'GITHUB',
-    label: 'GitHub',
-    description: 'GitHub.com or GitHub Enterprise',
-    enabled: true,
-  },
-  {
-    value: 'BITBUCKET_CLOUD',
-    label: 'Bitbucket Cloud',
-    description: 'Atlassian Bitbucket Cloud',
-    enabled: false,
-  },
-];
 
 const RELEASE_TRACKING_MODES: Array<{
   value: ReleaseTrackingModeValue;
@@ -107,6 +89,8 @@ const SelectionCard = ({
   <button
     type='button'
     onClick={onClick}
+    data-track-category='Release'
+    data-track-name='WIZARD_STEP_CLICK'
     disabled={isDisabled}
     aria-disabled={isDisabled}
     className={cn(
@@ -129,32 +113,6 @@ const SelectionCard = ({
       <p className='text-xs text-muted-foreground'>{description}</p>
     </div>
   </button>
-);
-
-// ─── Step 1: VCS Provider ────────────────────────────────────────────────────
-interface Step1Props {
-  selected: VCSProvider | null;
-  onSelect: (provider: VCSProvider) => void;
-}
-
-const Step1VCSProvider = ({ selected, onSelect }: Step1Props): ReactElement => (
-  <div className='space-y-2'>
-    <h3 className='text-base font-semibold'>Select Version Control System</h3>
-    <p className='text-xs text-muted-foreground'>Choose your code hosting provider.</p>
-    <div className='grid grid-cols-1 gap-2 mt-3'>
-      {VCS_PROVIDERS.map(provider => (
-        <SelectionCard
-          key={provider.value}
-          isSelected={selected === provider.value}
-          isDisabled={!provider.enabled}
-          onClick={() => onSelect(provider.value)}
-          label={provider.label}
-          description={provider.description}
-          badge={!provider.enabled ? 'Coming soon' : undefined}
-        />
-      ))}
-    </div>
-  </div>
 );
 
 // ─── Step 2: Applications + Channel ─────────────────────────────────────────
@@ -213,6 +171,8 @@ const PathChipsInput = ({
           <button
             type='button'
             onClick={() => remove(p)}
+            data-track-category='Release'
+            data-track-name='REMOVE_PATH_CHIP'
             className='text-muted-foreground hover:text-destructive shrink-0'
             aria-label={`Remove ${p}`}
           >
@@ -225,6 +185,8 @@ const PathChipsInput = ({
         value={draft}
         aria-label={ariaLabel}
         placeholder={paths.length === 0 ? placeholder : ''}
+        data-track-category='Release'
+        data-track-name='PATH_DRAFT_INPUT'
         onChange={e => {
           const v = e.target.value;
           // Pasting or typing a comma commits everything up to the last comma
@@ -300,7 +262,7 @@ const OwnerTeamPicker = ({
       onSelect={next => onChange(next ?? '')}
       placeholder='Select owner team'
       searchPlaceholder='Search user groups…'
-      showUnassignOption
+      showUnassignOption={!!value.trim()}
       unassignLabel='No owner team'
       width='100%'
     />
@@ -326,14 +288,16 @@ const ApplicationRow = ({
 }: ApplicationRowProps): ReactElement => (
   <div className='px-3 py-2 bg-muted rounded-md space-y-2'>
     <div className='flex items-center justify-between'>
-      <h4 className='font-medium text-sm'>Application {index + 1}</h4>
+      <h4 className='font-medium text-sm'>Service {index + 1}</h4>
       {canRemove && (
         <button
           type='button'
           onClick={() => onRemove(app.id)}
+          data-track-category='Release'
+          data-track-name='REMOVE_WIZARD_APP'
           className='text-muted-foreground hover:text-destructive transition-colors p-1 rounded hover:bg-destructive/10'
           aria-label={isLocked ? 'Delete on save' : 'Remove'}
-          title={isLocked ? 'This application will be deleted on Save' : 'Remove'}
+          title={isLocked ? 'This service will be deleted on Save' : 'Remove'}
         >
           <Trash2 size={14} />
         </button>
@@ -343,7 +307,7 @@ const ApplicationRow = ({
     <div className='grid grid-cols-1 md:grid-cols-2 gap-x-2 gap-y-2'>
       <div>
         <label className={LABEL_CLASS} htmlFor={`application-name-${app.id}`}>
-          Application Name *
+          Service Name *
         </label>
         <input
           id={`application-name-${app.id}`}
@@ -351,6 +315,8 @@ const ApplicationRow = ({
           value={app.name}
           disabled={isLocked}
           onChange={e => onUpdate(app.id, 'name', e.target.value)}
+          data-track-category='Release'
+          data-track-name='APPLICATION_NAME_INPUT'
           placeholder='e.g., backend'
           className={INPUT_CLASS}
         />
@@ -358,17 +324,19 @@ const ApplicationRow = ({
 
       <div>
         <label className={LABEL_CLASS} htmlFor={`application-regex-${app.id}`}>
-          Application Regex *
+          Service Regex *
         </label>
         <input
           id={`application-regex-${app.id}`}
           type='text'
           value={app.regex}
           onChange={e => onUpdate(app.id, 'regex', e.target.value)}
+          data-track-category='Release'
+          data-track-name='APPLICATION_REGEX_INPUT'
           placeholder='e.g., ^backend/'
           className={INPUT_CLASS}
         />
-        <p className={HELP_CLASS}>Matches commit file paths to identify this app</p>
+        <p className={HELP_CLASS}>Matches commit file paths to identify this service</p>
       </div>
 
       <div>
@@ -382,7 +350,7 @@ const ApplicationRow = ({
           value={app.envPaths}
           onChange={v => onUpdate(app.id, 'envPaths', v)}
           placeholder='config/env.yml, .env.prod'
-          ariaLabel={`Environment file paths for application ${index + 1}`}
+          ariaLabel={`Environment file paths for service ${index + 1}`}
         />
         <p className={HELP_CLASS}>Press Enter or type a comma to add a path</p>
       </div>
@@ -393,7 +361,7 @@ const ApplicationRow = ({
           value={app.migrationPaths}
           onChange={v => onUpdate(app.id, 'migrationPaths', v)}
           placeholder='migrations/, db/migrate/'
-          ariaLabel={`Migration file paths for application ${index + 1}`}
+          ariaLabel={`Migration file paths for service ${index + 1}`}
         />
         <p className={HELP_CLASS}>Press Enter or type a comma to add a path</p>
       </div>
@@ -420,6 +388,9 @@ interface Step3Props {
   isTestingConnection: boolean;
   /** null = not tested yet; otherwise the last test result. */
   connectionTest: { ok: boolean; message: string } | null;
+  lockTrackingMode: boolean;
+  onSuggestServices: () => Promise<void>;
+  isSuggesting: boolean;
 }
 
 const Step3Applications = ({
@@ -440,13 +411,16 @@ const Step3Applications = ({
   onTestConnection,
   isTestingConnection,
   connectionTest,
+  lockTrackingMode,
+  onSuggestServices,
+  isSuggesting,
 }: Step3Props): ReactElement => {
   return (
     <div className='space-y-3'>
       <div>
-        <h3 className='text-base font-semibold'>Configure Applications</h3>
+        <h3 className='text-base font-semibold'>Configure repository</h3>
         <p className='text-xs text-muted-foreground'>
-          Add applications, their file-path regexes, and app-specific env / migration paths.
+          Add services, their file-path regexes, and service-specific env / migration paths.
         </p>
       </div>
 
@@ -464,6 +438,8 @@ const Step3Applications = ({
                   type='text'
                   value={sharedRepoUrl}
                   onChange={e => onSharedRepoUrlChange(e.target.value)}
+                  data-track-category='Release'
+                  data-track-name='REPOSITORY_URL_INPUT'
                   placeholder='https://bitbucket.example.com/scm/PROJECT/repo.git'
                   className={INPUT_CLASS}
                 />
@@ -471,8 +447,11 @@ const Step3Applications = ({
                   variant='secondary'
                   size='sm'
                   onClick={() => void onTestConnection()}
+                  data-track-category='Release'
+                  data-track-name='TEST_REPO_CONNECTION'
                   disabled={isTestingConnection || !sharedRepoUrl.trim()}
-                  title='Verify the repo URL and token before configuring applications'
+                  title='Verify the repo URL and token before configuring services'
+                  trackId='test_release_repo_connection'
                 >
                   <PlugZap size={14} />
                   {isTestingConnection ? 'Testing…' : 'Test'}
@@ -490,7 +469,7 @@ const Step3Applications = ({
                 </p>
               ) : (
                 <p className={HELP_CLASS}>
-                  Verifies the repo URL + token before you configure applications.
+                  Verifies the repo URL + token before you configure services.
                 </p>
               )}
             </div>
@@ -506,12 +485,19 @@ const Step3Applications = ({
                 <SelectionCard
                   key={mode.value}
                   isSelected={releaseTrackingMode === mode.value}
+                  isDisabled={lockTrackingMode}
                   onClick={() => onReleaseTrackingModeChange(mode.value)}
                   label={mode.label}
                   description={mode.description}
                 />
               ))}
             </div>
+            {lockTrackingMode && (
+              <p className={HELP_CLASS}>
+                Tracking mode is fixed once a repository is configured. Changing it would discard
+                the existing release analysis. Remove and re-add the repository to switch.
+              </p>
+            )}
           </div>
 
           <div className='px-3 py-2 bg-primary/5 rounded-md border border-primary/20 space-y-1.5'>
@@ -557,47 +543,33 @@ const Step3Applications = ({
       </div>
 
       {allowApplicationListChanges && (
-        <Button variant='secondary' onClick={onAddApplication} className='w-full' size='sm'>
-          + Add Another Application
-        </Button>
+        <div className='flex gap-2'>
+          <Button
+            variant='secondary'
+            onClick={onAddApplication}
+            data-track-category='Release'
+            data-track-name='ADD_APPLICATION'
+            className='flex-1'
+            size='sm'
+          >
+            + Add service
+          </Button>
+          <Button
+            variant='secondary'
+            onClick={() => void onSuggestServices()}
+            disabled={isSuggesting || !sharedRepoUrl.trim()}
+            className='flex-1'
+            size='sm'
+            title='Use AI to suggest services and env / migration paths from the repo'
+          >
+            <Sparkles size={14} />
+            {isSuggesting ? 'Suggesting…' : 'Suggest with AI'}
+          </Button>
+        </div>
       )}
     </div>
   );
 };
-
-// ─── WizardProgressBar ───────────────────────────────────────────────────────
-const STEP_LABELS: Record<number, string> = {
-  1: '1. VCS Provider',
-  2: '2. Applications',
-};
-
-interface WizardProgressBarProps {
-  currentStep: number;
-  totalSteps: number;
-}
-
-const WizardProgressBar = ({ currentStep, totalSteps }: WizardProgressBarProps): ReactElement => (
-  <div className='mb-4'>
-    <div className='w-full h-1.5 bg-muted rounded-full overflow-hidden'>
-      <div
-        className='h-full bg-primary transition-all w-[var(--progress-width)]'
-        style={{ '--progress-width': `${(currentStep / totalSteps) * 100}%` } as CSSProperties}
-      />
-    </div>
-    <div className='mt-2 flex justify-between text-xs'>
-      {Array.from({ length: totalSteps }, (_, i) => i + 1).map(step => (
-        <span
-          key={step}
-          className={cn(
-            currentStep >= step ? 'text-foreground font-medium' : 'text-muted-foreground',
-          )}
-        >
-          {STEP_LABELS[step]}
-        </span>
-      ))}
-    </div>
-  </div>
-);
 
 // ─── ReleaseConfigWizard (root) ───────────────────────────────────────────────
 function jsonStringArray(value: unknown): string[] {
@@ -631,7 +603,6 @@ function buildExistingConfig(
   return {
     mainBoardId: mainBoard.id,
     mainBoardName: mainBoard.name,
-    vcsProvider: mainBoard.vcsProvider as ExistingReleaseConfig['vcsProvider'],
     releaseTrackingMode:
       mainBoard.releaseTrackingMode as ExistingReleaseConfig['releaseTrackingMode'],
     channelId: applications[0]?.channelId ?? null,
@@ -664,10 +635,15 @@ const ReleaseConfigWizardForm = ({
     application => application.boardId === applicationBoardId,
   );
   const isApplicationEdit = mode.kind === 'edit-application';
+  const isApplicationAdd = mode.kind === 'add-application';
+  // Both single-service modes wear the lean form: no repo/tracking/channel
+  // controls, no list add/remove — just the one service row.
+  const isSingleService = isApplicationEdit || isApplicationAdd;
 
   const form = useReleaseConfigForm({
     projectId,
     existingConfig,
+    addServiceMode: isApplicationAdd,
     onSave: mainBoard => {
       if (isApplicationEdit && selectedApplication) {
         onSave({ id: selectedApplication.boardId, name: selectedApplication.name });
@@ -677,8 +653,13 @@ const ReleaseConfigWizardForm = ({
     },
   });
 
-  const visibleApplications =
-    isApplicationEdit && selectedApplication
+  // Add mode shows only the freshly-seeded blank row; edit mode shows only the
+  // edited row; otherwise the whole group is visible. The full group always
+  // stays in form state so the save submits every service (see the mutator,
+  // which deletes any app missing from the payload).
+  const visibleApplications = isApplicationAdd
+    ? form.applications.filter(application => application.id === form.addedServiceId)
+    : isApplicationEdit && selectedApplication
       ? form.applications.filter(application => application.boardId === selectedApplication.boardId)
       : form.applications;
 
@@ -687,18 +668,17 @@ const ReleaseConfigWizardForm = ({
     null,
   );
   const handleTestConnection = async (): Promise<void> => {
-    if (!form.sharedRepoUrl.trim() || !form.vcsProvider) return;
+    if (!form.sharedRepoUrl.trim()) return;
     setIsTestingConnection(true);
     setConnectionTest(null);
     try {
       const response = await apiInstance.post<{ ok: boolean; message: string }>(
         '/commits/analyze/test-connection',
-        { repoUrl: form.sharedRepoUrl.trim(), vcsProvider: form.vcsProvider },
+        { repoUrl: form.sharedRepoUrl.trim() },
       );
       setConnectionTest(response.data);
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Test failed';
-      setConnectionTest({ ok: false, message: msg });
+      setConnectionTest({ ok: false, message: getApiErrorMessage(err, 'Test failed') });
     } finally {
       setIsTestingConnection(false);
     }
@@ -706,7 +686,45 @@ const ReleaseConfigWizardForm = ({
 
   useEffect(() => {
     setConnectionTest(null);
-  }, [form.sharedRepoUrl, form.vcsProvider]);
+  }, [form.sharedRepoUrl]);
+
+  const [isSuggesting, setIsSuggesting] = useState(false);
+  const [suggestions, setSuggestions] = useState<SuggestedService[] | null>(null);
+  const [suggestChecked, setSuggestChecked] = useState<boolean[]>([]);
+  const [suggestMode, setSuggestMode] = useState<'add' | 'replace'>('add');
+
+  const handleSuggestServices = async (): Promise<void> => {
+    if (!form.sharedRepoUrl.trim()) return;
+    setIsSuggesting(true);
+    try {
+      const response = await apiInstance.post<{ services?: SuggestedService[]; message?: string }>(
+        '/commits/analyze/suggest-services',
+        { repoUrl: form.sharedRepoUrl.trim(), projectId },
+      );
+      const services = response.data.services ?? [];
+      if (services.length === 0) {
+        toast.info(response.data.message ?? 'No services could be suggested for this repository.');
+        return;
+      }
+      setSuggestions(services);
+      setSuggestChecked(services.map(() => true));
+      // Default to replacing when there's nothing to preserve.
+      setSuggestMode(form.applications.some(app => app.name.trim()) ? 'add' : 'replace');
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, 'Failed to suggest services'));
+    } finally {
+      setIsSuggesting(false);
+    }
+  };
+
+  const applyPickedSuggestions = (): void => {
+    if (!suggestions) return;
+    const picked = suggestions.filter((_, i) => suggestChecked[i]);
+    if (picked.length === 0) return;
+    form.applyServiceSuggestions(picked, suggestMode);
+    setSuggestions(null);
+    toast.success(`Applied ${picked.length} service${picked.length > 1 ? 's' : ''}`);
+  };
 
   // The form keeps the complete group in memory even when application edit
   // displays one row. The backend uses the submitted list to detect removals.
@@ -715,20 +733,26 @@ const ReleaseConfigWizardForm = ({
     [existingConfig],
   );
 
-  const canProceed =
-    form.currentStep === 1
-      ? !!form.vcsProvider
-      : !!form.sharedRepoUrl.trim() && form.applications.some(app => app.name.trim());
+  const canProceed = !!form.sharedRepoUrl.trim() && form.applications.some(app => app.name.trim());
+
+  // In add mode, gate on the new row itself being filled — the group already
+  // has named services, so the generic "some app has a name" check is always
+  // true and would let an empty add through.
+  const addedService = isApplicationAdd
+    ? form.applications.find(app => app.id === form.addedServiceId)
+    : null;
+  const addedServiceReady = !!addedService?.name.trim() && !!addedService?.regex.trim();
 
   const canSave =
     form.currentStep === 2 &&
     !!form.sharedRepoUrl.trim() &&
     form.applications.some(app => app.name.trim()) &&
+    (!isApplicationAdd || addedServiceReady) &&
     // The save falls back to the group's stored channel when the picker is
-    // hidden (application edit) or the channel failed to prefill.
+    // hidden (single-service modes) or the channel failed to prefill.
     (!!form.selectedChannel || !!existingConfig?.channelId);
 
-  const showCancelOnLeft = form.currentStep === 1 || form.isEditing;
+  const showCancelOnLeft = true;
 
   return (
     <Dialog
@@ -736,18 +760,89 @@ const ReleaseConfigWizardForm = ({
       onOpenChange={onClose}
       title={
         mode.kind === 'create'
-          ? 'Create Release Board'
-          : isApplicationEdit
-            ? 'Edit Application Release Config'
-            : 'Edit Release Board Config'
+          ? 'Connect Repository'
+          : isApplicationAdd
+            ? 'Add Service'
+            : isApplicationEdit
+              ? 'Edit Service Release Config'
+              : 'Edit Repository Config'
       }
       className='max-w-5xl'
     >
-      <div className='p-4 w-full'>
-        {!form.isEditing && <WizardProgressBar currentStep={form.currentStep} totalSteps={2} />}
-
-        {form.currentStep === 1 && !form.isEditing && (
-          <Step1VCSProvider selected={form.vcsProvider} onSelect={form.setVcsProvider} />
+      <div className='p-4 w-full relative'>
+        {suggestions && (
+          <div className='absolute inset-0 z-20 flex items-center justify-center bg-background/80 p-4'>
+            <div className='w-full max-w-lg space-y-3 rounded-xl border border-border bg-background p-4 shadow-lg'>
+              <div>
+                <h4 className='text-sm font-semibold'>
+                  AI found {suggestions.length} service{suggestions.length > 1 ? 's' : ''}
+                </h4>
+                <p className='text-xs text-muted-foreground'>Pick which to apply.</p>
+              </div>
+              <div className='max-h-[300px] space-y-2 overflow-y-auto'>
+                {suggestions.map((s, i) => (
+                  <label
+                    key={`${s.name}-${i}`}
+                    className='flex cursor-pointer items-start gap-2 rounded-md border border-border p-2 hover:bg-muted'
+                  >
+                    <input
+                      type='checkbox'
+                      checked={suggestChecked[i] ?? false}
+                      onChange={() =>
+                        setSuggestChecked(prev => prev.map((v, idx) => (idx === i ? !v : v)))
+                      }
+                      className='mt-0.5'
+                    />
+                    <div className='min-w-0'>
+                      <div className='text-sm font-medium'>
+                        {s.name}{' '}
+                        <span className='font-mono text-xs text-muted-foreground'>{s.regex}</span>
+                      </div>
+                      {(s.envPaths.length > 0 || s.migrationPaths.length > 0) && (
+                        <div className='truncate text-xs text-muted-foreground'>
+                          {s.envPaths.length > 0 && `env: ${s.envPaths.join(', ')}`}
+                          {s.envPaths.length > 0 && s.migrationPaths.length > 0 && ' · '}
+                          {s.migrationPaths.length > 0 &&
+                            `migrations: ${s.migrationPaths.join(', ')}`}
+                        </div>
+                      )}
+                    </div>
+                  </label>
+                ))}
+              </div>
+              <div className='flex items-center gap-4 text-sm'>
+                <label className='flex cursor-pointer items-center gap-1.5'>
+                  <input
+                    type='radio'
+                    checked={suggestMode === 'add'}
+                    onChange={() => setSuggestMode('add')}
+                  />
+                  Add to existing
+                </label>
+                <label className='flex cursor-pointer items-center gap-1.5'>
+                  <input
+                    type='radio'
+                    checked={suggestMode === 'replace'}
+                    onChange={() => setSuggestMode('replace')}
+                  />
+                  Replace all
+                </label>
+              </div>
+              <div className='flex justify-end gap-2'>
+                <Button variant='secondary' size='sm' onClick={() => setSuggestions(null)}>
+                  Cancel
+                </Button>
+                <Button
+                  variant='default'
+                  size='sm'
+                  disabled={suggestChecked.every(v => !v)}
+                  onClick={applyPickedSuggestions}
+                >
+                  Apply {suggestChecked.filter(Boolean).length}
+                </Button>
+              </div>
+            </div>
+          </div>
         )}
         {form.currentStep === 2 && (
           <Step3Applications
@@ -761,13 +856,16 @@ const ReleaseConfigWizardForm = ({
             onUpdateApplication={form.updateApplication}
             releaseTrackingMode={form.releaseTrackingMode}
             onReleaseTrackingModeChange={form.setReleaseTrackingMode}
+            lockTrackingMode={form.isEditing}
             sharedRepoUrl={form.sharedRepoUrl}
             onSharedRepoUrlChange={form.setSharedRepoUrl}
-            showGroupControls={!isApplicationEdit}
-            allowApplicationListChanges={!isApplicationEdit}
+            showGroupControls={!isSingleService}
+            allowApplicationListChanges={!isSingleService}
             onTestConnection={handleTestConnection}
             isTestingConnection={isTestingConnection}
             connectionTest={connectionTest}
+            onSuggestServices={handleSuggestServices}
+            isSuggesting={isSuggesting}
           />
         )}
 
@@ -775,6 +873,8 @@ const ReleaseConfigWizardForm = ({
           <Button
             variant='secondary'
             onClick={showCancelOnLeft ? onClose : form.handleBack}
+            data-track-category='Release'
+            data-track-name='WIZARD_BACK_OR_CANCEL'
             disabled={form.isSaving}
           >
             {showCancelOnLeft ? (
@@ -787,22 +887,33 @@ const ReleaseConfigWizardForm = ({
           </Button>
 
           {form.currentStep < 2 ? (
-            <Button variant='default' onClick={form.handleNext} disabled={!canProceed}>
+            <Button
+              variant='default'
+              onClick={form.handleNext}
+              data-track-category='Release'
+              data-track-name='WIZARD_NEXT'
+              disabled={!canProceed}
+            >
               Next <ChevronRight size={16} />
             </Button>
           ) : (
             <Button
               variant='default'
               onClick={() => void form.handleSave()}
+              data-track-category='Release'
+              data-track-name='SAVE_RELEASE_CONFIG'
+              trackId='save_release_config'
               disabled={!canSave || form.isSaving}
             >
               {form.isSaving
                 ? 'Saving...'
-                : isApplicationEdit
-                  ? 'Save Application'
-                  : form.isEditing
-                    ? 'Next'
-                    : 'Save Configuration'}
+                : isApplicationAdd
+                  ? 'Add Service'
+                  : isApplicationEdit
+                    ? 'Save Service'
+                    : form.isEditing
+                      ? 'Next'
+                      : 'Save Configuration'}
             </Button>
           )}
         </div>
@@ -831,7 +942,7 @@ export const ReleaseConfigWizard = ({
     [applications, mode.kind, applicationBoardId],
   );
   const mainBoardId =
-    mode.kind === 'edit-main'
+    mode.kind === 'edit-main' || mode.kind === 'add-application'
       ? mode.mainBoardId
       : mode.kind === 'edit-application'
         ? (selectedApplication?.mainReleaseBoardId ?? '')
@@ -884,7 +995,7 @@ export const ReleaseConfigWizard = ({
     return (
       <Dialog open={isOpen} onOpenChange={onClose} title='Release configuration unavailable'>
         <div className='p-6 text-sm text-destructive'>
-          This release board does not have a valid owning release configuration.
+          This repository does not have a valid owning release configuration.
         </div>
       </Dialog>
     );

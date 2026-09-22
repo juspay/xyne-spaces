@@ -1,0 +1,161 @@
+import { useMemo } from 'react';
+import { CallStatus } from '@xyne/shared';
+import { useCachedQuery } from './useCachedQuery';
+import { useUsers } from './useUsers';
+import { queries } from '../zero/queries';
+import {
+  getPreviewParticipantEntries,
+  type Call,
+} from '../routes/CallHistoryScreen/callHistoryItem.utils';
+
+type CallParticipant = NonNullable<Call['participants']>[number];
+type MergedParticipant = Partial<CallParticipant> & {
+  userId: string;
+  isCurrentUser?: boolean;
+  /** Set only for preview-sourced rows, which carry no `joinedAt` of their own. */
+  previewHasJoined?: boolean;
+};
+
+/** A call participant with its display fields resolved against the user directory. */
+export interface CallParticipantRow {
+  userId: string;
+  name: string;
+  email: string;
+  isExternal: boolean;
+  isCurrentUser: boolean;
+  /** Actually showed up, as opposed to merely being invited. */
+  hasJoined: boolean;
+  /** Epoch ms of the latest join/leave. One row per person, so not a history. */
+  joinedAtMs: number | null;
+  leftAtMs: number | null;
+}
+
+interface UseCallParticipantRosterResult {
+  participants: CallParticipantRow[];
+  isLoading: boolean;
+}
+
+/**
+ * Merges a call's inlined participants with its preview ids and — when the inlined
+ * list is known to be truncated — the full roster fetched from Zero.
+ *
+ * `isEnabled` gates that fetch, so a caller not showing the roster costs nothing;
+ * the inlined and preview participants resolve either way, which lets a trigger
+ * render avatars first. `call` is nullable because it may not have arrived yet.
+ */
+export function useCallParticipantRoster(
+  call: Call | null | undefined,
+  isEnabled: boolean,
+  currentUserId: string | undefined,
+): UseCallParticipantRosterResult {
+  // Live calls always fetch: `participantCount` is only refreshed when the call ends.
+  const hasFullParticipants =
+    call?.status !== CallStatus.ACTIVE &&
+    call?.participantCount !== null &&
+    call?.participantCount !== undefined &&
+    call.participantCount <= (call.participants?.length ?? 0);
+
+  const [fullParticipants, fullParticipantsDetails] = useCachedQuery(
+    queries.callParticipantsByCallId({ callId: call?.id ?? '' }),
+    {
+      enabled: Boolean(call) && isEnabled && !hasFullParticipants,
+    },
+  );
+
+  const allUsers = useUsers();
+  const usersById = useMemo(() => {
+    const map = new Map<string, { name: string; email: string }>();
+    for (const u of allUsers) {
+      map.set(u.id, { name: u.name, email: u.email });
+    }
+    return map;
+  }, [allUsers]);
+
+  const previewParticipantEntries = useMemo(
+    () => getPreviewParticipantEntries(call?.participantPreviewUserIds, currentUserId).slice(0, 3),
+    [call?.participantPreviewUserIds, currentUserId],
+  );
+
+  const previewParticipants = useMemo(() => {
+    const nextParticipants: MergedParticipant[] = [];
+    const seen = new Set<string>();
+
+    for (const participant of call?.participants ?? []) {
+      if (participant.userId && !seen.has(participant.userId)) {
+        nextParticipants.push({
+          ...participant,
+          userId: participant.userId,
+          isCurrentUser: participant.userId === currentUserId,
+        });
+        seen.add(participant.userId);
+      }
+    }
+
+    for (const entry of previewParticipantEntries) {
+      if (!seen.has(entry.userId)) {
+        nextParticipants.push({
+          userId: entry.userId,
+          isCurrentUser: entry.userId === currentUserId,
+          previewHasJoined: entry.hasJoined,
+        });
+        seen.add(entry.userId);
+      }
+    }
+
+    return nextParticipants;
+  }, [call?.participants, currentUserId, previewParticipantEntries]);
+
+  const participants = useMemo<CallParticipantRow[]>(() => {
+    const merged = [...previewParticipants];
+    const indexByUserId = new Map(merged.map((participant, index) => [participant.userId, index]));
+
+    // Fetched rows replace preview rows in place, whose join flag can be stale.
+    for (const participant of fullParticipants ?? []) {
+      if (!participant.userId) continue;
+
+      const fullParticipant = {
+        ...participant,
+        isCurrentUser: participant.userId === currentUserId,
+      };
+      const index = indexByUserId.get(participant.userId);
+      if (index === undefined) {
+        indexByUserId.set(participant.userId, merged.length);
+        merged.push(fullParticipant);
+      } else {
+        merged[index] = fullParticipant;
+      }
+    }
+
+    return merged.map(participant => {
+      const isExternal = Boolean(participant.isExternal);
+      const directoryUser = usersById.get(participant.userId);
+
+      return {
+        userId: participant.userId,
+        name: isExternal
+          ? participant.displayName || 'Guest'
+          : (directoryUser?.name ?? 'Unknown User'),
+        email: isExternal ? (participant.email ?? '') : (directoryUser?.email ?? ''),
+        isExternal,
+        isCurrentUser: Boolean(participant.isCurrentUser),
+        // `joinedAt` is the authoritative signal; preview-only rows fall back to
+        // the flag carried in the preview payload.
+        hasJoined:
+          participant.joinedAt !== null && participant.joinedAt !== undefined
+            ? true
+            : Boolean(participant.previewHasJoined),
+        joinedAtMs: typeof participant.joinedAt === 'number' ? participant.joinedAt : null,
+        leftAtMs: typeof participant.leftAt === 'number' ? participant.leftAt : null,
+      };
+    });
+  }, [currentUserId, fullParticipants, previewParticipants, usersById]);
+
+  return {
+    participants,
+    isLoading:
+      Boolean(call) &&
+      isEnabled &&
+      !hasFullParticipants &&
+      fullParticipantsDetails.type !== 'complete',
+  };
+}

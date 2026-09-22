@@ -4,10 +4,13 @@ import { toast } from 'sonner';
 
 import { useTheme } from './useTheme';
 import { useAILandingDefault } from './useAILandingDefault';
+import { useAppModeCollapseSidebar } from './useAppModeCollapseSidebar';
 import { useDebugSettings } from './useDebugSettings';
 import { useEnterSendsMessage } from './useEnterSendsMessage';
 import { useDefaultFormattingToolbarOpen } from './useDefaultFormattingToolbarOpen';
 import { useShowThreadTags } from './useShowThreadTags';
+import { useStreamsVisibility } from './useStreamsVisibility';
+import { useSummaryModelPreference } from './useSummaryModelPreference';
 import { useSearchMode } from './useSearchMode';
 import { useThreadBroadcastMentions } from './useThreadBroadcastMentions';
 import { useCallJoinSettings } from './useCallJoinSettings';
@@ -42,12 +45,15 @@ export function usePreferencesState(enabled: boolean) {
   );
   const { theme, changeTheme } = useTheme();
   const { aiLandingDefault, setAiLandingDefault } = useAILandingDefault();
+  const { appModeCollapseSidebar, setAppModeCollapseSidebar } = useAppModeCollapseSidebar();
   const { settings: debugSettings, toggleSendIndicators } = useDebugSettings();
   const { enterSendsMessage, setEnterSendsMessage } = useEnterSendsMessage();
   const { defaultFormattingToolbarOpen, setDefaultFormattingToolbarOpen } =
     useDefaultFormattingToolbarOpen();
   const { showThreadTags, setShowThreadTags } = useShowThreadTags();
-  const { searchMode, setSearchMode } = useSearchMode();
+  const { showStreams, setShowStreams } = useStreamsVisibility();
+  const { summaryModelPreference, setSummaryModelPreference } = useSummaryModelPreference();
+  const { searchMode } = useSearchMode();
   const { showClawDashboard, setShowClawDashboard } = useClawDashboardVisibility();
   const { allowThreadBroadcastMentions, setAllowThreadBroadcastMentions } =
     useThreadBroadcastMentions();
@@ -135,6 +141,8 @@ export function usePreferencesState(enabled: boolean) {
     theme,
     changeTheme,
     aiLandingDefault,
+    appModeCollapseSidebar,
+    setAppModeCollapseSidebar,
     setAiLandingDefault,
     debugSettings,
     toggleSendIndicators,
@@ -142,10 +150,13 @@ export function usePreferencesState(enabled: boolean) {
     defaultFormattingToolbarOpen,
     setDefaultFormattingToolbarOpen,
     showThreadTags,
+    showStreams,
+    setShowStreams,
     setShowThreadTags,
+    summaryModelPreference,
+    setSummaryModelPreference,
     setEnterSendsMessage,
     searchMode,
-    setSearchMode,
     showClawDashboard,
     setShowClawDashboard,
     allowThreadBroadcastMentions,

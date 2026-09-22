@@ -11,6 +11,16 @@
  */
 
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
+import { errMsg } from "../../lib/errors.js";
+import { assertSafeOutboundUrl } from "../../mcpgateway/services/http-client.js";
+
+// The Jenkins base URL comes from a user-stored connection credential. Refuse
+// internal / private / metadata destinations before every request (which carries
+// the connection's Basic-auth credentials) so a crafted baseUrl cannot SSRF.
+async function guardedFetch(input: string, init?: RequestInit): Promise<Response> {
+  await assertSafeOutboundUrl(input);
+  return fetch(input, init);
+}
 
 // ─── Config ───────────────────────────────────────────────────────────────
 
@@ -53,7 +63,7 @@ async function getCrumb(
   config: JenkinsConfig,
 ): Promise<{ crumb: string; crumbField: string } | null> {
   try {
-    const response = await fetch(`${config.baseUrl}/crumbIssuer/api/json`, {
+    const response = await guardedFetch(`${config.baseUrl}/crumbIssuer/api/json`, {
       headers: { Authorization: getAuthHeader(config.username, config.apiToken) },
     });
     if (!response.ok) return null;
@@ -81,7 +91,7 @@ async function triggerBuild(
     };
     if (crumb) headers[crumb.crumbField] = crumb.crumb;
 
-    const response = await fetch(url, {
+    const response = await guardedFetch(url, {
       method: "POST",
       headers,
       body: "json={}",
@@ -92,14 +102,14 @@ async function triggerBuild(
     }
     return { success: false, error: `Jenkins returned ${response.status}` };
   } catch (err) {
-    return { success: false, error: err instanceof Error ? err.message : String(err) };
+    return { success: false, error: errMsg(err) };
   }
 }
 
 async function getLatestBuild(config: JenkinsConfig, branch: string): Promise<JenkinsBuild | null> {
   try {
     const url = `${config.baseUrl}${config.jobPath}/job/${encodeURIComponent(branch)}/lastBuild/api/json`;
-    const response = await fetch(url, {
+    const response = await guardedFetch(url, {
       headers: { Authorization: getAuthHeader(config.username, config.apiToken) },
     });
     if (!response.ok) return null;
@@ -116,7 +126,7 @@ async function getBuildByNumber(
 ): Promise<JenkinsBuild | null> {
   try {
     const url = `${config.baseUrl}${config.jobPath}/job/${encodeURIComponent(branch)}/${buildNumber}/api/json`;
-    const response = await fetch(url, {
+    const response = await guardedFetch(url, {
       headers: { Authorization: getAuthHeader(config.username, config.apiToken) },
     });
     if (!response.ok) return null;
@@ -133,7 +143,7 @@ async function getBuildStages(
 ): Promise<JenkinsStage[]> {
   try {
     const url = `${config.baseUrl}${config.jobPath}/job/${encodeURIComponent(branch)}/${buildNumber}/wfapi/describe`;
-    const response = await fetch(url, {
+    const response = await guardedFetch(url, {
       headers: { Authorization: getAuthHeader(config.username, config.apiToken) },
     });
     if (!response.ok) return [];
@@ -154,7 +164,7 @@ async function getBuildLogs(
     const url = stageName
       ? `${config.baseUrl}${config.jobPath}/job/${encodeURIComponent(branch)}/${buildNumber}/execution/node/${stageName}/wfapi/log`
       : `${config.baseUrl}${config.jobPath}/job/${encodeURIComponent(branch)}/${buildNumber}/consoleText`;
-    const response = await fetch(url, {
+    const response = await guardedFetch(url, {
       headers: { Authorization: getAuthHeader(config.username, config.apiToken) },
     });
     if (!response.ok) return "";
@@ -171,7 +181,7 @@ async function listBuilds(
 ): Promise<JenkinsBuildInfo[]> {
   try {
     const url = `${config.baseUrl}${config.jobPath}/job/${encodeURIComponent(branch)}/api/json?tree=builds[id,number,result,building,url,timestamp]{0,${limit}}`;
-    const response = await fetch(url, {
+    const response = await guardedFetch(url, {
       headers: { Authorization: getAuthHeader(config.username, config.apiToken) },
     });
     if (!response.ok) return [];
@@ -228,7 +238,7 @@ export const tools: JenkinsTool[] = [
     inputSchema: { type: "object", properties: {}, required: [] },
     async handler(_args, { config }) {
       try {
-        const response = await fetch(`${config.baseUrl}/api/json`, {
+        const response = await guardedFetch(`${config.baseUrl}/api/json`, {
           headers: { Authorization: getAuthHeader(config.username, config.apiToken) },
         });
         if (response.ok) {
@@ -240,7 +250,7 @@ export const tools: JenkinsTool[] = [
         );
       } catch (err) {
         return text(
-          `Could not reach Jenkins at ${config.baseUrl}: ${err instanceof Error ? err.message : String(err)}`,
+          `Could not reach Jenkins at ${config.baseUrl}: ${errMsg(err)}`,
           true,
         );
       }

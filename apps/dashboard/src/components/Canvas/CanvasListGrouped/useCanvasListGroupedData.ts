@@ -17,6 +17,7 @@ import {
 import {
   filterArchivedCanvases,
   filterExcludedCallGeneratedCanvases,
+  filterExcludedRecordingGeneratedCanvases,
   filterStarredCanvases,
   withStarredCanvasState,
 } from '../canvasFilters';
@@ -25,6 +26,7 @@ interface UseCanvasListGroupedDataParams {
   currentUserId?: string | undefined;
   collapsedProjects: ReadonlySet<string>;
   excludeCallGeneratedCanvases: boolean;
+  excludeRecordingGeneratedCanvases: boolean;
   showStarredOnly: boolean;
   includeArchived: boolean;
   onlyArchived: boolean;
@@ -53,6 +55,7 @@ export function useCanvasListGroupedData({
   currentUserId,
   collapsedProjects,
   excludeCallGeneratedCanvases,
+  excludeRecordingGeneratedCanvases,
   showStarredOnly,
   includeArchived,
   onlyArchived,
@@ -83,8 +86,8 @@ export function useCanvasListGroupedData({
   const projectIds = useMemo(() => lazyProjects.map(project => project.id), [lazyProjects]);
   const allProjectChannels = useMemo(
     () =>
-      allVisibleChannels.filter(channel =>
-        projectIds.includes(channel.projectId),
+      allVisibleChannels.filter(
+        channel => channel.projectId !== null && projectIds.includes(channel.projectId),
       ) as CanvasChannel[],
     [allVisibleChannels, projectIds],
   );
@@ -110,19 +113,23 @@ export function useCanvasListGroupedData({
   const lazyPersonalCanvases = useMemo(
     () =>
       filterStarredCanvases(
-        filterExcludedCallGeneratedCanvases(
-          withStarredCanvasState(
-            filterArchivedCanvases(toArray<Canvas>(personalCanvasesResult), {
-              includeArchived,
-              onlyArchived,
-            }),
+        filterExcludedRecordingGeneratedCanvases(
+          filterExcludedCallGeneratedCanvases(
+            withStarredCanvasState(
+              filterArchivedCanvases(toArray<Canvas>(personalCanvasesResult), {
+                includeArchived,
+                onlyArchived,
+              }),
+            ),
+            excludeCallGeneratedCanvases,
           ),
-          excludeCallGeneratedCanvases,
+          excludeRecordingGeneratedCanvases,
         ),
         showStarredOnly,
       ),
     [
       excludeCallGeneratedCanvases,
+      excludeRecordingGeneratedCanvases,
       includeArchived,
       onlyArchived,
       personalCanvasesResult,

@@ -49,6 +49,7 @@ export const MappedTicketModal: React.FC<MappedTicketModalProps> = ({
             <ThreadMessages
               ticketId={mappedTicketId}
               onClose={onClose}
+              defaultTab='thread'
               {...(currentTicket?.conversation?.channelId && {
                 channelId: currentTicket.conversation.channelId,
               })}

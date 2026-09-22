@@ -10,7 +10,7 @@ import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { useUser } from '../../../hooks/useUsers';
 import { useTypingState } from '../../../contexts/TypingStateContext';
-import { isStatusExpired } from '../../../utils/statusUtils';
+import { resolveUserStatus } from '../../../utils/statusUtils';
 import { StatusIndicator } from '../StatusIndicator';
 import { useCallActions } from '../../../hooks/useCallActions';
 import { usePlatform } from '../../../hooks/usePlatform';
@@ -48,9 +48,7 @@ const UserHoverWrapperInner: React.FC<UserHoverWrapperProps> = ({
     return (): void => window.removeEventListener('scroll', handleScroll, true);
   }, [isHoverOpen]);
 
-  // Check if user has a valid status
-  const hasValidStatus =
-    user?.statusEmoji && (!user?.statusExpiryAt || !isStatusExpired(user.statusExpiryAt));
+  const displayStatus = resolveUserStatus(user);
 
   // Use useCallActions hook - channelId will be empty string initially, then update
   const { handleCallClick } = useCallActions({
@@ -137,6 +135,8 @@ const UserHoverWrapperInner: React.FC<UserHoverWrapperProps> = ({
           e.stopPropagation();
           handleProfileClick();
         }}
+        data-track-category='MENTION'
+        data-track-name='OPEN_USER_PROFILE_FROM_MENTION'
         onKeyDown={e => {
           if (e.key === 'Enter' || e.key === ' ') {
             e.preventDefault();
@@ -162,6 +162,8 @@ const UserHoverWrapperInner: React.FC<UserHoverWrapperProps> = ({
             e.stopPropagation();
             handleProfileClick();
           }}
+          data-track-category='MENTION'
+          data-track-name='OPEN_USER_PROFILE_FROM_MENTION'
           onKeyDown={e => {
             if (e.key === 'Enter' || e.key === ' ') {
               e.preventDefault();
@@ -209,16 +211,17 @@ const UserHoverWrapperInner: React.FC<UserHoverWrapperProps> = ({
             {user.email && (
               <div className='text-sm text-muted-foreground truncate'>{user.email}</div>
             )}
-            {hasValidStatus && (
+            {displayStatus.hasStatus && (
               <div className='flex items-center gap-2 mt-2 text-sm text-foreground'>
                 <StatusIndicator
                   statusEmoji={user.statusEmoji}
                   statusContent={user.statusContent}
                   statusExpiryAt={user.statusExpiryAt}
+                  activityStatus={user.activityStatus}
                   size='sm'
                   showOnHover={false}
                 />
-                <span>{user.statusContent}</span>
+                <span>{displayStatus.content}</span>
               </div>
             )}
           </div>
@@ -228,7 +231,14 @@ const UserHoverWrapperInner: React.FC<UserHoverWrapperProps> = ({
             <Button
               variant='secondary'
               size='default'
-              onClick={handleSendMessage}
+              onClick={e => {
+                // The hover card floats over a clickable result card — stop the click from
+                // bubbling (via the portal) to the card, which would open the message pane too.
+                e.stopPropagation();
+                handleSendMessage();
+              }}
+              data-track-category='MENTION'
+              data-track-name='SEND_MESSAGE_FROM_MENTION'
               className='flex items-center gap-2'
             >
               <ChatDefault className='size-4' />
@@ -237,7 +247,12 @@ const UserHoverWrapperInner: React.FC<UserHoverWrapperProps> = ({
             <Button
               variant='secondary'
               size='default'
-              onClick={handleHuddleClick}
+              onClick={e => {
+                e.stopPropagation();
+                handleHuddleClick();
+              }}
+              data-track-category='MENTION'
+              data-track-name='START_HUDDLE_FROM_MENTION'
               className='flex items-center gap-2'
             >
               <Headphones className='size-4' />

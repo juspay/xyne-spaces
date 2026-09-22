@@ -20,7 +20,7 @@ import { ChannelRepository } from '@/database/repositories/channelRepository';
 import { EmailRepository } from '@/database/repositories/emailRepository';
 import { db } from '@/database/client';
 import { withWorkspaceScope } from '@/database/tenant/context';
-import { emailMatchesDl } from '@/services/dlResolver';
+import { emailMatchesDl, parseDlAliases } from '@/services/dlResolver';
 import { normalizeRfcMessageId, normalizeRfcMessageIds } from '@/utils/emailRfcMessageId';
 
 const TAG = '[MicrosoftRefetch]';
@@ -74,18 +74,20 @@ export class MicrosoftRefetch extends BaseRefetch {
     const preference = await preferenceRepo.findByChannelId(ingestChannelId);
     const userId = preference?.ownerUserId ?? source.displayName;
 
-    // For DL desks: routing key is `dlEmail` appearing in From / To / Cc.
+    // For DL desks: routing key is `dlEmail` or an alias appearing in From / To / Cc.
     // Microsoft classic DGs don't emit List-ID, so we anchor on visible
     // sender/recipient headers only. Messages with no match are silently dropped.
-    const targetDl = options.dlEmail?.toLowerCase() ?? null;
+    const targetDls = options.dlEmail
+      ? [options.dlEmail, ...parseDlAliases(preference?.dlAliases)].map(a => a.toLowerCase())
+      : [];
 
     // Step 1: list message ids in the window.
     const value = await this.listMessagesInRange(
       accessToken,
       options.startDate,
       options.endDate,
-      targetDl,
-      targetDl ? null : RANGE_MAX_MESSAGES,
+      targetDls,
+      targetDls.length > 0 ? null : RANGE_MAX_MESSAGES,
     );
     logger.info(`${TAG} range listing returned ${value.length} messages`, {
       startDate: options.startDate,
@@ -241,6 +243,7 @@ export class MicrosoftRefetch extends BaseRefetch {
           );
           if (!msgResponse.ok) throw new Error(`fetch message ${id}: ${msgResponse.status}`);
           const email = (await msgResponse.json()) as GraphMailMessage;
+          logger.info(`${TAG} fetched new email for channel ${ingestChannelId}`, { messageId: id, threadId });
 
           const preDownloadedAttachments = email.hasAttachments
             ? await preDownloadGraphAttachments({
@@ -341,12 +344,13 @@ export class MicrosoftRefetch extends BaseRefetch {
     accessToken: string,
     startDate: string,
     endDate: string,
-    targetDl: string | null,
+    targetDls: string[],
     maxMessages: number | null,
   ): Promise<GraphMessageStub[]> {
-    const selectFields = targetDl
-      ? 'id,receivedDateTime,conversationId,internetMessageId,from,toRecipients,ccRecipients'
-      : 'id,receivedDateTime,conversationId,internetMessageId';
+    const selectFields =
+      targetDls.length > 0
+        ? 'id,receivedDateTime,conversationId,internetMessageId,from,toRecipients,ccRecipients'
+        : 'id,receivedDateTime,conversationId,internetMessageId';
 
     const initialUrl = new URL(`${config.microsoftGraph.baseUrl}/me/messages`);
     initialUrl.searchParams.set(
@@ -374,7 +378,7 @@ export class MicrosoftRefetch extends BaseRefetch {
         '@odata.nextLink'?: string;
       };
       for (const m of json.value ?? []) {
-        if (targetDl && !emailMatchesDl(stubToDlInput(m), targetDl)) {
+        if (targetDls.length > 0 && !emailMatchesDl(stubToDlInput(m), targetDls)) {
           droppedNoMatch += 1;
           continue;
         }
@@ -384,9 +388,9 @@ export class MicrosoftRefetch extends BaseRefetch {
       nextLink = json['@odata.nextLink'];
     }
 
-    if (targetDl) {
+    if (targetDls.length > 0) {
       logger.info(`${TAG} DL recipient/from filter`, {
-        targetDl,
+        targetDls,
         matched: collected.length,
         dropped: droppedNoMatch,
       });

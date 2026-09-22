@@ -1,6 +1,6 @@
 import { Prisma, PrismaClient } from '@prisma/client'
 import { BaseQueryACL, ACLContext } from '../base-acl'
-import { getAccessibleTicketIds, isGuestContext } from './channel-access-helper'
+import { accessibleTicketWhere, getAccessibleTicketIds, isGuestContext } from './channel-access-helper'
 
 export class TicketEntityMappingsACL extends BaseQueryACL<
   Prisma.TicketEntityMappingWhereInput,
@@ -21,7 +21,7 @@ export class TicketEntityMappingsACL extends BaseQueryACL<
     }
 
     return {
-      ticket: { workspaceId: this.ctx.workspaceId },
+      ticket: await accessibleTicketWhere(this.prisma, this.ctx),
     }
   }
 

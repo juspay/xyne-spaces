@@ -41,6 +41,9 @@ export interface ElectronAPI {
     callerEmail: string;
     callType: CallType;
     callerPicture?: string;
+    body?: string;
+    /** Suppresses the OS notification sound; the dock still bounces. */
+    silent?: boolean;
   }) => void;
   closeCallNotification: (callId: string) => void;
   onCallNotificationClicked: (callback: (data: { callId: string }) => void) => () => void;
@@ -52,7 +55,11 @@ export interface ElectronAPI {
   onBrowserNewTab: (callback: () => void) => () => void;
   onBrowserFindInPage: (callback: () => void) => () => void;
   onNavigateToTicketThread: (callback: (data: { ticketId: string }) => void) => () => void;
-  onOpenInBrowserPanel: (callback: (url: string) => void) => () => void;
+  onAppWindowLimitReached: (callback: (limit: number) => void) => () => void;
+  focusHostWebContents?: () => Promise<void>;
+  onOpenInBrowserPanel: (
+    callback: (url: string, sourceWebContentsId?: number) => void,
+  ) => () => void;
   // Optional: absent on Electron builds older than the one that added it.
   onLinkOpenedExternal?: (callback: (url: string) => void) => () => void;
   onReloadActiveBrowserTab: (callback: () => void) => () => void;
@@ -90,6 +97,17 @@ export interface ElectronAPI {
     settings: Partial<{ popups: boolean; openLinksExternally: boolean }>,
   ) => Promise<{ popups: boolean; openLinksExternally: boolean }>;
   clearSiteData: () => Promise<{ success: boolean }>;
+  captureAppWindow?: (maxWidth?: number) => Promise<{ data: string }>;
+  readClipboardText?: () => Promise<string>;
+  writeClipboardText?: (text: string) => Promise<{ success: boolean }>;
+  browserImportAvailable?: () => Promise<{ available: boolean }>;
+  importChromeCookies?: () => Promise<{
+    success: boolean;
+    imported?: number;
+    skipped?: number;
+    hosts?: number;
+    error?: string;
+  }>;
   exportCanvasMarkdown?: (
     fileName: string,
     content: string,
@@ -100,6 +118,8 @@ export interface ElectronAPI {
   ) => Promise<{ saved: boolean; filePath?: string }>;
   onWindowModeChanged: (callback: (data: { compact: boolean }) => void) => () => void;
   onRecordingSystemSuspend: (callback: () => void) => () => void;
+  onRecordingStopForTeardown?: (callback: () => void) => () => void;
+  onCallStopForTeardown?: (callback: () => void) => () => void;
   onRecordingResumeRequest?: (callback: () => void) => () => void;
   onRecordingPauseRequest?: (callback: () => void) => () => void;
   onLog: (callback: (message: { data?: unknown[] }) => void) => () => void;
@@ -123,6 +143,21 @@ export interface ElectronAPI {
     onStartRecordingFromMeeting: (callback: () => void) => () => void;
     onStopRecordingFromMeeting: (callback: () => void) => () => void;
     setEnabled: (enabled: boolean) => void;
+    /** Fires with the meeting on detection and with null when it ends. */
+    onMeetingStateChanged: (
+      callback: (meeting: { app: string; startedAt: string } | null) => void,
+    ) => () => void;
+    /** Seeds state on mount — detection broadcasts are not replayed. */
+    getCurrentMeeting: () => Promise<{ app: string; startedAt: string } | null>;
+  };
+  /**
+   * Raw mic activity, meeting app or not. Separate from `meetingDetector`
+   * because the meeting-detection preference does not gate it: this is what
+   * keeps a call quiet while the user is talking to someone else.
+   */
+  micMonitor?: {
+    onStateChanged: (callback: (active: boolean) => void) => () => void;
+    getState: () => Promise<boolean>;
   };
   meetingPopup?: {
     onShow: (callback: (data: { app: string; startedAt: string }) => void) => () => void;
@@ -189,6 +224,25 @@ export interface ElectronAPI {
     setEnabled: (enabled: boolean) => void;
     onEnabledChanged: (callback: (enabled: boolean) => void) => () => void;
   };
+  localHarness?: {
+    getStatus: () => Promise<LocalHarnessStatus>;
+    detect: () => Promise<LocalHarnessInstallation[]>;
+    connect: () => Promise<LocalHarnessStatus>;
+    disconnect: () => Promise<LocalHarnessStatus>;
+    setProviderEnabled: (
+      provider: LocalHarnessInstallation['provider'],
+      enabled: boolean,
+    ) => Promise<LocalHarnessStatus>;
+    pickFolder?: () => Promise<LocalHarnessFolder | null>;
+    listFolders?: () => Promise<Array<{ path: string; name: string }>>;
+    onPageToolRequest?: (
+      listener: (req: { id: string; toolName: string; args: Record<string, unknown> }) => void,
+    ) => () => void;
+    sendPageToolResult?: (
+      id: string,
+      result: { ok: boolean; content: string; image?: { data: string; mimeType: string } },
+    ) => void;
+  };
   saveErrorReportFile?(
     fileName: string,
     buffer: ArrayBuffer | null,
@@ -200,6 +254,58 @@ export interface ElectronAPI {
   readErrorReportRecordingFile?(recordingToken: string): Promise<ArrayBuffer>;
   cleanupErrorReportRecording?(filePath: string): Promise<void>;
   onErrorReportRecordingProgress?(callback: (data: { elapsedSeconds: number }) => void): () => void;
+}
+
+export interface LocalHarnessFolder {
+  path: string;
+  name: string;
+  branch?: string;
+  remote?: string;
+}
+
+export interface LocalHarnessInstallation {
+  provider: 'claude-code' | 'codex-cli';
+  binaryPath: string;
+  version: string;
+  authenticated: boolean;
+  /** Whether the user connected this harness on this device. */
+  enabled?: boolean;
+}
+
+export interface LocalHarnessStatus {
+  supported: boolean;
+  connected: boolean;
+  deviceId: string | null;
+  deviceName: string;
+  platform: string;
+  installations: LocalHarnessInstallation[];
+  lastError: string | null;
+  containerRuntime?: { available: boolean; reason?: string };
+}
+
+export interface ElectronWebviewElement extends HTMLElement {
+  src: string;
+  loadURL(url: string): Promise<void> | void;
+  getURL(): string;
+  getTitle(): string;
+  reload(): void;
+  stop(): void;
+  focus(): void;
+  copy(): void;
+  getWebContentsId?: () => number;
+  isLoading(): boolean;
+  executeJavaScript(code: string, userGesture?: boolean): Promise<unknown>;
+  sendInputEvent(event: Record<string, unknown>): Promise<void> | void;
+  capturePage(): Promise<{
+    toDataURL(): string;
+    toPNG(): Uint8Array;
+    getSize(): { width: number; height: number };
+    resize(options: { width?: number; height?: number }): {
+      toDataURL(): string;
+      getSize(): { width: number; height: number };
+    };
+  }>;
+  setZoomFactor?: (factor: number) => void;
 }
 
 declare global {

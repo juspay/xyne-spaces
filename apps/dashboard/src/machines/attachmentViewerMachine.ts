@@ -1,5 +1,10 @@
 import { createMachine, createActor, fromPromise, assign } from 'xstate';
 import { fetchFile } from '../services/clients/fileFetchService';
+import {
+  heicWebpDownloadUrl,
+  isHeicAttachment,
+  toWebpFilename,
+} from '../services/heicAttachmentService';
 import { MessageType } from '@xyne/shared';
 
 export interface AttachmentRef {
@@ -258,6 +263,17 @@ export const attachmentViewerMachine = createMachine(
       },
       error: {
         on: {
+          UPDATE: {
+            target: 'opening',
+            actions: assign({
+              attachments: ({ event }) => event.attachments,
+              currentIndex: ({ event }) => event.startIndex ?? 0,
+              fileData: null,
+              status: () => 'loading',
+              error: null,
+              retryCount: 0,
+            }),
+          },
           RETRY: {
             target: 'opening',
             actions: assign(({ context }) => ({
@@ -290,6 +306,17 @@ export const attachmentViewerMachine = createMachine(
           // to download the full file via fetchFile at the start
           if (isVideoMimeType(mimeType)) {
             return null;
+          }
+
+          // HEIC cannot render from its original bytes in most browsers; fetch
+          // the backend's lossy (q85) WebP rendition instead (generated + cached
+          // server-side on first request).
+          if (isHeicAttachment(mimeType, fileName)) {
+            return fetchFile(
+              heicWebpDownloadUrl(attachmentId),
+              toWebpFilename(fileName),
+              'image/webp',
+            );
           }
 
           return fetchFile(attachmentId, fileName, mimeType);

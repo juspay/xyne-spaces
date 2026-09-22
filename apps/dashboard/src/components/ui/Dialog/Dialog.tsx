@@ -3,6 +3,7 @@ import * as DialogPrimitive from '@radix-ui/react-dialog';
 import Drawer from '../Drawer';
 import { cn } from '../../../utils/classNames';
 import { useOverlayEffect } from '../../../machines/stateMachine';
+import { useScope } from '../../../shortcuts';
 
 export interface DialogProps {
   trigger?: ReactNode;
@@ -35,6 +36,8 @@ export interface DialogProps {
     typeof DialogPrimitive.Content
   >['onInteractOutside'];
   testId?: string;
+  /** Keep the Radix modal on small screens instead of switching to the default drawer. */
+  mobileVariant?: 'drawer' | 'dialog';
 }
 
 /**
@@ -69,9 +72,13 @@ export const Dialog = ({
   onPointerDownOutside,
   onInteractOutside,
   testId,
+  mobileVariant = 'drawer',
 }: DialogProps): React.ReactElement => {
   const [isMobile, setIsMobile] = useState(false);
   useOverlayEffect(open ?? false);
+  // Claims the keyboard for as long as the dialog is up, so shortcuts belonging
+  // to the page behind it stay out of the way.
+  useScope('modal', open ?? false);
 
   // Detect screen size changes
   useEffect(() => {
@@ -90,7 +97,7 @@ export const Dialog = ({
   }, []);
 
   // Use Drawer for mobile screens
-  if (isMobile) {
+  if (isMobile && mobileVariant === 'drawer') {
     return (
       <Drawer
         {...(trigger !== undefined && { trigger })}

@@ -1,6 +1,11 @@
 import React, { useState } from 'react';
 import { toast } from 'sonner';
-import { CircleCheck, Loader2, Pencil, Save } from 'lucide-react';
+import { Save } from 'lucide-react';
+import {
+  CheckTickCircle as CircleCheck,
+  Spinner as Loader2,
+  PencilEdit as Pencil,
+} from '@xyne/icons';
 import type { ReenterMode, Ticket } from '@xyne/shared';
 import type { Stage } from '../../../routes/KanbanBoardScreen/KanbanBoardScreen.types';
 import Button from '../../ui/Button';
@@ -312,7 +317,7 @@ export const StageFormInlinePanel: React.FC<StageFormInlinePanelProps> = ({
         <div
           className={
             embedded
-              ? `min-h-0 flex-1 overflow-y-auto ${submittedHeader && !isEditing ? 'px-3 py-3' : 'p-4'}`
+              ? `min-h-0 flex-1 overflow-x-hidden overflow-y-auto ${submittedHeader && !isEditing ? 'px-3 py-3' : 'p-4'}`
               : 'p-4'
           }
         >
@@ -338,6 +343,7 @@ export const StageFormInlinePanel: React.FC<StageFormInlinePanelProps> = ({
               setLocalDocChanges={setLocalDocChanges}
               valuesForRender={valuesForRender}
               targetStageId={targetStage.id}
+              parentTicketId={ticket.id}
               disabled={isApproved || isSubmitted || !isEditing}
               readOnlyDocs={!isEditing}
               readOnlySummary={!isEditing}

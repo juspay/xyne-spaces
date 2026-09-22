@@ -10,6 +10,7 @@ import { config } from "@/config/env";
 import { outageAlertService } from "@/services/outageAlertService";
 import { extractMentionsFromContent } from "@/utils/mentionUtils";
 import {
+	deleteConversationMessage,
 	findOrCreateConversation,
 	getChannelHistory,
 	getConversationReplies,
@@ -25,20 +26,26 @@ import {
 	uploadFiles,
 } from "@/services/fileUploadService";
 import { redisService } from "@/services/redisService";
+import { classifyUpload, screenUploadBuffer, MAX_FILE_SIZE_BYTES } from "@/middleware/upload";
+import { deliverEphemeralMessage } from "@/apps/core/ephemeralDelivery";
 import { wrapSlackHandler } from "./error-transformer";
 import {
 	getResolvedChannelId,
 	getSlackAuthContext,
 	resolveSlackChannel,
+	resolveSlackUserId,
 } from "./middleware";
 import {
+	transformDelete,
 	transformPostMessage,
 	transformUpdate,
+	transformPostEphemeral,
 } from "./request-transformers/chat";
 import {
 	transformHistory,
 	transformList,
 	transformReplies,
+	transformUsersConversations,
 } from "./request-transformers/conversations";
 import { transformFilesUpload } from "./request-transformers/files";
 import {
@@ -46,8 +53,10 @@ import {
 	transformUsersLookupByEmail,
 } from "./request-transformers/users";
 import {
+	transformDeleteResponse,
 	transformPostMessageResponse,
 	transformUpdateResponse,
+	transformPostEphemeralResponse,
 } from "./response-transformers/chat";
 import {
 	transformHistoryResponse,
@@ -55,6 +64,7 @@ import {
 	transformListResponse,
 	transformOpenResponse,
 	transformRepliesResponse,
+	transformUsersConversationsResponse,
 } from "./response-transformers/conversations";
 import { deriveFiletype, transformFilesUploadResponse } from "./response-transformers/files";
 import { transformUsergroupsListResponse } from "./response-transformers/usergroups";
@@ -143,6 +153,29 @@ const PostMessageSchema = z
 		},
 	);
 
+const PostEphemeralSchema = z
+	.object({
+		channel: z.string().min(1, "channel is required"),
+		user: z.string().min(1, "user is required"),
+		text: z.string().optional(),
+		blocks: SlackArraySchema,
+		attachments: SlackArraySchema,
+		thread_ts: SlackOptionalStringSchema,
+		mrkdwn: SlackBooleanSchema.default(true),
+		metadata: SlackRecordSchema,
+		username: SlackOptionalStringSchema,
+	})
+	.refine(
+		(data) =>
+			!!data.text ||
+			(data.blocks && data.blocks.length > 0) ||
+			(data.attachments && data.attachments.length > 0),
+		{
+			message: "Either text, blocks, or attachments is required",
+			path: ["text"],
+		},
+	);
+
 const UpdateSchema = z
 	.object({
 		channel: z.string().min(1, "channel is required"),
@@ -161,6 +194,11 @@ const UpdateSchema = z
 			path: ["text"],
 		},
 	);
+
+const DeleteSchema = z.object({
+	channel: z.string().min(1, "channel is required"),
+	ts: z.string().min(1, "ts is required"),
+});
 
 const HistorySchema = z.object({
 	channel: z.string().min(1, "channel is required"),
@@ -207,6 +245,18 @@ const ConversationsOpenSchema = z
 
 const UsersInfoSchema = z.object({
 	user: z.string().min(1, "user is required"),
+});
+
+const UsersConversationsSchema = z.object({
+	user: z.string().optional(),
+	types: z.string().optional(),
+	limit: z
+		.union([z.number(), z.string()])
+		.optional()
+		.transform((val) => (val ? Number(val) : 100)),
+	cursor: z.string().optional(),
+	exclude_archived: SlackBooleanSchema.default(false),
+	team_id: z.string().optional(),
 });
 
 const UsersLookupByEmailSchema = z.object({
@@ -299,22 +349,23 @@ export class SlackController {
 	});
 
 	chatPostMessage = wrapSlackHandler(async (req: Request, res: Response) => {
+		logger.info("[SLACK-POST-MESSAGE] Received request", { body: req.body, query: req.query, headers: req.headers });
 		const parsed = PostMessageSchema.safeParse(req.body);
 		if (!parsed.success) {
 			res.status(200).json({ ok: false, error: "invalid_arguments" });
 			return;
 		}
 
+		if (JSON.stringify(req.body).length > XYNE_MESSAGE_CONTENT_MAX_LENGTH) {
+			res.status(200).json({ ok: false, error: "msg_too_long" });
+			return;
+		}
 		const context = getSlackAuthContext(req);
 		const channelId = getResolvedChannelId(req);
 		const args = await transformPostMessage(
 			{ ...parsed.data, channel: channelId },
 			context,
 		);
-		if (args.content.length > XYNE_MESSAGE_CONTENT_MAX_LENGTH) {
-			res.status(200).json({ ok: false, error: "msg_too_long" });
-			return;
-		}
 
 		const threadResolution = await resolveSlackThreadConversationId(
 			args.conversationId,
@@ -394,6 +445,74 @@ export class SlackController {
 		}
 	});
 
+
+	chatPostEphemeral = wrapSlackHandler(async (req: Request, res: Response) => {
+		const parsed = PostEphemeralSchema.safeParse(req.body);
+		if (!parsed.success) {
+			res.status(200).json({ ok: false, error: "invalid_arguments" });
+			return;
+		}
+
+		if (JSON.stringify(req.body).length > XYNE_MESSAGE_CONTENT_MAX_LENGTH) {
+			res.status(200).json({ ok: false, error: "msg_too_long" });
+			return;
+		}
+
+		const context = getSlackAuthContext(req);
+		const channelId = getResolvedChannelId(req);
+
+		const recipientId = await resolveSlackUserId(
+			parsed.data.user,
+			context.workspaceId ?? "",
+		);
+		if (!recipientId) {
+			res.status(200).json({ ok: false, error: "user_not_found" });
+			return;
+		}
+
+		const threadResolution = await resolveSlackThreadConversationId(
+			parsed.data.thread_ts,
+			channelId,
+		);
+		if (threadResolution.error) {
+			res.status(200).json({ ok: false, error: threadResolution.error });
+			return;
+		}
+
+		const args = await transformPostEphemeral(
+			{ ...parsed.data, channel: channelId, recipientId },
+			context,
+		);
+
+		const sender = await repositories.users.findById(context.userId);
+
+		const result = await deliverEphemeralMessage({
+			channelId,
+			conversationId: threadResolution.conversationId,
+			recipientId: args.recipientId,
+			senderId: context.userId,
+			senderName: sender?.name,
+			messageDelivery: "EPHEMERAL",
+			...(args.flow && { appId: context.appId, flow: args.flow }),
+			content: args.content,
+			isMarkdown: args.isMarkdown,
+			metadata: args.metadata,
+		});
+
+		if (!result.ok) {
+			res.status(200).json({
+				ok: false,
+				error:
+					result.reason === "not_in_channel"
+						? "user_not_in_channel"
+						: "invalid_arguments",
+			});
+			return;
+		}
+
+		res.status(200).json(transformPostEphemeralResponse(result.messageId));
+	});
+
 	chatUpdate = wrapSlackHandler(async (req: Request, res: Response) => {
 		const parsed = UpdateSchema.safeParse(req.body);
 		if (!parsed.success) {
@@ -401,12 +520,12 @@ export class SlackController {
 			return;
 		}
 
-		const context = getSlackAuthContext(req);
-		const args = await transformUpdate(parsed.data, context);
-		if (args.content.length > XYNE_MESSAGE_CONTENT_MAX_LENGTH) {
+		if (JSON.stringify(req.body).length > XYNE_MESSAGE_CONTENT_MAX_LENGTH) {
 			res.status(200).json({ ok: false, error: "msg_too_long" });
 			return;
 		}
+		const context = getSlackAuthContext(req);
+		const args = await transformUpdate(parsed.data, context);
 		const channelId = getResolvedChannelId(req);
 
 		const existingMessage = await repositories.messages.findById(args.messageId);
@@ -440,6 +559,39 @@ export class SlackController {
 			context.userId,
 		);
 		res.status(200).json(slackResponse);
+	});
+
+
+	chatDelete = wrapSlackHandler(async (req: Request, res: Response) => {
+		const parsed = DeleteSchema.safeParse(req.body);
+		if (!parsed.success) {
+			res.status(200).json({ ok: false, error: "invalid_arguments" });
+			return;
+		}
+
+		const context = getSlackAuthContext(req);
+		const channelId = getResolvedChannelId(req);
+		const args = transformDelete({ ...parsed.data, channel: channelId });
+		const existingMessage = await repositories.messages.findById(args.messageId);
+		if (!existingMessage) {
+			res.status(200).json({ ok: false, error: "message_not_found" });
+			return;
+		}
+		if (existingMessage.isDeleted) {
+			res.status(200).json({ ok: true, channel: channelId, ts: args.messageId });
+			return;
+		}
+		if (existingMessage.senderId !== context.userId || existingMessage.msgType !== MessageType.BOT) {
+			res.status(200).json({ ok: false, error: "cant_delete_message" });
+			return;
+		}
+		const existingConversation = await repositories.conversations.findById(existingMessage.conversationId);
+		if (!existingConversation || existingConversation.channelId !== args.channelId) {
+			res.status(200).json({ ok: false, error: "message_not_found" });
+			return;
+		}
+		const result = await deleteConversationMessage(args.messageId, context.userId);
+		res.status(200).json(transformDeleteResponse(result, channelId));
 	});
 
 	conversationsHistory = wrapSlackHandler(
@@ -660,11 +812,70 @@ export class SlackController {
 				statusEmoji: user.statusEmoji,
 				statusContent: user.statusContent,
 				statusExpiryAt: user.statusExpiryAt,
+				activityStatus: user.activityStatus,
 			}),
 		);
 	});
 
+	usersConversations = wrapSlackHandler(async (req: Request, res: Response) => {
+		const parsed = UsersConversationsSchema.safeParse(getSlackParams(req));
+		if (!parsed.success) {
+			res.status(200).json({ ok: false, error: "invalid_arguments" });
+			return;
+		}
+
+		const context = getSlackAuthContext(req);
+		// Slack defaults to the authed user when `user` is omitted
+		const targetUserId = parsed.data.user ?? context.userId;
+		if (!targetUserId) {
+			res.status(200).json({ ok: false, error: "user_not_found" });
+			return;
+		}
+
+		if (parsed.data.user) {
+			const targetUser = await repositories.users.findById(targetUserId);
+			if (!targetUser) {
+				res.status(200).json({ ok: false, error: "user_not_found" });
+				return;
+			}
+		}
+
+		const args = transformUsersConversations({
+			...parsed.data,
+			user: targetUserId,
+		});
+		if (args.unknownTypes.length > 0) {
+			res.status(200).json({ ok: false, error: "invalid_types" });
+			return;
+		}
+
+		const channels = await repositories.channels.findManyPaginated({
+			where: args.where,
+			limit: args.limit + 1,
+			cursor: args.cursor,
+		});
+
+		const hasMore = channels.length > args.limit;
+		const items = hasMore ? channels.slice(0, args.limit) : channels;
+		const slackResponse = transformUsersConversationsResponse({
+			items: items.map((channel) => ({
+				id: channel.id,
+				name: channel.name,
+				description: channel.description || undefined,
+				scopeType: channel.scopeType,
+				visibility: channel.visibility,
+				projectId: channel.projectId,
+				createdBy: channel.createdBy,
+				createdAt: channel.createdAt,
+			})),
+			hasMore,
+			nextCursor: hasMore ? items[items.length - 1]?.id : undefined,
+		});
+		res.status(200).json(slackResponse);
+	});
+
 	filesUpload = wrapSlackHandler(async (req: Request, res: Response) => {
+		logger.info("[SLACK-FILES-UPLOAD] Received request", { body: req.body, query: req.query, headers: req.headers });
 		const parsed = FilesUploadSchema.safeParse(req.body);
 		if (!parsed.success) {
 			res.status(200).json({ ok: false, error: "invalid_arguments" });
@@ -732,6 +943,20 @@ export class SlackController {
 			return;
 		}
 
+		// Server-side content validation: reject disallowed types and executable
+		// content even when the extension/MIME look benign.
+		for (const f of uploadedFiles) {
+			const verdict = await screenUploadBuffer(f.buffer, f.originalname, f.mimetype);
+			if (!verdict.ok) {
+				logger.warn("[SLACK-FILES-UPLOAD] File rejected by content screening", {
+					filename: f.originalname,
+					reason: verdict.reason,
+				});
+				res.status(200).json({ ok: false, error: "file_type_not_allowed" });
+				return;
+			}
+		}
+
 		const result = await ingestAttachment({
 			files: uploadedFiles,
 			channelId,
@@ -796,7 +1021,19 @@ export class SlackController {
 				return;
 			}
 
-			const { filename } = parsed.data;
+			const { filename, length } = parsed.data;
+			// Fail fast: reject a disallowed file type by name before issuing an upload
+			// URL. The binary step re-checks name and content once the bytes arrive.
+			if (classifyUpload(undefined, filename) !== "allowed") {
+				res.status(200).json({ ok: false, error: "file_type_not_allowed" });
+				return;
+			}
+			// Bound the declared size server-side rather than trusting the client value;
+			// the binary step enforces the actual byte length as the authoritative check.
+			if (length > MAX_FILE_SIZE_BYTES) {
+				res.status(200).json({ ok: false, error: "file_too_large" });
+				return;
+			}
 			const { userId, appId } = getSlackAuthContext(req);
 			const fileId = uuidv4();
 
@@ -859,7 +1096,26 @@ export class SlackController {
 				return;
 			}
 
+			// Authoritative size check on the actual bytes received (not a client-declared
+			// length).
+			if (fileBuffer.length > MAX_FILE_SIZE_BYTES) {
+				res.status(200).json({ ok: false, error: "file_too_large" });
+				return;
+			}
+
 			const mimeType = req.get("content-type") || "application/octet-stream";
+
+			// Server-side validation for the binary upload step, which does not pass
+			// through multer: reject disallowed types and executable content.
+			const verdict = await screenUploadBuffer(fileBuffer, state.filename, mimeType);
+			if (!verdict.ok) {
+				logger.warn("[SLACK-FILES-UPLOAD-V2] File rejected by content screening", {
+					filename: state.filename,
+					reason: verdict.reason,
+				});
+				res.status(200).json({ ok: false, error: "file_type_not_allowed" });
+				return;
+			}
 
 			const syntheticFile = {
 				fieldname: "file",

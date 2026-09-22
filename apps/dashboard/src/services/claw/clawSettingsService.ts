@@ -106,6 +106,26 @@ export async function pollCopilotGitHubLogin(userId: string): Promise<{ status: 
   return data.data;
 }
 
+export type CredentialHealthStatus = 'ok' | 'invalid' | 'model-unavailable' | 'unknown' | 'missing';
+
+export interface CredentialHealth {
+  provider: string;
+  status: CredentialHealthStatus;
+  message?: string;
+  models?: number;
+}
+
+export async function verifyProviderCredentialForUser(
+  userId: string,
+  provider: string,
+): Promise<CredentialHealth> {
+  const data = await clawRequest<{ success: boolean; data: CredentialHealth }>(
+    `/api/v1/settings/provider-credentials/${encodeURIComponent(provider)}/verify`,
+    { ...withUser(userId), method: 'POST' },
+  );
+  return data.data;
+}
+
 export async function listCopilotModelsForUser(userId: string): Promise<ProviderModelOption[]> {
   const data = await clawRequest<{ success: boolean; data: ProviderModelOption[] }>(
     '/api/v1/settings/copilot/models',
@@ -150,4 +170,41 @@ export async function listCodexModelsForUser(userId: string): Promise<ProviderMo
     withUser(userId),
   );
   return data.data;
+}
+
+export interface ClaudeOauthFlow {
+  url: string;
+  state: string;
+  expiresIn: number;
+}
+
+/** Begin the Claude browser sign-in; returns the consent URL to open. */
+export async function startClaudeOauth(userId: string): Promise<ClaudeOauthFlow> {
+  const data = await clawRequest<{ success: boolean; data: ClaudeOauthFlow }>(
+    '/api/v1/settings/provider-credentials/claude/oauth/start',
+    {
+      method: 'POST',
+      headers: { [USER_ID_HEADER]: userId },
+      body: JSON.stringify({}),
+    },
+  );
+  return data.data;
+}
+
+/**
+ * Finish sign-in with what Anthropic showed the user. Accepts a bare code, a
+ * "code#state" pair, or the whole redirect URL — the server normalises it.
+ */
+export async function exchangeClaudeOauth(
+  userId: string,
+  payload: { code: string; state: string },
+): Promise<void> {
+  await clawRequest<{ success: boolean }>(
+    '/api/v1/settings/provider-credentials/claude/oauth/exchange',
+    {
+      method: 'POST',
+      headers: { [USER_ID_HEADER]: userId },
+      body: JSON.stringify(payload),
+    },
+  );
 }

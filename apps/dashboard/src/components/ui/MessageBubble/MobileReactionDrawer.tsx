@@ -6,7 +6,7 @@ import { useAuth } from '../../../hooks/useAuth';
 import { useUsers } from '../../../hooks/useUsers';
 import Avatar from '../Avatar/Avatar';
 import { renderEmoji } from '../../../utils/customEmojiUtils';
-import { isStatusExpired } from '../../../utils/statusUtils';
+import { resolveUserStatus } from '../../../utils/statusUtils';
 import { AnimatePresence, motion, Variants } from 'framer-motion';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
@@ -180,6 +180,8 @@ export default function MobileReactionDrawer({
         <Drawer.Overlay
           className='fixed inset-0 z-[100] bg-background/80 backdrop-blur-[2px]'
           onClick={() => setIsOpen(false)}
+          data-track-category='MESSAGE'
+          data-track-name='CLOSE_REACTION_DRAWER_OVERLAY'
           onTouchStart={e => e.stopPropagation()}
           onTouchMove={e => e.stopPropagation()}
           onTouchEnd={e => e.stopPropagation()}
@@ -208,6 +210,8 @@ export default function MobileReactionDrawer({
                   className='flex py-2 items-center justify-center gap-1 border-0 px-3 text-sm font-medium whitespace-nowrap text-muted-foreground outline-none select-none rounded-md ~hover:text-foreground ~hover:bg-accent ~focus-visible:ring-2 ~focus-visible:ring-ring data-[active]:text-foreground ~data-[active]:bg-accent'
                   value='all'
                   onClick={() => handleTabClick('all')}
+                  data-track-category='MESSAGE'
+                  data-track-name='SWITCH_REACTION_TAB'
                 >
                   <span>All</span>
                   <span className='text-xs text-muted-foreground'>
@@ -220,6 +224,8 @@ export default function MobileReactionDrawer({
                     className='flex py-2 items-center justify-center gap-1 border-0 px-3 text-sm font-medium whitespace-nowrap text-muted-foreground outline-none select-none rounded-md ~hover:text-foreground ~hover:bg-accent ~focus-visible:ring-2 ~focus-visible:ring-ring data-[active]:text-foreground ~data-[active]:bg-accent'
                     value={emojiName}
                     onClick={() => handleTabClick(emojiName)}
+                    data-track-category='MESSAGE'
+                    data-track-name='SWITCH_REACTION_TAB'
                   >
                     <span>{renderEmoji(emojiName)}</span>
                     <span className='text-xs text-muted-foreground'>{count}</span>
@@ -256,6 +262,8 @@ export default function MobileReactionDrawer({
                         <button
                           key={idx}
                           onClick={() => paginate(idx + 1 - currentTabIndex)}
+                          data-track-category='MESSAGE'
+                          data-track-name='SWITCH_REACTION_TAB'
                           className='flex items-start gap-3 px-2 py-2 w-full text-left hover:bg-accent active:bg-accent rounded-lg transition-colors'
                         >
                           <span className='*:text-2xl flex-shrink-0'>
@@ -275,19 +283,19 @@ export default function MobileReactionDrawer({
                           <>
                             <button
                               onClick={() => handleUserClick(user.userId)}
+                              data-track-category='MESSAGE'
+                              data-track-name='OPEN_REACTOR_PROFILE'
                               key={idx}
                               className='flex items-center gap-3 px-2 py-2'
                             >
                               <Avatar userId={user.userId} size='sm' showActiveStatus={false} />
                               <span className='text-sm text-foreground truncate flex items-center gap-1'>
                                 {user.name}
-                                {user.user?.statusEmoji &&
-                                  (!user.user.statusExpiryAt ||
-                                    !isStatusExpired(user.user.statusExpiryAt)) && (
-                                    <span className='inline-flex'>
-                                      {renderEmoji(user.user.statusEmoji)}
-                                    </span>
-                                  )}
+                                {resolveUserStatus(user.user).hasStatus && (
+                                  <span className='inline-flex'>
+                                    {renderEmoji(resolveUserStatus(user.user).emoji)}
+                                  </span>
+                                )}
                                 {currentUser && user.userId === currentUser.id && (
                                   <span className='text-muted-foreground'>(you)</span>
                                 )}

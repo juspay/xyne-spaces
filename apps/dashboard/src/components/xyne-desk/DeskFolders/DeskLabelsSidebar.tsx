@@ -8,13 +8,20 @@ import { mutators } from '../../../zero/mutators';
 import { useZero } from '../../../hooks/useZero';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { Dialog } from '../../ui/Dialog/Dialog';
+
 import { cn } from '../../../utils/classNames';
 import {
   deleteConversationLabel,
   fetchConversationLabelDeleteImpact,
   type ConversationLabelDeleteImpact,
+  type LabelUnreadFilters,
 } from '../../../api/conversationLabelsApi';
 import { deskLabelRulesQueryKey } from '../AutoLabelWizard/AutoLabelRules';
+import {
+  normalizeLabelUnreadFilters,
+  useFilteredLabelUnreadCount,
+  useLabelUnreadCounts,
+} from './useLabelUnreadCounts';
 
 /**
  * Gmail-style "Labels" section for the desk sidebar. The "Labels" heading is not
@@ -42,21 +49,38 @@ const colorForName = (name: string): string => {
 
 interface DeskLabelsSidebarProps {
   channelId: string;
+  isMember: boolean;
   activeLabelId: string | null;
   onSelectLabel: (labelId: string, labelName: string) => void;
   onDeletedLabel?: (labelId: string) => void;
+  labelUnreadFilters?: LabelUnreadFilters;
 }
 
 export const DeskLabelsSidebar = ({
   channelId,
+  isMember,
   activeLabelId,
   onSelectLabel,
   onDeletedLabel,
+  labelUnreadFilters,
 }: DeskLabelsSidebarProps): ReactElement => {
   const zero = useZero();
   const queryClient = useQueryClient();
-  const [labels] = useCachedQuery(queries.conversationLabelsByChannelId({ channelId }), {
-    enabled: !!channelId,
+  const [labels] = useCachedQuery(
+    queries.conversationLabelsByChannelIdV2({ channelId, isMember }),
+    { enabled: !!channelId },
+  );
+  const { data: unreadCounts } = useLabelUnreadCounts(channelId, isMember);
+  const normalizedLabelFilters = useMemo(
+    () => normalizeLabelUnreadFilters(labelUnreadFilters),
+    [labelUnreadFilters],
+  );
+  const hasActiveFilters = normalizedLabelFilters !== undefined;
+  const { data: filteredUnreadCount } = useFilteredLabelUnreadCount({
+    channelId,
+    labelId: activeLabelId,
+    filters: normalizedLabelFilters,
+    enabled: hasActiveFilters,
   });
   const [createOpen, setCreateOpen] = useState(false);
   const [newName, setNewName] = useState('');
@@ -70,7 +94,7 @@ export const DeskLabelsSidebar = ({
     const trimmed = newName.trim();
     if (!trimmed) return;
     if (list.some(l => l.name.toLowerCase() === trimmed.toLowerCase())) {
-      toast.error('A label with this name already exists');
+      toast.error('You already have a label with this name in this channel.');
       return;
     }
     // Close optimistically; the mutation applies locally first and we surface
@@ -160,6 +184,11 @@ export const DeskLabelsSidebar = ({
           list.map(label => {
             const color = label.color ?? colorForName(label.name);
             const active = activeLabelId === label.id;
+            const count =
+              active && hasActiveFilters
+                ? (filteredUnreadCount?.unreadCount ?? 0)
+                : (unreadCounts?.[label.id] ?? 0);
+            const showUnread = count > 0;
             return (
               <div
                 key={label.id}
@@ -176,11 +205,24 @@ export const DeskLabelsSidebar = ({
                   className='flex items-center gap-3 flex-1 min-w-0 px-3 h-full text-left'
                   data-track-category='Support'
                   data-track-name='SelectSidebarLabel'
+                  data-track-metadata={JSON.stringify({ to: label.id })}
                 >
                   <span className='size-4 flex items-center justify-center shrink-0'>
                     <Tag size={14} style={{ color }} fill={color} />
                   </span>
-                  <span className='flex-1 truncate min-w-0'>{label.name}</span>
+                  <span
+                    className={cn(
+                      'flex-1 truncate min-w-0',
+                      showUnread && 'font-semibold text-sidebar-unread-foreground',
+                    )}
+                  >
+                    {label.name}
+                  </span>
+                  {showUnread && (
+                    <span className='shrink-0 min-w-4 px-1 rounded-full text-center text-[10px] font-semibold leading-4 bg-sidebar-accent-foreground/10 text-sidebar-accent-foreground'>
+                      {count > 99 ? '99+' : count}
+                    </span>
+                  )}
                 </button>
                 <button
                   type='button'
@@ -263,6 +305,7 @@ export const DeskLabelsSidebar = ({
               type='button'
               onClick={() => void handleCreate()}
               disabled={!newName.trim()}
+              data-ph-capture-attribute-track-id='create_desk_label'
               className='text-sm font-medium px-4 py-2 rounded-md bg-primary text-primary-foreground hover:bg-primary/90 shadow-sm disabled:opacity-50 disabled:pointer-events-none transition-colors'
               data-track-category='Support'
               data-track-name='ConfirmCreateLabel'
@@ -310,6 +353,7 @@ export const DeskLabelsSidebar = ({
                 type='button'
                 onClick={() => void confirmDelete()}
                 disabled={deleteSubmitting}
+                data-ph-capture-attribute-track-id='delete_desk_label'
                 className='inline-flex items-center gap-2 text-sm font-medium px-4 py-2 rounded-md bg-destructive text-destructive-foreground hover:bg-destructive/90 disabled:opacity-50 disabled:pointer-events-none transition-colors'
                 data-track-category='Support'
                 data-track-name='ConfirmDeleteLabel'

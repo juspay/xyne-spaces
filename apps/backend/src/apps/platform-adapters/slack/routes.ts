@@ -32,10 +32,24 @@ router.post(
 );
 
 router.post(
+	"/chat.postEphemeral",
+	requirePermission("chat:write"),
+	slackChannelValidation("body"),
+	controller.chatPostEphemeral,
+);
+
+router.post(
 	"/chat.update",
 	requirePermission("chat:write"),
 	slackChannelValidation("body"),
 	controller.chatUpdate,
+);
+
+router.post(
+	"/chat.delete",
+	requirePermission("chat:delete"),
+	slackChannelValidation("body"),
+	controller.chatDelete,
 );
 
 router.get(
@@ -87,6 +101,17 @@ router.post("/users.info", requirePermission("users:read"), controller.usersInfo
 
 router.get("/users.lookupByEmail", requirePermission("users:read"), controller.usersLookupByEmail);
 router.post("/users.lookupByEmail", requirePermission("users:read"), controller.usersLookupByEmail);
+
+router.get(
+	"/users.conversations",
+	requirePermission("channels:read"),
+	controller.usersConversations,
+);
+router.post(
+	"/users.conversations",
+	requirePermission("channels:read"),
+	controller.usersConversations,
+);
 
 router.get("/usergroups.list", requirePermission("usergroups:read"), controller.usergroupsList);
 router.post("/usergroups.list", requirePermission("usergroups:read"), controller.usergroupsList);

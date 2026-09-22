@@ -24,11 +24,12 @@ export function useUpdateEmailChannelPreference() {
   const zero = useZero();
 
   const updatePreference = useCallback(
-    ({
+    async ({
       channelId,
       ownerUserId,
       assigneeUserGroupId,
       sendAsEmail,
+      dlAliases,
       defaultCc,
       emailMergeMode,
       twoStepSendEnabled,
@@ -36,11 +37,17 @@ export function useUpdateEmailChannelPreference() {
       autoDraftAgentSlug,
       metricsEnabled,
       frtStageNames,
+      metricsGuestVisibility,
+      appWebhookDeliveryEnabled,
+      deskReportEnabled,
+      deskReportAgentSlug,
+      deskReportRangeDays,
     }: {
       channelId: string;
       ownerUserId?: string;
       assigneeUserGroupId?: string | null;
       sendAsEmail?: string | null;
+      dlAliases?: string | null;
       defaultCc?: string | null;
       emailMergeMode?: EmailMergeMode;
       twoStepSendEnabled?: boolean;
@@ -48,13 +55,19 @@ export function useUpdateEmailChannelPreference() {
       autoDraftAgentSlug?: string | null;
       metricsEnabled?: boolean;
       frtStageNames?: string | null;
+      metricsGuestVisibility?: string | null;
+      appWebhookDeliveryEnabled?: boolean;
+      deskReportEnabled?: boolean;
+      deskReportAgentSlug?: string | null;
+      deskReportRangeDays?: number;
     }): Promise<void> => {
-      zero.mutate(
+      const mutation = zero.mutate(
         mutators.emailChannelPreference.upsert({
           channelId,
           ...(ownerUserId !== undefined ? { ownerUserId } : {}),
           ...(assigneeUserGroupId !== undefined ? { assigneeUserGroupId } : {}),
           ...(sendAsEmail !== undefined ? { sendAsEmail } : {}),
+          ...(dlAliases !== undefined ? { dlAliases } : {}),
           ...(defaultCc !== undefined ? { defaultCc } : {}),
           ...(emailMergeMode !== undefined ? { emailMergeMode } : {}),
           ...(twoStepSendEnabled !== undefined ? { twoStepSendEnabled } : {}),
@@ -64,15 +77,26 @@ export function useUpdateEmailChannelPreference() {
             : {}),
           ...(metricsEnabled !== undefined ? { metricsEnabled } : {}),
           ...(frtStageNames !== undefined ? { frtStageNames } : {}),
+          ...(metricsGuestVisibility !== undefined ? { metricsGuestVisibility } : {}),
+          ...(appWebhookDeliveryEnabled !== undefined ? { appWebhookDeliveryEnabled } : {}),
+          ...(deskReportEnabled !== undefined ? { deskReportEnabled } : {}),
+          ...(deskReportAgentSlug !== undefined
+            ? { deskReportAgentSlug: deskReportAgentSlug || null }
+            : {}),
+          ...(deskReportRangeDays !== undefined ? { deskReportRangeDays } : {}),
         }),
       );
-      return Promise.resolve();
+      // Zero resolves .server with the rejection instead of rejecting the promise.
+      const result = await mutation.server;
+      if (result?.type === 'error') {
+        throw new Error(result.error?.message || 'Failed to save settings');
+      }
     },
     [zero],
   );
 
   return {
     mutateAsync: updatePreference,
-    isPending: false, // Zero mutations are instant with optimistic updates
+    isPending: false,
   };
 }

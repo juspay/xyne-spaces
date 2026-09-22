@@ -1,4 +1,18 @@
+import { isAgentOwnedRun } from "../lib/agent-owned-runs.js";
+import { applyAiScreenCommand } from "../lib/ai-screen-commands.js";
+import { parseSlashCommand } from "../lib/parseSlashCommand.js";
+import { screenUploadFiles } from "../lib/upload-screening.js";
 import { Router, type Request, type RequestHandler, type Response } from "express";
+import { errMsg } from "../lib/errors.js";
+import { SDLC_AGENT_SLUG, isAgentInvocableBy, IMMEDIATE_TASK_COMMAND_RE, parseLocalSandboxCommand } from "xyne-claw-shared";
+import { recordDeliveredArtifacts } from "../lib/delivered-artifacts.js";
+import { recordUploadedArtifacts } from "../lib/conversation-artifact-signals.js";
+import {
+  localFolderUnavailableMessage,
+  splitLocalFolderContext,
+  toLocalFolderWorkspace,
+  type LocalFolderContextItem,
+} from "../lib/local-folder-context.js";
 import { randomUUID } from "node:crypto";
 import multer from "multer";
 import { existsSync, readdirSync } from "node:fs";
@@ -10,7 +24,13 @@ import { prisma } from "../db.js";
 import { cancelRunRecovery } from "../queue/run-recovery-worker.js";
 import { decrypt } from "../crypto.js";
 import { CONFIG } from "../config.js";
-import { KNOWN_PROVIDERS, buildProviderConfig, agentCredRefreshTarget, userCredRefreshTarget } from "../lib/agent-provider-config.js";
+import { KNOWN_PROVIDERS, buildProviderConfig, agentCredRefreshTarget, userCredRefreshTarget, agentDefaultSpeed, providerConfigForSpeed, applyFastModeModels } from "../lib/agent-provider-config.js";
+import { awaitTurnHandoff, isTurnControlCommand } from "../lib/run-turn-handoff.js";
+import { dispatchLocalHarnessRun, isLocalHarnessProvider, localHarnessProviderLabel, pinnedModelForProvider, resolveLocalHarnessTarget, resolveLocalHarnessTargetForProvider, resolveLocalSandbox } from "../lib/local-harness.js";
+
+import { planServerContinuation } from "../lib/local-harness-continuation.js";
+import { authenticatedProviders, localHarnessRepository } from "../repositories/localHarnessRepository.js";
+import { localHarnessSessionRepository } from "../repositories/localHarnessSessionRepository.js";
 import { resolveFastMode } from "../lib/fast-mode.js";
 import { extractFollowUpSuggestionsFromInvocations } from "../lib/follow-up-suggestions.js";
 import { getRequesterId, getOrgId, getAgentEditAccess, isClawAdmin } from "../middleware/agent-acl.js";
@@ -32,8 +52,26 @@ import { subscribeLive, publishLiveEvent, type LiveEvent } from "../lib/live-con
 import { pushDelta, endDeltaCoalescer, liveUserIdForSession } from "../lib/live-delta-coalescer.js";
 import { resolveSdlcRepositoryForUser } from "../lib/sdlc-repository-context.js";
 
+import { attachArtifactToSessionApp } from "../lib/artifact-app-session.js";
 import { createLogger } from "../logger.js";
 const log = createLogger("agent-chat");
+
+const XYNE_CHAT_SURFACE_PRIMER = [
+  "## Xyne AI chat surface",
+  "You are answering inside the Xyne AI chat, not a terminal or a code editor. Your reply is rendered to the user as chat markdown in a conversation thread.",
+  "To show a diagram, emit a fenced ```mermaid or ```d2 code block — those render as real diagrams in the chat. There is no other way to draw a diagram here: Excalidraw scenes, ASCII art, and image files do not render.",
+  "Never describe, mention, or refer back to a diagram, chart, or visual as if the user can see it unless you actually emitted a ```mermaid or ```d2 block (or created an artifact) in THIS reply. If you cannot render something, say so plainly instead of narrating a visual that does not exist.",
+  "You cannot open a runnable React app, an Excalidraw canvas, or a browser tab from this reply; only the tools you were given can affect anything outside the chat.",
+].join("\n");
+
+function withXyneChatSurfacePrimer(systemPrompt: string | null | undefined): string {
+  const base = (systemPrompt ?? "").trim();
+  return base ? `${XYNE_CHAT_SURFACE_PRIMER}\n\n${base}` : XYNE_CHAT_SURFACE_PRIMER;
+}
+
+function sanitizeForLog(value: unknown): string {
+  return String(value).replace(/[\r\n]+/g, " ");
+}
 
 function withoutFollowUpRecorderInvocations(value: unknown[]): unknown[] {
   return value.filter((item) => {
@@ -143,6 +181,18 @@ const internalRouter = Router();
 const REDACTED_TOOL_RESULT = "[result hidden — another user's run]";
 
 /**
+ * An awakened run (heartbeat / reflex) is owned by the agent's own bot
+ * identity, not by a person, so there is no user privacy for the cross-user
+ * redaction to protect — and an admin needs to read exactly what it did.
+ * See lib/agent-owned-runs.ts.
+ */
+function shouldRedactRun(crossUser: boolean, runUserId: string | null | undefined, requesterId: string, triggerSource?: string | null): boolean {
+  if (!crossUser) return false;
+  if (runUserId === requesterId) return false;
+  return !isAgentOwnedRun(triggerSource);
+}
+
+/**
  * Strip RESULT bodies from a run's tool invocations while preserving every
  * other field (name, args, isError, status, subagent nesting). Used when an
  * admin inspects a run they don't own.
@@ -216,6 +266,15 @@ interface PendingStream {
   /** Parent ref the assistant placeholder was created under. Echoed in `done`
    *  so the frontend can stitch the optimistic message into the tree. */
   assistantParentId?: string;
+  /** Whether this subscriber may receive `debug` frames.
+   *
+   *  The debug frame carries the agent's full system prompt, instructions and
+   *  tool-use policy. The stored-history endpoint already withholds it from
+   *  callers without elevated access; the live stream did not, so the same
+   *  content was readable by any user who could start a run. Resolved once when
+   *  the stream is opened — the callback handler that forwards frames runs on
+   *  an S2S request from xyne-claw and has no end-user identity of its own. */
+  allowDebug?: boolean;
 }
 const pendingStreams = new Map<string, PendingStream>();
 
@@ -238,6 +297,23 @@ interface PersistedAttachment {
   mimeType: string;
   originalFilename: string;
   size: number;
+  /**
+   * Client-facing filename. The client's completion handler reads `fileName`,
+   * so sending only `originalFilename` left it undefined on the live path.
+   */
+  fileName?: string;
+  /**
+   * The artifact manifest, ENRICHED with appId/versionId.
+   *
+   * This is the only channel that can carry them live. `attachArtifactToSessionApp`
+   * runs at persist time — after the tool returned — so the tool's own metadata
+   * has no appId, and without it a freshly generated app cannot address itself:
+   * the card shows Save (thinking it is unsaved), Expand falls back to the
+   * dialog, and App Creation mode never opens until a reload refetches
+   * /messages. Allowlisted to `reactArtifact` for the same reason that endpoint
+   * allowlists it — passing metadata wholesale would leak the GCS `url`.
+   */
+  metadata?: { reactArtifact?: unknown };
 }
 
 /* ─────────────────────────────────────────────────────────────────────
@@ -295,7 +371,12 @@ function ensureChatEventsSubscriber(): void {
     const stream = pendingStreams.get(msg.callbackId);
     if (!stream) return; // stream lives on another pod (or already resolved)
     if (msg.kind === "progress") {
-      for (const e of msg.events) stream.sendEvent(e.event, e.data);
+      // Same withholding as the same-pod path above: the pod that owns the
+      // subscriber is the only one that knows whether it may see `debug`.
+      for (const e of msg.events) {
+        if (e.event === "debug" && !stream.allowDebug) continue;
+        stream.sendEvent(e.event, e.data);
+      }
       return;
     }
     stream.sendEvent("debug_artifacts_ready", {
@@ -346,7 +427,9 @@ async function persistAssistantResult(args: {
    *  instead of creating a new one. The placeholder is reserved at /chat
    *  time so its id can drive PI session branching and AgentRun linkage. */
   assistantMessageId?: string;
+  runProvider?: string;
 }): Promise<{ messageId: string; persistedAttachments: PersistedAttachment[] } | null> {
+  const runProviderField = args.runProvider ? { runProvider: args.runProvider } : {};
   if (args.sessionId) {
     const guard = await redisService.getConnection()
       .set(`agent-chat:msg-persisted:${args.sessionId}`, "1", "EX", 86_400, "NX")
@@ -358,6 +441,7 @@ async function persistAssistantResult(args: {
     ? await chatMessageRepository.update(args.assistantMessageId, {
         content: args.content,
         status: args.status,
+        ...runProviderField,
       }).catch(() => null)
     : await chatMessageRepository.create({
         conversationId: args.conversationId,
@@ -367,6 +451,7 @@ async function persistAssistantResult(args: {
         content: args.content,
         status: args.status,
         orgId: args.orgId,
+        ...runProviderField,
       });
   // If the placeholder was already swept (rare race) or update threw, fall
   // back to creating a fresh row so the assistant text isn't lost.
@@ -378,6 +463,7 @@ async function persistAssistantResult(args: {
     content: args.content,
     status: args.status,
     orgId: args.orgId,
+    ...runProviderField,
   });
 
   // Persist any tool-generated attachments (e.g. create-ppt .pptx) into GCS
@@ -402,12 +488,37 @@ async function persistAssistantResult(args: {
 
         const inlineMeta = att.metadata && typeof att.metadata === "object" ? att.metadata : undefined;
         const fallbackSlide = fallbackSlides.get(att.fileName);
-        const attachmentMetadata: Record<string, unknown> | undefined =
+        let attachmentMetadata: Record<string, unknown> | undefined =
           inlineMeta && Object.keys(inlineMeta).length > 0
             ? inlineMeta
             : fallbackSlide
               ? { slideJson: fallbackSlide }
               : undefined;
+
+        // A conversation owns ONE app: the first generated artifact creates it,
+        // every later one becomes a version of it. Done here rather than in the
+        // tool because the tool runs in xyne-claw with no database. The ids are
+        // stamped onto the manifest so the chat card can address the app (and
+        // its version history) instead of only the raw attachment.
+        const reactArtifact = attachmentMetadata?.["reactArtifact"];
+        if (reactArtifact && typeof reactArtifact === "object") {
+          const session = await attachArtifactToSessionApp({
+            conversationId: args.conversationId,
+            userId: args.userId,
+            payload: buffer,
+          });
+          if (session) {
+            attachmentMetadata = {
+              ...attachmentMetadata,
+              reactArtifact: {
+                ...(reactArtifact as Record<string, unknown>),
+                appId: session.appId,
+                versionId: session.versionId,
+                versionNumber: session.versionNumber,
+              },
+            };
+          }
+        }
 
         const row = await prisma.chatAttachment.create({
           data: {
@@ -420,11 +531,17 @@ async function persistAssistantResult(args: {
             ...(attachmentMetadata ? { metadata: attachmentMetadata as import("@prisma/client").Prisma.InputJsonValue } : {}),
           },
         });
+        const reactArtifactMeta =
+          attachmentMetadata && typeof attachmentMetadata === "object"
+            ? attachmentMetadata["reactArtifact"]
+            : undefined;
         persistedAttachments.push({
           id: row.id,
           mimeType: row.mimeType,
           originalFilename: row.originalFilename,
+          fileName: row.originalFilename,
           size: row.size,
+          ...(reactArtifactMeta ? { metadata: { reactArtifact: reactArtifactMeta } } : {}),
         });
       } catch (e) {
         log.error("[agent-chat] failed to persist assistant attachment:", e);
@@ -587,6 +704,18 @@ router.post(
       const thumbnails = filesMap?.["thumbnails"];
       if (files.length === 0) {
         res.status(400).json({ success: false, error: "No files uploaded" });
+        return;
+      }
+
+      // Deny-by-default content screening: reject native executables / the EICAR
+      // test file (by magic bytes, regardless of filename) and executable
+      // extensions / MIME types, so an attachment can't be a malware carrier.
+      const rejected = screenUploadFiles([...files, ...(thumbnails ?? [])]);
+      if (rejected) {
+        res.status(400).json({
+          success: false,
+          error: `File "${rejected.filename}" was rejected: ${rejected.reason}`,
+        });
         return;
       }
 
@@ -765,7 +894,7 @@ router.get("/:slug/context/search", async (req: Request<{ slug: string }>, res: 
       return;
     }
 
-    const agent = await agentRepository.findBySlug(req.params.slug, getOrgId(req));
+    const agent = await agentRepository.findBySlugVisibleTo(req.params.slug, getOrgId(req), getRequesterId(req));
     if (!agent) {
       log.warn(`[agent-chat/context-search] agent org-scoped miss slug=${req.params.slug} orgId=${getOrgId(req) ?? "none"} userId=${userId}`);
       res.status(404).json({ success: false, error: "Agent not found" });
@@ -775,10 +904,6 @@ router.get("/:slug/context/search", async (req: Request<{ slug: string }>, res: 
     const rawType = String(req.query["type"] ?? "all").trim() as ContextSearchType;
     if (rawType !== "all" && rawType !== "channel" && rawType !== "ticket" && rawType !== "canvas" && rawType !== "call" && rawType !== "repository") {
       res.status(400).json({ success: false, error: "type must be one of all|channel|ticket|canvas|call|repository" });
-      return;
-    }
-    if (rawType === "repository" && req.params.slug !== "sdlc-agent") {
-      res.status(400).json({ success: false, error: "Repository context is only available for the SDLC Assistant" });
       return;
     }
 
@@ -800,6 +925,39 @@ router.get("/:slug/context/search", async (req: Request<{ slug: string }>, res: 
   }
 });
 
+// Platform fallback for the model picker: list models off claw's platform
+// LiteLLM key (S2S — the key never leaves claw). Fail-soft: any failure yields
+// an empty list so the picker hides instead of erroring the chat page.
+async function listPlatformModels(): Promise<{
+  success: true;
+  data: Array<{ id: string; name: string }>;
+  defaultModel: string | null;
+  pinProvider: "spaces";
+}> {
+  const empty = { success: true as const, data: [], defaultModel: null, pinProvider: "spaces" as const };
+  if (!CONFIG.xyneClawS2sKey) return empty;
+  try {
+    const url = `${CONFIG.xyneClawUrl.replace(/\/$/, "")}/internal/litellm/models`;
+    const upstream = await fetch(url, {
+      headers: { "x-s2s-key": CONFIG.xyneClawS2sKey },
+      signal: AbortSignal.timeout(20_000),
+    });
+    if (!upstream.ok) {
+      const text = await upstream.text().catch(() => "");
+      log.error(`[agent-chat] platform models via claw failed: ${upstream.status} ${text.slice(0, 200)}`);
+      return empty;
+    }
+    const payload = (await upstream.json()) as { data?: Array<{ id?: string; name?: string }>; defaultModel?: string | null };
+    const data = (payload.data ?? [])
+      .filter((m): m is { id: string; name?: string } => Boolean(m.id))
+      .map((m) => ({ id: m.id, name: m.name ?? m.id }));
+    return { success: true, data, defaultModel: payload.defaultModel ?? null, pinProvider: "spaces" };
+  } catch (err) {
+    log.error("[agent-chat] platform models via claw error:", err);
+    return empty;
+  }
+}
+
 // GET /:slug/litellm-models — models the agent's shared LiteLLM credential can
 // access, for the per-chat model switcher. Any authenticated chat participant
 // may call this (the router is mounted under requireAuth): it lists models off
@@ -808,6 +966,53 @@ router.get("/:slug/context/search", async (req: Request<{ slug: string }>, res: 
 // list (not an error) when the agent has no litellm credential so the UI can
 // simply hide the picker. `defaultModel` is the agent's configured model, used
 // to preselect the dropdown.
+interface LocalHarnessModelEntry {
+  id: string;
+  name: string;
+  provider: "local-harness";
+  harness: string;
+  deviceName: string;
+  recommended: boolean;
+}
+
+async function resolveHarnessModelEntries(
+  userId: string,
+  orgId: string,
+  slug: string,
+  agentCfg: Record<string, unknown>,
+): Promise<LocalHarnessModelEntry[]> {
+  if (!CONFIG.localHarnessEnabled) return [];
+  const rawOrder = agentCfg["providerOrder"];
+  const providerOrder = Array.isArray(rawOrder) ? rawOrder.filter((e): e is string => typeof e === "string") : [];
+  const personalProvider = (await userAgentConfigRepository.findByUserAndAgent(userId, orgId, slug).catch(() => null))?.provider;
+
+  const [devices, recommendedTarget] = await Promise.all([
+    localHarnessRepository.listOnlineDevices(userId).catch(() => []),
+    resolveLocalHarnessTarget({ userId, orgId, providerOrder, personalProvider }).catch(() => undefined),
+  ]);
+
+  const entries: LocalHarnessModelEntry[] = [];
+  const seen = new Set<string>();
+  for (const device of devices) {
+    for (const provider of authenticatedProviders(device)) {
+      if (!isLocalHarnessProvider(provider) || seen.has(provider)) continue;
+      seen.add(provider);
+      const deviceName = device.deviceName;
+      const label = localHarnessProviderLabel(provider);
+      entries.push({
+        id: `local-harness:${provider}`,
+        name: deviceName ? `${label} (${deviceName})` : label,
+        provider: "local-harness",
+        harness: provider,
+        deviceName,
+        recommended: recommendedTarget?.provider === provider,
+      });
+    }
+  }
+  entries.sort((a, b) => Number(b.recommended) - Number(a.recommended));
+  return entries;
+}
+
 router.get("/:slug/litellm-models", async (req: Request<{ slug: string }>, res: Response): Promise<void> => {
   try {
     const userId = getRequesterId(req);
@@ -815,14 +1020,51 @@ router.get("/:slug/litellm-models", async (req: Request<{ slug: string }>, res: 
       res.status(401).json({ success: false, error: "x-user-id header is required" });
       return;
     }
-    const agent = await agentRepository.findBySlug(req.params.slug, getOrgId(req));
+    const agent = await agentRepository.findBySlugVisibleTo(req.params.slug, getOrgId(req), getRequesterId(req));
     if (!agent) {
       res.status(404).json({ success: false, error: "Agent not found" });
       return;
     }
     const cred = await agentProviderCredentialsRepository.findByAgentAndProvider(agent.id, "litellm").catch(() => null);
-    if (!cred?.encryptedKey || !cred.iv || !cred.authTag) {
-      res.json({ success: true, data: [], defaultModel: null });
+    const hasCred = Boolean(cred?.encryptedKey && cred?.iv && cred?.authTag);
+
+    // The picker follows the agent's provider ORDER: whichever of spaces /
+    // litellm would serve a no-pin run supplies both the model list and the
+    // "Recommended" default, so the label always matches what actually runs.
+    //   [spaces, litellm…]    → platform list; default = modelSettings.model
+    //                           (the agent's Spaces model) ?? platform default
+    //   [litellm, …] + cred   → the credential's list; default = cred.model
+    //   no order + cred       → litellm (bare-credential fallback, mirrors
+    //                           resolveAgentProviderConfigs)
+    //   otherwise             → spaces (keyless platform default, via claw —
+    //                           LITELLM_API_KEY stays on the claw pod, same
+    //                           pattern as entity-llm). pinProvider tells the
+    //                           composer which providerOverride a pick rides.
+    const agentCfg = (agent.config ?? {}) as Record<string, unknown>;
+    const rawOrder = agentCfg["providerOrder"];
+    const order = Array.isArray(rawOrder) ? rawOrder.filter((e): e is string => typeof e === "string") : [];
+    const relevant = order.filter((e) => e === "spaces" || (e === "litellm" && hasCred));
+    // No order → the platform default serves (strict ranking: a credential
+    // that was saved but never selected as a provider never routes a run).
+    // Legacy config.provider = "litellm" still counts as an explicit selection.
+    const legacyProvider = typeof agentCfg["provider"] === "string" ? agentCfg["provider"] : undefined;
+    const primary = relevant[0] ?? (order.length === 0 && legacyProvider === "litellm" && hasCred ? "litellm" : "spaces");
+
+    const harnessEntries = await resolveHarnessModelEntries(userId, agent.orgId, req.params.slug, agentCfg);
+    const recommendedHarness = harnessEntries.find((entry) => entry.recommended);
+
+    if (primary === "spaces" || !cred?.encryptedKey || !cred.iv || !cred.authTag) {
+      const platform = await listPlatformModels();
+      const ms = agentCfg["modelSettings"] as Record<string, unknown> | undefined;
+      const rawSpacesModel = ms?.["model"];
+      const spacesModel = typeof rawSpacesModel === "string" && rawSpacesModel.trim() ? rawSpacesModel.trim() : null;
+      const platformData = Array.isArray(platform.data) ? platform.data : [];
+      res.json({
+        ...platform,
+        data: [...harnessEntries, ...platformData],
+        defaultModel: spacesModel ?? platform.defaultModel,
+        ...(recommendedHarness ? { recommendedId: recommendedHarness.id } : {}),
+      });
       return;
     }
     const apiKey = decrypt(cred.encryptedKey, cred.iv, cred.authTag, CONFIG.encryptionKey);
@@ -841,10 +1083,20 @@ router.get("/:slug/litellm-models", async (req: Request<{ slug: string }>, res: 
       .filter((m): m is { id: string } => Boolean(m.id))
       .map((m) => ({ id: m.id, name: m.id }))
       .sort((a, b) => a.name.localeCompare(b.name));
-    res.json({ success: true, data: models, defaultModel: cred.model ?? null });
+    res.json({
+      success: true,
+      data: [...harnessEntries, ...models],
+      defaultModel: cred.model ?? null,
+      pinProvider: "litellm",
+      ...(recommendedHarness ? { recommendedId: recommendedHarness.id } : {}),
+    });
   } catch (err) {
     log.error("[agent-chat] litellm-models error:", err);
-    res.status(500).json({ success: false, error: err instanceof Error ? err.message : "Failed to fetch models" });
+    // fetch() network failures bury the real reason (ENOTFOUND, ECONNREFUSED)
+    // in err.cause — surface it so a prod 500 body is diagnosable on sight.
+    const cause = err instanceof Error && err.cause instanceof Error ? ` (${err.cause.message})` : "";
+    const message = err instanceof Error ? err.message : "Failed to fetch models";
+    res.status(500).json({ success: false, error: `${message}${cause}` });
   }
 });
 
@@ -869,6 +1121,9 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
       designArtifactAttachmentId,
       designSelection,
       researchContext,
+      speed: rawSpeed,
+      thinkingLevel: rawThinkingLevel,
+      sandboxMode,
     } = req.body as {
       message?: string;
       conversationId?: string;
@@ -893,8 +1148,30 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
       designArtifactAttachmentId?: string;
       designSelection?: unknown;
       researchContext?: { type?: unknown; id?: unknown; name?: unknown } | null;
+      /** Per-message provider fast mode (composer toggle). Rides the agent's
+       *  modelSettings.speed for this run only — same credential, same model,
+       *  Anthropic's faster tier. Omitted = agent default. */
+      speed?: "standard" | "fast";
+      /** Per-message thinking level (the composer's model menu). Rides the
+       *  agent's modelSettings.thinkingLevel for this run only. */
+      thinkingLevel?: "off" | "minimal" | "low" | "medium" | "high";
+      sandboxMode?: "local" | "remote" | "container";
     };
     const userId = getRequesterId(req) ?? (req.body as { userId?: string }).userId;
+    const speedOverride: "standard" | "fast" | undefined =
+      rawSpeed === "fast" || rawSpeed === "standard" ? rawSpeed : undefined;
+    if (rawSpeed !== undefined && !speedOverride) {
+      res.status(400).json({ success: false, error: 'speed must be "standard" or "fast"' });
+      return;
+    }
+    const CHAT_THINKING_LEVELS = ["off", "minimal", "low", "medium", "high"] as const;
+    const thinkingOverride = typeof rawThinkingLevel === "string" && (CHAT_THINKING_LEVELS as readonly string[]).includes(rawThinkingLevel)
+      ? rawThinkingLevel as (typeof CHAT_THINKING_LEVELS)[number]
+      : undefined;
+    if (rawThinkingLevel !== undefined && !thinkingOverride) {
+      res.status(400).json({ success: false, error: `thinkingLevel must be one of: ${CHAT_THINKING_LEVELS.join(", ")}` });
+      return;
+    }
 
     if (!message || typeof message !== "string" || !message.trim()) {
       res.status(400).json({ success: false, error: "message is required" });
@@ -967,17 +1244,22 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
         ].join("\n")
       : "";
 
-    const agent = await agentRepository.findBySlug(slug, getOrgId(req));
+    const agent = await agentRepository.findBySlugVisibleTo(slug, getOrgId(req), userId);
     if (!agent) {
       log.warn(`[agent-chat/chat] agent org-scoped miss slug=${slug} orgId=${getOrgId(req) ?? "none"} userId=${userId}`);
       res.status(404).json({ success: false, error: "Agent not found" });
       return;
     }
+    // Invocation whitelist — dashboard chat surface. Same rule as every other
+    // entry point; refused like a disabled/absent agent.
+    if (!isAgentInvocableBy(agent.config as Record<string, unknown> | null, userId)) {
+      log.warn(`[agent-chat/chat] invocation denied (not whitelisted) slug=${slug} userId=${userId}`);
+      res.status(403).json({ success: false, error: `agent "${slug}" is restricted — you don't have access to it` });
+      return;
+    }
     const conversationId = existingConvId ?? `chat-${randomUUID()}`;
 
-    const sdlcResolution = slug === "sdlc-agent"
-      ? await resolveSdlcRepositoryForUser(userId, researchContext, conversationId)
-      : { ok: true as const, repository: undefined };
+    const sdlcResolution = await resolveSdlcRepositoryForUser(userId, researchContext, conversationId);
     if (!sdlcResolution.ok) {
       res.status(sdlcResolution.status).json({ success: false, error: sdlcResolution.error });
       return;
@@ -986,8 +1268,12 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
     // Eval runs pin the generation LLM per request. Validate up-front (clean
     // 400) — once the SSE stream opens we can only fail mid-stream.
     const OVERRIDABLE = new Set(["spaces", "copilot", "claude", "codex", "litellm"]);
+    const harnessPinned = providerOverride?.provider === "local-harness";
+    const pinnedHarnessProvider = harnessPinned && typeof providerOverride?.model === "string"
+      ? providerOverride.model.replace(/^local-harness:/, "")
+      : undefined;
     const override = providerOverride?.provider && OVERRIDABLE.has(providerOverride.provider) ? providerOverride : undefined;
-    if (providerOverride?.provider && !override) {
+    if (providerOverride?.provider && !override && !harnessPinned) {
       res.status(400).json({ success: false, error: `Unknown provider override "${providerOverride.provider}"` });
       return;
     }
@@ -1005,12 +1291,16 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
       }
     }
 
-    const normalized = normalizeAttachedContext(attachedContext);
+    const contextSplit = splitLocalFolderContext(attachedContext);
+    const normalized = normalizeAttachedContext(
+      Array.isArray(attachedContext) ? contextSplit.rest : attachedContext,
+    );
     if (normalized.error) {
       res.status(400).json({ success: false, error: normalized.error });
       return;
     }
     const attachedContextItems = normalized.items;
+    const persistedAttachedContext: unknown[] = [...attachedContextItems, ...contextSplit.localFolders];
     const spacesAuth = attachedContextItems.length > 0 ? await resolveSpacesAuth(req, userId) : undefined;
     if (attachedContextItems.length > 0 && !spacesAuth) {
       res.status(401).json({ success: false, error: "Spaces credentials not found for attached context" });
@@ -1044,6 +1334,7 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
     let cloneSourcePiConversationId: string | null = null;
     let cloneBranchMode: "lastUser" | "beforeLastUser" = "lastUser";
     let hydratedAttachments: Array<{ fileName: string; mimeType: string; data: string }> = [];
+    let uploadedAttachmentMeta: Array<{ id: string; fileName: string; mimeType: string }> = [];
     let designArtifactAttachment: { fileName: string; mimeType: string; data: string } | null = null;
 
     if (studioMode === "design" && designArtifactAttachmentId) {
@@ -1116,6 +1407,7 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
         conversationId, agentSlug: slug, userId, role: "user", content: message.trim(),
         parentId: requestedParent?.id ?? null,
         orgId: agent.orgId,
+        ...(persistedAttachedContext.length > 0 ? { attachedContext: persistedAttachedContext } : {}),
       });
       createdUserMessageId = userMsg.id;
       assistantParentId = userMsg.id;
@@ -1131,6 +1423,7 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
         conversationId, agentSlug: slug, userId, role: "user", content: message.trim(),
         parentId: userParentId,
         orgId: agent.orgId,
+        ...(persistedAttachedContext.length > 0 ? { attachedContext: persistedAttachedContext } : {}),
       });
       createdUserMessageId = userMsg.id;
       assistantParentId = userMsg.id;
@@ -1143,6 +1436,18 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
           const buf = await gcsService.getFileBuffer(r.url);
           return { fileName: r.originalFilename, mimeType: r.mimeType, data: buf.toString("base64") };
         }));
+        uploadedAttachmentMeta = rows.map((r) => ({
+          id: r.id,
+          fileName: r.originalFilename,
+          mimeType: r.mimeType,
+        }));
+        void recordUploadedArtifacts({
+          conversationId,
+          messageId: userMsg.id,
+          userId,
+          orgId: agent.orgId,
+          uploads: rows.map((r) => ({ id: r.id, originalFilename: r.originalFilename })),
+        });
       }
     }
 
@@ -1207,6 +1512,15 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
       "X-Accel-Buffering": "no", // disable proxy buffering (istio/nginx)
     });
 
+    // Whether this subscriber may receive `debug` frames. Same predicate the
+    // stored-history endpoint uses for `debugEvents`, so a caller sees the same
+    // debug content live as it would on replay. Resolved here, before the SSE
+    // promise, because the callback that forwards frames arrives on a separate
+    // S2S request with no end-user identity of its own.
+    const debugIsAdmin = await isClawAdmin(userId);
+    const debugEditAccess = debugIsAdmin ? null : await getAgentEditAccess(userId, slug, getOrgId(req));
+    const allowDebug = debugIsAdmin || Boolean(debugEditAccess?.canEdit);
+
     // Send conversationId immediately
     res.write(`event: meta\ndata: ${JSON.stringify({ conversationId })}\n\n`);
 
@@ -1248,6 +1562,7 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
         resolve,
         setClosed: () => { closed = true; },
         assistantMessageId: assistantMsg.id,
+        allowDebug,
         ...(createdUserMessageId ? { userMessageId: createdUserMessageId } : {}),
         ...(assistantParentId ? { assistantParentId } : {}),
       });
@@ -1262,6 +1577,18 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
         }
       }, 30 * 60 * 1000); // 30 minutes
     });
+
+    if (!isRegenerate && !isEditUserMessage && !isTurnControlCommand(message)) {
+      const handoff = await awaitTurnHandoff({
+        conversationId,
+        agentSlug: slug,
+        userId,
+        onLabel: (label) => pendingStreams.get(callbackId)?.sendEvent("progress", { toolLabel: label }),
+      });
+      if (handoff.handedOff) {
+        log.info(`[agent-chat] previous turn handed off conv=${conversationId} reason=${handoff.reason}`);
+      }
+    }
 
     // Call /run.
     //
@@ -1285,13 +1612,24 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
     const rawPersonalProvider = userAgentConfig?.provider;
     // "spaces" is the platform-default sentinel, not a real personal credential —
     // saving it should not override the agent-level providerOrder/credentials.
-    const personalProvider = rawPersonalProvider && rawPersonalProvider !== "spaces"
+    const selectedPersonalProvider = rawPersonalProvider && rawPersonalProvider !== "spaces"
       ? rawPersonalProvider
       : undefined;
-    const agentLevelProvider = (agent.config as Record<string, unknown> | null)?.["provider"] as string | undefined;
-    const rawProviderOrder = (agent.config as Record<string, unknown> | null)?.["providerOrder"];
+    const personalProvider = isLocalHarnessProvider(selectedPersonalProvider) ? undefined : selectedPersonalProvider;
+    // Effective speed for THIS run: the composer toggle wins, else the agent
+    // default. Fast mode may resolve against its own provider profile
+    // (config.fastModeProfile) — same credential keys, possibly different
+    // providers/models. See lib/agent-provider-config.ts.
+    const effectiveSpeed = speedOverride ?? agentDefaultSpeed(agent.config);
+    const speedConfig = providerConfigForSpeed(agent.config, effectiveSpeed);
+    const agentLevelProvider = speedConfig["provider"] as string | undefined;
+    const rawProviderOrder = speedConfig["providerOrder"];
     const agentProviderOrder: string[] = Array.isArray(rawProviderOrder)
       ? rawProviderOrder.filter((p): p is string => typeof p === "string" && KNOWN_PROVIDERS.has(p))
+      : [];
+    const rawConfiguredProviderOrder = (agent.config as Record<string, unknown> | null)?.["providerOrder"];
+    const configuredProviderOrder: string[] = Array.isArray(rawConfiguredProviderOrder)
+      ? rawConfiguredProviderOrder.filter((p): p is string => typeof p === "string")
       : [];
     const userProvider = personalProvider ?? agentLevelProvider;
 
@@ -1318,6 +1656,7 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
       const cfg = buildProviderConfig(row.provider, row);
       if (cfg) { providerConfigs[row.provider] = cfg; providerScope[row.provider] = "agent"; }
     }
+    applyFastModeModels(providerConfigs, agent.config, effectiveSpeed);
 
     // Refresh Claude OAuth before use (short-lived token; see webhook.ts for the
     // rationale). Mutates the resolved config's apiKey and persists the rotated
@@ -1346,9 +1685,12 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
     // Resolution: personal user provider always wins. Otherwise providerOrder
     // (canonical) takes over, with legacy config.provider as fallback for
     // agents that haven't migrated yet.
+    // STRICT RANKING — top first. "spaces" is keyless and can always serve,
+    // so an explicit spaces entry wins over lower-ranked saved credentials
+    // (mirrors resolveAgentProviderConfigs).
     let resolvedParentProvider = personalProvider;
     if (!resolvedParentProvider && agentProviderOrder.length > 0) {
-      resolvedParentProvider = agentProviderOrder.find((p) => providerConfigs[p]) ?? agentProviderOrder[0];
+      resolvedParentProvider = agentProviderOrder.find((p) => p === "spaces" || providerConfigs[p]) ?? agentProviderOrder[0];
     }
     if (!resolvedParentProvider && agentLevelProvider) {
       resolvedParentProvider = agentLevelProvider;
@@ -1393,10 +1735,49 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
           resolvedParentProvider = override.provider;
           if (override.model?.trim()) providerConfigs[override.provider] = { ...cfg, model: override.model.trim() };
           runtimeProviderOrder = [];
+        } else if (override.provider === "litellm" && override.model?.trim()) {
+          // No agent litellm credential — the pick came off the platform
+          // allowed-model list (litellm-models' claw fallback). Apply it as a
+          // "spaces" pin so it still takes effect instead of silently no-oping.
+          resolvedParentProvider = "spaces";
+          runAgentConfig = {
+            ...(runAgentConfig ?? {}),
+            modelSettings: {
+              ...((runAgentConfig?.["modelSettings"] as Record<string, unknown> | undefined) ?? {}),
+              model: override.model.trim(),
+            },
+          };
+          runtimeProviderOrder = [];
         }
       }
     }
 
+    // Per-message fast-mode / thinking overrides win over the agent's saved
+    // modelSettings for this run only (not persisted to the agent). The
+    // thinking pick also outranks the fast profile's thinking override —
+    // claw overlays fastModeProfile.modelSettings over modelSettings on fast
+    // runs, so mirror the choice into the profile too when one exists.
+    if (speedOverride || thinkingOverride) {
+      runAgentConfig = {
+        ...(runAgentConfig ?? {}),
+        modelSettings: {
+          ...((runAgentConfig?.["modelSettings"] as Record<string, unknown> | undefined) ?? {}),
+          ...(speedOverride ? { speed: speedOverride } : {}),
+          ...(thinkingOverride ? { thinkingLevel: thinkingOverride } : {}),
+        },
+      };
+      const profile = runAgentConfig["fastModeProfile"];
+      if (thinkingOverride && profile && typeof profile === "object" && !Array.isArray(profile)
+          && (profile as Record<string, unknown>)["modelSettings"]) {
+        runAgentConfig["fastModeProfile"] = {
+          ...(profile as Record<string, unknown>),
+          modelSettings: {
+            ...((profile as Record<string, unknown>)["modelSettings"] as Record<string, unknown>),
+            thinkingLevel: thinkingOverride,
+          },
+        };
+      }
+    }
     const effectiveAgentConfig = disableTools
       ? {
           ...(runAgentConfig ?? {}),
@@ -1410,7 +1791,7 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
       userId,
       userName: user?.name,
       userEmail: user?.email,
-      task: studioMode === "design" ? `/design ${message.trim()}` : message.trim(),
+      task: studioMode === "design" ? `/design ${message.trim()}` : applyAiScreenCommand(message).task,
       conversationId,
       orgId: agent.orgId,
       ...(piConversationId !== conversationId ? { piSessionConversationId: piConversationId } : {}),
@@ -1447,6 +1828,61 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
       fastMode: fastModeEnabled,
     };
 
+    const forwardedTask = typeof forwardBody["task"] === "string" ? forwardBody["task"] as string : "";
+    const isTaskCommandRun = IMMEDIATE_TASK_COMMAND_RE.test(forwardedTask);
+    const sandboxCommand = parseLocalSandboxCommand(forwardedTask);
+    const containerSandboxMode = sandboxMode === "container";
+    const deviceSandboxMode = sandboxMode === "local" || containerSandboxMode;
+    const localSandboxRequested = deviceSandboxMode && Boolean(sandboxCommand) && hydratedAttachments.length === 0;
+
+    let localFolderItem: LocalFolderContextItem | null = contextSplit.localFolders[0] ?? null;
+    if (!localFolderItem) {
+      const sticky = await chatMessageRepository
+        .latestLocalFolderContext(conversationId, slug)
+        .catch(() => null);
+      localFolderItem = splitLocalFolderContext(sticky ? [sticky] : []).localFolders[0] ?? null;
+    }
+    const localFolderWorkspace = localFolderItem ? toLocalFolderWorkspace(localFolderItem) : null;
+    const workspaceRun = Boolean(localFolderWorkspace) && (!isTaskCommandRun || deviceSandboxMode);
+
+    const harnessBlockedByCommand = isTaskCommandRun && !localSandboxRequested && !workspaceRun;
+    if (harnessBlockedByCommand) {
+      log.info(`[agent-chat] local-harness skipped for conv=${conversationId}: task command (sandboxMode=${sandboxMode ?? "remote"})`);
+    } else if (localSandboxRequested) {
+      log.info(`[agent-chat] local sandbox requested for conv=${conversationId}: command=/${sandboxCommand}`);
+    }
+
+    const pinnedHarnessTarget = !harnessBlockedByCommand && pinnedHarnessProvider && isLocalHarnessProvider(pinnedHarnessProvider)
+      ? await resolveLocalHarnessTargetForProvider(userId, pinnedHarnessProvider).catch(() => undefined)
+      : undefined;
+    if (!harnessBlockedByCommand && pinnedHarnessProvider && !pinnedHarnessTarget) {
+      log.info(`[agent-chat] pinned local-harness provider=${pinnedHarnessProvider} has no online device — falling back`);
+    }
+
+    const localTarget = harnessBlockedByCommand ? undefined : pinnedHarnessTarget ?? await resolveLocalHarnessTarget({
+      userId,
+      orgId: agent.orgId,
+      providerOrder: configuredProviderOrder,
+      personalProvider: rawPersonalProvider,
+    }).catch((err: unknown) => {
+      log.warn("[agent-chat] local-harness resolution failed — using server run:", err instanceof Error ? err.message : err);
+      return undefined;
+    });
+
+    try {
+      const serverCatchUp = await planServerContinuation({
+        conversationId,
+        agentSlug: slug,
+        excludeMessageIds: [createdUserMessageId, assistantMsg.id].filter((id): id is string => Boolean(id)),
+      });
+      if (serverCatchUp) {
+        const existing = typeof forwardBody["context"] === "string" ? (forwardBody["context"] as string) : "";
+        forwardBody["context"] = existing ? `${existing}\n\n${serverCatchUp}` : serverCatchUp;
+      }
+    } catch (catchUpErr) {
+      log.warn("[agent-chat] server catch-up context failed:", catchUpErr instanceof Error ? catchUpErr.message : catchUpErr);
+    }
+
     // SSE consumer path. We send Accept: text/event-stream so the /run proxy
     // routes us through SSE pass-through (one ordered TCP connection from
     // claw → claw-auth) instead of falling back to the legacy POST bridge,
@@ -1458,8 +1894,56 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
     // final payload into our own /callback handler — same trick as
     // run-stream.ts — so all the finalize + persistAssistantResult + resolve
     // wiring stays in one place.
+    const resolvedLocalSandbox = localTarget && localSandboxRequested && sandboxCommand
+      ? await resolveLocalSandbox(sandboxCommand)
+      : localTarget && deviceSandboxMode && !isTaskCommandRun
+        ? { command: "chat", instruction: "", skills: [] }
+        : undefined;
+    const localSandbox = resolvedLocalSandbox && containerSandboxMode
+      ? { ...resolvedLocalSandbox, container: true }
+      : resolvedLocalSandbox;
+    if (localTarget && localSandboxRequested && !localSandbox) {
+      log.info(`[agent-chat] local sandbox spec unavailable for /${sandboxCommand} conv=${conversationId} — using the server run`);
+    }
+
     let runBody: { success: boolean; sessionId?: string; error?: string; deferred?: boolean };
-    if (CONFIG.clawSseTransport) {
+    if (workspaceRun && localFolderWorkspace && !localTarget) {
+      runBody = { success: false, error: localFolderUnavailableMessage(localFolderWorkspace.name) };
+    } else if (localTarget && (!localSandboxRequested || localSandbox || workspaceRun)) {
+      if (parseSlashCommand(message)?.kind === "compact") {
+        await localHarnessSessionRepository.clearForConversation(conversationId).catch(() => 0);
+      }
+      const dispatched = await dispatchLocalHarnessRun({
+        target: localTarget,
+        userId,
+        orgId: agent.orgId,
+        conversationId,
+        agentSlug: slug,
+        agentName: agent.name,
+        systemPrompt: withXyneChatSurfacePrimer(agent.systemPrompt),
+        model: pinnedModelForProvider(runAgentConfig, localTarget.provider),
+        task: localSandboxRequested ? forwardedTask : message.trim(),
+        ...(uploadedAttachmentMeta.length ? { attachments: uploadedAttachmentMeta } : {}),
+        context:
+          [
+            resolvedContext.promptPrefix || "",
+            typeof additionalInstructions === "string" ? additionalInstructions.trim() : "",
+            designSelectionInstruction,
+          ]
+            .filter(Boolean)
+            .join("\n\n") || null,
+        ...(localSandbox ? { localSandbox } : {}),
+        progressUrl,
+        callbackUrl,
+        serverFallbackBody: forwardBody,
+        ...(workspaceRun && localFolderWorkspace ? { workspace: localFolderWorkspace, noServerFallback: true } : {}),
+        continuation: {
+          agentSlug: slug,
+          excludeMessageIds: [createdUserMessageId, assistantMsg.id].filter((id): id is string => Boolean(id)),
+        },
+      });
+      runBody = { success: true, sessionId: dispatched.sessionId };
+    } else if (CONFIG.clawSseTransport) {
       runBody = await runAgentChatViaSse({
         forwardBody,
         callbackId,
@@ -1609,11 +2093,25 @@ router.post("/:slug/chat/cancel", async (req: Request<{ slug: string }>, res: Re
       return;
     }
 
+    const harnessRun = await localHarnessRepository.findBySessionId(sessionId).catch(() => null);
+    if (harnessRun) {
+      const cancelled = await localHarnessRepository.cancelRun(harnessRun.id).catch(() => false);
+      if (cancelled) {
+        const { relayResult } = await import("../lib/local-harness.js");
+        await relayResult(harnessRun, { status: "cancelled", text: "" });
+      }
+      res.json({
+        success: true,
+        data: { sessionId, conversationId: run.conversationId, status: "cancelled" },
+      });
+      return;
+    }
+
     // Ownership was checked above; preserve it across the S2S hop.
     try {
       await cancelRunSession(sessionId, userId);
     } catch (err) {
-      res.status(502).json({ success: false, error: err instanceof Error ? err.message : String(err) });
+      res.status(502).json({ success: false, error: errMsg(err) });
       return;
     }
 
@@ -1634,14 +2132,16 @@ router.post("/:slug/chat/cancel", async (req: Request<{ slug: string }>, res: Re
 // assistant under the same user message.
 router.post("/:slug/chat/:convId/regenerate", async (req: Request<{ slug: string; convId: string }>, res: Response) => {
   try {
-    const { convId } = req.params;
+    const { slug, convId } = req.params;
     const userId = getRequesterId(req);
     if (!userId) {
       res.status(400).json({ success: false, error: "userId or x-user-id header required" });
       return;
     }
 
-    const messages = await chatMessageRepository.findByConversation(convId);
+    const messages = (await chatMessageRepository.findByConversationAndAgent(convId, slug)).filter(
+      (m) => m.userId === userId,
+    );
     const lastAssistant = [...messages].reverse().find((m) => m.role === "assistant");
     if (!lastAssistant) {
       res.status(400).json({ success: false, error: "No assistant message found" });
@@ -1708,7 +2208,14 @@ internalRouter.post("/:slug/chat/:convId/progress", async (req: Request<{ slug: 
 
   if (events.length > 0 && callbackId) {
     if (stream) {
-      for (const e of events) stream.sendEvent(e.event, e.data);
+      // `debug` is withheld unless the subscriber was resolved as elevated when
+      // the stream opened. Filtered at delivery rather than at construction
+      // because the same `events` array is also published cross-pod, where the
+      // receiving pod owns the subscriber and applies this same check.
+      for (const e of events) {
+        if (e.event === "debug" && !stream.allowDebug) continue;
+        stream.sendEvent(e.event, e.data);
+      }
     } else {
       publishChatEvent({ kind: "progress", callbackId, events });
     }
@@ -1816,7 +2323,7 @@ internalRouter.post("/:slug/chat/:convId/callback", async (req: Request<{ slug: 
   let includeCitations = false;
   try {
     const agentRow = callbackOrgId
-      ? await agentRepository.findBySlug(req.params.slug, callbackOrgId)
+      ? await agentRepository.findBySlugVisibleTo(req.params.slug, callbackOrgId, userId)
       : null;
     const replyOpts = (agentRow?.config as { replyOptions?: { includeCitations?: boolean } } | undefined)?.replyOptions;
     if (replyOpts && replyOpts.includeCitations === true) includeCitations = true;
@@ -1894,7 +2401,7 @@ internalRouter.post("/:slug/chat/:convId/callback", async (req: Request<{ slug: 
   let persisted: { messageId: string; persistedAttachments: PersistedAttachment[] } | null = null;
   if (userId && callbackOrgId) {
     try {
-      const agent = await agentRepository.findBySlug(req.params.slug, callbackOrgId);
+      const agent = await agentRepository.findBySlugVisibleTo(req.params.slug, callbackOrgId, userId);
       if (!agent) {
         log.warn(`[agent-chat/result] agent org-scoped miss slug=${req.params.slug} orgId=${callbackOrgId ?? "none"} userId=${userId ?? "none"} sessionId=${req.params.convId}`);
         res.status(404).json({ success: false, error: "Agent not found" });
@@ -1911,8 +2418,26 @@ internalRouter.post("/:slug/chat/:convId/callback", async (req: Request<{ slug: 
         ...(toolInvocations !== undefined ? { toolInvocations } : {}),
         ...(sessionId ? { sessionId } : {}),
         ...(chatMessageId ? { assistantMessageId: chatMessageId } : {}),
+        ...(provider ? { runProvider: provider } : {}),
       });
       persistedFlag = true; // non-null = written now; null = guard loss = a retry already wrote it
+      if (persisted?.persistedAttachments.length) {
+        const runRow = sessionId ? await agentRunRepository.findBySessionId(sessionId).catch(() => null) : null;
+        void recordDeliveredArtifacts({
+          conversationId: req.params.convId,
+          userId,
+          orgId: agent.orgId,
+          messageId: persisted.messageId,
+          task: runRow?.task ?? null,
+          attachments: persisted.persistedAttachments.map((att) => ({
+            id: att.id,
+            originalFilename: att.originalFilename,
+            mimeType: att.mimeType,
+          })),
+        }).catch((artifactErr: unknown) => {
+          log.warn("[agent-chat] delivered-artifact record failed:", artifactErr instanceof Error ? artifactErr.message : artifactErr);
+        });
+      }
     } catch (err) {
       log.error("[agent-chat] callback-side persist failed (SSE pod will fall back):", err instanceof Error ? err.message : err);
     }
@@ -1977,7 +2502,9 @@ router.post("/:slug/chat/:convId/fork", async (req: Request<{ slug: string; conv
       return;
     }
 
-    const sourceMessages = await chatMessageRepository.findByConversationAndAgent(convId, slug);
+    const sourceMessages = (await chatMessageRepository.findByConversationAndAgent(convId, slug)).filter(
+      (m) => m.userId === userId,
+    );
     if (sourceMessages.length === 0) {
       res.status(404).json({ success: false, error: "Source conversation is empty" });
       return;
@@ -2088,16 +2615,25 @@ router.get("/:slug/chat/:convId/messages", async (req: Request<{ slug: string; c
       ? await agentRunRepository.listByConversation(req.params.convId, userId)
       : await agentRunRepository.listByUser(userId || "", { conversationId: req.params.convId });
 
-    // Strip internal GCS paths from attachment metadata before sending to client
+    // Strip internal GCS paths from attachment metadata before sending to client.
+    // `reactArtifact` is the one metadata key allowed through: it is the small
+    // manifest (title/entry/file paths/dep names) the dashboard's artifact card
+    // renders from, and it carries no storage paths. Everything else — including
+    // slideJson, which has its own ACL'd endpoint — stays server-side. Keep this
+    // an explicit allowlist: passing `a.metadata` wholesale would leak `url`.
     const serialized = messages.map((m) => {
-      const attachmentsRaw = (m as unknown as { attachments?: Array<{ id: string; mimeType: string; originalFilename: string; width: number | null; height: number | null }> }).attachments ?? [];
-      const attachments = attachmentsRaw.map((a) => ({
-        id: a.id,
-        mimeType: a.mimeType,
-        originalFilename: a.originalFilename,
-        width: a.width,
-        height: a.height,
-      }));
+      const attachmentsRaw = (m as unknown as { attachments?: Array<{ id: string; mimeType: string; originalFilename: string; width: number | null; height: number | null; metadata?: Record<string, unknown> | null }> }).attachments ?? [];
+      const attachments = attachmentsRaw.map((a) => {
+        const reactArtifact = a.metadata && typeof a.metadata === "object" ? a.metadata["reactArtifact"] : undefined;
+        return {
+          id: a.id,
+          mimeType: a.mimeType,
+          originalFilename: a.originalFilename,
+          width: a.width,
+          height: a.height,
+          ...(reactArtifact ? { metadata: { reactArtifact } } : {}),
+        };
+      });
       return { ...m, attachments };
     });
 
@@ -2138,7 +2674,7 @@ router.get("/:slug/chat/:convId/messages", async (req: Request<{ slug: string; c
         const visibleInvocations = withoutFollowUpRecorderInvocations(invocations as unknown[]);
         if (visibleInvocations.length > 0) {
           invocationsByMsgId[linkedId] =
-            crossUser && run.userId !== userId
+            shouldRedactRun(crossUser, run.userId, userId, run.triggerSource)
               ? redactToolResults(visibleInvocations)
               : visibleInvocations;
         }
@@ -2175,7 +2711,7 @@ router.get("/:slug/chat/:convId/messages", async (req: Request<{ slug: string; c
         // chips sharing the Spaces mark cost one copy, not N.
         if (visibleInvocations.length > 0) {
           invocationsByMsgId[msg.id] =
-            crossUser && run.userId !== userId
+            shouldRedactRun(crossUser, run.userId, userId, run.triggerSource)
               ? redactToolResults(visibleInvocations)
               : visibleInvocations;
         }
@@ -2325,7 +2861,7 @@ router.get("/:slug/chat/:convId/live", async (req: Request<{ slug: string; convI
         const visibleInvocations = withoutFollowUpRecorderInvocations(invs as unknown[]);
         if (visibleInvocations.length > 0) {
           invocationsByMsgId[msg.id] =
-            crossUser && run.userId !== userId
+            shouldRedactRun(crossUser, run.userId, userId, run.triggerSource)
               ? redactToolResults(visibleInvocations)
               : visibleInvocations;
         }
@@ -2341,7 +2877,7 @@ router.get("/:slug/chat/:convId/live", async (req: Request<{ slug: string; convI
         const visibleInvocations = withoutFollowUpRecorderInvocations(
           r.toolInvocations as unknown[],
         );
-        return crossUser && r.userId !== userId
+        return shouldRedactRun(crossUser, r.userId, userId, r.triggerSource)
           ? redactToolResults(visibleInvocations)
           : visibleInvocations;
       });
@@ -2361,7 +2897,7 @@ router.get("/:slug/chat/:convId/live", async (req: Request<{ slug: string; convI
       })}\n\n`,
     );
   } catch (err) {
-    log.warn("[agent-chat] live snapshot failed:", err instanceof Error ? err.message : String(err));
+    log.warn("[agent-chat] live snapshot failed:", errMsg(err));
   }
 
   // 2) Subscribe to live deltas (cross-pod via Redis). Buffer-free: write as they arrive.
@@ -2369,7 +2905,10 @@ router.get("/:slug/chat/:convId/live", async (req: Request<{ slug: string; convI
     if (evt.agentSlug && evt.agentSlug !== slug) return; // scope to this agent
     if (!allow(evt.userId)) return;
     let data: LiveEvent = evt;
-    if (evt.type === "invocation" && crossUser && evt.userId !== userId) {
+    // Same rule as the stored transcript above — without this an awakened run
+    // streamed its tool results pre-redacted and only became readable after it
+    // completed and the viewer refetched from Postgres.
+    if (evt.type === "invocation" && shouldRedactRun(crossUser, evt.userId, userId, evt.triggerSource)) {
       data = { ...evt, toolInvocation: redactToolResults([evt.toolInvocation])[0] };
     }
     try {
@@ -2584,11 +3123,21 @@ router.get("/:slug/chat/:convId/debug", async (req: Request<{ slug: string; conv
         aclRuns.filter((r) => r.usedUserToken && r.userId !== requesterId).map((r) => r.sessionId),
       );
       const ownerBySession = new Map(aclRuns.map((r) => [r.sessionId, r.userId]));
-      const ownsSession = (sid: string | undefined): boolean => !!sid && ownerBySession.get(sid) === requesterId;
+      // Awakened runs have no human owner, so "readable" for them means the
+      // admin can read them — that IS the audit trail for an agent acting
+      // unattended. See lib/agent-owned-runs.ts.
+      const agentOwnedSessions = new Set(
+        aclRuns.filter((r) => isAgentOwnedRun(r.triggerSource)).map((r) => r.sessionId),
+      );
+      const readable = (sid: string | undefined, ownerUserId?: string | null): boolean =>
+        ownerUserId === requesterId ||
+        (!!sid && (agentOwnedSessions.has(sid) || ownerBySession.get(sid) === requesterId));
+      const ownsSession = (sid: string | undefined): boolean =>
+        !!sid && (agentOwnedSessions.has(sid) || ownerBySession.get(sid) === requesterId);
 
       const d = body.data;
       const hideDebugSession = d.debugSession?.sessionId ? hiddenSessionIds.has(d.debugSession.sessionId) : false;
-      const debugSessionOwned = d.debugSession?.userId === requesterId;
+      const debugSessionOwned = readable(d.debugSession?.sessionId, d.debugSession?.userId);
       body.data = {
         ...d,
         debugSession: hideDebugSession
@@ -2604,7 +3153,9 @@ router.get("/:slug/chat/:convId/debug", async (req: Request<{ slug: string; conv
         runs: (d.runs ?? [])
           .filter((r) => !hiddenSessionIds.has(r.data?.sessionId ?? ""))
           .map((r) =>
-            r.data?.userId === requesterId ? r : { ...r, data: redactResultKeysDeep(r.data) as typeof r.data },
+            readable(r.data?.sessionId, r.data?.userId)
+              ? r
+              : { ...r, data: redactResultKeysDeep(r.data) as typeof r.data },
           ),
         subagents: (d.subagents ?? [])
           .filter((s) => !hiddenSessionIds.has(s.data?.parentSessionId ?? ""))
@@ -2774,9 +3325,14 @@ router.get("/:slug/conversations", async (req: Request<{ slug: string }>, res: R
     // Get all messages for this user+agent, grouped by conversation
     const allMessages = await chatMessageRepository.findByUserAndAgent(userId, req.params.slug);
 
-    // Group by conversationId
+    // Group by conversationId, skipping artifact-app threads. Those are real,
+    // durable conversations, but their prompts are written by app code on the
+    // user's behalf — surfacing them here would bury the user's own chats under
+    // machine-generated ones. They stay visible in the Agent Control Center via
+    // triggerSource "app". The id prefix is the marker, same as "scheduled_".
     const convMap = new Map<string, typeof allMessages>();
     for (const msg of allMessages) {
+      if (msg.conversationId.startsWith("app_")) continue;
       const list = convMap.get(msg.conversationId) ?? [];
       list.push(msg);
       convMap.set(msg.conversationId, list);
@@ -2836,6 +3392,40 @@ router.post("/:slug/chat/approve-action", async (req: Request<{ slug: string }>,
       return;
     }
 
+    const { resumeLocalHarnessRunForAction, rejectionResultText, findLocalHarnessRunForAction } =
+      await import("../lib/local-harness-approval.js");
+    const harnessRun = await findLocalHarnessRunForAction(callerUserId, action.signature);
+
+    const harnessEnvelope = harnessRun?.envelope as { conversationId?: string } | null | undefined;
+    const bodyConversationId = (req.body as { conversationId?: unknown }).conversationId;
+    const approvedConversationId = harnessEnvelope?.conversationId
+      ?? (typeof bodyConversationId === "string" && bodyConversationId ? bodyConversationId : null);
+    const { userOwnsConversation } = await import("../lib/conversation-artifacts.js");
+    const conversationOwned = approvedConversationId
+      ? (harnessRun ? true : await userOwnsConversation(approvedConversationId, callerUserId))
+      : false;
+    const persistResolution = (resolution: "approved" | "declined") => {
+      if (!approvedConversationId || !conversationOwned) return;
+      chatMessageRepository
+        .resolvePendingAction(approvedConversationId, action.signature!, resolution)
+        .catch((err: unknown) => log.warn(`[agent-chat] pending action resolution not persisted: ${errMsg(err)}`));
+    };
+
+    if ((req.body as { approved?: boolean }).approved === false) {
+      persistResolution("declined");
+      if (harnessRun) {
+        await resumeLocalHarnessRunForAction({
+          userId: callerUserId,
+          signature: action.signature,
+          tool: action.tool,
+          approved: false,
+          resultText: rejectionResultText(action.tool),
+        });
+      }
+      res.json({ success: true, data: { content: "" } });
+      return;
+    }
+
     const { executeWriteAction } = await import("../lib/write-actions.js");
     const result = await executeWriteAction({
       serverType: action.serverType,
@@ -2846,12 +3436,37 @@ router.post("/:slug/chat/approve-action", async (req: Request<{ slug: string }>,
     });
 
     if (!result.ok) {
-      log.error(`[agent-chat] approve-action failed: ${action.tool} — ${result.error}`);
+      log.error(`[agent-chat] approve-action failed: ${sanitizeForLog(action.tool)} — ${sanitizeForLog(result.error)}`);
       res.status(400).json({ success: false, error: result.error ?? "Execution failed" });
       return;
     }
 
-    log.info(`[agent-chat] approve-action ok: ${action.tool} → ${result.content.slice(0, 100)}`);
+    persistResolution("approved");
+    if (approvedConversationId && conversationOwned) {
+      const { ingestArtifactSignals } = await import("../lib/conversation-artifact-signals.js");
+      {
+        void ingestArtifactSignals({
+          conversationId: approvedConversationId,
+          runId: harnessRun?.sessionId ?? null,
+          userId: callerUserId,
+          orgId: harnessRun?.orgId ?? null,
+          toolName: action.tool,
+          toolResult: result.content,
+        });
+      }
+    }
+
+    if (harnessRun) {
+      await resumeLocalHarnessRunForAction({
+        userId: callerUserId,
+        signature: action.signature,
+        tool: action.tool,
+        approved: true,
+        resultText: result.content,
+      });
+    }
+
+    log.info(`[agent-chat] approve-action ok: ${sanitizeForLog(action.tool)} → ${sanitizeForLog(result.content).slice(0, 100)}`);
     res.json({ success: true, data: { content: result.content } });
   } catch (err) {
     log.error("[agent-chat] approve-action error:", err);
@@ -2909,6 +3524,16 @@ async function runAgentChatViaSse(
           url: `${CONFIG.internalUrl}/claw/api/v1/internal/run`,
           body: forwardBody,
           ...(CONFIG.xyneClawS2sKey ? { s2sKey: CONFIG.xyneClawS2sKey } : {}),
+          ...(liveUserId
+            ? {
+                artifactContext: {
+                  conversationId,
+                  userId: liveUserId,
+                  orgId: typeof forwardBody["orgId"] === "string" ? (forwardBody["orgId"] as string) : null,
+                  messageId: assistantMessageId ?? null,
+                },
+              }
+            : {}),
           onSeqGap: (expected, got) => {
             log.warn(`[agent-chat/sse] seq gap callbackId=${callbackId}: expected ${expected}, got ${got}`);
           },
@@ -2962,8 +3587,23 @@ async function runAgentChatViaSse(
             onPlan: (_sid, todos) => {
               pendingStreams.get(callbackId)?.sendEvent("plan", { todos });
             },
+            onUiWidget: (_sid, widget) => {
+              // Keep the existing plan event stable for current clients while
+              // exposing the generic envelope for every other widget type.
+              if (widget.type === "plan") {
+                pendingStreams.get(callbackId)?.sendEvent("plan", { todos: widget.payload.todos });
+              } else {
+                pendingStreams.get(callbackId)?.sendEvent("ui-widget", { widget });
+              }
+            },
             onDebug: (_sid, debugEvent) => {
-              pendingStreams.get(callbackId)?.sendEvent("debug", { debugEvent });
+              // Same gate as the legacy /progress path (line ~325/1901): debug
+              // frames carry the full system prompt / tool policy, so only the
+              // agent's editors or a Claw admin may receive them. Without this
+              // check the SSE transport (CLAW_SSE_TRANSPORT=on) re-opens PY-JP-012.
+              const debugStream = pendingStreams.get(callbackId);
+              if (!debugStream?.allowDebug) return;
+              debugStream.sendEvent("debug", { debugEvent });
             },
             onCancelled: (_sid, reason) => {
               // Distinct cancel signal so the v3 chat UI can drop its typing
@@ -3012,7 +3652,7 @@ async function runAgentChatViaSse(
               log.warn(`[agent-chat/sse] /callback returned ${cbRes.status}: ${text.slice(0, 300)}`);
             }
           } catch (err) {
-            log.error(`[agent-chat/sse] /callback POST failed (callbackId=${callbackId}): ${err instanceof Error ? err.message : String(err)}`);
+            log.error(`[agent-chat/sse] /callback POST failed (callbackId=${callbackId}): ${errMsg(err)}`);
           }
         } else {
           // No done frame ever arrived — synthesise a failed callback so the
@@ -3034,7 +3674,7 @@ async function runAgentChatViaSse(
           } catch { /* nothing else we can do */ }
         }
       } catch (err) {
-        log.error(`[agent-chat/sse] consumeClawStream failed (slug=${slug}, conv=${conversationId}, callbackId=${callbackId}): ${err instanceof Error ? err.message : String(err)}`);
+        log.error(`[agent-chat/sse] consumeClawStream failed (slug=${slug}, conv=${conversationId}, callbackId=${callbackId}): ${errMsg(err)}`);
         // If we never handed off, surface the failure synchronously so the
         // outer handler can short-circuit with the proper error message.
         if (!handed) {

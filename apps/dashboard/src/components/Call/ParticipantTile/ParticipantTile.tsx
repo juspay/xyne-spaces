@@ -1,9 +1,11 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { ConnectionQuality, Track } from 'livekit-client';
 import { useSelector } from '@xstate/react';
 import { useParticipantNetworkQuality } from '../hooks/useParticipantNetworkQuality';
-import { Hand, MicOff, Monitor, ImagePlus, Maximize2 } from 'lucide-react';
+import { Hand, Monitor, ImagePlus, Pin } from 'lucide-react';
 import { SignalBars } from '../components/SignalBars';
+import { AudioIndicator } from '../components/AudioIndicator';
+import { getParticipantPicturePath } from '../callParticipant.utils';
 import type { ParticipantInfo } from '../../../machines/roomMachine';
 import { roomActor } from '../../../machines/roomMachine';
 import { ParticipantAvatar } from '../ParticipantAvatar/ParticipantAvatar';
@@ -32,8 +34,12 @@ interface ParticipantTileProps {
   requestedAiController?: boolean;
   isHandRaised?: boolean | undefined;
   onToggleHandRaise?: (() => void) | undefined;
-  /** Shows a hover "expand" button (top-right) that opens this tile full-screen. */
+  /** Shows a hover "Pin" button (top-centre of the tile) that spotlights this participant. */
   onExpand?: (() => void) | undefined;
+  /** Hide the participant name overlay (used by presentation mode's full-bleed tile) */
+  hideNameLabel?: boolean | undefined;
+  /** Drop the speaking/raised-hand glow ring (a full-screen coloured frame looks wrong) */
+  hideSpeakingIndicator?: boolean | undefined;
 }
 
 export function ParticipantTile({
@@ -51,6 +57,8 @@ export function ParticipantTile({
   isHandRaised = false,
   onToggleHandRaise,
   onExpand,
+  hideNameLabel = false,
+  hideSpeakingIndicator = false,
 }: ParticipantTileProps): React.ReactElement {
   // Get track publications - these are observables that update automatically
   const cameraPublication = participant.participant?.getTrackPublication(Track.Source.Camera);
@@ -80,6 +88,7 @@ export function ParticipantTile({
   // Check if this is the AI agent participant
   const isAIAgent = participant.identity.startsWith('agent-');
   const isControlled = isAIAgent && aiController;
+  const canPin = !!onExpand && !isScreenShare && !compact && !isAIAgent;
 
   // Host detection + host name for the agent-tile menu: the backend stamps the
   // host's LiveKit identity as `createdBy` in room metadata (same source the toggle uses).
@@ -108,19 +117,18 @@ export function ParticipantTile({
   // Determine avatar and background colors
   const colors = getAvatarColors(participant.identity);
 
-  // Extract picture path from participant metadata
-  let picturePath: string | null = null;
-  try {
-    const meta = participant.participant?.metadata;
-    if (meta) {
-      const parsed = JSON.parse(meta) as { picture?: string };
-      picturePath = parsed.picture ?? null;
-    }
-  } catch {
-    // ignore parse errors
-  }
+  const { url: pictureUrl } = useProfilePictureUrl(
+    participant.identity,
+    getParticipantPicturePath(participant.participant),
+  );
 
-  const { url: pictureUrl } = useProfilePictureUrl(participant.identity, picturePath);
+  // Camera-off backdrop is the participant's own profile picture, blown up and
+  // blurred to a wash (Meet's treatment) — so a tile is recognisably *theirs*
+  // rather than tinted by an arbitrary hash bucket. Falls back to the identity
+  // colour when they have no picture or it fails to load. The AI agent keeps the
+  // colour wash: its logo is a white disc, which blurs to a glaring pale tile.
+  const [pictureBackdropFailed, setPictureBackdropFailed] = useState(false);
+  const showPictureBackdrop = !!pictureUrl && !pictureBackdropFailed && !isAIAgent;
 
   // Create track references for LiveKit components only if publication exists.
   // Memoized so the trackRef keeps a stable identity across unrelated re-renders
@@ -150,41 +158,68 @@ export function ParticipantTile({
     [isScreenShare, participant.isLocal],
   );
 
-  // Border styling based on state
-  const getBorderClass = (): string => {
+  // State frame, drawn as an overlay ON TOP of the tile's contents rather than
+  // as a border or inset ring on the tile itself. The tile's children are
+  // full-bleed and absolutely positioned (blurred backdrop, scrim, <video>), and
+  // every one of them paints over the element's own box — so an inset ring was
+  // almost entirely hidden and the speaking state read as a faint outer haze.
+  // An overlay is also free of layout cost: a real border width change would
+  // resize the content box and nudge the video every time someone spoke.
+  const getStateBorderClass = (): string => {
     if (isFocused && isScreenShare) {
-      return 'border-blue-500 border-2';
+      return 'border-[1.5px] border-blue-500';
     }
     if (isScreenShare) {
-      return 'border-blue-400 border-2 cursor-pointer hover:border-blue-300';
+      return 'border-[1.5px] border-blue-400 group-hover:border-blue-300';
     }
     // General "this tile is the current main/focused view" highlight — used e.g.
     // when a camera tile has been pinned to the main stage during screen share.
     if (isFocused) {
-      return 'border-blue-400 border-2';
+      return 'border-[1.5px] border-blue-400';
     }
-    // Hand raised — amber glow to draw attention (a raised hand usually means
-    // the person is waiting to speak, so it takes precedence over the speaking ring).
+    // Presentation mode fills the screen, so any state frame becomes a coloured
+    // border around the whole viewport — drop it entirely there.
+    if (hideSpeakingIndicator) {
+      return 'border-0';
+    }
+    // Hand raised — amber to draw attention (a raised hand usually means the
+    // person is waiting to speak, so it takes precedence over the speaking ring).
     if (isHandRaised) {
-      return compact
-        ? 'border-[2px] border-amber-400 shadow-[0_0_15px_rgba(251,191,36,0.6)]'
-        : 'border-amber-400 border-[3px] shadow-[0_0_15px_rgba(251,191,36,0.6)]';
+      return compact ? 'border-[1.5px] border-amber-400' : 'border-2 border-amber-400';
+    }
+    // Active speaker: Meet's blue frame.
+    if (isSpeaking && participant.isMicrophoneEnabled) {
+      return compact ? 'border-[1.5px] border-[#8ab4f8]' : 'border-[3px] border-[#8ab4f8]';
+    }
+    // Resting state: a hairline highlight rather than a grey border. This is the
+    // edge that reads as "pane of glass" rather than "boxed div".
+    return 'border border-white/10';
+  };
+
+  // Outer glow. Lives on the tile itself (a non-inset box-shadow paints outside
+  // the element, so nothing can cover it). Kept faint — the overlay border is the
+  // real state signal; a strong glow bleeds onto neighbouring tiles.
+  const getGlowClass = (): string => {
+    if (hideSpeakingIndicator) {
+      return '';
+    }
+    if (isHandRaised) {
+      return 'shadow-[0_0_8px_rgba(251,191,36,0.2)]';
     }
     if (isSpeaking && participant.isMicrophoneEnabled) {
-      return compact
-        ? 'border-[2px] border-green-500 shadow-[0_0_15px_rgba(34,197,94,0.5)]'
-        : 'border-green-500 border-[3px] shadow-[0_0_15px_rgba(34,197,94,0.5)]';
+      return 'shadow-[0_0_10px_rgba(138,180,248,0.25)]';
     }
-    return compact ? 'border border-gray-700/30' : 'border-gray-700/30 border';
+    return compact ? 'shadow-lg' : 'shadow-[0_4px_24px_rgba(0,0,0,0.45)]';
   };
 
   return (
     <div
       className={cn(
-        'relative bg-gradient-to-br from-gray-800 to-gray-900 rounded-lg overflow-hidden flex items-center justify-center transition-all duration-200',
-        compact ? 'shadow-lg' : 'shadow-lg group',
+        'relative bg-[#1e1f20] overflow-hidden flex items-center justify-center transition-all duration-200 group',
+        compact ? 'rounded-xl' : 'rounded-2xl',
         isClickable && !isScreenShare && 'cursor-pointer hover:brightness-110',
-        getBorderClass(),
+        isScreenShare && 'cursor-pointer',
+        getGlowClass(),
         className,
       )}
       role={isClickable ? 'button' : undefined}
@@ -198,82 +233,83 @@ export function ParticipantTile({
         participantName: participant.name,
       })}
     >
-      {/* Expand-to-fullscreen button — top-right corner, hover-revealed (mirrors the
-          screen-share tile's expand affordance). Not shown for screen-share tiles
-          (ScreenShareView already has its own fullscreen entry point) or compact
-          tiles (mini call view), and never overlaps the AI agent's actions menu
-          since that only renders on agent tiles. */}
-      {onExpand && !isScreenShare && !compact && !isAIAgent && (
-        <button
-          onClick={e => {
-            e.stopPropagation();
-            onExpand();
-          }}
-          title='Expand'
-          aria-label={`Expand ${participant.isLocal ? 'your' : `${participant.name}'s`} video`}
-          data-track-category='CALLS'
-          data-track-name='Expand_Participant_Tile'
-          data-track-metadata={JSON.stringify({ participantIdentity: participant.identity })}
-          className={cn(
-            'absolute top-1 right-1 sm:top-2 sm:right-2 z-20 flex items-center justify-center',
-            'rounded-md p-1.5 sm:p-2 bg-black/50 text-white/90 shadow-md transition-all duration-200',
-            'opacity-0 group-hover:opacity-100 focus-visible:opacity-100 hover:bg-black/70 hover:text-white',
-            'focus:outline-none focus-visible:ring-2 focus-visible:ring-white/60',
-          )}
-        >
-          <Maximize2 className='h-3.5 w-3.5 sm:h-4 sm:w-4' />
-        </button>
-      )}
-
-      {/* Agent-tile actions. Host: "Remove from call" opens the transcription popover
-          (one-click stop/start there) — the reversible soft kill-switch, not a hard
-          removal. Non-host: a disabled note pointing them to the host. */}
-      {isAIAgent && !compact && (
+      {/* Hover actions — a small pill at the top-centre, clear of the avatar, the
+          name/mic row bottom-left and the corner controls. Pin puts
+          this participant on the main stage; the AI agent gets its actions menu
+          instead (host: "Remove from call" opens the transcription popover, the
+          reversible soft kill-switch; non-host: a note pointing to the host).
+          Not shown on screen-share tiles (ScreenShareView has its own entry
+          point) or compact mini-view tiles. */}
+      {(canPin || (isAIAgent && !compact)) && (
         <div
           data-theme='midnight'
-          className='absolute top-2 right-2 z-20 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100'
+          className={cn(
+            'absolute left-1/2 top-2 z-20 flex -translate-x-1/2 items-center gap-0.5 rounded-full p-0.5 sm:top-3',
+            'bg-black/60 shadow-md ring-1 ring-inset ring-white/15 backdrop-blur-md',
+            'opacity-0 transition-opacity duration-150 group-hover:opacity-100 focus-within:opacity-100',
+          )}
         >
-          <CompactActionsMenu
-            triggerClassName='p-1.5 h-7 w-7 rounded-md border-0 bg-background/70 text-foreground hover:bg-background'
-            forceDarkTheme
-            items={[
-              isHost
-                ? {
-                    onSelect: () => roomActor.send({ type: 'SET_PRIVACY_POPOVER', open: true }),
-                    testId: 'remove-agent-menu-item',
-                    customContent: (
-                      <div className='flex items-start gap-2.5 px-3 py-2'>
-                        <SlashedBot className='mt-0.5 h-4 w-4 text-destructive' />
-                        <div className='min-w-0'>
-                          <div className='text-sm font-semibold text-destructive'>
-                            Remove from call
-                          </div>
-                          <div className='mt-0.5 text-xs leading-snug text-muted-foreground'>
-                            Stops transcription for everyone. You can add the agent back later.
+          {canPin && (
+            <button
+              type='button'
+              onClick={e => {
+                e.stopPropagation();
+                onExpand?.();
+              }}
+              title='Pin to the main stage'
+              aria-label={`Pin ${participant.isLocal ? 'your' : `${participant.name}'s`} video`}
+              data-track-category='CALLS'
+              data-track-name='Expand_Participant_Tile'
+              data-track-metadata={JSON.stringify({ participantIdentity: participant.identity })}
+              className='flex h-7 items-center gap-1 rounded-full px-2 text-xs font-medium text-white outline-none transition-colors hover:bg-white/15 focus-visible:ring-2 focus-visible:ring-white/60'
+            >
+              <Pin className='h-3.5 w-3.5' />
+              <span>Pin</span>
+            </button>
+          )}
+          {isAIAgent && !compact && (
+            <CompactActionsMenu
+              triggerClassName='p-1.5 h-7 w-7 rounded-full border-0 bg-transparent text-white hover:bg-white/15'
+              forceDarkTheme
+              items={[
+                isHost
+                  ? {
+                      onSelect: () => roomActor.send({ type: 'SET_PRIVACY_POPOVER', open: true }),
+                      testId: 'remove-agent-menu-item',
+                      customContent: (
+                        <div className='flex items-start gap-2.5 px-3 py-2'>
+                          <SlashedBot className='mt-0.5 h-4 w-4 text-destructive' />
+                          <div className='min-w-0'>
+                            <div className='text-sm font-semibold text-destructive'>
+                              Remove from call
+                            </div>
+                            <div className='mt-0.5 text-xs leading-snug text-muted-foreground'>
+                              Stops transcription for everyone. You can add the agent back later.
+                            </div>
                           </div>
                         </div>
-                      </div>
-                    ),
-                  }
-                : {
-                    disabled: true,
-                    onSelect: () => undefined,
-                    testId: 'remove-agent-menu-item-disabled',
-                    customContent: (
-                      <div className='flex max-w-[16rem] items-start gap-2.5 px-3 py-2'>
-                        <SlashedBot className='mt-0.5 h-4 w-4 flex-shrink-0 text-muted-foreground' />
-                        <div className='min-w-0 text-xs leading-snug text-muted-foreground'>
-                          Please ask{' '}
-                          <span className='font-semibold text-foreground'>
-                            {hostName ?? 'the host'}
-                          </span>{' '}
-                          (host) to stop transcribing the call.
+                      ),
+                    }
+                  : {
+                      disabled: true,
+                      onSelect: () => undefined,
+                      testId: 'remove-agent-menu-item-disabled',
+                      customContent: (
+                        <div className='flex max-w-[16rem] items-start gap-2.5 px-3 py-2'>
+                          <SlashedBot className='mt-0.5 h-4 w-4 flex-shrink-0 text-muted-foreground' />
+                          <div className='min-w-0 text-xs leading-snug text-muted-foreground'>
+                            Please ask{' '}
+                            <span className='font-semibold text-foreground'>
+                              {hostName ?? 'the host'}
+                            </span>{' '}
+                            (host) to stop transcribing the call.
+                          </div>
                         </div>
-                      </div>
-                    ),
-                  },
-            ]}
-          />
+                      ),
+                    },
+              ]}
+            />
+          )}
         </div>
       )}
 
@@ -293,15 +329,63 @@ export function ParticipantTile({
         />
       ) : (
         <div
-          className='flex items-center justify-center w-full h-full'
-          style={{ backgroundColor: colors.background }}
+          className='relative flex items-center justify-center w-full h-full overflow-hidden'
+          style={
+            showPictureBackdrop
+              ? { backgroundColor: '#1e1f20' }
+              : {
+                  // Fallback: a near-neutral tile lit by a soft radial wash of the
+                  // identity colour behind the avatar — rather than that colour
+                  // filling the whole cell as a flat saturated slab.
+                  backgroundColor: '#1e1f20',
+                  backgroundImage: `radial-gradient(115% 95% at 50% 45%, ${colors.background} 0%, rgba(30,31,32,0) 60%)`,
+                }
+          }
         >
+          {showPictureBackdrop ? (
+            <>
+              {/* Scaled past the tile edges so the blur's soft, semi-transparent
+                  border is clipped away rather than showing as a pale frame. */}
+              <img
+                src={pictureUrl}
+                alt=''
+                aria-hidden
+                onError={() => setPictureBackdropFailed(true)}
+                className={cn(
+                  'pointer-events-none absolute inset-0 h-full w-full object-cover',
+                  'scale-150 saturate-150 visual-regression-hide',
+                  compact ? 'blur-xl' : 'blur-2xl sm:blur-3xl',
+                )}
+              />
+              {/* Holds the wash well below the avatar and keeps the name pill and
+                  badges legible over whatever the picture happens to contain. */}
+              <div
+                aria-hidden
+                className='pointer-events-none absolute inset-0'
+                style={{
+                  background:
+                    'radial-gradient(115% 95% at 50% 45%, rgba(30,31,32,0.35) 0%, rgba(30,31,32,0.92) 75%)',
+                }}
+              />
+            </>
+          ) : (
+            /* Faint halo so the avatar sits *in* the wash instead of floating on top
+               of it — kept low-opacity so it doesn't read as a glow. */
+            <div
+              aria-hidden
+              className={cn(
+                'pointer-events-none absolute rounded-full blur-2xl opacity-[0.08]',
+                compact ? 'h-16 w-16' : 'h-28 w-28 sm:h-36 sm:w-36',
+              )}
+              style={{ backgroundColor: colors.avatar }}
+            />
+          )}
           {isAIAgent ? (
             <img
               src='/images/xyne_logo.png'
               alt='Xyne Automatic'
               className={cn(
-                'rounded-full object-cover visual-regression-hide',
+                'relative rounded-full object-cover ring-1 ring-white/15 visual-regression-hide',
                 avatarSize === 'small'
                   ? 'w-8 h-8'
                   : avatarSize === 'medium'
@@ -315,16 +399,28 @@ export function ParticipantTile({
               size={avatarSize}
               backgroundColor={colors.avatar}
               pictureUrl={pictureUrl}
+              className='relative shadow-none ring-1 ring-white/15'
             />
           )}
         </div>
       )}
 
+      {/* State frame. z-30 puts it above the video/backdrop and all the badges;
+          pointer-events-none so the controls underneath stay clickable. */}
+      <div
+        aria-hidden
+        className={cn(
+          'pointer-events-none absolute inset-0 z-30',
+          compact ? 'rounded-xl' : 'rounded-2xl',
+          getStateBorderClass(),
+        )}
+      />
+
       {/* Screen Share Indicator Badge */}
       {showScreenShareBadge && (
         <div
           className={cn(
-            'absolute bg-blue-500 rounded-full shadow-lg z-10',
+            'absolute bg-blue-500/85 backdrop-blur-md ring-1 ring-inset ring-white/20 rounded-full shadow-lg z-10',
             compact ? 'top-0.5 left-0.5 p-0.5' : 'top-1 left-1 sm:top-2 sm:left-2 p-1 sm:p-1.5',
           )}
         >
@@ -343,16 +439,32 @@ export function ParticipantTile({
           double (or triple, whenever a participant appeared in more than one
           tile at once) their audio. */}
 
-      {/* Participant Info Overlay */}
+      {/* Bottom-left: mic state + name. The mic badge sits beside the name rather
+          than in a corner, because the corners are taken by view controls
+          (spotlight exit/fullscreen, modal close, the blur toggle). Presentation
+          mode hides the name and the speaking bars but keeps the muted state. */}
       <div
         className={cn(
-          'absolute text-white font-medium drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)] visual-regression-hide',
+          'pointer-events-none absolute z-10 flex items-center visual-regression-hide',
           compact
-            ? 'bottom-0.5 left-0.5 text-[9px]'
-            : 'bottom-1 left-1 sm:bottom-2 sm:left-2 text-[10px] sm:text-xs max-w-[calc(100%-0.5rem)] truncate',
+            ? 'bottom-1 left-1 gap-1 max-w-[calc(100%-2rem)]'
+            : 'bottom-2 left-2 gap-1.5 max-w-[calc(100%-4.5rem)] sm:bottom-3 sm:left-3',
         )}
       >
-        {participant.isLocal ? 'You' : isAIAgent ? 'Xyne Automatic' : participant.name}
+        <AudioIndicator
+          isMuted={!participant.isMicrophoneEnabled}
+          isSpeaking={!hideSpeakingIndicator && isSpeaking && participant.isMicrophoneEnabled}
+        />
+        {!hideNameLabel && (
+          <span
+            className={cn(
+              'truncate font-medium text-white [text-shadow:0_1px_3px_rgba(0,0,0,0.75)]',
+              compact ? 'text-[10px]' : 'text-xs sm:text-sm',
+            )}
+          >
+            {participant.isLocal ? 'You' : isAIAgent ? 'Xyne Automatic' : participant.name}
+          </span>
+        )}
       </div>
 
       {/* Background Blur Toggle - local tile only, when camera is on */}
@@ -369,12 +481,13 @@ export function ParticipantTile({
           data-track-metadata={JSON.stringify({ enabled: !isBackgroundBlurEnabled })}
           className={cn(
             'absolute z-10 flex items-center justify-center rounded-full shadow-md transition-colors',
+            'backdrop-blur-md ring-1 ring-inset ring-white/15',
             compact
               ? 'bottom-1 right-1 p-1'
               : 'bottom-1 right-1 p-1.5 sm:bottom-2 sm:right-2 sm:p-2',
             isBackgroundBlurEnabled
-              ? 'bg-blue-600 text-white hover:bg-blue-500'
-              : 'bg-black/50 text-white hover:bg-black/70',
+              ? 'bg-blue-600/90 text-white hover:bg-blue-500'
+              : 'bg-black/45 text-white hover:bg-black/70',
           )}
         >
           <ImagePlus className={cn(compact ? 'w-3 h-3' : 'w-4 h-4 sm:w-5 sm:h-5')} />
@@ -386,7 +499,7 @@ export function ParticipantTile({
       {isHandRaised && (
         <div
           className={cn(
-            'absolute left-0 top-0 z-20 flex items-center gap-1 rounded-br-lg bg-amber-500 font-semibold text-white shadow-md',
+            'absolute left-0 top-0 z-20 flex items-center gap-1 rounded-br-xl bg-amber-500/90 backdrop-blur-md font-semibold text-white shadow-md',
             compact ? 'px-1 py-0.5 text-[9px]' : 'px-2 py-1 text-[10px] sm:text-xs',
           )}
         >
@@ -422,9 +535,10 @@ export function ParticipantTile({
               : compact
                 ? 'right-1'
                 : 'right-1 sm:right-2',
+            'backdrop-blur-md ring-1 ring-inset ring-white/15',
             isHandRaised
-              ? 'bg-amber-500 text-white hover:bg-amber-400'
-              : 'bg-black/55 text-white hover:bg-black/75',
+              ? 'bg-amber-500/90 text-white hover:bg-amber-400'
+              : 'bg-black/45 text-white hover:bg-black/75',
           )}
         >
           <Hand className={cn(compact ? 'h-3 w-3' : 'h-4 w-4 sm:h-5 sm:w-5')} />
@@ -435,7 +549,7 @@ export function ParticipantTile({
       {isControlled && (
         <div
           className={cn(
-            'absolute bg-purple-600/90 backdrop-blur-sm text-white font-medium rounded px-2 py-1 shadow-lg',
+            'absolute bg-purple-600/85 backdrop-blur-md ring-1 ring-inset ring-white/20 text-white font-medium rounded-lg px-2 py-1 shadow-lg',
             compact
               ? 'top-0.5 right-0.5 text-[8px]'
               : 'top-1 right-1 sm:top-2 sm:right-2 text-[9px] sm:text-[10px]',
@@ -455,7 +569,7 @@ export function ParticipantTile({
       {(networkQuality === ConnectionQuality.Poor || networkQuality === ConnectionQuality.Lost) && (
         <div
           className={cn(
-            'absolute rounded-full visual-regression-hide',
+            'absolute rounded-full backdrop-blur-md ring-1 ring-inset ring-white/10 visual-regression-hide',
             compact
               ? cornerHasControl
                 ? 'bottom-6 right-0.5 p-0.5'
@@ -464,8 +578,8 @@ export function ParticipantTile({
                 ? 'bottom-10 right-1 sm:bottom-12 sm:right-2 p-1'
                 : 'bottom-1 right-1 sm:bottom-2 sm:right-2 p-1',
             networkQuality === ConnectionQuality.Lost
-              ? 'bg-black/40 text-red-400'
-              : 'bg-black/40 text-amber-400',
+              ? 'bg-black/50 text-red-400'
+              : 'bg-black/50 text-amber-400',
           )}
           title={networkQuality === ConnectionQuality.Lost ? 'Connection lost' : 'Poor connection'}
         >
@@ -473,20 +587,6 @@ export function ParticipantTile({
             activeColor={networkQuality === ConnectionQuality.Lost ? '#f87171' : '#fbbf24'}
             className={cn(compact ? 'w-2.5 h-2.5' : 'w-3.5 h-3.5')}
           />
-        </div>
-      )}
-
-      {/* Mute indicator */}
-      {!participant.isMicrophoneEnabled && (
-        <div
-          className={cn(
-            'absolute bg-red-500 rounded-full',
-            compact
-              ? 'top-0.5 right-0.5 p-0.5 shadow-sm'
-              : 'top-1 right-1 sm:top-2 sm:right-2 p-1 sm:p-1.5 shadow-lg',
-          )}
-        >
-          <MicOff className={cn('text-white', compact ? 'w-2.5 h-2.5' : 'w-2 h-2 sm:w-3 sm:h-3')} />
         </div>
       )}
     </div>

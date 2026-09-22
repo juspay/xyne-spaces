@@ -27,6 +27,8 @@ import {
 } from "../../lib/api";
 import { parseGatewaySelectionKey, parseGatewaySource } from "../lib/gatewayKeys";
 import { ConfirmDialog } from "./ui/ConfirmDialog";
+import { Dialog } from "./ui/Dialog";
+import { Button } from "./ui/Button";
 
 export interface ToolboxSelection {
   subagents: string[];
@@ -117,7 +119,8 @@ interface DelegatedAgentsConfig {
   grants: AgentDelegationGrant[];
   loading?: boolean;
   disabled?: boolean;
-  onAddGrant: (calleeSlug: string, identityMode: DelegationIdentityMode) => Promise<void>;
+  currentUserId: string;
+  onAddGrant: (calleeSlug: string, identityMode: DelegationIdentityMode, requestReason?: string) => Promise<void>;
   onDeleteGrant: (grant: AgentDelegationGrant) => Promise<void>;
   onAddConfigEntry: (calleeSlug: string) => Promise<void>;
   onCreateGrantForConfig: (calleeSlug: string) => Promise<void>;
@@ -189,6 +192,8 @@ export function ToolboxPicker({
   const [delegationBusy, setDelegationBusy] = useState<string | null>(null);
   const [pendingDeleteGrant, setPendingDeleteGrant] = useState<AgentDelegationGrant | null>(null);
   const [pendingBulkAgentDelete, setPendingBulkAgentDelete] = useState(false);
+  const [pendingDelegationReason, setPendingDelegationReason] = useState<{ slugs: string[]; title: string; description: string } | null>(null);
+  const [delegationReason, setDelegationReason] = useState("");
 
   // Responsive layout pick (only when `variant` is not forced).
   const rootRef = useRef<HTMLDivElement>(null);
@@ -211,8 +216,27 @@ export function ToolboxPicker({
     const arr = value[key];
     onChange({ ...value, [key]: arr.includes(val) ? arr.filter((x) => x !== val) : [...arr, val] });
   };
-  const toggleAll = (key: RequiredSelectionKey, all: string[]) =>
-    onChange({ ...value, [key]: value[key].length === all.length ? [] : all });
+  /**
+   * Select-all for ONE section.
+   *
+   * Sections share a single array — every MCP server's tools live in `direct` —
+   * so this unions and subtracts rather than assigning. Assigning `all` replaced
+   * the whole array, which silently dropped every other server's picks. Same
+   * shape as `toggleCustomGroup` below, which always did it this way.
+   *
+   * `select` is for callers that already know which way they are going; without
+   * it the section flips on its own current state.
+   */
+  const toggleAll = (key: RequiredSelectionKey, all: string[], select?: boolean) => {
+    const current = value[key];
+    const shouldSelect = select ?? !(all.length > 0 && all.every((v) => current.includes(v)));
+    onChange({
+      ...value,
+      [key]: shouldSelect
+        ? [...new Set([...current, ...all])]
+        : current.filter((x) => !all.includes(x)),
+    });
+  };
   const toggleCustomGroup = (slugs: string[], allSelected: boolean) =>
     onChange({ ...value, custom: allSelected ? value.custom.filter((x) => !slugs.includes(x)) : [...new Set([...value.custom, ...slugs])] });
   const clearAll = () =>
@@ -413,7 +437,7 @@ export function ToolboxPicker({
   ) => {
     const gatewaySource = parseGatewaySource(source);
     if (!gatewaySource) {
-      toggleAll("direct", tools.map((t) => t.name));
+      toggleAll("direct", tools.map((t) => t.name), next);
       return;
     }
     const groupKeys = tools.map((t) => t.slug);
@@ -503,12 +527,44 @@ export function ToolboxPicker({
       setDelegationBusy(null);
     }
   };
+  const agentNeedsReason = (agentOption: AgentLight) =>
+    !!delegatedAgents && agentOption.ownerUserId !== delegatedAgents.currentUserId;
+
+  const requestDelegationReason = (agentsToAdd: AgentLight[]) => {
+    const firstAgent = agentsToAdd[0];
+    if (!firstAgent) return;
+    setDelegationReason("");
+    setPendingDelegationReason({
+      slugs: agentsToAdd.map((a) => a.slug),
+      title: agentsToAdd.length === 1
+        ? `Why does this agent need ${firstAgent.name}?`
+        : `Why does this agent need ${agentsToAdd.length} delegated agents?`,
+      description: "This is sent to the target agent owner with the approval request and kept on the delegation record.",
+    });
+  };
+
+  const addDelegatedAgents = (agentsToAdd: AgentLight[], requestReason?: string) => {
+    const firstAgent = agentsToAdd[0];
+    if (!delegatedAgents || !firstAgent) return;
+    void runDelegationAction(
+      agentsToAdd.length === 1 ? `add-agent:${firstAgent.slug}` : "agents-select-all",
+      async () => {
+        for (const agentOption of agentsToAdd) {
+          await delegatedAgents.onAddGrant(agentOption.slug, "user", requestReason);
+        }
+      },
+    );
+  };
+
   const handleAgentChipToggle = (agentSlug: string) => {
     if (!delegatedAgents || delegatedAgents.disabled || delegationBusy) return;
     const grant = grantBySlug.get(agentSlug);
     const selected = configAgentSlugs.has(agentSlug) || !!grant;
     if (!selected) {
-      void runDelegationAction(`add-agent:${agentSlug}`, () => delegatedAgents.onAddGrant(agentSlug, "user"));
+      const agentOption = agentBySlug.get(agentSlug);
+      if (!agentOption) return;
+      if (agentNeedsReason(agentOption)) requestDelegationReason([agentOption]);
+      else addDelegatedAgents([agentOption]);
       return;
     }
     if (grant) {
@@ -524,11 +580,8 @@ export function ToolboxPicker({
       return;
     }
     const missing = agentOptions.filter((a) => !configAgentSlugs.has(a.slug) && !grantBySlug.has(a.slug));
-    void runDelegationAction("agents-select-all", async () => {
-      for (const agentOption of missing) {
-        await delegatedAgents.onAddGrant(agentOption.slug, "user");
-      }
-    });
+    if (missing.some(agentNeedsReason)) requestDelegationReason(missing);
+    else addDelegatedAgents(missing);
   };
 
   const searchQ = toolSearch.trim().toLowerCase();
@@ -895,6 +948,59 @@ export function ToolboxPicker({
 
   const delegationConfirmDialogs = delegatedAgents ? (
     <>
+      <Dialog
+        open={pendingDelegationReason !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setPendingDelegationReason(null);
+            setDelegationReason("");
+          }
+        }}
+        title={pendingDelegationReason?.title ?? "Why is this delegation needed?"}
+        description={pendingDelegationReason?.description}
+        maxWidth={520}
+        footer={
+          <>
+            <Button
+              variant="secondary"
+              onClick={() => {
+                setPendingDelegationReason(null);
+                setDelegationReason("");
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              disabled={delegationReason.trim().length < 3 || delegationBusy !== null}
+              onClick={() => {
+                if (!pendingDelegationReason || !delegatedAgents) return;
+                const agentsToAdd = pendingDelegationReason.slugs
+                  .map((slug) => agentBySlug.get(slug))
+                  .filter((agent): agent is AgentLight => !!agent);
+                const reason = delegationReason.trim();
+                setPendingDelegationReason(null);
+                setDelegationReason("");
+                addDelegatedAgents(agentsToAdd, reason);
+              }}
+            >
+              Request approval
+            </Button>
+          </>
+        }
+      >
+        <textarea
+          autoFocus
+          value={delegationReason}
+          onChange={(e) => setDelegationReason(e.target.value.slice(0, 1000))}
+          placeholder="Explain the user flow, data needed, and why calling this agent is safer than duplicating its tools."
+          className="min-h-[120px] w-full resize-y rounded-lg border border-xyne-border bg-xyne-surface-sunken px-3 py-2 text-[13px] leading-relaxed text-xyne-fg-primary placeholder:text-xyne-fg-placeholder focus:border-xyne-border-focus focus:outline-none"
+        />
+        <div className="mt-2 flex items-center justify-between gap-2 text-[11px] text-xyne-fg-tertiary">
+          <span>Required when adding an agent owned by someone else.</span>
+          <span>{delegationReason.trim().length}/1000</span>
+        </div>
+      </Dialog>
       <ConfirmDialog
         open={pendingDeleteGrant !== null}
         onOpenChange={(open) => {

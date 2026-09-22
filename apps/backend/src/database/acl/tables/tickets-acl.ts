@@ -1,7 +1,11 @@
 import { Prisma, PrismaClient } from '@prisma/client'
 import { BaseQueryACL, ACLContext } from '../base-acl'
-import { getAccessibleTicketIds, isGuestContext } from './channel-access-helper'
+import { accessibleTicketWhere, getAccessibleTicketIds, isGuestContext } from './channel-access-helper'
 
+/**
+ * Reads and writes both use `accessibleTicketWhere`; `workspaceId` alone let any member read
+ * every board's tickets, and left the read filter bypassable by writing.
+ */
 export class TicketsACL extends BaseQueryACL<
   Prisma.TicketWhereInput,
   Prisma.TicketUncheckedCreateInput
@@ -21,13 +25,21 @@ export class TicketsACL extends BaseQueryACL<
       }
     }
 
-    return {
-      workspaceId: this.ctx.workspaceId,
-    }
+    return accessibleTicketWhere(this.prisma, this.ctx)
   }
 
   async getMutateWhere(): Promise<Prisma.TicketWhereInput> {
-    return { workspaceId: this.ctx.workspaceId }
+    const ctx = this.ctx
+    if (isGuestContext(ctx)) {
+      const ticketIds = await getAccessibleTicketIds(this.prisma, this.ctx.userId, this.ctx)
+
+      return {
+        workspaceId: this.ctx.workspaceId,
+        id: { in: ticketIds },
+      }
+    }
+
+    return accessibleTicketWhere(this.prisma, this.ctx)
   }
 
   async canCreate(data: Prisma.TicketUncheckedCreateInput): Promise<boolean> {

@@ -11,7 +11,8 @@ import {
 } from '@/database/repositories/appCommandRepository';
 import { db } from '@/database/client';
 import { logger } from '@/utils/logger';
-import { assertWebhookUrlSafe, SsrfBlockedError } from '@/utils/ssrfGuard';
+import { SsrfBlockedError, safeWebhookFetch } from '@/utils/ssrfGuard';
+import { prepareAppWebhookDispatch } from '@/apps/core/appUrlResolver';
 import { ConversationParticipation, MessageType } from '@xyne/shared';
 
 /**
@@ -624,30 +625,44 @@ export class CommandController {
         eventType,
       });
 
-      // Reject webhook URLs whose host resolves to an internal/private address.
+      // Resolve INTERNAL apps to their in-cluster pod URL; EXTERNAL apps go through the SSRF guard.
+      const dispatchHeaders: Record<string, string> = {
+        'Content-Type': 'application/json',
+        'X-Xyne-Event': eventType,
+      };
+      let dispatchUrl: string;
+      let dispatchIsInternal = false;
       try {
-        await assertWebhookUrlSafe(match.webhookUrl);
+        const prepared = await prepareAppWebhookDispatch(match.webhookUrl, dispatchHeaders);
+        dispatchUrl = prepared.url;
+        dispatchIsInternal = prepared.isInternal;
       } catch (err) {
         if (err instanceof SsrfBlockedError) {
           logger.warn('[COMMAND-DISPATCH] Blocked SSRF-unsafe webhook URL', {
             appId: match.appId,
             reason: err.message,
           });
-          throw new Error('App webhook URL is not allowed');
+        } else {
+          logger.error('[COMMAND-DISPATCH] Could not resolve app webhook URL', {
+            appId: match.appId,
+            error: err,
+          });
         }
-        throw err;
+        throw new Error('App webhook URL is not allowed');
       }
 
-      const appResponse = await fetch(match.webhookUrl, {
+      // Internal = trusted-config pod URL (plain client); external = user-supplied,
+      // so validate + pin the connection (rebinding-safe).
+      const dispatchInit: RequestInit = {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Xyne-Event': eventType,
-        },
+        headers: dispatchHeaders,
         body: JSON.stringify(payload),
         redirect: 'manual',
         signal: AbortSignal.timeout(30_000),
-      });
+      };
+      const appResponse = dispatchIsInternal
+        ? await fetch(dispatchUrl, dispatchInit)
+        : await safeWebhookFetch(dispatchUrl, dispatchInit);
 
       if (!appResponse.ok) {
         const errorBody = await appResponse.text().catch(() => 'unknown error');

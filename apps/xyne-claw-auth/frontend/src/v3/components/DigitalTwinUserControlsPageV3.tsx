@@ -96,6 +96,13 @@ export function DigitalTwinUserControlsPageV3({ userId }: { userId: string }) {
   const [customTo, setCustomTo] = useState(dateInputValue(new Date()));
   const [actionError, setActionError] = useState("");
   const [saving, setSaving] = useState(false);
+  /** Selected user ids for bulk enable/disable. Keyed by id rather than row
+   *  index so a selection survives sorting and refresh; cleared when the filter
+   *  changes, because "select all" would otherwise mean something different
+   *  from what is on screen. */
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulk, setBulk] = useState<{ mode: "enable" | "disable"; ids: string[] } | null>(null);
+  const [bulkProgress, setBulkProgress] = useState({ done: 0, total: 0, failed: 0 });
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -128,11 +135,80 @@ export function DigitalTwinUserControlsPageV3({ userId }: { userId: string }) {
   }, [userId, search, status, orgId, sort, pageSize, offset, showSnackbar]);
 
   useEffect(() => { void load(); }, [load]);
+  // A selection that outlived its filter is a footgun — the ids stay valid but
+  // stop matching what the operator can see.
+  useEffect(() => { setSelected(new Set()); }, [search, status, orgId, offset, pageSize]);
 
   const organizationOptions = useMemo(
     () => [{ value: "", label: "All organizations" }, ...page.organizations.map((org) => ({ value: org.id, label: org.name }))],
     [page.organizations],
   );
+
+  const pageIds = useMemo(() => page.rows.map((r) => r.id), [page.rows]);
+  const allOnPageSelected = pageIds.length > 0 && pageIds.every((id) => selected.has(id));
+  const selectedRows = useMemo(
+    () => page.rows.filter((r) => selected.has(r.id)),
+    [page.rows, selected],
+  );
+  const selectedEnabled = selectedRows.filter((r) => r.enabled).length;
+  const selectedDisabled = selectedRows.length - selectedEnabled;
+
+  const toggleOne = (id: string) =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+
+  const toggleAllOnPage = () =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (allOnPageSelected) pageIds.forEach((id) => next.delete(id));
+      else pageIds.forEach((id) => next.add(id));
+      return next;
+    });
+
+  /**
+   * Apply enable/disable across many users.
+   *
+   * Sequential, not parallel: each enable can kick off a backfill job, and
+   * firing N of those at once would flood the queue the same way the memory
+   * import flooded Hindsight. Failures are counted and the run continues, so
+   * one bad user cannot abort the batch — the summary reports what actually
+   * landed rather than claiming the whole thing worked.
+   *
+   * Bulk enable never starts a backfill (null window). Backfilling is a heavy,
+   * per-user decision and is still available on the individual row.
+   */
+  const runBulk = async () => {
+    if (!bulk) return;
+    const { mode, ids } = bulk;
+    setSaving(true);
+    setBulkProgress({ done: 0, total: ids.length, failed: 0 });
+    let failed = 0;
+    for (let i = 0; i < ids.length; i++) {
+      try {
+        if (mode === "enable") await adminEnableDigitalTwinForUser(userId, ids[i]!, null);
+        else await adminDisableDigitalTwinForUser(userId, ids[i]!);
+      } catch {
+        failed += 1;
+      }
+      setBulkProgress({ done: i + 1, total: ids.length, failed });
+    }
+    setSaving(false);
+    setBulk(null);
+    setSelected(new Set());
+    const ok = ids.length - failed;
+    showSnackbar({
+      variant: failed ? (ok ? "warning" : "error") : "success",
+      title: failed
+        ? `${ok} of ${ids.length} ${mode}d — ${failed} failed`
+        : `${ok} user${ok === 1 ? "" : "s"} ${mode}d`,
+      ...(failed ? { description: "Retry the failures; the rest are already applied." } : {}),
+      duration: 7_000,
+    });
+    await load(true);
+  };
 
   const openLifecycle = (kind: "enable" | "backfill", user: AdminDigitalTwinUser) => {
     setLifecycleAction({ kind, user });
@@ -270,6 +346,46 @@ export function DigitalTwinUserControlsPageV3({ userId }: { userId: string }) {
           </div>
 
           <div className="overflow-hidden rounded-xl border border-xyne-border bg-xyne-surface">
+            {/* Bulk action bar — only present when something is selected, so the
+                default view stays a plain table. Counts are split by current
+                state so the operator can see that "Enable" will only move the
+                N that are actually off. */}
+            {selected.size > 0 && (
+              <div className="flex flex-wrap items-center gap-3 border-b border-xyne-border bg-xyne-surface-subtle px-4 py-3">
+                <span className="text-[12px] font-medium text-xyne-fg-primary">
+                  {selected.size} selected
+                </span>
+                <span className="text-[11px] text-xyne-fg-tertiary">
+                  {selectedDisabled} off · {selectedEnabled} on
+                </span>
+                <div className="ml-auto flex items-center gap-2">
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    disabled={saving || selectedDisabled === 0}
+                    onClick={() =>
+                      setBulk({ mode: "enable", ids: selectedRows.filter((r) => !r.enabled).map((r) => r.id) })
+                    }
+                  >
+                    Enable {selectedDisabled > 0 ? selectedDisabled : ""}
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    disabled={saving || selectedEnabled === 0}
+                    onClick={() =>
+                      setBulk({ mode: "disable", ids: selectedRows.filter((r) => r.enabled).map((r) => r.id) })
+                    }
+                  >
+                    Disable {selectedEnabled > 0 ? selectedEnabled : ""}
+                  </Button>
+                  <Button size="sm" variant="ghost" disabled={saving} onClick={() => setSelected(new Set())}>
+                    Clear
+                  </Button>
+                </div>
+              </div>
+            )}
+
             {loading ? (
               <div className="flex items-center justify-center gap-2 py-16 text-[13px] text-xyne-fg-muted">
                 <SpinnerGapIcon size={16} className="animate-spin" /> Loading users…
@@ -284,6 +400,15 @@ export function DigitalTwinUserControlsPageV3({ userId }: { userId: string }) {
                 <table className="min-w-[960px] w-full text-left text-[13px]">
                   <thead>
                     <tr className="border-b border-xyne-border bg-xyne-surface-subtle text-[11px] uppercase tracking-wide text-xyne-fg-tertiary">
+                      <th className="w-[36px] px-4 py-3">
+                        <input
+                          type="checkbox"
+                          checked={allOnPageSelected}
+                          onChange={toggleAllOnPage}
+                          aria-label={allOnPageSelected ? "Clear selection on this page" : "Select all users on this page"}
+                          className="cursor-pointer"
+                        />
+                      </th>
                       <th className="px-4 py-3 font-medium">User</th>
                       <th className="px-4 py-3 font-medium">Organization</th>
                       <th className="px-4 py-3 font-medium">Digital Twin</th>
@@ -296,7 +421,21 @@ export function DigitalTwinUserControlsPageV3({ userId }: { userId: string }) {
                     {page.rows.map((user) => {
                       const backfill = backfillBadge(user);
                       return (
-                        <tr key={user.id} className="border-b border-xyne-border-subtle last:border-b-0 hover:bg-xyne-surface-subtle/40">
+                        <tr
+                          key={user.id}
+                          className={`border-b border-xyne-border-subtle last:border-b-0 hover:bg-xyne-surface-subtle/40 ${
+                            selected.has(user.id) ? "bg-xyne-surface-subtle/60" : ""
+                          }`}
+                        >
+                          <td className="px-4 py-3">
+                            <input
+                              type="checkbox"
+                              checked={selected.has(user.id)}
+                              onChange={() => toggleOne(user.id)}
+                              aria-label={`Select ${user.name}`}
+                              className="cursor-pointer"
+                            />
+                          </td>
                           <td className="px-4 py-3">
                             <div className="font-medium text-xyne-fg-primary">{user.name}</div>
                             <div className="text-[11px] text-xyne-fg-muted">{user.email}</div>
@@ -442,6 +581,25 @@ export function DigitalTwinUserControlsPageV3({ userId }: { userId: string }) {
       </div>
     </Dialog>
 
+    {bulk && (
+      <ConfirmDialog
+        open
+        onOpenChange={(o) => { if (!o && !saving) setBulk(null); }}
+        title={bulk.mode === "enable" ? `Enable Digital Twin for ${bulk.ids.length} users?` : `Disable Digital Twin for ${bulk.ids.length} users?`}
+        description={
+          bulk.mode === "enable"
+            ? "Their Twins start learning from new activity. No history is backfilled — use the per-user control for that."
+            : "Their Twins stop drafting replies and any running backfill is cancelled. Memories already learned are kept."
+        }
+        confirmLabel={
+          saving
+            ? `Working… ${bulkProgress.done}/${bulkProgress.total}`
+            : bulk.mode === "enable" ? "Enable all" : "Disable all"
+        }
+        {...(bulk.mode === "disable" ? { danger: true } : {})}
+        onConfirm={() => void runBulk()}
+      />
+    )}
     <ConfirmDialog
       open={disableTarget != null}
       onOpenChange={(open) => { if (!open && !saving) setDisableTarget(null); }}

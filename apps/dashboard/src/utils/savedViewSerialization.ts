@@ -1,7 +1,8 @@
 import { SavedConfigEntityName, TicketPriority } from '@xyne/shared';
+import { v4 as uuidv4 } from 'uuid';
 import type { TicketFilters } from '../components/Tickets/TicketFilters/types';
 
-type SavedConfigValueRow = {
+export type SavedConfigValueRow = {
   entityName: SavedConfigEntityName;
   fieldName: string;
   fieldValue: string;
@@ -54,11 +55,23 @@ export function valuesToFilters(values: ReadonlyArray<SavedConfigValueRow>): Tic
       case 'tags':
         result.tags = [...(result.tags ?? []), fieldValue];
         break;
+      case 'roleAssignments': {
+        const [roleId, userIds] = fieldValue.split('|');
+        if (!roleId) break;
+        result.roleAssignments = [
+          ...(result.roleAssignments ?? []),
+          { roleId, userIds: (userIds ?? '').split(',').filter(Boolean) },
+        ];
+        break;
+      }
       case 'stages':
         result.stages = [...(result.stages ?? []), fieldValue];
         break;
       case 'ticketTypes':
         result.ticketTypes = [...(result.ticketTypes ?? []), fieldValue];
+        break;
+      case 'merchantIds':
+        result.merchantIds = [...(result.merchantIds ?? []), fieldValue];
         break;
       case 'sourceChannels':
         result.sourceChannels = [...(result.sourceChannels ?? []), fieldValue];
@@ -75,29 +88,115 @@ export function valuesToFilters(values: ReadonlyArray<SavedConfigValueRow>): Tic
       case 'createdDateEnd':
         result.createdDateEnd = Number(fieldValue);
         break;
+      // Desk-specific fields
+      case 'aiCategory':
+        result.aiCategory = [...(result.aiCategory ?? []), fieldValue];
+        break;
+      case 'generatedTags':
+        result.generatedTags = [...(result.generatedTags ?? []), fieldValue];
+        break;
+      case 'assigned':
+        result.assigned = fieldValue === 'true';
+        break;
+      case 'hasAiDraft':
+        result.hasAiDraft = fieldValue === 'true';
+        break;
+      case 'hasSubTickets':
+        result.hasSubTickets = fieldValue === 'true';
+        break;
+      case 'conversationLabelId':
+        result.conversationLabelId = fieldValue;
+        break;
+      case 'lastEmailAtStart':
+        result.lastEmailAtStart = Number(fieldValue);
+        break;
+      case 'lastEmailAtEnd':
+        result.lastEmailAtEnd = Number(fieldValue);
+        break;
     }
   }
   return result;
 }
 
+type DeskValueRow = {
+  id: string;
+  entityName: SavedConfigEntityName;
+  fieldName: string;
+  fieldValue: string;
+};
+
+/** Serialize TicketFilters (including desk-specific fields) to saved-view value rows. */
+export function deskFiltersToValues(filters: TicketFilters): DeskValueRow[] {
+  const values: DeskValueRow[] = [];
+
+  const addTicket = (fieldName: string, fieldValue: string): void => {
+    values.push({ id: uuidv4(), entityName: SavedConfigEntityName.TICKET, fieldName, fieldValue });
+  };
+  const addForm = (fieldName: string, fieldValue: string): void => {
+    values.push({
+      id: uuidv4(),
+      entityName: SavedConfigEntityName.FORM_ENTITY_VALUE,
+      fieldName,
+      fieldValue,
+    });
+  };
+
+  // Standard ticket fields
+  filters.priority?.forEach(v => addTicket('priority', v));
+  filters.assignee?.forEach(v => addTicket('assignee', v));
+  filters.userGroups?.forEach(v => addTicket('userGroups', v));
+  filters.createdBy?.forEach(v => addTicket('createdBy', v));
+  filters.stages?.forEach(v => addTicket('stages', v));
+  filters.ticketTypes?.forEach(v => addTicket('ticketTypes', v));
+  filters.merchantIds?.forEach(v => addTicket('merchantIds', v));
+  filters.sourceChannels?.forEach(v => addTicket('sourceChannels', v));
+  filters.tags?.forEach(v => addTicket('tags', v));
+  if (filters.dueDateStart !== undefined) addTicket('dueDateStart', String(filters.dueDateStart));
+  if (filters.dueDateEnd !== undefined) addTicket('dueDateEnd', String(filters.dueDateEnd));
+  if (filters.createdDateStart !== undefined)
+    addTicket('createdDateStart', String(filters.createdDateStart));
+  if (filters.createdDateEnd !== undefined)
+    addTicket('createdDateEnd', String(filters.createdDateEnd));
+
+  // Desk-specific fields
+  filters.aiCategory?.forEach(v => addTicket('aiCategory', v));
+  filters.generatedTags?.forEach(v => addTicket('generatedTags', v));
+  if (filters.assigned !== undefined) addTicket('assigned', String(filters.assigned));
+  if (filters.hasAiDraft !== undefined) addTicket('hasAiDraft', String(filters.hasAiDraft));
+  if (filters.hasSubTickets !== undefined)
+    addTicket('hasSubTickets', String(filters.hasSubTickets));
+  if (filters.conversationLabelId) addTicket('conversationLabelId', filters.conversationLabelId);
+  if (filters.lastEmailAtStart !== undefined)
+    addTicket('lastEmailAtStart', String(filters.lastEmailAtStart));
+  if (filters.lastEmailAtEnd !== undefined)
+    addTicket('lastEmailAtEnd', String(filters.lastEmailAtEnd));
+
+  // Dynamic form fields
+  if (filters.dynamicFields) {
+    Object.entries(filters.dynamicFields).forEach(([fieldId, val]) => {
+      if (Array.isArray(val)) {
+        val.forEach(v => addForm(fieldId, v));
+      } else {
+        if (val.start !== undefined) addForm(`${fieldId}.start`, String(val.start));
+        if (val.end !== undefined) addForm(`${fieldId}.end`, String(val.end));
+      }
+    });
+  }
+
+  return values;
+}
+
 interface ShareableView {
+  id: string;
   name: string;
   contextId: string;
   values?: readonly SavedConfigValueRow[];
 }
 
-// Self-contained share link: /projects/views/new#cfg=<base64(JSON{name,filters,groupBy})>.
-// Recipient opens it → builder prefilled → "Save view" creates their own private copy.
+// DB-backed share link: /projects/views/{viewId}.
+// The link itself grants no access — users must be shared with via the
+// Share dialog (view_access) to open the view.
 export function buildShareLink(view: ShareableView): string {
-  const values = view.values ?? [];
-  const filters = valuesToFilters(values);
-  // Legacy per-board views store their board in contextId, not as 'boards' value rows.
-  if (!filters.boards?.length && view.contextId) {
-    filters.boards = [view.contextId];
-  }
-  const groupBy = values.find(v => v.fieldName === '__groupBy')?.fieldValue;
-  const cfg = { name: view.name, filters, ...(groupBy ? { groupBy } : {}) };
-  const encoded = btoa(encodeURIComponent(JSON.stringify(cfg)));
   const base = window.location.pathname.split('/projects')[0];
-  return `${window.location.origin}${base}/projects/views/new#cfg=${encoded}`;
+  return `${window.location.origin}${base}/projects/views/${view.id}`;
 }

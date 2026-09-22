@@ -20,7 +20,7 @@ import { useVirtualizer } from '@tanstack/react-virtual';
 import { findLastEditableMessage, isEventFromEmptyInput } from '../../../utils/chatUtils';
 import { useShortcutById } from '../../../shortcuts';
 import { useAuth } from '../../../hooks/useAuth';
-import { useEditContext } from '../../../providers/EditProvider';
+import { useMessageEdit, withEditSurface } from '../../../providers/EditProvider';
 import { useCombinedMesseges } from './ChatListV2.utils';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { formatDatePill } from '../../../utils/dateUtils';
@@ -37,17 +37,34 @@ import { v4 as uuidv4 } from 'uuid';
 import { withProfiler } from '../../../utils/withProfiler';
 import { getInitialMessageFromConversation } from '../../../utils/conversationMessageHelpers';
 import { usePendingForChannel, buildPendingChannelConversation } from '@xyne/shared/messages';
+import { useEphemeralChannelConversations } from '../../../hooks/useEphemeralMessages';
 import { MessageHoverToolbar } from '../HoverActionsToolbar/MessageHoverToolbar';
 
 export type ChatListProps = {
   channelId: string;
   projectId?: string | undefined;
   cachedConversations: Conversation[];
+  conversationIds?: string[] | undefined;
+  onOpenThread?: ((conversationId: string, e?: React.MouseEvent) => void) | undefined;
   linkedItemCreatedAt?: Anchor;
   linkedCutoffCreatedAt?: Anchor;
   linkedConversationId?: string | null;
   channelScopeType?: ChannelScopeType | undefined;
   skipMarkAsReadRef: React.RefObject<boolean>;
+  unreadsOnly?: boolean;
+  onThreadClick?: (channelId: string, conversationId: string) => void;
+  /**
+   * What to show instead of the centred spinner while the first page loads.
+   *
+   * For hosts that already showed a placeholder before this mounted. The default
+   * overlay is opaque and full-bleed, so it replaces whatever the host had with a
+   * different loading language and then cuts to content — three states where the
+   * host only ever meant to show one. Handing the host's own placeholder down
+   * makes the middle state indistinguishable from the first.
+   */
+  loadingFallback?: React.ReactNode;
+  // Reports the virtualizer's real total content height (px) whenever it changes.
+  onTotalHeightChange?: (height: number) => void;
 };
 
 type Anchor = {
@@ -196,11 +213,17 @@ const ChatListV4: React.FC<ChatListProps> = ({
   channelId,
   projectId,
   cachedConversations,
+  conversationIds: conversationIdsFilter,
+  onOpenThread: onOpenThreadOverride,
   linkedItemCreatedAt,
   linkedCutoffCreatedAt,
   linkedConversationId,
   channelScopeType,
   skipMarkAsReadRef,
+  unreadsOnly,
+  onThreadClick,
+  loadingFallback,
+  onTotalHeightChange,
 }) => {
   // Save scroll position when unmounting due to /browser fullscreen navigation.
   useEffect(() => {
@@ -220,9 +243,14 @@ const ChatListV4: React.FC<ChatListProps> = ({
   const activityNavigationNonce =
     (location.state as { activityNavigationNonce?: number } | null)?.activityNavigationNonce ?? 0;
   const { baseRoute } = useRouteContext();
-  const { editingMessageId, requestEdit } = useEditContext();
+  const { isEditingMessage, requestEdit } = useMessageEdit();
   const channelParticipation = useChannelParticipation(channelId);
-  const isMember = !!channelParticipation;
+  const isDmScope =
+    channelScopeType === ChannelScopeType.DM || channelScopeType === ChannelScopeType.GROUP_DM;
+  // A closed DM isn't in the seeded status map at mount, so participation is briefly undefined;
+  // treat an opened DM/group-DM as a member so ConversationsACL loads messages (its participant
+  // check still re-verifies real membership — a non-participant gets nothing, not a leak).
+  const isMember = !!channelParticipation || isDmScope;
   const channel = useVisibleChannel(channelId);
 
   const [newConversationsAnchor, setNewConversationsAnchor] = useState<Anchor | null>(
@@ -290,6 +318,7 @@ const ChatListV4: React.FC<ChatListProps> = ({
     didDeferredScrollCorrection: false,
   });
   const initialLinkedIdRef = useRef<string | null>(null);
+  const requestedFetchKeyRef = useRef<string | null>(null);
   const lastAutoScrollKeyRef = useRef<string | undefined>(undefined);
 
   // ── Scroll container ──────────────────────────────────────────────────────────
@@ -319,8 +348,23 @@ const ChatListV4: React.FC<ChatListProps> = ({
     return [...base, ...pendingRows];
   }, [conversations, pendingForChannel]);
 
+  // In unreads-only mode (the Unreads inbox), hide everything the user has
+  // already seen; pending rows carry the newest timestamps so they survive.
+  const filteredConversations = useMemo(() => {
+    if (!unreadsOnly || !channelParticipation?.lastViewedAt) return conversationsWithPending;
+    return conversationsWithPending.filter(
+      conv => conv.createdAt > channelParticipation.lastViewedAt,
+    );
+  }, [conversationsWithPending, unreadsOnly, channelParticipation?.lastViewedAt]);
+
+  const ephemeralConversations = useEphemeralChannelConversations(channelId);
+  const conversationsWithEphemeral = useMemo(() => {
+    if (ephemeralConversations.length === 0) return filteredConversations;
+    return [...filteredConversations, ...ephemeralConversations];
+  }, [filteredConversations, ephemeralConversations]);
+
   const { combinedMessages, itemHeights } = useCombinedMesseges(
-    conversationsWithPending,
+    conversationsWithEphemeral,
     isMobile,
     newConversationBoundary?.index ?? -1,
   );
@@ -339,8 +383,14 @@ const ChatListV4: React.FC<ChatListProps> = ({
   // Container for the shared hover toolbar overlay (Slack pattern): one
   // toolbar for the whole list, positioned over the hovered row.
   const hoverToolbarContainerRef = useRef<HTMLDivElement>(null);
+  // Require resolved participation: while it's undefined, `?.conversationSeenCutoffAt !== null`
+  // is spuriously true and — now that DMs default isMember to true — would route to the cutoff
+  // path with a null anchor, skipping both load paths and leaving the list stuck empty.
   const shouldUseCutoffQuery =
-    channelParticipation?.conversationSeenCutoffAt !== null && isMember && !linkedConversationId;
+    !!channelParticipation &&
+    channelParticipation.conversationSeenCutoffAt !== null &&
+    isMember &&
+    !linkedConversationId;
 
   // ── TanStack Virtualizer ──────────────────────────────────────────────────────
   // anchorTo: 'end' replaces Virtuoso's firstItemIndex trick and alignToBottom.
@@ -388,6 +438,15 @@ const ChatListV4: React.FC<ChatListProps> = ({
     return (isNearBottom && isLastFewItems) || virtualizer.scrollDirection === 'backward';
   };
 
+  const lastReportedTotalHeightRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (!onTotalHeightChange) return;
+    const totalHeight = virtualizer.getTotalSize();
+    if (lastReportedTotalHeightRef.current === totalHeight) return;
+    lastReportedTotalHeightRef.current = totalHeight;
+    onTotalHeightChange(totalHeight);
+  });
+
   const virtualItems = virtualizer.getVirtualItems();
   const isConversationFullyVisible = useCallback(
     (conversationId: string, index: number): boolean => {
@@ -411,16 +470,22 @@ const ChatListV4: React.FC<ChatListProps> = ({
   );
 
   // ── Queries ───────────────────────────────────────────────────────────────────
+  const conversationFilterEnabled =
+    conversationIdsFilter === undefined || conversationIdsFilter.length > 0;
+  useEffect(() => {
+    if (!conversationFilterEnabled) setIsInitialLoadComplete(true);
+  }, [conversationFilterEnabled]);
   const [updatedConversations, updatedConversationsDetails] = useQuery(
     queries.channelConversationsPaginatedV3({
       channelId,
       isMember,
+      ...(conversationIdsFilter && { conversationIds: conversationIdsFilter }),
       start: inViewAnchor ? { createdAt: inViewAnchor.createdAt } : null,
       direction: inViewAnchor ? inViewAnchor.direction : 'forward',
       limit: PAGE_SIZE,
     }),
     {
-      enabled: !shouldUseCutoffQuery && inViewAnchor !== null,
+      enabled: !shouldUseCutoffQuery && inViewAnchor !== null && conversationFilterEnabled,
     },
   );
 
@@ -437,12 +502,13 @@ const ChatListV4: React.FC<ChatListProps> = ({
     queries.channelConversationsPaginatedV3({
       channelId,
       isMember,
+      ...(conversationIdsFilter && { conversationIds: conversationIdsFilter }),
       start: cutoffAnchor,
       direction: 'backward',
       limit: PAGE_SIZE,
     }),
     {
-      enabled: shouldUseCutoffQuery && cutoffAnchor !== null,
+      enabled: shouldUseCutoffQuery && cutoffAnchor !== null && conversationFilterEnabled,
     },
   );
 
@@ -450,8 +516,10 @@ const ChatListV4: React.FC<ChatListProps> = ({
     queries.channelLatestMultipleConversationsV3({
       channelId,
       isMember,
+      ...(conversationIdsFilter && { conversationIds: conversationIdsFilter }),
       limit: PAGE_SIZE / 2,
     }),
+    { enabled: conversationFilterEnabled },
   );
 
   // ── Initial load (normal path) ────────────────────────────────────────────────
@@ -461,16 +529,19 @@ const ChatListV4: React.FC<ChatListProps> = ({
     }
 
     Promise.all([
-      zero.run(
-        queries.channelConversationsPaginatedV3({
-          channelId,
-          isMember,
-          start: oldConversationsAnchorRef.current,
-          direction: 'forward',
-          limit: PAGE_SIZE,
-        }),
-        { type: 'complete' },
-      ),
+      !unreadsOnly
+        ? zero.run(
+            queries.channelConversationsPaginatedV3({
+              channelId,
+              isMember,
+              ...(conversationIdsFilter && { conversationIds: conversationIdsFilter }),
+              start: oldConversationsAnchorRef.current,
+              direction: 'forward',
+              limit: PAGE_SIZE,
+            }),
+            { type: 'complete' },
+          )
+        : Promise.resolve([]),
       newConversationsAnchor &&
         zero.run(
           queries.channelConversationsPaginatedV3({
@@ -589,13 +660,14 @@ const ChatListV4: React.FC<ChatListProps> = ({
 
   const fetchOlderMessages = useCallback(() => {
     // isFetchingOlder=true → suppressed (previous fetch in flight).
-    if (isFetchingOlderRef.current || hasReachedChannelStartRef.current) return;
+    if (isFetchingOlderRef.current || hasReachedChannelStartRef.current || unreadsOnly) return;
     isFetchingOlderRef.current = true;
     zero
       .run(
         queries.channelConversationsPaginatedV3({
           channelId,
           isMember,
+          ...(conversationIdsFilter && { conversationIds: conversationIdsFilter }),
           start: oldConversationsAnchorRef.current,
           direction: 'forward',
           limit: PAGE_SIZE,
@@ -646,6 +718,7 @@ const ChatListV4: React.FC<ChatListProps> = ({
         queries.channelConversationsPaginatedV3({
           channelId,
           isMember,
+          ...(conversationIdsFilter && { conversationIds: conversationIdsFilter }),
           start: newConversationsAnchor,
           direction: 'backward',
           limit: PAGE_SIZE,
@@ -781,17 +854,23 @@ const ChatListV4: React.FC<ChatListProps> = ({
     // No double-rAF re-snap needed.
   }, [combinedMessages.length, isInitialLoadComplete]);
 
-  // ── Activity re-scroll (subsequent navigations) ───────────────────────────────────
+  // ── Activity re-scroll (subsequent navigations + deep links not yet loaded) ──────────
+  // Re-runs on combinedMessages so a deep link whose target is not in the initial
+  // window still scrolls once the fetch below lands it. initialLinkedIdRef is
+  // consumed ONLY after the target is actually found — consuming it up front (the
+  // old bug) latched the navigation as handled while the target was still absent,
+  // so the corrective scroll never ran when the data arrived.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (!linkedItemCreatedAt || !linkedConversationId || !isInitialLoadComplete) return;
     const navigationKey = `${linkedConversationId}:${location.key}:${activityNavigationNonce}`;
     if (navigationKey === initialLinkedIdRef.current) return;
-    initialLinkedIdRef.current = navigationKey;
 
     const idx = combinedMessages.findIndex(
       item => item.data.conversationId === linkedConversationId,
     );
     if (idx !== -1) {
+      initialLinkedIdRef.current = navigationKey;
       const isLast = idx === combinedMessages.length - 1;
 
       requestAnimationFrame(() => {
@@ -804,23 +883,31 @@ const ChatListV4: React.FC<ChatListProps> = ({
           window.setTimeout(scrollToLinkedConversation, 80);
         }
       });
-    } else {
-      if (linkedCutoffCreatedAt) {
-        setCutoffAnchor(prev =>
-          prev?.createdAt === linkedCutoffCreatedAt.createdAt ? prev : linkedCutoffCreatedAt,
-        );
-        return;
-      }
-      oldConversationsAnchorRef.current = linkedItemCreatedAt;
-      setNewConversationsAnchor(linkedItemCreatedAt);
-      window.setTimeout(() => {
-        fetchNewerMessages();
-        fetchOlderMessages();
-      }, 0);
+      return;
     }
+
+    // Target not in the current window: fetch it ONCE per navigation (do not
+    // consume initialLinkedIdRef) so this effect re-runs on the resulting
+    // combinedMessages change and scrolls to the target above.
+    if (requestedFetchKeyRef.current === navigationKey) return;
+    requestedFetchKeyRef.current = navigationKey;
+
+    if (linkedCutoffCreatedAt) {
+      setCutoffAnchor(prev =>
+        prev?.createdAt === linkedCutoffCreatedAt.createdAt ? prev : linkedCutoffCreatedAt,
+      );
+      return;
+    }
+    oldConversationsAnchorRef.current = linkedItemCreatedAt;
+    setNewConversationsAnchor(linkedItemCreatedAt);
+    window.setTimeout(() => {
+      fetchNewerMessages();
+      fetchOlderMessages();
+    }, 0);
   }, [
     linkedConversationId,
     activityNavigationNonce,
+    combinedMessages,
     isInitialLoadComplete,
     isConversationFullyVisible,
   ]);
@@ -999,7 +1086,7 @@ const ChatListV4: React.FC<ChatListProps> = ({
 
   // ── Persist conversations to query cache ──────────────────────────────────────
   useEffect(() => {
-    if (!channelId) return;
+    if (!channelId || conversationIdsFilter) return;
 
     const flushToCache = (): void => {
       const latest = conversationsRef.current;
@@ -1028,29 +1115,35 @@ const ChatListV4: React.FC<ChatListProps> = ({
       document.removeEventListener('visibilitychange', handleVisibilityChange);
       flushToCache();
     };
-  }, [channelId]);
+  }, [channelId, conversationIdsFilter]);
 
   // ── Thread opening scroll ──────────────────────────────────────────────────────
   const { conversationId: activeThreadConversationId } = useParams<{ conversationId?: string }>();
   const prevActiveThreadRef = useRef<string | undefined>(undefined);
 
   useEffect(() => {
-    if (
-      !activeThreadConversationId ||
-      activeThreadConversationId === prevActiveThreadRef.current ||
-      !isInitialLoadComplete
-    ) {
-      prevActiveThreadRef.current = activeThreadConversationId;
+    // Reset when no thread is open so reopening the same thread scrolls again.
+    if (!activeThreadConversationId) {
+      prevActiveThreadRef.current = undefined;
       return;
     }
-    prevActiveThreadRef.current = activeThreadConversationId;
+    if (!isInitialLoadComplete) return;
+    if (activeThreadConversationId === prevActiveThreadRef.current) return;
 
     const idx = combinedMessages.findIndex(
       item => item.data.conversationId === activeThreadConversationId,
     );
+    // Target not loaded into the window yet — do NOT consume the ref; this effect
+    // re-runs on combinedMessages and scrolls once the conversation lands.
     if (idx === -1) return;
 
     const timer = setTimeout(() => {
+      // Consume only once the scroll actually runs. Consuming before the timer
+      // fires loses it: a `conversations` change inside the 100ms window clears
+      // the timer through this effect's cleanup, and the re-run then early-returns
+      // on the already-consumed ref. Leaving it unconsumed lets the re-run
+      // recompute `idx` against the new list and reschedule.
+      prevActiveThreadRef.current = activeThreadConversationId;
       requestAnimationFrame(() => {
         if (isConversationFullyVisible(activeThreadConversationId, idx)) return;
         virtualizer.scrollToIndex(idx, { align: 'center' });
@@ -1067,6 +1160,14 @@ const ChatListV4: React.FC<ChatListProps> = ({
 
   const handleOpenThread = useCallback(
     (conversationId: string, e?: React.MouseEvent): void => {
+      if (onOpenThreadOverride) {
+        onOpenThreadOverride(conversationId, e);
+        return;
+      }
+      if (onThreadClick) {
+        onThreadClick(channelId, conversationId);
+        return;
+      }
       const conversation = conversations.find(c => c.conversationId === conversationId);
       const conversationMetadata = conversation?.metadata as { ticketId?: string } | null;
       const initMsg = conversation ? getInitialMessageFromConversation(conversation) : null;
@@ -1083,7 +1184,7 @@ const ChatListV4: React.FC<ChatListProps> = ({
         standaloneNavigate(navigate, `${baseRoute}/${channelId}/${conversationId}`, { event: e });
       }
     },
-    [channelId, conversations, navigate],
+    [channelId, conversations, navigate, onOpenThreadOverride, onThreadClick],
   );
 
   const isEventFromChannelInput = useCallback(
@@ -1105,12 +1206,12 @@ const ChatListV4: React.FC<ChatListProps> = ({
       virtualizer.scrollToIndex(index, { align: 'center' });
     };
 
-    if (editingMessageId === message.messageId) {
+    if (isEditingMessage(message.messageId)) {
       scrollToConversation();
       return;
     }
     requestEdit(message.messageId, scrollToConversation);
-  }, [conversations, user?.id, editingMessageId, requestEdit, virtualizer]);
+  }, [conversations, user?.id, isEditingMessage, requestEdit, virtualizer]);
 
   useShortcutById('composer.editLastMessage', handleEditLastMessage, {
     enabled: conversations.length > 0,
@@ -1310,7 +1411,11 @@ const ChatListV4: React.FC<ChatListProps> = ({
     );
 
   if (!isInitialLoadComplete && cachedConversations.length === 0)
-    return (
+    return loadingFallback !== undefined ? (
+      <div className='absolute inset-0 bg-background z-50' data-testid='chat-list-loading'>
+        {loadingFallback}
+      </div>
+    ) : (
       <div
         className='absolute inset-0 flex items-center justify-center bg-background z-50'
         data-testid='chat-list-loading'
@@ -1487,4 +1592,4 @@ const ChatListV4: React.FC<ChatListProps> = ({
   );
 };
 
-export default withProfiler(ChatListV4, 'ChatListV4');
+export default withProfiler(withEditSurface(ChatListV4), 'ChatListV4');

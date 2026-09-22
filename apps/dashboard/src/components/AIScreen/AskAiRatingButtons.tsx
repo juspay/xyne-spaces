@@ -1,6 +1,7 @@
 import { logger, Event as LogEvent } from '../../utils/logger';
 import { useEffect, useState, type ReactElement } from 'react';
 import { ThumbsUp, ThumbsDown } from 'lucide-react';
+
 import { cn } from '../../utils/classNames';
 import { rateV2Message } from '../../services/XyneAI/XyneAISessionsV2Service';
 
@@ -28,6 +29,7 @@ export function AskAiRatingButtons({
   comment,
   onChange,
   className,
+  trackMetadata,
 }: {
   /** Assistant ChatMessage id. Absent only mid-stream (buttons aren't shown
    *  then); once the turn completes it's the server id, so rating always works. */
@@ -37,6 +39,8 @@ export function AskAiRatingButtons({
   /** Lets the parent reflect the new rating in its message state. */
   onChange?: ((feedback: FeedbackNum, comment?: string | null) => void) | undefined;
   className?: string | undefined;
+  /** Run dimensions merged into the LIKE / DISLIKE / RATING_COMMENT_SAVE clicks. */
+  trackMetadata?: Record<string, unknown> | undefined;
 }): ReactElement {
   const [current, setCurrent] = useState<FeedbackNum>(feedback ?? 0);
   const [saving, setSaving] = useState(false);
@@ -82,6 +86,7 @@ export function AskAiRatingButtons({
   return (
     <span className={cn('inline-flex items-center gap-0.5', className)}>
       <button
+        data-ph-capture-attribute-track-id='ask_ai_rate_up'
         type='button'
         onClick={(): void => {
           setShowComment(false);
@@ -95,9 +100,10 @@ export function AskAiRatingButtons({
         )}
         data-track-category='XyneAI'
         data-track-name='LIKE_MESSAGE'
+        data-track-metadata={JSON.stringify({ ...trackMetadata, messageId })}
       >
         <ThumbsUp
-          className='h-3.5 w-3.5'
+          className='size-3.5'
           aria-hidden
           strokeWidth={1.75}
           fill={isUp ? 'currentColor' : 'none'}
@@ -105,6 +111,7 @@ export function AskAiRatingButtons({
         />
       </button>
       <button
+        data-ph-capture-attribute-track-id='ask_ai_rate_down'
         type='button'
         onClick={(): void => {
           setShowComment(true);
@@ -118,9 +125,10 @@ export function AskAiRatingButtons({
         )}
         data-track-category='XyneAI'
         data-track-name='DISLIKE_MESSAGE'
+        data-track-metadata={JSON.stringify({ ...trackMetadata, messageId })}
       >
         <ThumbsDown
-          className='h-3.5 w-3.5'
+          className='size-3.5'
           aria-hidden
           strokeWidth={1.75}
           fill={isDown ? 'currentColor' : 'none'}
@@ -147,6 +155,7 @@ export function AskAiRatingButtons({
             }}
           />
           <button
+            data-ph-capture-attribute-track-id='ask_ai_rate_comment_save'
             type='button'
             onClick={(): void => {
               void submit('down', commentText);
@@ -155,6 +164,7 @@ export function AskAiRatingButtons({
             disabled={saving}
             data-track-category='XyneAI'
             data-track-name='RATING_COMMENT_SAVE'
+            data-track-metadata={JSON.stringify({ ...trackMetadata, messageId })}
             className='rounded-md bg-secondary px-2 py-0.5 text-[11px] text-foreground transition-colors hover:bg-muted'
           >
             Save

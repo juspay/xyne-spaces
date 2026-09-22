@@ -1,6 +1,6 @@
 import React, { useMemo, type ReactNode } from 'react';
 import { Dialog } from '../../ui/Dialog/Dialog';
-import { FileText } from 'lucide-react';
+import { FileText } from '@xyne/icons';
 import {
   FormFieldType,
   type FormEntityValues,

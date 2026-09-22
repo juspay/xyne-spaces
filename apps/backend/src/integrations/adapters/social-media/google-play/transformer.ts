@@ -45,12 +45,12 @@ export class GooglePlayReviewsTransformer extends BaseTransformer<unknown, Norma
           clientVersionName: review.clientVersionName,
           clientVersionCode: review.clientVersionCode,
           updateExisting: true,
-          skipBlockingCheck: true,
         },
         metadata: {
           eventType: SOCIAL_MEDIA_INTERACTION_TYPES.REVIEW,
           timestamp: review.occurredAt,
           source: 'social-media',
+          fromEmailAddress: review.authorName ?? source.displayName,
         },
         ticketCustomFields: [
           {
@@ -90,7 +90,6 @@ export class GooglePlayReviewsTransformer extends BaseTransformer<unknown, Norma
           to: [],
           type: EmailType.REPLY,
           updateExisting: true,
-          skipBlockingCheck: true,
         },
         metadata: {
           eventType: SOCIAL_MEDIA_INTERACTION_TYPES.REPLY,

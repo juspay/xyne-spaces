@@ -31,6 +31,7 @@ import { copyTextToClipboard } from '../../../utils/clipboardUtils';
 import { tokenizeMessage, isEmojiOnlyFromDom } from '../../../utils/emojiUtils';
 import { useUsers } from '../../../hooks/useUsers';
 import { GroupHoverWrapper } from '../../ui/GroupMentionPopover/GroupMentionPopover';
+import { LinkHoverCard } from '../LinkHoverCard/LinkHoverCard';
 import { getUserDisplayNameById } from '../../../utils/userDisplayName';
 import { ToolOutputRenderer } from '../../Charts';
 import type { ToolOutput as GeniusToolOutput } from '../../../types/toolOutput';
@@ -48,7 +49,6 @@ import { ChannelScopeType, type FlowDefinition } from '@xyne/shared';
 import { useChannelDisplayName } from '../../../hooks/useChannelDisplayName';
 import { withWorkspacePrefix } from '../../../hooks/useShareableOrigin';
 import { formatChannelLabel } from '../ChatDirectory/ChatDirectory.utils';
-import { callLobbyService } from '../../../services/Call/callLobbyService';
 
 interface RenderMessageWithHTMLProps {
   message: string;
@@ -57,6 +57,8 @@ interface RenderMessageWithHTMLProps {
   showEdited?: boolean;
   isSystemMessage?: boolean;
   breakLongLinks?: boolean;
+  /** Render URLs/links as inert plain text (activity sidebar: a click opens the activity, not the link). */
+  disableLinks?: boolean;
   /** Needed to render embedded FlowScreenManager widgets */
   messageId?: string;
   conversationId?: string;
@@ -125,38 +127,16 @@ export const InternalXyneLink = ({
   });
   const [copied, setCopied] = useState(false);
 
-  const handleOpen = (event: React.MouseEvent<HTMLAnchorElement>): void => {
-    onClick?.(event);
-    if (event.defaultPrevented) return;
-    if (parsedLink?.kind !== 'call' || !parsedLink.callId) return;
-    if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-
-    event.preventDefault();
-    void callLobbyService
-      .resolveInternalRoute(parsedLink.callId)
-      .then(resolution => {
-        if (resolution.result === 'internal') {
-          window.location.assign(
-            `/${encodeURIComponent(resolution.workspaceId)}/call/${encodeURIComponent(parsedLink.callId!)}`,
-          );
-          return;
-        }
-
-        // Users without a valid session for the call's workspace enter through
-        // the external lobby in the same Spaces tab.
-        window.location.assign(resolvedHref);
-      })
-      .catch(() => {
-        window.location.assign(resolvedHref);
-      });
-  };
+  // Call links are left to bubble: the document-level handler in App.tsx routes
+  // every anchor in the app, and it turns an invite URL into the dashboard's own
+  // call route. Claiming them here as well would do the same work twice.
 
   if (!resolvedHref || !parsedLink) {
     return (
       <a
         href={href}
         className={className}
-        onClick={handleOpen}
+        onClick={onClick}
         data-track-category='MESSAGE'
         data-track-name='OPEN_MESSAGE_LINK'
         {...props}
@@ -197,7 +177,7 @@ export const InternalXyneLink = ({
       <a
         href={href}
         className={className}
-        onClick={handleOpen}
+        onClick={onClick}
         data-track-category='MESSAGE'
         data-track-name='OPEN_INTERNAL_LINK'
         data-track-metadata={JSON.stringify({ href: copyHref, kind: parsedLink.kind })}
@@ -223,14 +203,21 @@ export const InternalXyneLink = ({
   return (
     <span className='group/internal-link inline-flex items-center gap-1.5 align-baseline max-w-full'>
       {parsedLink.kind === 'canvas' ? (
-        <CanvasLink href={href} className={linkClassName} onClick={handleOpen} {...props}>
+        <CanvasLink
+          href={href}
+          canvasId={parsedLink.canvasId}
+          linkWorkspaceId={parsedLink.workspaceId}
+          className={linkClassName}
+          onClick={onClick}
+          {...props}
+        >
           {linkContent}
         </CanvasLink>
       ) : (
         <a
           href={resolvedHref}
           className={linkClassName}
-          onClick={handleOpen}
+          onClick={onClick}
           data-track-category='MESSAGE'
           data-track-name='OPEN_INTERNAL_LINK'
           data-track-metadata={JSON.stringify({ href: resolvedHref, kind: parsedLink.kind })}
@@ -261,13 +248,18 @@ export const InternalXyneLink = ({
 
 const CanvasLink = ({
   href,
+  canvasId,
+  linkWorkspaceId,
   children,
   ...props
-}: React.AnchorHTMLAttributes<HTMLAnchorElement>): JSX.Element => {
+}: React.AnchorHTMLAttributes<HTMLAnchorElement> & {
+  canvasId?: string | undefined;
+  linkWorkspaceId?: string | undefined;
+}): JSX.Element => {
   const resolvedHref = href ?? '';
   const navigate = useNavigate();
   const location = useLocation();
-  const { channelId } = useParams<{ channelId: string }>();
+  const { channelId, workspaceId } = useParams<{ channelId: string; workspaceId: string }>();
   const { isMobile } = usePlatform();
 
   const handleClick = (event: React.MouseEvent<HTMLAnchorElement>): void => {
@@ -282,17 +274,26 @@ const CanvasLink = ({
       return;
     }
 
-    if (url.origin === window.location.origin && url.pathname.startsWith('/chat/canvas/')) {
-      event.preventDefault();
-      const parts = url.pathname.split('/');
-      const targetCanvasId = parts[parts.length - 1];
+    // A link into another workspace is left to the browser: both branches below
+    // resolve through the router, which scopes paths to the workspace already
+    // open, so intercepting would either look the canvas up in the wrong
+    // workspace (overlay) or double the prefix (fallback). A bare link carries
+    // no workspace and always belongs to the current one.
+    const isSameWorkspace = !linkWorkspaceId || linkWorkspaceId === workspaceId;
 
-      if (targetCanvasId && channelId) {
+    if (url.origin === window.location.origin && isSameWorkspace) {
+      event.preventDefault();
+
+      if (canvasId && channelId) {
         // Open as overlay in current channel
-        void navigate(`${location.pathname}#canvas=${targetCanvasId}`);
+        void navigate(`${location.pathname}#canvas=${canvasId}`);
       } else {
-        // Fallback to full page navigation
-        void navigate(url.pathname);
+        // Fallback to full page navigation, keeping any query/hash the link
+        // carries. Every canvas route lives under /:workspaceId, so a bare
+        // link needs the current workspace prepended.
+        const routerPath =
+          linkWorkspaceId || !workspaceId ? url.pathname : `/${workspaceId}${url.pathname}`;
+        void navigate(`${routerPath}${url.search}${url.hash}`);
       }
     }
 
@@ -304,8 +305,8 @@ const CanvasLink = ({
   return (
     <a
       href={resolvedHref}
-      onClick={handleClick}
       {...props}
+      onClick={handleClick}
       data-track-category='MESSAGE'
       data-track-name='OPEN_CANVAS_LINK'
       data-track-metadata={JSON.stringify({ href: resolvedHref })}
@@ -887,6 +888,11 @@ const parseNode = (
   conversationId?: string,
   preserveThreadRoute = false,
   slashCommandArtifactContext?: RenderMessageWithHTMLProps['slashCommandArtifactContext'],
+  disableLinks = false,
+  // True when this node is inside a <code>/<pre> region. Unlike `insideCodeBlock`
+  // (which is also set for anchors to suppress URL auto-linking), this is strictly
+  // code context, so mentions can be flattened to inert text without affecting links.
+  insideCode = false,
 ): React.ReactNode | null => {
   if (node.nodeType === Node.TEXT_NODE) {
     const text = node.textContent || '';
@@ -910,7 +916,16 @@ const parseNode = (
         addTokenizedNodes(parts, textBeforeUrl, skipEmojiWrapping, `emoji-url-${offset}`);
       }
 
-      if (parseInternalXyneLink(url)) {
+      if (disableLinks) {
+        parts.push(
+          <span
+            key={`${keyPrefix}-url-${offset}`}
+            className={cn('text-primary hover:underline', breakLongLinks && 'break-all')}
+          >
+            {url}
+          </span>,
+        );
+      } else if (parseInternalXyneLink(url)) {
         const external = isExternalUrl(url);
         const linkProps = getAnchorTargetProps(url);
 
@@ -962,6 +977,17 @@ const parseNode = (
 
   const el = node as HTMLElement;
   const tag = el.tagName.toLowerCase();
+
+  // Inside code blocks / inline code, a mention span is almost always a false
+  // positive — e.g. `@Juspay` inside the email `guruprasad.bhosale@Juspay.in`
+  // in a SQL snippet. Render it as inert text instead of an interactive chip.
+  if (insideCode && el.hasAttribute('data-mention')) {
+    return (
+      <React.Fragment key={`${keyPrefix}-code-mention-${idx}`}>
+        {el.textContent ?? ''}
+      </React.Fragment>
+    );
+  }
 
   if (el.hasAttribute('data-mention') && el.getAttribute('data-mention-type') === 'user') {
     const userId = el.getAttribute('data-user-id') || '';
@@ -1086,15 +1112,16 @@ const parseNode = (
           context: [flowJSON.screenId],
         });
         return (
-          <FlowScreenManager
-            key={`${keyPrefix}-flow-${idx}-${flowJSON.screenId}`}
-            flow={flowJSON}
-            messageId={messageId ?? ''}
-            conversationId={conversationId ?? ''}
-            {...(slashCommandArtifactContext && {
-              messageContext: slashCommandArtifactContext,
-            })}
-          />
+          <div key={`${keyPrefix}-flow-${idx}-${flowJSON.screenId}`} className='mt-1.5'>
+            <FlowScreenManager
+              flow={flowJSON}
+              messageId={messageId ?? ''}
+              conversationId={conversationId ?? ''}
+              {...(slashCommandArtifactContext && {
+                messageContext: slashCommandArtifactContext,
+              })}
+            />
+          </div>
         );
       } catch (e) {
         logger.error(Event.FRONTEND_ERROR, {
@@ -1139,6 +1166,8 @@ const parseNode = (
       conversationId,
       preserveThreadRoute,
       slashCommandArtifactContext,
+      disableLinks,
+      insideCode || isCodeElement,
     );
     if (parsed !== null) children.push(parsed);
   });
@@ -1273,6 +1302,14 @@ const parseNode = (
     }
   }
 
+  if (tag === 'a' && disableLinks) {
+    return (
+      <span key={`${keyPrefix}-nolink-${idx}`} className='text-primary hover:underline'>
+        {children}
+      </span>
+    );
+  }
+
   if (tag === 'a') {
     let href = el.getAttribute('href');
     if (href && isValidURL(href)) {
@@ -1332,6 +1369,16 @@ const parseNode = (
       props['data-track-category'] = 'MESSAGE';
       props['data-track-name'] = isExternal ? 'ClickExternalLink' : 'ClickInternalLink';
       props['data-track-metadata'] = JSON.stringify({ url: href, isExternal });
+
+      const label = (el.textContent ?? '').trim().replace(/\/+$/, '');
+      if (isExternal && label !== href.replace(/\/+$/, '')) {
+        const { key, ...anchorProps } = props;
+        return (
+          <LinkHoverCard key={key as string} href={href}>
+            {React.createElement(tag, anchorProps, ...children)}
+          </LinkHoverCard>
+        );
+      }
     }
   }
 
@@ -1367,6 +1414,7 @@ export const RenderMessageWithHTML: React.FC<RenderMessageWithHTMLProps> = ({
   showEdited = false,
   isSystemMessage = false,
   breakLongLinks = false,
+  disableLinks = false,
   messageId,
   conversationId,
   preserveThreadRoute = false,
@@ -1416,6 +1464,7 @@ export const RenderMessageWithHTML: React.FC<RenderMessageWithHTMLProps> = ({
           conversationId,
           preserveThreadRoute,
           slashCommandArtifactContext,
+          disableLinks,
         );
         if (parsed !== null) nodes.push(parsed);
       });
@@ -1429,6 +1478,7 @@ export const RenderMessageWithHTML: React.FC<RenderMessageWithHTMLProps> = ({
     keyPrefix,
     navigate,
     breakLongLinks,
+    disableLinks,
     messageId,
     conversationId,
     preserveThreadRoute,

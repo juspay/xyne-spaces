@@ -11,6 +11,11 @@ import {
   generateDocumentThumbnail,
   isPreviewableDocument,
 } from '../services/documentThumbnailService';
+import {
+  convertHeicFileWithDimensions,
+  isHeicAttachment,
+  sniffHeicFile,
+} from '../services/heicAttachmentService';
 import type { UploadedFile } from '../components/ui/files/Files.types';
 import { logger, Event } from '../utils/logger';
 
@@ -163,9 +168,16 @@ export function useDraftAttachments() {
           }
         }
         // Get dimensions for image files
-        else if (file.type.startsWith('image/')) {
+        else if (file.type.startsWith('image/') || isHeicAttachment(file.type, file.name)) {
           try {
-            const dims = await getImageDimensions(file);
+            let dims = await getImageDimensions(file);
+            if (!dims) {
+              const sniffed = await sniffHeicFile(file);
+              if (sniffed ?? isHeicAttachment(file.type, file.name)) {
+                const converted = await convertHeicFileWithDimensions(file);
+                dims = { width: converted.width, height: converted.height };
+              }
+            }
             if (dims) {
               width = dims.width;
               height = dims.height;
@@ -209,9 +221,18 @@ export function useDraftAttachments() {
           );
         }
         // For images, cache the full file blob so it displays instantly after send
-        // Images don't have a separate thumbnail - they use the full file directly
+        // Images don't have a separate thumbnail - they use the full file directly.
+        // HEIC is excluded: the original blob can't render in most browsers, and
+        // the chip fetches the server-side WebP thumbnail instead (see
+        // heicAttachmentService). Local Files are decided by their ftyp brand —
+        // the browser's type/extension is a guess that mislabels renamed HEICs
+        // as .jpg, which would cache an unrenderable blob.
         if (file.type.startsWith('image/')) {
-          queryClient.setQueryData(['preview-blob', attachmentId], file);
+          void sniffHeicFile(file).then(sniffed => {
+            if (!(sniffed ?? isHeicAttachment(file.type, file.name))) {
+              queryClient.setQueryData(['preview-blob', attachmentId], file);
+            }
+          });
         }
       });
 
@@ -265,22 +286,9 @@ export function useDraftAttachments() {
 
         const formData = new FormData();
 
-        // Add all files
-        filesArray.forEach(file => {
-          formData.append('files', file);
-        });
-
-        // Add all thumbnails (if available)
-        processedFiles.forEach(({ thumbnailBlob, file }) => {
-          if (thumbnailBlob) {
-            formData.append('thumbnails', thumbnailBlob, `${file.name}_thumb.jpg`);
-          } else {
-            // Add placeholder for consistent indexing
-            formData.append('thumbnails', new Blob([]), '');
-          }
-        });
-
-        // Add fileMetadata JSON with complete information for all files
+        // Text fields go in BEFORE the file bodies. Multipart parts are parsed in wire
+        // order, so on a mid-upload disconnect the server has already read the ids and
+        // can mark those rows FAILED; appended last, they would never arrive.
         const fileMetadataArray = processedFiles.map(
           ({ index, thumbnailBlob, width, height, duration }) => ({
             fileIndex: index,
@@ -300,6 +308,21 @@ export function useDraftAttachments() {
         if (conversationId) {
           formData.append('conversationId', conversationId);
         }
+
+        // Add all files
+        filesArray.forEach(file => {
+          formData.append('files', file);
+        });
+
+        // Add all thumbnails (if available)
+        processedFiles.forEach(({ thumbnailBlob, file }) => {
+          if (thumbnailBlob) {
+            formData.append('thumbnails', thumbnailBlob, `${file.name}_thumb.jpg`);
+          } else {
+            // Add placeholder for consistent indexing
+            formData.append('thumbnails', new Blob([]), '');
+          }
+        });
 
         await apiInstance.post('/drafts/attachments/upload', formData);
 

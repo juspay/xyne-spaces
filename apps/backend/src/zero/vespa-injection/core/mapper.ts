@@ -1,3 +1,4 @@
+import { readFromYSweetStrict } from '@/utils/ysweetUtils';
 import { extractMentionsFromContent } from '@/utils/mentionUtils';
 import { extractChannelMentions } from '@/utils/mentionParser';
 import { appSchema, callSchema, channelSchema, InsertDocument, mailSchema, messageSchema, projectSchema, schemaToDocType, SubApp, ticketSchema, userSchema, VespaAppDocument, VespaCallDocument, VespaChatContainerDocument, VespaChatMessageDocument, VespaDocType, VespaFileDocument, VespaMailDocument, VespaProjectDocument, VespaSchema, VespaTicketDocument, samTranscriptSchema } from '@/vespa/src/types';
@@ -14,6 +15,7 @@ import {
   VespaOperationType as VespaOpType,
 } from '@xyne/shared';
 import { FormFieldType } from '@xyne/shared';
+import { indexableTagNames, parseAppliedTags } from '@xyne/shared';
 import { VespaJobType, VespaPayload } from './types';
 import { db } from '@/database/client';
 import {
@@ -32,6 +34,7 @@ import { FileProcessor } from '@/services/fileProcessor';
 import { transformUserToVespa } from '@/services/vespaTransformers';
 import { extractPlainTextFromHtml } from '@/utils/contentUtils';
 import { getFlowJsonContentForNotification } from '@/zero/side-effects/tables/messages-handler';
+import { extractLinksFromContent } from '@/utils/urlUtils';
 import vespaClient from '@/vespa/client';
 import { messageSignalService } from '@/services/personalization';
 import { logger } from '@/utils/logger';
@@ -84,6 +87,9 @@ const loadTicketFormFields = async (ticketId: string) => {
 };
 
 const getRef = (schema: VespaSchema, docId: string) => `id:${NAMESPACE}:${schema}::${docId}`
+// One-hot of the doc's channel, matched against user-doc channelWeights by the `personalized` rank profile.
+const channelWeightedSetFor = (channelId: string | null | undefined) =>
+  channelId ? { [`channel:${channelId}`]: 1 } : undefined;
 
 /**
  * Convert timestamp to number (Unix timestamp in milliseconds)
@@ -355,7 +361,9 @@ export const mapChannel = async (
     isPrivate: args.visibility === ChannelVisibility.PRIVATE,
     createdBy: args.createdBy,
     ownerId: args.createdBy,
-    projectId: args.projectId,
+    // Omit when the channel has no project (decoupling); mirrors the collection
+    // path below (`channel?.projectId ?? undefined`). Feed drops undefined keys.
+    projectId: args.projectId ?? undefined,
     visibility: args.visibility,
     isIm: args.scopeType === ChannelScopeType.DM,
     isMpim: args.scopeType === ChannelScopeType.GROUP_DM,
@@ -450,38 +458,18 @@ export const mapMessage = async (
     getFlowJsonContentForNotification(args.content || '') ||
     extractPlainTextFromHtml(args.content || '') || '';
 
+  const messageLinks = extractLinksFromContent(args.content || '');
+
   const threadInfo = await mapAndUpdatePreviousMessagesMentions(args.messageId, args.conversationId);
 
-  // Message acts, denormalized onto the doc so search can filter on them. Stored as a
-  // stringified JSON array; parsed defensively because it is plain TEXT with no DB-level
-  // guarantee of shape.
-  let messageActs: string[] = [];
-  if (args.messageActs) {
-    try {
-      const parsed: unknown = JSON.parse(args.messageActs);
-      if (Array.isArray(parsed)) {
-        messageActs = parsed.filter((v): v is string => typeof v === 'string');
-      }
-    } catch {
-      logger.warn('[VESPA] Ignoring malformed messageActs', { messageId: args.messageId });
-    }
-  }
-
-  // Thread types, same stringified-array shape as messageActs.
-  let threadType: string[] = [];
-  if (conversation.threadType) {
-    try {
-      const parsed: unknown = JSON.parse(conversation.threadType);
-      threadType = Array.isArray(parsed)
-        ? parsed.filter((v): v is string => typeof v === 'string')
-        : typeof parsed === 'string'
-          ? [parsed]
-          : [];
-    } catch {
-      // Rows written before the column held an array stored a bare name.
-      threadType = [conversation.threadType];
-    }
-  }
+  // Tag names, denormalized onto the doc so search can filter on them. Everything on the
+  // thread is indexed as soon as it lands — classifier or person, vocabulary or free-form —
+  // minus anything removed.
+  //
+  // messageActs holds the thread types this message is the EVIDENCE for: the classifier
+  // cites a message per type, and that citation is stored on both sides.
+  const messageActs = indexableTagNames(parseAppliedTags(args.messageActs));
+  const threadType = indexableTagNames(parseAppliedTags(conversation.threadType));
 
   // Update parent ticket thread fields if this is a ticket conversation
   await updateTicketThreadFields(args.conversationId);
@@ -505,6 +493,8 @@ export const mapMessage = async (
     docType: VespaDocType.MESSAGE,
     text: messageContent,
     chunks: chunkPlainText(messageContent),
+    links: messageLinks,
+    hasLinks: messageLinks.length > 0,
     username: sender?.name || '',
     userEmail: sender?.email || '',
     image: "",
@@ -704,6 +694,7 @@ export const mapTicket = async (args: InsertValue<TicketsSchema>): Promise<Vespa
     convId: args.conversationId,
     userGroupId: args.userGroupId,
     channelRef: getRef(channelSchema, conversation?.channelId || ""),// if there is no channelId we can refer it with projectRef
+    channelWeightedSet: channelWeightedSetFor(conversation?.channelId),
     projectRef: getRef(projectSchema, args.projectId),
     threadId: args.conversationId,
     status: (args.statusV2 || mapStatusToStatusV2(args.status as TicketStatus)) as TicketStatusV2,
@@ -851,9 +842,10 @@ export const mapCollection = async (
   if (rootCollection.scopeType === 'CHANNEL') {
     const channel = await db.channel.findUnique({
       where: { id: rootCollection.scopeId },
-      select: { projectId: true, workspaceId: true },
+      select: { workspaceId: true },
     });
-    projectId = channel?.projectId ?? undefined;
+    // projectId left undefined — channel collections no longer derive a project from
+    // channel.projectId (decoupled); the file doc's projectId is simply omitted.
     channelRef = getRef(channelSchema, rootCollection.scopeId);
     const resolved = await resolveOrgAndWorkspace(channel?.workspaceId);
     workspaceId = resolved.workspaceId;
@@ -888,6 +880,7 @@ export const mapCollection = async (
     clFd: collectionItem.collectionId,
     projectId,
     channelRef,
+    channelWeightedSet: channelWeightedSetFor(rootCollection.scopeType === 'CHANNEL' ? rootCollection.scopeId : undefined),
     workspaceId,
     orgId,
   };
@@ -935,11 +928,13 @@ export const mapCanvas = async (args: InsertValue<CanvasesSchema>, workspaceId?:
 
   let chunks: string[] = [];
 
-  // Focus only on manually created canvases (stored in DB as BlockNote JSON)
+  // Collaborative canvases store their content in Y-Sweet; legacy canvases use DB JSON.
   try {
-    const content = (args as any).content;
+    const content = args.isCollaborative
+      ? await readFromYSweetStrict(args.id, args.lastEditedBy || args.createdBy)
+      : args.content;
 
-    if (content) {
+    if (Array.isArray(content) && content.length > 0) {
       const markdown = await convertBlockNoteToMarkdown(content);
       const textStrategy = new TextStrategy();
       const result = await textStrategy.parse(Buffer.from(markdown), args.id);
@@ -951,6 +946,7 @@ export const mapCanvas = async (args: InsertValue<CanvasesSchema>, workspaceId?:
     }
   } catch (error) {
     logger.error(`[Mapper] Failed to extract text from canvas ${args.id}:`, error);
+    if (args.isCollaborative) throw error;
   }
 
   // Denormalized ACL: direct users + members of every channel/group the canvas is shared to.
@@ -994,6 +990,7 @@ export const mapCanvas = async (args: InsertValue<CanvasesSchema>, workspaceId?:
     mimeType: 'application/json',
     subApp: SubApp.CANVAS,
     channelRef,
+    channelWeightedSet: channelWeightedSetFor(args.channelId),
     conversationId: undefined,
     workspaceId: effectiveWorkspaceId,
     orgId: effectiveOrgId,
@@ -1094,6 +1091,7 @@ export const mapTranscript = async (args: InsertValue<TranscriptsSchema>, worksp
     mimeType: 'text/plain',
     subApp: SubApp.TRANSCRIPT,
     channelRef,
+    channelWeightedSet: channelWeightedSetFor(args.channelId),
     conversationId,
     callType: args.callType,
     workspaceId: effectiveWorkspaceId,
@@ -1404,6 +1402,7 @@ export const mapFile = async (
     mimeType: args.mimetype,
     subApp: args.entityType === 'TICKET' ? SubApp.TICKET_ATTACHMENT : SubApp.CHAT_ATTACHMENT,
     channelRef,
+    channelWeightedSet: channelWeightedSetFor(channelId),
     conversationId,
     messageId: args.entityType === 'CHAT' ? args.entityId : undefined,
     ticketId: args.entityType === 'TICKET' ? args.entityId : undefined,
@@ -1452,7 +1451,7 @@ export const mapEmail = async (email: Email, workspaceId?: string, orgId?: strin
 
   const ticket = await db.ticket.findFirst({
     where: { conversationId: email.conversationId },
-    select: { id: true, xyneId: true },
+    select: { id: true, xyneId: true, project: { select: { code: true } } },
   });
   const ticketFormFields = ticket ? await loadTicketFormFields(ticket.id) : [];
 
@@ -1513,6 +1512,7 @@ export const mapEmail = async (email: Email, workspaceId?: string, orgId?: strin
     parentThreadId: email.externalThreadId || undefined,
     mailId: email.externalMessageId || undefined,
     xyneId: ticket?.xyneId ?? undefined,
+    projectCode: ticket?.project?.code ?? undefined,
     ticketFormFields,
     ticketFormFieldValues: Array.from(new Set(ticketFormFields.map(field => field.fieldValue))),
     subject: email.subject,
@@ -1523,6 +1523,7 @@ export const mapEmail = async (email: Email, workspaceId?: string, orgId?: strin
     /** entity = "support_desk"; future: "personal" for Gmail */
     entity: 'support_desk',
     channelRef: getRef(channelSchema, channelId),
+    channelWeightedSet: channelWeightedSetFor(channelId),
     from: email.from,
     to: email.to,
     cc: email.cc.length > 0 ? email.cc : undefined,

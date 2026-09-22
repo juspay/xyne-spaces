@@ -15,7 +15,7 @@ export {
 export { AffinityService } from "../services/affinityService.js";
 export type { AffinityWeights } from "../services/affinityService.js";
 
-export { useCacConfig } from "./useCacConfig.js";
+export { useCacConfig, useOptionalCacConfig } from "./useCacConfig.js";
 
 export { useChannelRecentSenders } from "./useChannelRecentSenders.js";
 export { useDmAffinityRank } from "./useDmAffinityRank.js";
@@ -37,6 +37,7 @@ export type { MentionResult } from "../types/mention.js";
 
 export {
   searchUsers,
+  searchUsersWithScores,
   useUsers,
   useUsersById,
   useUser,

@@ -10,6 +10,7 @@ const APP_PERMISSION_SCOPES = [
   { scope: 'calls:write', description: 'Schedule and manage calls from apps' },
   { scope: 'channels:read', description: 'Read channel metadata and history from apps' },
   { scope: 'chat:write', description: 'Post and update chat messages from apps' },
+  { scope: 'chat:delete', description: 'Delete chat messages the app posted, from apps' },
   { scope: 'desk:read', description: 'Read desk configuration and desk-linked channel metadata' },
   { scope: 'desk:write', description: 'Create inbound desk events and desk-linked ticket activity' },
   { scope: 'email:read', description: 'Read email replies and email-thread data from apps' },
@@ -20,6 +21,7 @@ const APP_PERMISSION_SCOPES = [
   { scope: 'tickets:write', description: 'Create and update tickets from apps' },
   { scope: 'usergroups:read', description: 'Read user groups from apps' },
   { scope: 'users:read', description: 'Read user profile information from apps' },
+  { scope: 'workflows:start', description: 'Start attached workflows from apps' },
 ];
 
 async function main() {

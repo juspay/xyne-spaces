@@ -3,7 +3,12 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createCipheriv, randomBytes } from "node:crypto";
 import { PrismaClient, type Prisma } from "@prisma/client";
-import { getAllCustomTools } from "xyne-claw-shared";
+import { SDLC_AGENT_SLUG, getAllCustomTools } from "xyne-claw-shared";
+import { sdlcAgentDesiredState } from "../src/lib/sdlc-agent-sync.js";
+import {
+  WORKFLOW_TOOL_NAMES,
+  WORKFLOW_WRITE_TOOL_NAMES,
+} from "../src/mcp/servers/xyne-workflows-tools.js";
 
 const prisma = new PrismaClient();
 
@@ -139,6 +144,14 @@ const SERVERS = [
     description: "Dedicated dynamic-dashboard tools for the dashboard-ai agent (pinned; not user-connectable).",
     credentialForm: { fields: [] },
     writeToolPolicy: { mode: "allowlist", tools: [] },
+  },
+  {
+    type: "xyne-workflows",
+    name: "Xyne Workflows",
+    url: "",
+    description: "Workflow authoring and run tools for Ask AI (pinned; not user-connectable).",
+    credentialForm: { fields: [] },
+    writeToolPolicy: { mode: "allowlist", tools: [...WORKFLOW_WRITE_TOOL_NAMES] },
   },
   {
     type: "xyne-spaces-app-tools",
@@ -853,22 +866,26 @@ You have direct access to Spaces tools, a \`spaces\` subagent, and a \`google\` 
 
 **Before you lean on \`spaces-search\`** (or when its results look empty, over-broad, or wrong, or when you need to COUNT "how many X") — read the \`spaces-vespa-schema\` skill. It explains the search index itself: how \`type\` picks which schema you search, what your query text is actually matched against, hybrid lexical+semantic ranking, and the non-obvious behavior of \`from\`/\`in\`/date filters (e.g. \`in\` doesn't scope files; dates skip emails) — the difference between a search that lands and one that returns noise.
 
+**Support-desk questions go to \`spaces-desk-metrics\`, not to ticket listings.** Anything aggregate about a desk — volumes, averages, first-response or resolution time, CSAT, per-agent performance, priority/stage/tag breakdowns, classification or categorization counts, opened-vs-closed trends — is that tool's job, and it computes the numbers in the database. Reach for \`spaces-tickets\` only when the asker points at specific tickets and wants their detail: status, history, description, who owns it. Never assemble desk-level numbers by listing tickets and counting them yourself — a listing is one page of a filtered slice, so any total you derive from it is quietly wrong. That includes \`spaces-tickets { summary: true }\`: its counts cover only the rows that one call returned, so at desk scale they silently under-report.
+
 **When the answer might live in the asker's Google** — their email, calendar, meetings, schedule, Drive files, contacts, or tasks — read the \`google-workspace\` skill. It maps exactly what the \`google\` subagent can do and when to reach for it. Do NOT default to Spaces-only: if the question is about the asker's inbox, schedule, or files, Google is the source — and many questions need BOTH, so check Spaces and Google in parallel and merge.
 
 **When drafting an email or reply** — the \`spaces-email-drafting\` skill has the workflow. Email is a separate, fast path.
 
-**For "how do we…?" / "why do we…?" / policy / SOP questions**, hit \`memory-search\` FIRST. You have a shared knowledge bank (you'll see a "Shared Knowledge Bank" block in your context listing what's in it). A short authoritative hit there beats a long crawl through messages.
+**For "how do we…?" / "why do we…?" / policy / SOP questions**, \`memory-search\` can provide useful business context, past mistakes, debugging approaches, tool-use guidance, and reasons behind previous decisions. Treat memory as supporting context only: it can be stale or incomplete, so verify current facts against code, logs, databases, metrics, live tools, or the relevant source of truth.
 
 # Other tools you can reach for
 - **genius-analytics** — business metrics (GMV, revenue, success rates, KPIs). Pass the question in natural language.
 - **genius-investigation** — root-cause analysis on incidents, fraud, disputes, outages.
+- **spaces-desk-metrics** — support-desk analytics: first-response and resolution times, CSAT, tickets opened, email replies, per-agent performance, priority/stage/tag breakdowns, and opened-vs-closed trends — for one desk or merged across several. Name the desk you want; call it with no desk to see which ones exist. Request only the \`metrics\` the question needs. Read the \`notes\` it returns before you summarize: they say which figures count tickets *created* in the window versus events that *happened* in it, and reading that backwards inverts the answer.
 - **visualize** — turn metrics you ALREADY have into a chart (bar, line, area, pie/donut, KPI, scatter, table). Reach for it whenever your answer carries counts, totals, trends, breakdowns, proportions, or a before/after comparison — from any source, not just analytics tools. It renders only if you copy its \`\`\`chart block back verbatim. See the \`charts\` skill for chart choice and payload shapes.
 - **query-codebase** / **review-pull-request** — high-level code/PR understanding. **Require** a repo/product selected in the research context; if none is selected, tell the user to pick one — don't call.
 - **web-search** / **deep-research** — for things outside the workspace (when enabled).
 - **generate-image** — image from a detailed text prompt.
 - **artifacts** subagent — polished PPTX/PDF generation. Give it a rich brief.
 - **spaces-create-canvas** / **spaces-edit-canvas** — collaborative docs inside Spaces.
-- **spaces-sdlc-create-artifact** — create a PRD or Tech Doc only when the active Spaces context explicitly identifies an SDLC repository. This V1 action creates the editable canvas immediately; use the supplied SDLC repository id and require a parent PRD for a Tech Doc.
+- **spaces-sdlc-mutate-artifact** — create or update a PRD or Tech Doc only when active Spaces context explicitly identifies an SDLC repository. Use action create/update, supplied SDLC repository id, and require a parent PRD for a Tech Doc.
+- **spaces-sdlc-list-artifact-versions** then **spaces-sdlc-read-artifact-version** — inspect bounded immutable history for a Wiki page, Hub Knowledge document, PRD, or Tech Doc in the selected repository. Read the current artifact first, retrieve only relevant versions, and treat old text as supporting context rather than current truth.
 
 # Write actions need approval
 These return "Action queued for approval" — that's **normal**, not an error: \`spaces-create-ticket\`, \`spaces-update-ticket\`, \`spaces-schedule-call\`, \`user-send-message\`, \`spaces-create-canvas\`, \`spaces-edit-canvas\`. Tell the user to hit Approve. Do NOT retry.
@@ -926,9 +943,9 @@ You:
       color: "#6366f1",
       config: {
         // Opt into the shared knowledge bank — injects the `memory-search`
-        // tool and a "Shared Knowledge Bank" hint listing available memory
-        // clusters. Used for SOPs, decisions, and verified facts captured
-        // from past sessions.
+        // tool. Used for SOPs, decisions, past mistakes, and debugging
+        // context captured from past sessions; the tool description keeps
+        // source-of-truth-first guidance explicit.
         memoryEnabled: true,
         // Enforce inline citations: post-response, claw nudges the agent to add
         // verbatim [clf-…] tokens when it answered from citeable sources but
@@ -959,6 +976,7 @@ You:
             "spaces-thread-attachments",
             "spaces-fetch-attachment",
             "spaces-workflow-stats",
+            "spaces-desk-metrics",
             // Write-side — require approval (see toolPermissions below).
             "spaces-create-ticket",
             "spaces-update-ticket",
@@ -966,7 +984,8 @@ You:
             "user-send-message",
             "spaces-create-canvas",
             "spaces-edit-canvas",
-            "spaces-sdlc-create-artifact",
+            "spaces-sdlc-mutate-artifact",
+            ...WORKFLOW_TOOL_NAMES,
           ],
           custom: ["genius-analytics", "genius-investigation", "query-codebase", "review-pull-request", "web-search", "deep-research", "generate-image", "add-citations", "visualize"]
         },
@@ -976,7 +995,10 @@ You:
           "xyne-spaces__spaces-schedule-call": "ask",
           "xyne-spaces__user-send-message": "ask",
           "xyne-spaces__spaces-create-canvas": "ask",
-          "xyne-spaces__spaces-edit-canvas": "ask"
+          "xyne-spaces__spaces-edit-canvas": "ask",
+          "xyne-workflows__workflow_create": "allow",
+          "xyne-workflows__workflow_update": "allow",
+          "xyne-workflows__workflow_run": "allow"
         },
         // Deterministic skill injection. Skills otherwise load via pi's
         // progressive disclosure (only the 1-line <available_skills> description
@@ -1007,9 +1029,9 @@ You:
       systemPrompt: ASK_AI_PROMPT,
       config: {
         // Opt into the shared knowledge bank — injects the `memory-search`
-        // tool and a "Shared Knowledge Bank" hint listing available memory
-        // clusters. Used for SOPs, decisions, and verified facts captured
-        // from past sessions.
+        // tool. Used for SOPs, decisions, past mistakes, and debugging
+        // context captured from past sessions; the tool description keeps
+        // source-of-truth-first guidance explicit.
         memoryEnabled: true,
         // Enforce inline citations: post-response, claw nudges the agent to add
         // verbatim [clf-…] tokens when it answered from citeable sources but
@@ -1040,6 +1062,7 @@ You:
             "spaces-thread-attachments",
             "spaces-fetch-attachment",
             "spaces-workflow-stats",
+            "spaces-desk-metrics",
             // Write-side — require approval (see toolPermissions below).
             "spaces-create-ticket",
             "spaces-update-ticket",
@@ -1047,7 +1070,8 @@ You:
             "user-send-message",
             "spaces-create-canvas",
             "spaces-edit-canvas",
-            "spaces-sdlc-create-artifact",
+            "spaces-sdlc-mutate-artifact",
+            ...WORKFLOW_TOOL_NAMES,
           ],
           custom: ["genius-analytics", "genius-investigation", "query-codebase", "review-pull-request", "web-search", "deep-research", "generate-image", "add-citations", "visualize"]
         },
@@ -1057,7 +1081,10 @@ You:
           "xyne-spaces__spaces-schedule-call": "ask",
           "xyne-spaces__user-send-message": "ask",
           "xyne-spaces__spaces-create-canvas": "ask",
-          "xyne-spaces__spaces-edit-canvas": "ask"
+          "xyne-spaces__spaces-edit-canvas": "ask",
+          "xyne-workflows__workflow_create": "allow",
+          "xyne-workflows__workflow_update": "allow",
+          "xyne-workflows__workflow_run": "allow"
         },
         // Deterministic skill injection — see the matching block in `create`
         // for the full rationale and the toolName/skillSlug/when conventions.
@@ -1071,109 +1098,20 @@ You:
   });
   console.log("[seed] Upserted ask-ai agent with spaces, artifacts subagents and genius tool");
 
-  const SDLC_DIRECT_TOOL_SLUGS = [
-    // Selecting the connector subagents exposes their complete read palettes.
-    // Keep connector write tools direct so the normal approval gates still apply.
-    "spaces-whoami",
-    "spaces-search",
-    "spaces-tickets",
-    "spaces-messages",
-    "spaces-message-detail",
-    "spaces-channels",
-    "spaces-users",
-    "spaces-activity",
-    "spaces-projects",
-    "spaces-project-team-members",
-    "spaces-boards",
-    "spaces-calls",
-    "spaces-canvases",
-    "spaces-read-canvas",
-    "spaces-meeting-insights",
-    "spaces-emails",
-    "spaces-thread-attachments",
-    "spaces-fetch-attachment",
-    "spaces-workflow-stats",
-    "spaces-create-ticket",
-    "spaces-update-ticket",
-    "spaces-schedule-call",
-    "user-send-message",
-    "spaces-create-canvas",
-    "spaces-edit-canvas",
-    "spaces-upload-to-kb",
-    "spaces-sdlc-create-artifact",
-    "spaces-sdlc-update-baseline",
-    "create_repository",
-    "merge_pull_request",
-  ];
-  const sdlcSandboxToolSlugs = customTools
-    .filter((tool) => tool.source === "custom:sandbox")
-    .map((tool) => tool.slug);
-  const sdlcCustomToolSlugs = [
-    ...new Set([
-      ...sdlcSandboxToolSlugs,
-      "web-search",
-      "todo-read",
-      "todo-write",
-    ]),
-  ];
-  const SDLC_TOOL_PERMISSIONS = {
-    "xyne-spaces__spaces-create-ticket": "ask",
-    "xyne-spaces__spaces-update-ticket": "ask",
-    "xyne-spaces__spaces-schedule-call": "ask",
-    "xyne-spaces__user-send-message": "ask",
-    "xyne-spaces__spaces-create-canvas": "ask",
-    "xyne-spaces__spaces-edit-canvas": "ask",
-    "xyne-spaces__spaces-upload-to-kb": "ask",
-    "xyne-spaces__spaces-sdlc-create-artifact": "allow",
-    "xyne-spaces__spaces-sdlc-update-baseline": "allow",
+  const sdlcDesired = sdlcAgentDesiredState();
+  const sdlcAgentRow = {
+    name: sdlcDesired.name,
+    description: sdlcDesired.description,
+    systemPrompt: sdlcDesired.systemPrompt,
+    scope: sdlcDesired.scope,
+    color: sdlcDesired.color,
+    config: sdlcDesired.config,
   };
 
-  const SDLC_AGENT_PROMPT = `You are **SDLC Assistant** — the focused engineering agent for repository-backed software delivery in Xyne Spaces.
-
-Every repository operation must use the SDLC repository pinned by trusted run context. Never infer a repository from its display name, search Spaces to discover one, or select a repository from an error message. If no valid SDLC repository context is attached, explain that the user must select a repository from an SDLC Hub and stop without calling repository or artifact tools.
-
-For baseline work, use sandbox-repo-setup for the pinned repository, search the pinned repository channel for relevant imported Wiki canvases with spaces-search, read their full content with spaces-read-canvas, and verify their claims against the live repository. Then use spaces-sdlc-update-baseline to begin one draft, checkpoint each required section immediately after its focused inspection, and finalize only after all sections are present. Cite exact relative paths and symbols, distinguish source evidence from inference, and record Wiki/source disagreements with the live repository treated as authoritative. If repository setup or source inspection fails, report the failure and leave the resumable draft unfinalized.
-
-Create PRDs and Tech Docs only with spaces-sdlc-create-artifact. A Tech Doc requires its parent PRD. Never use a generic canvas for an SDLC artifact. Repository access and SDLC Hub membership are mandatory; treat an authorization failure as terminal.
-
-For implementation work, modify only the pinned repository and requested branch, run relevant existing checks, avoid unrelated changes, never expose secrets, and never claim a push or pull request succeeded without verification.`;
-
   const sdlcAgent = await prisma.agent.upsert({
-    where: { orgId_slug: { orgId: defaultOrg.id, slug: "sdlc-agent" } },
-    create: {
-      slug: "sdlc-agent",
-      orgId: defaultOrg.id,
-      name: "SDLC Assistant",
-      description: "Repository-grounded baselines, PRDs, Tech Docs, and implementation workflows.",
-      systemPrompt: SDLC_AGENT_PROMPT,
-      scope: "global",
-      color: "#2563eb",
-      config: {
-        requireSdlcRepository: true,
-        tools: {
-          subagents: ["spaces", "context7", "github", "bitbucket"],
-          direct: SDLC_DIRECT_TOOL_SLUGS,
-          custom: sdlcCustomToolSlugs,
-        },
-        toolPermissions: SDLC_TOOL_PERMISSIONS,
-      },
-    },
-    update: {
-      name: "SDLC Assistant",
-      description: "Repository-grounded baselines, PRDs, Tech Docs, and implementation workflows.",
-      systemPrompt: SDLC_AGENT_PROMPT,
-      scope: "global",
-      color: "#2563eb",
-      config: {
-        requireSdlcRepository: true,
-        tools: {
-          subagents: ["spaces", "context7", "github", "bitbucket"],
-          direct: SDLC_DIRECT_TOOL_SLUGS,
-          custom: sdlcCustomToolSlugs,
-        },
-        toolPermissions: SDLC_TOOL_PERMISSIONS,
-      },
-    },
+    where: { orgId_slug: { orgId: defaultOrg.id, slug: SDLC_AGENT_SLUG } },
+    create: { slug: SDLC_AGENT_SLUG, orgId: defaultOrg.id, ...sdlcAgentRow },
+    update: sdlcAgentRow,
   });
 
   const askAiSharedBindings = await prisma.agentProviderCredentials.findMany({
@@ -1221,28 +1159,20 @@ For implementation work, modify only the pinned repository and requested branch,
     });
   }
 
-  for (const slug of [
-    "builtin__read",
-    "todo-read",
-    "todo-write",
-    "web-search",
-    // Core SDLC sandbox operations are safe inside the ephemeral repository
-    // sandbox. Other selected sandbox tools keep their normal runtime gates.
-    "sandbox-repo-setup",
-    "sandbox-run",
-    "sandbox-run-detached",
-    "sandbox-poll-job",
-    "sandbox-read-file",
-    "sandbox-destroy",
-  ]) {
+  const sdlcAgentToolIds: string[] = [];
+  for (const slug of sdlcDesired.agentToolAllows) {
     const tool = await prisma.tool.findUnique({ where: { slug } });
     if (!tool) continue;
+    sdlcAgentToolIds.push(tool.id);
     await prisma.agentTool.upsert({
       where: { agentId_toolId: { agentId: sdlcAgent.id, toolId: tool.id } },
       create: { agentId: sdlcAgent.id, toolId: tool.id, permission: "allow" },
       update: { permission: "allow" },
     });
   }
+  await prisma.agentTool.deleteMany({
+    where: { agentId: sdlcAgent.id, toolId: { notIn: sdlcAgentToolIds } },
+  });
   console.log(`[seed] Upserted sdlc-agent; shared provider bindings=${askAiSharedBindings.length}`);
 
   // Attach genius-analytics and genius-investigation tools to ask-ai agent
@@ -2268,6 +2198,36 @@ DRILL-DOWN: Use this path ONLY when the user wants to EXPLORE a focused tile's d
     }
   } else {
     console.warn("[seed] Skipped dashboard-ai pin: ENCRYPTION_KEY not set");
+  }
+
+  const workflowsCredsPayload = encryptCreds({});
+  if (workflowsCredsPayload) {
+    const workflowsServerRow = await prisma.mcpServer.findUnique({ where: { type: "xyne-workflows" } });
+    if (workflowsServerRow) {
+      await prisma.agentMcpConnection.upsert({
+        where: {
+          agentId_mcpServerId_slug: {
+            agentId: askAIAgent.id,
+            mcpServerId: workflowsServerRow.id,
+            slug: "default",
+          },
+        },
+        create: {
+          agentId: askAIAgent.id,
+          mcpServerId: workflowsServerRow.id,
+          slug: "default",
+          encryptedCreds: workflowsCredsPayload.encryptedCreds,
+          iv: workflowsCredsPayload.iv,
+          authTag: workflowsCredsPayload.authTag,
+        },
+        update: {},
+      });
+      console.log("[seed] Pinned xyne-workflows MCP server to ask-ai");
+    } else {
+      console.warn("[seed] Skipped ask-ai workflows pin: xyne-workflows server row not found");
+    }
+  } else {
+    console.warn("[seed] Skipped ask-ai workflows pin: ENCRYPTION_KEY not set");
   }
 
   // ── Claw concierge agent ─────────────────────────────────────────────────

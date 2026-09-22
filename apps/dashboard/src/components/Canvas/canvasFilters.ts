@@ -2,7 +2,6 @@ import type { Canvas } from './Canvas.types';
 
 const EXCLUDED_CALL_GENERATED_SOURCES = new Set([
   'call_prd',
-  'call_detailed_summary',
   'genius_dm_response',
   'genius_canvas_long_response',
   'jira_migration_report',
@@ -13,6 +12,8 @@ const EXCLUDED_CALL_GENERATED_SOURCES = new Set([
   // Retired generators — kept so their existing legacy canvases stay filtered.
   'xyne_auto_rca',
 ]);
+
+const RECORDING_GENERATED_SOURCES = new Set(['call_notes', 'call_detailed_summary']);
 
 function getCanvasMetadataSource(canvas: Canvas): string | undefined {
   const metadata = canvas.metadata;
@@ -38,6 +39,40 @@ export function filterExcludedCallGeneratedCanvases(
   }
 
   return canvases.filter(canvas => !isExcludedCallGeneratedCanvas(canvas));
+}
+
+export function isExcludedRecordingGeneratedCanvas(canvas: Canvas): boolean {
+  const source = getCanvasMetadataSource(canvas);
+  return source ? RECORDING_GENERATED_SOURCES.has(source) : false;
+}
+
+export function getRecordingCanvasCallId(canvas: Canvas): string | null {
+  if (!isExcludedRecordingGeneratedCanvas(canvas)) {
+    return null;
+  }
+
+  const metadata = canvas.metadata;
+  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
+    return null;
+  }
+
+  const callId = (metadata as Record<string, unknown>)['callId'];
+  return typeof callId === 'string' && callId ? callId : null;
+}
+
+export function filterExcludedRecordingGeneratedCanvases(
+  canvases: Canvas[],
+  excludeRecordingGeneratedCanvases: boolean,
+): Canvas[] {
+  if (!excludeRecordingGeneratedCanvases) {
+    return canvases;
+  }
+
+  return canvases.filter(canvas => !isExcludedRecordingGeneratedCanvas(canvas));
+}
+
+export function isAnyCallGeneratedCanvas(canvas: Canvas): boolean {
+  return isExcludedCallGeneratedCanvas(canvas) || isExcludedRecordingGeneratedCanvas(canvas);
 }
 
 export function filterStarredCanvases(canvases: Canvas[], showStarredOnly: boolean): Canvas[] {

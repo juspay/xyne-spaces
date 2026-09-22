@@ -10,6 +10,7 @@ import {
 import { getSmartSnippet } from '../RenderMessageWithHTML/searchSnippetRender';
 import { useNavigate } from 'react-router-dom';
 import { Home } from 'lucide-react';
+import { EditSurfaceScope } from '../../../providers/EditProvider';
 import { ChatBubble } from '../ChatBubble/ChatBubble';
 import AvatarGroup from '../../ui/Avatar/AvatarGroup';
 import { useChannel } from '../../../hooks/useChannels';
@@ -26,6 +27,10 @@ import type {
 const WORD_LIMIT = 30;
 
 interface SearchResultMessageCardProps {
+  /** 0-based rank of this card in the result list; the search-quality signal. */
+  resultIndex?: number;
+  /** Total results the query returned, so click rank can be normalised. */
+  resultCount?: number;
   channelId: string;
   conversationId: string;
   matchedMessageId: string | null;
@@ -50,6 +55,8 @@ interface SearchResultMessageCardProps {
 }
 
 export const SearchResultMessageCard = memo(function SearchResultMessageCard({
+  resultIndex,
+  resultCount,
   channelId,
   conversationId,
   matchedMessageId,
@@ -59,7 +66,8 @@ export const SearchResultMessageCard = memo(function SearchResultMessageCard({
   onCardClick,
   searchThread,
 }: SearchResultMessageCardProps): ReactElement | null {
-  const { onSelectThread, onSelectUser, onSelectChannelContext } = useContext(SearchResultsContext);
+  const { onSelectThread, onSelectUser, onSelectMessageContext, onResultOpen } =
+    useContext(SearchResultsContext);
   const channel = useChannel(channelId);
   const navigate = useNavigate();
   const [isExpanded, setIsExpanded] = useState(false);
@@ -122,6 +130,7 @@ export const SearchResultMessageCard = memo(function SearchResultMessageCard({
           thumbnailUrl: null,
           isDeleted: false,
           uploadStatus: null,
+          position: null,
         },
       ];
     });
@@ -187,6 +196,7 @@ export const SearchResultMessageCard = memo(function SearchResultMessageCard({
           replies_md: null,
           initial_message_md: null,
           parent_message_md: null,
+          sub_tickets_md: null,
           doNotPostToChannel: null,
         }
       : undefined;
@@ -234,6 +244,8 @@ export const SearchResultMessageCard = memo(function SearchResultMessageCard({
 
   const navigateToMessage = (): void => {
     if (!targetMessage) return;
+    // Jumping to home still leaves from this search — record it before routing away.
+    onResultOpen?.();
     void navigate(
       isMatchRoot
         ? `/chat/dir/${channelId}#origin=${conversationId}`
@@ -245,7 +257,7 @@ export const SearchResultMessageCard = memo(function SearchResultMessageCard({
     if (replyCount > 0) {
       onSelectThread?.({ channelId, conversationId, matchedMessageId });
     } else {
-      onSelectChannelContext?.(channelId, conversationId, undefined, matchedMessageId);
+      onSelectMessageContext?.(channelId, conversationId, undefined, matchedMessageId);
     }
   };
 
@@ -292,6 +304,13 @@ export const SearchResultMessageCard = memo(function SearchResultMessageCard({
       )}
       data-track-category='SEARCH_RESULTS'
       data-track-name='OPEN_SEARCH_MESSAGE'
+      data-track-label='Open search result'
+      data-track-metadata={JSON.stringify({
+        ...(resultIndex !== undefined && { resultIndex }),
+        ...(resultCount !== undefined && { resultCount }),
+        channelId,
+        source: 'search_result',
+      })}
     >
       <div className='relative py-1'>
         <button
@@ -305,6 +324,12 @@ export const SearchResultMessageCard = memo(function SearchResultMessageCard({
           aria-label='Open in home'
           data-track-category='SEARCH_RESULTS'
           data-track-name='JUMP_TO_MESSAGE'
+          data-track-metadata={JSON.stringify({
+            ...(resultIndex !== undefined && { resultIndex }),
+            ...(resultCount !== undefined && { resultCount }),
+            channelId,
+            source: 'search_result',
+          })}
         >
           <Home size={14} />
         </button>
@@ -312,34 +337,36 @@ export const SearchResultMessageCard = memo(function SearchResultMessageCard({
           <div className='px-4 py-3 text-sm text-muted-foreground'>Message no longer available</div>
         ) : (
           <>
-            <ChatBubble
-              message={displayMessage ?? targetMessage}
-              channelId={channelId}
-              showAvatar
-              context='channel'
-              channelScopeType={channel?.scopeType}
-              searchItemView
-              {...(onSelectUser && { onUserClick: onSelectUser })}
-              {...(fabricatedConversation && { conversation: fabricatedConversation })}
-              {...(canExpand &&
-                isExpanded && {
-                  afterTextContent: (
-                    <button
-                      data-prevent-thread
-                      onClick={e => {
-                        e.stopPropagation();
-                        setIsExpanded(false);
-                      }}
-                      className='block text-muted-foreground hover:underline mt-1'
-                      style={{ fontSize: '0.75rem' }}
-                      data-track-category='SEARCH_RESULTS'
-                      data-track-name='COLLAPSE_MESSAGE'
-                    >
-                      Show less
-                    </button>
-                  ),
-                })}
-            />
+            <EditSurfaceScope>
+              <ChatBubble
+                message={displayMessage ?? targetMessage}
+                channelId={channelId}
+                showAvatar
+                context='channel'
+                channelScopeType={channel?.scopeType}
+                searchItemView
+                {...(onSelectUser && { onUserClick: onSelectUser })}
+                {...(fabricatedConversation && { conversation: fabricatedConversation })}
+                {...(canExpand &&
+                  isExpanded && {
+                    afterTextContent: (
+                      <button
+                        data-prevent-thread
+                        onClick={e => {
+                          e.stopPropagation();
+                          setIsExpanded(false);
+                        }}
+                        className='block text-muted-foreground hover:underline mt-1'
+                        style={{ fontSize: '0.75rem' }}
+                        data-track-category='SEARCH_RESULTS'
+                        data-track-name='COLLAPSE_MESSAGE'
+                      >
+                        Show less
+                      </button>
+                    ),
+                  })}
+              />
+            </EditSurfaceScope>
             {/* Reply preview: repliers' avatars (from Vespa threadSenders) + count.
                 The conversation isn't fetched, so avatars come from the surfaced
                 participant ids. */}

@@ -1,3 +1,4 @@
+import { readTrackSource } from '../../../services/Analytics/trackSource';
 import { ReactElement, useRef, useEffect } from 'react';
 import useMeasure from '../../../hooks/useMeasure';
 import { ResizableGroup, Panel, Separator } from '../../ui/Resizable/Resizable';
@@ -7,6 +8,7 @@ import {
   useNavigate,
   useParams,
   useLocation,
+  useNavigationType,
   useOutletContext,
   useSearchParams,
 } from 'react-router-dom';
@@ -18,19 +20,16 @@ import { useZero } from '../../../hooks/useZero';
 import { ChannelScopeType, isDeskChannelType } from '@xyne/shared';
 import { useAuthContextValues } from '../../../hooks/useAuth';
 import { mutators } from '../../../zero/mutators';
-import {
-  mixpanelService,
-  EVENTS,
-  EVENT_PROPERTIES,
-} from '../../../services/Analytics/mixpanelService';
 import { usePreviousChannelId } from '../../../hooks/usePreviousChannelId';
-import { useChannel, useGetChannelUserStatus } from '../../../hooks/useChannels';
+import { useChannel, useChannelParticipation } from '../../../hooks/useChannels';
 import { setLastVisitedChannel } from '../../../hooks/useLastVisitedChannel';
 import { useRouteContext } from '../../../hooks/useRouteContext';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { useIsInPanelWebview } from '../../../hooks/useIsInPanelWebview';
 import { useChannelDisplayName } from '../../../hooks/useChannelDisplayName';
 import { CallExternalChatPanel } from '../../Call/CallExternalChatPanel/CallExternalChatPanel';
+import { globalClickTracker } from '../../../services/Analytics/globalClickTracker';
+import { channelTrackingMetadata } from '../../../services/Analytics/channelTracking';
 
 interface ChatScreenContext {
   shouldStackThread?: boolean;
@@ -40,6 +39,9 @@ const ChatView = (): ReactElement => {
   const chatViewContainerRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
   const location = useLocation();
+  // POP = back/forward. Used to stop CHANNEL_VIEWED's `source` replaying a stale
+  // origin from history state (see the effect below).
+  const navigationType = useNavigationType();
   const { channelId, conversationId, workspaceId } = useParams<{
     channelId: string;
     conversationId?: string;
@@ -57,15 +59,15 @@ const ChatView = (): ReactElement => {
   const outletContext = useOutletContext<ChatScreenContext>();
   const shouldStackThreadFromParent = outletContext?.shouldStackThread || false;
 
-  // Track previous channelId to detect navigation changes
-  const prevChannelIdRef = useRef<string | undefined>(undefined);
+  // Last channel for which CHANNEL_VIEWED was recorded this mount.
+  const viewedChannelIdRef = useRef<string | undefined>(undefined);
 
   // Track previous channelId for navigation back on leave
   const previousChannelId = usePreviousChannelId(channelId);
 
   // Query channel data to check if it's a DM and if user's participation is closed
   const channel = useChannel(channelId || '');
-  const channelUserStatus = useGetChannelUserStatus(channelId || '');
+  const channelUserStatus = useChannelParticipation(channelId || '');
   const { baseRoute } = useRouteContext();
   const { isMobile } = usePlatform();
   const isInPanelWebview = useIsInPanelWebview();
@@ -94,36 +96,58 @@ const ChatView = (): ReactElement => {
   const { groupId } = useParams<{ groupId?: string }>();
   const isGroupPanelOpen = !!groupId;
 
-  // Reopen DM if user navigates to a closed DM (only on navigation, not on data updates)
+  // CHANNEL_VIEWED: one event per channel entry, whichever way the user got here
+  // (sidebar, search, mention, notification, deep link). Waits for the channel
+  // row so the name/scope can ride along, then latches on channelId so
+  // re-renders and thread navigation inside the same channel don't refire.
+  //
+  // `source` is the attribution: the navigating surface sets `state.trackSource`
+  // (see useWorkspaceNavigate, which forwards NavigateOptions untouched) and
+  // readTrackSource applies the rules: POP after the first load is the back
+  // button (history_pop) — React Router replays the ORIGINAL state on history
+  // navigation, so without this a back button would re-report whichever surface
+  // the user first arrived from; the router's `default` key marks the first
+  // load itself (deep link, refresh), which is `direct`, not history.
+  //
+  // No event label: for a DM the display name is the other person's name, and
+  // eventLabel is stored verbatim and unmasked. The channel dimensions below
+  // already carry everything reportable (channelTrackingMetadata drops the name
+  // for DM scopes on purpose).
   useEffect(() => {
-    // Only run when channelId changes (navigation), not on data updates
-    if (prevChannelIdRef.current === channelId) return;
-    prevChannelIdRef.current = channelId;
+    if (!channel || !channelId) return;
+    if (viewedChannelIdRef.current === channelId) return;
+    viewedChannelIdRef.current = channelId;
 
+    const source = readTrackSource(location.state, navigationType, location.key);
+
+    globalClickTracker.trackManualEvent('CHANNEL', 'CHANNEL_VIEWED', undefined, {
+      ...channelTrackingMetadata(channel),
+      openedInThread: !!conversationId,
+      source,
+    });
+  }, [channel, channelId, conversationId, location.state, location.key, navigationType]);
+
+  // Reopen a closed DM: its status loads async (absent from the channel-status map), so key on channelUserStatus with a per-channel ref rather than the single-shot navigation ref.
+  const reopenAttemptedForRef = useRef<string | undefined>(undefined);
+  useEffect(() => {
     if (!channel || !channelId) return;
 
     const isDM =
       channel.scopeType === ChannelScopeType.DM || channel.scopeType === ChannelScopeType.GROUP_DM;
-
-    // Track conversation opened (no sensitive data - only conversation type)
-    const conversationType =
-      channel.scopeType === ChannelScopeType.DM
-        ? EVENT_PROPERTIES.CONVERSATION_TYPES.DM
-        : channel.scopeType === ChannelScopeType.GROUP_DM
-          ? EVENT_PROPERTIES.CONVERSATION_TYPES.GROUP_DM
-          : EVENT_PROPERTIES.CONVERSATION_TYPES.CHANNEL;
-
-    mixpanelService.track(EVENTS.CONVERSATION_OPENED, {
-      type: conversationType,
-    });
-
     if (!isDM) return;
 
-    // If user's participation is closed, reopen it
-    if (channelUserStatus?.isClosed) {
+    // Already handled this channel this visit.
+    if (reopenAttemptedForRef.current === channelId) return;
+
+    // Status not resolved yet (closed DMs load via a fallback query); this effect re-runs when it changes.
+    if (channelUserStatus === undefined) return;
+
+    reopenAttemptedForRef.current = channelId;
+
+    if (channelUserStatus.isClosed) {
       zero.mutate(mutators.channel.reopenDm({ channelId, updatedAt: Date.now() }));
     }
-  }, [channel, channelId, context.userID, zero]);
+  }, [channel, channelId, channelUserStatus, zero]);
 
   // Save the current channelId as the last visited channel.
   useEffect(() => {

@@ -14,12 +14,28 @@ interface FileScope {
   id: string;
   name: string;
 }
+/** A folder scope. Sent to claw-auth as a single 'folder' attached_context
+ *  pointer — NOT expanded to a recursive file list here (xyneAIControllerV2.ts
+ *  doesn't do that); claw-auth resolves it itself, at Vespa-query time, since
+ *  Vespa's collectionId filter only ever matches a doc's ROOT collection.
+ *  The picker just tracks the id. */
+interface FolderScope {
+  id: string;
+  name: string;
+}
 
 interface ComposerCollectionPickerProps {
   collections: SelectedCollection[];
   fileScopes: FileScope[];
+  folderScopes: FolderScope[];
   onCollectionsChange: (collections: SelectedCollection[]) => void;
   onFileScopesChange: (fileScopes: FileScope[]) => void;
+  onFolderScopesChange: (folderScopes: FolderScope[]) => void;
+  /** Controlled open state. When passed, the picker's own "book" trigger is not
+   *  rendered — the composer opens it from the "+" menu's Collections row and
+   *  the popover anchors to wherever this component sits in the toolbar. */
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }
 
 /**
@@ -32,10 +48,23 @@ interface ComposerCollectionPickerProps {
 export function ComposerCollectionPicker({
   collections,
   fileScopes,
+  folderScopes,
   onCollectionsChange,
   onFileScopesChange,
+  onFolderScopesChange,
+  open: controlledOpen,
+  onOpenChange,
 }: ComposerCollectionPickerProps): ReactElement {
-  const [open, setOpen] = useState(false);
+  const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
+  const isControlled = controlledOpen !== undefined;
+  const open = isControlled ? controlledOpen : uncontrolledOpen;
+  const setOpen = useCallback(
+    (next: boolean) => {
+      if (isControlled) onOpenChange?.(next);
+      else setUncontrolledOpen(next);
+    },
+    [isControlled, onOpenChange],
+  );
   const [search, setSearch] = useState('');
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -85,12 +114,18 @@ export function ComposerCollectionPicker({
   }, [allSubfolders, currentFolderId, fileQuery]);
 
   const currentFiles = useMemo(() => {
+    // CollectionItem.id (cuid, "rowId" here) is the id attached_context 'file'
+    // items carry — see toAttachedContext in ContextPickerPanel.tsx. Filter on
+    // fileId (the stable UUID) existing so folders/placeholder rows are
+    // excluded, but store rowId as the scope's id.
     return (currentFolderItems ?? [])
       .map(it => ({
+        rowId: (it as { id?: string }).id ?? '',
         fileId: (it as { fileId?: string }).fileId ?? '',
         name: (it as { name: string }).name,
       }))
-      .filter(it => it.fileId && (!fileQuery || it.name.toLowerCase().includes(fileQuery)));
+      .filter(it => it.fileId && (!fileQuery || it.name.toLowerCase().includes(fileQuery)))
+      .map(({ rowId, name }) => ({ rowId, name }));
   }, [currentFolderItems, fileQuery]);
 
   // Reset navigation + search whenever the picker closes.
@@ -111,7 +146,7 @@ export function ComposerCollectionPicker({
     };
     document.addEventListener('mousedown', onClick);
     return () => document.removeEventListener('mousedown', onClick);
-  }, [open]);
+  }, [open, setOpen]);
 
   // Disambiguate single-click (select) from double-click (open).
   const clickTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -142,14 +177,14 @@ export function ComposerCollectionPicker({
   );
 
   const handleToggleFile = useCallback(
-    (file: { fileId: string; name: string }) => {
+    (file: { rowId: string; name: string }) => {
       // Toggle this file in/out of the multi-select set — keep the picker open
       // so several files (across folders) can be picked in one pass.
-      const isSelected = fileScopes.some(f => f.id === file.fileId);
+      const isSelected = fileScopes.some(f => f.id === file.rowId);
       onFileScopesChange(
         isSelected
-          ? fileScopes.filter(f => f.id !== file.fileId)
-          : [...fileScopes, { id: file.fileId, name: file.name }],
+          ? fileScopes.filter(f => f.id !== file.rowId)
+          : [...fileScopes, { id: file.rowId, name: file.name }],
       );
       // Keep the file's root collection in scope so the backend can resolve it.
       const root = navStack[0];
@@ -160,27 +195,51 @@ export function ComposerCollectionPicker({
     [fileScopes, collections, navStack, onFileScopesChange, onCollectionsChange],
   );
 
+  const handleFolderSingleClick = useCallback(
+    (folder: { id: string; name: string }) => {
+      if (clickTimer.current) return; // a double-click is in progress
+      clickTimer.current = setTimeout(() => {
+        clickTimer.current = null;
+        const isSelected = folderScopes.some(f => f.id === folder.id);
+        onFolderScopesChange(
+          isSelected
+            ? folderScopes.filter(f => f.id !== folder.id)
+            : [...folderScopes, { id: folder.id, name: folder.name }],
+        );
+        // Keep the folder's root collection in scope too, same as file picks —
+        // the backend resolves a folder id against its root collection.
+        const root = navStack[0];
+        if (!isSelected && root && !collections.some(c => c.id === root.id)) {
+          onCollectionsChange([...collections, root]);
+        }
+      }, 220);
+    },
+    [folderScopes, collections, navStack, onFolderScopesChange, onCollectionsChange],
+  );
+
   return (
     <div ref={containerRef} className='relative'>
-      <button
-        type='button'
-        onClick={() => setOpen(o => !o)}
-        aria-label='Select collections'
-        title='Select collections'
-        className={cn(
-          'inline-flex h-8 w-8 items-center justify-center rounded-full transition',
-          // Accent only while something is actually scoped — idle matches the
-          // neighbouring ToolbarButtons so the row reads as one set. Files count
-          // as a selection too: this picker sets both.
-          collections.length > 0 || fileScopes.length > 0
-            ? 'bg-secondary text-[#7C3AED]'
-            : 'text-muted-foreground hover:bg-secondary hover:text-foreground',
-        )}
-        data-track-category='XyneAI'
-        data-track-name='OPEN_COLLECTION_SELECTOR'
-      >
-        <BookOpen className='h-4 w-4' aria-hidden />
-      </button>
+      {!isControlled && (
+        <button
+          type='button'
+          onClick={() => setOpen(!open)}
+          aria-label='Select collections'
+          title='Select collections'
+          className={cn(
+            'inline-flex h-8 w-8 items-center justify-center rounded-full transition',
+            // Accent only while something is actually scoped — idle matches the
+            // neighbouring ToolbarButtons so the row reads as one set. Files count
+            // as a selection too: this picker sets both.
+            collections.length > 0 || fileScopes.length > 0 || folderScopes.length > 0
+              ? 'bg-secondary text-claw-ai-fg'
+              : 'text-muted-foreground hover:bg-secondary hover:text-foreground',
+          )}
+          data-track-category='XyneAI'
+          data-track-name='OPEN_COLLECTION_SELECTOR'
+        >
+          <BookOpen className='h-4 w-4' aria-hidden />
+        </button>
+      )}
 
       {open && (
         <div className='absolute bottom-full left-0 z-50 mb-2 w-72 overflow-hidden rounded-lg border border-border bg-popover shadow-lg'>
@@ -222,26 +281,34 @@ export function ComposerCollectionPicker({
                 </div>
               ) : (
                 <div className='py-1'>
-                  {currentSubfolders.map(folder => (
-                    <button
-                      key={folder.id}
-                      type='button'
-                      onDoubleClick={() => openNode(folder)}
-                      className='flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-accent'
-                      title='Double-click to open'
-                      data-track-category='XyneAI'
-                      data-track-name='OPEN_KB_FOLDER'
-                    >
-                      <Folder className='h-4 w-4 flex-shrink-0 text-[#7C3AED]' />
-                      <span className='flex-1 truncate'>{folder.name}</span>
-                      <ChevronRight className='h-4 w-4 flex-shrink-0 text-muted-foreground' />
-                    </button>
-                  ))}
-                  {currentFiles.map(file => {
-                    const isSelected = fileScopes.some(f => f.id === file.fileId);
+                  {currentSubfolders.map(folder => {
+                    const isSelected = folderScopes.some(f => f.id === folder.id);
                     return (
                       <button
-                        key={file.fileId}
+                        key={folder.id}
+                        type='button'
+                        onClick={() => handleFolderSingleClick(folder)}
+                        onDoubleClick={() => openNode(folder)}
+                        className={cn(
+                          'flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-accent',
+                          isSelected && 'bg-accent',
+                        )}
+                        title='Click to select · double-click to open'
+                        data-track-category='XyneAI'
+                        data-track-name='SELECT_KB_FOLDER'
+                      >
+                        <Folder className='h-4 w-4 flex-shrink-0 text-claw-ai-fg' />
+                        <span className='flex-1 truncate'>{folder.name}</span>
+                        {isSelected && <span className='text-xs text-claw-ai-fg'>Selected</span>}
+                        <ChevronRight className='h-4 w-4 flex-shrink-0 text-muted-foreground' />
+                      </button>
+                    );
+                  })}
+                  {currentFiles.map(file => {
+                    const isSelected = fileScopes.some(f => f.id === file.rowId);
+                    return (
+                      <button
+                        key={file.rowId}
                         type='button'
                         onClick={() => handleToggleFile(file)}
                         className={cn(
@@ -251,9 +318,9 @@ export function ComposerCollectionPicker({
                         data-track-category='XyneAI'
                         data-track-name='SELECT_FILE_SCOPE'
                       >
-                        <FileText className='h-4 w-4 flex-shrink-0 text-[#7C3AED]' />
+                        <FileText className='h-4 w-4 flex-shrink-0 text-claw-ai-fg' />
                         <span className='flex-1 truncate'>{file.name}</span>
-                        {isSelected && <span className='text-xs text-[#7C3AED]'>Selected</span>}
+                        {isSelected && <span className='text-xs text-claw-ai-fg'>Selected</span>}
                       </button>
                     );
                   })}
@@ -286,9 +353,9 @@ export function ComposerCollectionPicker({
                       data-track-category='XyneAI'
                       data-track-name='SELECT_COLLECTION'
                     >
-                      <BookOpen className='h-4 w-4 flex-shrink-0 text-[#7C3AED]' />
+                      <BookOpen className='h-4 w-4 flex-shrink-0 text-claw-ai-fg' />
                       <span className='flex-1 truncate'>{collection.name}</span>
-                      {isSelected && <span className='text-xs text-[#7C3AED]'>Selected</span>}
+                      {isSelected && <span className='text-xs text-claw-ai-fg'>Selected</span>}
                       <ChevronRight className='h-4 w-4 flex-shrink-0 text-muted-foreground' />
                     </button>
                   );

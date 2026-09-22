@@ -1,6 +1,7 @@
-import { Sparkles } from 'lucide-react';
+import { PencilEditAi } from '@xyne/icons';
 import type { ReactElement } from 'react';
 import { cn } from '../../../utils/classNames';
+import { Tooltip } from '../../ui/Tooltip';
 import { useTwinDraftBadge } from './TwinDraftBadgeContext';
 
 export function TwinDraftIndicator({
@@ -15,15 +16,19 @@ export function TwinDraftIndicator({
 
   const label = badge.action === 'react' ? 'Twin reaction' : 'Twin draft';
   return (
-    <span
-      className={cn(
-        'inline-flex items-center gap-1 rounded-full border border-border bg-muted/60 px-1.5 py-0.5 text-[10px] font-medium leading-none text-muted-foreground',
-        className,
-      )}
-      title='The Digital Twin drafted a response for you — open the thread to review it'
+    <Tooltip
+      content='The Digital Twin drafted a response for you — open the thread to review it'
+      side='top'
     >
-      <Sparkles size={9} className='shrink-0' />
-      {label}
-    </span>
+      <span
+        className={cn(
+          'inline-flex items-center gap-1 rounded-full border border-border bg-muted/60 px-1.5 py-0.5 text-[10px] font-medium leading-none text-muted-foreground',
+          className,
+        )}
+      >
+        <PencilEditAi size={9} className='shrink-0' />
+        {label}
+      </span>
+    </Tooltip>
   );
 }

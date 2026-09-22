@@ -346,12 +346,46 @@ export class MicrosoftDeskService {
         },
       });
 
-      // Reuse the project's default board (same pattern as Google) — no per-connection
-      // board/stages creation. If the project has no boards yet, boardId stays null.
-      const board = await tx.board.findFirst({
+      // Reuse the project's boards (same pattern as Google) — no per-connection
+      // board/stages creation. If the project has no boards yet, the mapping list is empty.
+      const boards = await tx.board.findMany({
         where: { projectId: channelData.projectId },
         orderBy: { createdAt: 'asc' },
+        select: { id: true },
       });
+      const board = boards[0] ?? null;
+
+      // Populate ChannelBoardMapping so downstream consumers can resolve
+      // channel→boards without going through channel.projectId.
+      // Default: explicit channelData.boardId if provided, else the first (oldest) board.
+      if (boards.length > 0) {
+        // Honour the requested boardId only when it actually belongs to this
+        // project's board set, otherwise fall back to the oldest board. Without
+        // this guard a requested boardId outside the project yields a mapping
+        // set with NO default row.
+        const defaultBoardId =
+          channelData.boardId && boards.some(b => b.id === channelData.boardId)
+            ? channelData.boardId
+            : boards[0].id;
+        if (channelData.boardId && channelData.boardId !== defaultBoardId) {
+          logger.warn(
+            `[CBM_DEFAULT] Requested boardId ${channelData.boardId} is not in project ${channelData.projectId} for channel ${channel.id}; ` +
+              `defaulting to oldest board ${defaultBoardId}.`,
+          );
+        }
+        await tx.channelBoardMapping.createMany({
+          data: boards.map(b => ({
+            channelId: channel.id,
+            boardId: b.id,
+            workspaceId: channelData.workspaceId,
+            isDefault: b.id === defaultBoardId,
+            createdBy: channelData.userId,
+            createdAt: now,
+            updatedAt: now,
+          })),
+          skipDuplicates: true,
+        });
+      }
 
       await tx.externalSource.create({
         data: {

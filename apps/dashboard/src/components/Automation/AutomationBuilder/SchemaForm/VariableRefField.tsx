@@ -32,7 +32,7 @@ export function VariableRefField({
         value={value ?? ''}
         onChange={e => onChange(e.target.value.length > 0 ? e.target.value : undefined)}
         placeholder={placeholder}
-        data-track-category='Automation'
+        data-track-category='automation-builder'
         data-track-name='VariableRefFieldInput'
         className='h-9 w-full flex-1 rounded-md border border-input bg-transparent px-3 text-sm text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground/40'
       />

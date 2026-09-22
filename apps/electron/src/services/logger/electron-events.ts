@@ -35,6 +35,7 @@ const ElectronEvent = {
     MEETING_APP_IDENTIFIED: 'meeting_app_identified',
     MEETING_POPUP_SHOWN: 'meeting_popup_shown',
     MEETING_POPUP_SKIPPED_LOGGED_OUT: 'meeting_popup_skipped_logged_out',
+    MEETING_POPUP_SKIPPED_RECORDING: 'meeting_popup_skipped_recording',
     MEETING_POPUP_DISMISSED: 'meeting_popup_dismissed',
     MEETING_POPUP_START_RECORDING: 'meeting_popup_start_recording',
     MEETING_POPUP_HIDDEN: 'meeting_popup_hidden',
@@ -56,6 +57,9 @@ const ElectronEvent = {
     // Security guard rail events
     OPEN_EXTERNAL_BLOCKED: 'open_external_blocked',
     DEEP_LINK_INVITATION_REJECTED: 'deep_link_invitation_rejected',
+    DEEP_LINK_PARAM_REJECTED: 'deep_link_param_rejected',
+    AGENT_AUTH_PEER_MISMATCH: 'agent_auth_peer_mismatch',
+    AGENT_AUTH_COOLDOWN_BLOCKED: 'agent_auth_cooldown_blocked',
     } as const;
 
 export type ElectronEventType = (typeof ElectronEvent)[keyof typeof ElectronEvent];

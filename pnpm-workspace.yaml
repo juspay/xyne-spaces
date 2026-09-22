@@ -10,6 +10,7 @@ packages:
   - apps/backend/eslint-rules
   - apps/dashboard
   - apps/dashboard-external
+  - apps/dashboard-edge
   - apps/electron
   - apps/site
   - apps/xyne-claw

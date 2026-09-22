@@ -28,6 +28,7 @@ import { useGetChannelUserStatus } from '../../../hooks/useChannels';
 import Badge from '../../ui/Badge';
 import Avatar from '../../ui/Avatar/Avatar';
 import Tooltip from '../../ui/Tooltip';
+
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -38,6 +39,7 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuSubContent,
 } from '../../ui/dropdown-menu';
+import { AddToStreamMenuItem } from '../../Streams/components/AddToStreamMenu/AddToStreamMenu';
 import { stripHtml } from '../../xyne-desk/EmailComposer/helpers';
 import { cn } from '../../../utils/classNames';
 import { renderEmoji } from '../../../utils/customEmojiUtils';
@@ -50,6 +52,7 @@ import { StatusIndicator } from '../../ui/StatusIndicator';
 import { standaloneNavigate } from '../../../utils/electronApp';
 import { SupportChannelBadge } from '../SupportChannelBadge';
 import { useChannelHasSlashCommandArtifactSideEffect } from '../SlashCommandArtifactSideEffects';
+import { channelTrackingMetadata } from '../../../services/Analytics/channelTracking';
 
 interface ChannelItemV2Props {
   channel: VisibleChannel;
@@ -158,7 +161,14 @@ const ChannelItemV2 = memo(
     const handleChannelClick = (e: React.MouseEvent<HTMLAnchorElement>): void => {
       e.preventDefault();
       e.stopPropagation();
-      standaloneNavigate(navigate, `/chat/dir/${channel.id}`, { event: e });
+      // `state` must ride THIS call, not the <Link>: preventDefault above means
+      // the Link's own navigation (and its state) never runs. standaloneNavigate
+      // spreads everything but `event` into navigate(), so state reaches
+      // location.state and CHANNEL_VIEWED can attribute the open.
+      standaloneNavigate(navigate, `/chat/dir/${channel.id}`, {
+        event: e,
+        state: { trackSource: isDM ? 'sidebar_dm' : 'sidebar_channel' },
+      });
     };
 
     const draftTooltipContent = (
@@ -178,10 +188,11 @@ const ChannelItemV2 = memo(
         onClick={handleChannelClick}
         data-track-category='CHAT_SIDEBAR'
         data-track-name='OPEN_CHANNEL'
+        data-track-label='Open channel'
         data-track-metadata={JSON.stringify({
-          channelId: channel.id,
-          channelName: displayName,
+          ...channelTrackingMetadata(channel),
           isDM,
+          source: isDM ? 'sidebar_dm' : 'sidebar_channel',
         })}
       >
         <div
@@ -209,12 +220,13 @@ const ChannelItemV2 = memo(
                 statusEmoji={dmUser?.statusEmoji}
                 statusContent={dmUser?.statusContent}
                 statusExpiryAt={dmUser?.statusExpiryAt}
+                activityStatus={dmUser?.activityStatus}
                 size='sm'
                 showOnHover={true}
               />
             )}
           </span>
-          {hasActiveCall && (
+          {hasActiveCall && !isDM && (
             <span className='shrink-0 rounded-full bg-status-success px-2 py-1 text-background'>
               <Headphones size={14} />
             </span>
@@ -257,6 +269,7 @@ const ChannelItemV2 = memo(
                 onCloseAutoFocus={e => e.preventDefault()}
                 className='min-w-[180px]'
               >
+                <AddToStreamMenuItem source={{ kind: 'channel', channelId: channel.id }} />
                 <DropdownMenuSub>
                   <DropdownMenuSubTrigger className='gap-2'>
                     <FolderArrowRight size={14} className='shrink-0' />
@@ -275,6 +288,8 @@ const ChannelItemV2 = memo(
                             e.stopPropagation();
                             onMoveToSection?.(channel.id, section.id);
                           }}
+                          data-track-category='CHAT_SIDEBAR'
+                          data-track-name='MOVE_CHANNEL_TO_SECTION'
                         >
                           {section.emoji && (
                             <span className='shrink-0'>{renderEmoji(section.emoji, 'size-4')}</span>
@@ -298,6 +313,8 @@ const ChannelItemV2 = memo(
                         e.stopPropagation();
                         onMoveToSection?.(channel.id, null);
                       }}
+                      data-track-category='CHAT_SIDEBAR'
+                      data-track-name='REMOVE_CHANNEL_FROM_SECTION'
                     >
                       <FolderRemove size={14} className='shrink-0' />
                       <span className='flex-1'>Remove from section</span>
@@ -312,11 +329,12 @@ const ChannelItemV2 = memo(
               type='button'
               className='group-hover:block hidden p-1 rounded-md -blue'
               onClick={handleCloseDm}
+              data-ph-capture-attribute-track-id='close_dm_channel'
               data-track-category='CHAT_SIDEBAR'
               data-track-name='CLOSE_DM_CHANNEL'
+              data-track-label='Close DM channel'
               data-track-metadata={JSON.stringify({
-                channelId: channel.id,
-                channelName: displayName,
+                ...channelTrackingMetadata(channel),
               })}
             >
               <MultipleCrossCancelDefault size={14} className='shrink-0' />

@@ -28,6 +28,7 @@ export function ToolboxStep({ state, update }: Props): ReactElement {
             direct: next.direct,
             custom: next.custom,
             gateway: next.gateway ?? [],
+            callableAgents: state.tools.callableAgents,
           },
         })
       }

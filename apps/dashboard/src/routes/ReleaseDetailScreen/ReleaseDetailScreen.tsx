@@ -1,5 +1,5 @@
 /* eslint-disable local-rules/require-tracking-on-click */
-import { ReactElement, useEffect, useMemo, useRef, useState } from 'react';
+import { ReactElement, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams, useLocation } from 'react-router-dom';
 import {
   ArrowLeft,
@@ -12,33 +12,34 @@ import {
   RefreshCw,
   Rocket,
   Server,
+  Sparkles,
   SquareArrowOutUpRight,
   TestTube,
   Ticket as TicketIcon,
 } from 'lucide-react';
 import * as Tabs from '@radix-ui/react-tabs';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
-import { FormContextType, FormEntityType } from '@xyne/shared';
+import { FormContextType, FormEntityType, type VCSProviderType } from '@xyne/shared';
 import { toast } from 'sonner';
+import { getApiErrorMessage } from '../../utils/apiError';
 
 import { useCachedQuery } from '../../hooks/useCachedQuery';
 import { useZero } from '../../hooks/useZero';
 import { useUsers } from '../../hooks/useUsers';
 import { useRouteContext } from '../../hooks/useRouteContext';
+import { useCanManageRelease } from '../../hooks/usePermissions';
 import { queries } from '../../zero/queries';
 import { mutators } from '../../zero/mutators';
 import { resolveDisplayFormFields } from '../../utils/board/resolveDisplayFormFields';
 import { ChangeSections, type ChangeSectionsGroup } from '../../components/Release/ChangeCards';
 import { ReleaseStagePicker } from '../../components/Release/ReleaseStagePicker';
-import { DevTicketStagePicker } from '../../components/Release/DevTicketStagePicker';
-import { QAOwnerPicker } from '../../components/Release/QAOwnerPicker';
+import { ReleaseDevTicketsTable } from '../../components/Release/ReleaseDevTicketsTable';
 import {
   buildValuesByChangeId,
   buildGroupedByApp,
   buildStagesByBoard,
   filterGroupsByKind,
   buildChangeCountsByKey,
-  type ChangeCounts,
 } from '../../components/Release/releaseChanges.utils';
 import { cn } from '../../utils/classNames';
 import { Dialog } from '../../components/ui/Dialog';
@@ -49,12 +50,31 @@ import {
   buildDevTicketsCsvFilename,
   buildReleaseDetailDevTicketRows,
   downloadCsvFile,
-  devTicketAddableCellValue,
+  groupDevTicketRowsByRepo,
   CORE_ADDABLE_DEV_TICKET_COLUMNS,
 } from './releaseReport.utils';
 import { apiInstance } from '../../services/clients/apiClient';
+import { CanvasPreview } from '../../components/Canvas/CanvasPreview/CanvasPreview';
 
-type TabValue = 'testing' | 'envs' | 'migrations' | 'timeline';
+type TabValue = 'testing' | 'envs' | 'migrations' | 'timeline' | 'releasenotes';
+
+import {
+  ReleaseInsightsPanel,
+  readReleaseInsights,
+  readIsGeneratingInsights,
+} from '../../components/Release/ReleaseInsightsPanel';
+
+// Shape returned by GET /commits/analyze/repos/:releaseId. Mirrors the
+// non_zero release_repositories row; structurally compatible with the
+// RepoRangeInput the grouping util consumes.
+type ReleaseRepositoryRow = {
+  id: string;
+  releaseId: string;
+  mainReleaseBoardId: string;
+  branch: string;
+  deployedCommit: string;
+  newCommit: string;
+};
 
 // Map ReleaseEventType (from shared schema) to icon + color for the timeline.
 // Kept here (not exported) since the timeline is the only consumer right now.
@@ -190,27 +210,7 @@ function groupTimelineEvents(
 // Page size for the Testing tab's ART (dev-ticket) table. CSV export bypasses
 // this and fetches the whole release on demand.
 const ART_PAGE_SIZE = 25;
-
-// ─── ChangeCountBadge ─────────────────────────────────────────────────────────
-const ChangeCountBadge = ({ counts }: { counts?: ChangeCounts | undefined }): ReactElement => {
-  if (!counts || (counts.env === 0 && counts.mig === 0)) {
-    return <span className='text-muted-foreground'>—</span>;
-  }
-  return (
-    <span className='inline-flex items-center gap-1 text-xs'>
-      {counts.env > 0 && (
-        <span className='px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-200'>
-          {counts.env} env
-        </span>
-      )}
-      {counts.mig > 0 && (
-        <span className='px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-200'>
-          {counts.mig} mig
-        </span>
-      )}
-    </span>
-  );
-};
+const ART_FILTER_LOAD_ALL = 1000;
 
 // ─── Tab trigger helper ───────────────────────────────────────────────────────
 const TabTrigger = ({
@@ -234,7 +234,11 @@ const TabTrigger = ({
 );
 
 const isTabValue = (value: unknown): value is TabValue =>
-  value === 'testing' || value === 'envs' || value === 'migrations' || value === 'timeline';
+  value === 'testing' ||
+  value === 'envs' ||
+  value === 'migrations' ||
+  value === 'timeline' ||
+  value === 'releasenotes';
 
 // ─── ReleaseDetailScreen ──────────────────────────────────────────────────────
 const ReleaseDetailScreen = (): ReactElement => {
@@ -259,6 +263,8 @@ const ReleaseDetailScreen = (): ReactElement => {
   >([null]);
   const artStart = artCursorStack[artCursorStack.length - 1] ?? null;
   const artPageIndex = artCursorStack.length - 1;
+
+  const [filtersLoadAll, setFiltersLoadAll] = useState(false);
 
   // Export is an imperative full-release read rather than a cached subscription.
   // The request token prevents an old request from downloading or updating state
@@ -294,14 +300,25 @@ const ReleaseDetailScreen = (): ReactElement => {
     queries.getFormEntityValuesByEntityId({ entityId: releaseTicketId ?? '' }),
     { enabled: !!releaseTicketId },
   );
-  // Added-column keys (persisted on the release ticket metadata). Read above the
-  // ART query since they decide whether it syncs the heavy column relations.
+  // Column config lives on the release board so it persists across all its releases.
+  const [releaseBoards] = useCachedQuery(
+    queries.boardsByIds({ boardIds: releaseTicket?.boardId ? [releaseTicket.boardId] : [] }),
+    { enabled: !!releaseTicket?.boardId },
+  );
+  const releaseBoard = releaseBoards?.[0];
+
   const persistedColumnKeys = useMemo(() => {
-    const md = releaseTicket?.metadata;
-    if (!md || typeof md !== 'object' || Array.isArray(md)) return [];
-    const value = (md as Record<string, unknown>)['devTicketColumns'];
-    return Array.isArray(value) ? value.filter((k): k is string => typeof k === 'string') : [];
-  }, [releaseTicket?.metadata]);
+    const read = (md: unknown): string[] | null => {
+      if (!md || typeof md !== 'object' || Array.isArray(md)) return null;
+      const value = (md as Record<string, unknown>)['devTicketColumns'];
+      return Array.isArray(value) ? value.filter((k): k is string => typeof k === 'string') : null;
+    };
+    // Board-level picks win; fall back to the pre-board-level location on the release ticket.
+    return read(releaseBoard?.metadata) ?? read(releaseTicket?.metadata) ?? [];
+  }, [releaseBoard?.metadata, releaseTicket?.metadata]);
+  // Column picks are saved on the release board, which board.update gates behind release-manage
+  // access — hide the control for everyone else instead of letting the save fail.
+  const canManageRelease = useCanManageRelease();
 
   const [selectedColumnKeys, setSelectedColumnKeys] = useState<string[]>([]);
   useEffect(() => {
@@ -321,18 +338,69 @@ const ReleaseDetailScreen = (): ReactElement => {
   const [artPage] = useCachedQuery(
     queries.applicationReleaseTicketsByReleaseId({
       releaseId: releaseTicketId ?? '',
-      limit: ART_PAGE_SIZE + 1,
-      start: artStart,
+      limit: filtersLoadAll ? ART_FILTER_LOAD_ALL : ART_PAGE_SIZE + 1,
+      start: filtersLoadAll ? null : artStart,
       includeColumnData: needsDevTicketColumnData,
     }),
     { enabled: !!releaseTicketId },
   );
-  const artHasMore = (artPage?.length ?? 0) > ART_PAGE_SIZE;
+  // No pager in load-all mode, so don't trim to a page — show every loaded row.
+  const artHasMore = !filtersLoadAll && (artPage?.length ?? 0) > ART_PAGE_SIZE;
   const artRows = useMemo(
     () => (artHasMore ? (artPage ?? []).slice(0, ART_PAGE_SIZE) : (artPage ?? [])),
     [artPage, artHasMore],
   );
 
+  // release_repositories lives in the non_zero schema (server-only, not
+  // Zero-replicated), so it's fetched over HTTP instead of synced via Zero.
+  // Refetched after a re-run — the only in-screen action that changes these rows.
+  const [releaseRepositories, setReleaseRepositories] = useState<ReleaseRepositoryRow[]>([]);
+  const [analysisCanvasId, setAnalysisCanvasId] = useState<string | null>(null);
+  const fetchReleaseRepositories = useCallback(async (): Promise<void> => {
+    if (!releaseTicketId) {
+      setReleaseRepositories([]);
+      setAnalysisCanvasId(null);
+      return;
+    }
+    // Discard a stale response if the active release changed mid-flight.
+    const requestedReleaseId = releaseTicketId;
+    try {
+      const response = await apiInstance.get<{
+        repos: ReleaseRepositoryRow[];
+        analysisCanvasId?: string | null;
+      }>(`/commits/analyze/repos/${releaseTicketId}`);
+      if (activeReleaseIdRef.current !== requestedReleaseId) return;
+      setReleaseRepositories(response.data?.repos ?? []);
+      setAnalysisCanvasId(response.data?.analysisCanvasId ?? null);
+    } catch {
+      if (activeReleaseIdRef.current !== requestedReleaseId) return;
+      setReleaseRepositories([]);
+      setAnalysisCanvasId(null);
+      toast.error('Could not load the repository breakdown for this release. Try refreshing.');
+    }
+  }, [releaseTicketId]);
+  useEffect(() => {
+    void fetchReleaseRepositories();
+  }, [fetchReleaseRepositories]);
+  const [applications] = useCachedQuery(
+    queries.applicationsByProjectId({ projectId: projectId ?? '' }),
+    { enabled: !!projectId },
+  );
+  const [boards] = useCachedQuery(queries.boardsListByProject({ projectId: projectId ?? '' }), {
+    enabled: !!projectId,
+  });
+  // repoUrl → stored vcsProvider (via the app's main release board) for the badge.
+  const vcsProviderByRepoUrl = useMemo(() => {
+    const byBoard = new Map((boards ?? []).map(b => [b.id, b.vcsProvider ?? null]));
+    const map = new Map<string, VCSProviderType | null>();
+    const apps = applications instanceof Error ? [] : (applications ?? []);
+    for (const app of apps) {
+      if (app.repoUrl && app.mainReleaseBoardId && !map.has(app.repoUrl)) {
+        map.set(app.repoUrl, byBoard.get(app.mainReleaseBoardId) ?? null);
+      }
+    }
+    return map;
+  }, [applications, boards]);
   const [releaseChanges] = useCachedQuery(
     queries.releaseChangesByReleaseId({ releaseId: releaseTicketId ?? '' }),
     { enabled: !!releaseTicketId },
@@ -375,8 +443,8 @@ const ReleaseDetailScreen = (): ReactElement => {
   }, [releaseFormValues]);
 
   const groupedByApp = useMemo<ChangeSectionsGroup[]>(
-    () => buildGroupedByApp(releaseChanges),
-    [releaseChanges],
+    () => buildGroupedByApp(releaseChanges, vcsProviderByRepoUrl),
+    [releaseChanges, vcsProviderByRepoUrl],
   );
   const envsByApp = useMemo(() => filterGroupsByKind(groupedByApp, 'ENV'), [groupedByApp]);
   const migrationsByApp = useMemo(
@@ -408,6 +476,23 @@ const ReleaseDetailScreen = (): ReactElement => {
     [artRows, users, changeCountsByDevTicket],
   );
 
+  // Grouping keeps one row per (ticket, app board) so a cross-repo ticket reaches
+  // every repo group; the flat table/CSV use the one-row-per-ticket set above.
+  const groupedDevTicketRows = useMemo(
+    () =>
+      buildReleaseDetailDevTicketRows(artRows, users, changeCountsByDevTicket, {
+        dedupeBy: 'ticketAndBoard',
+      }),
+    [artRows, users, changeCountsByDevTicket],
+  );
+
+  const repoCount = releaseRepositories?.length ?? 0;
+  const isMultiRepo = repoCount > 1;
+  const devTicketRepoGroups = useMemo(
+    () => groupDevTicketRowsByRepo(groupedDevTicketRows, releaseRepositories, applications),
+    [groupedDevTicketRows, releaseRepositories, applications],
+  );
+
   // Per-board stage lists for release status controls.
   const stagesByBoard = useMemo(() => {
     return buildStagesByBoard(stages);
@@ -426,15 +511,48 @@ const ReleaseDetailScreen = (): ReactElement => {
         {},
       );
       if (response.data?.success) {
+        void fetchReleaseRepositories();
         toast.success('Commit analysis re-run — check the conversation for the new summary.');
       } else {
         toast.error(response.data?.error ?? 'Re-run failed');
       }
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Re-run failed';
-      toast.error(msg);
+      toast.error(getApiErrorMessage(err, 'Re-run failed'));
     } finally {
       setIsReRunning(false);
+    }
+  };
+
+  const releaseInsights = useMemo(
+    () => readReleaseInsights(releaseTicket?.metadata),
+    [releaseTicket?.metadata],
+  );
+  const isGeneratingInsights = useMemo(
+    () => readIsGeneratingInsights(releaseTicket?.metadata),
+    [releaseTicket?.metadata],
+  );
+
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  // Re-analyzing overwrites existing insights, so gate it behind a confirm.
+  // First-time analysis (no insights yet) runs straight away — nothing to lose.
+  const [confirmReanalyze, setConfirmReanalyze] = useState(false);
+  const handleAnalyzeRelease = async (): Promise<void> => {
+    if (!releaseTicket?.id) return;
+    setIsAnalyzing(true);
+    try {
+      const response = await apiInstance.post<{ success: boolean; error?: string }>(
+        `/tickets/${releaseTicket.id}/release-insights`,
+        {},
+      );
+      if (response.data?.success) {
+        toast.success('Release insights generated.');
+      } else {
+        toast.error(response.data?.error ?? 'Analysis failed');
+      }
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, 'Analysis failed'));
+    } finally {
+      setIsAnalyzing(false);
     }
   };
 
@@ -489,6 +607,25 @@ const ReleaseDetailScreen = (): ReactElement => {
     ? `${releaseTicket.xyneId} · ${releaseTicket.title || 'Release ticket'}`
     : releaseTicket?.title || 'Release';
 
+  const returnToUrl = (location.state as { returnToUrl?: string } | null)?.returnToUrl;
+  const releaseTicketChannelId = (releaseTicket as { channelId?: string | null } | undefined)
+    ?.channelId;
+  const releaseTicketConversationId = (
+    releaseTicket as { conversationId?: string | null } | undefined
+  )?.conversationId;
+  const canGoToTicket = !!returnToUrl || !!(releaseTicketChannelId && releaseTicketConversationId);
+  const goToReleaseTicket = (): void => {
+    if (returnToUrl && /^\/(?![/\\])/.test(returnToUrl)) {
+      void navigate(returnToUrl);
+      return;
+    }
+    if (releaseTicketChannelId && releaseTicketConversationId && releaseTicketId) {
+      void navigate(
+        `${baseRoute}/${releaseTicketChannelId}/${releaseTicketConversationId}/${releaseTicketId}?selectedTab=details`,
+      );
+    }
+  };
+
   const exportDevTickets = async (): Promise<void> => {
     if (isExportingArt) return;
 
@@ -540,16 +677,11 @@ const ReleaseDetailScreen = (): ReactElement => {
       : selectedColumnKeys.filter(k => k !== key);
     setSelectedColumnKeys(nextKeys);
 
-    const md = releaseTicket?.metadata;
-    const base =
-      md && typeof md === 'object' && !Array.isArray(md) ? (md as Record<string, unknown>) : {};
+    const boardId = releaseTicket?.boardId;
+    if (!boardId) return;
     void (async (): Promise<void> => {
       const res = await zero.mutate(
-        mutators.ticket.update({
-          id: releaseTicketId,
-          metadata: { ...base, devTicketColumns: nextKeys },
-          updatedAt: Date.now(),
-        }),
+        mutators.board.update({ boardId, devTicketColumns: nextKeys, timestamp: Date.now() }),
       ).server;
       if (res.type === 'error') {
         toast.error('Failed to save columns');
@@ -572,8 +704,13 @@ const ReleaseDetailScreen = (): ReactElement => {
         <div className='max-w-none'>
           <button
             onClick={() =>
-              void navigate(`/listProjects/${projectId}`, { state: { tab: 'release' } })
+              void navigate(`/listProjects/${projectId}`, {
+                // 'releases' = the Releases list in release-manager mode ('release' is Repositories).
+                state: { tab: 'releases', from: 'releaseManager' },
+              })
             }
+            data-track-category='Release'
+            data-track-name='BACK_TO_PROJECT_RELEASES'
             className='flex items-center gap-2 text-muted-foreground hover:text-foreground mb-6 transition-colors'
           >
             <ArrowLeft size={20} />
@@ -584,18 +721,37 @@ const ReleaseDetailScreen = (): ReactElement => {
             {/* Header */}
             <div className='flex items-start justify-between gap-4'>
               <h1 className='text-2xl font-bold text-foreground'>{releaseLabel}</h1>
-              <button
-                type='button'
-                onClick={() => {
-                  const w = window.open(window.location.href, '_blank');
-                  w?.focus();
-                }}
-                className='shrink-0 p-1.5 rounded text-muted-foreground hover:text-foreground hover:bg-muted transition-colors'
-                title='Open in new window'
-                aria-label='Open in new window'
-              >
-                <SquareArrowOutUpRight size={16} />
-              </button>
+              <div className='flex items-center gap-2 shrink-0'>
+                {canGoToTicket && (
+                  <button
+                    type='button'
+                    onClick={goToReleaseTicket}
+                    data-track-event='BUTTON_CLICK'
+                    data-track-category='Release'
+                    data-track-name='GoToReleaseTicket'
+                    data-testid='go-to-release-ticket'
+                    className='inline-flex items-center gap-1.5 rounded border border-border px-3 py-1.5 text-sm font-medium text-foreground hover:bg-muted transition-colors'
+                    title='Open the release ticket in its channel'
+                  >
+                    <TicketIcon size={15} />
+                    Go to ticket
+                  </button>
+                )}
+                <button
+                  type='button'
+                  onClick={() => {
+                    const w = window.open(window.location.href, '_blank');
+                    w?.focus();
+                  }}
+                  data-track-category='Release'
+                  data-track-name='OPEN_RELEASE_IN_NEW_WINDOW'
+                  className='p-1.5 rounded text-muted-foreground hover:text-foreground hover:bg-muted transition-colors'
+                  title='Open in new window'
+                  aria-label='Open in new window'
+                >
+                  <SquareArrowOutUpRight size={16} />
+                </button>
+              </div>
             </div>
 
             {releaseTicket && (
@@ -605,6 +761,7 @@ const ReleaseDetailScreen = (): ReactElement => {
                   <ReleaseStagePicker
                     ticketId={releaseTicket.id}
                     stageName={releaseTicket.stageName}
+                    statusV2={releaseTicket.statusV2}
                     boardId={releaseTicket.boardId}
                     stages={stagesByBoard.get(releaseTicket.boardId) ?? []}
                   />
@@ -615,6 +772,7 @@ const ReleaseDetailScreen = (): ReactElement => {
                   </span>
                 )}
                 <span>· Created {new Date(releaseTicket.createdAt).toLocaleString()}</span>
+                {isMultiRepo && <span>· {repoCount} repositories</span>}
               </div>
             )}
 
@@ -643,12 +801,15 @@ const ReleaseDetailScreen = (): ReactElement => {
                 <TabTrigger value='timeline' activeTab={activeTab}>
                   Timeline
                 </TabTrigger>
+                <TabTrigger value='releasenotes' activeTab={activeTab}>
+                  Release notes
+                </TabTrigger>
               </Tabs.List>
 
               {/* Dev Tickets tab */}
               <Tabs.Content value='testing' className='mt-6 outline-none'>
                 <div className='mb-3 flex flex-wrap justify-end gap-2'>
-                  {availableColumns.length > 0 && (
+                  {canManageRelease && availableColumns.length > 0 && (
                     <DropdownMenu.Root>
                       <DropdownMenu.Trigger asChild>
                         <button
@@ -760,7 +921,7 @@ const ReleaseDetailScreen = (): ReactElement => {
                     className='inline-flex items-center gap-2 rounded border border-border px-3 py-1.5 text-sm font-medium text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50'
                   >
                     <Download size={15} />
-                    {isExportingArt ? 'Preparing…' : 'Export as CSV'}
+                    {isExportingArt ? 'Preparing…' : 'Export all'}
                   </button>
                 </div>
                 {!artRows || artRows.length === 0 ? (
@@ -771,130 +932,42 @@ const ReleaseDetailScreen = (): ReactElement => {
                     </p>
                   </div>
                 ) : (
-                  <div className='thin-scrollbar overflow-x-auto rounded-lg border border-border'>
-                    <table className='w-max min-w-full text-sm [&_td]:whitespace-nowrap [&_th]:whitespace-nowrap'>
-                      <thead className='bg-muted text-left'>
-                        <tr>
-                          <th className='sticky left-0 z-10 w-[110px] bg-muted px-4 py-2 font-medium'>
-                            Ticket Id
-                          </th>
-                          <th className='sticky left-[110px] z-10 min-w-[220px] border-r border-border bg-muted px-4 py-2 font-medium'>
-                            Title
-                          </th>
-                          <th className='px-4 py-2 font-medium'>PR</th>
-                          <th className='px-4 py-2 font-medium'>Dev Owner</th>
-                          <th className='px-4 py-2 font-medium'>Type</th>
-                          <th className='px-4 py-2 font-medium min-w-[160px]'>Status</th>
-                          <th className='px-4 py-2 font-medium'>Changes</th>
-                          <th className='px-4 py-2 font-medium'>QA Owner</th>
-                          {selectedColumns.map(col => (
-                            <th key={col.key} className='min-w-[120px] px-4 py-2 font-medium'>
-                              {col.label}
-                            </th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {devTicketRows.map(row => {
-                          return (
-                            <tr key={row.internalTicketId} className='border-t border-border'>
-                              <td className='sticky left-0 z-10 w-[110px] bg-background px-4 py-2 font-mono text-xs'>
-                                {row.internalTicketId && row.channelId && row.conversationId ? (
-                                  <button
-                                    className='text-primary hover:underline cursor-pointer'
-                                    onClick={() =>
-                                      void navigate(
-                                        `${baseRoute}/${row.channelId}/${row.conversationId}/${row.internalTicketId}?selectedTab=details`,
-                                      )
-                                    }
-                                  >
-                                    {row.ticketId}
-                                  </button>
-                                ) : (
-                                  <span className='text-muted-foreground'>{row.ticketId}</span>
-                                )}
-                              </td>
-                              <td
-                                title={row.title}
-                                className='sticky left-[110px] z-10 min-w-[220px] max-w-[320px] truncate border-r border-border bg-background px-4 py-2'
-                              >
-                                {row.title}
-                              </td>
-                              <td className='px-4 py-2'>
-                                {row.prId && row.prUrl ? (
-                                  <a
-                                    href={row.prUrl}
-                                    target='_blank'
-                                    rel='noopener noreferrer'
-                                    className='text-primary hover:underline'
-                                  >
-                                    #{row.prId}
-                                  </a>
-                                ) : (
-                                  <span className='text-muted-foreground'>—</span>
-                                )}
-                              </td>
-                              <td className='px-4 py-2 text-muted-foreground'>{row.devOwner}</td>
-                              <td className='px-4 py-2'>
-                                <div className='flex items-center gap-1.5'>
-                                  <span className='text-xs px-2 py-0.5 rounded bg-muted'>
-                                    {row.type}
-                                  </span>
-                                  {row.isHotfix && (
-                                    <span className='text-xs px-2 py-0.5 rounded font-medium bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400'>
-                                      🔥 Hotfix
-                                    </span>
-                                  )}
-                                </div>
-                              </td>
-                              <td className='px-4 py-2'>
-                                <DevTicketStagePicker
-                                  ticketId={row.internalTicketId}
-                                  stageName={row.status}
-                                  stages={row.boardId ? (stagesByBoard.get(row.boardId) ?? []) : []}
-                                  artId={row.artId}
-                                  onCancelled={stage =>
-                                    failureDialog.openFor(
-                                      row.artId,
-                                      row.title,
-                                      stage,
-                                      row.failureReason ?? '',
-                                    )
-                                  }
-                                />
-                              </td>
-                              <td className='px-4 py-2 text-xs'>
-                                <ChangeCountBadge counts={row.changeCounts} />
-                              </td>
-                              <td className='px-4 py-2'>
-                                <QAOwnerPicker
-                                  artId={row.artId}
-                                  testedBy={row.testedBy}
-                                  currentUserName={row.testedBy ? row.qaOwner : null}
-                                />
-                              </td>
-                              {selectedColumns.map(col => (
-                                <td
-                                  key={col.key}
-                                  title={devTicketAddableCellValue(row, col.key)}
-                                  className='min-w-[120px] max-w-[240px] truncate px-4 py-2 text-muted-foreground'
-                                >
-                                  {devTicketAddableCellValue(row, col.key)}
-                                </td>
-                              ))}
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                    {(artHasMore || artPageIndex > 0) && (
-                      <div className='flex items-center justify-end gap-3 border-t border-border px-4 py-2 text-sm'>
+                  <>
+                    <ReleaseDevTicketsTable
+                      key={releaseTicketId}
+                      devTicketRows={devTicketRows}
+                      repoGroups={devTicketRepoGroups}
+                      isMultiRepo={isMultiRepo}
+                      selectedColumns={selectedColumns}
+                      stagesByBoard={stagesByBoard}
+                      onCancelledStage={(row, stage) =>
+                        failureDialog.openFor(row.artId, row.title, stage, row.failureReason ?? '')
+                      }
+                      baseRoute={baseRoute}
+                      releaseTicketXyneId={releaseTicket?.xyneId}
+                      releaseVersion={releaseVersion}
+                      onFiltersActiveChange={active => {
+                        setFiltersLoadAll(active);
+                        if (active) setArtCursorStack([null]);
+                      }}
+                    />
+                    {filtersLoadAll && (artPage?.length ?? 0) >= ART_FILTER_LOAD_ALL && (
+                      <div className='mt-3 rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-2 text-xs text-amber-700 dark:text-amber-400'>
+                        Filtering the newest {ART_FILTER_LOAD_ALL} dev tickets — this release has
+                        more, so matches in older rows may not appear. Narrow by repo or board to
+                        see them.
+                      </div>
+                    )}
+                    {!filtersLoadAll && (artHasMore || artPageIndex > 0) && (
+                      <div className='mt-3 flex items-center justify-end gap-3 rounded-lg border border-border px-4 py-2 text-sm'>
                         <span className='text-xs text-muted-foreground'>
                           Page {artPageIndex + 1}
                         </span>
                         <button
                           type='button'
                           onClick={goPrevArtPage}
+                          data-track-category='Release'
+                          data-track-name='ARTIFACTS_PREV_PAGE'
                           disabled={artPageIndex === 0}
                           className='rounded border border-border px-2 py-1 text-xs transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50'
                         >
@@ -903,6 +976,8 @@ const ReleaseDetailScreen = (): ReactElement => {
                         <button
                           type='button'
                           onClick={goNextArtPage}
+                          data-track-category='Release'
+                          data-track-name='ARTIFACTS_NEXT_PAGE'
                           disabled={!artHasMore}
                           className='rounded border border-border px-2 py-1 text-xs transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50'
                         >
@@ -910,7 +985,7 @@ const ReleaseDetailScreen = (): ReactElement => {
                         </button>
                       </div>
                     )}
-                  </div>
+                  </>
                 )}
               </Tabs.Content>
 
@@ -996,10 +1071,89 @@ const ReleaseDetailScreen = (): ReactElement => {
                   </ol>
                 )}
               </Tabs.Content>
+
+              <Tabs.Content value='releasenotes' className='mt-6 outline-none'>
+                <div className='mb-4 flex items-start justify-between gap-3'>
+                  <div>
+                    <h3 className='text-sm font-semibold text-foreground'>Release Insights</h3>
+                    <p className='text-xs text-muted-foreground'>
+                      AI-generated stats &amp; summary for this release.
+                      {releaseInsights?.generatedAt &&
+                        ` Updated ${new Date(releaseInsights.generatedAt).toLocaleString()}.`}
+                    </p>
+                  </div>
+                  <button
+                    type='button'
+                    onClick={() => {
+                      if (releaseInsights) setConfirmReanalyze(true);
+                      else void handleAnalyzeRelease();
+                    }}
+                    disabled={isAnalyzing || isGeneratingInsights}
+                    hidden={!canManageRelease}
+                    data-testid='analyze-release-button'
+                    className='inline-flex shrink-0 items-center gap-2 rounded border border-border px-3 py-1.5 text-sm font-medium text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50'
+                  >
+                    <Sparkles
+                      size={14}
+                      className={isAnalyzing || isGeneratingInsights ? 'animate-pulse' : ''}
+                    />
+                    {isAnalyzing || isGeneratingInsights
+                      ? 'Analyzing…'
+                      : releaseInsights
+                        ? 'Re-analyze'
+                        : 'Analyze release'}
+                  </button>
+                </div>
+
+                {releaseInsights && <ReleaseInsightsPanel insights={releaseInsights} />}
+
+                {analysisCanvasId ? (
+                  <CanvasPreview canvasId={analysisCanvasId} expanded />
+                ) : (
+                  <div className='text-center py-8 bg-muted rounded-lg border border-dashed border-border'>
+                    <p className='text-sm text-muted-foreground'>
+                      No release notes yet. They appear here once commit analysis has run for this
+                      release — use “Re-run Analysis” on the Dev Tickets tab to generate them.
+                    </p>
+                  </div>
+                )}
+              </Tabs.Content>
             </Tabs.Root>
           </div>
         </div>
       </div>
+
+      {/* Re-analyze confirmation — guards overwriting existing insights */}
+      <Dialog
+        open={confirmReanalyze}
+        onOpenChange={setConfirmReanalyze}
+        title='Re-analyze this release?'
+        description='This replaces the current AI insights with a freshly generated set — the existing summary, stats, and risk assessment will be overwritten.'
+      >
+        <div className='flex justify-end gap-2 p-4'>
+          <button
+            type='button'
+            className='px-3 py-1.5 text-sm rounded border border-border hover:bg-muted transition-colors'
+            onClick={() => setConfirmReanalyze(false)}
+            data-track-category='Release'
+            data-track-name='CANCEL_REANALYZE'
+          >
+            Cancel
+          </button>
+          <button
+            type='button'
+            className='px-3 py-1.5 text-sm rounded bg-primary text-white hover:bg-primary/80 transition-colors'
+            onClick={() => {
+              setConfirmReanalyze(false);
+              void handleAnalyzeRelease();
+            }}
+            data-track-category='Release'
+            data-track-name='CONFIRM_REANALYZE'
+          >
+            Re-analyze
+          </button>
+        </div>
+      </Dialog>
 
       {/* Failure Reason Dialog */}
       <Dialog
@@ -1020,6 +1174,8 @@ const ReleaseDetailScreen = (): ReactElement => {
               type='button'
               className='px-3 py-1.5 text-sm rounded border border-border hover:bg-muted transition-colors'
               onClick={failureDialog.close}
+              data-track-category='Release'
+              data-track-name='CLOSE_FAILURE_DIALOG'
             >
               Cancel
             </button>
@@ -1030,6 +1186,8 @@ const ReleaseDetailScreen = (): ReactElement => {
                 !failureDialog.state.failureReason.trim() || failureDialog.state.isSubmitting
               }
               onClick={() => void failureDialog.submit()}
+              data-track-category='Release'
+              data-track-name='SUBMIT_FAILURE_DIALOG'
             >
               {failureDialog.state.isSubmitting ? 'Saving...' : 'Submit'}
             </button>

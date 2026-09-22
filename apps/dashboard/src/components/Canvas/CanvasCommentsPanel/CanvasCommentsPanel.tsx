@@ -414,6 +414,8 @@ function CanvasCommentThreadSection({
                     <Button
                       variant='ghost'
                       size='iconSm'
+                      data-track-category='CANVAS'
+                      data-track-name='open_comment_actions_menu'
                       className='size-6 shrink-0 text-muted-foreground opacity-0 transition-opacity duration-150 focus-visible:opacity-100 group-hover:opacity-100'
                       aria-label='Comment actions'
                     >
@@ -421,13 +423,19 @@ function CanvasCommentThreadSection({
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align='end'>
-                    <DropdownMenuItem onClick={() => onSetEditingCommentId(comment.id)}>
+                    <DropdownMenuItem
+                      onClick={() => onSetEditingCommentId(comment.id)}
+                      data-track-category='CANVAS'
+                      data-track-name='edit_comment'
+                    >
                       <Pencil className='size-4' />
                       Edit
                     </DropdownMenuItem>
                     <DropdownMenuItem
                       className='text-destructive focus:text-destructive'
                       onClick={() => onDeleteComment(comment.id)}
+                      data-track-category='CANVAS'
+                      data-track-name='delete_comment'
                     >
                       <Trash2 className='size-4' />
                       Delete
@@ -476,7 +484,13 @@ function CanvasCommentThreadSection({
                 minHeightClassName='min-h-[38px]'
                 onSubmit={payload => onUpdateComment(thread, comment, payload)}
                 actions={
-                  <Button variant='ghost' size='sm' onClick={() => onSetEditingCommentId(null)}>
+                  <Button
+                    variant='ghost'
+                    size='sm'
+                    onClick={() => onSetEditingCommentId(null)}
+                    data-track-category='CANVAS'
+                    data-track-name='cancel_edit_comment'
+                  >
                     Cancel
                   </Button>
                 }
@@ -509,6 +523,8 @@ function CanvasCommentThreadSection({
           variant='outline'
           size='sm'
           onClick={() => onSelectBlock(thread.blockId)}
+          data-track-category='CANVAS'
+          data-track-name='go_to_comment_anchor'
           className='h-[26px] gap-1.5 rounded-[7px] px-2.5 text-xs font-medium'
         >
           <ArrowRight className='size-3.5' />
@@ -520,6 +536,8 @@ function CanvasCommentThreadSection({
             variant='outline'
             size='sm'
             onClick={() => onSetThreadStatus(thread.id, CanvasCommentThreadStatus.RESOLVED)}
+            data-track-category='CANVAS'
+            data-track-name='resolve_comment_thread'
             className='h-[26px] gap-1.5 rounded-[7px] px-2.5 text-xs font-medium active:scale-[0.96]'
           >
             <Check className='size-3.5' />
@@ -531,6 +549,8 @@ function CanvasCommentThreadSection({
             variant='outline'
             size='sm'
             onClick={() => onSetThreadStatus(thread.id, CanvasCommentThreadStatus.OPEN)}
+            data-track-category='CANVAS'
+            data-track-name='reopen_comment_thread'
             className='h-[26px] gap-1.5 rounded-[7px] px-2.5 text-xs font-medium active:scale-[0.96]'
           >
             <RotateCcw className='size-3.5' />
@@ -764,6 +784,8 @@ export function CanvasCommentsPanel({
             variant='ghost'
             size='iconSm'
             onClick={onClose}
+            data-track-category='CANVAS'
+            data-track-name='close_comments_panel'
             aria-label='Close comments'
             className='size-7 shrink-0 text-muted-foreground'
           >

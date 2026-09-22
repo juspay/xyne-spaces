@@ -20,6 +20,10 @@ function encodePathSegment(value: unknown): string {
   return encodeURIComponent(String(value));
 }
 
+function sanitizeForLog(value: unknown): string {
+  return String(value).replace(/\n|\r/g, " ");
+}
+
 /**
  * Extract auth token from backend response
  */
@@ -72,14 +76,13 @@ async function fetchAuthToken(
   // Check cache first
   const cached = await tokenCache.getToken(tenantId, serviceName, authEmail);
   if (cached) {
-    console.log(`[auth] Token retrieved from cache for service=${serviceName} email=${authEmail}`);
     return cached;
   }
 
   // Call token endpoint with JWT for verification
   const tokenUrl = `${backendUrl}${tokenEndpointUrl}`;
   
-  console.log(`[auth] Fetching new token from ${tokenUrl} for service=${serviceName} email=${authEmail}`);
+  console.log(`[auth] Fetching new token from ${tokenUrl} for service=${serviceName}`);
 
   const tokenRequestHeaders: Record<string, string> = {
     "Content-Type": "application/json",
@@ -130,7 +133,7 @@ export async function executeTool(
 ): Promise<ExecuteToolResult> {
   const startTime = Date.now();
   const { serviceName, toolName, arguments: toolArgs, backendId } = request;
-  console.log(`[execute] START service=${serviceName} tool=${toolName} backend=${backendId ?? "auto"}`);
+  console.log(`[execute] START service=${sanitizeForLog(serviceName)} tool=${sanitizeForLog(toolName)} backend=${sanitizeForLog(backendId ?? "auto")}`);
 
   if (!isGatewayEnabled) {
     return {
@@ -230,15 +233,19 @@ export async function executeTool(
     });
 
     const fullUrl = `${selectedBackend.backendUrl}${pathWithParams}`;
-    console.log(`[execute] Calling service=${serviceName} tool=${toolName} method=${tool.method || "POST"}`);
+    console.log(
+      `[execute] Calling service=${sanitizeForLog(serviceName)} tool=${sanitizeForLog(toolName)} method=${sanitizeForLog(tool.method || "POST")}`
+    );
 
     // Strip path params from body
-    const requestArgs: Record<string, unknown> = {};
+    const requestArgEntries = new Map<string, unknown>();
     for (const [key, value] of Object.entries(toolArgs)) {
       if (!pathParamNames.has(key)) {
-        requestArgs[key] = value;
+        requestArgEntries.set(key, value);
       }
     }
+    const requestArgs: Record<string, unknown> =
+      Object.fromEntries(requestArgEntries);
 
     // Build request-bound signature context before forwarding.
     const httpMethod = (tool.method || "POST").toUpperCase();
@@ -248,7 +255,7 @@ export async function executeTool(
       "Content-Type": "application/json",
       [xAuthHeaderName]: authToken,
     };
-    console.log(`[execute] Forward request prepared service=${serviceName} tool=${toolName} method=${httpMethod}`);
+    console.log(`[execute] Forward request prepared service=${sanitizeForLog(serviceName)} tool=${sanitizeForLog(toolName)} method=${sanitizeForLog(httpMethod)}`);
 
     // Execute request
     let backendResponse: { status: number; data: unknown };
@@ -304,7 +311,7 @@ export async function executeTool(
     }
 
     const duration = Date.now() - startTime;
-    console.log(`[execute] SUCCESS service=${serviceName} tool=${toolName} backend=${selectedBackend.backendId} status=${backendResponse.status} duration=${duration}ms`);
+    console.log(`[execute] SUCCESS service=${sanitizeForLog(serviceName)} tool=${sanitizeForLog(toolName)} backend=${sanitizeForLog(selectedBackend.backendId)} status=${backendResponse.status} duration=${duration}ms`);
 
     return {
       success: true,
@@ -316,7 +323,7 @@ export async function executeTool(
     };
   } catch (error) {
     const duration = Date.now() - startTime;
-    console.log(`[execute] FAILED service=${serviceName} tool=${toolName} duration=${duration}ms error=${error instanceof Error ? error.message : "unknown"}`);
+    console.log(`[execute] FAILED service=${sanitizeForLog(serviceName)} tool=${sanitizeForLog(toolName)} duration=${duration}ms error=${sanitizeForLog(error instanceof Error ? error.message : "unknown")}`);
 
     if (error instanceof HttpRequestError) {
       if (error.code === "http") {

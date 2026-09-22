@@ -1,18 +1,31 @@
 import type { DeleteID, InsertValue, Transaction, UpdateValue } from '@rocicorp/zero';
-import { ChannelRole, SavedConfigVisibility, Schema } from '@xyne/shared';
+import { ChannelRole, SavedConfigContextType, SavedConfigVisibility, Schema } from '@xyne/shared';
 import { BaseACL } from '../core/base-acl';
 import { MutationACLError, type TableSchema, type QueryContext } from '../core/types';
 import { zql } from '../../queries';
+
+async function isChannelAdmin(
+  tx: Transaction<Schema>,
+  userId: string,
+  channelId: string,
+): Promise<boolean> {
+  const p = await tx.run(
+    zql.channel_participants
+      .where('userId', userId)
+      .where('channelId', channelId)
+      .where('role', ChannelRole.ADMIN),
+  );
+  return p.length > 0;
+}
 
 /**
  * Checks if a user can create or promote a saved view to PUBLIC visibility.
  * Allowed if the user is:
  *   - The board creator
  *   - The project creator
- *   - An admin participant in any channel of the project
- *
- * NOTE: channelId is not stored in saved_user_configurations, so we derive
- * the channel from the board's projectId and check all project channels.
+ *   - An admin participant in any channel that maps to this board
+ *     (via channel_board_mappings — channel.projectId is being deprecated
+ *     as a read source)
  */
 async function canMakePublicView(
   tx: Transaction<Schema>,
@@ -27,12 +40,19 @@ async function canMakePublicView(
   if (!project) return false;
   if (project.createdBy === userId) return true;
 
-  // Check if user is an admin participant in any channel of this project
+  // Channels mapped to this board (a channel can span projects, so we anchor
+  // to boardId, not projectId).
+  const mappings = await tx.run(
+    zql.channel_board_mappings.where('boardId', boardId),
+  );
+  const mappedChannelIds = mappings.map(m => m.channelId);
+  if (mappedChannelIds.length === 0) return false;
+
   const adminParticipant = await tx.run(
     zql.channel_participants
       .where('userId', userId)
       .where('role', ChannelRole.ADMIN)
-      .whereExists('channel', q => q.where('projectId', project.id)),
+      .where('channelId', 'IN', mappedChannelIds),
   );
 
   return adminParticipant.length > 0;
@@ -56,7 +76,9 @@ export class SavedUserConfigurationsACL extends BaseACL<'saved_user_configuratio
     }
 
     if (args.visibility === SavedConfigVisibility.PUBLIC) {
-      const allowed = await canMakePublicView(tx, this.ctx.userID, args.contextId);
+      const allowed = args.contextType === SavedConfigContextType.DESK_TICKET
+        ? await isChannelAdmin(tx, this.ctx.userID, args.contextId)
+        : await canMakePublicView(tx, this.ctx.userID, args.contextId);
       if (!allowed) {
         throw new MutationACLError(
           'Saved view insert failed: you do not have permission to create a public view',
@@ -91,7 +113,9 @@ export class SavedUserConfigurationsACL extends BaseACL<'saved_user_configuratio
       args.visibility === SavedConfigVisibility.PUBLIC &&
       config.visibility !== SavedConfigVisibility.PUBLIC
     ) {
-      const allowed = await canMakePublicView(tx, this.ctx.userID, config.contextId);
+      const allowed = config.contextType === SavedConfigContextType.DESK_TICKET
+        ? await isChannelAdmin(tx, this.ctx.userID, config.contextId)
+        : await canMakePublicView(tx, this.ctx.userID, config.contextId);
       if (!allowed) {
         throw new MutationACLError(
           'Saved view update failed: you do not have permission to make this view public',

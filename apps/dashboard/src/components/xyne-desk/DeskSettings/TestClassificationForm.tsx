@@ -77,9 +77,10 @@ export const TestClassificationForm: React.FC<TestClassificationFormProps> = ({
       </div>
       <button
         type='button'
+        data-ph-capture-attribute-track-id='run_classification_preview'
         onClick={onRunPreview}
         disabled={isPreviewing || !subjectValue.trim() || !bodyValue.trim()}
-        className='flex items-center gap-1.5 rounded-lg bg-desk-accent px-3 py-1.5 text-sm text-white transition-colors hover:bg-desk-accent-hover disabled:cursor-not-allowed disabled:opacity-50'
+        className='flex h-auto items-center gap-1.5 rounded-lg bg-desk-accent px-3 py-1.5 text-sm text-white transition-colors hover:bg-desk-accent-hover disabled:cursor-not-allowed disabled:opacity-50'
         data-track-category={trackCategory}
         data-track-name={runTrackName}
       >

@@ -1,4 +1,4 @@
-import { ReactElement } from 'react';
+import { ReactElement, useMemo } from 'react';
 import { useZero } from '../../../hooks/useZero';
 import { CreateTicketModal } from '../CreateTicketModal/CreateTicketModal';
 import { mutators } from '../../../zero/mutators';
@@ -12,30 +12,68 @@ interface SubTicketModalProps {
   onClose: () => void;
   ticketId: string;
   conversationId: string;
-  onSuccess?: () => void;
+  sourceMessageId?: string;
+  initialTitle?: string;
+  initialDescription?: string;
+  /** Receives the created ticket, after the sub-ticket mapping is wired. */
+  onSuccess?: (createdTicket: { id: string; xyneId?: string | undefined }) => void;
+  /** Which surface opened the sub-ticket form; defaults to the modal itself. */
+  trackSource?: string;
 }
+
+type InitialAssignee = { type: 'assigneeTo' | 'userGroup'; value: string } | null;
 
 export const SubTicketModal = ({
   isOpen,
   onClose,
   ticketId,
   conversationId,
+  sourceMessageId,
+  initialTitle,
+  initialDescription,
   onSuccess,
+  trackSource = 'sub_ticket_modal',
 }: SubTicketModalProps): ReactElement | null => {
   const zero = useZero();
 
   // Get ticket info to pass to CreateTicketModal
   const [ticket] = useCachedQuery(queries.ticketByIdV2({ ticketId }));
 
-  if (!isOpen) return null;
+  // A sub-ticket inherits the parent's assignee, falling back to its user group.
+  const initialAssignee = useMemo<InitialAssignee>(() => {
+    if (ticket?.assignedTo) return { type: 'assigneeTo', value: ticket.assignedTo };
+    if (ticket?.userGroupId) return { type: 'userGroup', value: ticket.userGroupId };
+    return null;
+  }, [ticket?.assignedTo, ticket?.userGroupId]);
+
+  // Zero stores eta as epoch ms; CreateTicketModal expects a Date.
+  const initialEta = useMemo(() => (ticket?.eta ? new Date(ticket.eta) : null), [ticket?.eta]);
+
+  const initialTags = useMemo(
+    () => ticket?.tagMappings?.map(tag => tag.tagName).filter(Boolean) ?? [],
+    [ticket?.tagMappings],
+  );
+
+  // CreateTicketModal reads its initial values once on mount, so hold off until
+  // the parent ticket has loaded — otherwise the prefill silently comes up empty.
+  if (!isOpen || !ticket) return null;
 
   return (
     <CreateTicketModal
       isOpen={isOpen}
       onClose={onClose}
-      channelId={ticket?.conversation?.channelId || ''}
-      projectId={ticket?.projectId || ''}
+      channelId={ticket.conversation?.channelId || ''}
+      projectId={ticket.projectId || ''}
+      selectedBoardId={ticket.boardId}
+      initialAssignee={initialAssignee}
+      initialEta={initialEta}
+      initialPriority={ticket.priority}
+      initialTags={initialTags}
       isFromSubTicket={true}
+      trackSource={trackSource}
+      {...(sourceMessageId && { sourceMessageId })}
+      {...(initialTitle && { initialTitle })}
+      {...(initialDescription && { initialDescription })}
       parentTicketId={ticketId}
       onTicketCreated={createdTicket => {
         // Create SubTicket and mapping using Zero mutators
@@ -76,7 +114,7 @@ export const SubTicketModal = ({
         );
 
         onClose();
-        onSuccess?.();
+        onSuccess?.(createdTicket);
       }}
     />
   );

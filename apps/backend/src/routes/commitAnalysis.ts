@@ -1,10 +1,18 @@
 import { Router, Request, Response } from 'express';
-import { authMiddleware } from '@/middleware/auth';
+import { authorizePrivilegedOrResource } from '@/middleware/authorize';
 import { CommitAnalysisController } from '@/controllers/commitAnalysisController';
-import { testRepoConnection } from '@/services/release/repoInspector';
-import { BaseTicketType, FormEntityType, VCSProviderType } from '@xyne/shared';
+import {
+  testRepoConnection,
+  listGitHubRepoFilePaths,
+  listBitbucketRepoFilePaths,
+} from '@/services/release/repoInspector';
+import { suggestReleaseServices } from '@/agents/release-service-suggest/index.js';
+import { AccessType, BaseTicketType, FormEntityType, VCSProviderType } from '@xyne/shared';
 import { logger } from '@/utils/logger';
+import { config } from '@/config/env';
 import { db } from '@/database/client';
+import { findAnalysisCanvasIdForConversation } from '@/utils/commitAnalysisCanvas';
+import { detectVcsProvider } from '@/utils/repoUrlParser';
 import { FormsRepository } from '@/database/repositories/formsRepository';
 import { unifiedBotUserService } from '@/bots/unified/index.js';
 
@@ -17,7 +25,7 @@ router.get('/latest-deployed-commit', commitAnalysisController.getLatestDeployed
 // Re-run commit analysis for an existing release ticket. Used by the "Re-run"
 // button on the Release Detail screen — saves the create-delete-recreate dance
 // when the user iterates on Application regex / paths config.
-router.post('/re-run/:ticketId', async (req: Request, res: Response): Promise<void> => {
+router.post('/re-run/:ticketId', authorizePrivilegedOrResource('RELEASE-MANAGER', AccessType.WRITE), async (req: Request, res: Response): Promise<void> => {
   const { ticketId } = req.params;
   const userId = req.user?.id;
   if (!userId) {
@@ -59,7 +67,8 @@ router.post('/re-run/:ticketId', async (req: Request, res: Response): Promise<vo
     const newCommitId = String(formValues['newCommitId'] ?? '').trim();
     const branch = String(formValues['branch'] ?? '').trim() || 'main';
 
-    if (!deployedCommitId || !newCommitId) {
+    const repoCount = await db.releaseRepository.count({ where: { releaseId: ticketId } });
+    if (repoCount === 0 && (!deployedCommitId || !newCommitId)) {
       res.status(400).json({
         error:
           'This release ticket is missing deployedCommitId or newCommitId form fields — re-run is only supported for COMMIT_RANGE releases.',
@@ -84,35 +93,135 @@ router.post('/re-run/:ticketId', async (req: Request, res: Response): Promise<vo
       workspaceId: ticket.workspaceId,
       // keep Hotfix-type re-runs flagging ART rows as hotfix (matches create path)
       isHotFix: ticket.ticketType === BaseTicketType.Hotfix,
+      isReRun: true,
     });
 
     res.json({ success: result.success, canvasUrl: result.canvasUrl, error: result.error });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    logger.error(`[CommitAnalysis] re-run failed for ticket=${ticketId}: ${msg}`);
+    logger.error('[CommitAnalysis] re-run failed', { ticketId, error: msg });
     res.status(500).json({ error: msg });
   }
 });
 
-router.post('/test-connection', authMiddleware.requireAdminOrOwner, async (req: Request, res: Response): Promise<void> => {
-  const { repoUrl, vcsProvider } = req.body as { repoUrl?: string; vcsProvider?: string };
-  if (!repoUrl || !vcsProvider) {
-    res.status(400).json({ ok: false, message: 'repoUrl and vcsProvider are required' });
+// Per (release ticket × repo) commit ranges for a release ticket. Read from the
+// non_zero schema (server-only, not Zero-replicated) and served over HTTP — the
+// Release Detail screen fetches this instead of syncing the table via Zero.
+router.get('/repos/:releaseId', async (req: Request, res: Response): Promise<void> => {
+  const { releaseId } = req.params;
+  const workspaceId = req.user?.workspaceId;
+  if (!workspaceId) {
+    res.status(401).json({ error: 'Authentication required' });
     return;
   }
-  if (!Object.values(VCSProviderType).includes(vcsProvider as VCSProviderType)) {
-    res.status(400).json({ ok: false, message: `invalid vcsProvider: ${vcsProvider}` });
+  if (!releaseId) {
+    res.status(400).json({ error: 'releaseId is required' });
+    return;
+  }
+  try {
+    const repos = await db.releaseRepository.findMany({
+      where: { releaseId, workspaceId },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+    });
+
+    const ticket = await db.ticket.findFirst({
+      where: { id: releaseId, workspaceId },
+      select: { conversationId: true, channelId: true },
+    });
+    const analysisCanvasId = await findAnalysisCanvasIdForConversation(
+      ticket?.conversationId ?? undefined,
+      ticket?.channelId ?? undefined,
+    );
+
+    res.json({ repos, analysisCanvasId });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    logger.error('[CommitAnalysis] repos fetch failed', { releaseId, error: msg });
+    res.status(500).json({ error: msg });
+  }
+});
+
+router.post('/test-connection', authorizePrivilegedOrResource('RELEASE-MANAGER', AccessType.WRITE), async (req: Request, res: Response): Promise<void> => {
+  const { repoUrl } = req.body as { repoUrl?: string };
+  if (!repoUrl) {
+    res.status(400).json({ ok: false, message: 'repoUrl is required' });
+    return;
+  }
+  const vcsProvider = detectVcsProvider(repoUrl);
+  if (!vcsProvider) {
+    res.status(400).json({
+      ok: false,
+      message:
+        'Unsupported or unrecognized repository URL — provide a GitHub or Bitbucket Server repository URL',
+    });
     return;
   }
   try {
     const result = await testRepoConnection({
       repoUrl,
-      vcsProvider: vcsProvider as VCSProviderType,
+      vcsProvider,
     });
     res.json(result);
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     res.json({ ok: false, message: msg });
+  }
+});
+
+// AI-suggest services + env/migration paths from the repo's file tree, to
+// prefill the release-config wizard. Supports GitHub and Bitbucket Server.
+// Scope note: repoUrl is caller-supplied and listing uses the org-wide token, so
+// any RELEASE-MANAGER WRITE holder can list any repo that token can read. This is
+// intentional — the wizard prefills repos not yet configured, so it can't be
+// restricted to existing applications; the VCS host is pinned to config (no SSRF).
+router.post('/suggest-services', authorizePrivilegedOrResource('RELEASE-MANAGER', AccessType.WRITE), async (req: Request, res: Response): Promise<void> => {
+  const { repoUrl, projectId: rawProjectId } = req.body as { repoUrl?: string; projectId?: unknown };
+  const projectId = typeof rawProjectId === 'string' && rawProjectId ? rawProjectId : null;
+  const userId = req.user?.id;
+  const workspaceId = req.user?.workspaceId;
+  if (!userId || !workspaceId) {
+    res.status(401).json({ error: 'Authentication required' });
+    return;
+  }
+  if (!repoUrl) {
+    res.status(400).json({ error: 'repoUrl is required' });
+    return;
+  }
+  const provider = detectVcsProvider(repoUrl);
+  // detectVcsProvider treats any non-GitHub URL as Bitbucket, so also require the
+  // configured Bitbucket host — otherwise a GitLab URL surfaces as a Bitbucket auth error.
+  const bitbucketHost = config.bitbucket.baseUrl.replace(/^https?:\/\//, '').split('/')[0] || null;
+  const isSupported =
+    provider === VCSProviderType.GITHUB ||
+    (provider === VCSProviderType.BITBUCKET_SERVER && !!bitbucketHost && repoUrl.includes(bitbucketHost));
+  if (!isSupported) {
+    res.json({
+      services: [],
+      message: 'AI suggestions support GitHub and Bitbucket Server repositories.',
+    });
+    return;
+  }
+  try {
+    if (projectId) {
+      const project = await db.project.findUnique({
+        where: { id: projectId },
+        select: { workspaceId: true },
+      });
+      if (!project || project.workspaceId !== workspaceId) {
+        res.status(404).json({ error: 'Project not found' });
+        return;
+      }
+    }
+    const paths =
+      provider === VCSProviderType.GITHUB
+        ? await listGitHubRepoFilePaths(repoUrl)
+        : await listBitbucketRepoFilePaths(repoUrl);
+    const result = await suggestReleaseServices({ paths }, { projectId: projectId ?? null, userId });
+    res.json(result);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    logger.error('[CommitAnalysis] suggest-services failed', { repoUrl, error: msg });
+    res.status(500).json({ error: 'Failed to suggest services for this repository' });
   }
 });
 

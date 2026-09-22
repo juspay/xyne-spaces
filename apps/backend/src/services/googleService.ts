@@ -49,6 +49,7 @@ interface WatchResult {
 export interface GmailMessageRef {
   id: string;
   threadId: string;
+  labelIds?: string[];
 }
 
 interface SetupExternalSourceParams {
@@ -152,11 +153,13 @@ export class GoogleService {
 
   async getMessageById(messageId: string): Promise<GmailMessageData | null> {
     try {
-      const response = await this.gmail.users.messages.get({
-        userId: 'me',
-        id: messageId,
-        format: 'full',
-      });
+      const response = await withGmailRetry(`messages.get ${messageId}`, () =>
+        this.gmail.users.messages.get({
+          userId: 'me',
+          id: messageId,
+          format: 'full',
+        }),
+      );
       return response.data as GmailMessageData;
     } catch (error) {
       // 404 = message was deleted/expired between Gmail publishing the event
@@ -173,15 +176,20 @@ export class GoogleService {
 
   async getAttachment(messageId: string, attachmentId: string): Promise<string | null> {
     try {
-      const response = await this.gmail.users.messages.attachments.get({
-        userId: 'me',
-        messageId,
-        id: attachmentId,
-      });
+      const response = await withGmailRetry(`attachments.get ${attachmentId}`, () =>
+        this.gmail.users.messages.attachments.get({
+          userId: 'me',
+          messageId,
+          id: attachmentId,
+        }),
+      );
       return response.data.data || null;
     } catch (error) {
       logger.error(`${TAG} Failed to fetch attachment ${attachmentId}`, error);
-      return null;
+      throw Object.assign(
+        new Error(`Failed to fetch Gmail attachment: ${getErrorMessage(error)}`),
+        { status: getHttpStatus(error), cause: error },
+      );
     }
   }
 
@@ -195,7 +203,8 @@ export class GoogleService {
     startHistoryId: string,
   ): Promise<{ messageIds: string[]; historyId: string | null }> {
     const { messages, historyId } = await this.listMessageRefsFromHistory(startHistoryId);
-    return { messageIds: messages.map(m => m.id), historyId };
+    const ingestable = messages.filter(m => !m.labelIds?.includes('DRAFT'));
+    return { messageIds: ingestable.map(m => m.id), historyId };
   }
 
   async listMessageRefsFromHistory(
@@ -207,17 +216,24 @@ export class GoogleService {
       let pageToken: string | undefined;
 
       do {
-        const response = await this.gmail.users.history.list({
-          userId: 'me',
-          startHistoryId,
-          historyTypes: ['messageAdded'],
-          ...(pageToken && { pageToken }),
-        });
+        const response = await withGmailRetry(`history.list ${startHistoryId}`, () =>
+          this.gmail.users.history.list({
+            userId: 'me',
+            startHistoryId,
+            historyTypes: ['messageAdded'],
+            ...(pageToken && { pageToken }),
+          }),
+        );
 
         for (const record of response.data.history || []) {
           for (const msg of record.messagesAdded || []) {
             const id = msg.message?.id;
-            if (id) messages.push({ id, threadId: msg.message?.threadId ?? id });
+            if (id)
+              messages.push({
+                id,
+                threadId: msg.message?.threadId ?? id,
+                ...(msg.message?.labelIds && { labelIds: msg.message.labelIds }),
+              });
           }
         }
 
@@ -268,12 +284,14 @@ export class GoogleService {
 
     try {
       do {
-        const response = await this.gmail.users.messages.list({
-          userId: 'me',
-          q,
-          maxResults: maxMessages === null ? 100 : Math.min(100, maxMessages - messages.length),
-          ...(pageToken && { pageToken }),
-        });
+        const response = await withGmailRetry('messages.list', () =>
+          this.gmail.users.messages.list({
+            userId: 'me',
+            q,
+            maxResults: maxMessages === null ? 100 : Math.min(100, maxMessages - messages.length),
+            ...(pageToken && { pageToken }),
+          }),
+        );
 
         for (const msg of response.data.messages || []) {
           if (msg.id) {
@@ -1176,4 +1194,34 @@ function getErrorMessage(error: unknown): string {
 
 export function getHttpStatus(error: unknown): number | undefined {
   return (error as { status?: number } | null | undefined)?.status;
+}
+
+/**
+ * Gmail rejects bursts with "Too many concurrent requests for user." — a
+ * transient signal Google asks callers to back off on, not a real failure.
+ * Without this a single burst costs a held cursor or a dropped attachment.
+ */
+const RETRYABLE_STATUSES = new Set([429, 500, 502, 503, 504]);
+const GMAIL_MAX_ATTEMPTS = 4;
+
+export function isRetryableGmailError(error: unknown): boolean {
+  const status = getHttpStatus(error);
+  if (status !== undefined && RETRYABLE_STATUSES.has(status)) return true;
+  // Some Gmail paths report the per-user concurrency cap as 403.
+  return status === 403 && /rate limit|too many concurrent/i.test(getErrorMessage(error));
+}
+
+async function withGmailRetry<T>(label: string, call: () => Promise<T>): Promise<T> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await call();
+    } catch (error) {
+      if (attempt >= GMAIL_MAX_ATTEMPTS || !isRetryableGmailError(error)) throw error;
+      const delayMs = 500 * 2 ** (attempt - 1) + Math.floor(Math.random() * 250);
+      logger.warn(
+        `${TAG} ${label} throttled — retry ${attempt}/${GMAIL_MAX_ATTEMPTS - 1} in ${delayMs}ms: ${getErrorMessage(error)}`,
+      );
+      await new Promise(resolve => setTimeout(resolve, delayMs));
+    }
+  }
 }

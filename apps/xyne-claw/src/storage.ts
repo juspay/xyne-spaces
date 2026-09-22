@@ -233,6 +233,24 @@ export async function gcsListDebugRuns(storeKey: string): Promise<string[] | nul
   }
 }
 
+/**
+ * Download an arbitrary object by its full name. Used to pull run attachments
+ * that claw-auth parked in the store instead of base64-inlining them into the
+ * /run body (`gcsRef`). Returns null on error/disabled so the caller can decide
+ * whether the attachment is droppable.
+ */
+export async function gcsDownloadObject(objectName: string): Promise<Buffer | null> {
+  const client = getStorage();
+  if (!client) return null;
+  try {
+    return await client.getFileBuffer(objectName);
+  } catch (err) {
+    noteIfCredsError(err);
+    log.warn(`[gcs] object download failed for ${objectName}:`, err instanceof Error ? err.message : String(err));
+    return null;
+  }
+}
+
 /** Download one per-run debug snapshot. Returns null on error/missing. */
 export async function gcsDownloadDebugRun(storeKey: string, fileName: string): Promise<Buffer | null> {
   const client = getStorage();
@@ -332,6 +350,43 @@ export async function gcsListSessionObjects(conversationId: string): Promise<Ses
   } catch (err) {
     noteIfCredsError(err);
     log.warn(`[gcs] direct list failed for ${conversationId}:`, err instanceof Error ? err.message : String(err));
+    return null;
+  }
+}
+
+/**
+ * Delete a session's ENTIRE archive from storage (every object under
+ * `claw-sessions/{id}/`). Without this, deleting only the local session dir
+ * (session-store `deleteSession`) leaves the GCS snapshot behind, so the next
+ * message resumes the archived session from storage — which makes `/clear`
+ * ineffective and lets a poisoned history (e.g. an unsupported image block that
+ * 400s every provider) survive forever (prod 2026-08-24). Returns:
+ *   - "deleted"  when storage was reachable (0+ objects removed)
+ *   - null       on error/disabled — caller should treat the archive as possibly still present
+ */
+export async function gcsDeleteSession(conversationId: string): Promise<"deleted" | null> {
+  const client = getStorage();
+  if (!client) return null;
+  const prefix = sessionPrefix(conversationId);
+  try {
+    const files = await client.listFiles(prefix);
+    const targets = files.filter((f) => f.name.slice(prefix.length));
+    let deleted = 0;
+    for (const f of targets) {
+      try {
+        await client.deleteFile(f.name);
+        deleted += 1;
+      } catch (err) {
+        // Best-effort per object; keep going so one stuck object doesn't strand
+        // the rest of the archive.
+        log.warn(`[gcs] session object delete failed ${f.name}:`, err instanceof Error ? err.message : String(err));
+      }
+    }
+    log.info(`[gcs] Deleted session archive ${conversationId} (${deleted}/${targets.length} objects)`);
+    return "deleted";
+  } catch (err) {
+    noteIfCredsError(err);
+    log.warn(`[gcs] direct session-archive delete failed for ${conversationId}:`, err instanceof Error ? err.message : String(err));
     return null;
   }
 }

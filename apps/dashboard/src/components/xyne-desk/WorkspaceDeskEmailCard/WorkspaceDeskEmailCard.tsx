@@ -19,6 +19,7 @@ import {
   disconnectWorkspaceDeskIntegration,
 } from '../../../services/clients/workspaceDeskApi';
 import { initWorkspaceDeskOAuth } from '../../../services/clients/integrationOAuthApi';
+import { globalClickTracker } from '../../../services/Analytics/globalClickTracker';
 
 export const WorkspaceDeskEmailCard = (): ReactElement => {
   const { role } = useAuthContextValues();
@@ -53,12 +54,34 @@ export const WorkspaceDeskEmailCard = (): ReactElement => {
 
   const handleDisconnect = async (): Promise<void> => {
     setIsDisconnecting(true);
+    // Outcome of confirm-disconnect: the click is intent, this is the result.
+    const startedAt = Date.now();
+    const disconnectDims = {
+      provider: status?.sourceType === 'microsoft' ? 'microsoft' : 'google',
+      scope: 'workspace',
+    };
     try {
       await disconnectWorkspaceDeskIntegration();
+      globalClickTracker.trackManualEvent(
+        'workspace-desk-email',
+        'EMAIL_ACCOUNT_DISCONNECTED',
+        undefined,
+        { ...disconnectDims, latencyMs: Date.now() - startedAt },
+      );
       toast.success('Shared mailbox disconnected.');
       setShowDisconnectConfirm(false);
       void queryClient.invalidateQueries({ queryKey: ['workspace-shared-mailbox-status'] });
     } catch (err) {
+      globalClickTracker.trackManualEvent(
+        'workspace-desk-email',
+        'EMAIL_ACCOUNT_DISCONNECT_FAILED',
+        undefined,
+        {
+          ...disconnectDims,
+          latencyMs: Date.now() - startedAt,
+          errorKind: err instanceof Error ? err.name : 'unknown',
+        },
+      );
       toast.error(err instanceof Error ? err.message : 'Failed to disconnect — please try again.');
     } finally {
       setIsDisconnecting(false);
@@ -183,6 +206,8 @@ export const WorkspaceDeskEmailCard = (): ReactElement => {
               variant='secondary'
               size='sm'
               onClick={() => setShowDisconnectConfirm(false)}
+              data-track-category='workspace-desk-email'
+              data-track-name='CANCEL_DISCONNECT'
               disabled={isDisconnecting}
             >
               Cancel

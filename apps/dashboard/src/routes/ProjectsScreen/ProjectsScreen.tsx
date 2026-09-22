@@ -1,28 +1,88 @@
-import { ReactElement } from 'react';
-import { Outlet, useLocation } from 'react-router-dom';
-import { ResizableGroup, Panel, Separator } from '../../components/ui/Resizable/Resizable';
+import { ReactElement, useCallback, useEffect, useMemo, useState } from 'react';
+import { Navigate, Outlet, useLocation, useParams } from 'react-router-dom';
+import { SidebarLeftOpen } from '@xyne/icons';
+import { Tooltip } from '../../components/ui/Tooltip/Tooltip';
+import {
+  ResizableGroup,
+  Panel,
+  Separator,
+  usePanelRef,
+  type PanelSize,
+} from '../../components/ui/Resizable/Resizable';
 import {
   PROJECTS_SIDEBAR_DEFAULT_WIDTH,
   PROJECTS_SIDEBAR_MAX_WIDTH,
   PROJECTS_SIDEBAR_MIN_WIDTH,
 } from './projectsSidebarWidth';
 import { ProjectSidebar } from '../../components/Project';
-import { queries } from '../../zero/queries';
 import { usePlatform } from '../../hooks/usePlatform';
 import { useResizablePanel } from '../../hooks/useResizablePanel';
-import { useUsers } from '../../hooks/useUsers';
-import { useCachedQuery } from '../../hooks/useCachedQuery';
-import { useUserGroups } from '../../hooks/useUserGroup';
+
+export type ProjectsScreenOutletContext = {
+  leftHeaderSlot?: ReactElement | null;
+};
 
 const ProjectsScreen = (): ReactElement => {
   const location = useLocation();
+  const { workspaceId, ticketId } = useParams<{ workspaceId?: string; ticketId?: string }>();
   const { isMobile } = usePlatform();
   const { isWideScreen, containerRef } = useResizablePanel({ isMobile });
 
-  // Fetch all projects using zero
-  const [projects] = useCachedQuery(queries.getAllProjects());
-  const users = useUsers();
-  const userGroups = useUserGroups();
+  const sidebarPanelRef = usePanelRef();
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+
+  const toggleSidebar = useCallback((): void => {
+    const panel = sidebarPanelRef.current;
+    if (!panel) return;
+    if (panel.isCollapsed()) panel.expand();
+    else panel.collapse();
+  }, [sidebarPanelRef]);
+
+  const outletContext = useMemo<ProjectsScreenOutletContext>(
+    () => ({
+      leftHeaderSlot: isSidebarCollapsed ? (
+        <Tooltip content='Show ticket views' side='bottom' delayDuration={300}>
+          <button
+            type='button'
+            onClick={toggleSidebar}
+            aria-label='Expand sidebar'
+            aria-controls='projects-sidebar-region'
+            className='-ml-1 flex size-[30px] shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring'
+            data-track-category='Projects'
+            data-track-name='ToggleProjectsSidebar'
+          >
+            <SidebarLeftOpen className='size-4' />
+          </button>
+        </Tooltip>
+      ) : null,
+    }),
+    [isSidebarCollapsed, toggleSidebar],
+  );
+
+  const ticketsRootPath = `/${workspaceId}/projects`;
+  const lastTicketsPathKey = `lastTicketsPath_${workspaceId}`;
+  const isAtTicketsRoot = location.pathname === ticketsRootPath && !location.search;
+  const [entryRedirect, setEntryRedirect] = useState(() =>
+    isAtTicketsRoot ? localStorage.getItem(lastTicketsPathKey) : null,
+  );
+  const redirectTo =
+    isAtTicketsRoot && entryRedirect && entryRedirect !== ticketsRootPath ? entryRedirect : null;
+
+  useEffect(() => {
+    if (redirectTo) return;
+    setEntryRedirect(null);
+    if (!ticketId) {
+      const params = new URLSearchParams(location.search);
+      params.delete('search');
+      const query = params.toString();
+      localStorage.setItem(
+        lastTicketsPathKey,
+        query ? `${location.pathname}?${query}` : location.pathname,
+      );
+    }
+  }, [redirectTo, ticketId, lastTicketsPathKey, location.pathname, location.search]);
+
+  if (redirectTo) return <Navigate to={redirectTo} replace />;
 
   return (
     <div
@@ -40,13 +100,17 @@ const ProjectsScreen = (): ReactElement => {
           {/* LEFT PANEL (Sidebar) */}
           <Panel
             id='projects-sidebar'
+            panelRef={sidebarPanelRef}
             defaultSize={PROJECTS_SIDEBAR_DEFAULT_WIDTH}
             minSize={PROJECTS_SIDEBAR_MIN_WIDTH}
             maxSize={PROJECTS_SIDEBAR_MAX_WIDTH}
             groupResizeBehavior='preserve-pixel-size'
+            collapsible
+            collapsedSize={0}
+            onResize={(size: PanelSize) => setIsSidebarCollapsed(size.inPixels === 0)}
           >
-            <aside className='w-full h-full'>
-              <ProjectSidebar projects={projects} persons={users} userGroups={userGroups} />
+            <aside id='projects-sidebar-region' className='w-full h-full'>
+              <ProjectSidebar onToggleCollapse={toggleSidebar} />
             </aside>
           </Panel>
 
@@ -65,7 +129,7 @@ const ProjectsScreen = (): ReactElement => {
               className='flex-1 h-full overflow-hidden relative flex flex-col rounded-2xl border border-border bg-background'
             >
               <div className='flex-1 overflow-hidden relative'>
-                <Outlet />
+                <Outlet context={outletContext} />
               </div>
             </main>
           </Panel>

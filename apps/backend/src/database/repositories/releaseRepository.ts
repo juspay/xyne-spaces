@@ -20,6 +20,11 @@ type FetchRCAOptions = {
 };
 
 export class ReleaseRepository {
+	async createReleaseRepositories(rows: Prisma.ReleaseRepositoryCreateManyInput[]): Promise<void> {
+		if (rows.length === 0) return;
+		await prisma.releaseRepository.createMany({ data: rows, skipDuplicates: true });
+	}
+
 	async findReleaseChangeType(changeType: string, applicationId: string): Promise<ReleaseChangeType | null> {
 		return await prisma.releaseChangeType.findFirst({
 			where: { changeType, applicationId },

@@ -43,13 +43,16 @@ export function useBoardTicketNav(ticketId: string): BoardTicketNavState {
   const [, setSearchParams] = useSearchParams();
   const goTo = useCallback(
     (row: { id: string; conversationId: string | null }): void => {
-      setSearchParams(prev => {
-        const next = new URLSearchParams(prev);
-        next.set('ticketId', row.id);
-        if (row.conversationId) next.set('conversationId', row.conversationId);
-        next.set('nofocus', '1');
-        return next;
-      });
+      setSearchParams(
+        prev => {
+          const next = new URLSearchParams(prev);
+          next.set('ticketId', row.id);
+          if (row.conversationId) next.set('conversationId', row.conversationId);
+          next.set('nofocus', '1');
+          return next;
+        },
+        { state: { trackSource: 'board_nav' } },
+      );
     },
     [setSearchParams],
   );
@@ -61,16 +64,19 @@ export function useBoardTicketNav(ticketId: string): BoardTicketNavState {
   const fetchPage = useCallback(
     async (start: Cursor, dir: 'forward' | 'backward', limit: number): Promise<NavRow[]> => {
       if (!baseArgs) return [];
+      const queryArgs = {
+        ...baseArgs,
+        overdueReferenceTime: baseArgs.overdueReferenceTime ?? undefined,
+        columnType,
+        stageName: '',
+        start: { createdAt: start.createdAt, id: start.id },
+        dir,
+        limit,
+      };
       const rows = (await zero.run(
-        queries.kanbanTicketsPageV2({
-          ...baseArgs,
-          overdueReferenceTime: baseArgs.overdueReferenceTime ?? undefined,
-          columnType,
-          stageName: '',
-          start: { createdAt: start.createdAt, id: start.id },
-          dir,
-          limit,
-        }),
+        queries.kanbanTicketsPageV3({
+          ...queryArgs,
+        } as Parameters<typeof queries.kanbanTicketsPageV3>[0]),
         { type: 'complete' },
       )) as KanbanTicketsPageRow[];
       return rows.map(r => ({

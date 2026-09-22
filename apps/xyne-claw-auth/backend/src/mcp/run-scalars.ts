@@ -10,6 +10,7 @@
  */
 
 import { redisService } from "../redis.js";
+import { errMsg } from "../lib/errors.js";
 import { createLogger } from "../logger.js";
 
 const log = createLogger("run-scalars");
@@ -21,6 +22,9 @@ export interface RunScalars {
   dataSourceId?: string;
   draftId?: string;
   focusedComponentId?: string;
+  workflowId?: string;
+  executionId?: string;
+  focusedStepId?: string;
 }
 
 function key(sessionId: string): string {
@@ -29,11 +33,11 @@ function key(sessionId: string): string {
 
 export async function storeRunScalars(sessionId: string, scalars: RunScalars): Promise<void> {
   if (!sessionId) return;
-  if (!scalars.dataSourceId && !scalars.draftId && !scalars.focusedComponentId) return;
+  if (!Object.values(scalars).some((v) => typeof v === "string" && v)) return;
   try {
     await redisService.getConnection().set(key(sessionId), JSON.stringify(scalars), "EX", TTL_SECONDS);
   } catch (err) {
-    log.warn(`[run-scalars] store failed for ${sessionId}:`, err instanceof Error ? err.message : String(err));
+    log.warn(`[run-scalars] store failed for ${sessionId}:`, errMsg(err));
   }
 }
 
@@ -45,7 +49,7 @@ export async function loadRunScalars(sessionId: string): Promise<RunScalars> {
     const parsed = JSON.parse(raw) as RunScalars;
     return parsed && typeof parsed === "object" ? parsed : {};
   } catch (err) {
-    log.warn(`[run-scalars] load failed for ${sessionId}:`, err instanceof Error ? err.message : String(err));
+    log.warn(`[run-scalars] load failed for ${sessionId}:`, errMsg(err));
     return {};
   }
 }

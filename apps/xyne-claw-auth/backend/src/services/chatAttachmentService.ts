@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { errMsg } from "../lib/errors.js";
 import { gcsService } from "./storageService.js";
 import { chatAttachmentRepository } from "../repositories/chatAttachmentRepository.js";
 import { createLogger } from "../logger.js";
@@ -117,7 +118,7 @@ export async function persistBase64ChatAttachments(
       });
       results.push({ id: row.id, originalFilename: row.originalFilename, mimeType: row.mimeType });
     } catch (err) {
-      log.warn(`[callback] failed to persist attachment ${attachment.fileName}: ${err instanceof Error ? err.message : String(err)}`);
+      log.warn(`[callback] failed to persist attachment ${attachment.fileName}: ${errMsg(err)}`);
     }
   }
   return results;

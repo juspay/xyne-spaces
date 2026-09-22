@@ -1,16 +1,22 @@
 /**
  * Calendar Manual Sync Routes
  *
- * POST /api/calendar/sync/google     — trigger Google Calendar sync for current user
- * POST /api/calendar/sync/microsoft  — trigger Microsoft Calendar sync for current user
+ * POST /api/calendar/sync/google     — queue a Google Calendar sync for current user
+ * POST /api/calendar/sync/microsoft  — queue a Microsoft Calendar sync for current user
  * GET  /api/calendar/sync/provider   — return which calendar provider the current user has
+ *
+ * These endpoints only enqueue. Every write into the calls table happens in the
+ * worker process, never here — see ENABLE_CALENDAR_SYNC_WORKER. That is what keeps
+ * an environment whose API is deployed but whose worker is not (pre-prod) from
+ * creating calendar rows of its own and colliding on the unique index once data
+ * moves between environments.
  */
 
 import express, { type Response } from 'express';
 import { logger } from '@/utils/logger';
 import { repositories } from '@/database/repositories';
-import { syncGoogleCalendarNow } from '@/queues/googleCalendarSyncQueue';
-import { syncMicrosoftCalendarNow } from '@/queues/microsoftCalendarSyncQueue';
+import { enqueueGoogleCalendarManualSync } from '@/queues/googleCalendarSyncQueue';
+import { enqueueMicrosoftCalendarManualSync } from '@/queues/microsoftCalendarSyncQueue';
 import { pubSubWatchService } from '@/pubsub';
 import { parseCalendarCredentials } from '@/database/repositories/externalSourceRepository';
 import { AuthProvider } from '@xyne/shared';
@@ -122,13 +128,13 @@ router.post('/google', async (req, res) => {
       logger.info(`[CALENDAR_SYNC][GOOGLE][ROUTE] Watch already active for ${user.email}`);
     }
 
-    await syncGoogleCalendarNow(subscription.id);
-    logger.info(`[CALENDAR_SYNC][GOOGLE][ROUTE] Manual sync completed`, {
+    await enqueueGoogleCalendarManualSync(subscription.id);
+    logger.info(`[CALENDAR_SYNC][GOOGLE][ROUTE] Manual sync queued`, {
       sourceId: subscription.id,
       userId,
       email: user.email,
     });
-    return res.json({ success: true, message: 'Google Calendar sync completed successfully' });
+    return res.json({ success: true, message: 'Google Calendar sync started' });
   } catch (err) {
     const raw = err instanceof Error ? err.message : String(err);
     logger.error(`[CALENDAR_SYNC][GOOGLE][ROUTE] Manual sync failed for user ${userId}: ${raw}`);
@@ -210,13 +216,13 @@ router.post('/microsoft', async (req, res) => {
       );
     }
 
-    await syncMicrosoftCalendarNow(subscription.id);
-    logger.info(`[CALENDAR_SYNC][MICROSOFT][ROUTE] Manual sync completed`, {
+    await enqueueMicrosoftCalendarManualSync(subscription.id);
+    logger.info(`[CALENDAR_SYNC][MICROSOFT][ROUTE] Manual sync queued`, {
       sourceId: subscription.id,
       userId,
       email: user.email,
     });
-    return res.json({ success: true, message: 'Microsoft Calendar sync completed successfully' });
+    return res.json({ success: true, message: 'Microsoft Calendar sync started' });
   } catch (err) {
     const raw = err instanceof Error ? err.message : String(err);
     logger.error(`[CALENDAR_SYNC][MICROSOFT][ROUTE] Manual sync failed for user ${userId}: ${raw}`);

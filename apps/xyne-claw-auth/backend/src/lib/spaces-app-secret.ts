@@ -32,6 +32,7 @@
  *   `${ciphertext}:${iv}:${authTag}` (each base64)
  */
 import { CONFIG } from "../config.js";
+import { errMsg } from "./errors.js";
 import { encrypt, decryptSpacesCbc } from "../crypto.js";
 import { prisma } from "../db.js";
 import { getInstalledAppSigningSecret } from "./spaces-db.js";
@@ -84,7 +85,7 @@ export async function backfillSigningSecretFromSpacesDb(args: {
     return true;
   } catch (err) {
     log.warn(
-      `[spaces-app-secret] db-path backfill failed for agentId=${agentId}: ${err instanceof Error ? err.message : String(err)}`,
+      `[spaces-app-secret] db-path backfill failed for agentId=${agentId}: ${errMsg(err)}`,
     );
     return false;
   }
@@ -134,7 +135,7 @@ export async function fetchAndStoreSigningSecretFromSpacesApi(args: {
     return true;
   } catch (err) {
     log.warn(
-      `[spaces-app-secret] api fetch errored for agentId=${agentId}: ${err instanceof Error ? err.message : String(err)}`,
+      `[spaces-app-secret] api fetch errored for agentId=${agentId}: ${errMsg(err)}`,
     );
     return false;
   }

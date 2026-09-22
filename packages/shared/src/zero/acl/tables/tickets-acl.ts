@@ -1,8 +1,8 @@
 import type { Query } from '@rocicorp/zero';
 import type { Schema, Context } from '../../schema';
-import { ChannelVisibility } from '../../schema';
 import { BaseQueryACL } from '../core/base-acl';
 import type { SelectArgs } from '../core/types';
+import { SCALAR, channelAccessArgs, channelAccessWhere, scalarChannelBody } from '../core/channel-access';
 import { guestTicketAccessWhere, isGuestContext } from '../core/guest-acl-utils';
 
 export class TicketsACL extends BaseQueryACL<'tickets'> {
@@ -17,38 +17,29 @@ export class TicketsACL extends BaseQueryACL<'tickets'> {
         .where(guestTicketAccessWhere(this.ctx));
     }
 
-    const channelId = args?.channelId as string | undefined;
-
-    // When the caller knows the user is a member (pre-checked against channel_user_status),
-    // use a scalar EXISTS on channel_participants which resolves once at hydration time
-    // instead of the expensive OR(PUBLIC, EXISTS(participants)) evaluated per-row during push.
-
     query = query.where('workspaceId', '=', this.ctx.workspaceId);
 
-    if (args?.isMember && channelId) {
-      return query.whereExists('channel', (ch) =>
-        ch.whereExists('participants', (p) =>
-          p.where('userId', this.ctx.userID).where('channelId', channelId),
-          { scalar: true }
-        ),
-      );
+    const { channelId, isMember } = channelAccessArgs(args);
+    if (channelId) {
+      return query.whereExists('channel', scalarChannelBody(this.ctx, channelId, isMember), SCALAR);
     }
 
-    if (args?.isMember === false && channelId) {
-      return query.whereExists('channel', (ch) =>
-        ch.where("id", channelId).where('visibility', ChannelVisibility.PUBLIC),
-        { scalar: true }
-      );
-    }
-
-    return query.whereExists('channel', (ch) =>
-      ch.where(({ or, cmp, exists }) =>
-        or(
-          cmp('visibility', ChannelVisibility.PUBLIC),
-          exists('participants', (p) => p.where('userId', this.ctx.userID))
-        )
-      )
+    // Pin the join direction instead of letting the planner choose it.
+    //
+    // Left free, the planner may flip this exists so the CHILD drives: it then
+    // materialises `channels` with an unconstrained read (`SELECT … FROM "channels"
+    // ORDER BY "id"` — every channel on the cluster) and turns the result into a
+    // literal `tickets.channelId IN (…)` list. That is the plan production picked,
+    // and it cost 60,000 channel reads per hydration to yield 239 usable ids.
+    //
+    // As a semi-join the parent drives and each candidate ticket probes `channels`
+    // by primary key, which the `take` operator bounds. Measured on the bench
+    // replica: semi-join 62,697 rows scanned vs flipped 73,067, and the flipped
+    // plan carried the whole channels table on top.
+    return query.whereExists(
+      'channel',
+      (ch) => ch.where(channelAccessWhere(this.ctx)),
+      { flip: false },
     );
-  
   }
 }

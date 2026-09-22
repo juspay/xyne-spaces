@@ -1,16 +1,16 @@
 import { KataClient } from "@xyne/kata-sdk";
 import type { Session } from "@xyne/kata-sdk";
 import type { ToolDefinition, ToolExecutionContext } from "../types.js";
+import { SDLC_META_KEYS } from "../../sdlc/meta.js";
 import { redactSecrets, redactAndStringify } from "./redact.js";
 import { rotateTemplate, isSameTemplateFamily } from "./template-rotation.js";
 import { formatSandboxUnavailable, isSandboxUnavailableDeferEnabled } from "./unavailable-signal.js";
 import { createLogger } from "../../logger.js";
-import { readFile } from "node:fs/promises";
+import { createReadStream } from "node:fs";
 import { resolve, join, sep } from "node:path";
 import {
   cleanupSdlcGitCredentialMaterial,
-  installSdlcGitCredentialBootstrap,
-  type SdlcRuntimeCredentialBinding,
+  installSdlcRepositoryAccess,
 } from "./sdlc-credential-bootstrap.js";
 
 const sandboxLog = createLogger("sandbox-tools");
@@ -30,6 +30,39 @@ function isCredentialPath(p: string): boolean {
 }
 
 const SESSION_STORE = new Map<string, Session>();
+
+// Single-flight for sandbox-repo-setup, keyed by (user, conversation).
+//
+// A cold claim takes 5-7 min (warm pool is 2 replicas; past that each claim
+// cold-boots a Kata microVM). The model does not know that, so on "destroy this
+// one and get a new one" it fired three setups 20:42/20:44:55/20:45:37 that ran
+// CONCURRENTLY, exhausted the warm pool and turned one request into ~9 min of
+// churn (measured 2026-08-29). Prompt guidance cannot make this safe — a second
+// call is never what the user wanted, so it is coalesced onto the first here:
+// the later callers await the same provisioning and get the same session back
+// instead of claiming more pods.
+const REPO_SETUP_INFLIGHT = new Map<string, Promise<string>>();
+
+function withRepoSetupSingleFlight(tool: ToolDefinition): ToolDefinition {
+  const run = tool.execute.bind(tool);
+  return {
+    ...tool,
+    async execute(params, context) {
+      const key = context ? storeKeyFromContext(context) : undefined;
+      if (!key) return run(params, context);
+      const inflight = REPO_SETUP_INFLIGHT.get(key);
+      if (inflight) return inflight;
+      const started = (async () => run(params, context))();
+      REPO_SETUP_INFLIGHT.set(key, started);
+      void started
+        .catch(() => undefined)
+        .finally(() => {
+          if (REPO_SETUP_INFLIGHT.get(key) === started) REPO_SETUP_INFLIGHT.delete(key);
+        });
+      return started;
+    },
+  };
+}
 interface SessionOwner {
   userId: string;
   conversationId: string;
@@ -194,14 +227,34 @@ export function buildSandboxStoreKey(userId: string | undefined, conversationId:
   return slug ? `${cidSeg}_${slug}` : cidSeg;
 }
 
-function isStaleSessionError(err: unknown): boolean {
+export function isStaleSessionError(err: unknown): boolean {
   const msg = err instanceof Error ? err.message : String(err);
   return STALE_PATTERNS.some((re) => re.test(msg));
 }
 
+/**
+ * The conversation identity the SANDBOX is keyed by — which is NOT always the
+ * conversation the SESSION lives under. Two overrides fold in here, and this is
+ * the single chokepoint both `storeKeyFromContext` and `ownerFromContext` read,
+ * so the store key and the ownership check can never disagree:
+ *
+ *   meta.sandboxConversationId — generic explicit override. A run whose session
+ *     lives under a synthetic conversation (the PR review room's
+ *     `review-room_<sha>`) but which must REUSE the parent run's already-warm
+ *     sandbox passes the parent's raw conversationId here. Without it the room
+ *     run keys a different, empty sandbox and pays a cold repo setup.
+ */
+export function sandboxConversationIdFromMeta(
+  meta: Record<string, string> | undefined,
+): string | undefined {
+  const override = meta?.["sandboxConversationId"]?.trim();
+  if (override) return override;
+  return meta?.["conversationId"]?.trim();
+}
+
 function ownerFromContext(context: { meta?: Record<string, string> } | undefined): SessionOwner | undefined {
   const userId = context?.meta?.["userId"]?.trim();
-  const conversationId = context?.meta?.["conversationId"]?.trim();
+  const conversationId = sandboxConversationIdFromMeta(context?.meta);
   if (!userId || !conversationId) return undefined;
   return {
     userId,
@@ -213,7 +266,7 @@ function ownerFromContext(context: { meta?: Record<string, string> } | undefined
 function storeKeyFromContext(context: { meta?: Record<string, string> } | undefined): string | undefined {
   return buildSandboxStoreKey(
     context?.meta?.["userId"],
-    context?.meta?.["conversationId"],
+    sandboxConversationIdFromMeta(context?.meta),
     context?.meta?.["agentSlug"],
   );
 }
@@ -348,8 +401,20 @@ function isSessionOwnedByContext(session: Session, lookupKey: string | undefined
     SESSION_OWNER.get(session.id);
   const caller = ownerFromContext(context);
   if (!owner || !caller) return false;
-  return owner.userId === caller.userId &&
-    owner.conversationId === caller.conversationId &&
+  // Match the SAME identity buildSandboxStoreKey uses, or the two disagree.
+  // That key deliberately EXCLUDES userId (a thread's sandbox is shared by every
+  // user in that thread for the same agent), so comparing userId here locked out
+  // every participant except whoever happened to create the session: the lookup
+  // hands you a thread-shared session and this check then refuses it.
+  // Observed 2026-08-25 on credit-doctor — a second user in the thread could not
+  // run, destroy, or recreate the sandbox; every recovery path returned
+  // "not authorized for this user/conversation", including sandbox-destroy, so
+  // the thread could not be unwedged by anyone but the original caller.
+  // userId is part of the identity only for PER_USER_SESSION_AGENTS, which are
+  // exactly the agents whose store key folds userId in.
+  const perUserAgent = !!caller.agentSlug && PER_USER_SESSION_AGENTS.has(caller.agentSlug);
+  if (perUserAgent && owner.userId !== caller.userId) return false;
+  return owner.conversationId === caller.conversationId &&
     owner.agentSlug === caller.agentSlug;
 }
 
@@ -474,6 +539,7 @@ export interface RepoSetupConfig {
   repoUrl?: string;
   defaultBranch: string;
   cloneDepth?: number;
+  cloneTimeoutMs?: number;
   workDir: string;
   template: string;
   sessionTimeoutMs?: number;
@@ -506,8 +572,25 @@ export interface RepoSetupConfig {
   /** Generic repositories are not baked into their template. Skip the golden
    * clone probe and clone them immediately. */
   skipBakedCloneWait?: boolean;
-  /** Durable binding used to mint a fresh one-use envelope for each sandbox bootstrap. */
-  runtimeCredentialBinding?: SdlcRuntimeCredentialBinding;
+}
+
+export function buildRepoCloneCommand(
+  config: RepoSetupConfig,
+  baseBranch: string,
+): string {
+  if (!config.repoUrl) {
+    throw new Error("Repository URL is required for clone");
+  }
+
+  return [
+    "git clone",
+    config.cloneDepth ? `--depth ${config.cloneDepth}` : "",
+    `--branch ${baseBranch}`,
+    config.repoUrl,
+    config.workDir,
+  ]
+    .filter(Boolean)
+    .join(" ");
 }
 
 export const SANDBOX_CONFIG_SCHEMA = {
@@ -607,7 +690,18 @@ export const sandboxCreate: ToolDefinition = {
     // A UI-pinned sandbox repo wins over whatever template the LLM passed —
     // a pinned agent must always get its own sandbox, never the legacy kata one.
     const pinnedTemplate = await pinnedTemplateForContext(context);
-    const template = pinnedTemplate ?? (params["template"] as string | undefined);
+    const requestedTemplate = pinnedTemplate ?? (params["template"] as string | undefined);
+    // ROTATE, exactly as the repo-setup path does. Without this, every
+    // sandbox-create on a pinned agent clones the BASE template's single
+    // snapshot: pinnedTemplateForContext returns REPO_CONFIGS[repo].template,
+    // which is deliberately the base name (ROTATION_SETS is KEYED by it), so
+    // skipping rotation concentrates every claim on one GCP snapshot and trips
+    // its per-source op-rate limit. Measured 2026-08-25: agent-workspace and
+    // xyne-cli both stormed with RESOURCE_OPERATION_RATE_EXCEEDED and ~35
+    // Pending pods cluster-wide, while the four a/b/c/d rotation pools sat
+    // absorbing nothing. rotateTemplate() returns non-rotated templates
+    // unchanged, so this is a no-op for every template without a rotation set.
+    const template = requestedTemplate ? rotateTemplate(requestedTemplate) : requestedTemplate;
 
     const existing = SESSION_STORE.get(storeKey);
     if (existing) {
@@ -643,10 +737,16 @@ export const sandboxCreate: ToolDefinition = {
 export const sandboxRun: ToolDefinition = {
   slug: "sandbox-run",
   name: "Sandbox Run Command",
-  description: 
-    "**PREFERRED**: Run shell commands in an isolated Kata/QEMU microVM sandbox. " +
+  description:
+    "**PREFERRED** for SHORT commands: run shell commands in an isolated Kata/QEMU microVM sandbox. " +
     "Use this instead of bash for better isolation, safety, and clean environment. " +
-    "Ideal for git clone, npm install, build processes, file operations, and any command execution. " +
+    "Ideal for greps, file reads/edits, git status/log/diff, and any command that finishes in well under 60s. " +
+    "BATCH related steps into ONE call (chain with && or ;) — each call costs a full model round-trip, so " +
+    "many single-line calls are the dominant cost of a long sandbox session. " +
+    "DO NOT use it for long work — installs (pnpm/npm/yarn add|install), builds, tsc typechecks, and test " +
+    "suites routinely exceed the timeout (default 60000ms). This call is SYNCHRONOUS: when the timeout is " +
+    "hit the call returns an error, the work is abandoned, and re-running the same command just burns the " +
+    "timeout again. For anything that may take more than ~60s use sandbox-run-detached + sandbox-poll-job. " +
     "Auto-detects existing sessions or creates fresh sandboxes as needed.",
   source: "custom:sandbox",
   configSchema: SANDBOX_CONFIG_SCHEMA,
@@ -659,11 +759,17 @@ export const sandboxRun: ToolDefinition = {
       },
       cmd: {
         type: "string",
-        description: "Shell command to execute",
+        description:
+          "Shell command to execute. BATCH related steps into ONE call — every invocation costs a full " +
+          "model round-trip (~5-10s), so 20 one-line calls waste minutes versus a single chained command. " +
+          "Chain with && (stop on first failure) or ; (always continue), use a heredoc for multi-line " +
+          "scripts, and echo section markers so you can read one combined output, e.g. " +
+          "`cd /workspace/repo && echo '== branch ==' && git branch --show-current && echo '== status ==' && git status --short`. " +
+          "Only split into separate calls when a later step genuinely depends on reading the earlier output first.",
       },
       timeoutMs: {
         type: "number",
-        description: "Command timeout in milliseconds (default: 60000)",
+        description: "Command timeout in milliseconds (default: 60000). On timeout the call returns an error and the work is abandoned — raise this only for commands you are confident finish sooner; otherwise use sandbox-run-detached.",
       },
     },
     required: ["cmd"],
@@ -679,6 +785,7 @@ export const sandboxRun: ToolDefinition = {
 
     // Try explicit sessionId first
     const explicitSessionId = params["sessionId"] as string | undefined;
+    let replacedDeadSession: string | null = null;
     if (explicitSessionId) {
       const session = SESSION_STORE.get(explicitSessionId);
       if (!session) return `Error: Session ${explicitSessionId} not found.`;
@@ -694,20 +801,21 @@ export const sandboxRun: ToolDefinition = {
       } catch (err) {
         if (isStaleSessionError(err)) {
           evictSession(session);
-          return `Error: Session ${explicitSessionId} died (sandbox pod replaced). Call sandbox-repo-setup to re-provision.`;
+          replacedDeadSession = explicitSessionId;
+        } else {
+          const msg = err instanceof Error ? err.message : String(err);
+          if (/aborted due to timeout|operation was aborted/i.test(msg)) {
+            return `Error: Command exceeded the ${timeoutMs}ms sandbox-run timeout and was abandoned (the VM is still alive; the command may still be running). Do NOT just retry the same command with sandbox-run — it will time out again. Re-run it with sandbox-run-detached and poll with sandbox-poll-job, or pass a larger timeoutMs if you are sure it finishes sooner. DO NOT attempt to destroy the session.`;
+          }
+          return `Error: ${redactSecrets(msg)}`;
         }
-        const msg = err instanceof Error ? err.message : String(err);
-        if (/aborted due to timeout|operation was aborted/i.test(msg)) {
-          return `Error: Tool call timed out (sandbox-router may be slow). The VM is likely still alive — retry the same sandbox-run, or call sandbox-repo-setup which will reuse the existing session. DO NOT attempt to destroy the session.`;
-        }
-        return `Error: ${redactSecrets(msg)}`;
       }
     }
 
     // Try auto-resolve from conversation context
     const conversationId = context.meta?.["conversationId"];
     const storeKey = storeKeyFromContext(context);
-    if (conversationId) {
+    if (conversationId && !replacedDeadSession) {
       const session = storeKey ? SESSION_STORE.get(storeKey) : undefined;
       if (session) {
         if (!isSessionOwnedByContext(session, storeKey, context)) {
@@ -721,13 +829,14 @@ export const sandboxRun: ToolDefinition = {
         } catch (err) {
           if (isStaleSessionError(err)) {
             evictSession(session, storeKey);
-            return `Error: Sandbox session for this conversation died (pod replaced). Call sandbox-repo-setup to re-provision.`;
+            replacedDeadSession = session.id;
+          } else {
+            const msg = err instanceof Error ? err.message : String(err);
+            if (/aborted due to timeout|operation was aborted/i.test(msg)) {
+              return `Error: Command exceeded the ${timeoutMs}ms sandbox-run timeout and was abandoned (the VM is still alive; the command may still be running). Do NOT just retry the same command with sandbox-run — it will time out again. Re-run it with sandbox-run-detached and poll with sandbox-poll-job, or pass a larger timeoutMs if you are sure it finishes sooner. DO NOT attempt to destroy the session.`;
+            }
+            return `Error: ${redactSecrets(msg)}`;
           }
-          const msg = err instanceof Error ? err.message : String(err);
-          if (/aborted due to timeout|operation was aborted/i.test(msg)) {
-            return `Error: Tool call timed out (sandbox-router may be slow). The VM is likely still alive — retry the same sandbox-run, or call sandbox-repo-setup which will reuse the existing session. DO NOT attempt to destroy the session.`;
-          }
-          return `Error: ${redactSecrets(msg)}`;
         }
       }
     }
@@ -737,10 +846,26 @@ export const sandboxRun: ToolDefinition = {
     // never the legacy kata default.
     try {
       const pinnedTemplate = await pinnedTemplateForContext(context);
-      const client = makeClient(context.config, pinnedTemplate);
+      // Rotate here too — a one-shot exec still provisions a VM from the
+      // template's snapshot, so an un-rotated base name concentrates clones
+      // the same way sandbox-create did.
+      const oneShotTemplate = pinnedTemplate ? rotateTemplate(pinnedTemplate) : pinnedTemplate;
+      const client = makeClient(context.config, oneShotTemplate);
       const result = await client.exec(cmd, { timeoutMs });
-      return redactAndStringify({ stdout: result.stdout, stderr: result.stderr, exitCode: result.exitCode });
+      return redactAndStringify({
+        stdout: result.stdout,
+        stderr: result.stderr,
+        exitCode: result.exitCode,
+        ...(replacedDeadSession
+          ? {
+              note: `Previous sandbox session ${replacedDeadSession} was dead (pod replaced); this command ran on a fresh one-shot VM from the pinned template. Repo state is the template baseline — if you need a specific branch or the services running, call sandbox-repo-setup once and reuse the session it returns.`,
+            }
+          : {}),
+      });
     } catch (err) {
+      if (replacedDeadSession) {
+        return `Error: Sandbox session ${replacedDeadSession} was dead (pod replaced) and the fallback one-shot VM also failed: ${sandboxErr(err)}`;
+      }
       return sandboxErr(err);
     }
   },
@@ -753,8 +878,11 @@ export const sandboxRunDetached: ToolDefinition = {
   slug: "sandbox-run-detached",
   name: "Sandbox Run Detached",
   description:
-    "Start a long-running command in the background inside a sandbox session. " +
-    "Returns immediately with a jobId. Use sandbox-poll-job to check completion.",
+    "**USE THIS FOR ANY LONG COMMAND (>~60s).** Starts the command in the background inside a sandbox " +
+    "session and returns immediately with a jobId; poll it with sandbox-poll-job. This is the correct tool " +
+    "for dependency installs (pnpm/npm/yarn add|install), builds, tsc typechecks, lint, and test suites — " +
+    "sandbox-run would time out on these and lose the work, while a detached job keeps running to " +
+    "completion. Prefer starting the job, doing other useful work, then polling.",
   source: "custom:sandbox",
   configSchema: SANDBOX_CONFIG_SCHEMA,
   inputSchema: {
@@ -1014,9 +1142,10 @@ export const sandboxCopyIn: ToolDefinition = {
   slug: "sandbox-copy-in",
   name: "Sandbox Copy Skill File",
   description:
-    "Copy a companion file bundled with a loaded skill (a script or asset in the skill's folder) directly into a sandbox session, WITHOUT pasting its content. " +
-    "Prefer this over sandbox-write-file when a skill ships a script/binary you need to run in the sandbox: the file is streamed server-side, so large or binary files stay intact and don't bloat context. " +
-    "`skillPath` is relative to the skill directory shown in the skill's <location> (e.g. 'sandbox-record-video/scripts/recorder.mjs').",
+    "Copy a file directly into a sandbox session WITHOUT pasting its content — the bytes stream server-side, so large/binary files stay intact and don't bloat context. " +
+    "Pass EITHER `skillPath` (a companion file bundled with a loaded skill, relative to the skill's <location>, e.g. 'sandbox-record-video/scripts/recorder.mjs') " +
+    "OR `contextPath` (a spilled tool-result / attachment file under this run's .context, e.g. 'tool-results/<file>.json'). " +
+    "Prefer contextPath to forward a whole MCP result file into the sandbox byte-for-byte instead of retyping it with sandbox-write-file.",
   source: "custom:sandbox",
   configSchema: SANDBOX_CONFIG_SCHEMA,
   inputSchema: {
@@ -1031,35 +1160,48 @@ export const sandboxCopyIn: ToolDefinition = {
         description:
           "Path of the skill companion file RELATIVE to this run's session-skills root, e.g. '<skill-slug>/scripts/run.sh'. Leading '/' and '..' are rejected.",
       },
+      contextPath: {
+        type: "string",
+        description:
+          "Path of a spilled tool-result / attachment file RELATIVE to this run's .context root, e.g. 'tool-results/<file>.json'. Use this to forward a whole MCP result file into the sandbox. Leading '/' and '..' are rejected.",
+      },
       destPath: {
         type: "string",
-        description: "Absolute destination path inside the sandbox (default: /workspace/<basename of skillPath>).",
+        description: "Absolute destination path inside the sandbox (default: /workspace/<basename of source path>).",
       },
     },
-    required: ["sessionId", "skillPath"],
+    required: ["sessionId"],
   },
 
   async execute(params, context) {
     if (!context) return "Error: No execution context available.";
     const sessionId = params["sessionId"] as string;
-    const skillPathRaw = params["skillPath"] as string;
+    const skillPathRaw = params["skillPath"] as string | undefined;
+    const contextPathRaw = params["contextPath"] as string | undefined;
     const destPathRaw = params["destPath"] as string | undefined;
 
-    const skillsRoot = context.meta?.["skillsRoot"];
-    if (!skillsRoot) {
-      return "Error: No skills are materialized for this run (context.meta.skillsRoot is unset), so there is nothing to copy in. Use sandbox-write-file for ad-hoc content.";
+    // Exactly one source: a skill companion file (skillsRoot) or a spilled
+    // tool-result file (.context root). Each is confined to its own root.
+    const hasSkill = typeof skillPathRaw === "string" && skillPathRaw.trim().length > 0;
+    const hasContext = typeof contextPathRaw === "string" && contextPathRaw.trim().length > 0;
+    if (hasSkill === hasContext) {
+      return "Error: pass exactly one of skillPath (a loaded skill's companion file) or contextPath (a spilled tool-result file under .context).";
     }
-    if (typeof skillPathRaw !== "string" || skillPathRaw.trim().length === 0) {
-      return "Error: skillPath must be a non-empty path relative to the skill directory.";
+    const rootRaw = hasSkill ? context.meta?.["skillsRoot"] : context.meta?.["contextRoot"];
+    if (!rootRaw) {
+      return hasSkill
+        ? "Error: No skills are materialized for this run (context.meta.skillsRoot is unset). Use sandbox-write-file for ad-hoc content."
+        : "Error: No .context root for this run (context.meta.contextRoot is unset), so there is no tool-result file to copy in.";
     }
+    const relPath = (hasSkill ? skillPathRaw! : contextPathRaw!).trim();
 
-    // Confine the source to THIS run's session-skills root. Reject absolute
-    // inputs and any '..' traversal that escapes the root — otherwise this
-    // becomes an arbitrary pod-file / cross-session read primitive.
-    const rootAbs = resolve(skillsRoot);
-    const sourceAbs = resolve(join(rootAbs, skillPathRaw));
+    // Confine the source to its root. Reject absolute inputs and any '..'
+    // traversal that escapes it — otherwise this becomes an arbitrary
+    // pod-file / cross-session read primitive.
+    const rootAbs = resolve(rootRaw);
+    const sourceAbs = resolve(join(rootAbs, relPath));
     if (sourceAbs !== rootAbs && !sourceAbs.startsWith(rootAbs + sep)) {
-      return "Error: skillPath escapes the skill directory. Pass a path relative to the skill folder (no leading '/' and no '..').";
+      return "Error: path escapes its root. Pass a relative path (no leading '/' and no '..').";
     }
     if (isCredentialPath(sourceAbs)) {
       return JSON.stringify({ error: "Refused: path looks like a credential file" });
@@ -1079,16 +1221,27 @@ export const sandboxCopyIn: ToolDefinition = {
     if (roWrite) return roWrite;
 
     try {
-      const buf = await readFile(sourceAbs);
-      await session.files.write(destPath, buf);
-      return JSON.stringify({ skillPath: skillPathRaw, destPath, bytes: buf.length, copied: true });
+      // Stream the file in bounded chunks instead of one base64 JSON POST.
+      // A whole-file write() base64-inflates the payload ~1.33x into a single
+      // /write body, which the sandbox workspace server rejects with
+      // "request entity too large" for large spilled MCP results (observed at
+      // ~486 KB raw -> ~650 KB body). writeStream reuses the same /write
+      // endpoint per chunk and appends server-side, so no single request is
+      // large and no workspace-image change is needed. 256 KiB keeps a clear
+      // margin under the observed cap.
+      const { bytesWritten } = await session.files.writeStream(
+        destPath,
+        createReadStream(sourceAbs),
+        { chunkBytes: 256 * 1024 },
+      );
+      return JSON.stringify({ sourcePath: relPath, destPath, bytes: bytesWritten, copied: true });
     } catch (err) {
       if (isStaleSessionError(err)) {
         evictSession(session);
         return `Error: Session ${sessionId} died (sandbox pod replaced). Call sandbox-repo-setup to re-provision.`;
       }
       if ((err as NodeJS.ErrnoException)?.code === "ENOENT") {
-        return `Error: Skill file not found at '${skillPathRaw}'. Check the path relative to the skill's <location> directory.`;
+        return `Error: file not found at '${relPath}'. Check the path is relative to the ${hasSkill ? "skill's <location> directory" : "run's .context root"}.`;
       }
       return sandboxErr(err);
     }
@@ -1418,7 +1571,7 @@ export function makeRepoSetupTool(config: RepoSetupConfig): ToolDefinition {
       additionalProperties: { type: "string" },
     };
   }
-  return {
+  const tool: ToolDefinition = {
     slug: config.slug,
     name: config.name,
     description: config.description,
@@ -1543,11 +1696,6 @@ export function makeRepoSetupTool(config: RepoSetupConfig): ToolDefinition {
             : cached.id.includes("agent-workspace") || cached.id.includes("docker-dev");
           if (isRepoTemplate && await probeSession(cached, storeKey)) {
             log.push(`Reusing existing sandbox session ${cached.id}`);
-            if (config.runtimeCredentialBinding) {
-              await cleanupSdlcGitCredentialMaterial(cached).catch(() => undefined);
-              await installSdlcGitCredentialBootstrap(cached, config.runtimeCredentialBinding);
-              log.push("SDLC bootstrap refreshed: PAT helper and PAT-account commit identity installed.");
-            }
             try {
               // The pod prebakes a shallow clone of the default branch.
               // branchName might be:
@@ -1580,11 +1728,7 @@ export function makeRepoSetupTool(config: RepoSetupConfig): ToolDefinition {
             // Refresh git identity on reuse too — the userEmail/userName in
             // meta come from the caller's /run payload, so if a different
             // user picks up the conversation we want their identity now.
-            if (config.runtimeCredentialBinding) {
-              log.push("Git author and committer are bound to the sandbox-fetched PAT account.");
-            } else {
-              await configureGitIdentity(cached, allWorkDirs, userEmail, userName, log);
-            }
+            await configureGitIdentity(cached, allWorkDirs, userEmail, userName, log);
             return JSON.stringify({
               sessionId: cached.id,
               branch: branchName,
@@ -1619,16 +1763,6 @@ export function makeRepoSetupTool(config: RepoSetupConfig): ToolDefinition {
       rememberSession(storeKey, session, claimTemplate, ownerFromContext(context));
       await reportExperimentSandboxCreated(context, session, claimTemplate);
       log.push(`Session created: ${session.id}`);
-      if (config.runtimeCredentialBinding) {
-        try {
-          await installSdlcGitCredentialBootstrap(session, config.runtimeCredentialBinding);
-        } catch (error) {
-          await session.destroy().catch(() => undefined);
-          evictSession(session, storeKey);
-          throw error;
-        }
-        log.push("SDLC bootstrap completed: PAT helper and PAT-account commit identity installed.");
-      }
 
       const pollUntilDone = async (jobId: string, label: string, timeoutMs: number) => {
         const deadline = Date.now() + timeoutMs;
@@ -1709,14 +1843,45 @@ export function makeRepoSetupTool(config: RepoSetupConfig): ToolDefinition {
         // brand-new sandbox whose tree mutations all come from automated
         // boot scripts — never user work. Interactive re-calls hit the
         // reuse path (above) which leaves the tree alone.
-        const branchJobId = await session.commands.runDetached(
+        // ALWAYS FETCH — never skip freshness. But only do the DESTRUCTIVE part
+        // (reset --hard + checkout) when it would actually change something.
+        //
+        // Why: after a PVC clone from a snapshot, git sees stat-dirty index
+        // entries, so `git reset --hard` rewrites the worktree and every file
+        // gets a new mtime — even when content is byte-identical. Build systems
+        // key on mtime, so that silently destroys the golden's most expensive
+        // artifact. Measured 2026-08-29 on hyperswitch: 2113 .rs files restamped
+        // at claim time, the prebuilt 4.85GB `router` (built 20:10) ended up
+        // OLDER than its sources (20:52), and the prebake began a ~24-min
+        // rebuild for a checkout that was literally `main -> main`.
+        //
+        // The trade this AVOIDS: skipping the fetch would keep the cache but
+        // silently pin the agent to whatever commit the golden baked, so a stale
+        // golden would serve stale code under the right branch name. Fetching
+        // first keeps that honest — when the branch really has moved we take the
+        // reset+checkout and the rebuild is legitimate work, not waste.
+        const fetchState = await session.commands.run(
           `cd ${config.workDir} && ` +
-          `git reset --hard HEAD 2>/dev/null; git clean -fd 2>/dev/null; ` +
-          `(if git fetch origin ${branchName} 2>/dev/null; then ` +
-          `git checkout -B ${branchName} FETCH_HEAD; else ` +
-          `git fetch origin ${baseBranch} && git checkout -B ${baseBranch} FETCH_HEAD && git checkout -B ${branchName}; fi)`,
-        );
-        await pollUntilDone(branchJobId, `git fetch+checkout ${branchName}`, 60_000);
+          `git fetch origin ${branchName} 2>/dev/null && ` +
+          `test "$(git rev-parse HEAD 2>/dev/null)" = "$(git rev-parse FETCH_HEAD 2>/dev/null)" && ` +
+          `test -z "$(git status --porcelain 2>/dev/null)" && echo current || echo stale`,
+          60_000,
+        ).catch(() => ({ stdout: "stale" }) as { stdout: string });
+        if ((fetchState.stdout ?? "").trim() === "current") {
+          log.push(
+            `${branchName} already at origin tip with a clean tree — skipping reset/checkout ` +
+            `(a reset here restamps every file and forces a full rebuild).`,
+          );
+        } else {
+          const branchJobId = await session.commands.runDetached(
+            `cd ${config.workDir} && ` +
+            `git reset --hard HEAD 2>/dev/null; git clean -fd 2>/dev/null; ` +
+            `(if git fetch origin ${branchName} 2>/dev/null; then ` +
+            `git checkout -B ${branchName} FETCH_HEAD; else ` +
+            `git fetch origin ${baseBranch} && git checkout -B ${baseBranch} FETCH_HEAD && git checkout -B ${branchName}; fi)`,
+          );
+          await pollUntilDone(branchJobId, `git fetch+checkout ${branchName}`, 60_000);
+        }
 
         // Prebake (entrypoint runs npm ci × 3 + nix build .#xyne-space-services
         // in the background) drops /tmp/prebake-done when it finishes. Wait
@@ -1747,6 +1912,19 @@ export function makeRepoSetupTool(config: RepoSetupConfig): ToolDefinition {
         // this once services-up is present AND the backend dev log shows a fatal
         // startup error — a crash, not slow progress.
         const CRASH_GRACE_MS = 8 * 60_000;
+        // DETERMINISTIC failures get a much shorter grace. A config-schema
+        // rejection can never resolve by waiting — the backend re-reads the
+        // same .env.local and fails identically every time — so holding the
+        // agent for the full CRASH_GRACE_MS buys nothing. Measured 2026-08-29:
+        // a claim whose mounted Secret still carried
+        //     LIVEKIT_API_KEY=devkey
+        // ("must not be the published development key") burned ~12 min before
+        // reporting anything, 8 of which was this grace, and then handed the
+        // agent a sandbox with no backend/dashboard. Slow-but-progressing
+        // templates (hyperswitch cargo cold build, 25-35 min) never emit these
+        // patterns, so they keep the long grace below.
+        const FATAL_GRACE_MS = 90_000;
+        const FATAL_PATTERNS = "Config validation error|must not be the published|is required";
         const startedWaitAt = Date.now();
         while (Date.now() < prebakeDeadline) {
           try {
@@ -1757,6 +1935,19 @@ export function makeRepoSetupTool(config: RepoSetupConfig): ToolDefinition {
             if ((probe.stdout ?? "").trim() === "done") {
               prebakeDone = true;
               break;
+            }
+            // Deterministic config rejections: check from ~90s. These cannot
+            // clear by waiting, so there is nothing to be gained by the long
+            // grace — and the agent gets an actionable message instead of a
+            // silent "Executing tools…".
+            const waited = Date.now() - startedWaitAt;
+            if (waited > FATAL_GRACE_MS && waited <= CRASH_GRACE_MS) {
+              const fatal = await session.commands.run(
+                `grep -iE "${FATAL_PATTERNS}" /tmp/prebake-backend-dev.log 2>/dev/null | tail -4`,
+                8_000,
+              ).catch(() => ({ stdout: "" }) as { stdout: string });
+              const f = (fatal.stdout ?? "").trim();
+              if (f) { backendCrash = f; break; }
             }
             // Fast-fail on a DEFINITIVE backend crash so a bad golden bake (e.g.
             // env-schema drift: "DATABASE_URL is required") surfaces in ~8 min,
@@ -1796,10 +1987,10 @@ export function makeRepoSetupTool(config: RepoSetupConfig): ToolDefinition {
         // Should never happen with the agent-workspace image (entrypoint
         // prebakes the clone), but kept as a safety net for older / bare
         // sandbox templates that haven't been migrated.
-        const cloneCmd = `git clone ${config.cloneDepth ? `--depth ${config.cloneDepth}` : ""} --branch ${baseBranch} ${config.repoUrl} ${config.workDir}`;
+        const cloneCmd = buildRepoCloneCommand(config, baseBranch);
         log.push(`No baked clone — cloning ${config.repoUrl} (${baseBranch})...`);
         const cloneJobId = await session.commands.runDetached(cloneCmd);
-        await pollUntilDone(cloneJobId, "git clone", 5 * 60_000);
+        await pollUntilDone(cloneJobId, "git clone", config.cloneTimeoutMs ?? 5 * 60_000);
         log.push("Cutting branch: " + branchName);
         const branchJobId = await session.commands.runDetached(
           `cd ${config.workDir} && (git checkout ${branchName} 2>/dev/null || git checkout -b ${branchName})`,
@@ -1815,11 +2006,7 @@ export function makeRepoSetupTool(config: RepoSetupConfig): ToolDefinition {
 
       // Author every commit as the human who triggered this run, with
       // Xyne Spaces as committer. Runs across primary + aux workdirs.
-      if (config.runtimeCredentialBinding) {
-        log.push("Git author and committer are bound to the sandbox-fetched PAT account.");
-      } else {
-        await configureGitIdentity(session, allWorkDirs, userEmail, userName, log);
-      }
+      await configureGitIdentity(session, allWorkDirs, userEmail, userName, log);
 
       const jobIds: Record<string, string> = {};
 
@@ -1946,6 +2133,7 @@ export function makeRepoSetupTool(config: RepoSetupConfig): ToolDefinition {
       });
     },
   };
+  return withRepoSetupSingleFlight(tool);
 }
 
 // Read-only git for the shared sbx-git sandbox: read ANY branch by ref without
@@ -2121,11 +2309,9 @@ export const sandboxRepoSetup: ToolDefinition = {
   slug: "sandbox-repo-setup",
   name: "Sandbox Repository Setup",
   description:
-    "Set up a repository workspace. For read-first repos (e.g. xyne-spaces) this DEFAULTS to an INSTANT " +
-    "READ-ONLY sandbox (shared git server, no clone/wait): use it for reading, grepping, inspecting code, " +
-    "and PR review — what you want almost always. Pass write:true ONLY when you must edit files, build, run " +
-    "tests, or commit — that claims a short-lived (~20 min, auto-expiring) writable dev sandbox for the given " +
-    "branch. Prefer read; escalate to write only when you actually need to change code, then let it expire.",
+    "Set up a workspace for one of the platform's configured repositories (REPO_CONFIGS). Read-first repositories " +
+    "default to the shared read-only workspace; write:true claims a writable one. SDLC hub repositories are not set " +
+    "up here: create a sandbox and call sdlc-repository-access instead.",
   source: "custom:sandbox",
   configSchema: SANDBOX_CONFIG_SCHEMA,
   inputSchema: {
@@ -2138,9 +2324,7 @@ export const sandboxRepoSetup: ToolDefinition = {
       write: {
         type: "boolean",
         description:
-          "Default false = instant READ-ONLY git sandbox (read/grep/inspect; no build/run/write). " +
-          "Set true ONLY to edit/build/run/commit — claims a short-lived (~20 min) writable dev sandbox that auto-expires. " +
-          "Do NOT set true just to look at code.",
+          "For read-first repositories, false uses the shared read-only workspace and true claims a writable workspace.",
       },
       branchName: {
         type: "string",
@@ -2162,32 +2346,10 @@ export const sandboxRepoSetup: ToolDefinition = {
     // ignore whatever repoName the LLM passed. This is what makes the setup
     // deterministic — the operator picks the repo in the agent UI, not the model.
     const pinnedRepo = context.meta?.["sandboxRepo"]?.trim();
-    const dynamicRepo = resolveDynamicSdlcRepositoryConfig(context);
-    const hasSdlcRepositoryMetadata = [
-      "sdlcRepositoryId",
-      "sdlcRepositoryName",
-      "sdlcRepositoryUrl",
-      "sdlcRepositoryBaseBranch",
-      "sdlcRepositoryWrite",
-    ].some((key) => context.meta?.[key] !== undefined);
-    if (
-      !dynamicRepo &&
-      (hasSdlcRepositoryMetadata || context.meta?.["requireSdlcRepository"] === "true")
-    ) {
-      return "Error: Valid SDLC repository context is required; refusing to fall back to a static repository.";
-    }
-    const repoName = dynamicRepo?.name || pinnedRepo || (params["repoName"] as string);
+    const repoName = pinnedRepo || (params["repoName"] as string);
     const wantWrite = params["write"] === true;
     const requestedBranchName = params["branchName"] as string;
     const sessionDurationMs = params["sessionDurationMs"] as number | undefined;
-    if (
-      dynamicRepo &&
-      wantWrite &&
-      context.meta?.["sdlcRepositoryWrite"] !== "true"
-    ) {
-      return "Error: This SDLC run is pinned to read-only repository access.";
-    }
-
     // Import here to avoid circular dependency
     const { REPO_CONFIGS, isReadOnlyJob } = await import("./repo-configs.js");
 
@@ -2211,7 +2373,7 @@ export const sandboxRepoSetup: ToolDefinition = {
       return resolveSbxGit(repoName, context);
     }
 
-    let config = dynamicRepo?.config ?? REPO_CONFIGS[repoName];
+    const config = REPO_CONFIGS[repoName];
 
     // 2. Per-repo READ-FIRST (config.readFirst, e.g. xyne-spaces): default every
     //    interactive run to read-only sbx-git; only claim a writable golden dev
@@ -2228,58 +2390,6 @@ export const sandboxRepoSetup: ToolDefinition = {
       const availableRepos = Object.keys(REPO_CONFIGS).join(", ");
       return `Error: Repository '${repoName}' not found. Available repos: ${availableRepos}`;
     }
-    if (dynamicRepo) {
-      const operation = context.meta?.["sdlcRuntimeCredentialOperation"]?.trim();
-      const executionId = context.meta?.["sdlcExecutionId"]?.trim();
-      const sessionId = context.meta?.["sdlcSessionId"]?.trim();
-      const agentSlug = context.meta?.["agentSlug"]?.trim();
-      // Chat-surface SDLC runs carry repository context but no dispatched
-      // execution, so no runtime credential grant exists and a private-repo
-      // clone cannot be authenticated. When the same repo exists in the local
-      // REPO_CONFIGS mirror, serve the fast read-only sbx-git sandbox instead
-      // (seconds, no credentials). Otherwise point the agent at its canvases.
-      if (!operation && !executionId && !sessionId) {
-        // The SDLC repo row's display name ("Xyne Spaces") rarely matches a
-        // REPO_CONFIGS key ("xyne-spaces") — try the caller's requested name
-        // and a slugified display name before giving up on the local mirror.
-        const mirrorCandidates = [
-          repoName,
-          typeof params["repoName"] === "string" ? (params["repoName"] as string) : "",
-          repoName.trim().toLowerCase().replace(/\s+/g, "-"),
-        ].filter(Boolean);
-        const mirrorName = mirrorCandidates.find((name) => REPO_CONFIGS[name]);
-        if (!wantWrite && mirrorName) {
-          return resolveSbxGit(mirrorName, context);
-        }
-        return (
-          "Error: Repository cloning is only available inside dispatched SDLC executions (setup/artifact/work). " +
-          "This chat run has no repository credential grant. Use the Repo Knowledge baseline canvases " +
-          "(spaces-search / spaces-read-canvas in the repository channel) as the source instead."
-        );
-      }
-      if (operation || executionId || sessionId) {
-        if (agentSlug !== "sdlc-agent") {
-          return "Error: SDLC runtime credentials are restricted to the sdlc-agent profile.";
-        }
-        if (
-          (operation !== "CLONE" && operation !== "PUSH") ||
-          !executionId ||
-          !sessionId
-        ) {
-          return "Error: Incomplete SDLC runtime credential grant context.";
-        }
-        config = {
-          ...config,
-          runtimeCredentialBinding: {
-            agentSlug: "sdlc-agent",
-            operation,
-            executionId,
-            sessionId,
-            repoId: dynamicRepo.repoId,
-          },
-        };
-      }
-    }
     // branchName is now optional in the schema (read-first calls don't pass it).
     // On the writable path, default a missing branch to the repo's defaultBranch
     // so a non-read-first (legacy) repo — or a write:true call that forgot the
@@ -2287,7 +2397,7 @@ export const sandboxRepoSetup: ToolDefinition = {
     // feature branch afterwards via sandbox-run before pushing.
     const effectiveBranch = requestedBranchName || config.defaultBranch;
     if (!isSafeGitRef(effectiveBranch)) {
-      return "Error: Invalid branch name for SDLC sandbox.";
+      return "Error: Invalid branch name.";
     }
 
     // On-demand write sandbox lifetime: per-repo writeSessionTimeoutMs when set
@@ -2360,58 +2470,71 @@ function isSafeGitRef(value: string): boolean {
     !value.includes("..") && !value.includes("//") && !value.endsWith(".") && !value.endsWith("/");
 }
 
-export function resolveDynamicSdlcRepositoryConfig(
-  context: ToolExecutionContext,
-): { repoId: string; name: string; config: RepoSetupConfig } | null {
-  const rawId = context.meta?.["sdlcRepositoryId"]?.trim();
-  const rawUrl = context.meta?.["sdlcRepositoryUrl"]?.trim();
-  const rawName = context.meta?.["sdlcRepositoryName"]?.trim();
-  const baseBranch = context.meta?.["sdlcRepositoryBaseBranch"]?.trim() || "main";
-  if (!rawId || !rawUrl || !rawName) return null;
-  if (!isSafeGitRef(baseBranch)) return null;
-
-  let parsed: URL;
-  try {
-    parsed = new URL(rawUrl);
-  } catch {
-    return null;
-  }
-  if (
-    parsed.protocol !== "https:" ||
-    parsed.hostname.toLowerCase() !== "github.com" ||
-    parsed.username ||
-    parsed.password ||
-    parsed.search ||
-    parsed.hash
-  ) {
-    return null;
-  }
-  const segments = parsed.pathname.replace(/\.git$/, "").split("/").filter(Boolean);
-  if (segments.length !== 2 || segments.some((part) => !/^[A-Za-z0-9_.-]+$/.test(part))) {
-    return null;
-  }
-  const name = rawName.replace(/[^A-Za-z0-9_.-]/g, "-").slice(0, 80) || segments[1]!;
-  const repoUrl = `https://github.com/${segments[0]}/${segments[1]}.git`;
-  return {
-    repoId: rawId,
-    name,
-    config: {
-      slug: "sandbox-sdlc-repository-setup",
-      name: `SDLC repository: ${name}`,
-      description: "Run-scoped public GitHub repository attached to an SDLC hub.",
-      repoUrl,
-      defaultBranch: baseBranch,
-      cloneDepth: 1,
-      workDir: `/workspace/${name}`,
-      template: "kata-workspace-template",
-      sessionTimeoutMs: 60 * 60 * 1000,
-      idleTimeoutMs: 20 * 60 * 1000,
-      readyTimeoutMs: 10 * 60 * 1000,
-      steps: [],
-      skipBakedCloneWait: true,
+export const sdlcRepositoryAccess: ToolDefinition = {
+  slug: "sdlc-repository-access",
+  name: "SDLC Repository Access",
+  description:
+    "Give a sandbox git access to one SDLC repository. Installs that repository's credential and commit identity, " +
+    "then returns its clone URL and base branch. Afterwards use plain git in the sandbox: " +
+    "`git clone <cloneUrl>`, commit, push. Clone with the exact cloneUrl returned, or commits lose their identity. " +
+    "Call it once per repository per run; access is removed when the run ends. Get repoId from " +
+    "spaces-sdlc-list-repositories and sessionId from sandbox-create.",
+  source: "custom:sandbox",
+  configSchema: SANDBOX_CONFIG_SCHEMA,
+  inputSchema: {
+    type: "object",
+    properties: {
+      repoId: { type: "string", description: "SDLC repository id from spaces-sdlc-list-repositories." },
+      sessionId: { type: "string", description: "Sandbox session id from sandbox-create." },
     },
-  };
-}
+    required: ["repoId", "sessionId"],
+  },
+
+  async execute(params, context) {
+    if (!context) return "Error: No execution context available.";
+    const repoId = String(params["repoId"] ?? "").trim();
+    const sessionId = String(params["sessionId"] ?? "").trim();
+    if (!repoId || !sessionId) return "Error: repoId and sessionId are required.";
+    const workspaceId = context.meta?.[SDLC_META_KEYS.workspaceId]?.trim();
+    const actorUserId = context.meta?.[SDLC_META_KEYS.actorUserId]?.trim();
+    if (!workspaceId || !actorUserId) {
+      return "Error: SDLC repository access is only available in a run started from an SDLC hub or with a repository selected.";
+    }
+    if (actorUserId !== context.meta?.["userId"]?.trim()) {
+      return "Error: SDLC run context does not belong to this run's user.";
+    }
+    const session = SESSION_STORE.get(sessionId);
+    if (!session) return `Error: Session ${sessionId} not found. Call sandbox-create first.`;
+    if (!isSessionOwnedByContext(session, sessionId, context)) {
+      return unauthorizedSessionMessage(sessionId);
+    }
+    if (READONLY_SESSIONS.has(session.id) || SHARED_SESSIONS.has(session.id)) {
+      return "Error: A shared read-only sandbox cannot hold repository credentials. Call sandbox-create for your own sandbox.";
+    }
+    try {
+      const { mode, repository } = await installSdlcRepositoryAccess(session, {
+        repoId,
+        workspaceId,
+        actorUserId,
+      });
+      return JSON.stringify({
+        sessionId,
+        repoId,
+        access: mode === "credential" ? "read-write" : "anonymous read-only (public repository, no credential)",
+        name: repository.name,
+        cloneUrl: repository.cloneUrl,
+        baseBranch: repository.baseBranch,
+        next: `git clone --branch ${repository.baseBranch} ${repository.cloneUrl} /workspace/${repository.name}`,
+      });
+    } catch (err) {
+      if (isStaleSessionError(err)) {
+        evictSession(session);
+        return `Error: Session ${sessionId} died (sandbox pod replaced). Call sandbox-create again.`;
+      }
+      return sandboxErr(err);
+    }
+  },
+};
 
 /**
  * Destroy a sandbox session and free its resources.

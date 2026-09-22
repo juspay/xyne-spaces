@@ -183,11 +183,23 @@ const ClawSkillCreateScreen = (): ReactElement => {
               onChange={e => void handlePick(e.target.files, fileInputRef.current)}
             />
             <div className='flex flex-wrap items-center gap-2'>
-              <Button variant='outline' size='sm' onClick={() => dirInputRef.current?.click()}>
+              <Button
+                variant='outline'
+                size='sm'
+                onClick={() => dirInputRef.current?.click()}
+                data-track-category='Claw Agents'
+                data-track-name='PICK_SKILL_DIRECTORY'
+              >
                 <FolderOpen className='size-3.5' />
                 Upload folder
               </Button>
-              <Button variant='outline' size='sm' onClick={() => fileInputRef.current?.click()}>
+              <Button
+                variant='outline'
+                size='sm'
+                onClick={() => fileInputRef.current?.click()}
+                data-track-category='Claw Agents'
+                data-track-name='PICK_SKILL_FILES'
+              >
                 <Upload className='size-3.5' />
                 Upload files
               </Button>
@@ -215,10 +227,21 @@ const ClawSkillCreateScreen = (): ReactElement => {
             widthClass,
           )}
         >
-          <Button variant='ghost' onClick={cancel}>
+          <Button
+            variant='ghost'
+            onClick={cancel}
+            data-track-category='Claw Agents'
+            data-track-name='CANCEL_CREATE_SKILL'
+          >
             Cancel
           </Button>
-          <Button onClick={handleCreate} loading={createMutation.isPending} disabled={!canCreate}>
+          <Button
+            onClick={handleCreate}
+            data-track-category='Claw Agents'
+            data-track-name='CREATE_SKILL'
+            loading={createMutation.isPending}
+            disabled={!canCreate}
+          >
             {!createMutation.isPending && <Check className='size-4' />}
             Create skill
           </Button>

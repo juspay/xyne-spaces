@@ -101,7 +101,13 @@ export function ConditionEditor({
         ))}
       </div>
       <div className='flex gap-2'>
-        <Button variant='outline' size='sm' onClick={addLeaf}>
+        <Button
+          variant='outline'
+          size='sm'
+          onClick={addLeaf}
+          data-track-category='automation-builder'
+          data-track-name='ADD_CONDITION_LEAF'
+        >
           <Plus className='size-4' />
           Add condition
         </Button>

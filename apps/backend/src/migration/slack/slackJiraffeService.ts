@@ -1,4 +1,5 @@
 import { logger } from '../../utils/logger';
+import { resolveChannelDefaultBoard } from '../../utils/channelDefaultBoard';
 import { ExternalEntityType, MessageDirection, VespaInsertionStatus, VespaOperationType } from '@xyne/shared';
 import { ChannelRepository } from '../../database/repositories/channelRepository';
 import { WebClient } from '@slack/web-api';
@@ -196,7 +197,6 @@ async function ingestTicket(
   ticket: BitbotTicket,
   externalSourceName: string,
   channelId: string,
-  projectId: string,
   boardMapper: Map<string, string>,
   defaultBoardId: string,
   sourceChannelId: string,
@@ -347,6 +347,17 @@ async function ingestTicket(
   const boardId =
     boardMapper.get(ticket.task_type.toUpperCase().replace(/_/g, ' ')) || defaultBoardId;
 
+  // Resolve projectId from the chosen board — never the caller's projectId,
+  // so task_type mapping and default fallback can't drift out of sync.
+  const board = await db.board.findUnique({
+    where: { id: boardId },
+    select: { projectId: true },
+  });
+  if (!board) {
+    throw new Error(`Board ${boardId} not found for ticket ${ticket.id}`);
+  }
+  const boardProjectId = board.projectId;
+
   // Resolve stage name and look up its defaultTicketStatusV2
   let resolvedStageName = ticket.status.replace(/_/g, ' ').toUpperCase().trim() || 'TO BE PICKED';
   resolvedStageName = resolvedStageName === 'TO BE PICKED UP' ? 'TO BE PICKED' : resolvedStageName;
@@ -426,7 +437,7 @@ async function ingestTicket(
   // Generate xyneId and create ticket
   const { TicketIdService } = await import('../../services/ticketIdService');
   const createdTicket = await db.$transaction(async (tx) => {
-    const xyneId = await TicketIdService.generateTicketId(tx, projectId);
+    const xyneId = await TicketIdService.generateTicketId(tx, boardProjectId);
     const channel = await channelRepo.findById(channelId);
 
     const newTicket = await tx.ticket.create({
@@ -437,7 +448,7 @@ async function ingestTicket(
         updatedBy: userId,
         conversationId: conversation.conversation.conversationId,
         channelId: channelId,
-        projectId: projectId,
+        projectId: boardProjectId,
         workspaceId: channel?.workspaceId ?? '',
         boardId: boardId,
         ...(resolvedUserGroupId && { userGroupId: resolvedUserGroupId }),
@@ -602,19 +613,38 @@ export async function runMigrationJiraffe(input: MigrationJiraffeInput) {
   const db = DatabaseClient.getInstance();
   const channel = await db.channel.findUnique({
     where: { id: input.xyneSpaceChannelId },
-    include: { project: true },
   });
 
-  if (!channel?.projectId) {
+  if (!channel) {
     if (ENABLE_NOTIFICATIONS && messageTs) {
       await postMessage({
         channelId: input.channelId,
-        text: '❌ Channel not found or has no project associated.',
+        text: '❌ Channel not found.',
         threadTs: messageTs,
         botToken: jiraffeBotToken,
       });
     }
-    logger.error('[Migration] Channel not found or has no project', {
+    logger.error('[Migration] Channel not found', {
+      channelId: input.xyneSpaceChannelId,
+    });
+    return;
+  }
+
+  // Derive projectId from the channel's default board (ChannelBoardMapping first,
+  // legacy channel.projectId as fallback).
+  const resolvedBoard = await resolveChannelDefaultBoard(db, channel.id);
+  const derivedProjectId = resolvedBoard?.projectId ?? null;
+
+  if (!derivedProjectId) {
+    if (ENABLE_NOTIFICATIONS && messageTs) {
+      await postMessage({
+        channelId: input.channelId,
+        text: '❌ No board with project found for channel.',
+        threadTs: messageTs,
+        botToken: jiraffeBotToken,
+      });
+    }
+    logger.error('[Migration] No board with project found for channel', {
       channelId: input.xyneSpaceChannelId,
     });
     return;
@@ -634,7 +664,7 @@ export async function runMigrationJiraffe(input: MigrationJiraffeInput) {
 
   // Validate boards and build mapper
   const boardValidation = await validateAndMapBoards(
-    channel.projectId,
+    derivedProjectId,
     requiredBoards,
     input.channelId,
     messageTs,
@@ -717,7 +747,6 @@ export async function runMigrationJiraffe(input: MigrationJiraffeInput) {
             ticket,
             externalSourceName,
             input.xyneSpaceChannelId,
-            channel.projectId,
             boardMapper,
             defaultBoardId,
             input.channelId,

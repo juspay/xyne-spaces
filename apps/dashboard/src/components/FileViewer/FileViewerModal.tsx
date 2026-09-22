@@ -7,12 +7,19 @@ import { useLocation } from 'react-router-dom';
 import { detectFileType, formatFileSize } from './utils';
 import { fetchFile, downloadFile, createPreviewUrl } from '../../services/clients/fileFetchService';
 import { downloadAttachment } from '../Chat/MessageAttachment/utils';
+import {
+  heicWebpDownloadUrl,
+  isHeicAttachment,
+  isWebRenderableImageType,
+  toWebpFilename,
+} from '../../services/heicAttachmentService';
 import { usePlatform } from '../../hooks/usePlatform';
 import { useShortcut, useScope } from '../../shortcuts';
 import { cn } from '../../utils/classNames';
 import { useSelector } from '@xstate/react';
 import { PreviewSplitDialog, PreviewThreadPanel } from '../ui/PreviewSplitDialog';
 import { ChatBubble } from '../Chat/ChatBubble/ChatBubble';
+import { EditSurfaceScope } from '../../providers/EditProvider';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
 import { useGetChannelUserStatus } from '../../hooks/useChannels';
 import { queries } from '../../zero/queries';
@@ -46,6 +53,12 @@ interface FilePreviewModalProps {
   files?: FileItem[];
   currentIndex?: number;
   onNavigate?: (index: number) => void;
+  /**
+   * Tailwind z-index class for the overlay and content. Raise it when the modal
+   * is opened from inside a higher-stacked surface — the Cmd+K palette sits at
+   * z-[9999], so the default would render the preview behind it.
+   */
+  zIndexClass?: string;
 }
 
 // Inline Loading Component
@@ -63,15 +76,17 @@ const SlidePlaceholder: React.FC<{ file: FileItem }> = ({ file }) => {
   const [blobUrl, setBlobUrl] = useState<string | null>(null);
   const urlRef = useRef<string | null>(null);
 
-  const isImage = file.mimeType.startsWith('image/');
   const isVideo = file.mimeType.startsWith('video/');
+  // HEIC can't render from its original bytes — use the server's WebP thumbnail
+  const isHeic = isHeicAttachment(file.mimeType, file.fileName);
+  const isImage = file.mimeType.startsWith('image/') || isHeic;
 
   useEffect(() => {
     // For images, fetch the preview thumbnail so user sees the image during swipe
     if (!isImage && !(isVideo && file.thumbnailUrl)) return;
 
     const source =
-      isVideo && file.thumbnailUrl && file.attachmentId
+      file.attachmentId && ((isVideo && file.thumbnailUrl) || isHeic)
         ? `/attachments/${file.attachmentId}/thumbnail`
         : file.attachmentId || file.fileUrl;
 
@@ -89,7 +104,7 @@ const SlidePlaceholder: React.FC<{ file: FileItem }> = ({ file }) => {
         urlRef.current = null;
       }
     };
-  }, [file.attachmentId, file.fileUrl, file.thumbnailUrl, isImage, isVideo]);
+  }, [file.attachmentId, file.fileUrl, file.thumbnailUrl, isImage, isVideo, isHeic]);
 
   if (blobUrl) {
     return (
@@ -103,20 +118,34 @@ const SlidePlaceholder: React.FC<{ file: FileItem }> = ({ file }) => {
 };
 
 // Individual slide component - fetches its own file
-const SlideContent: React.FC<{
+export const SlideContent: React.FC<{
   file: FileItem;
   isActive: boolean;
   disableGestures?: boolean;
   initialTime?: number | undefined;
   autoPlay?: boolean;
   onInteractionStateChange?: (state: ZoomState) => void;
-}> = ({ file, isActive, disableGestures, initialTime, autoPlay, onInteractionStateChange }) => {
+  onExpand?: () => void;
+  /** Passed to the viewer: false lets a surface that frames the preview itself
+   *  drop the viewer's own header and border. */
+  chrome?: boolean;
+}> = ({
+  file,
+  isActive,
+  disableGestures,
+  initialTime,
+  autoPlay,
+  onInteractionStateChange,
+  onExpand,
+  chrome,
+}) => {
   const [fileData, setFileData] = useState<File | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const fileType = detectFileType(file.mimeType, file.fileName);
   const isVideo = fileType?.displayName === 'Video';
   const isCarouselMode = Boolean(disableGestures);
+  const isHeic = isHeicAttachment(file.mimeType, file.fileName);
 
   const [viewerResetKey, setViewerResetKey] = useState(0);
   const prevActiveRef = useRef(isActive);
@@ -136,10 +165,23 @@ const SlideContent: React.FC<{
 
     if (isVideo) return;
 
+    // HEIC can't render from its original bytes; fetch the server's lossy
+    // (q85) WebP rendition instead (the plain fileUrl still serves the original).
+    if (isHeic) {
+      fetchFile(
+        heicWebpDownloadUrl(file.attachmentId || file.fileUrl),
+        toWebpFilename(file.fileName),
+        'image/webp',
+      )
+        .then(setFileData)
+        .catch(err => setError(err instanceof Error ? err.message : 'Failed to load file'));
+      return;
+    }
+
     fetchFile(file.fileUrl, file.fileName, file.mimeType)
       .then(setFileData)
       .catch(err => setError(err instanceof Error ? err.message : 'Failed to load file'));
-  }, [file.fileUrl, file.fileName, file.mimeType, isVideo, isActive]);
+  }, [file.fileUrl, file.fileName, file.mimeType, file.attachmentId, isVideo, isActive, isHeic]);
 
   if (error) {
     return (
@@ -172,6 +214,7 @@ const SlideContent: React.FC<{
             fileName={file.fileName}
             attachmentId={file.attachmentId}
             autoPlay={Boolean(autoPlay)}
+            {...(onExpand && { onExpand })}
             {...(initialTime !== undefined && { initialTime })}
             {...(isCarouselMode && { disableGestures: true })}
             {...(isCarouselMode && onInteractionStateChange && { onInteractionStateChange })}
@@ -187,7 +230,7 @@ const SlideContent: React.FC<{
           onClick={() => {
             void downloadFile(file.fileUrl, file.fileName);
           }}
-          data-track-category='FILE_VIEWER'
+          data-track-category='FileViewer'
           data-track-name='DownloadVideo'
           className='px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 flex items-center gap-2'
         >
@@ -203,6 +246,17 @@ const SlideContent: React.FC<{
     return null;
   }
 
+  // HEIC fall-through: the webp fetch returned the original bytes. A
+  // browser-renderable image (renamed JPEG) still renders; HEIC originals
+  // cannot — show the non-image fallback instead of a broken <img>.
+  if (isHeic && !isWebRenderableImageType(fileData.type)) {
+    return (
+      <div className='text-muted text-center'>
+        <p>Preview not available</p>
+      </div>
+    );
+  }
+
   const ViewerComponent = fileType.component;
   return (
     <div className={`${fileType.wrapperClass} max-w-full max-h-full`}>
@@ -210,6 +264,7 @@ const SlideContent: React.FC<{
         key={viewerResetKey}
         source={fileData}
         fileName={file.fileName}
+        {...(chrome === false && { chrome })}
         // Only the visible slide participates in search; adjacent mounted slides
         // must not register as the find bar's target.
         searchable={isActive}
@@ -238,6 +293,7 @@ const ErrorState: React.FC<{
         data-track-category='FileViewer'
         data-track-name='RETRY_LOAD_FILE'
         data-track-metadata={JSON.stringify({ error })}
+        data-ph-capture-attribute-track-id='retry_load_file'
       >
         Try Again
       </button>
@@ -290,6 +346,7 @@ const FilePreviewModalInner: React.FC<FilePreviewModalProps> = ({
   files,
   currentIndex = 0,
   onNavigate,
+  zIndexClass = 'z-[56]',
 }) => {
   // Simple state - service handles all caching and complexity
   const [fileData, setFileData] = useState<File | null>(null);
@@ -326,6 +383,7 @@ const FilePreviewModalInner: React.FC<FilePreviewModalProps> = ({
 
   // For videos, skip the download and use streaming directly
   const isVideo = fileType?.displayName === 'Video';
+  const isHeic = isHeicAttachment(currentMimeType, currentFileName);
 
   // Expand mounted slides as user navigates (current ±1), reset on close
   useEffect(() => {
@@ -437,11 +495,24 @@ const FilePreviewModalInner: React.FC<FilePreviewModalProps> = ({
     setIsLoading(true);
     setError(null);
 
-    fetchFile(currentFileUrl, currentFileName, currentMimeType)
+    // HEIC can't render from its original bytes; fetch the WebP rendition
+    fetchFile(
+      isHeic ? heicWebpDownloadUrl(currentFileUrl) : currentFileUrl,
+      isHeic ? toWebpFilename(currentFileName) : currentFileName,
+      isHeic ? 'image/webp' : currentMimeType,
+    )
       .then(setFileData)
       .catch(err => setError(err instanceof Error ? err.message : 'Failed to load file'))
       .finally(() => setIsLoading(false));
-  }, [isOpen, currentFileUrl, currentFileName, currentMimeType, isVideo, hasStackNavigation]);
+  }, [
+    isOpen,
+    currentFileUrl,
+    currentFileName,
+    currentMimeType,
+    isVideo,
+    isHeic,
+    hasStackNavigation,
+  ]);
 
   // Handle download with utility function
   const handleDownload = async (): Promise<void> => {
@@ -466,7 +537,11 @@ const FilePreviewModalInner: React.FC<FilePreviewModalProps> = ({
           onRetry={() => {
             setIsLoading(true);
             setError(null);
-            fetchFile(currentFileUrl, currentFileName, currentMimeType)
+            fetchFile(
+              isHeic ? heicWebpDownloadUrl(currentFileUrl) : currentFileUrl,
+              isHeic ? toWebpFilename(currentFileName) : currentFileName,
+              isHeic ? 'image/webp' : currentMimeType,
+            )
               .then(setFileData)
               .catch(err => setError(err instanceof Error ? err.message : 'Failed to load file'))
               .finally(() => setIsLoading(false));
@@ -516,6 +591,14 @@ const FilePreviewModalInner: React.FC<FilePreviewModalProps> = ({
     // For non-video files, ensure we have file data before rendering
     if (!fileData) {
       return <LoadingState message='Loading file data...' />;
+    }
+
+    // HEIC fall-through: the webp fetch returned the original bytes. A
+    // browser-renderable image (renamed JPEG) still renders; HEIC originals
+    // (TOO_LARGE) cannot — drop to the non-image fallback instead of a
+    // silently broken <img>.
+    if (isHeic && !isWebRenderableImageType(fileData.type)) {
+      return <UnsupportedFileState onDownload={() => void handleDownload()} />;
     }
 
     // Render the appropriate viewer component
@@ -606,6 +689,7 @@ const FilePreviewModalInner: React.FC<FilePreviewModalProps> = ({
               <SlideContent
                 file={file}
                 isActive={index === currentFileIndex}
+                onExpand={onClose}
                 {...(disableCarouselGestures && { disableGestures: true })}
                 {...(index === currentFileIndex && {
                   onInteractionStateChange: (state: ZoomState) => {
@@ -622,7 +706,10 @@ const FilePreviewModalInner: React.FC<FilePreviewModalProps> = ({
     );
   };
 
-  const isImage = fileType?.displayName === 'Image';
+  const isImage = fileType?.displayName === 'Image' || isHeic;
+  // HEIC fall-through to non-renderable original bytes — skip the background
+  // image too; it would be a silently broken <img> behind the fallback UI.
+  const heicOriginalBytes = isHeic && fileData !== null && !isWebRenderableImageType(fileData.type);
 
   const [backgroundImageUrl, setBackgroundImageUrl] = useState<string | null>(null);
 
@@ -636,7 +723,7 @@ const FilePreviewModalInner: React.FC<FilePreviewModalProps> = ({
   useEffect(() => {
     let objectUrl: string | null = null;
 
-    if (isImage && fileData) {
+    if (isImage && fileData && !heicOriginalBytes) {
       objectUrl = URL.createObjectURL(fileData);
       setBackgroundImageUrl(objectUrl);
     } else {
@@ -646,7 +733,7 @@ const FilePreviewModalInner: React.FC<FilePreviewModalProps> = ({
     return (): void => {
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [isImage, fileData]);
+  }, [isImage, fileData, heicOriginalBytes]);
 
   const { copyImage } = useClipboard();
   const [copied, setCopied] = useState(false);
@@ -736,7 +823,7 @@ const FilePreviewModalInner: React.FC<FilePreviewModalProps> = ({
             aria-label='Previous file'
             title='Previous (←)'
             type='button'
-            data-track-category='FILE_VIEWER'
+            data-track-category='FileViewer'
             data-track-name='PreviousFile'
           >
             <ChevronLeft className='h-6 w-6' />
@@ -754,7 +841,7 @@ const FilePreviewModalInner: React.FC<FilePreviewModalProps> = ({
             aria-label='Next file'
             title='Next (→)'
             type='button'
-            data-track-category='FILE_VIEWER'
+            data-track-category='FileViewer'
             data-track-name='NextFile'
           >
             <ChevronRight className='h-6 w-6' />
@@ -774,9 +861,11 @@ const FilePreviewModalInner: React.FC<FilePreviewModalProps> = ({
       }}
     >
       <Dialog.Portal>
-        <Dialog.Overlay className='fixed inset-0 flex items-center justify-center bg-black/50 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 z-[56]' />
+        <Dialog.Overlay
+          className={`fixed inset-0 flex items-center justify-center bg-black/50 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 ${zIndexClass}`}
+        />
         <Dialog.Content
-          className={`fixed z-[56] bg-black focus:outline-none
+          className={`fixed ${zIndexClass} bg-black focus:outline-none
           data-[state=closed]:fade-out transition-all ease-in-out duration-300
           data-[state=open]:fade-in overflow-hidden
           ${
@@ -1074,8 +1163,13 @@ const AttachmentGalleryModalInner: React.FC = () => {
 
   const fileType = detectFileType(currentMimeType, currentFileName);
   const isVideo = fileType?.displayName === 'Video';
-  const isImage = fileType?.displayName === 'Image';
+  const isHeic = isHeicAttachment(currentMimeType, currentFileName);
+  const isImage = fileType?.displayName === 'Image' || isHeic;
   const isPdf = fileType?.displayName === 'PDF Document';
+  // HEIC fall-through to non-renderable original bytes (NOT_HEIC/TOO_LARGE):
+  // skip the image render paths; they would be a silently broken <img>.
+  const heicOriginalBytes =
+    isHeic && machineFileData !== null && !isWebRenderableImageType(machineFileData.type);
 
   // Track mounted slides
   useEffect(() => {
@@ -1190,7 +1284,7 @@ const AttachmentGalleryModalInner: React.FC = () => {
           <p className='text-gray-400'>Video cannot be streamed</p>
           <button
             onClick={() => void handleDownload()}
-            data-track-category='FILE_VIEWER'
+            data-track-category='FileViewer'
             data-track-name='DownloadVideo'
             className='px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 flex items-center gap-2'
           >
@@ -1223,6 +1317,13 @@ const AttachmentGalleryModalInner: React.FC = () => {
       return <LoadingState message='Loading file data...' />;
     }
 
+    // HEIC fall-through: the webp fetch returned the original bytes. A
+    // browser-renderable image (renamed JPEG) still renders; HEIC originals
+    // (TOO_LARGE) cannot — drop to the non-image fallback.
+    if (heicOriginalBytes) {
+      return <UnsupportedFileState onDownload={() => void handleDownload()} />;
+    }
+
     const ViewerComponent = fileType.component;
     const initialPage: number | undefined = currentAttachment?.initialPage;
     return (
@@ -1238,11 +1339,11 @@ const AttachmentGalleryModalInner: React.FC = () => {
 
   // Background image for images
   const backgroundImageUrl = useMemo(() => {
-    if (isImage && machineFileData) {
+    if (isImage && machineFileData && !heicOriginalBytes) {
       return URL.createObjectURL(machineFileData);
     }
     return null;
-  }, [isImage, machineFileData]);
+  }, [isImage, machineFileData, heicOriginalBytes]);
 
   // Cleanup background URL
   useEffect(() => {
@@ -1359,6 +1460,7 @@ const AttachmentGalleryModalInner: React.FC = () => {
               <SlideContent
                 file={file}
                 isActive={index === currentFileIndex}
+                onExpand={() => attachmentViewerActor.send({ type: 'CLOSE' })}
                 {...(disableCarouselGestures && { disableGestures: true })}
                 // Pass initialTime to active video
                 initialTime={initialTime}
@@ -1411,7 +1513,7 @@ const AttachmentGalleryModalInner: React.FC = () => {
           {isImage && (
             <button
               onClick={() => void handleCopyImageGallery()}
-              data-track-category='FILE_VIEWER'
+              data-track-category='FileViewer'
               data-track-name='CopyImageGallery'
               title='Copy Image'
               className='inline-flex items-center gap-2 justify-center w-9 h-9 text-sm font-medium text-white/90 hover:text-white hover:bg-white/10 rounded-md transition-colors'
@@ -1425,7 +1527,7 @@ const AttachmentGalleryModalInner: React.FC = () => {
           )}
           <button
             onClick={() => void handleDownload()}
-            data-track-category='FILE_VIEWER'
+            data-track-category='FileViewer'
             data-track-name='DownloadFile'
             className='inline-flex items-center gap-2 justify-center w-9 h-9 text-sm font-medium text-white/90 hover:text-white hover:bg-white/10 rounded-md transition-colors'
           >
@@ -1435,7 +1537,7 @@ const AttachmentGalleryModalInner: React.FC = () => {
             <Dialog.Close asChild>
               <button
                 onClick={() => attachmentViewerActor.send({ type: 'CLOSE' })}
-                data-track-category='FILE_VIEWER'
+                data-track-category='FileViewer'
                 data-track-name='Close'
                 className='inline-flex items-center justify-center w-9 h-9 text-white/90 hover:text-white hover:bg-white/10 rounded-md transition-colors'
                 aria-label='Close'
@@ -1460,7 +1562,7 @@ const AttachmentGalleryModalInner: React.FC = () => {
         {canGoPrevious && (
           <button
             onClick={handlePrevious}
-            data-track-category='FILE_VIEWER'
+            data-track-category='FileViewer'
             data-track-name='NavigatePrevious'
             className={cn(
               'absolute left-4 top-1/2 -translate-y-1/2 z-50 rounded-full p-3 bg-black/10 hover:bg-black/20 text-white transition-all duration-200',
@@ -1476,7 +1578,7 @@ const AttachmentGalleryModalInner: React.FC = () => {
         {canGoNext && (
           <button
             onClick={handleNext}
-            data-track-category='FILE_VIEWER'
+            data-track-category='FileViewer'
             data-track-name='NavigateNext'
             className={cn(
               'absolute right-4 top-1/2 -translate-y-1/2 z-50 rounded-full p-3 bg-black/10 hover:bg-black/20 text-white transition-all duration-200',
@@ -1519,17 +1621,19 @@ const AttachmentGalleryModalInner: React.FC = () => {
     };
 
     return (
-      <div className='flex-1 overflow-auto py-4'>
-        <ChatBubble
-          message={message as unknown as Parameters<typeof ChatBubble>[0]['message']}
-          channelId={currentAttachment?.channelId || ''}
-          showAvatar={true}
-          context='thread'
-          isFirstInThread={true}
-          isTicketThread={false}
-          disableAskAI={true}
-        />
-      </div>
+      <EditSurfaceScope>
+        <div className='flex-1 overflow-auto py-4'>
+          <ChatBubble
+            message={message as unknown as Parameters<typeof ChatBubble>[0]['message']}
+            channelId={currentAttachment?.channelId || ''}
+            showAvatar={true}
+            context='thread'
+            isFirstInThread={true}
+            isTicketThread={false}
+            disableAskAI={true}
+          />
+        </div>
+      </EditSurfaceScope>
     );
   };
 

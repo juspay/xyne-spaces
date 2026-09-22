@@ -1,8 +1,10 @@
 import React, { ReactElement } from 'react';
+import type { SdlcCallLink } from '@xyne/shared';
 import { PhoneDefault, PhoneCancel } from '@xyne/icons';
 import { useCallActions } from '../../../hooks/useCallActions';
 import { cn } from '../../../utils/classNames';
 import Tooltip from '../../ui/Tooltip';
+import { ShortcutHint } from '../../ui/ShortcutHint';
 import { ChannelScopeType } from '@xyne/shared';
 import { CallConfirmationModal } from '../CallConfirmationModal';
 import { useCallConfirmation } from '../../../hooks/useCallConfirmation';
@@ -19,7 +21,14 @@ interface CallTriggerProps {
   participantCount?: number | undefined;
   callDisplayName?: string; // Display name for CallKit (DM: participant name, Channel: channel name)
   conversationId?: string; // Optional: for thread-initiated calls
+  sdlcLink?: SdlcCallLink | undefined; // Optional: SDLC entity to link the call to
   isMember: boolean; // Whether the current user is a member of the channel
+  /**
+   * Which surface rendered this trigger, for analytics. The same component backs
+   * the chat header, the mobile header and the SDLC repo header, so without this
+   * every start-call click arrives as one indistinguishable `Call_Trigger` row.
+   */
+  trackSource?: string;
 }
 
 /**
@@ -43,7 +52,9 @@ export const CallTrigger: React.FC<CallTriggerProps> = ({
   participantCount,
   callDisplayName,
   conversationId,
+  sdlcLink,
   isMember,
+  trackSource = 'chat_header',
 }) => {
   const {
     handleCallClick,
@@ -56,6 +67,7 @@ export const CallTrigger: React.FC<CallTriggerProps> = ({
     targetUserIds,
     callDisplayName,
     conversationId,
+    sdlcLink,
   });
 
   const { showConfirmModal, modalContent, handleCallAction, handleConfirmCall, closeModal } =
@@ -102,7 +114,19 @@ export const CallTrigger: React.FC<CallTriggerProps> = ({
   // Default Button trigger
   return (
     <>
-      <Tooltip content={tooltipContent} side='left'>
+      <Tooltip
+        content={
+          isAlone || isNotMember ? (
+            tooltipContent
+          ) : (
+            <span className='flex items-center gap-2'>
+              {tooltipContent}
+              <ShortcutHint shortcut='huddle.toggle' />
+            </span>
+          )
+        }
+        side='left'
+      >
         <button
           onClick={handleButtonClick}
           disabled={isAlone || isNotMember}
@@ -114,6 +138,9 @@ export const CallTrigger: React.FC<CallTriggerProps> = ({
             isInCall,
             channelId: channelId,
             targetUserIds,
+            source: trackSource,
+            scopeType,
+            participantCount,
           })}
           className={cn(
             'flex items-center justify-center transition-colors',

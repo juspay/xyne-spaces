@@ -21,12 +21,13 @@ concurrency:
 jobs:
   ci:
     uses: ./.github/workflows/ci.yml
+    secrets: inherit
 
   semantic-release:
     name: "Prod: Semantic Release"
     needs: ci
     if: github.ref_name == 'main' || startsWith(github.ref_name, 'release-')
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     env:
       HUSKY: "0"
     steps:

@@ -4,6 +4,7 @@ import { Channel, NotificationLevel, ChannelScopeType } from '@xyne/shared';
 import { mutators } from '../../../zero/mutators';
 import { Monitor, Smartphone } from 'lucide-react';
 import * as Switch from '@radix-ui/react-switch';
+
 import { cn } from '../../../utils/classNames';
 import { useGlobalNotificationSettings } from '../../../hooks/useGlobalNotificationSettings';
 import { useQuery } from '../../../hooks/useQuery';
@@ -141,7 +142,7 @@ const NotificationsTab = ({ channel, isParticipant }: NotificationsTabProps): Re
                 onCheckedChange={checked =>
                   setNotificationLevel('desktop', checked ? null : NotificationLevel.NONE)
                 }
-                data-track-category='notifications'
+                data-track-category='NOTIFICATIONS'
                 data-track-name='toggle_desktop_notifications'
                 className={cn(switchClass, !settingsReady && 'opacity-40 cursor-not-allowed')}
               >
@@ -157,7 +158,8 @@ const NotificationsTab = ({ channel, isParticipant }: NotificationsTabProps): Re
                     key={opt.value}
                     disabled={!settingsReady}
                     onClick={() => setNotificationLevel('desktop', opt.value)}
-                    data-track-category='notifications'
+                    data-track-category='NOTIFICATIONS'
+                    data-ph-capture-attribute-track-id={`set_desktop_notification_level_${opt.value.toLowerCase()}`}
                     data-track-name={`set_desktop_level_${opt.value.toLowerCase()}`}
                     className={cn(
                       'px-2 py-1.5 text-xs rounded-md border transition-colors',
@@ -193,7 +195,7 @@ const NotificationsTab = ({ channel, isParticipant }: NotificationsTabProps): Re
                 onCheckedChange={checked =>
                   setNotificationLevel('mobile', checked ? null : NotificationLevel.NONE)
                 }
-                data-track-category='notifications'
+                data-track-category='NOTIFICATIONS'
                 data-track-name='toggle_mobile_notifications'
                 className={cn(switchClass, !settingsReady && 'opacity-40 cursor-not-allowed')}
               >
@@ -209,7 +211,8 @@ const NotificationsTab = ({ channel, isParticipant }: NotificationsTabProps): Re
                     key={opt.value}
                     disabled={!settingsReady}
                     onClick={() => setNotificationLevel('mobile', opt.value)}
-                    data-track-category='notifications'
+                    data-track-category='NOTIFICATIONS'
+                    data-ph-capture-attribute-track-id={`set_mobile_notification_level_${opt.value.toLowerCase()}`}
                     data-track-name={`set_mobile_level_${opt.value.toLowerCase()}`}
                     className={cn(
                       'px-2 py-1.5 text-xs rounded-md border transition-colors',
@@ -255,7 +258,7 @@ const NotificationsTab = ({ channel, isParticipant }: NotificationsTabProps): Re
                       }),
                     );
                   }}
-                  data-track-category='notifications'
+                  data-track-category='NOTIFICATIONS'
                   data-track-name='toggle_channel_thread_reply'
                   className={cn(
                     switchClass,
@@ -294,7 +297,7 @@ const NotificationsTab = ({ channel, isParticipant }: NotificationsTabProps): Re
                       }),
                     );
                   }}
-                  data-track-category='notifications'
+                  data-track-category='NOTIFICATIONS'
                   data-track-name='toggle_channel_wide_mentions'
                   className={cn(
                     switchClass,

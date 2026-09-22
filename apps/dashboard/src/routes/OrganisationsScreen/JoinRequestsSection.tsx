@@ -130,7 +130,14 @@ export const JoinRequestsSection = ({ orgId }: JoinRequestsSectionProps): ReactE
             </p>
           </div>
         </div>
-        <Button variant='outline' size='sm' onClick={() => void loadRequests()} loading={isLoading}>
+        <Button
+          variant='outline'
+          size='sm'
+          onClick={() => void loadRequests()}
+          data-track-category='Organisations'
+          data-track-name='RELOAD_JOIN_REQUESTS'
+          loading={isLoading}
+        >
           <RefreshCw className='h-4 w-4' />
           Refresh
         </Button>
@@ -191,6 +198,8 @@ export const JoinRequestsSection = ({ orgId }: JoinRequestsSectionProps): ReactE
                         onClick={() =>
                           void reviewRequest(request, WorkspaceJoinRequestAction.REJECT)
                         }
+                        data-track-category='Organisations'
+                        data-track-name='REJECT_JOIN_REQUEST'
                         className='text-destructive hover:bg-destructive/10 hover:text-destructive'
                       >
                         <UserX className='h-4 w-4' />
@@ -202,6 +211,8 @@ export const JoinRequestsSection = ({ orgId }: JoinRequestsSectionProps): ReactE
                         onClick={() =>
                           void reviewRequest(request, WorkspaceJoinRequestAction.APPROVE)
                         }
+                        data-track-category='Organisations'
+                        data-track-name='APPROVE_JOIN_REQUEST'
                       >
                         <UserCheck className='h-4 w-4' />
                         Approve

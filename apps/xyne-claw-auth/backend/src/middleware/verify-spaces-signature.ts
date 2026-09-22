@@ -22,14 +22,82 @@
  *   - Does NOT change req body shape. Downstream handlers continue to read
  *     req.body (JSON-parsed) as before.
  */
-import { createHmac, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, timingSafeEqual } from "node:crypto";
+import { errMsg } from "../lib/errors.js";
 import type { NextFunction, Request, Response } from "express";
 import { CONFIG } from "../config.js";
 import { decrypt } from "../crypto.js";
 import { prisma } from "../db.js";
+import { redisService } from "../redis.js";
+import { s2sKeyMatches } from "./require-auth.js";
 
 import { createLogger } from "../logger.js";
 const log = createLogger("verify-spaces-signature");
+
+const MAX_TIMESTAMP_SKEW_MS = 5 * 60 * 1000;
+const SEEN_SIGNATURE_TTL_MS = MAX_TIMESTAMP_SKEW_MS;
+const SEEN_SIGNATURE_TTL_SEC = Math.ceil(SEEN_SIGNATURE_TTL_MS / 1000);
+const MAX_SEEN_SIGNATURES = 10_000;
+// Fallback only — the authoritative replay set lives in Redis so all replicas
+// share it and a pod restart doesn't reopen the window. This map covers the
+// Redis-down case at the old per-pod strength.
+const seenSignatures = new Map<string, number>();
+
+/**
+ * Atomically record-and-check the signature in Redis. Returns:
+ *   "fresh"  — first sighting, recorded (SET NX won the race)
+ *   "replay" — already recorded inside the TTL window
+ *   null     — Redis unavailable; caller falls back to the in-memory map
+ * The key hashes the signature: bounded key size, and the raw HMAC never
+ * appears in Redis (a dump of the keyspace shouldn't yield replayable values).
+ */
+async function checkSignatureReplayRedis(signature: string): Promise<"fresh" | "replay" | null> {
+  try {
+    const redis = redisService.getConnection();
+    const key = `spaces-sig-replay:${createHash("sha256").update(signature).digest("hex")}`;
+    const set = await redis.set(key, "1", "EX", SEEN_SIGNATURE_TTL_SEC, "NX");
+    return set === "OK" ? "fresh" : "replay";
+  } catch (err) {
+    log.warn(`[replay-check] redis unavailable, falling back to in-memory set: ${errMsg(err)}`);
+    return null;
+  }
+}
+
+function pruneSeenSignatures(now: number): void {
+  if (seenSignatures.size < MAX_SEEN_SIGNATURES) return;
+  for (const [sig, expiry] of seenSignatures) {
+    if (expiry <= now) seenSignatures.delete(sig);
+  }
+  if (seenSignatures.size >= MAX_SEEN_SIGNATURES) {
+    const overflow = seenSignatures.size - MAX_SEEN_SIGNATURES + 1;
+    let i = 0;
+    for (const sig of seenSignatures.keys()) {
+      seenSignatures.delete(sig);
+      if (++i >= overflow) break;
+    }
+  }
+}
+
+function parseSignedEpochMs(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value > 1e12 ? value : value * 1000;
+  }
+  if (typeof value === "string" && value.length > 0) {
+    const numeric = Number(value);
+    if (Number.isFinite(numeric)) return numeric > 1e12 ? numeric : numeric * 1000;
+    const parsed = Date.parse(value);
+    return Number.isNaN(parsed) ? null : parsed;
+  }
+  return null;
+}
+
+function signedTimestampMs(rawBody: Buffer): number | null {
+  let parsed: unknown;
+  try { parsed = JSON.parse(rawBody.toString("utf8")); } catch { return null; }
+  if (!parsed || typeof parsed !== "object") return null;
+  const obj = parsed as { timestamp?: unknown; payload?: { createdAt?: unknown } };
+  return parseSignedEpochMs(obj.timestamp) ?? parseSignedEpochMs(obj.payload?.createdAt);
+}
 
 function parseGcmBundle(blob: string): [string, string, string] | null {
   const parts = blob.split(":");
@@ -125,7 +193,7 @@ export async function verifySpacesSignature(
   try {
     plaintextSecret = decrypt(parts[0], parts[1], parts[2], CONFIG.encryptionKey);
   } catch (err) {
-    verificationFailure("decrypt_failed", "secret decrypt failed", `error=${err instanceof Error ? err.message : String(err)}`);
+    verificationFailure("decrypt_failed", "secret decrypt failed", `error=${errMsg(err)}`);
     return;
   }
 
@@ -147,6 +215,50 @@ export async function verifySpacesSignature(
   if (!matches) {
     verificationFailure("mismatch", "invalid signature", `bodyBytes=${rawBody.length} headerLen=${received.length} ${diagnoseMismatch(rawBody, plaintextSecret, received)}`);
     return;
+  }
+
+  const now = Date.now();
+  const signedTs = signedTimestampMs(rawBody);
+  if (signedTs !== null && Math.abs(now - signedTs) > MAX_TIMESTAMP_SKEW_MS) {
+    verificationFailure("stale_timestamp", "signature timestamp outside allowed window", `skewMs=${now - signedTs}`);
+    return;
+  }
+  // Replay dedup runs ONLY for external Spaces callers (no s2s key). A single
+  // approval click is signature-verified TWICE in one request chain: first at
+  // the /webhook edge, then again at /flow/action after proxyFlowAction
+  // forwards the SAME x-xyne-signature. That internal hop always carries the
+  // s2s key (the /flow mount is requireStrictS2S), so gating on its ABSENCE
+  // means the same in-flight signature is only recorded once. Without this the
+  // replay guard rejects the second (proxied) verification as a "duplicate
+  // signature" and every Spaces flow-action approval 401s. The HMAC
+  // authenticity check above still runs on BOTH hops; only the replay-set
+  // record/check is skipped for trusted s2s callers.
+  // Flow-action callbacks (X-Xyne-Event: flow_action) are exempt from
+  // signature-replay dedup: their signed body is intentionally STABLE (the same
+  // approval re-clicks/retries hash identically), and double-execution is
+  // already prevented downstream — flow-action.ts re-verifies a per-action HMAC
+  // signature and the plan/skill/agent-tools apply paths consume the card
+  // atomically ("already used"). Replay-rejecting them here is redundant AND is
+  // exactly what hard-blocks approvals ("duplicate signature"). Detected at the
+  // edge by the header; the internal /flow/action proxy hop carries the s2s key
+  // (its mount is requireStrictS2S) and is covered by isInternalReverify.
+  const isFlowAction = req.headers["x-xyne-event"] === "flow_action";
+  const isInternalReverify = s2sKeyMatches(req.headers["x-s2s-key"]);
+  if (!isInternalReverify && !isFlowAction) {
+    const redisVerdict = await checkSignatureReplayRedis(received);
+    if (redisVerdict === "replay") {
+      verificationFailure("replayed_signature", "duplicate signature");
+      return;
+    }
+    if (redisVerdict === null) {
+      const priorExpiry = seenSignatures.get(received);
+      if (priorExpiry !== undefined && priorExpiry > now) {
+        verificationFailure("replayed_signature", "duplicate signature");
+        return;
+      }
+      pruneSeenSignatures(now);
+      seenSignatures.set(received, now + SEEN_SIGNATURE_TTL_MS);
+    }
   }
 
   next();

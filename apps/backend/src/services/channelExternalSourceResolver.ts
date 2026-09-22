@@ -27,7 +27,9 @@ export class ChannelExternalSourceResolver {
    * backs the channel (caller should surface a 404).
    */
   async resolveForChannel(channelId: string) {
-    const source = await this.externalSourceRepo.findByChannelId(channelId);
+    const source = await this.externalSourceRepo.findChannelSource(channelId, {
+      sourceTypes: ['google', 'microsoft', 'zoho'],
+    });
     if (source) {
       return source;
     }

@@ -1,5 +1,5 @@
 import React from 'react';
-import { ChevronDown, Check } from 'lucide-react';
+import { ChevronDown, CheckTickSingle as Check } from '@xyne/icons';
 import * as Popover from '@radix-ui/react-popover';
 import type {
   ResponseSchemaField,

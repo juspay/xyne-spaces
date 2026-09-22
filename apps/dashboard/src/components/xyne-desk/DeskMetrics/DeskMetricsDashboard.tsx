@@ -1,6 +1,10 @@
-import React, { ReactElement, useMemo, useState, useCallback, useEffect } from 'react';
+import React, { ReactElement, useMemo, useState, useCallback, useEffect, useRef } from 'react';
 import { useAuth } from '../../../hooks/useAuth';
-import { usePersistedDeskMetricsFilters } from '../../../hooks/usePersistedDeskMetricsFilters';
+import {
+  CHART_VIEW_LABELS,
+  usePersistedDeskMetricsFilters,
+  type ChartView,
+} from '../../../hooks/usePersistedDeskMetricsFilters';
 import {
   RefreshCw,
   X,
@@ -8,6 +12,7 @@ import {
   BarChart4,
   AlertCircle,
   Check,
+  Sparkles,
   ChevronLeft,
   ChevronRight,
   ChevronDown,
@@ -25,15 +30,19 @@ import {
 } from 'lucide-react';
 import * as PopoverPrimitive from '@radix-ui/react-popover';
 import { Popover } from '../../ui/Popover';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../ui/Select';
 import {
+  AICategorySubmenu,
   DynamicFieldSubmenu,
   PrioritySubmenu,
   StagesSubmenu,
   UserSubmenu,
   UserGroupSubmenu,
 } from '../../Tickets/TicketFilters/Submenus';
+import { classificationApi } from '../../../api/classificationApi';
 import { getIconForFieldType } from '../../Tickets/TicketFilters/fieldTypeIcons';
-import { DeskMetricsDateRangePicker } from './DeskMetricsDateRangePicker';
+import { DeskMetricsDateRangePicker, matchPreset } from './DeskMetricsDateRangePicker';
+import { globalClickTracker } from '../../../services/Analytics/globalClickTracker';
 import {
   Bar,
   BarChart,
@@ -52,6 +61,7 @@ import {
   DESK_METRICS_MAX_AGGREGATE_DESKS,
   FormFieldType,
   parseFieldOptionValues,
+  WorkspaceRole,
   type DeskMetricsAgentRow,
   type DeskMetricsPerDeskRow,
   type DeskMetricsSkippedDesk,
@@ -61,6 +71,7 @@ import {
 import type { ResolvedDisplayFormField } from '../../../utils/board/resolveDisplayFormFields';
 import { Dialog } from '../../ui/Dialog/Dialog';
 import { cn } from '../../../utils/classNames';
+import { getStageStatusMeta } from '../../../utils/board/stageStatusIcon';
 import { useAggregateDeskMetrics } from '../../../hooks/useDeskMetrics';
 import { showDownloadCompleteToast } from '../../../utils/downloadToast';
 import { CHART_COLORS as VIZ_CHART_COLORS } from '../../QueryVisualizations/constants';
@@ -88,6 +99,9 @@ export interface DeskMetricsDashboardProps {
   availableDesks?: DeskMetricsSelectableDesk[];
   customFieldDefinitions?: readonly ResolvedDisplayFormField[];
   availableStages?: readonly DeskMetricsStageOption[];
+  onTicketClick: (ticket: DeskMetricsTicketRow) => void;
+  /** Which surface opened the dashboard — DESK_METRICS_VIEWED `source`. */
+  trackSource?: 'toolbar' | 'settings_tab';
 }
 
 /** Shows a checklist of tags for a category, derived from already-fetched breakdown data. */
@@ -115,7 +129,11 @@ const TagsInCategorySubmenu = ({
       <div className='border-b border-border px-3 py-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground'>
         {category}
       </div>
-      <div className='max-h-72 overflow-y-auto p-1'>
+      <div
+        className='max-h-72 overflow-y-auto p-1'
+        onWheel={e => e.stopPropagation()}
+        onTouchMove={e => e.stopPropagation()}
+      >
         {availableTags.length === 0 ? (
           <div className='p-6 text-center text-sm text-muted-foreground'>No tags available</div>
         ) : (
@@ -434,9 +452,16 @@ const agentSortValue = (row: DeskMetricsAgentRow, key: AgentSortKey): string | n
 const MetricsAgentTable = ({
   agents,
   onDownload,
+  onAgentClick,
+  canDownload,
+  trackMetadata,
 }: {
   agents: DeskMetricsAgentRow[];
   onDownload: () => void;
+  onAgentClick: (assigneeId: string | null) => void;
+  canDownload: boolean;
+  /** JSON dimensions (desk count, range) for the export click. */
+  trackMetadata?: string;
 }): ReactElement => {
   const [sortKey, setSortKey] = useState<AgentSortKey>('assigned');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
@@ -496,9 +521,13 @@ const MetricsAgentTable = ({
           <button
             type='button'
             onClick={onDownload}
-            className='flex items-center gap-1 rounded-[8px] border border-desk-border px-2 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground dark:border-border'
+            className={cn(
+              'flex items-center gap-1 rounded-[8px] border border-desk-border px-2 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground dark:border-border',
+              !canDownload && 'hidden',
+            )}
             data-track-category='DeskMetrics'
             data-track-name='DownloadAgentCsv'
+            data-track-metadata={trackMetadata}
           >
             <Download size={12} />
             CSV
@@ -586,9 +615,23 @@ const MetricsAgentTable = ({
                       <span className='flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-muted text-[10px] font-semibold uppercase text-muted-foreground'>
                         {agentDisplayName(row).slice(0, 2)}
                       </span>
-                      <span className='max-w-[180px] truncate' title={agentDisplayName(row)}>
-                        {agentDisplayName(row)}
-                      </span>
+                      {row.assigneeId ? (
+                        <button
+                          type='button'
+                          onClick={() => onAgentClick(row.assigneeId)}
+                          data-track-category='DeskMetrics'
+                          data-track-name='OpenAgentOverview'
+                          data-track-metadata={JSON.stringify({ assigneeId: row.assigneeId })}
+                          className='max-w-[180px] truncate text-left hover:text-desk-accent hover:underline'
+                          title={agentDisplayName(row)}
+                        >
+                          {agentDisplayName(row)}
+                        </button>
+                      ) : (
+                        <span className='max-w-[180px] truncate' title={agentDisplayName(row)}>
+                          {agentDisplayName(row)}
+                        </span>
+                      )}
                     </div>
                   </td>
                   <td className='whitespace-nowrap px-4 py-2 text-right font-mono text-xs tabular-nums text-foreground'>
@@ -662,14 +705,28 @@ const MetricsAgentTable = ({
 const MetricsTicketTable = ({
   tickets,
   onDownload,
+  onTicketClick,
+  onAssigneeClick,
+  canSee,
+  trackMetadata,
 }: {
   tickets: DeskMetricsTicketRow[];
   onDownload: () => void;
+  onTicketClick: (ticket: DeskMetricsTicketRow) => void;
+  onAssigneeClick: (assigneeId: string) => void;
+  canSee: (key: string) => boolean;
+  /** JSON dimensions (desk count, range) for the export click. */
+  trackMetadata?: string;
 }): ReactElement => {
   const [page, setPage] = useState(0);
   const totalPages = Math.ceil(tickets.length / PAGE_SIZE);
   const pageRows = tickets.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
   const customFieldKeys = useMemo(() => getCustomFieldKeys(tickets), [tickets]);
+  const hide = (column: string): boolean => !canSee(`column:${column}`);
+
+  useEffect(() => {
+    setPage(0);
+  }, [tickets]);
 
   return (
     <div className='rounded-[12px] border border-desk-border bg-background dark:border-border'>
@@ -679,9 +736,13 @@ const MetricsTicketTable = ({
           <button
             type='button'
             onClick={onDownload}
-            className='flex items-center gap-1 rounded-[8px] border border-desk-border px-2 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground dark:border-border'
+            className={cn(
+              'flex items-center gap-1 rounded-[8px] border border-desk-border px-2 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground dark:border-border',
+              !canSee('csvDownload') && 'hidden',
+            )}
             data-track-category='DeskMetrics'
             data-track-name='DownloadCsv'
+            data-track-metadata={trackMetadata}
           >
             <Download size={12} />
             CSV
@@ -716,7 +777,22 @@ const MetricsTicketTable = ({
         </div>
       </div>
       <div className='overflow-x-auto'>
-        <table className='w-full text-sm'>
+        <table
+          className={cn(
+            'w-full text-sm',
+            hide('id') && '[&_td:nth-child(1)]:hidden [&_th:nth-child(1)]:hidden',
+            hide('title') && '[&_td:nth-child(2)]:hidden [&_th:nth-child(2)]:hidden',
+            hide('assignee') && '[&_td:nth-child(3)]:hidden [&_th:nth-child(3)]:hidden',
+            hide('priority') && '[&_td:nth-child(4)]:hidden [&_th:nth-child(4)]:hidden',
+            hide('stage') && '[&_td:nth-child(5)]:hidden [&_th:nth-child(5)]:hidden',
+            hide('frt') && '[&_td:nth-child(6)]:hidden [&_th:nth-child(6)]:hidden',
+            hide('rt') && '[&_td:nth-child(7)]:hidden [&_th:nth-child(7)]:hidden',
+            hide('csat') && '[&_td:nth-child(8)]:hidden [&_th:nth-child(8)]:hidden',
+            hide('tags') && '[&_td:nth-child(9)]:hidden [&_th:nth-child(9)]:hidden',
+            hide('createdAt') && '[&_td:nth-last-child(2)]:hidden [&_th:nth-last-child(2)]:hidden',
+            hide('age') && '[&_td:nth-last-child(1)]:hidden [&_th:nth-last-child(1)]:hidden',
+          )}
+        >
           <thead>
             <tr className='border-b border-desk-border/60 text-left dark:border-border/60'>
               <th className='px-4 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground'>
@@ -750,6 +826,7 @@ const MetricsTicketTable = ({
                 <th
                   key={key}
                   className='whitespace-nowrap px-4 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground'
+                  hidden={hide(`field:${key}`)}
                 >
                   {key}
                 </th>
@@ -772,13 +849,60 @@ const MetricsTicketTable = ({
                 )}
               >
                 <td className='whitespace-nowrap px-4 py-2 font-mono text-xs text-muted-foreground'>
-                  {row.xyneId ?? row.ticketId.slice(0, 8)}
+                  {row.xyneId ? (
+                    <button
+                      type='button'
+                      onClick={() => onTicketClick(row)}
+                      data-track-category='DeskMetrics'
+                      data-track-name='OpenMetricsTicket'
+                      data-track-metadata={JSON.stringify({
+                        ticketId: row.ticketId,
+                        channelId: row.channelId,
+                        xyneId: row.xyneId,
+                      })}
+                      className='text-left hover:text-desk-accent hover:underline'
+                    >
+                      {row.xyneId}
+                    </button>
+                  ) : (
+                    row.ticketId.slice(0, 8)
+                  )}
                 </td>
                 <td className='px-4 py-2 text-foreground'>
-                  <div className='max-w-[200px] truncate'>{row.title ?? '—'}</div>
+                  {row.xyneId ? (
+                    <button
+                      type='button'
+                      onClick={() => onTicketClick(row)}
+                      data-track-category='DeskMetrics'
+                      data-track-name='OpenMetricsTicket'
+                      data-track-metadata={JSON.stringify({
+                        ticketId: row.ticketId,
+                        channelId: row.channelId,
+                        xyneId: row.xyneId,
+                      })}
+                      className='max-w-[200px] truncate text-left hover:text-desk-accent hover:underline'
+                    >
+                      {row.title ?? '—'}
+                    </button>
+                  ) : (
+                    <div className='max-w-[200px] truncate'>{row.title ?? '—'}</div>
+                  )}
                 </td>
                 <td className='px-4 py-2 text-xs text-muted-foreground'>
-                  <div className='max-w-[140px] truncate'>{row.assigneeName ?? 'Unassigned'}</div>
+                  {row.assigneeId ? (
+                    <button
+                      type='button'
+                      onClick={() => onAssigneeClick(row.assigneeId!)}
+                      data-track-category='DeskMetrics'
+                      data-track-name='FilterByTicketAssignee'
+                      data-track-metadata={JSON.stringify({ assigneeId: row.assigneeId })}
+                      className='max-w-[140px] truncate text-left hover:text-desk-accent hover:underline'
+                    >
+                      {row.assigneeName ?? 'Unassigned'}
+                    </button>
+                  ) : (
+                    <div className='max-w-[140px] truncate'>Unassigned</div>
+                  )}
                 </td>
                 <td className='whitespace-nowrap px-4 py-2'>
                   <span
@@ -825,6 +949,7 @@ const MetricsTicketTable = ({
                   <td
                     key={key}
                     className='whitespace-nowrap px-4 py-2 text-xs text-muted-foreground'
+                    hidden={hide(`field:${key}`)}
                   >
                     <div className='max-w-[160px] truncate'>{row.customFields?.[key] || '—'}</div>
                   </td>
@@ -849,15 +974,7 @@ const MetricsTicketTable = ({
   );
 };
 
-const KpiCard = ({
-  label,
-  value,
-  sub,
-}: {
-  label: string;
-  value: string;
-  sub?: string;
-}): ReactElement => (
+const KpiCard = ({ label, value }: { label: string; value: string }): ReactElement => (
   <div className='flex flex-col gap-1 rounded-[12px] border border-desk-border bg-background p-4 dark:border-border'>
     <div className='text-[10px] font-medium uppercase tracking-[0.16em] text-muted-foreground'>
       {label}
@@ -865,7 +982,6 @@ const KpiCard = ({
     <div className='font-mono text-2xl font-semibold leading-none tabular-nums text-foreground'>
       {value}
     </div>
-    {sub && <div className='text-xs text-muted-foreground'>{sub}</div>}
   </div>
 );
 
@@ -877,8 +993,11 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
   availableDesks = [],
   customFieldDefinitions = [],
   availableStages = [],
+  onTicketClick,
+  trackSource = 'toolbar',
 }) => {
   const { user } = useAuth();
+  const isGuest = user?.role === WorkspaceRole.GUEST;
   const {
     dateRange,
     startTime,
@@ -889,6 +1008,7 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
     selectedUserGroupIds,
     selectedTagCategory,
     selectedTagValues,
+    selectedAiCategories,
     selectedCustomFieldValues,
     setDateRange: persistDateRange,
     setSelectedAssigneeIds,
@@ -897,19 +1017,24 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
     setSelectedUserGroupIds,
     setSelectedTagCategory,
     setSelectedTagValues,
+    setSelectedAiCategories,
     setSelectedCustomFieldValues,
     comparedChannelIds,
     setComparedChannelIds,
+    chartView: persistedChartView,
+    setChartView,
+    activeTab,
+    setActiveTab,
   } = usePersistedDeskMetricsFilters(user?.id, channelId);
 
-  const [activeTab, setActiveTab] = useState<'overview' | 'agents' | 'desks'>('overview');
   const [deskPickerOpen, setDeskPickerOpen] = useState(false);
   const [deskSearch, setDeskSearch] = useState('');
 
   const selectedDeskIds = useMemo(() => {
+    if (isGuest) return [channelId];
     const selectable = new Set(availableDesks.map(d => d.id));
     return [channelId, ...comparedChannelIds.filter(id => selectable.has(id) && id !== channelId)];
-  }, [channelId, comparedChannelIds, availableDesks]);
+  }, [isGuest, channelId, comparedChannelIds, availableDesks]);
 
   const isMultiDesk = selectedDeskIds.length > 1;
   const isDeskSelectionAtLimit = selectedDeskIds.length >= DESK_METRICS_MAX_AGGREGATE_DESKS;
@@ -932,12 +1057,7 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
     [channelId, comparedChannelIds, selectedDeskIds.length, setComparedChannelIds],
   );
 
-  const [chartView, setChartView] = useState<'priority' | 'trend' | 'assignee' | 'tags'>(
-    'priority',
-  );
-  const [expandedChart, setExpandedChart] = useState<
-    'priority' | 'trend' | 'assignee' | 'tags' | null
-  >(null);
+  const [expandedChart, setExpandedChart] = useState<ChartView | null>(null);
   const rangeStartMs = dateTimeMs(dateRange.startDate, startTime, false);
   const rangeEndMs = dateTimeMs(dateRange.endDate, endTime, true);
   const timeRangeParam = `${rangeStartMs}_${rangeEndMs}`;
@@ -945,12 +1065,38 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
   const [assigneePopoverOpen, setAssigneePopoverOpen] = useState(false);
   const [customFieldPopoverOpen, setCustomFieldPopoverOpen] = useState(false);
   const [activeSubmenu, setActiveSubmenu] = useState<string | null>(null);
+  const [filterSearch, setFilterSearch] = useState('');
+  // Stable tag list per category: grows as tags are seen, never shrinks.
+  // Prevents mutually-exclusive tags (e.g. sentiment) from disappearing when
+  // selecting one tag filters the cohort and the API stops returning the others.
+  const [stableTagsInCategory, setStableTagsInCategory] = useState<string[]>([]);
+  const [availableAiCategories, setAvailableAiCategories] = useState<string[]>([]);
 
   useEffect(() => {
     setCustomFieldPopoverOpen(false);
     setActiveSubmenu(null);
-    if (!isMultiDesk) setActiveTab(current => (current === 'desks' ? 'overview' : current));
-  }, [isMultiDesk]);
+    if (!isMultiDesk && activeTab === 'desks') setActiveTab('overview');
+  }, [activeTab, isMultiDesk, setActiveTab]);
+
+  useEffect(() => {
+    if (!open || !channelId || isMultiDesk) {
+      setAvailableAiCategories([]);
+      return;
+    }
+    let cancelled = false;
+    setAvailableAiCategories([]);
+    classificationApi
+      .getAiCategories(channelId)
+      .then(categories => {
+        if (!cancelled) setAvailableAiCategories(categories);
+      })
+      .catch(() => {
+        if (!cancelled) setAvailableAiCategories([]);
+      });
+    return (): void => {
+      cancelled = true;
+    };
+  }, [open, channelId, isMultiDesk]);
 
   const customFieldDefinitionByName = useMemo(() => {
     const definitions = new Map<string, ResolvedDisplayFormField>();
@@ -1009,7 +1155,9 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
     (!isMultiDesk && selectedStageNames.length > 0) ||
     selectedPriorities.length > 0 ||
     selectedUserGroupIds.length > 0 ||
+    selectedTagCategory !== null ||
     selectedTagValues.length > 0 ||
+    (!isMultiDesk && selectedAiCategories.length > 0) ||
     (!isMultiDesk && activeCustomFieldKeys.length > 0);
   const hasAnyFiltersActive = selectedAssigneeIds.length > 0 || hasMoreFiltersActive;
 
@@ -1031,13 +1179,31 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
     selectedDeskIds,
     timeRangeParam,
     open,
-    selectedAssigneeIds,
+    isGuest ? [] : selectedAssigneeIds,
     customFieldFilter,
     isMultiDesk ? [] : selectedStageNames,
     selectedPriorities,
     selectedUserGroupIds,
     selectedTagValues,
+    isMultiDesk ? [] : selectedAiCategories,
   );
+
+  // Guests see what the desk owner didn't turn off (Desk Settings → Metrics); others see everything.
+  const canSee = (key: string): boolean => !isGuest || data?.guestVisibility?.[key] !== false;
+
+  useEffect(() => {
+    if (selectedTagCategory === null) {
+      setStableTagsInCategory([]);
+      return;
+    }
+    const fresh = (data?.tagBreakdown ?? [])
+      .filter(tb => tb.tagCategory === selectedTagCategory)
+      .map(tb => `${tb.tagCategory}:${tb.tag}`);
+    setStableTagsInCategory(prev => {
+      const prevForCategory = prev.filter(k => k.startsWith(`${selectedTagCategory}:`));
+      return [...new Set([...prevForCategory, ...fresh])];
+    });
+  }, [selectedTagCategory, data?.tagBreakdown]);
 
   const availableCustomFields = useMemo(() => {
     const fields = new Map<string, DeskMetricsCustomFieldDefinition>();
@@ -1083,6 +1249,90 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
     for (const desk of availableDesks) map.set(desk.id, desk.name);
     return map;
   }, [channelId, channelName, availableDesks]);
+
+  // Stage and custom fields differ per board; desk needs several desks; tag:* follows chart:tags.
+  const chartViewOptions: ChartView[] = [
+    ...(['priority', 'trend', 'assignee', 'tags', 'csat'] as const),
+    ...(isMultiDesk ? (['status', 'desk'] as const) : (['stage', 'status'] as const)),
+    ...(data?.tagCategories ?? []).map(c => `tag:${c.tagCategory}` as const),
+    ...(isMultiDesk ? [] : availableCustomFields.map(f => `field:${f.fieldName}` as const)),
+  ].filter(view => canSee(`chart:${view.startsWith('tag:') ? 'tags' : view}`));
+  const chartView = chartViewOptions.includes(persistedChartView)
+    ? persistedChartView
+    : (chartViewOptions[0] ?? 'priority');
+
+  // DESK_METRICS_VIEWED: the dashboard has 42 tracked clicks and no impression,
+  // so nothing said how often it is opened or over what range. One event per
+  // desk-set + range once the aggregate query has data; filter changes inside
+  // the same range are their own clicks and do not refire this.
+  const rangeDays = Math.max(1, Math.round((rangeEndMs - rangeStartMs) / DAY_MS));
+  const activeFilterKeys = useMemo(
+    () =>
+      [
+        selectedAssigneeIds.length > 0 && 'assignee',
+        selectedStageNames.length > 0 && 'stage',
+        selectedPriorities.length > 0 && 'priority',
+        selectedUserGroupIds.length > 0 && 'userGroup',
+        selectedTagValues.length > 0 && 'tags',
+        selectedAiCategories.length > 0 && 'aiCategory',
+        Object.keys(selectedCustomFieldValues).length > 0 && 'customField',
+      ].filter((k): k is string => typeof k === 'string'),
+    [
+      selectedAssigneeIds,
+      selectedStageNames,
+      selectedPriorities,
+      selectedUserGroupIds,
+      selectedTagValues,
+      selectedAiCategories,
+      selectedCustomFieldValues,
+    ],
+  );
+  const metricsViewedKeyRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!open || !data) return;
+    const key = `${[...selectedDeskIds].sort().join(',')}:${timeRangeParam}`;
+    if (metricsViewedKeyRef.current === key) return;
+    metricsViewedKeyRef.current = key;
+    globalClickTracker.trackManualEvent('DeskMetrics', 'DESK_METRICS_VIEWED', undefined, {
+      channelId,
+      deskCount: selectedDeskIds.length,
+      rangeDays,
+      rangePreset: matchPreset(dateRange) ?? 'custom',
+      activeFilterKeys,
+      chartView,
+      isGuest,
+      source: trackSource,
+    });
+  }, [
+    open,
+    data,
+    selectedDeskIds,
+    timeRangeParam,
+    channelId,
+    rangeDays,
+    dateRange,
+    activeFilterKeys,
+    chartView,
+    isGuest,
+    trackSource,
+  ]);
+  useEffect(() => {
+    if (!open) metricsViewedKeyRef.current = null;
+  }, [open]);
+  // Dimensions every filter / chart / export click in this dashboard carries.
+  const metricsClickMetadata = useMemo(
+    () =>
+      JSON.stringify({
+        channelId,
+        deskCount: selectedDeskIds.length,
+        rangeDays,
+        chart: chartView,
+      }),
+    [channelId, selectedDeskIds.length, rangeDays, chartView],
+  );
+  const chartViewLabel = (view: ChartView): string =>
+    (CHART_VIEW_LABELS as Record<string, string>)[view] ?? view.slice(view.indexOf(':') + 1);
+  const isBreakdownView = !['priority', 'trend', 'assignee', 'tags'].includes(chartView);
 
   useEffect(() => {
     if (open) void refetch();
@@ -1167,6 +1417,48 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
       .sort((a, b) => b.count - a.count);
   }, [data?.tickets]);
 
+  const breakdownData = useMemo(() => {
+    if (!isBreakdownView) return [];
+    const fieldName = chartView.startsWith('field:') ? chartView.slice('field:'.length) : '';
+    const valuesOf = (ticket: DeskMetricsTicketRow): string[] => {
+      if (chartView === 'stage') return [ticket.stageName ?? 'No stage'];
+      if (chartView === 'desk') return [deskNameById.get(ticket.channelId) ?? ticket.channelId];
+      if (chartView === 'csat') return [ticket.csatRating ?? 'No response'];
+      if (chartView.startsWith('tag:')) {
+        const tags = (ticket.tags ?? [])
+          .filter(tag => `tag:${tag.tagCategory}` === chartView)
+          .map(tag => tag.tag);
+        return tags.length > 0 ? tags : ['Not tagged'];
+      }
+      if (chartView === 'status') return [getStageStatusMeta(ticket.statusV2).label];
+      const value = ticket.customFields?.[fieldName]?.trim();
+      if (!value) return ['Not set'];
+      return customFieldDefinitionByName.get(fieldName)?.fieldType === FormFieldType.MULTI_SELECT
+        ? value.split(', ')
+        : [value];
+    };
+    const counts = new Map<string, number>();
+    for (const ticket of data?.tickets ?? []) {
+      for (const value of valuesOf(ticket)) counts.set(value, (counts.get(value) ?? 0) + 1);
+    }
+    const rows = [...counts].sort((a, b) => b[1] - a[1]);
+    const rest = rows.slice(9);
+    const result = rows.slice(0, 9).map(([name, value], i) => ({
+      name,
+      value,
+      color: VIZ_CHART_COLORS.series[i % VIZ_CHART_COLORS.series.length] ?? '#94a3b8',
+    }));
+    if (rest.length > 0) {
+      result.push({
+        name: `+${rest.length} more`,
+        value: rest.reduce((s, [, count]) => s + count, 0),
+        color: '#94a3b8',
+      });
+    }
+    return result;
+  }, [isBreakdownView, chartView, customFieldDefinitionByName, deskNameById, data?.tickets]);
+  const pieData = chartView === 'priority' ? priorityData : breakdownData;
+
   // Shuffled once per mount so bar colors are random but don't flicker on re-renders
   const barColors = useMemo(
     () => [...VIZ_CHART_COLORS.series].sort(() => Math.random() - 0.5),
@@ -1181,7 +1473,6 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
     return Math.floor(pointCount / 6);
   }, [trendData.length]);
 
-  const csatTotal = (data?.csat.good ?? 0) + (data?.csat.bad ?? 0);
   const isEmpty = !!data && data.tickets.length === 0 && data.counts.stageCounts.length === 0;
 
   const handleDownload = useCallback(() => {
@@ -1222,6 +1513,24 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
     const filename = downloadAgentCsv(agents);
     showDownloadCompleteToast(filename);
   }, [agents]);
+
+  const handleAssigneeClick = useCallback(
+    (assigneeId: string) => {
+      if (isGuest) return;
+      setSelectedAssigneeIds([assigneeId]);
+      setActiveTab('agents');
+    },
+    [isGuest, setSelectedAssigneeIds, setActiveTab],
+  );
+
+  const handleAgentClick = useCallback(
+    (assigneeId: string | null) => {
+      if (!assigneeId || isGuest) return;
+      setSelectedAssigneeIds([assigneeId]);
+      setActiveTab('overview');
+    },
+    [isGuest, setSelectedAssigneeIds, setActiveTab],
+  );
 
   return (
     <Dialog
@@ -1267,7 +1576,7 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                 {(
                   [
                     { id: 'overview', label: 'Overview' },
-                    { id: 'agents', label: 'Agents' },
+                    ...(canSee('agentsTab') ? ([{ id: 'agents', label: 'Agents' }] as const) : []),
                     ...(isMultiDesk ? ([{ id: 'desks', label: 'By desk' }] as const) : []),
                   ] as const
                 ).map(({ id, label }) => (
@@ -1306,7 +1615,7 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
             </div>
             <div className='contents'>
               <div className='col-span-2 row-start-2 -mx-6 flex min-w-0 flex-wrap items-center justify-start gap-3 border-t border-desk-border bg-muted/20 px-6 py-3 dark:border-border'>
-                {availableDesks.length > 1 && (
+                {availableDesks.length > 1 && !isGuest && (
                   <Popover
                     open={deskPickerOpen}
                     onOpenChange={openState => {
@@ -1334,7 +1643,7 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                             onClick={e => {
                               e.stopPropagation();
                               setComparedChannelIds([]);
-                              setActiveTab(prev => (prev === 'desks' ? 'overview' : prev));
+                              if (activeTab === 'desks') setActiveTab('overview');
                             }}
                           />
                         ) : (
@@ -1441,7 +1750,10 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                   trigger={
                     <button
                       type='button'
-                      className='flex h-[32px] min-w-[140px] items-center gap-1.5 rounded-[8px] border border-desk-border bg-background px-3 text-sm text-foreground shadow-none hover:bg-accent dark:border-border'
+                      className={cn(
+                        'flex h-[32px] min-w-[140px] items-center gap-1.5 rounded-[8px] border border-desk-border bg-background px-3 text-sm text-foreground shadow-none hover:bg-accent dark:border-border',
+                        isGuest && 'hidden',
+                      )}
                       data-track-category='DeskMetrics'
                       data-track-name='AssigneeFilter'
                     >
@@ -1477,12 +1789,15 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                     open={customFieldPopoverOpen}
                     onOpenChange={nextOpen => {
                       setCustomFieldPopoverOpen(nextOpen);
-                      if (!nextOpen) setActiveSubmenu(null);
+                      if (!nextOpen) {
+                        setActiveSubmenu(null);
+                        setFilterSearch('');
+                      }
                     }}
                     align='start'
                     sideOffset={6}
                     collisionPadding={12}
-                    className='max-h-[400px] w-56 overflow-y-auto rounded-lg border border-border bg-background p-0 shadow-lg'
+                    className='w-56 rounded-lg border border-border bg-background p-0 shadow-lg'
                     onInteractOutside={event => {
                       const target = event.target;
                       if (
@@ -1495,9 +1810,13 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                     trigger={
                       <button
                         type='button'
-                        className='flex h-[32px] items-center gap-1.5 rounded-[10px] border border-border bg-background px-3 text-sm text-foreground shadow-sm hover:bg-muted'
+                        className={cn(
+                          'flex h-[32px] items-center gap-1.5 rounded-[10px] border border-border bg-background px-3 text-sm text-foreground shadow-sm hover:bg-muted',
+                          !canSee('moreFilters') && 'hidden',
+                        )}
                         data-track-category='DeskMetrics'
                         data-track-name='OpenCustomFieldFilters'
+                        data-track-metadata={metricsClickMetadata}
                       >
                         <ListFilter size={13} className='shrink-0' />
                         <span className='font-medium'>More Filters</span>
@@ -1507,300 +1826,239 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                       </button>
                     }
                   >
-                    <div className='py-1'>
-                      <PopoverPrimitive.Root
-                        open={activeSubmenu === '__priority'}
-                        onOpenChange={nextOpen => setActiveSubmenu(nextOpen ? '__priority' : null)}
+                    <>
+                      <div className='flex items-center gap-2 border-b border-border px-2 py-1.5'>
+                        <Search size={14} className='shrink-0 text-muted-foreground' />
+                        <input
+                          type='text'
+                          value={filterSearch}
+                          onChange={e => setFilterSearch(e.target.value)}
+                          onKeyDown={e => e.stopPropagation()}
+                          placeholder='Search filters…'
+                          className='w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground'
+                          data-track-category='DeskMetrics'
+                          data-track-name='SearchFilters'
+                        />
+                      </div>
+                      <div
+                        className='max-h-[360px] overflow-y-auto py-1'
+                        onWheel={e => e.stopPropagation()}
+                        onTouchMove={e => e.stopPropagation()}
                       >
-                        <PopoverPrimitive.Trigger asChild>
-                          <button
-                            type='button'
-                            className={cn(
-                              'flex w-full items-center justify-between px-4 py-2 text-sm hover:bg-muted',
-                              activeSubmenu === '__priority' && 'bg-muted font-medium',
-                            )}
-                            data-track-category='DeskMetrics'
-                            data-track-name='OpenPriorityFilterSubmenu'
+                        {(!filterSearch || 'priority'.includes(filterSearch.toLowerCase())) && (
+                          <PopoverPrimitive.Root
+                            open={activeSubmenu === '__priority'}
+                            onOpenChange={nextOpen =>
+                              setActiveSubmenu(nextOpen ? '__priority' : null)
+                            }
                           >
-                            <div className='flex min-w-0 items-center gap-3'>
-                              <BarChart4 size={16} className='shrink-0' />
-                              <span>Priority</span>
-                              {selectedPriorities.length > 0 && (
-                                <span className='h-1.5 w-1.5 shrink-0 rounded-full bg-blue-500' />
-                              )}
-                            </div>
-                            <ChevronRight size={16} className='shrink-0 text-muted-foreground' />
-                          </button>
-                        </PopoverPrimitive.Trigger>
-                        <PopoverPrimitive.Portal>
-                          <PopoverPrimitive.Content
-                            side='right'
-                            align='start'
-                            sideOffset={4}
-                            collisionPadding={12}
-                            className='z-[70] outline-none'
-                            data-custom-field-submenu='true'
-                            onOpenAutoFocus={event => event.preventDefault()}
+                            <PopoverPrimitive.Trigger asChild>
+                              <button
+                                type='button'
+                                className={cn(
+                                  'flex w-full items-center justify-between px-4 py-2 text-sm hover:bg-muted',
+                                  activeSubmenu === '__priority' && 'bg-muted font-medium',
+                                )}
+                                data-track-category='DeskMetrics'
+                                data-track-name='OpenPriorityFilterSubmenu'
+                                data-track-metadata={metricsClickMetadata}
+                              >
+                                <div className='flex min-w-0 items-center gap-3'>
+                                  <BarChart4 size={16} className='shrink-0' />
+                                  <span>Priority</span>
+                                  {selectedPriorities.length > 0 && (
+                                    <span className='h-1.5 w-1.5 shrink-0 rounded-full bg-blue-500' />
+                                  )}
+                                </div>
+                                <ChevronRight
+                                  size={16}
+                                  className='shrink-0 text-muted-foreground'
+                                />
+                              </button>
+                            </PopoverPrimitive.Trigger>
+                            <PopoverPrimitive.Portal>
+                              <PopoverPrimitive.Content
+                                side='right'
+                                align='start'
+                                sideOffset={4}
+                                collisionPadding={12}
+                                className='z-[70] outline-none'
+                                data-custom-field-submenu='true'
+                                onOpenAutoFocus={event => event.preventDefault()}
+                              >
+                                <PrioritySubmenu
+                                  selectedPriorities={selectedPriorities}
+                                  onChange={setSelectedPriorities}
+                                />
+                              </PopoverPrimitive.Content>
+                            </PopoverPrimitive.Portal>
+                          </PopoverPrimitive.Root>
+                        )}
+                        {(!filterSearch || 'user groups'.includes(filterSearch.toLowerCase())) && (
+                          <PopoverPrimitive.Root
+                            open={activeSubmenu === '__userGroups'}
+                            onOpenChange={nextOpen =>
+                              setActiveSubmenu(nextOpen ? '__userGroups' : null)
+                            }
                           >
-                            <PrioritySubmenu
-                              selectedPriorities={selectedPriorities}
-                              onChange={setSelectedPriorities}
-                            />
-                          </PopoverPrimitive.Content>
-                        </PopoverPrimitive.Portal>
-                      </PopoverPrimitive.Root>
-
-                      <PopoverPrimitive.Root
-                        open={activeSubmenu === '__userGroups'}
-                        onOpenChange={nextOpen =>
-                          setActiveSubmenu(nextOpen ? '__userGroups' : null)
-                        }
-                      >
-                        <PopoverPrimitive.Trigger asChild>
-                          <button
-                            type='button'
-                            className={cn(
-                              'flex w-full items-center justify-between px-4 py-2 text-sm hover:bg-muted',
-                              activeSubmenu === '__userGroups' && 'bg-muted font-medium',
-                            )}
-                            data-track-category='DeskMetrics'
-                            data-track-name='OpenUserGroupFilterSubmenu'
+                            <PopoverPrimitive.Trigger asChild>
+                              <button
+                                type='button'
+                                className={cn(
+                                  'flex w-full items-center justify-between px-4 py-2 text-sm hover:bg-muted',
+                                  activeSubmenu === '__userGroups' && 'bg-muted font-medium',
+                                )}
+                                data-track-category='DeskMetrics'
+                                data-track-name='OpenUserGroupFilterSubmenu'
+                                data-track-metadata={metricsClickMetadata}
+                              >
+                                <div className='flex min-w-0 items-center gap-3'>
+                                  <Users size={16} className='shrink-0' />
+                                  <span>User Groups</span>
+                                  {selectedUserGroupIds.length > 0 && (
+                                    <span className='h-1.5 w-1.5 shrink-0 rounded-full bg-blue-500' />
+                                  )}
+                                </div>
+                                <ChevronRight
+                                  size={16}
+                                  className='shrink-0 text-muted-foreground'
+                                />
+                              </button>
+                            </PopoverPrimitive.Trigger>
+                            <PopoverPrimitive.Portal>
+                              <PopoverPrimitive.Content
+                                side='right'
+                                align='start'
+                                sideOffset={4}
+                                collisionPadding={12}
+                                className='z-[70] outline-none'
+                                data-custom-field-submenu='true'
+                                onOpenAutoFocus={event => event.preventDefault()}
+                              >
+                                <UserGroupSubmenu
+                                  selectedGroups={selectedUserGroupIds}
+                                  onChange={setSelectedUserGroupIds}
+                                  onClose={() => setActiveSubmenu(null)}
+                                />
+                              </PopoverPrimitive.Content>
+                            </PopoverPrimitive.Portal>
+                          </PopoverPrimitive.Root>
+                        )}
+                        {(!filterSearch || 'tag category'.includes(filterSearch.toLowerCase())) && (
+                          <PopoverPrimitive.Root
+                            open={activeSubmenu === '__tagCategory'}
+                            onOpenChange={nextOpen =>
+                              setActiveSubmenu(nextOpen ? '__tagCategory' : null)
+                            }
                           >
-                            <div className='flex min-w-0 items-center gap-3'>
-                              <Users size={16} className='shrink-0' />
-                              <span>User Groups</span>
-                              {selectedUserGroupIds.length > 0 && (
-                                <span className='h-1.5 w-1.5 shrink-0 rounded-full bg-blue-500' />
-                              )}
-                            </div>
-                            <ChevronRight size={16} className='shrink-0 text-muted-foreground' />
-                          </button>
-                        </PopoverPrimitive.Trigger>
-                        <PopoverPrimitive.Portal>
-                          <PopoverPrimitive.Content
-                            side='right'
-                            align='start'
-                            sideOffset={4}
-                            collisionPadding={12}
-                            className='z-[70] outline-none'
-                            data-custom-field-submenu='true'
-                            onOpenAutoFocus={event => event.preventDefault()}
-                          >
-                            <UserGroupSubmenu
-                              selectedGroups={selectedUserGroupIds}
-                              onChange={setSelectedUserGroupIds}
-                              onClose={() => setActiveSubmenu(null)}
-                            />
-                          </PopoverPrimitive.Content>
-                        </PopoverPrimitive.Portal>
-                      </PopoverPrimitive.Root>
-
-                      {/* Tag Category (single-select) */}
-                      <PopoverPrimitive.Root
-                        open={activeSubmenu === '__tagCategory'}
-                        onOpenChange={nextOpen =>
-                          setActiveSubmenu(nextOpen ? '__tagCategory' : null)
-                        }
-                      >
-                        <PopoverPrimitive.Trigger asChild>
-                          <button
-                            type='button'
-                            className={cn(
-                              'flex w-full items-center justify-between px-4 py-2 text-sm hover:bg-muted',
-                              activeSubmenu === '__tagCategory' && 'bg-muted font-medium',
-                            )}
-                            data-track-category='DeskMetrics'
-                            data-track-name='OpenTagCategorySubmenu'
-                          >
-                            <div className='flex min-w-0 items-center gap-3'>
-                              <Tag size={16} className='shrink-0' />
-                              <span>Tag Category</span>
-                              {selectedTagCategory !== null && (
-                                <span className='h-1.5 w-1.5 shrink-0 rounded-full bg-blue-500' />
-                              )}
-                            </div>
-                            <ChevronRight size={16} className='shrink-0 text-muted-foreground' />
-                          </button>
-                        </PopoverPrimitive.Trigger>
-                        <PopoverPrimitive.Portal>
-                          <PopoverPrimitive.Content
-                            side='right'
-                            align='start'
-                            sideOffset={4}
-                            collisionPadding={12}
-                            className='z-[70] outline-none'
-                            data-custom-field-submenu='true'
-                            onOpenAutoFocus={event => event.preventDefault()}
-                          >
-                            <div className='w-56 rounded-[10px] border border-border bg-background shadow-lg'>
-                              <div className='border-b border-border px-3 py-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground'>
-                                Select Category
-                              </div>
-                              <div className='max-h-72 overflow-y-auto p-1'>
-                                {(data?.tagCategories ?? []).length === 0 ? (
-                                  <div className='p-6 text-center text-sm text-muted-foreground'>
-                                    No categories
+                            <PopoverPrimitive.Trigger asChild>
+                              <button
+                                type='button'
+                                className={cn(
+                                  'flex w-full items-center justify-between px-4 py-2 text-sm hover:bg-muted',
+                                  activeSubmenu === '__tagCategory' && 'bg-muted font-medium',
+                                )}
+                                data-track-category='DeskMetrics'
+                                data-track-name='OpenTagCategorySubmenu'
+                                data-track-metadata={metricsClickMetadata}
+                              >
+                                <div className='flex min-w-0 items-center gap-3'>
+                                  <Tag size={16} className='shrink-0' />
+                                  <span>Tag Category</span>
+                                  {selectedTagCategory !== null && (
+                                    <span className='h-1.5 w-1.5 shrink-0 rounded-full bg-blue-500' />
+                                  )}
+                                </div>
+                                <ChevronRight
+                                  size={16}
+                                  className='shrink-0 text-muted-foreground'
+                                />
+                              </button>
+                            </PopoverPrimitive.Trigger>
+                            <PopoverPrimitive.Portal>
+                              <PopoverPrimitive.Content
+                                side='right'
+                                align='start'
+                                sideOffset={4}
+                                collisionPadding={12}
+                                className='z-[70] outline-none'
+                                data-custom-field-submenu='true'
+                                onOpenAutoFocus={event => event.preventDefault()}
+                              >
+                                <div className='w-56 rounded-[10px] border border-border bg-background shadow-lg'>
+                                  <div className='border-b border-border px-3 py-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground'>
+                                    Select Category
                                   </div>
-                                ) : (
-                                  <div className='space-y-0.5'>
-                                    {(data?.tagCategories ?? []).map(tc => (
-                                      <button
-                                        key={tc.tagCategory}
-                                        type='button'
-                                        onClick={() => {
-                                          setSelectedTagCategory(
-                                            selectedTagCategory === tc.tagCategory
-                                              ? null
-                                              : tc.tagCategory,
-                                          );
-                                          setActiveSubmenu(null);
-                                        }}
-                                        data-track-category='DeskMetrics'
-                                        data-track-name='SelectTagCategory'
-                                        className={cn(
-                                          'flex w-full items-center justify-between rounded-[6px] px-3 py-2 text-sm transition-colors',
-                                          selectedTagCategory === tc.tagCategory
-                                            ? 'bg-accent text-accent-foreground'
-                                            : 'text-foreground hover:bg-muted',
-                                        )}
-                                      >
-                                        <span className='truncate'>{tc.tagCategory}</span>
-                                        <span className='ml-2 shrink-0 text-xs text-muted-foreground'>
-                                          {tc.count}
-                                        </span>
-                                      </button>
-                                    ))}
+                                  <div
+                                    className='max-h-72 overflow-y-auto p-1'
+                                    onWheel={e => e.stopPropagation()}
+                                    onTouchMove={e => e.stopPropagation()}
+                                  >
+                                    {(data?.tagCategories ?? []).length === 0 ? (
+                                      <div className='p-6 text-center text-sm text-muted-foreground'>
+                                        No categories
+                                      </div>
+                                    ) : (
+                                      <div className='space-y-0.5'>
+                                        {(data?.tagCategories ?? []).map(tc => (
+                                          <button
+                                            key={tc.tagCategory}
+                                            type='button'
+                                            onClick={() => {
+                                              setSelectedTagCategory(
+                                                selectedTagCategory === tc.tagCategory
+                                                  ? null
+                                                  : tc.tagCategory,
+                                              );
+                                              setActiveSubmenu(null);
+                                            }}
+                                            data-track-category='DeskMetrics'
+                                            data-track-name='SelectTagCategory'
+                                            className={cn(
+                                              'flex w-full items-center justify-between rounded-[6px] px-3 py-2 text-sm transition-colors',
+                                              selectedTagCategory === tc.tagCategory
+                                                ? 'bg-accent text-accent-foreground'
+                                                : 'text-foreground hover:bg-muted',
+                                            )}
+                                          >
+                                            <span className='truncate'>{tc.tagCategory}</span>
+                                            <span className='ml-2 shrink-0 text-xs text-muted-foreground'>
+                                              {tc.count}
+                                            </span>
+                                          </button>
+                                        ))}
+                                      </div>
+                                    )}
                                   </div>
-                                )}
-                              </div>
-                            </div>
-                          </PopoverPrimitive.Content>
-                        </PopoverPrimitive.Portal>
-                      </PopoverPrimitive.Root>
-
-                      {/* Tags within selected category */}
-                      {selectedTagCategory !== null && (
-                        <PopoverPrimitive.Root
-                          open={activeSubmenu === '__tags'}
-                          onOpenChange={nextOpen => setActiveSubmenu(nextOpen ? '__tags' : null)}
-                        >
-                          <PopoverPrimitive.Trigger asChild>
-                            <button
-                              type='button'
-                              className={cn(
-                                'flex w-full items-center justify-between px-4 py-2 text-sm hover:bg-muted',
-                                activeSubmenu === '__tags' && 'bg-muted font-medium',
-                              )}
-                              data-track-category='DeskMetrics'
-                              data-track-name='OpenTagsSubmenu'
-                            >
-                              <div className='flex min-w-0 items-center gap-3'>
-                                <Tag size={16} className='shrink-0' />
-                                <span>Tags</span>
-                                {selectedTagValues.length > 0 && (
-                                  <span className='h-1.5 w-1.5 shrink-0 rounded-full bg-blue-500' />
-                                )}
-                              </div>
-                              <ChevronRight size={16} className='shrink-0 text-muted-foreground' />
-                            </button>
-                          </PopoverPrimitive.Trigger>
-                          <PopoverPrimitive.Portal>
-                            <PopoverPrimitive.Content
-                              side='right'
-                              align='start'
-                              sideOffset={4}
-                              collisionPadding={12}
-                              className='z-[70] outline-none'
-                              data-custom-field-submenu='true'
-                              onOpenAutoFocus={event => event.preventDefault()}
-                            >
-                              <TagsInCategorySubmenu
-                                availableTags={(data?.tagBreakdown ?? [])
-                                  .filter(tb => tb.tagCategory === selectedTagCategory)
-                                  .map(tb => `${tb.tagCategory}:${tb.tag}`)}
-                                category={selectedTagCategory}
-                                selectedTags={selectedTagValues}
-                                onChange={setSelectedTagValues}
-                              />
-                            </PopoverPrimitive.Content>
-                          </PopoverPrimitive.Portal>
-                        </PopoverPrimitive.Root>
-                      )}
-
-                      {!isMultiDesk && stageOptions.length > 0 && (
-                        <PopoverPrimitive.Root
-                          open={activeSubmenu === '__stages'}
-                          onOpenChange={nextOpen => setActiveSubmenu(nextOpen ? '__stages' : null)}
-                        >
-                          <PopoverPrimitive.Trigger asChild>
-                            <button
-                              type='button'
-                              className={cn(
-                                'flex w-full items-center justify-between px-4 py-2 text-sm hover:bg-muted',
-                                activeSubmenu === '__stages' && 'bg-muted font-medium',
-                              )}
-                              data-track-category='DeskMetrics'
-                              data-track-name='OpenStageFilterSubmenu'
-                            >
-                              <div className='flex min-w-0 items-center gap-3'>
-                                <Circle size={16} className='shrink-0' />
-                                <span>Stages</span>
-                                {selectedStageNames.length > 0 && (
-                                  <span className='h-1.5 w-1.5 shrink-0 rounded-full bg-blue-500' />
-                                )}
-                              </div>
-                              <ChevronRight size={16} className='shrink-0 text-muted-foreground' />
-                            </button>
-                          </PopoverPrimitive.Trigger>
-                          <PopoverPrimitive.Portal>
-                            <PopoverPrimitive.Content
-                              side='right'
-                              align='start'
-                              sideOffset={4}
-                              collisionPadding={12}
-                              className='z-[70] outline-none'
-                              data-custom-field-submenu='true'
-                              onOpenAutoFocus={event => event.preventDefault()}
-                            >
-                              <StagesSubmenu
-                                selectedStages={selectedStageNames}
-                                onChange={setSelectedStageNames}
-                                availableStages={[...stageOptions]}
-                              />
-                            </PopoverPrimitive.Content>
-                          </PopoverPrimitive.Portal>
-                        </PopoverPrimitive.Root>
-                      )}
-                      {!isMultiDesk &&
-                        availableCustomFields.map(definition => {
-                          const key = definition.fieldName;
-                          const FieldIcon = getIconForFieldType(definition.fieldType);
-                          const isOpen = activeSubmenu === key;
-                          const isActive = activeCustomFieldKeys.includes(key);
-
-                          return (
+                                </div>
+                              </PopoverPrimitive.Content>
+                            </PopoverPrimitive.Portal>
+                          </PopoverPrimitive.Root>
+                        )}
+                        {/* Tags within selected category */}
+                        {selectedTagCategory !== null &&
+                          (!filterSearch || 'tags'.includes(filterSearch.toLowerCase())) && (
                             <PopoverPrimitive.Root
-                              key={key}
-                              open={isOpen}
-                              onOpenChange={nextOpen => setActiveSubmenu(nextOpen ? key : null)}
+                              open={activeSubmenu === '__tags'}
+                              onOpenChange={nextOpen =>
+                                setActiveSubmenu(nextOpen ? '__tags' : null)
+                              }
                             >
                               <PopoverPrimitive.Trigger asChild>
                                 <button
                                   type='button'
                                   className={cn(
                                     'flex w-full items-center justify-between px-4 py-2 text-sm hover:bg-muted',
-                                    isOpen && 'bg-muted font-medium',
+                                    activeSubmenu === '__tags' && 'bg-muted font-medium',
                                   )}
                                   data-track-category='DeskMetrics'
-                                  data-track-name='OpenCustomFieldFilterSubmenu'
-                                  data-track-metadata={JSON.stringify({ fieldName: key })}
+                                  data-track-name='OpenTagsSubmenu'
+                                  data-track-metadata={metricsClickMetadata}
                                 >
                                   <div className='flex min-w-0 items-center gap-3'>
-                                    <FieldIcon className='h-4 w-4 shrink-0' />
-                                    <span className='truncate' title={key}>
-                                      {key}
-                                    </span>
-                                    {isActive && (
+                                    <Tag size={16} className='shrink-0' />
+                                    <span>Tags</span>
+                                    {selectedTagValues.length > 0 && (
                                       <span className='h-1.5 w-1.5 shrink-0 rounded-full bg-blue-500' />
                                     )}
                                   </div>
@@ -1820,24 +2078,204 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                                   data-custom-field-submenu='true'
                                   onOpenAutoFocus={event => event.preventDefault()}
                                 >
-                                  <DynamicFieldSubmenu
-                                    fieldId={definition.id}
-                                    fieldName={key}
-                                    fieldType={definition.fieldType}
-                                    fieldEnum={parseFieldOptionValues(definition.fieldEnum)}
-                                    selectedValue={selectedCustomFieldValues[key] ?? []}
-                                    onChange={value => {
-                                      if (!Array.isArray(value)) return;
-                                      updateCustomFieldValues(key, value);
-                                    }}
-                                    onClose={() => setActiveSubmenu(null)}
+                                  <TagsInCategorySubmenu
+                                    availableTags={stableTagsInCategory}
+                                    category={selectedTagCategory}
+                                    selectedTags={selectedTagValues}
+                                    onChange={setSelectedTagValues}
                                   />
                                 </PopoverPrimitive.Content>
                               </PopoverPrimitive.Portal>
                             </PopoverPrimitive.Root>
-                          );
-                        })}
-                    </div>
+                          )}
+
+                        {!isMultiDesk &&
+                          stageOptions.length > 0 &&
+                          (!filterSearch || 'stages'.includes(filterSearch.toLowerCase())) && (
+                            <PopoverPrimitive.Root
+                              open={activeSubmenu === '__stages'}
+                              onOpenChange={nextOpen =>
+                                setActiveSubmenu(nextOpen ? '__stages' : null)
+                              }
+                            >
+                              <PopoverPrimitive.Trigger asChild>
+                                <button
+                                  type='button'
+                                  className={cn(
+                                    'flex w-full items-center justify-between px-4 py-2 text-sm hover:bg-muted',
+                                    activeSubmenu === '__stages' && 'bg-muted font-medium',
+                                  )}
+                                  data-track-category='DeskMetrics'
+                                  data-track-name='OpenStageFilterSubmenu'
+                                  data-track-metadata={metricsClickMetadata}
+                                >
+                                  <div className='flex min-w-0 items-center gap-3'>
+                                    <Circle size={16} className='shrink-0' />
+                                    <span>Stages</span>
+                                    {selectedStageNames.length > 0 && (
+                                      <span className='h-1.5 w-1.5 shrink-0 rounded-full bg-blue-500' />
+                                    )}
+                                  </div>
+                                  <ChevronRight
+                                    size={16}
+                                    className='shrink-0 text-muted-foreground'
+                                  />
+                                </button>
+                              </PopoverPrimitive.Trigger>
+                              <PopoverPrimitive.Portal>
+                                <PopoverPrimitive.Content
+                                  side='right'
+                                  align='start'
+                                  sideOffset={4}
+                                  collisionPadding={12}
+                                  className='z-[70] outline-none'
+                                  data-custom-field-submenu='true'
+                                  onOpenAutoFocus={event => event.preventDefault()}
+                                >
+                                  <StagesSubmenu
+                                    selectedStages={selectedStageNames}
+                                    onChange={setSelectedStageNames}
+                                    availableStages={[...stageOptions]}
+                                  />
+                                </PopoverPrimitive.Content>
+                              </PopoverPrimitive.Portal>
+                            </PopoverPrimitive.Root>
+                          )}
+                        {!isMultiDesk &&
+                          (!filterSearch || 'ai category'.includes(filterSearch.toLowerCase())) && (
+                            <PopoverPrimitive.Root
+                              open={activeSubmenu === '__aiCategory'}
+                              onOpenChange={nextOpen =>
+                                setActiveSubmenu(nextOpen ? '__aiCategory' : null)
+                              }
+                            >
+                              <PopoverPrimitive.Trigger asChild>
+                                <button
+                                  type='button'
+                                  className={cn(
+                                    'flex w-full items-center justify-between px-4 py-2 text-sm hover:bg-muted',
+                                    activeSubmenu === '__aiCategory' && 'bg-muted font-medium',
+                                  )}
+                                  data-track-category='DeskMetrics'
+                                  data-track-name='OpenAICategoryFilterSubmenu'
+                                  data-track-metadata={metricsClickMetadata}
+                                >
+                                  <div className='flex min-w-0 items-center gap-3'>
+                                    <Sparkles size={16} className='shrink-0' />
+                                    <span>AI Category</span>
+                                    {selectedAiCategories.length > 0 && (
+                                      <span className='h-1.5 w-1.5 shrink-0 rounded-full bg-blue-500' />
+                                    )}
+                                  </div>
+                                  <ChevronRight
+                                    size={16}
+                                    className='shrink-0 text-muted-foreground'
+                                  />
+                                </button>
+                              </PopoverPrimitive.Trigger>
+                              <PopoverPrimitive.Portal>
+                                <PopoverPrimitive.Content
+                                  side='right'
+                                  align='start'
+                                  sideOffset={4}
+                                  collisionPadding={12}
+                                  className='z-[70] outline-none'
+                                  data-custom-field-submenu='true'
+                                  onOpenAutoFocus={event => event.preventDefault()}
+                                >
+                                  <AICategorySubmenu
+                                    selectedCategories={selectedAiCategories}
+                                    onChange={setSelectedAiCategories}
+                                    availableCategories={[
+                                      ...new Set([
+                                        ...availableAiCategories,
+                                        ...selectedAiCategories,
+                                      ]),
+                                    ]}
+                                  />
+                                </PopoverPrimitive.Content>
+                              </PopoverPrimitive.Portal>
+                            </PopoverPrimitive.Root>
+                          )}
+                        {!isMultiDesk &&
+                          availableCustomFields
+                            .filter(
+                              def =>
+                                !filterSearch ||
+                                def.fieldName.toLowerCase().includes(filterSearch.toLowerCase()),
+                            )
+                            .map(definition => {
+                              const key = definition.fieldName;
+                              const FieldIcon = getIconForFieldType(definition.fieldType);
+                              const isOpen = activeSubmenu === key;
+                              const isActive = activeCustomFieldKeys.includes(key);
+
+                              return (
+                                <PopoverPrimitive.Root
+                                  key={key}
+                                  open={isOpen}
+                                  onOpenChange={nextOpen => setActiveSubmenu(nextOpen ? key : null)}
+                                >
+                                  <PopoverPrimitive.Trigger asChild>
+                                    <button
+                                      type='button'
+                                      className={cn(
+                                        'flex w-full items-center justify-between px-4 py-2 text-sm hover:bg-muted',
+                                        isOpen && 'bg-muted font-medium',
+                                      )}
+                                      data-track-category='DeskMetrics'
+                                      data-track-name='OpenCustomFieldFilterSubmenu'
+                                      data-track-metadata={JSON.stringify({
+                                        channelId,
+                                        deskCount: selectedDeskIds.length,
+                                        rangeDays,
+                                        fieldName: key,
+                                      })}
+                                    >
+                                      <div className='flex min-w-0 items-center gap-3'>
+                                        <FieldIcon className='h-4 w-4 shrink-0' />
+                                        <span className='truncate' title={key}>
+                                          {key}
+                                        </span>
+                                        {isActive && (
+                                          <span className='h-1.5 w-1.5 shrink-0 rounded-full bg-blue-500' />
+                                        )}
+                                      </div>
+                                      <ChevronRight
+                                        size={16}
+                                        className='shrink-0 text-muted-foreground'
+                                      />
+                                    </button>
+                                  </PopoverPrimitive.Trigger>
+                                  <PopoverPrimitive.Portal>
+                                    <PopoverPrimitive.Content
+                                      side='right'
+                                      align='start'
+                                      sideOffset={4}
+                                      collisionPadding={12}
+                                      className='z-[70] outline-none'
+                                      data-custom-field-submenu='true'
+                                      onOpenAutoFocus={event => event.preventDefault()}
+                                    >
+                                      <DynamicFieldSubmenu
+                                        fieldId={definition.id}
+                                        fieldName={key}
+                                        fieldType={definition.fieldType}
+                                        fieldEnum={parseFieldOptionValues(definition.fieldEnum)}
+                                        selectedValue={selectedCustomFieldValues[key] ?? []}
+                                        onChange={value => {
+                                          if (!Array.isArray(value)) return;
+                                          updateCustomFieldValues(key, value);
+                                        }}
+                                        onClose={() => setActiveSubmenu(null)}
+                                      />
+                                    </PopoverPrimitive.Content>
+                                  </PopoverPrimitive.Portal>
+                                </PopoverPrimitive.Root>
+                              );
+                            })}
+                      </div>
+                    </>
                   </Popover>
 
                   {hasAnyFiltersActive && (
@@ -1850,6 +2288,7 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                         setSelectedUserGroupIds([]);
                         setSelectedTagCategory(null);
                         setSelectedTagValues([]);
+                        setSelectedAiCategories([]);
                         clearAllCustomFieldFilters();
                       }}
                       className='flex h-[32px] items-center gap-1.5 rounded-[10px] border border-border bg-background px-3 text-sm text-foreground shadow-sm hover:bg-muted'
@@ -2031,7 +2470,7 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                   Blended totals in Overview are weighted by these counts.
                 </p>
               </div>
-            ) : activeTab === 'agents' ? (
+            ) : activeTab === 'agents' && canSee('agentsTab') ? (
               <div className='flex flex-col gap-4'>
                 {agents.length === 0 ? (
                   <div className='flex flex-col items-center justify-center gap-2 rounded-[12px] border border-dashed border-desk-border py-16 text-center dark:border-border'>
@@ -2047,30 +2486,10 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                 ) : (
                   <>
                     <div className='grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5'>
-                      <KpiCard
-                        label='Agents'
-                        value={String(agentTotals.count)}
-                        sub='with activity'
-                      />
-                      <KpiCard
-                        label='Total Tickets'
-                        value={String(data.counts.openedInRange)}
-                        sub='created in range'
-                      />
-                      <KpiCard
-                        label='Tickets Resolved'
-                        value={String(agentTotals.resolved)}
-                        {...(agentTotals.assigned > 0
-                          ? {
-                              sub: `${Math.round((agentTotals.resolved / agentTotals.assigned) * 100)}% of assigned`,
-                            }
-                          : {})}
-                      />
-                      <KpiCard
-                        label='Tickets Reopened'
-                        value={String(agentTotals.reopened)}
-                        sub='distinct tickets'
-                      />
+                      <KpiCard label='Agents' value={String(agentTotals.count)} />
+                      <KpiCard label='Total Tickets' value={String(data.counts.openedInRange)} />
+                      <KpiCard label='Tickets Resolved' value={String(agentTotals.resolved)} />
+                      <KpiCard label='Tickets Reopened' value={String(agentTotals.reopened)} />
                       <KpiCard label='Replies Sent' value={String(agentTotals.replies)} />
                     </div>
 
@@ -2122,7 +2541,13 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                       </div>
                     </div>
 
-                    <MetricsAgentTable agents={agents} onDownload={handleDownloadAgents} />
+                    <MetricsAgentTable
+                      agents={agents}
+                      onDownload={handleDownloadAgents}
+                      onAgentClick={handleAgentClick}
+                      canDownload={canSee('csvDownload')}
+                      trackMetadata={metricsClickMetadata}
+                    />
                   </>
                 )}
               </div>
@@ -2130,30 +2555,36 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
               <div className='flex flex-col gap-4'>
                 {/* KPI row — FRT / RT / CSAT / Email Replies */}
                 <div className='grid grid-cols-2 gap-3 md:grid-cols-4'>
-                  <KpiCard
-                    label='Avg First Response'
-                    value={formatDuration(data.frt.avgSeconds)}
-                    sub={`${data.frt.respondedTickets} responded`}
-                  />
-                  <KpiCard
-                    label='Avg Resolution'
-                    value={formatDuration(data.rt.avgSeconds)}
-                    sub={`${data.rt.resolvedTickets} resolved`}
-                  />
-                  <KpiCard
-                    label='CSAT'
-                    value={data.csat.avgScore !== null ? `${data.csat.avgScore.toFixed(1)}/5` : '—'}
-                    sub={
-                      csatTotal > 0
-                        ? `${data.csat.good} good · ${data.csat.bad} bad`
-                        : 'No responses'
-                    }
-                  />
-                  <KpiCard label='Email Replies' value={String(data.counts.emailRepliesInRange)} />
+                  {isGuest && canSee('kpi:ticketsCreated') && (
+                    <KpiCard label='Tickets Created' value={String(data.counts.openedInRange)} />
+                  )}
+                  {canSee('kpi:avgFirstResponse') && (
+                    <KpiCard
+                      label='Avg First Response'
+                      value={formatDuration(data.frt.avgSeconds)}
+                    />
+                  )}
+                  {canSee('kpi:avgResolution') && (
+                    <KpiCard label='Avg Resolution' value={formatDuration(data.rt.avgSeconds)} />
+                  )}
+                  {canSee('kpi:csat') && (
+                    <KpiCard
+                      label='CSAT'
+                      value={
+                        data.csat.avgScore !== null ? `${data.csat.avgScore.toFixed(1)}/5` : '—'
+                      }
+                    />
+                  )}
+                  {canSee('kpi:emailReplies') && (
+                    <KpiCard
+                      label='Email Replies'
+                      value={String(data.counts.emailRepliesInRange)}
+                    />
+                  )}
                 </div>
 
                 {/* Stage counts */}
-                {data.counts.stageCounts.length > 0 && (
+                {data.counts.stageCounts.length > 0 && canSee('stageCounts') && (
                   <div className='flex flex-col gap-2 rounded-[12px] border border-desk-border bg-background p-4 dark:border-border'>
                     <div className='text-sm font-medium text-foreground'>Tickets by stage</div>
                     <div className='flex flex-wrap gap-2'>
@@ -2185,7 +2616,12 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                 ) : (
                   <>
                     {/* Chart panel with view selector */}
-                    <div className='flex flex-col rounded-[12px] border border-desk-border bg-background p-4 dark:border-border'>
+                    <div
+                      className={cn(
+                        'flex flex-col rounded-[12px] border border-desk-border bg-background p-4 dark:border-border',
+                        chartViewOptions.length === 0 && 'hidden',
+                      )}
+                    >
                       <div className='mb-3 flex items-center justify-between gap-3'>
                         <div className='text-sm font-medium text-foreground'>
                           {chartView === 'priority' && 'Tickets by priority'}
@@ -2196,72 +2632,36 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                             (selectedTagCategory
                               ? `Tags in "${selectedTagCategory}"`
                               : 'Tickets by tag category')}
+                          {isBreakdownView && `Tickets by ${chartViewLabel(chartView)}`}
                         </div>
                         <div className='flex items-center gap-2'>
-                          <div className='flex items-center gap-0.5 rounded-[8px] border border-desk-border bg-muted/30 p-0.5 dark:border-border'>
-                            <button
-                              type='button'
-                              onClick={() => setChartView('priority')}
+                          <Select
+                            value={chartView}
+                            onValueChange={view => setChartView(view as ChartView)}
+                          >
+                            <SelectTrigger
                               data-track-category='DeskMetrics'
-                              data-track-name='ChartViewPriority'
-                              className={cn(
-                                'rounded-[6px] px-2.5 py-1 text-xs font-medium transition-colors',
-                                chartView === 'priority'
-                                  ? 'bg-background text-foreground shadow-sm'
-                                  : 'text-muted-foreground hover:text-foreground',
-                              )}
+                              data-track-name='ChartBreakdownBy'
+                              className='h-7 gap-1.5 text-xs'
                             >
-                              By Priority
-                            </button>
-                            <button
-                              type='button'
-                              onClick={() => setChartView('trend')}
-                              data-track-category='DeskMetrics'
-                              data-track-name='ChartViewTrend'
-                              className={cn(
-                                'rounded-[6px] px-2.5 py-1 text-xs font-medium transition-colors',
-                                chartView === 'trend'
-                                  ? 'bg-background text-foreground shadow-sm'
-                                  : 'text-muted-foreground hover:text-foreground',
-                              )}
-                            >
-                              Created vs Resolved
-                            </button>
-                            <button
-                              type='button'
-                              onClick={() => setChartView('assignee')}
-                              data-track-category='DeskMetrics'
-                              data-track-name='ChartViewAssignee'
-                              className={cn(
-                                'rounded-[6px] px-2.5 py-1 text-xs font-medium transition-colors',
-                                chartView === 'assignee'
-                                  ? 'bg-background text-foreground shadow-sm'
-                                  : 'text-muted-foreground hover:text-foreground',
-                              )}
-                            >
-                              By Assignee
-                            </button>
-                            <button
-                              type='button'
-                              onClick={() => setChartView('tags')}
-                              data-track-category='DeskMetrics'
-                              data-track-name='ChartViewTags'
-                              className={cn(
-                                'rounded-[6px] px-2.5 py-1 text-xs font-medium transition-colors',
-                                chartView === 'tags'
-                                  ? 'bg-background text-foreground shadow-sm'
-                                  : 'text-muted-foreground hover:text-foreground',
-                              )}
-                            >
-                              By Tags
-                            </button>
-                          </div>
+                              <span className='text-muted-foreground'>Breakdown by</span>
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {chartViewOptions.map(view => (
+                                <SelectItem key={view} value={view} className='text-xs'>
+                                  {chartViewLabel(view)}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
                           <button
                             type='button'
                             onClick={() => setExpandedChart(chartView)}
                             title='Expand'
                             data-track-category='DeskMetrics'
                             data-track-name='ExpandChart'
+                            data-track-metadata={metricsClickMetadata}
                             className='flex h-7 w-7 items-center justify-center rounded-[6px] text-muted-foreground hover:bg-accent hover:text-foreground'
                           >
                             <Maximize2 size={13} />
@@ -2269,8 +2669,8 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                         </div>
                       </div>
 
-                      {chartView === 'priority' &&
-                        (priorityData.length === 0 ? (
+                      {(chartView === 'priority' || isBreakdownView) &&
+                        (pieData.length === 0 ? (
                           <div className='flex h-[280px] items-center justify-center text-xs text-muted-foreground'>
                             No tickets in range
                           </div>
@@ -2279,14 +2679,14 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                             <ResponsiveContainer width='100%' height='100%'>
                               <PieChart>
                                 <Pie
-                                  data={priorityData}
+                                  data={pieData}
                                   dataKey='value'
                                   nameKey='name'
                                   innerRadius={70}
                                   outerRadius={105}
                                   paddingAngle={3}
                                 >
-                                  {priorityData.map(entry => (
+                                  {pieData.map(entry => (
                                     <Cell key={entry.name} fill={entry.color} />
                                   ))}
                                 </Pie>
@@ -2429,8 +2829,15 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                     </div>
 
                     {/* Ticket table */}
-                    {data.tickets.length > 0 && (
-                      <MetricsTicketTable tickets={data.tickets} onDownload={handleDownload} />
+                    {data.tickets.length > 0 && canSee('ticketTable') && (
+                      <MetricsTicketTable
+                        tickets={data.tickets}
+                        onDownload={handleDownload}
+                        onTicketClick={onTicketClick}
+                        onAssigneeClick={handleAssigneeClick}
+                        canSee={canSee}
+                        trackMetadata={metricsClickMetadata}
+                      />
                     )}
                   </>
                 )}
@@ -2467,6 +2874,7 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                   (selectedTagCategory
                     ? `Tags in "${selectedTagCategory}"`
                     : 'Tickets by tag category')}
+                {isBreakdownView && `Tickets by ${chartViewLabel(chartView)}`}
               </h2>
               <button
                 type='button'
@@ -2479,8 +2887,8 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
               </button>
             </div>
             <div className='min-h-0 flex-1'>
-              {expandedChart === 'priority' &&
-                (priorityData.length === 0 ? (
+              {(expandedChart === 'priority' || isBreakdownView) &&
+                (pieData.length === 0 ? (
                   <div className='flex h-full items-center justify-center text-sm text-muted-foreground'>
                     No tickets in range
                   </div>
@@ -2488,14 +2896,14 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                   <ResponsiveContainer width='100%' height='100%'>
                     <PieChart>
                       <Pie
-                        data={priorityData}
+                        data={pieData}
                         dataKey='value'
                         nameKey='name'
                         innerRadius='30%'
                         outerRadius='55%'
                         paddingAngle={3}
                       >
-                        {priorityData.map(entry => (
+                        {pieData.map(entry => (
                           <Cell key={entry.name} fill={entry.color} />
                         ))}
                       </Pie>

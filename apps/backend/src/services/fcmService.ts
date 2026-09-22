@@ -566,7 +566,7 @@ class FcmPushService {
         token,
         data: this.buildDataPayload(payload, isSilent),
         android: {
-          priority: 'high',
+          priority: isSilent ? 'normal' : 'high',
           ttl: '86400s',
         },
         ...(webpush ? { webpush } : {}),

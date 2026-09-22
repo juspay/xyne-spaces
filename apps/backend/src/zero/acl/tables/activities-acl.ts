@@ -13,8 +13,14 @@ export class ActivitiesACL extends BaseACL<'activities'> {
     }
   }
 
-  async canInsert(_args: InsertValue<TableSchema<'activities'>>, _tx: Transaction<Schema>): Promise<void> {
-    //Any user can insert activity for any other user
+  async canInsert(args: InsertValue<TableSchema<'activities'>>, tx: Transaction<Schema>): Promise<void> {
+    // Any member may raise an activity for any other member — one person's action is what
+    // puts a row in someone else's feed. The workspace is the bound: the row must name the
+    // caller's own, and the member it is about has to belong to it.
+    if (args.workspaceId !== this.ctx.workspaceId) {
+      throw new MutationACLError('Activity insert failed: wrong workspace', 'activities');
+    }
+    await this.verifyWorkspace(args.userId, tx);
   }
 
   async canUpdate(args: UpdateValue<TableSchema<'activities'>>, tx: Transaction<Schema>): Promise<void> {

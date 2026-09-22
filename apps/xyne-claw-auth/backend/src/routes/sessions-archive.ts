@@ -13,6 +13,7 @@
  */
 
 import { Router } from "express";
+import { errMsg } from "../lib/errors.js";
 import type { Request, Response } from "express";
 import { gcsService } from "../services/storageService.js";
 import { redisService } from "../redis.js";
@@ -131,7 +132,7 @@ sessionsArchiveRouter.post("/archive", async (req: Request, res: Response) => {
     log.info(`[sessions-archive] archived conversationId=${conversationId} files=${uploaded}`);
     res.json({ success: true, uploaded });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
+    const msg = errMsg(err);
     log.error(`[sessions-archive] archive failed conversationId=${conversationId}: ${msg}`);
     res.status(500).json({ success: false, error: msg });
   }
@@ -146,6 +147,12 @@ sessionsArchiveRouter.post("/archive", async (req: Request, res: Response) => {
  * the conversation was never archived — caller treats that as "not found,
  * start fresh", not as an error.
  */
+function isNotFound(err: unknown): boolean {
+  const code = (err as { code?: unknown } | null)?.code;
+  if (code === 404 || code === "404" || code === "ENOTFOUND") return true;
+  return /not found|does not exist|no such bucket/i.test(errMsg(err));
+}
+
 sessionsArchiveRouter.get("/restore/:conversationId", async (req: Request, res: Response) => {
   const rawParam = req.params["conversationId"];
   const conversationId = typeof rawParam === "string" ? rawParam : undefined;
@@ -174,7 +181,15 @@ sessionsArchiveRouter.get("/restore/:conversationId", async (req: Request, res: 
     log.info(`[sessions-archive] restored conversationId=${conversationId} files=${files.length}`);
     res.json({ success: true, files });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
+    const msg = errMsg(err);
+    // A bucket or prefix that does not exist means this conversation was never
+    // archived. Reporting that as an error makes the caller refuse to start a
+    // session it is allowed to start fresh, so answer it as an empty archive.
+    if (isNotFound(err)) {
+      log.warn(`[sessions-archive] no archive for conversationId=${conversationId}: ${msg}`);
+      res.json({ success: true, files: [] });
+      return;
+    }
     log.error(`[sessions-archive] restore failed conversationId=${conversationId}: ${msg}`);
     res.status(500).json({ success: false, error: msg });
   }

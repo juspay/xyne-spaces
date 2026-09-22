@@ -1,6 +1,6 @@
-import { ReactElement, useEffect, useRef } from 'react';
+import { ComponentPropsWithoutRef, ReactElement, useEffect, useRef } from 'react';
 
-interface CheckboxProps {
+interface CheckboxProps extends Omit<ComponentPropsWithoutRef<'input'>, 'onChange' | 'size'> {
   checked: boolean;
   onChange: (checked: boolean) => void;
   label?: string;
@@ -14,6 +14,10 @@ interface CheckboxProps {
       shrink below its content width. For tight flex rows (e.g. composer footers)
       where a long label would otherwise push siblings out of the container. */
   truncateLabel?: boolean;
+  /** Replaces the size preset's label typography. For surfaces where the label has to
+      match surrounding text rather than the checkbox's own scale (e.g. the search
+      Filters dialog, where labels sit at the same 14px as the field values). */
+  labelClassName?: string;
 }
 
 export function Checkbox({
@@ -25,6 +29,8 @@ export function Checkbox({
   disabled = false,
   size = 'md',
   truncateLabel = false,
+  labelClassName,
+  ...rest
 }: CheckboxProps): ReactElement {
   const sm = size === 'sm';
   const inputRef = useRef<HTMLInputElement>(null);
@@ -64,9 +70,17 @@ export function Checkbox({
             ...(ariaLabel ? { 'aria-label': ariaLabel } : {})
           }
           onChange={e => onChange(e.target.checked)}
+          // Default tag so every Checkbox is captured even when the call site
+          // adds nothing. `rest` is spread after it, so a call site passing
+          // data-track-category/name overrides these — same as any other
+          // element. globalClickTracker ignores clicks on inputs, so this is
+          // picked up by its change listener as a SELECTION_CHANGE.
+          data-track-category='CHECKBOX'
+          data-track-name={label ?? 'CHECKBOX'}
           className={`absolute inset-0 w-full h-full opacity-0 m-0 p-0 ${
             disabled ? 'cursor-not-allowed' : 'cursor-pointer'
           }`}
+          {...rest}
         />
         {indeterminate ? (
           <svg
@@ -101,7 +115,8 @@ export function Checkbox({
       {label && (
         <span
           className={`${
-            sm ? 'text-xs text-muted-foreground' : 'text-[13px] font-medium text-foreground'
+            labelClassName ??
+            (sm ? 'text-xs text-muted-foreground' : 'text-[13px] font-medium text-foreground')
           } ${truncateLabel ? 'truncate' : ''}`}
           {...(truncateLabel && { title: label })}
         >

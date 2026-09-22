@@ -1,15 +1,29 @@
 import { Router, type Request, type Response } from "express";
+import { errMsg } from "../lib/errors.js";
 import { randomUUID } from "node:crypto";
 import { CONFIG } from "../config.js";
 import { requireAuth, requireNoAccessToken, requireResultToken } from "../middleware/require-auth.js";
-import { getRequesterId } from "../middleware/agent-acl.js";
+import { getRequesterId, getAgentEditAccess, isClawAdmin } from "../middleware/agent-acl.js";
 import { prisma } from "../db.js";
-import { chatMessageRepository, agentRunRepository, chatAttachmentRepository } from "../repositories/index.js";
+import { chatMessageRepository, agentRunRepository, chatAttachmentRepository, userAgentConfigRepository } from "../repositories/index.js";
+import { awaitTurnHandoff, isTurnControlCommand } from "../lib/run-turn-handoff.js";
+import { dispatchLocalHarnessRun, localHarnessProviderLabel, pinnedModelForProvider, resolveLocalHarnessTarget, resolveLocalHarnessTargetForProvider, resolveLocalSandbox } from "../lib/local-harness.js";
+import { isLocalHarnessProvider, IMMEDIATE_TASK_COMMAND_RE, parseLocalSandboxCommand } from "xyne-claw-shared";
+import { planServerContinuation } from "../lib/local-harness-continuation.js";
+import { applyAiScreenCommand } from "../lib/ai-screen-commands.js";
+import { parseSlashCommand } from "../lib/parseSlashCommand.js";
+import { localHarnessSessionRepository } from "../repositories/localHarnessSessionRepository.js";
+import {
+  localFolderUnavailableMessage,
+  splitLocalFolderContext,
+  toLocalFolderWorkspace,
+  type LocalFolderContextItem,
+} from "../lib/local-folder-context.js";
 import { gcsService } from "../services/storageService.js";
 import { appendCitations, hydrateInvocationIcons } from "../lib/citations.js";
-import { resolveAgentProviderConfigs } from "../lib/agent-provider-config.js";
+import { resolveAgentProviderConfigs, agentDefaultSpeed, parseFastModeProfile } from "../lib/agent-provider-config.js";
 import { resolveFastMode } from "../lib/fast-mode.js";
-import { resolveSdlcRepositoryForUser } from "../lib/sdlc-repository-context.js";
+import { resolveSdlcHubContextForUser, resolveSdlcRepositoryForUser } from "../lib/sdlc-repository-context.js";
 import {
   buildFollowUpConversationHistory,
   buildLateFollowUpInvocations,
@@ -19,6 +33,9 @@ import {
   parseLateFollowUpCallback,
 } from "../lib/follow-up-suggestions.js";
 import { consumeClawStream } from "../lib/consume-claw-stream.js";
+import { recordUploadedArtifacts } from "../lib/conversation-artifact-signals.js";
+import { attachArtifactToSessionApp } from "../lib/artifact-app-session.js";
+import { recordDeliveredArtifacts } from "../lib/delivered-artifacts.js";
 import { publishLiveEvent } from "../lib/live-conversation-bus.js";
 import { pushDelta, endDeltaCoalescer } from "../lib/live-delta-coalescer.js";
 import { redisService } from "../redis.js";
@@ -55,10 +72,17 @@ interface PendingStream {
     toolInvocations?: unknown;
     followUpSuggestions?: string[] | undefined;
     followUpsPending?: boolean | undefined;
+    clawRunOrigin?: Record<string, unknown> | undefined;
   }) => void;
   reject: (error: Error) => void;
   setClosed: () => void;
   cookieHeader: string | undefined;
+  /** Whether this subscriber may receive `debug` frames. Debug frames carry the
+   *  full system prompt / instructions / tool policy (WAPT PY-JP-012), so they
+   *  must only reach the agent's owner/editors or a Claw admin. Resolved once
+   *  when the SSE opens — the internal /progress POST that forwards frames has
+   *  no end-user identity of its own. */
+  allowDebug: boolean;
 }
 
 interface StreamMeta {
@@ -140,6 +164,8 @@ interface PersistedAttachment {
   mimeType: string;
   originalFilename: string;
   size: number;
+  /** Allowlisted subset of ChatAttachment.metadata — see persistRunStreamResult. */
+  metadata?: { reactArtifact: unknown };
 }
 
 type StreamBusEvent =
@@ -174,7 +200,10 @@ function ensureStreamEventsSubscriber(): void {
     const stream = pendingStreams.get(msg.streamId);
     if (!stream) return; // stream lives on another pod (or already resolved)
     if (msg.kind === "progress") {
-      for (const e of msg.events) stream.sendEvent(e.event, e.data);
+      for (const e of msg.events) {
+        if (e.event === "debug" && !stream.allowDebug) continue;
+        stream.sendEvent(e.event, e.data);
+      }
       return;
     }
     // result
@@ -222,12 +251,26 @@ export async function persistRunStreamResult(args: {
   orgId: string;
   attachments?: StreamAttachment[];
   sessionId?: string;
+  pendingActions?: Array<Record<string, unknown>>;
   /** Branching: when set, UPDATE this pre-created assistant placeholder row
    *  instead of creating a new one. The placeholder id is reserved at
    *  POST /run/stream so it can drive PI session branching, AgentRun.chatMessageId
    *  linkage, and the SSE `done` payload's stable id. */
   assistantMessageId?: string;
+  runProvider?: string;
 }): Promise<{ messageId: string; persistedAttachments: PersistedAttachment[] } | null> {
+  const runProviderField = args.runProvider ? { runProvider: args.runProvider } : {};
+  // A run that produced no text did not succeed, whatever it reported. Saying
+  // "completed" with an empty body leaves the reader staring at a blank turn
+  // with nothing to act on — the budget rejections read exactly like that.
+  if (args.status === "completed" && !args.content.trim() && !args.pendingActions?.length) {
+    args = {
+      ...args,
+      status: "failed",
+      content: "The model returned nothing for this turn. Check the run's debug view for why.",
+    };
+    log.warn(`[run-stream] empty completed result for session=${args.sessionId ?? "?"} — recorded as failed`);
+  }
   if (args.sessionId) {
     const guard = await redisService.getConnection()
       .set(`${STREAM_PERSIST_KEY_PREFIX}${args.sessionId}`, "1", "EX", 86_400, "NX")
@@ -241,10 +284,10 @@ export async function persistRunStreamResult(args: {
   // was swept between dispatch and finalize.
   const assistantMsg = args.assistantMessageId
     ? await chatMessageRepository
-        .update(args.assistantMessageId, { content: args.content, status: args.status })
+        .update(args.assistantMessageId, { content: args.content, status: args.status, ...(args.pendingActions?.length ? { pendingActions: args.pendingActions } : {}), ...runProviderField })
         .catch(async (err: unknown) => {
           log.warn(
-            `[run-stream] placeholder update failed (${err instanceof Error ? err.message : String(err)}); creating fresh row`,
+            `[run-stream] placeholder update failed (${errMsg(err)}); creating fresh row`,
           );
           return chatMessageRepository.create({
             conversationId: args.conversationId,
@@ -254,6 +297,8 @@ export async function persistRunStreamResult(args: {
             content: args.content,
             status: args.status,
             orgId: args.orgId,
+            ...(args.pendingActions?.length ? { pendingActions: args.pendingActions } : {}),
+            ...runProviderField,
           });
         })
     : await chatMessageRepository.create({
@@ -264,6 +309,8 @@ export async function persistRunStreamResult(args: {
         content: args.content,
         status: args.status,
         orgId: args.orgId,
+        ...(args.pendingActions?.length ? { pendingActions: args.pendingActions } : {}),
+        ...runProviderField,
         ...(await chatMessageRepository.latestMessageId(args.conversationId, args.agentSlug)
           .then((id) => (id ? { parentId: id } : {}))
           .catch(() => ({}))),
@@ -280,6 +327,37 @@ export async function persistRunStreamResult(args: {
         const safeName = att.fileName.replace(/[^\w.\-]+/g, "_").slice(0, 200);
         const destPath = `chat-attachments/${args.userId}/${year}/${month}/${Date.now()}-${randomUUID()}-${safeName}`;
         await gcsService.uploadFile(buffer, destPath, att.mimeType);
+        // Tool-supplied metadata (e.g. create-react-artifact's manifest) rides
+        // the attachment rather than the tool-result text, which pi truncates.
+        // Without persisting it here the artifact would survive a reload only
+        // via the /agents/:convId/messages path and be missing from this run.
+        let attachmentMetadata = att.metadata as Record<string, unknown> | undefined;
+
+        // A conversation owns ONE app. This mirrors the identical hook in
+        // agent-chat.ts's persistAssistantResult: the dashboard's AI screen
+        // streams through THIS path, not /agent-chat, so scoping only that one
+        // left every AI-screen artifact unversioned and unowned.
+        const sessionArtifact = attachmentMetadata?.["reactArtifact"];
+        if (sessionArtifact && typeof sessionArtifact === "object") {
+          const session = await attachArtifactToSessionApp({
+            conversationId: args.conversationId,
+            userId: args.userId,
+            payload: buffer,
+          });
+          if (session) {
+            attachmentMetadata = {
+              ...attachmentMetadata,
+              reactArtifact: {
+                ...(sessionArtifact as Record<string, unknown>),
+                appId: session.appId,
+                versionId: session.versionId,
+                versionNumber: session.versionNumber,
+              },
+            };
+          }
+        }
+
+        const hasMetadata = attachmentMetadata && Object.keys(attachmentMetadata).length > 0;
         const row = await prisma.chatAttachment.create({
           data: {
             chatMessageId: assistantMsg.id,
@@ -289,16 +367,23 @@ export async function persistRunStreamResult(args: {
             originalFilename: att.fileName,
             mimeType: att.mimeType,
             size: buffer.length,
+            ...(hasMetadata ? { metadata: attachmentMetadata as import("@prisma/client").Prisma.InputJsonValue } : {}),
           },
         });
+        // Only `reactArtifact` goes back over the wire — the same allowlist the
+        // message-history serializer applies, so `url` never reaches a client.
+        // Read the STAMPED metadata, not att.metadata: the session ids were just
+        // added, and the card rendering this stream needs them immediately.
+        const reactArtifact = attachmentMetadata?.["reactArtifact"];
         persistedAttachments.push({
           id: row.id,
           mimeType: row.mimeType,
           originalFilename: row.originalFilename,
           size: row.size,
+          ...(reactArtifact ? { metadata: { reactArtifact } } : {}),
         });
       } catch (attErr) {
-        log.error(`[run-stream] Failed to persist attachment ${att.fileName}:`, attErr instanceof Error ? attErr.message : String(attErr));
+        log.error(`[run-stream] Failed to persist attachment ${att.fileName}:`, errMsg(attErr));
       }
     }
   }
@@ -350,6 +435,14 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
       researchContext,
       webSearchEnabled,
       deepResearchEnabled,
+      /** Per-message provider fast mode (Spaces composer ⚡ toggle). Overrides
+       *  the agent's modelSettings.speed for THIS run only; absent = agent
+       *  default. Invalid values are ignored rather than 400d — this route is
+       *  a pass-through for several callers. */
+      speed: rawSpeed,
+      /** Per-message thinking level (Spaces composer dropdown). Merged over the
+       *  agent's modelSettings for this run; invalid values are ignored. */
+      thinkingLevel: rawThinkingLevel,
       agentConfig,
       additionalInstructions,
       generateFollowUpSuggestions,
@@ -359,7 +452,13 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
       parentUserMessageId,
       parentAssistantMessageId,
       editedUserMessageId,
-    } = req.body as Record<string, unknown>;
+      studioMode,
+      designArtifactAttachmentId,
+      designSelection,
+      pageSelection,
+      openItems,
+      sandboxMode,
+    } = req.body as Record<string, unknown> & { sandboxMode?: "local" | "remote" | "container" };
 
     if (!task || typeof task !== "string") {
       res.status(400).json({ success: false, error: "task is required" });
@@ -370,6 +469,139 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
       res.status(400).json({ success: false, error: "userId is required" });
       return;
     }
+
+    if (studioMode !== undefined && studioMode !== "design") {
+      res.status(400).json({ success: false, error: "Unknown studioMode" });
+      return;
+    }
+    if (
+      designArtifactAttachmentId !== undefined &&
+      (studioMode !== "design" || typeof designArtifactAttachmentId !== "string" || designArtifactAttachmentId.length > 200)
+    ) {
+      res.status(400).json({ success: false, error: "Invalid Design Studio artifact" });
+      return;
+    }
+
+
+    const normalizedDesignSelection = (() => {
+      if (studioMode !== "design" || !designSelection || typeof designSelection !== "object") return null;
+      const value = designSelection as Record<string, unknown>;
+      const scope = value["scope"];
+      const selector = value["selector"];
+      const tagName = value["tagName"];
+      if (
+        (scope !== "element" && scope !== "component" && scope !== "design-system") ||
+        typeof selector !== "string" || !selector.trim() || selector.length > 600 ||
+        typeof tagName !== "string" || !tagName.trim() || tagName.length > 80
+      ) return null;
+      const strings = (input: unknown, limit: number, itemLimit: number): string[] =>
+        Array.isArray(input)
+          ? input.filter((item): item is string => typeof item === "string").slice(0, limit).map((item) => item.slice(0, itemLimit))
+          : [];
+      const styles = Object.fromEntries(
+        Object.entries(value["styles"] && typeof value["styles"] === "object" ? value["styles"] as Record<string, unknown> : {})
+          .filter((entry): entry is [string, string] => typeof entry[1] === "string")
+          .slice(0, 30)
+          .map(([key, styleValue]) => [key.slice(0, 80), styleValue.slice(0, 240)]),
+      );
+      return {
+        scope,
+        selector: selector.trim(),
+        tagName: tagName.trim(),
+        label: typeof value["label"] === "string" ? value["label"].slice(0, 240) : tagName.trim(),
+        id: typeof value["id"] === "string" ? value["id"].slice(0, 160) : undefined,
+        classes: strings(value["classes"], 16, 120),
+        text: typeof value["text"] === "string" ? value["text"].slice(0, 1200) : "",
+        ancestors: strings(value["ancestors"], 6, 600),
+        styles,
+      };
+    })();
+
+    const designSelectionInstruction = normalizedDesignSelection
+      ? [
+          "## Design Studio selection (captured by the preview inspector)",
+          `- Edit scope: ${normalizedDesignSelection.scope}`,
+          `- Stable selector: ${normalizedDesignSelection.selector}`,
+          `- Node: ${normalizedDesignSelection.tagName}`,
+          `- Label: ${normalizedDesignSelection.label}`,
+          ...(normalizedDesignSelection.id ? [`- ID: ${normalizedDesignSelection.id}`] : []),
+          ...(normalizedDesignSelection.classes.length ? [`- Classes: ${normalizedDesignSelection.classes.join(" ")}`] : []),
+          ...(normalizedDesignSelection.ancestors.length ? [`- Ancestors: ${normalizedDesignSelection.ancestors.join(" -> ")}`] : []),
+          ...(normalizedDesignSelection.text ? [`- Current text: ${normalizedDesignSelection.text}`] : []),
+          `- Computed styles: ${JSON.stringify(normalizedDesignSelection.styles)}`,
+          "Apply the user's instruction to this exact node. For component scope, update the reusable component/pattern behind it. " +
+            "For design-system scope, update shared tokens/rules and every semantically matching instance; do not merely patch one inline style.",
+        ].join("\n")
+      : "";
+
+    // What the reader has open on the surface that sent this turn. Without it a
+    // question about "this page" can only be answered from the route name.
+    const openItemsInstruction = (() => {
+      if (!openItems || typeof openItems !== "object") return "";
+      const value = openItems as { container?: unknown; items?: unknown };
+      const rows = Array.isArray(value.items) ? value.items : [];
+      const lines = rows
+        .filter((row): row is Record<string, unknown> => Boolean(row) && typeof row === "object")
+        .slice(0, 20)
+        .map((row) => {
+          const title = typeof row["title"] === "string" ? row["title"].slice(0, 200) : "";
+          if (!title) return "";
+          const kind = typeof row["kind"] === "string" ? row["kind"] : "";
+          const url = typeof row["url"] === "string" ? row["url"].slice(0, 500) : "";
+          const active = row["active"] === true;
+          return `- ${active ? "[open now] " : ""}${title}${kind ? ` (${kind.toLowerCase()})` : ""}${url ? ` — ${url}` : ""}`;
+        })
+        .filter(Boolean);
+      if (lines.length === 0) return "";
+      const container = typeof value.container === "string" ? value.container.slice(0, 200) : "";
+      const placement = (openItems as { placement?: Record<string, unknown> }).placement;
+      const channelId =
+        placement && typeof placement["channelId"] === "string" ? placement["channelId"] : "";
+      const folderId =
+        placement && typeof placement["folderId"] === "string" ? placement["folderId"] : "";
+      return [
+        "## Open on the user's screen",
+        container ? `They are in "${container}".` : "",
+        "These are the tabs they have open; the one marked [open now] is what they are looking at:",
+        ...lines,
+        'When they say "this page", "this doc" or "what is open", they mean that one.',
+        channelId && folderId
+          ? `Anything you create for them belongs here too: pass channelId="${channelId}" and ` +
+            `sdlcFolderId="${folderId}" to spaces-create-canvas so it is filed in this folder ` +
+            "rather than left unfiled."
+          : "",
+      ]
+        .filter(Boolean)
+        .join("\n");
+    })();
+
+    const pageSelectionInstruction = (() => {
+      if (!pageSelection || typeof pageSelection !== "object") return "";
+      const value = pageSelection as Record<string, unknown>;
+      const text = typeof value["text"] === "string" ? value["text"].trim().slice(0, 4000) : "";
+      const url = typeof value["url"] === "string" ? value["url"].trim().slice(0, 2000) : "";
+      if (!text || !url) return "";
+      const title = typeof value["title"] === "string" ? value["title"].trim().slice(0, 240) : "";
+      const intent = value["intent"] === "edit" ? "edit" : "ask";
+      return [
+        "## Page selection (captured from the workspace browser)",
+        `- Page: ${title || url}`,
+        `- URL: ${url}`,
+        "- Selected passage:",
+        text,
+        intent === "edit"
+          ? "The user picked this passage to change. Apply their instruction to this exact passage using the " +
+            "connector tool for this document (for Google Docs, google-docs-edit), anchoring the change on this " +
+            "text rather than rewriting the whole document."
+          : "The user picked this passage to ask about. This is a page they were reading, not a document you can " +
+            "write to, so answer about it rather than trying to edit it. Quote it back only when it helps.",
+      ].join("\n");
+    })();
+
+    const compactRequested = parseSlashCommand(task)?.kind === "compact";
+    const effectiveTask = studioMode === "design" && !/^\/design(?:\s|$)/i.test(task.trim())
+      ? `/design ${task.trim()}`
+      : applyAiScreenCommand(task).task;
 
     const sessionUserId = req.headers["x-user-id"];
     if (typeof sessionUserId === "string" && sessionUserId && sessionUserId !== userId) {
@@ -395,6 +627,7 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
         name: true,
         description: true,
         config: true,
+        systemPrompt: true,
       },
     }).catch(() => null);
     if (!agentRow) {
@@ -404,19 +637,30 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
     }
     const orgId = agentRow.orgId;
 
-    const sdlcResolution = slug === "sdlc-agent"
-      ? await resolveSdlcRepositoryForUser(
-          userId,
-          researchContext && typeof researchContext === "object" && !Array.isArray(researchContext)
-            ? researchContext as { type?: unknown; id?: unknown }
-            : undefined,
-          convId,
-        )
-      : { ok: true as const, repository: undefined };
+    // Gate for `debug` SSE frames (system prompt / instructions / tool policy).
+    // Same predicate the /agent-chat stream uses: only the agent's editors or a
+    // Claw admin may watch a live debug trace. Resolved here (not in the
+    // /progress forwarder) because that forwarder is an internal S2S POST with
+    // no user identity.
+    const allowDebug = (await isClawAdmin(userId))
+      || Boolean((await getAgentEditAccess(userId, slug, orgId))?.canEdit);
+
+    const sdlcResolution = await resolveSdlcRepositoryForUser(
+      userId,
+      researchContext && typeof researchContext === "object" && !Array.isArray(researchContext)
+        ? researchContext as { type?: unknown; id?: unknown }
+        : undefined,
+      convId,
+    );
     if (!sdlcResolution.ok) {
       res.status(sdlcResolution.status).json({ success: false, error: sdlcResolution.error });
       return;
     }
+    const sdlcContext =
+      sdlcResolution.repository?.agentContext ??
+      (typeof channelId === "string"
+        ? await resolveSdlcHubContextForUser(userId, channelId, convId)
+        : undefined);
 
     // Resolve the agent's provider credentials so this SSE run uses the agent's
     // configured provider + model (e.g. a shared LiteLLM key) rather than the env
@@ -425,7 +669,13 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
     // to claw's env LITELLM_MODEL. Agent-level resolution (the same shared
     // resolver the headless + automation paths use). Body-supplied values win
     // only when the agent has no configured creds.
-    const resolvedProviders = await resolveAgentProviderConfigs(agentRow).catch(() => null);
+    const speedOverride = rawSpeed === "fast" || rawSpeed === "standard" ? rawSpeed : undefined;
+    const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high"];
+    const thinkingOverride = typeof rawThinkingLevel === "string" && THINKING_LEVELS.includes(rawThinkingLevel)
+      ? rawThinkingLevel
+      : undefined;
+    const effectiveSpeed = speedOverride ?? agentDefaultSpeed(agentRow.config);
+    const resolvedProviders = await resolveAgentProviderConfigs(agentRow, { speed: effectiveSpeed }).catch(() => null);
     const resolvedProvider = resolvedProviders?.provider ?? (provider as string | undefined);
     const resolvedProviderConfigs =
       resolvedProviders && Object.keys(resolvedProviders.providerConfigs).length > 0
@@ -435,6 +685,21 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
       resolvedProviders && resolvedProviders.providerOrder.length > 0
         ? resolvedProviders.providerOrder
         : undefined;
+    const pinnedOverride = (providerOverride ?? undefined) as { provider?: string; model?: string } | undefined;
+    const harnessPinned = pinnedOverride?.provider === "local-harness";
+    const serverPinned =
+      !harnessPinned &&
+      (pinnedOverride?.provider === "litellm" || pinnedOverride?.provider === "spaces") &&
+      Boolean(pinnedOverride?.model);
+    const forwardedProviderOverride = harnessPinned ? undefined : providerOverride;
+
+    const rawPersonalProvider = CONFIG.localHarnessEnabled
+      ? (await userAgentConfigRepository.findByUserAndAgent(userId, orgId, slug).catch(() => null))?.provider
+      : undefined;
+    const rawAgentProviderOrder = (agentRow.config as Record<string, unknown> | null)?.["providerOrder"];
+    const agentConfiguredProviderOrder: string[] = Array.isArray(rawAgentProviderOrder)
+      ? rawAgentProviderOrder.filter((p): p is string => typeof p === "string")
+      : [];
 
     // Branching-aware turn setup. Mirrors /agent-chat/:slug/chat — see that
     // route for the full design rationale. Three flows:
@@ -547,11 +812,14 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
             content: task.trim(),
             parentId: requestedParent?.id ?? null,
             orgId,
+            ...(Array.isArray(attachedContext) && attachedContext.length > 0
+              ? { attachedContext }
+              : {}),
           });
           createdUserMessageId = userMsg.id;
           assistantParentId = userMsg.id;
         } catch (msgErr) {
-          log.warn("[run-stream] Failed to persist edit-user message:", msgErr instanceof Error ? msgErr.message : String(msgErr));
+          log.warn("[run-stream] Failed to persist edit-user message:", errMsg(msgErr));
         }
       }
     } else {
@@ -580,11 +848,14 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
             content: task.trim(),
             parentId: userParentId,
             orgId,
+            ...(Array.isArray(attachedContext) && attachedContext.length > 0
+              ? { attachedContext }
+              : {}),
           });
           createdUserMessageId = userMsg.id;
           assistantParentId = userMsg.id;
         } catch (msgErr) {
-          log.warn("[run-stream] Failed to persist user message:", msgErr instanceof Error ? msgErr.message : String(msgErr));
+          log.warn("[run-stream] Failed to persist user message:", errMsg(msgErr));
         }
       }
     }
@@ -605,7 +876,7 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
           orgId,
         });
       } catch (msgErr) {
-        log.warn("[run-stream] Failed to pre-create assistant placeholder:", msgErr instanceof Error ? msgErr.message : String(msgErr));
+        log.warn("[run-stream] Failed to pre-create assistant placeholder:", errMsg(msgErr));
       }
     }
 
@@ -638,6 +909,7 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
     // so they survive page reloads.
     const incomingAttachments = attachments as Array<{ fileName: string; mimeType: string; data: string }> | undefined;
     const persistedUserAttachmentIds: string[] = [];
+    const harnessAttachments: Array<{ id: string; fileName: string; mimeType: string }> = [];
     if (incomingAttachments && incomingAttachments.length > 0 && userId) {
       const now = new Date();
       const year = String(now.getUTCFullYear());
@@ -662,8 +934,9 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
             },
           });
           persistedUserAttachmentIds.push(row.id);
+          harnessAttachments.push({ id: row.id, fileName: att.fileName, mimeType: att.mimeType });
         } catch (attErr) {
-          log.warn(`[run-stream] Failed to persist user attachment ${att.fileName}:`, attErr instanceof Error ? attErr.message : String(attErr));
+          log.warn(`[run-stream] Failed to persist user attachment ${att.fileName}:`, errMsg(attErr));
         }
       }
 
@@ -675,9 +948,17 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
             userId,
           );
         } catch (linkErr) {
-          log.warn("[run-stream] Failed to link user attachments to message:", linkErr instanceof Error ? linkErr.message : String(linkErr));
+          log.warn("[run-stream] Failed to link user attachments to message:", errMsg(linkErr));
         }
       }
+
+      void recordUploadedArtifacts({
+        conversationId: convId,
+        messageId: userMsg?.id ?? null,
+        userId,
+        orgId: orgId ?? null,
+        uploads: harnessAttachments.map((a) => ({ id: a.id, originalFilename: a.fileName })),
+      });
     }
 
     // Rehydrate attachments from prior turns of this conversation. Claw's
@@ -735,6 +1016,17 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
         // Restore chronological order so older versions of a duplicated
         // filename get overwritten by the newer one when claw writes them.
         kept.reverse();
+        // A local-harness run fetches each file from the bridge by id, so the
+        // device needs the ids of earlier turns' files too — without these a
+        // conversation with any attachment history would both lose access to
+        // those files and fail the harness-eligibility check below.
+        for (const row of kept) {
+          harnessAttachments.push({
+            id: row.id,
+            fileName: row.originalFilename,
+            mimeType: row.mimeType,
+          });
+        }
         for (const row of kept) {
           try {
             const buf = await gcsService.getFileBuffer(row.url);
@@ -746,7 +1038,7 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
           } catch (fetchErr) {
             log.warn(
               `[run-stream] Failed to rehydrate prior attachment ${row.originalFilename} (${row.id}):`,
-              fetchErr instanceof Error ? fetchErr.message : String(fetchErr),
+              errMsg(fetchErr),
             );
           }
         }
@@ -758,19 +1050,45 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
       } catch (queryErr) {
         log.warn(
           "[run-stream] Failed to query prior conversation attachments:",
-          queryErr instanceof Error ? queryErr.message : String(queryErr),
+          errMsg(queryErr),
         );
       }
     }
+    let designArtifactAttachment: { fileName: string; mimeType: string; data: string } | null = null;
+    if (studioMode === "design" && typeof designArtifactAttachmentId === "string" && designArtifactAttachmentId) {
+      const [artifact] = await chatAttachmentRepository.findManyByIdsForUser([designArtifactAttachmentId], userId);
+      if (!artifact || (!artifact.mimeType.toLowerCase().includes("html") && !artifact.originalFilename.toLowerCase().endsWith(".html"))) {
+        res.status(400).json({ success: false, error: "Design Studio artifact is unavailable" });
+        return;
+      }
+      if (artifact.size > 10 * 1024 * 1024) {
+        res.status(400).json({ success: false, error: "Design Studio artifact exceeds the 10 MB HTML limit" });
+        return;
+      }
+      const designBuf = await gcsService.getFileBuffer(artifact.url);
+      designArtifactAttachment = {
+        fileName: artifact.originalFilename,
+        mimeType: "text/html",
+        data: designBuf.toString("base64"),
+      };
+    }
+
     const mergedAttachments: Array<{ fileName: string; mimeType: string; data: string }> = [
       ...priorAttachments,
       ...(incomingAttachments ?? []),
     ];
+    if (
+      designArtifactAttachment &&
+      !mergedAttachments.some((attachment) => attachment.fileName === designArtifactAttachment.fileName)
+    ) {
+      mergedAttachments.push(designArtifactAttachment);
+    }
 
     res.writeHead(200, {
       "Content-Type": "text/event-stream",
-      "Cache-Control": "no-cache",
+      "Cache-Control": "no-cache, no-transform",
       Connection: "keep-alive",
+      "X-Accel-Buffering": "no",
     });
 
     // Keepalive comment on the frontend leg (Spaces backend ← claw-auth).
@@ -803,6 +1121,7 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
       toolInvocations?: unknown;
       followUpSuggestions?: string[] | undefined;
       followUpsPending?: boolean | undefined;
+      clawRunOrigin?: Record<string, unknown> | undefined;
     }>((resolve, reject) => {
       let closed = false;
       pendingStreams.set(streamId, {
@@ -818,6 +1137,7 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
           closed = true;
         },
         cookieHeader: req.headers["cookie"] as string | undefined,
+        allowDebug,
       });
 
       setTimeout(() => {
@@ -837,13 +1157,25 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
       agentSlug: slug,
       orgId,
       conversationId: convId,
-      task: task.trim(),
+      task: effectiveTask,
       ...(assistantMsg ? { assistantMessageId: assistantMsg.id } : {}),
       ...(createdUserMessageId ? { userMessageId: createdUserMessageId } : {}),
       assistantParentId,
     });
 
     res.write(`event: meta\ndata: ${JSON.stringify({ streamId, conversationId: convId })}\n\n`);
+
+    if (convId && userId && !isRegenerateFlag && !isEditUserMessageFlag && !isTurnControlCommand(effectiveTask)) {
+      const handoff = await awaitTurnHandoff({
+        conversationId: convId,
+        agentSlug: slug,
+        userId,
+        onLabel: (label) => pendingStreams.get(streamId)?.sendEvent("label", { toolLabel: label }),
+      });
+      if (handoff.handedOff) {
+        log.info(`[run-stream] previous turn handed off conv=${convId} reason=${handoff.reason}`);
+      }
+    }
 
     // assistantMessageId on the callback URL so cross-pod callbacks can
     // resolve the placeholder without depending on local pendingStreams.
@@ -861,9 +1193,7 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
     } = incomingAgentConfig;
     const enrichedAgentConfig: Record<string, unknown> = {
       ...safeIncomingAgentConfig,
-      ...(sdlcResolution.repository
-        ? { sdlcContext: sdlcResolution.repository.agentContext }
-        : {}),
+      ...(sdlcContext ? { sdlcContext } : {}),
       followUpConversationHistory: buildFollowUpConversationHistory(
         existingMessageRows.map((message) => ({
           id: message.id,
@@ -880,6 +1210,63 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
         description: agentRow.description,
       },
     };
+    // Fast mode: forward the agent's model settings (with the effective speed)
+    // and fast-mode profile so claw applies the speed + run-setting overrides.
+    // ONLY when this run is fast — this route otherwise forwards no stored
+    // modelSettings, and standard runs must stay byte-identical to today.
+    if (effectiveSpeed === "fast" || thinkingOverride) {
+      const storedConfig = (agentRow.config as Record<string, unknown> | null) ?? {};
+      const storedModelSettings = storedConfig["modelSettings"];
+      // Fast runs carry the agent's full model settings (this route otherwise
+      // forwards none) so the speed + fast-profile overrides apply in claw. A
+      // standard run with ONLY a thinking override forwards just that field —
+      // anything more would change behavior for settings this path never
+      // honored before. The per-message thinking override wins over both the
+      // stored value and the fast profile's override.
+      enrichedAgentConfig["modelSettings"] = {
+        ...(effectiveSpeed === "fast" && storedModelSettings && typeof storedModelSettings === "object" && !Array.isArray(storedModelSettings)
+          ? storedModelSettings as Record<string, unknown>
+          : {}),
+        ...(effectiveSpeed === "fast" ? { speed: "fast" } : {}),
+        ...(thinkingOverride ? { thinkingLevel: thinkingOverride } : {}),
+      };
+      if (effectiveSpeed === "fast") {
+        const profile = parseFastModeProfile(storedConfig);
+        if (storedConfig["fastModeProfile"] !== undefined && storedConfig["fastModeProfile"] !== null) {
+          // Drop the profile's own thinking override when the user picked one
+          // for this message — claw overlays profile.modelSettings over
+          // modelSettings on fast runs, and the per-message choice must win.
+          const rawProfile = storedConfig["fastModeProfile"];
+          enrichedAgentConfig["fastModeProfile"] = thinkingOverride && rawProfile && typeof rawProfile === "object" && !Array.isArray(rawProfile) && (rawProfile as Record<string, unknown>)["modelSettings"]
+            ? {
+                ...(rawProfile as Record<string, unknown>),
+                modelSettings: {
+                  ...((rawProfile as Record<string, unknown>)["modelSettings"] as Record<string, unknown>),
+                  thinkingLevel: thinkingOverride,
+                },
+              }
+            : rawProfile;
+        }
+        log.info(`[run-stream] fast mode for ${slug} (override=${speedOverride ?? "agent-default"}, profile=${profile.providers}${thinkingOverride ? `, thinking=${thinkingOverride}` : ""})`);
+      } else {
+        log.info(`[run-stream] thinking override for ${slug}: ${thinkingOverride}`);
+      }
+    }
+
+    const splitContext = splitLocalFolderContext(attachedContext);
+    const forwardedAttachedContext = Array.isArray(attachedContext)
+      ? splitContext.rest
+      : attachedContext;
+    let localFolderItem: LocalFolderContextItem | null = splitContext.localFolders[0] ?? null;
+    if (!localFolderItem && convId) {
+      const sticky = await chatMessageRepository
+        .latestLocalFolderContext(convId, slug)
+        .catch(() => null);
+      const stickySplit = splitLocalFolderContext(sticky ? [sticky] : []);
+      localFolderItem = stickySplit.localFolders[0] ?? null;
+    }
+    const localFolderWorkspace = localFolderItem ? toLocalFolderWorkspace(localFolderItem) : null;
+
     const fastModeEnabled = await resolveFastMode(
       convId,
       slug,
@@ -890,11 +1277,11 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
       userId,
       userName,
       userEmail,
-      task,
+      task: effectiveTask,
       agentSlug: slug,
       orgId,
       ...(resolvedProvider ? { provider: resolvedProvider } : {}),
-      ...(providerOverride ? { providerOverride } : {}),
+      ...(forwardedProviderOverride ? { providerOverride: forwardedProviderOverride } : {}),
       conversationId: convId,
       ...(piConversationId !== convId ? { piSessionConversationId: piConversationId } : {}),
       ...(isRegenerateFlag ? { isRegenerate: true } : {}),
@@ -904,7 +1291,7 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
       canvasIds,
       ticketIds,
       callIds,
-      attachedContext,
+      attachedContext: forwardedAttachedContext,
       attachments: mergedAttachments.length > 0 ? mergedAttachments : attachments,
       contextFiles,
       ...(resolvedProviderConfigs && Object.keys(resolvedProviderConfigs).length > 0 ? { providerConfigs: resolvedProviderConfigs } : {}),
@@ -915,10 +1302,34 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
       deepResearchEnabled,
       agentConfig: enrichedAgentConfig,
       additionalInstructions,
+      ...(designSelectionInstruction || pageSelectionInstruction || openItemsInstruction
+        ? {
+            additionalInstructions: [
+              typeof additionalInstructions === "string" ? additionalInstructions.trim() : "",
+              designSelectionInstruction,
+              pageSelectionInstruction,
+              openItemsInstruction,
+            ].filter(Boolean).join("\n\n"),
+          }
+        : {}),
       ...(generateFollowUpSuggestions === true ? { generateFollowUpSuggestions: true } : {}),
       __persistedByCaller: true,
       fastMode: fastModeEnabled,
     };
+
+    try {
+      const serverCatchUp = await planServerContinuation({
+        conversationId: convId,
+        agentSlug: slug,
+        excludeMessageIds: [createdUserMessageId, assistantMsg?.id].filter((id): id is string => Boolean(id)),
+      });
+      if (serverCatchUp) {
+        const existing = typeof runRequestBody["context"] === "string" ? (runRequestBody["context"] as string) : "";
+        runRequestBody["context"] = existing ? `${existing}\n\n${serverCatchUp}` : serverCatchUp;
+      }
+    } catch (catchUpErr) {
+      log.warn("[run-stream] server catch-up context failed:", errMsg(catchUpErr));
+    }
 
     // Register req-close cleanup unconditionally — both transports need it so a
     // dropped frontend connection short-circuits the run. The AbortController
@@ -946,6 +1357,213 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
       }, UPSTREAM_ABORT_GRACE_MS);
     });
 
+    const isTaskCommandRun = IMMEDIATE_TASK_COMMAND_RE.test(effectiveTask);
+    const sandboxCommand = parseLocalSandboxCommand(effectiveTask);
+    const containerSandboxMode = sandboxMode === "container";
+    const deviceSandboxMode = sandboxMode === "local" || containerSandboxMode;
+    const localSandboxRequested = deviceSandboxMode && Boolean(sandboxCommand);
+    const designRevisionOnly = Boolean(
+      localSandboxRequested &&
+        designArtifactAttachment &&
+        mergedAttachments.length === 1 &&
+        mergedAttachments[0] === designArtifactAttachment &&
+        !(Array.isArray(attachments) && attachments.length > 0),
+    );
+    // Attached context is resolved server-side into a prompt block. The harness
+    // has no resolver of its own, so resolve it here and ship the block in the
+    // envelope — otherwise a run with context could only go to the server.
+    let attachedContextPrefix = '';
+    let attachedContextFiles: Array<{ path: string; content: string }> = [];
+    if (Array.isArray(forwardedAttachedContext) && forwardedAttachedContext.length > 0) {
+      try {
+        const { buildAttachedContextPayload, normalizeAttachedContext } = await import(
+          "../services/agentChatContextService.js"
+        );
+        const { getSpacesAuthForUser } = await import("../lib/spaces-db.js");
+        const auth = await getSpacesAuthForUser(userId);
+        const normalized = normalizeAttachedContext(forwardedAttachedContext);
+        if (auth && normalized.items.length > 0) {
+          const payload = await buildAttachedContextPayload(normalized.items, auth);
+          attachedContextPrefix = payload.promptPrefix ?? '';
+          attachedContextFiles = payload.contextFiles ?? [];
+        }
+      } catch (err) {
+        log.warn(`[run-stream] attached context resolution failed: ${errMsg(err)}`);
+      }
+    }
+
+    const harnessInstructionBlocks = [
+      typeof additionalInstructions === "string" ? additionalInstructions.trim() : "",
+      designSelectionInstruction,
+      pageSelectionInstruction,
+      openItemsInstruction,
+    ].filter(Boolean);
+    const localSandboxContext = [
+      attachedContextPrefix,
+      designRevisionOnly && designArtifactAttachment
+        ? `Current design HTML (revise this):\n\`\`\`html\n${Buffer.from(designArtifactAttachment.data, "base64").toString("utf8")}\n\`\`\``
+        : "",
+      ...harnessInstructionBlocks,
+    ]
+      .filter(Boolean)
+      .join("\n\n") || null;
+    const attachmentsClear =
+      (mergedAttachments.length === 0 && !(Array.isArray(attachments) && attachments.length > 0)) || designRevisionOnly;
+    const workspaceRun = Boolean(localFolderWorkspace) && (!isTaskCommandRun || deviceSandboxMode);
+    // Uploaded files ride along in the run envelope, and attached context is
+    // resolved above into the envelope's context block, so neither forces the
+    // server path any more. Context files the caller supplied still do: claw
+    // writes those into the run's workspace.
+    const contextResolved =
+      !(Array.isArray(forwardedAttachedContext) && forwardedAttachedContext.length > 0) ||
+      Boolean(attachedContextPrefix) ||
+      attachedContextFiles.length > 0;
+    const harnessEligible =
+      workspaceRun ||
+      ((!isTaskCommandRun || localSandboxRequested) &&
+        contextResolved &&
+        !(Array.isArray(contextFiles) && contextFiles.length > 0) &&
+        (attachmentsClear || harnessAttachments.length > 0));
+    if (CONFIG.localHarnessEnabled && isTaskCommandRun && !localSandboxRequested) {
+      log.info(
+        `[run-stream] local-harness skipped for conv=${convId}: task command (sandboxMode=${sandboxMode ?? "remote"})`,
+      );
+    } else if (CONFIG.localHarnessEnabled && !harnessEligible) {
+      log.info(`[run-stream] local-harness skipped for conv=${convId}: run carries attached context`);
+    } else if (CONFIG.localHarnessEnabled && localSandboxRequested) {
+      log.info(`[run-stream] local sandbox requested for conv=${convId}: command=/${sandboxCommand}`);
+    }
+    const pinnedHarnessProvider = harnessPinned && typeof pinnedOverride?.model === "string"
+      ? pinnedOverride.model.replace(/^local-harness:/, "")
+      : undefined;
+    const pinnedHarnessTarget = harnessEligible && pinnedHarnessProvider && isLocalHarnessProvider(pinnedHarnessProvider)
+      ? await resolveLocalHarnessTargetForProvider(userId, pinnedHarnessProvider).catch((harnessErr: unknown) => {
+          log.warn("[run-stream] pinned local-harness resolution failed:", errMsg(harnessErr));
+          return undefined;
+        })
+      : undefined;
+    if (pinnedHarnessProvider && !pinnedHarnessTarget) {
+      log.info(`[run-stream] pinned local-harness provider=${pinnedHarnessProvider} has no online device — falling back`);
+    }
+
+    const localTarget = pinnedHarnessTarget ?? (harnessEligible && (!serverPinned || workspaceRun)
+      ? await resolveLocalHarnessTarget({
+          userId,
+          orgId,
+          providerOrder: agentConfiguredProviderOrder,
+          personalProvider: rawPersonalProvider,
+        }).catch((harnessErr: unknown) => {
+          log.warn("[run-stream] local-harness resolution failed — using server run:", errMsg(harnessErr));
+          return undefined;
+        })
+      : undefined);
+
+    const resolvedLocalSandbox = localTarget && localSandboxRequested && sandboxCommand
+      ? await resolveLocalSandbox(sandboxCommand)
+      : localTarget && deviceSandboxMode && !isTaskCommandRun
+        ? { command: "chat", instruction: "", skills: [] }
+        : undefined;
+    const localSandbox = resolvedLocalSandbox && containerSandboxMode
+      ? { ...resolvedLocalSandbox, container: true }
+      : resolvedLocalSandbox;
+    if (localTarget && localSandboxRequested && !localSandbox) {
+      log.info(`[run-stream] local sandbox spec unavailable for /${sandboxCommand} conv=${convId} — using the server run`);
+    }
+
+    // A conversation attached to a local folder can only run on the desktop
+    // harness — the server has no copy of the user's working tree, so falling
+    // back to it would silently answer about the wrong thing.
+    if (workspaceRun && localFolderWorkspace && !localTarget) {
+      pendingStreams.delete(streamId);
+      streamMeta.delete(streamId);
+      const errContent = localFolderUnavailableMessage(localFolderWorkspace.name);
+      try {
+        if (assistantMsg) {
+          await chatMessageRepository.update(assistantMsg.id, { content: errContent, status: "failed" });
+        } else {
+          await chatMessageRepository.create({ conversationId: convId, agentSlug: slug, userId, role: "assistant", content: errContent, status: "failed", orgId });
+        }
+      } catch (msgErr) {
+        log.warn("[run-stream] Failed to persist local-folder failure message:", errMsg(msgErr));
+      }
+      if (!res.writableEnded && !res.destroyed) {
+        res.write(`event: done\ndata: ${JSON.stringify({
+          content: errContent,
+          status: "failed",
+          conversationId: convId,
+          ...(assistantMsg ? { id: assistantMsg.id } : {}),
+          ...(createdUserMessageId ? { userMessageId: createdUserMessageId } : {}),
+          ...(assistantParentId ? { parentId: assistantParentId } : {}),
+        })}\n\n`);
+        res.end();
+      }
+      return;
+    }
+
+    if (localTarget && (!localSandboxRequested || localSandbox || workspaceRun)) {
+      if (compactRequested) {
+        await localHarnessSessionRepository.clearForConversation(convId).catch(() => 0);
+      }
+      const dispatched = await dispatchLocalHarnessRun({
+        target: localTarget,
+        userId,
+        orgId,
+        conversationId: convId,
+        agentSlug: slug,
+        agentName: agentRow.name,
+        systemPrompt: agentRow.systemPrompt,
+        model: pinnedModelForProvider(agentRow.config, localTarget.provider),
+        task: effectiveTask,
+        context: localSandboxContext,
+        ...(localSandbox ? { localSandbox } : {}),
+        ...(harnessAttachments.length ? { attachments: harnessAttachments } : {}),
+        progressUrl: internalProgressUrl,
+        callbackUrl: internalCallbackUrl,
+        serverFallbackBody: runRequestBody,
+        ...(workspaceRun && localFolderWorkspace ? { workspace: localFolderWorkspace, noServerFallback: true } : {}),
+        continuation: {
+          agentSlug: slug,
+          excludeMessageIds: [createdUserMessageId, assistantMsg?.id].filter((id): id is string => Boolean(id)),
+        },
+      });
+
+      const runOrigin = { kind: "local-harness" as const, provider: localTarget.provider, harnessName: localHarnessProviderLabel(localTarget.provider) };
+
+      res.write(`event: run\ndata: ${JSON.stringify({ sessionId: dispatched.sessionId, conversationId: convId, clawRunOrigin: runOrigin })}\n\n`);
+
+      agentRunRepository.start({
+        sessionId: dispatched.sessionId,
+        userId,
+        agentSlug: slug,
+        orgId,
+        triggerSource: "chat",
+        task: effectiveTask,
+        conversationId: convId,
+        fastMode: fastModeEnabled,
+      }).catch((e: unknown) => log.warn("[run-stream] AgentRun.start failed:", errMsg(e)));
+
+      const harnessResult = await resultPromise;
+
+      if (!res.writableEnded && !res.destroyed) {
+        res.write(`event: done\ndata: ${JSON.stringify({
+          content: harnessResult.content,
+          status: harnessResult.status,
+          conversationId: convId,
+          clawRunOrigin: harnessResult.clawRunOrigin ?? runOrigin,
+          ...(harnessResult.errorCode ? { errorCode: harnessResult.errorCode } : {}),
+          ...(assistantMsg ? { id: assistantMsg.id } : {}),
+          ...(createdUserMessageId ? { userMessageId: createdUserMessageId } : {}),
+          ...(assistantParentId ? { parentId: assistantParentId } : {}),
+          ...(harnessResult.pendingActions?.length ? { pendingActions: harnessResult.pendingActions } : {}),
+          ...(harnessResult.attachments?.length ? { attachments: harnessResult.attachments } : {}),
+          ...(harnessResult.followUpSuggestions?.length ? { followUpSuggestions: harnessResult.followUpSuggestions } : {}),
+          ...(harnessResult.followUpsPending === true ? { followUpsPending: true } : {}),
+        })}\n\n`);
+        res.end();
+      }
+      return;
+    }
+
     // SSE transport: open /internal/run with Accept: text/event-stream and
     // consume ordered frames over a single TCP connection. Each frame is
     // dispatched into the same pendingStreams.sendEvent(...) and
@@ -961,7 +1579,7 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
         slug,
         userId,
         orgId,
-        task,
+        task: effectiveTask,
         runRequestBody,
         cookie: req.headers["cookie"] as string | undefined,
         xUserId: req.headers["x-user-id"] as string | undefined,
@@ -1030,7 +1648,7 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
           await chatMessageRepository.create({ conversationId: convId, agentSlug: slug, userId, role: "assistant", content: errContent, status: "failed", orgId });
         }
       } catch (msgErr) {
-        log.warn("[run-stream] Failed to persist error assistant message:", msgErr instanceof Error ? msgErr.message : String(msgErr));
+        log.warn("[run-stream] Failed to persist error assistant message:", errMsg(msgErr));
       }
 
       res.write(`event: error\ndata: ${JSON.stringify({
@@ -1051,10 +1669,10 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
         agentSlug: slug,
         orgId,
         triggerSource: "chat",
-        task: task.trim(),
+        task: effectiveTask,
         conversationId: convId,
         fastMode: fastModeEnabled,
-      }).catch((e: unknown) => log.warn("[run-stream] AgentRun.start failed:", e instanceof Error ? e.message : String(e)));
+      }).catch((e: unknown) => log.warn("[run-stream] AgentRun.start failed:", errMsg(e)));
     }
 
     const result = await resultPromise;
@@ -1192,6 +1810,8 @@ internalRouter.post("/:streamId/progress", (req: Request<{ streamId: string }>, 
       events.push({ event: "reasoning", data: { delta: body.reasoningDelta } });
     } else if (body.textDelta !== undefined) {
       events.push({ event: "delta", data: { content: body.textDelta } });
+    } else if (Array.isArray(body.todos)) {
+      events.push({ event: "plan", data: { todos: body.todos, ...(typeof body.planTitle === "string" ? { title: body.planTitle } : {}) } });
     } else if (body.attachment) {
       events.push({ event: "attachment", data: body.attachment });
     } else if (body.debugEvent) {
@@ -1201,7 +1821,10 @@ internalRouter.post("/:streamId/progress", (req: Request<{ streamId: string }>, 
     if (events.length > 0) {
       const localStream = pendingStreams.get(streamId);
       if (localStream) {
-        for (const e of events) localStream.sendEvent(e.event, e.data);
+        for (const e of events) {
+          if (e.event === "debug" && !localStream.allowDebug) continue;
+          localStream.sendEvent(e.event, e.data);
+        }
       } else {
         publishStreamEvent({ kind: "progress", streamId, events });
       }
@@ -1268,7 +1891,18 @@ internalRouter.post("/:streamId/callback", async (req: Request<{ streamId: strin
     // Append LLM-provided citations (same logic as agent-chat.ts). For a
     // session-lock failure, replace the raw token with a friendly, retryable
     // message so it never renders as the assistant's answer.
-    const content = isSessionLockedFailure
+    const rawLocalHarness = body["localHarness"];
+    const callbackRunOrigin = rawLocalHarness && typeof rawLocalHarness === "object" && !Array.isArray(rawLocalHarness)
+      ? { kind: "local-harness", ...(rawLocalHarness as Record<string, unknown>) }
+      : undefined;
+
+    const harnessUnreachableNotice = body["localHarnessUnreachable"] === true
+      ? `⚠️ I couldn't reach **${localHarnessProviderLabel(typeof body["localHarnessProvider"] === "string" ? body["localHarnessProvider"] : "your local harness")}** on your machine, and running this on Xyne's servers instead didn't start either. Open the Xyne desktop app (or turn off the local harness for this agent) and try again.`
+      : undefined;
+
+    const content = harnessUnreachableNotice
+      ? harnessUnreachableNotice
+      : isSessionLockedFailure
       ? SESSION_LOCKED_USER_MESSAGE
       : status === "completed" && rawResult
         ? appendCitations(rawResult, toolInvocations, { baseUrl: CONFIG.spacesAppUrl, includeCitations: true }, llmCitations)
@@ -1301,7 +1935,7 @@ internalRouter.post("/:streamId/callback", async (req: Request<{ streamId: strin
             };
           }
         } catch (lookupErr) {
-          log.warn(`[run-stream] agent_run lookup failed for sessionId=${sessionId}:`, lookupErr instanceof Error ? lookupErr.message : String(lookupErr));
+          log.warn(`[run-stream] agent_run lookup failed for sessionId=${sessionId}:`, errMsg(lookupErr));
         }
       }
     }
@@ -1320,7 +1954,7 @@ internalRouter.post("/:streamId/callback", async (req: Request<{ streamId: strin
     // attachments all point at the same row.
     if (meta?.conversationId && meta.userId) {
       try {
-        await persistRunStreamResult({
+        const persistedResult = await persistRunStreamResult({
           conversationId: meta.conversationId,
           agentSlug: meta.agentSlug,
           userId: meta.userId,
@@ -1330,9 +1964,27 @@ internalRouter.post("/:streamId/callback", async (req: Request<{ streamId: strin
           ...(callbackAttachments?.length ? { attachments: callbackAttachments } : {}),
           ...(sessionId ? { sessionId } : {}),
           ...(assistantMessageId ? { assistantMessageId } : {}),
+          ...(pendingActions?.length ? { pendingActions } : {}),
+          ...(provider ? { runProvider: provider } : {}),
         });
+        if (persistedResult?.persistedAttachments.length) {
+          void recordDeliveredArtifacts({
+            conversationId: meta.conversationId,
+            userId: meta.userId,
+            orgId: meta.orgId ?? null,
+            messageId: persistedResult.messageId,
+            task: meta.task ?? null,
+            attachments: persistedResult.persistedAttachments.map((att) => ({
+              id: att.id,
+              originalFilename: att.originalFilename,
+              mimeType: att.mimeType,
+            })),
+          }).catch((artifactErr: unknown) => {
+            log.warn(`[run-stream] delivered-artifact record failed:`, errMsg(artifactErr));
+          });
+        }
       } catch (msgErr) {
-        log.warn(`[run-stream] Failed to persist assistant message:`, msgErr instanceof Error ? msgErr.message : String(msgErr));
+        log.warn(`[run-stream] Failed to persist assistant message:`, errMsg(msgErr));
       }
     } else {
       log.warn(`[run-stream] callback streamId=${streamId} missing meta (userId/conversationId) — message persistence skipped`);
@@ -1361,7 +2013,7 @@ internalRouter.post("/:streamId/callback", async (req: Request<{ streamId: strin
           ...(typeof body["fastMode"] === "boolean" ? { fastMode: body["fastMode"] as boolean } : {}),
         });
       } catch (finalizeErr) {
-        log.warn(`[run-stream] Failed to finalize agent run:`, finalizeErr instanceof Error ? finalizeErr.message : String(finalizeErr));
+        log.warn(`[run-stream] Failed to finalize agent run:`, errMsg(finalizeErr));
       }
     }
 
@@ -1394,6 +2046,7 @@ internalRouter.post("/:streamId/callback", async (req: Request<{ streamId: strin
         toolInvocations,
         followUpSuggestions,
         ...(followUpsPending ? { followUpsPending: true } : {}),
+        ...(callbackRunOrigin ? { clawRunOrigin: callbackRunOrigin } : {}),
       });
     } else if (meta?.conversationId) {
       // Stream lives on another pod (the multi-replica case that returns
@@ -1481,7 +2134,7 @@ internalRouter.post(
       log.info(`[follow-ups] persisted late suggestions streamId=${req.params.streamId} sessionId=${sessionId} count=${suggestions.length}`);
       res.json({ success: true });
     } catch (err) {
-      log.warn(`[follow-ups] failed to persist late suggestions sessionId=${sessionId}:`, err instanceof Error ? err.message : String(err));
+      log.warn(`[follow-ups] failed to persist late suggestions sessionId=${sessionId}:`, errMsg(err));
       res.status(500).json({ success: false, error: "Failed to persist follow-up suggestions" });
     }
   },
@@ -1537,7 +2190,7 @@ async function runViaSseTransport(opts: RunViaSseOpts): Promise<void> {
       task: task.trim(),
       conversationId: convId,
       fastMode: runRequestBody["fastMode"] === true,
-    }).catch((e: unknown) => log.warn("[run-stream/sse] AgentRun.start failed:", e instanceof Error ? e.message : String(e)));
+    }).catch((e: unknown) => log.warn("[run-stream/sse] AgentRun.start failed:", errMsg(e)));
   };
 
   const consumeResult = await consumeClawStream({
@@ -1549,6 +2202,12 @@ async function runViaSseTransport(opts: RunViaSseOpts): Promise<void> {
       ...(xUserId ? { "x-user-id": xUserId } : {}),
     },
     ...(upstreamSignal ? { signal: upstreamSignal } : {}),
+    artifactContext: {
+      conversationId: convId,
+      userId,
+      orgId,
+      messageId: assistantMessageId ?? null,
+    },
     onSeqGap: (expected, got) => {
       // We still process the frame; surfacing the gap to logs is enough for
       // the first-cut migration. A future hardening pass can reconnect with
@@ -1594,6 +2253,13 @@ async function runViaSseTransport(opts: RunViaSseOpts): Promise<void> {
       onPlan: (_sid, todos) => {
         stream.sendEvent("plan", { todos });
       },
+      onUiWidget: (_sid, widget) => {
+        if (widget.type === "plan") {
+          stream.sendEvent("plan", { todos: widget.payload.todos });
+        } else {
+          stream.sendEvent("ui-widget", { widget });
+        }
+      },
       onSandboxPreview: (sessionId, payload) => {
         // Sandbox preview today lands on /webhook/progress which posts the
         // noVNC link as a Spaces channel message. Replaying that POST keeps
@@ -1606,7 +2272,7 @@ async function runViaSseTransport(opts: RunViaSseOpts): Promise<void> {
           },
           body: JSON.stringify({ sessionId, ...payload }),
           signal: AbortSignal.timeout(5_000),
-        }).catch((err) => log.warn(`[run-stream/sse] sandbox replay failed: ${err instanceof Error ? err.message : String(err)}`));
+        }).catch((err) => log.warn(`[run-stream/sse] sandbox replay failed: ${errMsg(err)}`));
       },
       onProgressLabel: (sessionId, payload) => {
         // Same reasoning as onSandboxPreview — progress labels feed the Spaces
@@ -1625,6 +2291,7 @@ async function runViaSseTransport(opts: RunViaSseOpts): Promise<void> {
         if (CONFIG.liveToolCallsEnabled && toolLabel) publishLiveEvent(convId, { type: "label", conversationId: convId, agentSlug: slug, userId, toolLabel, ts: Date.now() });
       },
       onDebug: (_sid, debugEvent) => {
+        if (!stream.allowDebug) return;
         stream.sendEvent("debug", { debugEvent });
       },
       onCancelled: (_sid, reason) => {
@@ -1692,7 +2359,7 @@ async function runViaSseTransport(opts: RunViaSseOpts): Promise<void> {
         log.warn(`[run-stream/sse] failed-callback returned ${cbRes.status}: ${text.slice(0, 300)}`);
       }
     } catch (err) {
-      log.error(`[run-stream/sse] failed-callback POST threw (stream=${streamId}): ${err instanceof Error ? err.message : String(err)}`);
+      log.error(`[run-stream/sse] failed-callback POST threw (stream=${streamId}): ${errMsg(err)}`);
     }
     return;
   }

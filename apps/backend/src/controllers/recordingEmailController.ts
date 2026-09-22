@@ -1,5 +1,5 @@
 import type { Request, Response } from 'express';
-import { CallType, ChannelType, RecordingType } from '@xyne/shared';
+import { ChannelType, RecordingType } from '@xyne/shared';
 import z from 'zod';
 import { db } from '@/database/client';
 import { repositories } from '@/database/repositories';
@@ -11,6 +11,7 @@ import { canvasAuthService } from '@/services/canvasAuthService';
 import { convertBlockNoteToMarkdown } from '@/services/canvasService';
 import { transcriptService } from '@/services/transcriptService';
 import { normalizeStoragePath } from '@xyne/storage';
+import { callSubject } from '@/utils/callTypeUtils';
 import { extractEmailAddress } from '@/utils/email';
 import { readFromYSweet } from '@/utils/ysweetUtils';
 import { logger } from '@/utils/logger';
@@ -171,11 +172,7 @@ export class RecordingEmailController {
     }
 
     const call = await repositories.calls.findByExternalId(callId);
-    if (
-      !call ||
-      call.callType !== CallType.HEADLESS ||
-      (call.workspaceId !== null && call.workspaceId !== workspaceId)
-    ) {
+    if (!call || (call.workspaceId !== null && call.workspaceId !== workspaceId)) {
       throw new RecordingEmailError('Recording not found', 404);
     }
 
@@ -464,7 +461,7 @@ export class RecordingEmailController {
       throw new RecordingEmailError('Canvas attachment is no longer available', 400);
     }
 
-    const ySweetBlocks = await readFromYSweet(canvas.id);
+    const ySweetBlocks = await readFromYSweet(canvas.id, userId);
     const storedBlocks = Array.isArray(canvas.content) ? canvas.content : [];
     const markdown = await convertBlockNoteToMarkdown(
       ySweetBlocks.length > 0 ? ySweetBlocks : storedBlocks
@@ -593,8 +590,9 @@ export class RecordingEmailController {
         ...(sender ? { channelId: sender.channelId } : { channelId: null }),
         ...(!sender
           ? {
-              unavailableReason:
-                'Connect an email account matching your Xyne account before sending recording recaps.',
+              unavailableReason: `Connect an email account matching your Xyne account before sending ${callSubject(
+                call,
+              )} recaps.`,
             }
           : {}),
         attachments,

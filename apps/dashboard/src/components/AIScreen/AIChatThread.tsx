@@ -1,7 +1,9 @@
+import type { XyneAiSendTrigger } from '../../services/Analytics/xyneAiTracking';
 import { logger, Event as LogEvent } from '../../utils/logger';
 import {
   useContext,
   useEffect,
+  Fragment,
   useRef,
   useState,
   useCallback,
@@ -24,16 +26,24 @@ import {
   Upload,
   Pencil,
   RefreshCw,
+  Check,
+  X,
+  Clock,
+  MoreHorizontal,
+  Quote,
 } from 'lucide-react';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkBreaks from 'remark-breaks';
+import { useQueryClient } from '@tanstack/react-query';
+import { conversationArtifactsQueryKey } from '../../services/XyneAI/XyneAIArtifactsService';
 import { Link } from 'react-router-dom';
 import { useXyneAIStream } from '../../hooks/useXyneAIStream';
 import { useSelectedAgent } from '../../hooks/useSelectedAgent';
 import { useAskAIVersion } from '../../hooks/useAskAIVersion';
 import type {
   Message,
+  PlanTodo,
   MessageAttachment,
   ToolInvocation as ToolInvocationType,
   ClawCitation,
@@ -43,8 +53,23 @@ import { buildXyneAIStreamThreadId } from '../../utils/xyneAIStreamThreadId';
 import { cn } from '../../utils/classNames';
 import { AskAiRatingButtons } from './AskAiRatingButtons';
 import { AIComposer, type AIComposerAttachment, type AIComposerHandle } from './AIComposer';
+import { ReadonlyContextPills } from './ReadonlyContextPills';
 import { type ComposerContext, toStreamOverrides } from './composerContext';
+import {
+  anchorFromArgs,
+  documentIdFromArgs,
+  isDocEditTool,
+  revealDocEdit,
+} from './Workspace/revealDocEdit';
+import {
+  designChatContent,
+  hasDesignHtml,
+  htmlToBase64,
+  useDesignStudio,
+  usePageSelection,
+} from './Workspace';
 import { fetchV2ConversationMessages } from '../../services/XyneAI/XyneAISessionsV2Service';
+import { lengthBucket } from '../../services/Analytics/trackSource';
 import { xyneAIStreamManager } from '../../services/XyneAI/XyneAIStreamManager';
 import { BASE_URL } from '../../services/clients/apiClient';
 import { BrailleLoader, AnimatedLabel, useStableLabel } from './ReasoningLoader';
@@ -67,7 +92,15 @@ import {
   resolveCitationIconUrl,
 } from '../Chat/XyneAISidebar/utils/clawCitationUrl';
 import { CitationLink } from '../Chat/XyneAISidebar/components/CitationLink';
+
 import { useCitationDocs, panelDocFromCitation } from './citationDocs';
+import { MessageReactArtifacts, toArtifactRef } from './ReactArtifact';
+import { OpenUrlActions } from './OpenUrlActions';
+import { ArtifactRestoreNotice } from './ReactArtifact/ArtifactRestoreNotice';
+import { PromptMarkerRail, type PromptMarker } from './PromptMarkerRail';
+import type { ArtifactAppRestoreEvent } from '../../services/claw/artifactAppsService';
+import { useAppCreationModeSignal } from './ReactArtifact/appCreationModeContext';
+import { SidebarLeftClose, SidebarLeftOpen } from '@xyne/icons';
 import { Tooltip } from '../ui/Tooltip';
 import {
   ConversationToolInvocationsContext,
@@ -76,6 +109,8 @@ import {
   processNodeForUserTags,
 } from '../Chat/XyneAISidebar/components/MessageItem';
 import { ToolInvocationList } from '../Chat/XyneAISidebar/components/ToolInvocationList';
+import { PendingActionBlock } from '../Chat/XyneAISidebar/components/PendingActionBlock';
+import { respondToPendingAction } from '../../services/XyneAI/XyneAIPendingActionService';
 import {
   ActivityStatusChip,
   LiveReasoning,
@@ -104,8 +139,20 @@ interface AIChatThreadProps {
   /** Context/toggles chosen on the landing composer — applied to the first
    *  auto-submitted turn and used to seed the chat composer. */
   initialExtras?: ComposerContext | undefined;
+  /** Which affordance sent `initialQuery` on the landing composer. Absent means
+   *  a true auto-send (an entry point set the query without a composer). */
+  initialTrigger?: XyneAiSendTrigger | undefined;
   onSetMobileSidebarOpen?: ((open: boolean) => void) | undefined;
+  /** Desktop sidebar toggle for the header; state drives which icon shows. */
+  onToggleSidebar?: (() => void) | undefined;
+  sidebarCollapsed?: boolean | undefined;
   onConversationChange?: ((sessionId: string) => void) | undefined;
+  /** App Creation mode: the id of the app this thread is building, or null.
+   *  A conversation owns exactly one app (Step 1), so the last artifact's
+   *  appId identifies it unambiguously. */
+  onAppChange?:
+    | ((appId: string | null, latestVersionId: string | null, generatedLive: boolean) => void)
+    | undefined;
   /** Forwarded to the composer's AIAgentSelector — fires when the user picks
    *  a different agent from inside an active chat, so the parent can open a
    *  fresh conversation scoped to that agent. Carries the current composer
@@ -124,6 +171,9 @@ interface AIChatThreadProps {
 
 export interface AIChatThreadHandle {
   addFiles: (files: File[]) => void;
+  /** Submit `text` as a new turn with the composer's current context, leaving
+   *  whatever the user has drafted untouched. False if a reply is streaming. */
+  submitPrompt: (text: string) => boolean;
 }
 
 const toMessageAttachments = (attachments: AIComposerAttachment[]): MessageAttachment[] =>
@@ -199,12 +249,18 @@ function stripUnknownCiteLinks(content: string, validCitationKeys: Set<string>):
 function ChatTopbar({
   title,
   onOpenSidebar,
+  onToggleSidebar,
+  sidebarCollapsed,
 }: {
   title: string;
   onOpenSidebar?: () => void;
+  onToggleSidebar?: (() => void) | undefined;
+  sidebarCollapsed?: boolean | undefined;
 }): ReactElement {
   return (
-    <header className='ai-chat-topbar flex h-12 shrink-0 items-center gap-1 border-b border-[#e5e2dc] bg-transparent px-3 backdrop-blur-md sm:px-4'>
+    <header
+      className={`ai-chat-topbar flex h-[53px] shrink-0 items-center gap-1 border-b border-sidebar-border-muted bg-transparent px-3 backdrop-blur-md sm:px-4`}
+    >
       <button
         type='button'
         onClick={onOpenSidebar}
@@ -216,7 +272,25 @@ function ChatTopbar({
       >
         <Menu className='h-4 w-4' aria-hidden strokeWidth={1.75} />
       </button>
-      <h1 className='flex-1 truncate text-[13.5px] font-medium text-foreground'>{title}</h1>
+      {onToggleSidebar && (
+        <button
+          type='button'
+          onClick={onToggleSidebar}
+          aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          aria-controls='ai-sidebar'
+          title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          className='hidden h-8 w-8 shrink-0 place-items-center rounded-lg text-muted-foreground transition-colors hover:bg-secondary/60 hover:text-foreground md:grid'
+          data-track-category='XyneAI'
+          data-track-name='TOGGLE_DESKTOP_SIDEBAR'
+        >
+          {sidebarCollapsed ? (
+            <SidebarLeftOpen size={16} aria-hidden='true' />
+          ) : (
+            <SidebarLeftClose size={16} aria-hidden='true' />
+          )}
+        </button>
+      )}
+      <h1 className='flex-1 truncate text-base font-medium text-foreground'>{title}</h1>
     </header>
   );
 }
@@ -307,7 +381,7 @@ function ReasoningSection({
       style={{ transition: 'grid-template-rows 220ms ease-out, opacity 180ms ease-out' }}
     >
       <div className='overflow-hidden'>
-        <div className='my-1 text-[12.5px]'>
+        <div className='my-1 text-xs'>
           <button
             type='button'
             onClick={() => {
@@ -433,6 +507,9 @@ const buildClawCitationTooltip = (citation: ClawCitation | null): string => {
   if (citation.kind === 'canvas') {
     return citation.label ? `Canvas — ${citation.label}` : 'Canvas';
   }
+  if (citation.kind === 'recording') {
+    return citation.label ? `Recording — ${citation.label}` : 'Recording';
+  }
   if (citation.kind === 'external') {
     return citation.label || citation.url || 'External link';
   }
@@ -510,7 +587,7 @@ function ClawCitationChip({
         className={chipClass}
         aria-label={tooltip}
         onClick={openInPanel}
-        data-track-category='ask-ai'
+        data-track-category='AskAI'
         data-track-name='citation-open-doc-panel'
       >
         {chipInner}
@@ -667,6 +744,57 @@ const ANSWER_REHYPE_PLUGINS = [rehypeStreamWordFade];
 // intercept it.
 const preserveUrlTransform = (url: string): string => url;
 
+const PLAN_STATUS_CLASSES: Record<PlanTodo['status'], string> = {
+  pending: 'text-muted-foreground',
+  in_progress: 'text-primary',
+  completed: 'text-emerald-600 dark:text-emerald-400',
+  failed: 'text-destructive',
+};
+
+function PlanStatusIcon({ status }: { status: PlanTodo['status'] }): ReactElement {
+  if (status === 'completed') return <Check className='h-3.5 w-3.5' aria-hidden='true' />;
+  if (status === 'failed') return <X className='h-3.5 w-3.5' aria-hidden='true' />;
+  if (status === 'in_progress') return <Clock className='h-3.5 w-3.5' aria-hidden='true' />;
+  return <MoreHorizontal className='h-3.5 w-3.5' aria-hidden='true' />;
+}
+
+function PlanCard({
+  todos,
+  title,
+}: {
+  todos: PlanTodo[];
+  title?: string | undefined;
+}): ReactElement {
+  const done = todos.filter(todo => todo.status === 'completed').length;
+  const failed = todos.filter(todo => todo.status === 'failed').length;
+  return (
+    <div className='w-full max-w-[520px] rounded-lg border border-border bg-card px-3 py-2.5 text-[13px] text-foreground'>
+      <div className='mb-2 flex items-center justify-between gap-3'>
+        <span className='truncate font-medium'>{title || 'Plan'}</span>
+        <span className='shrink-0 text-[11px] text-muted-foreground'>
+          {done}/{todos.length} done{failed ? `, ${failed} failed` : ''}
+        </span>
+      </div>
+      <div className='space-y-1.5'>
+        {todos.map((todo, index) => (
+          <div key={todo.id || index} className='flex min-w-0 items-start gap-2'>
+            <span
+              className={`mt-0.5 inline-flex h-4 w-4 shrink-0 items-center justify-center ${PLAN_STATUS_CLASSES[todo.status]}`}
+            >
+              <PlanStatusIcon status={todo.status} />
+            </span>
+            <span
+              className={`min-w-0 break-words leading-snug ${todo.status === 'in_progress' ? 'font-medium' : ''}`}
+            >
+              {todo.title}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function ChatMessageBubble({
   message,
   onCopy,
@@ -681,8 +809,15 @@ function ChatMessageBubble({
   onBranchNavigate,
   isV2,
   onRatingChange,
+  trackContext,
+  agentSlug,
+  onPendingActionResolved,
 }: {
   message: Message;
+  /** Run dimensions merged into every act-on-answer click (joins to the run). */
+  trackContext?: Record<string, unknown> | undefined;
+  agentSlug?: string | undefined;
+  onPendingActionResolved?: (() => void) | undefined;
   onCopy?: () => void;
   onFeedback?: (messageId: string, feedbackType: 'LIKE' | 'DISLIKE') => void;
   feedbackValue?: FeedbackValue;
@@ -833,7 +968,9 @@ function ChatMessageBubble({
     const stripped = stripCitationMarks(linkified);
     const nonClfStripped = stripNonClfCitationTokens(stripped);
     const cleaned = stripUnknownCiteLinks(nonClfStripped, validCitationKeys);
-    return message.isStreaming ? cleaned + '\n' : cleaned;
+    const designed =
+      message.type === 'bot' && hasDesignHtml(cleaned) ? designChatContent(cleaned) : cleaned;
+    return message.isStreaming ? designed + '\n' : designed;
   }, [
     message.type,
     message.content,
@@ -1011,12 +1148,25 @@ function ChatMessageBubble({
 
   const hasUserContent = isUser && message.content.trim().length > 0;
   const hasUserAttachments = isUser && !!message.attachments && message.attachments.length > 0;
+  // Everything an assistant message attached EXCEPT its React artifacts, which
+  // MessageReactArtifacts renders as the app itself.
+  const botAttachments = useMemo(
+    () => (message.attachments ?? []).filter(a => toArtifactRef(a) === null),
+    [message.attachments],
+  );
+  const hasAttachedContext =
+    isUser && !!message.attachedContext && message.attachedContext.length > 0;
+  const passage = isUser ? message.pageSelection : undefined;
   if (isUser && !hasUserContent && !hasUserAttachments) {
     return null as unknown as ReactElement;
   }
 
   return (
     <div
+      // The rail measures these to place its ticks. Marking every message (not
+      // just user ones) keeps the attribute meaningful if the rail later shows
+      // answers too; it filters by type on its own side.
+      data-prompt-marker={isUser ? message.id : undefined}
       className={cn(
         'group w-full',
         isUser ? 'flex justify-end px-2 py-3 sm:px-4' : 'px-2 py-5 sm:px-4',
@@ -1050,7 +1200,7 @@ function ChatMessageBubble({
             )}
             <div
               className={cn(
-                'ai-user-bubble rounded-3xl bg-[#ececec] px-4 py-2.5 text-[14.5px] leading-relaxed text-gray-900',
+                'ai-user-bubble rounded-3xl bg-[#ececec] px-4 py-2.5 text-sm leading-relaxed text-gray-900',
                 isEditing ? 'w-full' : 'max-w-full',
               )}
             >
@@ -1072,7 +1222,7 @@ function ChatMessageBubble({
                         setIsEditing(false);
                       }
                     }}
-                    className='min-h-[60px] w-full resize-none bg-transparent text-[14.5px] leading-relaxed text-gray-900 outline-none'
+                    className='min-h-[60px] w-full resize-none bg-transparent text-sm leading-relaxed text-gray-900 outline-none'
                     rows={Math.max(2, editText.split('\n').length)}
                     data-track-category='XyneAI'
                     data-track-name='EDIT_TEXTAREA'
@@ -1088,6 +1238,7 @@ function ChatMessageBubble({
                       Cancel
                     </button>
                     <button
+                      data-ph-capture-attribute-track-id='ai_chat_edit_submit'
                       type='button'
                       onClick={() => {
                         if (editText.trim()) {
@@ -1128,6 +1279,24 @@ function ChatMessageBubble({
               )}
             </div>
           </div>
+          {/* Read-only context pills the user attached to this turn — persisted
+              per message so they survive a reload (see ReadonlyContextPills).
+              Rendered BELOW the message bubble. */}
+          {passage && !isEditing && (
+            <div className='mt-1 flex justify-end'>
+              <div
+                className='flex max-w-[28rem] items-center gap-1.5 rounded-md border border-border bg-secondary/40 px-2 py-1 text-[11px] text-muted-foreground'
+                title={`From ${passage.title}:\n\n${passage.text.slice(0, 600)}`}
+              >
+                <Quote className='h-3 w-3 shrink-0' aria-hidden='true' />
+                <span className='min-w-0 truncate italic'>{passage.text}</span>
+                <span className='shrink-0 opacity-70'>{passage.title}</span>
+              </div>
+            </div>
+          )}
+          {hasAttachedContext && !isEditing && (
+            <ReadonlyContextPills items={message.attachedContext!} />
+          )}
           {/* Branch switcher for user-message versions (created via edit). */}
           {branchInfo && onBranchNavigate && !isEditing && (
             <BranchNavigator
@@ -1154,7 +1323,7 @@ function ChatMessageBubble({
 
           {displayContent && displayContent.length > 0 && (
             <div
-              className={`bot-markdown-content xyne-ai-markdown text-[15px] font-normal leading-7 text-foreground${
+              className={`bot-markdown-content xyne-ai-markdown text-sm font-normal leading-7 text-foreground${
                 // Keyed off everStreamed (not isStreaming) so content that
                 // lands AT completion — the final tail words, finalized
                 // citation chips — still fades in instead of popping the
@@ -1172,6 +1341,43 @@ function ChatMessageBubble({
             </div>
           )}
 
+          {!isUser && message.planTodos && message.planTodos.length > 0 && (
+            <PlanCard todos={message.planTodos} title={message.planTitle} />
+          )}
+
+          {!isUser && message.pendingActions && message.pendingActions.length > 0 && (
+            <PendingActionBlock
+              actions={message.pendingActions}
+              onApprove={async (action, index) => {
+                await respondToPendingAction(message, action, index, true, agentSlug || 'ask-ai');
+                onPendingActionResolved?.();
+              }}
+              onDecline={async (action, index) => {
+                await respondToPendingAction(message, action, index, false, agentSlug || 'ask-ai');
+                onPendingActionResolved?.();
+              }}
+            />
+          )}
+
+          {!isUser && <MessageReactArtifacts message={message} />}
+
+          {!isUser && <OpenUrlActions toolInvocations={message.toolInvocations} />}
+
+          {/* Bot Message Attachments (e.g., generated PDFs from artifacts tool).
+              React artifacts are excluded: MessageReactArtifacts above already
+              renders each one as a running app (or a pane reference), so listing
+              them here too produced a second "artifact.json (click to download)"
+              row under every generated app — the raw bytes of the thing sitting
+              directly above it. `toArtifactRef` is the same predicate that
+              component selects on, so the two can never disagree. */}
+          {!isUser && botAttachments.length > 0 && (
+            <div className='mt-2 space-y-2'>
+              {botAttachments.map((attachment, index) => (
+                <AttachmentPreview key={index} attachment={attachment} />
+              ))}
+            </div>
+          )}
+
           {inlineCitations.length > 0 && <InlineCitations citations={inlineCitations} />}
 
           {!isUser &&
@@ -1179,7 +1385,7 @@ function ChatMessageBubble({
           onFollowUpSuggestionClick &&
           message.followUpSuggestions?.length ? (
             <div className='mt-1 flex flex-wrap gap-2' data-testid='ask-ai-follow-ups'>
-              {message.followUpSuggestions.map(suggestion => (
+              {message.followUpSuggestions.map((suggestion, suggestionIndex) => (
                 <button
                   key={suggestion}
                   type='button'
@@ -1187,7 +1393,12 @@ function ChatMessageBubble({
                   className='rounded-full border border-border bg-card px-3 py-1.5 text-left text-xs font-medium leading-5 text-muted-foreground transition-colors hover:bg-accent'
                   data-track-category='AskAI'
                   data-track-name='FollowUpSuggestion'
-                  data-track-metadata={JSON.stringify({ suggestion })}
+                  data-track-metadata={JSON.stringify({
+                    ...trackContext,
+                    messageId: message.id,
+                    index: suggestionIndex,
+                    lengthBucket: lengthBucket(suggestion.length),
+                  })}
                 >
                   {suggestion}
                 </button>
@@ -1218,6 +1429,7 @@ function ChatMessageBubble({
                 className='inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground'
                 data-track-category='XyneAI'
                 data-track-name='COPY_MESSAGE'
+                data-track-metadata={JSON.stringify({ ...trackContext, messageId: message.id })}
               >
                 <Copy className='h-3.5 w-3.5' aria-hidden strokeWidth={1.75} />
               </button>
@@ -1229,6 +1441,7 @@ function ChatMessageBubble({
                   feedback={message.feedback}
                   comment={message.ratingComment}
                   onChange={(fb, c): void => onRatingChange?.(message.id, fb, c)}
+                  trackMetadata={trackContext}
                 />
               ) : (
                 <>
@@ -1242,6 +1455,7 @@ function ChatMessageBubble({
                     )}
                     data-track-category='XyneAI'
                     data-track-name='LIKE_MESSAGE'
+                    data-track-metadata={JSON.stringify({ ...trackContext, messageId: message.id })}
                   >
                     <ThumbsUp
                       className='h-3.5 w-3.5'
@@ -1261,6 +1475,7 @@ function ChatMessageBubble({
                     )}
                     data-track-category='XyneAI'
                     data-track-name='DISLIKE_MESSAGE'
+                    data-track-metadata={JSON.stringify({ ...trackContext, messageId: message.id })}
                   >
                     <ThumbsDown
                       className='h-3.5 w-3.5'
@@ -1276,12 +1491,14 @@ function ChatMessageBubble({
                   Only wired on the latest bot message. */}
               {onRegenerate && (
                 <button
+                  data-ph-capture-attribute-track-id='ai_chat_regenerate'
                   type='button'
                   onClick={onRegenerate}
                   title='Regenerate response'
                   className='inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground'
                   data-track-category='XyneAI'
                   data-track-name='REGENERATE_MESSAGE'
+                  data-track-metadata={JSON.stringify({ ...trackContext, messageId: message.id })}
                 >
                   <RefreshCw className='h-3.5 w-3.5' aria-hidden strokeWidth={1.75} />
                 </button>
@@ -1312,8 +1529,12 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
     initialQuery,
     initialAttachments,
     initialExtras,
+    initialTrigger,
     onSetMobileSidebarOpen,
+    onToggleSidebar,
+    sidebarCollapsed,
     onConversationChange,
+    onAppChange,
     onAgentChange,
     onContextChange,
     onInitialQueryConsumed,
@@ -1331,6 +1552,7 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
       addFiles: (files: File[]): void => {
         composerRef.current?.addFiles(files);
       },
+      submitPrompt: (text: string): boolean => composerRef.current?.submitPrompt(text) ?? false,
     }),
     [],
   );
@@ -1488,7 +1710,18 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
     setDebugArtifactsReadyVersion,
     isV2,
     agentSlug: effectiveAgentSlug,
+    surface: 'page',
   });
+
+  // Dimensions every act-on-answer click carries (see ChatMessageBubble).
+  const messageTrackContext = useMemo(
+    () => ({
+      surface: 'page',
+      ...(conversationId && { conversationId }),
+      agentSlug: effectiveAgentSlug ?? 'ask-ai',
+    }),
+    [conversationId, effectiveAgentSlug],
+  );
 
   // ── Branching: resolve the visible path from the full message tree ────────────
   // Mirrors XyneAISidebar. `messages` is the full tree (siblings share a
@@ -1498,6 +1731,32 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
     () => resolveActivePath(messages, branchSelections),
     [messages, branchSelections],
   );
+
+  const queryClient = useQueryClient();
+  const designStudio = useDesignStudio();
+  const revealedEditsRef = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    for (const message of displayMessages) {
+      for (const invocation of message.toolInvocations ?? []) {
+        if (invocation.status !== 'completed' || invocation.isError) continue;
+        if (!isDocEditTool(invocation.toolName)) continue;
+        const key = invocation.toolCallId ?? `${message.id}:${invocation.toolName}`;
+        if (revealedEditsRef.current.has(key)) continue;
+        revealedEditsRef.current.add(key);
+        const args = invocation.args ?? {};
+        const anchor = anchorFromArgs(args);
+        if (!anchor) continue;
+        void revealDocEdit(documentIdFromArgs(args), anchor);
+      }
+    }
+  }, [displayMessages]);
+  const pageSelection = usePageSelection();
+  const publishDesignMessages = designStudio?.publishMessages;
+  useEffect(() => {
+    publishDesignMessages?.(displayMessages);
+    return () => publishDesignMessages?.([]);
+  }, [publishDesignMessages, displayMessages]);
 
   const isActiveSessionStreaming = useMemo(() => messages.some(m => m.isStreaming), [messages]);
 
@@ -1671,6 +1930,25 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
     let cancelled = false;
     const loadSession = async (): Promise<void> => {
       isLoadingSession.current = true;
+      // Carry the opened conversation's last user-turn context into the composer,
+      // so switching chats pre-fills the input with the context you last used
+      // there. Context is chat-wise: REPLACE the composer with this chat's
+      // last-turn context, and CLEAR it when that turn had none — so a chat's
+      // context never leaks into another chat.
+      const seedComposerFromLastUserTurn = (msgs: Message[]): void => {
+        const reversed = [...msgs].reverse();
+        const lastUser = reversed.find(m => m.type === 'user');
+        const items = lastUser?.attachedContext ?? [];
+        if (items.some(item => item.type === 'local-folder')) {
+          composerRef.current?.setContext(items);
+          return;
+        }
+        const stickyFolder = reversed
+          .filter(m => m.type === 'user')
+          .flatMap(m => m.attachedContext ?? [])
+          .find(item => item.type === 'local-folder');
+        composerRef.current?.setContext(stickyFolder ? [...items, stickyFolder] : items);
+      };
       // Clear stale branch selections from any previously-viewed session; the
       // freshly-loaded tree defaults to its latest branch via resolveActivePath.
       setBranchSelections({});
@@ -1690,6 +1968,7 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
             live.status === 'completed' && m.isStreaming ? { ...m, isStreaming: false } : m,
           );
           setMessages(normalized);
+          seedComposerFromLastUserTurn(normalized);
           setConversationId(live.sessionId || sessionId);
           setDebugEvents(live.debugEvents);
           setDebugArtifactsReadyVersion(live.debugArtifactsReadyVersion);
@@ -1728,6 +2007,7 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
           }
 
           setMessages(loadedMessages);
+          seedComposerFromLastUserTurn(loadedMessages);
           setConversationId(sessionId);
           onConversationChange?.(sessionId);
           // Reload mid-run: no in-memory stream was adopted above, so attach a
@@ -1789,13 +2069,25 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
         undefined,
         undefined,
         undefined,
-        initialExtras ? toStreamOverrides(initialExtras) : undefined,
+        {
+          ...(initialExtras ? toStreamOverrides(initialExtras) : {}),
+          // The landing composer's button / Enter is the real trigger; a button
+          // send already has its own click row and must not also emit here.
+          trigger: initialTrigger ?? 'auto_send',
+        },
       );
       // After the call, so "consumed" means "actually submitted" and the
       // attachments above are read before the parent drops them.
       onInitialQueryConsumed?.();
     }
-  }, [initialQuery, initialAttachments, initialExtras, submitQuery, onInitialQueryConsumed]);
+  }, [
+    initialQuery,
+    initialAttachments,
+    initialExtras,
+    initialTrigger,
+    submitQuery,
+    onInitialQueryConsumed,
+  ]);
 
   // Notify parent when conversationId changes (draft -> real session)
   useEffect(() => {
@@ -1803,6 +2095,60 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
       onConversationChange(conversationId);
     }
   }, [conversationId, onConversationChange]);
+
+  // Surface this thread's app to the shell, so App Creation mode can render it
+  // in the right-hand pane. Scanned newest-first: a thread owns ONE app, so the
+  // most recent artifact carrying an appId names it, and older turns of the
+  // same app agree. Attachments that predate session-scoping have no appId and
+  // are correctly ignored — they never became apps.
+  // Which messages were seen streaming during THIS mount. An artifact whose
+  // message is in this set was generated live in front of the user; one loaded
+  // from history never streamed here. That distinction is what lets "collapse
+  // the sidebar when an app is being created" fire on creation only, and never
+  // on merely opening an old thread that happens to contain an app. The set
+  // resets with the component (chatKey remounts on thread switch), so history
+  // can never masquerade as live.
+  // Keyed by stableKey as well as id: a streaming message carries a temp id
+  // that is swapped for the server id at completion — which is exactly when its
+  // artifact attachment arrives. Recording only the temp id meant the finished
+  // message never matched, and the first build of every thread was reported as
+  // history rather than as a live generation.
+  const streamedMessageIds = useRef(new Set<string>());
+  useEffect(() => {
+    for (const m of displayMessages) {
+      if (!m.isStreaming) continue;
+      streamedMessageIds.current.add(m.id);
+      if (m.stableKey) streamedMessageIds.current.add(m.stableKey);
+    }
+  }, [displayMessages]);
+
+  useEffect(() => {
+    if (!onAppChange) return;
+    let foundApp: string | null = null;
+    let foundVersion: string | null = null;
+    let generatedLive = false;
+    for (let i = displayMessages.length - 1; i >= 0 && !foundApp; i--) {
+      const message = displayMessages[i];
+      for (const att of message?.attachments ?? []) {
+        const artifact = att.metadata?.reactArtifact;
+        if (artifact?.appId) {
+          foundApp = artifact.appId;
+          // The newest generation's build. The pane's app query is cached, so
+          // this is the freshness signal: a versionId the loaded version list
+          // does not contain means "a generation just landed — refetch".
+          foundVersion = artifact.versionId ?? null;
+          generatedLive = Boolean(
+            message &&
+            (streamedMessageIds.current.has(message.id) ||
+              (message.stableKey !== undefined &&
+                streamedMessageIds.current.has(message.stableKey))),
+          );
+          break;
+        }
+      }
+    }
+    onAppChange(foundApp, foundVersion, generatedLive);
+  }, [displayMessages, onAppChange]);
 
   // Reset stick-to-bottom + hide the jump pill whenever the conversation
   // identity changes (draft → real session, or sidebar session swap that
@@ -1902,6 +2248,7 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
       text: string,
       attachments?: AIComposerAttachment[],
       context?: ComposerContext,
+      trigger?: XyneAiSendTrigger,
     ): Promise<void> => {
       const hasAttachments = (attachments?.length ?? 0) > 0;
       if (!text.trim() && !hasAttachments) return;
@@ -1938,9 +2285,20 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
         parentMessageId = displayMessages[displayMessages.length - 1]?.id;
       }
 
+      const pendingDesignEdit = designStudio?.readPendingEdit() ?? null;
+      const messageAttachments = toMessageAttachments(attachments ?? []);
+      if (pendingDesignEdit?.html) {
+        messageAttachments.push({
+          mimeType: 'text/html',
+          filename: pendingDesignEdit.fileName,
+          originalFilename: pendingDesignEdit.fileName,
+          data: htmlToBase64(pendingDesignEdit.html),
+        });
+      }
+
       await submitQuery(
         text,
-        toMessageAttachments(attachments ?? []),
+        messageAttachments,
         undefined,
         undefined,
         undefined,
@@ -1949,10 +2307,27 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
         undefined,
         undefined,
         undefined,
-        context ? toStreamOverrides(context) : undefined,
+        {
+          ...(context ? toStreamOverrides(context) : {}),
+          ...(trigger && { trigger }),
+          ...(pendingDesignEdit || (designStudio?.designMode.active && !/^\s*\//.test(text))
+            ? {
+                studioMode: 'design' as const,
+                ...(pendingDesignEdit?.selection
+                  ? { designSelection: pendingDesignEdit.selection }
+                  : {}),
+              }
+            : {}),
+          ...(pageSelection?.readSelection()
+            ? { pageSelection: pageSelection.readSelection()! }
+            : {}),
+        },
       );
+
+      pendingDesignEdit?.clear();
+      pageSelection?.clearSelection();
     },
-    [submitQuery, isLegacyConversation, displayMessages, messages],
+    [submitQuery, isLegacyConversation, displayMessages, messages, designStudio, pageSelection],
   );
 
   const handleStop = useCallback((): void => {
@@ -2067,6 +2442,46 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
     return all;
   }, [displayMessages]);
 
+  // Restores are not messages — they are events with a timestamp — so they are
+  // merged into the transcript by anchoring each one to the last message that
+  // preceded it. Anchoring rather than concatenating keeps the render loop
+  // driven by `displayMessages` alone, so branch selection, sibling pagers and
+  // turn indices all keep counting messages and only messages.
+  //
+  // Read from the context, not from props: the events must survive closing the
+  // pane. History that vanishes when a panel is dismissed is not history.
+  const { restores: appRestores } = useAppCreationModeSignal();
+  const restoresByMessageId = useMemo(() => {
+    const byMessage = new Map<string, ArtifactAppRestoreEvent[]>();
+    if (appRestores.length === 0 || displayMessages.length === 0) return byMessage;
+    for (const event of appRestores) {
+      const at = new Date(event.createdAt).getTime();
+      if (Number.isNaN(at)) continue;
+      // Falls back to the first message, so an event that somehow predates the
+      // whole thread still renders instead of disappearing.
+      let anchorId = displayMessages[0]!.id;
+      for (const m of displayMessages) {
+        if (new Date(m.timestamp).getTime() > at) break;
+        anchorId = m.id;
+      }
+      const existing = byMessage.get(anchorId);
+      if (existing) existing.push(event);
+      else byMessage.set(anchorId, [event]);
+    }
+    return byMessage;
+  }, [appRestores, displayMessages]);
+
+  // Only prompts. The answers are what you scroll THROUGH; the questions are
+  // what you scroll TO — so marking both would bury the landmarks among the
+  // things being navigated.
+  const promptMarkers = useMemo<PromptMarker[]>(
+    () =>
+      displayMessages
+        .filter(m => m.type === 'user' && m.content.trim().length > 0)
+        .map(m => ({ id: m.id, text: m.content })),
+    [displayMessages],
+  );
+
   const title =
     messages.length > 0
       ? (messages.find(m => m.type === 'user')?.content.slice(0, 40) ?? 'New chat')
@@ -2090,109 +2505,161 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
             </div>
           </div>
         )}
-        <ChatTopbar title={title} onOpenSidebar={(): void => onSetMobileSidebarOpen?.(true)} />
+        <ChatTopbar
+          title={title}
+          onOpenSidebar={(): void => onSetMobileSidebarOpen?.(true)}
+          onToggleSidebar={onToggleSidebar}
+          sidebarCollapsed={sidebarCollapsed}
+        />
 
-        {/* Messages area — tabIndex enables keyboard scroll (PageUp/Home/ArrowUp)
-          which the auto-scroll effect listens for to unstick from bottom. */}
-        <div
-          ref={scrollRef}
-          // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex
-          tabIndex={0}
-          className='relative flex-1 overflow-y-auto px-2 py-6 focus:outline-none sm:px-4'
-          role='log'
-          aria-live='polite'
-          aria-label='Chat messages'
-        >
-          <div ref={contentRef} className='mx-auto flex max-w-3xl flex-col'>
-            <ConversationToolInvocationsContext.Provider value={conversationToolInvocations}>
-              {displayMessages.map((message, idx) => {
-                const feedbackValue: FeedbackValue =
-                  message.feedback === 1 ? 'LIKE' : message.feedback === 2 ? 'DISLIKE' : null;
-                const botTurnIndex =
-                  message.type === 'bot'
-                    ? displayMessages.slice(0, idx + 1).filter(m => m.type === 'bot').length - 1
-                    : -1;
-                // Branching is disabled for legacy conversations (no parentId).
-                const branchEnabled = !isLegacyConversation;
-                const isLatestUserMessage = idx === lastUserIndex;
-                const isLatestBotMessage = idx === lastBotIndex;
-                const siblingCount = siblingCountById.get(message.id) ?? 1;
-                const branchInfo =
-                  branchEnabled && siblingCount > 1
-                    ? { index: siblingIndexById.get(message.id) ?? 0, total: siblingCount }
-                    : undefined;
-                return (
-                  <ChatMessageBubble
+        {/* Non-scrolling frame around the scroller. The prompt rail lives HERE,
+          as a sibling of the scroll area rather than inside it — anything
+          positioned inside an overflow container scrolls away with the content,
+          so the rail has to be anchored to the frame that stays put. */}
+        <div className='relative min-h-0 flex-1'>
+          <PromptMarkerRail markers={promptMarkers} scrollRef={scrollRef} />
+          {/* Messages area — tabIndex enables keyboard scroll (PageUp/Home/ArrowUp)
+            which the auto-scroll effect listens for to unstick from bottom. */}
+          <div
+            ref={scrollRef}
+            // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex
+            tabIndex={0}
+            // md:px-10 reserves the prompt rail's column. The rail is 32px wide
+            // and absolutely positioned at the left edge, so with only sm:px-4
+            // the transcript ran right up against the ticks whenever the
+            // available width was tight — which is exactly App Creation mode.
+            // Applied on BOTH sides so the centred column stays centred; at
+            // wide sizes max-w-3xl already leaves far more margin than this, so
+            // the padding only bites when it is actually needed.
+            className='relative h-full overflow-y-auto px-2 py-6 focus:outline-none sm:px-4 md:px-10'
+            role='log'
+            aria-live='polite'
+            aria-label='Chat messages'
+          >
+            <div ref={contentRef} className='mx-auto flex max-w-3xl flex-col'>
+              <ConversationToolInvocationsContext.Provider value={conversationToolInvocations}>
+                {displayMessages.map((message, idx) => {
+                  const feedbackValue: FeedbackValue =
+                    message.feedback === 1 ? 'LIKE' : message.feedback === 2 ? 'DISLIKE' : null;
+                  const botTurnIndex =
+                    message.type === 'bot'
+                      ? displayMessages.slice(0, idx + 1).filter(m => m.type === 'bot').length - 1
+                      : -1;
+                  // Branching is disabled for legacy conversations (no parentId).
+                  const branchEnabled = !isLegacyConversation;
+                  const isLatestUserMessage = idx === lastUserIndex;
+                  const isLatestBotMessage = idx === lastBotIndex;
+                  const siblingCount = siblingCountById.get(message.id) ?? 1;
+                  const branchInfo =
+                    branchEnabled && siblingCount > 1
+                      ? { index: siblingIndexById.get(message.id) ?? 0, total: siblingCount }
+                      : undefined;
+                  const restoresHere = restoresByMessageId.get(message.id);
+                  return (
                     // Stable key so the bubble doesn't remount when the id swaps
                     // temp→server at completion (which would kill the reasoning
                     // section's transitions).
-                    key={message.stableKey ?? message.id}
-                    message={message}
-                    onCopy={() => {
-                      void navigator.clipboard.writeText(
-                        message.content || message.streamingContent || '',
-                      );
-                    }}
-                    onFeedback={(id, type) => {
-                      void handleFeedback(id, type);
-                    }}
-                    feedbackValue={feedbackValue}
-                    isV2={isV2}
-                    onRatingChange={handleRatingChange}
-                    onDebug={
-                      isV2 && message.type === 'bot'
-                        ? () => {
-                            setDebugTurnIndex(botTurnIndex);
-                            // Pin to this message's run when known (branching-safe);
-                            // null falls back to turn-index for unlinked live runs.
-                            setDebugSessionId(message.debugSessionId ?? null);
-                            setDebugFocusToolCallId(null);
-                            setShowDebugger(true);
-                          }
-                        : undefined
-                    }
-                    onOpenToolDebug={
-                      isV2 && message.type === 'bot'
-                        ? (toolCallId: string) => {
-                            setDebugTurnIndex(botTurnIndex);
-                            setDebugSessionId(message.debugSessionId ?? null);
-                            setDebugFocusToolCallId(toolCallId);
-                            setShowDebugger(true);
-                          }
-                        : undefined
-                    }
-                    onEditSubmit={
-                      branchEnabled && isLatestUserMessage
-                        ? (newContent: string) => void handleEditMessage(message.id, newContent)
-                        : undefined
-                    }
-                    onRegenerate={
-                      branchEnabled && isLatestBotMessage && !message.isStreaming
-                        ? () => void handleRegenerate()
-                        : undefined
-                    }
-                    onFollowUpSuggestionClick={
-                      isV2 && isLatestBotMessage && !message.isStreaming
-                        ? handleFollowUpSuggestion
-                        : undefined
-                    }
-                    branchInfo={branchInfo}
-                    onBranchNavigate={
-                      branchInfo
-                        ? (direction: 'prev' | 'next') =>
-                            handleBranchNavigate(message.id, direction)
-                        : undefined
-                    }
-                  />
-                );
-              })}
-            </ConversationToolInvocationsContext.Provider>
-            <div ref={tailRef} />
+                    <Fragment key={message.stableKey ?? message.id}>
+                      <ChatMessageBubble
+                        trackContext={messageTrackContext}
+                        message={message}
+                        agentSlug={effectiveAgentSlug ?? undefined}
+                        onPendingActionResolved={() => {
+                          if (!conversationId) return;
+                          const refreshArtifacts = (): void => {
+                            void queryClient.invalidateQueries({
+                              queryKey: conversationArtifactsQueryKey(conversationId),
+                            });
+                          };
+                          refreshArtifacts();
+                          window.setTimeout(refreshArtifacts, 4000);
+                          window.setTimeout(refreshArtifacts, 12000);
+                          liveViewerRef.current?.detach();
+                          liveViewerRef.current = {
+                            sessionId: conversationId,
+                            detach: xyneAIStreamManager.attachLiveViewer(
+                              threadId,
+                              conversationId,
+                              effectiveAgentSlug || 'ask-ai',
+                              xyneAIStreamManager.getActiveStream(threadId)?.messages ?? messages,
+                            ),
+                          };
+                        }}
+                        onCopy={() => {
+                          void navigator.clipboard.writeText(
+                            message.content || message.streamingContent || '',
+                          );
+                        }}
+                        onFeedback={(id, type) => {
+                          void handleFeedback(id, type);
+                        }}
+                        feedbackValue={feedbackValue}
+                        isV2={isV2}
+                        onRatingChange={handleRatingChange}
+                        onDebug={
+                          isV2 && message.type === 'bot'
+                            ? () => {
+                                setDebugTurnIndex(botTurnIndex);
+                                // Pin to this message's run when known (branching-safe);
+                                // null falls back to turn-index for unlinked live runs.
+                                setDebugSessionId(message.debugSessionId ?? null);
+                                setDebugFocusToolCallId(null);
+                                setShowDebugger(true);
+                              }
+                            : undefined
+                        }
+                        onOpenToolDebug={
+                          isV2 && message.type === 'bot'
+                            ? (toolCallId: string) => {
+                                setDebugTurnIndex(botTurnIndex);
+                                setDebugSessionId(message.debugSessionId ?? null);
+                                setDebugFocusToolCallId(toolCallId);
+                                setShowDebugger(true);
+                              }
+                            : undefined
+                        }
+                        onEditSubmit={
+                          branchEnabled && isLatestUserMessage
+                            ? (newContent: string) => void handleEditMessage(message.id, newContent)
+                            : undefined
+                        }
+                        onRegenerate={
+                          branchEnabled && isLatestBotMessage && !message.isStreaming
+                            ? () => void handleRegenerate()
+                            : undefined
+                        }
+                        onFollowUpSuggestionClick={
+                          isV2 && isLatestBotMessage && !message.isStreaming
+                            ? handleFollowUpSuggestion
+                            : undefined
+                        }
+                        branchInfo={branchInfo}
+                        onBranchNavigate={
+                          branchInfo
+                            ? (direction: 'prev' | 'next') =>
+                                handleBranchNavigate(message.id, direction)
+                            : undefined
+                        }
+                      />
+                      {restoresHere?.map(event => (
+                        <ArtifactRestoreNotice key={event.id} event={event} />
+                      ))}
+                    </Fragment>
+                  );
+                })}
+              </ConversationToolInvocationsContext.Provider>
+              <div ref={tailRef} />
+            </div>
           </div>
         </div>
 
         {/* Bottom composer — pill sits above it, mirroring xyne-search /ai. */}
-        <div className='relative shrink-0 px-4 pb-4 pt-3 sm:px-6'>
+        {/* md:px-10 matches the transcript's gutter above. Both columns are
+            `mx-auto max-w-3xl`, so they only line up while their padding
+            agrees: once width is tight enough that the cap stops binding — App
+            Creation mode — a narrower gutter here would make the composer
+            wider than the messages it sits under. */}
+        <div className='relative shrink-0 px-4 pb-2 pt-3 sm:px-6 md:px-10'>
           {showJumpPill && (
             <button
               type='button'
@@ -2212,8 +2679,8 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
             <AIComposer
               ref={composerRef}
               autoFocus
-              onSubmit={(text, attachments, context): void => {
-                void handleSubmit(text, attachments, context);
+              onSubmit={(text, attachments, context, trigger): void => {
+                void handleSubmit(text, attachments, context, trigger);
               }}
               onAgentChange={onAgentChange}
               showAgentSelector={isV2}

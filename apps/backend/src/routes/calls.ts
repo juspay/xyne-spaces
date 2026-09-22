@@ -5,6 +5,7 @@ import { callHostControlController } from '@/controllers/callHostControlControll
 import { scheduleCallController } from '@/controllers/scheduleCallController';
 import { callChatController, requireInternalCallParticipant } from '@/controllers/callChatController';
 import { uploadSingle } from '@/middleware/upload';
+import { workspaceScopedRoute } from '@/database/tenant/context';
 import { summaryTemplateController } from '@/controllers/summaryTemplateController';
 import { recordingSharingController } from '@/controllers/recordingSharingController';
 import { recordingGoogleDocController } from '@/controllers/recordingGoogleDocController';
@@ -16,13 +17,17 @@ router.post('/series', scheduleCallController.createRecurringSeries);
 router.patch('/series/:seriesId', scheduleCallController.updateRecurringSeries);
 router.delete('/series/:seriesId', scheduleCallController.cancelRecurringSeries);
 router.post('/initiate', callController.initiateCall);
-router.post('/join', callController.joinCall);
+// The call link is the invitation: anyone in the call's workspace may join, invited
+// or not. The per-user call ACL would hide an uninvited call and answer 404, so the
+// handler's lookups run at workspace scope. joinCall still checks the workspace itself.
+router.post('/join', workspaceScopedRoute, callController.joinCall);
 router.post('/schedule', scheduleCallController.scheduleCall);
 
 // Recordings endpoints (HEADLESS calls)
 router.get('/recordings', callController.getRecordings);
 router.post('/recordings/bulk-delete', callController.bulkDeleteRecordings);
 router.post('/recordings/:callId/generate-summary', callController.regenerateRecordingSummary);
+router.post('/recordings/:callId/generate-labels', callController.regenerateRecordingLabels);
 router.get(
   '/recordings/:callId/email-compose-context',
   recordingEmailController.getComposeContext,
@@ -32,6 +37,7 @@ router.post('/recordings/:callId/export-google-doc', recordingGoogleDocControlle
 router.get('/recordings/:callId/google-doc-compose-context', recordingGoogleDocController.context);
 router.post('/recordings/:callId/sharing', recordingSharingController.manage);
 router.get('/recordings/:callId', callController.getRecordingDetail);
+router.post('/recordings/:callId/participants', callController.manageRecordingParticipants);
 router.patch('/recordings/:callId', callController.updateRecordingTitle);
 router.delete('/recordings/:callId', callController.deleteRecording);
 router.get('/summary-templates', summaryTemplateController.list);
@@ -76,7 +82,8 @@ router.get('/:callId/download-transcript', callController.downloadTranscript);
 // Download recording endpoint (streams the call's latest recording — legacy/headless player)
 router.get('/:callId/download-recording', callController.downloadRecording);
 
-// In-call recordings (call_recordings table) — per-recording download, rename, delete
+// In-call recordings (call_recordings table) — list, per-recording download, rename, delete
+router.get('/:callId/recordings', callController.listCallRecordings);
 router.get('/:callId/recordings/:recordingId/download', callController.downloadCallRecording);
 router.patch('/:callId/recordings/:recordingId', callController.renameCallRecording);
 router.delete('/:callId/recordings/:recordingId', callController.deleteCallRecording);
@@ -91,8 +98,14 @@ router.post(
 // PRD Generation endpoint (generates PRD canvas from call transcript)
 router.post('/:callId/generate-prd', callController.generatePRD);
 
+// Get or create the collaborative notes canvas (shared across a recurring series)
+router.post('/:callId/notes-canvas', callController.getOrCreateNotesCanvas);
+
 // Detailed Summary Generation endpoint (generates comprehensive summary from call transcript)
 router.post('/:callId/generate-detailed-summary', callController.generateDetailedSummary);
+
+// Rewrite a call's detailed summary with a chosen summary template
+router.post('/:callId/generate-summary', callController.regenerateRecordingSummary);
 
 // Invite users to call (creates call_participants for notifications)
 router.post('/:callId/invite', callController.inviteUsers);
@@ -111,6 +124,18 @@ router.get('/:callId/participants', callController.getCallParticipants);
 
 // Get call chat history (for recording detail page)
 router.get('/:callId/chat-history', callController.getCallChatHistory);
+
+// Update a call's labels (the call's audience; recordings use /recordings/:callId)
+router.patch('/:callId/labels', callController.updateCallLabels);
+
+// Share a call with people, groups or channels.
+router.post('/:callId/sharing', recordingSharingController.manage);
+
+// Draft a follow-up email and export to Google Docs.
+router.get('/:callId/email-compose-context', recordingEmailController.getComposeContext);
+router.post('/:callId/send-email', recordingEmailController.sendRecordingEmail);
+router.get('/:callId/google-doc-compose-context', recordingGoogleDocController.context);
+router.post('/:callId/export-google-doc', recordingGoogleDocController.export);
 
 // Leave call endpoint
 router.post('/:callId/leave', callController.leaveCall);

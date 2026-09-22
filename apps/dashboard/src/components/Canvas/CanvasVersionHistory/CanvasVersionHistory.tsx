@@ -100,6 +100,8 @@ export const CanvasVersionHistory = ({
             variant='ghost'
             size='iconSm'
             onClick={onClose}
+            data-track-category='CANVAS'
+            data-track-name='CLOSE_VERSION_HISTORY'
             aria-label='Close version history'
           >
             <X size={16} />
@@ -185,6 +187,8 @@ export const CanvasVersionHistory = ({
                               onClick={() => {
                                 void onMakeCopy(version);
                               }}
+                              data-track-category='CANVAS'
+                              data-track-name='COPY_CANVAS_VERSION'
                               disabled={isRestoring || isRenaming || isCopying}
                             >
                               <Copy size={14} />
@@ -192,6 +196,8 @@ export const CanvasVersionHistory = ({
                             </DropdownMenuItem>
                             <DropdownMenuItem
                               onClick={() => onRestore(version)}
+                              data-track-category='CANVAS'
+                              data-track-name='RESTORE_CANVAS_VERSION'
                               disabled={isRestoring || isRenaming || isCopying}
                             >
                               <RotateCcw size={14} />
@@ -199,6 +205,8 @@ export const CanvasVersionHistory = ({
                             </DropdownMenuItem>
                             <DropdownMenuItem
                               onClick={() => openRenameDialog(version)}
+                              data-track-category='CANVAS'
+                              data-track-name='OPEN_RENAME_VERSION'
                               disabled={isRestoring || isRenaming || isCopying}
                             >
                               <Pencil size={14} />
@@ -245,7 +253,13 @@ export const CanvasVersionHistory = ({
             placeholder='Version name'
           />
           <div className='flex justify-end gap-2'>
-            <Button type='button' variant='secondary' onClick={closeRenameDialog}>
+            <Button
+              type='button'
+              variant='secondary'
+              onClick={closeRenameDialog}
+              data-track-category='CANVAS'
+              data-track-name='CANCEL_RENAME_VERSION'
+            >
               Cancel
             </Button>
             <Button

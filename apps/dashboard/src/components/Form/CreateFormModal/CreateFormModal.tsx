@@ -952,7 +952,7 @@ export const CreateFormModal = ({
                             <SelectTrigger
                               id={`fieldType-${index}`}
                               className='h-11 w-full rounded-[12px] px-2 py-3'
-                              data-track-category='Form'
+                              data-track-category='Forms'
                               data-track-name='SelectFieldType'
                             >
                               <SelectValue placeholder='Select a field type' />
@@ -1075,6 +1075,7 @@ export const CreateFormModal = ({
             <Button
               variant='default'
               type='submit'
+              trackId={isEditMode ? 'update_form' : 'create_form'}
               disabled={
                 (isEditMode && isReadOnly) ||
                 (isEditMode && fields.length === 0) ||

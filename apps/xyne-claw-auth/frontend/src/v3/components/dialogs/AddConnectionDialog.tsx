@@ -6,6 +6,7 @@ import { ServerIcon } from "../ui/ServerIcon";
 import { ArrowLeftIcon, PlusIcon } from "@phosphor-icons/react";
 import { useState, useEffect, type FormEvent, type ChangeEvent } from "react";
 import type { McpServer, CredentialField } from "../../../lib/types";
+import type { CreateServerResult } from "../../../lib/api";
 
 interface Props {
   open: boolean;
@@ -22,7 +23,7 @@ interface Props {
     httpConfigTemplate?: { url: string; headers: Record<string, string> };
     healthcheckSpec?: { name: string; params: Record<string, unknown> };
     writeToolPolicy?: { mode?: "allowlist" | "denylist" | "allAsk" | "allowAll"; tools?: string[] };
-  }) => Promise<McpServer>;
+  }) => Promise<CreateServerResult>;
   servers: McpServer[];
   credentialFields: Record<string, CredentialField[]>;
   connectedServerIds?: Set<string>;
@@ -497,6 +498,14 @@ export function AddConnectionDialog({
   // ── derived ─────────────────────────────────────────────────────────
   const isEditMode = !!editServerId;
   const isDefinitionEditMode = !!editDefinitionServerId;
+  // A shared (scope=global) connector cannot be edited in place — saving queues
+  // the change for admin approval. Drives the button label and the notice.
+  const definitionServer = isDefinitionEditMode
+    ? servers.find((s) => s.id === editDefinitionServerId)
+    : undefined;
+  const isGlobalDefinitionEdit =
+    (definitionServer?.connectorMeta as { scope?: string } | null | undefined)?.scope ===
+    "global";
   const selectedServer = createdServer ?? servers.find((s) => s.id === selectedServerId);
   const fields = (() => {
     if (!selectedServer) return [];
@@ -589,6 +598,7 @@ export function AddConnectionDialog({
     const form = new FormData(e.currentTarget);
     let activeServerId = selectedServerId;
     let activeServer = selectedServer;
+    let definitionEditQueued = false;
 
     if (mode === "new") {
       if (!newServerName.trim() || !newServerType.trim() || !newServerUrl.trim()) {
@@ -629,10 +639,16 @@ export function AddConnectionDialog({
             tools?: string[];
           }>("write tool policy", newWritePolicy),
         } as const;
-        const created = await onCreateServer(payload);
-        setCreatedServer(created);
-        activeServer = created;
-        activeServerId = created.id;
+        const result = await onCreateServer(payload);
+        if (result.kind === "editRequest") {
+          // Shared connector edit queued for admin approval — there is no live
+          // server to reconnect and the page already showed the approval toast.
+          definitionEditQueued = true;
+        } else {
+          setCreatedServer(result.server);
+          activeServer = result.server;
+          activeServerId = result.server.id;
+        }
       } catch (err) {
         setCreateError(err instanceof Error ? err.message : "Failed to create connector");
         setCreating(false);
@@ -640,6 +656,12 @@ export function AddConnectionDialog({
       } finally {
         setCreating(false);
       }
+    }
+
+    if (definitionEditQueued) {
+      // Nothing to reconnect for a shared connector awaiting approval — close.
+      handleOpenChange(false);
+      return;
     }
 
     if (!activeServerId || !activeServer) return;
@@ -718,12 +740,16 @@ export function AddConnectionDialog({
                 disabled={creating || (mode === "existing" && !selectedServerId)}
               >
                 {creating
-                  ? "Saving…"
+                  ? isGlobalDefinitionEdit
+                    ? "Sending…"
+                    : "Saving…"
                   : isEditMode
                     ? "Save & Reconnect"
                     : mode === "new"
                       ? isDefinitionEditMode
-                        ? "Save & Reconnect"
+                        ? isGlobalDefinitionEdit
+                          ? "Send for approval"
+                          : "Save & Reconnect"
                         : "Create & Connect"
                       : "Connect"}
               </Button>
@@ -872,7 +898,9 @@ export function AddConnectionDialog({
                 <div className="space-y-3">
                   <p className="text-[12px] leading-5 text-xyne-fg-muted">
                     {isDefinitionEditMode
-                      ? "Edit connector definition and overwrite the existing type, then reconnect with credentials below."
+                      ? isGlobalDefinitionEdit
+                        ? "This is a shared connector. Edit the definition below — your changes are sent to an admin for approval, not applied immediately."
+                        : "Edit connector definition and overwrite the existing type, then reconnect with credentials below."
                       : "Define the MCP endpoint and the fields each user must enter. You will test it with your own credentials before publishing it for others."}
                   </p>
                   <TextField

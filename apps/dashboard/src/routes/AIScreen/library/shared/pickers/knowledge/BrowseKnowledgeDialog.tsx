@@ -3,7 +3,7 @@ import { ChevronRight, MultipleCrossCancelDefault, UserCheck } from '@xyne/icons
 import { cn } from '@/utils/classNames';
 import { useClawKnowledgeBaseTree } from '@/hooks/useClawKnowledgeBaseTree';
 import type { KbCollectionNode, KbSelection } from '@/services/claw/clawKnowledgeBaseTypes';
-import { BrowseDialog } from '../../primitives/BrowseDialog';
+import { BrowseDialog, handleBrowseDialogOpenChange } from '../../primitives/BrowseDialog';
 import { DetailEmptyState } from '../../primitives/DetailPrimitives';
 import { BROWSE_CARD_IDLE, BROWSE_CARD_SELECTED } from '../../primitives/browseCard';
 import { KbCollectionMeta, KbFolderTile } from './KnowledgeTiles';
@@ -78,10 +78,12 @@ export function BrowseKnowledgeDialog({
   return (
     <BrowseDialog
       open={open}
-      onOpenChange={next => {
-        if (!next) setOpenId(null);
-        onOpenChange(next);
-      }}
+      onOpenChange={next =>
+        handleBrowseDialogOpenChange(next, onOpenChange, () => {
+          setQuery('');
+          setOpenId(null);
+        })
+      }
       title='Browse Knowledge Base'
       description='Choose what reference material this agent can read.'
       testId='browse-knowledge-dialog'

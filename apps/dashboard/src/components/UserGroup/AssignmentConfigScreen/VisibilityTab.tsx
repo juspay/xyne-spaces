@@ -7,8 +7,10 @@ import type { Board } from '@xyne/shared';
 import type { User } from '../../../machines/stateMachine';
 import {
   computeAssignmentScores,
+  computeUsePercentageForBoard,
   type ComplexityScoreLike,
   type ExpertiseMappingLike,
+  type UserGroupMappingLike,
   type WorkloadMappingLike,
 } from './AssignmentConfigScreen.utils';
 
@@ -26,6 +28,10 @@ interface VisibilityTabProps {
   workloadMappings: readonly WorkloadMappingLike[] | null | undefined;
   boardComplexityScores: readonly ComplexityScoreLike[] | null | undefined;
   expertiseMappings: readonly ExpertiseMappingLike[] | null | undefined;
+  isCurrentUserGroupMember: boolean;
+  userGroupMappings: readonly UserGroupMappingLike[] | null | undefined;
+  /** user_groups.maxWorkload — shown only when set (non-null). */
+  maxWorkload: number | null | undefined;
 }
 
 /**
@@ -41,7 +47,12 @@ export function VisibilityTab({
   workloadMappings,
   boardComplexityScores,
   expertiseMappings,
+  isCurrentUserGroupMember,
+  userGroupMappings,
+  maxWorkload,
 }: VisibilityTabProps): ReactElement {
+  const hasMaxWorkload = maxWorkload !== null && maxWorkload !== undefined;
+
   const scoreRows = useMemo(
     () =>
       computeAssignmentScores({
@@ -49,13 +60,36 @@ export function VisibilityTab({
         workloadMappings,
         boardComplexityScores,
         expertiseMappings,
+        userGroupMappings,
         boards,
         selectedBoardId,
+        maxWorkload: maxWorkload ?? null,
       }),
-    [users, workloadMappings, boardComplexityScores, expertiseMappings, boards, selectedBoardId],
+    [
+      users,
+      workloadMappings,
+      boardComplexityScores,
+      expertiseMappings,
+      userGroupMappings,
+      boards,
+      selectedBoardId,
+      maxWorkload,
+    ],
   );
 
   const selectedBoardName = boards.find(b => b.id === selectedBoardId)?.name;
+  const hasAnyStartOffset = scoreRows.some(row => row.startOffset > 0);
+  const usePercentage = computeUsePercentageForBoard(boardComplexityScores, selectedBoardId);
+
+  if (!isCurrentUserGroupMember) {
+    return (
+      <div className='rounded-2xl border border-border bg-card p-8 text-center'>
+        <p className='text-[13px] text-muted-foreground'>
+          You need to be part of this user group to see member workloads.
+        </p>
+      </div>
+    );
+  }
 
   return (
     <>
@@ -81,71 +115,118 @@ export function VisibilityTab({
           </Select>
           <p className='text-xs leading-[1.4] text-muted-foreground'>
             {selectedBoardId
-              ? 'Score = weightedActiveTasks − expertiseBonus − percentDiff. Lowest score is assigned next.'
+              ? usePercentage
+                ? 'Score = (weightedActiveTasks + coldStartOffset) − expertiseBonus − percentDiff. Lowest score is assigned next.'
+                : 'Score = (weightedActiveTasks + coldStartOffset) − expertiseBonus. Lowest score is assigned next. percentDiff is excluded because “Use percentage assignment” is off for this board.'
               : 'Pick a board to see the exact score. With “All boards”, only total open tickets and weighted load are shown.'}
           </p>
         </div>
       </div>
 
+      {hasMaxWorkload && (
+        <div className='rounded-2xl border border-border bg-card p-4'>
+          <p className='text-[13px] leading-[1.5] text-foreground'>
+            Max workload: <span className='font-medium'>{maxWorkload}</span>. Members at or above
+            this weighted load won&apos;t receive new tickets. If everyone is at capacity, no one is
+            assigned.
+          </p>
+        </div>
+      )}
+
       {/* Per-user tickets + score */}
       <div className='overflow-hidden rounded-2xl border border-border bg-card'>
-        <table className='min-w-full divide-y divide-border'>
-          <thead className='bg-muted/50'>
-            <tr>
-              <th className={cn(TABLE_HEAD_CELL, 'text-left')}>User</th>
-              <th className={cn(TABLE_HEAD_CELL, 'text-center')}>
-                Open Tickets
-                {selectedBoardId ? ` (${selectedBoardName})` : ' (all boards)'}
-              </th>
-              <th className={cn(TABLE_HEAD_CELL, 'text-center')}>Weighted Load</th>
-              {selectedBoardId && <th className={cn(TABLE_HEAD_CELL, 'text-center')}>Score</th>}
-            </tr>
-          </thead>
-          <tbody className='divide-y divide-border'>
-            {scoreRows.map(row => (
-              <tr key={row.user.id} className='transition-colors hover:bg-muted/50'>
-                <td className='px-6 py-4 whitespace-nowrap'>
-                  <div className='flex items-center'>
-                    <Avatar userId={row.user.id} size='sm' showActiveStatus={false} />
-                    <div className='ml-4 flex-1'>
-                      <div className='text-sm font-medium text-foreground'>
-                        {getUserDisplayName(row.user)}
-                      </div>
-                      <div className='text-sm text-muted-foreground'>{row.user.email}</div>
-                    </div>
-                  </div>
-                </td>
-                <td className='px-6 py-4 whitespace-nowrap text-center text-sm text-foreground'>
-                  {row.userTickets}
-                </td>
-                <td className='px-6 py-4 whitespace-nowrap text-center text-sm text-foreground'>
-                  {row.weightedActiveTasks}
-                </td>
-                {selectedBoardId && (
-                  <td className='px-6 py-4 whitespace-nowrap text-center text-sm font-medium text-foreground'>
-                    {row.score !== null ? row.score.toFixed(2) : '—'}
-                  </td>
-                )}
-              </tr>
-            ))}
-            {scoreRows.length === 0 && (
+        <div className='overflow-x-auto'>
+          <table className='min-w-full divide-y divide-border'>
+            <thead className='bg-muted/50'>
               <tr>
-                <td
-                  colSpan={selectedBoardId ? 4 : 3}
-                  className='px-6 py-8 text-center text-[13px] text-muted-foreground'
-                >
-                  No members to show.
-                </td>
+                <th className={cn(TABLE_HEAD_CELL, 'text-left')}>User</th>
+                <th className={cn(TABLE_HEAD_CELL, 'text-center')}>
+                  Open Tickets
+                  {selectedBoardId ? ` (${selectedBoardName})` : ' (all boards)'}
+                </th>
+                <th className={cn(TABLE_HEAD_CELL, 'text-center')}>Weighted Load</th>
+                {hasAnyStartOffset && (
+                  <th className={cn(TABLE_HEAD_CELL, 'text-center')}>Cold-Start Offset</th>
+                )}
+                {hasMaxWorkload && <th className={cn(TABLE_HEAD_CELL, 'text-center')}>Capacity</th>}
+                {selectedBoardId && <th className={cn(TABLE_HEAD_CELL, 'text-center')}>Score</th>}
               </tr>
-            )}
-          </tbody>
-        </table>
+            </thead>
+            <tbody className='divide-y divide-border'>
+              {scoreRows.map(row => (
+                <tr
+                  key={row.user.id}
+                  className={cn(
+                    'transition-colors hover:bg-muted/50',
+                    row.isAtCapacity && 'bg-destructive/5',
+                  )}
+                >
+                  <td className='px-6 py-4 whitespace-nowrap'>
+                    <div className='flex items-center'>
+                      <Avatar userId={row.user.id} size='sm' showActiveStatus={false} />
+                      <div className='ml-4 flex-1'>
+                        <div className='text-sm font-medium text-foreground'>
+                          {getUserDisplayName(row.user)}
+                        </div>
+                        <div className='text-sm text-muted-foreground'>{row.user.email}</div>
+                      </div>
+                    </div>
+                  </td>
+                  <td className='px-6 py-4 whitespace-nowrap text-center text-sm text-foreground'>
+                    {row.userTickets}
+                  </td>
+                  <td className='px-6 py-4 whitespace-nowrap text-center text-sm text-foreground'>
+                    {row.weightedActiveTasks}
+                  </td>
+                  {hasAnyStartOffset && (
+                    <td className='px-6 py-4 whitespace-nowrap text-center text-sm text-foreground'>
+                      {row.startOffset > 0 ? `+${row.startOffset}` : '—'}
+                    </td>
+                  )}
+                  {hasMaxWorkload && (
+                    <td className='px-6 py-4 whitespace-nowrap text-center text-sm'>
+                      {row.isAtCapacity ? (
+                        <span className='font-medium text-destructive'>At capacity</span>
+                      ) : (
+                        <span className='text-muted-foreground'>—</span>
+                      )}
+                    </td>
+                  )}
+                  {selectedBoardId && (
+                    <td className='px-6 py-4 whitespace-nowrap text-center text-sm font-medium text-foreground'>
+                      {row.displayScore !== null ? row.displayScore.toFixed(2) : '—'}
+                    </td>
+                  )}
+                </tr>
+              ))}
+              {scoreRows.length === 0 && (
+                <tr>
+                  <td
+                    colSpan={
+                      3 +
+                      (hasAnyStartOffset ? 1 : 0) +
+                      (hasMaxWorkload ? 1 : 0) +
+                      (selectedBoardId ? 1 : 0)
+                    }
+                    className='px-6 py-8 text-center text-[13px] text-muted-foreground'
+                  >
+                    No members to show.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
 
       <div className='rounded-2xl border border-border bg-muted/40 p-4'>
         <p className='text-[13px] leading-[1.5] text-muted-foreground'>
           Lower score is assigned first. Numbers reflect the last synced workload the engine scores
-          on. Eligibility (on-call / active / expertise) is configured in the Availability tab.
+          on. Scores shown here are shifted so the lowest reads as 0 — this is display-only and
+          doesn&apos;t change the actual assignment math or ordering. A Cold-Start Offset appears
+          once for brand-new members so they start at parity with the group instead of being flooded
+          with tickets — it&apos;s fixed the moment it&apos;s set and never decays. Eligibility
+          (on-call / active / expertise) is configured in the Availability tab.
         </p>
       </div>
     </>

@@ -1,61 +1,364 @@
 import { apiInstance } from '../clients/apiClient';
 
-export interface OrgSummaryResponse {
-  orgSummary: string[];
-  prTotal: string[];
-  aiUsages: {
-    total_tokens: number;
-    prompt_tokens: number;
-    completion_tokens: number;
-    total_spend: number;
-    currency: string;
-  };
+export type LeadershipConfidence = string;
+export type LeadershipPriority = string;
+
+export interface LeadershipReference {
+  reason?: string;
+  evidenceId?: string;
+  signalId?: string;
+  teamSummaryId?: string;
+  userIngestionId?: string;
+  sourceType?: string;
 }
 
-export interface Contributor {
-  role: string | null;
-  userId: string;
-  userName: string;
-  userEmail: string;
-  contributionNote: string;
+export interface LeadershipItem {
+  id?: string;
+  title?: string;
+  text?: string;
+  description?: string;
+  assessment?: string;
+  capability?: string;
+  context?: string;
+  decision?: string;
+  implication?: string;
+  impact?: string;
+  initiative?: string;
+  recommendedAction?: string;
+  action?: string;
+  why?: string;
+  whyCritical?: string;
+  reason?: string;
+  progressDescription?: string;
+  signal?: string;
+  expectedOutcome?: string;
+  summary?: string;
+  goalId?: string;
+  track?: string | null;
+  visibility?: string | null;
+  matchStrength?: string;
+  isTeamWorkingTowardsGoal?: boolean;
+  matchedSignals?: string[];
+  evidenceSourceTypes?: string[];
+  priority?: LeadershipPriority;
+  severity?: LeadershipPriority;
+  riskLevel?: LeadershipPriority;
+  importance?: LeadershipPriority;
+  deadlockRisk?: LeadershipPriority;
+  status?: string;
+  movement?: string;
+  currentMovement?: string;
+  momentum?: string;
+  timeHorizon?: string;
+  suggestedOwner?: string | null;
+  affectedTeamIds?: string[];
+  ownerUserIds?: string[];
+  contributorUserIds?: string[];
+  dependencies?: string[];
+  requiredNextSteps?: string[];
+  teamSignalRefs?: LeadershipReference[];
+  memberSignalRefs?: LeadershipReference[];
+  evidenceRefs?: LeadershipReference[];
+  [key: string]: unknown;
 }
 
-export interface OrgHighlight {
-  bulletId: string;
-  teamName: string;
-  bulletCat?: string;
-  prIdsUsed: number[];
-  repoNames: string[];
-  bulletText: string;
-  confidence: number;
+export interface LeadershipBullet {
+  id: string;
+  title: string;
+  text: string;
+  category?: string;
+  contributorTeamIds?: string[];
+  contributorUserIds?: string[];
+  teamSignalRefs?: LeadershipReference[];
+  memberSignalRefs?: LeadershipReference[];
+}
+
+export interface LeadershipExecutiveSummary {
+  narrative: string;
+  momentum: string;
+  topBets?: string[];
+  topSignals?: string[];
+  topBlockers?: string[];
+  topRisks?: string[];
+  immediateLeadershipActions?: string[];
+}
+
+export interface LeadershipMomentumDirection {
+  momentum: string;
+  direction: string;
+  assessment: string;
+  progressMade?: string[];
+  concerns?: string[];
+  progressingWorkstreamIds?: string[];
+  stalledWorkstreamIds?: string[];
+  progressingInitiativeIds?: string[];
+  stalledInitiativeIds?: string[];
+  busyButNotClearlyDirectional?: string[];
+}
+
+export interface LeadershipDecisionAgenda {
+  alignmentStatus?: string;
+  decisions?: LeadershipItem[];
+  conflictingDecisions?: LeadershipItem[];
+  conflicts?: string[];
+  openQuestions?: string[];
+  alignmentConcerns?: string[];
+}
+
+export interface TeamLeadershipSummary {
+  schemaVersion: '1.0';
+  scope: 'TEAM_LEADERSHIP_SNAPSHOT';
+  batchId: string;
   reportDate: string;
-  bulletTitle?: string;
-  contributors: Contributor[];
-  sourceTeamBulletIds: string[];
+  team: {
+    id: string;
+    name: string;
+  };
+  managerSummaryBullets: LeadershipBullet[];
+  executiveSummary: LeadershipExecutiveSummary;
+  operationalSnapshot: {
+    whoIsDoingWhat: LeadershipItem[];
+    needsUnblocking: LeadershipItem[];
+    criticalAndMoving: LeadershipItem[];
+    momentumAndDirection: LeadershipMomentumDirection;
+    decisionsAndAlignment: LeadershipDecisionAgenda;
+    peopleLoadFocusAndGaps: {
+      overloadedMembers?: LeadershipItem[];
+      lightOrInsufficientlyVisibleMembers?: LeadershipItem[];
+      contextSwitchingRisks?: LeadershipItem[];
+      singlePointsOfFailure?: LeadershipItem[];
+      ownershipGaps?: LeadershipItem[];
+      supportGaps?: LeadershipItem[];
+    };
+    upcomingAndAtRisk: LeadershipItem[];
+  };
+  leadershipSnapshot: {
+    directionalBet?: LeadershipItem & {
+      statedBet?: string | null;
+      inferredBet?: string | null;
+      technicalWaves?: string[];
+      businessWaves?: string[];
+      smallThingThatCanBecomeBig?: LeadershipItem[];
+      alignmentAssessment?: string;
+      confidence?: LeadershipConfidence;
+    };
+    capabilityMix?: {
+      observedStrengths?: LeadershipItem[];
+      developingCapabilities?: LeadershipItem[];
+      missingCapabilities?: LeadershipItem[];
+      singlePersonDependencies?: LeadershipItem[];
+      projectPhaseFit?: LeadershipItem[];
+      assessment?: string;
+      confidence?: LeadershipConfidence;
+    };
+    leadershipTouch?: {
+      currentObservedMode?: string;
+      recommendedMode?: string;
+      reasons?: string[];
+      interventionTriggers?: string[];
+      delegationSignals?: string[];
+      confidence?: LeadershipConfidence;
+    };
+    bottlenecks?: {
+      peopleOrOwnership?: LeadershipItem[];
+      process?: LeadershipItem[];
+      platform?: LeadershipItem[];
+    };
+    leadershipLeverage?: Record<string, LeadershipItem[] | undefined>;
+    nextLeap?: {
+      whatNext?: string;
+      whatIsWrong?: string;
+      theLeap?: string;
+      peopleChanges?: string[];
+      processChanges?: string[];
+      platformChanges?: string[];
+      successSignals?: string[];
+    };
+  };
+  team10xGoal?: LeadershipItem[];
+  recommendedActions: LeadershipItem[];
+  processingCoverage: {
+    expectedMembers: number;
+    completedUserSummaries: number;
+    failedUserSummaries: number;
+    missingMembers: Array<{ userEmail: string; reason: string }>;
+  };
+  dataGaps: Array<{ gap: string; impact: string }>;
+  overallConfidence: LeadershipConfidence;
 }
 
-export interface OrgHighlightResponse {
+export interface OrgLeadershipSummary {
+  schemaVersion: '1.0';
+  scope: 'ORG_LEADERSHIP_SNAPSHOT';
+  batchId: string;
+  reportDate: string;
+  organization: {
+    id: string;
+    name: string;
+    teamCount: number;
+    memberCount: number;
+  };
+  managerSummaryBullets: LeadershipBullet[];
+  executiveSummary: LeadershipExecutiveSummary;
+  operationalSnapshot: {
+    whoIsDoingWhat: LeadershipItem[];
+    needsUnblocking: LeadershipItem[];
+    criticalAndMoving: LeadershipItem[];
+    momentumAndDirection: LeadershipMomentumDirection;
+    decisionsAndAlignment: LeadershipDecisionAgenda;
+    loadFocusAndGaps: {
+      overloadedTeams?: LeadershipItem[];
+      teamsNeedingSupport?: LeadershipItem[];
+      capabilityGaps?: LeadershipItem[];
+      ownershipConcentrationRisks?: LeadershipItem[];
+      resourceImbalances?: LeadershipItem[];
+    };
+    upcomingAndAtRisk: LeadershipItem[];
+  };
+  founderSnapshot: {
+    portfolioOfBets?: LeadershipItem[];
+    organizationCapabilityMix?: {
+      strongCapabilities?: LeadershipItem[];
+      developingCapabilities?: LeadershipItem[];
+      missingCapabilities?: LeadershipItem[];
+      capabilitiesConcentratedInOneTeam?: LeadershipItem[];
+      capabilitiesConcentratedInOnePerson?: LeadershipItem[];
+      capabilityMovementOpportunities?: LeadershipItem[];
+      hiringOrUpskillingNeeds?: LeadershipItem[];
+      assessment?: string;
+    };
+    teamTouchPortfolio?: {
+      highTouch?: LeadershipItem[];
+      mediumTouch?: LeadershipItem[];
+      lowTouch?: LeadershipItem[];
+      insufficientEvidence?: LeadershipItem[];
+    };
+    cannotDeadlock?: LeadershipItem[];
+    organizationBottlenecks?: Record<string, LeadershipItem[] | undefined>;
+    decisionAgenda?: Record<string, LeadershipItem[] | undefined>;
+    leadershipLeverage?: Record<string, LeadershipItem[] | undefined>;
+    organizationNextLeap?: {
+      whatNext?: string;
+      whatIsWrong?: string;
+      theLeap?: string;
+      peopleMoves?: string[];
+      problemShapingChanges?: string[];
+      processChanges?: string[];
+      platformChanges?: string[];
+      connectionsNeeded?: string[];
+      successSignals?: string[];
+    };
+  };
+  recommendedActions: LeadershipItem[];
+  processingCoverage: {
+    expectedTeams: number;
+    completedTeamSummaries: number;
+    failedTeamSummaries: number;
+    missingTeams: Array<{ teamId: string; teamName: string; reason: string }>;
+  };
+  dataGaps: Array<{ gap: string; impact: string }>;
+  overallConfidence: LeadershipConfidence;
+}
+
+export interface UserLeadershipSummary {
+  schemaVersion: '1.0';
+  scope: 'USER_DAILY_SUMMARY';
+  batchId: string;
+  userIngestionId: string;
+  reportDate: string;
+  user: {
+    id: string;
+    email: string;
+    name: string;
+    role: string | null;
+    teamId: string | null;
+    teamName: string | null;
+  };
+  executiveSummary: string;
+  managerSummaryBullets: string[];
+  whoIsDoingWhat: LeadershipItem[];
+  needsUnblocking: LeadershipItem[];
+  criticalAndMoving: LeadershipItem[];
+  momentumAndDirection: LeadershipMomentumDirection;
+  decisionsAndAlignment: LeadershipDecisionAgenda;
+  peopleLoadFocusAndGaps: {
+    loadAssessment: string;
+    focusAssessment: string;
+    primaryFocus: string[];
+    secondaryFocus: string[];
+    contextSwitchingRisk: string;
+    assessment: string;
+    gaps: LeadershipItem[];
+  };
+  upcomingAndAtRisk: LeadershipItem[];
+  managerAttention: LeadershipItem[];
+  teamSignals: {
+    directionalSignals: LeadershipItem[];
+    capabilitySignals: LeadershipItem[];
+    dependencies: LeadershipItem[];
+  };
+  unknowns: Array<{ id: string; question: string; reason: string }>;
+  overallConfidence: LeadershipConfidence;
+}
+
+export interface OrgLeadershipSnapshotsResponse {
   from: string;
   to: string;
-  page: number;
-  limit: number;
-  total: number;
-  totalPages: number;
-  bullets: OrgHighlight[];
+  snapshots: Array<{
+    id: string;
+    batchId: string;
+    reportDate: string;
+    source: string;
+    completedAt: string | null;
+    summary: OrgLeadershipSummary;
+  }>;
 }
 
-export interface TeamPulse {
+export interface TeamLeadershipSnapshotsResponse {
+  from: string;
+  to: string;
   teamId: string;
   teamName: string;
-  summaryText: string[];
-  prCount: number;
-  commitCount: number;
+  snapshots: Array<{
+    id: string;
+    batchId: string;
+    reportDate: string;
+    teamId: string | null;
+    teamName: string;
+    status: string;
+    processingCoverage: {
+      expectedMembers: number;
+      completedUserSummaries: number;
+      failedUserSummaries: number;
+    };
+    errorMessage: string | null;
+    summary: TeamLeadershipSummary | null;
+    summaryMetadata: Record<string, unknown> | null;
+    completedAt: string | null;
+    createdAt: string;
+    updatedAt: string;
+  }>;
 }
 
-export interface TeamPulseResponse {
-  teams: TeamPulse[];
+export interface UserLeadershipSnapshotsResponse {
   from: string;
   to: string;
+  userEmail: string;
+  snapshots: Array<{
+    id: string;
+    batchId: string;
+    reportDate: string;
+    source: string;
+    completedAt: string | null;
+    user: {
+      email: string;
+      name: string;
+      teamId: string | null;
+      teamName: string | null;
+    };
+    summary: UserLeadershipSummary;
+    summaryMetadata: unknown;
+  }>;
 }
 
 export interface Team {
@@ -69,82 +372,22 @@ export interface TeamsResponse {
   data: Team[];
 }
 
-export interface TeamHighlight {
-  teamName: string;
-  reportDate: string;
-  bulletId: string;
-  bulletCat?: string;
-  bulletTitle?: string;
-  prIdsUsed: number[];
-  repoNames: string[];
-  bulletText: string;
-  confidence: number;
-  contributors: Contributor[];
+export type TeamGoalGroupKey = '10X' | '5X' | '2X' | 'READY_TO_ACCELERATE' | 'NO_GOAL_DATA';
+
+export interface TeamGoalGroupTeam extends Team {
+  highestTrack: '10X' | '5X' | '2X' | null;
+  activeGoalCount: number;
+  matchedGoalCount: number;
 }
 
-export interface TeamHighlightsResponse {
-  teamName: string;
-  from: string;
-  to: string;
-  page: number;
-  limit: number;
-  total: number;
-  totalPages: number;
-  bullets: TeamHighlight[];
-}
-
-export interface AIUsages {
-  total_tokens: number;
-  prompt_tokens: number;
-  completion_tokens: number;
-  total_spend: number;
-  currency: string;
-}
-
-export interface TeamMetricsResponse {
-  from: string;
-  to: string;
-  teamName: string;
-  totalPrCount: number;
-  totalCommitCount: number;
-  aiUsages: AIUsages;
-}
-
-interface SoloCommit {
-  commitId: string;
-  timestamp: string;
-  ingestionId: string;
-  commitMessage: string;
-  commitSummary: string;
-}
-
-interface AICost {
-  amount: number;
-  currency: string;
-}
-
-interface MemberAIUsages {
-  totalTokens: number;
-  promptTokens: number;
-  completionTokens: number;
-  cost: AICost;
-}
-
-interface ProductivityMetrics {
-  pullRequestCount: number;
-  totalCommitCount: number;
-  directCommitCount: number;
-  openPullRequestCount: number;
-  mergedPullRequestCount: number;
-}
-
-interface TeamInsights {
-  keyFocusAreas: string[];
-  items: {
+export interface TeamGoalGroupsResponse {
+  totalTeams: number;
+  groups: Record<TeamGoalGroupKey, TeamGoalGroupTeam[]>;
+  warnings: Array<{
+    code: 'GOAL_FETCH_FAILED';
+    teamId: string;
     teamName: string;
-    reportDate: string;
-    insight: string;
-  }[];
+  }>;
 }
 
 export interface TeamMember {
@@ -176,179 +419,48 @@ export interface TeamMember {
 }
 
 export interface TeamMembersResponse {
-  active_employee_count: number;
-  description: string | null;
-  employee_list: TeamMember[];
-}
-
-export interface UserProductivity {
-  from: string;
-  to: string;
-  userEmail: string;
-  soloCommits: SoloCommit[];
-  aiUsages: MemberAIUsages;
-  productivityMetrics: ProductivityMetrics;
-  teamInsights: TeamInsights;
-  tickets: Ticket[];
-}
-
-export interface OrgChannelRecap {
-  id: string;
-  channelId: string;
-  channelName: string;
-  recapDate: string;
-  summary: string;
-  userId: string;
-}
-
-export interface TicketMetrics {
-  totalCount: number;
-  solvedCount: number;
-  todoCount: number;
-  startedCount: number;
-  pausedCount: number;
-  cancelledCount: number;
-  overdueCount: number;
-}
-
-export interface OrgTicketRecapsResponse {
-  from: string;
-  to: string;
-  page: number;
-  limit: number;
-  total: number;
-  totalPages: number;
-  recaps: OrgChannelRecap[];
-  ticketMetrics: TicketMetrics;
-}
-
-export interface MatchedTeamChannel {
-  channelId: string;
-  channelName: string;
-  recapCount: number;
-  lastRecapDate: string;
-}
-
-export interface OverdueTicket {
-  id: string;
-  title: string;
-  description: string;
-  channelId: string;
-  statusV2: string;
-  eta: string;
-  createdAt: string;
-  updatedAt: string;
-  statusUpdatedAt: string | null;
-  closedAt: string | null;
-  firstRespondedAt: string | null;
-}
-
-export interface Ticket {
-  id: string;
-  xyneId?: string | null;
-  title: string;
+  active_employee_count?: number;
   description?: string | null;
-  statusV2: string;
-  priority?: string | null;
-  createdBy?: string | null;
-  assignedTo?: string | null;
-  stageName?: string | null;
-  boardId?: string | null;
-  projectId?: string | null;
-  channelId?: string | null;
-  eta?: string | null;
-  createdAt: string;
-  updatedAt: string;
-  statusUpdatedAt?: string | null;
-  closedAt: string | null;
-  firstRespondedAt?: string | null;
-  lastEmailAt?: string | null;
+  employee_list?: TeamMember[];
+  pagination: LeadershipPagination;
 }
 
-export interface TeamTicketRecapsResponse {
-  from: string;
-  to: string;
-  teamName: string;
+export interface LeadershipPagination {
   page: number;
   limit: number;
   total: number;
   totalPages: number;
-  matchedChannels: MatchedTeamChannel[];
-  totalMatchedChannels: number;
-  recaps: OrgChannelRecap[];
-  ticketMetrics: TicketMetrics;
-  overdueTickets: Ticket[];
 }
 
-export interface TeamChannelTicketsResponse {
+export type LeadershipScope = 'org' | 'team' | 'user';
+
+export interface LeadershipSectionResponse<T = LeadershipItem> extends LeadershipPagination {
+  snapshotId: string;
+  section: string;
+  items: T[];
+}
+
+export interface LeadershipSectionParams {
+  scope: LeadershipScope;
+  section: string;
   from: string;
   to: string;
-  teamId: string;
-  teamName: string;
   page: number;
-  limit: number;
-  cache: {
-    hit: boolean;
-    key: string;
-    ttlSeconds: number;
-  };
-  matchedChannels: MatchedTeamChannel[];
-  totalMatchedChannels: number;
-  total: number;
-  totalPages: number;
-  tickets: Ticket[];
-  ticketMetrics: TicketMetrics;
-}
-
-export const getOrgSummary = async (params: {
-  from: string;
-  to: string;
-}): Promise<OrgSummaryResponse> => {
-  const response = await apiInstance.get<OrgSummaryResponse>(
-    '/team-intelligence-dashboard/org/summary',
-    {
-      params: {
-        from: params.from,
-        to: params.to,
-      },
-    },
-  );
-  return response.data;
-};
-
-export const getOrgHighlights = async (params: {
-  from: string;
-  to: string;
-  page?: number;
   limit?: number;
-}): Promise<OrgHighlightResponse> => {
-  const response = await apiInstance.get<OrgHighlightResponse>(
-    '/team-intelligence-dashboard/org/bullets',
-    {
-      params: {
-        from: params.from,
-        to: params.to,
-        page: params.page ?? 1,
-        limit: params.limit ?? 20,
-      },
-    },
-  );
-  return response.data;
-};
+  teamId?: string;
+  userEmail?: string;
+}
 
-export const getTeamPulses = async (params: {
+export const getOrgLeadershipSnapshots = async (params: {
   from: string;
   to: string;
-}): Promise<TeamPulseResponse> => {
-  // GET /api/team-intelligence-dashboard/org/teams?from=2026-05-18&to=2026-05-20
-  const response = await apiInstance.get<TeamPulseResponse>(
-    '/team-intelligence-dashboard/org/teams',
+}): Promise<OrgLeadershipSnapshotsResponse> => {
+  const response = await apiInstance.get<OrgLeadershipSnapshotsResponse>(
+    '/team-intelligence-dashboard/org/leadership-snapshots',
     {
       params: {
         from: params.from,
         to: params.to,
-        page: 1,
-        limit: 20,
       },
     },
   );
@@ -363,61 +475,63 @@ export const getTeams = async (): Promise<TeamsResponse> => {
   return response.data;
 };
 
-export const getTeamHighlights = async (
-  teamId: string,
-  params: { from: string; to: string; page?: number; limit?: number },
-): Promise<TeamHighlightsResponse> => {
-  // GET/api/team-intelligence-dashboard/team/bullets?from=2026-05-18&to=2026-05-20&teamId=Core%20Platform&page=1&limit=2
-  const response = await apiInstance.get<TeamHighlightsResponse>(
-    '/team-intelligence-dashboard/team/bullets',
-    {
-      params: {
-        from: params.from,
-        to: params.to,
-        teamId: teamId,
-        page: params.page ?? 1,
-        limit: params.limit ?? 20,
-      },
-    },
+export const getTeamGoalGroups = async (): Promise<TeamGoalGroupsResponse> => {
+  const response = await apiInstance.get<TeamGoalGroupsResponse>(
+    '/team-intelligence-dashboard/org/team-goal-groups',
   );
   return response.data;
 };
 
-export const getTeamMetrics = async (
+export const getTeamLeadershipSnapshots = async (
   teamId: string,
   params: { from: string; to: string },
-): Promise<TeamMetricsResponse> => {
-  // GET /api/team-intelligence-dashboard/team/usage?from=YYYY-MM-DD&to=YYYY-MM-DD&teamId=Core%20Platform
-  const response = await apiInstance.get<TeamMetricsResponse>(
-    '/team-intelligence-dashboard/team/usage',
+): Promise<TeamLeadershipSnapshotsResponse> => {
+  const response = await apiInstance.get<TeamLeadershipSnapshotsResponse>(
+    '/team-intelligence-dashboard/team/leadership-snapshots',
     {
       params: {
         from: params.from,
         to: params.to,
-        teamId: teamId,
+        teamId,
       },
     },
   );
   return response.data;
 };
 
-export const getTeamMembers = async (teamId: string): Promise<TeamMembersResponse> => {
-  // GET /api/mettle/team-members?teamId=Data%20Engineering
+export const getTeamMembers = async (
+  teamId: string,
+  page: number,
+  limit = 12,
+): Promise<TeamMembersResponse> => {
   const response = await apiInstance.get<TeamMembersResponse>('/mettle/team-members', {
     params: {
-      teamId: teamId,
+      teamId,
+      page,
+      limit,
     },
   });
   return response.data;
 };
 
-export const getMemberInsights = async (
+export const getLeadershipSection = async <T = LeadershipItem>({
+  scope,
+  section,
+  ...params
+}: LeadershipSectionParams): Promise<LeadershipSectionResponse<T>> => {
+  const response = await apiInstance.get<LeadershipSectionResponse<T>>(
+    `/team-intelligence-dashboard/${scope}/leadership-sections/${section}`,
+    { params },
+  );
+  return response.data;
+};
+
+export const getUserLeadershipSnapshots = async (
   email: string,
   params: { from: string; to: string },
-): Promise<UserProductivity> => {
-  // GET /api/team-intelligence-dashboard/user/overview?from=2026-05-01&to=2026-05-20&userEmail=jane.doe@example.com"
-  const response = await apiInstance.get<UserProductivity>(
-    '/team-intelligence-dashboard/user/overview',
+): Promise<UserLeadershipSnapshotsResponse> => {
+  const response = await apiInstance.get<UserLeadershipSnapshotsResponse>(
+    '/team-intelligence-dashboard/user/leadership-snapshots',
     {
       params: {
         from: params.from,
@@ -439,76 +553,5 @@ export const getMemberDetails = async (email: string): Promise<TeamMember> => {
       },
     },
   );
-  return response.data;
-};
-
-export const getOrgTicketRecaps = async (params: {
-  from: string;
-  to: string;
-  page?: number;
-  limit?: number;
-}): Promise<OrgTicketRecapsResponse> => {
-  // GET /api/team-intelligence-dashboard/org/channel-recaps?from=YYYY-MM-DD&to=YYYY-MM-DD&page=1&limit=10
-  const response = await apiInstance.get<OrgTicketRecapsResponse>(
-    '/team-intelligence-dashboard/org/channel-recaps',
-    {
-      params: {
-        from: params.from,
-        to: params.to,
-        page: params.page ?? 1,
-        limit: params.limit ?? 10,
-      },
-    },
-  );
-  return response.data;
-};
-
-export const getTeamTicketRecaps = async (
-  teamId: string,
-  params: {
-    from: string;
-    to: string;
-    page?: number;
-    limit?: number;
-  },
-): Promise<TeamTicketRecapsResponse> => {
-  const response = await apiInstance.get<TeamTicketRecapsResponse>(
-    '/team-intelligence-dashboard/team/channel-recaps',
-    {
-      params: {
-        from: params.from,
-        to: params.to,
-        teamId: teamId,
-        page: params.page ?? 1,
-        limit: params.limit ?? 10,
-      },
-    },
-  );
-
-  return response.data;
-};
-
-export const getTeamChannelTickets = async (
-  teamId: string,
-  params: {
-    from: string;
-    to: string;
-    page?: number;
-    limit?: number;
-  },
-): Promise<TeamChannelTicketsResponse> => {
-  const response = await apiInstance.get<TeamChannelTicketsResponse>(
-    '/team-intelligence-dashboard/team/channel-tickets',
-    {
-      params: {
-        from: params.from,
-        to: params.to,
-        teamId: teamId,
-        page: params.page ?? 1,
-        limit: params.limit ?? 10,
-      },
-    },
-  );
-
   return response.data;
 };

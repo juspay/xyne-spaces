@@ -11,7 +11,9 @@ import { CanvasSideEffectHandler } from '@/zero/side-effects/tables/canvas-handl
 import { vespaQueue } from '@/queues/vespaQueue';
 import { fileSchema, SubApp } from '@/vespa/src/types';
 import { db } from '@/database/client';
+import { withWorkspaceScope } from '@/database/tenant/context';
 import { CanvasRole, CanvasVisibility } from '@xyne/shared';
+import { readFromYSweetStrict, syncToYSweet } from '@/utils/ysweetUtils';
 
 const prisma = DatabaseClient.getInstance();
 
@@ -75,6 +77,14 @@ export interface CommitAnalysisCanvasMetadata {
   migrationCount: number;
   envChangeCount: number;
   workspaceId?: string;
+}
+
+export interface CommitAnalysisRepoSlice {
+  workspace: string;
+  repoSlug: string;
+  deployedCommitId: string;
+  newCommitId: string;
+  results: CommitAnalysisResult[];
 }
 
 // A "result" shape narrowed to what the PR/env/migration renderers read. Both
@@ -301,6 +311,7 @@ async function buildMainAnalysisBlocks(
   migrationLinks: Array<{ filePath: string; diffUrl: string }> | undefined,
   metadata: CommitAnalysisCanvasMetadata,
   title: string,
+  repoSlices?: CommitAnalysisRepoSlice[],
 ): Promise<{ blocks: BlockNoteBlock[]; mentionedUserIds: string[] }> {
   const blocks: BlockNoteBlock[] = [];
   const mentionedUserIds = new Set<string>();
@@ -313,6 +324,8 @@ async function buildMainAnalysisBlocks(
   const commitsWithPR = results.filter((r) => r.pullRequest !== null).length;
   const commitsWithTicket = results.filter((r) => r.ticket !== null).length;
 
+  const multiRepo = (repoSlices?.length ?? 0) > 1;
+
   blocks.push({
     id: uuidv4(),
     type: 'heading',
@@ -320,23 +333,46 @@ async function buildMainAnalysisBlocks(
     content: [{ type: 'text', text: title, styles: { bold: true } }],
   });
 
-  blocks.push({
-    id: uuidv4(),
-    type: 'paragraph',
-    content: [
-      { type: 'text', text: 'Repository: ', styles: { bold: true } },
-      { type: 'text', text: `${metadata.workspace}/${metadata.repoSlug}`, styles: {} },
-    ],
-  });
+  if (multiRepo && repoSlices) {
+    blocks.push({
+      id: uuidv4(),
+      type: 'paragraph',
+      content: [
+        { type: 'text', text: 'Repositories ', styles: { bold: true } },
+        { type: 'text', text: `(${repoSlices.length})`, styles: {} },
+      ],
+    });
+    for (const slice of repoSlices) {
+      blocks.push({
+        id: uuidv4(),
+        type: 'bulletListItem',
+        content: [
+          { type: 'text', text: `${slice.workspace}/${slice.repoSlug}`, styles: { bold: true } },
+          { type: 'text', text: ' — ', styles: {} },
+          { type: 'text', text: `${slice.deployedCommitId.slice(0, 8)}...${slice.newCommitId.slice(0, 8)}`, styles: { code: true } },
+          { type: 'text', text: ` (${slice.results.length} commits)`, styles: {} },
+        ],
+      });
+    }
+  } else {
+    blocks.push({
+      id: uuidv4(),
+      type: 'paragraph',
+      content: [
+        { type: 'text', text: 'Repository: ', styles: { bold: true } },
+        { type: 'text', text: `${metadata.workspace}/${metadata.repoSlug}`, styles: {} },
+      ],
+    });
 
-  blocks.push({
-    id: uuidv4(),
-    type: 'paragraph',
-    content: [
-      { type: 'text', text: 'Commit Range: ', styles: { bold: true } },
-      { type: 'text', text: `${metadata.deployedCommitId.slice(0, 8)}...${metadata.newCommitId.slice(0, 8)}`, styles: { code: true } },
-    ],
-  });
+    blocks.push({
+      id: uuidv4(),
+      type: 'paragraph',
+      content: [
+        { type: 'text', text: 'Commit Range: ', styles: { bold: true } },
+        { type: 'text', text: `${metadata.deployedCommitId.slice(0, 8)}...${metadata.newCommitId.slice(0, 8)}`, styles: { code: true } },
+      ],
+    });
+  }
 
   blocks.push({
     id: uuidv4(),
@@ -426,10 +462,28 @@ async function buildMainAnalysisBlocks(
   const envChangesByPath = indexEnvChangesByPath(envChanges);
   const migrationLinksByCommit = indexMigrationLinksByCommit(migrationLinks);
 
-  for (const result of uniquePrResults(results)) {
-    await appendPullRequestBlocks(
-      blocks, result, metadata, mentionedUserIds, lookupUserByEmail, envChangesByPath, migrationLinksByCommit,
-    );
+  if (multiRepo && repoSlices) {
+    for (const slice of repoSlices) {
+      const prResults = uniquePrResults(slice.results);
+      if (prResults.length === 0) continue;
+      blocks.push({
+        id: uuidv4(),
+        type: 'heading',
+        props: { level: 3 },
+        content: [{ type: 'text', text: `📦 ${slice.workspace}/${slice.repoSlug}`, styles: {} }],
+      });
+      for (const result of prResults) {
+        await appendPullRequestBlocks(
+          blocks, result, metadata, mentionedUserIds, lookupUserByEmail, envChangesByPath, migrationLinksByCommit,
+        );
+      }
+    }
+  } else {
+    for (const result of uniquePrResults(results)) {
+      await appendPullRequestBlocks(
+        blocks, result, metadata, mentionedUserIds, lookupUserByEmail, envChangesByPath, migrationLinksByCommit,
+      );
+    }
   }
 
   return { blocks, mentionedUserIds: [...mentionedUserIds] };
@@ -510,16 +564,26 @@ async function fireCanvasSideEffectsAndIndex(
   createdByUserId: string,
   isInsert: boolean,
 ): Promise<void> {
-  const user = await db.user.findUnique({
-    where: { id: createdByUserId },
-    select: { id: true, email: true, workspaceId: true, role: true },
-  });
-  if (!user || !user.workspaceId) {
-    throw new Error(`User ${createdByUserId} not found or has no workspace assigned`);
-  }
-  if (isInsert) {
+  // The creator is usually the xyne-release-bot user, not the human whose request
+  // triggered the analysis. Under the ambient request context OrgMembersACL narrows
+  // the org_members read to the caller's OWN row (for non-admin members), hiding the
+  // bot's row and wrongly failing with "not a member of any organization". This is
+  // workspace work, so resolve the creator under service scope (tenant boundary only).
+  const { user, orgMember } = await withWorkspaceScope(async () => {
+    const user = await db.user.findUnique({
+      where: { id: createdByUserId },
+      select: { id: true, email: true, workspaceId: true, role: true },
+    });
+    if (!user || !user.workspaceId) {
+      throw new Error(`User ${createdByUserId} not found or has no workspace assigned`);
+    }
     // Email is globally unique in orgMember, single lookup is sufficient
-    const orgMember = await db.orgMember.findUnique({ where: { email: user.email } });
+    const orgMember = isInsert
+      ? await db.orgMember.findUnique({ where: { email: user.email } })
+      : null;
+    return { user, orgMember };
+  });
+  if (isInsert) {
     if (!orgMember) {
       throw new Error(`User ${createdByUserId} is not a member of any organization`);
     }
@@ -566,6 +630,14 @@ async function findExistingAnalysisCanvas(
   });
 }
 
+export async function findAnalysisCanvasIdForConversation(
+  conversationId: string | undefined,
+  channelId: string | undefined,
+): Promise<string | null> {
+  const canvas = await findExistingAnalysisCanvas(conversationId, channelId);
+  return canvas?.id ?? null;
+}
+
 type CanvasSection = 'main' | 'hotfix';
 
 export interface UpsertCommitAnalysisCanvasArgs {
@@ -576,6 +648,7 @@ export interface UpsertCommitAnalysisCanvasArgs {
   migrationLinks: Array<{ filePath: string; diffUrl: string }> | undefined;
   createdByUserId: string;
   metadata: CommitAnalysisCanvasMetadata;
+  repoSlices?: CommitAnalysisRepoSlice[];
 }
 
 /**
@@ -595,7 +668,7 @@ export interface UpsertCommitAnalysisCanvasArgs {
 export async function upsertCommitAnalysisCanvas(
   args: UpsertCommitAnalysisCanvasArgs,
 ): Promise<string | null> {
-  const { section, results, affectedApplications, envChanges, migrationLinks, createdByUserId, metadata } = args;
+  const { section, results, affectedApplications, envChanges, migrationLinks, createdByUserId, metadata, repoSlices } = args;
 
   // Serialize the re-entrant find-then-update/create (Re-run + webhook) so
   // concurrent runs don't double-create or clobber the canvas. Fails open.
@@ -611,13 +684,20 @@ export async function upsertCommitAnalysisCanvas(
     const now = new Date();
     const existing = await findExistingAnalysisCanvas(metadata.conversationId, metadata.channelId);
 
+    // Read the live document so rebuilding one section preserves the other.
+    // Legacy DB-backed canvases migrate after the replacement is stored successfully.
+    const existingBlocks = existing
+      ? existing.isCollaborative
+        ? await readFromYSweetStrict(existing.id, createdByUserId)
+        : (existing.content as unknown as BlockNoteBlock[]) ?? []
+      : [];
+
     let content: BlockNoteBlock[];
     let mentionedUserIds: string[];
 
     if (section === 'hotfix') {
       const hotfix = await buildHotfixSectionBlocks(results, envChanges, migrationLinks, metadata);
       if (existing) {
-        const existingBlocks = (existing.content as unknown as BlockNoteBlock[]) ?? [];
         content = [...stripHotfixSection(existingBlocks), ...hotfix.blocks];
       } else {
         // No canvas yet (hotfix arrived before any main analysis) — start from a
@@ -630,9 +710,9 @@ export async function upsertCommitAnalysisCanvas(
       mentionedUserIds = hotfix.mentionedUserIds;
     } else {
       const title = existing?.title || analysisCanvasTitle(metadata, now);
-      const main = await buildMainAnalysisBlocks(results, affectedApplications, envChanges, migrationLinks, metadata, title);
+      const main = await buildMainAnalysisBlocks(results, affectedApplications, envChanges, migrationLinks, metadata, title, repoSlices);
       const preservedHotfix = existing
-        ? extractHotfixSection((existing.content as unknown as BlockNoteBlock[]) ?? [])
+        ? extractHotfixSection(existingBlocks)
         : [];
       content = [...main.blocks, ...preservedHotfix];
       mentionedUserIds = main.mentionedUserIds;
@@ -641,10 +721,15 @@ export async function upsertCommitAnalysisCanvas(
     if (existing) {
       const prevMeta = (existing.metadata as Record<string, unknown>) || {};
       const prevMentions = Array.isArray(prevMeta.mentionedUserIds) ? (prevMeta.mentionedUserIds as string[]) : [];
+      const synced = await syncToYSweet(existing.id, content, createdByUserId);
+      if (!synced) {
+        throw new Error(`Failed to save commit analysis canvas ${existing.id} to Y-Sweet`);
+      }
       await prisma.canvas.update({
         where: { id: existing.id },
         data: {
-          content: content as any,
+          content: [],
+          isCollaborative: true,
           lastEditedBy: createdByUserId,
           lastEditedAt: now,
           updatedAt: now,
@@ -667,7 +752,12 @@ export async function upsertCommitAnalysisCanvas(
         },
       });
       logger.info(`[CanvasService] Updated release analysis canvas ${existing.id} (section=${section}) for ${metadata.workspace}/${metadata.repoSlug}`);
-      await fireCanvasSideEffectsAndIndex(existing.id, createdByUserId, false);
+      // Non-fatal side-effects (see persistNewAnalysisCanvas).
+      try {
+        await fireCanvasSideEffectsAndIndex(existing.id, createdByUserId, false);
+      } catch (sideEffectError) {
+        logger.error(`[CanvasService] Canvas ${existing.id} updated; side-effects/indexing failed (non-fatal):`, sideEffectError);
+      }
       return existing.id;
     }
 
@@ -697,7 +787,7 @@ function analysisCanvasTitle(metadata: CommitAnalysisCanvasMetadata, now: Date):
 
 // Shared new-canvas persistence (row + participant + side effects) for both entry points.
 async function persistNewAnalysisCanvas(args: {
-  content: unknown;
+  content: BlockNoteBlock[];
   mentionedUserIds: string[];
   commitCount: number;
   createdByUserId: string;
@@ -718,16 +808,21 @@ async function persistNewAnalysisCanvas(args: {
     throw new Error(`User ${createdByUserId} not found or has no workspace assigned`);
   }
 
+  const synced = await syncToYSweet(canvasId, content, createdByUserId);
+  if (!synced) {
+    throw new Error(`Failed to save commit analysis canvas ${canvasId} to Y-Sweet`);
+  }
+
   await prisma.canvas.create({
     data: {
       id: canvasId,
       title: finalTitle,
-      content: content as any,
+      content: [],
       workspaceId: creator.workspaceId,
       createdBy: createdByUserId,
       visibility: CanvasVisibility.PUBLIC,
       isTemplate: false,
-      isCollaborative: false,
+      isCollaborative: true,
       lastEditedBy: createdByUserId,
       lastEditedAt: now,
       createdAt: now,
@@ -762,7 +857,12 @@ async function persistNewAnalysisCanvas(args: {
     },
   });
 
-  await fireCanvasSideEffectsAndIndex(canvasId, createdByUserId, true);
+  // Side-effects/indexing must not abort canvas creation — degrade, keep the canvasId.
+  try {
+    await fireCanvasSideEffectsAndIndex(canvasId, createdByUserId, true);
+  } catch (sideEffectError) {
+    logger.error(`[CanvasService] Canvas ${canvasId} created; side-effects/indexing failed (non-fatal):`, sideEffectError);
+  }
   return canvasId;
 }
 
@@ -777,12 +877,13 @@ export async function createCommitAnalysisCanvas(
   envChanges: Array<{ filePath: string; fileName: string; newValue: string; commitId?: string }> | undefined,
   migrationLinks: Array<{ filePath: string; diffUrl: string }> | undefined,
   createdByUserId: string,
-  metadata: CommitAnalysisCanvasMetadata
+  metadata: CommitAnalysisCanvasMetadata,
+  repoSlices?: CommitAnalysisRepoSlice[]
 ): Promise<string | null> {
   try {
     const now = new Date();
     const { blocks: content, mentionedUserIds } = await buildMainAnalysisBlocks(
-      results, affectedApplications, envChanges, migrationLinks, metadata, analysisCanvasTitle(metadata, now),
+      results, affectedApplications, envChanges, migrationLinks, metadata, analysisCanvasTitle(metadata, now), repoSlices,
     );
 
     const canvasId = await persistNewAnalysisCanvas({

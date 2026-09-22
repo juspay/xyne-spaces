@@ -7,6 +7,7 @@ import { CanvasRole } from '@xyne/shared';
 import { HoverCard } from '../../ui/HoverCard/HoverCard';
 import Button from '../../ui/Button';
 import Avatar from '../../ui/Avatar/Avatar';
+import { getCanvasMentionDisplayText } from '../../../utils/canvasMentionUtils';
 
 function formatCanvasRoleLabel(role: CanvasRole): string {
   return role.charAt(0) + role.slice(1).toLowerCase();
@@ -108,7 +109,7 @@ const MentionAvatar = ({
 
 const MentionRender = ({ inlineContent }: MentionRenderProps) => {
   const props = inlineContent.props;
-  const displayName = props.groupId && props.groupName ? props.groupName : props.username || '';
+  const displayName = getCanvasMentionDisplayText(props);
   const {
     canGrantAccess,
     canGrantOwnerAccess,
@@ -169,6 +170,8 @@ const MentionRender = ({ inlineContent }: MentionRenderProps) => {
                 onClick={() => {
                   grantGroupMentionAccess(props.groupId, role);
                 }}
+                data-track-category='CANVAS'
+                data-track-name='GRANT_GROUP_MENTION_ACCESS'
               >
                 {formatCanvasRoleLabel(role)}
               </Button>
@@ -207,6 +210,8 @@ const MentionRender = ({ inlineContent }: MentionRenderProps) => {
                   role,
                 );
               }}
+              data-track-category='CANVAS'
+              data-track-name='GRANT_USER_MENTION_ACCESS'
             >
               {role.charAt(0) + role.slice(1).toLowerCase()}
             </Button>

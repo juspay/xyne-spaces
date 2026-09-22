@@ -43,6 +43,7 @@ export interface MessageActionsDrawerProps {
   showEditAction?: boolean;
   reactionsMd?: string | null;
   onReplyInThread?: (e?: React.MouseEvent) => void;
+  showSubscription?: boolean;
   onCreateTicket?: () => void;
   onEditMessage?: () => void;
   onDeleteMessage?: () => void;
@@ -77,6 +78,7 @@ export const MessageActionsDrawer: React.FC<MessageActionsDrawerProps> = ({
   showEditAction = false,
   reactionsMd,
   onReplyInThread,
+  showSubscription,
   onCreateTicket,
   onEditMessage,
   onDeleteMessage,
@@ -121,17 +123,8 @@ export const MessageActionsDrawer: React.FC<MessageActionsDrawerProps> = ({
     handleOpenChange(false); // Close drawer after action
   };
 
-  const handleEmojiSelect = (emoji: {
-    emoji: string;
-    isCustom: boolean;
-    emojiId?: string;
-    imageUrl?: string;
-    names?: string[];
-  }): void => {
-    // For custom emojis, store the emojiId with a prefix
-    const emojiName = emoji.isCustom
-      ? `custom:${emoji.emoji}:${emoji.names?.[0] || 'custom'}`
-      : emoji.emoji;
+  // Receives the stored reaction token, already serialised by the picker surface.
+  const handleEmojiSelect = (emojiName: string): void => {
     const hasReacted = !!user && (reactionsData[emojiName] || []).includes(user.id);
 
     toggleReaction({
@@ -204,6 +197,7 @@ export const MessageActionsDrawer: React.FC<MessageActionsDrawerProps> = ({
                   </button>
                   <AddReactionActionView
                     handleEmojiSelect={handleEmojiSelect}
+                    messageId={messageId}
                     customEmojis={customEmojis}
                   />
                 </div>
@@ -338,7 +332,7 @@ export const MessageActionsDrawer: React.FC<MessageActionsDrawerProps> = ({
                   )}
 
                   {/* Conversation Subscription */}
-                  {open && onReplyInThread && conversationId && (
+                  {open && showSubscription && conversationId && (
                     <ConversationSubscription
                       conversationId={conversationId}
                       {...(conversation && { conversation })}

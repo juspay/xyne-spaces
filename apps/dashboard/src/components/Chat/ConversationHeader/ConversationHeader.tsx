@@ -25,6 +25,7 @@ import { useChannelDisplayName } from '../../../hooks/useChannelDisplayName';
 import Dialog from '../../ui/Dialog';
 import * as Tabs from '@radix-ui/react-tabs';
 import { cn } from '../../../utils/classNames';
+import { ShortcutTooltip } from '../../ui/ShortcutTooltip';
 import { mutators } from '../../../zero/mutators';
 import Tooltip from '../../ui/Tooltip';
 import Info, { ChannelTab } from '../Info/Info';
@@ -43,11 +44,15 @@ import { useRouteContext } from '../../../hooks/useRouteContext';
 import { standaloneNavigate, APP_DRAG_STYLE, APP_NO_DRAG_STYLE } from '../../../utils/electronApp';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { XyneAIStar } from '../../icons/xyne-ai';
-import { trackAskAIOpened } from '../../../services/otel/xyneAIMetrics';
 import { invokeShortcut } from '../../../shortcuts';
+import { CalendarEvent } from '@xyne/icons';
+import { xyneCalendarActor } from '../../../machines/xyneCalendarMachine';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { queries } from '../../../zero/queries';
+import { isAIOnboardingActive } from '../../../contexts/AIOnboardingContext';
+import { useCallAutoJoin } from '../../../hooks/useCallAutoJoin';
 import { renderEmoji } from '../../../utils/customEmojiUtils';
+import { AddToStreamMenuItem } from '../../Streams/components/AddToStreamMenu/AddToStreamMenu';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -58,6 +63,7 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from '../../ui/dropdown-menu';
+import { channelTrackingMetadata } from '../../../services/Analytics/channelTracking';
 
 interface ConversationHeaderProps {
   channelId: string;
@@ -80,6 +86,7 @@ const ConversationHeader = ({
   const zero = useZero();
   const channel = useVisibleChannel(channelId);
   const channelUserStatus = useGetChannelUserStatus(channelId);
+  useCallAutoJoin({ channelId, isMember: !!channelUserStatus });
   const { displayName, avatarUserId } = useChannelDisplayName(channel, context.userID);
   const [isInfoOpen, setIsInfoOpen] = useState(false);
   const [infoDefaultTab, setInfoDefaultTab] = useState<ChannelTab>('about');
@@ -254,6 +261,7 @@ const ConversationHeader = ({
                 e.stopPropagation();
                 handleStarToggle();
               }}
+              trackId='toggle_star_channel'
               className={cn('h-7 w-7 rounded-lg shrink-0', actionIconClass)}
               style={APP_NO_DRAG_STYLE}
               data-track-category='CHANNELS'
@@ -301,6 +309,7 @@ const ConversationHeader = ({
                   statusEmoji={dmUser?.statusEmoji}
                   statusContent={dmUser?.statusContent}
                   statusExpiryAt={dmUser?.statusExpiryAt}
+                  activityStatus={dmUser?.activityStatus}
                   size='md'
                   showOnHover={true}
                 />
@@ -345,6 +354,8 @@ const ConversationHeader = ({
                   setInfoDefaultTab('notifications');
                   setIsInfoOpen(true);
                 }}
+                data-track-category='CHANNELS'
+                data-track-name='OPEN_CHANNEL_NOTIFICATIONS'
                 className={cn('h-7 w-7 rounded-lg', actionIconClass)}
               >
                 <span className='shrink-0'>
@@ -353,6 +364,24 @@ const ConversationHeader = ({
               </Button>
             </Tooltip>
           )}
+          <Tooltip content='Check Your Calendar' side='bottom'>
+            <Button
+              variant='ghost'
+              size='sm'
+              onClick={() => {
+                if (isAIOnboardingActive()) return;
+                xyneCalendarActor.send({
+                  type: xyneCalendarActor.getSnapshot().matches('open') ? 'CLOSE' : 'OPEN',
+                });
+              }}
+              className={cn('h-7 w-7 rounded-lg', actionIconClass)}
+              aria-label='Toggle Calendar sidebar'
+              data-track-category='CHANNELS'
+              data-track-name='TOGGLE_CALENDAR_SIDEBAR'
+            >
+              <CalendarEvent size={16} />
+            </Button>
+          </Tooltip>
           <Tooltip
             content={showOnboardingTooltip ? 'Ask AI lives here! Click anytime.' : 'Ask AI'}
             {...(showOnboardingTooltip ? { open: true } : {})}
@@ -362,11 +391,10 @@ const ConversationHeader = ({
               variant='ghost'
               size='sm'
               onClick={() => {
-                // Track Ask AI opened event via OTel metrics
-                trackAskAIOpened(channel.scopeType);
-
-                // Trigger xstate machine to open XyneAI
-                xyneAIActor.send({ type: 'OPEN', channelId });
+                // Trigger xstate machine to open XyneAI. The otel
+                // ask_ai_opened counter fires from the sidebar's open effect
+                // so every entry point counts, not just this one.
+                xyneAIActor.send({ type: 'OPEN', channelId, trackSource: 'channel_header' });
               }}
               className='h-7 w-7 rounded-lg'
               data-track-category='CHANNELS'
@@ -377,7 +405,7 @@ const ConversationHeader = ({
             </Button>
           </Tooltip>
           {!isCompact && (
-            <Tooltip content='Search in this channel'>
+            <ShortcutTooltip label='Search in this channel' shortcut='global.findInChannel'>
               <Button
                 variant='ghost'
                 size='sm'
@@ -389,7 +417,7 @@ const ConversationHeader = ({
               >
                 <SearchDefault size={16} />
               </Button>
-            </Tooltip>
+            </ShortcutTooltip>
           )}
           {isCompact && (
             <CompactActionsMenu
@@ -406,6 +434,7 @@ const ConversationHeader = ({
             callDisplayName={displayName}
             isMember={!!channelUserStatus}
             disabled={channel.isArchived}
+            trackSource='chat_header'
           />
           {!isCompact && (
             <DropdownMenu>
@@ -427,14 +456,22 @@ const ConversationHeader = ({
                     setInfoDefaultTab('about');
                     setIsInfoOpen(true);
                   }}
+                  data-track-category='CHANNELS'
+                  data-track-name='OPEN_CHANNEL_ABOUT'
                 >
                   <InformationCircle size={16} className='shrink-0' />
                   Channel details
                 </DropdownMenuItem>
-                <DropdownMenuItem className='gap-2' onClick={() => handleOpenAllLinks()}>
+                <DropdownMenuItem
+                  className='gap-2'
+                  onClick={() => handleOpenAllLinks()}
+                  data-track-category='CHANNELS'
+                  data-track-name='OPEN_ALL_CHANNEL_LINKS'
+                >
                   <ExternalLinkSquare size={16} className='shrink-0' />
                   Open all links
                 </DropdownMenuItem>
+                <AddToStreamMenuItem source={{ kind: 'channel', channelId }} />
                 <DropdownMenuSub>
                   <DropdownMenuSubTrigger className='gap-2'>
                     <FolderArrowRight size={16} className='shrink-0' />
@@ -449,6 +486,8 @@ const ConversationHeader = ({
                           key={section.id}
                           className='gap-2'
                           onClick={() => handleMoveToSection(section.id)}
+                          data-track-category='CHANNELS'
+                          data-track-name='MOVE_CHANNEL_TO_SECTION'
                         >
                           {section.emoji && (
                             <span className='shrink-0'>{renderEmoji(section.emoji, 'size-4')}</span>
@@ -469,6 +508,9 @@ const ConversationHeader = ({
                     <DropdownMenuItem
                       className='gap-2 text-destructive focus:text-destructive'
                       onClick={handleLeaveChannel}
+                      data-track-category='CHANNELS'
+                      data-track-name='LEAVE_CHANNEL'
+                      data-track-metadata={JSON.stringify(channelTrackingMetadata(channel))}
                     >
                       <UserArrowRight size={16} className='shrink-0' />
                       Leave channel
@@ -483,6 +525,8 @@ const ConversationHeader = ({
               variant='ghost'
               size='sm'
               onClick={onClose}
+              data-track-category='CHANNELS'
+              data-track-name='CLOSE_CONVERSATION_HEADER'
               className={cn('h-7 w-7 rounded-lg', actionIconClass)}
               aria-label='Close'
             >
@@ -496,28 +540,43 @@ const ConversationHeader = ({
           className='flex items-center justify-start gap-0.5 px-0.5 overflow-x-auto no-scrollbar'
           style={APP_NO_DRAG_STYLE}
         >
-          {channelTabs?.map(tab => (
-            <Tabs.Trigger key={tab.value} value={tab.value} asChild>
-              <button
-                data-testid={`channel-tab-${tab.value}`}
-                data-track-category='CHANNELS'
-                data-track-name='SWITCH_TAB'
-                data-track-metadata={JSON.stringify({ tabValue: tab.value })}
-                onClick={e => setActiveTab?.(tab.value || '', e)}
-                className={cn(
-                  'flex items-center justify-center gap-2 px-2.5 py-1.5 rounded-lg transition-colors duration-100 cursor-pointer',
-                  activeTab === tab.value
-                    ? 'bg-muted text-foreground'
-                    : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground',
-                )}
+          {channelTabs?.map(tab => {
+            const trigger = (
+              <Tabs.Trigger key={tab.value} value={tab.value} asChild>
+                <button
+                  data-testid={`channel-tab-${tab.value}`}
+                  data-track-category='CHANNELS'
+                  data-track-name='SWITCH_TAB'
+                  data-track-metadata={JSON.stringify({ tabValue: tab.value })}
+                  onClick={e => setActiveTab?.(tab.value || '', e)}
+                  className={cn(
+                    'flex items-center justify-center gap-2 px-2.5 py-1.5 rounded-lg transition-colors duration-100 cursor-pointer',
+                    activeTab === tab.value
+                      ? 'bg-muted text-foreground'
+                      : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground',
+                  )}
+                >
+                  <span className='shrink-0'>
+                    {cloneElement(tab.icon, { color: 'currentColor' } as { color: string })}
+                  </span>
+                  <span className={cn('text-sm font-medium tracking-[-0.28px]')}>{tab.label}</span>
+                </button>
+              </Tabs.Trigger>
+            );
+
+            if (tab.value !== 'canvas') return trigger;
+
+            return (
+              <ShortcutTooltip
+                key={tab.value}
+                label={tab.label}
+                shortcut='global.openCanvasTab'
+                side='bottom'
               >
-                <span className='shrink-0'>
-                  {cloneElement(tab.icon, { color: 'currentColor' } as { color: string })}
-                </span>
-                <span className={cn('text-sm font-medium tracking-[-0.28px]')}>{tab.label}</span>
-              </button>
-            </Tabs.Trigger>
-          ))}
+                {trigger}
+              </ShortcutTooltip>
+            );
+          })}
         </Tabs.List>
       </Tabs.Root>
 

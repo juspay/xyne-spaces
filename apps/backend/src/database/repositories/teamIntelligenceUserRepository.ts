@@ -1,6 +1,10 @@
 import { db } from '@/database/client';
 import { teamIntelligenceContentStorageService } from '@/team-intelligence/services/team-intelligence-content-storage.service';
-import { RecapEntityType } from '@xyne/shared';
+import {
+  TeamIntelligenceUserSummarySchema,
+  type TeamIntelligenceUserSummary,
+} from '@/team-intelligence/user-summary.schema';
+import { logger } from '@/utils/logger';
 
 export interface UserDetailsDateRangeFilters {
   from: Date;
@@ -8,12 +12,14 @@ export interface UserDetailsDateRangeFilters {
   userEmail: string;
   page: number;
   limit: number;
+  orgId?: string | null;
 }
 
 export interface UserOverviewDateRangeFilters {
   from: Date;
   to: Date;
   userEmail: string;
+  orgId?: string | null;
 }
 
 export interface UserAiUsageAggregate {
@@ -71,6 +77,7 @@ export interface UserDetailsDateRangeResult {
   soloCommits: Record<string, unknown>[];
   aiUsages: UserAiUsageAggregate;
   productivityMetrics: Record<string, number>;
+  userSummaries: Record<string, unknown>[];
   teamInsights: {
     items: Record<string, unknown>[];
     keyFocusAreas: string[];
@@ -97,6 +104,7 @@ export interface UserOverviewDateRangeResult {
   soloCommits: Record<string, unknown>[];
   aiUsages: UserAiUsageAggregate;
   productivityMetrics: Record<string, number>;
+  userSummaries: Record<string, unknown>[];
   teamInsights: {
     items: Record<string, unknown>[];
     keyFocusAreas: string[];
@@ -118,6 +126,27 @@ export interface UserOverviewDateRangeResult {
   }>;
 }
 
+export interface UserLeadershipSnapshotsDateRangeResult {
+  from: string;
+  to: string;
+  userEmail: string;
+  snapshots: Array<{
+    id: string;
+    batchId: string;
+    reportDate: string;
+    source: string;
+    completedAt: string | null;
+    user: {
+      email: string;
+      name: string;
+      teamId: string | null;
+      teamName: string | null;
+    };
+    summary: TeamIntelligenceUserSummary;
+    summaryMetadata: unknown;
+  }>;
+}
+
 function paginateArray<T>(items: T[], page: number, limit: number): { total: number; totalPages: number; items: T[] } {
   const total = items.length;
   const totalPages = total === 0 ? 0 : Math.ceil(total / limit);
@@ -133,7 +162,7 @@ function paginateArray<T>(items: T[], page: number, limit: number): { total: num
 
 class TeamIntelligenceUserRepository {
   private async getUserIngestions(filters: UserOverviewDateRangeFilters) {
-    const { from, to, userEmail } = filters;
+    const { from, to, userEmail, orgId } = filters;
 
     const rangeStart = new Date(from);
     rangeStart.setUTCHours(0, 0, 0, 0);
@@ -148,6 +177,7 @@ class TeamIntelligenceUserRepository {
           equals: userEmail,
           mode: 'insensitive',
         },
+        ...(orgId ? { orgId } : {}),
       },
       orderBy: [{ reportDate: 'desc' }, { updatedAt: 'desc' }],
       select: {
@@ -165,6 +195,7 @@ class TeamIntelligenceUserRepository {
           pullRequests?: unknown[];
           soloCommits?: unknown[];
           employeeSummary?: unknown[];
+          userSummary?: unknown;
           summaryMetadata?: unknown;
         }>(null, ingestion.contentUrl);
 
@@ -173,6 +204,10 @@ class TeamIntelligenceUserRepository {
           pullRequests: Array.isArray(content?.pullRequests) ? content.pullRequests : [],
           soloCommits: Array.isArray(content?.soloCommits) ? content.soloCommits : [],
           employeeSummary: Array.isArray(content?.employeeSummary) ? content.employeeSummary : [],
+          userSummary:
+            content?.userSummary && typeof content.userSummary === 'object' && !Array.isArray(content.userSummary)
+              ? content.userSummary
+              : null,
           summaryMetadata: content?.summaryMetadata ?? null,
         };
       })
@@ -188,6 +223,7 @@ class TeamIntelligenceUserRepository {
     soloCommits: unknown;
     aiUsage: unknown;
     employeeSummary: unknown;
+    userSummary: unknown;
     summaryMetadata: unknown;
   }>) {
 
@@ -195,6 +231,7 @@ class TeamIntelligenceUserRepository {
     const soloCommits: Record<string, unknown>[] = [];
     const teamInsights: Record<string, unknown>[] = [];
     const keyFocusAreas: string[] = [];
+    const userSummaries: Record<string, unknown>[] = [];
 
     const rawAiUsages = {
       total_tokens: 0,
@@ -319,6 +356,10 @@ class TeamIntelligenceUserRepository {
           }
         }
       }
+
+      if (ingestion.userSummary && typeof ingestion.userSummary === 'object' && !Array.isArray(ingestion.userSummary)) {
+        userSummaries.push(ingestion.userSummary as Record<string, unknown>);
+      }
     }
 
     const aiUsages = transformAiUsageFormat(rawAiUsages);
@@ -328,6 +369,7 @@ class TeamIntelligenceUserRepository {
       soloCommits,
       aiUsages,
       productivityMetrics,
+      userSummaries,
       teamInsights,
       keyFocusAreas,
     };
@@ -348,6 +390,7 @@ class TeamIntelligenceUserRepository {
       soloCommits: aggregateData.soloCommits,
       aiUsages: aggregateData.aiUsages,
       productivityMetrics: aggregateData.productivityMetrics,
+      userSummaries: aggregateData.userSummaries,
       teamInsights: {
         items: aggregateData.teamInsights,
         keyFocusAreas: aggregateData.keyFocusAreas,
@@ -447,11 +490,98 @@ class TeamIntelligenceUserRepository {
       soloCommits: aggregateData.soloCommits,
       aiUsages: aggregateData.aiUsages,
       productivityMetrics: aggregateData.productivityMetrics,
+      userSummaries: aggregateData.userSummaries,
       teamInsights: {
         items: aggregateData.teamInsights,
         keyFocusAreas: aggregateData.keyFocusAreas,
       },
       tickets,
+    };
+  }
+
+  async getUserLeadershipSnapshotsByDate(
+    filters: UserOverviewDateRangeFilters
+  ): Promise<UserLeadershipSnapshotsDateRangeResult> {
+    const { from, to, userEmail, orgId } = filters;
+
+    const rangeStart = new Date(from);
+    rangeStart.setUTCHours(0, 0, 0, 0);
+
+    const rangeEnd = new Date(to);
+    rangeEnd.setUTCHours(23, 59, 59, 999);
+
+    const rows = await db.teamIntelligenceUserIngestionV2.findMany({
+      where: {
+        reportDate: { gte: rangeStart, lte: rangeEnd },
+        processingStatus: 'COMPLETED',
+        userEmail: {
+          equals: userEmail,
+          mode: 'insensitive',
+        },
+        contentUrl: { not: null },
+        ...(orgId ? { orgId } : {}),
+      },
+      orderBy: [{ reportDate: 'desc' }, { completedAt: 'desc' }],
+      select: {
+        id: true,
+        batchId: true,
+        reportDate: true,
+        source: true,
+        userEmail: true,
+        userName: true,
+        teamId: true,
+        teamName: true,
+        completedAt: true,
+        contentUrl: true,
+      },
+    });
+
+    const hydrated = await Promise.all(
+      rows.map(async (row) => {
+        const content =
+          await teamIntelligenceContentStorageService.hydrateJsonPayload<{
+            userSummary?: unknown;
+            summaryMetadata?: unknown;
+          }>(null, row.contentUrl);
+        const parsed = TeamIntelligenceUserSummarySchema.safeParse(content?.userSummary);
+        if (!parsed.success) {
+          logger.warn(
+            '[TEAM-INTEL] Ignoring completed user summary with invalid structured content',
+            {
+              userIngestionId: row.id,
+              userEmail: row.userEmail,
+              error: parsed.error.message,
+            }
+          );
+          return null;
+        }
+
+        return {
+          id: row.id,
+          batchId: row.batchId,
+          reportDate: row.reportDate.toISOString().slice(0, 10),
+          source: row.source,
+          completedAt: row.completedAt?.toISOString() ?? null,
+          user: {
+            email: row.userEmail,
+            name: row.userName,
+            teamId: row.teamId,
+            teamName: row.teamName,
+          },
+          summary: parsed.data,
+          summaryMetadata: content?.summaryMetadata ?? null,
+        };
+      })
+    );
+
+    return {
+      from: rangeStart.toISOString().slice(0, 10),
+      to: rangeEnd.toISOString().slice(0, 10),
+      userEmail,
+      snapshots: hydrated.filter(
+        (snapshot): snapshot is NonNullable<(typeof hydrated)[number]> =>
+          snapshot !== null
+      ),
     };
   }
 
@@ -497,7 +627,7 @@ class TeamIntelligenceUserRepository {
     // Get total count for pagination
     const total = await db.recap.count({
       where: {
-        entityType: RecapEntityType.CHANNEL,
+        entityType: 'CHANNEL',
         userId: user.id,
         recapDate: {
           gte: from,
@@ -512,7 +642,7 @@ class TeamIntelligenceUserRepository {
     // Get paginated recaps
     const recaps = await db.recap.findMany({
       where: {
-        entityType: RecapEntityType.CHANNEL,
+        entityType: 'CHANNEL',
         userId: user.id,
         recapDate: {
           gte: from,

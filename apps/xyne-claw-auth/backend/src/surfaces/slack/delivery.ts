@@ -1,4 +1,5 @@
 import { prisma } from "../../db.js";
+import { errMsg } from "../../lib/errors.js";
 import { createLogger } from "../../logger.js";
 import type { FilesUploadV2Arguments } from "@slack/web-api";
 import { slackClient } from "./api.js";
@@ -92,7 +93,7 @@ export async function uploadSlackFiles(
       // Per-file isolation: one bad attachment must not sink the rest.
       log.warn("[slack-delivery] Slack file upload failed", {
         fileName: attachment.fileName,
-        error: error instanceof Error ? error.message : String(error),
+        error: errMsg(error),
       });
       failed += 1;
     }

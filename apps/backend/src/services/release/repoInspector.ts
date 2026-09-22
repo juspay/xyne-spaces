@@ -5,6 +5,8 @@
 import { config } from '@/config/env';
 import { parseGitHubRepoUrl, parseBitbucketRepoUrl } from '@/utils/repoUrlParser';
 import { normalizeBitbucketApiBaseUrl } from '@/services/release/buildVcsClient';
+import { GitHubService } from '@/services/githubService';
+import { BitbucketService } from '@/services/bitbucketService';
 import { VCSProviderType } from '@xyne/shared';
 
 // Bound outbound VCS calls.
@@ -40,10 +42,10 @@ export async function testRepoConnection(opts: {
     const headers: Record<string, string> = { Accept: 'application/vnd.github+json' };
     if (token) headers.Authorization = `Bearer ${token}`;
 
-    const resp = await fetch(`${apiUrl}/repos/${parsed.owner}/${parsed.repo}`, {
-      headers,
-      signal: AbortSignal.timeout(API_TIMEOUT_MS),
-    });
+    const resp = await fetch(
+      `${apiUrl}/repos/${encodeURIComponent(parsed.owner)}/${encodeURIComponent(parsed.repo)}`,
+      { headers, signal: AbortSignal.timeout(API_TIMEOUT_MS) },
+    );
     if (resp.ok) {
       const json = (await resp.json()) as { full_name: string; default_branch: string };
       return {
@@ -84,7 +86,7 @@ export async function testRepoConnection(opts: {
       headers.Authorization = `Basic ${basic}`;
     }
     const resp = await fetch(
-      `${baseUrl}/projects/${parsed.projectKey}/repos/${parsed.repoSlug}`,
+      `${baseUrl}/projects/${encodeURIComponent(parsed.projectKey)}/repos/${encodeURIComponent(parsed.repoSlug)}`,
       { headers, signal: AbortSignal.timeout(API_TIMEOUT_MS) },
     );
     if (resp.ok) {
@@ -108,4 +110,37 @@ export async function testRepoConnection(opts: {
   }
 
   return { ok: false, message: `Provider not supported: ${vcsProvider}` };
+}
+
+export async function listGitHubRepoFilePaths(repoUrl: string): Promise<string[]> {
+  const parsed = parseGitHubRepoUrl(repoUrl);
+  if (!parsed) {
+    throw new Error(`URL doesn't look like a GitHub repo URL`);
+  }
+  const conn = await testRepoConnection({ repoUrl, vcsProvider: VCSProviderType.GITHUB });
+  if (!conn.ok || !conn.defaultBranch) {
+    throw new Error(conn.message);
+  }
+  const github = new GitHubService({ token: config.github?.token, apiUrl: config.github?.apiUrl });
+  return github.listRepoTree(parsed.owner, parsed.repo, conn.defaultBranch);
+}
+
+export async function listBitbucketRepoFilePaths(repoUrl: string): Promise<string[]> {
+  const parsed = parseBitbucketRepoUrl(repoUrl);
+  if (!parsed) {
+    throw new Error(`URL doesn't look like a Bitbucket Server repo URL`);
+  }
+  const conn = await testRepoConnection({ repoUrl, vcsProvider: VCSProviderType.BITBUCKET_SERVER });
+  if (!conn.ok) {
+    throw new Error(conn.message);
+  }
+  const bitbucket = new BitbucketService({
+    baseUrl: normalizeBitbucketApiBaseUrl(config.bitbucket.baseUrl),
+    token: config.bitbucket.apiToken,
+    username: config.bitbucket.apiUsername ?? '',
+    password: config.bitbucket.password ?? '',
+    projectKey: parsed.projectKey,
+    repositorySlug: parsed.repoSlug,
+  });
+  return bitbucket.listFilePaths();
 }

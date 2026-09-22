@@ -149,6 +149,8 @@ const SortableSection = ({
                 e.stopPropagation();
                 onRename(section);
               }}
+              data-track-category='CHAT_SIDEBAR'
+              data-track-name='RENAME_SECTION'
             >
               <span className='flex size-5 shrink-0 items-center justify-center'>
                 <PencilEdit size={16} />
@@ -161,6 +163,8 @@ const SortableSection = ({
                 e.stopPropagation();
                 onManageChannels(section);
               }}
+              data-track-category='CHAT_SIDEBAR'
+              data-track-name='MANAGE_SECTION_CHANNELS'
             >
               <span className='flex size-5 shrink-0 items-center justify-center'>
                 <ListCheck size={16} />
@@ -173,6 +177,8 @@ const SortableSection = ({
                 e.stopPropagation();
                 onCreateSection();
               }}
+              data-track-category='CHAT_SIDEBAR'
+              data-track-name='CREATE_SECTION'
             >
               <span className='flex size-5 shrink-0 items-center justify-center'>
                 <FolderPlus size={16} />
@@ -194,6 +200,8 @@ const SortableSection = ({
                 e.stopPropagation();
                 onDelete(section);
               }}
+              data-track-category='CHAT_SIDEBAR'
+              data-track-name='DELETE_SECTION'
             >
               <span className='flex size-5 shrink-0 items-center justify-center'>
                 <DeleteDustbin02 size={16} />

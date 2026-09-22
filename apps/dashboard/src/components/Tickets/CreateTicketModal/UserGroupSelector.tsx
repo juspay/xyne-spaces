@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { Users } from 'lucide-react';
+import { UserTwo as Users } from '@xyne/icons';
 import { useUserGroups } from '../../../hooks/useUserGroup';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { queries } from '../../../zero/queries';
@@ -17,6 +17,9 @@ interface UserGroupSelectorProps {
 
   /** Callback when group selection changes */
   onGroupSelect: (groupId: string | null) => void;
+
+  /** Drop the trigger's border, for hosts that supply their own row chrome. */
+  noBorder?: boolean;
 }
 
 /**
@@ -37,6 +40,7 @@ interface UserGroupSelectorProps {
 export const UserGroupSelector: React.FC<UserGroupSelectorProps> = ({
   selectedGroupId,
   onGroupSelect,
+  noBorder,
 }) => {
   const [searchValue, setSearchValue] = useState('');
 
@@ -123,6 +127,7 @@ export const UserGroupSelector: React.FC<UserGroupSelectorProps> = ({
       searchPlaceholder='Search groups...'
       isLoading={false}
       width='auto'
+      noBorder={noBorder ?? false}
       onSearchChange={setSearchValue}
       disableClientFiltering={true}
     />

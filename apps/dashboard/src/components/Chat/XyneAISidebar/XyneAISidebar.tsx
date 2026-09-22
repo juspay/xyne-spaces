@@ -1,3 +1,4 @@
+import type { XyneAiSendTrigger } from '../../../services/Analytics/xyneAiTracking';
 import { logger, Event as LogEvent } from '../../../utils/logger';
 import {
   ReactElement,
@@ -43,13 +44,8 @@ import type {
 } from './utils/XyneAITypes';
 import { buildCitationUrl } from './utils/citationUrlBuilder';
 import { attachmentCitationPreviewStore } from '../../FileViewer/AttachmentCitationPreview';
-import {
-  trackCitationClicked,
-  trackWebSearchQuery,
-  trackDeepResearchQuery,
-  trackCanvasModeQuery,
-  trackAttachmentsAdded,
-} from '../../../services/otel/xyneAIMetrics';
+import { trackCitationClicked, trackAskAIOpened } from '../../../services/otel/xyneAIMetrics';
+import { globalClickTracker } from '../../../services/Analytics/globalClickTracker';
 import { AILandingHero, AILandingHeroErrorBoundary } from './components/AILandingHero';
 import { XyneAIEmptyState } from './components/XyneAIEmptyState';
 import { cn } from '../../../utils/classNames';
@@ -63,8 +59,13 @@ import {
   type SelectedRecording,
   type ContextSelections,
   toAttachedContext,
+  attachedContextToSelections,
 } from './components/ContextPickerPanel';
-import { MessageItem, ConversationToolInvocationsContext } from './components/MessageItem';
+import {
+  MessageItem,
+  ConversationToolInvocationsContext,
+  type EditedMessageContext,
+} from './components/MessageItem';
 import { ConversationHistory } from './components/ConversationHistory';
 import { XyneAIHeader } from './components/XyneAIHeader';
 import { XyneAIOnboardingHeader } from './components/XyneAIOnboardingHeader';
@@ -81,9 +82,12 @@ import {
   xyneAIActor,
   type ThreadInfo,
   type CanvasInfo,
+  type WorkflowInfo,
+  toWorkflowContext,
   type XyneAIContext,
   type AskAIInitialContextSelections,
   type SelectionInfo,
+  type XyneAIResearchContext,
   flattenCanvasContexts,
 } from '../../../machines/xyneAIMachine';
 import { xyneAIStreamManager } from '../../../services/XyneAI';
@@ -118,13 +122,21 @@ interface XyneAISidebarProps {
   contextOpenNonce?: number;
   variant?: 'sidebar' | 'fullscreen';
   onClose?: () => void;
+  preserveStreamingOnClose?: boolean;
+  hideHeaderClose?: boolean;
+  denseHeader?: boolean;
+  debuggerPresentation?: 'split' | 'replace';
   onDebuggerOpenChange?: (open: boolean) => void;
   initialConversationId?: string;
   onConversationChange?: (conversationId: string) => void;
   kbCollectionId?: string;
   kbChannelId?: string;
   kbDocId?: string;
+  workflowInfo?: WorkflowInfo | null;
+  workflowDismissed?: boolean;
   kbDocName?: string;
+  kbFolderId?: string;
+  kbFolderName?: string;
   // Bumped by xyneAIMachine each time OPEN is dispatched with a kbCollectionId.
   // The input box re-attaches the KB collection chip on every bump.
   kbOpenNonce?: number;
@@ -132,12 +144,40 @@ interface XyneAISidebarProps {
   // Locks the sidebar to one Claw agent instead of the app-wide selected-agent store (for embedded/isolated instances).
   forcedAgentSlug?: string | null;
   // Seed text for the input box; bump autoSendNonce to submit it as a real message.
-  initialQuery?: string;
+  initialQuery?: string | undefined;
   autoSendNonce?: number;
+  researchContext?: XyneAIResearchContext | null;
+  // Seed text that is *not* sent — bump seedNonce to place it in the composer and
+  // leave it there to be edited. For hosts that hand the user a prepared question
+  // rather than a finished one.
+  seedQuery?: string;
+  seedNonce?: number;
   // Reports whether the active conversation is streaming, so an embedding caller can mute its own controls.
   onStreamingChange?: (isStreaming: boolean) => void;
   // Reports the latest completed bot message's final text (no reasoning), for embedding callers.
   onFinalResponse?: (content: string) => void;
+  // Drops the tilted suggestion cards from the empty state, leaving the heading.
+  // Set by hosts that embed this in a narrow slot (e.g. a Streams column).
+  hideEmptyStateSuggestions?: boolean;
+  // Drops the header row entirely. For hosts whose own chrome already carries a
+  // title and a close, where this one is a second bar under the first however
+  // little it contains.
+  hideHeader?: boolean;
+  /**
+   * Never take the keyboard on mount.
+   *
+   * The effect below focuses the composer as soon as the editor exists. A
+   * programmatic focus makes the browser reveal the caret by scrolling every
+   * scrollable ancestor — harmless in a sidebar that owns the screen, and not
+   * harmless in a Streams column, where the ancestor is the horizontal strip and
+   * the reveal drags the whole stream sideways by whatever the viewport was
+   * clipping off that column. Several of these mount at once and the reader
+   * asked none of them for a composer.
+   */
+  suppressInputAutoFocus?: boolean;
+  /** Analytics `source` for XYNE_AI_OPENED when this instance is embedded
+   *  directly (not opened through xyneAIActor OPEN, which carries its own). */
+  trackSource?: string;
 }
 
 const XyneAISidebar = ({
@@ -149,19 +189,34 @@ const XyneAISidebar = ({
   startFreshChat = false,
   variant = 'sidebar',
   onClose,
+  preserveStreamingOnClose = false,
+  hideHeaderClose = false,
+  denseHeader = false,
+  debuggerPresentation = 'split',
   onDebuggerOpenChange,
   initialConversationId,
   onConversationChange,
   kbCollectionId: kbCollectionIdProp,
   kbDocId: kbDocIdProp,
+  workflowInfo,
+  workflowDismissed,
   kbDocName: kbDocNameProp,
+  kbFolderId: kbFolderIdProp,
+  kbFolderName: kbFolderNameProp,
   kbOpenNonce,
   visible = true,
   forcedAgentSlug,
   initialQuery,
   autoSendNonce,
+  researchContext,
+  seedQuery,
+  seedNonce,
   onStreamingChange,
   onFinalResponse,
+  hideEmptyStateSuggestions = false,
+  hideHeader = false,
+  suppressInputAutoFocus = false,
+  trackSource: trackSourceProp,
 }: XyneAISidebarProps): ReactElement => {
   const isFullscreen = variant === 'fullscreen';
   const [inputValue, setInputValue] = useState('');
@@ -246,9 +301,29 @@ const XyneAISidebar = ({
   useEffect(() => {
     setFileScopes(kbDocIdProp ? [{ id: kbDocIdProp, name: kbDocNameProp || 'this file' }] : []);
   }, [kbDocIdProp, kbDocNameProp, kbOpenNonce]);
+  // Folder scope(s) — multi-select, from the collection picker. Sent to
+  // claw-auth as a single 'folder' attached_context pointer per id — NOT
+  // expanded to a recursive file list here (xyneAIControllerV2.ts doesn't do
+  // that); claw-auth resolves it itself, at Vespa-query time, since Vespa's
+  // collectionId filter only ever matches a doc's ROOT collection and can't
+  // filter on a folder id directly.
+  // Seeded with the folder Ask AI was opened from (browsing inside a
+  // sub-folder in the KB screen, not its root); re-synced below like
+  // fileScopes so re-opening Ask AI from a folder re-attaches the chip even
+  // after it was manually removed.
+  const [folderScopes, setFolderScopes] = useState<{ id: string; name: string }[]>(
+    kbFolderIdProp ? [{ id: kbFolderIdProp, name: kbFolderNameProp || 'this folder' }] : [],
+  );
+  useEffect(() => {
+    setFolderScopes(
+      kbFolderIdProp ? [{ id: kbFolderIdProp, name: kbFolderNameProp || 'this folder' }] : [],
+    );
+  }, [kbFolderIdProp, kbFolderNameProp, kbOpenNonce]);
   // Bumping autoSendNonce seeds inputValue from initialQuery; submitted once seeded (see effect near handleSubmit).
   const autoSendPendingQueryRef = useRef<string | null>(null);
   const lastAutoSendNonceRef = useRef<number | undefined>(undefined);
+  const autoSendTriggerRef = useRef<'auto_send' | null>(null);
+
   useEffect(() => {
     if (autoSendNonce === undefined || autoSendNonce === lastAutoSendNonceRef.current) return;
     if (!initialQuery?.trim()) return;
@@ -256,6 +331,19 @@ const XyneAISidebar = ({
     autoSendPendingQueryRef.current = initialQuery;
     setInputValue(initialQuery);
   }, [autoSendNonce, initialQuery]);
+  // Seed *without* sending, which `autoSendNonce` above deliberately cannot do —
+  // it exists for callers that already know the whole question. A host that hands
+  // over a starting point instead needs the text in the box and the cursor after
+  // it, and firing a model call on the caller's behalf would be the wrong trade:
+  // the gestures that produce a seed (dropping a thread onto an Ask AI column)
+  // are far cheaper than the request they would otherwise trigger.
+  const lastSeedNonceRef = useRef<number | undefined>(undefined);
+  useEffect(() => {
+    if (seedNonce === undefined || seedNonce === lastSeedNonceRef.current) return;
+    if (!seedQuery?.trim()) return;
+    lastSeedNonceRef.current = seedNonce;
+    setInputValue(seedQuery);
+  }, [seedNonce, seedQuery]);
   const [webSearchEnabled, setWebSearchEnabled] = useState(false);
   const [deepResearchEnabled, setDeepResearchEnabled] = useState(false);
   const [createCanvasEnabled, setCreateCanvasEnabled] = useState(false);
@@ -264,6 +352,11 @@ const XyneAISidebar = ({
   const [selectedActivities, setSelectedActivities] = useState<UserActivity[]>([]);
   const [selectedTickets, setSelectedTickets] = useState<SelectedTicket[]>([]);
   const [selectedCanvases, setSelectedCanvases] = useState<SelectedCanvas[]>([]);
+  const activeWorkflowInfo = workflowDismissed ? null : (workflowInfo ?? null);
+  const handleRemoveWorkflowInfo = useCallback((e: React.MouseEvent): void => {
+    e.stopPropagation();
+    xyneAIActor.send({ type: 'DISMISS_WORKFLOW_CONTEXT' });
+  }, []);
   const [selectedTranscripts, setSelectedTranscripts] = useState<SelectedTranscript[]>([]);
   const [selectedRecordings, setSelectedRecordings] = useState<SelectedRecording[]>([]);
   const [browserContext, setBrowserContext] = useState<{
@@ -282,6 +375,7 @@ const XyneAISidebar = ({
   useEffect(() => {
     if (!initialContextSelections) return;
     setSelectedCanvases(initialContextSelections.canvases);
+    setSelectedTickets(initialContextSelections.tickets ?? []);
     setSelectedRecordings(initialContextSelections.recordings);
   }, [initialContextSelections, contextOpenNonce]);
   // Track the original channel where the current conversation was started
@@ -412,7 +506,7 @@ const XyneAISidebar = ({
   // Find the ProseMirror editor element and focus it once it exists.
   // Retry via rAF because editor mount timing can vary across renders/routes.
   useEffect(() => {
-    if (isMobile) return;
+    if (isMobile || suppressInputAutoFocus) return;
     let rafId: number | null = null;
     let attempts = 0;
 
@@ -436,7 +530,7 @@ const XyneAISidebar = ({
         cancelAnimationFrame(rafId);
       }
     };
-  }, [dragAndDropAreaRef, isMobile]);
+  }, [dragAndDropAreaRef, isMobile, suppressInputAutoFocus]);
 
   // Update activeThreadInfo when threadInfo prop changes
   const prevThreadConversationIdRef = useRef(threadInfo?.conversationId);
@@ -542,6 +636,75 @@ const XyneAISidebar = ({
 
   const scopeType = (channel?.['scopeType'] as string) || '';
 
+  // XYNE_AI_OPENED / XYNE_AI_CLOSED. This component is mounted only while the
+  // panel is open (AppRoot renders it conditionally; embedded callers mount it
+  // for their own lifetime), so mount and unmount are the open and close.
+  // The one exception is AppRoot's `visible={false}` copy, kept mounted in a
+  // hidden div so an in-flight stream survives closing the drawer: nobody is
+  // looking at it, so it must not count as an open (or a close).
+  // `source` is whichever surface dispatched OPEN (machine `openSource`), or
+  // the prop for embedded instances. The otel ask_ai_opened counter rides the
+  // same effect so every entry point counts, not just the two that used to
+  // call it directly. No label: the channel name for a DM is a person's name.
+  // The open is a single moment, so the effect keys on `visible` alone and
+  // reads everything else off a per-render snapshot ref: the props are
+  // attribution, not triggers, and a prop change must not re-open the panel.
+  const messagesSentWhileOpenRef = useRef(0);
+  const openTrackSnapshotRef = useRef({
+    trackSourceProp,
+    scopeType,
+    variant,
+    initialConversationId,
+    forcedAgentSlug,
+  });
+  openTrackSnapshotRef.current = {
+    trackSourceProp,
+    scopeType,
+    variant,
+    initialConversationId,
+    forcedAgentSlug,
+  };
+  useEffect(() => {
+    if (!visible) return;
+    const snap = openTrackSnapshotRef.current;
+    const ctx = xyneAIActor.getSnapshot().context;
+    const source = snap.trackSourceProp ?? ctx.openSource ?? 'unknown';
+    const openedAt = Date.now();
+    const sentCounter = messagesSentWhileOpenRef;
+    sentCounter.current = 0;
+    trackAskAIOpened(snap.scopeType || undefined);
+    globalClickTracker.trackManualEvent('XyneAI', 'XYNE_AI_OPENED', undefined, {
+      surface: 'panel',
+      variant: snap.variant,
+      source,
+      contextType: ctx.contextType,
+      startFreshChat: ctx.startFreshChat,
+      hasThreadInfo: !!ctx.threadInfo,
+      hasCanvasInfo: !!ctx.canvasInfo || ctx.canvasContexts.length > 0,
+      hasInitialQuery: !!ctx.initialQuery,
+      hasWorkflowContext: !!ctx.workflowInfo,
+      hasResearchContext: !!ctx.researchContext,
+      kbScope: ctx.kbDocId
+        ? 'file'
+        : ctx.kbFolderId
+          ? 'folder'
+          : ctx.kbCollectionId
+            ? 'collection'
+            : 'none',
+      resumedConversation: !!ctx.focusSessionId || !!snap.initialConversationId,
+      ...(snap.forcedAgentSlug && { agentSlug: snap.forcedAgentSlug }),
+    });
+    return () => {
+      globalClickTracker.trackManualEvent('XyneAI', 'XYNE_AI_CLOSED', undefined, {
+        surface: 'panel',
+        variant: snap.variant,
+        source,
+        msOpen: Date.now() - openedAt,
+        messagesSentWhileOpen: sentCounter.current,
+      });
+    };
+  }, [visible]);
+
   const allChannels = useAllVisibleChannels();
   const nonDMChannels = useMemo(
     () =>
@@ -593,6 +756,37 @@ const XyneAISidebar = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Repository-scoped SDLC chat is stricter than global Ask AI: entering the
+  // hub or switching its repository must replace the primary channel instead
+  // of preserving the channel chip from the previously-open global chat.
+  useEffect(() => {
+    if (researchContext?.type !== 'repository') return;
+    if (
+      !channelId ||
+      !channelName ||
+      scopeType === (ChannelScopeType.DM as string) ||
+      scopeType === (ChannelScopeType.GROUP_DM as string)
+    ) {
+      setSelectedChannels([]);
+      return;
+    }
+    const channel = allChannels.find(item => item.id === channelId);
+    const nextChannel: SelectedChannel = {
+      id: channelId,
+      name: channelName,
+      isPrivate: channel ? String(channel.visibility) === 'PRIVATE' : false,
+    };
+    setSelectedChannels(previous => {
+      const current = previous[0];
+      return previous.length === 1 &&
+        current?.id === nextChannel.id &&
+        current.name === nextChannel.name &&
+        current.isPrivate === nextChannel.isPrivate
+        ? previous
+        : [nextChannel];
+    });
+  }, [allChannels, channelId, channelName, researchContext, scopeType]);
+
   // Fetch web search configuration from backend
   const { data: configData } = useQuery<XyneAIConfigResponse>({
     queryKey: ['xyne-ai-config'],
@@ -628,12 +822,14 @@ const XyneAISidebar = ({
   // Ask AI v1 has been removed; everything runs on v2 (xyne-claw) now.
   const isV2 = true;
   const effectiveAgentSlug = selectedAgentSlug;
-
   // Per-run model pin. The model list is scoped to the AGENT's LiteLLM key, so
   // it refetches per agent and the pin resets on agent change — a model from
   // the previous agent's key may not exist on the new one.
   const modelAgentSlug = effectiveAgentSlug ?? 'ask-ai';
   const [selectedModel, setSelectedModel] = useState<string | null>(null);
+  const [thinkingLevel, setThinkingLevel] = useState<
+    'off' | 'minimal' | 'low' | 'medium' | 'high' | null
+  >(null);
   const { data: agentModelsData } = useQuery({
     queryKey: ['claw-agent-models', modelAgentSlug],
     queryFn: () => fetchClawAgentModels(modelAgentSlug),
@@ -642,6 +838,7 @@ const XyneAISidebar = ({
   });
   useEffect(() => {
     setSelectedModel(null);
+    setThinkingLevel(null);
   }, [modelAgentSlug]);
 
   useEffect(() => {
@@ -687,17 +884,38 @@ const XyneAISidebar = ({
     }
   }, [browserContext, webSearchAccessible, webSearchEnabled]);
 
+  // KB scopes shared by the sent attachedContext and the richer display set
+  // below. Every picker (composer "+" and the KB file viewer's "Ask AI") now
+  // stores CollectionItem.id (cuid) as fileScopes[].id — the id attached_context
+  // 'file' items carry, same as collections/folders — so files ride directly
+  // here too; no server-side id-shape resolution needed for this call site.
+  const kbContextSelections = {
+    channels: selectedChannels,
+    tickets: selectedTickets,
+    canvases: selectedCanvases,
+    transcripts: selectedTranscripts,
+    recordings: selectedRecordings,
+    localFolders: [],
+    folders: folderScopes,
+    files: fileScopes,
+    collections: selectedCollectionIds
+      .map(id => collectionsList.find(c => c.id === id))
+      .filter((c): c is CollectionSummary => c !== undefined)
+      .map(c => ({ id: c.id, name: c.name })),
+  };
+
   // Use the streaming hook with selected channel IDs, research context, and active thread info
   const { submitQuery, abortCurrentRequest } = useXyneAIStream({
+    surface: 'panel',
+    contextType: xyneAIActor.getSnapshot().context.contextType,
     channelIds: selectedChannels.map(ch => ch.id),
     activities: selectedActivities,
-    collectionIds: selectedCollectionIds ?? [],
-    fileIds: fileScopes.map(f => f.id),
     conversationId,
     streamSessionKey: streamThreadKey,
     threadConversationId: activeThreadInfo?.conversationId,
     attachmentIds: activeThreadInfo?.attachmentIds,
     canvasId: canvasInfo?.canvasId ?? null,
+    workflowContext: toWorkflowContext(activeWorkflowInfo),
     setMessages,
     setConversationId,
     setCurrentTraceId,
@@ -705,6 +923,7 @@ const XyneAISidebar = ({
     setDebugArtifactsReadyVersion,
     webSearchEnabled: webSearchAccessible ? webSearchEnabled : false,
     deepResearchEnabled: deepResearchAccessible ? deepResearchEnabled : false,
+    researchContext: researchContext ?? null,
     createCanvasEnabled,
     isV2,
     suppressCompletionToast: isAgentForced,
@@ -712,16 +931,31 @@ const XyneAISidebar = ({
     ticketIds: selectedTickets.map(t => t.id),
     canvasIds: selectedCanvases.map(c => c.id),
     callIds: [...selectedTranscripts.map(t => t.id), ...selectedRecordings.map(r => r.id)],
-    attachedContext: toAttachedContext({
-      channels: selectedChannels,
-      tickets: selectedTickets,
-      canvases: selectedCanvases,
-      transcripts: selectedTranscripts,
-      recordings: selectedRecordings,
-    }),
+    attachedContext: toAttachedContext(kbContextSelections),
+    // Same content as attachedContext now that files ride in kbContextSelections
+    // directly — kept as a separate field for the optimistic message pill so it
+    // matches what reload shows once the backend persists the sent context.
+    displayAttachedContext: toAttachedContext(kbContextSelections),
     agentSlug: effectiveAgentSlug,
     model: selectedModel,
+    modelProvider: !selectedModel
+      ? null
+      : selectedModel.startsWith('local-harness:')
+        ? 'local-harness'
+        : (agentModelsData?.pinProvider ?? 'litellm'),
+    thinkingLevel,
   });
+
+  // Dimensions every act-on-answer click carries (see MessageItem).
+  const messageTrackContext = useMemo(
+    () => ({
+      surface: 'panel',
+      ...(conversationId && { conversationId }),
+      agentSlug: effectiveAgentSlug ?? 'ask-ai',
+      ...(selectedModel && { model: selectedModel }),
+    }),
+    [conversationId, effectiveAgentSlug, selectedModel],
+  );
 
   // Start fresh chat when startFreshChat flag is set
   // This is triggered when XyneAI is invoked from "Ask AI" button
@@ -760,12 +994,21 @@ const XyneAISidebar = ({
             ...(channelId && { channelId }),
             ...(threadInfo && { threadInfo }),
             ...(canvasInfo && { canvasInfo }),
+            ...(researchContext && { researchContext }),
             startFreshChat: false,
           });
         }
       }
     }
-  }, [startFreshChat, channelId, threadInfo, canvasInfo, isFullscreen, isAgentForced]);
+  }, [
+    startFreshChat,
+    channelId,
+    threadInfo,
+    canvasInfo,
+    researchContext,
+    isFullscreen,
+    isAgentForced,
+  ]);
 
   // Scroll to bottom function
   const scrollToBottom = useCallback((): void => {
@@ -1052,6 +1295,7 @@ const XyneAISidebar = ({
           isStreaming: false,
         }));
         setMessages(messagesWithoutStreaming);
+        seedContextFromMessages(messagesWithoutStreaming);
         setConversationId(conversation.sessionId);
         setConversationChannelId(conversation.channelId || null);
         setBranchSelections({});
@@ -1307,6 +1551,26 @@ const XyneAISidebar = ({
     setSelectedRecordings(prev => prev.filter(r => r.id !== id));
   }, []);
 
+  // On switching to a conversation, carry its last user-turn context into the
+  // composer so the input is pre-filled with the context last used there.
+  // Context is chat-wise: REPLACE the editable context with this chat's last-turn
+  // context, and CLEAR it when that turn had none — so one chat's context never
+  // leaks into another. NOTE: collection PILLS are owned by XyneAIInputBox (only
+  // ids reach the sidebar), so we sync the ids here for what's sent, but the
+  // pill display for collections still only fully reflects on reload.
+  const seedContextFromMessages = useCallback((msgs: Message[]): void => {
+    const lastUser = [...msgs].reverse().find(m => m.type === 'user');
+    const c = attachedContextToSelections(lastUser?.attachedContext ?? []);
+    setSelectedChannels(c.channels);
+    setSelectedTickets(c.tickets);
+    setSelectedCanvases(c.canvases);
+    setSelectedTranscripts(c.transcripts);
+    setSelectedRecordings(c.recordings);
+    setFileScopes(c.fileScopes);
+    setFolderScopes(c.folderScopes);
+    setSelectedCollectionIds(c.collections.map(col => col.id));
+  }, []);
+
   const handleAddActivities = useCallback((activities: UserActivity[]): void => {
     if (activities.length === 0) return;
     setSelectedActivities(prev => {
@@ -1540,7 +1804,11 @@ const XyneAISidebar = ({
   // follow-up before reload, flattens after). The JAF v1 path infers the
   // same intent from `parentMessageId`, so the extra params are no-ops there.
   const handleEditMessage = useCallback(
-    async (messageId: string, newContent: string): Promise<void> => {
+    async (
+      messageId: string,
+      newContent: string,
+      editedContext?: EditedMessageContext,
+    ): Promise<void> => {
       if (isActiveSessionStreaming) return;
 
       const messageToEdit = messages.find((m: Message) => m.id === messageId);
@@ -1550,11 +1818,21 @@ const XyneAISidebar = ({
 
       const editedParentAssistant = messageToEdit.parentId ?? undefined;
 
+      // An edit that dropped a context card must re-run without it. `undefined`
+      // means the editor never offered the choice (mobile), so the original
+      // still stands; an empty list means the reader removed everything.
+      const editedAttachments = editedContext
+        ? (editedContext.attachments ?? [])
+        : (messageToEdit.attachments ?? []);
+      const editedSelectionContexts = editedContext
+        ? editedContext.selectionContexts
+        : messageToEdit.selectionContexts;
+
       // Submit with new content, parentId = original message's parent (creates sibling branch)
       await submitQuery(
         newContent,
-        messageToEdit.attachments ?? [],
-        messageToEdit.selectionContexts,
+        editedAttachments,
+        editedSelectionContexts,
         newContent,
         undefined, // userTags — not needed for edit
         editedParentAssistant,
@@ -1601,158 +1879,195 @@ const XyneAISidebar = ({
   );
   const deskAutoDraftRef = useRef<{ conversationId: string; channelId: string } | null>(null);
 
-  const handleSubmit = useCallback(async (): Promise<void> => {
-    // Allow submission if there's input, activities, OR selection contexts
-    if (!inputValue.trim() && selectedActivities.length === 0 && activeSelectionInfos.length === 0)
-      return;
-
-    const deskDraft = deskAutoDraftRef.current;
-    if (deskDraft && deskDraft.conversationId === conversationId) {
-      try {
-        const forked = await forkDeskAutoDraft(deskDraft.conversationId, deskDraft.channelId);
-        deskAutoDraftRef.current = null;
-        setConversationId(forked.conversationId);
-      } catch {
-        toast.error('Could not continue this draft conversation');
+  const handleSubmit = useCallback(
+    async (trigger?: XyneAiSendTrigger): Promise<void> => {
+      // Allow submission if there's input, activities, OR selection contexts
+      if (
+        !inputValue.trim() &&
+        selectedActivities.length === 0 &&
+        activeSelectionInfos.length === 0
+      )
         return;
+
+      const deskDraft = deskAutoDraftRef.current;
+      if (deskDraft && deskDraft.conversationId === conversationId) {
+        try {
+          const forked = await forkDeskAutoDraft(deskDraft.conversationId, deskDraft.channelId);
+          deskAutoDraftRef.current = null;
+          setConversationId(forked.conversationId);
+        } catch {
+          toast.error('Could not continue this draft conversation');
+          return;
+        }
       }
-    }
 
-    // Store the display content (what the user typed, without hidden context)
-    const displayContent = inputValue.trim();
+      // Store the display content (what the user typed, without hidden context)
+      const displayContent = inputValue.trim();
 
-    // Build the full query with all context for the AI
-    // Note: Activities are sent separately via attachedContext in useXyneAIStream, not in query
-    let query = inputValue;
+      // Build the full query with all context for the AI
+      // Note: Activities are sent separately via attachedContext in useXyneAIStream, not in query
+      let query = inputValue;
 
-    // Add browser context if present (hidden from display but sent to AI)
-    if (browserContext) {
-      const contextText = `\n\n[Browser Context]\nSelected Text: "${browserContext.text}"\nFrom: ${browserContext.title} (${browserContext.url})\nDomain: ${browserContext.domain}`;
-      query = query + contextText;
-    }
-
-    // Note: Selection text is NOT appended to query here - it's handled internally in useXyneAIStream
-    // The user message will show original query + selectionContexts as visual cards
-
-    const currentAttachments = attachments;
-
-    // Track submission-time metrics
-    if (webSearchEnabled) trackWebSearchQuery();
-    if (deepResearchEnabled) trackDeepResearchQuery();
-    if (createCanvasEnabled) trackCanvasModeQuery();
-    if (currentAttachments.length > 0) trackAttachmentsAdded(currentAttachments.length);
-
-    // Convert attachments to MessageAttachment format for display
-    const messageAttachments: MessageAttachment[] = currentAttachments.map(att => ({
-      filename: att.filename,
-      mimeType: att.mimeType,
-      data: att.data,
-    }));
-
-    // Build selection contexts for UI display and internal formatting
-    const selectionContexts =
-      activeSelectionInfos.length > 0
-        ? activeSelectionInfos.map(selection => ({
-            canvasId: selection.canvasId,
-            selectedText: selection.text,
-            preview: selection.preview,
-            ...(selection.canvasTitle && { canvasTitle: selection.canvasTitle }),
-          }))
-        : undefined;
-
-    // Stuck-draft recovery: a fresh draft slot still holding a completed turn
-    // means the first turn ended without ever establishing a server session
-    // (it errored/aborted before the sessionId arrived). A follow-up would be
-    // inserted as a second parentless root and resolveActivePath would fork the
-    // tree (phantom 1/2 branch arrows). The dead turn was never persisted — a
-    // reload already shows only the surviving turn — so drop it and start the
-    // retry as a clean single-chain conversation. Only clears local message
-    // state (not streamThreadKey/conversationId), so the submitQuery closure
-    // stays valid and live-stream routing is unaffected.
-    if (
-      !editingMessageId &&
-      usesDraftStreamKeyRef.current &&
-      messages.length > 0 &&
-      !messages.some((m: Message) => m.isStreaming)
-    ) {
-      setMessages([]);
-      setBranchSelections({});
-    }
-
-    // Determine parentMessageId for branching
-    let parentMessageId: string | undefined;
-
-    if (editingMessageId) {
-      // Mobile edit: create sibling branch from same parent as the edited message
-      const editedMsg = messages.find((m: Message) => m.id === editingMessageId);
-      if (editedMsg) {
-        parentMessageId = editedMsg.parentId ?? undefined;
+      // Add browser context if present (hidden from display but sent to AI)
+      if (browserContext) {
+        const contextText = `\n\n[Browser Context]\nSelected Text: "${browserContext.text}"\nFrom: ${browserContext.title} (${browserContext.url})\nDomain: ${browserContext.domain}`;
+        query = query + contextText;
       }
-      abortCurrentRequest();
-      setEditingMessageId(null);
-    } else if (!isLegacyConversation) {
-      // Normal submit: chain from the last displayed message for established sessions only.
-      // Draft stream slots (new chat / new parallel session) stay on a fresh server session until
-      // the first turn completes — omit parentMessageId here so turns are not linked as tree
-      // siblings/branches of another session. Regenerate and edit still pass parent explicitly.
-      const lastDisplayed = displayMessages[displayMessages.length - 1];
-      if (lastDisplayed && !usesDraftStreamKeyRef.current) {
-        parentMessageId = lastDisplayed.id;
+
+      // Note: Selection text is NOT appended to query here - it's handled internally in useXyneAIStream
+      // The user message will show original query + selectionContexts as visual cards
+
+      const currentAttachments = attachments;
+
+      // Submission-time otel counters fire inside useXyneAIStream.submitQuery now,
+      // so the /ai page and this panel count the same way.
+      messagesSentWhileOpenRef.current += 1;
+      // The auto-send effect below clears autoSendPendingQueryRef before calling
+      // handleSubmit, so read the trigger off a flag it sets for this one call;
+      // otherwise it is whatever the input box said (button / enter).
+      const sendTrigger = autoSendTriggerRef.current ?? trigger ?? null;
+      autoSendTriggerRef.current = null;
+
+      // Convert attachments to MessageAttachment format for display
+      const messageAttachments: MessageAttachment[] = currentAttachments.map(att => ({
+        filename: att.filename,
+        mimeType: att.mimeType,
+        data: att.data,
+      }));
+
+      // Build selection contexts for UI display and internal formatting
+      const selectionContexts =
+        activeSelectionInfos.length > 0
+          ? activeSelectionInfos.map(selection => ({
+              canvasId: selection.canvasId,
+              selectedText: selection.text,
+              preview: selection.preview,
+              ...(selection.canvasTitle && { canvasTitle: selection.canvasTitle }),
+            }))
+          : undefined;
+
+      // Stuck-draft recovery: a fresh draft slot still holding a completed turn
+      // means the first turn ended without ever establishing a server session
+      // (it errored/aborted before the sessionId arrived). A follow-up would be
+      // inserted as a second parentless root and resolveActivePath would fork the
+      // tree (phantom 1/2 branch arrows). The dead turn was never persisted — a
+      // reload already shows only the surviving turn — so drop it and start the
+      // retry as a clean single-chain conversation. Only clears local message
+      // state (not streamThreadKey/conversationId), so the submitQuery closure
+      // stays valid and live-stream routing is unaffected.
+      if (
+        !editingMessageId &&
+        usesDraftStreamKeyRef.current &&
+        messages.length > 0 &&
+        !messages.some((m: Message) => m.isStreaming)
+      ) {
+        setMessages([]);
+        setBranchSelections({});
       }
-    }
 
-    setInputValue('');
-    setAttachments([]);
-    setSelectedActivities([]);
-    setBrowserContext(null); // Clear browser context after submit
-    // Note: Don't clear selection infos - they persist for follow-up questions
+      // Determine parentMessageId for branching
+      let parentMessageId: string | undefined;
 
-    // Set the channel ID for this conversation if not already set
-    // This ensures the conversation is saved to the correct channel even if user switches channels
-    // For KB context (channelId is null), use kbCollectionId for storage
-    if (!conversationChannelId) {
-      if (channelId) {
-        setConversationChannelId(channelId);
-      } else if (kbCollectionIdProp) {
-        setConversationChannelId(kbCollectionIdProp);
+      if (editingMessageId) {
+        // Mobile edit: create sibling branch from same parent as the edited message
+        const editedMsg = messages.find((m: Message) => m.id === editingMessageId);
+        if (editedMsg) {
+          parentMessageId = editedMsg.parentId ?? undefined;
+        }
+        abortCurrentRequest();
+        setEditingMessageId(null);
+      } else if (!isLegacyConversation) {
+        // Normal submit: chain from the last displayed message for established sessions only.
+        // Draft stream slots (new chat / new parallel session) stay on a fresh server session until
+        // the first turn completes — omit parentMessageId here so turns are not linked as tree
+        // siblings/branches of another session. Regenerate and edit still pass parent explicitly.
+        const lastDisplayed = displayMessages[displayMessages.length - 1];
+        if (lastDisplayed && !usesDraftStreamKeyRef.current) {
+          parentMessageId = lastDisplayed.id;
+        }
       }
-    }
 
-    // Scroll immediately after clearing input, before query is submitted
-    setTimeout(() => {
-      scrollToBottom();
-    }, 50);
+      setInputValue('');
+      setAttachments([]);
+      setSelectedActivities([]);
+      setBrowserContext(null); // Clear browser context after submit
+      // Note: Don't clear selection infos - they persist for follow-up questions
 
-    // Include userTags in the user message for display
-    const userTagsForMessage =
-      Object.keys(currentUserTags).length > 0 ? currentUserTags : undefined;
+      // Set the channel ID for this conversation if not already set
+      // This ensures the conversation is saved to the correct channel even if user switches channels
+      // For KB context (channelId is null), use kbCollectionId for storage
+      if (!conversationChannelId) {
+        if (channelId) {
+          setConversationChannelId(channelId);
+        } else if (kbCollectionIdProp) {
+          setConversationChannelId(kbCollectionIdProp);
+        }
+      }
 
-    await submitQuery(
-      query,
-      messageAttachments,
-      selectionContexts,
-      displayContent,
-      userTagsForMessage,
-      parentMessageId,
-    );
-  }, [
-    inputValue,
-    attachments,
-    selectedActivities,
-    activeSelectionInfos,
-    browserContext,
-    currentUserTags,
-    submitQuery,
-    scrollToBottom,
-    conversationChannelId,
-    channelId,
-    editingMessageId,
-    messages,
-    displayMessages,
-    abortCurrentRequest,
-    isLegacyConversation,
-    kbCollectionIdProp,
-  ]);
+      // Scroll immediately after clearing input, before query is submitted
+      setTimeout(() => {
+        scrollToBottom();
+      }, 50);
+
+      // Include userTags in the user message for display
+      const userTagsForMessage =
+        Object.keys(currentUserTags).length > 0 ? currentUserTags : undefined;
+
+      try {
+        await submitQuery(
+          query,
+          messageAttachments,
+          selectionContexts,
+          displayContent,
+          userTagsForMessage,
+          parentMessageId,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          sendTrigger ? { trigger: sendTrigger } : undefined,
+        );
+      } finally {
+        // The attachment belongs to the message it was sent with, not to the
+        // conversation: the sent message carries its own copy of attachedContext
+        // (persisted server-side — it is what the history pills and
+        // edit/regenerate read), so clearing the composer changes nothing already
+        // said. Left in place it silently steered every later answer, and nothing
+        // ever removed it.
+        //
+        // In a finally: a send that throws is exactly when the context must not
+        // be left behind, since the turn it belonged to never happened.
+        setSelectedChannels([]);
+        setSelectedTickets([]);
+        setSelectedCanvases([]);
+        setSelectedTranscripts([]);
+        setSelectedRecordings([]);
+        setActiveSelectionInfos([]);
+        processedSelectionKeysRef.current.clear();
+        // The machine holds the canvas selections that feed the list above;
+        // without this its next update would put them straight back.
+        xyneAIActor.send({ type: 'CLEAR_SELECTIONS' });
+      }
+    },
+    [
+      inputValue,
+      attachments,
+      selectedActivities,
+      activeSelectionInfos,
+      browserContext,
+      currentUserTags,
+      submitQuery,
+      scrollToBottom,
+      conversationChannelId,
+      channelId,
+      editingMessageId,
+      messages,
+      displayMessages,
+      abortCurrentRequest,
+      isLegacyConversation,
+      kbCollectionIdProp,
+    ],
+  );
 
   // Submits once the auto-send seed effect above has landed in inputValue (handleSubmit closes over it).
   useEffect(() => {
@@ -1761,6 +2076,7 @@ const XyneAISidebar = ({
       inputValue === autoSendPendingQueryRef.current
     ) {
       autoSendPendingQueryRef.current = null;
+      autoSendTriggerRef.current = 'auto_send';
       void handleSubmit();
     }
   }, [inputValue, handleSubmit]);
@@ -1779,6 +2095,7 @@ const XyneAISidebar = ({
     canvases: selectedCanvases,
     transcripts: selectedTranscripts,
     recordings: selectedRecordings,
+    localFolders: [],
   };
 
   const sharedInputSectionProps = {
@@ -1788,6 +2105,8 @@ const XyneAISidebar = ({
     defaultModel: agentModelsData?.defaultModel ?? null,
     selectedModel,
     onSelectModel: setSelectedModel,
+    thinkingLevel,
+    onSelectThinking: setThinkingLevel,
     showContextModal,
     onCloseContextModal: handleCloseContextModal,
     onConfirmContext: handleConfirmContext,
@@ -1798,10 +2117,12 @@ const XyneAISidebar = ({
     scopeType,
     threadInfo: activeThreadInfo,
     canvasInfo,
+    workflowInfo: activeWorkflowInfo,
+    onRemoveWorkflowInfo: handleRemoveWorkflowInfo,
     selectionInfos: activeSelectionInfos,
     inputValue,
     onInputChange: setInputValue,
-    onSubmit: () => void handleSubmit(),
+    onSubmit: (trigger?: 'button' | 'enter') => void handleSubmit(trigger),
     onThreadInfoChange: setActiveThreadInfo,
     onSelectionInfosChange: setActiveSelectionInfos,
     onAttachmentsChange: setAttachments,
@@ -1819,6 +2140,8 @@ const XyneAISidebar = ({
       : {}),
     fileScopes,
     onFileScopesChange: setFileScopes,
+    folderScopes,
+    onFolderScopesChange: setFolderScopes,
     onOpenContextModal: handleOpenContextModal,
     selectedTickets,
     onRemoveTicket: handleRemoveTicket,
@@ -1830,7 +2153,9 @@ const XyneAISidebar = ({
     onRemoveRecording: handleRemoveRecording,
     selectedActivities,
     onActivitiesChange: setSelectedActivities,
-    onAbort: abortCurrentRequest,
+    onAbort: () => {
+      abortCurrentRequest();
+    },
     webSearchEnabled,
     webSearchAccessible,
     onWebSearchToggle: () => setWebSearchEnabled(!webSearchEnabled),
@@ -1842,7 +2167,8 @@ const XyneAISidebar = ({
     onUserTagsChange: setCurrentUserTags,
   };
 
-  const showInlineDebugger = showDebugger && isV2;
+  const showInlineDebugger = showDebugger && isV2 && debuggerPresentation === 'split';
+  const showReplacingDebugger = showDebugger && isV2 && debuggerPresentation === 'replace';
   const isCompactSidebar = sidebarContentWidth > 0 && sidebarContentWidth < 760;
   const isTightSidebar = sidebarContentWidth > 0 && sidebarContentWidth < 640;
 
@@ -1892,6 +2218,7 @@ const XyneAISidebar = ({
           'relative flex min-h-0 min-w-0 flex-1 flex-col',
           isMobile && 'bg-background',
           showInlineDebugger && 'border-r border-border/70',
+          showReplacingDebugger && 'hidden',
         )}
       >
         {/* Drag and Drop Overlay */}
@@ -1936,7 +2263,7 @@ const XyneAISidebar = ({
           <div ref={sidebarContentRef} className='flex h-full min-h-0 flex-col'>
             {aiOnboarding.isActive ? (
               <XyneAIOnboardingHeader onClose={completeOnboarding} />
-            ) : isFullscreen && messages.length === 0 ? null : (
+            ) : hideHeader ? null : isFullscreen && messages.length === 0 ? null : (
               <XyneAIHeader
                 onNewChat={handleNewChat}
                 onShowHistory={() => setShowHistorySidebar(true)}
@@ -1946,6 +2273,8 @@ const XyneAISidebar = ({
                 isTight={isTightSidebar}
                 title={isFullscreen ? 'Xyne AI' : selectedAgentName || 'Ask AI'}
                 selectedAgent={selectedAgent}
+                hideClose={hideHeaderClose}
+                dense={denseHeader}
                 onShowDebugger={
                   isV2 && !isAgentForced
                     ? () => {
@@ -1967,7 +2296,7 @@ const XyneAISidebar = ({
                 {...(onClose !== undefined
                   ? {
                       onClose: () => {
-                        abortCurrentRequest();
+                        if (!preserveStreamingOnClose) abortCurrentRequest();
                         onClose();
                       },
                     }
@@ -2083,7 +2412,7 @@ const XyneAISidebar = ({
                       </div>
                     </div>
                   ) : (
-                    <XyneAIEmptyState />
+                    <XyneAIEmptyState hideSuggestions={hideEmptyStateSuggestions} />
                   )
                 ) : (
                   <div className={cn(isFullscreen ? 'flex justify-center' : '')}>
@@ -2145,6 +2474,7 @@ const XyneAISidebar = ({
                                   onSummarizerCitationClick={handleSummarizerCitationClick}
                                   feedbackValue={feedbackMap[message.id] || null}
                                   isV2={isV2}
+                                  trackContext={messageTrackContext}
                                   onRatingChange={handleRatingChange}
                                   onRegenerate={
                                     !isLegacyConversation && isLatestBotMessage
@@ -2153,8 +2483,8 @@ const XyneAISidebar = ({
                                   }
                                   onEditSubmit={
                                     !isLegacyConversation && isLatestUserMessage
-                                      ? (newContent: string) =>
-                                          void handleEditMessage(message.id, newContent)
+                                      ? (newContent: string, context?: EditedMessageContext) =>
+                                          void handleEditMessage(message.id, newContent, context)
                                       : undefined
                                   }
                                   onEditMobile={
@@ -2175,7 +2505,7 @@ const XyneAISidebar = ({
                                       : undefined
                                   }
                                   onDebug={
-                                    isV2 && message.type === 'bot'
+                                    isV2 && !isAgentForced && message.type === 'bot'
                                       ? () => {
                                           setDebugTurnIndex(botTurnIndex);
                                           // Prefer sessionId pinning when the
@@ -2190,7 +2520,7 @@ const XyneAISidebar = ({
                                       : undefined
                                   }
                                   onOpenToolDebug={
-                                    isV2 && message.type === 'bot'
+                                    isV2 && !isAgentForced && message.type === 'bot'
                                       ? (toolCallId: string) => {
                                           setDebugTurnIndex(botTurnIndex);
                                           setDebugSessionId(message.debugSessionId ?? null);
@@ -2278,6 +2608,23 @@ const XyneAISidebar = ({
           </div>
         )}
       </div>
+
+      {showReplacingDebugger && (
+        <AskAIDebugPanel
+          open
+          fill
+          conversationId={conversationId || streamThreadKey}
+          agentSlug={effectiveAgentSlug || 'ask-ai'}
+          liveEvents={debugEvents}
+          running={isActiveSessionStreaming}
+          artifactsReadyVersion={debugArtifactsReadyVersion}
+          selectedTurnIndex={debugTurnIndex}
+          selectedTurnLive={debugTurnIndex !== null && debugTurnIndex === streamingBotTurnIndex}
+          selectedSessionId={debugSessionId}
+          focusToolCallId={debugFocusToolCallId}
+          onClose={() => setShowDebugger(false)}
+        />
+      )}
 
       {showInlineDebugger && (
         <>

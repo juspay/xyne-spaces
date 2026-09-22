@@ -24,6 +24,15 @@ registerDecryptionFallback(dataEncryptionKey, rootEncryptionKey);
 
 export const CONFIG = {
   port: Number(process.env["AUTH_SERVICE_PORT"] ?? 3003),
+  /**
+   * Reverse proxies in front of this process, for `trust proxy`.
+   *
+   * Defaults to 1 for the single load balancer every deployed environment sits
+   * behind. Harmless locally, where no X-Forwarded-For arrives and `req.ip`
+   * stays the socket address. Raise it if another hop is added, and never set
+   * it higher than the real count or clients can forge the header.
+   */
+  trustedProxyHops: Number(process.env["TRUSTED_PROXY_HOPS"] ?? 1),
   selfUrl: process.env["AUTH_SERVICE_URL"] ?? `http://localhost:${process.env["AUTH_SERVICE_PORT"] ?? 3003}`,
   // Cluster-internal URL used for service-to-service callbacks (claw → claw-auth)
   // and self-dispatch (claw-auth → its own /run). Setting this to the in-cluster
@@ -70,7 +79,7 @@ export const CONFIG = {
   // key that lives on the platform proxy can leave the credential's baseUrl
   // blank and hit this. Trailing slashes stripped so `${base}/v1/models` joins
   // cleanly.
-  litellmBaseUrl: (process.env["LITELLM_BASE_URL"] ?? "https://grid.ai.example.com").replace(/\/+$/, ""),
+  litellmBaseUrl: (process.env["LITELLM_BASE_URL"] ?? "https://grid.ai.juspay.net").replace(/\/+$/, ""),
   /**
    * Flip the claw → claw-auth transport from per-chunk HTTP POSTs to a single
    * SSE stream. When on, run-stream.ts opens an SSE connection to claw's
@@ -88,6 +97,14 @@ export const CONFIG = {
   cliTokensEnabled: ["1", "true", "on", "yes"].includes(
     (process.env["CLI_TOKENS_ENABLED"] ?? "").trim().toLowerCase(),
   ),
+  localHarnessEnabled: ["1", "true", "on", "yes"].includes(
+    (process.env["LOCAL_HARNESS_ENABLED"] ?? "").trim().toLowerCase(),
+  ),
+  localHarnessDefaultAll: ["1", "true", "on", "yes"].includes(
+    (process.env["LOCAL_HARNESS_DEFAULT_ALL"] ?? "").trim().toLowerCase(),
+  ),
+  localHarnessPollTimeoutMs: Number(process.env["LOCAL_HARNESS_POLL_TIMEOUT_MS"] ?? 25_000),
+  localHarnessRunTimeoutMs: Number(process.env["LOCAL_HARNESS_RUN_TIMEOUT_MS"] ?? 900_000),
   xyneSpacesCallbackUrl: process.env["XYNE_SPACES_CALLBACK_URL"] ?? "",
   spacesBackendUrl: process.env["SPACES_BACKEND_URL"] ?? "http://localhost:3001",
   // Cluster-internal Spaces URL — used for high-volume server-to-server API
@@ -136,6 +153,10 @@ export const CONFIG = {
   // + instructions are stored under the fixed logical "daily-brief" slug,
   // independent of this, so switching the executing agent never moves user data.
   dailyBriefAgentSlug: process.env["DAILY_BRIEF_AGENT_SLUG"] ?? "ask-ai",
+  webhookHistoryWordLimit: Math.max(1, Number(process.env["WEBHOOK_HISTORY_WORD_LIMIT"] ?? 1500)),
+  attachmentDownloadTimeoutMs: Math.max(1_000, Number(process.env["ATTACHMENT_DOWNLOAD_TIMEOUT_MS"] ?? 60_000)),
+  runAttachmentRefs: process.env["XYNE_RUN_ATTACHMENT_REFS"] === "1",
+  runQueueMaxAttempts: Math.max(1, Number(process.env["RUN_QUEUE_MAX_ATTEMPTS"] ?? 4)),
   dailyBriefConcurrency: Number(process.env["DAILY_BRIEF_CONCURRENCY"] ?? 8),
   // CLUSTER-GLOBAL cap on concurrent brief LLM runs (Redis semaphore), independent
   // of replica count — this, not per-worker concurrency, is the real provider-rate
@@ -147,6 +168,34 @@ export const CONFIG = {
   dailyBriefRateDurationMs: Number(process.env["DAILY_BRIEF_RATE_DURATION_MS"] ?? 1000),
   dailyBriefCronUtcHour: Number(process.env["DAILY_BRIEF_CRON_UTC_HOUR"] ?? 0),
   dailyBriefCronUtcMinute: Number(process.env["DAILY_BRIEF_CRON_UTC_MINUTE"] ?? 30),
+
+  // Weekly usage-pattern sync. Same two-stage shape as the Daily Brief: a
+  // leader-locked cron enqueues one job per ACTIVE agent, a bounded worker
+  // drains them. Per-pod concurrency is small on purpose; the cluster-global
+  // cap below is the one that actually bounds provider load across replicas.
+  usagePatternConcurrency: Math.max(1, Number(process.env["USAGE_PATTERN_CONCURRENCY"] ?? 2)),
+  usagePatternGlobalConcurrency: Number(process.env["USAGE_PATTERN_GLOBAL_CONCURRENCY"] ?? 3),
+  // Long, because deferring is cheap here: a job that waits out the window is
+  // retried on backoff and the week has room for that. It has to exceed how
+  // long a slot is typically HELD, though, or a queue draining behind three
+  // slow passes would burn its BullMQ attempts just waiting to start.
+  usagePatternSlotWaitMs: Math.max(1_000, Number(process.env["USAGE_PATTERN_SLOT_WAIT_MS"] ?? 1_800_000)),
+  // Lookback for the synthesis window. Long enough that a weekly pass sees a
+  // corpus that can clear the aggregation thresholds.
+  usagePatternWindowDays: Math.max(1, Number(process.env["USAGE_PATTERN_WINDOW_DAYS"] ?? 30)),
+  // Shares USAGE_PATTERNS_MIN_RUNS with the threshold inside the synthesizer, so
+  // the roster filter and the pass agree on what "too few runs" means.
+  usagePatternMinRuns: Math.max(1, Number(process.env["USAGE_PATTERNS_MIN_RUNS"] ?? 3)),
+  // Ceiling on one week's fan-out. Never reached by a normal roster; it is
+  // the stop on a runaway (a fleet-wide scan across many orgs, or a threshold
+  // mistyped low). What it drops is logged rather than silently truncated.
+  usagePatternMaxPerWeek: Math.max(1, Number(process.env["USAGE_PATTERN_MAX_PER_WEEK"] ?? 500)),
+  // UTC day-of-week (0 = Sunday) and time of the weekly slot. Monday 02:00 UTC
+  // by default: early in the ISO week, so a pod that boots later in the week can
+  // still catch up on it. Sunday would leave no room.
+  usagePatternCronUtcDay: Number(process.env["USAGE_PATTERN_CRON_UTC_DAY"] ?? 1),
+  usagePatternCronUtcHour: Number(process.env["USAGE_PATTERN_CRON_UTC_HOUR"] ?? 2),
+  usagePatternCronUtcMinute: Number(process.env["USAGE_PATTERN_CRON_UTC_MINUTE"] ?? 0),
   // OTLP/HTTP metrics → the shared collector (same one the spaces backend and
   // dashboard export to). Set ENABLE_OTEL_METRICS=false where no collector runs.
   otelMetricsEnabled: (process.env["ENABLE_OTEL_METRICS"] ?? "true").trim().toLowerCase() !== "false",
@@ -267,6 +316,30 @@ export const CONFIG = {
    */
   searchEvalQueryDelayMs: Number(process.env["SEARCH_EVAL_QUERY_DELAY_MS"] ?? 500),
   /**
+   * EnterpriseRAG-Bench (Onyx) eval harness — targets a SEPARATE Vespa cluster
+   * holding the benchmark corpus, never the prod-connected one above.
+   *
+   *   ONYX_EVAL_VESPA_ENDPOINT  benchmark Vespa query endpoint — used ONLY by
+   *                             the harness's gold-material fetch by id
+   *                             (§5.3 search); the agent-under-test NEVER
+   *                             touches this — retrieval runs via spaces-search
+   *                             (the prod code path).
+   *   ONYX_EVAL_WORKSPACE_ID    workspaceId stamped on every benchmark doc —
+   *                             used verbatim as the YQL `workspaceId contains`
+   *                             filter for the gold fetch (Vespa only, is a
+   *                             string literal there; no DB validates it).
+   *   ONYX_EVAL_CLAW_TIMEOUT_MS the claw run timeout applied to the S2S call.
+   *
+   * The dispatch fires the SEEDED "onyx-ask-ai" agent row — slug hardcoded in
+   * the worker; bench tool narrowing (onyx-bench-search only) is also
+   * programmatic. Retrieval reaches the benchmark Vespa DIRECTLY
+   * (CONFIG.onyxVespaEndpoint) from the tool child — no spaces backend in the
+   * path.
+   */
+  onyxVespaEndpoint: (process.env["ONYX_EVAL_VESPA_ENDPOINT"] ?? "").replace(/\/+$/, ""),
+  onyxWorkspaceId: process.env["ONYX_EVAL_WORKSPACE_ID"] ?? "",
+  onyxEvalClawTimeoutMs: Number(process.env["ONYX_EVAL_CLAW_TIMEOUT_MS"] ?? 300_000),
+  /**
    * Entity extraction — reads a channel's threads/tickets out of Vespa and
    * discovers the entity types the org talks about. The completions run on
    * xyne-claw (see services/entityExtraction/entityLlmClient.ts), so the model
@@ -331,6 +404,17 @@ export const CONFIG = {
   ).replace(/\/+$/, ""),
 } as const;
 
+// Prod safety gate: the claw-auth → session-MCP relay and the run callbacks
+// authenticate to xyne-claw with x-s2s-key. If the local harness is enabled in
+// production without that shared secret, every relay/callback would be sent
+// UNAUTHENTICATED — fail fast at boot instead of shipping an open bridge.
+if (CONFIG.localHarnessEnabled && CONFIG.isProduction && !CONFIG.xyneClawS2sKey) {
+  throw new Error(
+    "LOCAL_HARNESS_ENABLED=true in production requires XYNE_CLAW_S2S_KEY to be set " +
+    "(the local-harness MCP relay and run callbacks must be S2S-authenticated).",
+  );
+}
+
 // Grafana → error auto-fix pipeline (lives here — claw stays stateless; the
 // queues + fix records ride this service's existing Redis).
 export const ERROR_PIPELINE = {
@@ -346,3 +430,20 @@ export const ERROR_PIPELINE = {
   agentUserId: process.env["ERROR_PIPELINE_AGENT_USER_ID"] ?? "",
   agentTimeoutMs: 30 * 60 * 1000,
 } as const;
+
+export const CLAUDE_OAUTH = {
+  clientId: process.env["CLAUDE_OAUTH_CLIENT_ID"] ?? "",
+  authorizeUrl: process.env["CLAUDE_OAUTH_AUTHORIZE_URL"] ?? "",
+  tokenUrl: process.env["CLAUDE_OAUTH_TOKEN_URL"] ?? "",
+  redirectUri: process.env["CLAUDE_OAUTH_REDIRECT_URI"] ?? "",
+  scopes: process.env["CLAUDE_OAUTH_SCOPES"] ?? "",
+  pkcePrefix: process.env["CLAUDE_OAUTH_PKCE_PREFIX"] ?? "claude-pkce-user:",
+} as const;
+
+export const claudeOAuthConfigured = (): boolean =>
+  Boolean(
+    CLAUDE_OAUTH.clientId &&
+      CLAUDE_OAUTH.authorizeUrl &&
+      CLAUDE_OAUTH.tokenUrl &&
+      CLAUDE_OAUTH.redirectUri,
+  );

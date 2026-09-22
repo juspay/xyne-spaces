@@ -1,13 +1,12 @@
 import { ReactElement, useEffect, useMemo, useRef } from 'react';
 import type { Ticket, TicketTag } from '@xyne/shared';
-import type { TicketPriority } from '@xyne/shared';
+import { type TicketPriority } from '@xyne/shared';
 import { queries } from '../../zero/queries';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
 import { useGetChannelUserStatus } from '../../hooks/useChannels';
 import { dataLoadDuration, safeRecordMetric } from '../../services/otel';
 import { logger, Event } from '../../utils/logger';
 import { TicketTable } from '../../components/Tickets/TicketTable/TicketTable';
-import { buildDynamicFieldColumns } from '../../components/Tickets/TicketTable/dynamicFieldColumns';
 import {
   ticketMatchesDynamicFieldEntries,
   type DynamicFieldFilterEntry,
@@ -72,7 +71,7 @@ export const SupportTicketTable = ({
 
   const { conversationIdWhitelist, ...restTicketFilter } = ticketFilter;
   const [supportTickets, supportTicketsDetails] = useCachedQuery(
-    queries.supportTicketsFilteredV3({
+    queries.supportTicketsFilteredV4({
       channelId,
       isMember,
       ...restTicketFilter,
@@ -168,7 +167,7 @@ export const SupportTicketTable = ({
     if (dynamicallyFilteredTickets) onTicketsLoaded?.(dynamicallyFilteredTickets as Ticket[]);
   }, [dynamicallyFilteredTickets, onTicketsLoaded]);
 
-  // supportTicketsFilteredV3 already relates tagMappings on every row, so unlike
+  // supportTicketsFilteredV4 already relates tagMappings on every row, so unlike
   // Board's ticketsQueryV2 there's no fallback path needed here.
   const tagsByTicketId = useMemo(() => {
     const map = new Map<string, TicketTag[]>();
@@ -193,11 +192,6 @@ export const SupportTicketTable = ({
     return Array.from(new Set(projectTags.map(tag => tag.name))).sort();
   }, [projectTags]);
 
-  const extraColumns = useMemo(
-    () => buildDynamicFieldColumns(dynamicFieldColumns ?? []),
-    [dynamicFieldColumns],
-  );
-
   return (
     <TicketTable
       tickets={(dynamicallyFilteredTickets ?? []) as Ticket[]}
@@ -207,7 +201,7 @@ export const SupportTicketTable = ({
       {...(selectedIds !== undefined ? { selectedIds } : {})}
       {...(onSelectionChange !== undefined ? { onSelectionChange } : {})}
       {...(visibleColumns ? { visibleColumns } : {})}
-      extraColumns={extraColumns}
+      paginationMode='pages'
     />
   );
 };

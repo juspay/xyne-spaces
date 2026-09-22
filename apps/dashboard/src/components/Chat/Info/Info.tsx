@@ -19,9 +19,10 @@ import { isOneToOneDMChannel, isGroupDMChannel } from '../ChatDirectory/ChatDire
 import Button from '../../ui/Button';
 import * as Tabs from '@radix-ui/react-tabs';
 import { cn } from '../../../utils/classNames';
+import { logger, Event as LogEvent } from '../../../utils/logger';
 import Input from '../../ui/Input';
 import { Dialog } from '../../ui/Dialog/Dialog';
-import { AddPeopleForm } from '../AddPeopleForm/AddPeopleForm';
+import { AddPeopleDialog } from '../AddPeopleForm/AddPeopleDialog';
 import AboutChannel from '../AboutChannel/AboutChannel';
 import ChannelSettings from '../ChannelInformation/ChannelSettings';
 import { CallSummaryConfig } from '../CallSettings/CallSummaryConfig';
@@ -58,13 +59,27 @@ import { useCallConfirmation } from '../../../hooks/useCallConfirmation';
 import { CallConfirmationModal } from '../../Call/CallConfirmationModal';
 import { useGetChannelUserStatus } from '../../../hooks/useChannels';
 import { mutators } from '../../../zero/mutators';
-import { useUser, useUsers } from '../../../hooks/useUsers';
+import { useUser, useUsers, useUsersById } from '../../../hooks/useUsers';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { v4 as uuidv4 } from 'uuid';
 import { VisibleChannel } from '../../../machines/stateMachine';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
+import { channelTrackingMetadata } from '../../../services/Analytics/channelTracking';
 
-export type ChannelTab = 'about' | 'members' | 'notifications' | 'settings' | 'ai-features';
+export type ChannelTab =
+  | 'about'
+  | 'members'
+  | 'agents-apps'
+  | 'notifications'
+  | 'settings'
+  | 'ai-features';
+
+const APP_USER_EMAIL_SUFFIXES = ['@app.xyne.ai', '@bot.xyne.ai'];
+const isAppUserEmail = (email: string | null | undefined): boolean => {
+  if (!email) return false;
+  const lower = email.toLowerCase();
+  return APP_USER_EMAIL_SUFFIXES.some(suffix => lower.endsWith(suffix));
+};
 interface InfoProps {
   channel: VisibleChannel;
   previousChannelId?: string | null;
@@ -93,6 +108,18 @@ const Info = ({
   const [showPromoteDialog, setShowPromoteDialog] = useState(false);
 
   const [participants] = useCachedQuery(queries.channelParticipants({ channelId: channel.id }));
+  const usersById = useUsersById();
+
+  const { humanMemberCount, agentAppCount } = useMemo(() => {
+    let human = 0;
+    let agentApp = 0;
+    for (const p of participants) {
+      const user = usersById.get(p.userId);
+      if (isAppUserEmail(user?.email)) agentApp++;
+      else human++;
+    }
+    return { humanMemberCount: human, agentAppCount: agentApp };
+  }, [participants, usersById]);
 
   const currentUserParticipant = useMemo(
     () => participants.find(p => p.userId === context.userID),
@@ -108,8 +135,9 @@ const Info = ({
   const addUserPolicy = channel.channelStats?.addUserPolicy ?? ChannelAddUserPolicy.EVERYONE;
   const showAddPeopleButton =
     isParticipant &&
-    !isDM &&
-    (channel.scopeType === ChannelScopeType.GROUP_DM ||
+    !isSelfDM &&
+    (isDM ||
+      channel.scopeType === ChannelScopeType.GROUP_DM ||
       currentUserParticipant?.role === ChannelRole.ADMIN ||
       addUserPolicy === ChannelAddUserPolicy.EVERYONE);
 
@@ -117,8 +145,43 @@ const Info = ({
   const navigate = useNavigate();
   const location = useLocation();
   const channelUserStatus = useGetChannelUserStatus(channel.id);
-  const [project] = useCachedQuery(queries.projectById({ projectId: channel.projectId }));
-  const [boards] = useCachedQuery(queries.boardsListByProject({ projectId: channel.projectId }));
+  // channel.projectId is nullable (decoupling). Empty string → no project/board match,
+  // and the panel falls back to the channel's board mappings below.
+  const [project] = useCachedQuery(queries.projectById({ projectId: channel.projectId ?? '' }));
+  const [channelBoardMappings, mappingDetails] = useCachedQuery(
+    queries.boardsByChannel({ channelId: channel.id }),
+  );
+  const [projectBoards] = useCachedQuery(
+    queries.boardsListByProject({ projectId: channel.projectId ?? '' }),
+  );
+
+  const boards = useMemo(() => {
+    const mappingSynced = mappingDetails.type === 'complete';
+    const mappedBoards = channelBoardMappings?.map(m => m.board) ?? [];
+    const filtered = mappedBoards.filter((b): b is NonNullable<typeof b> => Boolean(b));
+    const projectBoardsList = projectBoards ?? [];
+    if (filtered.length > 0) {
+      logger.debug(LogEvent.KANBAN_ENTITY_LOADED, {
+        source: 'Info',
+        resolution: 'channel-board-mapping',
+        channelId: channel.id,
+        mappedCount: filtered.length,
+        projectBoardsCount: projectBoardsList.length,
+      });
+      return filtered;
+    }
+    if (!mappingSynced) {
+      return projectBoardsList;
+    }
+    logger.debug(LogEvent.KANBAN_ENTITY_LOADED, {
+      source: 'Info',
+      resolution: 'project-boards-fallback',
+      channelId: channel.id,
+      mappedCount: 0,
+      projectBoardsCount: projectBoardsList.length,
+    });
+    return projectBoardsList;
+  }, [channelBoardMappings, mappingDetails.type, projectBoards, channel.id]);
 
   // Get target user ID for 1:1 DM calls
   const targetUserId = useMemo(() => {
@@ -139,11 +202,6 @@ const Info = ({
 
   const handleAddPeopleClick = (): void => {
     setShowAddPeopleDialog(true);
-  };
-
-  const handleAddPeopleSuccess = (): void => {
-    setShowAddPeopleDialog(false);
-    // Success - participants appear in the list automatically, no toast needed
   };
 
   const handleAddPeopleCancel = (): void => {
@@ -324,6 +382,7 @@ const Info = ({
             isStarred: channelUserStatus?.isStarred,
             channelId: channel.id,
           })}
+          data-ph-capture-attribute-track-id='toggle_channel_star'
         >
           {channelUserStatus?.isStarred ? (
             <LucideStar size={16} className='text-status-pending' fill='currentColor' />
@@ -392,7 +451,8 @@ const Info = ({
             className={headerLinkContainerStyle}
             data-track-category='CHAT_INFO'
             data-track-name='LEAVE_CHANNEL'
-            data-track-metadata={JSON.stringify({ channelId: channel.id })}
+            data-track-metadata={JSON.stringify(channelTrackingMetadata(channel))}
+            data-ph-capture-attribute-track-id='leave_channel'
           >
             <LucideLogOut size={16} className='text-destructive' />
             <div className='text-destructive text-[13px]'>Leave</div>
@@ -410,7 +470,12 @@ const Info = ({
           </Tabs.Trigger>
           {!isDM && (
             <Tabs.Trigger value='members' className={tabTriggerClass('members')}>
-              Members {channel.channelStats?.participantCount || 0}
+              Members {humanMemberCount}
+            </Tabs.Trigger>
+          )}
+          {!isDM && (
+            <Tabs.Trigger value='agents-apps' className={tabTriggerClass('agents-apps')}>
+              Agents & Apps {agentAppCount}
             </Tabs.Trigger>
           )}
           {isParticipant && !isSelfDM && (isDM || isGroupDM || !!channelUserStatus) && (
@@ -453,6 +518,21 @@ const Info = ({
               participants={participants}
               channelDisplayName={channelDisplayName}
               popoverContainer={popoverContainerRef.current}
+              filterMode='members'
+            />
+          </Tabs.Content>
+        )}
+        {!isDM && (
+          <Tabs.Content
+            value='agents-apps'
+            className='outline-none flex-1 min-h-0 rounded-b-lg overflow-hidden'
+          >
+            <ChannelMembers
+              channel={channel}
+              participants={participants}
+              channelDisplayName={channelDisplayName}
+              popoverContainer={popoverContainerRef.current}
+              filterMode='agents-apps'
             />
           </Tabs.Content>
         )}
@@ -498,13 +578,11 @@ const Info = ({
         )}
       </Tabs.Root>
 
-      <Dialog open={showAddPeopleDialog} onOpenChange={setShowAddPeopleDialog} title='Add Members'>
-        <AddPeopleForm
-          channelId={channel.id}
-          onSuccess={handleAddPeopleSuccess}
-          onCancel={handleAddPeopleCancel}
-        />
-      </Dialog>
+      <AddPeopleDialog
+        channelId={channel.id}
+        open={showAddPeopleDialog}
+        onOpenChange={open => (open ? setShowAddPeopleDialog(true) : handleAddPeopleCancel())}
+      />
 
       <Dialog open={showPromoteDialog} onOpenChange={setShowPromoteDialog}>
         <div className='p-4'>
@@ -635,6 +713,7 @@ const ParticipantListItem = ({
                       data-track-category='CHAT_INFO'
                       data-track-name='REMOVE_ADMIN'
                       data-track-metadata={JSON.stringify({ userId: participant.userId })}
+                      data-ph-capture-attribute-track-id='remove_channel_admin'
                     >
                       <LucideUserMinus size={14} />
                       <span className='text-[14px] text-foreground'>Remove admin</span>
@@ -646,6 +725,7 @@ const ParticipantListItem = ({
                       data-track-category='CHAT_INFO'
                       data-track-name='MAKE_ADMIN'
                       data-track-metadata={JSON.stringify({ userId: participant.userId })}
+                      data-ph-capture-attribute-track-id='make_channel_admin'
                     >
                       <LucideUser size={14} />
                       <span className='text-[14px] text-foreground'>Make admin</span>
@@ -657,7 +737,7 @@ const ParticipantListItem = ({
                     onClick={() =>
                       onRemove(participant.userId, getUserDisplayName(user) || 'this user')
                     }
-                    data-track-category='ChatInfo'
+                    data-track-category='CHAT_INFO'
                     data-track-name='RemoveParticipant'
                     data-track-metadata={JSON.stringify({ userId: participant.userId })}
                   >
@@ -680,11 +760,13 @@ const ChannelMembers = ({
   channel,
   channelDisplayName,
   popoverContainer,
+  filterMode = 'members',
 }: {
   channel: Channel;
   participants: NonNullable<QueryResultType<typeof queries.channelParticipants>>;
   channelDisplayName: string;
   popoverContainer?: HTMLElement | null;
+  filterMode?: 'members' | 'agents-apps';
 }): ReactElement => {
   const context = useAuthContextValues();
   const zero = useZero();
@@ -741,9 +823,12 @@ const ChannelMembers = ({
 
   const allUsers = useUsers();
   const usersById = useMemo(() => {
-    const map = new Map<string, { name: string; displayName?: string | null }>();
+    const map = new Map<
+      string,
+      { name: string; displayName?: string | null; email?: string | null }
+    >();
     for (const u of allUsers) {
-      map.set(u.id, { name: u.name, displayName: u.displayName });
+      map.set(u.id, { name: u.name, displayName: u.displayName, email: u.email });
     }
     return map;
   }, [allUsers]);
@@ -854,6 +939,15 @@ const ChannelMembers = ({
   const isAuthorizedToRemoveParticipant =
     channel.scopeType === ChannelScopeType.DEFAULT && currentUserIsAdmin;
 
+  const matchesFilterMode = useCallback(
+    (userId: string): boolean => {
+      const user = usersById.get(userId);
+      const isApp = isAppUserEmail(user?.email);
+      return filterMode === 'agents-apps' ? isApp : !isApp;
+    },
+    [usersById, filterMode],
+  );
+
   const filteredParticipants = useMemo(() => {
     // Helper to check if name starts with query (first or any word)
     const nameStartsWith = (name: string, query: string): boolean => {
@@ -870,25 +964,27 @@ const ChannelMembers = ({
 
     if (searchQuery.trim()) {
       // When searching, sort results so that users whose names start with the query appear first
-      return [...searchResults].sort((a, b) => {
-        const userA = usersById.get(a.userId);
-        const userB = usersById.get(b.userId);
-        const displayA = getUserDisplayName(userA);
-        const displayB = getUserDisplayName(userB);
-        const aStartsWith = userA ? nameStartsWith(displayA, searchQuery) : false;
-        const bStartsWith = userB ? nameStartsWith(displayB, searchQuery) : false;
+      return [...searchResults]
+        .filter(p => matchesFilterMode(p.userId))
+        .sort((a, b) => {
+          const userA = usersById.get(a.userId);
+          const userB = usersById.get(b.userId);
+          const displayA = getUserDisplayName(userA);
+          const displayB = getUserDisplayName(userB);
+          const aStartsWith = userA ? nameStartsWith(displayA, searchQuery) : false;
+          const bStartsWith = userB ? nameStartsWith(displayB, searchQuery) : false;
 
-        if (aStartsWith && !bStartsWith) return -1;
-        if (!aStartsWith && bStartsWith) return 1;
+          if (aStartsWith && !bStartsWith) return -1;
+          if (!aStartsWith && bStartsWith) return 1;
 
-        const nameA = displayA;
-        const nameB = displayB;
-        return nameA.localeCompare(nameB);
-      });
+          const nameA = displayA;
+          const nameB = displayB;
+          return nameA.localeCompare(nameB);
+        });
     }
 
-    return accumulatedParticipants;
-  }, [accumulatedParticipants, searchQuery, searchResults, usersById]);
+    return accumulatedParticipants.filter(p => matchesFilterMode(p.userId));
+  }, [accumulatedParticipants, searchQuery, searchResults, usersById, matchesFilterMode]);
 
   return (
     <div className='relative h-full min-h-0 flex flex-col'>
@@ -898,7 +994,7 @@ const ChannelMembers = ({
           <Input
             ref={searchInputRef}
             type='text'
-            placeholder='Find members'
+            placeholder={filterMode === 'agents-apps' ? 'Find agents & apps' : 'Find members'}
             autoFocus={!isMobile}
             value={searchQuery}
             onChange={handleSearchChange}
@@ -949,13 +1045,26 @@ const ChannelMembers = ({
               : 'This person will lose access to the channel but may rejoin later.'}
           </p>
           <div className='flex justify-end gap-3'>
-            <Button variant='secondary' onClick={() => setRemoveDialogOpen(false)} className='px-6'>
+            <Button
+              variant='secondary'
+              onClick={() => setRemoveDialogOpen(false)}
+              data-track-category='CHAT_INFO'
+              data-track-name='CANCEL_REMOVE_PARTICIPANT'
+              className='px-6'
+            >
               Cancel
             </Button>
             <Button
               variant='destructive'
               onClick={() => userToRemove && handleRemoveParticipant(userToRemove.id)}
+              data-track-category='CHAT_INFO'
+              data-track-name='CONFIRM_REMOVE_PARTICIPANT'
+              data-track-metadata={JSON.stringify({
+                ...channelTrackingMetadata(channel),
+                targetUserId: userToRemove?.id,
+              })}
               className='px-6'
+              trackId='remove_channel_participant'
             >
               Remove
             </Button>

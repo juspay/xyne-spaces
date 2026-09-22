@@ -256,6 +256,7 @@ export const SlaSettings: React.FC<SlaSettingsProps> = ({ boardId, disabled = fa
                     data-track-category='BOARD_SLA_SETTINGS'
                     data-track-name='TOGGLE_SLA_PRIORITY'
                     data-track-metadata={JSON.stringify({ priority })}
+                    data-ph-capture-attribute-track-id='toggle_sla_priority'
                   >
                     <span
                       className={cn(
@@ -537,7 +538,18 @@ export const SlaSettings: React.FC<SlaSettingsProps> = ({ boardId, disabled = fa
                       className='px-3 py-1.5 text-sm font-medium text-white bg-[#6276be] rounded-lg hover:bg-[#4f62a8] dark:hover:bg-[#7986d0] disabled:opacity-50 disabled:cursor-not-allowed transition-colors'
                       data-track-category='BOARD_SLA_SETTINGS'
                       data-track-name='SAVE_SLA_POLICY'
-                      data-track-metadata={JSON.stringify({ priority })}
+                      data-track-metadata={JSON.stringify({
+                        priority,
+                        priorityCount: existingPolicies.filter(p => p.isActive).length,
+                        businessHours: draft.businessHoursOnly,
+                        responseMinutes: Math.round(timeValueToDecimal(draft.responseTime) * 60),
+                        resolutionMinutes: Math.round(
+                          timeValueToDecimal(draft.resolutionTime) * 60,
+                        ),
+                        workdayStart: draft.workdayStart,
+                        workdayEnd: draft.workdayEnd,
+                      })}
+                      data-ph-capture-attribute-track-id='save_sla_policy'
                     >
                       Save
                     </button>

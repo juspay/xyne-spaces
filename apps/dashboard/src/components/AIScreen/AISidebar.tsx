@@ -20,6 +20,7 @@ import { usePlatform } from '../../hooks/usePlatform';
 import { useClawAdminAccessQuery } from '../../hooks/useClawAdminAccess';
 import { useClawOrgManageAccess } from '../../hooks/useClawOrganization';
 import { useAuth } from '../../hooks/useAuth';
+import { useDailyBriefEnabled } from '../../hooks/useDailyBriefEnabled';
 import { useV2SessionsList, useV2SessionInvalidator } from '../../hooks/useAskAISessionsV2';
 import { deleteV2Conversation } from '../../services/XyneAI/XyneAISessionsV2Service';
 import { useSelectedAgent } from '../../hooks/useSelectedAgent';
@@ -52,7 +53,7 @@ const LIST_ROW_IDLE_CLASS =
 
 type NavIcon = ComponentType<SVGProps<SVGSVGElement> & { size?: number }>;
 
-interface AINavItem {
+export interface AINavItem {
   key: string;
   label: string;
   icon: NavIcon;
@@ -63,11 +64,13 @@ interface AINavItem {
   trackName?: string;
   adminOnly?: boolean;
   orgManagerOnly?: boolean;
+  /** Hidden unless the user has the scheduled morning brief switched on. */
+  dailyBriefOnly?: boolean;
 }
 
-const NAV_ITEMS: AINavItem[] = [
+export const NAV_ITEMS: AINavItem[] = [
   { key: 'knowledge', label: 'Knowledge', icon: Notebook as NavIcon, to: '/ai/knowledge' },
-  { key: 'library', label: 'Library', icon: LayoutGridStackDown as NavIcon, to: '/ai/library' },
+  { key: 'agent-hub', label: 'Agent Hub', icon: LayoutGridStackDown as NavIcon, to: '/ai/library' },
   { key: 'digital-twin', label: 'Digital twin', icon: UserTwo as NavIcon, to: '/ai/digital-twin' },
   {
     key: 'organization',
@@ -86,6 +89,7 @@ const NAV_ITEMS: AINavItem[] = [
     to: '/ai/daily-brief/today',
     matchPath: '/ai/daily-brief',
     trackName: 'OPEN_DAILY_BRIEF',
+    dailyBriefOnly: true,
   },
 ];
 
@@ -252,6 +256,10 @@ function SessionHistory({
                     className='flex w-full items-center gap-2 px-4 py-2 text-left text-sm text-destructive hover:bg-accent'
                     data-track-category='XyneAI'
                     data-track-name='DELETE_SESSION'
+                    data-track-metadata={JSON.stringify({
+                      surface: 'page',
+                      conversationId: session.sessionId,
+                    })}
                   >
                     <DeleteDustbin01 size={14} className='shrink-0' aria-hidden />
                     <span>Delete</span>
@@ -306,10 +314,15 @@ function SessionHistory({
               </Button>
               <Button
                 variant='destructive'
+                trackId='ai_delete_session'
                 loading={isDeleting}
                 onClick={() => void confirmDelete()}
                 data-track-category='XyneAI'
                 data-track-name='CONFIRM_DELETE_SESSION'
+                data-track-metadata={JSON.stringify({
+                  surface: 'page',
+                  conversationId: pendingDeleteId,
+                })}
               >
                 Delete
               </Button>
@@ -342,8 +355,13 @@ export function AISidebar({
   const { user } = useAuth();
   const { isAdmin } = useClawAdminAccessQuery(user?.id);
   const { canManage: canManageOrg } = useClawOrgManageAccess();
+  const { enabled: dailyBriefEnabled } = useDailyBriefEnabled();
+  const onDailyBriefRoute = pathname.includes('/ai/daily-brief');
   const visibleNavItems = NAV_ITEMS.filter(
-    item => (!item.adminOnly || isAdmin) && (!item.orgManagerOnly || canManageOrg),
+    item =>
+      (!item.adminOnly || isAdmin) &&
+      (!item.orgManagerOnly || canManageOrg) &&
+      (!item.dailyBriefOnly || dailyBriefEnabled === true || onDailyBriefRoute),
   );
   const isNewChatActive = !routedActiveItem && !activeSessionId;
 

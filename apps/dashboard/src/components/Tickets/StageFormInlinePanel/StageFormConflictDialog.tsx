@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, FileText, Loader2 } from 'lucide-react';
+import { AlertTriangle, FileText, Spinner as Loader2 } from '@xyne/icons';
 import { useSelector } from '@xstate/react';
 import { FormFieldType } from '@xyne/shared';
 import type { MessageAttachment as MessageAttachmentRow } from '@xyne/shared';

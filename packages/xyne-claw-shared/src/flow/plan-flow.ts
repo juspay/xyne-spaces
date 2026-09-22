@@ -19,7 +19,7 @@
  *
  * Paired with the `todo-write` / `todo-read` tools (tools/todo/todo-tools.ts),
  * the `propose-plan` terminal tool (plan mode), and the claw-auth
- * /webhook/progress `kind:"plan"` + /webhook/result `pendingPlan` handlers that
+ * unified `ui-widget` progress + /webhook/result `pendingPlan` handlers that
  * do the post-then-update.
  */
 

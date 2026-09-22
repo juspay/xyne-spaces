@@ -18,6 +18,8 @@ import { config } from '@/config/env';
 import { currentWorkspaceId } from '@/database/tenant/context';
 import { Prisma } from '@prisma/client';
 import { IngestionStatus } from '@xyne/shared';
+import { maybeNotifyCollectionIngestionComplete } from '@/services/collectionIngestionNotifier';
+import { cleanupStage } from './storage';
 import {
   DOCLING_FILE_STATUS,
   DOCLING_PART_STATUS,
@@ -92,6 +94,19 @@ const partFromRow = (row: RawRow): DoclingPart => ({
   createdAt: dateOrNull(row.created_at) || new Date(),
   updatedAt: dateOrNull(row.updated_at) || new Date(),
 });
+
+/**
+ * A file that fails terminally is never written and never cleaned up by the
+ * writer, so its staged parts and per-part OCR results — document-derived
+ * content — would sit in the default bucket forever. Drop them on the terminal
+ * transition instead, unless the operator asked to keep temp results for
+ * debugging. Detached and best-effort: cleanupStage logs its own failures and
+ * never throws, and a failed cleanup must not fail the transition.
+ */
+const cleanupStageAfterTerminalFailure = (fileId: string): void => {
+  if (config.doclingScheduler.keepTempResults) return;
+  void cleanupStage(fileId);
+};
 
 /** Mark the latest collection item for a file with an ingestion status. */
 const setCollectionItemStatus = async (
@@ -485,6 +500,9 @@ export const failDoclingFile = async (
       WHERE file_id = ${fileId}`;
     await setCollectionItemStatus(tx, fileId, IngestionStatus.FAILED);
   });
+  // Terminal transition committed — check if the whole collection is now done.
+  void maybeNotifyCollectionIngestionComplete(fileId).catch(() => {});
+  cleanupStageAfterTerminalFailure(fileId);
 };
 
 export const failDoclingFileIfOwned = async (
@@ -492,7 +510,7 @@ export const failDoclingFileIfOwned = async (
   expectedStatus: string,
   errorMessage: string,
 ): Promise<boolean> => {
-  return await db.$transaction(async (tx) => {
+  const owned = await db.$transaction(async (tx) => {
     const claimed = await tx.$queryRaw<RawRow[]>`
       UPDATE non_zero.docling_async_files
       SET status = ${DOCLING_FILE_STATUS.Failed},
@@ -518,6 +536,11 @@ export const failDoclingFileIfOwned = async (
     await setCollectionItemStatus(tx, file.fileId, IngestionStatus.FAILED);
     return true;
   });
+  if (owned) {
+    void maybeNotifyCollectionIngestionComplete(file.fileId).catch(() => {});
+    cleanupStageAfterTerminalFailure(file.fileId);
+  }
+  return owned;
 };
 
 export const claimNextDoclingFileToWrite = async (
@@ -572,7 +595,7 @@ export const markDoclingFileCompleted = async (input: {
   leaseOwner?: string | null;
   leaseToken?: string | null;
 }): Promise<boolean> => {
-  return await db.$transaction(async (tx) => {
+  const completed = await db.$transaction(async (tx) => {
     const claimed = await tx.$queryRaw<RawRow[]>`
       UPDATE non_zero.docling_async_files
       SET status = ${DOCLING_FILE_STATUS.Completed},
@@ -597,6 +620,10 @@ export const markDoclingFileCompleted = async (input: {
       WHERE file_id = ${input.fileId}`;
     return true;
   });
+  if (completed) {
+    void maybeNotifyCollectionIngestionComplete(input.fileId).catch(() => {});
+  }
+  return completed;
 };
 
 /**
@@ -624,6 +651,8 @@ export const completeDoclingFileViaSyncFallback = async (
       WHERE file_id = ${fileId}`;
     await setCollectionItemStatus(tx, fileId, IngestionStatus.COMPLETED);
   });
+  // Terminal transition committed — check if the whole collection is now done.
+  void maybeNotifyCollectionIngestionComplete(fileId).catch(() => {});
 };
 
 export const requeueExpiredDoclingLeases = async (now = new Date()): Promise<void> => {

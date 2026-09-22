@@ -40,7 +40,10 @@ export default tseslint.config(
       "public/**/*",
       "src2/**/*",
       "eslint-rules/**/*",
-      "electron/preload.ts"
+      "electron/preload.ts",
+      // Node-side build/eval scripts. Outside tsconfig.app.json, so the
+      // type-checked rules cannot resolve them.
+      "scripts/**/*"
     ],
   },
 
@@ -176,6 +179,24 @@ export default tseslint.config(
           leadingUnderscore: "allow",
         },
       ],
+    }
+  },
+
+  // Unit tests are excluded from tsconfig.app.json, so they need their own project
+  {
+    files: ["src/**/*.test.ts", "src/**/*.test.tsx"],
+    languageOptions: {
+      parser: tseslint.parser,
+      parserOptions: {
+        project: "./tsconfig.test.json",
+        tsconfigRootDir: import.meta.dirname,
+      }
+    },
+    rules: {
+      "@typescript-eslint/explicit-function-return-type": "warn",
+      "@typescript-eslint/no-explicit-any": "error",
+      "@typescript-eslint/no-unused-vars": ["error", { "argsIgnorePattern": "^_", "varsIgnorePattern": "^_" }],
+      "prefer-const": "error",
     }
   },
 

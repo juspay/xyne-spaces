@@ -13,7 +13,10 @@ import { CanvasList } from '../CanvasList';
 import { CanvasListGrouped } from '../CanvasListGrouped';
 import { useZero } from '../../../hooks/useZero';
 import { mutators } from '../../../zero/mutators';
+import { queries } from '../../../zero/queries';
 import type { Canvas } from '../Canvas.types';
+import { CanvasVisibility, CanvasRole } from '@xyne/shared';
+import { logger, Event } from '../../../utils/logger';
 import { useAuth } from '../../../hooks/useAuth';
 import { Switch } from '../../ui/Switch';
 import {
@@ -40,7 +43,7 @@ import {
 } from './canvasSidebarWidth';
 import AppNavigator from '../../AppNavigator/AppNavigator';
 import { cn } from '../../../utils/classNames';
-import { APP_NO_DRAG_STYLE } from '../../../utils/electronApp';
+import { APP_NO_DRAG_STYLE, standaloneNavigate } from '../../../utils/electronApp';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { usePath } from '../../../hooks/usePath';
 import { useDebouncedValue } from '../../../hooks/useDebouncedValue';
@@ -51,6 +54,7 @@ import { useCanvasArchiveToggle } from '../useCanvasArchiveToggle';
 export type CanvasPanelOutletContext = {
   leftHeaderSlot?: ReactElement | null;
 };
+import { useCachedQuery } from '../../../hooks/useCachedQuery';
 
 const CanvasPanel = (): ReactElement => {
   const { isMobile } = usePlatform();
@@ -77,6 +81,7 @@ const CanvasPanel = (): ReactElement => {
   const [isPersonalSectionCollapsed, setIsPersonalSectionCollapsed] = useState(false);
   const [excludeCallGeneratedCanvases] = useState(true);
   const [onlyCallGeneratedCanvases, setOnlyCallGeneratedCanvases] = useState(false);
+  const [onlyRecordingGeneratedCanvases, setOnlyRecordingGeneratedCanvases] = useState(false);
   const [onlyArchivedCanvases, setOnlyArchivedCanvases] = useState(false);
   const [groupedSearchQuery, setGroupedSearchQuery] = useState('');
   const [listOptionsOpen, setListOptionsOpen] = useState(false);
@@ -84,41 +89,57 @@ const CanvasPanel = (): ReactElement => {
   const effectiveGroupedSearchQuery =
     debouncedGroupedSearchQuery.trim().length >= 2 ? debouncedGroupedSearchQuery : '';
   const selectedCanvasId = isOnIndexRoute ? undefined : location.pathname.split('/').at(-1);
+  const [lastCanvas, lastCanvasDetails] = useCachedQuery(
+    queries.getCanvas({ canvasId: lastCanvasId ?? '' }),
+    { enabled: !!lastCanvasId },
+  );
+
+  // react-resizable-panels snaps flex-basis instantly with no CSS transition of its
+  // own. We animate the toggle here (not permanently, so manual drag-resize stays
+  // 1:1 with the pointer instead of lagging behind a transition).
+  const [isSidebarToggleAnimating, setIsSidebarToggleAnimating] = useState(false);
 
   useEffect(() => {
     const panel = canvasPanelRef.current;
     if (!panel) return;
 
+    const isCurrentlyCollapsed = panel.isCollapsed();
+    if (isSidebarCollapsed === isCurrentlyCollapsed) return;
+
+    setIsSidebarToggleAnimating(true);
     if (isSidebarCollapsed) {
-      if (!panel.isCollapsed()) panel.collapse();
-    } else if (panel.isCollapsed()) {
+      panel.collapse();
+    } else {
       panel.expand();
     }
-  }, [isSidebarCollapsed]);
 
-  // Remember which canvas was last opened
-  useEffect(() => {
-    if (
-      selectedCanvasId &&
-      selectedCanvasId !== 'new' &&
-      selectedCanvasId !== lastCanvasId &&
-      !deletedCanvasIdsRef.current.has(selectedCanvasId)
-    ) {
-      setLastCanvasId(selectedCanvasId);
-    }
-  }, [selectedCanvasId, lastCanvasId, setLastCanvasId]);
+    const timeoutId = window.setTimeout(() => setIsSidebarToggleAnimating(false), 220);
+    return (): void => window.clearTimeout(timeoutId);
+  }, [isSidebarCollapsed]);
 
   // Restore last opened canvas when landing on the canvas index
   useEffect(() => {
-    if (
-      !isMobile &&
-      isOnIndexRoute &&
-      lastCanvasId &&
-      !deletedCanvasIdsRef.current.has(lastCanvasId)
-    ) {
+    if (!lastCanvasId) return;
+
+    if (lastCanvasDetails.type !== 'complete') return;
+
+    if (!lastCanvas) {
+      setLastCanvasId(null);
+      return;
+    }
+
+    if (!isMobile && isOnIndexRoute && !deletedCanvasIdsRef.current.has(lastCanvasId)) {
       void navigate(`/chat/canvas/${lastCanvasId}`, { replace: true });
     }
-  }, [isMobile, isOnIndexRoute, lastCanvasId, navigate]);
+  }, [
+    isMobile,
+    isOnIndexRoute,
+    lastCanvas,
+    lastCanvasDetails.type,
+    lastCanvasId,
+    navigate,
+    setLastCanvasId,
+  ]);
 
   const handleCreateCanvas = useCallback(async () => {
     setIsCreatingCanvas(true);
@@ -126,6 +147,7 @@ const CanvasPanel = (): ReactElement => {
       setIsPersonalSectionCollapsed(false);
     }
     const newCanvasId = uuidv4();
+    const createStartedAt = performance.now();
 
     try {
       await canvasService.createCollaborativeCanvas({
@@ -133,15 +155,40 @@ const CanvasPanel = (): ReactElement => {
         title: 'Untitled Canvas',
       });
 
-      void navigate(`/chat/canvas/${newCanvasId}`);
-    } catch {
+      logger.info(Event.CANVAS_CREATED, {
+        canvasId: newCanvasId,
+        durationMs: Math.round(performance.now() - createStartedAt),
+      });
+
+      const now = Date.now();
+      const optimisticCanvas: Canvas = {
+        id: newCanvasId,
+        title: 'Untitled Canvas',
+        content: [],
+        createdBy: user?.id || '',
+        visibility: CanvasVisibility.PRIVATE,
+        isTemplate: false,
+        isArchived: false,
+        isCollaborative: true,
+        isStarred: false,
+        createdAt: now,
+        updatedAt: now,
+        accessLevel: CanvasRole.OWNER,
+      };
+
+      void navigate(`/chat/canvas/${newCanvasId}`, { state: { canvas: optimisticCanvas } });
+    } catch (error) {
+      logger.error(Event.CANVAS_CREATE_FAILED, {
+        canvasId: newCanvasId,
+        error: error instanceof Error ? error.message : String(error),
+      });
       toast.error('Error', {
         description: 'Failed to create canvas. Please try again.',
       });
     } finally {
       setIsCreatingCanvas(false);
     }
-  }, [navigate, viewMode]);
+  }, [navigate, viewMode, user?.id]);
 
   const handleSelectCanvas = useCallback(
     (e: React.MouseEvent | KeyboardEvent, canvas: Canvas) => {
@@ -152,15 +199,12 @@ const CanvasPanel = (): ReactElement => {
         return;
       }
 
-      const isCmdClick = 'metaKey' in e && (e.metaKey || e.ctrlKey);
       // Navigate to the canvas in the right panel
       const canvasUrl = `/chat/canvas/${canvas.id}`;
-      // Only open in new tab on desktop when Cmd/Ctrl+Click is pressed
-      if (!isMobile && isCmdClick) {
-        window.open(canvasUrl, '_blank');
-      } else {
-        void navigate(canvasUrl);
-      }
+      standaloneNavigate(navigate, canvasUrl, {
+        event: !isMobile && 'button' in e ? e : undefined,
+        state: { canvas },
+      });
     },
     [navigate, isMobile],
   );
@@ -265,6 +309,7 @@ const CanvasPanel = (): ReactElement => {
           <button
             type='button'
             className='flex size-7 shrink-0 items-center justify-center rounded-lg text-foreground transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring'
+            style={APP_NO_DRAG_STYLE}
             onClick={expandCanvasSidebar}
             aria-label='Show canvases panel'
             data-track-category='CANVAS'
@@ -367,6 +412,30 @@ const CanvasPanel = (): ReactElement => {
                     className='items-start gap-2 rounded-lg px-2 py-2 text-[13px]'
                     onSelect={event => event.preventDefault()}
                     data-track-category='CANVAS'
+                    data-track-name='TOGGLE_ONLY_RECORDING_GENERATED_CANVASES'
+                  >
+                    <Bot size={15} className='mt-0.5 shrink-0 text-sidebar-foreground/55' />
+                    <span className='min-w-0 flex-1'>
+                      <span className='block leading-5'>Only recording-generated</span>
+                      <span className='block max-w-[170px] text-xs leading-4 text-sidebar-foreground/50'>
+                        Notes and summaries from your recordings
+                      </span>
+                    </span>
+                    <Switch
+                      id='only-recording-generated-canvases'
+                      checked={onlyRecordingGeneratedCanvases}
+                      onCheckedChange={checked => {
+                        setOnlyRecordingGeneratedCanvases(checked);
+                        if (checked) {
+                          setViewMode('list');
+                        }
+                      }}
+                    />
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    className='items-start gap-2 rounded-lg px-2 py-2 text-[13px]'
+                    onSelect={event => event.preventDefault()}
+                    data-track-category='CANVAS'
                     data-track-name='TOGGLE_ONLY_ARCHIVED_CANVASES'
                   >
                     <Archive size={15} className='mt-0.5 shrink-0 text-sidebar-foreground/55' />
@@ -440,6 +509,7 @@ const CanvasPanel = (): ReactElement => {
                 onlyCallGeneratedCanvases ? false : excludeCallGeneratedCanvases
               }
               onlyCallGeneratedCanvases={onlyCallGeneratedCanvases}
+              onlyRecordingGeneratedCanvases={onlyRecordingGeneratedCanvases}
               showStarredOnly={false}
               onlyArchived={onlyArchivedCanvases}
               onToggleStar={handleToggleStar}
@@ -491,6 +561,9 @@ const CanvasPanel = (): ReactElement => {
         <Panel
           id='canvas-sidebar'
           panelRef={canvasPanelRef}
+          className={cn(
+            isSidebarToggleAnimating && 'transition-[flex-basis] duration-200 ease-out',
+          )}
           defaultSize={CANVAS_SIDEBAR_DEFAULT_WIDTH}
           minSize={CANVAS_SIDEBAR_MIN_WIDTH}
           maxSize={CANVAS_SIDEBAR_MAX_WIDTH}

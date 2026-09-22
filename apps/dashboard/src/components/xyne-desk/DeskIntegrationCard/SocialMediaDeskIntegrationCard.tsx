@@ -1,5 +1,5 @@
 import { ReactElement, useState } from 'react';
-import { ANDROID_PACKAGE_NAME_PATTERN } from '@xyne/shared';
+import { ANDROID_PACKAGE_NAME_PATTERN, SOCIAL_MEDIA_SOURCE_TYPE } from '@xyne/shared';
 import { Plug, Plus, RefreshCw, Trash2, Unplug } from 'lucide-react';
 import { toast } from 'sonner';
 import {
@@ -44,10 +44,11 @@ export const SocialMediaDeskIntegrationCard = ({
   const [isAdding, setIsAdding] = useState(false);
   const [isReauthorizing, setIsReauthorizing] = useState(false);
   const [appAction, setAppAction] = useState<string | null>(null);
-  const { isConnected, hasSource, sourceType, connectedLabel, googlePlayApps } =
+  const { isConnected, hasSource, sourceType, connectedLabel, deskApps } =
     useChannelIntegrationInfo(channelId);
 
-  if (sourceType !== 'google-play-reviews' || !hasSource) {
+  // Play-only by design: every action below is a Play OAuth/package flow. App Store needs its own card.
+  if (sourceType !== SOCIAL_MEDIA_SOURCE_TYPE.GOOGLE_PLAY || !hasSource) {
     return null;
   }
   if (!canManage) return null;
@@ -173,10 +174,11 @@ export const SocialMediaDeskIntegrationCard = ({
           'You can reconnect this source later.',
         ]}
         trackCategory='social-media-desk-integration'
+        provider='google_play'
       />
 
       <div className='flex flex-col gap-2'>
-        {googlePlayApps.map(app => {
+        {deskApps.map(app => {
           const connectionAction = `${app.isActive ? 'disconnect' : 'reconnect'}:${app.id}`;
           return (
             <div
@@ -186,7 +188,7 @@ export const SocialMediaDeskIntegrationCard = ({
               <div className='min-w-0'>
                 <p className='truncate text-sm font-medium text-foreground'>{app.displayName}</p>
                 <p className='truncate text-xs text-muted-foreground'>
-                  {app.packageName ?? 'Package name unavailable'} ·{' '}
+                  {app.externalIdentifier ?? 'Package name unavailable'} ·{' '}
                   {app.isActive ? 'Connected' : 'Disconnected'}
                 </p>
               </div>
@@ -198,6 +200,8 @@ export const SocialMediaDeskIntegrationCard = ({
                   loading={appAction === connectionAction}
                   disabled={appAction !== null}
                   onClick={() => void handleAppConnection(app.id, !app.isActive)}
+                  data-track-category='social-media-desk-integration'
+                  data-track-name='toggle-google-play-app-connection'
                 >
                   {app.isActive ? <Unplug size={14} /> : <Plug size={14} />}
                   {app.isActive ? 'Disconnect' : 'Reconnect'}
@@ -268,6 +272,8 @@ export const SocialMediaDeskIntegrationCard = ({
                     id={`google-play-app-name-${index}`}
                     value={application.displayName}
                     onChange={event => updateApplication(index, 'displayName', event.target.value)}
+                    data-track-category='social-media-desk-integration'
+                    data-track-name='app-name-input'
                     placeholder='My Android app'
                     maxLength={120}
                   />
@@ -281,6 +287,8 @@ export const SocialMediaDeskIntegrationCard = ({
                     id={`google-play-package-name-${index}`}
                     value={application.packageName}
                     onChange={event => updateApplication(index, 'packageName', event.target.value)}
+                    data-track-category='social-media-desk-integration'
+                    data-track-name='package-name-input'
                     placeholder='com.example.app'
                     aria-invalid={
                       application.packageName.length > 0 &&
@@ -299,6 +307,8 @@ export const SocialMediaDeskIntegrationCard = ({
                       current.filter((_, applicationIndex) => applicationIndex !== index),
                     )
                   }
+                  data-track-category='social-media-desk-integration'
+                  data-track-name='remove-app-row'
                 >
                   <Trash2 size={14} />
                 </Button>
@@ -319,6 +329,8 @@ export const SocialMediaDeskIntegrationCard = ({
               onClick={() =>
                 setApplications(current => [...current, createGooglePlayApplication()])
               }
+              data-track-category='social-media-desk-integration'
+              data-track-name='add-app-row'
             >
               <Plus size={14} />
               Add another
@@ -330,6 +342,8 @@ export const SocialMediaDeskIntegrationCard = ({
                 size='sm'
                 disabled={isAdding}
                 onClick={() => setShowAddApps(false)}
+                data-track-category='social-media-desk-integration'
+                data-track-name='cancel-add-apps'
               >
                 Cancel
               </Button>
@@ -339,6 +353,8 @@ export const SocialMediaDeskIntegrationCard = ({
                 loading={isAdding}
                 disabled={!canAdd}
                 onClick={() => void handleAddApplications()}
+                data-track-category='social-media-desk-integration'
+                data-track-name='submit-add-apps'
               >
                 Add apps
               </Button>

@@ -174,6 +174,8 @@ export function ConditionalCard({
                 variant='outline'
                 size='sm'
                 onClick={() => setEditorOpen(true)}
+                data-track-category='automation-builder'
+                data-track-name='conditional-open-editor'
                 className='gap-1.5'
               >
                 <Pencil className='size-3.5' />
@@ -229,11 +231,15 @@ export function ConditionalCard({
                       setTagConditionError(null);
                       setEditorOpen(false);
                     }}
+                    data-track-category='automation-builder'
+                    data-track-name='conditional-cancel-condition'
                   >
                     Cancel
                   </Button>
                   <Button
                     size='sm'
+                    data-track-category='automation-builder'
+                    data-track-name='conditional-save-condition'
                     onClick={() => {
                       if (hasInvalidTagCondition(draftCondition)) {
                         setTagConditionError(
@@ -256,7 +262,7 @@ export function ConditionalCard({
             </div>
           </Dialog>
 
-          <div className='grid grid-cols-1 gap-4 lg:grid-cols-2'>
+          <div className='flex gap-4 overflow-x-auto pb-2'>
             <BranchSteps
               label='If true'
               accent='green'

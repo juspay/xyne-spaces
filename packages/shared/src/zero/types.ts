@@ -96,7 +96,6 @@ export enum EntityType {
 }
 
 export enum GuestEntity {
-  PROJECT = 'PROJECT',
   CHANNEL = 'CHANNEL',
   CANVAS = 'CANVAS',
 }
@@ -119,6 +118,9 @@ export enum AttachmentEntityType {
   COLLECTION = 'COLLECTION',
   FORM_ENTITY_VALUE = 'FORM_ENTITY_VALUE',
   WORKFLOW_STEPS = 'WORKFLOW_STEPS',
+  DESK_REPORT = 'DESK_REPORT',
+  RECORDING = 'RECORDING',
+  SDLC_HUB = 'SDLC_HUB',
 }
 
 // @ts-ignore TS1294
@@ -350,6 +352,8 @@ export enum ActivityType {
   TAGS = 'TAGS',
   ENTITY = 'ENTITY',
   SUBTICKET_CREATED = 'SUBTICKET_CREATED',
+  SUBTICKET_LINKED = 'SUBTICKET_LINKED',
+  SUBTICKET_UNLINKED = 'SUBTICKET_UNLINKED',
   BOARD = 'BOARD',
   PR = 'PR',
   USER_GROUP_ID = 'USER_GROUP_ID',
@@ -366,6 +370,17 @@ export enum ActivityType {
   EMAIL_SENT = 'EMAIL_SENT',
   TICKET_CREATED = 'TICKET_CREATED',
   CSAT_RECEIVED = 'CSAT_RECEIVED',
+  // ETA risk-detection / automatic-recalculation feature (see
+  // packages/shared/src/tickets/etaActivityValues.ts for each type's stored
+  // `value` shape). Distinct from the existing ETA/STAGE_ETA field-change
+  // activities above and from the pre-existing stage/ticket-overdue breach
+  // activities, which keep using their own actorAction values.
+  ETA_AUTO_RECOMPUTED = 'ETA_AUTO_RECOMPUTED',
+  ETA_MANUALLY_UPDATED = 'ETA_MANUALLY_UPDATED',
+  ETA_RISK_DETECTED = 'ETA_RISK_DETECTED',
+  ETA_RISK_ACKNOWLEDGED = 'ETA_RISK_ACKNOWLEDGED',
+  ETA_RISK_REOPENED = 'ETA_RISK_REOPENED',
+  ETA_RISK_RESOLVED = 'ETA_RISK_RESOLVED',
 }
 
 // @ts-ignore TS1294
@@ -420,6 +435,12 @@ export enum CallStatus {
 }
 
 // @ts-ignore TS1294
+export enum CallVisibility {
+  PUBLIC = 'PUBLIC',
+  PRIVATE = 'PRIVATE',
+}
+
+// @ts-ignore TS1294
 export enum RecordingType {
   AUDIO_ONLY = 'AUDIO_ONLY',
   AUDIO_SCREEN = 'AUDIO_SCREEN',
@@ -441,6 +462,13 @@ export enum InvitationResponse {
   DECLINED = 'DECLINED',
   LEFT = 'LEFT',
   MISSED = 'MISSED',
+}
+
+// @ts-ignore TS1294
+export enum RingStatus {
+  CALLING = 'CALLING',
+  RINGING = 'RINGING',
+  BUSY = 'BUSY',
 }
 
 // @ts-ignore TS1294
@@ -470,6 +498,11 @@ export enum AuthProvider {
 export enum UserStatus {
   ACTIVE = 'ACTIVE',
   INACTIVE = 'INACTIVE',
+}
+
+// @ts-ignore TS1294
+export enum UserActivityStatus {
+  IN_CALL = 'IN_CALL',
 }
 
 // @ts-ignore TS1294
@@ -606,6 +639,8 @@ export enum NotificationType {
   TICKET_SUBTICKET_ADDED = "TICKET_SUBTICKET_ADDED",
   TICKET_RELATED_TICKET_ADDED = "TICKET_RELATED_TICKET_ADDED",
   TICKET_RELATED_TICKET_REMOVED = "TICKET_RELATED_TICKET_REMOVED",
+  /** Planning-risk detected/reopened - stage deadline later than ticket due date, not yet overdue. */
+  TICKET_ETA_PLANNING_RISK = "TICKET_ETA_PLANNING_RISK",
   CHANNEL_MESSAGE = "CHANNEL_MESSAGE",
   MENTION = "MENTION",
   DIRECT_MESSAGE = "DIRECT_MESSAGE",
@@ -631,7 +666,12 @@ export enum NotificationType {
   EMAIL_BACKFILL_REQUIRED = "EMAIL_BACKFILL_REQUIRED",
   CANVAS_SHARED = "CANVAS_SHARED",
   RECORDING_SHARED = "RECORDING_SHARED",
+  RECORDING_SUMMARY_READY = "RECORDING_SUMMARY_READY",
   SUMMARY_TEMPLATE_SHARED = "SUMMARY_TEMPLATE_SHARED",
+  COLLECTION_INGESTION_COMPLETED = "COLLECTION_INGESTION_COMPLETED",
+  MAX_WORKLOAD_REACHED = "MAX_WORKLOAD_REACHED",
+  ASSIGNMENT_PAUSED = "ASSIGNMENT_PAUSED",
+  ASSIGNMENT_RESUMED = "ASSIGNMENT_RESUMED",
 }
 
 // @ts-ignore TS1294
@@ -730,6 +770,9 @@ export enum ChannelType {
   APP = 'APP',
   CALL = 'CALL',
   SOCIAL_MEDIA = 'SOCIAL_MEDIA',
+  // SDLC repository channel: system-managed, hidden from the chat surfaces
+  // the same way SUPPORT channels are (inline type checks).
+  SDLC = 'SDLC',
 }
 
 // @ts-ignore TS1294
@@ -761,6 +804,7 @@ export enum FormFieldType {
   MULTI_SELECT = 'MULTI_SELECT',
   USER = 'USER',
   DOC = 'DOC',
+  TICKET = 'TICKET',
 }
 
 // @ts-ignore TS1294
@@ -952,6 +996,7 @@ export enum ProjectType {
 // @ts-ignore TS1294
 export enum SavedConfigContextType {
   BOARD = 'BOARD',
+  DESK_TICKET = 'DESK_TICKET',
 }
 
 // @ts-ignore TS1294
@@ -964,6 +1009,12 @@ export enum SavedConfigVisibility {
 export enum SavedConfigEntityName {
   TICKET = 'TICKET',
   FORM_ENTITY_VALUE = 'FORM_ENTITY_VALUE',
+}
+
+// Who a saved-view share grant targets. USER today; USER_GROUP / CHANNEL slots reserved.
+// @ts-ignore TS1294
+export enum ViewAccessEntityType {
+  USER = 'USER',
 }
 
 // @ts-ignore TS1294
@@ -1028,6 +1079,8 @@ export enum AppPermissionStatus {
 export enum AppPermissionType {
   READ = 'READ',
   WRITE = 'WRITE',
+  DELETE = 'DELETE',
+  START = 'START',
 }
 
 // @ts-ignore TS1294
@@ -1138,6 +1191,10 @@ export enum WorkflowEventType {
   MESSAGE_RECEIVED = 'MESSAGE_RECEIVED',
   CALL_EVENT = 'CALL_EVENT',
   TAG_GENERATED = 'TAG_GENERATED',
+  MANUAL = 'MANUAL',
+  CRON = 'CRON',
+  EVENT = 'EVENT',
+  WEBHOOK_V2 = 'WEBHOOK_V2',
 }
 
 // @ts-ignore TS1294
@@ -1158,6 +1215,8 @@ export enum WorkflowMappingEntityType {
 export const ShareableEntityType = {
   NOTE_TAKER: 'NOTE_TAKER',
   SUMMARY_TEMPLATE: 'SUMMARY_TEMPLATE',
+  CALL: 'CALL',
+  WORKFLOW: 'WORKFLOW',
 } as const;
 
 export type ShareableEntityType = typeof ShareableEntityType[keyof typeof ShareableEntityType];

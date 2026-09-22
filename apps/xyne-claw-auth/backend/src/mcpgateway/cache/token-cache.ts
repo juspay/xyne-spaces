@@ -4,6 +4,7 @@
  */
 
 import { redisService } from "../../redis.js";
+import { errMsg } from "../../lib/errors.js";
 import { CACHE, TIMEOUTS } from "../config/index.js";
 import type { FetchedToken } from "../types/index.js";
 
@@ -59,7 +60,7 @@ export async function setToken(
   try {
     await withRedisTimeout(redis.setex(key, ttlSeconds, token), "SETEX");
   } catch (err) {
-    console.warn(`[auth-cache] setToken skipped for ${serviceName}: ${err instanceof Error ? err.message : String(err)}`);
+    console.warn(`[auth-cache] setToken skipped for ${serviceName}: ${errMsg(err)}`);
   }
 }
 
@@ -78,7 +79,7 @@ export async function getToken(
   try {
     token = await withRedisTimeout(redis.get(key), "GET");
   } catch (err) {
-    console.warn(`[auth-cache] getToken fallback miss for ${serviceName}: ${err instanceof Error ? err.message : String(err)}`);
+    console.warn(`[auth-cache] getToken fallback miss for ${serviceName}: ${errMsg(err)}`);
     return null;
   }
 

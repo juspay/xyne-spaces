@@ -6,6 +6,9 @@ import { apiInstance, BASE_URL } from '../services/clients/apiClient';
  * Minimal surface for the Daily Brief dashboard page:
  *   - getLatest()  → today's stored brief (or the most recent one)
  *   - getHistory() → the user's recent briefs, newest first
+ *   - getDates()   → every day the user has a brief for (date + status only)
+ *   - getByDate()  → the stored brief for one day
+ *   - trackSwitch() → beacon: the user switched to another brief
  *   - regenerate() → re-run the brief now, streaming progress over SSE
  *
  * This is intentionally thin — a starting point for UI developers to build on.
@@ -58,6 +61,12 @@ export interface DailyBriefHistoryItem {
   data?: DailyBriefPayload | null;
   agentSlug?: string | null;
   generatedAt?: string | null;
+}
+
+/** One day the user has a brief for (GET /daily-brief/dates) — no content. */
+export interface DailyBriefDate {
+  date: string;
+  status: string;
 }
 
 /** Callbacks for the regenerate SSE stream. */
@@ -120,6 +129,35 @@ export const dailyBriefApi = {
       params: { limit },
     });
     return Array.isArray(res.data) ? res.data : [];
+  },
+
+  /** Every day the user has a brief for, newest first — the date picker's calendar. */
+  getDates: async (limit = 365): Promise<DailyBriefDate[]> => {
+    const res = await apiInstance.get<DailyBriefDate[]>('/daily-brief/dates', {
+      params: { limit },
+    });
+    return Array.isArray(res.data) ? res.data : [];
+  },
+
+  /** The stored brief for one YYYY-MM-DD bucket (`status: 'none'` when there isn't one). */
+  getByDate: async (date: string): Promise<DailyBriefLatest> => {
+    const res = await apiInstance.get<DailyBriefLatest>(
+      `/daily-brief/by-date/${encodeURIComponent(date)}`,
+    );
+    return res.data;
+  },
+
+  /**
+   * Tell the server this user switched briefs. Counted server-side because the
+   * screen keeps the recent window in memory, so a switch is otherwise invisible.
+   * Fire-and-forget: a failed beacon must never surface to the reader.
+   */
+  trackSwitch: async (source: 'history_menu' | 'date_picker'): Promise<void> => {
+    try {
+      await apiInstance.post('/daily-brief/switched', { source });
+    } catch {
+      // best-effort telemetry
+    }
   },
 
   /**

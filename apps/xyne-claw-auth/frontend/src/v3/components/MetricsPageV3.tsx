@@ -18,6 +18,8 @@ import {
 } from "recharts";
 import {
   fetchGlobalMetrics, fetchAgentMetrics, listAgents,
+  fetchAwakeningActivity, type AwakeningActivity,
+  fetchAwakeningRuns, type AwakeningRun,
   fetchAgentImprovements, applyImprovement, dismissImprovement,
   type GlobalMetrics, type GlobalMetricsDayBucket, type AgentMetrics,
   type SlowSession, type ToolLatencyRow, type AgentSentiment, type GlobalMetricsProviderRow,
@@ -79,10 +81,13 @@ export function MetricsPanel({
   fetcher,
   showLeaderboard = false,
   onAgentClick,
+  orgScope,
 }: {
   userId: string;
   fetcher: (userId: string, days: 1 | 7 | 30) => Promise<GlobalMetrics | AgentMetrics>;
   showLeaderboard?: boolean;
+  /** Passed through to the awakening rollup, which fetches independently. */
+  orgScope?: AdminOrgScope;
   /** When the workspace leaderboard renders an agent, clicking it bubbles up
    *  so the parent page can pivot to that agent's view. */
   onAgentClick?: (agentSlug: string) => void;
@@ -194,6 +199,9 @@ export function MetricsPanel({
             <Card title="Tool latency for this agent" subtitle={`Top ${data.toolLatency.length} tools by cumulative time — find the one dragging the agent down`}>
               <ToolLatencyTable rows={data.toolLatency} />
             </Card>
+          )}
+          {showLeaderboard && (
+            <AwakeningActivityCard userId={userId} days={days} orgScope={orgScope} />
           )}
           {data.slowSessions.length > 0 && (
             <Card title="Slowest sessions" subtitle={`Top ${data.slowSessions.length} by total wall-clock — expand a row for the tool breakdown`}>
@@ -378,10 +386,315 @@ export function MetricsPageV3({ userId }: MetricsPageV3Props) {
           fetcher={fetcher}
           showLeaderboard={!selectedAgent}
           onAgentClick={(slug) => setSelectedAgent(slug)}
+          orgScope={adminOrgScope}
         />
       </div>
     </div>
   );
+}
+
+/**
+ * Awakening rollup — agents that ran with nobody triggering them.
+ *
+ * Fetches independently rather than riding the main metrics payload: awakened
+ * runs live in their own table (`agent_awakening_runs`) with no `userId`, and
+ * folding unattended runs into per-user latency would skew it.
+ *
+ * Renders nothing at all when no agent in the org has ever woken, so the
+ * section stays invisible for workspaces that do not use the feature.
+ */
+function AwakeningActivityCard({
+  userId,
+  days,
+  orgScope,
+}: {
+  userId: string;
+  days: 1 | 7 | 30;
+  orgScope?: AdminOrgScope;
+}) {
+  const [data, setData] = useState<AwakeningActivity | null>(null);
+  const [failed, setFailed] = useState(false);
+  // Keyed by agent AND kind: the rollup lists one row per wake kind, so keying
+  // on agentId alone expanded an agent's heartbeat and reflex rows together.
+  const [openRow, setOpenRow] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setFailed(false);
+    fetchAwakeningActivity(userId, days, orgScope)
+      .then((d) => { if (!cancelled) setData(d); })
+      .catch(() => { if (!cancelled) setFailed(true); });
+    return () => { cancelled = true; };
+  }, [userId, days, orgScope]);
+
+  if (failed || !data) return null;
+  // Never configured here — do not show an empty shell.
+  if (data.agents.length === 0 && data.totals.runs === 0) return null;
+
+  const { totals } = data;
+  const stopped = data.agents.filter((a) => !a.enabled || a.lastError);
+
+  return (
+    <Card
+      title="Awakened agents"
+      subtitle="Runs that nobody triggered — the agent woke on a heartbeat or a reflex and decided for itself whether to act."
+    >
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-[12px] mb-[16px]">
+        <Tile label="Wakes" value={String(totals.runs)} sub={`${totals.events} events collected`} />
+        <Tile
+          label="Acted"
+          value={String(totals.ran)}
+          sub={totals.shadow > 0 ? `${totals.shadow} in shadow` : undefined}
+        />
+        <Tile
+          label="Stayed quiet"
+          value={String(totals.skipped)}
+          sub="gate found nothing worth doing"
+        />
+        <Tile
+          label="Failed"
+          value={String(totals.failed)}
+          sub={totals.injections > 0 ? `${totals.injections} live updates` : undefined}
+          subTone={totals.failed > 0 ? "bad" : "flat"}
+        />
+      </div>
+
+      {stopped.length > 0 && (
+        <div className="mb-[16px] rounded-lg border border-amber-300/60 bg-amber-50 p-3 dark:border-amber-900/60 dark:bg-amber-950/30">
+          <div className="text-[12px] font-medium text-amber-900 dark:text-amber-200 mb-1">
+            {stopped.length} agent{stopped.length === 1 ? "" : "s"} not waking
+          </div>
+          {stopped.slice(0, 5).map((a) => (
+            <div key={a.agentSlug} className="text-[12px] text-amber-800 dark:text-amber-300">
+              <span className="font-mono">{a.agentSlug}</span>
+              {a.lastError ? ` — ${a.lastError}` : " — switched off"}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {data.byAgent.length > 0 && (
+        <table className="w-full text-[12px]">
+          <thead className="text-xyne-fg-muted">
+            <tr className="text-left border-b border-xyne-border">
+              <th className="py-2 font-medium">Agent</th>
+              <th className="py-2 font-medium">Kind</th>
+              <th className="py-2 font-medium text-right">Wakes</th>
+              <th className="py-2 font-medium text-right">Acted</th>
+              <th className="py-2 font-medium text-right">Quiet</th>
+              <th className="py-2 font-medium text-right">Failed</th>
+              <th className="py-2 font-medium text-right">Events</th>
+              <th className="py-2 font-medium text-right">Last wake</th>
+            </tr>
+          </thead>
+          <tbody>
+            {data.byAgent.map((r) => (
+              <React.Fragment key={`${r.agentId}:${r.kind}`}>
+              <tr
+                className="border-b border-xyne-border/50 cursor-pointer hover:bg-xyne-bg-secondary/60"
+                onClick={() => setOpenRow(openRow === rowKey(r) ? null : rowKey(r))}
+              >
+                <td className="py-2 font-mono text-xyne-fg-primary">
+                  <span className="mr-1 inline-block w-3 text-xyne-fg-muted">
+                    {openRow === rowKey(r) ? "▾" : "▸"}
+                  </span>
+                  {r.agentSlug}
+                </td>
+                <td className="py-2 text-xyne-fg-muted">{r.kind}</td>
+                <td className="py-2 text-right text-xyne-fg-primary">{r.runs}</td>
+                <td className="py-2 text-right text-xyne-fg-primary">{r.ran}</td>
+                <td className="py-2 text-right text-xyne-fg-muted">{r.skipped}</td>
+                <td className={"py-2 text-right " + (r.failed > 0 ? "text-red-500" : "text-xyne-fg-muted")}>
+                  {r.failed}
+                </td>
+                <td className="py-2 text-right text-xyne-fg-muted">{r.events}</td>
+                <td className="py-2 text-right text-xyne-fg-muted">
+                  {r.lastRunAt ? new Date(r.lastRunAt).toLocaleString() : "—"}
+                </td>
+              </tr>
+              {openRow === rowKey(r) && (
+                <tr>
+                  <td colSpan={8} className="p-0">
+                    <AwakeningRunsPanel
+                      userId={userId}
+                      agentId={r.agentId}
+                      agentSlug={r.agentSlug}
+                      kind={r.kind}
+                      days={days}
+                      orgScope={orgScope}
+                    />
+                  </td>
+                </tr>
+              )}
+              </React.Fragment>
+            ))}
+          </tbody>
+        </table>
+      )}
+
+      {data.skipReasons.length > 0 && (
+        <div className="mt-[16px]">
+          <div className="text-[12px] text-xyne-fg-muted mb-2">
+            Why it stayed quiet — a healthy agent skips far more often than it acts.
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {data.skipReasons.map((r) => (
+              <span
+                key={r.reason}
+                className="rounded-full bg-xyne-bg-secondary px-3 py-1 text-[12px] text-xyne-fg-muted"
+              >
+                <span className="font-mono">{r.reason}</span> · {r.count}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+    </Card>
+  );
+}
+
+const RUNS_PAGE_SIZE = 20;
+
+/** The rollup is one row per (agent, wake kind) — both are needed to identify a row. */
+const rowKey = (r: { agentId: string; kind: string }): string => `${r.agentId}:${r.kind}`;
+
+/**
+ * One agent's wake history, paginated.
+ *
+ * Lists every wake ATTEMPT, not just the ones that acted — a skipped wake
+ * carries the gate rule that fired, which is usually the thing you opened this
+ * to find out. Wakes that dispatched link to their transcript; skipped ones
+ * never created a conversation and have nothing to link to.
+ */
+function AwakeningRunsPanel({
+  userId,
+  agentId,
+  agentSlug,
+  kind,
+  days,
+  orgScope,
+}: {
+  userId: string;
+  agentId: string;
+  agentSlug: string;
+  /** Narrows to the wake kind of the row that was clicked. */
+  kind: string;
+  days: 1 | 7 | 30;
+  orgScope?: AdminOrgScope;
+}) {
+  const [runs, setRuns] = useState<AwakeningRun[]>([]);
+  const [total, setTotal] = useState(0);
+  const [offset, setOffset] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  // Reset paging when the window changes — offset 40 is meaningless against a
+  // freshly narrowed result set.
+  useEffect(() => { setOffset(0); }, [days, agentId, kind]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    fetchAwakeningRuns(userId, agentId, days, RUNS_PAGE_SIZE, offset, orgScope, kind)
+      .then((page) => {
+        if (cancelled) return;
+        setRuns(page.runs);
+        setTotal(page.total);
+      })
+      .catch((e) => { if (!cancelled) setError(e instanceof Error ? e.message : String(e)); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [userId, agentId, kind, days, offset, orgScope]);
+
+  const from = total === 0 ? 0 : offset + 1;
+  const to = Math.min(offset + RUNS_PAGE_SIZE, total);
+
+  return (
+    <div className="bg-xyne-bg-secondary/40 px-3 py-3 border-b border-xyne-border/50">
+      {error ? (
+        <div className="text-[12px] text-red-500">Failed to load sessions: {error}</div>
+      ) : loading && runs.length === 0 ? (
+        <Skeleton className="h-[120px] w-full" />
+      ) : runs.length === 0 ? (
+        <div className="text-[12px] text-xyne-fg-muted">
+          No {kind} wakes for {agentSlug} in this window.
+        </div>
+      ) : (
+        <>
+          <table className="w-full text-[12px]">
+            <thead className="text-xyne-fg-muted">
+              <tr className="text-left border-b border-xyne-border/60">
+                <th className="py-1.5 font-medium">When</th>
+                <th className="py-1.5 font-medium">Outcome</th>
+                <th className="py-1.5 font-medium">Why</th>
+                <th className="py-1.5 font-medium text-right">Events</th>
+                <th className="py-1.5 font-medium text-right">Updates</th>
+                <th className="py-1.5 font-medium text-right">Took</th>
+                <th className="py-1.5 font-medium text-right">Transcript</th>
+              </tr>
+            </thead>
+            <tbody>
+              {runs.map((r) => (
+                <tr key={r.id} className="border-b border-xyne-border/30">
+                  <td className="py-1.5 text-xyne-fg-primary whitespace-nowrap">
+                    {new Date(r.startedAt).toLocaleString()}
+                  </td>
+                  <td className={"py-1.5 " + outcomeTone(r.outcome)}>{r.outcome}</td>
+                  <td className="py-1.5 font-mono text-xyne-fg-muted">{r.skipReason ?? "—"}</td>
+                  <td className="py-1.5 text-right text-xyne-fg-muted">{r.eventCount}</td>
+                  <td className="py-1.5 text-right text-xyne-fg-muted">
+                    {r.injectionsUsed > 0 ? r.injectionsUsed : "—"}
+                  </td>
+                  <td className="py-1.5 text-right text-xyne-fg-muted">{fmtMs(r.durationMs)}</td>
+                  <td className="py-1.5 text-right">
+                    {r.conversationId ? (
+                      <a
+                        className="text-blue-500 hover:underline"
+                        href={`/claw/v3/chat?agent=${encodeURIComponent(agentSlug)}&conversation=${encodeURIComponent(r.conversationId)}&allRuns=1`}
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        open
+                      </a>
+                    ) : (
+                      <span className="text-xyne-fg-muted">—</span>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+
+          <div className="mt-2 flex items-center justify-between text-[12px] text-xyne-fg-muted">
+            <span>{from}–{to} of {total}</span>
+            <div className="flex items-center gap-2">
+              <button
+                disabled={offset === 0 || loading}
+                onClick={() => setOffset(Math.max(0, offset - RUNS_PAGE_SIZE))}
+                className="rounded-md border border-xyne-border px-2 py-1 disabled:opacity-40 hover:text-xyne-fg-primary"
+              >
+                Previous
+              </button>
+              <button
+                disabled={to >= total || loading}
+                onClick={() => setOffset(offset + RUNS_PAGE_SIZE)}
+                className="rounded-md border border-xyne-border px-2 py-1 disabled:opacity-40 hover:text-xyne-fg-primary"
+              >
+                Next
+              </button>
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function outcomeTone(outcome: string): string {
+  if (outcome === "failed") return "text-red-500";
+  if (outcome === "skipped") return "text-xyne-fg-muted";
+  if (outcome === "shadow") return "text-amber-500";
+  return "text-xyne-fg-primary";
 }
 
 /* ── building blocks ──────────────────────────────────────────────────── */

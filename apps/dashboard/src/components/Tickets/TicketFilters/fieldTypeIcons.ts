@@ -1,4 +1,12 @@
-import { BarChart3, Calendar, FileText, Hash, ToggleLeft, User } from 'lucide-react';
+import { ToggleLeft } from 'lucide-react';
+import {
+  BarchartDefault as BarChart3,
+  CalendarDefault as Calendar,
+  FileText,
+  Hashtag as Hash,
+  TicketToken,
+  UserDefault as User,
+} from '@xyne/icons';
 import { FormFieldType } from '@xyne/shared';
 
 export const getIconForFieldType = (fieldType: FormFieldType): typeof BarChart3 => {
@@ -15,6 +23,8 @@ export const getIconForFieldType = (fieldType: FormFieldType): typeof BarChart3 
       return BarChart3;
     case FormFieldType.USER:
       return User;
+    case FormFieldType.TICKET:
+      return TicketToken;
     default:
       return Hash;
   }

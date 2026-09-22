@@ -13,16 +13,24 @@ import { NativeInboundMessageType, reactNativeBridge } from '../../utils/reactNa
 import { useZero } from '../../hooks/useZero';
 import { callActor } from '../../machines/callMachine';
 import { roomActor } from '../../machines/roomMachine';
+import { useSelector } from '@xstate/react';
 import { CallType } from '@xyne/shared';
+import { buildSdlcPath, parseSdlcNavTarget } from '@xyne/shared/sdlc';
 import { setupPresenceListeners, cleanupPresenceListeners } from '../../machines/stateMachine';
 import { queryCacheActor, type Conversation } from '../../machines/queryCacheMachine';
 import { MEETING_DETECTION_ENABLED_KEY } from '../../constants/settings';
 import {
+  getRecordingStatus,
   sendRecordingEvent,
+  stopRecordingForNavigation,
   stopRecordingForTeardown,
   useRecordingStore,
 } from '../../hooks/useRecordingStore';
+import { getRecordingDefaultLayout } from '../../hooks/useRecordingDefaultLayout';
 import { sendSosAlertEvent } from '../../stores/sosAlertStore';
+import { globalClickTracker } from '../../services/Analytics/globalClickTracker';
+import { setExternalMeeting, setMicBusy } from '../../stores/externalMeetingStore';
+import { confirmInterrupt } from '../InterruptGuard/InterruptGuard';
 
 // Singleton: a fresh Audio element PER NOTIFICATION leaked native listener
 // registrations and media elements — heap analysis showed "JS event
@@ -70,6 +78,8 @@ interface NotificationData {
       commentThreadId?: string;
       conversation?: Conversation;
       notificationType?: string;
+      ticketId?: string;
+      sdlcTarget?: unknown;
     };
     metadata?: {
       notificationType?: string;
@@ -127,6 +137,12 @@ export const NotificationHandler: React.FC = () => {
   }, [activeWorkspaceId]);
   const isConnectedRef = useRef(false);
   const isElectron = typeof window !== 'undefined' && window.electronAPI !== undefined;
+
+  const goToRecordings = useCallback((): void => {
+    const workspaceId = activeWorkspaceIdRef.current;
+    if (!workspaceId) return;
+    void navigate(withWorkspacePrefix('/recordings', workspaceId));
+  }, [navigate]);
   const [suppressNativeToasts, setSuppressNativeToasts] = useState<boolean>(() =>
     reactNativeBridge.isAvailable(),
   );
@@ -139,6 +155,7 @@ export const NotificationHandler: React.FC = () => {
       const currentWorkspaceId = activeWorkspaceIdRef.current;
 
       if (targetWorkspaceId && targetWorkspaceId !== currentWorkspaceId) {
+        if (!(await confirmInterrupt('workspaceSwitch'))) return;
         try {
           await axios.post(
             `${API_BASE_URL}/auth/switch-workspace`,
@@ -165,7 +182,8 @@ export const NotificationHandler: React.FC = () => {
         }
       }
 
-      void navigate(resolvedUrl);
+      // Arrival events (TICKET_VIEWED, CHANNEL_VIEWED) read this to attribute the open.
+      void navigate(resolvedUrl, { state: { trackSource: 'notification' } });
     },
     [navigate],
   );
@@ -223,10 +241,23 @@ export const NotificationHandler: React.FC = () => {
             ),
           });
         }
+        // Socket delivery spreads metadata into `data`; the REST row keeps `metadata`.
+        const ids = { ...data.notification.metadata, ...data.notification.data };
+        // The server leaves actionUrl chat-shaped for push, which has no SDLC routes,
+        // so a hub path is rebuilt here from the target it resolved at send time.
+        const sdlcTarget = parseSdlcNavTarget(ids.sdlcTarget);
+        const sdlcActionUrl = sdlcTarget ? buildSdlcPath(sdlcTarget) : undefined;
         const resolvedRawActionUrl =
-          data.notification.actionUrl || canvasRedirectUrl || fallbackChatActionUrl;
+          sdlcActionUrl ||
+          data.notification.actionUrl ||
+          canvasRedirectUrl ||
+          fallbackChatActionUrl;
         const resolvedActionUrl = resolvedRawActionUrl
-          ? withWorkspacePrefix(resolvedRawActionUrl, notificationWorkspaceId)
+          ? withWorkspacePrefix(
+              resolvedRawActionUrl,
+              // Unprefixed SDLC paths bind :workspaceId to "sdlc" — never ship one.
+              notificationWorkspaceId ?? activeWorkspaceIdRef.current,
+            )
           : undefined;
 
         // Always show workspace at the top when available, matching Slack.
@@ -318,6 +349,19 @@ export const NotificationHandler: React.FC = () => {
             action: {
               label: 'View',
               onClick: (): void => {
+                globalClickTracker.trackManualEvent(
+                  'NOTIFICATIONS',
+                  'CLICK_NOTIFICATION_TOAST_VIEW',
+                  undefined,
+                  {
+                    // Without a target this event could not be tied to the
+                    // CHANNEL_VIEWED it causes, so notification click-through
+                    // was unattributable.
+                    notificationType,
+                    targetUrl: resolvedActionUrl,
+                    source: 'notification_toast',
+                  },
+                );
                 void handleNotificationClick(resolvedActionUrl, notificationWorkspaceId);
               },
             },
@@ -575,6 +619,12 @@ export const NotificationHandler: React.FC = () => {
   useEffect(() => {
     if (isElectron && window.electronAPI && typeof window.electronAPI.onNavigateTo === 'function') {
       const handleNavigate = (url: string, workspaceId?: string): void => {
+        // The navigate-to IPC fires for notifications, deep links, tray and
+        // overlay navigations alike — the renderer cannot tell them apart, so
+        // this is recorded as a generic externally-triggered navigation.
+        globalClickTracker.trackManualEvent('NAVIGATION', 'ELECTRON_NAVIGATE', undefined, {
+          to: url,
+        });
         void handleNotificationClick(url, workspaceId);
       };
 
@@ -590,25 +640,121 @@ export const NotificationHandler: React.FC = () => {
     // Sync stored preference to main process on startup
     meetingDetector.setEnabled(localStorage.getItem(MEETING_DETECTION_ENABLED_KEY) !== 'false');
     const cleanup = meetingDetector.onStartRecordingFromMeeting(() => {
-      sendRecordingEvent({ type: 'requestAutoStart' });
+      goToRecordings();
+      const status = getRecordingStatus();
+      if (status === 'idle' || status === 'error') {
+        sendRecordingEvent({ type: 'clearTranscripts' });
+        sendRecordingEvent({ type: 'startRecording', defaultLayout: getRecordingDefaultLayout() });
+      } else {
+        sendRecordingEvent({ type: 'requestAutoStart' });
+      }
     });
     window.electronAPI?.ipcSend?.('recording:renderer-ready');
     return cleanup;
-  }, [isElectron]);
+  }, [isElectron, goToRecordings]);
 
   // Handle stop signal from the floating recording pill's Stop button
   useEffect(() => {
     const meetingDetector = window.electronAPI?.meetingDetector;
     if (!isElectron || !meetingDetector) return;
     return meetingDetector.onStopRecordingFromMeeting(() => {
+      goToRecordings();
       sendRecordingEvent({ type: 'requestStop' });
     });
+  }, [isElectron, goToRecordings]);
+
+  // Mirror the main process's meeting state into the renderer, so an incoming
+  // call can ring silently while the user is on Zoom/Meet/Teams. Lives here
+  // beside the two effects that already report call and recording state to main
+  // — this is the return leg of the same conversation.
+  useEffect(() => {
+    const meetingDetector = window.electronAPI?.meetingDetector;
+    if (!isElectron || !meetingDetector?.onMeetingStateChanged) return;
+
+    // Detection is broadcast once and never replayed, so a renderer that
+    // reloaded mid-meeting has to ask.
+    let cancelled = false;
+    void meetingDetector.getCurrentMeeting?.().then(meeting => {
+      // A live event that landed while the seed was in flight is newer than the
+      // seed, so it must not be clobbered by it.
+      if (!cancelled) setExternalMeeting(meeting);
+    });
+
+    const cleanup = meetingDetector.onMeetingStateChanged(meeting => {
+      cancelled = true;
+      setExternalMeeting(meeting);
+    });
+
+    return (): void => {
+      cancelled = true;
+      cleanup();
+      // Nothing is listening for meeting:ended any more; leaving this set would
+      // silence every later call.
+      setExternalMeeting(null);
+    };
+  }, [isElectron]);
+
+  // The signal that actually silences an incoming call: is anything holding the
+  // mic. Gated on Electron and nothing else — in particular not on the
+  // meeting-detection preference, which used to take this whole path down with
+  // it and leave the user's Zoom call fighting a full-volume ringtone.
+  useEffect(() => {
+    const micMonitor = window.electronAPI?.micMonitor;
+    if (!isElectron || !micMonitor?.onStateChanged) return;
+
+    // Broadcasts are not replayed, so a renderer that reloaded mid-meeting has
+    // to ask.
+    let cancelled = false;
+    void micMonitor.getState?.().then(active => {
+      // A live event that landed while the seed was in flight is newer.
+      if (!cancelled) setMicBusy(active);
+    });
+
+    const cleanup = micMonitor.onStateChanged(active => {
+      cancelled = true;
+      setMicBusy(active);
+    });
+
+    return (): void => {
+      cancelled = true;
+      cleanup();
+      // Nothing is listening for the release any more; leaving this set would
+      // silence every later call.
+      setMicBusy(false);
+    };
   }, [isElectron]);
 
   useEffect(() => {
     if (!isElectron || !window.electronAPI?.onRecordingSystemSuspend) return;
     return window.electronAPI.onRecordingSystemSuspend(stopRecordingForTeardown);
   }, [isElectron]);
+
+  useEffect(() => {
+    if (!isElectron || !window.electronAPI?.onRecordingStopForTeardown) return;
+    return window.electronAPI.onRecordingStopForTeardown(stopRecordingForNavigation);
+  }, [isElectron]);
+
+  useEffect(() => {
+    if (!isElectron || !window.electronAPI?.onCallStopForTeardown) return;
+    return window.electronAPI.onCallStopForTeardown(() => {
+      roomActor.send({ type: 'DISCONNECT' });
+    });
+  }, [isElectron]);
+
+  // Same states useCallJoinOrInitiate treats as "in a call"; `initiating` lands
+  // before the mic is enabled, so main knows the upcoming activation is ours.
+  const isInXyneCall = useSelector(
+    roomActor,
+    s =>
+      s.matches('initiating') ||
+      s.matches('joining') ||
+      s.matches('connecting') ||
+      s.matches('connected'),
+  );
+  useEffect(() => {
+    if (!isElectron) return;
+    window.electronAPI?.ipcSend?.('call:state-changed', isInXyneCall);
+  }, [isElectron, isInXyneCall]);
 
   const recordingStatus = useRecordingStore(ctx => ctx.status);
   const recordingStartTime = useRecordingStore(ctx => ctx.startTime);
@@ -620,6 +766,9 @@ export const NotificationHandler: React.FC = () => {
     const isActive = recordingStatus === 'recording' || recordingStatus === 'paused';
     const state = {
       active: isActive,
+      // Sent before the mic is enabled, so the meeting detector can tell our own
+      // recording from a meeting worth offering to record.
+      starting: recordingStatus === 'starting',
       startTime: recordingStartTime ?? undefined,
       paused: recordingStatus === 'paused',
       pauseStartedAt: recordingPauseStartedAt,

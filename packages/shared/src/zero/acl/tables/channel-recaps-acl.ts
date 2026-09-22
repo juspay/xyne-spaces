@@ -1,7 +1,8 @@
 import type { Query } from '@rocicorp/zero';
 import type { Schema, Context } from '../../schema';
-import { ChannelVisibility } from '../../schema';
 import { BaseQueryACL } from '../core/base-acl';
+import type { SelectArgs } from '../core/types';
+import { SCALAR, channelAccessArgs, channelAccessWhere, scalarChannelBody } from '../core/channel-access';
 import { guestChannelAccessWhere, isGuestContext } from '../core/guest-acl-utils';
 
 export class ChannelRecapsACL extends BaseQueryACL<'channel_recaps'> {
@@ -9,7 +10,7 @@ export class ChannelRecapsACL extends BaseQueryACL<'channel_recaps'> {
     super(ctx, 'channel_recaps');
   }
 
-  canSelect<TReturn>(query: Query<'channel_recaps', Schema, TReturn>): Query<'channel_recaps', Schema, TReturn> {
+  canSelect<TReturn>(query: Query<'channel_recaps', Schema, TReturn>, args?: SelectArgs): Query<'channel_recaps', Schema, TReturn> {
     if (isGuestContext(this.ctx)) {
       return query.where(({ or, cmp, and, exists }) =>
         or(
@@ -28,19 +29,29 @@ export class ChannelRecapsACL extends BaseQueryACL<'channel_recaps'> {
 
     // Base recaps (userId IS NULL): accessible to channel participants or public channels in the workspace
     // Custom recaps (userId = userID): only accessible to the specific user who owns them
+    const { channelId, isMember } = channelAccessArgs(args);
+    if (channelId) {
+      return query.where(({ or, cmp, and, exists }) =>
+        or(
+          and(
+            cmp('userId', 'IS', null),
+            exists('channel', scalarChannelBody(this.ctx, channelId, isMember), SCALAR)
+          ),
+          cmp('userId', '=', this.ctx.userID)
+        )
+      );
+    }
+
     return query.where(({ or, cmp, and, exists }) =>
       or(
         and(
           cmp('userId', 'IS', null),
+          // Pin the join direction — see tickets-acl.ts for the full rationale.
           exists('channel', (ch) =>
             ch
               .where('workspaceId', '=', this.ctx.workspaceId)
-              .where(({ or: or2, cmp: cmp2, exists: exists2 }) =>
-                or2(
-                  cmp2('visibility', '=', ChannelVisibility.PUBLIC),
-                  exists2('participants', (p) => p.where('userId', this.ctx.userID))
-                )
-              )
+              .where(channelAccessWhere(this.ctx)),
+            { flip: false },
           )
         ),
         cmp('userId', '=', this.ctx.userID)

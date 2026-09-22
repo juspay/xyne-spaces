@@ -1,10 +1,12 @@
 import { QueryResultType } from '@rocicorp/zero';
 import { queries } from '../../../zero/queries';
 import { useMemo } from 'react';
+import { useShowThreadTags } from '../../../hooks/useShowThreadTags';
 import { CombinedMessageItem, shouldShowAvatar } from './ChatListUtils';
 import { MessageMetadata } from '../../ui/MessageBubble/MessageBubble.utils';
 import { MessageType, parseReactionsMd } from '@xyne/shared';
 import { getInitialMessageFromConversation } from '../../../utils/conversationMessageHelpers';
+import { isPreviewableDocument } from '../../../services/documentThumbnailService';
 
 type CombinedMesseges = {
   combinedMessages: CombinedMessageItem[];
@@ -38,6 +40,7 @@ const WITHOUT_AVATAR_PADDING = 16;
 const ATTACHMENT_CHROME = 16; // py-2 wrapper (8px top + 8px bottom)
 const MEDIA_CAP = 256; // Preview fixedHeight (desktop)
 const FILE_CARD_HEIGHT = 256; // h-64 container for non-image file attachments (estimator)
+const FILE_PILL_HEIGHT = 62;
 const ATTACHMENT_HEADER = 16; // single text-xs flex row, line-height ~16px
 
 // Video constraints (must match InlineVideoPlayer)
@@ -144,12 +147,16 @@ function estimateImageDisplayHeight(
  * @param prevItem      - The item immediately before this one (or null)
  * @param isMobile      - Whether the viewport is in mobile mode
  * @param isNewMsgBoundary - Whether the red "New Messages" divider is shown above this item
+ * @param showThreadTags - Whether the reader has thread tag chips enabled; must match what
+ *                         ChatListItem passes to `shouldShowAvatar`, or the estimated height
+ *                         disagrees with the rendered one.
  */
 export function estimateMessageHeight(
   item: CombinedMessageItem,
   prevItem: CombinedMessageItem | null,
   isMobile: boolean,
   isNewMsgBoundary = false,
+  showThreadTags = false,
 ): number {
   // Only 'conversation' type items exist in this list (no date-separator via
   // useCombinedMesseges – those come from GroupedVirtuoso group headers).
@@ -164,7 +171,7 @@ export function estimateMessageHeight(
   const msgType = message.msgType;
 
   // ── Determine avatar visibility ──
-  const showAvatar = prevItem === null || shouldShowAvatar(item, prevItem);
+  const showAvatar = prevItem === null || shouldShowAvatar(item, prevItem, showThreadTags);
   let height = showAvatar ? WITH_AVATAR_PADDING : WITHOUT_AVATAR_PADDING;
 
   // ── New-message boundary divider ──
@@ -173,8 +180,11 @@ export function estimateMessageHeight(
   // ── Private system notice header ("Only visible to you") ──
   const isMentionUserAddition = metadata?.messageSubtype === 'user_not_in_channel';
   const isTicketNudge = metadata?.messageSubtype === 'ticket_nudge';
+  // Ephemeral cards render the same header (see MessageBubble), so the
+  // virtualizer has to allocate the same extra height or the row is mis-sized.
+  const isEphemeralNotice = metadata?.['__xyneEphemeral'] === true;
   const isPrivateSystemNotice = isMentionUserAddition || isTicketNudge;
-  if (isPrivateSystemNotice) height += PRIVATE_NOTICE_HEADER;
+  if (isPrivateSystemNotice || isEphemeralNotice) height += PRIVATE_NOTICE_HEADER;
 
   // ── Avatar header row (sender name + timestamp) ──
   if (showAvatar) height += AVATAR_HEADER_HEIGHT;
@@ -411,10 +421,18 @@ export function estimateMessageHeight(
         height += rowCount * (MEDIA_CAP + ATTACHMENT_CHROME);
       }
 
-      // Files (includes text/plain, PDFs, etc.): each on its own row.
-      // FilePills are in flex-col gap-2 (8px gap between each pill).
       if (files.length > 0) {
-        height += files.length * FILE_CARD_HEIGHT + (files.length - 1) * 8;
+        const singleFile = files.length === 1 ? files[0] : undefined;
+        const showsPreviewCard =
+          !!singleFile && isPreviewableDocument(singleFile.mimetype) && !!singleFile.thumbnailUrl;
+
+        if (showsPreviewCard) {
+          height += FILE_CARD_HEIGHT;
+        } else {
+          const pillsPerRow = isMobile ? 1 : 2;
+          const rows = Math.ceil(files.length / pillsPerRow);
+          height += rows * FILE_PILL_HEIGHT + (rows - 1) * 8;
+        }
       }
     }
   }
@@ -488,6 +506,8 @@ export const useCombinedMesseges = (
   isMobile: boolean,
   isNewMsgBoundaryIndex = -1,
 ): CombinedMesseges => {
+  const { showThreadTags } = useShowThreadTags();
+
   const combinedMessages: CombinedMessageItem[] = useMemo(() => {
     return conversations.map(conversation => ({
       type: 'conversation' as const,
@@ -525,9 +545,9 @@ export const useCombinedMesseges = (
     return combinedMessages.map((item, index) => {
       const prevItem = index > 0 ? (combinedMessages[index - 1] ?? null) : null;
       const isNewMsgBoundary = index === isNewMsgBoundaryIndex;
-      return estimateMessageHeight(item, prevItem, isMobile, isNewMsgBoundary);
+      return estimateMessageHeight(item, prevItem, isMobile, isNewMsgBoundary, showThreadTags);
     });
-  }, [combinedMessages, isMobile, isNewMsgBoundaryIndex]);
+  }, [combinedMessages, isMobile, isNewMsgBoundaryIndex, showThreadTags]);
 
   return {
     groupCounts,

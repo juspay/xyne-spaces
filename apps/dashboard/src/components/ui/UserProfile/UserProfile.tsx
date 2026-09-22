@@ -21,7 +21,7 @@ import Avatar from '../Avatar/Avatar';
 import { StatusIndicator } from '../StatusIndicator';
 import { Button } from '../Button/Button';
 import { UpdateStatusModal } from '../../AppSidebar/UpdateStatusModal';
-import { isStatusExpired, formatExpiryTime } from '../../../utils/statusUtils';
+import { isStatusExpired, formatExpiryTime, resolveUserStatus } from '../../../utils/statusUtils';
 import { cn } from '../../../utils/classNames';
 import { renderEmoji } from '../../../utils/customEmojiUtils';
 import { queries } from '../../../zero/queries';
@@ -329,6 +329,8 @@ export const UserProfile: React.FC<UserProfileProps> = ({
   const statusExpiryAt = user?.statusExpiryAt;
   const hasStatus = statusEmoji && (!statusExpiryAt || !isStatusExpired(statusExpiryAt));
 
+  const displayStatus = resolveUserStatus(user);
+
   if (!user) {
     return (
       <div className={cn('p-6', className)}>
@@ -352,6 +354,8 @@ export const UserProfile: React.FC<UserProfileProps> = ({
             <div
               className='relative group cursor-pointer'
               onClick={handlePictureClick}
+              data-track-category='USER_PROFILE'
+              data-track-name='CHANGE_PROFILE_PICTURE'
               onKeyDown={e => {
                 if (e.key === 'Enter') handlePictureClick();
               }}
@@ -421,6 +425,8 @@ export const UserProfile: React.FC<UserProfileProps> = ({
                 />
                 <button
                   onClick={handleSaveEdit}
+                  data-track-category='USER_PROFILE'
+                  data-track-name='SAVE_TEAM'
                   className='p-1 text-green-600 hover:bg-green-50 rounded'
                   title='Save'
                 >
@@ -428,6 +434,8 @@ export const UserProfile: React.FC<UserProfileProps> = ({
                 </button>
                 <button
                   onClick={handleCancelEdit}
+                  data-track-category='USER_PROFILE'
+                  data-track-name='CANCEL_EDIT_TEAM'
                   className='p-1 text-muted-foreground hover:bg-accent rounded'
                   title='Cancel'
                 >
@@ -442,6 +450,8 @@ export const UserProfile: React.FC<UserProfileProps> = ({
               {isOwnProfile && (
                 <button
                   onClick={() => handleStartEdit('team', userProfile.team)}
+                  data-track-category='USER_PROFILE'
+                  data-track-name='EDIT_TEAM_NAME'
                   className='text-muted-foreground hover:text-muted-foreground'
                   title='Edit team name'
                 >
@@ -452,6 +462,8 @@ export const UserProfile: React.FC<UserProfileProps> = ({
           ) : isOwnProfile ? (
             <button
               onClick={() => handleStartEdit('team')}
+              data-track-category='USER_PROFILE'
+              data-track-name='START_EDIT_TEAM'
               className='mt-1 text-sm text-action-primary hover:opacity-80 flex items-center gap-1 transition-opacity'
             >
               <span>+ Add Team Name</span>
@@ -473,15 +485,15 @@ export const UserProfile: React.FC<UserProfileProps> = ({
           )}
 
           {/* Custom Status - Show for everyone if set */}
-          {hasStatus && !isOwnProfile && (
+          {displayStatus.hasStatus && !isOwnProfile && (
             <div className='mt-2'>
               <div className='flex items-center gap-2 text-sm text-foreground'>
-                <span className='text-base'>{renderEmoji(statusEmoji || '')}</span>
-                <span>{statusContent}</span>
+                <span className='text-base'>{renderEmoji(displayStatus.emoji)}</span>
+                <span>{displayStatus.content}</span>
               </div>
-              {statusExpiryAt && (
+              {displayStatus.expiryAt && (
                 <div className='text-xs text-muted-foreground mt-1'>
-                  {formatExpiryTime(statusExpiryAt, true)}
+                  {formatExpiryTime(displayStatus.expiryAt, true)}
                 </div>
               )}
             </div>
@@ -492,6 +504,8 @@ export const UserProfile: React.FC<UserProfileProps> = ({
             <div className='flex items-center gap-2 mt-4'>
               <Button
                 onClick={handleMessageClick}
+                data-track-category='USER_PROFILE'
+                data-track-name='SEND_MESSAGE_TO_USER'
                 className='flex items-center gap-2 px-4 py-2 border border-input bg-background hover:bg-accent text-foreground rounded-lg'
                 variant='outline'
               >
@@ -500,6 +514,8 @@ export const UserProfile: React.FC<UserProfileProps> = ({
               </Button>
               <Button
                 onClick={handleHuddleClick}
+                data-track-category='USER_PROFILE'
+                data-track-name='START_HUDDLE_WITH_USER'
                 className='flex items-center gap-2 px-4 py-2 border border-input bg-background hover:bg-accent text-foreground rounded-lg'
                 variant='outline'
               >
@@ -523,6 +539,8 @@ export const UserProfile: React.FC<UserProfileProps> = ({
                   : 'border-border bg-muted',
               )}
               onClick={() => setIsStatusModalOpen(true)}
+              data-track-category='USER_PROFILE'
+              data-track-name='OPEN_STATUS_MODAL'
               onKeyDown={e => {
                 if (e.key === 'Enter' || e.key === ' ') {
                   e.preventDefault();
@@ -553,6 +571,8 @@ export const UserProfile: React.FC<UserProfileProps> = ({
                     variant='ghost'
                     size='sm'
                     onClick={handleClearStatus}
+                    data-track-category='USER_PROFILE'
+                    data-track-name='CLEAR_STATUS'
                     className='flex-shrink-0 p-1 h-auto hover:bg-accent min-w-[20px]'
                     title='Clear status'
                   >
@@ -610,6 +630,8 @@ export const UserProfile: React.FC<UserProfileProps> = ({
                     setEditingField(null);
                     setSelectedManagerUsers([]);
                   }}
+                  data-track-category='USER_PROFILE'
+                  data-track-name='CANCEL_EDIT_MANAGER'
                   className='px-3 py-1.5 text-sm text-muted-foreground hover:text-foreground'
                 >
                   Cancel
@@ -630,6 +652,8 @@ export const UserProfile: React.FC<UserProfileProps> = ({
                     setEditingField(null);
                     setSelectedManagerUsers([]);
                   }}
+                  data-track-category='USER_PROFILE'
+                  data-track-name='SAVE_MANAGER'
                   className='px-3 py-1.5 text-sm bg-gray-900 text-white rounded hover:bg-gray-800'
                 >
                   Save
@@ -649,6 +673,8 @@ export const UserProfile: React.FC<UserProfileProps> = ({
                 setEditingField('manager');
                 setSelectedManagerUsers([]);
               }}
+              data-track-category='USER_PROFILE'
+              data-track-name='START_EDIT_MANAGER'
               className='text-sm text-action-primary hover:opacity-80 flex items-center gap-1 transition-opacity'
             >
               <span>+ Add Manager</span>
@@ -677,6 +703,8 @@ export const UserProfile: React.FC<UserProfileProps> = ({
                   size='iconSm'
                   className='h-5 w-5 p-0 text-muted-foreground hover:text-foreground'
                   onClick={handleCopyUserId}
+                  data-track-category='USER_PROFILE'
+                  data-track-name='COPY_USER_ID'
                   title='Copy user ID'
                 >
                   {copiedUserId ? <Check className='size-3' /> : <Copy className='size-3' />}
@@ -710,6 +738,8 @@ export const UserProfile: React.FC<UserProfileProps> = ({
                   {isOwnProfile && userProfile?.displayName && editingField !== 'displayName' && (
                     <button
                       onClick={() => handleStartEdit('displayName', userProfile.displayName)}
+                      data-track-category='USER_PROFILE'
+                      data-track-name='START_EDIT_DISPLAY_NAME'
                       className='text-muted-foreground hover:text-muted-foreground'
                       title='Edit display name'
                     >
@@ -735,6 +765,8 @@ export const UserProfile: React.FC<UserProfileProps> = ({
                       />
                       <button
                         onClick={handleSaveEdit}
+                        data-track-category='USER_PROFILE'
+                        data-track-name='SAVE_DISPLAY_NAME'
                         className='p-1 text-green-600 hover:bg-green-50 rounded'
                         title='Save'
                       >
@@ -742,6 +774,8 @@ export const UserProfile: React.FC<UserProfileProps> = ({
                       </button>
                       <button
                         onClick={handleCancelEdit}
+                        data-track-category='USER_PROFILE'
+                        data-track-name='CANCEL_EDIT_DISPLAY_NAME'
                         className='p-1 text-muted-foreground hover:bg-accent rounded'
                         title='Cancel'
                       >
@@ -755,6 +789,8 @@ export const UserProfile: React.FC<UserProfileProps> = ({
                 ) : isOwnProfile ? (
                   <button
                     onClick={() => handleStartEdit('displayName', userProfile?.displayName)}
+                    data-track-category='USER_PROFILE'
+                    data-track-name='START_EDIT_DISPLAY_NAME'
                     className='mt-1 text-sm text-action-primary hover:opacity-80 transition-opacity'
                   >
                     + Add Display Name
@@ -776,6 +812,8 @@ export const UserProfile: React.FC<UserProfileProps> = ({
                   {isOwnProfile && userProfile?.phoneNumber && editingField !== 'phoneNumber' && (
                     <button
                       onClick={() => handleStartEdit('phoneNumber', userProfile.phoneNumber)}
+                      data-track-category='USER_PROFILE'
+                      data-track-name='START_EDIT_PHONE_NUMBER'
                       className='text-muted-foreground hover:text-muted-foreground'
                       title='Edit phone number'
                     >
@@ -801,6 +839,8 @@ export const UserProfile: React.FC<UserProfileProps> = ({
                       />
                       <button
                         onClick={handleSaveEdit}
+                        data-track-category='USER_PROFILE'
+                        data-track-name='SAVE_PHONE_NUMBER'
                         className='p-1 text-green-600 hover:bg-green-50 rounded'
                         title='Save'
                       >
@@ -808,6 +848,8 @@ export const UserProfile: React.FC<UserProfileProps> = ({
                       </button>
                       <button
                         onClick={handleCancelEdit}
+                        data-track-category='USER_PROFILE'
+                        data-track-name='CANCEL_EDIT_PHONE_NUMBER'
                         className='p-1 text-muted-foreground hover:bg-accent rounded'
                         title='Cancel'
                       >
@@ -821,6 +863,8 @@ export const UserProfile: React.FC<UserProfileProps> = ({
                 ) : (
                   <button
                     onClick={() => handleStartEdit('phoneNumber')}
+                    data-track-category='USER_PROFILE'
+                    data-track-name='START_EDIT_PHONE_NUMBER'
                     className='mt-1 text-sm text-action-primary hover:opacity-80 transition-opacity'
                   >
                     + Add Phone Number
@@ -866,6 +910,8 @@ export const UserProfile: React.FC<UserProfileProps> = ({
                   {isOwnProfile && userProfile?.dob && editingField !== 'dob' && (
                     <button
                       onClick={() => handleStartEdit('dob', userProfile.dob)}
+                      data-track-category='USER_PROFILE'
+                      data-track-name='START_EDIT_BIRTH_DATE'
                       className='text-muted-foreground hover:text-muted-foreground'
                       title='Edit birth date'
                     >
@@ -890,6 +936,8 @@ export const UserProfile: React.FC<UserProfileProps> = ({
                       />
                       <button
                         onClick={handleSaveEdit}
+                        data-track-category='USER_PROFILE'
+                        data-track-name='SAVE_BIRTH_DATE'
                         className='p-1 text-green-600 hover:bg-green-50 rounded'
                         title='Save'
                       >
@@ -897,6 +945,8 @@ export const UserProfile: React.FC<UserProfileProps> = ({
                       </button>
                       <button
                         onClick={handleCancelEdit}
+                        data-track-category='USER_PROFILE'
+                        data-track-name='CANCEL_EDIT_BIRTH_DATE'
                         className='p-1 text-muted-foreground hover:bg-accent rounded'
                         title='Cancel'
                       >
@@ -919,6 +969,8 @@ export const UserProfile: React.FC<UserProfileProps> = ({
                 ) : (
                   <button
                     onClick={() => handleStartEdit('dob')}
+                    data-track-category='USER_PROFILE'
+                    data-track-name='START_EDIT_BIRTH_DATE'
                     className='mt-1 text-sm text-action-primary hover:opacity-80 transition-opacity'
                   >
                     + Add Birth Date

@@ -1,19 +1,79 @@
 import { Type } from "@sinclair/typebox";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
-import { SUBAGENT_DEFINITIONS, findSubagentDefinitionForServer } from "xyne-claw-shared";
+import {
+  classifyToolRisk,
+  riskAtOrBelow,
+  SUBAGENT_DEFINITIONS,
+  findSubagentDefinitionForServer,
+  isPresentationToolSource,
+  PRESENTATION_CATALOG_SOURCE,
+} from "xyne-claw-shared";
 import type { McpToolGroup } from "./mcp.js";
 import type { CustomSubagentSpec } from "./subagent-tools.js";
 
 export interface ToolCatalogEntry {
   name: string;
   oneLineDescription: string;
+  /**
+   * Provenance label: `subagent:<name>`, `custom-subagent:<name>`, or
+   * `presentation`. routes/run.ts parses the `subagent:`/`custom-subagent:`
+   * prefixes to apply the per-agent tools config, so this string's shape is
+   * load-bearing — don't repurpose it for display.
+   */
   source: string;
+  /**
+   * The catalog this tool belongs to — the user-facing grouping that
+   * `search-tools`/`load-tools` filter on, and that the system-prompt index
+   * lists. Derived from `source` at build time so the two can diverge without
+   * breaking the config filter above.
+   */
+  catalog: string;
+  /**
+   * What the tool definition declared about mutating, so `search-tools`'
+   * risk ceiling can use it instead of re-guessing from the name. Undefined
+   * ≠ "read" — see `classifyToolRisk`.
+   */
+  isWrite?: boolean;
+  /**
+   * The MCP server this tool came from, when one did.
+   *
+   * Distinct from `catalog`: a subagent-wrapped server is catalogued under the
+   * WRAPPER's name ("spaces"), while this stays the server's own type
+   * ("xyne-spaces"). Loading or listing "everything from one MCP" needs the
+   * second, and no other field carries it.
+   */
+  mcpServer?: string;
 }
 
 export interface ToolCatalogItem {
   entry: ToolCatalogEntry;
   tool: ToolDefinition;
 }
+
+/** One tool from the deployment-wide catalog, as claw-auth returns it. */
+export interface DeploymentToolMatch {
+  slug: string;
+  name: string;
+  integration: string;
+  description: string;
+  risk: "read" | "write" | "destructive";
+  params: Array<{ name: string; type: string; required: boolean; description: string }>;
+  grantedToAgents?: number;
+}
+
+/**
+ * Searches every tool the deployment has, not just this run's.
+ *
+ * Injected, not imported: the catalog module is pure, but the lookup needs
+ * the run's authenticated session. Absent (subagents, tests, a claw-auth
+ * outage), `scope:"claw"` degrades to a clear message instead of erroring.
+ */
+export type DeploymentToolSearch = (params: {
+  query: string;
+  integration?: string;
+  maxRisk?: string;
+  limit: number;
+}) => Promise<DeploymentToolMatch[]>;
 
 export interface FastToolRuntimeController {
   getActiveToolSet?: () => string[];
@@ -26,7 +86,24 @@ export interface FastToolRuntimeController {
   }>;
 }
 
-const META_TOOL_NAMES = new Set(["search-tools", "load-tools"]);
+const META_TOOL_NAMES = new Set(["load-tools", "search-tools"]);
+
+/**
+ * True when a catalogued tool is really a meta-tool under claw-auth's naming.
+ *
+ * The claw-auth System Tool `search_tools` answers exactly what `search-tools
+ * scope:"claw"` does, and the UI title-cases both to the same untagged
+ * "Search Tools" label — offering both makes a run trace unreadable, so the
+ * System Tool is excluded whenever the meta-tools are present.
+ */
+export function duplicatesMetaTool(name: string): boolean {
+  // Strip only the `Built-in__` prefix before comparing (the System Tool
+  // arrives as `Built-in__search_tools`) — a third-party server's own
+  // `search_tools` is not a duplicate.
+  const runtime = extractRuntimeToolName(name);
+  if (runtime !== name && !name.startsWith("Built-in__")) return false;
+  return META_TOOL_NAMES.has(runtime.toLowerCase().replace(/_/g, "-"));
+}
 
 function extractRuntimeToolName(name: string): string {
   const idx = name.lastIndexOf("__");
@@ -57,8 +134,20 @@ function isDirectPick(tool: ToolDefinition, directPickSuffixes: string[] | undef
   return directPickSuffixes.some((suffix) => tool.name.endsWith(suffix));
 }
 
-function addUnique(items: ToolCatalogItem[], seen: Set<string>, tool: ToolDefinition, source: string): void {
-  if (META_TOOL_NAMES.has(tool.name) || seen.has(tool.name)) return;
+/** `subagent:github` → `github`; `presentation` → `presentation`. */
+export function catalogNameForSource(source: string): string {
+  const idx = source.indexOf(":");
+  return idx >= 0 ? source.slice(idx + 1) : source;
+}
+
+function addUnique(
+  items: ToolCatalogItem[],
+  seen: Set<string>,
+  tool: ToolDefinition,
+  source: string,
+  mcpServer?: string,
+): void {
+  if (duplicatesMetaTool(tool.name) || seen.has(tool.name)) return;
   seen.add(tool.name);
   items.push({
     tool,
@@ -66,6 +155,9 @@ function addUnique(items: ToolCatalogItem[], seen: Set<string>, tool: ToolDefini
       name: tool.name,
       oneLineDescription: oneLineDescription(tool),
       source,
+      catalog: catalogNameForSource(source),
+      ...(isCustomWriteTool(tool) ? { isWrite: true } : {}),
+      ...(mcpServer ? { mcpServer } : {}),
     },
   });
 }
@@ -100,34 +192,95 @@ export function buildToolCatalog(params: {
   groups: McpToolGroup[];
   customTools?: ToolDefinition[];
   customSubagents?: CustomSubagentSpec[];
+  /**
+   * Whether to catalogue subagent-wrapped read tools.
+   *
+   * Only meaningful when subagent delegation is OFF (fast mode) — there the
+   * catalog stands in for the wrappers, so the individual read tools belong in
+   * it. With delegation ON, the wrapper tool is already in the palette and
+   * cataloguing its members too would show the model both `spaces` and
+   * `Spaces__spaces-search`, which is duplication, not disclosure.
+   *
+   * Presentation tools are catalogued either way: they're wrapped by nothing.
+   */
+  includeSubagentTools?: boolean;
+  /**
+   * Catalogues def-less servers' tools and in-process custom tools that no
+   * subagent wraps. Set when the open palette is on, so these become
+   * loadable instead of eager — a def-less server's tools otherwise go
+   * straight to `directTools` (subagent-tools.ts) with full schemas in every
+   * prompt. Granted tools are unaffected: `routes/run.ts` filters
+   * always-active names back out of the catalog.
+   */
+  catalogUnwrapped?: boolean;
 }): ToolCatalogItem[] {
   const items: ToolCatalogItem[] = [];
   const seen = new Set<string>();
 
-  for (const group of params.groups) {
-    const def = findSubagentDefinitionForServer(group.serverType);
-    if (!def) continue;
-    const writeSet = new Set(group.writeTools.map(String));
-    for (const tool of group.tools) {
-      if (writeSet.has(extractRuntimeToolName(tool.name))) continue;
-      addUnique(items, seen, tool, `subagent:${def.name}`);
+  if (params.includeSubagentTools) {
+    for (const group of params.groups) {
+      if (group.sourceSubagent) continue;
+      const def = findSubagentDefinitionForServer(group.serverType);
+      if (!def) continue;
+      const writeSet = new Set(group.writeTools.map(String));
+      for (const tool of group.tools) {
+        if (writeSet.has(extractRuntimeToolName(tool.name))) continue;
+        addUnique(items, seen, tool, `subagent:${def.name}`, group.serverType);
+      }
     }
-  }
 
-  if (params.customTools) {
-    for (const def of SUBAGENT_DEFINITIONS) {
-      const matched = params.customTools.filter((tool) => customToolSource(tool) === def.serverType);
-      for (const tool of matched) {
-        if (isCustomWriteTool(tool)) continue;
-        addUnique(items, seen, tool, `subagent:${def.name}`);
+    if (params.customTools) {
+      for (const def of SUBAGENT_DEFINITIONS) {
+        const matched = params.customTools.filter((tool) => customToolSource(tool) === def.serverType);
+        for (const tool of matched) {
+          if (isCustomWriteTool(tool)) continue;
+          addUnique(items, seen, tool, `subagent:${def.name}`, def.serverType);
+        }
+      }
+    }
+
+    for (const spec of params.customSubagents ?? []) {
+      const palette = resolveCustomSubagentTools(spec.tools, params.groups, params.customTools);
+      for (const tool of palette) {
+        addUnique(items, seen, tool, `custom-subagent:${spec.name}`);
       }
     }
   }
 
-  for (const spec of params.customSubagents ?? []) {
-    const palette = resolveCustomSubagentTools(spec.tools, params.groups, params.customTools);
-    for (const tool of palette) {
-      addUnique(items, seen, tool, `custom-subagent:${spec.name}`);
+  // Presentation tools (post-code-block / post-diff / post-chart / visualize)
+  // aren't wrapped by any subagent, so the loops above skip them and they'd
+  // otherwise fall through to remainingCustomTools → fastAlwaysActiveToolNames.
+  // They're response-only: the agent needs them once it knows what to say, not
+  // while it's still working. Catalogue them so load-tools pulls the schema in
+  // at the point of use. Write-tool exclusion doesn't apply — they only render.
+  // See packages/xyne-claw-shared/src/tools/presentation.ts.
+  for (const tool of params.customTools ?? []) {
+    if (isPresentationToolSource(customToolSource(tool))) {
+      addUnique(items, seen, tool, PRESENTATION_CATALOG_SOURCE);
+    }
+  }
+
+  if (params.catalogUnwrapped) {
+    // Def-less servers, under the same `server:<type>` pseudo-source
+    // tool-resolution.ts already uses for them.
+    for (const group of params.groups) {
+      if (group.sourceSubagent) continue;
+      if (findSubagentDefinitionForServer(group.serverType)) continue;
+      const writeSet = new Set(group.writeTools.map(String));
+      for (const tool of group.tools) {
+        if (writeSet.has(extractRuntimeToolName(tool.name))) continue;
+        addUnique(items, seen, tool, `server:${group.serverType}`, group.serverType);
+      }
+    }
+
+    // In-process custom tools with no MCP server behind them. Writes stay eager:
+    // a write tool is something an admin picked deliberately, and the palette
+    // refuses writes at "read" anyway.
+    for (const tool of params.customTools ?? []) {
+      const source = customToolSource(tool);
+      if (!source || isPresentationToolSource(source)) continue;
+      if (isCustomWriteTool(tool)) continue;
+      addUnique(items, seen, tool, source);
     }
   }
 
@@ -146,6 +299,7 @@ export function buildFastModeDirectTools(params: {
   const remainingCustomTools: ToolDefinition[] = [];
 
   for (const group of params.groups) {
+    if (group.sourceSubagent) continue;
     const def = findSubagentDefinitionForServer(group.serverType);
     if (!def) {
       directTools.push(...group.tools);
@@ -162,6 +316,13 @@ export function buildFastModeDirectTools(params: {
 
   for (const tool of params.customTools ?? []) {
     const source = customToolSource(tool);
+    // Response-only cards go to the lazy catalog, never to the always-active
+    // set — buildToolCatalog above claims them. This branch must come FIRST:
+    // presentation tools are wrapped by no subagent, so the next check would
+    // otherwise sweep them into remainingCustomTools, and a name that lands in
+    // fastAlwaysActiveToolNames is filtered back OUT of the catalog in
+    // routes/run.ts. Both halves have to agree or the tool is simply eager.
+    if (isPresentationToolSource(source)) continue;
     const wrappedBySubagent = source
       ? findSubagentDefinitionForServer(source) !== undefined
       : false;
@@ -177,69 +338,394 @@ export function buildFastModeDirectTools(params: {
   return { directTools, remainingCustomTools };
 }
 
+const DEFAULT_SEARCH_LIMIT = 10;
+const MAX_SEARCH_LIMIT = 50;
+
+/** The one result shape a meta-tool returns. */
+function text(body: string): { content: Array<{ type: "text"; text: string }>; details: Record<string, never> } {
+  return { content: [{ type: "text" as const, text: body }], details: {} };
+}
+
+/**
+ * Risk for a catalog entry, using the same classifier as the index and the
+ * Toolbox badge. The entry's `isWrite` is believed when present; otherwise the
+ * name decides, leaning write.
+ */
+function entryRisk(entry: ToolCatalogEntry): ReturnType<typeof classifyToolRisk> {
+  return classifyToolRisk(entry.name, entry.isWrite);
+}
+
+/** Ranked hit from the agent-scope matcher. */
+interface ScopedHit {
+  entry: ToolCatalogEntry;
+  hits: number;
+}
+
+/**
+ * Token overlap over name, catalog, source and one-liner, ranked by hit
+ * count — OR not AND, so a multi-word query still matches tools that contain
+ * only some of the words. Tokens under MIN_TOKEN are dropped: matching is by
+ * substring, so a 1-2 letter token is contained in nearly every description
+ * and would swamp the ranking. Lexical, not semantic: this is the agent's own
+ * (small, already-prompted) palette — `scope:"claw"` is the vector search for
+ * the deployment-wide catalog the model hasn't seen.
+ */
+const MIN_TOKEN = 3;
+
+function matchScoped(entries: ToolCatalogEntry[], query: string): ToolCatalogEntry[] {
+  const tokens = query.toLowerCase().split(/[^a-z0-9]+/).filter((t) => t.length >= MIN_TOKEN);
+  if (tokens.length === 0) return entries;
+  return entries
+    .map((entry): ScopedHit => {
+      const haystack = `${entry.name} ${entry.catalog} ${entry.source} ${entry.oneLineDescription}`.toLowerCase();
+      return { entry, hits: tokens.reduce((n, token) => (haystack.includes(token) ? n + 1 : n), 0) };
+    })
+    .filter((s) => s.hits > 0)
+    .sort((a, b) => b.hits - a.hits || a.entry.name.localeCompare(b.entry.name))
+    .map((s) => s.entry);
+}
+
+/**
+ * Resolves a name the model typed to the name the catalog actually holds.
+ *
+ * Agent-scope search quotes server-decorated runtime names (e.g.
+ * `Xyne_Spaces__spaces-my-items`); deployment scope quotes the bare `tools`
+ * table name and can't know this run's prefixes. Tried in descending
+ * confidence; an ambiguous suffix match is reported rather than guessed —
+ * two servers can share a bare tool name, and loading the wrong one silently
+ * is worse than asking for the qualified name.
+ */
+function resolveCatalogName(
+  requested: string,
+  byName: Map<string, ToolCatalogEntry>,
+  catalog: ToolCatalogEntry[],
+): { name: string } | { ambiguous: string[] } | null {
+  if (byName.has(requested)) return { name: requested };
+
+  const norm = (v: string): string => v.toLowerCase().replace(/_/g, "-");
+  const wanted = norm(requested);
+
+  const matches = catalog.filter((entry) => {
+    const name = entry.name;
+    return (
+      norm(name) === wanted ||
+      name.endsWith(`__${requested}`) ||
+      norm(name).endsWith(`--${wanted}`) ||
+      norm(extractRuntimeToolName(name)) === wanted
+    );
+  });
+
+  if (matches.length === 1) return { name: matches[0]!.name };
+  if (matches.length > 1) return { ambiguous: matches.map((m) => m.name) };
+  return null;
+}
+
+/**
+ * Explains an unresolved name using what this run actually holds, so
+ * "unknown" reads as a diagnosis (wrong name vs. genuinely not in this run)
+ * rather than a dead end. Not reached for an empty catalog — `execute`
+ * returns `emptyCatalogMessage` before resolving anything.
+ */
+function unknownExplanation(unknown: string[], catalog: ToolCatalogEntry[]): string {
+  const head = `Unknown: ${unknown.join(", ")}.`;
+  const byCatalog = [...new Set(catalog.map((e) => e.catalog))].sort();
+  const sample = catalog.slice(0, 8).map((e) => e.name);
+  return `${head} This run holds ${catalog.length} loadable tool(s) across ${byCatalog.join(", ")} — ` +
+    `for example: ${sample.join(", ")}${catalog.length > sample.length ? ", …" : ""}. ` +
+    'Call search-tools with scope="agent" to search them. A tool the deployment has but this run does ' +
+    "not means its integration has no credentials here, and no palette setting changes that.";
+}
+
+/** Groups entries under their catalog headings, the browse view. */
+function renderGrouped(entries: ToolCatalogEntry[], header: string): string {
+  const grouped = new Map<string, ToolCatalogEntry[]>();
+  for (const entry of entries) {
+    const list = grouped.get(entry.catalog) ?? [];
+    list.push(entry);
+    grouped.set(entry.catalog, list);
+  }
+  const sections = [...grouped.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([name, group]) => {
+      const sorted = group.slice().sort((a, b) => a.name.localeCompare(b.name));
+      return [
+        `## ${name} (${sorted.length})`,
+        ...sorted.map((e) => `  - ${e.name} [${entryRisk(e)}]: ${e.oneLineDescription}`),
+      ].join("\n");
+    });
+  return [header, ...sections].join("\n\n");
+}
+
+function renderDeployment(matches: DeploymentToolMatch[], note: string): string {
+  if (matches.length === 0) {
+    return "No tools in this deployment match that. Try fewer constraints, or describe the task differently.";
+  }
+  const lines = matches.map((m) => {
+    const required = m.params.filter((p) => p.required).map((p) => p.name);
+    const params = required.length ? ` — needs ${required.join(", ")}` : "";
+    const granted = typeof m.grantedToAgents === "number" ? `, granted to ${m.grantedToAgents} agent(s)` : "";
+    return `  - ${m.name} [${m.integration}, ${m.risk}${granted}]${params}\n      ${m.description.replace(/\s+/g, " ").slice(0, 200)}`;
+  });
+  return [`Deployment catalog — ${matches.length} match${matches.length === 1 ? "" : "es"}.`, ...lines, "", note].join("\n");
+}
+
+/** One MCP server this run is connected to, as search-tools reports it. */
+export interface McpServerSummary {
+  serverType: string;
+  serverName: string;
+  /** Tools the server exposes in this run, before any catalog filtering. */
+  tools: number;
+  /** Set when a subagent wrapper owns the server; its tools are reached through
+   *  that wrapper rather than loaded individually. */
+  wrappedBy?: string;
+}
+
+/**
+ * The connected MCP servers, independent of what got catalogued.
+ *
+ * Built from the groups rather than from catalog entries on purpose: a server
+ * whose tools are all behind a subagent wrapper, or all writes, contributes no
+ * catalog entries at all, and answering "which MCPs am I connected to" with
+ * silence about it would be wrong.
+ */
+export function describeMcpServers(groups: McpToolGroup[]): McpServerSummary[] {
+  const byType = new Map<string, McpServerSummary>();
+  for (const group of groups) {
+    const existing = byType.get(group.serverType);
+    if (existing) {
+      existing.tools += group.tools.length;
+      continue;
+    }
+    const wrapper = group.sourceSubagent?.name ?? findSubagentDefinitionForServer(group.serverType)?.name;
+    byType.set(group.serverType, {
+      serverType: group.serverType,
+      serverName: group.serverName,
+      tools: group.tools.length,
+      ...(wrapper ? { wrappedBy: wrapper } : {}),
+    });
+  }
+  return [...byType.values()].sort((a, b) => a.serverType.localeCompare(b.serverType));
+}
+
 export function buildFastModeMetaTools(options: {
   catalog: ToolCatalogEntry[];
   controller: FastToolRuntimeController;
+  /**
+   * Extra detail appended to the empty-catalog answer of search-tools/load-tools,
+   * e.g. which configured subagents resolved to zero tools. The runtime loader
+   * is only wired when the catalog has entries (see agent.ts), so without this
+   * an empty catalog answered load-tools with the internal-sounding
+   * "tool loader is not initialized".
+   */
+  emptyCatalogNote?: string;
+  /** Backs `scope:"claw"`. Absent → that scope answers with why. */
+  searchDeployment?: DeploymentToolSearch;
+  /** True when this agent may load tools it was never granted. Decides only
+   *  what the deployment-scope answer tells the model to do next. */
+  openPalette?: boolean;
+  /** Connected MCP servers, for `scope:"mcp"`. Empty when none are wired. */
+  mcpServers?: McpServerSummary[];
 }): ToolDefinition[] {
   const catalog = [...options.catalog].sort((a, b) => a.name.localeCompare(b.name));
+  const emptyCatalogMessage = [
+    "No loadable tools are configured for this agent.",
+    options.emptyCatalogNote?.trim(),
+  ]
+    .filter(Boolean)
+    .join(" ");
   const byName = new Map(catalog.map((entry) => [entry.name, entry]));
-  const renderList = (entries: ToolCatalogEntry[]): string =>
-    entries
-      .slice(0, 50)
-      .map((entry) => `- ${entry.name} (${entry.source}): ${entry.oneLineDescription}`)
-      .join("\n") + (entries.length > 50 ? `\n...and ${entries.length - 50} more. Narrow the query.` : "");
-  const renderMatches = (matches: ToolCatalogEntry[]): string => {
-    // Never dead-end. A no-match search used to return a bare "No matching
-    // tools found.", which left the model with nothing to act on — it would
-    // just stop. Instead fall back to the FULL catalog so it can still pick a
-    // name and call load-tools. (Search is a hint, not an access boundary.)
-    if (matches.length === 0) {
-      if (catalog.length === 0) return "The fast-mode catalog is empty — no loadable tools are configured for this agent.";
-      return `No tool name/description matched that query. Showing the full catalog (${catalog.length}) — pick the names you need and call load-tools:\n${renderList(catalog)}`;
+
+  const catalogNames = [...new Set(catalog.map((entry) => entry.catalog))].sort();
+  const mcpServers = options.mcpServers ?? [];
+  // Every server the run is connected to, plus any the catalog names on its own,
+  // so the enum still guides the model when `mcpServers` was not supplied.
+  const mcpServerTypes = [
+    ...new Set([
+      ...mcpServers.map((server) => server.serverType),
+      ...catalog.flatMap((entry) => (entry.mcpServer ? [entry.mcpServer] : [])),
+    ]),
+  ].sort();
+  const entriesForMcp = (serverType: string): ToolCatalogEntry[] =>
+    catalog.filter((entry) => entry.mcpServer === serverType);
+  /** Resolve the optional `catalog` filter, or return an error string. */
+  const scopeTo = (raw: unknown): { entries: ToolCatalogEntry[] } | { error: string } => {
+    const name = typeof raw === "string" ? raw.trim() : "";
+    if (!name) return { entries: catalog };
+    if (!catalogNames.includes(name)) {
+      return { error: `Error: unknown catalog ${JSON.stringify(name)}. Available: ${catalogNames.join(", ") || "(none)"}.` };
     }
-    return renderList(matches);
+    return { entries: catalog.filter((entry) => entry.catalog === name) };
   };
 
   return [
     {
       name: "search-tools",
       label: "Search Tools",
-      description: "Search the fast-mode tool catalog by name, source, or description. Use this before load-tools when you are unsure which direct tool you need.",
+      description:
+        "Find a tool. Covers two different questions, and `scope` picks which one.\n" +
+        `scope="agent" (the default) looks at the tools THIS run can use. Everything it returns is loadable right now — pass the exact names to load-tools and they are callable on your next turn. Catalogs: ${catalogNames.join(", ") || "(none)"}.\n` +
+        'scope="claw" looks at every tool the deployment has, including ones this agent was never given. Use it to find out what exists at all — planning work, configuring another agent, or checking whether a capability is even available here. Results are not necessarily loadable; the answer says which.\n' +
+        'scope="mcp" answers "which MCP servers am I connected to". On its own it lists them with their tool counts; add `mcp` to list one server\'s tools. Use it when the ask names a system ("anything from Heisenberg?") rather than a task.\n' +
+        "Omit `query` to browse the whole scope. Pass `query` to narrow it, and describe what you are trying to DO rather than guessing a tool name — \"post a message to a channel\", \"fill in a pdf form\". Agent scope matches on words, so keywords work; claw scope is a semantic search, so a full phrase works better than a single noun.\n" +
+        "`catalog` narrows the agent scope to one catalog; `integration` narrows the claw scope to one product (google, sandbox, github). `maxRisk` is a ceiling, not an exact match: \"read\" excludes everything that writes, \"write\" still excludes destructive. Use it when you only need to look something up.\n" +
+        "Call it before guessing a tool name. A wrong name costs a failed call; a search costs one cheap round trip.",
       parameters: Type.Unsafe({
         type: "object",
         additionalProperties: false,
         properties: {
-          query: { type: "string", description: "Case-insensitive keyword or substring to search for." },
+          query: {
+            type: "string",
+            description: "What you are trying to do, in plain words. Omit to list everything in scope.",
+          },
+          scope: {
+            type: "string",
+            enum: ["agent", "claw", "mcp"],
+            description:
+              '"agent" (default) = tools this run can load. "claw" = every tool the deployment has, whether or not this agent holds it. "mcp" = the connected MCP servers themselves.',
+          },
+          catalog: {
+            type: "string",
+            ...(catalogNames.length > 0 ? { enum: catalogNames } : {}),
+            description: "Agent scope only. Restrict to one catalog.",
+          },
+          integration: {
+            type: "string",
+            description: 'Claw scope only. Restrict to one integration, e.g. "google" or "sandbox".',
+          },
+          mcp: {
+            type: "string",
+            ...(mcpServerTypes.length > 0 ? { enum: mcpServerTypes } : {}),
+            description:
+              'One MCP server, by its server type. In "mcp" scope it lists that server\'s tools; in "agent" scope it restricts results to that server. Not the same as `catalog`: a wrapped server is catalogued under its subagent name.',
+          },
+          maxRisk: {
+            type: "string",
+            enum: ["read", "write", "destructive"],
+            description: "Ceiling on how dangerous a returned tool may be. Omit for no ceiling.",
+          },
+          limit: { type: "number", description: "Maximum results. Default 10, max 50." },
         },
-        required: ["query"],
       }),
       async execute(_toolCallId: string, params: unknown) {
-        const query = String((params as { query?: unknown } | undefined)?.query ?? "").trim().toLowerCase();
-        if (!query) {
-          return { content: [{ type: "text" as const, text: renderMatches(catalog) }], details: {} };
+        const input = (params ?? {}) as {
+          query?: unknown; scope?: unknown; catalog?: unknown; integration?: unknown;
+          maxRisk?: unknown; limit?: unknown; mcp?: unknown;
+        };
+        const query = typeof input.query === "string" ? input.query.trim() : "";
+        const limit = Math.min(Math.max(Number(input.limit) || DEFAULT_SEARCH_LIMIT, 1), MAX_SEARCH_LIMIT);
+        const maxRisk = typeof input.maxRisk === "string" ? input.maxRisk : undefined;
+        const mcp = typeof input.mcp === "string" ? input.mcp.trim() : "";
+
+        if (input.scope === "mcp") {
+          if (mcp) {
+            const known = mcpServers.find((server) => server.serverType === mcp);
+            const entries = entriesForMcp(mcp);
+            if (!known && entries.length === 0) {
+              return text(
+                `No MCP server "${mcp}" in this run. Connected: ${mcpServerTypes.join(", ") || "(none)"}.`,
+              );
+            }
+            if (entries.length === 0) {
+              // Connected, but nothing individually loadable: every tool sits
+              // behind a wrapper or is a write the catalog never takes.
+              return text(
+                `${mcp} is connected${known?.wrappedBy ? ` and handled by the "${known.wrappedBy}" tool` : ""}, ` +
+                `but none of its ${known?.tools ?? 0} tool(s) are individually loadable here` +
+                `${known?.wrappedBy ? `. Call "${known.wrappedBy}" instead.` : "."}`,
+              );
+            }
+            return text(
+              `${mcp} — ${entries.length} loadable tool(s). load-tools({ mcp: "${mcp}" }) takes all of them.\n\n` +
+              renderGrouped(entries.slice(0, limit), "") +
+              (entries.length > limit ? `\n\n…and ${entries.length - limit} more; raise \`limit\` to see them.` : ""),
+            );
+          }
+          if (mcpServers.length === 0) {
+            return text("No MCP servers are connected in this run.");
+          }
+          const lines = mcpServers.map((server) => {
+            const loadable = entriesForMcp(server.serverType).length;
+            const wrapped = server.wrappedBy ? `, reached through "${server.wrappedBy}"` : "";
+            return `  - ${server.serverType} (${server.serverName}): ${server.tools} tool(s)${wrapped}, ${loadable} individually loadable`;
+          });
+          return text(
+            `${mcpServers.length} connected MCP server(s):\n${lines.join("\n")}\n\n` +
+            'Add `mcp` to list one server\'s tools, or call load-tools({ mcp: "<server>" }) to take them all.',
+          );
         }
-        const tokens = query.split(/\s+/).filter(Boolean);
-        // Rank by how many query tokens each entry matches (OR, not AND). The
-        // old `tokens.every(...)` required EVERY word to appear in one tool's
-        // name+source+description, so a natural query like "grafana query loki
-        // clickhouse logs" matched nothing even when grafana tools existed.
-        // Now any overlap surfaces the tool, best matches first.
-        const matches = catalog
-          .map((entry) => {
-            const haystack = `${entry.name} ${entry.source} ${entry.oneLineDescription}`.toLowerCase();
-            const hits = tokens.reduce((n, token) => (haystack.includes(token) ? n + 1 : n), 0);
-            return { entry, hits };
-          })
-          .filter((s) => s.hits > 0)
-          .sort((a, b) => b.hits - a.hits || a.entry.name.localeCompare(b.entry.name))
-          .map((s) => s.entry);
-        return { content: [{ type: "text" as const, text: renderMatches(matches) }], details: {} };
+
+        if (input.scope === "claw") {
+          if (!options.searchDeployment) {
+            return text(
+              "The deployment-wide catalog is not reachable from this run. " +
+              'Use scope="agent" to search the tools already available here.',
+            );
+          }
+          const matches = await options.searchDeployment({
+            query,
+            limit,
+            ...(typeof input.integration === "string" && input.integration.trim()
+              ? { integration: input.integration.trim() }
+              : {}),
+            ...(maxRisk ? { maxRisk } : {}),
+          }).catch((err: unknown) => (err instanceof Error ? err.message : String(err)));
+          if (typeof matches === "string") {
+            // Surface the real error (404 vs 403 vs timeout) rather than a
+            // generic "could not reach" message.
+            return text(
+              `Could not reach the deployment catalog: ${matches.slice(0, 200)}. ` +
+              'scope="agent" still works and covers everything this run can load.',
+            );
+          }
+          // Telling a restricted agent to load-tools one of these yields
+          // "unknown", which reads as a broken tool, not a permission
+          // boundary — hence the distinct wording below. openPalette only
+          // waives the grant requirement; it can't conjure credentials, so a
+          // tool whose integration was never connected still isn't loadable.
+          return text(renderDeployment(matches, options.openPalette
+            ? "This agent has an open palette, so try load-tools with the exact name. "
+              + 'A name that comes back "unknown" is not in this run at all — its integration has no '
+              + "credentials here, and no palette setting changes that."
+            : "These are NOT loadable in this run: this agent only loads what it was granted. "
+              + 'Re-run with scope="agent" to see what is, or ask an admin to grant one of the above.'));
+        }
+
+        const scoped = scopeTo(input.catalog);
+        if ("error" in scoped) return text(scoped.error);
+        if (scoped.entries.length === 0) {
+          return text(`The tool catalog is empty. ${emptyCatalogMessage}`);
+        }
+        if (mcp && !mcpServerTypes.includes(mcp)) {
+          return text(`No MCP server "${mcp}" in this run. Connected: ${mcpServerTypes.join(", ") || "(none)"}.`);
+        }
+        const byServer = mcp ? scoped.entries.filter((e) => e.mcpServer === mcp) : scoped.entries;
+
+        const allowed = maxRisk ? new Set(riskAtOrBelow(maxRisk as "read" | "write" | "destructive")) : null;
+        const risked = allowed ? byServer.filter((e) => allowed.has(entryRisk(e))) : byServer;
+        const matched = query ? matchScoped(risked, query) : risked;
+        if (matched.length === 0) {
+          return text(
+            `No tool in this agent's catalog matches ${JSON.stringify(query)}. ` +
+            `${risked.length} tool(s) are available here — call search-tools with no query to browse them, ` +
+            'or scope="claw" to check whether the deployment has one this agent was not given.',
+          );
+        }
+
+        const shown = matched.slice(0, limit);
+        const header =
+          `${shown.length} of ${matched.length} matching tool(s)${query ? ` for ${JSON.stringify(query)}` : ""}. ` +
+          'Pick the names you need and call load-tools({ names: [...] }), or load-tools({ catalog: "<name>" }) for a whole catalog.';
+        return text(renderGrouped(shown, header));
       },
     },
     {
       name: "load-tools",
       label: "Load Tools",
-      description: "Load full schemas for fast-mode tools so you can call them directly on the next turn. Batch all needed names in one call. The loaded set is append-only for this session.",
+      description:
+        "Activate tools so you can call them directly. Their full schemas arrive on your NEXT turn, so batch everything you need into one call rather than loading one at a time.\n" +
+        "Pass `names` for specific tools — one name or many, exactly as search-tools spelled them. Pass `catalog` to take a whole catalog at once, which is worth doing for small ones instead of searching first. Pass `mcp` to take everything one MCP server exposes here. Any combination loads the union.\n" +
+        "The loaded set only grows: nothing you load is taken away later in this session, so there is no need to re-load a tool you already have. " +
+        `Only tools in this agent's catalog can be loaded; if a name comes back "unknown", search-tools with scope="agent" will show what is actually here. Catalogs: ${catalogNames.join(", ") || "(none)"}.`,
       parameters: Type.Unsafe({
         type: "object",
         additionalProperties: false,
@@ -247,30 +733,87 @@ export function buildFastModeMetaTools(options: {
           names: {
             type: "array",
             items: { type: "string" },
-            description: "Exact tool names from search-tools/catalog to load.",
+            description: "Exact tool names, as search-tools or the catalog index spelled them.",
+          },
+          catalog: {
+            type: "string",
+            ...(catalogNames.length > 0 ? { enum: catalogNames } : {}),
+            description: "Optional. Load every tool in this catalog. Combine with `names` to also load tools from elsewhere.",
+          },
+          mcp: {
+            type: "string",
+            ...(mcpServerTypes.length > 0 ? { enum: mcpServerTypes } : {}),
+            description:
+              'Optional. Load every loadable tool from one MCP server, by server type. Use search-tools with scope="mcp" to see which are connected.',
           },
         },
-        required: ["names"],
       }),
       async execute(_toolCallId: string, params: unknown) {
-        if (!options.controller?.loadTools) {
-          return { content: [{ type: "text" as const, text: "Error: fast-mode loader is not initialized." }], details: {} };
+        if (catalog.length === 0) {
+          return { content: [{ type: "text" as const, text: emptyCatalogMessage }], details: {} };
         }
-        const rawNames = (params as { names?: unknown } | undefined)?.names;
-        const names = Array.isArray(rawNames)
+        if (!options.controller?.loadTools) {
+          return { content: [{ type: "text" as const, text: "Error: tool loader is not initialized." }], details: {} };
+        }
+        const input = params as { names?: unknown; catalog?: unknown; mcp?: unknown } | undefined;
+        const scoped = scopeTo(input?.catalog);
+        if ("error" in scoped) {
+          return { content: [{ type: "text" as const, text: scoped.error }], details: {} };
+        }
+        const wantMcp = typeof input?.mcp === "string" ? input.mcp.trim() : "";
+        if (wantMcp && !mcpServerTypes.includes(wantMcp)) {
+          return {
+            content: [{ type: "text" as const, text: `No MCP server "${wantMcp}" in this run. Connected: ${mcpServerTypes.join(", ") || "(none)"}.` }],
+            details: {},
+          };
+        }
+        const fromMcp = wantMcp ? entriesForMcp(wantMcp).map((entry) => entry.name) : [];
+        if (wantMcp && fromMcp.length === 0) {
+          const known = mcpServers.find((server) => server.serverType === wantMcp);
+          return {
+            content: [{ type: "text" as const, text:
+              `${wantMcp} is connected but exposes nothing individually loadable here` +
+              `${known?.wrappedBy ? `. Call "${known.wrappedBy}" instead.` : "."}` }],
+            details: {},
+          };
+        }
+        // A `catalog` argument expands to its member names, so the controller
+        // keeps its single names-based contract and the budget/append-only
+        // accounting downstream is unchanged.
+        const fromCatalog = typeof input?.catalog === "string" && input.catalog.trim()
+          ? scoped.entries.map((entry) => entry.name)
+          : [];
+        const rawNames = input?.names;
+        const explicit = Array.isArray(rawNames)
           ? rawNames.map((n) => String(n).trim()).filter(Boolean)
           : [];
+        const names = [...new Set([...explicit, ...fromCatalog, ...fromMcp])];
         if (names.length === 0) {
-          return { content: [{ type: "text" as const, text: "Error: provide at least one tool name to load." }], details: {} };
+          return {
+            content: [{ type: "text" as const, text: "Error: provide `names`, a `catalog`, an `mcp`, or any combination." }],
+            details: {},
+          };
         }
-        const unknown = names.filter((name) => !byName.has(name));
-        const result = await options.controller.loadTools(names);
+        const resolved: string[] = [];
+        const unknown: string[] = [];
+        const ambiguous: string[] = [];
+        for (const requested of names) {
+          const hit = resolveCatalogName(requested, byName, catalog);
+          if (hit === null) unknown.push(requested);
+          else if ("ambiguous" in hit) ambiguous.push(`${requested} (could be ${hit.ambiguous.join(" or ")})`);
+          else resolved.push(hit.name);
+        }
+
+        // Call even with nothing resolved: it's the only source of the real
+        // active-set/budget numbers — skipping it would fake "0/0".
+        const result = await options.controller.loadTools(resolved);
+
+        const allUnknown = [...unknown, ...result.unknown.filter((name) => !unknown.includes(name))];
         const parts = [
           result.loaded.length > 0 ? `Loaded: ${result.loaded.join(", ")}` : "",
           result.alreadyLoaded.length > 0 ? `Already loaded: ${result.alreadyLoaded.join(", ")}` : "",
-          [...unknown, ...result.unknown.filter((name) => !unknown.includes(name))].length > 0
-            ? `Unknown: ${[...unknown, ...result.unknown.filter((name) => !unknown.includes(name))].join(", ")}`
-            : "",
+          ambiguous.length > 0 ? `Ambiguous, name the server too: ${ambiguous.join("; ")}` : "",
+          allUnknown.length > 0 ? unknownExplanation(allUnknown, catalog) : "",
           `Active tools: ${result.activeToolSet.length}/${result.maxActiveTools}`,
           "Loaded tools are available starting with the next assistant turn.",
         ].filter(Boolean);
@@ -280,15 +823,57 @@ export function buildFastModeMetaTools(options: {
   ];
 }
 
-export function renderToolCatalogForPrompt(catalog: ToolCatalogEntry[]): string {
+/**
+ * Above this many entries a catalog is listed by name only and the model is
+ * pointed at `search-tools`. At or below it, every tool is listed inline with
+ * its one-liner — for a 3-4 tool catalog that costs almost nothing and saves
+ * the model a search round trip before it can act.
+ */
+const INLINE_LISTING_MAX = 15;
+
+/**
+ * The system-prompt catalog index.
+ *
+ * Two-level disclosure, same shape as a skill's name+description: catalog names
+ * (and, for small catalogs, tool names + one-liners) are always present, while
+ * the full JSON schemas stay out until `load-tools` pulls them in. The model
+ * always knows a tool EXISTS; it just doesn't carry the parameter schema until
+ * it needs it.
+ *
+ * `subagentDelegationDisabled` controls one sentence: in fast mode the catalog
+ * replaces delegation and the model must call these tools itself, whereas with
+ * delegation on the catalog is purely additive and the claim would be false.
+ */
+export function renderToolCatalogForPrompt(
+  catalog: ToolCatalogEntry[],
+  opts?: { subagentDelegationDisabled?: boolean },
+): string {
   if (catalog.length === 0) return "";
-  const lines = catalog
-    .slice()
-    .sort((a, b) => a.name.localeCompare(b.name))
-    .map((entry) => `- ${entry.name} (${entry.source}): ${entry.oneLineDescription}`);
+
+  const byCatalog = new Map<string, ToolCatalogEntry[]>();
+  for (const entry of catalog) {
+    const list = byCatalog.get(entry.catalog) ?? [];
+    list.push(entry);
+    byCatalog.set(entry.catalog, list);
+  }
+
+  const sections = [...byCatalog.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .flatMap(([name, entries]) => {
+      const sorted = entries.slice().sort((a, b) => a.name.localeCompare(b.name));
+      const header = `- **${name}** (${sorted.length} tool${sorted.length === 1 ? "" : "s"})`;
+      if (sorted.length > INLINE_LISTING_MAX) {
+        return [`${header} — call search-tools with this catalog to see its tools.`];
+      }
+      return [header, ...sorted.map((entry) => `    - ${entry.name}: ${entry.oneLineDescription}`)];
+    });
+
   return [
-    "## Fast Mode Tool Catalog",
-    "Subagent delegation is disabled. Use `search-tools` and `load-tools` to load direct tool schemas on demand, then call loaded tools yourself. Prefer loading every tool you need in one batch.",
-    ...lines,
+    "## Tool Catalogs",
+    opts?.subagentDelegationDisabled
+      ? "Subagent delegation is disabled. The tools below are NOT loaded yet — use `load-tools` to pull in the ones you need, then call them yourself."
+      : "The tools below are NOT loaded yet — their full schemas arrive only when you ask for them.",
+    "Call `search-tools` to find one — no arguments lists everything here, a `query` narrows it, and `scope=\"claw\"` looks beyond this agent at every tool the deployment has. Then `load-tools` activates the ones you need. Loaded tools are callable from your next turn, so batch everything into one call.",
+    ...sections,
   ].join("\n");
 }

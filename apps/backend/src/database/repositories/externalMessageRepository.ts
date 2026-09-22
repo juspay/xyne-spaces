@@ -46,13 +46,19 @@ export class ExternalMessageRepository {
    */
   async findByExternalIds(externalSourceId: string, externalIds: string[]) {
     if (externalIds.length === 0) return [];
-    return await this.db.externalMessage.findMany({
-      where: {
-        externalSourceId,
-        externalId: { in: externalIds },
-      },
-      select: { externalId: true, direction: true },
-    });
+    // Postgres caps prepared-statement params at 32767; chunk the IN list so huge conversations don't overflow it.
+    const CHUNK = 20000;
+    const query = (ids: string[]) =>
+      this.db.externalMessage.findMany({
+        where: { externalSourceId, externalId: { in: ids } },
+        select: { externalId: true, direction: true },
+      });
+    if (externalIds.length <= CHUNK) return await query(externalIds);
+    const out: Awaited<ReturnType<typeof query>> = [];
+    for (let i = 0; i < externalIds.length; i += CHUNK) {
+      out.push(...(await query(externalIds.slice(i, i + CHUNK))));
+    }
+    return out;
   }
 
   /**
@@ -61,6 +67,37 @@ export class ExternalMessageRepository {
   async findByMessageId(messageId: string) {
     return await this.db.externalMessage.findFirst({
       where: { messageId }
+    });
+  }
+
+  /**
+   * Any link on these emails owned by a source OTHER than the given one — i.e.
+   * "does another integration already own this conversation?". Used to stop the
+   * channel-scoped thread fallback from adopting a thread that belongs to a
+   * different app, mailbox, or Slack desk on the same channel.
+   */
+  async findForeignLinkByEmailIds(emailIds: string[], excludeExternalSourceId: string) {
+    if (emailIds.length === 0) return null;
+    return await this.db.externalMessage.findFirst({
+      where: {
+        entityType: ExternalEntityType.EMAIL,
+        entityId: { in: emailIds },
+        externalSourceId: { not: excludeExternalSourceId },
+      },
+      select: { id: true, externalSourceId: true },
+    });
+  }
+
+  /** Find the newest app-desk link for the given email (entity) IDs, scoped to the given app-desk source IDs (ExternalMessage has no FK relation to filter by sourceType). */
+  async findLatestAppDeskLinkByEmailIds(emailIds: string[], externalSourceIds: string[]) {
+    if (emailIds.length === 0 || externalSourceIds.length === 0) return null;
+    return await this.db.externalMessage.findFirst({
+      where: {
+        entityType: ExternalEntityType.EMAIL,
+        entityId: { in: emailIds },
+        externalSourceId: { in: externalSourceIds },
+      },
+      orderBy: { createdAt: 'desc' },
     });
   }
 

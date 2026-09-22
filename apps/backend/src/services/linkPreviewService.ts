@@ -1,7 +1,8 @@
 import axios, { AxiosResponse } from 'axios';
 import { parse } from 'node-html-parser';
 import {logger} from '@/utils/logger';
-import { assertHostIsExternal } from '@/utils/ssrfGuard';
+import { resolveExternalHostPinned, pinnedAgentsFor } from '@/utils/ssrfGuard';
+import { config } from '@/config/env';
 
 export interface ExternalLinkMetadata {
   type?: 'external';
@@ -112,17 +113,24 @@ export class LinkPreviewService {
    * RFC1918, link-local/metadata 169.254.0.0/16, *.svc.cluster.local, etc.),
    * following redirects manually so each hop is re-checked. Link previews have
    * no legitimate internal target, so internal hosts are always refused.
+   *
+   * DATA_SOURCE_ALLOW_PRIVATE_HOSTS is honoured only in local development — it
+   * exists for dashboard data-source connectors, not link previews, and reading it
+   * unqualified would disable this guard wherever a connector needs it. Mirrors
+   * assertWebhookUrlSafe.
    */
   private async safeGet(initialUrl: string): Promise<AxiosResponse> {
     const MAX_REDIRECTS = 5;
     let currentUrl = initialUrl;
+    const egressProxy = this.egressProxy();
 
     for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
       const parsed = new URL(currentUrl);
       if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
         throw new Error(`Blocked non-http(s) scheme: ${parsed.protocol}`);
       }
-      await assertHostIsExternal(parsed.hostname);
+      const allowPrivate = config.dataSource.allowPrivateHosts && config.env === 'development';
+      const pinned = await resolveExternalHostPinned(parsed.hostname, allowPrivate);
 
       const response = await axios.get(currentUrl, {
         headers: {
@@ -133,6 +141,12 @@ export class LinkPreviewService {
         maxContentLength: this.MAX_CONTENT_LENGTH,
         maxRedirects: 0, // follow manually so each hop is re-validated above
         validateStatus: (status) => status >= 200 && status < 400,
+        ...(egressProxy
+          // Routed through the configured proxy, which makes the outbound
+          // connection; per-address pinning applies to a direct connection only.
+          ? { proxy: egressProxy }
+          // Direct connection: connect to the validated addresses (anti-rebinding).
+          : (pinned ? pinnedAgentsFor(parsed.hostname, pinned) : {})),
       });
 
       // Not a redirect → this is the final response.
@@ -146,6 +160,27 @@ export class LinkPreviewService {
     }
 
     throw new Error(`Too many redirects (> ${MAX_REDIRECTS})`);
+  }
+
+  /**
+   * Parsed forward-proxy for the preview fetch (LINK_PREVIEW_EGRESS_PROXY_URL), or
+   * undefined when unset (direct connection).
+   */
+  private egressProxy(): { host: string; port: number; protocol: string } | undefined {
+    const raw = config.linkPreview.egressProxyUrl;
+    if (!raw) return undefined;
+    try {
+      const u = new URL(raw);
+      const protocol = u.protocol.replace(/:$/, '');
+      return {
+        host: u.hostname,
+        port: Number(u.port) || (protocol === 'https' ? 443 : 80),
+        protocol,
+      };
+    } catch {
+      logger.warn(`Invalid LINK_PREVIEW_EGRESS_PROXY_URL; ignoring and connecting directly: ${raw}`);
+      return undefined;
+    }
   }
 
   /**

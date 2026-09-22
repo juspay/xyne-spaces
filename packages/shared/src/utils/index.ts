@@ -1,4 +1,12 @@
-export { searchUsers, searchChannels } from './search.js';
+export { searchUsers, searchUsersWithScores, searchChannels } from './search.js';
+export { matchesAllTokens } from './tokenMatch.js';
+export { tierOf, TIER_FUZZY, type Tier } from './searchTier.js';
+export {
+  mergeRankedCandidates,
+  saturateAffinity,
+  type CandidateType,
+  type RankedCandidate,
+} from './globalPhase.js';
 export {
   canonicalArgsJson,
   shadowKeyFor,
@@ -17,6 +25,7 @@ export {
   extractUserMentions,
   extractGroupMentions,
   extractAllMentions,
+  stripCodeRegions,
 } from './mentionParser.js';
 export {
   matchKind,

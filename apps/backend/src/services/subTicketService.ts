@@ -4,6 +4,10 @@ import { v4 as uuidv4, v5 as uuidv5 } from 'uuid';
 import { db } from '@/database/client';
 import { logger } from '@/utils/logger';
 import { recordTicketTimelineEvent } from '@/services/ticketTimelineEventService';
+import {
+  syncConversationSubTicketsMd,
+  linkSubTicketConversationToParent,
+} from '@/utils/ticketMd';
 
 export interface CreateSubTicketInput {
   parentTicketId: string;
@@ -40,20 +44,6 @@ export async function createSubTicket(
     throw new Error(`Parent ticket "${input.parentTicketId}" not found`);
   }
 
-  // Normal boards retain the historical one-level sub-ticket limit. FLOW is
-  // the sole override because its materialized run graph can be arbitrarily deep.
-  if (parent.board.boardType !== BoardType.FLOW) {
-    const parentAsSubTicket = await db.subTicket.findFirst({
-      where: { mappedTicketId: parent.id },
-      select: { id: true },
-    });
-    if (parentAsSubTicket) {
-      throw new Error(
-        `Cannot create a sub-ticket under a sub-ticket. Parent ticket ${parent.id} is already a sub-ticket.`,
-      );
-    }
-  }
-
   await db.$transaction(async (tx: Prisma.TransactionClient) => {
     await tx.subTicket.create({
       data: {
@@ -74,6 +64,11 @@ export async function createSubTicket(
     await tx.ticketSubTicketMapping.create({
       data: { id: mappingId, ticketId: parent.id, subTicketId, workspaceId: parent.workspaceId },
     });
+
+    if (input.mappedTicketId) {
+      await syncConversationSubTicketsMd(tx, parent.id);
+      await linkSubTicketConversationToParent(tx, input.mappedTicketId, parent.id);
+    }
 
     const displayId = input.subTicketXyneId ?? subTicketId.slice(0, 8).toUpperCase();
     await recordTicketTimelineEvent(
@@ -256,6 +251,11 @@ export async function createFlowSubTicketMappings(input: {
         });
       }
     }
+
+    for (const parent of parents) {
+      await syncConversationSubTicketsMd(tx, parent.id);
+    }
+    await linkSubTicketConversationToParent(tx, input.mappedTicketId, primaryParent.id);
   });
 
   return {

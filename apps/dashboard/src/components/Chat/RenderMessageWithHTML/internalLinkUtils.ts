@@ -12,6 +12,8 @@ export type InternalXyneLinkKind =
 export interface ParsedInternalXyneLink {
   kind: InternalXyneLinkKind;
   href: string;
+  /** Workspace segment when the link carries one; absent for the bare form. */
+  workspaceId?: string;
   channelId?: string;
   conversationId?: string;
   ticketId?: string;
@@ -40,7 +42,47 @@ const INTERNAL_XYNE_HOSTS = new Set([
 /** Paths that should be treated as external (no internal router handling) */
 const EXTERNAL_PATH_PREFIXES = ['/claw', '/claw-preview', '/changelog'];
 
+/**
+ * Extract the call id from a Xyne call invite link.
+ *
+ * Every call is shared through a single URL — `{EXTERNAL_CALL_INVITE_BASE_URL}
+ * /call/<externalId>` — so a host can send the same link to teammates and to
+ * guests. That invite host is deployment config and is not always the
+ * dashboard's own origin, so the `/external/call/<id>` shape is accepted on any
+ * host: it is ours and nobody else's. The bare `/call/<id>` form is the
+ * dashboard's own route, so it stays behind the internal-host check.
+ */
+export const parseCallInviteLink = (href: string): string | null => {
+  try {
+    const url = new URL(href, window.location.origin);
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+      return null;
+    }
+
+    const segments = url.pathname.split('/').filter(Boolean);
+    if (segments[0] === 'external' && segments[1] === 'call' && segments[2]) {
+      return segments[2];
+    }
+
+    const isOurHost =
+      INTERNAL_XYNE_HOSTS.has(url.hostname) || url.origin === window.location.origin;
+    if (isOurHost && segments[0] === 'call' && segments[1]) {
+      return segments[1];
+    }
+    return null;
+  } catch {
+    return null;
+  }
+};
+
 export const parseInternalXyneLink = (href: string): ParsedInternalXyneLink | null => {
+  // Checked before the host allowlist: an invite link may point at a call host
+  // that is not one of our app hosts.
+  const inviteCallId = parseCallInviteLink(href);
+  if (inviteCallId) {
+    return { kind: 'call', href, callId: inviteCallId };
+  }
+
   try {
     const url = new URL(href, window.location.origin);
     const isOurHost =
@@ -60,21 +102,9 @@ export const parseInternalXyneLink = (href: string): ParsedInternalXyneLink | nu
     };
 
     const segments = url.pathname.split('/').filter(Boolean);
-    const callId =
-      segments[0] === 'external' && segments[1] === 'call'
-        ? segments[2]
-        : segments[0] === 'call'
-          ? segments[1]
-          : undefined;
-    if (callId) {
-      return {
-        kind: 'call',
-        href,
-        callId,
-      };
-    }
+    let linkWorkspaceId: string | undefined;
     if (segments[0] !== 'chat' && segments[1] === 'chat') {
-      segments.shift();
+      linkWorkspaceId = segments.shift();
     }
     if (segments[0] !== 'chat') {
       return fallbackUnknownLink;
@@ -84,6 +114,7 @@ export const parseInternalXyneLink = (href: string): ParsedInternalXyneLink | nu
       return {
         kind: 'canvas',
         href,
+        ...(linkWorkspaceId ? { workspaceId: linkWorkspaceId } : {}),
         canvasId: segments[2],
       };
     }

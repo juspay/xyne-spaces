@@ -246,7 +246,12 @@ export const AcceptInvitation = (): ReactElement => {
           <h1 className='text-2xl font-semibold text-foreground mb-2'>
             You are not supposed to access this invitation
           </h1>
-          <Button onClick={handleGoHome} className='w-full'>
+          <Button
+            onClick={handleGoHome}
+            data-track-category='Invitations'
+            data-track-name='GO_HOME_FROM_INVITE'
+            className='w-full'
+          >
             Go to Home
           </Button>
         </div>
@@ -263,7 +268,12 @@ export const AcceptInvitation = (): ReactElement => {
           </div>
           <h1 className='text-2xl font-semibold text-foreground mb-2'>Invitation Expired</h1>
           <p className='text-muted-foreground mb-6'>{state.message}</p>
-          <Button onClick={handleGoHome} className='w-full'>
+          <Button
+            onClick={handleGoHome}
+            data-track-category='Invitations'
+            data-track-name='GO_HOME_FROM_INVITE'
+            className='w-full'
+          >
             Go to Home
           </Button>
         </div>
@@ -280,7 +290,12 @@ export const AcceptInvitation = (): ReactElement => {
           </div>
           <h1 className='text-2xl font-semibold text-foreground mb-2'>Invalid Invitation</h1>
           <p className='text-muted-foreground mb-6'>{state.message}</p>
-          <Button onClick={handleGoHome} className='w-full'>
+          <Button
+            onClick={handleGoHome}
+            data-track-category='Invitations'
+            data-track-name='GO_HOME_FROM_INVITE'
+            className='w-full'
+          >
             Go to Home
           </Button>
         </div>
@@ -397,7 +412,12 @@ export const AcceptInvitation = (): ReactElement => {
           )}
         </div>
 
-        <Button onClick={() => void handleAccept()} className='w-full'>
+        <Button
+          onClick={() => void handleAccept()}
+          data-track-category='Invitations'
+          data-track-name='ACCEPT_INVITATION'
+          className='w-full'
+        >
           Accept Invitation
         </Button>
       </div>

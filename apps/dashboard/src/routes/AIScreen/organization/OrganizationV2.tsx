@@ -180,7 +180,12 @@ const OrganizationV2 = (): ReactElement => {
             title='Organization unavailable'
             description={org.error.message}
             action={
-              <Button variant='outline' onClick={() => void org.refetch()}>
+              <Button
+                variant='outline'
+                onClick={() => void org.refetch()}
+                data-track-category='Claw Organization'
+                data-track-name='Organization: retry load'
+              >
                 Try again
               </Button>
             }

@@ -22,6 +22,7 @@ import {
   DropdownMenuTrigger,
 } from '../../ui/dropdown-menu';
 import Input from '../../ui/Input';
+
 import { CanvasRow, HighlightedText } from '../CanvasRow';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { queries } from '../../../zero/queries';
@@ -29,6 +30,7 @@ import type { CanvasUser, FolderGroup, ProjectGroup } from './CanvasListGrouped.
 import {
   filterArchivedCanvases,
   filterExcludedCallGeneratedCanvases,
+  filterExcludedRecordingGeneratedCanvases,
   filterStarredCanvases,
   withStarredCanvasState,
 } from '../canvasFilters';
@@ -37,6 +39,7 @@ import {
   getChannelDisplayName,
   matchesGroupedCanvasSearch,
 } from './CanvasListGrouped.utils';
+import { mergeCanvasRestLabels, useCanvasLabelMapResult } from '../useCanvasLabels';
 
 const groupedCanvasRowTrackNames = {
   canvasOpen: 'Open_Canvas_Grouped',
@@ -85,6 +88,7 @@ interface FolderGroupSectionProps {
   setRenamingFolderName: React.Dispatch<React.SetStateAction<string>>;
   isCreatingCanvas: boolean;
   excludeCallGeneratedCanvases: boolean;
+  excludeRecordingGeneratedCanvases: boolean;
   showStarredOnly: boolean;
   onSelect: (e: React.MouseEvent | KeyboardEvent, canvas: Canvas) => void;
   onDelete?: ((id: string) => void) | undefined;
@@ -114,6 +118,7 @@ const FolderGroupSection: React.FC<FolderGroupSectionProps> = ({
   setRenamingFolderName,
   isCreatingCanvas,
   excludeCallGeneratedCanvases,
+  excludeRecordingGeneratedCanvases,
   showStarredOnly,
   onSelect,
   onDelete,
@@ -159,19 +164,23 @@ const FolderGroupSection: React.FC<FolderGroupSectionProps> = ({
   const folderCanvases = useMemo(
     () =>
       filterStarredCanvases(
-        filterExcludedCallGeneratedCanvases(
-          withStarredCanvasState(
-            filterArchivedCanvases(
-              toArray<Canvas>(isProjectFolder ? projectFolderCanvases : genericFolderCanvases),
-              { includeArchived, onlyArchived },
+        filterExcludedRecordingGeneratedCanvases(
+          filterExcludedCallGeneratedCanvases(
+            withStarredCanvasState(
+              filterArchivedCanvases(
+                toArray<Canvas>(isProjectFolder ? projectFolderCanvases : genericFolderCanvases),
+                { includeArchived, onlyArchived },
+              ),
             ),
+            excludeCallGeneratedCanvases,
           ),
-          excludeCallGeneratedCanvases,
+          excludeRecordingGeneratedCanvases,
         ),
         showStarredOnly,
       ),
     [
       excludeCallGeneratedCanvases,
+      excludeRecordingGeneratedCanvases,
       genericFolderCanvases,
       includeArchived,
       isProjectFolder,
@@ -180,15 +189,22 @@ const FolderGroupSection: React.FC<FolderGroupSectionProps> = ({
       showStarredOnly,
     ],
   );
+  const folderCanvasIds = useMemo(() => folderCanvases.map(canvas => canvas.id), [folderCanvases]);
+  const { labelsByCanvasId: folderLabelsByCanvasId, refreshIfStale: refreshFolderLabelsIfStale } =
+    useCanvasLabelMapResult(folderCanvasIds);
+  const folderCanvasesWithLabels = useMemo(
+    () => folderCanvases.map(canvas => mergeCanvasRestLabels(canvas, folderLabelsByCanvasId)),
+    [folderCanvases, folderLabelsByCanvasId],
+  );
   const folderNameMatches = matchesGroupedCanvasSearch(folderGroup.folder.name, searchQuery);
   const visibleFolderCanvases = useMemo(
     () =>
       isSearchActive
-        ? folderCanvases.filter(
+        ? folderCanvasesWithLabels.filter(
             canvas => folderNameMatches || canvasMatchesGroupedSearch(canvas, searchQuery),
           )
-        : folderCanvases,
-    [folderCanvases, folderNameMatches, isSearchActive, searchQuery],
+        : folderCanvasesWithLabels,
+    [folderCanvasesWithLabels, folderNameMatches, isSearchActive, searchQuery],
   );
   const isRenaming = renamingFolderId === folderGroup.folder.id;
   const isProjectDefaultFolder =
@@ -213,7 +229,7 @@ const FolderGroupSection: React.FC<FolderGroupSectionProps> = ({
   }
 
   return (
-    <div key={folderGroup.folder.id}>
+    <div key={folderGroup.folder.id} onMouseEnter={() => refreshFolderLabelsIfStale()}>
       <div className={cn(indentClassName, 'relative')}>
         <div className={ROW_CLASS}>
           <button
@@ -267,6 +283,7 @@ const FolderGroupSection: React.FC<FolderGroupSectionProps> = ({
             onClick={() => void onCreateCanvasInFolder(folderGroup.folder)}
             disabled={isCreatingCanvas}
             title='Create canvas in folder'
+            data-ph-capture-attribute-track-id='create_canvas_in_folder'
             data-track-category='CANVAS'
             data-track-name='CREATE_CANVAS_IN_FOLDER'
           >
@@ -368,6 +385,7 @@ interface ChannelSectionProps extends Omit<
   channelGroup: ProjectGroup['channels'][number];
   onRegisterFolderIds: (folderIds: readonly string[]) => void;
   excludeCallGeneratedCanvases: boolean;
+  excludeRecordingGeneratedCanvases: boolean;
   searchQuery: string;
 }
 
@@ -397,6 +415,7 @@ const ChannelSection: React.FC<ChannelSectionProps> = ({
   onDeleteFolder,
   onRegisterFolderIds,
   excludeCallGeneratedCanvases,
+  excludeRecordingGeneratedCanvases,
   showStarredOnly,
   includeArchived,
   onlyArchived,
@@ -424,34 +443,51 @@ const ChannelSection: React.FC<ChannelSectionProps> = ({
   const channelRootCanvases = useMemo(
     () =>
       filterStarredCanvases(
-        filterExcludedCallGeneratedCanvases(
-          withStarredCanvasState(
-            filterArchivedCanvases(toArray<Canvas>(channelRootCanvasesResult), {
-              includeArchived,
-              onlyArchived,
-            }),
+        filterExcludedRecordingGeneratedCanvases(
+          filterExcludedCallGeneratedCanvases(
+            withStarredCanvasState(
+              filterArchivedCanvases(toArray<Canvas>(channelRootCanvasesResult), {
+                includeArchived,
+                onlyArchived,
+              }),
+            ),
+            excludeCallGeneratedCanvases,
           ),
-          excludeCallGeneratedCanvases,
+          excludeRecordingGeneratedCanvases,
         ),
         showStarredOnly,
       ),
     [
       channelRootCanvasesResult,
       excludeCallGeneratedCanvases,
+      excludeRecordingGeneratedCanvases,
       includeArchived,
       onlyArchived,
       showStarredOnly,
     ],
   );
+  const channelRootCanvasIds = useMemo(
+    () => channelRootCanvases.map(canvas => canvas.id),
+    [channelRootCanvases],
+  );
+  const {
+    labelsByCanvasId: channelRootLabelsByCanvasId,
+    refreshIfStale: refreshChannelRootLabelsIfStale,
+  } = useCanvasLabelMapResult(channelRootCanvasIds);
+  const channelRootCanvasesWithLabels = useMemo(
+    () =>
+      channelRootCanvases.map(canvas => mergeCanvasRestLabels(canvas, channelRootLabelsByCanvasId)),
+    [channelRootCanvases, channelRootLabelsByCanvasId],
+  );
   const channelNameMatches = matchesGroupedCanvasSearch(channelName, searchQuery);
   const visibleChannelRootCanvases = useMemo(
     () =>
       isSearchActive
-        ? channelRootCanvases.filter(
+        ? channelRootCanvasesWithLabels.filter(
             canvas => channelNameMatches || canvasMatchesGroupedSearch(canvas, searchQuery),
           )
-        : channelRootCanvases,
-    [channelNameMatches, channelRootCanvases, isSearchActive, searchQuery],
+        : channelRootCanvasesWithLabels,
+    [channelNameMatches, channelRootCanvasesWithLabels, isSearchActive, searchQuery],
   );
   const channelFolders = useMemo(
     () => toArray<CanvasFolder>(channelFoldersResult),
@@ -473,7 +509,7 @@ const ChannelSection: React.FC<ChannelSectionProps> = ({
   }, [channelFolders, onRegisterFolderIds]);
 
   return (
-    <div key={channelGroup.channel.id}>
+    <div key={channelGroup.channel.id} onMouseEnter={() => refreshChannelRootLabelsIfStale()}>
       {showChannelHeader && (
         <div className='group flex items-center pl-3'>
           <button
@@ -524,6 +560,7 @@ const ChannelSection: React.FC<ChannelSectionProps> = ({
               setRenamingFolderName={setRenamingFolderName}
               isCreatingCanvas={isCreatingCanvas}
               excludeCallGeneratedCanvases={excludeCallGeneratedCanvases}
+              excludeRecordingGeneratedCanvases={excludeRecordingGeneratedCanvases}
               showStarredOnly={showStarredOnly}
               onSelect={onSelect}
               onDelete={onDelete}
@@ -593,6 +630,7 @@ const ProjectSection: React.FC<ProjectSectionProps> = ({
   onDeleteFolder,
   onRegisterFolderIds,
   excludeCallGeneratedCanvases,
+  excludeRecordingGeneratedCanvases,
   showStarredOnly,
   includeArchived,
   onlyArchived,
@@ -614,31 +652,48 @@ const ProjectSection: React.FC<ProjectSectionProps> = ({
   const projectRootCanvases = useMemo(
     () =>
       filterStarredCanvases(
-        filterExcludedCallGeneratedCanvases(
-          withStarredCanvasState(
-            filterArchivedCanvases(group.rootCanvases, { includeArchived, onlyArchived }),
+        filterExcludedRecordingGeneratedCanvases(
+          filterExcludedCallGeneratedCanvases(
+            withStarredCanvasState(
+              filterArchivedCanvases(group.rootCanvases, { includeArchived, onlyArchived }),
+            ),
+            excludeCallGeneratedCanvases,
           ),
-          excludeCallGeneratedCanvases,
+          excludeRecordingGeneratedCanvases,
         ),
         showStarredOnly,
       ),
     [
       excludeCallGeneratedCanvases,
+      excludeRecordingGeneratedCanvases,
       group.rootCanvases,
       includeArchived,
       onlyArchived,
       showStarredOnly,
     ],
   );
+  const projectRootCanvasIds = useMemo(
+    () => projectRootCanvases.map(canvas => canvas.id),
+    [projectRootCanvases],
+  );
+  const {
+    labelsByCanvasId: projectRootLabelsByCanvasId,
+    refreshIfStale: refreshProjectRootLabelsIfStale,
+  } = useCanvasLabelMapResult(projectRootCanvasIds);
+  const projectRootCanvasesWithLabels = useMemo(
+    () =>
+      projectRootCanvases.map(canvas => mergeCanvasRestLabels(canvas, projectRootLabelsByCanvasId)),
+    [projectRootCanvases, projectRootLabelsByCanvasId],
+  );
   const projectNameMatches = matchesGroupedCanvasSearch(group.project.name, searchQuery);
   const visibleProjectRootCanvases = useMemo(
     () =>
       isSearchActive
-        ? projectRootCanvases.filter(
+        ? projectRootCanvasesWithLabels.filter(
             canvas => projectNameMatches || canvasMatchesGroupedSearch(canvas, searchQuery),
           )
-        : projectRootCanvases,
-    [isSearchActive, projectNameMatches, projectRootCanvases, searchQuery],
+        : projectRootCanvasesWithLabels,
+    [isSearchActive, projectNameMatches, projectRootCanvasesWithLabels, searchQuery],
   );
 
   useEffect(() => {
@@ -666,7 +721,11 @@ const ProjectSection: React.FC<ProjectSectionProps> = ({
     hasMatchingChannel;
 
   return (
-    <section key={group.project.id} className={showProjectHeader ? 'pb-1' : ''}>
+    <section
+      key={group.project.id}
+      className={showProjectHeader ? 'pb-1' : ''}
+      onMouseEnter={() => refreshProjectRootLabelsIfStale()}
+    >
       {showProjectHeader && (
         <div className='group flex items-center'>
           <button
@@ -740,6 +799,7 @@ const ProjectSection: React.FC<ProjectSectionProps> = ({
               setRenamingFolderName={setRenamingFolderName}
               isCreatingCanvas={isCreatingCanvas}
               excludeCallGeneratedCanvases={excludeCallGeneratedCanvases}
+              excludeRecordingGeneratedCanvases={excludeRecordingGeneratedCanvases}
               showStarredOnly={showStarredOnly}
               onSelect={onSelect}
               onDelete={onDelete}
@@ -775,6 +835,7 @@ const ProjectSection: React.FC<ProjectSectionProps> = ({
               setRenamingFolderName={setRenamingFolderName}
               isCreatingCanvas={isCreatingCanvas}
               excludeCallGeneratedCanvases={excludeCallGeneratedCanvases}
+              excludeRecordingGeneratedCanvases={excludeRecordingGeneratedCanvases}
               showStarredOnly={showStarredOnly}
               onSelect={onSelect}
               onDelete={onDelete}
@@ -930,6 +991,7 @@ export interface CanvasListGroupedContentProps {
   adminChannelIds: ReadonlySet<string>;
   isPersonalSectionCollapsed: boolean;
   excludeCallGeneratedCanvases: boolean;
+  excludeRecordingGeneratedCanvases: boolean;
   showStarredOnly: boolean;
   collapsedProjects: ReadonlySet<string>;
   collapsedChannels: ReadonlySet<string>;
@@ -977,6 +1039,7 @@ export const CanvasListGroupedContent: React.FC<CanvasListGroupedContentProps> =
   adminChannelIds,
   isPersonalSectionCollapsed,
   excludeCallGeneratedCanvases,
+  excludeRecordingGeneratedCanvases,
   showStarredOnly,
   collapsedProjects,
   collapsedChannels,
@@ -1009,10 +1072,25 @@ export const CanvasListGroupedContent: React.FC<CanvasListGroupedContentProps> =
   isSearchLoading,
 }) => {
   const isSearchActive = searchQuery.length > 0;
+  const personalCanvasIds = useMemo(
+    () => personalCanvases.map(canvas => canvas.id),
+    [personalCanvases],
+  );
+  const {
+    labelsByCanvasId: personalLabelsByCanvasId,
+    refreshIfStale: refreshPersonalLabelsIfStale,
+  } = useCanvasLabelMapResult(personalCanvasIds);
+  const personalCanvasesWithLabels = useMemo(
+    () => personalCanvases.map(canvas => mergeCanvasRestLabels(canvas, personalLabelsByCanvasId)),
+    [personalCanvases, personalLabelsByCanvasId],
+  );
   const personalRootCanvases = useMemo(() => {
-    let filtered = filterExcludedCallGeneratedCanvases(
-      filterArchivedCanvases(personalCanvases, { includeArchived, onlyArchived }),
-      excludeCallGeneratedCanvases,
+    let filtered = filterExcludedRecordingGeneratedCanvases(
+      filterExcludedCallGeneratedCanvases(
+        filterArchivedCanvases(personalCanvasesWithLabels, { includeArchived, onlyArchived }),
+        excludeCallGeneratedCanvases,
+      ),
+      excludeRecordingGeneratedCanvases,
     );
 
     filtered = currentUserId
@@ -1025,16 +1103,20 @@ export const CanvasListGroupedContent: React.FC<CanvasListGroupedContentProps> =
   }, [
     currentUserId,
     excludeCallGeneratedCanvases,
+    excludeRecordingGeneratedCanvases,
     includeArchived,
     isSearchActive,
     onlyArchived,
-    personalCanvases,
+    personalCanvasesWithLabels,
     searchQuery,
   ]);
   const sharedRootCanvases = useMemo(() => {
-    let filtered = filterExcludedCallGeneratedCanvases(
-      filterArchivedCanvases(personalCanvases, { includeArchived, onlyArchived }),
-      excludeCallGeneratedCanvases,
+    let filtered = filterExcludedRecordingGeneratedCanvases(
+      filterExcludedCallGeneratedCanvases(
+        filterArchivedCanvases(personalCanvasesWithLabels, { includeArchived, onlyArchived }),
+        excludeCallGeneratedCanvases,
+      ),
+      excludeRecordingGeneratedCanvases,
     );
 
     filtered = currentUserId ? filtered.filter(canvas => canvas.createdBy !== currentUserId) : [];
@@ -1045,10 +1127,11 @@ export const CanvasListGroupedContent: React.FC<CanvasListGroupedContentProps> =
   }, [
     currentUserId,
     excludeCallGeneratedCanvases,
+    excludeRecordingGeneratedCanvases,
     includeArchived,
     isSearchActive,
     onlyArchived,
-    personalCanvases,
+    personalCanvasesWithLabels,
     searchQuery,
   ]);
 
@@ -1065,7 +1148,7 @@ export const CanvasListGroupedContent: React.FC<CanvasListGroupedContentProps> =
   }
 
   return (
-    <div className='space-y-1'>
+    <div className='space-y-1' onMouseEnter={() => refreshPersonalLabelsIfStale()}>
       {isSearchLoading && (
         <div className='flex items-center justify-center gap-3 px-3 h-9 text-sm text-sidebar-foreground'>
           <Spinner size={16} className='animate-spin shrink-0' />
@@ -1145,6 +1228,7 @@ export const CanvasListGroupedContent: React.FC<CanvasListGroupedContentProps> =
                 setRenamingFolderName={setRenamingFolderName}
                 isCreatingCanvas={isCreatingCanvas}
                 excludeCallGeneratedCanvases={excludeCallGeneratedCanvases}
+                excludeRecordingGeneratedCanvases={excludeRecordingGeneratedCanvases}
                 showStarredOnly={showStarredOnly}
                 onSelect={onSelect}
                 onDelete={onDelete}
@@ -1234,6 +1318,7 @@ export const CanvasListGroupedContent: React.FC<CanvasListGroupedContentProps> =
           onDeleteFolder={onDeleteFolder}
           onRegisterFolderIds={onRegisterFolderIds}
           excludeCallGeneratedCanvases={excludeCallGeneratedCanvases}
+          excludeRecordingGeneratedCanvases={excludeRecordingGeneratedCanvases}
           showStarredOnly={showStarredOnly}
           includeArchived={includeArchived}
           onlyArchived={onlyArchived}

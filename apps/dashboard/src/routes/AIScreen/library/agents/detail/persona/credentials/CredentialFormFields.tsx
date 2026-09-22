@@ -11,12 +11,15 @@ import {
   baseUrlPlaceholder,
   REASONING_OPTIONS,
   supportsAuthType,
+  supportsOauth,
   supportsReasoning,
   type CredentialForm,
 } from './credentialForm';
+import { CredentialOauthFlow } from './CredentialOauthFlow';
+import type { CredentialScope } from './credentialScope';
 
 const FIELD =
-  'h-11 w-full rounded-2xl border border-border bg-card px-4 text-sm leading-5 text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring';
+  'h-11 w-full rounded-lg border border-border bg-card px-4 text-sm leading-5 text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring';
 
 const Field = ({
   label,
@@ -40,32 +43,75 @@ interface CredentialFormFieldsProps {
   form: CredentialForm;
   onChange: (next: CredentialForm) => void;
   editing: boolean;
+  scope: CredentialScope;
+  onOauthConnected: () => void;
 }
 
 export function CredentialFormFields({
   form,
   onChange,
   editing,
+  scope,
+  onOauthConnected,
 }: CredentialFormFieldsProps): ReactElement {
   const set = <K extends keyof CredentialForm>(key: K, value: CredentialForm[K]): void =>
     onChange({ ...form, [key]: value });
 
+  // OAuth stores the token bundle server-side through its own exchange, so the
+  // key field would have nothing to collect.
+  const oauthProvider =
+    form.authType === 'oauth_token' && supportsOauth(form.provider) ? form.provider : null;
+
   return (
     <div className='flex w-full flex-col gap-3'>
-      <Field label='API key' optional={editing}>
-        <input
-          value={form.apiKey}
-          onChange={e => set('apiKey', e.target.value)}
-          type='password'
-          placeholder={editing ? 'Leave blank to keep the stored key' : 'sk-…'}
-          aria-label='API key'
-          autoComplete='off'
-          autoFocus
-          data-track-category='Claw Agents'
-          data-track-name='Agent detail v2: credential api key'
-          className={FIELD}
+      {supportsAuthType(form.provider) && (
+        <Field label='Auth type'>
+          <Select
+            value={form.authType}
+            onValueChange={next => set('authType', next as CredentialForm['authType'])}
+          >
+            <SelectTrigger
+              size='sm'
+              aria-label='Auth type'
+              data-track-category='Claw Agents'
+              data-track-name='Agent detail v2: credential auth type'
+              className='h-11 w-full rounded-lg'
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {AUTH_TYPE_OPTIONS.map(option => (
+                <SelectItem key={option.value} value={option.value}>
+                  {option.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </Field>
+      )}
+
+      {oauthProvider ? (
+        <CredentialOauthFlow
+          scope={scope}
+          provider={oauthProvider}
+          onConnected={onOauthConnected}
         />
-      </Field>
+      ) : (
+        <Field label='API key' optional={editing}>
+          <input
+            value={form.apiKey}
+            onChange={e => set('apiKey', e.target.value)}
+            type='password'
+            placeholder={editing ? 'Leave blank to keep the stored key' : 'sk-…'}
+            aria-label='API key'
+            autoComplete='off'
+            autoFocus
+            data-track-category='Claw Agents'
+            data-track-name='Agent detail v2: credential api key'
+            className={FIELD}
+          />
+        </Field>
+      )}
 
       <Field label='Model' optional>
         <input
@@ -91,32 +137,6 @@ export function CredentialFormFields({
         />
       </Field>
 
-      {supportsAuthType(form.provider) && (
-        <Field label='Auth type'>
-          <Select
-            value={form.authType}
-            onValueChange={next => set('authType', next as CredentialForm['authType'])}
-          >
-            <SelectTrigger
-              size='sm'
-              aria-label='Auth type'
-              data-track-category='Claw Agents'
-              data-track-name='Agent detail v2: credential auth type'
-              className='h-11 w-full rounded-2xl'
-            >
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {AUTH_TYPE_OPTIONS.map(option => (
-                <SelectItem key={option.value} value={option.value}>
-                  {option.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </Field>
-      )}
-
       {supportsReasoning(form.provider) && (
         <Field label='Reasoning effort' optional>
           <Select
@@ -130,7 +150,7 @@ export function CredentialFormFields({
               aria-label='Reasoning effort'
               data-track-category='Claw Agents'
               data-track-name='Agent detail v2: credential reasoning effort'
-              className='h-11 w-full rounded-2xl'
+              className='h-11 w-full rounded-lg'
             >
               <SelectValue />
             </SelectTrigger>

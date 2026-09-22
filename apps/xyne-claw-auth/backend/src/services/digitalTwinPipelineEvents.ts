@@ -9,6 +9,7 @@
  */
 
 import { prisma } from "../db.js";
+import { errMsg } from "../lib/errors.js";
 import { createLogger, createTraceId } from "../logger.js";
 import type { UserMemoryCuratorTrace } from "xyne-claw-shared";
 
@@ -17,7 +18,7 @@ const logger = createLogger("digital-twin-pipeline-events", createTraceId());
 /** Rolling retention window for the event feed. */
 const DEFAULT_PRUNE_DAYS = 30;
 
-export type PipelineEventRunType = "backfill" | "daily" | "upload" | "twin-approval" | "synthesize" | "gate";
+export type PipelineEventRunType = "backfill" | "daily" | "upload" | "twin-approval" | "synthesize" | "gate" | "retry";
 export type PipelineEventSourceKind = "messages" | "calls" | "canvases";
 /** `running`/`retry` are IN-FLIGHT states (a curator batch mid-LLM-call) so the
  *  pipeline feed isn't silent for 15 min; terminal states are ok/empty/error. */
@@ -106,6 +107,7 @@ export function deriveRunType(source: string): PipelineEventRunType {
   if (source.startsWith("twin-approval:")) return "twin-approval";
   if (source.startsWith("synthesize:")) return "synthesize";
   if (source.startsWith("gate:")) return "gate";
+  if (source.startsWith("retry:")) return "retry";
   return "daily";
 }
 
@@ -124,7 +126,8 @@ export function deriveSourceKind(source: string): PipelineEventSourceKind | null
   if (source.startsWith("backfill:")) {
     return asSourceKind(parts[parts.length - 2]);
   }
-  if (source.startsWith("daily:")) {
+  // daily:<YYYY-MM-DD>:<kind> and retry:<YYYY-MM-DD>:<kind> share a shape.
+  if (source.startsWith("daily:") || source.startsWith("retry:")) {
     return asSourceKind(parts[2]);
   }
   return null;
@@ -170,7 +173,7 @@ export async function recordPipelineEvent(input: RecordPipelineEventInput): Prom
     logger.warn("[digital-twin-pipeline-events] recordPipelineEvent failed", {
       userId: input.userId,
       source: input.source,
-      err: err instanceof Error ? err.message : String(err),
+      err: errMsg(err),
     });
     return null;
   }
@@ -205,7 +208,7 @@ export async function startSynthesisEvent(
   } catch (err) {
     logger.warn("[digital-twin-pipeline-events] startSynthesisEvent failed", {
       userId,
-      err: err instanceof Error ? err.message : String(err),
+      err: errMsg(err),
     });
     return null;
   }
@@ -240,7 +243,7 @@ export async function finishSynthesisEvent(
   } catch (err) {
     logger.warn("[digital-twin-pipeline-events] finishSynthesisEvent failed", {
       id,
-      err: err instanceof Error ? err.message : String(err),
+      err: errMsg(err),
     });
   }
 }
@@ -280,7 +283,7 @@ export async function startCuratorBatchEvent(input: {
     logger.warn("[digital-twin-pipeline-events] startCuratorBatchEvent failed", {
       userId: input.userId,
       source: input.source,
-      err: err instanceof Error ? err.message : String(err),
+      err: errMsg(err),
     });
     return null;
   }
@@ -306,7 +309,7 @@ export async function updateCuratorBatchAttempt(
   } catch (err) {
     logger.warn("[digital-twin-pipeline-events] updateCuratorBatchAttempt failed", {
       id,
-      err: err instanceof Error ? err.message : String(err),
+      err: errMsg(err),
     });
   }
 }
@@ -343,7 +346,7 @@ export async function finishCuratorBatchEvent(
   } catch (err) {
     logger.warn("[digital-twin-pipeline-events] finishCuratorBatchEvent failed — creating fresh", {
       id,
-      err: err instanceof Error ? err.message : String(err),
+      err: errMsg(err),
     });
     return recordPipelineEvent(input);
   }
@@ -446,7 +449,7 @@ export async function recordGateEvent(input: {
   } catch (err) {
     logger.warn("[digital-twin-pipeline-events] recordGateEvent failed", {
       userId: input.userId,
-      err: err instanceof Error ? err.message : String(err),
+      err: errMsg(err),
     });
     return null;
   }
@@ -463,7 +466,7 @@ export async function prunePipelineEvents(days = DEFAULT_PRUNE_DAYS): Promise<nu
   } catch (err) {
     logger.warn("[digital-twin-pipeline-events] prunePipelineEvents failed", {
       days,
-      err: err instanceof Error ? err.message : String(err),
+      err: errMsg(err),
     });
     return 0;
   }

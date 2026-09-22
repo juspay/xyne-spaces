@@ -66,6 +66,14 @@ async function getUserGroupIds(db: PrismaClient, userId: string): Promise<string
     return rows.map(r => r.userGroupId);
 }
 
+async function getUserChannelIds(db: PrismaClient, userId: string): Promise<string[]> {
+    const rows = await db.channelParticipant.findMany({
+        where: { userId },
+        select: { channelId: true },
+    });
+    return rows.map(r => r.channelId);
+}
+
 /**
  * Resolve the effective role for a user on a single (already-loaded) collection.
  * Caller must pre-load permissions if they want the same single-query path the
@@ -75,9 +83,9 @@ async function getUserGroupIds(db: PrismaClient, userId: string): Promise<string
 export async function resolveCollectionAccess(
     userId: string,
     collection: Pick<Collection, 'ownerId' | 'isPrivate'> & {
-        permissions?: Array<{ userId: string | null; userGroupId: string | null; role: CollectionRole }>;
+        permissions?: Array<{ userId: string | null; userGroupId: string | null; channelId?: string | null; role: CollectionRole }>;
     },
-    options?: { userGroupIds?: string[] }
+    options?: { userGroupIds?: string[]; userChannelIds?: string[] }
 ): Promise<ResolvedRoleResult> {
     if (collection.ownerId === userId) {
         return { role: CollectionRole.OWNER };
@@ -86,18 +94,24 @@ export async function resolveCollectionAccess(
     const db = DatabaseClient.getInstance();
     const userGroupIds = options?.userGroupIds ?? (await getUserGroupIds(db, userId));
     const groupSet = new Set(userGroupIds);
+    const userChannelIds = options?.userChannelIds ?? (await getUserChannelIds(db, userId));
+    const channelSet = new Set(userChannelIds);
 
     let role: CollectionRole | null = null;
     for (const p of collection.permissions ?? []) {
         if (p.userId === userId) role = maxRole(role, p.role);
         if (p.userGroupId && groupSet.has(p.userGroupId)) role = maxRole(role, p.role);
+        // Channel grants are always stored as VIEWER (enforced in
+        // grantPermission), so this can never elevate anyone above VIEWER.
+        if (p.channelId && channelSet.has(p.channelId)) role = maxRole(role, p.role);
     }
 
     if (!role && !collection.isPrivate) {
-        // Public collections grant implicit EDITOR — mirrors prior behaviour at
-        // collectionController.ts:191-193. Kept here so the legacy controller's
-        // upload/edit paths still permit non-private collections.
-        role = CollectionRole.EDITOR;
+        // Public collections grant implicit VIEWER (read-only) — write access
+        // requires being the owner or an explicit collaborator (EDITOR/OWNER
+        // CollectionPermission row). See zero/mutators.ts's matching write-path
+        // checks for the enforcement side of this.
+        role = CollectionRole.VIEWER;
     }
 
     return { role };
@@ -116,6 +130,7 @@ export async function listAccessibleRootCollections(
 ): Promise<Array<AccessibleCollectionNode>> {
     const db = DatabaseClient.getInstance();
     const userGroupIds = await getUserGroupIds(db, userId);
+    const userChannelIds = await getUserChannelIds(db, userId);
 
     const rows = await db.collection.findMany({
         where: {
@@ -131,6 +146,9 @@ export async function listAccessibleRootCollections(
                 ...(userGroupIds.length > 0
                     ? [{ permissions: { some: { userGroupId: { in: userGroupIds } } } }]
                     : []),
+                ...(userChannelIds.length > 0
+                    ? [{ permissions: { some: { channelId: { in: userChannelIds } } } }]
+                    : []),
             ],
         },
         include: {
@@ -139,9 +157,10 @@ export async function listAccessibleRootCollections(
                     OR: [
                         { userId },
                         ...(userGroupIds.length > 0 ? [{ userGroupId: { in: userGroupIds } }] : []),
+                        ...(userChannelIds.length > 0 ? [{ channelId: { in: userChannelIds } }] : []),
                     ],
                 },
-                select: { userId: true, userGroupId: true, role: true },
+                select: { userId: true, userGroupId: true, channelId: true, role: true },
             },
         },
         orderBy: { createdAt: 'desc' },
@@ -153,7 +172,7 @@ export async function listAccessibleRootCollections(
     const channelIds = [...new Set(
         rows.filter(r => r.scopeType === 'CHANNEL').map(r => r.scopeId).filter(Boolean)
     )];
-    const channelMeta = new Map<string, { name: string; projectId: string; projectName: string }>();
+    const channelMeta = new Map<string, { name: string; projectId: string | null; projectName: string }>();
     if (channelIds.length > 0) {
         // NOTE: do NOT select the required `channel.project` relation here.
         // Projects are hard-deleted with no FK cascade (relationMode = "prisma"),
@@ -172,7 +191,7 @@ export async function listAccessibleRootCollections(
             },
         });
 
-        const projectIds = [...new Set(channels.map(c => c.projectId).filter(Boolean))];
+        const projectIds = [...new Set(channels.map(c => c.projectId).filter((p): p is string => Boolean(p)))];
         const projectNames = new Map<string, string>();
         if (projectIds.length > 0) {
             const projects = await db.project.findMany({
@@ -188,9 +207,9 @@ export async function listAccessibleRootCollections(
             channelMeta.set(c.id, {
                 name: c.name,
                 projectId: c.projectId,
-                // Orphaned channel (project hard-deleted): fall back to a blank
-                // project name instead of throwing.
-                projectName: projectNames.get(c.projectId) ?? '',
+                // Orphaned channel (project hard-deleted) or a channel with no project
+                // (decoupled): fall back to a blank project name instead of throwing.
+                projectName: c.projectId ? projectNames.get(c.projectId) ?? '' : '',
             });
         }
     }
@@ -199,8 +218,8 @@ export async function listAccessibleRootCollections(
     for (const row of rows) {
         const { role } = await resolveCollectionAccess(
             userId,
-            { ownerId: row.ownerId, isPrivate: row.isPrivate, permissions: row.permissions as Array<{ userId: string | null; userGroupId: string | null; role: CollectionRole }> },
-            { userGroupIds }
+            { ownerId: row.ownerId, isPrivate: row.isPrivate, permissions: row.permissions as Array<{ userId: string | null; userGroupId: string | null; channelId: string | null; role: CollectionRole }> },
+            { userGroupIds, userChannelIds }
         );
         if (!role) continue;
         const meta = row.scopeType === 'CHANNEL' ? channelMeta.get(row.scopeId) : undefined;

@@ -6,7 +6,7 @@ import { Switch } from '../../components/ui/Switch';
 import { Tooltip } from '../../components/ui/Tooltip/Tooltip';
 import { cn } from '../../utils/classNames';
 import { getUserDisplayName } from '../../utils/userDisplayName';
-import { MentionType } from '../../components/Chat/ChatDirectory/ChannelCommandMenu.types';
+import { ChipType } from '../../components/Chat/ChatDirectory/ChannelCommandMenu.types';
 import {
   LexicalSearchInput,
   type InitialQueryData,
@@ -21,11 +21,11 @@ interface CallHistorySearchPanelProps {
   syncMessage: CalendarSyncMessage | null;
   reauthCountdown: CalendarReauthCountdown | null;
   onCalendarSync: () => void;
-  callMentionSearchType: MentionType | null;
+  callMentionSearchType: ChipType | null;
   callMentionSearchQuery: string;
   callSearchSelectedMentions: Array<{
     id: string;
-    type: MentionType;
+    type: ChipType;
     prefix?: string;
     name?: string;
   }>;
@@ -42,7 +42,7 @@ interface CallHistorySearchPanelProps {
   closeCallMentionSearch: () => void;
   handleCallSearchChange: (
     text: string,
-    mentions: Array<{ id: string; type: MentionType; prefix?: string }>,
+    mentions: Array<{ id: string; type: ChipType; prefix?: string }>,
   ) => void;
   handleCallUserSearch: (query: string | null) => void;
   handleCallChannelSearch: (query: string | null) => void;
@@ -91,7 +91,7 @@ export function CallHistorySearchPanel({
             <button
               onClick={onCalendarSync}
               disabled={isSyncing}
-              data-track-category='Calls'
+              data-track-category='CALLS'
               data-track-name='calendar-sync'
               title={`Sync ${calendarProvider === 'GOOGLE' ? 'Google' : 'Microsoft'} Calendar`}
               className={cn(
@@ -180,7 +180,7 @@ export function CallHistorySearchPanel({
               onEscapeKeyDown={closeCallMentionSearch}
               className='z-[9999] w-[var(--radix-popover-trigger-width)] overflow-hidden rounded-md border border-border bg-popover shadow-lg'
             >
-              {callMentionSearchType === MentionType.USER ? (
+              {callMentionSearchType === ChipType.USER ? (
                 filteredUserMentionResults.length > 0 ? (
                   <ul className='max-h-64 overflow-y-auto py-1'>
                     {filteredUserMentionResults.map((candidate, index) => (
@@ -193,7 +193,7 @@ export function CallHistorySearchPanel({
                               hasNavigatedMentions &&
                               'bg-accent text-accent-foreground',
                           )}
-                          data-track-category='Calls'
+                          data-track-category='CALLS'
                           data-track-name='call-search-select-user-filter'
                           onMouseEnter={() => {
                             setSelectedMentionIndex(index);
@@ -223,7 +223,7 @@ export function CallHistorySearchPanel({
                 ) : (
                   <div className='px-3 py-3 text-sm text-muted-foreground'>No users found</div>
                 )
-              ) : callMentionSearchType === MentionType.CHANNEL ? (
+              ) : callMentionSearchType === ChipType.CHANNEL ? (
                 channelMentionResults.length > 0 ? (
                   <ul className='max-h-64 overflow-y-auto py-1'>
                     {channelMentionResults.map((channel, index) => (
@@ -236,7 +236,7 @@ export function CallHistorySearchPanel({
                               hasNavigatedMentions &&
                               'bg-accent text-accent-foreground',
                           )}
-                          data-track-category='Calls'
+                          data-track-category='CALLS'
                           data-track-name='call-search-select-channel-filter'
                           onMouseEnter={() => {
                             setSelectedMentionIndex(index);
@@ -263,18 +263,27 @@ export function CallHistorySearchPanel({
           </Popover.Portal>
         </Popover.Root>
         <div className='flex items-center gap-3 shrink-0'>
-          <label
-            htmlFor='channel-calls-toggle'
-            className='hidden md:block text-sm text-muted-foreground whitespace-nowrap cursor-pointer select-none'
+          <Tooltip
+            content='Show calls from your channels where you were not a direct participant'
+            side='bottom'
           >
-            Include all channel calls
-          </label>
+            <label
+              htmlFor='channel-calls-toggle'
+              className='hidden md:flex items-center gap-1 text-sm text-muted-foreground whitespace-nowrap cursor-pointer select-none'
+            >
+              See thread calls
+              <Info className='size-3.5' />
+            </label>
+          </Tooltip>
           <Switch
             id='channel-calls-toggle'
             checked={showChannelCalls}
             onCheckedChange={setShowChannelCalls}
           />
-          <Tooltip content='Include all channel calls' side='bottom'>
+          <Tooltip
+            content='Show calls from your channels where you were not a direct participant'
+            side='bottom'
+          >
             <button className='md:hidden text-muted-foreground flex items-center'>
               <Info className='size-4' />
             </button>

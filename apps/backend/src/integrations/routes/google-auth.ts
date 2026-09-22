@@ -1286,10 +1286,43 @@ router.get('/auth/callback', async (req: Request, res: Response): Promise<void> 
           },
         });
 
-        const board = await tx.board.findFirst({
+        const boards = await tx.board.findMany({
           where: { projectId: cd.projectId },
           orderBy: { createdAt: 'asc' },
+          select: { id: true },
         });
+        const board = boards[0] ?? null;
+
+        // Dual-write: mirror the channel→project board set into ChannelBoardMapping
+        // so downstream consumers never need to read channel.projectId.
+        if (boards.length > 0) {
+          // Resolve the default board: honour the requested boardId only when it
+          // actually belongs to this project's board set, otherwise fall back to
+          // the oldest board. Without this guard a requested boardId outside the
+          // project yields a mapping set with NO default row.
+          const defaultBoardId =
+            cd.boardId && boards.some((b) => b.id === cd.boardId)
+              ? cd.boardId
+              : boards[0].id;
+          if (cd.boardId && cd.boardId !== defaultBoardId) {
+            logger.warn(
+              `[CBM_DEFAULT] Requested boardId ${cd.boardId} is not in project ${cd.projectId} for channel ${ch.id}; ` +
+                `defaulting to oldest board ${defaultBoardId}.`,
+            );
+          }
+          await tx.channelBoardMapping.createMany({
+            data: boards.map((b) => ({
+              channelId: ch.id,
+              boardId: b.id,
+              workspaceId: cd.workspaceId,
+              isDefault: b.id === defaultBoardId,
+              createdBy: cd.userId,
+              createdAt: now,
+              updatedAt: now,
+            })),
+            skipDuplicates: true,
+          });
+        }
 
         await tx.externalSource.create({
           data: {

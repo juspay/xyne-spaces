@@ -11,14 +11,12 @@ import { DatePill } from '../DatePill';
 import { MessageType, ChannelScopeType } from '@xyne/shared';
 import { MessageMetadata } from '../../ui/MessageBubble/MessageBubble.utils';
 import { ConversationWithTicket } from '../../ui/MessageBubble/MessageBubble.types';
-import { useEditContext } from '../../../providers/EditProvider';
+import { useMessageEdit, withEditSurface } from '../../../providers/EditProvider';
 import { useShortcutById } from '../../../shortcuts';
 import { findLastEditableMessage, isEventFromEmptyInput } from '../../../utils/chatUtils';
 import { ArrowDown, ArrowUp, ChevronUp } from 'lucide-react';
 import { AttachmentRef } from '../../../machines/attachmentViewerMachine';
 import { useThreadReadTracking } from '../../../hooks/useThreadReadTracking';
-import { useCachedQuery } from '../../../hooks/useCachedQuery';
-import { getInitialMessageFromConversation } from '../../../utils/conversationMessageHelpers';
 
 type ThreadListProps = {
   channelId: string;
@@ -27,7 +25,6 @@ type ThreadListProps = {
   initialScrollOffset?: number;
   onScrollPositionChange?: (position: number) => void;
   isTicketThread?: boolean;
-  isFlowStep?: boolean;
   messagesWithSeparators?: ThreadListItemWithSeparator[] | undefined;
   channelScopeType?: ChannelScopeType | undefined;
   conversation?: ConversationWithTicket | undefined;
@@ -40,6 +37,11 @@ type ThreadListProps = {
   conversationParticipant?: { lastReadAt?: number | null };
   /** Scroll to and highlight this specific message on mount. Overrides URL-hash-based scroll. */
   matchedMessageId?: string | null;
+  /** Tag being inspected from the thread header. Passed straight through to the bubbles. */
+  inspectedTag?: string | null;
+  /** Overrides the bubbles' default profile navigation (pass a noop to disable it, e.g. SDLC panels). */
+  onUserClick?: ((userId: string) => void) | undefined;
+  spawnedTicketMessageIds?: ReadonlySet<string> | undefined;
 };
 
 /** Space reserved below the last message for the typing / agent-activity bar, which
@@ -55,7 +57,6 @@ const ThreadList = ({
   initialScrollOffset,
   onScrollPositionChange,
   isTicketThread = false,
-  isFlowStep = false,
   messagesWithSeparators,
   channelScopeType,
   conversation,
@@ -66,9 +67,12 @@ const ThreadList = ({
   isMessagesLoaded = true,
   conversationParticipant,
   matchedMessageId,
+  inspectedTag = null,
+  onUserClick,
+  spawnedTicketMessageIds,
 }: ThreadListProps): ReactElement => {
   const { user } = useAuthContext();
-  const { editingMessageId, requestEdit } = useEditContext();
+  const { isEditingMessage, isEditingHere, requestEdit } = useMessageEdit();
   const location = useLocation();
   const activityNavigationNonce =
     (location.state as { activityNavigationNonce?: number } | null)?.activityNavigationNonce ?? 0;
@@ -125,13 +129,13 @@ const ThreadList = ({
       }
     };
 
-    if (editingMessageId === message.messageId) {
+    if (isEditingMessage(message.messageId)) {
       scrollToMessage();
       return;
     }
 
     requestEdit(message.messageId, scrollToMessage);
-  }, [conversationId, threadMessages, user?.id, editingMessageId, requestEdit]);
+  }, [conversationId, threadMessages, user?.id, isEditingMessage, requestEdit]);
 
   useShortcutById('composer.editLastMessage', handleEditLastMessage, {
     enabled: threadMessages.length > 0,
@@ -147,18 +151,12 @@ const ThreadList = ({
     isNearBottomRef.current = isNearBottom;
   }, [isNearBottom]);
 
-  const threadTicketId = useMemo(() => {
-    if (!isTicketThread || !conversation) return '';
-    const initMsg = getInitialMessageFromConversation(conversation) ?? conversation.initialMessage;
-    return ((initMsg?.metadata as Record<string, unknown>)?.['ticketId'] as string) || '';
-  }, [isTicketThread, conversation]);
+  const isEditingRef = useRef(false);
+  useEffect(() => {
+    isEditingRef.current = isEditingHere;
+  }, [isEditingHere]);
 
-  // Subtickets cannot be nested: hide the action when the thread's ticket is itself a subticket.
-  const [threadTicketParentSubTicket] = useCachedQuery(
-    queries.subTicketByMappedTicketId({ mappedTicketId: threadTicketId }),
-    { enabled: !!threadTicketId },
-  );
-  const isThreadTicketSubTicket = !!threadTicketParentSubTicket;
+  const lastAutoScrolledMessageIdRef = useRef<string | null>(null);
 
   const {
     firstUnreadIndex,
@@ -209,6 +207,7 @@ const ThreadList = ({
 
   useEffect(() => {
     hasAppliedInitialScrollRef.current = false;
+    lastAutoScrolledMessageIdRef.current = null;
     setIsNearBottom(false);
     setIsNearTop(true);
     setHasOverflow(false);
@@ -308,12 +307,17 @@ const ThreadList = ({
    *    - Skip if we've navigated to a specific message via link
    */
   useEffect(() => {
+    const latestMessage = threadMessages?.[threadMessages.length - 1];
+    const latestMessageId = latestMessage?.messageId ?? null;
+    const isAppend = latestMessageId !== lastAutoScrolledMessageIdRef.current;
+    lastAutoScrolledMessageIdRef.current = latestMessageId;
+
     const container = scrollContainerRef.current;
     if (!container || !threadMessages?.length) return;
     if (!hasAppliedInitialScrollRef.current) return;
     if (!enableJumpFab && !hasOverflow) return;
+    if (!isAppend) return;
 
-    const latestMessage = threadMessages[threadMessages.length - 1];
     const isFromCurrentUser = latestMessage?.senderId === user?.id;
 
     const threshold = 100;
@@ -338,6 +342,7 @@ const ThreadList = ({
       // overflow purely because of the padding and switch on the jump FAB.
       const overflow = container.scrollHeight > container.clientHeight + 8 + ACTIVITY_BAR_PADDING;
       setHasOverflow(overflow);
+      if (isEditingRef.current) return;
       if (!overflow) {
         setIsNearBottom(true);
         return;
@@ -378,7 +383,9 @@ const ThreadList = ({
     const handleScroll = (): void => {
       const distanceFromBottom =
         container.scrollHeight - container.scrollTop - container.clientHeight;
-      setIsNearBottom(distanceFromBottom < 150);
+      if (!isEditingRef.current) {
+        setIsNearBottom(distanceFromBottom < 150);
+      }
       setIsNearTop(container.scrollTop < 150);
 
       setIsScrolling(true);
@@ -497,10 +504,10 @@ const ThreadList = ({
                       channelId={channelId}
                       showAvatar={showAvatar}
                       context='thread'
+                      {...(onUserClick && { onUserClick })}
+                      {...(spawnedTicketMessageIds && { spawnedTicketMessageIds })}
                       isFirstInThread={messageIndex === 0}
                       isTicketThread={isTicketThread}
-                      isFlowStep={isFlowStep}
-                      isThreadTicketSubTicket={isThreadTicketSubTicket}
                       channelScopeType={channelScopeType}
                       allThreadAttachments={allThreadAttachments}
                       workflowNumber={workflowNumberMap?.get(threadMessage.messageId)}
@@ -509,6 +516,7 @@ const ThreadList = ({
                       {...(disableAskAI !== undefined && { disableAskAI })}
                       {...(conversation && { conversation })}
                       highlightMessageId={matchedMessageId ?? null}
+                      inspectedTag={inspectedTag}
                     />
                   </div>
                   {messageIndex === 0 && threadMessages.length > 1 && (
@@ -596,16 +604,17 @@ const ThreadList = ({
                     channelId={channelId}
                     showAvatar={showAvatar}
                     context='thread'
+                    {...(onUserClick && { onUserClick })}
+                    {...(spawnedTicketMessageIds && { spawnedTicketMessageIds })}
                     isFirstInThread={index === 0}
                     isTicketThread={isTicketThread}
-                    isFlowStep={isFlowStep}
-                    isThreadTicketSubTicket={isThreadTicketSubTicket}
                     channelScopeType={channelScopeType}
                     allThreadAttachments={allThreadAttachments}
                     workflowNumber={workflowNumberMap?.get(threadMessage.messageId)}
                     {...(disableAskAI !== undefined && { disableAskAI })}
                     {...(conversation && { conversation })}
                     highlightMessageId={matchedMessageId ?? null}
+                    inspectedTag={inspectedTag}
                   />
                 </div>
                 {!enableCollapsing &&
@@ -683,4 +692,4 @@ const ThreadList = ({
   );
 };
 
-export default ThreadList;
+export default withEditSurface(ThreadList);

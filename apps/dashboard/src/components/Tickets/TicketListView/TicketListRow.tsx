@@ -1,5 +1,6 @@
 import { MouseEvent, ReactElement, useMemo } from 'react';
-import { Sparkles, Pencil, Wand2, Loader2 } from 'lucide-react';
+import { Wand2 } from 'lucide-react';
+import { SparkleAi02 as Sparkles, PencilEdit as Pencil, Spinner as Loader2 } from '@xyne/icons';
 import { cn } from '../../../utils/classNames';
 import { findEmailAddress, parseFirstEmailAddress } from '../../../utils/emailAddress';
 import { Tooltip } from '../../ui/Tooltip/Tooltip';
@@ -7,7 +8,8 @@ import { TruncatedTooltip } from '../../ui/Tooltip/TruncatedTooltip';
 import { Checkbox } from '../../ui/Checkbox/Checkbox';
 import { useAuthContextValues } from '../../../hooks/useAuth';
 import type { TicketListItem } from './TicketListView.types';
-import { AssigneePicker } from './AssigneePicker';
+import { UserSelector } from '../CreateTicketModal/UserSelector';
+import { useTicketAssignee, resolveAssigneeRef } from '../../../hooks/useTicketAssignee';
 import { PriorityPicker } from './PriorityPicker';
 import { AutoDraftStatus } from '@xyne/shared';
 import { getTicketListColumnAlignClass } from './ticketListColumns';
@@ -98,6 +100,8 @@ export const TicketListRow = ({
 }: TicketListRowProps): ReactElement => {
   const ticketIdValue = ticket.xyneId || ticket.id || '';
   const isHumanInterventionTicket = ticket.stageName?.toLowerCase().includes('human') ?? false;
+  const assignee = resolveAssigneeRef(ticket.assignedTo, ticket.userGroupId);
+  const onAssign = useTicketAssignee(ticket.id, assignee);
 
   const metadata = ticket.metadata as { fromEmailAddress?: string | null } | null | undefined;
   const fromEmailAddress = metadata?.fromEmailAddress;
@@ -337,10 +341,12 @@ export const TicketListRow = ({
         </span>
       </div>
       <div className={cn('flex min-w-0 items-center', getTicketListColumnAlignClass('assignee'))}>
-        <AssigneePicker
-          ticketId={ticket.id}
-          assignedTo={ticket.assignedTo}
+        <UserSelector
+          selectedUserId={assignee.userId}
+          assignedGroupId={assignee.groupId}
+          onUserSelect={onAssign}
           channelId={ticket.channelId ?? undefined}
+          variant='compact'
         />
       </div>
       <div

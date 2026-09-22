@@ -141,6 +141,7 @@ export const DocxViewer: React.FC<BaseViewerProps> = ({ source, searchable }) =>
               data-track-category='FileViewer'
               data-track-name='RETRY_LOAD_DOCUMENT'
               data-track-metadata={JSON.stringify({ fileType: 'docx', source })}
+              data-ph-capture-attribute-track-id='retry_load_document'
             >
               Retry
             </button>

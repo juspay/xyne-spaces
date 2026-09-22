@@ -9,16 +9,11 @@ import {
   type ComponentType,
 } from 'react';
 import { useNavigate, useLocation, useParams } from 'react-router-dom';
+import { useRadarEnabled } from '../../../hooks/radarCacConfig';
 import { useLastVisitedChannel } from '../../../hooks/useLastVisitedChannel';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { useShortcutById } from '../../../shortcuts';
 import {
-  ChatPlus,
-  Subtask,
-  ChatTyping,
-  BookmarkDefault,
-  SendPlaneSlant,
-  ListAiGenerated,
   ChevronRight,
   PlusDefault,
   FolderPlus,
@@ -92,6 +87,9 @@ import SectionSettingsMenu, { MENU_ROW } from './SectionSettingsMenu';
 import SortableChannelItem from './SortableChannelItem';
 import ChannelItemV2 from './ChannelItemV2';
 import Tooltip from '../../ui/Tooltip';
+import { ShortcutHint } from '../../ui/ShortcutHint';
+import type { ShortcutId } from '../../../shortcuts';
+import { chatNavItems, type ChatNavKey } from '../../AppSidebar/navigationConfig';
 import ChannelCommandMenu from './ChannelCommandMenu';
 import AppNavigator from '../../AppNavigator/AppNavigator';
 import { useThreadSidebarState } from '../../../hooks/useUnreadThreadsCount';
@@ -211,6 +209,18 @@ const GroupSettingsMenu = ({
   );
 };
 
+const CHAT_NAV_ROW_DEFAULT_CLASS = 'text-sidebar-foreground hover:text-sidebar-accent-foreground';
+
+const CHAT_NAV_TEST_IDS: Partial<Record<ChatNavKey, string>> = {
+  bookmarks: 'open-bookmarks-button',
+  'drafts-sent': 'open-drafts-and-sent-button',
+};
+
+const CHAT_NAV_SHORTCUTS: Partial<Record<ChatNavKey, ShortcutId>> = {
+  'new-message': 'global.composeMessage',
+  threads: 'global.openThreads',
+};
+
 const ChatDirectory = ({
   channelData,
   allChannelsUserStatus,
@@ -224,6 +234,10 @@ const ChatDirectory = ({
   const listContainerRef = useRef<HTMLDivElement>(null);
   const context = useAuthContextValues();
   const auth = useAuth();
+  // Radar rollout is runtime CAC (radar_config), not a build-time flag:
+  // enabling it must not need a dashboard rebuild, and the pilot runs on an
+  // allowedEmails subset first.
+  const radarEnabled = useRadarEnabled(auth.user?.email);
   const { selfDmChannelId, landingChannelId } = auth;
   const zero = useZero();
   const lastVisitedChannelId = useLastVisitedChannel(workspaceId ?? '');
@@ -235,6 +249,7 @@ const ChatDirectory = ({
   const prefetchRecap = usePrefetchRecap();
   const [showAddChannelForm, setShowAddChannelForm] = useState(false);
   const [showAddSectionForm, setShowAddSectionForm] = useState(false);
+  const [addSectionSource, setAddSectionSource] = useState<'channels' | 'dms'>('channels');
   const [sectionToRename, setSectionToRename] = useState<ChannelSection | null>(null);
   const [sectionToDelete, setSectionToDelete] = useState<ChannelSection | null>(null);
   const [sectionToManage, setSectionToManage] = useState<ChannelSection | null>(null);
@@ -365,7 +380,12 @@ const ChatDirectory = ({
     const allOrdered = [...starred, ...channels, ...directMessages];
     let hasUnread = false;
     for (const c of allOrdered) {
-      if (isDeskChannelType(c.type) || c.type === ChannelType.SUPPORT) continue;
+      if (
+        isDeskChannelType(c.type) ||
+        c.type === ChannelType.SUPPORT ||
+        c.type === ChannelType.SDLC
+      )
+        continue;
 
       const count = unreadCounts[c.id] ?? 0;
 
@@ -395,7 +415,12 @@ const ChatDirectory = ({
   const unreadChannelIds = useMemo(() => {
     const ids = new Set<string>();
     for (const c of flatSidebarChannels ?? []) {
-      if (isDeskChannelType(c.type) || c.type === ChannelType.SUPPORT) continue;
+      if (
+        isDeskChannelType(c.type) ||
+        c.type === ChannelType.SUPPORT ||
+        c.type === ChannelType.SDLC
+      )
+        continue;
       const status = allChannelsUserStatus.find(
         s => s.channelId === c.id && s.userId === context.userID,
       );
@@ -605,6 +630,63 @@ const ChatDirectory = ({
     createDmMutation.mutate(dmRequest);
   };
 
+  const chatNavStateClass = (key: ChatNavKey): string => {
+    switch (key) {
+      case 'threads':
+        return hasUnreadThreads
+          ? 'text-sidebar-accent-foreground font-semibold'
+          : CHAT_NAV_ROW_DEFAULT_CLASS;
+      case 'unreads':
+        return location.pathname.includes('/chat/dir/unreads')
+          ? 'text-sidebar-accent-foreground font-medium bg-sidebar-accent'
+          : unreadActivityStats.hasUnread
+            ? 'text-sidebar-accent-foreground font-semibold'
+            : CHAT_NAV_ROW_DEFAULT_CLASS;
+      case 'bookmarks':
+        return overdueRemindersCount > 0
+          ? 'text-sidebar-accent-foreground font-semibold'
+          : CHAT_NAV_ROW_DEFAULT_CLASS;
+      case 'drafts-sent':
+        return location.pathname.endsWith('/chat/drafts-sent')
+          ? 'text-sidebar-accent-foreground'
+          : CHAT_NAV_ROW_DEFAULT_CLASS;
+      case 'recap':
+        return recapUnreadCount > 0
+          ? 'text-sidebar-accent-foreground font-semibold'
+          : CHAT_NAV_ROW_DEFAULT_CLASS;
+      case 'radar':
+        return location.pathname.includes('/chat/dir/radar')
+          ? 'text-sidebar-accent-foreground font-semibold bg-sidebar-accent'
+          : CHAT_NAV_ROW_DEFAULT_CLASS;
+      default:
+        return CHAT_NAV_ROW_DEFAULT_CLASS;
+    }
+  };
+
+  const chatNavBadgeCount = (key: ChatNavKey): number => {
+    switch (key) {
+      case 'threads':
+        return threadCount;
+      case 'bookmarks':
+        return overdueRemindersCount;
+      case 'recap':
+        return recapUnreadCount;
+      default:
+        return 0;
+    }
+  };
+
+  const chatNavTrackMetadata = (key: ChatNavKey): string | undefined => {
+    switch (key) {
+      case 'threads':
+        return JSON.stringify({ threadCount, hasUnreadThreads });
+      case 'bookmarks':
+        return JSON.stringify({ overdueRemindersCount });
+      default:
+        return undefined;
+    }
+  };
+
   return (
     <div className={cn('h-full w-full flex flex-col', isMobile && 'bg-sidebar')}>
       <div className='w-full h-[52px] shrink-0'>
@@ -648,167 +730,61 @@ const ChatDirectory = ({
           className='flex-1 h-full overflow-y-scroll no-scrollbar pb-[calc(2.5rem+env(safe-area-inset-bottom))] px-0.5 pt-1 outline-none'
         >
           <div className='hidden md:block'>
-            <button
-              className={cn(
-                'flex items-center justify-start gap-3 w-full px-3 py-2 text-sm font-medium tracking-[-0.14px] rounded-[10px] border border-transparent transition-colors hover:bg-sidebar-accent hover:border-sidebar-border',
-                'text-sidebar-foreground hover:text-sidebar-accent-foreground',
-              )}
-              onClick={() => {
-                void navigate('/chat/search?mode=dm', { replace: true });
-              }}
-              data-track-category='CHAT_SIDEBAR'
-              data-track-name='NEW_MESSAGE'
-            >
-              <span className='size-4 flex items-center justify-center shrink-0'>
-                <ChatPlus className='size-4' />
-              </span>
-              <span className='flex-1 min-w-0 text-left truncate block'>New Message</span>
-            </button>
-            <button
-              className={cn(
-                'flex items-center justify-start gap-3 w-full px-3 py-2 text-sm font-medium tracking-[-0.14px] rounded-[10px] border border-transparent transition-colors hover:bg-sidebar-accent hover:border-sidebar-border',
-                hasUnreadThreads
-                  ? 'text-sidebar-accent-foreground font-semibold'
-                  : 'text-sidebar-foreground hover:text-sidebar-accent-foreground',
-              )}
-              onClick={() => {
-                void navigate('/chat/dir/threads');
-              }}
-              data-track-category='CHAT_SIDEBAR'
-              data-track-name='OPEN_THREADS'
-              data-track-metadata={JSON.stringify({ threadCount, hasUnreadThreads })}
-            >
-              <span className='size-4 flex items-center justify-center shrink-0'>
-                <Subtask className='size-4' />
-              </span>
-              <span className='flex-1 min-w-0 text-left truncate block'>Threads</span>
-              {threadCount > 0 && (
-                <span className='size-5 flex items-center justify-center shrink-0'>
-                  <Badge
-                    variant='success'
-                    className='text-xs h-[18px] px-[6px] py-[1px] bg-sidebar-primary border border-sidebar-accent-ring text-sidebar-primary-foreground'
-                  >
-                    {threadCount > 10 ? '10+' : threadCount}
-                  </Badge>
-                </span>
-              )}
-            </button>
-            <button
-              className={cn(
-                'flex items-center justify-start gap-3 w-full px-3 py-2 text-sm font-medium tracking-[-0.14px] rounded-[10px] border border-transparent transition-colors hover:bg-sidebar-accent hover:border-sidebar-border',
-                location.pathname.includes('/chat/dir/unreads')
-                  ? 'text-sidebar-accent-foreground font-medium bg-sidebar-accent'
-                  : unreadActivityStats.hasUnread
-                    ? 'text-sidebar-accent-foreground font-semibold'
-                    : 'text-sidebar-foreground hover:text-sidebar-accent-foreground',
-              )}
-              onClick={() => {
-                void navigate('/chat/dir/unreads');
-              }}
-              data-track-category='CHAT_SIDEBAR'
-              data-track-name='OPEN_UNREADS'
-            >
-              <span className='size-4 flex items-center justify-center shrink-0'>
-                <ChatTyping className='size-4' />
-              </span>
-              <span className='flex-1 min-w-0 text-left truncate block'>Unreads</span>
-            </button>
-            <button
-              className={cn(
-                'flex items-center justify-start gap-3 w-full px-3 py-2 text-sm font-medium tracking-[-0.14px] rounded-[10px] border border-transparent transition-colors hover:bg-sidebar-accent hover:border-sidebar-border',
-                overdueRemindersCount > 0
-                  ? 'text-sidebar-accent-foreground font-semibold'
-                  : 'text-sidebar-foreground hover:text-sidebar-accent-foreground',
-              )}
-              onClick={() => {
-                void navigate('/chat/bookmarks');
-              }}
-              data-testid='open-bookmarks-button'
-              data-track-category='CHAT_SIDEBAR'
-              data-track-name='OPEN_BOOKMARKS'
-              data-track-metadata={JSON.stringify({ overdueRemindersCount })}
-            >
-              <span className='size-4 flex items-center justify-center shrink-0'>
-                <BookmarkDefault className='size-4' />
-              </span>
-              <span className='flex-1 min-w-0 text-left truncate block'>Bookmarks</span>
-              {overdueRemindersCount > 0 && (
-                <span className='size-5 flex items-center justify-center shrink-0'>
-                  <Badge
-                    variant='success'
-                    className='text-xs h-[18px] px-[6px] py-[1px] bg-sidebar-primary border border-sidebar-accent-ring text-sidebar-primary-foreground'
-                  >
-                    {overdueRemindersCount > 10 ? '10+' : overdueRemindersCount}
-                  </Badge>
-                </span>
-              )}
-            </button>
-            <button
-              className={cn(
-                'flex items-center justify-start gap-3 w-full px-3 py-2 text-sm font-medium tracking-[-0.14px] rounded-[10px] border border-transparent transition-colors hover:bg-sidebar-accent hover:border-sidebar-border',
-                location.pathname.endsWith('/chat/drafts-sent')
-                  ? 'text-sidebar-accent-foreground'
-                  : 'text-sidebar-foreground hover:text-sidebar-accent-foreground',
-              )}
-              onClick={() => {
-                void navigate('drafts-sent');
-              }}
-              data-testid='open-drafts-and-sent-button'
-              data-track-category='CHAT_SIDEBAR'
-              data-track-name='OPEN_DRAFTS_AND_SENT'
-            >
-              <span className='size-4 flex items-center justify-center shrink-0'>
-                <SendPlaneSlant className='size-4' />
-              </span>
-              <span className='flex-1 min-w-0 text-left truncate block'>Drafts &amp; Sent</span>
-              <span className='flex items-center gap-2 text-sidebar-foreground'>
-                {draftsCount > 0 && (
-                  <span className='flex items-center gap-1 text-xs'>
-                    <PencilEdit size={12} />
-                    {draftsCount}
+            {chatNavItems(radarEnabled).map(item => {
+              const Icon = item.icon;
+              const shortcut = CHAT_NAV_SHORTCUTS[item.key];
+              const badgeCount = chatNavBadgeCount(item.key);
+              return (
+                <button
+                  key={item.key}
+                  className={cn(
+                    'flex items-center justify-start gap-3 w-full px-3 py-2 text-sm font-medium tracking-[-0.14px] rounded-[10px] border border-transparent transition-colors hover:bg-sidebar-accent hover:border-sidebar-border',
+                    chatNavStateClass(item.key),
+                  )}
+                  onClick={() => {
+                    const to = item.sidebarTo ?? item.to;
+                    void (item.replace ? navigate(to, { replace: true }) : navigate(to));
+                  }}
+                  onMouseEnter={item.key === 'recap' ? prefetchRecap : undefined}
+                  data-testid={CHAT_NAV_TEST_IDS[item.key]}
+                  data-track-category='CHAT_SIDEBAR'
+                  data-track-name={item.trackName}
+                  data-track-metadata={chatNavTrackMetadata(item.key)}
+                >
+                  <span className='size-4 flex items-center justify-center shrink-0'>
+                    <Icon className='size-4' />
                   </span>
-                )}
-                {pendingScheduledCount > 0 && (
-                  <span className='flex items-center gap-1 text-xs'>
-                    <ClockDefault size={12} />
-                    {pendingScheduledCount}
-                  </span>
-                )}
-              </span>
-            </button>
-            <button
-              className={cn(
-                'flex items-center justify-start gap-3 w-full px-3 py-2 text-sm font-medium tracking-[-0.14px] rounded-[10px] border border-transparent transition-colors hover:bg-sidebar-accent hover:border-sidebar-border',
-                recapUnreadCount > 0
-                  ? 'text-sidebar-accent-foreground font-semibold'
-                  : 'text-sidebar-foreground hover:text-sidebar-accent-foreground',
-              )}
-              onMouseEnter={() => {
-                // Pre-fetch recap data on hover for instant load
-                prefetchRecap();
-              }}
-              onClick={() => {
-                // Always navigate to recap page first
-                void navigate('/chat/dir/recap');
-              }}
-              data-track-category='CHAT_SIDEBAR'
-              data-track-name='OPEN_RECAP'
-            >
-              <span className='size-4 flex items-center justify-center shrink-0'>
-                <ListAiGenerated className='size-4' />
-              </span>
-              <span className='flex-1 min-w-0 text-left truncate block'>Recap</span>
-              {recapUnreadCount > 0 && (
-                <span className='size-5 flex items-center justify-center shrink-0'>
-                  <Badge
-                    variant='success'
-                    className='text-xs h-[18px] px-[6px] py-[1px] bg-sidebar-primary border border-sidebar-accent-ring text-sidebar-primary-foreground'
-                  >
-                    {recapUnreadCount > 10 ? '10+' : recapUnreadCount}
-                  </Badge>
-                </span>
-              )}
-            </button>
+                  <span className='flex-1 min-w-0 text-left truncate block'>{item.label}</span>
+                  {shortcut !== undefined && <ShortcutHint shortcut={shortcut} />}
+                  {item.key === 'drafts-sent' && (
+                    <span className='flex items-center gap-2 text-sidebar-foreground'>
+                      {draftsCount > 0 && (
+                        <span className='flex items-center gap-1 text-xs'>
+                          <PencilEdit size={12} />
+                          {draftsCount}
+                        </span>
+                      )}
+                      {pendingScheduledCount > 0 && (
+                        <span className='flex items-center gap-1 text-xs'>
+                          <ClockDefault size={12} />
+                          {pendingScheduledCount}
+                        </span>
+                      )}
+                    </span>
+                  )}
+                  {badgeCount > 0 && (
+                    <span className='size-5 flex items-center justify-center shrink-0'>
+                      <Badge
+                        variant='success'
+                        className='text-xs h-[18px] px-[6px] py-[1px] bg-sidebar-primary border border-sidebar-accent-ring text-sidebar-primary-foreground'
+                      >
+                        {badgeCount > 10 ? '10+' : badgeCount}
+                      </Badge>
+                    </span>
+                  )}
+                </button>
+              );
+            })}
           </div>
 
           <div className='py-3 w-full hidden md:block' />
@@ -895,7 +871,10 @@ const ChatDirectory = ({
                     onRename={setSectionToRename}
                     onDelete={setSectionToDelete}
                     onManageChannels={setSectionToManage}
-                    onCreateSection={() => setShowAddSectionForm(true)}
+                    onCreateSection={() => {
+                      setAddSectionSource('channels');
+                      setShowAddSectionForm(true);
+                    }}
                     onMoveChannelToSection={moveChannelToSection}
                     onSetSortOrder={(sectionId, order) => {
                       void zero.mutate(
@@ -1040,7 +1019,10 @@ const ChatDirectory = ({
                             label: 'New section',
                             icon: FolderPlus,
                             trackName: 'CREATE_NEW_SECTION',
-                            onSelect: () => setShowAddSectionForm(true),
+                            onSelect: () => {
+                              setAddSectionSource('channels');
+                              setShowAddSectionForm(true);
+                            },
                           },
                         ]}
                       />
@@ -1130,6 +1112,15 @@ const ChatDirectory = ({
                           trackName: 'CREATE_DIRECT_MESSAGE',
                           onSelect: handleAddDirectMessage,
                         },
+                        {
+                          label: 'New section',
+                          icon: FolderPlus,
+                          trackName: 'CREATE_NEW_SECTION',
+                          onSelect: () => {
+                            setAddSectionSource('dms');
+                            setShowAddSectionForm(true);
+                          },
+                        },
                       ]}
                     />
                   </div>
@@ -1205,6 +1196,7 @@ const ChatDirectory = ({
               channels={sectionableChannels}
               existingNames={(channelSections ?? []).map(s => s.name)}
               lastSectionPosition={lastSectionPosition}
+              prioritizeType={addSectionSource === 'dms' ? 'dm' : 'channel'}
               onClose={() => setShowAddSectionForm(false)}
             />
           )}
@@ -1279,6 +1271,7 @@ const ChatDirectory = ({
               </button>
               <button
                 onClick={handleConfirmDeleteSection}
+                data-ph-capture-attribute-track-id='delete_channel_section'
                 data-track-category='CHAT_SIDEBAR'
                 data-track-name='CONFIRM_DELETE_SECTION'
                 className='inline-flex items-center justify-center rounded-md px-4 py-2 text-sm font-medium bg-destructive text-destructive-foreground hover:bg-destructive/90 transition-colors'
@@ -1353,6 +1346,8 @@ const ChatDirectory = ({
           <div className='flex items-center justify-between gap-2'>
             <button
               onClick={() => void navigate('/chat')}
+              data-track-category='CHAT_SIDEBAR'
+              data-track-name='BACK_TO_CHAT'
               className='h-8 px-4 flex items-center justify-center rounded-[999px] border border-[#FFF] bg-[linear-gradient(180deg,_#FFF_0%,_#FAFAFA_100%)] shadow-[inset_0_4px_6px_0_#F5F5F5,0_0_12px_0_#E5E5E5] min-[500px]:hidden z-30 '
             >
               Chat
@@ -1360,6 +1355,8 @@ const ChatDirectory = ({
             <div className='z-30'>
               <button
                 onClick={() => setIsCommandMenuOpen(true)}
+                data-track-category='CHAT_SIDEBAR'
+                data-track-name='OPEN_COMMAND_MENU'
                 className='h-8 px-2 flex items-center justify-center rounded-[999px] border border-[#FFF] bg-[linear-gradient(180deg,_#FFF_0%,_#FAFAFA_100%)] shadow-[inset_0_4px_6px_0_#F5F5F5,0_0_12px_0_#E5E5E5] min-[500px]:hidden z-30'
               >
                 <SearchDefault size={16} />
@@ -1371,11 +1368,15 @@ const ChatDirectory = ({
         {/* Desktop */}
         {/* <div className=' sticky top-0 z-50 hidden min-[500px]:block pt-4 bg-sidebar-background'>
           <div className='pb-6 flex items-center justify-between'>
-            <button onClick={() => void navigate('/chat')} className='cursor-pointer'>
+            <button onClick={() => void navigate('/chat')}
+              data-track-category='CHAT_SIDEBAR'
+              data-track-name='BACK_TO_CHAT' className='cursor-pointer'>
               <h2 className='text-black font-inter text-base font-semibold leading-normal'>Chat</h2>
             </button>
             <button
               onClick={() => setIsCommandMenuOpen(true)}
+              data-track-category='CHAT_SIDEBAR'
+              data-track-name='OPEN_COMMAND_MENU'
               className='size-8 items-center justify-center hidden min-[500px]:flex cursor-pointer'
             >
               <SearchDefault size={16} />
@@ -1386,7 +1387,7 @@ const ChatDirectory = ({
             label='Activity'
             {...(activityCount > 0 && { count: activityCount })}
             onClick={() => {
-              mixpanelService.track(EVENTS.INITIATE_ACTION, {
+              posthogService.capture(EVENTS.INITIATE_ACTION, {
                 type: EVENT_PROPERTIES.ACTION_TYPES.ACTIVITY_VIEWED,
               });
               void navigate('/chat/dir/activity');
@@ -1397,7 +1398,7 @@ const ChatDirectory = ({
             label='Thread'
             disabled={true}
             onClick={() => {
-              mixpanelService.track(EVENTS.INITIATE_ACTION, {
+              posthogService.capture(EVENTS.INITIATE_ACTION, {
                 type: EVENT_PROPERTIES.ACTION_TYPES.THREAD_VIEWED,
               });
               void navigate('/chat/threads');
@@ -1409,6 +1410,9 @@ const ChatDirectory = ({
             onClick={() => {
               void navigate('/chat/bookmarks');
             }}
+            data-track-category='CHAT_SIDEBAR'
+            data-track-name='OPEN_BOOKMARKS'
+            data-track-metadata={JSON.stringify({ overdueRemindersCount })}
           />
           <hr className='border-border mt-4' />
         </div> */}

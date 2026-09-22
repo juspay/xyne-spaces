@@ -1,12 +1,13 @@
-import { ipcMain, shell, app, BrowserView, BrowserWindow, desktopCapturer, dialog } from 'electron';
+import { ipcMain, shell, app, session, BrowserView, BrowserWindow, desktopCapturer, dialog, clipboard } from 'electron';
 import type { IpcMainEvent, IpcMainInvokeEvent } from 'electron';
 import { promises as fs } from 'fs';
 import * as path from 'path';
 import { clearAllCookies, clearBrowserTabsData, syncXyneCookiesToBrowserPanel } from '../services/cookies';
+import { chromeProfileAvailable, importChromeCookies } from '../services/browser-import';
 import { showNotification, NotificationData, showCallNotification, closeCallNotification, CallNotificationData } from '../services/notifications';
 import { getMainWindow, loadApp, toggleWindowCompactMode } from '../window/manager';
 import { setupMTLSIpcHandlers } from './mtls-handlers';
-import { config } from '../app/config';
+import { config, ENABLE_LOCAL_HARNESS } from '../app/config';
 import { performHardReload } from '../services/version-checker';
 import { Logger, errorLogger } from '../services/logger/Logger';
 import ElectronEvent from '../services/logger/electron-events';
@@ -24,16 +25,20 @@ import {
 import { isTrayVisible, setTrayVisible } from '../services/tray';
 import {
   focusMainWindow,
+  isRecordingInProgress,
   markRendererReady,
   resumeRecordingFromOutside,
+  setCallActive,
   setOverlayMinimized,
   setRecordingPillEnabled,
+  setRecordingStarting,
   stopRecording,
   syncRecordingState,
 } from '../services/recording-controller';
 import { meetingDetectorService } from '../services/meeting-detector';
 import { browserSettingsService, BrowserSettings } from '../services/browser-settings';
 import { errorReportRecorder } from '../services/error-report-recorder';
+import { localHarnessBridge, LOCAL_HARNESS_PROVIDERS, type LocalHarnessProvider } from '../services/local-harness';
 
 
 let previewBrowserView: BrowserView | null = null;
@@ -193,6 +198,21 @@ export function setupIpcHandlers(): void {
     // Return absolute path to webview preload script
     const preloadPath = path.join(__dirname, 'webview-preload.js');
     event.returnValue = preloadPath;
+  });
+
+  // Focus the embedder. A <webview> guest holds focus in its own web contents,
+  // and nothing in the renderer can take it back — window.focus() and blurring
+  // the element both leave it where it is. Until focus returns, the first click
+  // on the app's own chrome is spent transferring it and never reaches the DOM,
+  // so buttons beside an embedded page appear to need two clicks.
+  ipcMain.handle('focus-host-webcontents', (event) => {
+    // Any top frame of a window this app opened, not only the main one: folder
+    // windows embed pages too, and there the main-window check would both
+    // refuse the focus and log a blocked-sender warning on every pointerenter.
+    const sender = BrowserWindow.fromWebContents(event.sender);
+    const frame = event.senderFrame;
+    if (!sender || sender.isDestroyed() || !frame || frame.parent !== null) return;
+    event.sender.focus();
   });
 
   // Copy Xyne auth cookies from defaultSession to the persist:xyne-spaces
@@ -454,7 +474,7 @@ export function setupIpcHandlers(): void {
       if (mainWindow.isMinimized()) mainWindow.restore();
       mainWindow.show();
       mainWindow.focus();
-      if (process.platform === 'darwin') app.dock.bounce('critical');
+      if (process.platform === 'darwin') app.dock?.bounce('critical');
     }
   });
 
@@ -567,9 +587,10 @@ export function setupIpcHandlers(): void {
   ipcMain.on('meeting-popup:start-recording', () => {
     Logger.info(ElectronEvent.MEETING_POPUP_START_RECORDING, {}, 'MeetingDetector');
     const mainWindow = getMainWindow();
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      // Navigate and auto-start recording without stealing focus from the meeting
-      mainWindow.webContents.send('navigate-to', '/recordings');
+    if (mainWindow && !mainWindow.isDestroyed() && !isRecordingInProgress()) {
+      // Auto-start recording without stealing focus from the meeting. The
+      // renderer navigates itself — main has no workspace id, and the router is
+      // /:workspaceId/recordings.
       mainWindow.webContents.send('meeting:start-recording');
     }
     // Delay close so the popup can show the recording-started state for 3 seconds
@@ -620,6 +641,7 @@ export function setupIpcHandlers(): void {
       event,
       state: {
         active: boolean;
+        starting?: boolean;
         startTime?: number;
         paused?: boolean;
         pauseStartedAt?: number | null;
@@ -628,11 +650,14 @@ export function setupIpcHandlers(): void {
     ) => {
       if (!isMainWindowSender(event)) return;
       markRendererReady();
+      // Applied before clearing `starting`: the reverse order briefly leaves
+      // both flags false, which flickers the pill off and back on every start.
       syncRecordingState(!!state?.active, state?.startTime, {
         paused: !!state?.paused,
         pauseStartedAt: state?.pauseStartedAt ?? null,
         accumulatedPausedMs: state?.accumulatedPausedMs ?? 0,
       });
+      setRecordingStarting(!!state?.starting);
     },
   );
 
@@ -640,6 +665,11 @@ export function setupIpcHandlers(): void {
     if (!isMainWindowSender(event)) return;
     if (theme !== 'light' && theme !== 'dark') return;
     setRecordingPillTheme(theme);
+  });
+
+  ipcMain.on('call:state-changed', (event, inCall: unknown) => {
+    if (!isMainWindowSender(event)) return;
+    setCallActive(!!inCall);
   });
 
   ipcMain.on('recording:renderer-ready', (event) => {
@@ -652,6 +682,14 @@ export function setupIpcHandlers(): void {
     syncRecordingState(false);
   });
 
+  // Seeds the renderer's meeting state. The 'meeting:detected' broadcast is
+  // fire-and-forget, so a renderer that reloads mid-meeting would otherwise
+  // never learn one is running and would ring a call it should have silenced.
+  ipcMain.handle('meeting:get-current', () => meetingDetectorService.getCurrentMeeting());
+
+  // Same reason, for the signal that actually silences the ring.
+  ipcMain.handle('mic:get-state', () => meetingDetectorService.getMicActive());
+
   // Meeting detection toggle (user preference from settings)
   ipcMain.on('meeting-detection:set-enabled', (_event, enabled: boolean) => {
     Logger.info(
@@ -661,12 +699,10 @@ export function setupIpcHandlers(): void {
       { enabled },
       'MeetingDetector',
     );
-    if (enabled) {
-      meetingDetectorService.start();
-    } else {
-      hideMeetingPopup();
-      meetingDetectorService.stop();
-    }
+    // Only the "record this meeting?" popup. Stopping the detector here used to
+    // take the mic signal down with it, so a user who turned detection off got a
+    // full-volume ringtone through every Zoom call.
+    meetingDetectorService.setPopupEnabled(enabled);
   });
 
   // Browser Settings handlers
@@ -677,6 +713,48 @@ export function setupIpcHandlers(): void {
   ipcMain.handle('set-browser-settings', (event, settings: Partial<BrowserSettings>) => {
     if (!isMainWindowSender(event)) throw new Error('Unauthorized sender');
     return browserSettingsService.setSettings(settings);
+  });
+
+  ipcMain.handle('app-window:capture', async (event, maxWidth: unknown) => {
+    if (!isMainWindowSender(event)) throw new Error('Unauthorized sender');
+    const win = getMainWindow();
+    if (!win || win.isDestroyed()) return { data: '' };
+    const image = await win.webContents.capturePage();
+    const width = typeof maxWidth === 'number' && maxWidth > 200 ? Math.floor(maxWidth) : 1280;
+    const size = image.getSize();
+    const resized = size.width > width ? image.resize({ width }) : image;
+    return { data: resized.toPNG().toString('base64') };
+  });
+
+  ipcMain.handle('clipboard:read-text', (event) => {
+    if (!isMainWindowSender(event)) throw new Error('Unauthorized sender');
+    return clipboard.readText();
+  });
+
+  ipcMain.handle('clipboard:write-text', (event, text: unknown) => {
+    if (!isMainWindowSender(event)) throw new Error('Unauthorized sender');
+    clipboard.writeText(typeof text === 'string' ? text : '');
+    return { success: true };
+  });
+
+  ipcMain.handle('browser-import:available', async (event) => {
+    if (!isMainWindowSender(event)) throw new Error('Unauthorized sender');
+    if (process.platform !== 'darwin') return { available: false };
+    return { available: await chromeProfileAvailable() };
+  });
+
+  ipcMain.handle('browser-import:chrome', async (event) => {
+    if (!isMainWindowSender(event)) throw new Error('Unauthorized sender');
+    if (process.platform !== 'darwin') {
+      return { success: false, error: 'unsupported-platform' };
+    }
+    try {
+      const result = await importChromeCookies();
+      return { success: true, ...result };
+    } catch (error) {
+      Logger.logError('browser-import.chrome.failed', error);
+      return { success: false, error: 'import-failed' };
+    }
   });
 
   ipcMain.handle('clear-site-data', async (event) => {
@@ -695,4 +773,76 @@ export function setupIpcHandlers(): void {
       return { success: false, error: error instanceof Error ? error.message : String(error) };
     }
   });
+
+  const requireLocalHarness = (event: IpcMainInvokeEvent): void => {
+    if (!isMainWindowSender(event)) throw new Error('Unauthorized sender');
+    if (!ENABLE_LOCAL_HARNESS) throw new Error('Local harness is not available in this build');
+  };
+
+  ipcMain.handle('local-harness:status', async (event) => {
+    if (!isMainWindowSender(event)) throw new Error('Unauthorized sender');
+    if (!ENABLE_LOCAL_HARNESS) {
+      return {
+        supported: false,
+        connected: false,
+        deviceId: null,
+        deviceName: '',
+        platform: process.platform,
+        installations: [],
+        lastError: null,
+      };
+    }
+    return localHarnessBridge.status();
+  });
+
+  ipcMain.handle('local-harness:detect', async (event) => {
+    requireLocalHarness(event);
+    return localHarnessBridge.rescan();
+  });
+
+  ipcMain.handle('local-harness:set-provider', async (event, provider: unknown, enabled: unknown) => {
+    requireLocalHarness(event);
+    if (!LOCAL_HARNESS_PROVIDERS.includes(provider as LocalHarnessProvider)) {
+      throw new Error('Unknown local harness provider');
+    }
+    return localHarnessBridge.setProviderEnabled(
+      provider as LocalHarnessProvider,
+      enabled === true,
+      await xyneCookieHeader(),
+    );
+  });
+
+  ipcMain.handle('local-harness:connect', async (event) => {
+    requireLocalHarness(event);
+    return localHarnessBridge.connect(await xyneCookieHeader());
+  });
+
+  ipcMain.handle('local-harness:disconnect', async (event) => {
+    requireLocalHarness(event);
+    return localHarnessBridge.disconnect(await xyneCookieHeader());
+  });
+
+  ipcMain.handle('local-harness:pick-folder', async (event) => {
+    requireLocalHarness(event);
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (!win || win.isDestroyed()) throw new Error('Unauthorized sender');
+
+    const picked = await dialog.showOpenDialog(win, {
+      properties: ['openDirectory', 'createDirectory'],
+    });
+    const selected = picked.canceled ? undefined : picked.filePaths[0];
+    if (!selected) return null;
+
+    return localHarnessBridge.addWorkspace(selected);
+  });
+
+  ipcMain.handle('local-harness:list-folders', async (event) => {
+    requireLocalHarness(event);
+    return localHarnessBridge.listWorkspaces();
+  });
+}
+
+async function xyneCookieHeader(): Promise<string> {
+  const cookies = await session.defaultSession.cookies.get({ url: config.FRONTEND_URL });
+  return cookies.map((c) => `${c.name}=${c.value}`).join('; ');
 }

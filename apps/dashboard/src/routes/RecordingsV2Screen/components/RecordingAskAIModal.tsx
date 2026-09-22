@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useState, type ReactElement } from 'react';
 import type { User } from '@xyne/shared/machines';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
-import { AlertTriangle, MicOn, MultipleCrossCancelDefault, SearchBig } from '@xyne/icons';
+import { AlertTriangle, MultipleCrossCancelDefault, SearchBig } from '@xyne/icons';
+import { AudioLines } from 'lucide-react';
 import { Button } from '../../../components/ui/Button/Button';
 import { Checkbox } from '../../../components/ui/Checkbox/Checkbox';
 import { Dialog } from '../../../components/ui/Dialog';
@@ -269,7 +270,12 @@ const RecordingAskAIModal = ({
               No recordings match that search.
             </p>
           ) : (
-            <ul className='flex flex-col' role='listbox' aria-multiselectable='true'>
+            <ul
+              className='flex flex-col'
+              role='listbox'
+              aria-multiselectable='true'
+              data-theme-tokens
+            >
               {rows.map(row =>
                 row.type === 'group' ? (
                   <li
@@ -335,7 +341,7 @@ const RecordingAskAIModal = ({
             type='button'
             onClick={handleConfirm}
             disabled={selectedCount === 0}
-            className='h-8 shrink-0 gap-2.5 rounded-lg px-5 text-xs font-semibold bg-foreground hover:bg-foreground/80 transition-opacity duration-300'
+            className='h-8 shrink-0 gap-2.5 rounded-lg px-5 text-xs font-semibold bg-foreground text-background hover:bg-foreground/80 transition-opacity duration-300'
             data-track-category='RecordingsV2'
             data-track-name='send_recordings_to_ask_ai'
             data-track-metadata={JSON.stringify({ recordingCount: selectedCount })}
@@ -378,6 +384,7 @@ const RecordingOption = ({
       role='option'
       aria-selected={checked}
       aria-disabled={blocked}
+      data-theme-tokens
       onClick={() => onToggle(recording.id)}
       onKeyDown={event => {
         if (event.key !== 'Enter') return;
@@ -397,7 +404,7 @@ const RecordingOption = ({
       </span>
 
       <span className='flex size-8 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground'>
-        <MicOn size={15} strokeWidth={2} variant='Contrast' />
+        <AudioLines size={15} strokeWidth={2.2} />
       </span>
 
       <span className='min-w-0 flex-1'>

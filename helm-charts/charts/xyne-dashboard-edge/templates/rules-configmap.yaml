@@ -1,0 +1,12 @@
+{{- if .Values.rules }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "xyne-common.fullname" . }}-rules
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "xyne-common.labels" . | nindent 4 }}
+data:
+  rules.json: |
+    {{- .Values.rules | toPrettyJson | nindent 4 }}
+{{- end }}

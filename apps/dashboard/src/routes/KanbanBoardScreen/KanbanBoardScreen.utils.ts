@@ -397,8 +397,15 @@ export const applyTicketFilters = (
       }
     }
 
-    // User groups filter
-    if (filters.userGroups && filters.userGroups.length > 0) {
+    // User groups filter.
+    //
+    // '' means the group is UNKNOWN, not absent: search-backed rows are built by toTicket
+    // (useVespaTicketSearch) from Vespa's `lean` document summary, which does not project
+    // userGroupId, so it defaults to ''. Vespa already applied this filter server-side, so
+    // such a row cannot and need not be re-judged here — dropping it emptied the board (and
+    // with it the derived group list) when switching to assignee/priority grouping while a
+    // search was active. A Zero row that genuinely has no group is null and still drops.
+    if (filters.userGroups && filters.userGroups.length > 0 && ticket.userGroupId !== '') {
       if (!ticket.userGroupId || !filters.userGroups.includes(ticket.userGroupId)) {
         return false;
       }
@@ -464,6 +471,13 @@ export const applyTicketFilters = (
     // Ticket type filter
     if (filters.ticketTypes && filters.ticketTypes.length > 0) {
       if (!ticket.ticketType || !filters.ticketTypes.includes(ticket.ticketType)) {
+        return false;
+      }
+    }
+
+    // Merchant ID filter (exact match)
+    if (filters.merchantIds && filters.merchantIds.length > 0) {
+      if (!ticket.merchantId || !filters.merchantIds.includes(ticket.merchantId)) {
         return false;
       }
     }
@@ -636,4 +650,16 @@ export const extractGroupableFormFields = (
       field.fieldType === FormFieldType.MULTI_SELECT ||
       field.fieldType === FormFieldType.USER,
   );
+};
+
+export const DERIVED_COLUMNS = ['stage'];
+
+export const DEFAULT_VISIBLE_COLUMNS = ['assignee', 'dueDate', 'status', 'priority', 'tags'];
+
+export const mergeSavedColumns = (prev: Set<string>, saved: string[]): Set<string> => {
+  const next = new Set(saved);
+  for (const key of DERIVED_COLUMNS) {
+    if (prev.has(key)) next.add(key);
+  }
+  return next;
 };

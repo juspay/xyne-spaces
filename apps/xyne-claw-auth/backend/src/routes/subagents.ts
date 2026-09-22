@@ -16,7 +16,13 @@
 
 import { Router, type Request, type Response } from "express";
 import { Prisma } from "@prisma/client";
+import { asyncHandler, ok, badRequest, unauthorized, forbidden, notFound, HttpError } from "../lib/http.js";
 import { prisma } from "../db.js";
+import { encrypt } from "../crypto.js";
+import { CONFIG } from "../config.js";
+import { writeAuditLog } from "../lib/audit.js";
+import { verifyMcpCredentials } from "../lib/mcp-credential-verify.js";
+import { validateCredentials } from "../validation.js";
 import {
   subagentDefinitionRepository,
   subagentShareRepository,
@@ -33,6 +39,11 @@ import { createLogger } from "../logger.js";
 const log = createLogger("subagents");
 
 const router = Router();
+
+// Instance-slug convention, identical to AgentMcpConnection.slug.
+const SUBAGENT_MCP_SLUG_RE = /^[a-z0-9][a-z0-9-]{0,31}$/;
+const isValidInstanceSlug = (v: unknown): v is string =>
+  typeof v === "string" && SUBAGENT_MCP_SLUG_RE.test(v);
 
 // ── Response shapes ──────────────────────────────────────────────────────
 
@@ -98,13 +109,6 @@ function dbRowAsListItem(
   };
 }
 
-function sendValidationError(res: Response, err: unknown): boolean {
-  if (err instanceof ValidationError) {
-    res.status(400).json({ success: false, error: err.message, field: err.field });
-    return true;
-  }
-  return false;
-}
 
 // ── ACL helpers ──────────────────────────────────────────────────────────
 
@@ -120,369 +124,488 @@ async function canEditSubagent(row: NonNullable<DbRow>, userId: string): Promise
 }
 
 // ── GET / — list all (builtins + customs) ────────────────────────────────
-router.get("/", async (req: Request, res: Response) => {
-  try {
-    // Phase-2: org-scope custom subagents (built-ins are platform-wide below).
-    const customs = await subagentDefinitionRepository.listAll(getOrgId(req));
-    // Batch-load shares for every custom in one query so the list view can
-    // show share badges without N round-trips.
-    const sharesByDef = new Map<string, Awaited<ReturnType<typeof subagentShareRepository.listBySubagent>>>();
-    for (const c of customs) {
-      const rows = await subagentShareRepository.listBySubagent(c.id);
-      sharesByDef.set(c.id, rows);
-    }
-    // Batch-resolve creator names (createdByUserId has no User relation).
-    const creatorIds = [...new Set(customs.map((c) => c.createdByUserId).filter((x): x is string => !!x))];
-    const creators = creatorIds.length
-      ? await prisma.user.findMany({ where: { id: { in: creatorIds } }, select: { id: true, name: true, email: true } })
-      : [];
-    const creatorById = new Map(creators.map((u) => [u.id, u]));
-    const items = [
-      ...SUBAGENT_DEFINITIONS.map(builtinAsListItem),
-      ...customs.map((c) =>
-        dbRowAsListItem(c, sharesByDef.get(c.id) ?? [], c.createdByUserId ? creatorById.get(c.createdByUserId) ?? null : null),
-      ),
-    ];
-    res.json({ success: true, data: items });
-  } catch (err) {
-    log.error("[subagents] list error:", err);
-    res.status(500).json({ success: false, error: "Internal server error" });
+router.get("/", asyncHandler(async (req: Request, res: Response) => {
+  // Phase-2: org-scope custom subagents (built-ins are platform-wide below).
+  const customs = await subagentDefinitionRepository.listAll(getOrgId(req));
+  // Batch-load shares for every custom in one query so the list view can
+  // show share badges without N round-trips.
+  const sharesByDef = new Map<string, Awaited<ReturnType<typeof subagentShareRepository.listBySubagent>>>();
+  for (const c of customs) {
+    const rows = await subagentShareRepository.listBySubagent(c.id);
+    sharesByDef.set(c.id, rows);
   }
-});
+  // Batch-resolve creator names (createdByUserId has no User relation).
+  const creatorIds = [...new Set(customs.map((c) => c.createdByUserId).filter((x): x is string => !!x))];
+  const creators = creatorIds.length
+    ? await prisma.user.findMany({ where: { id: { in: creatorIds } }, select: { id: true, name: true, email: true } })
+    : [];
+  const creatorById = new Map(creators.map((u) => [u.id, u]));
+  const items = [
+    ...SUBAGENT_DEFINITIONS.map(builtinAsListItem),
+    ...customs.map((c) =>
+      dbRowAsListItem(c, sharesByDef.get(c.id) ?? [], c.createdByUserId ? creatorById.get(c.createdByUserId) ?? null : null),
+    ),
+  ];
+  ok(res, items);
+}));
 
 // ── GET /:name — single subagent ─────────────────────────────────────────
-router.get("/:name", async (req: Request, res: Response) => {
-  try {
-    const name = typeof req.params.name === "string" ? req.params.name : "";
-    if (!name) return res.status(400).json({ success: false, error: "name is required" });
+router.get("/:name", asyncHandler(async (req: Request, res: Response) => {
+  const name = typeof req.params.name === "string" ? req.params.name : "";
+  if (!name) throw badRequest("name is required");
 
-    const builtin = SUBAGENT_DEFINITIONS.find((d) => d.name === name);
-    if (builtin) return res.json({ success: true, data: builtinAsListItem(builtin) });
+  const builtin = SUBAGENT_DEFINITIONS.find((d) => d.name === name);
+  if (builtin) return ok(res, builtinAsListItem(builtin));
 
-    const row = await subagentDefinitionRepository.findByName(name, getOrgId(req));
-    if (!row) {
-      log.warn(`[subagents/get] subagent org-scoped miss name=${name} orgId=${getOrgId(req) ?? "none"} userId=${getRequesterId(req) ?? "none"}`);
-      return res.status(404).json({ success: false, error: "subagent not found" });
-    }
-    const shares = await subagentShareRepository.listBySubagent(row.id);
-    const creator = row.createdByUserId
-      ? await prisma.user.findUnique({
-        where: { id: row.createdByUserId },
-        select: { name: true, email: true },
-      })
-      : null;
-
-    return res.json({ success: true, data: dbRowAsListItem(row, shares, creator) });
-  } catch (err) {
-    log.error("[subagents] get error:", err);
-    return res.status(500).json({ success: false, error: "Internal server error" });
+  const row = await subagentDefinitionRepository.findByName(name, getOrgId(req));
+  if (!row) {
+    log.warn(`[subagents/get] subagent org-scoped miss name=${name} orgId=${getOrgId(req) ?? "none"} userId=${getRequesterId(req) ?? "none"}`);
+    throw notFound("subagent not found");
   }
-});
+  const shares = await subagentShareRepository.listBySubagent(row.id);
+  const creator = row.createdByUserId
+    ? await prisma.user.findUnique({
+      where: { id: row.createdByUserId },
+      select: { name: true, email: true },
+    })
+    : null;
+
+  ok(res, dbRowAsListItem(row, shares, creator));
+}));
 
 // ── POST / — create (any authenticated user) ─────────────────────────────
-router.post("/", async (req: Request, res: Response) => {
-  try {
-    const requesterId = getRequesterId(req);
-    if (!requesterId) {
-      return res.status(401).json({ success: false, error: "x-user-id header is required" });
-    }
-    const orgId = getOrgId(req);
-    if (!orgId) {
-      log.warn(`[subagents/create] orgId is required requesterId=${requesterId} name=${typeof req.body?.name === "string" ? req.body.name : "none"}`);
-      return res.status(400).json({ success: false, error: "orgId is required" });
-    }
-    const validated = await validateSubagentInput(prisma, req.body, { isCreate: true, orgId });
-
-    const created = await subagentDefinitionRepository.create({
-      name: validated.name,
-      description: validated.description,
-      progressLabels: validated.progressLabels,
-      systemPrompt: validated.systemPrompt,
-      paramName: validated.paramName,
-      paramDescription: validated.paramDescription,
-      tools: validated.tools as object,
-      // Persist only when non-empty. Storing {} would be indistinguishable
-      // from "no map set" downstream — null is the canonical empty.
-      ...(Object.keys(validated.mcpInstanceMap).length > 0
-        ? { mcpInstanceMap: validated.mcpInstanceMap as object }
-        : {}),
-      createdByUserId: requesterId,
-      // Phase-2: stamp the creating org so no null-org subagent is minted (which
-      // would block the future NOT-NULL flip).
-      org: { connect: { id: orgId } },
-      ...(validated.skillIds.length > 0
-        ? {
-            skills: {
-              create: validated.skillIds.map((skillId) => ({ skillId })),
-            },
-          }
-        : {}),
-    });
-
-    return res.status(201).json({ success: true, data: dbRowAsListItem(created, []) });
-  } catch (err) {
-    if (sendValidationError(res, err)) return;
-    log.error("[subagents] create error:", err);
-    return res.status(500).json({ success: false, error: "Internal server error" });
+router.post("/", asyncHandler(async (req: Request, res: Response) => {
+  const requesterId = getRequesterId(req);
+  if (!requesterId) {
+    throw unauthorized("x-user-id header is required");
   }
-});
+  const orgId = getOrgId(req);
+  if (!orgId) {
+    log.warn(`[subagents/create] orgId is required requesterId=${requesterId} name=${typeof req.body?.name === "string" ? req.body.name : "none"}`);
+    throw badRequest("orgId is required");
+  }
+  const validated = await validateSubagentInput(prisma, req.body, { isCreate: true, orgId }).catch((err) => {
+    if (err instanceof ValidationError) throw new HttpError(400, err.message, undefined, { field: err.field });
+    throw err;
+  });
+
+  const created = await subagentDefinitionRepository.create({
+    name: validated.name,
+    description: validated.description,
+    progressLabels: validated.progressLabels,
+    systemPrompt: validated.systemPrompt,
+    paramName: validated.paramName,
+    paramDescription: validated.paramDescription,
+    tools: validated.tools as object,
+    // Persist only when non-empty. Storing {} would be indistinguishable
+    // from "no map set" downstream — null is the canonical empty.
+    ...(Object.keys(validated.mcpInstanceMap).length > 0
+      ? { mcpInstanceMap: validated.mcpInstanceMap as object }
+      : {}),
+    createdByUserId: requesterId,
+    // Phase-2: stamp the creating org so no null-org subagent is minted (which
+    // would block the future NOT-NULL flip).
+    org: { connect: { id: orgId } },
+    ...(validated.skillIds.length > 0
+      ? {
+          skills: {
+            create: validated.skillIds.map((skillId) => ({ skillId })),
+          },
+        }
+      : {}),
+  });
+
+  res.status(201).json({ success: true, data: dbRowAsListItem(created, []) });
+}));
 
 // ── PUT /:name — update (owner OR admin OR EDITOR share) ─────────────────
-router.put("/:name", async (req: Request, res: Response) => {
-  try {
-    const requesterId = getRequesterId(req);
-    if (!requesterId) {
-      return res.status(401).json({ success: false, error: "x-user-id header is required" });
-    }
-    const name = typeof req.params.name === "string" ? req.params.name : "";
-    if (!name) return res.status(400).json({ success: false, error: "name is required" });
-
-    if (SUBAGENT_DEFINITIONS.some((d) => d.name === name)) {
-      return res.status(400).json({
-        success: false,
-        error: `"${name}" is a built-in subagent and cannot be modified`,
-      });
-    }
-    const existing = await subagentDefinitionRepository.findByName(name, getOrgId(req));
-    if (!existing) {
-      log.warn(`[subagents/update] subagent org-scoped miss name=${name} orgId=${getOrgId(req) ?? "none"} userId=${requesterId}`);
-      return res.status(404).json({ success: false, error: "subagent not found" });
-    }
-
-    if (!(await canEditSubagent(existing, requesterId))) {
-      return res.status(403).json({
-        success: false,
-        error: "Only the owner, contributors, or admins can update this subagent",
-      });
-    }
-
-    const incomingName = (req.body as Record<string, unknown>)?.["name"];
-    if (typeof incomingName === "string" && incomingName !== name) {
-      return res.status(400).json({ success: false, error: "name is immutable" });
-    }
-
-    const validated = await validateSubagentInput(
-      prisma,
-      { ...(req.body as Record<string, unknown>), name } as Parameters<typeof validateSubagentInput>[1],
-      { isCreate: false, orgId: existing.orgId },
-    );
-
-    const updated = await subagentDefinitionRepository.update(name, existing.orgId, {
-      description: validated.description,
-      progressLabels: validated.progressLabels,
-      systemPrompt: validated.systemPrompt,
-      paramName: validated.paramName,
-      paramDescription: validated.paramDescription,
-      tools: validated.tools as object,
-      // Prisma's nullable-JSON-column convention: use `Prisma.JsonNull` to
-      // clear back to inherit-all; non-empty replaces it.
-      mcpInstanceMap: Object.keys(validated.mcpInstanceMap).length > 0
-        ? (validated.mcpInstanceMap as Prisma.InputJsonValue)
-        : Prisma.JsonNull,
-    });
-
-    await subagentDefinitionRepository.replaceSkills(updated.id, validated.skillIds);
-    const refreshed = await subagentDefinitionRepository.findByName(name, getOrgId(req));
-    const shares = refreshed ? await subagentShareRepository.listBySubagent(refreshed.id) : [];
-    return res.json({ success: true, data: dbRowAsListItem(refreshed!, shares) });
-  } catch (err) {
-    if (sendValidationError(res, err)) return;
-    log.error("[subagents] update error:", err);
-    return res.status(500).json({ success: false, error: "Internal server error" });
+router.put("/:name", asyncHandler(async (req: Request, res: Response) => {
+  const requesterId = getRequesterId(req);
+  if (!requesterId) {
+    throw unauthorized("x-user-id header is required");
   }
-});
+  const name = typeof req.params.name === "string" ? req.params.name : "";
+  if (!name) throw badRequest("name is required");
+
+  if (SUBAGENT_DEFINITIONS.some((d) => d.name === name)) {
+    throw badRequest(`"${name}" is a built-in subagent and cannot be modified`);
+  }
+  const existing = await subagentDefinitionRepository.findByName(name, getOrgId(req));
+  if (!existing) {
+    log.warn(`[subagents/update] subagent org-scoped miss name=${name} orgId=${getOrgId(req) ?? "none"} userId=${requesterId}`);
+    throw notFound("subagent not found");
+  }
+
+  if (!(await canEditSubagent(existing, requesterId))) {
+    throw forbidden("Only the owner, contributors, or admins can update this subagent");
+  }
+
+  const incomingName = (req.body as Record<string, unknown>)?.["name"];
+  if (typeof incomingName === "string" && incomingName !== name) {
+    throw badRequest("name is immutable");
+  }
+
+  const validated = await validateSubagentInput(
+    prisma,
+    { ...(req.body as Record<string, unknown>), name } as Parameters<typeof validateSubagentInput>[1],
+    { isCreate: false, orgId: existing.orgId },
+  ).catch((err) => {
+    if (err instanceof ValidationError) throw new HttpError(400, err.message, undefined, { field: err.field });
+    throw err;
+  });
+
+  const updated = await subagentDefinitionRepository.update(name, existing.orgId, {
+    description: validated.description,
+    progressLabels: validated.progressLabels,
+    systemPrompt: validated.systemPrompt,
+    paramName: validated.paramName,
+    paramDescription: validated.paramDescription,
+    tools: validated.tools as object,
+    // Prisma's nullable-JSON-column convention: use `Prisma.JsonNull` to
+    // clear back to inherit-all; non-empty replaces it.
+    mcpInstanceMap: Object.keys(validated.mcpInstanceMap).length > 0
+      ? (validated.mcpInstanceMap as Prisma.InputJsonValue)
+      : Prisma.JsonNull,
+  });
+
+  await subagentDefinitionRepository.replaceSkills(updated.id, validated.skillIds);
+  const refreshed = await subagentDefinitionRepository.findByName(name, getOrgId(req));
+  const shares = refreshed ? await subagentShareRepository.listBySubagent(refreshed.id) : [];
+  ok(res, dbRowAsListItem(refreshed!, shares));
+}));
 
 // ── DELETE /:name — soft-delete (owner OR admin OR EDITOR share) ─────────
-router.delete("/:name", async (req: Request, res: Response) => {
-  try {
-    const requesterId = getRequesterId(req);
-    if (!requesterId) {
-      return res.status(401).json({ success: false, error: "x-user-id header is required" });
-    }
-    const name = typeof req.params.name === "string" ? req.params.name : "";
-    if (!name) return res.status(400).json({ success: false, error: "name is required" });
-    if (SUBAGENT_DEFINITIONS.some((d) => d.name === name)) {
-      return res.status(400).json({
-        success: false,
-        error: `"${name}" is a built-in subagent and cannot be deleted`,
-      });
-    }
-    const existing = await subagentDefinitionRepository.findByName(name, getOrgId(req));
-    if (!existing) {
-      log.warn(`[subagents/delete] subagent org-scoped miss name=${name} orgId=${getOrgId(req) ?? "none"} userId=${requesterId}`);
-      return res.status(404).json({ success: false, error: "subagent not found" });
-    }
-    if (!(await canEditSubagent(existing, requesterId))) {
-      return res.status(403).json({
-        success: false,
-        error: "Only the owner, contributors, or admins can disable this subagent",
-      });
-    }
-    await subagentDefinitionRepository.disable(name, existing.orgId);
-    return res.json({ success: true });
-  } catch (err) {
-    log.error("[subagents] delete error:", err);
-    return res.status(500).json({ success: false, error: "Internal server error" });
+router.delete("/:name", asyncHandler(async (req: Request, res: Response) => {
+  const requesterId = getRequesterId(req);
+  if (!requesterId) {
+    throw unauthorized("x-user-id header is required");
   }
-});
+  const name = typeof req.params.name === "string" ? req.params.name : "";
+  if (!name) throw badRequest("name is required");
+  if (SUBAGENT_DEFINITIONS.some((d) => d.name === name)) {
+    throw badRequest(`"${name}" is a built-in subagent and cannot be deleted`);
+  }
+  const existing = await subagentDefinitionRepository.findByName(name, getOrgId(req));
+  if (!existing) {
+    log.warn(`[subagents/delete] subagent org-scoped miss name=${name} orgId=${getOrgId(req) ?? "none"} userId=${requesterId}`);
+    throw notFound("subagent not found");
+  }
+  if (!(await canEditSubagent(existing, requesterId))) {
+    throw forbidden("Only the owner, contributors, or admins can disable this subagent");
+  }
+  await subagentDefinitionRepository.disable(name, existing.orgId);
+  ok(res);
+}));
 
 // ── POST /:name/enable — undo soft-delete (owner OR admin OR EDITOR share) ──
-router.post("/:name/enable", async (req: Request, res: Response) => {
-  try {
-    const requesterId = getRequesterId(req);
-    if (!requesterId) {
-      return res.status(401).json({ success: false, error: "x-user-id header is required" });
-    }
-    const name = typeof req.params.name === "string" ? req.params.name : "";
-    if (!name) return res.status(400).json({ success: false, error: "name is required" });
-    if (SUBAGENT_DEFINITIONS.some((d) => d.name === name)) {
-      return res.status(400).json({ success: false, error: "built-ins are always enabled" });
-    }
-    const existing = await subagentDefinitionRepository.findByName(name, getOrgId(req));
-    if (!existing) {
-      log.warn(`[subagents/restore] subagent org-scoped miss name=${name} orgId=${getOrgId(req) ?? "none"} userId=${requesterId}`);
-      return res.status(404).json({ success: false, error: "subagent not found" });
-    }
-    if (!(await canEditSubagent(existing, requesterId))) {
-      return res.status(403).json({
-        success: false,
-        error: "Only the owner, contributors, or admins can re-enable this subagent",
-      });
-    }
-    const updated = await subagentDefinitionRepository.enable(name, existing.orgId);
-    const shares = await subagentShareRepository.listBySubagent(updated.id);
-    return res.json({ success: true, data: dbRowAsListItem(updated, shares) });
-  } catch (err) {
-    log.error("[subagents] enable error:", err);
-    return res.status(500).json({ success: false, error: "Internal server error" });
+router.post("/:name/enable", asyncHandler(async (req: Request, res: Response) => {
+  const requesterId = getRequesterId(req);
+  if (!requesterId) {
+    throw unauthorized("x-user-id header is required");
   }
-});
+  const name = typeof req.params.name === "string" ? req.params.name : "";
+  if (!name) throw badRequest("name is required");
+  if (SUBAGENT_DEFINITIONS.some((d) => d.name === name)) {
+    throw badRequest("built-ins are always enabled");
+  }
+  const existing = await subagentDefinitionRepository.findByName(name, getOrgId(req));
+  if (!existing) {
+    log.warn(`[subagents/restore] subagent org-scoped miss name=${name} orgId=${getOrgId(req) ?? "none"} userId=${requesterId}`);
+    throw notFound("subagent not found");
+  }
+  if (!(await canEditSubagent(existing, requesterId))) {
+    throw forbidden("Only the owner, contributors, or admins can re-enable this subagent");
+  }
+  const updated = await subagentDefinitionRepository.enable(name, existing.orgId);
+  const shares = await subagentShareRepository.listBySubagent(updated.id);
+  ok(res, dbRowAsListItem(updated, shares));
+}));
 
 // ── Shares ───────────────────────────────────────────────────────────────
 
-router.get("/:name/shares", async (req: Request, res: Response) => {
-  try {
-    const name = typeof req.params.name === "string" ? req.params.name : "";
-    if (!name) return res.status(400).json({ success: false, error: "name is required" });
-    if (SUBAGENT_DEFINITIONS.some((d) => d.name === name)) {
-      return res.json({ success: true, data: [] });
-    }
-    const row = await subagentDefinitionRepository.findByName(name, getOrgId(req));
-    if (!row) {
-      log.warn(`[subagents/shares] subagent org-scoped miss name=${name} orgId=${getOrgId(req) ?? "none"} userId=${getRequesterId(req) ?? "none"}`);
-      return res.status(404).json({ success: false, error: "subagent not found" });
-    }
-    const shares = await subagentShareRepository.listBySubagent(row.id);
-    return res.json({
-      success: true,
-      data: shares.map((s) => ({
-        userId: s.userId,
-        role: s.role,
-        name: s.user.name ?? "",
-        email: s.user.email ?? "",
-        sharedBy: s.sharedBy ?? null,
-        createdAt: s.createdAt,
-      })),
-    });
-  } catch (err) {
-    log.error("[subagents] list shares error:", err);
-    return res.status(500).json({ success: false, error: "Internal server error" });
+router.get("/:name/shares", asyncHandler(async (req: Request, res: Response) => {
+  const name = typeof req.params.name === "string" ? req.params.name : "";
+  if (!name) throw badRequest("name is required");
+  if (SUBAGENT_DEFINITIONS.some((d) => d.name === name)) {
+    return ok(res, []);
   }
-});
+  const row = await subagentDefinitionRepository.findByName(name, getOrgId(req));
+  if (!row) {
+    log.warn(`[subagents/shares] subagent org-scoped miss name=${name} orgId=${getOrgId(req) ?? "none"} userId=${getRequesterId(req) ?? "none"}`);
+    throw notFound("subagent not found");
+  }
+  const shares = await subagentShareRepository.listBySubagent(row.id);
+  ok(res, shares.map((s) => ({
+    userId: s.userId,
+    role: s.role,
+    name: s.user.name ?? "",
+    email: s.user.email ?? "",
+    sharedBy: s.sharedBy ?? null,
+    createdAt: s.createdAt,
+  })));
+}));
 
-router.post("/:name/shares", async (req: Request, res: Response) => {
-  try {
-    const requesterId = getRequesterId(req);
-    if (!requesterId) {
-      return res.status(401).json({ success: false, error: "x-user-id header is required" });
-    }
-    const name = typeof req.params.name === "string" ? req.params.name : "";
-    if (!name) return res.status(400).json({ success: false, error: "name is required" });
-    if (SUBAGENT_DEFINITIONS.some((d) => d.name === name)) {
-      return res.status(400).json({ success: false, error: "built-in subagents cannot be shared" });
-    }
-    const row = await subagentDefinitionRepository.findByName(name, getOrgId(req));
-    if (!row) {
-      log.warn(`[subagents/share] subagent org-scoped miss name=${name} orgId=${getOrgId(req) ?? "none"} userId=${requesterId}`);
-      return res.status(404).json({ success: false, error: "subagent not found" });
-    }
-    if (!(await canEditSubagent(row, requesterId))) {
-      return res.status(403).json({
-        success: false,
-        error: "Only the owner, contributors, or admins can add a contributor",
-      });
-    }
+router.post("/:name/shares", asyncHandler(async (req: Request, res: Response) => {
+  const requesterId = getRequesterId(req);
+  if (!requesterId) {
+    throw unauthorized("x-user-id header is required");
+  }
+  const name = typeof req.params.name === "string" ? req.params.name : "";
+  if (!name) throw badRequest("name is required");
+  if (SUBAGENT_DEFINITIONS.some((d) => d.name === name)) {
+    throw badRequest("built-in subagents cannot be shared");
+  }
+  const row = await subagentDefinitionRepository.findByName(name, getOrgId(req));
+  if (!row) {
+    log.warn(`[subagents/share] subagent org-scoped miss name=${name} orgId=${getOrgId(req) ?? "none"} userId=${requesterId}`);
+    throw notFound("subagent not found");
+  }
+  if (!(await canEditSubagent(row, requesterId))) {
+    throw forbidden("Only the owner, contributors, or admins can add a contributor");
+  }
 
-    const body = req.body as { userIdOrEmail?: string; role?: string };
-    const userIdOrEmail = (body.userIdOrEmail ?? "").trim();
-    const role = (body.role ?? "EDITOR").toUpperCase();
-    if (!userIdOrEmail) {
-      return res.status(400).json({ success: false, error: "userIdOrEmail is required" });
-    }
-    if (role !== "EDITOR") {
-      return res.status(400).json({ success: false, error: 'role must be "EDITOR"' });
-    }
+  const body = req.body as { userIdOrEmail?: string; role?: string };
+  const userIdOrEmail = (body.userIdOrEmail ?? "").trim();
+  const role = (body.role ?? "EDITOR").toUpperCase();
+  if (!userIdOrEmail) {
+    throw badRequest("userIdOrEmail is required");
+  }
+  if (role !== "EDITOR") {
+    throw badRequest('role must be "EDITOR"');
+  }
 
-    // Resolve userIdOrEmail to a real userId. Accept either form so the
-    // frontend can let users type an email without an extra lookup hop.
-    let target = await userRepository.findById(userIdOrEmail);
-    const requesterOrgId = getOrgId(req);
-    if (!target && requesterOrgId) {
-      target = await prisma.user.findFirst({ where: { email: userIdOrEmail, orgId: requesterOrgId } });
-    }
-    if (!target) {
-      return res.status(404).json({ success: false, error: `No user matches "${userIdOrEmail}"` });
-    }
-    if (target.id === row.createdByUserId) {
-      return res.status(400).json({ success: false, error: "owner is already the creator — no share needed" });
-    }
+  // Resolve userIdOrEmail to a real userId. Accept either form so the
+  // frontend can let users type an email without an extra lookup hop.
+  let target = await userRepository.findById(userIdOrEmail);
+  const requesterOrgId = getOrgId(req);
+  if (!target && requesterOrgId) {
+    target = await prisma.user.findFirst({ where: { email: userIdOrEmail, orgId: requesterOrgId } });
+  }
+  if (!target) {
+    throw notFound(`No user matches "${userIdOrEmail}"`);
+  }
+  if (target.id === row.createdByUserId) {
+    throw badRequest("owner is already the creator — no share needed");
+  }
 
-    const share = await subagentShareRepository.upsert(row.id, target.id, role, requesterId);
-    return res.status(201).json({
-      success: true,
-      data: {
-        userId: share.userId,
-        role: share.role,
-        name: share.user.name ?? "",
-        email: share.user.email ?? "",
-        sharedBy: share.sharedBy ?? null,
-        createdAt: share.createdAt,
+  const share = await subagentShareRepository.upsert(row.id, target.id, role, requesterId);
+  res.status(201).json({
+    success: true,
+    data: {
+      userId: share.userId,
+      role: share.role,
+      name: share.user.name ?? "",
+      email: share.user.email ?? "",
+      sharedBy: share.sharedBy ?? null,
+      createdAt: share.createdAt,
+    },
+  });
+}));
+
+router.delete("/:name/shares/:userId", asyncHandler(async (req: Request, res: Response) => {
+  const requesterId = getRequesterId(req);
+  if (!requesterId) {
+    throw unauthorized("x-user-id header is required");
+  }
+  const name = typeof req.params.name === "string" ? req.params.name : "";
+  const userId = typeof req.params.userId === "string" ? req.params.userId : "";
+  if (!name || !userId) {
+    throw badRequest("name and userId are required");
+  }
+  const row = await subagentDefinitionRepository.findByName(name, getOrgId(req));
+  if (!row) {
+    log.warn(`[subagents/unshare] subagent org-scoped miss name=${name} orgId=${getOrgId(req) ?? "none"} userId=${requesterId} targetUserId=${userId}`);
+    throw notFound("subagent not found");
+  }
+  if (!(await canEditSubagent(row, requesterId))) {
+    throw forbidden("Only the owner, contributors, or admins can remove a contributor");
+  }
+  await subagentShareRepository.delete(row.id, userId).catch(() => undefined);
+  ok(res);
+}));
+
+// ── Per-subagent MCP credentials ─────────────────────────────────────────
+// Companion to the agent-level routes in agents.ts. A subagent can pin its own
+// MCP credential per (server type, instance slug); when `nonOverridable` is set
+// (default) the credentials-loader forces that identity above the
+// agent/user/global cascade. Built-in subagents (code-defined, no DB row)
+// cannot hold pinned creds. All three routes require edit rights on the
+// subagent because credential configuration is sensitive.
+
+async function resolveEditableSubagent(req: Request): Promise<NonNullable<DbRow>> {
+  const name = typeof req.params.name === "string" ? req.params.name : "";
+  if (!name) throw badRequest("name is required");
+  if (SUBAGENT_DEFINITIONS.some((d) => d.name === name)) {
+    throw badRequest("Built-in subagents cannot hold pinned MCP credentials");
+  }
+  const requesterId = getRequesterId(req);
+  if (!requesterId) throw unauthorized("authentication required");
+  const row = await subagentDefinitionRepository.findByName(name, getOrgId(req));
+  if (!row) throw notFound("subagent not found");
+  if (!(await canEditSubagent(row, requesterId))) {
+    throw forbidden("you do not have edit access to this subagent");
+  }
+  return row;
+}
+
+// GET /:name/mcp/connections — list pinned instances (metadata only, no secrets).
+router.get("/:name/mcp/connections", asyncHandler(async (req: Request, res: Response) => {
+  const subagent = await resolveEditableSubagent(req);
+  const connections = await prisma.subagentMcpConnection.findMany({
+    where: { subagentDefinitionId: subagent.id },
+    include: { mcpServer: { select: { id: true, type: true, name: true } } },
+    orderBy: [{ mcpServerId: "asc" }, { createdAt: "asc" }],
+  });
+  ok(res, connections.map((c) => ({
+    id: c.id,
+    mcpServerId: c.mcpServerId,
+    mcpServerType: c.mcpServer.type,
+    mcpServerName: c.mcpServer.name,
+    slug: c.slug,
+    displayName: c.displayName ?? c.mcpServer.name,
+    nonOverridable: c.nonOverridable,
+    createdByUserId: c.createdByUserId,
+    createdAt: c.createdAt,
+    updatedAt: c.updatedAt,
+  })));
+}));
+
+// POST /:name/mcp/connections — create or update a pinned instance in place.
+// Identified by (subagent, serverType, slug). slug defaults to 'default'.
+router.post("/:name/mcp/connections", asyncHandler(async (req: Request, res: Response) => {
+  const subagent = await resolveEditableSubagent(req);
+  const requesterId = getRequesterId(req)!;
+  const { mcpServerType, slug: rawSlug, displayName, credentials, nonOverridable } = req.body as {
+    mcpServerType?: string;
+    slug?: string;
+    displayName?: string;
+    credentials?: Record<string, unknown>;
+    nonOverridable?: boolean;
+  };
+  if (!mcpServerType || typeof mcpServerType !== "string") {
+    throw badRequest("mcpServerType is required");
+  }
+  if (!credentials || typeof credentials !== "object") {
+    throw badRequest("credentials object is required");
+  }
+  const instanceSlug = rawSlug ?? "default";
+  if (!isValidInstanceSlug(instanceSlug)) {
+    throw badRequest("slug must be lowercase alphanumeric + hyphen, 1-32 chars");
+  }
+  if (nonOverridable !== undefined && typeof nonOverridable !== "boolean") {
+    throw badRequest("nonOverridable must be a boolean");
+  }
+  const server = await prisma.mcpServer.findUnique({ where: { type: mcpServerType } });
+  if (!server) throw notFound(`Unknown mcpServerType: ${mcpServerType}`);
+
+  const shape = await validateCredentials(server.type, credentials as Record<string, unknown>);
+  if (!shape.valid) throw badRequest(shape.error);
+
+  const verification = await verifyMcpCredentials({
+    sessionKey: `subagent:${subagent.id}:${instanceSlug}`,
+    serverType: server.type,
+    serverName: server.name,
+    credentials: credentials as Record<string, unknown>,
+  });
+  if (!verification.ok) {
+    throw new HttpError(verification.kind === "rejected" ? 400 : 502, verification.message);
+  }
+
+  const { ciphertext, iv, authTag } = encrypt(JSON.stringify(credentials), CONFIG.encryptionKey);
+  const cleanDisplayName = typeof displayName === "string" && displayName.trim().length > 0
+    ? displayName.trim()
+    : null;
+
+  const row = await prisma.subagentMcpConnection.upsert({
+    where: {
+      subagentDefinitionId_mcpServerId_slug: {
+        subagentDefinitionId: subagent.id,
+        mcpServerId: server.id,
+        slug: instanceSlug,
+      },
+    },
+    create: {
+      subagentDefinitionId: subagent.id,
+      mcpServerId: server.id,
+      slug: instanceSlug,
+      displayName: cleanDisplayName,
+      nonOverridable: nonOverridable ?? true,
+      encryptedCreds: ciphertext,
+      iv,
+      authTag,
+      createdByUserId: requesterId,
+    },
+    update: {
+      encryptedCreds: ciphertext,
+      iv,
+      authTag,
+      // Only overwrite optional fields when the caller explicitly sent them,
+      // so a creds-only update doesn't clobber a previously-set label/flag.
+      ...(cleanDisplayName !== null ? { displayName: cleanDisplayName } : {}),
+      ...(nonOverridable !== undefined ? { nonOverridable } : {}),
+    },
+  });
+
+  await writeAuditLog({
+    actorUserId: requesterId,
+    eventType: "SUBAGENT_MCP_UPDATED",
+    targetId: subagent.id,
+    description: `Set MCP "${mcpServerType}" / instance "${instanceSlug}" (nonOverridable=${row.nonOverridable}) on subagent "${subagent.name}"`,
+  });
+
+  res.status(201).json({
+    success: true,
+    data: {
+      id: row.id,
+      mcpServerId: row.mcpServerId,
+      mcpServerType: server.type,
+      mcpServerName: server.name,
+      slug: row.slug,
+      displayName: row.displayName ?? server.name,
+      nonOverridable: row.nonOverridable,
+      createdByUserId: row.createdByUserId,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+    },
+  });
+}));
+
+// DELETE /:name/mcp/connections/:mcpServerType/:instanceSlug
+router.delete(
+  "/:name/mcp/connections/:mcpServerType/:instanceSlug",
+  asyncHandler(async (req: Request, res: Response) => {
+    const subagent = await resolveEditableSubagent(req);
+    const requesterId = getRequesterId(req)!;
+    const { mcpServerType, instanceSlug } = req.params as { mcpServerType: string; instanceSlug: string };
+    if (!isValidInstanceSlug(instanceSlug)) throw badRequest("Invalid instance slug");
+    const server = await prisma.mcpServer.findUnique({ where: { type: mcpServerType } });
+    if (!server) throw notFound(`Unknown mcpServerType: ${mcpServerType}`);
+
+    // deleteMany is idempotent: it removes the row if present and reports the
+    // count, without throwing when the pin does not exist. This avoids the old
+    // `.catch(() => undefined)` which swallowed EVERY error (e.g. a DB outage)
+    // and then emitted a "deleted" audit log that never happened.
+    const { count } = await prisma.subagentMcpConnection.deleteMany({
+      where: {
+        subagentDefinitionId: subagent.id,
+        mcpServerId: server.id,
+        slug: instanceSlug,
       },
     });
-  } catch (err) {
-    log.error("[subagents] add share error:", err);
-    return res.status(500).json({ success: false, error: "Internal server error" });
-  }
-});
 
-router.delete("/:name/shares/:userId", async (req: Request, res: Response) => {
-  try {
-    const requesterId = getRequesterId(req);
-    if (!requesterId) {
-      return res.status(401).json({ success: false, error: "x-user-id header is required" });
-    }
-    const name = typeof req.params.name === "string" ? req.params.name : "";
-    const userId = typeof req.params.userId === "string" ? req.params.userId : "";
-    if (!name || !userId) {
-      return res.status(400).json({ success: false, error: "name and userId are required" });
-    }
-    const row = await subagentDefinitionRepository.findByName(name, getOrgId(req));
-    if (!row) {
-      log.warn(`[subagents/unshare] subagent org-scoped miss name=${name} orgId=${getOrgId(req) ?? "none"} userId=${requesterId} targetUserId=${userId}`);
-      return res.status(404).json({ success: false, error: "subagent not found" });
-    }
-    if (!(await canEditSubagent(row, requesterId))) {
-      return res.status(403).json({
-        success: false,
-        error: "Only the owner, contributors, or admins can remove a contributor",
+    // Only record the audit event when a row was actually removed, so the
+    // audit trail cannot claim a deletion that did not occur.
+    if (count > 0) {
+      await writeAuditLog({
+        actorUserId: requesterId,
+        eventType: "SUBAGENT_MCP_DELETED",
+        targetId: subagent.id,
+        description: `Removed MCP "${mcpServerType}" / instance "${instanceSlug}" from subagent "${subagent.name}"`,
       });
     }
-    await subagentShareRepository.delete(row.id, userId).catch(() => undefined);
-    return res.json({ success: true });
-  } catch (err) {
-    log.error("[subagents] remove share error:", err);
-    return res.status(500).json({ success: false, error: "Internal server error" });
-  }
-});
+
+    ok(res, { deleted: count > 0 });
+  }),
+);
 
 export default router;

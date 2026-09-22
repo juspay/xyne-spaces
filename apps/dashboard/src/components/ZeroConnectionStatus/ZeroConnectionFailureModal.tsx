@@ -80,6 +80,7 @@ export const ZeroConnectionFailureModal = ({
         {/* Refresh Button — behaviour differs between Electron and web */}
         <button
           onClick={handleRefresh}
+          data-ph-capture-attribute-track-id='reload_app_on_connection_failure'
           className='w-full py-3 px-4 rounded-lg font-medium flex items-center justify-center gap-2 transition-all duration-200 bg-blue-600 hover:bg-blue-700 text-white shadow-md hover:shadow-lg'
           data-track-category='ZERO_CONNECTION'
           data-track-name='RELOAD_APP_ON_CONNECTION_FAILURE'

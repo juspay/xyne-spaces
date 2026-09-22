@@ -1,3 +1,6 @@
+import { CallStatus } from '@xyne/shared';
+import { formatRelativeTime } from './dateUtils';
+
 interface AiControllerLike {
   id: string;
   name: string;
@@ -25,6 +28,38 @@ interface AiButtonActionParams {
   isControlledByOther: boolean;
   onRequestControl?: (() => void) | undefined;
   onToggleAIAssistant: () => void;
+}
+
+export interface AiControlState {
+  /** The local user currently controls the agent. */
+  isController: boolean;
+  /** Someone else controls the agent. */
+  isControlledByOther: boolean;
+  /** Another participant is waiting for control. */
+  hasPendingRequestFromOther: boolean;
+  /** The local user is the one waiting for control. */
+  isRequestingUser: boolean;
+}
+
+/** Who owns Xyne Automatic, from the local user's point of view. */
+export function getAiControlState({
+  localParticipantId,
+  aiController,
+  pendingControlRequest,
+}: {
+  localParticipantId: string | null;
+  aiController: AiControllerLike | null;
+  pendingControlRequest: PendingControlRequestLike | null;
+}): AiControlState {
+  const isController = !!localParticipantId && localParticipantId === aiController?.id;
+  return {
+    isController,
+    isControlledByOther: !!aiController && !isController,
+    hasPendingRequestFromOther:
+      !!pendingControlRequest && pendingControlRequest.requesterId !== localParticipantId,
+    isRequestingUser:
+      !!pendingControlRequest && pendingControlRequest.requesterId === localParticipantId,
+  };
 }
 
 export function getAiButtonDisabled({
@@ -80,6 +115,72 @@ export function getAiButtonColorClass({
     return 'bg-yellow-600 hover:bg-yellow-700 text-white shadow-yellow-500/50';
   }
   return defaultControlClass;
+}
+
+interface CallInviteInfo {
+  title?: string | null | undefined;
+  hostName?: string | null | undefined;
+  roomLink: string;
+  status?: CallStatus | null | undefined;
+  startsAt?: number | null | undefined;
+  endsAt?: number | null | undefined;
+  startedAt?: number | null | undefined;
+  endedAt?: number | null | undefined;
+  timezone?: string | null | undefined;
+}
+
+export function buildCallInviteText({
+  title,
+  hostName,
+  roomLink,
+  status,
+  startsAt,
+  endsAt,
+  startedAt,
+  endedAt,
+  timezone,
+}: CallInviteInfo): string {
+  const rangeStart = status === CallStatus.SCHEDULED ? startsAt : startedAt;
+  const rangeEnd = status === CallStatus.ENDED ? endedAt : endsAt;
+
+  const scheduleLines: string[] = [];
+  if (rangeStart) {
+    // 'UTC' means no real timezone was captured for this call (e.g. an instant call), so
+    // fall back to the viewer's own local zone instead of mislabeling times as UTC.
+    const timeZone = timezone && timezone.toUpperCase() !== 'UTC' ? timezone : undefined;
+    const dateLabel = new Intl.DateTimeFormat('en-US', {
+      weekday: 'short',
+      month: 'long',
+      day: 'numeric',
+      timeZone,
+    }).format(rangeStart);
+    const timeFmt = new Intl.DateTimeFormat('en-US', {
+      hour: 'numeric',
+      minute: '2-digit',
+      hour12: true,
+      timeZone,
+    });
+    scheduleLines.push(
+      rangeEnd
+        ? `${dateLabel} · ${timeFmt.format(rangeStart)} – ${timeFmt.format(rangeEnd)}`
+        : `${dateLabel} · ${timeFmt.format(rangeStart)}`,
+    );
+    if (timeZone) scheduleLines.push(`Time zone: ${timeZone}`);
+    if (status === CallStatus.ACTIVE || status === CallStatus.IN_PROGRESS) {
+      scheduleLines.push(`This call started ${formatRelativeTime(rangeStart)}`);
+    }
+  }
+
+  const heading = title || (hostName ? `${hostName} is inviting you to join the call` : null);
+  const lines = [
+    ...(heading ? [heading] : []),
+    ...(title && hostName ? [`Hosted by ${hostName}`] : []),
+    ...scheduleLines,
+    '',
+    'Xyne Call joining info',
+    `Video call link: ${roomLink}`,
+  ];
+  return lines.join('\n');
 }
 
 export function handleAiButtonClick({

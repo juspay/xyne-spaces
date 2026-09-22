@@ -1,5 +1,5 @@
-import { CircleDashed, CircleDot, Signature, CircleX, CircleCheck } from 'lucide-react';
 import { TicketStatusV2 } from '@xyne/shared';
+import { StageStatusIcon } from '../../../utils/board/stageStatusIcon';
 import type { ApproverEntry } from '../ApproverSelector/ApproverSelector.types';
 
 /**
@@ -46,27 +46,27 @@ export const STATUS_OPTIONS = [
   {
     status: TicketStatusV2.TODO,
     label: 'To Do',
-    icon: <CircleDashed strokeWidth={2.5} className='w-3.5 h-3.5 text-orange-500' />,
+    icon: <StageStatusIcon status={TicketStatusV2.TODO} />,
   },
   {
     status: TicketStatusV2.STARTED,
     label: 'Started',
-    icon: <CircleDot strokeWidth={2.5} className='w-3.5 h-3.5 text-blue-500' />,
+    icon: <StageStatusIcon status={TicketStatusV2.STARTED} />,
   },
   {
     status: TicketStatusV2.PAUSED,
     label: 'Paused',
-    icon: <Signature strokeWidth={2.5} className='w-3.5 h-3.5 text-teal-500' />,
+    icon: <StageStatusIcon status={TicketStatusV2.PAUSED} />,
   },
   {
     status: TicketStatusV2.COMPLETED,
     label: 'Completed',
-    icon: <CircleCheck strokeWidth={2.5} className='w-3.5 h-3.5 text-green-500' />,
+    icon: <StageStatusIcon status={TicketStatusV2.COMPLETED} />,
   },
   {
     status: TicketStatusV2.CANCELLED,
     label: 'Cancelled',
-    icon: <CircleX strokeWidth={2.5} className='w-3.5 h-3.5 text-red-500' />,
+    icon: <StageStatusIcon status={TicketStatusV2.CANCELLED} />,
   },
 ];
 

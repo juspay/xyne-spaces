@@ -1,4 +1,4 @@
-import { TicketStatusV2, TicketPriority } from '@xyne/shared';
+import { TicketStatusV2, TicketPriority, type EntityLinkOwner } from '@xyne/shared';
 
 export interface CreateTicketRequest {
   /** Internal idempotency hook (used by FLOW materialization). */
@@ -28,6 +28,8 @@ export interface CreateTicketRequest {
   closedAt?: Date;
   closedBy?: string;
   sourceConversationId?: string;
+  entityLinkContext?: EntityLinkOwner;
+  sourceMessageId?: string; // Source message this ticket was created from (create-from-message flows)
   excludedChatAttachmentIds?: string[]; // IDs of chat attachments to exclude when creating from conversation
   draftAttachmentIds?: string[]; // IDs of draft attachments to transfer to ticket when creating from conversation
   dynamicFields?: Record<string, string>; // Dynamic form field values for the ticket

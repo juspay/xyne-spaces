@@ -7,6 +7,7 @@ import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight';
 import { all, createLowlight } from 'lowlight';
 import { ArrowUp, Loader2, Paperclip, X } from 'lucide-react';
 import { toast } from 'sonner';
+import { getApiErrorMessage } from '../../../utils/apiError';
 import type { EmojiClickData } from 'emoji-picker-react';
 import { AutoDraftStatus } from '@xyne/shared';
 import { apiInstance, BASE_URL } from '../../../services/clients/apiClient';
@@ -173,8 +174,8 @@ const SlackComposer = ({
       setAttachments([]);
       lastLoadedDraftRef.current = '';
       deleteDraft();
-    } catch {
-      toast.error('Failed to send message');
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, 'Failed to send message'));
     } finally {
       setSending(false);
     }
@@ -254,11 +255,6 @@ const SlackComposer = ({
 
   return (
     <div className='px-4 py-3 border-t border-border'>
-      {recordOnly && (
-        <div className='mb-2 text-xs text-muted-foreground'>
-          Receive-only desk — this is saved to the ticket but not sent to the app.
-        </div>
-      )}
       {/* Auth status (Slack send-as-user — not applicable to app desks) */}
       {variant === 'slack' && !authLoading && (
         <div className='flex items-center gap-2 mb-2 text-xs text-muted-foreground'>
@@ -273,6 +269,7 @@ const SlackComposer = ({
                 className='text-xs text-muted-foreground underline hover:text-foreground cursor-pointer'
                 data-track-category='slack-composer'
                 data-track-name='disconnect-slack-user'
+                data-ph-capture-attribute-track-id='disconnect_slack_user'
               >
                 Disconnect
               </button>
@@ -287,6 +284,7 @@ const SlackComposer = ({
                 className='text-xs text-primary underline hover:text-primary/80 cursor-pointer'
                 data-track-category='slack-composer'
                 data-track-name='connect-slack-user'
+                data-ph-capture-attribute-track-id='connect_slack_user'
               >
                 Connect your Slack
               </button>
@@ -414,6 +412,7 @@ const SlackComposer = ({
                 data-track-category='slack-composer'
                 data-track-name='send-reply'
                 aria-label='Send reply'
+                data-ph-capture-attribute-track-id='send_slack_reply'
               >
                 {sending ? <Loader2 size={16} className='animate-spin' /> : <ArrowUp size={16} />}
               </button>

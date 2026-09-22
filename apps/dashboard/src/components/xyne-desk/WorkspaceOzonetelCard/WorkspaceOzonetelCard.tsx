@@ -81,6 +81,7 @@ export const WorkspaceOzonetelCard = (): ReactElement => {
   const [ticketSubjectTemplate, setTicketSubjectTemplate] = useState(
     '{callType} call from {callerId} ({monitorUcid})',
   );
+  const [customerPhoneFieldName, setCustomerPhoneFieldName] = useState('');
   const [ticketRules, setTicketRules] = useState<OzonetelTicketRules>({});
   const [defaultChannelId, setDefaultChannelId] = useState('');
   const [campaignRoutes, setCampaignRoutes] = useState<
@@ -100,6 +101,7 @@ export const WorkspaceOzonetelCard = (): ReactElement => {
     setTicketSubjectTemplate(
       data.ticketRules?.ticketSubjectTemplate ?? '{callType} call from {callerId} ({monitorUcid})',
     );
+    setCustomerPhoneFieldName(data.ticketRules?.customerPhoneFieldName ?? '');
     setTicketRules(data.ticketRules ?? {});
     setDefaultChannelId(data.ticketRules?.defaultChannelId ?? '');
     setCampaignRoutes(
@@ -193,6 +195,9 @@ export const WorkspaceOzonetelCard = (): ReactElement => {
         defaultChannelId,
         campaignRouting,
         ...(ticketSubjectTemplate ? { ticketSubjectTemplate } : {}),
+        ...(customerPhoneFieldName.trim()
+          ? { customerPhoneFieldName: customerPhoneFieldName.trim() }
+          : {}),
       },
     });
   };
@@ -383,6 +388,7 @@ export const WorkspaceOzonetelCard = (): ReactElement => {
                       disabled={!data?.configured || subscribeMutation.isPending}
                       label={subscribeMutation.isPending ? 'Subscribing…' : 'Reconnect live events'}
                       trackName='SubscribeLiveEvents'
+                      trackId='subscribe_ozonetel_live_events'
                     />
                   </div>
 
@@ -438,6 +444,20 @@ export const WorkspaceOzonetelCard = (): ReactElement => {
                           ))}
                         </SelectContent>
                       </Select>
+                    </Field>
+
+                    <Field
+                      label='Customer Phone Field'
+                      help='Ticket custom field holding the customer number. On app desks, a toolbar call to that number is logged on the open ticket.'
+                    >
+                      <input
+                        value={customerPhoneFieldName}
+                        onChange={e => setCustomerPhoneFieldName(e.target.value)}
+                        placeholder='Customer Phone'
+                        data-track-category='workspace-ozonetel'
+                        data-track-name='EditCustomerPhoneField'
+                        className={inputClass}
+                      />
                     </Field>
 
                     <Field
@@ -666,6 +686,7 @@ export const WorkspaceOzonetelCard = (): ReactElement => {
                 className='rounded-[12px] border border-desk-accent bg-desk-accent px-4 py-2 text-sm font-medium text-white shadow-sm transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50'
                 data-track-category='workspace-ozonetel'
                 data-track-name='SaveConfig'
+                data-ph-capture-attribute-track-id='save_ozonetel_config'
               >
                 {mutation.isPending ? 'Saving…' : 'Save Ozonetel config'}
               </button>
@@ -745,11 +766,13 @@ function ActionButton({
   disabled,
   label,
   trackName,
+  trackId,
 }: {
   onClick: () => void;
   disabled: boolean;
   label: string;
   trackName: string;
+  trackId?: string;
 }): ReactElement {
   return (
     <button
@@ -762,6 +785,7 @@ function ActionButton({
       )}
       data-track-category='workspace-ozonetel'
       data-track-name={trackName}
+      {...(trackId ? { trackId } : {})}
     >
       {label}
     </button>

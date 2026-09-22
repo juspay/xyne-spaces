@@ -1,4 +1,5 @@
 import { Prisma } from "@prisma/client";
+import { errMsg } from "../lib/errors.js";
 import { prisma } from "../db.js";
 import { createLogger } from "../logger.js";
 import { ensureTwinBank } from "./userMemoryCuratorClient.js";
@@ -184,7 +185,7 @@ export async function adminEnableDigitalTwin(input: {
   await ensureDefaultFiles(TWIN_AGENT_SLUG, input.userId).catch((error) => {
     log.warn("Failed to seed default Digital Twin files during admin enable", {
       userId: input.userId,
-      error: error instanceof Error ? error.message : String(error),
+      error: errMsg(error),
     });
   });
 

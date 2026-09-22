@@ -15,6 +15,7 @@ import { EmailChannelPreferenceRepository } from '@/database/repositories/emailC
 import { UserRepository } from '@/database/repositories/users';
 import { repositories } from '@/database/repositories';
 import { logger } from '@/utils/logger';
+import { resolveChannelDefaultBoard } from '@/utils/channelDefaultBoard';
 import { Prisma } from '@prisma/client';
 import {
   EmailType,
@@ -24,6 +25,8 @@ import {
   ActivityType,
 } from '@xyne/shared';
 import { db } from '@/database/client';
+import { websocketService } from '@/services/websocketService';
+import { advanceLastEmailAt } from '@/database/ticketLastEmailAt';
 import {
   listS2SClawAgents,
   getConversationTranscript,
@@ -332,12 +335,10 @@ export class EmailController {
             ...(fileAttachments.length > 0 && { attachments: fileAttachments }),
           });
         } catch (sendErr: any) {
-          if (fileAttachments.length > 0) {
-            const reason = sendErr instanceof Error ? sendErr.message : String(sendErr);
-            throw new AttachmentUploadError(
-              fileAttachments.map(a => ({ name: a.name, reason })),
-            );
-          }
+          logger.error('[EmailController] Google replyToConversation failed', {
+            conversationId,
+            message: sendErr?.message,
+          });
           throw sendErr;
         }
       } else {
@@ -390,10 +391,8 @@ export class EmailController {
         sentByUserId: userId,
       });
       
-      await db.ticket.updateMany({
-        where: { conversationId },
-        data: { lastEmailAt: newEmail.createdAt },
-      });
+      await advanceLastEmailAt(db, { conversationId }, newEmail.createdAt);
+      websocketService.broadcastLabelUnreadCountsUpdate(conversation.channelId);
 
       // 6a. Record the reply as a ticket event, mirroring how stage changes surface: a
       // ticket_activities row for the Details → Activity timeline, plus a SYSTEM message for the
@@ -987,13 +986,9 @@ export class EmailController {
       try {
         let boardId: string | undefined =
           preference?.boardId ?? externalSource.boardId ?? undefined;
-        if (!boardId && channel.projectId) {
-          const firstBoard = await db.board.findFirst({
-            where: { projectId: channel.projectId },
-            orderBy: { createdAt: 'asc' },
-            select: { id: true },
-          });
-          boardId = firstBoard?.id;
+        if (!boardId) {
+          const resolved = await resolveChannelDefaultBoard(db, channelId);
+          boardId = resolved?.boardId;
         }
 
         const created = await emailService.createConversationWithEmail({

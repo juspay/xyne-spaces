@@ -5,6 +5,8 @@ import { Dialog } from '../ui/Dialog/Dialog';
 import { Button } from '../ui/Button/Button';
 import Input from '../ui/Input/Input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/Select/Select';
+import { SegmentedToggle } from '../ui/SegmentedToggle';
+import { cn } from '../../utils/classNames';
 import { ChannelScopeType, ChannelVisibility } from '@xyne/shared';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
 import { queries } from '../../zero/queries';
@@ -18,6 +20,7 @@ import {
   scheduledMessageApi,
   type CreateScheduledMessagePayload,
   type UpdateScheduledMessagePayload,
+  type SchedulePayloadFields,
 } from '../../services/scheduledMessageService';
 
 interface ScheduledMessageModalProps {
@@ -32,10 +35,34 @@ interface FormValues {
   title: string;
   messageContent: string;
   messageContentHtml: string;
+  frequency: 'WEEKLY' | 'MONTHLY';
   dayMode: 'weekday' | 'custom';
   daysOfWeek: string[];
+  monthlyMode: 'DAY_OF_MONTH' | 'NTH_WEEKDAY' | 'LAST_DAY';
+  dayOfMonth: string; // "1".."28"
+  weekOrdinal: string; // "1".."4" | "LAST"
+  weekday: string; // "0".."6"
   scheduledTime: string;
   isActive: boolean;
+}
+
+// Encode the form's monthly selection into the persisted shape: daysOfWeek "-" plus
+// a mode and a packed integer (DAY_OF_MONTH: 1..28 or -1=last day; NTH_WEEKDAY:
+// ordinal*10 + weekday, ordinal 1..4 or 5=last). The UI's "Last day" maps to
+// DAY_OF_MONTH = -1.
+function buildMonthlyFields(v: FormValues): SchedulePayloadFields {
+  if (v.monthlyMode === 'LAST_DAY') {
+    return { daysOfWeek: '-', monthlyMode: 'DAY_OF_MONTH', monthlyValue: -1 };
+  }
+  if (v.monthlyMode === 'NTH_WEEKDAY') {
+    const ordinal = v.weekOrdinal === 'LAST' ? 5 : Number(v.weekOrdinal);
+    return {
+      daysOfWeek: '-',
+      monthlyMode: 'NTH_WEEKDAY',
+      monthlyValue: ordinal * 10 + Number(v.weekday),
+    };
+  }
+  return { daysOfWeek: '-', monthlyMode: 'DAY_OF_MONTH', monthlyValue: Number(v.dayOfMonth) };
 }
 
 const ScheduledMessageModal = ({
@@ -81,14 +108,21 @@ const ScheduledMessageModal = ({
       title: '',
       messageContent: '',
       messageContentHtml: '',
+      frequency: 'WEEKLY',
       dayMode: 'weekday',
       daysOfWeek: ['1', '2', '3', '4', '5'],
+      monthlyMode: 'DAY_OF_MONTH',
+      dayOfMonth: '1',
+      weekOrdinal: '1',
+      weekday: '1',
       scheduledTime: '09:00',
       isActive: true,
     },
   });
 
   const dayMode = watch('dayMode');
+  const frequency = watch('frequency');
+  const monthlyMode = watch('monthlyMode');
   const currentChannelId = watch('channelId');
 
   // Mention search for @ mentions in message content
@@ -125,16 +159,45 @@ const ScheduledMessageModal = ({
         String(utcDate.getMinutes()).padStart(2, '0'),
       ].join(':');
 
+      // Monthly rows store daysOfWeek as "-"; weekly rows hold the day list.
+      const isMonthly = scheduledMessage.daysOfWeek === '-';
       const isWeekday = scheduledMessage.daysOfWeek === '1,2,3,4,5';
-      const daysArray = scheduledMessage.daysOfWeek.split(',');
+      const daysArray =
+        !isMonthly && scheduledMessage.daysOfWeek.length > 0
+          ? scheduledMessage.daysOfWeek.split(',')
+          : ['1', '2', '3', '4', '5'];
+
+      // Decode the packed monthlyValue back into the UI's mode + fields.
+      const mv = scheduledMessage.monthlyValue ?? 1;
+      let uiMonthlyMode: FormValues['monthlyMode'] = 'DAY_OF_MONTH';
+      let uiDayOfMonth = '1';
+      let uiWeekOrdinal = '1';
+      let uiWeekday = '1';
+      if (isMonthly && scheduledMessage.monthlyMode === 'DAY_OF_MONTH') {
+        if (mv === -1) {
+          uiMonthlyMode = 'LAST_DAY';
+        } else {
+          uiDayOfMonth = String(mv);
+        }
+      } else if (isMonthly && scheduledMessage.monthlyMode === 'NTH_WEEKDAY') {
+        uiMonthlyMode = 'NTH_WEEKDAY';
+        const ordinal = Math.floor(mv / 10);
+        uiWeekOrdinal = ordinal === 5 ? 'LAST' : String(ordinal);
+        uiWeekday = String(mv % 10);
+      }
 
       reset({
         channelId: scheduledMessage.channelId,
         title: scheduledMessage.title,
         messageContent: scheduledMessage.messageContent,
         messageContentHtml: scheduledMessage.messageContent,
+        frequency: isMonthly ? 'MONTHLY' : 'WEEKLY',
         dayMode: isWeekday ? 'weekday' : 'custom',
         daysOfWeek: daysArray,
+        monthlyMode: uiMonthlyMode,
+        dayOfMonth: uiDayOfMonth,
+        weekOrdinal: uiWeekOrdinal,
+        weekday: uiWeekday,
         scheduledTime: localTime,
         isActive: scheduledMessage.isActive,
       });
@@ -148,8 +211,13 @@ const ScheduledMessageModal = ({
         title: '',
         messageContent: '',
         messageContentHtml: '',
+        frequency: 'WEEKLY',
         dayMode: 'weekday',
         daysOfWeek: ['1', '2', '3', '4', '5'],
+        monthlyMode: 'DAY_OF_MONTH',
+        dayOfMonth: '1',
+        weekOrdinal: '1',
+        weekday: '1',
         scheduledTime: '09:00',
         isActive: true,
       });
@@ -175,16 +243,19 @@ const ScheduledMessageModal = ({
         String(utcMinutes).padStart(2, '0'),
       ].join(':');
 
-      // Join daysOfWeek array to comma-separated string
-      const daysOfWeek = formValues.daysOfWeek.sort((a, b) => Number(a) - Number(b)).join(',');
+      // Build the recurrence fields from the chosen frequency.
+      const scheduleFields: SchedulePayloadFields =
+        formValues.frequency === 'MONTHLY'
+          ? buildMonthlyFields(formValues)
+          : { daysOfWeek: formValues.daysOfWeek.sort((a, b) => Number(a) - Number(b)).join(',') };
 
       if (isEditMode && scheduledMessage) {
         const payload: UpdateScheduledMessagePayload = {
           title: formValues.title,
           messageContent: formValues.messageContentHtml,
-          daysOfWeek,
           scheduledTime,
           isActive: formValues.isActive,
+          ...scheduleFields,
         };
         await scheduledMessageApi.update(scheduledMessage.id, payload);
         toast.success('Scheduled message updated successfully');
@@ -193,8 +264,8 @@ const ScheduledMessageModal = ({
           channelId: formValues.channelId,
           title: formValues.title,
           messageContent: formValues.messageContentHtml,
-          daysOfWeek,
           scheduledTime,
+          ...scheduleFields,
         };
         await scheduledMessageApi.create(payload);
         toast.success('Scheduled message created successfully');
@@ -237,14 +308,25 @@ const ScheduledMessageModal = ({
   };
 
   const dayOptions = [
-    { value: '0', label: 'Sunday' },
-    { value: '1', label: 'Monday' },
-    { value: '2', label: 'Tuesday' },
-    { value: '3', label: 'Wednesday' },
-    { value: '4', label: 'Thursday' },
-    { value: '5', label: 'Friday' },
-    { value: '6', label: 'Saturday' },
+    { value: '0', label: 'Sunday', short: 'Su' },
+    { value: '1', label: 'Monday', short: 'Mo' },
+    { value: '2', label: 'Tuesday', short: 'Tu' },
+    { value: '3', label: 'Wednesday', short: 'We' },
+    { value: '4', label: 'Thursday', short: 'Th' },
+    { value: '5', label: 'Friday', short: 'Fr' },
+    { value: '6', label: 'Saturday', short: 'Sa' },
   ];
+
+  const ordinalOptions = [
+    { value: '1', label: 'First' },
+    { value: '2', label: 'Second' },
+    { value: '3', label: 'Third' },
+    { value: '4', label: 'Fourth' },
+    { value: 'LAST', label: 'Last' },
+  ];
+
+  // 1..28 only — every month has these days, so a monthly job always fires.
+  const dayOfMonthOptions = Array.from({ length: 28 }, (_, i) => String(i + 1));
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -380,39 +462,45 @@ const ScheduledMessageModal = ({
             )}
           </div>
 
-          {/* Day Selection */}
+          {/* Frequency */}
           <div>
-            <span className='block text-sm text-foreground font-medium mb-2'>Days</span>
-
-            {/* Weekday vs Custom Radio Buttons */}
+            <span className='block text-sm text-foreground font-medium mb-2'>Frequency</span>
             <Controller
-              name='dayMode'
+              name='frequency'
               control={control}
               render={({ field }) => (
-                <div className='space-y-2 mb-3'>
-                  <label className='flex items-center gap-2 cursor-pointer'>
-                    <input
-                      type='radio'
-                      value='weekday'
-                      checked={field.value === 'weekday'}
-                      onChange={e => {
-                        field.onChange(e.target.value);
+                <SegmentedToggle<FormValues['frequency']>
+                  value={field.value}
+                  onChange={field.onChange}
+                  className={!canEdit && isEditMode ? 'pointer-events-none opacity-50' : ''}
+                  options={[
+                    { value: 'WEEKLY', label: 'Weekly' },
+                    { value: 'MONTHLY', label: 'Monthly' },
+                  ]}
+                />
+              )}
+            />
+          </div>
+
+          {/* Weekly: Day Selection */}
+          {frequency === 'WEEKLY' && (
+            <div>
+              <span className='block text-sm text-foreground font-medium mb-2'>Days</span>
+
+              {/* Weekday vs Custom */}
+              <Controller
+                name='dayMode'
+                control={control}
+                render={({ field }) => (
+                  <SegmentedToggle<FormValues['dayMode']>
+                    value={field.value}
+                    onChange={value => {
+                      field.onChange(value);
+                      if (value === 'weekday') {
                         setValue('daysOfWeek', ['1', '2', '3', '4', '5']);
-                      }}
-                      disabled={!canEdit && isEditMode}
-                      data-track-category='scheduled-message'
-                      data-track-name='select-weekday-mode'
-                      className='w-4 h-4 text-primary focus:ring-2 focus:ring-primary cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed'
-                    />
-                    <span className='text-foreground text-sm'>Weekday (Monday - Friday)</span>
-                  </label>
-                  <label className='flex items-center gap-2 cursor-pointer'>
-                    <input
-                      type='radio'
-                      value='custom'
-                      checked={field.value === 'custom'}
-                      onChange={e => {
-                        field.onChange(e.target.value);
+                      } else {
+                        // Switching to custom: clear the preset weekday selection so the
+                        // user starts from a blank slate (but keep any custom picks).
                         const currentDays = watch('daysOfWeek');
                         if (
                           currentDays.length === 5 &&
@@ -420,61 +508,182 @@ const ScheduledMessageModal = ({
                         ) {
                           setValue('daysOfWeek', []);
                         }
-                      }}
-                      disabled={!canEdit && isEditMode}
-                      data-track-category='scheduled-message'
-                      data-track-name='select-custom-mode'
-                      className='w-4 h-4 text-primary focus:ring-2 focus:ring-primary cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed'
-                    />
-                    <span className='text-foreground text-sm'>Custom days of the week</span>
-                  </label>
-                </div>
-              )}
-            />
-
-            {/* Custom Day Checkboxes - only show for custom mode */}
-            {dayMode === 'custom' && (
-              <Controller
-                name='daysOfWeek'
-                control={control}
-                rules={{
-                  validate: value =>
-                    dayMode === 'custom' && value.length === 0 ? 'Select at least one day' : true,
-                }}
-                render={({ field }) => (
-                  <div className='space-y-2 pl-6'>
-                    {dayOptions.map(day => (
-                      <label
-                        key={day.value}
-                        htmlFor={`day-${day.value}`}
-                        className='flex items-center gap-2 cursor-pointer'
-                      >
-                        <input
-                          id={`day-${day.value}`}
-                          type='checkbox'
-                          checked={field.value.includes(day.value)}
-                          onChange={e => {
-                            const newValue = e.target.checked
-                              ? [...field.value, day.value]
-                              : field.value.filter(v => v !== day.value);
-                            field.onChange(newValue);
-                          }}
-                          disabled={!canEdit && isEditMode}
-                          data-track-category='scheduled-message'
-                          data-track-name={`toggle-day-${day.value}`}
-                          className='w-4 h-4 rounded border-gray-300 text-primary focus:ring-2 focus:ring-primary cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed'
-                        />
-                        <span className='text-sm text-foreground'>{day.label}</span>
-                      </label>
-                    ))}
-                  </div>
+                      }
+                    }}
+                    className={
+                      !canEdit && isEditMode ? 'mb-3 pointer-events-none opacity-50' : 'mb-3'
+                    }
+                    options={[
+                      { value: 'weekday', label: 'Weekdays', title: 'Monday – Friday' },
+                      { value: 'custom', label: 'Custom days', title: 'Pick specific days' },
+                    ]}
+                  />
                 )}
               />
-            )}
-            {errors.daysOfWeek && (
-              <p className='text-red-500 text-xs mt-1'>{errors.daysOfWeek.message}</p>
-            )}
-          </div>
+
+              {/* Custom day pills - only show for custom mode */}
+              {dayMode === 'custom' && (
+                <Controller
+                  name='daysOfWeek'
+                  control={control}
+                  rules={{
+                    validate: value =>
+                      dayMode === 'custom' && value.length === 0 ? 'Select at least one day' : true,
+                  }}
+                  render={({ field }) => (
+                    <div
+                      className={cn(
+                        'flex flex-wrap gap-1.5',
+                        !canEdit && isEditMode && 'pointer-events-none opacity-50',
+                      )}
+                    >
+                      {dayOptions.map(day => {
+                        const isActive = field.value.includes(day.value);
+                        return (
+                          <button
+                            key={day.value}
+                            type='button'
+                            title={day.label}
+                            aria-pressed={isActive}
+                            onClick={() => {
+                              const newValue = isActive
+                                ? field.value.filter(v => v !== day.value)
+                                : [...field.value, day.value];
+                              field.onChange(newValue);
+                            }}
+                            data-track-category='scheduled-message'
+                            data-track-name={`toggle-day-${day.value}`}
+                            className={cn(
+                              'flex h-9 w-9 items-center justify-center rounded-full border text-sm font-medium transition-colors',
+                              isActive
+                                ? 'border-transparent bg-action-primary text-action-primary-foreground'
+                                : 'border-border text-muted-foreground hover:border-foreground/30 hover:text-foreground',
+                            )}
+                          >
+                            {day.short}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                />
+              )}
+              {errors.daysOfWeek && (
+                <p className='text-red-500 text-xs mt-1'>{errors.daysOfWeek.message}</p>
+              )}
+            </div>
+          )}
+
+          {/* Monthly: Mode Selection */}
+          {frequency === 'MONTHLY' && (
+            <div>
+              <span className='block text-sm text-foreground font-medium mb-2'>On</span>
+
+              <Controller
+                name='monthlyMode'
+                control={control}
+                render={({ field }) => (
+                  <SegmentedToggle<FormValues['monthlyMode']>
+                    value={field.value}
+                    onChange={field.onChange}
+                    className={
+                      !canEdit && isEditMode ? 'mb-3 pointer-events-none opacity-50' : 'mb-3'
+                    }
+                    options={[
+                      {
+                        value: 'DAY_OF_MONTH',
+                        label: 'Day of month',
+                        title: 'A fixed day, e.g. the 15th',
+                      },
+                      { value: 'NTH_WEEKDAY', label: 'Weekday', title: 'e.g. the 2nd Tuesday' },
+                      { value: 'LAST_DAY', label: 'Last day', title: 'Last day of the month' },
+                    ]}
+                  />
+                )}
+              />
+
+              {/* Day of month: 1..28 */}
+              {monthlyMode === 'DAY_OF_MONTH' && (
+                <div className='pl-6'>
+                  <Controller
+                    name='dayOfMonth'
+                    control={control}
+                    render={({ field }) => (
+                      <Select
+                        value={field.value}
+                        onValueChange={field.onChange}
+                        disabled={!canEdit && isEditMode}
+                      >
+                        <SelectTrigger className='w-32'>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {dayOfMonthOptions.map(d => (
+                            <SelectItem key={d} value={d}>
+                              {d}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    )}
+                  />
+                  <p className='text-xs text-muted-foreground mt-1'>
+                    Limited to 1–28 so the message always fires, even in February.
+                  </p>
+                </div>
+              )}
+
+              {/* Nth weekday: ordinal + weekday */}
+              {monthlyMode === 'NTH_WEEKDAY' && (
+                <div className='pl-6 flex gap-2'>
+                  <Controller
+                    name='weekOrdinal'
+                    control={control}
+                    render={({ field }) => (
+                      <Select
+                        value={field.value}
+                        onValueChange={field.onChange}
+                        disabled={!canEdit && isEditMode}
+                      >
+                        <SelectTrigger className='w-32'>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {ordinalOptions.map(o => (
+                            <SelectItem key={o.value} value={o.value}>
+                              {o.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    )}
+                  />
+                  <Controller
+                    name='weekday'
+                    control={control}
+                    render={({ field }) => (
+                      <Select
+                        value={field.value}
+                        onValueChange={field.onChange}
+                        disabled={!canEdit && isEditMode}
+                      >
+                        <SelectTrigger className='w-40'>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {dayOptions.map(d => (
+                            <SelectItem key={d.value} value={d.value}>
+                              {d.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    )}
+                  />
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Scheduled Time */}
           <div>
@@ -542,13 +751,23 @@ const ScheduledMessageModal = ({
           <div className='flex justify-between pt-4'>
             <div>
               {isEditMode && canEdit && (
-                <Button type='button' onClick={() => void handleDelete()}>
+                <Button
+                  type='button'
+                  onClick={() => void handleDelete()}
+                  data-track-category='scheduled-message'
+                  data-track-name='DELETE_SCHEDULED_MESSAGE'
+                >
                   Delete
                 </Button>
               )}
             </div>
             <div className='flex gap-2'>
-              <Button type='button' onClick={() => onOpenChange(false)}>
+              <Button
+                type='button'
+                onClick={() => onOpenChange(false)}
+                data-track-category='scheduled-message'
+                data-track-name='CLOSE_SCHEDULED_MESSAGE_MODAL'
+              >
                 Cancel
               </Button>
               <Button type='submit' disabled={(!canEdit && isEditMode) || isSubmitting}>

@@ -3,6 +3,8 @@ import { BaseQueryACL, ACLContext } from './base-acl'
 import {
   ActivitiesACL,
   AppsACL,
+  AppCommandACL,
+  AppPermissionACL,
   InstalledAppsACL,
   AgentsACL,
   AgentStepsACL,
@@ -74,6 +76,7 @@ import {
   RolesACL,
   SavedUserConfigurationsACL,
   SavedUserConfigurationValuesACL,
+  ViewAccessACL,
   StageApproversACL,
   StagesACL,
   SubTicketsACL,
@@ -85,6 +88,7 @@ import {
   TicketEntityMappingsACL,
   TicketReferenceMappingsACL,
   TicketsACL,
+  TicketDescriptionsACL,
   TicketStageEtaACL,
   TicketSubTicketMappingsACL,
   TicketTagsACL,
@@ -142,6 +146,8 @@ export class ACLFactory {
       return new ActivitiesACL(ctx, prisma)
     case 'agent':
       return new AgentsACL(ctx, prisma)
+    case 'agentConversationShare':
+      return new BaseQueryACL(ctx, prisma)
     case 'agentStep':
       return new AgentStepsACL(ctx, prisma)
     case 'agentToolsMapping':
@@ -174,6 +180,20 @@ export class ACLFactory {
     case 'entityAccess':
       return new BaseQueryACL(ctx, prisma)
     case 'summaryTemplate':
+      return new BaseQueryACL(ctx, prisma)
+    // Radar execution engine: non_zero derived data, workspace-scoped; the
+    // feed API layers thread-membership checks in its own queries.
+    case 'executionItem':
+      return new BaseQueryACL(ctx, prisma)
+    case 'executionThreadState':
+      return new BaseQueryACL(ctx, prisma)
+    case 'executionItemMutation':
+      return new BaseQueryACL(ctx, prisma)
+    case 'executionRunLog':
+      return new BaseQueryACL(ctx, prisma)
+    // Rules are per user, and every read is already scoped to (workspaceId,
+    // userId) by radarRuleStore — there is no route that reads anyone else's.
+    case 'radarRule':
       return new BaseQueryACL(ctx, prisma)
     case 'channel':
       return new ChannelsACL(ctx, prisma)
@@ -271,14 +291,30 @@ export class ACLFactory {
       return new ReleaseChangeTypesACL(ctx, prisma)
     case 'releaseEvent':
       return new ReleaseEventsACL(ctx, prisma)
+    case 'releaseRepository':
+      // non_zero table (not Zero-synced); tenant scoping is enforced inline in
+      // the route/repo, so the generic ACL suffices for switch exhaustiveness.
+      return new BaseQueryACL(ctx, prisma)
     case 'repo':
       return new ReposACL(ctx, prisma)
+    case 'sdlcEntityLink':
+      return new BaseQueryACL(ctx, prisma)
+    case 'sdlcArtifact':
+      return new BaseQueryACL(ctx, prisma)
+    case 'sdlcTrack':
+      return new BaseQueryACL(ctx, prisma)
+    case 'sdlcFolder':
+      return new BaseQueryACL(ctx, prisma)
+    case 'sdlcItemComment':
+      return new BaseQueryACL(ctx, prisma)
     case 'role':
       return new RolesACL(ctx, prisma)
     case 'savedUserConfiguration':
       return new SavedUserConfigurationsACL(ctx, prisma)
     case 'savedUserConfigurationValue':
       return new SavedUserConfigurationValuesACL(ctx, prisma)
+    case 'viewAccess':
+      return new ViewAccessACL(ctx, prisma)
     case 'stage':
       return new StagesACL(ctx, prisma)
     case 'stageApprovers':
@@ -293,6 +329,8 @@ export class ACLFactory {
       return new SurfaceNudgeCountsACL(ctx, prisma)
     case 'ticket':
       return new TicketsACL(ctx, prisma)
+    case 'ticketDescription':
+      return new TicketDescriptionsACL(ctx, prisma)
     case 'ticketActivity':
       return new TicketActivitiesACL(ctx, prisma)
     case 'ticketAssignment':
@@ -348,11 +386,11 @@ export class ACLFactory {
     case 'apiKey':
       return new BaseQueryACL(ctx, prisma)
     case 'appCommand':
-      return new BaseQueryACL(ctx, prisma)
+      return new AppCommandACL(ctx, prisma)
     case 'appIncomingWebhook':
       return new BaseQueryACL(ctx, prisma)
     case 'appPermission':
-      return new BaseQueryACL(ctx, prisma)
+      return new AppPermissionACL(ctx, prisma)
     case 'apps':
       return new AppsACL(ctx, prisma)
     case 'availableAppPermission':
@@ -451,6 +489,10 @@ export class ACLFactory {
       return new BaseQueryACL(ctx, prisma)
     case 'tagsConfig':
       return new BaseQueryACL(ctx, prisma)
+    // Workspace-scoped config, reached only through the thread-type-vocabulary API, which
+    // does its own admin check. Listed so the switch stays exhaustive over ModelName.
+    case 'threadTypeVocabulary':
+      return new BaseQueryACL(ctx, prisma)
     case 'teamIntelligenceIngestionBatchV2':
       return new UnscopedACL(ctx, prisma)
     case 'teamIntelligenceOrgSummaryV2':
@@ -473,6 +515,10 @@ export class ACLFactory {
       return new BaseQueryACL(ctx, prisma)
     case 'vespaInsertionLogs':
       return new UnscopedACL(ctx, prisma)
+    case 'workflowCredential':
+      return new BaseQueryACL(ctx, prisma)
+    case 'workflowFolder':
+      return new BaseQueryACL(ctx, prisma)
     case 'workflowExecutionLock':
       return new BaseQueryACL(ctx, prisma)
     case 'workflowExecutionState':
@@ -499,7 +545,7 @@ export class ACLFactory {
       return new BaseQueryACL(ctx, prisma)
     case 'entityAlias':
       return new BaseQueryACL(ctx, prisma)
-    default:
+    case 'deskAutoLabelRuleReference':
       return new BaseQueryACL(ctx, prisma)
     }
   }

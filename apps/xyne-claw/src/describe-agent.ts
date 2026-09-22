@@ -27,7 +27,7 @@ export const DESCRIBE_AGENT_TOOL_NAME = "describe-agent";
 
 /** Shared ref the tool writes into; read back by run.ts. */
 export interface DescribeAgentRef {
-  value?: Extract<PendingAgentCard, { variant: "profile" }>;
+  value?: Extract<PendingAgentCard, { variant: "profile" | "profile-list" | "summary" }>;
   /** Repeat calls after the first — telemetry only, the first target stands. */
   duplicates?: number;
 }
@@ -45,6 +45,15 @@ export function buildDescribeAgentTool(ref: DescribeAgentRef): ToolDefinition {
       "Omit `slug` to describe YOURSELF (the usual case). Pass a slug only when the user",
       "asked about a DIFFERENT agent by name.",
       "",
+      "When the user asks WHICH agents can help with something (\"list agents that review PRs\"),",
+      "pass `slugs` with the matching agents, best match first — they render as a stack of the",
+      "same cards. Use list_agents first to find them. Prefer this over naming them in prose.",
+      "",
+      "When the user asks to see ALL their agents (\"list all my agents\", \"what agents do we",
+      "have?\"), pass `summary: true` instead. That posts a count with a link to the agent",
+      "library — the right answer when the roster is long. The SERVER counts them, so do not",
+      "state a number yourself and do not list the agents in text.",
+      "",
       "This does not end your turn — if the user asked something else as well, answer it",
       "normally in the same reply. Do not also describe your tools in text; the card",
       "covers that. Call it at most once per reply.",
@@ -57,6 +66,17 @@ export function buildDescribeAgentTool(ref: DescribeAgentRef): ToolDefinition {
           type: "string",
           description:
             "Optional. The agent to describe, e.g. 'ticket-triage'. Omit to describe yourself.",
+        },
+        summary: {
+          type: "boolean",
+          description:
+            "Set true to show a roster summary (total agent count + a link to the library) instead of individual cards. Use for 'list all my agents'.",
+        },
+        slugs: {
+          type: "array",
+          items: { type: "string" },
+          description:
+            "Optional. Several agents to show as a stack of cards, e.g. when the user asks which agents can help with X. Use INSTEAD of `slug`, and instead of listing agents in prose. Order them best-match first; the server caps how many render and summarises the rest.",
         },
       },
       required: [],
@@ -76,6 +96,41 @@ export function buildDescribeAgentTool(ref: DescribeAgentRef): ToolDefinition {
       }
 
       const p = (params as Record<string, unknown> | undefined) ?? {};
+
+      if (p["summary"] === true) {
+        ref.value = { variant: "summary" };
+        log.info("[describe-agent] queued roster summary card");
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: "A roster summary with the agent count and a link to the library will be shown with your reply. Do NOT state a count or list the agents in text — the card carries both. Say at most one short line.",
+            },
+          ],
+          details: { summary: true },
+        };
+      }
+
+      const rawList = Array.isArray(p["slugs"]) ? (p["slugs"] as unknown[]) : [];
+      const slugs = rawList
+        .filter((s): s is string => typeof s === "string")
+        .map((s) => s.trim().slice(0, 80))
+        .filter((s) => s.length > 0);
+
+      if (slugs.length > 0) {
+        ref.value = { variant: "profile-list", slugs };
+        log.info(`[describe-agent] queued ${slugs.length} profile cards: ${slugs.join(", ")}`);
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: `Capability cards for ${slugs.length} agent(s) will be shown with your reply — each one lists its real tools and integrations. Do NOT also list these agents or their tools in text; say at most one short line about why they fit.`,
+            },
+          ],
+          details: { slugs },
+        };
+      }
+
       const slug = typeof p["slug"] === "string" ? p["slug"].trim().slice(0, 80) : "";
       ref.value = { variant: "profile", ...(slug ? { slug } : {}) };
       log.info(`[describe-agent] queued profile card for ${slug || "self"}`);

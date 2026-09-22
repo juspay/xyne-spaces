@@ -28,6 +28,7 @@ import remarkBreaks from 'remark-breaks';
 import rehypeRaw from 'rehype-raw';
 import rehypeSanitize, { defaultSchema } from 'rehype-sanitize';
 import { RefineInput } from '../RefineInput/RefineInput';
+import type { DeskDraftTrackingSnapshot } from '../../../hooks/useDeskAIDraft';
 import { aiMarkdownProseClassName } from '../../../utils/markdownStyles';
 import { cn } from '../../../utils/classNames';
 import type { AIRefineQuickAction } from '../../../hooks/useDeskAIDraft';
@@ -80,6 +81,12 @@ interface DraftCardProps {
    * live. When provided, a "See sources" button is shown beside Insert/Replace.
    */
   onSeeSources?: () => void;
+  /**
+   * The owning composer's draft bookkeeping (from useDeskAIDraft), so Insert /
+   * Discard / Refine clicks join back to that composer's DRAFT_GENERATED —
+   * not to whichever composer mounted last.
+   */
+  getTrackingSnapshot?: () => Readonly<DeskDraftTrackingSnapshot>;
 }
 
 interface SelectionPopoverState {
@@ -108,6 +115,7 @@ export const DraftCard = ({
   onClearSelectedText,
   onCollapse,
   onSeeSources,
+  getTrackingSnapshot,
 }: DraftCardProps): ReactElement => {
   // Inline citations (the [clf-…] tokens / [1.1] chips) are intentionally
   // stripped from the draft body — sources now live only in the sources panel
@@ -116,6 +124,24 @@ export const DraftCard = ({
     () => stripCitationMarks(stripCitationBlock(draftContent)),
     [draftContent],
   );
+
+  // Joins Insert / Discard / Refine back to DRAFT_GENERATED. `generatedAt` is a
+  // timestamp, not a delta — the attribute is baked at render, and the click
+  // comes later; the delta is `timestamp - generatedAt` in the query.
+  const draftTrackMetadata = (extra?: Record<string, unknown>): string => {
+    const snapshot = getTrackingSnapshot?.();
+    return JSON.stringify({
+      isStreaming,
+      ...(snapshot && {
+        generatedAt: snapshot.generatedAt,
+        refineCount: snapshot.refineCount,
+        runKind: snapshot.kind,
+        ...(snapshot.composerSessionId && { composerSessionId: snapshot.composerSessionId }),
+        ...(snapshot.ticketId && { ticketId: snapshot.ticketId }),
+      }),
+      ...extra,
+    });
+  };
 
   const contentRef = useRef<HTMLDivElement>(null);
   const cardRef = useRef<HTMLDivElement>(null);
@@ -350,6 +376,7 @@ export const DraftCard = ({
                 title='Stop generating'
                 data-track-category='AIDraft'
                 data-track-name='StopDraft'
+                data-track-metadata={draftTrackMetadata()}
               >
                 <Square size={11} className='fill-current' />
                 <span>Stop</span>
@@ -363,6 +390,7 @@ export const DraftCard = ({
                 title='Discard draft'
                 data-track-category='AIDraft'
                 data-track-name='RejectDraft'
+                data-track-metadata={draftTrackMetadata()}
               >
                 <X size={14} />
               </button>
@@ -476,7 +504,7 @@ export const DraftCard = ({
                     className='w-full flex items-center gap-2.5 px-3 py-1.5 text-sm text-foreground hover:bg-muted transition-colors disabled:opacity-50'
                     data-track-category='AIDraft'
                     data-track-name='QuickRefine'
-                    data-track-metadata={JSON.stringify({ action: preset.id })}
+                    data-track-metadata={draftTrackMetadata({ action: preset.id })}
                   >
                     <span className='text-muted-foreground'>{preset.icon}</span>
                     <span>{preset.label}</span>
@@ -501,6 +529,7 @@ export const DraftCard = ({
           <div className={cn('relative flex items-center', !onSeeSources && 'ml-auto')}>
             <button
               type='button'
+              data-ph-capture-attribute-track-id='accept_ai_draft'
               onClick={onAccept}
               disabled={!draftContent || isStreaming}
               className='inline-flex items-center justify-center h-8 px-4 rounded-full bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 disabled:opacity-40 disabled:cursor-not-allowed transition-colors'
@@ -508,6 +537,7 @@ export const DraftCard = ({
               title='Insert draft'
               data-track-category='AIDraft'
               data-track-name='AcceptDraft'
+              data-track-metadata={draftTrackMetadata()}
             >
               Insert
             </button>

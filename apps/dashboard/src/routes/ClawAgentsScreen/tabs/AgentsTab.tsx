@@ -234,6 +234,8 @@ const AgentsTab = (): ReactElement => {
                 type='button'
                 className='shrink-0'
                 onClick={() => void navigate('/claw-agents/create')}
+                data-track-category='Claw Agents'
+                data-track-name='GO_TO_CREATE_AGENT'
               >
                 <Plus className='size-4' />
                 Create agent

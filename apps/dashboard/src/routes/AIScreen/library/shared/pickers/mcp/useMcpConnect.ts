@@ -1,13 +1,9 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/hooks/useAuth';
+import { useMcpCredentialFields } from './useMcpCredentialFields';
 import { clawErrorText } from '@/services/claw/clawRequest';
 import type { CredentialField, McpServer } from '@/services/claw/clawMcpTypes';
-import {
-  connectMcpServer,
-  connectStrategyFor,
-  getCredentialFields,
-  type ConnectStrategy,
-} from './mcpConnectionService';
+import { connectMcpServer, connectStrategyFor, type ConnectStrategy } from './mcpConnectionService';
 
 export interface McpConnect {
   fields: CredentialField[];
@@ -23,11 +19,7 @@ export function useMcpConnect(server: McpServer | undefined, onConnected: () => 
   const userId = user?.id;
   const queryClient = useQueryClient();
 
-  const fieldsQuery = useQuery({
-    queryKey: ['claw-mcp-credential-fields'],
-    queryFn: getCredentialFields,
-    staleTime: 5 * 60 * 1000,
-  });
+  const { fieldsFor } = useMcpCredentialFields();
 
   const mutation = useMutation({
     mutationFn: async (credentials: Record<string, string>) => {
@@ -41,9 +33,7 @@ export function useMcpConnect(server: McpServer | undefined, onConnected: () => 
     },
   });
 
-  const fields = server
-    ? (fieldsQuery.data?.[server.type] ?? server.credentialForm?.fields ?? [])
-    : [];
+  const fields = fieldsFor(server);
 
   return {
     fields,

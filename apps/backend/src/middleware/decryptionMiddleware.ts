@@ -4,6 +4,10 @@ import { getCryptoOperations } from '@/services/otel/cryptoMetrics';
 import { logger } from '@/utils/logger';
 import { getEncryptionProvider } from '@/services/encryption';
 
+function sanitizeForLog(value: unknown): string {
+  return String(value ?? '').replace(/[\r\n]+/g, '');
+}
+
 function hasEncryptedFields(obj: unknown): boolean {
   if (typeof obj === 'string') {
     return obj.startsWith('ENC:v1|sess|');
@@ -42,13 +46,11 @@ export async function decryptRequestBodyMiddleware(
     }
 
     const sessionId = req.cookies?.user_session_id ?? (req.headers['x-session-id'] as string | undefined);
-    const userId = req.user?.id;
 
-    if (!sessionId || !userId) {
+    if (!sessionId) {
       logger.warn('[decryptionMiddleware] encrypted fields present but session ID missing', {
-        method,
-        path: req.path,
-        hasUserId: Boolean(userId),
+        method: sanitizeForLog(method),
+        path: sanitizeForLog(req.path),
         hasSessionId: Boolean(sessionId),
       });
       getCryptoOperations().add(1, {
@@ -61,27 +63,27 @@ export async function decryptRequestBodyMiddleware(
     }
 
     logger.info('[decryptionMiddleware] encrypted fields detected in request body', {
-      method,
-      path: req.path,
+      method: sanitizeForLog(method),
+      path: sanitizeForLog(req.path),
     });
 
-    req.body = await getEncryptionProvider().decryptRequest(req.body, sessionId, userId);
+    req.body = await getEncryptionProvider().decryptRequest(req.body, sessionId);
 
     logger.info('[decryptionMiddleware] request body decrypted successfully', {
-      method,
-      path: req.path,
+      method: sanitizeForLog(method),
+      path: sanitizeForLog(req.path),
     });
   } catch (error) {
     logger.error('[decryptionMiddleware] failed to decrypt request body', {
-      method: req.method,
-      path: req.path,
-      error: error instanceof Error ? error.message : String(error),
+      method: sanitizeForLog(req.method),
+      path: sanitizeForLog(req.path),
+      error: sanitizeForLog(error instanceof Error ? error.message : String(error)),
     });
     getCryptoOperations().add(1, {
       operation: 'decrypt_request_body',
       status: 'error',
       reason: 'decrypt_failed',
-      path: req.path,
+      path: sanitizeForLog(req.path),
     });
     return next(new AppError('Failed to decrypt encrypted request body', 502));
   }
@@ -97,18 +99,17 @@ export function encryptResponseBodyMiddleware(
 
   res.json = ((body?: unknown): Response => {
     const sessionId = req.cookies?.user_session_id ?? (req.headers['x-session-id'] as string | undefined);
-    const userId = req.user?.id;
-    if (!sessionId || !userId || !body || typeof body !== 'object') {
+    if (!sessionId || !body || typeof body !== 'object') {
       return originalJson(body);
     }
 
-    void getEncryptionProvider().encryptResponse(body, sessionId, userId)
+    void getEncryptionProvider().encryptResponse(body, sessionId)
       .then((encryptedBody) => originalJson(encryptedBody))
       .catch((error) => {
         logger.error('[decryptionMiddleware] failed to encrypt response body', {
-          method: req.method,
-          path: req.path,
-          error: error instanceof Error ? error.message : String(error),
+          method: sanitizeForLog(req.method),
+          path: sanitizeForLog(req.path),
+          error: sanitizeForLog(error instanceof Error ? error.message : String(error)),
         });
         if (!res.headersSent) {
           res.status(502);

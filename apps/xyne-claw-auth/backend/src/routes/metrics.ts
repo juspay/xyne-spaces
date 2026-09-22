@@ -1184,3 +1184,251 @@ metricsRouter.post("/improvements/backfill", async (req: Request, res: Response)
     res.status(500).json({ error: err instanceof Error ? err.message : "Internal server error" });
   }
 });
+
+/**
+ * GET /metrics/awakening — activity for agents that wake on their own.
+ *
+ * Awakened runs are deliberately absent from the rest of this file's numbers:
+ * they have no `userId`, so the user-scoped filters every other endpoint
+ * applies would drop them, and mixing unattended runs into per-user latency
+ * would skew it. They still need to be observable — an awakened agent posts in
+ * public with nobody watching — so they get their own rollup.
+ *
+ * Three questions this answers, which is what operating the feature actually
+ * requires: is it running, what is it deciding, and is anything broken.
+ * Scoped by org only; there is no user dimension to scope by.
+ */
+metricsRouter.get("/awakening", async (req: Request, res: Response) => {
+  try {
+    const { orgFilter, scopeOrgId } = await resolveMetricsScope(req, "/metrics/awakening");
+    const days = parseDays(req);
+    const windowEnd = new Date();
+    const windowStart = new Date(windowEnd.getTime() - days * 24 * 60 * 60 * 1000);
+
+    const [totalsRaw, perDayRaw, byAgentRaw, skipRaw, statesRaw] = await Promise.all([
+      prisma.$queryRaw<Array<{
+        runs: bigint; ran: bigint; skipped: bigint; failed: bigint; shadow: bigint;
+        injections: bigint; events: bigint;
+      }>>`
+        SELECT
+          COUNT(*)                                        AS runs,
+          COUNT(*) FILTER (WHERE outcome = 'ran')         AS ran,
+          COUNT(*) FILTER (WHERE outcome = 'skipped')     AS skipped,
+          COUNT(*) FILTER (WHERE outcome = 'failed')      AS failed,
+          COUNT(*) FILTER (WHERE outcome = 'shadow')      AS shadow,
+          COALESCE(SUM("injectionsUsed"), 0)              AS injections,
+          COALESCE(SUM("eventCount"), 0)                  AS events
+        FROM "agent_awakening_runs"
+        WHERE "startedAt" >= ${windowStart} AND "startedAt" < ${windowEnd} ${orgFilter}
+      `,
+      prisma.$queryRaw<Array<{
+        day: Date; ran: bigint; skipped: bigint; failed: bigint;
+      }>>`
+        SELECT
+          date_trunc('day', "startedAt")::date            AS day,
+          COUNT(*) FILTER (WHERE outcome IN ('ran','shadow')) AS ran,
+          COUNT(*) FILTER (WHERE outcome = 'skipped')     AS skipped,
+          COUNT(*) FILTER (WHERE outcome = 'failed')      AS failed
+        FROM "agent_awakening_runs"
+        WHERE "startedAt" >= ${windowStart} AND "startedAt" < ${windowEnd} ${orgFilter}
+        GROUP BY 1 ORDER BY 1 ASC
+      `,
+      prisma.$queryRaw<Array<{
+        agent_id: string; agent_slug: string | null; kind: string; runs: bigint; ran: bigint;
+        skipped: bigint; failed: bigint; events: bigint; last_run_at: Date | null;
+      }>>`
+        SELECT
+          r."agentId"                                     AS agent_id,
+          a.slug                                          AS agent_slug,
+          r.kind                                          AS kind,
+          COUNT(*)                                        AS runs,
+          COUNT(*) FILTER (WHERE r.outcome IN ('ran','shadow')) AS ran,
+          COUNT(*) FILTER (WHERE r.outcome = 'skipped')   AS skipped,
+          COUNT(*) FILTER (WHERE r.outcome = 'failed')    AS failed,
+          COALESCE(SUM(r."eventCount"), 0)                AS events,
+          MAX(r."startedAt")                              AS last_run_at
+        FROM "agent_awakening_runs" r
+        LEFT JOIN "agents" a ON a.id = r."agentId"
+        WHERE r."startedAt" >= ${windowStart} AND r."startedAt" < ${windowEnd}
+          ${scopeOrgId ? Prisma.sql`AND r."orgId" = ${scopeOrgId}` : Prisma.empty}
+        GROUP BY 1, 2, 3
+        ORDER BY runs DESC
+        LIMIT 50
+      `,
+      prisma.$queryRaw<Array<{ reason: string | null; count: bigint }>>`
+        SELECT "skipReason" AS reason, COUNT(*) AS count
+        FROM "agent_awakening_runs"
+        WHERE "startedAt" >= ${windowStart} AND "startedAt" < ${windowEnd}
+          AND outcome = 'skipped' ${orgFilter}
+        GROUP BY 1 ORDER BY count DESC LIMIT 20
+      `,
+      // Current health, independent of the window: an agent the workers switched
+      // off has no recent runs BY DEFINITION, so it would be invisible above.
+      prisma.$queryRaw<Array<{
+        agent_slug: string | null; enabled: boolean; last_error: string | null;
+        next_due_at: Date | null; reflex_next_check_at: Date | null;
+        consecutive_failures: number;
+      }>>`
+        SELECT
+          a.slug                    AS agent_slug,
+          s.enabled                 AS enabled,
+          s."lastError"             AS last_error,
+          s."nextDueAt"             AS next_due_at,
+          s."reflexNextCheckAt"     AS reflex_next_check_at,
+          s."consecutiveFailures"   AS consecutive_failures
+        FROM "agent_awakening_state" s
+        LEFT JOIN "agents" a ON a.id = s."agentId"
+        WHERE TRUE ${scopeOrgId ? Prisma.sql`AND s."orgId" = ${scopeOrgId}` : Prisma.empty}
+        ORDER BY s.enabled DESC, a.slug ASC
+        LIMIT 100
+      `,
+    ]);
+
+    const t = totalsRaw[0];
+    res.json({
+      days,
+      totals: {
+        runs: Number(t?.runs ?? 0),
+        ran: Number(t?.ran ?? 0),
+        skipped: Number(t?.skipped ?? 0),
+        failed: Number(t?.failed ?? 0),
+        shadow: Number(t?.shadow ?? 0),
+        injections: Number(t?.injections ?? 0),
+        events: Number(t?.events ?? 0),
+      },
+      perDay: perDayRaw.map((r) => ({
+        day: r.day.toISOString().slice(0, 10),
+        ran: Number(r.ran),
+        skipped: Number(r.skipped),
+        failed: Number(r.failed),
+      })),
+      byAgent: byAgentRaw.map((r) => ({
+        agentId: r.agent_id,
+        agentSlug: r.agent_slug ?? "(deleted agent)",
+        kind: r.kind,
+        runs: Number(r.runs),
+        ran: Number(r.ran),
+        skipped: Number(r.skipped),
+        failed: Number(r.failed),
+        events: Number(r.events),
+        lastRunAt: r.last_run_at ? r.last_run_at.toISOString() : null,
+      })),
+      skipReasons: skipRaw.map((r) => ({
+        reason: r.reason ?? "(unspecified)",
+        count: Number(r.count),
+      })),
+      agents: statesRaw.map((r) => ({
+        agentSlug: r.agent_slug ?? "(deleted agent)",
+        enabled: r.enabled,
+        lastError: r.last_error,
+        nextDueAt: r.next_due_at ? r.next_due_at.toISOString() : null,
+        reflexNextCheckAt: r.reflex_next_check_at ? r.reflex_next_check_at.toISOString() : null,
+        consecutiveFailures: Number(r.consecutive_failures ?? 0),
+      })),
+    });
+  } catch (err) {
+    log.error("[metrics/awakening] error:", err);
+    res.status(500).json({ error: err instanceof Error ? err.message : "Internal server error" });
+  }
+});
+
+/**
+ * GET /metrics/awakening/:agentId/runs — one agent's wake history, paginated.
+ *
+ * The drill-down behind the Awakened agents section. Every wake ATTEMPT is a
+ * row here, not just the ones that acted, because "why did it stay quiet" is
+ * the question operators actually have — `skipReason` carries the gate rule
+ * that fired.
+ *
+ * `conversationId` is joined from agent_runs so each acting wake links straight
+ * to the transcript; a skipped wake never dispatched one and has none.
+ *
+ * `kind` narrows to heartbeat or reflex. The rollup above lists one row PER
+ * WAKE KIND, so drilling into an agent's heartbeat row must not return its
+ * reflex wakes as well.
+ */
+metricsRouter.get("/awakening/:agentId/runs", async (req: Request<{ agentId: string }>, res: Response) => {
+  try {
+    const { scopeOrgId } = await resolveMetricsScope(req, "/metrics/awakening/runs");
+    const { agentId } = req.params;
+    const days = parseDays(req);
+    const windowEnd = new Date();
+    const windowStart = new Date(windowEnd.getTime() - days * 24 * 60 * 60 * 1000);
+
+    const limit = Math.min(Math.max(Number(req.query["limit"]) || 20, 1), 100);
+    const offset = Math.max(Number(req.query["offset"]) || 0, 0);
+
+    // Org scoping is applied to the RUN rows, not just the agent, so an admin
+    // scoped to one org cannot page through another org's history by id.
+    const scope = scopeOrgId ? Prisma.sql`AND r."orgId" = ${scopeOrgId}` : Prisma.empty;
+
+    const kindRaw = String(req.query["kind"] ?? "");
+    const kindFilter = kindRaw === "heartbeat" || kindRaw === "reflex"
+      ? Prisma.sql`AND r.kind = ${kindRaw}`
+      : Prisma.empty;
+
+    const [rowsRaw, countRaw] = await Promise.all([
+      prisma.$queryRaw<Array<{
+        id: string; kind: string; outcome: string; skip_reason: string | null;
+        event_count: number; injections_used: number; session_id: string | null;
+        conversation_id: string | null; run_status: string | null;
+        window_start_ms: bigint; window_end_ms: bigint;
+        started_at: Date; completed_at: Date | null;
+      }>>`
+        SELECT
+          r.id                AS id,
+          r.kind              AS kind,
+          r.outcome           AS outcome,
+          r."skipReason"      AS skip_reason,
+          r."eventCount"      AS event_count,
+          r."injectionsUsed"  AS injections_used,
+          r."sessionId"       AS session_id,
+          ar."conversationId" AS conversation_id,
+          ar.status           AS run_status,
+          r."windowStartMs"   AS window_start_ms,
+          r."windowEndMs"     AS window_end_ms,
+          r."startedAt"       AS started_at,
+          r."completedAt"     AS completed_at
+        FROM "agent_awakening_runs" r
+        LEFT JOIN "agent_runs" ar ON ar."sessionId" = r."sessionId"
+        WHERE r."agentId" = ${agentId}
+          AND r."startedAt" >= ${windowStart} AND r."startedAt" < ${windowEnd}
+          ${scope} ${kindFilter}
+        ORDER BY r."startedAt" DESC
+        LIMIT ${limit} OFFSET ${offset}
+      `,
+      prisma.$queryRaw<Array<{ count: bigint }>>`
+        SELECT COUNT(*) AS count
+        FROM "agent_awakening_runs" r
+        WHERE r."agentId" = ${agentId}
+          AND r."startedAt" >= ${windowStart} AND r."startedAt" < ${windowEnd}
+          ${scope} ${kindFilter}
+      `,
+    ]);
+
+    res.json({
+      total: Number(countRaw[0]?.count ?? 0),
+      limit,
+      offset,
+      runs: rowsRaw.map((r) => ({
+        id: r.id,
+        kind: r.kind,
+        outcome: r.outcome,
+        skipReason: r.skip_reason,
+        eventCount: Number(r.event_count ?? 0),
+        injectionsUsed: Number(r.injections_used ?? 0),
+        sessionId: r.session_id,
+        conversationId: r.conversation_id,
+        runStatus: r.run_status,
+        windowStartMs: Number(r.window_start_ms),
+        windowEndMs: Number(r.window_end_ms),
+        startedAt: r.started_at.toISOString(),
+        completedAt: r.completed_at ? r.completed_at.toISOString() : null,
+        durationMs: r.completed_at ? r.completed_at.getTime() - r.started_at.getTime() : null,
+      })),
+    });
+  } catch (err) {
+    log.error("[metrics/awakening/runs] error:", err);
+    res.status(500).json({ error: err instanceof Error ? err.message : "Internal server error" });
+  }
+});

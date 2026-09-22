@@ -41,6 +41,115 @@ const userInputClause = (defaultIndex?: string, grammar = 'grammar:"tokenize"'):
   return `({${annotations}} userInput(@query))`;
 };
 
+/**
+ * The lexical clause: an explicit weakAnd of one `contains` per whitespace token.
+ *
+ * Not userInput() -- its parser turns an all-digit token into an IntItem, so "0002" becomes the
+ * integer 2 and matches every doc containing "2" (50,047 hits on prod, none containing "0002").
+ * A bound string in `contains` is a WordItem and keeps the literal token.
+ *
+ * weakAnd, not and/near/phrase: those require every term / proximity / adjacency and would gut
+ * recall on 5-10 word queries. No term annotations: implicitTransforms:false disables
+ * segmentation, which "JP_008" needs to match as phrase("JP","008").
+ */
+
+const lexicalClause = (query: string, params: VespaQueryParams): string => {
+  // Deduped: bind() reuses one placeholder per (field, value), so a repeated token would
+  // otherwise emit the same @placeholder twice and count twice in weakAnd's scoring.
+  const tokens = [...new Set(query.trim().split(/\s+/).filter(Boolean))];
+  if (tokens.length === 0) return userInputClause();
+  const clauses = tokens.map((token) => `default contains ${params.bind('qtok', token)}`);
+  // weakAnd of a single term is just the term; keeps the YQL readable in traces.
+  return clauses.length === 1 ? clauses[0] : `weakAnd(${clauses.join(', ')})`;
+};
+
+// `unified` only. Each schema's `default` fieldset bundles body text plus 3-gram
+// "_fuzzy" fields, so searching it matches on body content and on substrings inside
+// hashes. These schemas are searched in the listed fields instead.
+const UNIFIED_FIELD_SCOPE: Record<string, string[]> = {
+  [fileSchema]: ['fileName'],
+  [ticketSchema]: ['title', 'xyneId'],
+  [messageSchema]: ['text'],
+};
+
+const scopedLexicalClause = (
+  query: string,
+  params: VespaQueryParams,
+  schemas: VespaSchema[],
+): string => {
+  // Split on every non-letter/non-digit, so "xyne-327" becomes ["xyne", "327"] and both
+  // are required below. As one token Vespa splits it anyway and "xyne" alone matches.
+  const rawWords = query.trim().split(/[^\p{L}\p{N}]+/u);
+  const words: string[] = [];
+  for (const word of rawWords) {
+    if (word !== '' && !words.includes(word)) {
+      words.push(word);
+    }
+  }
+  if (words.length === 0) {
+    return userInputClause();
+  }
+
+  // `and`, not weakAnd: every word must match, which is queryCompleteness == 1.
+  const mustContainEveryWord = (fieldName: string): string => {
+    const clauses: string[] = [];
+    for (const word of words) {
+      clauses.push(`${fieldName} contains ${params.bind('qtok', word)}`);
+    }
+    if (clauses.length === 1) {
+      return clauses[0];
+    }
+    return `(${clauses.join(' and ')})`;
+  };
+
+  const scopedSchemas: VespaSchema[] = [];
+  const otherSchemas: VespaSchema[] = [];
+  for (const schema of schemas) {
+    if (UNIFIED_FIELD_SCOPE[schema]) {
+      scopedSchemas.push(schema);
+    } else {
+      otherSchemas.push(schema);
+    }
+  }
+
+  const branches: string[] = [];
+
+  // sddocname scopes a branch to one schema, since a query spans several at once.
+  for (const schema of scopedSchemas) {
+    const perField: string[] = [];
+    for (const fieldName of UNIFIED_FIELD_SCOPE[schema]) {
+      perField.push(mustContainEveryWord(fieldName));
+    }
+    let fieldClause: string;
+    if (perField.length === 1) {
+      fieldClause = perField[0];
+    } else {
+      fieldClause = `(${perField.join(' or ')})`;
+    }
+    branches.push(`(sddocname contains "${schema}" and ${fieldClause})`);
+  }
+
+  if (otherSchemas.length > 0) {
+    const defaultClause = mustContainEveryWord('default');
+    if (scopedSchemas.length === 0) {
+      branches.push(defaultClause);
+    } else {
+      // Must exclude the schemas above: an `or` branch only adds documents, so
+      // without this they come back through `default`.
+      const exclusions: string[] = [];
+      for (const schema of scopedSchemas) {
+        exclusions.push(`!(sddocname contains "${schema}")`);
+      }
+      branches.push(`(${exclusions.join(' and ')} and ${defaultClause})`);
+    }
+  }
+
+  if (branches.length === 1) {
+    return branches[0];
+  }
+  return `(\n      ${branches.join('\n   or ')}\n    )`;
+};
+
 export interface SlackFilters {
   channelId?: string[];
   projectId?: string[];
@@ -51,6 +160,15 @@ export interface SlackFilters {
   // or reference a channel (channelMentions field). Both are exact attribute membership filters.
   mentionedUserIds?: string[];
   mentionedChannelIds?: string[];
+  // Thread classification. threadType lives ONLY on a thread's root message, so filtering it
+  // yields one hit per matching thread — "show me the ISSUE threads". messageActs lives on
+  // each message the classifier cited as evidence, so filtering that yields the individual
+  // messages that justified a tag. Different questions; both exact attribute filters.
+  threadType?: string[];
+  messageActs?: string[];
+  // Entity filter: docs annotated with these entity names (chat_message/ticket `entityNames`).
+  // AND-ed, not OR-ed — multiple entities narrow to docs mentioning every one of them.
+  entityNames?: string[];
   // Date filters
   createdBefore?: string; // Created before date (multiple formats)
   createdAfter?: string; // Created after date (multiple formats)
@@ -82,6 +200,10 @@ export interface TicketFilters {
   createdRange?: string; // Time keyword (today, yesterday, this week, etc.)
   stage?: string[]; // Filter by ticket stage - comma-separated
   assignedTo?: string[]; // Filter by assigned user ID - comma-separated
+  userGroupId?: string[]; // Filter by user group ID - comma-separated
+  // Entity filter: docs annotated with these entity names (chat_message/ticket `entityNames`).
+  // AND-ed, not OR-ed — multiple entities narrow to docs mentioning every one of them.
+  entityNames?: string[];
 }
 
 export interface FileFilters {
@@ -202,6 +324,7 @@ export class YqlBuilder {
     sort?: string,
     useExactMatch: boolean = false,
     rankProfile?: string,
+    userEmail?: string,
   ): { yql: string; params: Record<string, string> } {
     const schemaNames = schemas.join(', ');
     // `limit` is interpolated raw into non-bindable YQL grammar ({targetHits:N}, max(N)); coerce to
@@ -215,7 +338,11 @@ export class YqlBuilder {
     const isTranscriptOnly = apps.length === 1 && apps[0].toLowerCase() === 'transcript';
     const queryLength = query?.length ?? 0;
 
-    // Optimization: Skip semantic search for short queries (< 3 chars) - lexical only
+    // Whether the vector half of retrieval runs. `useSemanticAnyway` is the caller's
+    // config-driven decision (searchService reads the
+    // `vespa_search_semantic_disabled_rank_profiles` Superposition flag and turns it off for
+    // rank profiles that read no vector feature). Short queries skip it regardless — under 4
+    // characters the embedding is noise.
     const useSemantic = useSemanticAnyway && queryLength > 3;
 
     if (query && query !== '*') {
@@ -237,7 +364,7 @@ export class YqlBuilder {
       or ({targetHits:${safeLimit}, approximate:false} nearestNeighbor(combined_embeddings, e))
     )`);
         } else {
-          // Lexical only: short query, skip semantic
+          // Lexical only: semantic disabled for this rank profile, or the query is too short.
           whereConditions.push(`(
       ${lexicalFieldClauses}
     )`);
@@ -253,27 +380,62 @@ export class YqlBuilder {
       or ({targetHits:${safeLimit}} nearestNeighbor(qna_embeddings, e))
     )`);
       } else {
-        // Lexical only: short query
+        // `lexicalClause` on both sides: the digit-token fix it carries is about how the lexical
+        // half is parsed, so it must not depend on whether the vector half runs.
+        const mainLexical =
+          rankProfile === RankProfile.unifiedRank
+            ? scopedLexicalClause(query, params, schemas)
+            : lexicalClause(query, params);
         if (useSemantic) {
           // approximate:false — combined_embeddings' HNSW returns 0 hits under any filter; drop after index rebuild.
           whereConditions.push(`(
-          ${userInputClause()}
+          ${mainLexical}
         or ({targetHits:${safeLimit}} nearestNeighbor(text_embeddings, e))
         or ({targetHits:${safeLimit}} nearestNeighbor(chunk_embeddings, e))
         or ({targetHits:${safeLimit}, approximate:false} nearestNeighbor(combined_embeddings, e))
         )`);
         } else {
-          whereConditions.push(userInputClause());
+          whereConditions.push(mainLexical);
         }
       }
 
-      // `personalized` only: caller as rank-only terms on the search block so the profile can
-      // read matches(userId|mentions|threadSenders). rank()'s extra args never change what
-      // matches; every other profile's YQL is untouched. Needs chat_message selected
-      // (`mentions` exists only there).
-      if (rankProfile === RankProfile.personalizedRank && userId && schemas.includes(messageSchema)) {
-        const me = params.bind('involvedUser', userId);
-        whereConditions[0] = `rank(${whereConditions[0]}, userId contains ${me}, mentions contains ${me}, threadSenders contains ${me})`;
+      // `personalized` and `unified`: caller as rank-only terms so each profile's involvement
+      // tier can read matches(<field>). rank()'s extra args never change what matches; each group
+      // is gated on its schema being selected (Vespa rejects fields absent from every source).
+      if (
+        (rankProfile === RankProfile.personalizedRank ||
+          rankProfile === RankProfile.unifiedRank) &&
+        userId
+      ) {
+        const rankTerms = new Set<string>();
+        let meId: string | undefined;
+        const me = () => (meId ??= params.bind('involvedUser', userId));
+        if (schemas.includes(messageSchema)) {
+          rankTerms.add(`userId contains ${me()}`);
+          rankTerms.add(`mentions contains ${me()}`);
+          rankTerms.add(`threadSenders contains ${me()}`);
+          rankTerms.add(`threadMentions contains ${me()}`);
+        }
+        if (schemas.includes(ticketSchema)) {
+          rankTerms.add(`createdBy contains ${me()}`);
+          rankTerms.add(`assignedTo contains ${me()}`);
+          rankTerms.add(`ticketMentions contains ${me()}`);
+          rankTerms.add(`threadMentions contains ${me()}`);
+          rankTerms.add(`threadSenders contains ${me()}`);
+        }
+        if (schemas.includes(fileSchema)) {
+          rankTerms.add(`ownerId contains ${me()}`);
+          rankTerms.add(`createdBy contains ${me()}`);
+        }
+        if (schemas.includes(mailSchema) && userEmail) {
+          // mail matches by email; `from` is a YQL keyword and must be quoted
+          const meEmail = params.bind('involvedEmail', userEmail);
+          rankTerms.add(`"from" contains ${meEmail}`);
+          rankTerms.add(`to contains ${meEmail}`);
+        }
+        if (rankTerms.size > 0) {
+          whereConditions[0] = `rank(${whereConditions[0]}, ${[...rankTerms].join(', ')})`;
+        }
       }
     }
     // Build app-specific conditions.
@@ -433,6 +595,7 @@ export class YqlBuilder {
       createdByUserId: boolean;
       isPrivate: boolean;
       messageType: boolean;
+      entityNames: boolean;
     }
   > = {
     [messageSchema]: {
@@ -442,6 +605,7 @@ export class YqlBuilder {
       createdByUserId: false,
       isPrivate: true,
       messageType: true,
+      entityNames: true,
     },
     [channelSchema]: {
       ownerId: true,
@@ -450,6 +614,7 @@ export class YqlBuilder {
       createdByUserId: false,
       isPrivate: true,
       messageType: false,
+      entityNames: false,
     },
     [attachmentSchema]: {
       ownerId: false,
@@ -458,6 +623,7 @@ export class YqlBuilder {
       createdByUserId: false,
       isPrivate: false,
       messageType: false,
+      entityNames: false,
     },
     [ticketSchema]: {
       ownerId: false,
@@ -466,6 +632,7 @@ export class YqlBuilder {
       createdByUserId: false,
       isPrivate: false,
       messageType: false,
+      entityNames: true,
     },
     [fileSchema]: {
       ownerId: true,
@@ -474,6 +641,7 @@ export class YqlBuilder {
       createdByUserId: false,
       isPrivate: true,
       messageType: false,
+      entityNames: false,
     },
     [mailSchema]: {
       ownerId: false,
@@ -482,6 +650,7 @@ export class YqlBuilder {
       createdByUserId: false,
       isPrivate: false,
       messageType: false,
+      entityNames: false,
     },
     [callSchema]: {
       ownerId: false,
@@ -490,6 +659,7 @@ export class YqlBuilder {
       createdByUserId: true,
       isPrivate: false,
       messageType: false,
+      entityNames: false,
     },
   };
 
@@ -759,12 +929,53 @@ export class YqlBuilder {
       conditions.push(`(${mentionedUsers})`);
     }
 
+    // Message-tag filter. `messageActs` is `match: exact` in the schema, so values go
+    // through verbatim — no casing coercion like `stage` does.
+    if (filters.messageActs && filters.messageActs.length > 0) {
+      const acts = filters.messageActs
+        .map((value) => `messageActs contains ${params.bind('messageActs', value.trim())}`)
+        .join(' and ');
+      conditions.push(`(${acts})`);
+    }
+
     // Channel-mention filter - messages that reference these channel(s)
     if (filters.mentionedChannelIds && filters.mentionedChannelIds.length > 0) {
       const mentionedChannels = filters.mentionedChannelIds
         .map((id) => `channelMentions contains ${params.bind('mentionedChannelId', id.trim())}`)
         .join(' or ');
       conditions.push(`(${mentionedChannels})`);
+    }
+
+    // Thread-type filter - the root messages of threads carrying these types.
+    if (filters.threadType && filters.threadType.length > 0) {
+      const threadTypes = filters.threadType
+        .map((type) => `threadType contains ${params.bind('threadType', type.trim())}`)
+        .join(' or ');
+      conditions.push(`(${threadTypes})`);
+    }
+
+    // Message-act filter - the individual messages the classifier cited as evidence for
+    // these types. Separate from threadType on purpose: OR-ing the two would return a
+    // thread's root AND its evidence messages as if they were unrelated hits.
+    if (filters.messageActs && filters.messageActs.length > 0) {
+      const acts = filters.messageActs
+        .map((act) => `messageActs contains ${params.bind('messageActs', act.trim())}`)
+        .join(' or ');
+      conditions.push(`(${acts})`);
+    }
+
+    // Entity filter — AND-ed so multiple entities narrow to messages mentioning every one
+    // of them. entityNames exists only on chat_message, so skip it when the query is pruned
+    // to chat_channel/chat_attachment only (else Vespa rejects the field reference).
+    if (
+      filters.entityNames &&
+      filters.entityNames.length > 0 &&
+      this.schemasHaveField(selectedSchemas, (f) => f.entityNames)
+    ) {
+      const entities = filters.entityNames
+        .map((entityName) => `entityNames contains ${params.bind('entityNames', entityName.trim())}`)
+        .join(' and ');
+      conditions.push(`(${entities})`);
     }
 
     if (filters.createdBefore) {
@@ -894,6 +1105,14 @@ export class YqlBuilder {
       conditions.push(`(${tagConditions})`);
     }
 
+    // Entity filter — AND-ed so multiple entities narrow to tickets mentioning every one of them.
+    if (filters.entityNames && filters.entityNames.length > 0) {
+      const entities = filters.entityNames
+        .map((entityName) => `entityNames contains ${params.bind('entityNames', entityName.trim())}`)
+        .join(' and ');
+      conditions.push(`(${entities})`);
+    }
+
     // Dynamic field filter (fieldId::value tokens)
     if (filters.dynamicFieldValues && filters.dynamicFieldValues.length > 0) {
       const valuesByFieldId = new Map<string, string[]>();
@@ -983,6 +1202,14 @@ export class YqlBuilder {
         .map((assignedTo) => `assignedTo contains ${params.bind('assignedTo', assignedTo.trim())}`)
         .join(' or ');
       conditions.push(`(${assignees})`);
+    }
+
+    // User group filter (array - comma-separated)
+    if (filters.userGroupId && filters.userGroupId.length > 0) {
+      const userGroups = filters.userGroupId
+        .map((userGroupId) => `userGroupId contains ${params.bind('userGroupId', userGroupId.trim())}`)
+        .join(' or ');
+      conditions.push(`(${userGroups})`);
     }
 
     // Date filters (ISO or dd/mm/yy or dd mon yy - no time keywords)
@@ -1322,12 +1549,16 @@ export class YqlBuilder {
    *                                    (imported as channelRef.docId)
    *   docType           -> docType   : every schema ('all')
    *   date / hour       -> createdAt : every schema except mail (mail uses `timestamp`)
+   *   threadType        -> threadType: chat_message only, and only on a thread's ROOT
+   *                                    message — so one group entry is one thread, with no
+   *                                    dedupe needed
    */
   private static readonly GROUP_FIELD_SCHEMAS: Record<string, VespaSchema[] | 'all'> = {
     senderId: [messageSchema, attachmentSchema],
     userId: [messageSchema, attachmentSchema],
     channelId: [messageSchema, attachmentSchema, ticketSchema, fileSchema, mailSchema],
     docType: 'all',
+    threadType: [messageSchema],
     date: [messageSchema, channelSchema, attachmentSchema, ticketSchema, fileSchema, userSchema],
     hour: [messageSchema, channelSchema, attachmentSchema, ticketSchema, fileSchema, userSchema],
   };
@@ -1387,6 +1618,15 @@ export class YqlBuilder {
       case 'hour':
         // Group by hour
         return `all(group(time.hourofday(createdAt)) max(24) each(max(10) each(output(summary()))))`;
+
+      case 'threadType':
+        // Counts only — no `each(...)` emitting summaries. This answers "how many threads
+        // carry each tag" for the whole vocabulary in ONE round trip; asking per name would
+        // be a query per candidate on a page that lists them all.
+        //
+        // threadType lives only on a thread's root message, so a group's count IS a thread
+        // count with no dedupe.
+        return `all(group(threadType) max(${maxGroups}) each(output(count(), max(createdAtTimestamp))))`;
 
       default:
         // Unknown groupBy field — return empty to avoid injecting arbitrary field names

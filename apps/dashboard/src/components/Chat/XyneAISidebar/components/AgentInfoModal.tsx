@@ -92,7 +92,7 @@ export const AgentInfoModal = ({
           <button
             onClick={onClose}
             className='p-2 rounded-lg hover:bg-accent transition-colors'
-            data-track-category='XYNE_AI'
+            data-track-category='XyneAI'
             data-track-name='CloseAgentInfoModal'
           >
             <X size={16} className='text-current' />

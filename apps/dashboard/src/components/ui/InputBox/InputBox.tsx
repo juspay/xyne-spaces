@@ -10,6 +10,7 @@ import { useEditor, EditorContent } from '@tiptap/react';
 import { NodeType as PMNodeType, Node as PMNode } from '@tiptap/pm/model';
 import StarterKit from '@tiptap/starter-kit';
 import Code from '@tiptap/extension-code';
+import Highlight from '@tiptap/extension-highlight';
 import { Plugin, PluginKey, TextSelection } from '@tiptap/pm/state';
 import { Extension, InputRule, textblockTypeInputRule, Mark } from '@tiptap/core';
 
@@ -35,12 +36,15 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '../dropdown-menu';
 
 import { toast } from 'sonner';
 import { EditorToolbar } from '../EditorToolbar';
 import { EmojiPickerButton } from '../EditorToolbar';
+import { LinkPopover } from '../EditorToolbar';
 import { MentionSelector } from '../Selectors';
 import { CommandSelector } from '../Selectors';
 import { EmojiSelector } from '../Selectors';
@@ -48,6 +52,12 @@ import { AttachmentPreview } from '../files';
 import { useOverlayZIndex } from '../../../contexts/OverlayZIndexContext';
 import type { UploadedFile } from '../files/Files.types';
 import { FilePreviewModal } from '../../FileViewer/FileViewerModal';
+import {
+  convertHeicFileToPreviewBlob,
+  isHeicAttachment,
+  sniffHeicFile,
+  toWebpFilename,
+} from '../../../services/heicAttachmentService';
 import type { MentionResult } from '@xyne/shared';
 import { MentionExtension, mentionPluginKey } from '../TipTapExtensions';
 import { CommandsExtension, commandPluginKey } from '../TipTapExtensions';
@@ -62,6 +72,7 @@ import { formatTypingMessage, resolveCommandTextFromHtml } from './InputBox.util
 import type { InputBoxHandle } from '../../../hooks/useDragAndDropAreaRef';
 import { sanitizeHtmlContent } from '../../Chat/ChatInput/ChatInput.utils';
 import { getEmojiFontSizeClass } from '../../../utils/emojiUtils';
+import { isEventFromInput } from '../../../utils/chatUtils';
 import { useDraftAttachments } from '../../../hooks/useDraft';
 import { MediaViewer } from '../files';
 import { usePlatform } from '../../../hooks/usePlatform';
@@ -70,6 +81,7 @@ import { useTypingState } from '../../../contexts/TypingStateContext';
 import { validateFile } from '../utils/files';
 import { useScope, useShortcutById } from '../../../shortcuts';
 import { useEnterSendsMessage } from '../../../hooks/useEnterSendsMessage';
+import { posthogService } from '../../../services/Analytics/posthogService';
 import { useDefaultFormattingToolbarOpen } from '../../../hooks/useDefaultFormattingToolbarOpen';
 import { Preferences } from '../../Settings/Preferences';
 import { Dialog } from '../Dialog';
@@ -87,7 +99,10 @@ import { VoiceInput } from './VoiceInput';
 import type { VoiceInputHandle } from './VoiceInput';
 import { v4 as uuidv4 } from 'uuid';
 import { logger, Event } from '../../../utils/logger';
-import { ScheduleMessageDialog } from '../ScheduleMessageDialog/ScheduleMessageDialog';
+import {
+  getSchedulePresets,
+  ScheduleMessageDialog,
+} from '../ScheduleMessageDialog/ScheduleMessageDialog';
 import { Checkbox } from '../Checkbox/Checkbox';
 
 /** Extract file extension (e.g. ".pdf") from a filename. Returns empty string if none. */
@@ -96,6 +111,23 @@ const getFileExtension = (name: string): string => {
   return dotIndex > 0 ? name.slice(dotIndex).toLowerCase() : '';
 };
 import { preloadEmojiData } from '../../../utils/emojiLookup';
+import { globalClickTracker } from '../../../services/Analytics/globalClickTracker';
+import { channelTrackingMetadata } from '../../../services/Analytics/channelTracking';
+
+/**
+ * Which affordance sent the message. Every send path funnels through one
+ * function, so without this the activity row cannot distinguish Enter from the
+ * Send button from the mobile editor.
+ */
+type SendTrigger =
+  | 'keyboard_enter'
+  | 'keyboard_mod_enter'
+  | 'keyboard_shift_enter'
+  | 'send_button'
+  | 'send_menu'
+  | 'mobile_editor'
+  | 'unknown';
+import { useChannel } from '../../../hooks/useChannels';
 
 const lowlight = createLowlight(all);
 
@@ -132,6 +164,67 @@ const MaxListDepthPlugin = Extension.create({
           if (!transaction.docChanged) return true;
           const maxDepth = getMaxListDepth(transaction.doc);
           return maxDepth <= MAX_LIST_DEPTH;
+        },
+      }),
+    ];
+  },
+});
+
+/**
+ * When an ordered list is directly preceded by another ordered list of the same
+ * style, continue its numbering instead of restarting at 1.
+ *
+ * ProseMirror keeps split/pasted ordered lists as separate `<ol>` nodes, and the
+ * second one has no `start` attribute, so the browser renders it from 1 again.
+ * This happens when a middle list item is lifted out on Enter (splitting one list
+ * into two) or when two ordered lists end up adjacent. We reconcile the `start`
+ * attribute so the visible numbering stays continuous.
+ */
+const OrderedListContinuationPlugin = Extension.create({
+  name: 'orderedListContinuation',
+  addProseMirrorPlugins() {
+    return [
+      new Plugin({
+        key: new PluginKey('orderedListContinuation'),
+        appendTransaction: (transactions, _oldState, newState) => {
+          if (!transactions.some(tr => tr.docChanged)) return null;
+          const orderedList = newState.schema.nodes['orderedList'];
+          if (!orderedList) return null;
+
+          const tr = newState.tr;
+          let modified = false;
+
+          const visit = (parent: PMNode, contentStart: number) => {
+            let prev: { node: PMNode; effStart: number } | null = null;
+            parent.forEach((child, offset) => {
+              const childPos = contentStart + offset;
+              if (child.type === orderedList) {
+                let effStart = (child.attrs['start'] as number) ?? 1;
+                if (
+                  prev &&
+                  prev.node.type === orderedList &&
+                  (prev.node.attrs['type'] ?? null) === (child.attrs['type'] ?? null)
+                ) {
+                  const desired = prev.effStart + prev.node.childCount;
+                  if (((child.attrs['start'] as number) ?? 1) !== desired) {
+                    tr.setNodeMarkup(childPos, undefined, {
+                      ...child.attrs,
+                      start: desired,
+                    });
+                    modified = true;
+                  }
+                  effStart = desired;
+                }
+                prev = { node: child, effStart };
+              } else {
+                prev = null;
+              }
+              if (child.childCount) visit(child, childPos + 1);
+            });
+          };
+
+          visit(newState.doc, 0);
+          return modified ? tr : null;
         },
       }),
     ];
@@ -187,6 +280,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
       onCreateCanvas,
       onTranscriptSelect,
       onScheduleSend,
+      showSchedulePresets = false,
       hasTicket = false,
       disableEnterToSend = false,
       hideSendButton = false,
@@ -194,6 +288,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
       hideVoiceInput = false,
       compact = false,
       sendDisabled = false,
+      sendDisabledReason,
       bottomLeftSlot,
       disableDraftUpload = false,
       dockSlot,
@@ -216,6 +311,8 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
     const [isPreferencesOpen, setIsPreferencesOpen] = useState(false);
     const [selectedFile, setSelectedFile] = useState<File | UploadedFile | null>(null);
     const [isViewerOpen, setIsViewerOpen] = useState(false);
+    const [heicPreviewId, setHeicPreviewId] = useState<string | null>(null);
+    const [heicPreviewName, setHeicPreviewName] = useState('image.heic');
 
     const alsoSendToChannelLabel = isDMThread ? 'Send as direct message' : 'Send to channel';
 
@@ -311,6 +408,10 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
     const [isSendMenuOpen, setIsSendMenuOpen] = useState(false);
     const [isScheduleDialogOpen, setIsScheduleDialogOpen] = useState(false);
     const openScheduleDialog = useCallback((): void => setIsScheduleDialogOpen(true), []);
+    const schedulePresets = React.useMemo(
+      () => (isSendMenuOpen && showSchedulePresets ? getSchedulePresets() : []),
+      [isSendMenuOpen, showSchedulePresets],
+    );
     const [isPlusMenuOpen, setIsPlusMenuOpen] = useState(false);
     const [showFormatToolbar, setShowFormatToolbar] = useState(defaultFormattingToolbarOpen);
     const [isTranscriptSelectorOpen, setIsTranscriptSelectorOpen] = useState(false);
@@ -344,6 +445,11 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
 
     useScope('composer', isFocused && !disabled && !isSending);
 
+    const isEventFromThisComposer = useCallback(
+      (event: KeyboardEvent): boolean => isEventFromInput(event, id),
+      [id],
+    );
+
     useShortcutById(
       'composer.attach',
       () => {
@@ -352,6 +458,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
       },
       {
         enabled: Boolean(features.fileAttachments) && !disabled && !isSending,
+        when: isEventFromThisComposer,
       },
     );
 
@@ -588,7 +695,13 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
             class: 'bg-muted rounded px-1 py-0.5 text-foreground font-mono text-[0.85em]',
           },
         }),
+        Highlight.configure({
+          HTMLAttributes: {
+            class: 'chat-text-highlight',
+          },
+        }),
         MaxListDepthPlugin,
+        OrderedListContinuationPlugin,
         InlineEmoji,
         ColonEmojiExtension.configure({
           getCustomEmojis: () => customEmojisRef.current || [],
@@ -747,7 +860,15 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                 return false;
               }
               event.preventDefault();
-              void handleSend();
+              // Keyboard sends are invisible to autocapture (click/change/submit
+              // only); emit it explicitly so keyboard vs button sends are visible.
+              // This branch serves BOTH Cmd/Ctrl+Enter and Shift+Enter, so the
+              // trigger has to mirror the keyCombo rather than assume mod.
+              posthogService.capture('message_send', {
+                trigger: 'keyboard',
+                keyCombo: event.metaKey ? 'mod_enter' : 'shift_enter',
+              });
+              void handleSend(event.metaKey ? 'keyboard_mod_enter' : 'keyboard_shift_enter');
               return true;
             }
             event.preventDefault();
@@ -901,7 +1022,13 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
 
             // On desktop with enterSendsMessage enabled: Send the message
             event.preventDefault();
-            void handleSend();
+            // Keyboard sends are invisible to autocapture (click/change/submit
+            // only); emit it explicitly so keyboard vs button sends are visible.
+            posthogService.capture('message_send', {
+              trigger: 'keyboard',
+              keyCombo: 'enter',
+            });
+            void handleSend('keyboard_enter');
             return true;
           }
 
@@ -1172,102 +1299,147 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
       ],
     );
 
-    const handleSend = useCallback(async () => {
-      if (!editor || isSending || sendDisabled) return;
+    const trackedChannel = useChannel(channelId ?? '');
 
-      // If a voice stream is active, finalize it for send first: this strips any
-      // unfinalized interim text and aborts the stream (discarding in-flight results)
-      // BEFORE we read the editor, so only committed text is sent and nothing leaks
-      // into the next message. No-op when no stream is active.
-      voiceInputRef.current?.abortForSend();
+    const submitScheduled = useCallback(
+      (scheduledFor: number): void => {
+        if (!onScheduleSend || !hasSendableContent) return;
+        const html = editor?.getHTML() ?? '';
+        const files = allAttachments.map(a => a.file).filter((f): f is File => f instanceof File);
+        void onScheduleSend(scheduledFor, html, files);
+        editor?.commands.clearContent(true);
+      },
+      [onScheduleSend, hasSendableContent, editor, allAttachments],
+    );
 
-      // The voice "shimmer" highlight is a transient editor-only decoration that
-      // auto-clears after ~1.4s; strip it across the doc so a quick send can't bake
-      // the orange highlight (a <span class="voice-shimmer">) into the sent message.
-      if (editor.schema.marks['voiceShimmer']) {
-        editor
-          .chain()
-          .setTextSelection({ from: 0, to: editor.state.doc.content.size })
-          .unsetMark('voiceShimmer')
-          .run();
-      }
-
-      // Flush pending debounced content update before sending so that
-      // onContentChange consumers (e.g. ComposeDmPanel form state) receive
-      // the latest content before handleSubmit reads from the form.
-      if (debouncedUpdateTimer.current) {
-        clearTimeout(debouncedUpdateTimer.current);
-        debouncedUpdateTimer.current = null;
-        const htmlContent = sanitizeHtmlContent(editor.getHTML());
-        lastAppliedValueRef.current = htmlContent;
-        onContentChange?.(htmlContent, editor.getText());
-      }
-
-      const plainText = editor.getText().trim();
-      const htmlContent = editor.getHTML();
-
-      if (!hasSendableContent) return;
-
-      // Detect if the entire content is a slash command (e.g. "/sell" or "/sell AAPL").
-      // If so, dispatch it to the app instead of sending it as a chat message.
-      const commandMatch = plainText.match(/^\/([\w-]+)(?:\s+(.*))?$/);
-      if (commandMatch && onCommandSelect) {
-        const cmdName = commandMatch[1] ?? '';
-        // Resolve mention spans from the HTML content so @user → <userid:xyneId>
-        // and @group → <groupid:xyneId> instead of bare display names.
-        const cmdText = resolveCommandTextFromHtml(htmlContent, cmdName);
-        const matchedCmd = commandItems.find(c => c.name.toLowerCase() === cmdName.toLowerCase());
-        if (matchedCmd && matchedCmd.kind !== 'slash-command-artifact') {
-          editor.commands.setContent('');
-          setContent('');
-          editor.commands.focus();
-          void onCommandSelect(matchedCmd, cmdText);
+    // `trigger` says which affordance sent the message. Every path funnels through
+    // this one function, which is what makes SEND_MESSAGE complete — but it also
+    // means the event cannot tell Enter from the button unless the caller says so.
+    const handleSend = useCallback(
+      async (trigger: SendTrigger = 'unknown') => {
+        if (!editor || isSending) return;
+        if (sendDisabled) {
+          // The button is disabled, but Enter still lands here — say why rather than
+          // swallowing the keystroke. Disabled buttons emit no pointer events, so the
+          // tooltip carrying the same reason never opens.
+          if (sendDisabledReason) toast.warning(sendDisabledReason);
           return;
         }
-      }
 
-      setIsSending(true);
-      try {
-        // Filter to only send actual File objects
-        // UploadedFile metadata-only attachments are already stored and referenced by ID
-        const filesToSend = allAttachments
-          .map(a => a.file)
-          .filter((f): f is File => f instanceof File);
+        // If a voice stream is active, finalize it for send first: this strips any
+        // unfinalized interim text and aborts the stream (discarding in-flight results)
+        // BEFORE we read the editor, so only committed text is sent and nothing leaks
+        // into the next message. No-op when no stream is active.
+        voiceInputRef.current?.abortForSend();
 
-        // Insert canvas link into editor if attached
-        if (attachedCanvas) {
-          const canvasLink = `${shareableOrigin}/chat/canvas/${attachedCanvas.id}`;
-          // Insert as plain link - platform will unfurl to show preview
-          editor?.commands.insertContent(` ${canvasLink}`);
+        // The voice "shimmer" highlight is a transient editor-only decoration that
+        // auto-clears after ~1.4s; strip it across the doc so a quick send can't bake
+        // the orange highlight (a <span class="voice-shimmer">) into the sent message.
+        if (editor.schema.marks['voiceShimmer']) {
+          editor
+            .chain()
+            .setTextSelection({ from: 0, to: editor.state.doc.content.size })
+            .unsetMark('voiceShimmer')
+            .run();
         }
 
-        // Get fresh content after inserting link
-        const finalHtmlContent = editor?.getHTML() || htmlContent;
-        const finalPlainText = editor?.getText().trim() || plainText;
-
-        await onSendMessage(finalPlainText, finalHtmlContent, filesToSend);
-        editor.commands.setContent('');
-        setContent('');
-        setAttachedCanvas(null);
-        if (disableDraftUpload) {
-          setAttachmentsMap(new Map());
+        // Flush pending debounced content update before sending so that
+        // onContentChange consumers (e.g. ComposeDmPanel form state) receive
+        // the latest content before handleSubmit reads from the form.
+        if (debouncedUpdateTimer.current) {
+          clearTimeout(debouncedUpdateTimer.current);
+          debouncedUpdateTimer.current = null;
+          const htmlContent = sanitizeHtmlContent(editor.getHTML());
+          lastAppliedValueRef.current = htmlContent;
+          onContentChange?.(htmlContent, editor.getText());
         }
-        editor.commands.focus();
-      } finally {
-        setIsSending(false);
-      }
-    }, [
-      editor,
-      allAttachments,
-      onSendMessage,
-      isSending,
-      attachedCanvas,
-      hasSendableContent,
-      sendDisabled,
-      commandItems,
-      onCommandSelect,
-      disableDraftUpload,
-    ]);
+
+        const plainText = editor.getText().trim();
+        const htmlContent = editor.getHTML();
+
+        if (!hasSendableContent) return;
+
+        // Detect if the entire content is a slash command (e.g. "/sell" or "/sell AAPL").
+        // If so, dispatch it to the app instead of sending it as a chat message.
+        const commandMatch = plainText.match(/^\/([\w-]+)(?:\s+(.*))?$/);
+        if (commandMatch && onCommandSelect) {
+          const cmdName = commandMatch[1] ?? '';
+          // Resolve mention spans from the HTML content so @user → <userid:xyneId>
+          // and @group → <groupid:xyneId> instead of bare display names.
+          const cmdText = resolveCommandTextFromHtml(htmlContent, cmdName);
+          const matchedCmd = commandItems.find(c => c.name.toLowerCase() === cmdName.toLowerCase());
+          if (matchedCmd && matchedCmd.kind !== 'slash-command-artifact') {
+            editor.commands.setContent('');
+            setContent('');
+            editor.commands.focus();
+            void onCommandSelect(matchedCmd, cmdText);
+            return;
+          }
+        }
+
+        setIsSending(true);
+        try {
+          // Filter to only send actual File objects
+          // UploadedFile metadata-only attachments are already stored and referenced by ID
+          const filesToSend = allAttachments
+            .map(a => a.file)
+            .filter((f): f is File => f instanceof File);
+
+          // Insert canvas link into editor if attached
+          if (attachedCanvas) {
+            const canvasLink = `${shareableOrigin}/chat/canvas/${attachedCanvas.id}`;
+            // Insert as plain link - platform will unfurl to show preview
+            editor?.commands.insertContent(` ${canvasLink}`);
+          }
+
+          // Get fresh content after inserting link
+          const finalHtmlContent = editor?.getHTML() || htmlContent;
+          const finalPlainText = editor?.getText().trim() || plainText;
+
+          await onSendMessage(finalPlainText, finalHtmlContent, filesToSend);
+
+          // Tracked here, not on the Send button: Enter, the button, the mobile
+          // editor and shortcuts all land in this function, and only a send that
+          // succeeded should count.
+          globalClickTracker.trackManualEvent('CHAT_INPUT', 'SEND_MESSAGE', undefined, {
+            ...channelTrackingMetadata(trackedChannel),
+            ...(conversationId !== null && { conversationId }),
+            isThreadReply: conversationId !== null,
+            hasAttachments: filesToSend.length > 0,
+            trigger,
+            attachmentCount: filesToSend.length,
+            hasCanvasAttached: attachedCanvas !== null,
+            // Length only — never the message body. contextMetadata is unmasked.
+            charLength: finalPlainText.length,
+            mentionCount: (finalHtmlContent.match(/data-mention-id=/g) ?? []).length,
+          });
+
+          editor.commands.setContent('');
+          setContent('');
+          setAttachedCanvas(null);
+          if (disableDraftUpload) {
+            setAttachmentsMap(new Map());
+          }
+          editor.commands.focus();
+        } finally {
+          setIsSending(false);
+        }
+      },
+      [
+        editor,
+        allAttachments,
+        onSendMessage,
+        isSending,
+        attachedCanvas,
+        hasSendableContent,
+        sendDisabled,
+        sendDisabledReason,
+        commandItems,
+        onCommandSelect,
+        disableDraftUpload,
+        trackedChannel,
+      ],
+    );
 
     // Canvas attachment handlers
     const handleCanvasSelect = useCallback((canvas: Canvas) => {
@@ -1367,7 +1539,48 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
       [providerRemoveDroppedFile, disableDraftUpload],
     );
 
-    const handlePreview = (file: File | UploadedFile): void => {
+    const handlePreview = async (
+      file: File | UploadedFile,
+      attachmentId?: string,
+    ): Promise<void> => {
+      // Local Files: the ftyp brand beats the browser's type/extension guess
+      // (a renamed .jpg can carry HEIC bytes). UploadedFiles have no local
+      // bytes, so they stay on metadata — which upload-time sniffing has
+      // already corrected server-side.
+      const sniffedHeic = file instanceof File ? await sniffHeicFile(file) : null;
+      const isHeic =
+        sniffedHeic ??
+        isHeicAttachment(
+          file instanceof File ? file.type : file.mimeType,
+          file instanceof File ? file.name : file.originalName,
+        );
+      if (isHeic) {
+        // Local HEIC File: convert client-side (cached from the chip's preview)
+        // and open the local-file viewer — works before the upload finishes.
+        if (file instanceof File) {
+          void convertHeicFileToPreviewBlob(file)
+            .then(blob => {
+              setSelectedFile(new File([blob], toWebpFilename(file.name), { type: 'image/webp' }));
+              setIsViewerOpen(true);
+            })
+            .catch(() => {
+              if (attachmentId) {
+                setHeicPreviewId(attachmentId);
+                setHeicPreviewName(file.name);
+                setIsViewerOpen(true);
+              }
+            });
+          return;
+        }
+        // UploadedFile HEIC (restored draft): server-backed viewer with its
+        // WebP rendition
+        if (attachmentId) {
+          setHeicPreviewId(attachmentId);
+          setHeicPreviewName(file.originalName);
+          setIsViewerOpen(true);
+          return;
+        }
+      }
       setSelectedFile(file);
       setIsViewerOpen(true);
     };
@@ -1375,6 +1588,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
     const handleCloseViewer = (): void => {
       setIsViewerOpen(false);
       setSelectedFile(null);
+      setHeicPreviewId(null);
     };
 
     // Convert channelItems to MentionResult format for the MentionSelector
@@ -1464,6 +1678,8 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
           <EmojiSelector editor={editor} customEmojis={customEmojis ?? []} />
         )}
 
+        {features.richText && <LinkPopover editor={editor} />}
+
         {/* Activity bar — absolutely positioned above the input box so showing/hiding
             never shifts the chat layout. The typing indicator and the agent pill share
             this single (left) slot; when both are active they alternate every 2s (see
@@ -1496,7 +1712,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
             </div>
           )}
           <div
-            className='flex items-center min-w-0'
+            className='flex items-center min-w-0 h-5 w-full bg-background px-[var(--composer-px)] pb-0.5'
             style={{ display: agentVisible ? 'flex' : 'none' }}
           >
             {agentSlot}
@@ -1541,6 +1757,8 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                 <button
                   type='button'
                   onClick={onCancelSlashCommandArtifact}
+                  data-track-category='CHAT_INPUT'
+                  data-track-name='CANCEL_SLASH_COMMAND_ARTIFACT'
                   className='ml-3 flex shrink-0 items-center gap-2 text-xs text-muted-foreground hover:text-foreground'
                   aria-label={`Cancel ${artifactComposerDefinition.badge} declaration`}
                 >
@@ -1583,7 +1801,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                 disabled={disabled}
                 emojiSizeClass={emojiSizeClass}
                 onAttachClick={handleAttachClick}
-                onSend={() => void handleSend()}
+                onSend={() => void handleSend('mobile_editor')}
                 placeholder={placeholder}
                 showMentions={features.mentions}
                 showFormattingToolbar={showMobileFormattingToolbar}
@@ -1611,7 +1829,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                           key={`file-${attachmentId}-${index}`}
                           file={file}
                           onRemove={() => void handleRemoveAttachment({ attachmentId, file })}
-                          onPreview={() => handlePreview(file)}
+                          onPreview={() => void handlePreview(file, attachmentId)}
                           isUploading={false}
                         />
                       ))}
@@ -1687,7 +1905,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                     key={attachmentId}
                     file={file}
                     onRemove={() => void handleRemoveAttachment({ attachmentId, file })}
-                    onPreview={() => handlePreview(file)}
+                    onPreview={() => void handlePreview(file, attachmentId)}
                     isUploading={false}
                   />
                 ))}
@@ -1702,7 +1920,18 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
             )}
 
             {/* Full-screen Viewer - Use MediaViewer for File objects, FilePreviewModal for UploadedFile */}
-            {selectedFile && (
+            {isViewerOpen && heicPreviewId && (
+              <FilePreviewModal
+                isOpen={isViewerOpen}
+                onClose={handleCloseViewer}
+                fileName={heicPreviewName}
+                fileUrl={`/attachments/${heicPreviewId}/download`}
+                mimeType='image/heic'
+                fileSize={0}
+                attachmentId={heicPreviewId}
+              />
+            )}
+            {selectedFile && !heicPreviewId && (
               <>
                 {selectedFile instanceof File ? (
                   <MediaViewer
@@ -1792,6 +2021,8 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                             handleAttachClick();
                             setIsPlusMenuOpen(false);
                           }}
+                          data-track-category='CHAT_INPUT'
+                          data-track-name='ATTACH_FILE'
                         >
                           <Plus className='h-4 w-4' /> Upload Files
                           <ShortcutHint keys='mod+o' className='ml-auto pl-6' />
@@ -1801,6 +2032,8 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                             setIsTranscriptSelectorOpen(true);
                             setIsPlusMenuOpen(false);
                           }}
+                          data-track-category='CHAT_INPUT'
+                          data-track-name='ATTACH_TRANSCRIPT'
                         >
                           <FileText className='h-4 w-4' /> Add Call Summary
                         </DropdownMenuItem>
@@ -1809,6 +2042,8 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                             setIsCanvasAttachmentModalOpen(true);
                             setIsPlusMenuOpen(false);
                           }}
+                          data-track-category='CHAT_INPUT'
+                          data-track-name='ATTACH_CANVAS'
                         >
                           <FileText className='h-4 w-4' /> Canvas
                         </DropdownMenuItem>
@@ -1860,6 +2095,8 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                         onClick={() => {
                           editor?.chain().focus().insertContent('@').run();
                         }}
+                        data-track-category='CHAT_INPUT'
+                        data-track-name='INSERT_USER_MENTION'
                         className='p-1.5 rounded hover:bg-accent transition-all duration-200 ease-in-out'
                         aria-label='Mention user'
                         data-testid='mention-user-btn'
@@ -1882,6 +2119,8 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                         onClick={() => {
                           editor?.chain().focus().insertContent('#').run();
                         }}
+                        data-track-category='CHAT_INPUT'
+                        data-track-name='INSERT_CHANNEL_MENTION'
                         className='p-1.5 rounded hover:bg-accent transition-all duration-200 ease-in-out'
                         aria-label='Mention channel'
                         disabled={disabled || isSending}
@@ -1901,6 +2140,8 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                       <button
                         type='button'
                         onClick={() => setShowFormatToolbar(prev => !prev)}
+                        data-track-category='CHAT_INPUT'
+                        data-track-name='TOGGLE_FORMAT_TOOLBAR'
                         className={`p-1.5 rounded transition-all duration-200 ease-in-out ${
                           showFormatToolbar
                             ? 'bg-accent text-foreground'
@@ -1943,7 +2184,9 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                       <button
                         type='button'
                         onClick={onCancel}
-                        className='p-2 rounded-md bg-muted text-foreground hover:bg-border transition-all duration-200 ease-in-out focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#FF4F4F] focus-visible:outline-offset-2'
+                        data-track-category='CHAT_INPUT'
+                        data-track-name='CANCEL_EDITING'
+                        className='p-2 rounded-md bg-muted text-foreground hover:bg-border transition-all duration-200 ease-in-out focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary focus-visible:outline-offset-2'
                         aria-label='Cancel editing'
                       >
                         <X className='h-4 w-4' />
@@ -1967,36 +2210,33 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                     <div className='relative flex items-center'>
                       {onCreateTicket ? (
                         <div
-                          className={`flex items-center rounded-md overflow-hidden transition-all duration-200 ease-in-out ${
+                          className={`flex items-stretch rounded-md overflow-hidden transition-all duration-200 ease-in-out ${
                             hasSendableContent && !sendDisabled
                               ? artifactComposerDefinition
-                                ? 'bg-orange-500 text-white hover:bg-orange-600'
-                                : 'bg-primary text-primary-foreground hover:bg-primary/90'
+                                ? 'bg-orange-500 text-white'
+                                : 'bg-primary text-primary-foreground'
                               : 'bg-muted text-muted-foreground cursor-not-allowed opacity-50'
                           }`}
                         >
                           <Tooltip
-                            content='Send message'
+                            content={sendDisabledReason ?? 'Send message'}
                             side='top'
                             delayDuration={1000}
                             skipDelayDuration={1000}
                           >
                             <button
                               type='button'
-                              onClick={() => void handleSend()}
+                              onClick={() => void handleSend('send_button')}
                               disabled={
                                 disabled || sendDisabled || isSending || !hasSendableContent
                               }
-                              className='p-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#FF4F4F] focus-visible:outline-offset-2'
+                              className={`p-2 flex items-center justify-center transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary focus-visible:outline-offset-2 ${
+                                hasSendableContent && !sendDisabled
+                                  ? 'cursor-pointer hover:bg-background/10'
+                                  : 'cursor-not-allowed'
+                              }`}
                               aria-label='Send message'
                               data-testid='send-message-button'
-                              data-track-category='CHAT_INPUT'
-                              data-track-name='SEND_MESSAGE'
-                              data-track-metadata={JSON.stringify({
-                                ...(conversationId !== null ? { conversationId } : { channelId }),
-                                message: editor?.getText().trim() || '',
-                                hasAttachments: allAttachments.length > 0,
-                              })}
                             >
                               {isSending ? (
                                 <Loader2 className='h-4 w-4 animate-spin' />
@@ -2006,7 +2246,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                             </button>
                           </Tooltip>
                           <div
-                            className={`w-px h-4 ${
+                            className={`w-px h-4 self-center ${
                               hasSendableContent ? 'bg-background/20' : 'bg-muted-foreground/20'
                             }`}
                           ></div>
@@ -2015,7 +2255,11 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                               <button
                                 type='button'
                                 disabled={disabled || sendDisabled || isSending}
-                                className='p-1.5 hover:bg-black/10 transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#FF4F4F] focus-visible:outline-offset-2'
+                                className={`p-1.5 flex items-center justify-center transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary focus-visible:outline-offset-2 ${
+                                  hasSendableContent && !sendDisabled
+                                    ? 'cursor-pointer hover:bg-background/10'
+                                    : 'cursor-not-allowed'
+                                }`}
                                 data-testid='send-options-menu'
                               >
                                 <ChevronBigDown className='h-3 w-3' />
@@ -2028,16 +2272,21 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                                     setIsSendMenuOpen(false);
                                     onCreateTicket(editor?.getText().trim() || '');
                                   }}
+                                  data-track-category='CHAT_INPUT'
+                                  data-track-name='CREATE_TICKET_FROM_INPUT'
                                 >
                                   <Ticket className='h-4 w-4' /> Create a ticket
                                 </DropdownMenuItem>
                               )}
                               {onScheduleSend && (
                                 <DropdownMenuItem
+                                  disabled={!hasSendableContent}
                                   onClick={() => {
                                     setIsSendMenuOpen(false);
                                     openScheduleDialog();
                                   }}
+                                  data-track-category='CHAT_INPUT'
+                                  data-track-name='OPEN_SCHEDULE_DIALOG'
                                 >
                                   <Clock className='h-4 w-4' /> Schedule message
                                 </DropdownMenuItem>
@@ -2048,33 +2297,31 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                       ) : onScheduleSend ? (
                         // No ticket creation but schedule send is available — split button
                         <div
-                          className={`flex items-center rounded-md overflow-hidden transition-all duration-200 ease-in-out ${
+                          className={`flex items-stretch rounded-md overflow-hidden transition-all duration-200 ease-in-out ${
                             hasSendableContent
                               ? artifactComposerDefinition
-                                ? 'bg-orange-500 text-white hover:bg-orange-600'
-                                : 'bg-primary text-white hover:bg-primary/90'
+                                ? 'bg-orange-500 text-white'
+                                : 'bg-primary text-white'
                               : 'bg-muted text-muted-foreground cursor-not-allowed opacity-80'
                           }`}
                         >
                           <Tooltip
-                            content='Send message'
+                            content={sendDisabledReason ?? 'Send message'}
                             side='top'
                             delayDuration={1000}
                             skipDelayDuration={1000}
                           >
                             <button
                               type='button'
-                              onClick={() => void handleSend()}
+                              onClick={() => void handleSend('send_button')}
                               disabled={disabled || isSending || !hasSendableContent}
-                              className='p-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#FF4F4F] focus-visible:outline-offset-2'
+                              className={`p-2 flex items-center justify-center transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary focus-visible:outline-offset-2 ${
+                                hasSendableContent
+                                  ? 'cursor-pointer hover:bg-background/10'
+                                  : 'cursor-not-allowed'
+                              }`}
                               aria-label='Send message'
                               data-testid='send-message-button'
-                              data-track-category='CHAT_INPUT'
-                              data-track-name='SEND_MESSAGE'
-                              data-track-metadata={JSON.stringify({
-                                ...(conversationId !== null ? { conversationId } : { channelId }),
-                                hasAttachments: allAttachments.length > 0,
-                              })}
                             >
                               {isSending ? (
                                 <Loader2 className='h-4 w-4 animate-spin' />
@@ -2084,63 +2331,97 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                             </button>
                           </Tooltip>
                           <div
-                            className={`w-px h-4 ${hasSendableContent ? 'bg-background/20' : 'bg-muted-foreground/20'}`}
+                            className={`w-px h-4 self-center ${hasSendableContent ? 'bg-background/20' : 'bg-muted-foreground/20'}`}
                           ></div>
-                          <DropdownMenu open={isSendMenuOpen} onOpenChange={setIsSendMenuOpen}>
-                            <DropdownMenuTrigger asChild>
-                              <button
-                                type='button'
-                                disabled={disabled || isSending}
-                                className='p-1.5 hover:bg-black/10 transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#FF4F4F] focus-visible:outline-offset-2'
-                                data-testid='send-options-menu'
-                              >
-                                <ChevronBigDown className='h-3 w-3' />
-                              </button>
-                            </DropdownMenuTrigger>
+                          <DropdownMenu
+                            open={isSendMenuOpen && hasSendableContent}
+                            onOpenChange={next => setIsSendMenuOpen(next && hasSendableContent)}
+                          >
+                            <Tooltip
+                              content='Schedule for later'
+                              side='top'
+                              delayDuration={1000}
+                              skipDelayDuration={1000}
+                              {...(!showSchedulePresets && { open: false })}
+                            >
+                              <DropdownMenuTrigger asChild>
+                                <button
+                                  type='button'
+                                  disabled={disabled || isSending || !hasSendableContent}
+                                  className={`p-1.5 flex items-center justify-center transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary focus-visible:outline-offset-2 ${
+                                    hasSendableContent
+                                      ? 'cursor-pointer hover:bg-background/10'
+                                      : 'cursor-not-allowed'
+                                  }`}
+                                  data-testid='send-options-menu'
+                                >
+                                  <ChevronBigDown className='h-3 w-3' />
+                                </button>
+                              </DropdownMenuTrigger>
+                            </Tooltip>
                             <DropdownMenuContent side='top' align='end'>
-                              <DropdownMenuItem
-                                onClick={() => {
-                                  void handleSend();
-                                  setIsSendMenuOpen(false);
-                                }}
-                              >
-                                <ArrowUp className='h-4 w-4' /> Send now
-                              </DropdownMenuItem>
+                              {showSchedulePresets ? (
+                                <>
+                                  <DropdownMenuLabel>Schedule message</DropdownMenuLabel>
+                                  {schedulePresets.map(option => (
+                                    <DropdownMenuItem
+                                      key={option.key}
+                                      onClick={() => {
+                                        setIsSendMenuOpen(false);
+                                        submitScheduled(option.at.getTime());
+                                      }}
+                                      data-track-category='CHAT_INPUT'
+                                      data-track-name={`SCHEDULE_PRESET_${option.trackId}`}
+                                    >
+                                      {option.label}
+                                    </DropdownMenuItem>
+                                  ))}
+                                  <DropdownMenuSeparator />
+                                </>
+                              ) : (
+                                <DropdownMenuItem
+                                  onClick={() => {
+                                    void handleSend('send_menu');
+                                    setIsSendMenuOpen(false);
+                                  }}
+                                  data-track-category='CHAT_INPUT'
+                                  data-track-name='SEND_FROM_MENU'
+                                >
+                                  <ArrowUp className='h-4 w-4' /> Send now
+                                </DropdownMenuItem>
+                              )}
                               <DropdownMenuItem
                                 onClick={() => {
                                   setIsSendMenuOpen(false);
                                   openScheduleDialog();
                                 }}
+                                data-track-category='CHAT_INPUT'
+                                data-track-name='OPEN_SCHEDULE_DIALOG'
                               >
-                                <Clock className='h-4 w-4' /> Schedule message
+                                <Clock className='h-4 w-4' />{' '}
+                                {showSchedulePresets ? 'Custom time' : 'Schedule message'}
                               </DropdownMenuItem>
                             </DropdownMenuContent>
                           </DropdownMenu>
                         </div>
                       ) : (
                         <Tooltip
-                          content='Send message'
+                          content={sendDisabledReason ?? 'Send message'}
                           side='top'
                           delayDuration={1000}
                           skipDelayDuration={1000}
                         >
                           <button
                             type='button'
-                            onClick={() => void handleSend()}
+                            onClick={() => void handleSend('send_button')}
                             disabled={disabled || sendDisabled || isSending || !hasSendableContent}
-                            className={`${compact ? 'flex size-8 items-center justify-center rounded-full p-0' : 'rounded-md p-2'} transition-all duration-200 ease-in-out focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#FF4F4F] focus-visible:outline-offset-2 ${
+                            className={`${compact ? 'flex size-8 items-center justify-center rounded-full p-0' : 'rounded-md p-2'} transition-all duration-200 ease-in-out focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary focus-visible:outline-offset-2 ${
                               hasSendableContent && !disabled && !sendDisabled
                                 ? 'bg-primary text-primary-foreground hover:bg-primary/90'
                                 : 'bg-muted text-muted-foreground cursor-not-allowed opacity-80'
                             }`}
                             aria-label='Send message'
                             data-testid='send-message-button'
-                            data-track-category='CHAT_INPUT'
-                            data-track-name='SEND_MESSAGE'
-                            data-track-metadata={JSON.stringify({
-                              ...(conversationId !== null ? { conversationId } : { channelId }),
-                              hasAttachments: allAttachments.length > 0,
-                            })}
                           >
                             {isSending ? (
                               <Loader2 className='h-4 w-4 animate-spin' />
@@ -2190,14 +2471,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
           <ScheduleMessageDialog
             open={isScheduleDialogOpen}
             onOpenChange={setIsScheduleDialogOpen}
-            onConfirm={scheduledFor => {
-              const html = editor?.getHTML() ?? '';
-              const files = allAttachments
-                .map(a => a.file)
-                .filter((f): f is File => f instanceof File);
-              void onScheduleSend(scheduledFor, html, files);
-              editor?.commands.clearContent(true);
-            }}
+            onConfirm={submitScheduled}
           />
         )}
 

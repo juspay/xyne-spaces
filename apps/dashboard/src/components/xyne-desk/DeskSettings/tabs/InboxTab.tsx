@@ -2,14 +2,18 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Plus, X, Check, Pencil, Trash2 } from 'lucide-react';
 import type { EmailSignature } from '@xyne/shared';
 import { v4 as uuidv4 } from 'uuid';
+import { toast } from 'sonner';
 import Avatar from '../../../ui/Avatar/Avatar';
 import { UserSelector } from '../../../Tickets/CreateTicketModal/UserSelector';
 import { DeskIntegrationCard } from '../../DeskIntegrationCard/DeskIntegrationCard';
 import { SlackDeskIntegrationCard } from '../../DeskIntegrationCard/SlackDeskIntegrationCard';
-import { AppDeskIntegrationCard } from '../../DeskIntegrationCard/AppDeskIntegrationCard';
 import { SocialMediaDeskIntegrationCard } from '../../DeskIntegrationCard/SocialMediaDeskIntegrationCard';
+import { AppStoreDeskIntegrationCard } from '../../DeskIntegrationCard/AppStoreDeskIntegrationCard';
+import { ConnectedAppsSection } from '../ConnectedAppsSection';
 import { InlineSignatureEditor } from '../InlineSignatureEditor';
 import { Switch } from '../../../ui/Switch';
+import { matchesUserQuery } from '../../../../utils/userDisplayName';
+import { useChannelApps } from '../../../../hooks/useChannelApps';
 import { useUsers } from '../../../../hooks/useUsers';
 import { useZero } from '../../../../hooks/useZero';
 import { mutators } from '../../../../zero/mutators';
@@ -25,12 +29,11 @@ export const SIGNATURE_AUTO_APPEND_STORAGE_KEY = 'signature-auto-append-enabled'
 const CC_USER_RESULT_LIMIT = 50;
 
 function filterUsersByQuery(
-  users: ReadonlyArray<{ id: string; name: string; email: string }>,
+  users: ReadonlyArray<{ id: string; name: string; email: string; displayName?: string | null }>,
   query: string,
 ) {
-  const q = query.trim().toLowerCase();
-  if (!q) return [];
-  return users.filter(u => u.name.toLowerCase().includes(q) || u.email.toLowerCase().includes(q));
+  if (!query.trim()) return [];
+  return users.filter(u => matchesUserQuery(u, query));
 }
 
 interface InboxTabProps {
@@ -48,20 +51,38 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
     isSlack,
     isApp,
     isSocial,
+    isDeskChannel,
     ownerId,
     setOwner,
     sendAsAlias,
     setSendAsAlias,
     sendAsAliasError,
+    isDl,
+    dlEmail,
+    dlAliases,
+    setDlAliases,
     ccEmails,
     setCcEmails,
     twoStepSend,
     setTwoStepSend,
     autoMergeEmails,
     setAutoMergeEmails,
+    appWebhookDeliveryEnabled,
+    setAppWebhookDeliveryEnabled,
   } = form;
 
   const [ccInputValue, setCcInputValue] = useState('');
+  const [dlAliasInput, setDlAliasInput] = useState('');
+  const commitDlAlias = (): boolean => {
+    const candidate = dlAliasInput.trim().toLowerCase();
+    if (!candidate) return true;
+    if (!/^[^\s@,()]+@[^\s@,()]+\.[^\s@,()]+$/.test(candidate)) return false;
+    if (candidate !== dlEmail?.trim().toLowerCase() && !dlAliases.includes(candidate)) {
+      setDlAliases(prev => [...prev, candidate]);
+    }
+    setDlAliasInput('');
+    return true;
+  };
   const [ccHighlightIndex, setCcHighlightIndex] = useState(0);
   const [signatureModalOpen, setSignatureModalOpen] = useState(false);
   const [editingSignature, setEditingSignature] = useState<EmailSignature | undefined>();
@@ -69,6 +90,12 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
     () => localStorage.getItem(SIGNATURE_AUTO_APPEND_STORAGE_KEY) !== 'false',
   );
   const signatureModalRef = useRef<HTMLDivElement>(null);
+
+  // Webhook delivery is a per-channel preference that now applies to any desk
+  // carrying app bindings, not just ChannelType.APP. Keep it visible on APP desks
+  // even before the first connect so the pre-existing control never disappears.
+  const { data: connectedApps } = useChannelApps(channelId, isDeskChannel && canManage);
+  const showAppWebhookDelivery = isApp || (connectedApps?.length ?? 0) > 0;
 
   useEffect(() => {
     if (signatureModalOpen) {
@@ -91,8 +118,14 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
     <>
       {isEmail && <DeskIntegrationCard channelId={channelId} canManage={canManage} />}
       {isSlack && <SlackDeskIntegrationCard channelId={channelId} canManage={canManage} />}
-      {isApp && <AppDeskIntegrationCard channelId={channelId} canManage={canManage} />}
       {isSocial && <SocialMediaDeskIntegrationCard channelId={channelId} canManage={canManage} />}
+      {isSocial && <AppStoreDeskIntegrationCard channelId={channelId} canManage={canManage} />}
+      {/*
+        Single owner of app connections on every desk type, APP included. Apps are the
+        one source type that went 1:N per channel, so unlike Slack/social they cannot be
+        managed by a single-connection card.
+      */}
+      {isDeskChannel && <ConnectedAppsSection channelId={channelId} canManage={canManage} />}
 
       <div className='flex flex-col gap-[16px]'>
         <div className='flex flex-col gap-[4px]'>
@@ -154,6 +187,65 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
           {sendAsAliasError && (
             <p className='text-[12px] leading-[120%] text-red-500'>{sendAsAliasError}</p>
           )}
+        </div>
+      )}
+
+      {isEmail && isDl && (
+        <div className='flex flex-col gap-[16px]'>
+          <div className='flex flex-col gap-[4px]'>
+            <div className='text-desk-label'>Additional inbound addresses</div>
+            <div className='text-desk-helper w-full max-w-[500px]'>
+              Mail addressed to any of these also lands in this desk. Add domain aliases of{' '}
+              {dlEmail ?? 'the distribution list'} — mail sent to an alias keeps the alias in its To
+              header, so it is not matched otherwise. Replies still go out from{' '}
+              {dlEmail ?? 'the distribution list'}.
+            </div>
+          </div>
+          <div
+            className={`flex w-full max-w-[500px] flex-wrap items-center gap-1.5 rounded-[10px] border border-border bg-background p-[6px] text-sm shadow-sm focus-within:ring-1 focus-within:ring-desk-accent ${
+              !canManage ? 'cursor-not-allowed bg-muted/40 opacity-60' : ''
+            }`}
+          >
+            {dlAliases.map((alias, idx) => (
+              <div
+                key={`${alias}-${idx}`}
+                className='inline-flex shrink-0 items-center gap-[4px] whitespace-nowrap rounded-[6px] bg-desk-accent-subtle py-[2px] pl-[6px] pr-[4px]'
+              >
+                <span className='text-[13px] font-medium leading-[18px] tracking-[-0.2px] text-desk-accent-foreground'>
+                  {alias}
+                </span>
+                <button
+                  type='button'
+                  onClick={() => setDlAliases(prev => prev.filter((_, i) => i !== idx))}
+                  disabled={!canManage}
+                  className='text-desk-accent-foreground hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50'
+                  data-track-category='DeskSettings'
+                  data-track-name='RemoveDlAlias'
+                  aria-label={`Remove ${alias}`}
+                >
+                  <X size={14} />
+                </button>
+              </div>
+            ))}
+            <input
+              type='text'
+              value={dlAliasInput}
+              onChange={e => setDlAliasInput(e.target.value)}
+              onKeyDown={e => {
+                if (e.key !== 'Enter' && e.key !== ',' && e.key !== 'Tab') return;
+                if (!dlAliasInput.trim()) return;
+                e.preventDefault();
+                if (!commitDlAlias()) toast.error('Enter a valid email address');
+              }}
+              onBlur={() => commitDlAlias()}
+              placeholder={dlAliases.length === 0 ? 'support.global@yourcompany.io' : ''}
+              readOnly={!canManage}
+              disabled={!canManage}
+              className='h-[24px] min-w-[180px] flex-1 border-0 bg-transparent px-[6px] text-sm text-foreground placeholder:text-muted-foreground focus:outline-none disabled:cursor-not-allowed'
+              data-track-category='DeskSettings'
+              data-track-name='DlAliasInput'
+            />
+          </div>
         </div>
       )}
 
@@ -284,6 +376,25 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
         </div>
       )}
 
+      {showAppWebhookDelivery && (
+        <div className='flex items-start justify-between gap-4'>
+          <div className='flex flex-col gap-[4px]'>
+            <div className='text-desk-label'>Send replies to app webhook</div>
+            <div className='text-desk-helper w-full max-w-[500px]'>
+              Forward every reply to the app webhook, and accept the reply only once the webhook
+              responds with 200. Turn this off if the app does not consume replies.
+            </div>
+          </div>
+          <Switch
+            variant='desk'
+            checked={appWebhookDeliveryEnabled}
+            onCheckedChange={setAppWebhookDeliveryEnabled}
+            disabled={!canManage}
+            aria-label='Toggle sending replies to the app webhook'
+          />
+        </div>
+      )}
+
       {isEmail && (
         <div className='flex items-start justify-between gap-4'>
           <div className='flex flex-col gap-[4px]'>
@@ -348,6 +459,7 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
           {signatureModalOpen && (
             <div ref={signatureModalRef}>
               <InlineSignatureEditor
+                signatureCount={signatures?.length ?? 0}
                 initial={editingSignature}
                 onSave={data => {
                   const now = Date.now();
@@ -448,6 +560,7 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
                       {!sig.isDefault && (
                         <button
                           type='button'
+                          data-ph-capture-attribute-track-id='set_default_signature'
                           onClick={() =>
                             zero.mutate(
                               mutators.emailSignature.setDefault({
@@ -456,9 +569,13 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
                               }),
                             )
                           }
-                          className='text-[13px] font-medium leading-[120%] tracking-[-0.1px] text-foreground'
+                          className='h-auto p-0 text-[13px] font-medium leading-[120%] tracking-[-0.1px] text-foreground hover:bg-transparent'
                           data-track-category='DeskSettings'
                           data-track-name='SetDefaultSignature'
+                          data-track-metadata={JSON.stringify({
+                            signatureCount: signatures?.length ?? 0,
+                            isDefault: true,
+                          })}
                         >
                           Set as default
                         </button>
@@ -479,8 +596,9 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
                       </button>
                       <button
                         type='button'
+                        data-ph-capture-attribute-track-id='delete_signature'
                         onClick={() => zero.mutate(mutators.emailSignature.delete({ id: sig.id }))}
-                        className='text-desk-muted transition-colors hover:text-red-500'
+                        className='size-auto p-0 text-desk-muted transition-colors hover:bg-transparent hover:text-red-500'
                         title='Delete signature'
                         aria-label='Delete signature'
                         data-track-category='DeskSettings'

@@ -1,14 +1,15 @@
 /**
- * Direct Vespa access for the `spaces-vespa-query` MCP tool — the raw-YQL
- * escape hatch, gated by DIRECT_VESPA_SEARCH. The agent writes its own YQL;
- * queryDirect() injects the per-schema ACL guard, picks a rank profile, runs
- * the query against VESPA_QUERY_ENDPOINT, and shapes the response.
+ * Direct Vespa access for the `spaces-vespa-search` MCP tool and the other
+ * direct-Vespa callers (corpus scan, evidence pack, context assembler), gated
+ * by DIRECT_VESPA_SEARCH. Callers hand queryDirect() a YQL string built in
+ * code; it injects the per-schema ACL guard, picks a rank profile, runs the
+ * query against VESPA_QUERY_ENDPOINT, and shapes the response.
  *
  * NOTE: this is NOT used by `spaces-search`. That tool always goes through the
  * Spaces backend /api/vespaSearch (the canonical YqlBuilder). An earlier
  * structured-params builder (searchDirect/buildYql) lived here too, but it was
  * a drift-prone second copy of YqlBuilder and was removed once spaces-search
- * was decoupled — only the raw-YQL path remains.
+ * was decoupled.
  *
  * ACL semantics below mirror backend/src/vespa/src/utils/YqlBuilder.ts — keep
  * aclConditionForSchema() in sync with any backend ACL/schema change.
@@ -128,9 +129,16 @@ export function convertDateLiteralsToMs(yql: string): string {
 // Referenced by injectAclGuard()/aclConditionForSchema() to harden agent-written
 // raw YQL. Mirrors the per-schema ACL in backend/src/vespa/src/utils/YqlBuilder.ts.
 
+/** Bench lane (onyx-ask-ai child spawned with ONYX_BENCH_VESPA=true): the
+ *  benchmark ingest marks its channels `permissions: ["*"]` = everyone in the
+ *  workspace can read */
+const isBenchLane = (): boolean => (process.env["ONYX_BENCH_VESPA"] ?? "").trim() === "true";
+
 export const ACL = {
   simple: (userId: string) =>
-    `permissions contains "${esc(userId)}"`,
+    isBenchLane()
+      ? `(permissions contains "${esc(userId)}" or permissions contains "*" or isPrivate contains "false")`
+      : `permissions contains "${esc(userId)}"`,
 
   // Member-or-public guard, shared by channel (chat_container) AND ticket:
   // visible if the user is in `permissions` (member list) OR the (owning) channel
@@ -741,8 +749,6 @@ export async function queryDirect(
       : {};
     Object.assign(payload, Object.keys(explicit).length > 0 ? explicit : defaultNativeInputs(query));
   }
-
-  console.error("[vespa-direct] raw YQL:", safeYql, "| profile:", profile);
 
   const debug = { payloads: [{ stage: "direct", yql: safeYql, vespaParams: {} as Record<string, unknown> }] };
 

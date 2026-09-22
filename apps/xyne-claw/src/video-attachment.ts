@@ -32,6 +32,7 @@ import { mkdtemp, writeFile, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { LITELLM } from "./config.js";
+import { matchesAttachmentType, VIDEO_ATTACHMENT, VIDEO_MIME_PREFIX } from "xyne-claw-shared";
 
 import { createLogger } from "./logger.js";
 const log = createLogger("video-attachment");
@@ -48,16 +49,11 @@ const MAX_NARRATIVE_CHARS = 12_000; // final narrative cap (footer appended if h
 const FFMPEG_TIMEOUT_MS = 120_000;  // 2 min per ffmpeg invocation
 const MODEL_TIMEOUT_MS = 60_000;    // per rolling-state model call
 
-export const VIDEO_MIME_PREFIX = "video/";
-export const VIDEO_EXTENSIONS = new Set([
-  ".mov", ".mp4", ".m4v", ".webm", ".avi", ".mkv", ".mpg", ".mpeg", ".wmv", ".flv",
-]);
+export { VIDEO_MIME_PREFIX };
+export const VIDEO_EXTENSIONS = VIDEO_ATTACHMENT.extensions;
 
-export function isVideoAttachment(fileName: string, mimeType: string): boolean {
-  if ((mimeType ?? "").toLowerCase().startsWith(VIDEO_MIME_PREFIX)) return true;
-  const dot = fileName.lastIndexOf(".");
-  if (dot < 0) return false;
-  return VIDEO_EXTENSIONS.has(fileName.slice(dot).toLowerCase());
+export function isVideoAttachment(fileName: string, mimeType?: string | null): boolean {
+  return matchesAttachmentType(fileName, mimeType, VIDEO_ATTACHMENT.mimeTypes, VIDEO_ATTACHMENT.extensions);
 }
 
 export interface VideoKeyframe {

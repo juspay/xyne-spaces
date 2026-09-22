@@ -159,6 +159,8 @@ export const PulseCreateActionableModal: React.FC<PulseCreateActionableModalProp
       onClick={e => {
         if (e.target === e.currentTarget) onClose();
       }}
+      data-track-category='MESSAGE'
+      data-track-name='CLOSE_PULSE_MODAL_BACKDROP'
       onKeyDown={e => {
         if (e.key === 'Escape') onClose();
       }}
@@ -181,6 +183,8 @@ export const PulseCreateActionableModal: React.FC<PulseCreateActionableModalProp
           <button
             type='button'
             onClick={onClose}
+            data-track-category='MESSAGE'
+            data-track-name='CLOSE_PULSE_MODAL'
             className='text-muted-foreground hover:text-foreground transition-colors rounded-md p-1 hover:bg-accent'
             aria-label='Close modal'
           >
@@ -205,6 +209,8 @@ export const PulseCreateActionableModal: React.FC<PulseCreateActionableModalProp
                   id='pulse-merchant'
                   type='button'
                   onClick={handleEditMerchantClick}
+                  data-track-category='MESSAGE'
+                  data-track-name='START_EDIT_PULSE_MERCHANT'
                   disabled={submitting}
                   className='border border-border rounded-lg px-3 py-2 text-sm text-foreground bg-muted hover:bg-accent transition-colors flex items-center justify-between text-left focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent disabled:opacity-60 disabled:cursor-not-allowed w-full'
                 >
@@ -266,6 +272,8 @@ export const PulseCreateActionableModal: React.FC<PulseCreateActionableModalProp
                               key={org.orgId}
                               type='button'
                               onClick={() => handleSelectOrg(org)}
+                              data-track-category='MESSAGE'
+                              data-track-name='SELECT_PULSE_ORG'
                               className={`w-full text-left px-3 py-2 text-xs transition-colors border-none cursor-pointer ${
                                 isCurrentOrg
                                   ? 'bg-accent text-action-primary font-medium'
@@ -282,6 +290,8 @@ export const PulseCreateActionableModal: React.FC<PulseCreateActionableModalProp
                     <button
                       type='button'
                       onClick={() => setIsEditingMerchant(false)}
+                      data-track-category='MESSAGE'
+                      data-track-name='CANCEL_EDIT_PULSE_MERCHANT'
                       className='text-xs text-muted-foreground hover:text-foreground'
                     >
                       Cancel
@@ -348,6 +358,8 @@ export const PulseCreateActionableModal: React.FC<PulseCreateActionableModalProp
             <button
               type='button'
               onClick={onClose}
+              data-track-category='MESSAGE'
+              data-track-name='CANCEL_PULSE_MODAL'
               disabled={submitting}
               className='px-4 py-2 text-sm font-medium text-muted-foreground hover:text-foreground rounded-lg hover:bg-accent transition disabled:opacity-50'
             >

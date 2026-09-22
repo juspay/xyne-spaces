@@ -25,6 +25,7 @@ import {
 import {
   listDigitalTwinPipelineEvents,
   getDigitalTwinPipelineEvent,
+  retryDigitalTwinPipelineEvent,
   getDigitalTwinStatus,
   type PipelineEventSummary,
   type PipelineEventDetail,
@@ -467,6 +468,17 @@ function EventDetail({ userId, id }: { userId: string; id: string }) {
   const [detail, setDetail] = useState<PipelineEventDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [retry, setRetry] = useState<"idle" | "sending" | "started" | "failed">("idle");
+
+  const onRetry = async (): Promise<void> => {
+    setRetry("sending");
+    try {
+      await retryDigitalTwinPipelineEvent(userId, id);
+      setRetry("started");
+    } catch {
+      setRetry("failed");
+    }
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -530,6 +542,29 @@ function EventDetail({ userId, id }: { userId: string; id: string }) {
         <div className="rounded-lg border border-xyne-error-border bg-xyne-error-bg px-[12px] py-[9px] text-[12px] text-xyne-error-fg">
           <span className="font-semibold">Pipeline error: </span>
           {trace?.error ?? detail.error ?? "unknown error"}
+        </div>
+      )}
+
+      {/* Retry — only for runs that stored nothing, so it can't duplicate
+          candidates. Re-walks the same window; results arrive as new events. */}
+      {(detail.status === "error" || detail.status === "empty") && detail.sourceKind && (
+        <div className="flex items-center gap-[10px]">
+          <button
+            type="button"
+            onClick={onRetry}
+            disabled={retry === "sending" || retry === "started"}
+            className="flex items-center gap-[6px] rounded border border-xyne-border px-[10px] py-[5px] text-[11.5px] text-xyne-fg-secondary transition-colors hover:bg-xyne-surface-hover disabled:opacity-50"
+          >
+            {retry === "sending" && <SpinnerGapIcon size={12} className="animate-spin" />}
+            {retry === "started" ? "Retry started" : "Retry this window"}
+          </button>
+          <span className="text-[11px] text-xyne-fg-muted">
+            {retry === "started"
+              ? "Running in the background — refresh in a minute to see the new run."
+              : retry === "failed"
+                ? "Could not start the retry."
+                : `Re-runs ${detail.sourceKind} for this window.`}
+          </span>
         </div>
       )}
 

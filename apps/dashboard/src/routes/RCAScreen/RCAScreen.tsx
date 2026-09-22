@@ -411,10 +411,21 @@ const RCADetailScreen = () => {
           <h3 className='text-lg font-semibold text-foreground'>Unsaved changes</h3>
           <p className='mt-2 text-sm text-muted-foreground'>{confirmDialog.message}</p>
           <div className='mt-6 flex justify-end gap-2'>
-            <Button type='button' variant='outline' onClick={() => closeConfirmDialog(false)}>
+            <Button
+              type='button'
+              variant='outline'
+              onClick={() => closeConfirmDialog(false)}
+              data-track-category='RCA'
+              data-track-name='CANCEL_RCA_CONFIRM'
+            >
               Skip Save
             </Button>
-            <Button type='button' onClick={() => closeConfirmDialog(true)}>
+            <Button
+              type='button'
+              onClick={() => closeConfirmDialog(true)}
+              data-track-category='RCA'
+              data-track-name='CONFIRM_RCA_ACTION'
+            >
               Save and Continue
             </Button>
           </div>

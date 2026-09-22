@@ -17,7 +17,9 @@
 // Auth: same `x-s2s-key` header that the legacy POST path uses. No handshake.
 
 import { Agent } from "undici";
-import { ClawSseParser, type ClawStreamEvent, type ClawDoneStatus, type Todo } from "xyne-claw-shared";
+import { errMsg } from "./errors.js";
+import { ClawSseParser, type ClawStreamEvent, type ClawDoneStatus, type Todo, type UiWidget } from "xyne-claw-shared";
+import { ingestArtifactSignals, ingestSandboxPreviewSignals } from "./conversation-artifact-signals.js";
 
 // An SSE run goes silent between frames while the model composes; undici's
 // default 300s bodyTimeout severs the socket mid-stream ("terminated"). Every
@@ -34,6 +36,7 @@ export interface ClawStreamHandlers {
   onSandboxPreview?: (sessionId: string, payload: Extract<ClawStreamEvent, { event: "sandbox-preview" }>["payload"]) => void | Promise<void>;
   onPlan?: (sessionId: string, todos: Todo[]) => void | Promise<void>;
   onPr?: (sessionId: string, pr: Extract<ClawStreamEvent, { event: "pr" }>["pr"]) => void | Promise<void>;
+  onUiWidget?: (sessionId: string, widget: UiWidget) => void | Promise<void>;
   onProgressLabel?: (sessionId: string, payload: Extract<ClawStreamEvent, { event: "progress-label" }>["payload"]) => void | Promise<void>;
   onDebug?: (sessionId: string, debugEvent: unknown) => void | Promise<void>;
   onCancelled?: (sessionId: string, reason: string | undefined) => void | Promise<void>;
@@ -48,6 +51,14 @@ export interface ClawStreamHandlers {
   onAny?: (event: ClawStreamEvent) => void;
 }
 
+export interface StreamArtifactContext {
+  conversationId: string;
+  userId: string;
+  orgId?: string | null;
+  messageId?: string | null;
+  runId?: string | null;
+}
+
 export interface ConsumeClawStreamOptions {
   url: string;
   body: Record<string, unknown>;
@@ -59,6 +70,7 @@ export interface ConsumeClawStreamOptions {
    *  the expected next value). Default: log and continue. Override to fail
    *  the run hard if your caller needs strict ordering. */
   onSeqGap?: (expected: number, got: number) => void;
+  artifactContext?: StreamArtifactContext;
 }
 
 export interface ConsumeClawStreamResult {
@@ -106,7 +118,7 @@ export async function consumeClawStream(opts: ConsumeClawStreamOptions): Promise
     throw new Error("Claw SSE response has no body");
   }
 
-  return consumeAlreadyOpenStream(response.body as ReadableStream<Uint8Array>, opts.handlers, opts.onSeqGap);
+  return consumeAlreadyOpenStream(response.body as ReadableStream<Uint8Array>, opts.handlers, opts.onSeqGap, opts.artifactContext);
 }
 
 // Consume an already-open SSE body stream. Used when the caller already has
@@ -116,6 +128,7 @@ export async function consumeAlreadyOpenStream(
   body: ReadableStream<Uint8Array>,
   handlers: ClawStreamHandlers,
   onSeqGap?: (expected: number, got: number) => void,
+  artifactContext?: StreamArtifactContext,
 ): Promise<ConsumeClawStreamResult> {
   const parser = new ClawSseParser();
   const decoder = new TextDecoder("utf-8");
@@ -125,6 +138,7 @@ export async function consumeAlreadyOpenStream(
   let result: ClawDoneStatus | undefined;
   let errorReason: string | undefined;
   let lastEventName: string | undefined;
+  const ingestGate = { inFlight: 0, warned: false };
 
   const reader = body.getReader();
   try {
@@ -145,6 +159,7 @@ export async function consumeAlreadyOpenStream(
         lastEventName = event.event;
         try { handlers.onAny?.(event); } catch (err) { logHandlerError("onAny", err); }
         await dispatch(event, handlers);
+        if (artifactContext) scheduleIngest(event, artifactContext, ingestGate);
         if (event.event === "done") {
           result = event.result;
         } else if (event.event === "error") {
@@ -186,6 +201,9 @@ async function dispatch(event: ClawStreamEvent, handlers: ClawStreamHandlers): P
       case "pr":
         await handlers.onPr?.(event.sessionId, event.pr);
         return;
+      case "ui-widget":
+        await handlers.onUiWidget?.(event.sessionId, event.widget);
+        return;
       case "progress-label":
         await handlers.onProgressLabel?.(event.sessionId, event.payload);
         return;
@@ -206,8 +224,47 @@ async function dispatch(event: ClawStreamEvent, handlers: ClawStreamHandlers): P
   }
 }
 
+const MAX_IN_FLIGHT_INGESTS = 32;
+
+interface IngestGate {
+  inFlight: number;
+  warned: boolean;
+}
+
+function scheduleIngest(event: ClawStreamEvent, ctx: StreamArtifactContext, gate: IngestGate): void {
+  if (event.event !== "invocation" && event.event !== "sandbox-preview") return;
+  if (gate.inFlight >= MAX_IN_FLIGHT_INGESTS) {
+    if (!gate.warned) {
+      gate.warned = true;
+      console.warn(
+        `[consume-claw-stream] artifact ingestion saturated at ${MAX_IN_FLIGHT_INGESTS} in flight; dropping further frames for this stream`,
+      );
+    }
+    return;
+  }
+  gate.inFlight++;
+  void ingestFrame(event, ctx).finally(() => {
+    gate.inFlight--;
+  });
+}
+
+async function ingestFrame(event: ClawStreamEvent, ctx: StreamArtifactContext): Promise<void> {
+  try {
+    if (event.event === "invocation") {
+      const inv = event.toolInvocation as { toolName?: unknown; result?: unknown; isError?: unknown } | null;
+      if (!inv || typeof inv !== "object" || inv.isError === true) return;
+      if (typeof inv.toolName !== "string") return;
+      await ingestArtifactSignals({ ...ctx, toolName: inv.toolName, toolResult: inv.result });
+    } else if (event.event === "sandbox-preview") {
+      await ingestSandboxPreviewSignals(ctx, event.payload);
+    }
+  } catch (err) {
+    logHandlerError(`${event.event}:artifact-ingest`, err);
+  }
+}
+
 function logHandlerError(eventName: string, err: unknown): void {
-  console.warn(`[consume-claw-stream] handler for "${eventName}" threw: ${err instanceof Error ? err.message : String(err)}`);
+  console.warn(`[consume-claw-stream] handler for "${eventName}" threw: ${errMsg(err)}`);
 }
 
 // ── SSE-to-legacy-POSTs bridge ─────────────────────────────────────────────
@@ -262,7 +319,7 @@ export async function bridgeClawSseToLegacyPosts(opts: BridgeOptions): Promise<v
         signal: AbortSignal.timeout(15_000),
       });
     } catch (err) {
-      console.warn(`[${tag}] progress POST failed (session=${sid}): ${err instanceof Error ? err.message : String(err)}`);
+      console.warn(`[${tag}] progress POST failed (session=${sid}): ${errMsg(err)}`);
     }
   };
 
@@ -294,6 +351,9 @@ export async function bridgeClawSseToLegacyPosts(opts: BridgeOptions): Promise<v
         onPr: async (sessionId, pr) => {
           await postProgress({ sessionId, kind: "pr", pr });
         },
+        onUiWidget: async (sessionId, widget) => {
+          await postProgress({ sessionId, kind: "ui-widget", widget });
+        },
         onProgressLabel: async (sessionId, payload) => {
           await postProgress({ sessionId, ...payload });
         },
@@ -316,11 +376,11 @@ export async function bridgeClawSseToLegacyPosts(opts: BridgeOptions): Promise<v
           body: JSON.stringify({ ...result.result, sessionId: sid }),
         });
       } catch (err) {
-        console.warn(`[${tag}] callback POST failed (session=${sid}): ${err instanceof Error ? err.message : String(err)}`);
+        console.warn(`[${tag}] callback POST failed (session=${sid}): ${errMsg(err)}`);
       }
     }
   } catch (err) {
-    console.error(`[${tag}] bridge failed (session=${sid}): ${err instanceof Error ? err.message : String(err)}`);
+    console.error(`[${tag}] bridge failed (session=${sid}): ${errMsg(err)}`);
     // Surface failure to the caller as a final callback POST so their run
     // tracker doesn't hang in "running" forever. Matches the failure-callback
     // claw's catch handler would have sent in the legacy path.

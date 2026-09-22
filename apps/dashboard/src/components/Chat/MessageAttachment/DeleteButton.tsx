@@ -118,6 +118,8 @@ export const DeleteButton = memo<DeleteButtonProps>(
                   e.stopPropagation();
                   setShowDeleteConfirm(false);
                 }}
+                data-track-category='MESSAGE_ATTACHMENT'
+                data-track-name='CLOSE_DELETE_ATTACHMENT_DIALOG'
                 variant='secondary'
                 aria-label='Close dialog'
               >
@@ -141,6 +143,8 @@ export const DeleteButton = memo<DeleteButtonProps>(
                   e.stopPropagation();
                   setShowDeleteConfirm(false);
                 }}
+                data-track-category='MESSAGE_ATTACHMENT'
+                data-track-name='CANCEL_DELETE_ATTACHMENT'
                 disabled={isDeleting}
                 variant='secondary'
               >
@@ -152,6 +156,9 @@ export const DeleteButton = memo<DeleteButtonProps>(
                   e.stopPropagation();
                   void handleConfirmDelete();
                 }}
+                data-track-category='MESSAGE_ATTACHMENT'
+                data-track-name='CONFIRM_DELETE_ATTACHMENT'
+                trackId='delete_attachment'
                 disabled={isDeleting}
                 variant='destructive'
               >

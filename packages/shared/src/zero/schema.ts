@@ -33,6 +33,7 @@ import {
   CallOrigin,
   CallStatus,
   CallType,
+  CallVisibility,
   CanvasCommentThreadStatus,
   CanvasRole,
   CanvasVisibility,
@@ -74,6 +75,7 @@ import {
   RCAStatus,
   RecapEntityType,
   RecurringCallSeriesStatus,
+  RingStatus,
   ReenterMode,
   ReleaseEventType,
   ReleaseTrackingMode,
@@ -90,6 +92,7 @@ import {
   TicketStageRequestStatus,
   TicketStatus,
   TicketStatusV2,
+  UserActivityStatus,
   UserPresenceStatus,
   UserResponsibility,
   UserStatus,
@@ -163,6 +166,7 @@ export const ticketTable = table('tickets')
     description: string(),
     status: enumeration<TicketStatus>(),  // Deprecated - use statusV2
     statusV2: enumeration<TicketStatusV2>(),
+    messageId: string().optional(), // Source message this ticket was created from
     createdBy: string(),
     updatedBy: string(),
     assignedTo: string().optional(),
@@ -184,6 +188,7 @@ export const ticketTable = table('tickets')
     userGroupId: string(),
     boardId: string(),
     stageName: string(),
+    isStageOverdue: boolean().optional(),
     ticketType: string().optional(),
     isArchived: boolean(),
     kanbanPosition: string().optional(),
@@ -197,6 +202,17 @@ export const ticketTable = table('tickets')
     emailReplyEnabled: boolean(),
   })
   .primaryKey('id');
+
+export const ticketDescriptionTable = table('ticket_descriptions')
+  .columns({
+    ticketId: string(),
+    workspaceId: string(),
+    channelId: string(),
+    description: string(),
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey('ticketId');
 
 export const subTicketTable = table('sub_tickets')
   .columns({
@@ -404,6 +420,8 @@ export const userGroupMappingTable = table('user_group_mappings')
     roleId: string().optional(),
     onCallSetNumber: number().optional(),
     onCallSetNumbers: json<number[]>(),
+    startOffset: number().optional(),
+    isNotified: boolean(),
     createdAt: number(),
     updatedAt: number(),
   })
@@ -489,26 +507,10 @@ export const workflowTable = table('workflows')
     eventType: string(),
     automationSeriesId: string().optional(),
     scheduledAt: number().optional(),
+    folderId: string().optional(),
+    summary: string().optional(),
     createdAt: number(),
     updatedAt: number(),
-  })
-  .primaryKey('id');
-
-export const workflowExecutionTable = table('workflow_executions')
-  .columns({
-    workspaceId: string(), // denormalized tenant key (stamped on insert)
-    id: string(),
-    workflowId: string(),
-    workflowType: string().optional(),
-    status: string(),
-    parentWorkflowExecutionId: string().optional(),
-    sourceStepsId: string().optional(),
-    stepInputOverrideData: string().optional(),
-    tag: string(),
-    createdAt: number(),
-    updatedAt: number(),
-    ignoreDuration: number(),
-    createdBy: string().optional(),
   })
   .primaryKey('id');
 
@@ -525,6 +527,7 @@ export const userGroupTable = table('user_groups')
     rotationInterval: enumeration<RotationInterval>().optional(),
     rotationStartDate: number().optional(),
     reassignOnUnavailable: boolean().optional(),
+    maxWorkload: number().optional(),
     createdAt: number(),
     updatedAt: number(),
     createdBy: string().optional(),
@@ -559,6 +562,7 @@ export const userTable = table('users')
     /** Assignment availability promoted from user_presence for query performance (dual-written) */
     assignmentUnavailableUntil: number().optional(),
     calendarVisibility: enumeration<CalendarVisibility>(),
+    activityStatus: enumeration<UserActivityStatus>().optional(),
   })
   .primaryKey('id');
 
@@ -889,6 +893,7 @@ export const conversationTable = table("conversations")
     ticket_md: string().optional(), // Markdown format ticket card data
     initial_message_md: string().optional(), // Markdown format initial message data
     parent_message_md: string().optional(), // Markdown format parent message data
+    sub_tickets_md: string().optional(), // Markdown format sub-ticket card snapshots
     doNotPostToChannel: boolean().optional(),
     createdAt: number(),
     threadType: string().optional(),
@@ -982,6 +987,7 @@ export const messageAttachmentTable = table('message_attachments')
     thumbnailUrl: string().optional(),
     isDeleted: boolean(),
     uploadStatus: enumeration<AttachmentUploadStatus>().optional(),
+    position: number().optional(),
   })
   .primaryKey('id');
 
@@ -1074,6 +1080,7 @@ export const activityTable = table('activities')
     conversationId: string().optional(),
     channelId: string().optional(),
     canvasId: string().optional(),
+    trackId: string().optional(),
     blockId: string().optional(),
     conversationSeenCutoffAt: number().optional(),
     actorId: string(),
@@ -1130,7 +1137,7 @@ export const surfaceNudgeTable = table('surface_nudges')
     state: enumeration<NudgeState>(),
     visibleTo: string().optional(),
     surfaceNudgeCountId: string().optional(),
-    projectId: string(),
+    projectId: string().optional(),
     createdAt: number(),
     updatedAt: number(),
   })
@@ -1190,10 +1197,12 @@ export const callTable = table('calls')
     callUpdatesChannel: string().optional(),
     participantCount: number().optional(),
     participantPreviewUserIds: string().optional(),
+    recordingParticipants: string(),
     summaryTemplateId: string().optional(),
     labels: json<string[]>(),
     markedItems: json<any[]>(),
     xyneManaged: boolean(),
+    visibility: enumeration<CallVisibility>().optional(),
   })
   .primaryKey('id');
 
@@ -1207,6 +1216,7 @@ export const entityAccessTable = table('entity_access' /* EntityAccess */)
     userGroupId: string().optional(),
     channelId: string().optional(),
     entityUserAccess: string(),
+    metadata: json().optional(),
     createdAt: number(),
     updatedAt: number(),
   })
@@ -1245,6 +1255,7 @@ export const callParticipantTable = table('call_participants')
     displayName: string().optional(),
     email: string().optional(),
     isExternal: boolean(),
+    ringStatus: enumeration<RingStatus>().optional(),
   })
   .primaryKey('id');
 
@@ -1348,6 +1359,7 @@ export const canvasVersionTable = table('canvas_versions')
 export const canvasCommentThreadTable = table('canvas_comment_threads' /* CanvasCommentThread */)
   .columns({
     id: string(),
+    workspaceId: string().optional(), // denormalized tenant key (stamped on insert; nullable during backfill release)
     canvasId: string(),
     blockId: string(),
     anchorText: string().optional(),
@@ -1364,6 +1376,7 @@ export const canvasCommentThreadTable = table('canvas_comment_threads' /* Canvas
 export const canvasCommentTable = table('canvas_comments' /* CanvasComment */)
   .columns({
     id: string(),
+    workspaceId: string().optional(), // denormalized tenant key (stamped on insert; nullable during backfill release)
     threadId: string(),
     canvasId: string(),
     body: string(),
@@ -1447,11 +1460,98 @@ export const repoTable = table('repos')
   .columns({
     workspaceId: string(), // denormalized tenant key (stamped on insert)
     id: string(),
-    name: string(),                     // e.g., "xyne-spaces"
-    url: string(),                      // SSH or HTTPS URL
-    baseBranch: json<string[]>(),       // Base branches to checkout from: ["main", "develop"]
-    prefix: string(),                   // Branch prefix: "feature"
+    name: string(), // e.g., "xyne-spaces"
+    url: string(), // SSH or HTTPS URL
+    canonicalUrl: string().optional(),
+    baseBranch: json<string[]>(), // Base branches to checkout from: ["main", "develop"]
+    prefix: string(), // Branch prefix: "feature"
     createdBy: string(),
+    projectId: string().optional(),
+    /** @deprecated -> membership is the CHANNEL -> REPOSITORY edge in sdlc_entity_links */
+    channelId: string().optional(),
+    sdlcSetupExecutionId: string().optional(),
+    accessCapabilities: json().optional(),
+  })
+  .primaryKey('id');
+
+export const sdlcEntityLinkTable = table('sdlc_entity_links')
+  .columns({
+    id: string(),
+    workspaceId: string(),
+    // The only scope these rows carry; a repository is one end of the edge.
+    channelId: string().optional(),
+    /** @deprecated -> scope is channelId; the repository is an endpoint of the edge */
+    repoId: string().optional(),
+    sourceType: string(),
+    sourceId: string(),
+    targetType: string(),
+    targetId: string(),
+    relationType: string(),
+    createdBy: string(),
+    createdAt: number(),
+  })
+  .primaryKey('id');
+
+export const sdlcArtifactTable = table('sdlc_artifacts')
+  .columns({
+    workspaceId: string(),
+    artifactId: string(),
+    /** @deprecated -> repository comes from the link table; no new reads or writes */
+    repoId: string().optional(),
+    artifactType: string(),
+    artifactStatus: string(),
+    workflowExecutionId: string().optional(),
+    generationCommit: string().optional(),
+    sourceReferences: string().optional(),
+    sourcePaths: string().optional(),
+    createdBy: string(),
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey('artifactId');
+
+// Tracks carry no scope column: the CHANNEL -> TRACK edge in sdlc_entity_links places them.
+export const sdlcFolderTable = table('sdlc_folders')
+  .columns({
+    workspaceId: string(),
+    id: string(),
+    name: string(),
+    createdBy: string(),
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey('id');
+
+export const sdlcItemCommentTable = table('sdlc_item_comments')
+  .columns({
+    id: string(),
+    workspaceId: string(),
+    entityType: string(),
+    entityId: string(),
+    body: string(),
+    anchorQuote: string().optional(),
+    anchorSelector: string().optional(),
+    resolved: boolean(),
+    resolvedBy: string().optional(),
+    resolvedAt: number().optional(),
+    createdBy: string(),
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey('id');
+
+export const sdlcTrackTable = table('sdlc_tracks')
+  .columns({
+    workspaceId: string(),
+    id: string(),
+    /** @deprecated -> scope is the CHANNEL -> TRACK edge in sdlc_entity_links */
+    repoId: string().optional(),
+    name: string(),
+    description: string().optional(),
+    status: string(),
+    createdBy: string(),
+    createdAt: number(),
+    updatedAt: number(),
   })
   .primaryKey('id');
 
@@ -1509,7 +1609,7 @@ export const conversationLabelTable = table('conversation_labels')
     name: string(),
     color: string().optional(),
     channelId: string(),
-    projectId: string(),
+    projectId: string().optional(),
     workspaceId: string(),
     createdBy: string(),
     createdAt: number(),
@@ -1565,6 +1665,9 @@ export const emailReadTable = table('email_reads') // Prisma model: EmailRead
     userId: string(),
     lastReadEmailId: string(),
     lastReadEmailAt: number(),
+    // True once tickets.lastEmailAt moves past lastReadEmailAt (see Prisma EmailRead.hasNewEmail).
+    // Nullable with no DB default; mutators always write it explicitly.
+    hasNewEmail: boolean().optional(),
     createdAt: number(),
     updatedAt: number(),
   })
@@ -1590,10 +1693,16 @@ export const emailChannelPreferenceTable = table('email_channel_preferences')
     autoDraftMode: enumeration<AutoDraftMode>().optional(),
     deskType: enumeration<DeskType>(),
     dlEmail: string().optional(),
+    dlAliases: string().optional(),
     workspaceId: string(),
     autoDraftAgentSlug: string().optional(),
     metricsEnabled: boolean().optional(),
     frtStageNames: string().optional(),
+    metricsGuestVisibility: string().optional(),
+    appWebhookDeliveryEnabled: boolean().optional(),
+    deskReportEnabled: boolean().optional(),
+    deskReportAgentSlug: string().optional(),
+    deskReportRangeDays: number().optional(),
   })
   .primaryKey('channelId');
 
@@ -1936,7 +2045,6 @@ export const releaseChangeTypeTable = table('release_change_types')
   })
   .primaryKey('id');
 
-
 export const rcaTable = table('rcas')
   .columns({
     workspaceId: string(), // denormalized tenant key (stamped on insert)
@@ -2019,7 +2127,7 @@ export const surfaceLinkTable = table('surface_links')
     targetId: string(),
     linkKind: enumeration<SurfaceLinkKind>(),
     createdBy: string(),
-    projectId: string(),
+    projectId: string().optional(),
     createdAt: number(),
   })
   .primaryKey('id');
@@ -2121,6 +2229,18 @@ export const savedUserConfigurationValueTable = table('saved_user_configuration_
   })
   .primaryKey('id');
 
+export const viewAccessTable = table('view_access')
+  .columns({
+    workspaceId: string(),
+    id: string(),
+    viewId: string(),
+    entityType: string(),
+    entityId: string(),
+    sharedBy: string(),
+    createdAt: number(),
+  })
+  .primaryKey('id');
+
 
 // Knowledge Base / Collection tables
 
@@ -2168,6 +2288,9 @@ export const collectionPermissionTable = table('collection_permissions')
     collectionId: string(),
     userId: string().optional(),
     userGroupId: string().optional(),
+    // Grants every current+future member of this channel access — always
+    // VIEWER, only offered for workspace-scoped collections in the UI.
+    channelId: string().optional(),
     role: enumeration<CollectionRole>(),
     canShare: boolean(),
     grantedBy: string().optional(),
@@ -2407,6 +2530,24 @@ export const ticketTableRelationships = relationships(ticketTable, ({ one, many 
     destField: ['ticketId'],
     destSchema: ticketTagMappingTable,
   }),
+  ticketDescription: one({
+    sourceField: ['id'],
+    destField: ['ticketId'],
+    destSchema: ticketDescriptionTable,
+  }),
+}));
+
+export const ticketDescriptionTableRelationships = relationships(ticketDescriptionTable, ({ one }) => ({
+  ticket: one({
+    sourceField: ['ticketId'],
+    destField: ['id'],
+    destSchema: ticketTable,
+  }),
+  channel: one({
+    sourceField: ['channelId'],
+    destField: ['id'],
+    destSchema: channelTable,
+  }),
 }));
 
 export const subTicketTableRelationships = relationships(subTicketTable, ({ one, many }) => ({
@@ -2612,6 +2753,11 @@ export const projectTableRelationships = relationships(projectTable, ({ one, man
     sourceField: ['id'],
     destField: ['projectId'],
     destSchema: canvasTable,
+  }),
+  repos: many({
+    sourceField: ['id'],
+    destField: ['projectId'],
+    destSchema: repoTable,
   }),
   projectTags: many({
     sourceField: ['id'],
@@ -2867,43 +3013,7 @@ export const workflowTableRelationships = relationships(workflowTable, ({ one, m
     destField: ['id'],
     destSchema: ticketTable,
   }),
-  workflowExecutions: many({
-    sourceField: ['id'],
-    destField: ['workflowId'],
-    destSchema: workflowExecutionTable,
-  }),
 }));
-
-export const workflowExecutionTableRelationships = relationships(
-  workflowExecutionTable,
-  ({ one, many }) => ({
-    workflow: one({
-      sourceField: ['workflowId'],
-      destField: ['id'],
-      destSchema: workflowTable,
-    }),
-    parentWorkflowExecution: one({
-      sourceField: ['parentWorkflowExecutionId'],
-      destField: ['id'],
-      destSchema: workflowExecutionTable,
-    }),
-    childWorkflowExecutions: many({
-      sourceField: ['id'],
-      destField: ['parentWorkflowExecutionId'],
-      destSchema: workflowExecutionTable,
-    }),
-    pullRequests: many({
-      sourceField: ['id'],
-      destField: ['workflowExecutionId'],
-      destSchema: pullRequestsTable,
-    }),
-    createdByUser: one({
-      sourceField: ['createdBy'],
-      destField: ['id'],
-      destSchema: userTable,
-    }),
-  }),
-);
 
 
 export const userGroupTableRelationships = relationships(userGroupTable, ({ one, many }) => ({
@@ -3040,6 +3150,13 @@ export const collectionTableRelationships = relationships(collectionTable, ({ ma
     destField: ['collectionId'],
     destSchema: collectionItemTable,
   }),
+  // Every file anywhere under this root collection (keyed on rootCollectionId, so it
+  // spans subfolders) — powers the KB root per-collection ingestion rollup.
+  allItems: many({
+    sourceField: ['id'],
+    destField: ['rootCollectionId'],
+    destSchema: collectionItemTable,
+  }),
   permissions: many({
     sourceField: ['rootCollectionId'],
     destField: ['collectionId'],
@@ -3075,6 +3192,11 @@ export const collectionPermissionTableRelationships = relationships(collectionPe
     sourceField: ['userGroupId'],
     destField: ['id'],
     destSchema: userGroupTable,
+  }),
+  channel: one({
+    sourceField: ['channelId'],
+    destField: ['id'],
+    destSchema: channelTable,
   }),
 }));
 
@@ -3265,6 +3387,11 @@ export const channelTableRelationships = relationships(channelTable, ({ one, man
     destField: ['channelId'],
     destSchema: canvasFolderTable,
   }),
+  sdlcEntityLinks: many({
+    sourceField: ['id'],
+    destField: ['channelId'],
+    destSchema: sdlcEntityLinkTable,
+  }),
   guestAccess: many({
     sourceField: ['id'],
     destField: ['accessibleEntityId'],
@@ -3293,6 +3420,85 @@ export const channelBoardMappingTableRelationships = relationships(
   }),
 );
 
+export const repoTableRelationships = relationships(repoTable, ({ one, many }) => ({
+  project: one({
+    sourceField: ['projectId'],
+    destField: ['id'],
+    destSchema: projectTable,
+  }),
+  // Membership edges pointing here. targetId is polymorphic, so readers filter
+  // by relationType.
+  sdlcEntityLinks: many({
+    sourceField: ['id'],
+    destField: ['targetId'],
+    destSchema: sdlcEntityLinkTable,
+  }),
+}));
+
+export const sdlcEntityLinkTableRelationships = relationships(sdlcEntityLinkTable, ({ one }) => ({
+  // Only meaningful on membership edges, where targetId is the repository.
+  repo: one({
+    sourceField: ['targetId'],
+    destField: ['id'],
+    destSchema: repoTable,
+  }),
+  channel: one({
+    sourceField: ['channelId'],
+    destField: ['id'],
+    destSchema: channelTable,
+  }),
+  workflow: one({
+    sourceField: ['targetId'],
+    destField: ['id'],
+    destSchema: workflowTable,
+  }),
+}));
+
+export const sdlcItemCommentTableRelationships = relationships(
+  sdlcItemCommentTable,
+  ({ many }) => ({
+    // The commented entity is placed in a hub by an edge, so the hub is reached
+    // the way a folder reaches it: through the edges pointing at the same id.
+    // targetId is polymorphic, so readers filter by relationType.
+    sdlcEntityLinks: many({
+      sourceField: ['entityId'],
+      destField: ['targetId'],
+      destSchema: sdlcEntityLinkTable,
+    }),
+  }),
+);
+
+export const sdlcArtifactTableRelationships = relationships(sdlcArtifactTable, ({ one }) => ({
+  repo: one({
+    sourceField: ['repoId'],
+    destField: ['id'],
+    destSchema: repoTable,
+  }),
+  canvas: one({
+    sourceField: ['artifactId'],
+    destField: ['id'],
+    destSchema: canvasTable,
+  }),
+}));
+
+export const sdlcFolderTableRelationships = relationships(sdlcFolderTable, ({ many }) => ({
+  // Edges pointing here. targetId is polymorphic, so readers filter by relationType.
+  sdlcEntityLinks: many({
+    sourceField: ['id'],
+    destField: ['targetId'],
+    destSchema: sdlcEntityLinkTable,
+  }),
+}));
+
+export const sdlcTrackTableRelationships = relationships(sdlcTrackTable, ({ many }) => ({
+  // Edges pointing here. targetId is polymorphic, so readers filter by relationType.
+  sdlcEntityLinks: many({
+    sourceField: ['id'],
+    destField: ['targetId'],
+    destSchema: sdlcEntityLinkTable,
+  }),
+}));
+
 export const channelStatsTableRelationships = relationships(channelStatsTable, ({ one }) => ({
   channel: one({
     sourceField: ['channelId'],
@@ -3307,6 +3513,14 @@ export const attachementTableRelationShips = relationships(messageAttachmentTabl
     sourceField: ["conversationId"],
     destField: ["conversationId"],
     destSchema: conversationTable
+  }),
+  // entityId is polymorphic, so this resolves only for the rows whose owning
+  // feature puts a channel there — SDLC hub files, which have no conversation to
+  // be authorised through. Same shape as sdlcEntityLinks.repo.
+  hubChannel: one({
+    sourceField: ["entityId"],
+    destField: ["id"],
+    destSchema: channelTable
   })
 }))
 
@@ -3765,6 +3979,11 @@ export const canvasFolderTableRelationships = relationships(canvasFolderTable, (
 }));
 
 export const canvasTableRelationships = relationships(canvasTable, ({ one, many }) => ({
+  sdlcArtifact: one({
+    sourceField: ['id'],
+    destField: ['artifactId'],
+    destSchema: sdlcArtifactTable,
+  }),
   participants: many({
     sourceField: ['id'],
     destField: ['canvasId'],
@@ -3912,11 +4131,6 @@ export const canvasUserStatusTableRelationships = relationships(
 );
 
 export const pullRequestsTableRelationships = relationships(pullRequestsTable, ({ one }) => ({
-  workflowExecution: one({
-    sourceField: ['workflowExecutionId'],
-    destField: ['id'],
-    destSchema: workflowExecutionTable,
-  }),
   ticket: one({
     sourceField: ['ticketId'],
     destField: ['id'],
@@ -4475,6 +4689,28 @@ export const savedUserConfigurationTableRelationships = relationships(
       destField: ['configId'],
       destSchema: savedUserConfigurationValueTable,
     }),
+    viewAccess: many({
+      sourceField: ['id'],
+      destField: ['viewId'],
+      destSchema: viewAccessTable,
+    }),
+    // Used only for DESK_TICKET configs where contextId holds a channelId.
+    contextChannel: one({
+      sourceField: ['contextId'],
+      destField: ['id'],
+      destSchema: channelTable,
+    }),
+  }),
+);
+
+export const viewAccessTableRelationships = relationships(
+  viewAccessTable,
+  ({ one }) => ({
+    view: one({
+      sourceField: ['viewId'],
+      destField: ['id'],
+      destSchema: savedUserConfigurationTable,
+    }),
   }),
 );
 
@@ -4589,6 +4825,7 @@ export const schema = createSchema({
     toolTable,
     agentToolsMappingTable,
     ticketTable,
+    ticketDescriptionTable,
     subTicketTable,
     ticketSubTicketMappingTable,
     ticketAssignmentTable,
@@ -4612,7 +4849,6 @@ export const schema = createSchema({
     userWorkloadMappingTable,
     userExpertiseMappingTable,
     workflowTable,
-    workflowExecutionTable,
     userGroupTable,
     userTable,
     userPresenceTable,
@@ -4665,6 +4901,11 @@ export const schema = createSchema({
     linkTable,
     linkAccessTable,
     repoTable,
+    sdlcEntityLinkTable,
+    sdlcArtifactTable,
+    sdlcFolderTable,
+    sdlcItemCommentTable,
+    sdlcTrackTable,
     emailTable,
     emailDraftTable,
     conversationLabelTable,
@@ -4712,6 +4953,7 @@ export const schema = createSchema({
     // Saved Views
     savedUserConfigurationTable,
     savedUserConfigurationValueTable,
+    viewAccessTable,
     // Knowledge Base
     collectionTable,
     collectionItemTable,
@@ -4723,6 +4965,7 @@ export const schema = createSchema({
     toolTableRelationships,
     agentToolsMappingTableRelationships,
     ticketTableRelationships,
+    ticketDescriptionTableRelationships,
     subTicketTableRelationships,
     ticketSubTicketMappingTableRelationships,
     ticketAssignmentTableRelationships,
@@ -4747,7 +4990,6 @@ export const schema = createSchema({
     userWorkloadMappingTableRelationships,
     userExpertiseMappingTableRelationships,
     workflowTableRelationships,
-    workflowExecutionTableRelationships,
     userGroupTableRelationships,
     userTableRelationships,
     userPresenceTableRelationships,
@@ -4760,6 +5002,12 @@ export const schema = createSchema({
     channelTableRelationships,
     channelBoardMappingTableRelationships,
     channelStatsTableRelationships,
+    repoTableRelationships,
+    sdlcEntityLinkTableRelationships,
+    sdlcArtifactTableRelationships,
+    sdlcFolderTableRelationships,
+    sdlcItemCommentTableRelationships,
+    sdlcTrackTableRelationships,
     messageTableRelationships,
     messageArtifactTableRelationships,
     draftMessageTableRelationships,
@@ -4841,6 +5089,7 @@ export const schema = createSchema({
     // Saved Views
     savedUserConfigurationTableRelationships,
     savedUserConfigurationValueTableRelationships,
+    viewAccessTableRelationships,
     // Knowledge Base
     collectionTableRelationships,
     collectionItemTableRelationships,
@@ -4872,7 +5121,6 @@ export type Board = Row<typeof schema.tables.boards>;
 export type Stage = Row<typeof schema.tables.stages>;
 export type StagePRStatusMapping = Row<typeof schema.tables.stage_pr_status_mappings>;
 export type Workflow = Row<typeof schema.tables.workflows>;
-export type WorkflowExecution = Row<typeof schema.tables.workflow_executions>;
 export type UserGroup = Row<typeof schema.tables.user_groups>;
 export type User = Row<typeof schema.tables.users>;
 export type UserGroupMapping = Row<typeof schema.tables.user_group_mappings>;
@@ -4928,6 +5176,11 @@ export type Link = Row<typeof schema.tables.links>;
 export type LinkAccess = Row<typeof schema.tables.link_access>;
 export type Email = Row<typeof schema.tables.emails>;
 export type Repo = Row<typeof schema.tables.repos>;
+export type SdlcEntityLink = Row<typeof schema.tables.sdlc_entity_links>;
+export type SdlcArtifact = Row<typeof schema.tables.sdlc_artifacts>;
+export type SdlcFolder = Row<typeof schema.tables.sdlc_folders>;
+export type SdlcItemComment = Row<typeof schema.tables.sdlc_item_comments>;
+export type SdlcTrack = Row<typeof schema.tables.sdlc_tracks>;
 export type EmailDraft = Row<typeof schema.tables.email_drafts>;
 export type ConversationLabel = Row<typeof schema.tables.conversation_labels>;
 export type ConversationLabelMapping = Row<typeof schema.tables.conversation_label_mappings>;
@@ -4982,6 +5235,7 @@ export type InstalledApps = Row<typeof schema.tables.installed_apps>;
 // Saved Views Types
 export type SavedUserConfiguration = Row<typeof schema.tables.saved_user_configurations>;
 export type SavedUserConfigurationValue = Row<typeof schema.tables.saved_user_configuration_values>;
+export type ViewAccess = Row<typeof schema.tables.view_access>;
 
 // Knowledge Base Types
 export type Collection = Row<typeof schema.tables.collections>;

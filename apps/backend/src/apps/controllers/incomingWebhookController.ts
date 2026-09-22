@@ -12,7 +12,7 @@ import { SlackBlockKitParser } from '@/integrations/adapters/slack-webhook-ticke
 import { resolveSlackMessageParts } from '@/integrations/adapters/slack-webhook-tickets/utils/slackUtils';
 import { MessageType, AppIncomingWebhookAction, AppIncomingWebhookType } from '@xyne/shared';
 import { config } from '@/config/env';
-import { assertWebhookUrlSafe, SsrfBlockedError } from '@/utils/ssrfGuard';
+import { assertWebhookUrlSafe, safeWebhookFetch, SsrfBlockedError } from '@/utils/ssrfGuard';
 import {
   buildSentinelRawFallbackMessage,
   buildSentinelRawFallbackTicketDescription,
@@ -276,6 +276,9 @@ class IncomingWebhookController {
         res.status(400).send('invalid_payload');
         return;
       }
+      logger.info('[INCOMING-WEBHOOK] BODY', {
+        body: context.body,
+      });
 
       // Unauthenticated webhook: no req.user, so open an explicit tenant scope from the
       // validated :workspaceId URL param so the workspaceId stamper fills downstream writes.
@@ -358,14 +361,11 @@ class IncomingWebhookController {
             }
 
             const board = await repositories.boards.findById(context.webhook.boardId);
-            const channel = await repositories.channels.findById(context.channelId);
-            if (!board || !channel || board.projectId !== channel.projectId) {
-              logger.warn('[Incoming-Webhook] Invalid board/channel configuration for ticket webhook', {
+            if (!board) {
+              logger.warn('[Incoming-Webhook] Invalid board configuration for ticket webhook', {
                 webhookId: context.webhook.id,
                 boardId: context.webhook.boardId,
                 channelId: context.channelId,
-                boardProjectId: board?.projectId,
-                channelProjectId: channel?.projectId,
               });
               res.status(400).send('invalid_payload');
               return;
@@ -707,11 +707,6 @@ class IncomingWebhookController {
           return;
         }
 
-        if (board.projectId !== channel.projectId) {
-          res.status(400).json({ error: 'Board must belong to the same project as the selected channel' });
-          return;
-        }
-
         boardName = board.name;
       }
 
@@ -1034,7 +1029,8 @@ class IncomingWebhookController {
     }
 
     try {
-      const response = await fetch(subscribeUrl, {
+      // Pin the connection to the address just validated (rebinding-safe).
+      const response = await safeWebhookFetch(subscribeUrl, {
         method: 'GET',
         // A redirect would take this somewhere we never intended, so treat one
         // as a failure rather than following it.

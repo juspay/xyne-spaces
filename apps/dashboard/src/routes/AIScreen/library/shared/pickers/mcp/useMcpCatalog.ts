@@ -1,4 +1,5 @@
 import { useMemo } from 'react';
+import type { UserConnection } from '@/services/claw/clawMcpTypes';
 import { useClawAvailableTools } from '@/hooks/useClawAvailableTools';
 import { useClawMcp } from '@/hooks/useClawMcp';
 import { buildMcpCatalog, type McpCatalogEntry } from './mcpCatalog';
@@ -6,6 +7,10 @@ import { buildMcpCatalog, type McpCatalogEntry } from './mcpCatalog';
 export interface McpCatalog {
   entries: McpCatalogEntry[];
   connectedServerIds: Set<string>;
+  /** Connectors the org covers with a shared credential — usable without your own. */
+  orgCoveredServerIds: Set<string>;
+  /** The live connection per server, for actions that need its id (disconnect, health). */
+  connectionsByServerId: Map<string, UserConnection>;
   loading: boolean;
   isError: boolean;
   refetch: () => void;
@@ -25,11 +30,34 @@ export function useMcpCatalog(): McpCatalog {
     [mcp.data?.connections],
   );
 
+  const orgCoveredServerIds = useMemo(
+    () =>
+      new Set(
+        (mcp.data?.availability ?? [])
+          .filter(entry => entry.org && !entry.personal)
+          .map(entry => entry.mcpServerId),
+      ),
+    [mcp.data?.availability],
+  );
+
+  const connectionsByServerId = useMemo(
+    () =>
+      new Map(
+        (mcp.data?.connections ?? []).map(connection => [connection.mcpServerId, connection]),
+      ),
+    [mcp.data?.connections],
+  );
+
   return {
     entries,
+    orgCoveredServerIds,
     connectedServerIds,
+    connectionsByServerId,
     loading: tools.isLoading,
     isError: tools.isError,
-    refetch: () => void tools.refetch(),
+    refetch: (): void => {
+      void tools.refetch();
+      void mcp.refetch();
+    },
   };
 }

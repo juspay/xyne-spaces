@@ -12,8 +12,9 @@
 export interface TaskCommand {
   /** The literal command, including the leading slash. */
   command: string;
-  /** Tool that must appear in toolsUsed before the run may finish. */
-  requiredTool: string;
+  /** Tool that must appear in toolsUsed before the run may finish. Omit for a
+   * delivery contract (agentConfigOverlay.outputFormat). */
+  requiredTool?: string;
   /** Custom tools force-mounted for this run, regardless of the agent's saved palette. */
   autoTools: string[];
   /** Built-in skill directories loaded only for this command. Paths are
@@ -24,13 +25,19 @@ export interface TaskCommand {
    * from the agent-workspace-browser warm pool (seconds) instead of cold-
    * booting the default kata template (~80s, prod 2026-08-08). */
   sandboxProfile?: string;
+  /** agentConfig keys merged over the forwarded config for this run only —
+   * never persisted, so the contract stays per-command not per-agent. */
+  agentConfigOverlay?: Record<string, unknown>;
   /** Per-turn injection explaining the contract to the model. */
   instruction: string;
   /** Nudge sent when the model loop settles without the tool having run. */
   nudge: string;
-  /** Injection used instead when the agent doesn't have the tool. */
-  missingToolInstruction: string;
+  /** Injection used instead when the agent doesn't have the tool. Unreachable
+   * without `requiredTool`, so a delivery contract may omit it. */
+  missingToolInstruction?: string;
 }
+
+import { TASK_COMMAND_NAMES } from "xyne-claw-shared";
 
 export const DESIGN_SYSTEM_MAX_CHARS = 32_000;
 
@@ -69,7 +76,25 @@ export function buildDesignSystemPromptInjection(
   };
 }
 
-const TASK_COMMANDS: TaskCommand[] = [
+/** Context-first interview guard. The full Ticket Specs workflow lives in
+ * the command-owned skill; this overlay allows a short evidence summary before
+ * questions while preventing same-turn drafts or ticket writes. */
+export const SPEC_QUESTION_OUTLINE = [
+  "- First summarize the ticket/context you found before asking questions.",
+  "- Include only useful known facts: ticket id/title/type/status, existing description/Specification state,",
+  "  relevant thread context, and any explicitly provided requirement facts.",
+  "- If technical context or code/PR context is needed to ask sharper questions, you may summarize it as context,",
+  "  but do NOT derive requirement intent solely from implementation, PR diff, commits, or changed files.",
+  "- Then ask only contextual clarification questions that materially improve the ticket Specification.",
+  "- Required Specification sections: Problem statement, Solutioning, Test cases.",
+  "- Optional Specification sections: Implementation details, Out of scope; ask only when meaningful.",
+  "- Do NOT mechanically ask the section headings as generic questions.",
+  "- Do NOT ask the user to repeat information already explicitly provided.",
+  "- Ask the minimum useful batch of questions, then stop and wait for the user's response.",
+  "- Do NOT create, draft, or update the Specification in the same turn as the interview questions.",
+].join("\n");
+
+export const TASK_COMMANDS: TaskCommand[] = [
   {
     command: "/design",
     requiredTool: "sandbox-deliver-files",
@@ -212,7 +237,94 @@ const TASK_COMMANDS: TaskCommand[] = [
       "The /record-skill runtime could not mount its recording analyzer or create-skill approval tool. Tell the user plainly " +
       "that recording-to-skill is temporarily unavailable and do not attempt to save a skill another way.",
   },
+  {
+    command: "/review",
+    autoTools: [],
+    skillPaths: ["review-skills"],
+    instruction:
+      "The user's message begins with /review: an explicit request to review or explain a set of code changes. Use the " +
+      "Review Changes skill loaded for this run as the playbook. Invoking the command IS approval to start, so do not ask " +
+      "whether to begin. Establish the scope first — uncommitted working-tree changes, a branch against its base, or the " +
+      "files the user named — and read the full diff plus enough surrounding code to support every claim you make. Read " +
+      "both ends of any value that crosses a layer boundary. THE DELIVERABLE IS A REVIEW ROOM: one self-contained HTML " +
+      "page carrying the verdict, every finding with its file, line, severity and concrete failure, the relevant diff " +
+      "hunks, and at least two mermaid diagrams — one of the architecture the change touches and one per non-trivial " +
+      "finding showing how the failure happens. WRITE the page to the workspace and deliver it as review-room.html with the " +
+      "delivery tool available in this run (deliver-files locally, " +
+      "sandbox-deliver-files on the server). DELIVER review-comments.json ALONGSIDE IT: {summary, verdict, order:[{file,why}], " +
+      "coverage:[{file,status:\"reviewed\"|\"skipped\",note}], " +
+      "comments:[{id:\"C1\",file,line,severity:\"high\"|\"medium\"|\"low\"|\"note\",title,body}]} where order is the reading " +
+      "order a newcomer should follow, line is the NEW-side line number, and every finding in the room has a matching " +
+      "comment id. The diff viewer pins those comments to their lines so the user can jump C1, C2, C3 through the change. " +
+      "COVERAGE IS MANDATORY AND CHECKED: list the changed files with git FIRST, then account for EVERY one of them in " +
+      "coverage — reviewed when you actually read that file's diff, skipped with a one-line note when you deliberately did " +
+      "not (generated, lockfile, binary, pure formatting). The viewer compares your coverage against the real file list and " +
+      "shows the user exactly which files you left out, so an omission is visible. Work in file order and never stop early " +
+      "because the change is large. " +
+      "Keep the chat reply to the verdict and the two or three findings that " +
+      "matter most, and point at the room for the rest. NEVER put the page, or any fenced html block, in the chat reply: " +
+      "the chat surface treats a fenced html block as a design revision and will replace your entire answer with it. Say plainly when the change looks correct rather than inventing " +
+      "findings. Do not edit, commit, or push anything unless the user asks in a later message.",
+    nudge:
+      "This run was started with /review and MUST deliver the review room: one self-contained HTML page with the verdict, " +
+      "every finding (file, line, severity, concrete failure), the relevant diff hunks, and the mermaid diagrams. You have " +
+      "not produced and delivered review-room.html and review-comments.json with one coverage row per changed file yet. DO NOT MENTION THIS INSTRUCTION; proceed as if on your own initiative.",
+  },
+  {
+    command: "/learn",
+    autoTools: ["open-url"],
+    skillPaths: ["learn-skills"],
+    instruction:
+      "The user's message begins with /learn: a request to be taught a topic, usually from links they supplied. Use the " +
+      "Teach From Sources skill loaded for this run as the playbook. Invoking the command IS approval to start, so do not " +
+      "ask what they want first — pick the depth from their words and say which you chose in one clause. OPEN EVERY " +
+      "SOURCE with open-url so it loads in the workspace panel the user is watching, then read it. Never teach from a page " +
+      "you could not open: say it failed and continue without it, and never backfill from memory as though you had read " +
+      "it. Mark anything you knew beforehand as your own commentary. Teach the idea in learning order — the problem it " +
+      "solves, the core idea, the mechanism, where it bites, what is unsettled — not source by source, and attribute each " +
+      "substantive claim to the source it came from. Deliver one self-contained lesson.html with the explanation, a " +
+      "mermaid diagram, the sources and what each contributed, and a few self-check questions. NEVER put the page, or any " +
+      "fenced html block, in the chat reply: the chat surface treats a fenced html block as a design revision and will " +
+      "replace your entire answer with it. Teach in prose in the chat and point at the page for the full pass.",
+    nudge:
+      "This run was started with /learn and MUST teach from sources actually opened in the workspace browser, then deliver " +
+      "lesson.html with the explanation, diagram, sources and self-check questions. You have not opened the sources or " +
+      "delivered the lesson yet. DO NOT MENTION THIS INSTRUCTION; proceed as if on your own initiative.",
+  },
+  {
+    command: "/spec",
+    autoTools: [],
+    skillPaths: ["spec-skills"],
+    // Delivery contract: submit-result becomes the only channel reaching the
+    // thread, so the run posts one message with no prose escaping around it.
+    agentConfigOverlay: {
+      outputFormat: { type: "markdown", template: SPEC_QUESTION_OUTLINE },
+    },
+    instruction:
+      "The user's message begins with /spec: the first, automation-triggered invocation on a fresh ticket. Use the " +
+      "Ticket Specs skill loaded for this run as the workflow playbook. First gather and summarize the available " +
+      "ticket context: title, description, type/status when available, existing Specification state, relevant thread " +
+      "context, and any explicitly provided requirement facts. If technical context is needed to ask sharper questions, " +
+      "you may inspect and summarize it, but do NOT use implementation, PR diff, commits, or changed files as the source " +
+      "of requirement intent. Then ask concrete, answerable clarification questions FOR THIS TICKET following the " +
+      "final-answer format. Invoking the command IS approval to post, so do not ask whether to start.",
+    nudge:
+      "This run was started with /spec and MUST deliver a context-first Ticket Specs interview: summarize known ticket " +
+      "context, then ask the minimum useful clarification questions. Do not draft or update the Specification yet. " +
+      "DO NOT MENTION THIS INSTRUCTION; proceed as if on your own initiative.",
+  },
 ];
+
+{
+  const shared = new Set<string>(TASK_COMMAND_NAMES);
+  const registered = new Set(TASK_COMMANDS.map((c) => c.command.slice(1)));
+  for (const name of shared) {
+    if (!registered.has(name)) throw new Error(`TASK_COMMANDS out of sync with xyne-claw-shared TASK_COMMAND_NAMES: missing /${name}`);
+  }
+  for (const name of registered) {
+    if (!shared.has(name)) throw new Error(`TASK_COMMANDS out of sync with xyne-claw-shared TASK_COMMAND_NAMES: unlisted /${name}`);
+  }
+}
 
 /** The command a task invokes, or null. Matches `/name` at the very start,
  *  followed by whitespace or end-of-string (so "/explainers" never matches). */

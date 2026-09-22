@@ -42,6 +42,8 @@ export const TablePagination: React.FC<TablePaginationProps> = ({
       <div className='flex items-center gap-2'>
         <button
           onClick={() => onPageChange(currentPage - 1)}
+          data-track-category='TABLE'
+          data-track-name='PREV_PAGE'
           disabled={currentPage <= 1}
           className='p-1.5 rounded-full border border-border hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed'
         >
@@ -52,6 +54,8 @@ export const TablePagination: React.FC<TablePaginationProps> = ({
         </span>
         <button
           onClick={() => onPageChange(currentPage + 1)}
+          data-track-category='TABLE'
+          data-track-name='NEXT_PAGE'
           disabled={currentPage >= totalPages}
           className='p-1.5 rounded-full border border-border hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed'
         >

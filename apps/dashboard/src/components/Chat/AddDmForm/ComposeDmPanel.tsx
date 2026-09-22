@@ -12,17 +12,11 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams, useLocation } from 'react-router-dom';
 import type { ReactElement } from 'react';
 import { useAuthContextValues } from '../../../hooks/useAuth';
-import { useAuth } from '../../../hooks/useAuth';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { useDragAndDropAreaRef } from '../../../hooks/useDragAndDropAreaRef';
 import { usePlatform } from '../../../hooks/usePlatform';
-import { useActiveUserSearch, useActiveUsers, useUser } from '../../../hooks/useUsers';
+import { useActiveUsers, useActiveUserSearch, useUser } from '../../../hooks/useUsers';
 import { cn } from '../../../utils/classNames';
-import {
-  EVENT_PROPERTIES,
-  EVENTS,
-  mixpanelService,
-} from '../../../services/Analytics/mixpanelService';
 import { mutators } from '../../../zero/mutators';
 import { queries } from '../../../zero/queries';
 import { InputBox } from '../../ui/InputBox';
@@ -37,6 +31,9 @@ import {
   useGetChannelUserStatus,
 } from '../../../hooks/useChannels';
 import { userToMentionResult } from '../../../utils/userDisplayName';
+import { useRankedActivePeople } from '../../../hooks/useRankedPeopleSearch';
+import { useAffinityCallback } from '../../../hooks/useAffinityCallback';
+import { rankChannelsByAffinity } from '../../../utils/rankingUtils';
 
 export interface CreateDmFormData {
   participants: User[];
@@ -54,7 +51,6 @@ export const ComposeDmPanel: React.FC = () => {
   const searchUserRef = useRef<HTMLInputElement>(null);
   const { dragAndDropAreaRef, inputRef: inputBoxRef, isDragging } = useDragAndDropAreaRef();
   const context = useAuthContextValues();
-  const { user } = useAuth();
   const { isMobile } = usePlatform();
   const navigate = useNavigate();
   const location = useLocation();
@@ -128,15 +124,6 @@ export const ComposeDmPanel: React.FC = () => {
           });
           channelId = response.id;
 
-          // Track group creation if more than 1 participant (excluding current user)
-          const isGroupDm = selectedUsers.length > 1;
-          mixpanelService.track(EVENTS.INITIATE_ACTION, {
-            type: isGroupDm
-              ? EVENT_PROPERTIES.ACTION_TYPES.NEW_GROUP_DM
-              : EVENT_PROPERTIES.ACTION_TYPES.NEW_DM,
-            hasInitialMessage: false,
-          });
-
           // If existing DM was returned (might have been closed), reopen it
           if (response.isExisting) {
             zero.mutate(
@@ -203,27 +190,40 @@ export const ComposeDmPanel: React.FC = () => {
       }));
   }, [channelResults]);
 
+  const mentionUserResults = useActiveUserSearch(mentionSearchQuery, 10);
+
   const composeMentionItems = useMemo(() => {
     const query = mentionSearchQuery.trim().toLowerCase();
     const isSelfDm = selectedUsers.length === 1 && selectedUsers[0]?.id === context.userID;
-    const selectedUserMentions = selectedUsers
-      .filter(selectedUser => isSelfDm || selectedUser.id !== context.userID)
-      .filter(selectedUser => {
-        if (!query) return true;
 
-        const emailLocalPart = selectedUser.email.split('@')[0] ?? '';
-        return [
-          selectedUser.displayName,
-          selectedUser.name,
-          selectedUser.email,
-          emailLocalPart,
-        ].some(value => value?.toLowerCase().includes(query) ?? false);
-      })
-      .map(selectedUser =>
-        userToMentionResult(selectedUser, selectedUser.id === context.userID, true),
+    const matchesQuery = (candidate: User): boolean => {
+      if (!query) return true;
+
+      const emailLocalPart = candidate.email.split('@')[0] ?? '';
+      return [candidate.displayName, candidate.name, candidate.email, emailLocalPart].some(
+        value => value?.toLowerCase().includes(query) ?? false,
       );
+    };
 
-    if (selectedUsers.length <= 1) return selectedUserMentions;
+    const recipients = selectedUsers
+      .filter(selectedUser => isSelfDm || selectedUser.id !== context.userID)
+      .filter(matchesQuery);
+    const recipientIds = new Set(recipients.map(selectedUser => selectedUser.id));
+
+    const workspaceUsers = mentionUserResults.filter(
+      candidate => !recipientIds.has(candidate.id) && (isSelfDm || candidate.id !== context.userID),
+    );
+
+    const userMentions = [
+      ...recipients.map(selectedUser =>
+        userToMentionResult(selectedUser, selectedUser.id === context.userID, true),
+      ),
+      ...workspaceUsers.map(candidate =>
+        userToMentionResult(candidate, candidate.id === context.userID),
+      ),
+    ];
+
+    if (selectedUsers.length <= 1) return userMentions;
 
     // Offer @channel and @here for group DMs, matching useMentionSearch's special
     // mentions. The backend (sendInitialMessage) handles both in the initial message.
@@ -244,10 +244,10 @@ export const ComposeDmPanel: React.FC = () => {
       },
     ].filter(mention => !query || mention.name.includes(query));
 
-    if (specialMentions.length === 0) return selectedUserMentions;
+    if (specialMentions.length === 0) return userMentions;
 
-    return [...specialMentions, ...selectedUserMentions];
-  }, [mentionSearchQuery, selectedUsers, context.userID]);
+    return [...specialMentions, ...userMentions];
+  }, [mentionSearchQuery, selectedUsers, context.userID, mentionUserResults]);
 
   const channelParticipation = useGetChannelUserStatus(existingDmChannel?.id || '');
   const [latestMessage] = useCachedQuery(
@@ -258,43 +258,15 @@ export const ComposeDmPanel: React.FC = () => {
     { enabled: !!existingDmChannel },
   );
 
-  // Get active users matching search query
-  const searchResults = useActiveUserSearch(searchValue, 10);
+  // Active people ranked by matchesAllTokens + MFU affinity + DM recency (seeds recent partners at rest).
+  const rankedPeople = useRankedActivePeople(searchValue, 10);
+  const affinityVersion = useAffinityCallback();
 
   const recipientChannelResults = useChannelSearch(searchValue, 10);
 
   // All active workspace users and visible channels – used for conversation-history ordering
   const allWorkspaceUsers = useActiveUsers();
   const visibleChannels = useAllVisibleChannels();
-
-  // Build an ordered list of user IDs based on most-recently-active DM channels
-  // (same logic as useMentionSearch so CMD+N matches the behaviour of @mentions)
-  const cachedDMParticipants = useMemo(() => {
-    const currentUserId = user?.id;
-    const sortedDmChannels = visibleChannels
-      .filter(
-        ch => ch.scopeType === ChannelScopeType.DM || ch.scopeType === ChannelScopeType.GROUP_DM,
-      )
-      .sort(
-        (a, b) => (b.channelStats?.lastActivityAt || 0) - (a.channelStats?.lastActivityAt || 0),
-      );
-
-    const dmUserIds: string[] = [];
-    for (const ch of sortedDmChannels) {
-      if (dmUserIds.length >= 10) break;
-      for (const participantId of ch.name.split(',')) {
-        if (dmUserIds.length >= 10) break;
-        if (participantId !== currentUserId && !dmUserIds.includes(participantId)) {
-          dmUserIds.push(participantId);
-        }
-      }
-    }
-
-    if (dmUserIds.length > 0) return dmUserIds;
-
-    // No DM history – fall back to all workspace users (excluding self)
-    return allWorkspaceUsers.filter(u => u.id !== currentUserId).map(u => u.id);
-  }, [visibleChannels, user?.id, allWorkspaceUsers]);
 
   // Build a lookup map for quick access by id
   const usersById = useMemo(() => {
@@ -305,124 +277,51 @@ export const ComposeDmPanel: React.FC = () => {
     return map;
   }, [allWorkspaceUsers]);
 
-  // Filter and map users to items, ordered by conversation history
+  // Rank people by matchesAllTokens + MFU affinity + DM recency (useRankedActivePeople seeds recent
+  // DM partners at rest). Preserve the self rules: drop self, then prepend it only for a query that
+  // is "self" or matches the current user's name (self is never shown in the empty browse state).
   const filteredUsers = useMemo(() => {
     const currentUserId = context.userID;
+    const others = rankedPeople.filter(u => u.id !== currentUserId).slice(0, 10);
+
+    const trimmed = searchValue.trim();
     const currentUser = usersById.get(currentUserId);
-
-    if (!searchValue.trim()) {
-      // No search query: show users ordered by most-recently-active DM
-      return cachedDMParticipants
-        .filter(id => id !== currentUserId)
-        .map(id => usersById.get(id))
-        .filter((u): u is User => u !== undefined)
-        .slice(0, 10);
-    }
-
-    const isSelfSearch = searchValue.trim().toLowerCase() === 'self';
-
-    // With a search query: use Fuse results but put DM conversation partners first,
-    // ordered by most-recently-active DM (position in cachedDMParticipants).
-    // If Fuse returns nothing (e.g. query is too short for minMatchCharLength),
-    // fall back to a simple substring match so single-char queries still work.
-    const dmRank = new Map(cachedDMParticipants.map((id, idx) => [id, idx]));
-    const baseResults =
-      searchResults && searchResults.length > 0
-        ? searchResults
-        : Array.from(usersById.values()).filter(u => {
-            const q = searchValue.toLowerCase();
-            return (
-              u.name.toLowerCase().includes(q) ||
-              u.email.toLowerCase().includes(q) ||
-              (u.displayName?.toLowerCase() || '').includes(q)
-            );
-          });
-
-    const otherResults = baseResults
-      .filter(user => user.id !== currentUserId)
-      .sort((a, b) => {
-        const rankA = dmRank.get(a.id) ?? Infinity;
-        const rankB = dmRank.get(b.id) ?? Infinity;
-        return rankA - rankB;
-      });
-
-    // Include current user when their name matches the query or "self" is searched
-    if (currentUser) {
-      const nameMatches = baseResults.some(u => u.id === currentUserId);
+    if (trimmed && currentUser) {
+      const isSelfSearch = trimmed.toLowerCase() === 'self';
+      const nameMatches = rankedPeople.some(u => u.id === currentUserId);
       if (isSelfSearch || nameMatches) {
-        return [currentUser, ...otherResults];
+        return [currentUser, ...others].slice(0, 10);
       }
     }
-
-    return otherResults;
-  }, [searchResults, searchValue, context.userID, cachedDMParticipants, usersById]);
+    return others;
+  }, [rankedPeople, searchValue, context.userID, usersById]);
 
   const mergedSearchItems = useMemo<SearchEntry[]>(() => {
-    const currentUserId = context.userID;
-    const q = searchValue.trim().toLowerCase();
+    // Re-read channel affinity once weights load (rankChannelsByAffinity reads it imperatively).
+    void affinityVersion;
 
-    const lastActivity = (ch: {
-      channelStats?: { lastActivityAt: number } | null | undefined;
-      lastActivityAt?: number | null | undefined;
-    }): number => ch.channelStats?.lastActivityAt ?? ch.lastActivityAt ?? 0;
+    // People keep the order the hook already produced: relevance (incl. raw-name + full-name token
+    // matches) → MFU affinity → DM recency. Do NOT re-rank them here — a coarse displayName-only tier
+    // would bury a high-affinity contact matched via their full name under a stray prefix match.
+    const userEntries: SearchEntry[] = filteredUsers.map(u => ({ type: 'user', user: u }));
 
-    const dmRecencyByUser = new Map<string, number>();
-    for (const ch of visibleChannels) {
-      if (ch.scopeType !== ChannelScopeType.DM && ch.scopeType !== ChannelScopeType.GROUP_DM) {
-        continue;
-      }
-      const ts = lastActivity(ch);
-      for (const pid of ch.name.split(',')) {
-        if (pid === currentUserId) continue;
-        if (ts > (dmRecencyByUser.get(pid) ?? 0)) dmRecencyByUser.set(pid, ts);
-      }
-    }
-
-    type Ranked = { entry: SearchEntry; name: string; recency: number };
-
-    const userRanked: Ranked[] = filteredUsers.map(u => ({
-      entry: { type: 'user', user: u },
-      name: (u.displayName || u.name || '').toLowerCase(),
-      recency: dmRecencyByUser.get(u.id) ?? 0,
+    // Channels: query → relevance-ranked search hits, browse → all visible; then float by MFU affinity.
+    const q = searchValue.trim();
+    const channelSource = q ? recipientChannelResults : visibleChannels;
+    const channelEntries: SearchEntry[] = rankChannelsByAffinity(
+      channelSource.filter(ch => ch.scopeType === ChannelScopeType.DEFAULT),
+    ).map(ch => ({
+      type: 'channel',
+      channel: {
+        id: ch.id,
+        name: ch.name,
+        isPrivate: ch.visibility === ChannelVisibility.PRIVATE,
+      },
     }));
 
-    const channelSource = q
-      ? recipientChannelResults
-      : [...visibleChannels].sort((a, b) => lastActivity(b) - lastActivity(a));
-
-    const channelRanked: Ranked[] = channelSource
-      .filter(ch => ch.scopeType === ChannelScopeType.DEFAULT)
-      .map(ch => ({
-        entry: {
-          type: 'channel',
-          channel: {
-            id: ch.id,
-            name: ch.name,
-            isPrivate: ch.visibility === ChannelVisibility.PRIVATE,
-          },
-        },
-        name: ch.name.toLowerCase(),
-        recency: lastActivity(ch),
-      }));
-
-    const tier = (name: string): number => {
-      if (!q) return 0;
-      if (name.startsWith(q)) return 0;
-      if (name.includes(q)) return 1;
-      return 2;
-    };
-
-    return [...userRanked, ...channelRanked]
-      .sort((a, b) => {
-        const ta = tier(a.name);
-        const tb = tier(b.name);
-        if (ta !== tb) return ta - tb;
-        if (a.recency !== b.recency) return b.recency - a.recency;
-        return a.name.localeCompare(b.name);
-      })
-      .slice(0, 15)
-      .map(r => r.entry);
-  }, [filteredUsers, recipientChannelResults, visibleChannels, searchValue, context.userID]);
+    // People first (this is a "message people" picker), then channels; capped.
+    return [...userEntries, ...channelEntries].slice(0, 15);
+  }, [filteredUsers, recipientChannelResults, visibleChannels, searchValue, affinityVersion]);
 
   // Build chat list props
   const chatListProps = useMemo(() => {

@@ -4,6 +4,9 @@ export interface AutomationsListProps {
   onCreate: () => void;
   onOpen: (automation: Automation) => void;
   onShowRuns?: (automation: Automation) => void;
-  /** When provided, only automations passing this predicate are shown (and counted). */
-  filterPredicate?: (automation: Automation) => boolean;
+  /** Preselects the Channel filter chip (e.g. a Desk settings tab scoped to one channel). Still user-adjustable. */
+  initialChannelIds?: string[];
+  /** Row menu "Clone" / "Edit" (non-draft). Default navigates `/automations/new?fork=<id>` (that route only) — pass these to handle it locally instead (e.g. a settings modal with its own view-state). */
+  onClone?: (automation: Automation) => void;
+  onEditFork?: (automation: Automation) => void;
 }

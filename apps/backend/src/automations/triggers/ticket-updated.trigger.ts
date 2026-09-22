@@ -56,6 +56,10 @@ export const FormFieldConditionSchema = z
 export type FormFieldCondition = z.infer<typeof FormFieldConditionSchema>;
 
 const TicketUpdatedConfigSchema = z.object({
+  projectIds: z
+    .array(z.string())
+    .optional()
+    .describe('Limit to tickets on these projects. Empty matches every project.'),
   boardIds: z
     .array(z.string())
     .optional()
@@ -64,10 +68,6 @@ const TicketUpdatedConfigSchema = z.object({
     .array(z.string())
     .optional()
     .describe('Limit to tickets posted to these channels. Empty matches every channel.'),
-  projectIds: z
-    .array(z.string())
-    .optional()
-    .describe('Limit to tickets on these projects. Empty matches every project.'),
   transitions: z
     .array(FieldTransitionSchema)
     .optional()

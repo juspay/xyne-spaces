@@ -5,6 +5,7 @@
  */
 
 import { NodeSDK } from "@opentelemetry/sdk-node";
+import { errMsg } from "../lib/errors.js";
 import { OTLPMetricExporter } from "@opentelemetry/exporter-metrics-otlp-http";
 import { PeriodicExportingMetricReader } from "@opentelemetry/sdk-metrics";
 import { CONFIG } from "../config.js";
@@ -34,7 +35,7 @@ export function initializeOpenTelemetry(): void {
       `[otel] metrics started for ${CONFIG.otelServiceName} -> ${CONFIG.otelBaseUrl}/v1/metrics (every ${CONFIG.otelExportIntervalMs}ms)`,
     );
   } catch (err) {
-    log.error("[otel] failed to initialize:", err instanceof Error ? err.message : String(err));
+    log.error("[otel] failed to initialize:", errMsg(err));
   }
 }
 
@@ -44,6 +45,6 @@ export async function shutdownOpenTelemetry(): Promise<void> {
     await sdk.shutdown();
     log.info("[otel] metrics shut down");
   } catch (err) {
-    log.error("[otel] shutdown failed:", err instanceof Error ? err.message : String(err));
+    log.error("[otel] shutdown failed:", errMsg(err));
   }
 }

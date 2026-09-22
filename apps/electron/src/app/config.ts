@@ -11,6 +11,7 @@ export interface AppConfig {
   MTLS_IDENTITY_NAME: string;
   UNPROTECTED_URL: string;
   FRONTEND_URL: string;
+  CLAW_AUTH_URL: string;
   DEEP_LINK_PROTOCOL: string;
   USER_DATA_SUFFIX: string;         // Appended to userData dir to isolate flavors
   APP_NAME: string;
@@ -29,10 +30,6 @@ export interface AppConfig {
   RELEASE_CONFIG_URL: string;
   UI_ZIP_URL: string;
   uiUpdateCheckIntervalMs: number;
-  agentInteract: {
-    endpoint: string;
-    method: string;
-  };
   preProdKey: string;
 }
 
@@ -43,6 +40,7 @@ const devConfig: AppConfig = {
   MTLS_IDENTITY_NAME: 'Web Simulation Client',
   UNPROTECTED_URL: 'http://localhost:4001',
   FRONTEND_URL: 'http://localhost:5173',
+  CLAW_AUTH_URL: 'http://localhost:3003',
   DEEP_LINK_PROTOCOL: 'xyne-spaces-dev',
   USER_DATA_SUFFIX: '-dev',
   APP_NAME: 'Xyne Spaces DEV',
@@ -60,10 +58,6 @@ const devConfig: AppConfig = {
   RELEASE_CONFIG_URL: 'http://localhost:3456',
   UI_ZIP_URL: 'http://localhost:8888/releases/dashboard.zip',
   uiUpdateCheckIntervalMs: 60 * 1000, // 1 minute for dev
-  agentInteract: {
-    endpoint: "/api/query",
-    method: "POST"
-  },
   preProdKey: 'preProdFeaturesEnabled'
 };
 
@@ -74,6 +68,7 @@ const prodConfig: AppConfig = {
   MTLS_IDENTITY_NAME: 'Web Simulation Client',
   UNPROTECTED_URL: 'https://spaces.xyne.juspay.net', // Non-mTLS endpoint only reserved for pre-enrollment logs and metrics
   FRONTEND_URL: 'https://app.spaces.xyne.juspay.net',
+  CLAW_AUTH_URL: 'https://app.spaces.xyne.juspay.net',
   DEEP_LINK_PROTOCOL: 'xyne-spaces',
   USER_DATA_SUFFIX: '',             // Empty — prod keeps original path, no migration needed
   APP_NAME: 'Xyne Spaces',
@@ -92,10 +87,6 @@ const prodConfig: AppConfig = {
   RELEASE_CONFIG_URL: 'https://airborne.juspay.in/release/xyne/xyne-mobile',
   UI_ZIP_URL: 'https://app.spaces.xyne.juspay.net/releases/dashboard.zip',
   uiUpdateCheckIntervalMs: 15 * 60 * 1000, // 15 minutes for prod
-  agentInteract: {
-    endpoint: "/api/query",
-    method: "POST"
-  },
   preProdKey: 'preProdFeaturesEnabled',
 };
 
@@ -106,6 +97,7 @@ const sandboxConfig: AppConfig = {
   MTLS_IDENTITY_NAME: 'Web Simulation Client Sandbox',
   UNPROTECTED_URL: 'https://spaces.xyne.juspay.net', // Non-mTLS endpoint only reserved for pre-enrollment logs and metrics
   FRONTEND_URL: 'https://app.spaces.sandbox.xyne.juspay.net',
+  CLAW_AUTH_URL: 'https://app.spaces.sandbox.xyne.juspay.net',
   DEEP_LINK_PROTOCOL: 'xyne-spaces-sandbox',
   USER_DATA_SUFFIX: '-sandbox',
   APP_NAME: 'Xyne Spaces Sandbox',
@@ -123,16 +115,18 @@ const sandboxConfig: AppConfig = {
   RELEASE_CONFIG_URL: 'https://airborne.juspay.in/release/xyne/xyne-mobile',
   UI_ZIP_URL: 'https://app.spaces.xyne.juspay.net/releases/dashboard.zip',
   uiUpdateCheckIntervalMs: 15 * 60 * 1000, // 15 minutes for prod
-  agentInteract: {
-    endpoint: "/api/query",
-    method: "POST"
-  },
   preProdKey: 'preProdFeaturesEnabled'
 };
 
 
 const baseConfig: AppConfig = process.env.NODE_ENV === 'development' ? devConfig
   : (APP_ENV === 'sandbox' ? sandboxConfig : prodConfig);
+
+// Local harness is allowed in ALL build targets (incl. prod). The authoritative
+// enable/disable gate lives server-side (LOCAL_HARNESS_ENABLED in xyne-claw-auth);
+// this client flag only controls whether we detect/offer a local CLI connection.
+// Override to false at build time via FEATURE_LOCAL_HARNESS_DISABLED for an emergency kill.
+export const ENABLE_LOCAL_HARNESS = process.env['FEATURE_LOCAL_HARNESS_DISABLED'] !== 'true';
 
 export const config: AppConfig = {
   ...baseConfig,

@@ -19,18 +19,23 @@ import ThreadMessages from '../../Chat/ThreadPannel';
 import { CallControls } from '../CallControls/CallControls';
 import { CallStateTransition } from '../CallStateTransition/CallStateTransition';
 import { ParticipantGrid } from '../ParticipantGrid/ParticipantGrid';
-import { findRemotePresenter } from '../ParticipantGrid/sortParticipants';
+import { findPresentationParticipant } from '../ParticipantGrid/sortParticipants';
 import { ScreenShareView } from '../ScreenShareView/ScreenShareView';
 import { ControlRequestDialog } from '../CallModals/ControlRequestDialog';
 import { ParticipantsSidebar } from '../ParticipantsSidebar/ParticipantsSidebar';
+import { getRingingInvitees, useIsDmCall } from '../ringStatus.utils';
 import { useCallChatNotifications } from '../hooks/useCallChatNotifications';
 import { isScreenShareActive } from '../../../utils/livekitScreenShare';
+import { isTranscriptionAgentIdentity } from '../../../utils/livekitAgent';
 import { useAuth } from '../../../hooks/useAuth';
 import { useTelepresenceEnabled } from '../useTelepresenceEnabled';
+import { useAutoPresentationMode } from '../useAutoPresentationMode';
 import { PresentationModeOverlay } from '../PresentationMode/PresentationModeOverlay';
 import { CallWhiteboardView } from '../CallWhiteboard';
 import { useCallWhiteboardStore } from '../../../stores/callWhiteboardStore';
 import Tooltip from '../../ui/Tooltip';
+
+const LINE_VIEW_HEIGHT = 40;
 
 interface MiniCallViewProps {
   participants: ParticipantInfo[];
@@ -72,6 +77,7 @@ interface MiniCallViewProps {
         readonly metadata: unknown;
         readonly displayName?: string | null | undefined;
         readonly isExternal?: boolean | undefined;
+        readonly ringStatus?: string | null | undefined;
       }>
     | undefined;
   isHost?: boolean | undefined;
@@ -124,7 +130,24 @@ export function MiniCallView({
   const isTelepresenceEnabled = useTelepresenceEnabled(user?.email);
   const isWhiteboardOpen = useCallWhiteboardStore(s => s.isOpen);
 
-  const participantCount = participants.length;
+  // People only — the Xyne Automatic agent isn't counted.
+  const participantCount = participants.filter(
+    p => !isTranscriptionAgentIdentity(p.identity),
+  ).length;
+
+  // Ring tiles are DM-only; elsewhere the sidebar carries ring status.
+  const isDmCall = useIsDmCall(channelId);
+  const ringingInvitees = useMemo(
+    () =>
+      isDmCall
+        ? getRingingInvitees(
+            callParticipants,
+            new Set(participants.map(p => p.identity)),
+            currentUserId !== undefined ? currentUserId : user?.id,
+          )
+        : [],
+    [isDmCall, callParticipants, participants, currentUserId, user?.id],
+  );
   const containerRef = useRef<HTMLDivElement>(null);
   const [overlayMode, setOverlayMode] = useState<'mini' | 'line'>('mini');
   const [miniLeft, setMiniLeft] = useState(20);
@@ -145,6 +168,7 @@ export function MiniCallView({
   // State for participants sidebar
   const [isParticipantsSidebarOpen, setIsParticipantsSidebarOpen] = useState(false);
   const [isPresentationMode, setIsPresentationMode] = useState(false);
+  useAutoPresentationMode(isTelepresenceEnabled, setIsPresentationMode);
 
   // Close participants sidebar when chat opens
   useEffect(() => {
@@ -189,8 +213,10 @@ export function MiniCallView({
         onClick={onClick}
         onPointerDown={(e): void => e.stopPropagation()}
         className={cn(
-          'inline-flex h-8 w-8 items-center justify-center rounded-md text-white transition-colors',
-          danger ? 'bg-red-600 hover:bg-red-700' : 'bg-gray-700/80 hover:bg-gray-600',
+          'inline-flex h-8 w-8 items-center justify-center rounded-full transition-colors',
+          danger
+            ? 'bg-[#dc362e] text-white hover:bg-[#e3554e]'
+            : 'bg-[#333537] text-[#e3e3e3] hover:bg-[#404245]',
         )}
         data-track-category='CALLS'
         data-track-name={trackName}
@@ -254,8 +280,8 @@ export function MiniCallView({
     p => p.identity === focusedScreenShareIdentity,
   );
 
-  const remoteParticipant = useMemo(
-    () => findRemotePresenter(participants, localParticipantId),
+  const presentationParticipant = useMemo(
+    () => findPresentationParticipant(participants, localParticipantId),
     [participants, localParticipantId],
   );
 
@@ -323,6 +349,8 @@ export function MiniCallView({
         aria-label='Resize width'
         className='absolute top-0 right-0 w-1 h-full cursor-ew-resize z-20'
         onMouseDown={e => handleResizeStart(e, 'right')}
+        data-track-category='CALLS'
+        data-track-name='RESIZE_MINI_CALL_WIDTH'
         onPointerDown={(e): void => e.stopPropagation()}
         onKeyDown={(e): void => {
           if (e.key === 'Enter' || e.key === ' ') {
@@ -339,6 +367,8 @@ export function MiniCallView({
           aria-label='Resize width and height'
           className='absolute bottom-0 right-0 w-4 h-4 cursor-nwse-resize z-30'
           onMouseDown={e => handleResizeStart(e, 'corner')}
+          data-track-category='CALLS'
+          data-track-name='RESIZE_MINI_CALL_CORNER'
           onPointerDown={(e): void => e.stopPropagation()}
           onKeyDown={(e): void => {
             if (e.key === 'Enter' || e.key === ' ') {
@@ -353,8 +383,24 @@ export function MiniCallView({
   if (isLineView) {
     return (
       <>
-        <div
-          className='fixed z-50 group/container'
+        {/* Draggable like the mini window: kept 20px inside the viewport on every
+            side. The header buttons stop pointerdown, so clicks never start a drag. */}
+        <motion.div
+          // Distinct keys: line and mini views are both motion.divs in the same
+          // slot, and without them React reuses one element — carrying this
+          // view's drag offset into the other and shoving it off-screen.
+          key='line-view'
+          drag
+          dragMomentum={false}
+          dragElastic={0}
+          dragConstraints={{
+            top: -(window.innerHeight - LINE_VIEW_HEIGHT - dockedLineBottom - 20),
+            left: 20 - lineLeft,
+            right: window.innerWidth - lineViewWidth - 20 - lineLeft,
+            bottom: 0,
+          }}
+          whileDrag={{ cursor: 'grabbing' }}
+          className='fixed z-50 group/container cursor-grab'
           style={{
             bottom: `${dockedLineBottom}px`,
             left: `${lineLeft}px`,
@@ -363,12 +409,12 @@ export function MiniCallView({
           <div
             ref={containerRef}
             className={cn(
-              'bg-gray-900 shadow-2xl overflow-hidden border backdrop-blur-sm relative',
-              'border-gray-700/70 rounded-full',
+              'bg-[#1e1f20] shadow-2xl overflow-hidden border backdrop-blur-sm relative',
+              'border-white/10 rounded-full',
             )}
             style={{
               width: `${lineViewWidth}px`,
-              height: '40px',
+              height: `${LINE_VIEW_HEIGHT}px`,
             }}
             data-testid='call-window'
           >
@@ -434,7 +480,7 @@ export function MiniCallView({
               </CallStateTransition>
             )}
           </div>
-        </div>
+        </motion.div>
         {/* Control Request Dialog */}
         {pendingControlRequest && localParticipantId === aiController?.id && (
           <ControlRequestDialog
@@ -449,7 +495,7 @@ export function MiniCallView({
         <PresentationModeOverlay
           callId={callId}
           isOpen={isPresentationMode}
-          participant={remoteParticipant ?? null}
+          participant={presentationParticipant ?? null}
           aiController={aiController}
           requestedAiController={requestedAiController}
           onExit={() => setIsPresentationMode(false)}
@@ -461,6 +507,7 @@ export function MiniCallView({
   return (
     <>
       <motion.div
+        key='mini-view'
         drag
         dragMomentum={false}
         dragElastic={0}
@@ -483,8 +530,8 @@ export function MiniCallView({
           <div
             ref={containerRef}
             className={cn(
-              'bg-gradient-to-br from-gray-900 to-gray-950 shadow-2xl overflow-hidden border-2 backdrop-blur-sm relative',
-              'border-gray-700/50',
+              'bg-[#131314] shadow-2xl overflow-hidden border-2 backdrop-blur-sm relative',
+              'border-white/10',
             )}
             style={{
               width: `${size.width}px`,
@@ -499,7 +546,7 @@ export function MiniCallView({
               {/* Normal connected state - show call UI */}
               <div className='h-full flex flex-col'>
                 {/* Header - Draggable */}
-                <div className='cursor-grab active:cursor-grabbing bg-gradient-to-r from-gray-800 to-gray-900 px-3 py-1.5 flex items-center justify-between border-b border-gray-700/50'>
+                <div className='cursor-grab active:cursor-grabbing bg-[#131314] px-3 py-1.5 flex items-center justify-between border-b border-white/[0.06]'>
                   <div className='flex items-center gap-2'>
                     <div className='relative visual-regression-hide'>
                       <div className='w-2 h-2 bg-green-500 rounded-full'></div>
@@ -519,12 +566,32 @@ export function MiniCallView({
                     >
                       <ChevronsDown className='h-4 w-4' />
                     </HeaderActionButton>
+                    {/* Back to the full call screen — mirrors "Minimize" in the full view's top bar */}
+                    <Tooltip content='Expand to full screen' side='bottom'>
+                      <button
+                        type='button'
+                        onClick={onExpand}
+                        onPointerDown={(e): void => e.stopPropagation()}
+                        className='inline-flex h-8 items-center gap-1.5 rounded-full bg-[#333537] pl-2.5 pr-3 text-xs font-medium text-[#e3e3e3] transition-colors hover:bg-[#404245]'
+                        aria-label='Expand to full screen'
+                        data-track-category='CALLS'
+                        data-track-name='TOGGLE_VIEW_MODE'
+                        data-track-metadata={JSON.stringify({
+                          callId,
+                          viewMode: 'mini',
+                          source: 'mini_header',
+                        })}
+                      >
+                        <Maximize2 className='h-3.5 w-3.5' />
+                        Expand
+                      </button>
+                    </Tooltip>
                   </div>
                 </div>
 
                 {/* Video Grid */}
                 <div
-                  className='flex-1 bg-gray-950/50 p-3 overflow-auto'
+                  className='flex-1 bg-[#131314] p-3 overflow-auto'
                   onPointerDown={(e): void => e.stopPropagation()}
                 >
                   {isWhiteboardOpen ? (
@@ -558,6 +625,7 @@ export function MiniCallView({
                     <div className='h-full'>
                       <ParticipantGrid
                         participants={participants}
+                        ringingInvitees={ringingInvitees}
                         compact={true}
                         aiController={aiController}
                         requestedAiController={requestedAiController}
@@ -567,9 +635,10 @@ export function MiniCallView({
                     </div>
                   )}
                 </div>
-
-                {/* Controls */}
-                <div className='pb-4' onPointerDown={(e): void => e.stopPropagation()}>
+                <div
+                  className='relative z-40 pb-4'
+                  onPointerDown={(e): void => e.stopPropagation()}
+                >
                   <CallControls
                     isMicEnabled={isMicEnabled}
                     isCameraEnabled={isCameraEnabled}
@@ -585,7 +654,6 @@ export function MiniCallView({
                     onToggleCamera={onToggleCamera}
                     onToggleScreenShare={onToggleScreenShare}
                     onDisconnect={onDisconnect}
-                    onToggleView={onExpand}
                     onToggleChat={onToggleThread}
                     onToggleParticipantsSidebar={() => {
                       setIsParticipantsSidebarOpen(prev => {
@@ -673,7 +741,7 @@ export function MiniCallView({
       <PresentationModeOverlay
         callId={callId}
         isOpen={isPresentationMode}
-        participant={remoteParticipant ?? null}
+        participant={presentationParticipant ?? null}
         aiController={aiController}
         requestedAiController={requestedAiController}
         onExit={() => setIsPresentationMode(false)}

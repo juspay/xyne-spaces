@@ -11,7 +11,7 @@ export const TicketPreviewPanel = ({
   onClose,
   ticketPreviewContent,
   createTicketContent,
-  trackCategory = 'BOARD',
+  trackCategory = 'Board',
 }: TicketPreviewPanelProps): ReactElement => {
   const [previewMode, setPreviewMode] = useState<PreviewMode>('ticket');
 

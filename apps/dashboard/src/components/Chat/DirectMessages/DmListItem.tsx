@@ -16,14 +16,15 @@ import { useAuthContextValues } from '../../../hooks/useAuth';
 import { useChannelDisplayName } from '../../../hooks/useChannelDisplayName';
 import { formatElapsedTime } from '../../../utils/dateUtils';
 import { usePlatform } from '../../../hooks/usePlatform';
-import { useUser } from '../../../hooks/useUsers';
+import { useUser, useUsersById } from '../../../hooks/useUsers';
 import { StatusIndicator } from '../../ui/StatusIndicator';
 import { getInitialMessageFromConversation } from '../../../utils/conversationMessageHelpers';
 import { RenderMessageWithHTML } from '../../Chat/RenderMessageWithHTML/RenderMessageWithHTML';
-import { sanitizeHtmlString } from '../../../utils/sanitizer';
-import { getFlowJsonPreviewText } from '../../../utils/flowPreview';
+import { sanitizeHtmlString, htmlToPlainText } from '../../../utils/sanitizer';
+import { getFlowJsonPreviewText, stripFlowMarkup } from '../../../utils/flowPreview';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
 import { getSlashCommandArtifactPreviewText } from '@xyne/shared';
+import { channelTrackingMetadata } from '../../../services/Analytics/channelTracking';
 
 interface DmListItemProps {
   channel: Channel;
@@ -66,44 +67,63 @@ export const DmListItem = ({
   // Get the sender of the last message
   const lastMessageSender = useUser(lastMessage?.senderId ?? '');
 
-  // Memoize HTML sanitization for message preview (Issue #1)
-  const sanitizedHtml = useMemo(() => {
-    if (!lastMessage) return '';
+  // A forwarded message stores the original content inside an XML envelope. Unwrap it
+  // before deriving any preview so flow/artifact messages use the same compact summary
+  // as messages sent directly in the DM.
+  const previewSourceContent = useMemo(() => {
+    if (!lastMessage?.content) return '';
 
-    // Handle forwarded messages - content is XML, need to parse it
     if (
       'msgType' in lastMessage &&
       lastMessage.msgType === MessageType.FORWARDED &&
       isForwardedMessageXml(lastMessage.content)
     ) {
       const parsed = parseForwardedMessageXml(lastMessage.content);
-      if (parsed) {
-        const text = parsed.optionalText || parsed.content;
-        return sanitizeHtmlString(text || 'Forwarded a message');
-      }
+      if (parsed) return parsed.optionalText || parsed.content || 'Forwarded a message';
     }
 
-    const rawContent =
-      lastMessage.content ||
-      ('attachments' in lastMessage && lastMessage.attachments?.length
+    return lastMessage.content;
+  }, [lastMessage]);
+
+  // Memoize HTML sanitization for message preview (Issue #1)
+  const sanitizedHtml = useMemo(() => {
+    if (!lastMessage) return '';
+
+    // Attachment-only messages arrive as empty rich-text markup (e.g. '<p></p>'),
+    // which is truthy but renders blank. Fall back to a label whenever the message
+    // has no visible text, so an attachment preview is not shown as an empty line.
+    const hasVisibleText = htmlToPlainText(previewSourceContent).length > 0;
+    const rawContent = hasVisibleText
+      ? previewSourceContent
+      : lastMessage.hasAttachment
         ? 'Sent an attachment'
-        : 'Message');
+        : previewSourceContent || 'Message';
 
     return sanitizeHtmlString(rawContent);
-  }, [lastMessage]);
+  }, [lastMessage, previewSourceContent]);
 
   // FlowJSON messages carry the whole interactive flow in their content. Feeding
   // that to RenderMessageWithHTML mounts the full flow card (title, textarea,
   // buttons) inside the one-line preview, breaking row layout. Collapse it to a
   // short plain-text summary instead.
   const flowPreviewText = useMemo(
-    () => (lastMessage?.content ? getFlowJsonPreviewText(lastMessage.content) : null),
-    [lastMessage?.content],
+    () => (previewSourceContent ? getFlowJsonPreviewText(previewSourceContent) : null),
+    [previewSourceContent],
   );
-  const slashCommandArtifactPreviewText = useMemo(
-    () => (lastMessage?.content ? getSlashCommandArtifactPreviewText(lastMessage.content) : null),
-    [lastMessage?.content],
-  );
+  const usersById = useUsersById();
+  const slashCommandArtifactPreviewText = useMemo(() => {
+    const preview = previewSourceContent
+      ? getSlashCommandArtifactPreviewText(previewSourceContent)
+      : null;
+    // The artifact preview is the raw Flow body; resolve its tokens so the row
+    // never shows `<broadcast:channel>` / `<userid:…>` verbatim.
+    return preview
+      ? stripFlowMarkup(preview, userId => {
+          const user = usersById.get(userId);
+          return user ? getUserDisplayName(user) : undefined;
+        })
+      : null;
+  }, [previewSourceContent, usersById]);
 
   // Memoize message preview with RenderMessageWithHTML component
   const messagePreview = useMemo(() => {
@@ -159,8 +179,12 @@ export const DmListItem = ({
   };
 
   const handleClick = (): void => {
-    // Navigate to /chat/dm/:channelId for both mobile and desktop
-    void navigate(`/chat/dm/${channel.id}?fromDM=true`);
+    // Navigate to /chat/dm/:channelId for both mobile and desktop. `trackSource`
+    // rides the navigation so CHANNEL_VIEWED can say where the open came from —
+    // the arrival fires for deep links and history too, which no click can cover.
+    void navigate(`/chat/dm/${channel.id}?fromDM=true`, {
+      state: { trackSource: 'sidebar_dm' },
+    });
   };
 
   const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
@@ -180,7 +204,11 @@ export const DmListItem = ({
         aria-label={`Open conversation with ${displayName}`}
         data-track-category='DM_LIST'
         data-track-name='OpenDMConversation'
-        data-track-metadata={JSON.stringify({ channelId: channel.id, displayName })}
+        data-track-label='Open DM conversation'
+        data-track-metadata={JSON.stringify({
+          ...channelTrackingMetadata(channel),
+          source: 'sidebar_dm',
+        })}
       >
         <DMItemAvatar
           userId={avatarUserId || null}
@@ -199,6 +227,7 @@ export const DmListItem = ({
                   statusEmoji={targetUser?.statusEmoji}
                   statusContent={targetUser?.statusContent}
                   statusExpiryAt={targetUser?.statusExpiryAt}
+                  activityStatus={targetUser?.activityStatus}
                   size='sm'
                   className='text-[14px]'
                 />
@@ -266,120 +295,118 @@ export const DmListItem = ({
     );
   }
 
+  const isUnread = unreadCount > 0;
+
   return (
-    <div className='w-full border-b border-border last:border-0 mt-0'>
-      <div
-        key={`dm-${channel.id}`}
-        onClick={handleClick}
-        onKeyDown={handleKeyDown}
-        className={cn(
-          'flex w-full items-center gap-[12px] px-4 py-3 cursor-pointer transition-colors',
-          'hover:bg-accent active:bg-accent',
-          isSelected && 'bg-input hover:bg-input active:bg-input',
+    <div
+      key={`dm-${channel.id}`}
+      onClick={handleClick}
+      onKeyDown={handleKeyDown}
+      className={cn(
+        'group flex w-full font-normal items-center gap-3 px-3 py-2 text-left cursor-pointer transition-colors duration-150 h-auto rounded-[14px] border border-transparent',
+        isUnread ? 'bg-activity-sidebar-primary' : 'bg-transparent',
+        'hover:!bg-sidebar-accent',
+        isSelected && '!bg-sidebar-accent border-sidebar-border',
+      )}
+      role='button'
+      tabIndex={0}
+      aria-label={`Open conversation with ${displayName}`}
+      data-track-category='DM'
+      data-track-name='OPEN_DM_CONVERSATION'
+      data-track-label='Open DM conversation'
+      data-track-metadata={JSON.stringify({
+        ...channelTrackingMetadata(channel),
+        source: 'sidebar_dm',
+        isUnread,
+      })}
+    >
+      <div className='relative flex-shrink-0'>
+        {isGroupDMChannel(channel.scopeType) ? (
+          <AvatarGroup userIds={otherParticipantIds} size='sm' isGroupDMAvatar className='size-9' />
+        ) : (
+          <Avatar
+            userId={avatarUserId}
+            size='rg'
+            className='size-9 rounded-[9px]'
+            showActiveStatus={channel.scopeType === ChannelScopeType.DM}
+          />
         )}
-        role='button'
-        tabIndex={0}
-        aria-label={`Open conversation with ${displayName}`}
-        data-track-category='DM'
-        data-track-name='OPEN_DM_CONVERSATION'
-        data-track-metadata={JSON.stringify({ channelId: channel.id, channelName: channel.name })}
-      >
-        {/* Avatar */}
-        <div className='relative shrink-0 size-10 rounded-[8px] overflow-visible'>
-          {isGroupDMChannel(channel.scopeType) ? (
-            <AvatarGroup userIds={otherParticipantIds} size='md' isGroupDMAvatar />
-          ) : (
-            <Avatar
-              userId={avatarUserId}
-              size='lg'
-              className='size-full rounded-[8px]'
-              showActiveStatus={channel.scopeType === ChannelScopeType.DM}
-            />
-          )}
+      </div>
+
+      <div className='flex flex-1 flex-col min-w-0 overflow-hidden'>
+        <div className='flex w-full items-start justify-between gap-2'>
+          <div
+            className={cn(
+              'flex items-center gap-1.5 min-w-0 flex-1 text-sm leading-snug',
+              isUnread ? 'text-foreground' : 'text-muted-foreground',
+            )}
+          >
+            <span className='font-semibold truncate min-w-0'>{displayName}</span>
+            {isDM && (
+              <StatusIndicator
+                statusEmoji={targetUser?.statusEmoji}
+                statusContent={targetUser?.statusContent}
+                statusExpiryAt={targetUser?.statusExpiryAt}
+                activityStatus={targetUser?.activityStatus}
+                size='sm'
+                className='flex-shrink-0 text-[14px]'
+              />
+            )}
+          </div>
+
+          <span className='flex-shrink-0 flex items-center gap-1.5 whitespace-nowrap text-xs text-muted-foreground ml-auto sm:ml-2'>
+            {lastMessage ? formatTime(lastMessage.createdAt) : null}
+          </span>
         </div>
 
-        {/* Content Container */}
-        <div className='flex flex-1 flex-col justify-center min-w-0 gap-[4px]'>
-          {/* Top Row: Name and Time */}
-          <div className='flex items-center justify-between gap-[4px] w-full'>
-            <div className='flex items-center gap-1.5 min-w-0 flex-1'>
-              <h4 className="font-['Inter'] font-semibold text-[16px] text-foreground tracking-[-0.32px] truncate leading-[1.2]">
-                {displayName}
-              </h4>
-              {isDM && (
-                <StatusIndicator
-                  statusEmoji={targetUser?.statusEmoji}
-                  statusContent={targetUser?.statusContent}
-                  statusExpiryAt={targetUser?.statusExpiryAt}
-                  size='sm'
-                  className='text-[14px]'
-                />
-              )}
-            </div>
-            {lastMessage && (
-              <span
-                className={cn(
-                  "shrink-0 font-['Inter'] font-normal text-[12px] text-muted-foreground tracking-[-0.24px] leading-[1.2]",
-                  unreadCount > 0 && !isSelected && 'text-primary',
-                )}
-              >
-                {formatTime(lastMessage.createdAt)}
-              </span>
+        <div className='mt-px flex w-full items-center gap-2'>
+          <div
+            onClick={e => {
+              if ((e.target as HTMLElement).tagName === 'A') {
+                e.stopPropagation();
+              }
+            }}
+            onKeyDown={e => {
+              if (
+                (e.key === 'Enter' || e.key === ' ') &&
+                (e.target as HTMLElement).tagName === 'A'
+              ) {
+                e.stopPropagation();
+              }
+            }}
+            role='presentation'
+            data-track-category='DM_LIST'
+            data-track-name='PREVIEW_LINK_CONTAINER'
+            className={cn(
+              'w-full min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-sm break-normal',
+              isUnread
+                ? 'text-foreground [&_.message-html-root]:!text-foreground'
+                : 'text-muted-foreground [&_.message-html-root]:!text-muted-foreground',
+              // Make RenderMessageWithHTML output inline and preserve link styles
+              '[&_.message-html-root]:inline',
+              '[&_.message-html-root_*]:inline',
+              '[&_.message-html-root_pre]:!inline [&_.message-html-root_pre]:!whitespace-nowrap',
+              '[&_.message-html-root_br]:hidden',
+              '[&_.message-html-root_a]:!text-[var(--link-color)]',
+              '[&_.message-html-root_a]:!no-underline',
+              '[&_.message-html-root_a:hover]:!underline',
+              '[&_.message-html-root_a:hover]:!text-[var(--link-hover-color)]',
+              // Hide internal link semantic labels (icons, borders, etc.) in preview
+              '[&_.message-html-root_span.group\\/internal-link]:contents',
+              '[&_.message-html-root_.group\\/internal-link_a]:!border-0',
+              '[&_.message-html-root_.group\\/internal-link_a]:!bg-transparent',
+              '[&_.message-html-root_.group\\/internal-link_a]:!p-0',
+              '[&_.message-html-root_.group\\/internal-link_a_.shrink-0]:!hidden',
+              '[&_.message-html-root_.group\\/internal-link_button]:!hidden',
             )}
+          >
+            {renderMessagePreview()}
           </div>
-
-          {/* Bottom Row: Message and Badge */}
-          <div className='flex items-start justify-between gap-[4px] w-full'>
-            <p
-              onClick={e => {
-                // Prevent DM navigation when clicking links in preview
-                if ((e.target as HTMLElement).tagName === 'A') {
-                  e.stopPropagation();
-                }
-              }}
-              onKeyDown={e => {
-                // Prevent DM navigation when activating links via keyboard
-                if (
-                  (e.key === 'Enter' || e.key === ' ') &&
-                  (e.target as HTMLElement).tagName === 'A'
-                ) {
-                  e.stopPropagation();
-                }
-              }}
-              role='presentation'
-              data-track-category='DM_LIST'
-              data-track-name='PREVIEW_LINK_CONTAINER'
-              className={cn(
-                "font-['Inter'] font-normal text-[14px] text-muted-foreground tracking-[-0.28px] leading-[1.35] truncate flex-1",
-                unreadCount > 0 && !isSelected && 'text-foreground font-medium',
-                // Make RenderMessageWithHTML output inline and preserve link styles
-                '[&_.message-html-root]:inline',
-                '[&_.message-html-root_*]:inline',
-                '[&_.message-html-root_pre]:!inline [&_.message-html-root_pre]:!whitespace-nowrap',
-                '[&_.message-html-root_br]:hidden',
-                '[&_.message-html-root_a]:!text-[var(--link-color)]',
-                '[&_.message-html-root_a]:!no-underline',
-                '[&_.message-html-root_a:hover]:!underline',
-                '[&_.message-html-root_a:hover]:!text-[var(--link-hover-color)]',
-                // Hide internal link semantic labels (icons, borders, etc.) in preview
-                '[&_.message-html-root_span.group\\/internal-link]:contents',
-                '[&_.message-html-root_.group\\/internal-link_a]:!border-0',
-                '[&_.message-html-root_.group\\/internal-link_a]:!bg-transparent',
-                '[&_.message-html-root_.group\\/internal-link_a]:!p-0',
-                '[&_.message-html-root_.group\\/internal-link_a_.shrink-0]:!hidden',
-                '[&_.message-html-root_.group\\/internal-link_button]:!hidden',
-              )}
-            >
-              {renderMessagePreview()}
-            </p>
-            {unreadCount > 0 && !isSelected && (
-              <div className='shrink-0 bg-primary flex flex-col items-center justify-center px-[6px] py-px rounded-[999px] h-[18px] min-w-[18px]'>
-                <span className="font-['Geist_Mono'] text-[14px] font-semibold leading-[1.2] text-primary-foreground">
-                  {unreadCount > 9 ? '9+' : unreadCount}
-                </span>
-              </div>
-            )}
-          </div>
+          {isUnread && (
+            <span className='shrink-0 rounded-md bg-sidebar-primary px-1 text-[0.625rem] font-bold tabular-nums text-sidebar-primary-foreground'>
+              {unreadCount > 9 ? '9+' : unreadCount}
+            </span>
+          )}
         </div>
       </div>
     </div>

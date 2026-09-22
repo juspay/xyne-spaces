@@ -63,12 +63,15 @@ import {
   UserRoleMappingsACL,
   UsersACL,
   UserWorkloadMappingsACL,
-  WorkflowExecutionsACL,
   WorkflowsACL,
   ReposACL,
+  SdlcEntityLinksACL,
+  SdlcArtifactsACL,
+  SdlcTracksACL,
   SavedUserConfigurationsACL,
   TicketAssignmentsACL,
   TicketStageEtaACL,
+  TicketDescriptionsACL,
   TicketStageRequestsACL,
   UserProfilesACL,
   UserPreferencesACL,
@@ -119,8 +122,11 @@ import {
   ReleaseChangesACL,
   ReleaseEventsACL,
   SavedUserConfigurationValuesACL,
+  ViewAccessACL,
   StageApproversACL,
   SurfaceLinksACL,
+  SdlcFoldersACL,
+  SdlcItemCommentsACL,
   SurfaceNudgeCountsACL,
   SurfaceNudgesACL,
   ToolsACL,
@@ -263,22 +269,34 @@ export class QueryACLFactory {
         return new TicketAssignmentsACL(ctx) as BaseQueryACL<TTable>;
       case 'ticket_stage_eta':
         return new TicketStageEtaACL(ctx) as BaseQueryACL<TTable>;
+      case 'ticket_descriptions':
+        return new TicketDescriptionsACL(ctx) as BaseQueryACL<TTable>;
       case 'ticket_stage_requests':
         return new TicketStageRequestsACL(ctx) as BaseQueryACL<TTable>;
       case 'user_workload_mappings':
         return new UserWorkloadMappingsACL(ctx) as BaseQueryACL<TTable>;
       case 'users':
         return new UsersACL(ctx) as BaseQueryACL<TTable>;
-      case 'workflow_executions':
-        return new WorkflowExecutionsACL(ctx) as BaseQueryACL<TTable>;
       case 'workflows':
         return new WorkflowsACL(ctx) as BaseQueryACL<TTable>;
       case 'repos':
         return new ReposACL(ctx) as BaseQueryACL<TTable>;
+      case 'sdlc_entity_links':
+        return new SdlcEntityLinksACL(ctx) as BaseQueryACL<TTable>;
+      case 'sdlc_artifacts':
+        return new SdlcArtifactsACL(ctx) as BaseQueryACL<TTable>;
+      case 'sdlc_folders':
+        return new SdlcFoldersACL(ctx) as BaseQueryACL<TTable>;
+      case 'sdlc_item_comments':
+        return new SdlcItemCommentsACL(ctx) as BaseQueryACL<TTable>;
+      case 'sdlc_tracks':
+        return new SdlcTracksACL(ctx) as BaseQueryACL<TTable>;
       case 'saved_user_configurations':
         return new SavedUserConfigurationsACL(ctx) as BaseQueryACL<TTable>;
       case 'saved_user_configuration_values':
         return new SavedUserConfigurationValuesACL(ctx) as BaseQueryACL<TTable>;
+      case 'view_access':
+        return new ViewAccessACL(ctx) as BaseQueryACL<TTable>;
       case 'delayed_messages':
         return new DelayedMessagesACL(ctx) as BaseQueryACL<TTable>;
       case 'collections':

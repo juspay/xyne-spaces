@@ -105,6 +105,7 @@ export const ZeroConnectionStatus = ({
         <button
           type='button'
           onClick={refreshConnection}
+          data-ph-capture-attribute-track-id='reconnect_zero_connection'
           aria-label={`Connection status: ${status.label}. ${status.hint ?? ''}`.trim()}
           data-testid='zero-connection-status'
           data-connection-state={connectionState.name}

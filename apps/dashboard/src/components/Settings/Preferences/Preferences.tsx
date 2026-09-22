@@ -13,14 +13,17 @@ import {
   ChevronLeft,
   ChevronRight,
   Calendar,
-  Search,
+  AudioLines,
   Monitor,
   Smartphone,
   LayoutGrid,
   Shield,
   Eye,
   EyeOff,
+  ChevronDown,
+  Check,
 } from 'lucide-react';
+import { ResolutionQualityHd, Spinner } from '@xyne/icons';
 import {
   NotificationLevel,
   MAX_NOTIFICATION_KEYWORDS,
@@ -33,6 +36,13 @@ import { Dialog } from '../../ui/Dialog/Dialog';
 import { Switch } from '../../ui/Switch';
 import { RadioGroup, Radio } from '../../ui/RadioGroup';
 import { Button } from '../../ui/Button/Button';
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+} from '../../ui/dropdown-menu';
+import { Tooltip } from '../../ui/Tooltip';
 
 import { usePlatform } from '../../../hooks/usePlatform';
 import type { Theme } from '../../../hooks/useTheme';
@@ -47,6 +57,8 @@ import { MeetingDetectionToggle } from '../MeetingDetectionToggle';
 import { MenuBarIconToggle } from '../MenuBarIconToggle';
 import { RecordingPillToggle } from '../RecordingPillToggle';
 import { ClawOverlayToggle } from '../ClawOverlayToggle';
+import { DailyBriefToggle } from '../DailyBriefToggle';
+import { IntentSuggestionsToggle } from '../IntentSuggestionsToggle';
 import { UpdateAssignmentStatusModal } from '../../AppSidebar/UpdateAssignmentStatusModal';
 import { VoiceSignatureModal } from '../VoiceSignatureModal/VoiceSignatureModal';
 import HuddleIcon from '../../icons/HuddleIcon';
@@ -59,9 +71,9 @@ import {
   CALL_MEDIA_QUALITY_OPTIONS,
   type CallMediaQuality,
 } from '../../../hooks/useCallMediaQualitySettings';
+import { useMaxCameraHeight, filterQualityOptionsByMax } from '../../../hooks/useMaxCameraQuality';
 import { useVisibleNavigationItems } from '../../../hooks/useVisibleNavigationItems';
 import { useToolbarItems } from '../../../hooks/useToolbarItems';
-import { isRequiredToolbarPath } from '../../AppSidebar/navigationConfig';
 import type { PreferenceSection, PreferencesProps, NavItem } from '.';
 import { disconnectCalendar } from '../../../services/clients/calendarApi';
 import { toast } from 'sonner';
@@ -73,6 +85,7 @@ const NAV_ITEMS: NavItem[] = [
   { id: 'availability', label: 'Availability', icon: <PauseCircle className='size-4' /> },
   { id: 'voice', label: 'Voice', icon: <Mic className='size-4' /> },
   { id: 'calls', label: 'Calls', icon: <HuddleIcon size={16} /> },
+  { id: 'recordings', label: 'Recordings', icon: <AudioLines className='size-4' /> },
   {
     id: 'messaging',
     label: 'Messaging',
@@ -80,7 +93,6 @@ const NAV_ITEMS: NavItem[] = [
     desktopOnly: true,
   },
   { id: 'launch', label: 'Launch', icon: <Zap className='size-4' />, desktopOnly: true },
-  { id: 'search', label: 'Search', icon: <Search className='size-4' /> },
   {
     id: 'toolbar',
     label: 'Toolbar',
@@ -116,27 +128,70 @@ const QualitySelect: FC<{
   label: string;
   value: CallMediaQuality;
   onChange: (value: CallMediaQuality) => void;
-}> = ({ id, label, value, onChange }) => (
-  <div className='flex items-center justify-between gap-4'>
-    <label htmlFor={id} className='text-sm font-medium text-foreground'>
-      {label}
-    </label>
-    <select
-      id={id}
-      value={value}
-      onChange={event => onChange(event.target.value as CallMediaQuality)}
-      className='h-8 min-w-32 rounded-md border border-border bg-background px-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring'
-      data-track-category='PREFERENCES'
-      data-track-name={id}
-    >
-      {CALL_MEDIA_QUALITY_OPTIONS.map(option => (
-        <option key={option.value} value={option.value}>
-          {option.label} - {option.description}
-        </option>
-      ))}
-    </select>
-  </div>
-);
+  options?: typeof CALL_MEDIA_QUALITY_OPTIONS;
+  disabled?: boolean;
+  action?: ReactNode;
+}> = ({
+  id,
+  label,
+  value,
+  onChange,
+  options = CALL_MEDIA_QUALITY_OPTIONS,
+  disabled = false,
+  action,
+}) => {
+  const selected = options.find(option => option.value === value) ?? options[0];
+  return (
+    <div className='flex items-center justify-between gap-4'>
+      <span id={`${id}-label`} className='text-sm font-medium text-foreground'>
+        {label}
+      </span>
+      <div className='flex items-center gap-2'>
+        {action}
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild disabled={disabled}>
+            <button
+              id={id}
+              type='button'
+              disabled={disabled}
+              aria-labelledby={`${id}-label ${id}`}
+              className='flex h-8 min-w-40 items-center justify-between gap-2 rounded-md border border-border bg-background px-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-background'
+              data-track-category='PREFERENCES'
+              data-track-name={id}
+            >
+              <span className='truncate'>
+                {selected?.label}
+                {selected && (
+                  <span className='text-muted-foreground'> - {selected.description}</span>
+                )}
+              </span>
+              <ChevronDown className='size-3.5 shrink-0 text-muted-foreground' />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align='end' className='min-w-40'>
+            {options.map(option => (
+              <DropdownMenuItem
+                key={option.value}
+                onClick={() => onChange(option.value)}
+                className='flex items-center justify-between gap-3'
+                data-track-category='PREFERENCES'
+                data-track-name={`${id}-${option.value}`}
+              >
+                <span>
+                  {option.label}{' '}
+                  <span className='text-muted-foreground'>- {option.description}</span>
+                </span>
+                {option.value === value && (
+                  <Check className='size-3.5 shrink-0 text-primary' aria-hidden />
+                )}
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+    </div>
+  );
+};
 
 // ─── Appearance ─────────────────────────────────────────────────────────────
 const AppearanceSection: FC<{ state: PreferencesState }> = ({ state }) => (
@@ -223,6 +278,7 @@ const NotificationKeywordsCard: FC = () => {
               <button
                 type='button'
                 onClick={() => removeKeyword(keyword)}
+                data-ph-capture-attribute-track-id='remove_notification_keyword'
                 className='rounded-full p-0.5 transition-colors'
                 aria-label={`Remove ${keyword}`}
                 data-track-category='PREFERENCES'
@@ -282,6 +338,8 @@ const NotificationsSection: FC<{ state: PreferencesState }> = () => {
               <button
                 key={level.value}
                 onClick={() => settings.update({ globalDesktopNotificationLevel: level.value })}
+                data-ph-capture-attribute-track-id='set_global_desktop_notification_level'
+                data-ph-capture-attribute-level={level.value}
                 data-track-category='PREFERENCES'
                 data-track-name={`SetGlobalDesktopLevel_${level.value}`}
                 className={cn(
@@ -308,6 +366,8 @@ const NotificationsSection: FC<{ state: PreferencesState }> = () => {
               <button
                 key={level.value}
                 onClick={() => settings.update({ globalMobileNotificationLevel: level.value })}
+                data-ph-capture-attribute-track-id='set_global_mobile_notification_level'
+                data-ph-capture-attribute-level={level.value}
                 data-track-category='PREFERENCES'
                 data-track-name={`SetGlobalMobileLevel_${level.value}`}
                 className={cn(
@@ -470,6 +530,16 @@ const VoiceSection: FC<{ state: PreferencesState }> = ({ state }) => (
 
 const CallsSection: FC<{ state: PreferencesState }> = ({ state }) => {
   const [isDisconnecting, setIsDisconnecting] = useState(false);
+  const {
+    maxHeight: maxCameraHeight,
+    isDetecting,
+    detect: detectCameraQuality,
+  } = useMaxCameraHeight();
+  const videoQualityOptions = filterQualityOptionsByMax(
+    CALL_MEDIA_QUALITY_OPTIONS,
+    maxCameraHeight,
+    state.callVideoQuality,
+  );
 
   const handleDisconnectCalendar = async () => {
     setIsDisconnecting(true);
@@ -525,6 +595,30 @@ const CallsSection: FC<{ state: PreferencesState }> = ({ state }) => {
           label='Video'
           value={state.callVideoQuality}
           onChange={state.setCallVideoQuality}
+          options={videoQualityOptions}
+          disabled={maxCameraHeight === null}
+          action={
+            maxCameraHeight === null && (
+              <Tooltip content="Detect your camera's max supported resolution" side='top'>
+                <Button
+                  type='button'
+                  variant='outline'
+                  size='iconSm'
+                  disabled={isDetecting}
+                  onClick={detectCameraQuality}
+                  aria-label='Detect camera quality'
+                  data-track-category='PREFERENCES'
+                  data-track-name='DetectCameraQuality'
+                >
+                  {isDetecting ? (
+                    <Spinner className='size-3.5 animate-spin' />
+                  ) : (
+                    <ResolutionQualityHd className='size-4' />
+                  )}
+                </Button>
+              </Tooltip>
+            )
+          }
         />
         <QualitySelect
           id='call-screen-share-quality'
@@ -575,6 +669,7 @@ const CallsSection: FC<{ state: PreferencesState }> = ({ state }) => {
           size='sm'
           disabled={isDisconnecting}
           onClick={() => void handleDisconnectCalendar()}
+          trackId='disconnect_calendar'
           data-track-category='PREFERENCES'
           data-track-name='DisconnectCalendar'
         >
@@ -584,6 +679,34 @@ const CallsSection: FC<{ state: PreferencesState }> = ({ state }) => {
     </div>
   );
 };
+
+const RecordingsSection: FC<{ state: PreferencesState }> = ({ state }) => (
+  <div className='space-y-6'>
+    <SectionHeader
+      title='Recordings'
+      subtitle='Configure how your recording summaries are generated'
+    />
+
+    <div className='p-3 rounded-lg border border-border bg-muted/30 space-y-3'>
+      <div>
+        <p className='text-sm font-medium text-foreground'>LLM summary generation model</p>
+        <p className='text-xs text-muted-foreground mt-0.5'>
+          Which model tier generates your recording summaries and titles. Fast is quicker; Thinking
+          is higher quality but slower.
+        </p>
+      </div>
+      <RadioGroup
+        value={state.summaryModelPreference}
+        onChange={value =>
+          state.setSummaryModelPreference(value === 'thinking' ? 'thinking' : 'fast')
+        }
+      >
+        <Radio value='fast'>Fast (default)</Radio>
+        <Radio value='thinking'>Thinking &mdash; higher quality, slower</Radio>
+      </RadioGroup>
+    </div>
+  </div>
+);
 
 // ─── Messaging ──────────────────────────────────────────────────────────────
 // Section is desktop-only (see NAV_ITEMS), so no isMobile branching needed.
@@ -671,18 +794,36 @@ const MessagingSection: FC<{ state: PreferencesState }> = ({ state }) => (
 const LaunchSection: FC<{ state: PreferencesState }> = ({ state }) => (
   <div className='space-y-4'>
     <SectionHeader title='Launch' subtitle='Configure your startup experience' />
-    <div className='flex items-center justify-between gap-4 p-3 rounded-lg border border-border bg-muted/30'>
-      <div>
-        <p className='text-sm font-medium text-foreground'>Open AI on launch</p>
-        <p className='text-xs text-muted-foreground mt-0.5'>
-          Start with the Xyne AI landing page instead of chat
-        </p>
+    <div className='p-3 rounded-lg border border-border bg-muted/30'>
+      <div className='flex items-center justify-between gap-4'>
+        <div>
+          <p className='text-sm font-medium text-foreground'>Open AI on launch</p>
+          <p className='text-xs text-muted-foreground mt-0.5'>
+            Start with the Xyne AI landing page instead of chat
+          </p>
+        </div>
+        <Switch
+          id='ai-landing-default'
+          checked={state.aiLandingDefault}
+          onCheckedChange={state.setAiLandingDefault}
+        />
       </div>
-      <Switch
-        id='ai-landing-default'
-        checked={state.aiLandingDefault}
-        onCheckedChange={state.setAiLandingDefault}
-      />
+      <DailyBriefToggle available={state.aiLandingDefault} />
+      <div className='mt-3 border-t border-border pt-3'>
+        <div className='flex items-center justify-between gap-4'>
+          <div>
+            <p className='text-sm font-medium text-foreground'>Collapse sidebar for apps</p>
+            <p className='mt-0.5 text-xs text-muted-foreground'>
+              Hide the sidebar when a chat is building an app
+            </p>
+          </div>
+          <Switch
+            id='app-mode-collapse-sidebar'
+            checked={state.appModeCollapseSidebar}
+            onCheckedChange={state.setAppModeCollapseSidebar}
+          />
+        </div>
+      </div>
     </div>
     <ClawOverlayToggle />
   </div>
@@ -826,6 +967,7 @@ const PasswordSection: FC = () => {
           onClick={() => void handleSubmit()}
           disabled={isSubmitting || !currentPassword || !newPassword || !confirmPassword}
           className='w-full'
+          trackId='update_password'
           data-track-category='PREFERENCES'
           data-track-name='UpdatePassword'
         >
@@ -838,11 +980,12 @@ const PasswordSection: FC = () => {
 
 // ─── Developer ──────────────────────────────────────────────────────────────
 const DeveloperSection: FC<{ state: PreferencesState }> = ({ state }) => {
-  const { isMobile } = usePlatform();
   return (
     <div className='space-y-4'>
       <SectionHeader title='Developer' subtitle='Debug settings and app information' />
       <div className='space-y-3'>
+        <IntentSuggestionsToggle />
+
         <div className='flex items-center justify-between gap-4 p-3 rounded-lg border border-border bg-muted/30'>
           <p className='text-sm font-medium text-foreground'>Show send indicators</p>
           <Switch
@@ -852,21 +995,21 @@ const DeveloperSection: FC<{ state: PreferencesState }> = ({ state }) => {
           />
         </div>
 
-        {!isMobile && (
-          <div className='flex items-center justify-between gap-4 p-3 rounded-lg border border-border bg-muted/30'>
-            <div>
-              <p className='text-sm font-medium text-foreground'>Show Claw Agents</p>
-              <p className='text-xs text-muted-foreground mt-0.5'>
-                Show the Claw Agents option in the Spaces sidebar.
-              </p>
-            </div>
-            <Switch
-              id='show-claw-agents'
-              checked={state.showClawDashboard}
-              onCheckedChange={state.setShowClawDashboard}
-            />
+        <div className='flex items-center justify-between gap-4 p-3 rounded-lg border border-border bg-muted/30'>
+          <div>
+            <p className='text-sm font-medium text-foreground'>Streams</p>
+            <p className='text-xs text-muted-foreground mt-0.5'>
+              Arrange channels, boards, tickets and threads side by side in one scrolling deck. Off
+              while it is new — turning it on adds Streams to the Toolbar list, where you can put it
+              in the sidebar.
+            </p>
           </div>
-        )}
+          <Switch
+            id='show-streams'
+            checked={state.showStreams}
+            onCheckedChange={state.setShowStreams}
+          />
+        </div>
 
         {detectReactNativeWebView() && (
           <Button
@@ -923,32 +1066,6 @@ const DeveloperSection: FC<{ state: PreferencesState }> = ({ state }) => {
   );
 };
 
-// ─── Search ─────────────────────────────────────────────────────────────────
-const SearchSection: FC<{ state: PreferencesState }> = ({ state }) => (
-  <div className='space-y-4'>
-    <SectionHeader
-      title='Search'
-      subtitle='Choose how search opens when you click the search bar or press ⌘K'
-    />
-    <div className='p-3 rounded-lg border border-border bg-muted/30 space-y-3'>
-      <RadioGroup
-        value={state.searchMode}
-        onChange={value => state.setSearchMode(value as 'popup' | 'screen')}
-      >
-        <Radio value='popup' subtext='Opens a floating modal — fast navigation and inline results'>
-          Quick search popup
-        </Radio>
-        <Radio
-          value='screen'
-          subtext='Opens the search results page with filters for type, sender, channel, and sort'
-        >
-          Full search screen
-        </Radio>
-      </RadioGroup>
-    </div>
-  </div>
-);
-
 // ─── Toolbar ────────────────────────────────────────────────────────────────
 const ToolbarSection: FC<{ state: PreferencesState }> = () => {
   const items = useVisibleNavigationItems();
@@ -963,8 +1080,7 @@ const ToolbarSection: FC<{ state: PreferencesState }> = () => {
       <div className='flex flex-col gap-1.5'>
         {items.map(item => {
           const Icon = item.icon;
-          const required = isRequiredToolbarPath(item.path);
-          const checked = required || toolbarPaths.has(item.path);
+          const checked = toolbarPaths.has(item.path);
           return (
             <div
               key={item.path}
@@ -977,11 +1093,9 @@ const ToolbarSection: FC<{ state: PreferencesState }> = () => {
                 <p className='text-sm font-medium text-foreground truncate'>{item.label}</p>
               </div>
               <div className='flex items-center gap-2.5 shrink-0'>
-                {required && <span className='text-xs text-muted-foreground'>Always on</span>}
                 <Switch
                   aria-label={`Show ${item.label} in toolbar`}
                   checked={checked}
-                  disabled={required}
                   onCheckedChange={value => setInToolbar(item.path, value)}
                 />
               </div>
@@ -1000,9 +1114,9 @@ const SECTIONS: Record<PreferenceSection, FC<{ state: PreferencesState }>> = {
   availability: AvailabilitySection,
   voice: VoiceSection,
   calls: CallsSection,
+  recordings: RecordingsSection,
   messaging: MessagingSection,
   launch: LaunchSection,
-  search: SearchSection,
   toolbar: ToolbarSection,
   calendar: CalendarSection,
   password: PasswordSection as FC<{ state: PreferencesState }>,

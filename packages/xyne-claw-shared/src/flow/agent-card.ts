@@ -36,6 +36,8 @@ import { FlowBuilder, type FlowComponent, type FlowDefinition } from './builder.
  *  without updating both consumers. */
 export const AGENT_COMPONENT_ID = 'agent';
 
+export const AGENT_EDITS_STATE_KEY = 'agent-edits';
+
 /** Display cap for the system prompt carried on the card. The card copy is for
  *  the expanded view only — the FULL prompt lives in the AgentRequest row and is
  *  what actually gets created, so truncating here is purely cosmetic. */
@@ -49,15 +51,47 @@ export interface AgentCapability {
   id: string;
   label: string;
   kind: 'subagent' | 'tool';
+  group?: 'subagent' | 'agent' | 'mcp' | 'builtin';
+  description?: string;
   /** MCP serverType whose brand icon represents this capability, e.g. "github". */
   iconKey?: string;
   /** serverType whose account/credentials this capability needs, when unconnected. */
   requiresConnection?: string;
+  parentId?: string;
+  parentLabel?: string;
 }
 
 export interface AgentDetailRow {
   label: string;
   value: string;
+}
+
+export interface AgentSkill {
+  id: string;
+  name: string;
+  description?: string;
+}
+
+export interface AgentKnowledgeSource {
+  id: string;
+  name: string;
+  kind?: 'collection' | 'file';
+}
+
+export interface AgentKnowledge {
+  scope?: 'COLLECTIONS' | 'USER';
+  sources?: AgentKnowledgeSource[];
+}
+
+export interface AgentMemory {
+  enabled: boolean;
+  requiresApproval?: boolean;
+}
+
+export interface AgentProviderStatus {
+  provider: string;
+  label: string;
+  connected: boolean;
 }
 
 export interface AgentConnectLink {
@@ -71,22 +105,42 @@ export interface AgentIdentity {
   slug: string;
   /** Handle credited under the name ("Built by @fractal-agent"). */
   builtBy?: string;
+  /** Owner's display name, credited in the card chin. */
+  ownedBy?: string;
+  /** Owner's user id, for the avatar beside that credit. */
+  ownedById?: string;
+  /** Reach: 'global' is org-wide, 'personal' belongs to one user. */
+  scope?: 'personal' | 'global';
   description?: string;
   systemPrompt?: string;
   modelId?: string;
   color?: string;
   capabilities?: AgentCapability[];
+  providerOrder?: string[];
+  providers?: AgentProviderStatus[];
+  skills?: AgentSkill[];
+  knowledge?: AgentKnowledge;
+  memory?: AgentMemory;
   details?: AgentDetailRow[];
   connectLinks?: AgentConnectLink[];
 }
 
 export type AgentDraftPhase = 'pending' | 'created' | 'rejected';
 
+export interface AgentToolSelection {
+  subagents?: string[];
+  direct?: string[];
+  gateway?: string[];
+  custom?: string[];
+  callableAgents?: string[];
+}
+
 export type AgentCardProps =
   | {
       variant: 'draft';
       phase: AgentDraftPhase;
       agent: AgentIdentity;
+      toolSelection?: AgentToolSelection;
       /** Seeds state.values[AGENT_COMPONENT_ID] — capability ids kept by the user. */
       selected?: string[];
       note?: string;
@@ -134,11 +188,19 @@ export function agentIdentity(input: {
   name: string;
   slug: string;
   builtBy?: string | null;
+  ownedBy?: string | null;
+  ownedById?: string | null;
+  scope?: string | null;
   description?: string | null;
   systemPrompt?: string | null;
   modelId?: string | null;
   color?: string | null;
   capabilities?: AgentCapability[];
+  providerOrder?: string[];
+  providers?: AgentProviderStatus[];
+  skills?: AgentSkill[];
+  knowledge?: AgentKnowledge;
+  memory?: AgentMemory;
   details?: AgentDetailRow[];
   connectLinks?: AgentConnectLink[];
 }): AgentIdentity {
@@ -151,6 +213,11 @@ export function agentIdentity(input: {
   // plain handle wherever else it is used.
   const builtBy = trimmed(input.builtBy, 80)?.replace(/^@+/, "");
   if (builtBy) identity.builtBy = builtBy;
+  const ownedBy = trimmed(input.ownedBy, 80)?.replace(/^@+/, "");
+  if (ownedBy) identity.ownedBy = ownedBy;
+  const ownedById = trimmed(input.ownedById, 80);
+  if (ownedById) identity.ownedById = ownedById;
+  if (input.scope === 'global' || input.scope === 'personal') identity.scope = input.scope;
   const description = trimmed(input.description, MAX_DESC);
   if (description) identity.description = description;
   const systemPrompt = trimmed(input.systemPrompt, MAX_CARD_PROMPT);
@@ -167,8 +234,12 @@ export function agentIdentity(input: {
       id: c.id.trim(),
       label: c.label.trim(),
       kind: c.kind,
+      ...(c.group ? { group: c.group } : {}),
+      ...(c.description ? { description: c.description } : {}),
       ...(c.iconKey ? { iconKey: c.iconKey } : {}),
       ...(c.requiresConnection ? { requiresConnection: c.requiresConnection } : {}),
+      ...(c.parentId ? { parentId: c.parentId } : {}),
+      ...(c.parentLabel ? { parentLabel: c.parentLabel } : {}),
     }));
   if (capabilities.length > 0) identity.capabilities = capabilities;
 
@@ -181,6 +252,38 @@ export function agentIdentity(input: {
   if (input.connectLinks && input.connectLinks.length > 0) {
     identity.connectLinks = input.connectLinks;
   }
+
+  const providerOrder = (input.providerOrder ?? []).map((p) => p.trim()).filter(Boolean);
+  if (providerOrder.length > 0) identity.providerOrder = providerOrder;
+
+  const providers = (input.providers ?? []).filter(
+    (p) => p.provider.trim().length > 0 && p.label.trim().length > 0,
+  );
+  if (providers.length > 0) identity.providers = providers;
+
+  const skills = (input.skills ?? [])
+    .filter((k) => k.id.trim().length > 0 && k.name.trim().length > 0)
+    .slice(0, MAX_CAPABILITIES)
+    .map((k) => ({
+      id: k.id.trim(),
+      name: k.name.trim(),
+      ...(k.description ? { description: k.description } : {}),
+    }));
+  if (skills.length > 0) identity.skills = skills;
+
+  if (input.knowledge) {
+    const sources = (input.knowledge.sources ?? [])
+      .filter((r) => r.id.trim().length > 0 && r.name.trim().length > 0)
+      .slice(0, MAX_CAPABILITIES)
+      .map((r) => ({ id: r.id.trim(), name: r.name.trim(), ...(r.kind ? { kind: r.kind } : {}) }));
+    const knowledge: AgentKnowledge = {
+      ...(input.knowledge.scope ? { scope: input.knowledge.scope } : {}),
+      ...(sources.length > 0 ? { sources } : {}),
+    };
+    if (Object.keys(knowledge).length > 0) identity.knowledge = knowledge;
+  }
+
+  if (input.memory) identity.memory = input.memory;
 
   return identity;
 }
@@ -198,6 +301,9 @@ export function buildAgentCardFlow(props: AgentCardProps, data: AgentCardData): 
           variant: 'draft',
           phase: props.phase,
           agent: props.agent,
+          ...(props.toolSelection && Object.keys(props.toolSelection).length > 0
+            ? { toolSelection: props.toolSelection }
+            : {}),
           // Default the selection to EVERY capability: an unchecked chip means
           // "the user removed it", so an absent seed must not read as "user
           // deselected everything".
@@ -227,6 +333,106 @@ export function buildAgentCardFlow(props: AgentCardProps, data: AgentCardData): 
       ...(data.requestId ? { requestId: data.requestId } : {}),
       agentSlug: data.agentSlug,
       ...(data.targetSlug ? { targetSlug: data.targetSlug } : {}),
+      userId: data.userId,
+      ...(data.conversationId ? { conversationId: data.conversationId } : {}),
+      ...(data.channelId ? { channelId: data.channelId } : {}),
+    })
+    .build();
+}
+
+export const MAX_AGENT_LIST_CARDS = 5;
+
+export interface AgentListCardData extends Omit<AgentCardData, 'targetSlug'> {
+  totalMatches?: number;
+}
+
+export function buildAgentListFlow(
+  agents: AgentIdentity[],
+  data: AgentListCardData,
+  max: number = MAX_AGENT_LIST_CARDS,
+): FlowDefinition {
+  const shown = agents.slice(0, Math.max(1, max));
+  const total = data.totalMatches ?? agents.length;
+  const hidden = Math.max(0, total - shown.length);
+
+  const builder = new FlowBuilder(`agent-list-${data.userId}-${shown.map((a) => a.slug).join('-')}`);
+
+  shown.forEach((agent, i) => {
+    builder.addComponent({
+      id: `${AGENT_COMPONENT_ID}-${agent.slug}`,
+      type: 'agent',
+      props: { variant: 'profile', agent },
+      ...(i < shown.length - 1 ? { style: { margin: '0 0 12px 0' } } : {}),
+    });
+  });
+
+  if (hidden > 0) {
+    builder.addText('agent-list-overflow', `+${hidden} more`, { variant: 'muted', size: 'sm' });
+  }
+
+  return builder
+    .setData({
+      actionType: 'agent-card',
+      variant: 'profile',
+      agentSlug: data.agentSlug,
+      userId: data.userId,
+      ...(data.conversationId ? { conversationId: data.conversationId } : {}),
+      ...(data.channelId ? { channelId: data.channelId } : {}),
+    })
+    .build();
+}
+
+export interface AgentSummaryRow {
+  slug: string;
+  name: string;
+  description?: string;
+}
+
+export interface AgentSummaryCounts {
+  total: number;
+  global?: number;
+  personal?: number;
+  agents?: AgentSummaryRow[];
+}
+
+/**
+ * Roster summary card — "you have N agents", with a link into the library.
+ *
+ * The counts come from the server's own query, never from the model: an agent
+ * asked "how many agents do we have?" must not answer from memory. There is no
+ * route in the payload — the dashboard node builds the library link from the
+ * workspace it is already in.
+ */
+export function buildAgentSummaryFlow(
+  counts: AgentSummaryCounts,
+  data: Omit<AgentCardData, 'targetSlug' | 'requestId'>,
+  /** Overrides the default "N agents available" heading. */
+  label?: string,
+): FlowDefinition {
+  return new FlowBuilder(`agent-summary-${data.userId}`)
+    .addComponent({
+      id: 'agent-summary',
+      type: 'agent_summary',
+      props: {
+        total: counts.total,
+        ...(label ? { label } : {}),
+        ...(counts.global !== undefined ? { global: counts.global } : {}),
+        ...(counts.personal !== undefined ? { personal: counts.personal } : {}),
+        ...(counts.agents?.length
+          ? {
+              agents: counts.agents.map((a) => ({
+                slug: a.slug,
+                name: a.name,
+                ...(a.description ? { description: a.description } : {}),
+              })),
+            }
+          : {}),
+      },
+    })
+    .setData({
+      actionType: 'agent-card',
+      variant: 'summary',
+      agentSlug: data.agentSlug,
       userId: data.userId,
       ...(data.conversationId ? { conversationId: data.conversationId } : {}),
       ...(data.channelId ? { channelId: data.channelId } : {}),

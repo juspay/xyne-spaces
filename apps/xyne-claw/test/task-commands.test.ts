@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { loadCustomTools } from "../src/custom-tools.js";
 import {
   DESIGN_SYSTEM_MAX_CHARS,
+  SPEC_QUESTION_OUTLINE,
   buildDesignSystemPromptInjection,
   parseTaskCommand,
   resolveTaskCommandMode,
@@ -217,5 +218,122 @@ describe("/record-skill task command", () => {
 
   it("executes immediately instead of entering plan mode", () => {
     expect(resolveTaskCommandMode("/record-skill", "plan")).toBe("auto");
+  });
+});
+
+describe("/spec task command", () => {
+  it("matches only the leading command token", () => {
+    expect(parseTaskCommand("/spec write the spec for XYNE-1")?.command).toBe("/spec");
+    expect(parseTaskCommand("  /SPEC\nXYNE-1")?.command).toBe("/spec");
+    expect(parseTaskCommand("please /spec XYNE-1")).toBeNull();
+    expect(parseTaskCommand("/specs XYNE-1")).toBeNull();
+  });
+
+  it("binds the run with a command-owned skill and delivery contract", () => {
+    const command = parseTaskCommand("/spec XYNE-1");
+    expect(command?.requiredTool).toBeUndefined();
+    expect(command?.skillPaths).toEqual(["spec-skills"]);
+    expect(command?.instruction).toContain("Ticket Specs skill");
+    const outputFormat = command?.agentConfigOverlay?.["outputFormat"] as
+      | { type?: string; template?: string }
+      | undefined;
+    expect(outputFormat?.type).toBe("markdown");
+    expect(outputFormat?.template).toBe(SPEC_QUESTION_OUTLINE);
+  });
+
+  it("keeps the first turn as a context-first interview", () => {
+    for (const heading of [
+      "Problem statement",
+      "Solutioning",
+      "Test cases",
+      "Implementation details",
+      "Out of scope",
+    ]) {
+      expect(SPEC_QUESTION_OUTLINE).toContain(heading);
+    }
+    expect(SPEC_QUESTION_OUTLINE).toContain("summarize the ticket/context");
+    expect(SPEC_QUESTION_OUTLINE).toContain("existing description/Specification state");
+    expect(SPEC_QUESTION_OUTLINE).toContain("contextual clarification questions");
+    expect(SPEC_QUESTION_OUTLINE).toContain("Do NOT mechanically ask");
+  });
+
+  it("allows technical context but prevents implementation-derived specs and same-turn writes", () => {
+    expect(SPEC_QUESTION_OUTLINE).toContain("technical context or code/PR context");
+    expect(SPEC_QUESTION_OUTLINE).toContain("Do NOT derive requirement intent solely from implementation");
+    expect(SPEC_QUESTION_OUTLINE).toContain("Ask the minimum useful batch of questions");
+    expect(SPEC_QUESTION_OUTLINE).toContain("Do NOT create, draft, or update the Specification");
+  });
+
+  it("keeps the overlay off the agent's own config", () => {
+    const savedConfig: Record<string, unknown> = { tools: { custom: ["todo-read"] } };
+    const command = parseTaskCommand("/spec XYNE-1");
+    const merged = { ...savedConfig, ...(command?.agentConfigOverlay ?? {}) };
+
+    expect(merged["outputFormat"]).toBeDefined();
+    expect(savedConfig["outputFormat"]).toBeUndefined();
+  });
+
+  it("executes immediately instead of entering plan mode", () => {
+    expect(resolveTaskCommandMode("/spec XYNE-1", "plan")).toBe("auto");
+  });
+});
+
+describe("/review", () => {
+  it("parses and loads the review skill pack", () => {
+    const command = parseTaskCommand("/review the local changes");
+    expect(command?.command).toBe("/review");
+    expect(command?.skillPaths).toContain("review-skills");
+  });
+
+  it("contracts for a delivered review room with diagrams", () => {
+    const command = parseTaskCommand("/review");
+    expect(command?.instruction).toContain("review-room.html");
+    expect(command?.instruction).toContain("mermaid");
+    expect(command?.nudge).toContain("review-room.html");
+  });
+
+  it("contracts for machine-readable comments the diff viewer can anchor", () => {
+    const command = parseTaskCommand("/review");
+    expect(command?.instruction).toContain("review-comments.json");
+    expect(command?.instruction).toContain("NEW-side line number");
+    expect(command?.instruction).toContain("order");
+    expect(command?.nudge).toContain("review-comments.json");
+  });
+
+  it("forces no tools and pins no sandbox profile, so it can run anywhere", () => {
+    const command = parseTaskCommand("/review");
+    expect(command?.autoTools).toEqual([]);
+    expect(command?.sandboxProfile).toBeUndefined();
+    expect(command?.requiredTool).toBeUndefined();
+  });
+
+  it("never edits the tree on its own", () => {
+    const command = parseTaskCommand("/review");
+    expect(command?.instruction).toContain("Do not edit, commit, or push");
+  });
+});
+
+describe("/learn", () => {
+  it("parses and loads the teaching skill pack", () => {
+    const command = parseTaskCommand("/learn how SSRF works from these links");
+    expect(command?.command).toBe("/learn");
+    expect(command?.skillPaths).toContain("learn-skills");
+  });
+
+  it("forces the browser tool so sources open where the user can watch", () => {
+    expect(parseTaskCommand("/learn")?.autoTools).toContain("open-url");
+  });
+
+  it("refuses to teach from a page it could not open", () => {
+    const instruction = parseTaskCommand("/learn")?.instruction ?? "";
+    expect(instruction).toContain("Never teach from a page");
+    expect(instruction).toContain("never backfill from memory");
+  });
+
+  it("contracts for a delivered lesson and forbids the chat fence", () => {
+    const command = parseTaskCommand("/learn");
+    expect(command?.instruction).toContain("lesson.html");
+    expect(command?.instruction).toContain("fenced html block");
+    expect(command?.nudge).toContain("lesson.html");
   });
 });

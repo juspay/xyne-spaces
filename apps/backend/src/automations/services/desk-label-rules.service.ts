@@ -20,6 +20,11 @@ import {
   type AutomationView,
 } from '../types/workflow-adapter';
 import { automationService } from './automation.service';
+import {
+  deskLabelBackfillQueue,
+  type DeskLabelBackfillRun,
+  type EnqueueBackfillResult,
+} from '../queue/desk-label-backfill.queue';
 
 export const DeskLabelRulesPayloadSchema = z.object({
   channelId: z.string().min(1),
@@ -31,6 +36,8 @@ export const DeskLabelRulesPayloadSchema = z.object({
     EmailReceivedConfigFieldsSchema.omit({ channelIds: true }),
   ).optional(),
   keepInInbox: z.boolean().optional(),
+  /** Also replay the rule over mail already in this desk. Off unless asked for. */
+  applyToExisting: z.boolean().optional(),
 });
 
 export type DeskLabelRulesPayload = z.infer<typeof DeskLabelRulesPayloadSchema>;
@@ -48,9 +55,13 @@ export interface DeskLabelRulesPage {
   };
 }
 
+export type DeskLabelBackfillOutcome = EnqueueBackfillResult | 'inactive';
+
 export interface DeskLabelRulesCreateResult {
   automations: AutomationView[];
   created: boolean;
+  /** Set only when the caller asked to replay the rule over existing mail. */
+  backfill: DeskLabelBackfillOutcome | null;
 }
 
 type DeskRulesDbClient = typeof db | Prisma.TransactionClient;
@@ -145,7 +156,7 @@ function ensureConfigValid(config: AutomationConfig): void {
 }
 
 function workflowToSingleResult(workflow: Workflow, created: boolean): DeskLabelRulesCreateResult {
-  return { automations: [workflowToAutomation(workflow)], created };
+  return { automations: [workflowToAutomation(workflow)], created, backfill: null };
 }
 
 function workflowStatusIn(statuses: AutomationStatus[]): Prisma.StringFilter | string {
@@ -229,6 +240,29 @@ class DeskLabelRulesService {
   }
 
   async create(
+    payload: DeskLabelRulesPayload,
+    auth: { userId: string; workspaceId: string },
+  ): Promise<DeskLabelRulesCreateResult> {
+    const result = await this.createRule(payload, auth);
+    if (!payload.applyToExisting) return result;
+
+    // Enqueued after the rule is committed — the worker reads the rule back from
+    // the DB, so a job started inside the transaction could find nothing there.
+    // A duplicate rule still backfills: "apply this rule to my old mail" is a
+    // valid ask even when the rule itself already existed.
+    const rule = result.automations[0];
+    if (!rule) return result;
+    if (rule.status !== AutomationStatus.ACTIVE) {
+      logger.info(
+        `[automations] desk-label-rule backfill skipped automation=${rule.id} status=${rule.status}`,
+      );
+      return { ...result, backfill: 'inactive' };
+    }
+
+    return { ...result, backfill: await this.enqueueBackfill(rule.id) };
+  }
+
+  private async createRule(
     payload: DeskLabelRulesPayload,
     auth: { userId: string; workspaceId: string },
   ): Promise<DeskLabelRulesCreateResult> {
@@ -444,6 +478,44 @@ class DeskLabelRulesService {
     return workflowToAutomation(updated);
   }
 
+  /** Replay an existing rule over the mail already in its desk. */
+  async startBackfill(
+    automationId: string,
+    auth: { userId: string; workspaceId: string },
+  ): Promise<EnqueueBackfillResult | null> {
+    const workflow = await this.requireOwnedDeskRule(db, automationId, auth);
+    if (workflow.status !== AutomationStatus.ACTIVE) {
+      throw serviceError('Activate the rule before applying it to existing emails.', 'invalid');
+    }
+    return this.enqueueBackfill(workflow.id);
+  }
+
+  async getBackfillStatus(
+    automationId: string,
+    auth: { userId: string; workspaceId: string },
+  ): Promise<DeskLabelBackfillRun | null> {
+    await this.requireOwnedDeskRule(db, automationId, auth);
+    if (!deskLabelBackfillQueue.isReady) return null;
+    return deskLabelBackfillQueue.getRun(automationId);
+  }
+
+  /**
+   * A backfill is a convenience pass over history, never part of the rule being
+   * saved — so a queue that is down must not fail rule creation.
+   */
+  private async enqueueBackfill(workflowId: string): Promise<EnqueueBackfillResult | null> {
+    try {
+      await deskLabelBackfillQueue.initialize();
+      return await deskLabelBackfillQueue.enqueue(workflowId);
+    } catch (err) {
+      logger.error(
+        `[automations] desk-label-rule backfill enqueue failed automation=${workflowId}:`,
+        err,
+      );
+      return null;
+    }
+  }
+
   async archivePersonal(
     automationId: string,
     auth: { userId: string; workspaceId: string },
@@ -517,7 +589,7 @@ class DeskLabelRulesService {
 
     const channel = await tx.channel.findFirst({
       where: { id: payload.channelId, workspaceId: auth.workspaceId },
-      select: { projectId: true, workspaceId: true },
+      select: { workspaceId: true },
     });
     if (!channel) {
       throw serviceError('Channel not found', 'not-found');
@@ -536,7 +608,8 @@ class DeskLabelRulesService {
         name: labelName,
         ...(payload.color ? { color: payload.color } : {}),
         channelId: payload.channelId,
-        projectId: channel.projectId,
+        // projectId intentionally omitted — conversationLabel.projectId is nullable
+        // (channel.projectId is being decoupled); labels are scoped by channel.
         workspaceId: channel.workspaceId,
         createdBy: auth.userId,
         createdAt: now,

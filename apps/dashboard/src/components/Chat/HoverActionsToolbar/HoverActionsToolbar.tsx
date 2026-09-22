@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useState } from 'react';
 import { Popover } from '../../ui/Popover';
 import EmojiPicker, { EmojiStyle, Theme } from 'emoji-picker-react';
 import {
@@ -24,13 +24,16 @@ import {
 import { EditMessageIcon } from '../../../assets/icons';
 import { UnpinIcon } from '../../../assets/icons/UnpinIcon';
 import { XyneAIStar } from '../../icons/xyne-ai';
-import { useReactions } from '../../../hooks/useReaction';
-import { useAuth } from '../../../hooks/useAuth';
 import { useCanCreateTicket } from '../../../hooks/usePermissions';
-import { parseReactionsMd } from '@xyne/shared';
 import { Tooltip } from '../../ui/Tooltip/Tooltip';
+import { ShortcutHint } from '../../ui/ShortcutHint';
 import Button from '../../ui/Button';
 import { useCustomEmojis } from '../../../hooks/useCustomEmojis';
+import { FrequentEmojiRow } from '../FrequentEmojis/FrequentEmojiRow';
+import { InlineQuickReactions } from '../FrequentEmojis/InlineQuickReactions';
+import { EMOJI_PICKER_CATEGORIES } from '../../../utils/emojiPickerCategories';
+import { toEmojiToken } from '../../../utils/customEmojiUtils';
+import { useApplyReaction } from '../../../hooks/useApplyReaction';
 import { useTheme } from '../../../hooks/useTheme';
 import { ConversationSubscription } from '../ConversationSubscription';
 import {
@@ -66,6 +69,7 @@ export interface HoverActionsToolbarProps {
   showEditAction?: boolean;
   reactionsMd?: string | null;
   onReplyInThread?: (e?: React.MouseEvent) => void;
+  showSubscription?: boolean;
   onCreateTicket?: () => void;
   onCreateSubTicket?: () => void;
   onEditMessage?: () => void;
@@ -124,6 +128,7 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
   showEditAction = false,
   reactionsMd,
   onReplyInThread,
+  showSubscription,
   onCreateTicket,
   onCreateSubTicket,
   onEditMessage,
@@ -152,8 +157,15 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
   onShowAllShortcuts,
   placement = 'above',
 }) => {
-  const { toggleReaction } = useReactions();
-  const { user } = useAuth();
+  // Shared identity for every action in this toolbar. `conversationId` is the
+  // thread key — it joins to a channel server-side, and it is what lets message
+  // actions roll up per thread instead of only per message.
+  const actionTrackMetadata = JSON.stringify({
+    messageId,
+    ...(conversationId !== undefined && { conversationId }),
+  });
+
+  const { applyReaction: toggleEmoji, hasReacted } = useApplyReaction(messageId, reactionsMd);
   const canCreateTicket = useCanCreateTicket();
   const [emojiOpen, setEmojiOpen] = useState(false);
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
@@ -161,11 +173,20 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
   const { data: customEmojis } = useCustomEmojis();
   const { theme } = useTheme();
   const emojiPickerTheme = theme === 'midnight' ? Theme.DARK : Theme.LIGHT;
-  const reactionsData = useMemo(() => parseReactionsMd(reactionsMd), [reactionsMd]);
 
   const handleEmojiOpenChange = (open: boolean): void => {
+    // Only report a real transition: the inline strip reacts without ever opening the
+    // popover, and an unconditional `false` tells the parent the picker just closed.
+    if (open === emojiOpen) return;
     setEmojiOpen(open);
     onEmojiPickerOpenChange?.(open);
+  };
+
+  // One path for every emoji this toolbar can apply — the picker grid, the Frequently Used
+  // row and the inline strip — so the toggle semantics and close behaviour cannot drift.
+  const applyReaction = (emojiName: string): void => {
+    toggleEmoji(emojiName);
+    handleEmojiOpenChange(false);
   };
 
   const handleDropdownOpenChange = (open: boolean): void => {
@@ -186,7 +207,7 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
     onRemindMeOption ||
     onForwardMessage ||
     (messageShortcuts && messageShortcuts.length > 0) ||
-    (onReplyInThread && conversationId);
+    (showSubscription && conversationId);
 
   // Keep toolbar visible if dropdown is open, even if parent says to hide
   if (!isVisible && !isDropdownOpen) return null;
@@ -194,8 +215,17 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
   return (
     <div
       key={`hover-actions-toolbar-${messageId}`}
-      className={`absolute ${placement === 'below' ? 'top-1' : '-top-7'} right-4 z-50 p-1 flex items-center gap-1 rounded-lg border border-border bg-popover shadow-md`}
+      className={`absolute ${placement === 'below' ? 'top-1' : '-top-7'} right-4 z-50 p-1 flex max-w-[calc(100%-2rem)] flex-wrap items-center justify-end gap-1 rounded-lg border border-border bg-popover shadow-md`}
     >
+      {/* Frequently used emojis, one click each — then the full picker */}
+      {onEmojiPickerOpenChange && (
+        <InlineQuickReactions
+          onSelect={applyReaction}
+          hasReacted={hasReacted}
+          messageId={messageId}
+        />
+      )}
+
       {/* Emojis */}
       {onEmojiPickerOpenChange && (
         <Popover
@@ -220,32 +250,21 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
           avoidCollisions={true}
           className='z-[60] bg-popover rounded-lg shadow-md p-0'
         >
-          <EmojiPicker
-            style={{
-              width: '320px',
-              ['--epr-emoji-size' as string]: '22px',
-              ['--epr-emoji-gap' as string]: '4px',
-            }}
-            theme={emojiPickerTheme}
-            emojiStyle={EmojiStyle.NATIVE}
-            onEmojiClick={emoji => {
-              // For custom emojis, store the emojiId with a prefix
-              const emojiName = emoji.isCustom
-                ? `custom:${emoji.emoji}:${emoji.names[0] || 'custom'}`
-                : emoji.emoji;
-              // Check if the user has already reacted with this emoji
-              const hasReacted = !!user && (reactionsData[emojiName] || []).includes(user.id);
-
-              toggleReaction({
-                messageId,
-                emoji: emojiName,
-                hasReacted,
-              });
-              handleEmojiOpenChange(false);
-            }}
-            customEmojis={customEmojis || []}
-            previewConfig={{ showPreview: true }}
-          />
+          <div className='w-[320px]'>
+            <FrequentEmojiRow onSelect={applyReaction} messageId={messageId} />
+            <EmojiPicker
+              style={{
+                ['--epr-emoji-size' as string]: '22px',
+                ['--epr-emoji-gap' as string]: '4px',
+              }}
+              categories={EMOJI_PICKER_CATEGORIES}
+              theme={emojiPickerTheme}
+              emojiStyle={EmojiStyle.NATIVE}
+              onEmojiClick={emoji => applyReaction(toEmojiToken(emoji))}
+              customEmojis={customEmojis || []}
+              previewConfig={{ showPreview: true }}
+            />
+          </div>
         </Popover>
       )}
 
@@ -260,7 +279,7 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
             data-testid='hover-action-reply-in-thread'
             data-track-category='HOVER_ACTIONS_TOOLBAR'
             data-track-name='REPLY_IN_THREAD'
-            data-track-metadata={JSON.stringify({ messageId })}
+            data-track-metadata={actionTrackMetadata}
           >
             <MessageCircleMore className='w-4 h-4' />
           </Button>
@@ -278,7 +297,11 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
             data-testid='hover-action-create-ticket'
             data-track-category='HOVER_ACTIONS_TOOLBAR'
             data-track-name='CREATE_TICKET_FROM_MESSAGE'
-            data-track-metadata={JSON.stringify({ messageId })}
+            data-track-metadata={JSON.stringify({
+              messageId,
+              ...(conversationId !== undefined && { conversationId }),
+              source: 'chat_message',
+            })}
           >
             <Ticket className='w-4 h-4' />
           </Button>
@@ -296,7 +319,7 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
             data-testid='hover-action-create-subticket'
             data-track-category='HOVER_ACTIONS_TOOLBAR'
             data-track-name='CREATE_SUBTICKET_FROM_MESSAGE'
-            data-track-metadata={JSON.stringify({ messageId })}
+            data-track-metadata={actionTrackMetadata}
           >
             <SquareAsterisk className='w-4 h-4' />
           </Button>
@@ -315,7 +338,7 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
             data-testid='hover-action-initiate-call'
             data-track-category='HOVER_ACTIONS_TOOLBAR'
             data-track-name='INITIATE_CALL'
-            data-track-metadata={JSON.stringify({ messageId })}
+            data-track-metadata={actionTrackMetadata}
           >
             <Headphones className='w-4 h-4' />
           </Button>
@@ -334,7 +357,7 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
             data-testid='hover-action-start-recording'
             data-track-category='HOVER_ACTIONS_TOOLBAR'
             data-track-name='START_RECORDING_FROM_MESSAGE'
-            data-track-metadata={JSON.stringify({ messageId })}
+            data-track-metadata={actionTrackMetadata}
           >
             <Mic className='w-4 h-4' />
           </Button>
@@ -352,7 +375,7 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
             data-testid='hover-action-ask-ai'
             data-track-category='HOVER_ACTIONS_TOOLBAR'
             data-track-name='ASK_AI'
-            data-track-metadata={JSON.stringify({ messageId })}
+            data-track-metadata={actionTrackMetadata}
           >
             <XyneAIStar size={16} />
           </Button>
@@ -383,7 +406,7 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
             {(() => {
               const hasEditSection = (showEditAction && onEditMessage) || onSendToChannel;
               const hasSubscriptionSection =
-                (onReplyInThread && conversationId) ||
+                (showSubscription && conversationId) ||
                 onMarkAsUnread ||
                 onBookmark ||
                 onRemindMeOption ||
@@ -400,12 +423,13 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
                       data-testid='hover-action-edit-message'
                       data-track-category='HOVER_ACTIONS_TOOLBAR'
                       data-track-name='EDIT_MESSAGE'
-                      data-track-metadata={JSON.stringify({ messageId })}
+                      data-track-metadata={actionTrackMetadata}
                     >
                       <span className='w-4 h-4 mr-2 flex items-center justify-center text-muted-foreground'>
                         <EditMessageIcon className='w-4 h-4' />
                       </span>
                       Edit
+                      <ShortcutHint shortcut='message.edit' className='ml-auto pl-6 text-xs' />
                     </DropdownMenuItem>
                   )}
 
@@ -415,7 +439,7 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
                       onClick={onSendToChannel}
                       data-track-category='HOVER_ACTIONS_TOOLBAR'
                       data-track-name='SEND_TO_CHANNEL'
-                      data-track-metadata={JSON.stringify({ messageId })}
+                      data-track-metadata={actionTrackMetadata}
                     >
                       <span className='w-4 h-4 mr-2 flex items-center justify-center text-muted-foreground'>
                         <CornerUpLeft className='w-4 h-4' />
@@ -428,7 +452,7 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
                   {hasEditSection && hasSubscriptionSection && <DropdownMenuSeparator />}
 
                   {/* Conversation Subscription */}
-                  {isDropdownOpen && onReplyInThread && conversationId && (
+                  {isDropdownOpen && showSubscription && conversationId && (
                     <DropdownMenuItem asChild>
                       <ConversationSubscription
                         conversationId={conversationId}
@@ -447,7 +471,7 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
                       data-testid='hover-action-mark-unread'
                       data-track-category='HOVER_ACTIONS_TOOLBAR'
                       data-track-name='MARK_AS_UNREAD'
-                      data-track-metadata={JSON.stringify({ messageId })}
+                      data-track-metadata={actionTrackMetadata}
                     >
                       <span className='w-4 h-4 mr-2 flex items-center justify-center text-muted-foreground'>
                         <div className='w-2.5 h-2.5 rounded-full border-2 border-current' />
@@ -465,12 +489,13 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
                       }
                       data-track-category='HOVER_ACTIONS_TOOLBAR'
                       data-track-name={isBookmarked ? 'REMOVE_BOOKMARK' : 'ADD_BOOKMARK'}
-                      data-track-metadata={JSON.stringify({ messageId })}
+                      data-track-metadata={actionTrackMetadata}
                     >
                       <span className='w-4 h-4 mr-2 flex items-center justify-center text-muted-foreground'>
                         <Bookmark className='w-4 h-4' />
                       </span>
                       {isBookmarked ? 'Remove bookmark' : 'Add bookmark'}
+                      <ShortcutHint shortcut='message.bookmark' className='ml-auto pl-6 text-xs' />
                     </DropdownMenuItem>
                   )}
 
@@ -481,7 +506,7 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
                         data-testid='hover-action-thread-tags'
                         data-track-category='HOVER_ACTIONS_TOOLBAR'
                         data-track-name='OPEN_THREAD_TAG_MENU'
-                        data-track-metadata={JSON.stringify({ messageId })}
+                        data-track-metadata={actionTrackMetadata}
                       >
                         <span className='w-4 h-4 mr-2 flex items-center justify-center text-muted-foreground'>
                           <TagIcon className='w-4 h-4' />
@@ -504,7 +529,7 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
                         data-testid='hover-action-remind-me'
                         data-track-category='HOVER_ACTIONS_TOOLBAR'
                         data-track-name='OPEN_REMINDER_MENU'
-                        data-track-metadata={JSON.stringify({ messageId })}
+                        data-track-metadata={actionTrackMetadata}
                       >
                         <span className='w-4 h-4 mr-2 flex items-center justify-center text-muted-foreground'>
                           <Clock3 className='w-4 h-4' />
@@ -519,7 +544,7 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
                             onClick={(): void => onRemindMeOption(option.option)}
                             data-track-category='HOVER_ACTIONS_TOOLBAR'
                             data-track-name={REMINDER_TRACK_NAME_BY_OPTION[option.option]}
-                            data-track-metadata={JSON.stringify({ messageId })}
+                            data-track-metadata={actionTrackMetadata}
                           >
                             {option.label}
                           </DropdownMenuItem>
@@ -543,6 +568,7 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
                         {isPinned ? <UnpinIcon className='w-4 h-4' /> : <Pin className='w-4 h-4' />}
                       </span>
                       {isPinned ? 'Unpin message' : 'Pin message'}
+                      <ShortcutHint shortcut='message.pin' className='ml-auto pl-6 text-xs' />
                     </DropdownMenuItem>
                   )}
 
@@ -556,12 +582,13 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
                       data-testid='hover-action-copy-link'
                       data-track-category='HOVER_ACTIONS_TOOLBAR'
                       data-track-name='COPY_LINK'
-                      data-track-metadata={JSON.stringify({ messageId })}
+                      data-track-metadata={actionTrackMetadata}
                     >
                       <span className='w-4 h-4 mr-2 flex items-center justify-center text-muted-foreground'>
                         <Link className='w-4 h-4' />
                       </span>
                       Copy link
+                      <ShortcutHint shortcut='message.copyLink' className='ml-auto pl-6 text-xs' />
                     </DropdownMenuItem>
                   )}
 
@@ -572,7 +599,7 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
                       data-testid='hover-action-copy-message'
                       data-track-category='HOVER_ACTIONS_TOOLBAR'
                       data-track-name='COPY_MESSAGE'
-                      data-track-metadata={JSON.stringify({ messageId })}
+                      data-track-metadata={actionTrackMetadata}
                     >
                       <span className='w-4 h-4 mr-2 flex items-center justify-center text-muted-foreground'>
                         <Copy className='w-4 h-4' />
@@ -588,7 +615,7 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
                       data-testid='hover-action-forward-message'
                       data-track-category='HOVER_ACTIONS_TOOLBAR'
                       data-track-name='FORWARD_MESSAGE'
-                      data-track-metadata={JSON.stringify({ messageId })}
+                      data-track-metadata={actionTrackMetadata}
                     >
                       <span className='w-4 h-4 mr-2 flex items-center justify-center text-muted-foreground'>
                         <Forward className='w-4 h-4' />
@@ -619,6 +646,8 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
                             <DropdownMenuItem
                               key={shortcut.commandName}
                               onClick={() => onRunShortcut?.(shortcut)}
+                              data-track-category='HOVER_ACTIONS_TOOLBAR'
+                              data-track-name='RUN_SHORTCUT'
                             >
                               <span className='w-4 h-4 mr-2 flex items-center justify-center text-muted-foreground'>
                                 <Zap className='w-3.5 h-3.5' />
@@ -634,7 +663,11 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
                           {messageShortcuts.length > 3 && (
                             <>
                               <DropdownMenuSeparator />
-                              <DropdownMenuItem onClick={onShowAllShortcuts}>
+                              <DropdownMenuItem
+                                onClick={onShowAllShortcuts}
+                                data-track-category='HOVER_ACTIONS_TOOLBAR'
+                                data-track-name='SHOW_ALL_SHORTCUTS'
+                              >
                                 <span className='w-4 h-4 mr-2 flex items-center justify-center text-muted-foreground'>
                                   <Zap className='w-4 h-4' />
                                 </span>
@@ -655,12 +688,13 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
                       data-testid='hover-action-delete-message'
                       data-track-category='HOVER_ACTIONS_TOOLBAR'
                       data-track-name='DELETE_MESSAGE'
-                      data-track-metadata={JSON.stringify({ messageId })}
+                      data-track-metadata={actionTrackMetadata}
                     >
                       <span className='w-4 h-4 mr-2 flex items-center justify-center'>
                         <Trash2 className='w-4 h-4' />
                       </span>
                       Delete
+                      <ShortcutHint shortcut='message.delete' className='ml-auto pl-6 text-xs' />
                     </DropdownMenuItem>
                   )}
                 </>

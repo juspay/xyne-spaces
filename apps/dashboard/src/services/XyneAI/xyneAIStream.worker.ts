@@ -1,3 +1,5 @@
+import type { DesignSelectionPayload } from '../../components/AIScreen/Workspace/design/designStudioContext';
+import type { PageSelectionPayload } from '../../components/AIScreen/Workspace/pageSelectionContext';
 /**
  * Web Worker for XyneAI Streaming
  * Runs API calls on a separate thread to avoid blocking the main UI thread
@@ -13,13 +15,20 @@ export interface WorkerStartStreamMessage {
       query: string;
       displayQuery?: string;
       channelIds: string[];
-      collectionIds?: string[];
-      fileIds?: string[];
       canvasIds?: string[];
       ticketIds?: string[];
       callIds?: string[];
       attachedContext?: Array<{
-        type: 'channel' | 'ticket' | 'canvas' | 'call' | 'activity';
+        type:
+          | 'channel'
+          | 'ticket'
+          | 'canvas'
+          | 'call'
+          | 'activity'
+          | 'collection'
+          | 'folder'
+          | 'file'
+          | 'local-folder';
         id: string;
         title: string;
         threadId?: string;
@@ -37,14 +46,30 @@ export interface WorkerStartStreamMessage {
       /** Single search + single answer pass instead of the full agentic tool
        *  loop — see xyne-claw-auth's run-stream.ts POST / instant branch. */
       instant?: boolean;
+      /** Per-run thinking level (composer dropdown). Absent = agent default. */
+      thinkingLevel?: 'off' | 'minimal' | 'low' | 'medium' | 'high';
       researchContext?: { type: string; id?: string; name: string } | null;
       canvasId?: string;
+      workflowContext?: {
+        workflowId?: string | null;
+        executionId?: string | null;
+        stepId?: string | null;
+      };
       messageAttachmentIds?: string[];
       attachments?: Array<{
         data: string;
         mimeType: string;
         filename: string;
       }>;
+      sandboxMode?: 'remote' | 'local' | 'container';
+      studioMode?: 'design';
+      designArtifactAttachmentId?: string;
+      designSelection?: DesignSelectionPayload;
+      pageSelection?: PageSelectionPayload;
+      openItems?: {
+        container?: string;
+        items: Array<{ title: string; kind: string; url?: string; active?: boolean }>;
+      };
       parentMessageId?: string;
       isRegenerate?: boolean;
       // Branching: edit-user signals that the new user message is a sibling
@@ -61,6 +86,8 @@ export interface WorkerStartStreamMessage {
       agentSlug?: string;
       /** Per-run model pin from the composer's model picker. */
       model?: string;
+      /** pinProvider for `model` — which provider the pin rides. */
+      modelProvider?: 'litellm' | 'spaces' | 'local-harness';
     };
   };
 }
@@ -164,10 +191,6 @@ async function executeStream(
         ...(requestBody.displayQuery && { display_query: requestBody.displayQuery }),
         /* eslint-disable @typescript-eslint/naming-convention */
         channel_ids: requestBody.channelIds,
-        ...(requestBody.collectionIds &&
-          requestBody.collectionIds.length > 0 && { collection_ids: requestBody.collectionIds }),
-        ...(requestBody.fileIds &&
-          requestBody.fileIds.length > 0 && { file_ids: requestBody.fileIds }),
         ...(requestBody.canvasIds &&
           requestBody.canvasIds.length > 0 && { canvas_ids: requestBody.canvasIds }),
         ...(requestBody.ticketIds &&
@@ -184,10 +207,12 @@ async function executeStream(
         deep_research_enabled: requestBody.deepResearchEnabled ?? false,
         create_canvas_enabled: requestBody.createCanvasEnabled ?? false,
         instant: requestBody.instant ?? false,
+        ...(requestBody.thinkingLevel ? { thinkingLevel: requestBody.thinkingLevel } : {}),
         research_context: requestBody.researchContext ?? null,
         ...(requestBody.canvasId && {
           canvas_id: requestBody.canvasId,
         }),
+        ...(requestBody.workflowContext && { workflowContext: requestBody.workflowContext }),
         ...(requestBody.messageAttachmentIds &&
           requestBody.messageAttachmentIds.length > 0 && {
             message_attachment_ids: requestBody.messageAttachmentIds,
@@ -200,6 +225,15 @@ async function executeStream(
               filename: a.filename,
             })),
           }),
+        ...(requestBody.sandboxMode &&
+          requestBody.sandboxMode !== 'remote' && { sandboxMode: requestBody.sandboxMode }),
+        ...(requestBody.studioMode && { studioMode: requestBody.studioMode }),
+        ...(requestBody.designArtifactAttachmentId && {
+          designArtifactAttachmentId: requestBody.designArtifactAttachmentId,
+        }),
+        ...(requestBody.designSelection && { designSelection: requestBody.designSelection }),
+        ...(requestBody.pageSelection && { pageSelection: requestBody.pageSelection }),
+        ...(requestBody.openItems && { openItems: requestBody.openItems }),
         ...(requestBody.parentMessageId && {
           parent_message_id: requestBody.parentMessageId,
         }),
@@ -218,6 +252,8 @@ async function executeStream(
         ...(requestBody.disableTools && { disable_tools: true }),
         ...(requestBody.agentSlug && { agentSlug: requestBody.agentSlug }),
         ...(requestBody.model && { model: requestBody.model }),
+        ...(requestBody.model &&
+          requestBody.modelProvider && { modelProvider: requestBody.modelProvider }),
         /* eslint-enable @typescript-eslint/naming-convention */
       }),
       signal: abortController.signal,

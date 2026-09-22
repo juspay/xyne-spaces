@@ -20,6 +20,7 @@
  */
 
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
+import { errMsg } from "../../lib/errors.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import {
   CallToolRequestSchema,
@@ -120,7 +121,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request): Promise<CallToo
     }
     return { content: [{ type: "text", text: `Unknown tool: ${name}` }], isError: true };
   } catch (e) {
-    return { content: [{ type: "text", text: e instanceof Error ? e.message : String(e) }], isError: true };
+    return { content: [{ type: "text", text: errMsg(e) }], isError: true };
   }
 });
 

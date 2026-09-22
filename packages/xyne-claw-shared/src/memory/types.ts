@@ -42,6 +42,16 @@ export interface RetainItem {
    *  to that user's own facts, which is REQUIRED on a shared multi-user bank so
    *  observations never mix users. Ignored by providers without observations. */
   observationScopes?: string[][];
+  /** Named retain strategy (Hindsight) applied to THIS item only — a bundle of
+   *  config overrides registered on the bank via EnsureBankOpts.retainStrategies.
+   *  Used to retain already-extracted facts verbatim (no LLM re-extraction).
+   *  Ignored by providers without named strategies. */
+  strategy?: string;
+  /** Entities to attach to this memory. In Hindsight's `chunks` extraction mode
+   *  (no LLM) these are the ONLY source of entity data, so supplying them is
+   *  what lets a verbatim restore rebuild entity links instead of landing as
+   *  unconnected nodes. */
+  entities?: Array<{ text: string; type?: string }>;
 }
 
 export interface RetainedMemory {
@@ -77,11 +87,25 @@ export interface RecallOpts {
   queryTimestamp?: string;
 }
 
+/** Per-arm retrieval scores. Hindsight fuses `semantic` (embedding closeness) and
+ *  `reranker` (cross-encoder) into `final`. Rank on `semantic` when the stored text
+ *  is descriptive rather than an answer to the query — the cross-encoder scores such
+ *  content near zero and drags `final` down with it. */
+export interface RecallScores {
+  final?: number;
+  semantic?: number;
+  reranker?: number;
+}
+
 export interface RecalledMemory {
   id: string;
   text: string;
   factType?: string;
   tags?: string[];
+  metadata?: Record<string, string>;
+  /** Provider chunk identity, when the provider stores chunks rather than facts. */
+  chunkId?: string;
+  scores?: RecallScores;
   score?: number;
 }
 
@@ -103,8 +127,39 @@ export interface Memory {
   content: string;
   tags?: string[];
   metadata?: Record<string, string>;
+  /** Provider chunk identity, `<document>_<ordinal>` — lets callers reassemble a
+   *  document that the provider split on write. */
+  chunkId?: string;
   factType?: string;
   createdAt?: string;
+  /** Canonical entity names Hindsight extracted for this memory. Drives the
+   *  entity edges in the constellation — over half the graph's edges — so an
+   *  export that omits them restores memories that look isolated. */
+  entities?: string[];
+  /** Number of source facts behind this memory. Observations start at 1 and are
+   *  incremented by the consolidation pass that also records a history entry, so
+   *  `proofCount > 1` is a free "this memory has history" signal — the provider
+   *  exposes no dedicated flag, and probing history per memory costs a request
+   *  each. Treat it as a hint: history can be cascade-deleted independently. */
+  proofCount?: number;
+}
+
+/**
+ * One prior version of a memory. Hindsight records these ONLY for derived
+ * observations (`fact_type === "observation"`), and only when consolidation
+ * UPDATES one — creation writes no entry. Raw world/experience facts always
+ * return an empty list, so callers should not offer a history affordance for
+ * them. Capped at 50 entries by the provider, newest first.
+ */
+export interface MemoryHistoryEntry {
+  /** The memory's text BEFORE this change. */
+  previousText: string;
+  previousTags?: string[];
+  previousMentionedAt?: string;
+  /** When the change happened. */
+  changedAt: string;
+  /** Source facts behind the change, already resolved to their text. */
+  sourceFacts?: Array<{ id: string; text: string }>;
 }
 
 export interface ReflectResult {
@@ -186,6 +241,32 @@ export interface EnsureBankOpts {
    *  this ON for temporal/evolution tracking, scoping observations per-user via
    *  RetainItem.observationScopes. */
   enableObservations?: boolean;
+  /** Named retain strategies to register on the bank: `{ name: {configOverrides} }`.
+   *  Items can then select one via RetainItem.strategy. Hindsight-only; the
+   *  overrides may set any bank-configurable field (e.g.
+   *  `retain_extraction_mode: "chunks"` to store content as-is with no LLM). */
+  retainStrategies?: Record<string, Record<string, unknown>>;
+  /** Retain-time extraction mode for the whole bank. `chunks` stores content
+   *  verbatim with no LLM on the write path, turning the bank into a plain vector
+   *  store — use it for banks holding documents rather than facts. Defaults to the
+   *  provider's fact-extraction mode so existing banks are unaffected. */
+  retainExtractionMode?: RetainExtractionMode;
+  /** Max characters per stored chunk. Raise it to keep a document whole. */
+  retainChunkSize?: number;
+}
+
+export type RetainExtractionMode = "concise" | "verbose" | "custom" | "verbatim" | "chunks";
+
+export interface RetainOpts {
+  /**
+   * Wait for the write to be queryable before resolving. Defaults to false,
+   * because fact extraction is slow enough that blocking on it would stall a
+   * request. Banks that store content verbatim have no extraction step, so a
+   * synchronous write costs little and makes read-after-write safe — without it
+   * a caller that reads back to decide what to replace sees nothing and writes
+   * a duplicate.
+   */
+  waitForIndex?: boolean;
 }
 
 /**
@@ -204,7 +285,7 @@ export interface MemoryProvider {
   ensureBank(bankId: string, opts?: EnsureBankOpts): Promise<void>;
 
   /** Store new memories. Provider may extract / chunk / re-embed internally. */
-  retain(bankId: string, items: RetainItem[]): Promise<RetainedMemory[]>;
+  retain(bankId: string, items: RetainItem[], opts?: RetainOpts): Promise<RetainedMemory[]>;
 
   /** Similarity-style retrieval. Returns ranked memories. */
   recall(bankId: string, query: string, opts?: RecallOpts): Promise<RecalledMemory[]>;
@@ -227,6 +308,10 @@ export interface MemoryProvider {
    */
   deleteByTag?(bankId: string, tag: string): Promise<number>;
 
+  /** Resolved bank settings plus the per-bank overrides actually stored.
+   *  Callers use it to confirm a bank is configured as requested. */
+  getBankConfig?(bankId: string): Promise<{ config: Record<string, unknown>; overrides: Record<string, unknown> }>;
+
   /**
    * Hard-delete EVERY memory in the bank. The bank row and config overrides
    * survive. Optional — callers feature-detect and own authorization.
@@ -243,6 +328,27 @@ export interface MemoryProvider {
    *  for the constellation view. `opts.tags` scopes to a subset (e.g. one user);
    *  Hindsight filters these at the SQL layer. Optional — callers feature-detect. */
   getMemoryGraph?(bankId: string, opts?: { tags?: string[]; limit?: number }): Promise<MemoryGraph>;
+
+  /** Prior versions of one memory, newest first. Providers without version
+   *  history omit this method entirely; callers must feature-detect. Returns []
+   *  (not an error) for a memory that simply has no history. */
+  getMemoryHistory?(bankId: string, memoryId: string): Promise<MemoryHistoryEntry[]>;
+
+  /**
+   * Ask the provider to (re)derive higher-order memories from raw facts.
+   *
+   * Async: returns once the job is QUEUED, not once it has run. `deduplicated`
+   * is true when an equivalent job was already pending and this call joined it
+   * rather than adding another.
+   *
+   * `observationScopes` restricts the run to facts carrying all tags in at
+   * least one scope — e.g. `[["user:abc"]]`. REQUIRED in practice on a shared
+   * multi-user bank: an unscoped run consolidates every user's facts.
+   */
+  consolidate?(
+    bankId: string,
+    opts?: { observationScopes?: string[][] },
+  ): Promise<{ operationId: string; deduplicated: boolean }>;
 }
 
 /** Convert an agent slug into a stable bank id usable by every provider. */

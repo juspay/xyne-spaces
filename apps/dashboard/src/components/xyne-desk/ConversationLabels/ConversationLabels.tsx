@@ -6,14 +6,17 @@ import { useZero } from '../../../hooks/useZero';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { queries } from '../../../zero/queries';
 import { mutators } from '../../../zero/mutators';
+import { trackDeskOutcome } from '../../../services/Analytics/deskTracking';
 import { Popover } from '../../ui/Popover/Popover';
+
 import { cn } from '../../../utils/classNames';
 
-export type ConversationLabelSlot = 'chips' | 'picker';
+export type ConversationLabelSlot = 'chips' | 'picker' | 'inline-picker';
 
 interface ConversationLabelsProps {
   conversationId: string;
   channelId: string;
+  isMember: boolean;
   slot: ConversationLabelSlot;
   appliedMappings: ReadonlyArray<{
     id: string;
@@ -50,6 +53,7 @@ const colorForName = (name: string): string => {
 export const ConversationLabels = ({
   conversationId,
   channelId,
+  isMember,
   slot,
   appliedMappings,
 }: ConversationLabelsProps): JSX.Element | null => {
@@ -58,9 +62,10 @@ export const ConversationLabels = ({
   const [search, setSearch] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const [catalog] = useCachedQuery(queries.conversationLabelsByChannelId({ channelId }), {
-    enabled: !!channelId && pickerOpen,
-  });
+  const [catalog] = useCachedQuery(
+    queries.conversationLabelsByChannelIdV2({ channelId, isMember }),
+    { enabled: !!channelId && (pickerOpen || slot === 'inline-picker') },
+  );
 
   const appliedNames = useMemo(
     () => new Set(appliedMappings.map(m => m.labelName.toLowerCase())),
@@ -84,10 +89,11 @@ export const ConversationLabels = ({
   }, [search, catalog]);
 
   const applyLabel = async (labelName: string, color: string, labelId?: string): Promise<void> => {
+    const resolvedLabelId = labelId ?? uuidv4();
     try {
       const result = await zero.mutate(
         mutators.conversationLabel.applyLabel({
-          labelId: labelId ?? uuidv4(),
+          labelId: resolvedLabelId,
           labelName,
           color,
           conversationId,
@@ -99,6 +105,20 @@ export const ConversationLabels = ({
       if (result.type === 'error') {
         throw new Error(result.error.message || 'Failed to apply label');
       }
+      // Label id only — the name is user content.
+      trackDeskOutcome(
+        'LABEL_APPLIED',
+        null,
+        {},
+        {
+          conversationId,
+          channelId,
+          labelId: resolvedLabelId,
+          isNewLabel: !labelId,
+          surface: 'picker',
+          labelCount: appliedMappings.length + 1,
+        },
+      );
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to apply label');
     }
@@ -112,6 +132,18 @@ export const ConversationLabels = ({
       if (result.type === 'error') {
         throw new Error(result.error.message || 'Failed to remove label');
       }
+      trackDeskOutcome(
+        'LABEL_REMOVED',
+        null,
+        {},
+        {
+          conversationId,
+          channelId,
+          labelId,
+          surface: 'picker',
+          labelCount: Math.max(0, appliedMappings.length - 1),
+        },
+      );
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to remove label');
     }
@@ -166,6 +198,7 @@ export const ConversationLabels = ({
             key={label.id}
             type='button'
             onClick={() => toggleByName(label.id, label.name, color)}
+            data-ph-capture-attribute-track-id='toggle_conversation_label'
             className='flex items-center justify-between w-full px-2 py-1.5 text-sm rounded text-left hover:bg-muted text-foreground'
             data-track-category='Support'
             data-track-name='ToggleConversationLabel'
@@ -186,6 +219,7 @@ export const ConversationLabels = ({
           <button
             type='button'
             onClick={createAndApply}
+            data-ph-capture-attribute-track-id='create_conversation_label'
             className='flex items-center gap-2 w-full px-2 py-1.5 text-sm rounded font-medium text-foreground hover:bg-muted'
             data-track-category='Support'
             data-track-name='CreateConversationLabel'
@@ -197,6 +231,10 @@ export const ConversationLabels = ({
       )}
     </div>
   );
+
+  if (slot === 'inline-picker') {
+    return <>{picker}</>;
+  }
 
   if (slot === 'chips') {
     if (appliedMappings.length === 0) return null;
@@ -215,6 +253,7 @@ export const ConversationLabels = ({
                 type='button'
                 aria-label={`Remove ${mapping.labelName}`}
                 onClick={() => void removeLabel(mapping.labelId)}
+                data-ph-capture-attribute-track-id='remove_conversation_label'
                 className='hover:bg-muted rounded-full p-0.5'
                 data-track-category='Support'
                 data-track-name='RemoveConversationLabel'

@@ -12,6 +12,7 @@ import {
   type RemoteParticipant,
 } from 'livekit-client';
 import { recordingService } from '../services/Recording/recordingService';
+import { getLocalVideoState, setLocalVideoMuted } from '../utils/recordingMedia';
 import { toast } from 'sonner';
 import { logger, Event } from '../utils/logger';
 import { formatDuration, normalizeTimestamp } from '../utils/dateUtils';
@@ -28,6 +29,24 @@ let transcriptIdCounter = 0;
 // `Room.disconnect()` emits Disconnected asynchronously. Mark a normal user
 // stop first so its callback cannot be mistaken for a server-side failure.
 const intentionallyDisconnectedRooms = new WeakSet<Room>();
+
+const PAGE_UNLOAD_GRACE_MS = 5000;
+let pageUnloading = false;
+let pageUnloadingReset: ReturnType<typeof setTimeout> | null = null;
+
+if (typeof window !== 'undefined') {
+  const markPageUnloading = (): void => {
+    pageUnloading = true;
+    if (pageUnloadingReset) clearTimeout(pageUnloadingReset);
+    pageUnloadingReset = setTimeout(() => {
+      pageUnloading = false;
+      pageUnloadingReset = null;
+    }, PAGE_UNLOAD_GRACE_MS);
+  };
+  for (const event of ['beforeunload', 'pagehide', 'freeze']) {
+    window.addEventListener(event, markPageUnloading);
+  }
+}
 
 export interface TranscriptEntry {
   id: number;
@@ -90,6 +109,8 @@ export interface RecordingState {
   activeLayout: RecordingLayout;
   isTranscriptMinimized: boolean;
   agentLeft: boolean;
+  isCameraEnabled: boolean;
+  isScreenShareEnabled: boolean;
 }
 
 const initialContext: RecordingState = {
@@ -118,9 +139,24 @@ const initialContext: RecordingState = {
   activeLayout: 'transcript',
   isTranscriptMinimized: false,
   agentLeft: false,
+  isCameraEnabled: false,
+  isScreenShareEnabled: false,
 };
 
 const ACTIVE_STATUSES: ReadonlySet<RecordingStatus> = new Set(['recording', 'paused', 'stopping']);
+
+/**
+ * Whether a recording session exists at all — including one still spinning up or
+ * winding down, where the mic is live or about to be.
+ *
+ * Broader than `ACTIVE_STATUSES`, which is about a session that has *started*.
+ * This is the test the start sites already use inline to refuse a second
+ * recording (ThreadPannel, ChatBubble, RecordingsV2Screen, useSlashCommands);
+ * named here so callers that need it stop re-spelling it.
+ */
+export function isRecordingSessionActive(status: RecordingStatus): boolean {
+  return status !== 'idle' && status !== 'error';
+}
 
 export const recordingStore = createStore({
   context: initialContext,
@@ -129,13 +165,16 @@ export const recordingStore = createStore({
     requestAutoStart: (
       context,
       event: { conversationId?: string; channelId?: string } = {},
-    ): RecordingState => ({
-      ...context,
-      pendingAutoStart: true,
-      autoStartRequestedAt: Date.now(),
-      pendingConversationId: event.conversationId ?? null,
-      pendingChannelId: event.channelId ?? null,
-    }),
+    ): RecordingState => {
+      if (context.status === 'starting') return context;
+      return {
+        ...context,
+        pendingAutoStart: true,
+        autoStartRequestedAt: Date.now(),
+        pendingConversationId: event.conversationId ?? null,
+        pendingChannelId: event.channelId ?? null,
+      };
+    },
 
     clearAutoStart: (context): RecordingState => ({
       ...context,
@@ -290,6 +329,7 @@ export const recordingStore = createStore({
 
       const handleRoomDisconnected = (): void => {
         if (intentionallyDisconnectedRooms.delete(room)) return;
+        if (pageUnloading) return;
 
         const current = recordingStore.getSnapshot().context;
         if (current.room !== room || !ACTIVE_STATUSES.has(current.status)) return;
@@ -308,6 +348,7 @@ export const recordingStore = createStore({
         try {
           const data = JSON.parse(metadata) as { recordingStartFailure?: unknown };
           if (data.recordingStartFailure !== true) return;
+          if (pageUnloading) return;
 
           const current = recordingStore.getSnapshot().context;
           if (current.room !== room || !ACTIVE_STATUSES.has(current.status)) return;
@@ -361,11 +402,17 @@ export const recordingStore = createStore({
         }
       };
 
+      const handleLocalTracksChanged = (): void => {
+        recordingStore.send({ type: 'syncLocalMedia', room });
+      };
+
       room.on(RoomEvent.DataReceived, handleDataReceived);
       room.on(RoomEvent.ParticipantDisconnected, handleParticipantDisconnected);
       room.on(RoomEvent.ParticipantConnected, handleParticipantConnected);
       room.on(RoomEvent.Disconnected, handleRoomDisconnected);
       room.on(RoomEvent.RoomMetadataChanged, handleRoomMetadataChanged);
+      room.on(RoomEvent.LocalTrackPublished, handleLocalTracksChanged);
+      room.on(RoomEvent.LocalTrackUnpublished, handleLocalTracksChanged);
 
       transcriptUnsubscribe = (): void => {
         clearAgentLeftTimer();
@@ -374,6 +421,8 @@ export const recordingStore = createStore({
         room.off(RoomEvent.ParticipantConnected, handleParticipantConnected);
         room.off(RoomEvent.Disconnected, handleRoomDisconnected);
         room.off(RoomEvent.RoomMetadataChanged, handleRoomMetadataChanged);
+        room.off(RoomEvent.LocalTrackPublished, handleLocalTracksChanged);
+        room.off(RoomEvent.LocalTrackUnpublished, handleLocalTracksChanged);
       };
 
       playAudio(AUDIO_PATHS.RECORDING_START);
@@ -401,9 +450,10 @@ export const recordingStore = createStore({
       const pauseStartedAt = Date.now();
       if (context.room) {
         void context.room.localParticipant.setMicrophoneEnabled(false);
+        setLocalVideoMuted(context.room, true);
       }
       toast.info('Recording paused', {
-        description: 'Microphone is muted',
+        description: 'Microphone and video are muted',
         duration: 2000,
       });
       return {
@@ -419,6 +469,7 @@ export const recordingStore = createStore({
       const resumedAt = Date.now();
       if (context.room) {
         void context.room.localParticipant.setMicrophoneEnabled(true);
+        setLocalVideoMuted(context.room, false);
       }
       toast.success('Recording resumed', {
         duration: 2000,
@@ -433,7 +484,10 @@ export const recordingStore = createStore({
       };
     },
 
-    stopRecording: (context): RecordingState => {
+    syncLocalMedia: (context, event: { room: Room }): RecordingState =>
+      context.room === event.room ? { ...context, ...getLocalVideoState(event.room) } : context,
+
+    stopRecording: (context, event?: { silent?: boolean }): RecordingState => {
       const durationMs = context.startTime
         ? calculateRecordingElapsedMs(
             context.startTime,
@@ -459,12 +513,16 @@ export const recordingStore = createStore({
         playAudio(AUDIO_PATHS.RECORDING_END);
       }
 
-      // Show toast
-      const duration = durationMs ? formatDuration(durationMs) : 'Unknown duration';
-      toast.success('Recording stopped', {
-        description: `Recording saved (${duration})`,
-        duration: 3000,
-      });
+      // A caller about to navigate away (workspace switch, reload) shows this
+      // toast itself once the destination page mounts — this one would just be
+      // torn down mid-display by the hard navigation before it's legible.
+      if (!event?.silent) {
+        const duration = durationMs ? formatDuration(durationMs) : 'Unknown duration';
+        toast.success('Recording stopped', {
+          description: `Recording saved (${duration})`,
+          duration: 3000,
+        });
+      }
 
       // Reset state
       return {
@@ -493,6 +551,8 @@ export const recordingStore = createStore({
         activeLayout: 'transcript',
         isTranscriptMinimized: false,
         agentLeft: false,
+        isCameraEnabled: false,
+        isScreenShareEnabled: false,
       };
     },
 
@@ -526,6 +586,8 @@ export const recordingStore = createStore({
         accumulatedPausedMs: 0,
         error: event.error,
         agentLeft: false,
+        isCameraEnabled: false,
+        isScreenShareEnabled: false,
       };
     },
 
@@ -560,6 +622,8 @@ export const recordingStore = createStore({
         activeLayout: 'transcript',
         isTranscriptMinimized: false,
         agentLeft: false,
+        isCameraEnabled: false,
+        isScreenShareEnabled: false,
       };
     },
 

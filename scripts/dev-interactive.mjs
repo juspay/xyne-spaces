@@ -72,12 +72,36 @@ export const APPS = [
     feature: "claw",
     port: 5174,
   },
+  // Reached through the main dashboard on 5173, which proxies /sdlc-app,
+  // /sdlc-api and /sdlc-zero to them.
+  {
+    id: "sdlc-backend",
+    filter: "xyne-spaces-backend",
+    script: "dev:sdlc",
+    hint: "SDLC API server · http://localhost:3011",
+    color: "yellow",
+    feature: "sdlc",
+    port: 3011,
+  },
+  {
+    id: "sdlc-dashboard",
+    filter: "xyne-spaces-dashboard",
+    script: "dev:sdlc",
+    hint: "SDLC web UI · http://localhost:5173/sdlc-app/",
+    color: "magenta",
+    feature: "sdlc",
+    port: 5175,
+  },
 ];
 
 const appIds = APPS.map((app) => app.id);
 const coreIds = APPS.filter((app) => app.core).map((app) => app.id);
+// The SDLC lane. Not in the infra feature picker — that one chooses docker
+// containers and this lane needs none. See docs/sdlc-fast-lane.md.
+const sdlcIds = APPS.filter((app) => app.feature === "sdlc").map((app) => app.id);
 
-const commandFor = (app) => `pnpm --filter ${app.filter} ${app.script}`;
+const FILE_LIMIT_PREFIX = process.platform === "win32" ? "" : "ulimit -n 65536; ";
+const commandFor = (app) => `${FILE_LIMIT_PREFIX}pnpm --filter ${app.filter} ${app.script}`;
 
 export function parseAppSpec(value) {
   const trimmed = (value ?? "").trim();
@@ -275,6 +299,11 @@ async function promptForApps(initial) {
   presetOptions.push(
     { value: "all", label: "Everything", hint: appIds.join(", ") },
     { value: "core", label: "Core", hint: coreIds.join(", ") },
+    {
+      value: "core+sdlc",
+      label: "Core + SDLC lane",
+      hint: [...coreIds, ...sdlcIds].join(", "),
+    },
     { value: "custom", label: "Pick apps", hint: "choose exactly what runs" },
   );
 
@@ -289,6 +318,7 @@ async function promptForApps(initial) {
   if (preset === "last") return initial;
   if (preset === "all") return [...appIds];
   if (preset === "core") return [...coreIds];
+  if (preset === "core+sdlc") return appIds.filter((id) => [...coreIds, ...sdlcIds].includes(id));
 
   const picked = await clack.multiselect({
     message: "Select apps (space to toggle, enter to confirm)",

@@ -17,9 +17,9 @@
  * `onMarkerSelect`, clicking any of the three opens the transcript at that point.
  */
 
-import { useCallback, useEffect, useState, type CSSProperties, type ReactElement } from 'react';
+import { useCallback, useEffect, useState, type ReactElement } from 'react';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
-import { StopSmall, Spinner, PauseBig, PlayBig, Flag, AlertTriangle } from '@xyne/icons';
+import { StopSmall, Spinner, PauseBig, PlayBig, AlertTriangle } from '@xyne/icons';
 import { Button } from '../../../components/ui/Button/Button';
 import { Tooltip } from '../../../components/ui/Tooltip';
 import { cn } from '../../../utils/classNames';
@@ -28,9 +28,26 @@ import { calculateRecordingElapsedMs, formatElapsedTime } from '../../../utils/r
 import { useAudioPlayback } from '../../../components/ui/AudioPlayer/useAudioPlayback';
 import type { RecordingDetail } from '../../../services/Recording/recordingService';
 import type { MarkedMoment } from '../../../stores/recordingStore';
-import { parseMarkedItems, type MarkedItem, type MarkedItemType } from './markedItems';
+import { parseMarkedItems, type MarkedItem } from '../../../components/CallTimeline/markedItems';
+import {
+  MARKER_NOUN,
+  MarkerDot,
+  MarkerLegend,
+  MomentFlag,
+} from '../../../components/CallTimeline/TimelineMarkers';
+import { isVideoRecordingType } from '../../../utils/recordingMedia';
+import { getAttachmentStreamUrl } from '../../../services/clients/apiClient';
+import { useRecordingVideo } from '../useRecordingVideo';
+import { InlineRecordingVideo, RecordingVideoDialog, RecordingVideoToggle } from './RecordingVideo';
 
 const TIMELINE_WINDOW_MS = 40 * 60 * 1000; // 40 min fixed window for the live timeline
+
+const PLAYBACK_SPEEDS = [
+  { value: 1, label: '1x' },
+  { value: 1.2, label: '1.2x' },
+  { value: 1.5, label: '1.5x' },
+  { value: 2, label: '2x' },
+] as const;
 
 interface LiveRecordingControlBarProps {
   recording: RecordingDetail;
@@ -38,6 +55,7 @@ interface LiveRecordingControlBarProps {
   onStopped?: () => void;
   onLoadAudio?: (signal: AbortSignal) => Promise<Blob>;
   onMarkerSelect?: (item: MarkedItem) => void;
+  onOpenTranscript?: () => void;
   isAudioPreparing?: boolean;
   /** True once playback is known to be unavailable for this recording. */
   isAudioUnavailable?: boolean;
@@ -52,6 +70,7 @@ export const LiveRecordingControlBar = ({
   onStopped,
   onLoadAudio,
   onMarkerSelect,
+  onOpenTranscript,
   isAudioPreparing = false,
   isAudioUnavailable = false,
 }: LiveRecordingControlBarProps): ReactElement | null => {
@@ -121,6 +140,7 @@ export const LiveRecordingControlBar = ({
         isAudioUnavailable={isAudioUnavailable}
         {...(onLoadAudio ? { onLoadAudio } : {})}
         {...(onMarkerSelect ? { onMarkerSelect } : {})}
+        {...(onOpenTranscript ? { onOpenTranscript } : {})}
       />
     );
   }
@@ -191,101 +211,12 @@ export const LiveRecordingControlBar = ({
         {isPaused ? 'Paused' : 'Live'}
       </span>
 
-      <RecordingVisualizer isPaused={isPaused} />
+      <RecordingVisualizer
+        isAnimated={!isPaused}
+        className='h-7 w-14 justify-center rounded-lg border border-border px-2'
+        {...(onOpenTranscript ? { onClick: onOpenTranscript } : {})}
+      />
     </div>
-  );
-};
-
-/* -------------------------------------------------------------------------- */
-/* Timeline markers                                                           */
-/* -------------------------------------------------------------------------- */
-
-/**
- * Decisions and actions the summary pipeline extracted, as dots sitting on the track
- * itself — moments get a flag above it instead
- */
-const MARKER_DOT_COLOR: Record<Exclude<MarkedItemType, 'moment'>, string> = {
-  decision: 'bg-yellow-500',
-  action: 'bg-orange-500',
-};
-
-/** Names the marker in its tooltip, so the three kinds read apart without the legend. */
-const MARKER_NOUN: Record<MarkedItemType, string> = {
-  decision: 'Decision',
-  action: 'Action',
-  moment: 'Marked moment',
-};
-
-const MARKER_INTERACTIVE =
-  "cursor-pointer transition-transform hover:scale-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring after:absolute after:-inset-2 after:content-[''] motion-reduce:transform-none";
-
-interface MomentFlagProps {
-  percent: number;
-  title: string;
-  onSelect?: () => void;
-}
-
-/** Flag pinned to a point on either timeline — a button only when it can be acted on. */
-const MomentFlag = ({ percent, title, onSelect }: MomentFlagProps): ReactElement => {
-  const className = cn(
-    'absolute bottom-1.5 z-10 flex -translate-x-0.5',
-    onSelect && MARKER_INTERACTIVE,
-  );
-  const glyph = <Flag size={14} variant='Solid' className='text-primary' aria-hidden='true' />;
-
-  if (!onSelect) {
-    return (
-      <span className={className} style={{ left: `${percent}%` }} title={title}>
-        {glyph}
-      </span>
-    );
-  }
-
-  return (
-    <button
-      type='button'
-      onClick={onSelect}
-      data-track-category='RecordingDetailV2'
-      data-track-name='marker_open_transcript_moment'
-      className={className}
-      style={{ left: `${percent}%` }}
-      title={title}
-      aria-label={title}
-    >
-      {glyph}
-    </button>
-  );
-};
-
-interface MarkerDotProps {
-  percent: number;
-  type: Exclude<MarkedItemType, 'moment'>;
-  title: string;
-  onSelect?: () => void;
-}
-
-const MarkerDot = ({ percent, type, title, onSelect }: MarkerDotProps): ReactElement => {
-  const className = cn(
-    'absolute top-1/2 z-10 size-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full ring-2 ring-background',
-    MARKER_DOT_COLOR[type],
-    onSelect && MARKER_INTERACTIVE,
-  );
-
-  if (!onSelect) {
-    return <span className={className} style={{ left: `${percent}%` }} title={title} />;
-  }
-
-  return (
-    <button
-      type='button'
-      onClick={onSelect}
-      data-track-category='RecordingDetailV2'
-      data-track-name='marker_open_transcript_item'
-      className={className}
-      style={{ left: `${percent}%` }}
-      title={title}
-      aria-label={title}
-    />
   );
 };
 
@@ -322,6 +253,7 @@ const LiveRecordingTimeline = ({
             key={index}
             percent={Math.min((moment.elapsedMs / TIMELINE_WINDOW_MS) * 100, 100)}
             title={`Marked moment at ${formatElapsedTime(moment.elapsedMs)}`}
+            trackCategory='RecordingDetailV2'
           />
         ))}
 
@@ -349,6 +281,8 @@ interface RecordedTimelineBarProps {
   onLoadAudio?: (signal: AbortSignal) => Promise<Blob>;
   /** Supplied once there is a transcript to open at the marker's timestamp. */
   onMarkerSelect?: (item: MarkedItem) => void;
+  /** Supplied once there is a transcript to open — the waveform pill opens it directly. */
+  onOpenTranscript?: () => void;
   /** True while the stitched audio is still on its way. */
   isAudioPreparing?: boolean;
   /** True once playback is known to be unavailable (e.g. older recordings). */
@@ -359,6 +293,7 @@ const RecordedTimelineBar = ({
   recording,
   onLoadAudio,
   onMarkerSelect,
+  onOpenTranscript,
   isAudioPreparing = false,
   isAudioUnavailable = false,
 }: RecordedTimelineBarProps): ReactElement => {
@@ -368,12 +303,23 @@ const RecordedTimelineBar = ({
       ? new Date(recording.endedAt).getTime() - new Date(recording.startedAt).getTime()
       : null);
 
+  const title = recording.title ?? 'Recording';
+  const streamAttachmentId = onLoadAudio ? (recording.attachmentId ?? null) : null;
+
   const playback = useAudioPlayback({
     onLoad: onLoadAudio ?? EMPTY_AUDIO_LOADER,
+    src: streamAttachmentId ? getAttachmentStreamUrl(streamAttachmentId) : undefined,
     initialDurationSec: fallbackDurationMs ? fallbackDurationMs / 1000 : undefined,
     showToastOnError: true,
   });
   const shouldReduceMotion = useReducedMotion();
+  const video = useRecordingVideo({
+    isAvailable: !!onLoadAudio && isVideoRecordingType(recording.recordingType),
+    title,
+    attachmentId: streamAttachmentId,
+    onLoad: onLoadAudio,
+    playback,
+  });
 
   // Prefer the media's own duration once it has loaded — the call's wall-clock span
   // can differ from the recorded audio by a second or two. It can also be unknown for
@@ -391,17 +337,19 @@ const RecordedTimelineBar = ({
   // load, the recording simply has no playable audio (e.g. older recordings) — show
   // an alert-triangle instead of a spinner that would otherwise never resolve.
   const showAudioUnavailable = !onLoadAudio && !isStitching && isAudioUnavailable;
-  const audioControlLabel = isStitching
-    ? 'Preparing audio'
-    : showAudioUnavailable
-      ? 'Recording is not available for playback.'
-      : !onLoadAudio
-        ? 'Audio is unavailable for this recording'
-        : playback.state === 'loading'
-          ? 'Loading audio'
-          : isPlaying
-            ? 'Pause recording'
-            : 'Play recording';
+  const audioControlLabel = video.isOpen
+    ? 'Playing in the video player'
+    : isStitching
+      ? 'Preparing audio'
+      : showAudioUnavailable
+        ? 'Recording is not available for playback.'
+        : !onLoadAudio
+          ? 'Audio is unavailable for this recording'
+          : playback.state === 'loading'
+            ? 'Loading audio'
+            : isPlaying
+              ? 'Pause recording'
+              : 'Play recording';
   const audioIconKey = isAudioBusy
     ? 'loading'
     : showAudioUnavailable
@@ -411,9 +359,11 @@ const RecordedTimelineBar = ({
         : 'play';
 
   const selectMarker =
-    playback.canSeek || onMarkerSelect
+    playback.canSeek || onMarkerSelect || video.isOpen
       ? (item: MarkedItem): void => {
-          if (playback.canSeek) playback.seek(item.timestampSeconds);
+          if (!video.seek(item.timestampSeconds) && playback.canSeek) {
+            playback.seek(item.timestampSeconds);
+          }
           onMarkerSelect?.(item);
         }
       : null;
@@ -432,7 +382,7 @@ const RecordedTimelineBar = ({
         variant='outline'
         size='icon'
         onClick={() => void playback.toggle()}
-        disabled={!onLoadAudio || playback.state === 'loading'}
+        disabled={!onLoadAudio || playback.state === 'loading' || video.isOpen}
         aria-busy={isAudioBusy}
         className='size-8 rounded-full border-border bg-card text-muted-foreground hover:text-foreground'
         aria-label={audioControlLabel}
@@ -466,6 +416,16 @@ const RecordedTimelineBar = ({
 
   return (
     <div className='mb-6 rounded-2xl border border-border bg-card px-5 py-4'>
+      {video.isOpen && (
+        <InlineRecordingVideo
+          ref={video.inlineRef}
+          video={video.source}
+          title={title}
+          initialTime={video.inlineStartSec}
+          onExpand={video.openDialog}
+        />
+      )}
+
       <div className='flex min-h-11 items-center gap-4'>
         {showAudioUnavailable ? (
           <Tooltip content='Recording is not available for playback.'>{playButton}</Tooltip>
@@ -496,6 +456,7 @@ const RecordedTimelineBar = ({
                 key={index}
                 percent={percent}
                 title={title}
+                trackCategory='RecordingDetailV2'
                 {...(onSelect ? { onSelect } : {})}
               />
             ) : (
@@ -504,6 +465,7 @@ const RecordedTimelineBar = ({
                 percent={percent}
                 type={item.type}
                 title={title}
+                trackCategory='RecordingDetailV2'
                 {...(onSelect ? { onSelect } : {})}
               />
             );
@@ -537,36 +499,72 @@ const RecordedTimelineBar = ({
           {formatElapsedTime(durationMs)}
         </span>
 
-        <RecordingVisualizer isPaused={!isPlaying} />
+        {video.isAvailable && (
+          <RecordingVideoToggle isOpen={video.isOpen} onToggle={video.toggle} />
+        )}
+
+        <RecordingVisualizer
+          isAnimated={false}
+          className='h-7 w-14 justify-center rounded-lg border border-border px-2'
+          {...(onOpenTranscript ? { onClick: onOpenTranscript } : {})}
+        />
       </div>
 
-      {/* Only worth explaining the markers once there are some to explain. */}
-      {markedTypes.size > 0 && <MarkerLegend types={markedTypes} />}
+      {video.dialogStartSec !== null && video.source.status === 'ready' && (
+        <RecordingVideoDialog
+          title={title}
+          video={video.source}
+          initialTime={video.dialogStartSec}
+          onClose={video.closeDialog}
+        />
+      )}
+
+      {/* Legend only when there's something to explain; speed only once audio can load. */}
+      {(markedTypes.size > 0 || onLoadAudio) && (
+        <div className='mt-3 flex items-center gap-4'>
+          {markedTypes.size > 0 && <MarkerLegend types={markedTypes} />}
+          {onLoadAudio && (
+            <div className='ml-auto'>
+              <PlaybackSpeedControl
+                rate={playback.playbackRate}
+                onChange={playback.setPlaybackRate}
+              />
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 };
 
-/** Reads the marker vocabulary of the track above it — only the kinds actually on it. */
-const MarkerLegend = ({ types }: { types: ReadonlySet<MarkedItemType> }): ReactElement => (
-  <div className='mt-3 flex items-center gap-5 pl-1 text-xs text-muted-foreground'>
-    {types.has('decision') && (
-      <span className='flex items-center gap-1.5'>
-        <span className={cn('size-2 rounded-full', MARKER_DOT_COLOR.decision)} aria-hidden='true' />
-        Decisions
-      </span>
-    )}
-    {types.has('action') && (
-      <span className='flex items-center gap-1.5'>
-        <span className={cn('size-2 rounded-full', MARKER_DOT_COLOR.action)} aria-hidden='true' />
-        Actions
-      </span>
-    )}
-    {types.has('moment') && (
-      <span className='flex items-center gap-1.5'>
-        <Flag size={12} variant='Solid' className='text-primary' aria-hidden='true' />
-        Marked moments
-      </span>
-    )}
+interface PlaybackSpeedControlProps {
+  rate: number;
+  onChange: (rate: number) => void;
+}
+
+/** Playback speed control after the audio has loaded. */
+const PlaybackSpeedControl = ({ rate, onChange }: PlaybackSpeedControlProps): ReactElement => (
+  <div className='flex shrink-0 items-center gap-2 text-xs text-muted-foreground'>
+    <span>Speed</span>
+    <div className='flex items-center gap-0.5 rounded-full bg-muted/60 p-0.5'>
+      {PLAYBACK_SPEEDS.map(speed => (
+        <button
+          key={speed.value}
+          type='button'
+          onClick={() => onChange(speed.value)}
+          className={cn(
+            'rounded-full px-2.5 py-1 font-mono text-xs transition-colors',
+            rate === speed.value
+              ? 'bg-card text-foreground shadow-sm'
+              : 'text-muted-foreground hover:text-foreground',
+          )}
+          data-track-category='RecordingDetailV2'
+          data-track-name='set_playback_speed'
+        >
+          {speed.label}
+        </button>
+      ))}
+    </div>
   </div>
 );
 
@@ -574,24 +572,72 @@ const MarkerLegend = ({ types }: { types: ReadonlySet<MarkedItemType> }): ReactE
 /* Audio visualizer                                                           */
 /* -------------------------------------------------------------------------- */
 
-const RecordingVisualizer = ({ isPaused }: { isPaused: boolean }): ReactElement => (
-  <div className='inline-flex h-7 w-14 items-center justify-center gap-0.5 rounded-lg border border-border px-2'>
-    {Array.from({ length: 4 }, (_, i) => {
-      if (isPaused) {
-        return <div key={i} className='size-1 rounded-full bg-muted-foreground' />;
-      }
+export interface RecordingVisualizerProps {
+  isAnimated: boolean;
+  onClick?: () => void;
+  size?: 'sm' | 'md';
+  colorClassName?: string;
+  className?: string;
+}
 
-      const style: CSSProperties = {
-        animation: `recWaveBar 0.55s ease-in-out ${i * 0.08}s infinite alternate`,
-      };
-      return (
-        <div key={i} className='flex h-4 items-center'>
-          <div
-            className='rec-overlay-waveform-bar w-1 rounded-full bg-primary !opacity-100'
-            style={style}
-          />
-        </div>
-      );
-    })}
-  </div>
-);
+const RECORDING_VISUALIZER_REST_HEIGHT = '40%';
+
+const RECORDING_VISUALIZER_SIZE_CLASSES = {
+  md: { wrapperHeight: 'h-4', barWidth: 'w-1.5' },
+  sm: { wrapperHeight: 'h-3', barWidth: 'w-0.5' },
+} as const;
+
+export const RecordingVisualizer = ({
+  isAnimated,
+  onClick,
+  size = 'md',
+  colorClassName = 'bg-primary',
+  className,
+}: RecordingVisualizerProps): ReactElement => {
+  const shouldReduceMotion = useReducedMotion();
+  const isWaving = isAnimated && !shouldReduceMotion;
+  const { wrapperHeight, barWidth } = RECORDING_VISUALIZER_SIZE_CLASSES[size];
+
+  const bars = Array.from({ length: 4 }, (_, i) => (
+    <div key={i} className={cn('flex items-center', wrapperHeight)}>
+      <motion.div
+        className={cn('rounded-full', barWidth, colorClassName)}
+        initial={{ height: isWaving ? '25%' : RECORDING_VISUALIZER_REST_HEIGHT }}
+        animate={
+          isWaving ? { height: ['25%', '100%'] } : { height: RECORDING_VISUALIZER_REST_HEIGHT }
+        }
+        transition={
+          isWaving
+            ? {
+                duration: 0.55,
+                delay: i * 0.08,
+                repeat: Infinity,
+                repeatType: 'mirror',
+                ease: 'easeInOut',
+              }
+            : { duration: 0.3, ease: 'easeOut' }
+        }
+      />
+    </div>
+  ));
+
+  const wrapperClassName = cn('inline-flex items-center gap-0.5', className);
+
+  if (!onClick) {
+    return <div className={wrapperClassName}>{bars}</div>;
+  }
+
+  return (
+    <button
+      type='button'
+      onClick={onClick}
+      className={cn(wrapperClassName, 'transition-colors hover:border-primary/50')}
+      aria-label='Open transcript'
+      title='Open transcript'
+      data-track-category='RecordingDetailV2'
+      data-track-name='waveform_open_transcript'
+    >
+      {bars}
+    </button>
+  );
+};

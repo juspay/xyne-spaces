@@ -71,6 +71,10 @@ export default {
           DEFAULT: 'hsl(var(--secondary))',
           foreground: 'hsl(var(--secondary-foreground))',
         },
+        warning: {
+          DEFAULT: 'hsl(var(--warning))',
+          foreground: 'hsl(var(--warning-foreground))',
+        },
         destructive: {
           DEFAULT: 'hsl(var(--destructive))',
           foreground: 'hsl(var(--destructive-foreground))',
@@ -102,6 +106,8 @@ export default {
         },
         activity: {
           'sidebar-primary': 'var(--activity-sidebar-primary)',
+          chip: 'var(--activity-chip)',
+          'chip-hover': 'var(--activity-chip-hover)',
         },
         desk: {
           helper: 'var(--desk-helper-foreground)',
@@ -124,6 +130,9 @@ export default {
           success: 'var(--status-success)',
           failure: 'var(--status-failure)',
           paused: 'var(--status-paused)',
+        },
+        'claw-ai': {
+          fg: 'var(--claw-ai-fg)',
         },
         sidebar: {
           DEFAULT: 'var(--sidebar)',
@@ -157,10 +166,27 @@ export default {
         sm: 'calc(var(--radius) - 4px)',
       },
       keyframes: {
+        'streams-column-flash': {
+          '0%, 100%': { boxShadow: '0 0 0 0 hsl(var(--primary) / 0)' },
+          '25%, 75%': { boxShadow: '0 0 0 3px hsl(var(--primary) / 0.55)' },
+        },
         // Incoming-call modal: the radar ping behind a solo caller's avatar.
         'call-radar': {
           '0%': { transform: 'scale(1)', opacity: '0.45' },
           '100%': { transform: 'scale(1.92)', opacity: '0' },
+        },
+        'live-ping': {
+          '0%': { transform: 'scale(1)', opacity: '0.55' },
+          '70%, 100%': { transform: 'scale(2.6)', opacity: '0' },
+        },
+        'live-pulse': {
+          '0%, 100%': { opacity: '1' },
+          '50%': { opacity: '0.45' },
+        },
+        // Meet-style "someone is talking" equaliser bars on tiles and the People panel.
+        'call-audio-bar': {
+          '0%, 100%': { transform: 'scaleY(0.35)' },
+          '50%': { transform: 'scaleY(1)' },
         },
         'call-card-in': {
           from: { opacity: '0', transform: 'scale(0.96) translateY(6px)' },
@@ -193,6 +219,18 @@ export default {
         fadeLeft: {
           '0%': { opacity: '0', transform: 'translateX(32px)' },
           '100%': { opacity: '1', transform: 'translateX(0)' },
+        },
+        railTravel: {
+          '0%': { left: '0%', opacity: '0' },
+          '12%': { opacity: '1' },
+          '88%': { opacity: '1' },
+          '100%': { left: '100%', opacity: '0' },
+        },
+        railTravelVertical: {
+          '0%': { top: '0%', opacity: '0' },
+          '12%': { opacity: '1' },
+          '88%': { opacity: '1' },
+          '100%': { top: '100%', opacity: '0' },
         },
         'slide-in-up': {
           from: {
@@ -264,7 +302,11 @@ export default {
         },
       },
       animation: {
+        'streams-column-flash': 'streams-column-flash 300ms cubic-bezier(0.23,1,0.32,1)',
         'call-radar': 'call-radar 2s cubic-bezier(0, 0, 0.2, 1) infinite',
+        'live-ping': 'live-ping 2s cubic-bezier(0, 0, 0.2, 1) infinite',
+        'live-pulse': 'live-pulse 2s ease-in-out infinite',
+        'call-audio-bar': 'call-audio-bar 0.9s ease-in-out infinite',
         'call-card-in': 'call-card-in 180ms cubic-bezier(0.2, 0.8, 0.2, 1)',
         'call-overlay-in': 'call-overlay-in 150ms linear',
         'accordion-down': 'accordion-down 0.2s ease-out',

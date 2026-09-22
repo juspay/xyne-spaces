@@ -50,8 +50,8 @@ export function hydrateCitationIcons<T>(invocations: T): T {
 export function collectCitationIconUrls(
   invocations: unknown,
 ): Record<string, string> {
-  const out: Record<string, string> = {};
-  if (!Array.isArray(invocations)) return out;
+  const out = new Map<string, string>();
+  if (!Array.isArray(invocations)) return Object.fromEntries(out);
   for (const inv of invocations) {
     if (!inv || typeof inv !== "object") continue;
     const citations = (inv as Record<string, unknown>).citations;
@@ -59,12 +59,12 @@ export function collectCitationIconUrls(
     for (const c of citations) {
       if (!c || typeof c !== "object") continue;
       const key = (c as Record<string, unknown>).iconKey;
-      if (typeof key !== "string" || key in out) continue;
+      if (typeof key !== "string" || out.has(key)) continue;
       const url = iconUrlForKey(key);
-      if (url) out[key] = url;
+      if (url) out.set(key, url);
     }
   }
-  return out;
+  return Object.fromEntries(out);
 }
 
 /**
@@ -201,8 +201,15 @@ function isStructuredCitation(v: unknown): v is StructuredCitation {
     r["kind"] === "canvas" ||
     r["kind"] === "ticket" ||
     r["kind"] === "external" ||
-    r["kind"] === "collection-item"
+    r["kind"] === "collection-item" ||
+    r["kind"] === "recording"
   );
+}
+
+/** Recording detail route. Keyed by the call's `externalId`, matching the
+ *  dashboard route `recordings/:recordingId` (AppRoot.tsx). */
+function buildRecordingUrl(_baseUrl: string, recordingId: string): string {
+  return `/recordings/${encodeURIComponent(recordingId)}`;
 }
 
 function buildTicketUrl(
@@ -254,6 +261,15 @@ function addStructuredCitation(
       // channel/conversation not available — render as plain text (no link)
       target.push({ label: c.label ?? `Ticket ${c.ticketId}`, url: "" });
     }
+    return;
+  }
+  if (c.kind === "recording" && c.recordingId) {
+    addCitation(
+      target,
+      seenUrls,
+      c.label ?? "Recording",
+      buildRecordingUrl(baseUrl, c.recordingId),
+    );
     return;
   }
   if (c.kind === "external" && c.url) {
@@ -456,6 +472,12 @@ function resolveLlmCitation(
     return {
       label: c.label || `Ticket ${c.ticketId}`,
       url: buildTicketUrl(baseUrl, c.channelId, c.conversationId, c.ticketId),
+    };
+  }
+  if (c.kind === "recording" && c.recordingId) {
+    return {
+      label: c.label?.trim() || "Recording",
+      url: buildRecordingUrl(baseUrl, c.recordingId),
     };
   }
   if (c.kind === "external" && c.url) {

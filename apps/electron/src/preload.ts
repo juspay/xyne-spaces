@@ -96,6 +96,8 @@ const electronAPI = {
     callerEmail: string;
     callType: 'AUDIO' | 'VIDEO';
     callerPicture?: string;
+    body?: string;
+    silent?: boolean;
   }) => {
     ipcRenderer.send('show-call-notification', data);
   },
@@ -144,8 +146,18 @@ const electronAPI = {
     return () => ipcRenderer.removeListener('open-xyne-ai-with-context', listener);
   },
 
-  onOpenInBrowserPanel: (callback: (url: string) => void) => {
-    const listener = (_event: unknown, url: string) => callback(url);
+  onAppWindowLimitReached: (callback: (limit: number) => void) => {
+    const listener = (_event: unknown, limit: number) => callback(limit);
+    ipcRenderer.on('app-window-limit-reached', listener);
+    return () => ipcRenderer.removeListener('app-window-limit-reached', listener);
+  },
+
+  /** Moves focus off an embedded <webview> guest and back to the app. */
+  focusHostWebContents: (): Promise<void> => ipcRenderer.invoke('focus-host-webcontents'),
+
+  onOpenInBrowserPanel: (callback: (url: string, sourceWebContentsId?: number) => void) => {
+    const listener = (_event: unknown, url: string, sourceWebContentsId?: number) =>
+      callback(url, sourceWebContentsId);
     ipcRenderer.on('open-in-browser-panel', listener);
     return () => ipcRenderer.removeListener('open-in-browser-panel', listener);
   },
@@ -166,6 +178,18 @@ const electronAPI = {
     const listener = () => callback();
     ipcRenderer.on('recording:system-suspend', listener);
     return () => ipcRenderer.removeListener('recording:system-suspend', listener);
+  },
+
+  onRecordingStopForTeardown: (callback: () => void) => {
+    const listener = () => callback();
+    ipcRenderer.on('recording:stop-for-teardown', listener);
+    return () => ipcRenderer.removeListener('recording:stop-for-teardown', listener);
+  },
+
+  onCallStopForTeardown: (callback: () => void) => {
+    const listener = () => callback();
+    ipcRenderer.on('call:stop-for-teardown', listener);
+    return () => ipcRenderer.removeListener('call:stop-for-teardown', listener);
   },
 
   onRecordingResumeRequest: (callback: () => void) => {
@@ -229,6 +253,11 @@ const electronAPI = {
   getBrowserSettings: () => ipcRenderer.invoke('get-browser-settings'),
   setBrowserSettings: (settings: any) => ipcRenderer.invoke('set-browser-settings', settings),
   clearSiteData: () => ipcRenderer.invoke('clear-site-data'),
+  captureAppWindow: (maxWidth?: number) => ipcRenderer.invoke('app-window:capture', maxWidth),
+  readClipboardText: () => ipcRenderer.invoke('clipboard:read-text'),
+  writeClipboardText: (text: string) => ipcRenderer.invoke('clipboard:write-text', text),
+  browserImportAvailable: () => ipcRenderer.invoke('browser-import:available'),
+  importChromeCookies: () => ipcRenderer.invoke('browser-import:chrome'),
 
   // File Management APIs
   openDownloadsFolder: () => ipcRenderer.invoke('open-downloads-folder'),
@@ -276,7 +305,9 @@ const electronAPI = {
   ipcSend: (channel: string, ...args: unknown[]) => {
     const allowed = [
       'app:theme-changed',
+      'call:state-changed',
       'meeting-popup:content-height',
+      'agent-consent:content-height',
       'recording-pill:recording-stopped',
       'recording:renderer-ready',
       'recording:set-minimized',
@@ -300,6 +331,35 @@ const electronAPI = {
     setEnabled: (enabled: boolean) => {
       ipcRenderer.send('meeting-detection:set-enabled', enabled);
     },
+    // One subscription over both edges, so a consumer that only cares whether a
+    // meeting is running cannot end up handling one event and missing the other.
+    onMeetingStateChanged: (
+      callback: (meeting: { app: string; startedAt: string } | null) => void,
+    ) => {
+      const onDetected = (_event: unknown, meeting: { app: string; startedAt: string }) =>
+        callback(meeting);
+      const onEnded = () => callback(null);
+      ipcRenderer.on('meeting:detected', onDetected);
+      ipcRenderer.on('meeting:ended', onEnded);
+      return () => {
+        ipcRenderer.removeListener('meeting:detected', onDetected);
+        ipcRenderer.removeListener('meeting:ended', onEnded);
+      };
+    },
+    getCurrentMeeting: (): Promise<{ app: string; startedAt: string } | null> =>
+      ipcRenderer.invoke('meeting:get-current'),
+  },
+
+  // Deliberately its own namespace rather than part of `meetingDetector`: this
+  // is raw mic activity, and unlike everything above it the meeting-detection
+  // preference has no say over it.
+  micMonitor: {
+    onStateChanged: (callback: (active: boolean) => void) => {
+      const listener = (_event: unknown, data: { active: boolean }) => callback(data.active);
+      ipcRenderer.on('mic:state-changed', listener);
+      return () => ipcRenderer.removeListener('mic:state-changed', listener);
+    },
+    getState: (): Promise<boolean> => ipcRenderer.invoke('mic:get-state'),
   },
 
   // Meeting popup (used by the popup window itself)
@@ -321,6 +381,27 @@ const electronAPI = {
     },
     dismiss: () => ipcRenderer.send('meeting-popup:dismiss'),
     startRecording: () => ipcRenderer.send('meeting-popup:start-recording'),
+  },
+
+  // Agent authorization consent modal (used by the consent window itself)
+  agentConsent: {
+    onShow: (
+      callback: (data: {
+        agentName: string;
+        agentType: string;
+        description: string;
+        requestedBy: string;
+        signed: boolean | null;
+        isKnown: boolean;
+        capabilities: string[];
+      }) => void,
+    ) => {
+      const listener = (_event: unknown, data: any) => callback(data);
+      ipcRenderer.on('agent-consent:show', listener);
+      return () => ipcRenderer.removeListener('agent-consent:show', listener);
+    },
+    respond: (result: { approved: boolean; duration: 'none' | '5min' | '1hour' | 'session' }) =>
+      ipcRenderer.send('agent-consent:respond', result),
   },
 
   // Screen Picker — in-app overlay instead of macOS native picker
@@ -428,6 +509,32 @@ const electronAPI = {
       const listener = (_event: unknown, enabled: boolean) => callback(enabled);
       ipcRenderer.on('claw:enabled-changed', listener);
       return () => ipcRenderer.removeListener('claw:enabled-changed', listener);
+    },
+  },
+
+  localHarness: {
+    getStatus: () => ipcRenderer.invoke('local-harness:status'),
+    detect: () => ipcRenderer.invoke('local-harness:detect'),
+    connect: () => ipcRenderer.invoke('local-harness:connect'),
+    disconnect: () => ipcRenderer.invoke('local-harness:disconnect'),
+    setProviderEnabled: (provider: string, enabled: boolean) =>
+      ipcRenderer.invoke('local-harness:set-provider', provider, enabled),
+    pickFolder: (): Promise<{ path: string; name: string; branch?: string; remote?: string } | null> =>
+      ipcRenderer.invoke('local-harness:pick-folder'),
+    listFolders: (): Promise<Array<{ path: string; name: string }>> =>
+      ipcRenderer.invoke('local-harness:list-folders'),
+    onPageToolRequest: (
+      callback: (req: { id: string; toolName: string; args: Record<string, unknown> }) => void,
+    ) => {
+      const listener = (
+        _event: unknown,
+        req: { id: string; toolName: string; args: Record<string, unknown> },
+      ) => callback(req);
+      ipcRenderer.on('local-harness:page-tool', listener);
+      return () => ipcRenderer.removeListener('local-harness:page-tool', listener);
+    },
+    sendPageToolResult: (id: string, result: { ok: boolean; content: string; image?: { data: string; mimeType: string } }) => {
+      ipcRenderer.send('local-harness:page-tool-result', { id, result });
     },
   },
 };

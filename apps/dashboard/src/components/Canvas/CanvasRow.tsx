@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   CopyDefault,
   FileText,
@@ -19,9 +19,12 @@ import {
   DropdownMenuTrigger,
 } from '../ui/dropdown-menu';
 import { Dialog } from '../ui/Dialog';
+
 import { Tooltip } from '../ui/Tooltip/Tooltip';
 import { CanvasShareModal } from './CanvasShareModal';
 import { cn } from '../../utils/classNames';
+import { getCanvasLabelDotClassName, getCanvasLabels } from './canvasLabelUtils';
+import { canvasLabelsApi } from '../../api/canvasLabelsApi';
 
 interface CanvasRowTrackNames {
   canvasOpen: string;
@@ -95,10 +98,41 @@ export const CanvasRow: React.FC<CanvasRowProps> = ({
 }) => {
   const [shareOpen, setShareOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [restLabels, setRestLabels] = useState<Canvas['labels'] | undefined>(undefined);
   const isSelected = selectedCanvasId === canvas.id;
   const isOwner = canvas.createdBy === currentUserId;
   const isEditor = canvas.accessLevel === CanvasRole.EDITOR;
   const canToggleStar = !!onToggleStar;
+  const canvasWithRestLabels =
+    restLabels !== undefined ? { ...canvas, labels: restLabels } : canvas;
+  const canvasLabels = getCanvasLabels(canvasWithRestLabels);
+  const visibleLabels = canvasLabels.slice(0, 2);
+  const hiddenLabelCount = Math.max(0, canvasLabels.length - visibleLabels.length);
+
+  useEffect(() => {
+    if (Array.isArray(canvas.labels) || !canvas.id || canvas.id === 'new') {
+      setRestLabels(undefined);
+      return;
+    }
+
+    let cancelled = false;
+    canvasLabelsApi
+      .getCanvasLabels([canvas.id])
+      .then(labelsByCanvasId => {
+        if (!cancelled) {
+          setRestLabels(labelsByCanvasId[canvas.id] ?? []);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setRestLabels(undefined);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [canvas.id, canvas.labels]);
 
   // The frame uses `file/file-text` for canvas rows. Public canvases keep the
   // globe so the (exceptional) shared state stays legible at a glance.
@@ -141,6 +175,28 @@ export const CanvasRow: React.FC<CanvasRowProps> = ({
                 Archived
               </span>
             )}
+            {visibleLabels.length > 0 && (
+              <span className='hidden min-w-0 shrink-0 items-center gap-1 lg:flex'>
+                {visibleLabels.map(label => (
+                  <span
+                    key={label.id}
+                    className='inline-flex h-5 max-w-[96px] items-center gap-1 rounded-md border border-sidebar-border-muted bg-sidebar px-1.5 text-[11px] leading-none text-sidebar-foreground/70'
+                  >
+                    <span
+                      className={`size-1.5 shrink-0 rounded-full ${getCanvasLabelDotClassName(
+                        label.name,
+                      )}`}
+                    />
+                    <span className='truncate'>{label.name}</span>
+                  </span>
+                ))}
+                {hiddenLabelCount > 0 && (
+                  <span className='text-[11px] text-sidebar-foreground/50'>
+                    +{hiddenLabelCount}
+                  </span>
+                )}
+              </span>
+            )}
           </button>
 
           {canToggleStar && (
@@ -156,6 +212,7 @@ export const CanvasRow: React.FC<CanvasRowProps> = ({
                 onToggleStar?.(canvas);
               }}
               title={canvas.isStarred ? 'Unstar canvas' : 'Star canvas'}
+              data-ph-capture-attribute-track-id='toggle_canvas_star'
               data-track-category='CANVAS'
               data-track-name='TOGGLE_CANVAS_STAR'
             >
@@ -183,12 +240,22 @@ export const CanvasRow: React.FC<CanvasRowProps> = ({
             </DropdownMenuTrigger>
             <DropdownMenuContent align='end' className='w-44'>
               {onDuplicate && (
-                <DropdownMenuItem className='gap-2' onClick={() => onDuplicate(canvas)}>
+                <DropdownMenuItem
+                  className='gap-2'
+                  onClick={() => onDuplicate(canvas)}
+                  data-track-category='CANVAS'
+                  data-track-name='DUPLICATE_CANVAS'
+                >
                   <CopyDefault size={14} className='shrink-0' />
                   <span className='flex-1'>Duplicate</span>
                 </DropdownMenuItem>
               )}
-              <DropdownMenuItem className='gap-2' onClick={() => setShareOpen(true)}>
+              <DropdownMenuItem
+                className='gap-2'
+                onClick={() => setShareOpen(true)}
+                data-track-category='CANVAS'
+                data-track-name='OPEN_SHARE_CANVAS'
+              >
                 <Share01 size={14} className='shrink-0' />
                 <span className='flex-1'>Share</span>
               </DropdownMenuItem>
@@ -213,6 +280,8 @@ export const CanvasRow: React.FC<CanvasRowProps> = ({
                   {onDelete && (
                     <DropdownMenuItem
                       onClick={() => onDelete(canvas.id)}
+                      data-track-category='CANVAS'
+                      data-track-name='DELETE_CANVAS'
                       className='gap-2 text-destructive focus:text-destructive'
                     >
                       <DeleteDustbin01 size={14} className='shrink-0' />

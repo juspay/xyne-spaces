@@ -384,17 +384,20 @@ const toTicketChangeValue = (value: unknown): string | number | null => {
 export const buildCreationFormFieldChanges = (
   fields: ReadonlyArray<{ fieldId: string; fieldName: string; actualFieldValue: unknown }>,
 ): FormFieldChanges => {
-  const changes: Record<string, { previousValue: string | number | null; newValue: string | number | null }> = {};
+  const changes = new Map<
+    string,
+    { previousValue: string | number | null; newValue: string | number | null }
+  >();
   for (const field of fields) {
     const entry = {
       previousValue: null,
       newValue: toTicketChangeValue(field.actualFieldValue),
     };
-    changes[field.fieldId] = entry;
-    changes[field.fieldName] = entry;
-    changes[field.fieldName.toLowerCase()] = entry;
+    changes.set(field.fieldId, entry);
+    changes.set(field.fieldName, entry);
+    changes.set(field.fieldName.toLowerCase(), entry);
   }
-  return changes;
+  return Object.fromEntries(changes);
 };
 
 /** Structural equality for custom-field values (handles arrays/objects, not just scalars). */
@@ -502,6 +505,11 @@ const emitCustomFieldWriteSideEffects = async (
         ticket: currentSnapshot,
         previousTicket: previousSnapshot,
       });
+      // Custom-field values feed dynamicFieldFilters in desk payloads, so label
+      // badges need invalidation on every custom-field write too.
+      if (currentSnapshot.channelId) {
+        websocketService.broadcastLabelUnreadCountsUpdate(currentSnapshot.channelId);
+      }
     }
   } catch (error) {
     logger.error('[TicketCustomFieldService] Failed to broadcast ticket counts after custom-field write:', {

@@ -1,16 +1,19 @@
 import { ReactElement, ReactNode, useMemo, useState } from 'react';
+import { Archive } from 'lucide-react';
+import {
+  SwapArrowVertical as ArrowUpDown,
+  KanbanBoard as SquareKanban,
+  ChevronRight,
+} from '@xyne/icons';
 import {
   Activity,
-  ArrowUpDown,
-  Calendar,
-  CircleCheck,
+  CalendarDefault as Calendar,
+  CheckTickCircle as CircleCheck,
   FileText,
-  SquareKanban,
   Tag,
-  Archive,
-  GitMerge,
-  Mail,
-} from 'lucide-react';
+  Merge as GitMerge,
+  EnvelopeDefault as Mail,
+} from '@xyne/icons';
 import {
   ActivityType,
   TicketReferenceRelation,
@@ -21,11 +24,18 @@ import {
   type ReferenceTicketActivityValue,
   type SubticketActivityValue,
   type BaseActivityValue,
+  type EtaAutoRecomputedActivityValue,
+  type EtaManuallyUpdatedActivityValue,
+  type EtaRiskDetectedActivityValue,
+  type EtaRiskAcknowledgedActivityValue,
+  type EtaRiskReopenedActivityValue,
+  type EtaRiskResolvedActivityValue,
 } from '@xyne/shared';
 import { formatReferenceLabel } from '../../../hooks/useTicketReferences';
 import { formatDistanceToNow, format } from 'date-fns';
 import { Tooltip } from '../../ui/Tooltip/Tooltip';
-import { Switch } from '../../ui/Switch';
+import { DetailToggle } from '../TicketDetails/DetailSection';
+import { cn } from '../../../utils/classNames';
 import { TicketPriorityIcon } from '../../../assets/icons';
 import { TicketStatusIcon } from '../../../assets/icons';
 import SmallUserAvatar from '../../UserAvatar/SmallUserAvatar';
@@ -255,6 +265,23 @@ export const getActivityDescription = (
       };
     }
 
+    case ActivityType.ETA:
+      return {
+        description: 'changed due date',
+        details: (
+          <>
+            from{' '}
+            <span className='font-semibold'>
+              {value?.oldValue ? new Date(value.oldValue).toLocaleDateString() : 'none'}
+            </span>{' '}
+            to{' '}
+            <span className='font-semibold'>
+              {value?.newValue ? new Date(value.newValue).toLocaleDateString() : 'none'}
+            </span>
+          </>
+        ),
+      };
+
     case ActivityType.STAGE_ETA:
       return {
         description: `updated stage deadline`,
@@ -271,6 +298,94 @@ export const getActivityDescription = (
           </>
         ),
       };
+
+    case ActivityType.ETA_AUTO_RECOMPUTED: {
+      const v = activity.value as EtaAutoRecomputedActivityValue | null;
+      return {
+        description: 'automatically extended due date',
+        details: (
+          <>
+            from{' '}
+            <span className='font-semibold'>
+              {v?.oldEta ? new Date(v.oldEta).toLocaleDateString() : 'none'}
+            </span>{' '}
+            to{' '}
+            <span className='font-semibold'>
+              {v?.finalEta ? new Date(v.finalEta).toLocaleDateString() : ''}
+            </span>
+            {v?.standardPathUsed ? ' via the Standard Path' : ''}
+          </>
+        ),
+      };
+    }
+
+    case ActivityType.ETA_MANUALLY_UPDATED: {
+      const v = activity.value as EtaManuallyUpdatedActivityValue | null;
+      return {
+        description: 'manually changed due date',
+        details: (
+          <>
+            from{' '}
+            <span className='font-semibold'>
+              {v?.oldEta ? new Date(v.oldEta).toLocaleDateString() : 'none'}
+            </span>{' '}
+            to{' '}
+            <span className='font-semibold'>
+              {v?.newEta ? new Date(v.newEta).toLocaleDateString() : ''}
+            </span>
+            {v?.reason ? <>: {v.reason}</> : ''}
+          </>
+        ),
+      };
+    }
+
+    case ActivityType.ETA_RISK_DETECTED: {
+      const v = activity.value as EtaRiskDetectedActivityValue | null;
+      return {
+        description: 'detected planning risk',
+        details: (
+          <>
+            stage deadline{' '}
+            <span className='font-semibold'>
+              {v?.stageEta ? new Date(v.stageEta).toLocaleDateString() : ''}
+            </span>{' '}
+            is later than due date{' '}
+            <span className='font-semibold'>
+              {v?.ticketEta ? new Date(v.ticketEta).toLocaleDateString() : ''}
+            </span>
+          </>
+        ),
+      };
+    }
+
+    case ActivityType.ETA_RISK_ACKNOWLEDGED: {
+      const v = activity.value as EtaRiskAcknowledgedActivityValue | null;
+      return {
+        description: 'acknowledged planning risk',
+        details: v?.reason || '',
+      };
+    }
+
+    case ActivityType.ETA_RISK_REOPENED: {
+      const v = activity.value as EtaRiskReopenedActivityValue | null;
+      return {
+        description: 'planning risk reopened',
+        details: v?.changedInputs?.length ? `${v.changedInputs.join(', ')} changed` : '',
+      };
+    }
+
+    case ActivityType.ETA_RISK_RESOLVED: {
+      const v = activity.value as EtaRiskResolvedActivityValue | null;
+      const causeText: Record<string, string> = {
+        CONDITION_NO_LONGER_TRUE: 'the condition no longer applies',
+        TERMINAL_STATUS: 'the ticket reached a terminal status',
+        MANUAL_DATE_CHANGE: 'the due date was changed manually',
+      };
+      return {
+        description: 'planning risk resolved',
+        details: v?.cause ? causeText[v.cause] || '' : '',
+      };
+    }
 
     case ActivityType.USER_GROUP_ID: {
       const oldGroup = userGroups?.find(g => g.id === value?.oldValue);
@@ -448,11 +563,26 @@ export const getActivityDescription = (
       };
     }
 
-    case ActivityType.SUBTICKET_CREATED: {
+    case ActivityType.SUBTICKET_CREATED:
+    case ActivityType.SUBTICKET_LINKED:
+    case ActivityType.SUBTICKET_UNLINKED: {
       const subTicketXyneId =
         value?.subTicketXyneId || value?.subTicketId?.substring(0, 8).toUpperCase();
+      // Newer rows carry the action in the activity type; older ones only in the value.
+      const subTicketAction =
+        activity.activityType === ActivityType.SUBTICKET_LINKED
+          ? 'linked'
+          : activity.activityType === ActivityType.SUBTICKET_UNLINKED
+            ? 'unlinked'
+            : value?.subTicketAction;
+      const description =
+        subTicketAction === 'linked'
+          ? 'linked subticket'
+          : subTicketAction === 'unlinked'
+            ? 'unlinked subticket'
+            : 'created subticket';
       return {
-        description: 'created subticket',
+        description,
         details: <span className='font-semibold'>{subTicketXyneId}</span>,
       };
     }
@@ -629,8 +759,16 @@ export const getActivityIcon = (activity: TicketActivityType): ReactElement => {
       return <Tag size={12} className='text-gray-400' />;
     case ActivityType.ETA:
     case ActivityType.STAGE_ETA:
+    case ActivityType.ETA_AUTO_RECOMPUTED:
+    case ActivityType.ETA_MANUALLY_UPDATED:
+    case ActivityType.ETA_RISK_DETECTED:
+    case ActivityType.ETA_RISK_ACKNOWLEDGED:
+    case ActivityType.ETA_RISK_REOPENED:
+    case ActivityType.ETA_RISK_RESOLVED:
       return <Calendar size={12} />;
     case ActivityType.SUBTICKET_CREATED:
+    case ActivityType.SUBTICKET_LINKED:
+    case ActivityType.SUBTICKET_UNLINKED:
       return <FileText size={12} className='text-blue-600' />;
     case ActivityType.BOARD:
       return <SquareKanban size={12} className='text-purple-600' />;
@@ -659,6 +797,7 @@ export const TicketActivity = ({
 }: TicketActivityProps): ReactElement => {
   const [sortOrder, setSortOrder] = useState<SortOrder>('newest');
   const [showExactTime, setShowExactTime] = useState(false);
+  const [isOpen, setIsOpen] = useState(false);
 
   const sortedActivities = useMemo(() => {
     if (!activities) return [];
@@ -701,37 +840,60 @@ export const TicketActivity = ({
     setSortOrder(prev => (prev === 'newest' ? 'oldest' : 'newest'));
   };
   return (
-    <div className='mt-8' data-testid='ticket-activity-section'>
-      <div className='flex items-center justify-between'>
-        <h3 className='text-base font-semibold text-foreground mb-4 flex items-center gap-2'>
-          Activity
-        </h3>
+    <div className='pt-[30px]' data-testid='ticket-activity-section'>
+      <div className='mb-1.5 flex items-center gap-2.5'>
+        <button
+          type='button'
+          onClick={() => setIsOpen(prev => !prev)}
+          aria-expanded={isOpen}
+          className='flex items-center gap-[9px] rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
+          data-track-category='Tickets'
+          data-track-name='ToggleActivitySection'
+        >
+          <ChevronRight
+            size={12}
+            className={cn(
+              'w-3 shrink-0 text-muted-foreground/70 transition-transform duration-150 ease-[cubic-bezier(0.23,1,0.32,1)]',
+              isOpen && 'rotate-90',
+            )}
+          />
+          <span className='text-[11px] font-semibold uppercase tracking-[0.45px] text-muted-foreground'>
+            Activity
+          </span>
+          <span className='font-mono text-[11px] tabular-nums text-muted-foreground/70'>
+            {sortedActivities.length}
+          </span>
+        </button>
 
-        <div className='flex items-center gap-3'>
-          <div className='flex items-center gap-2'>
-            <span className='text-[13px] text-muted-foreground'>Exact time</span>
-            <Switch
+        <div className='flex-1' />
+
+        {isOpen && (
+          <>
+            <DetailToggle
               checked={showExactTime}
-              onCheckedChange={setShowExactTime}
-              aria-label='Show exact activity time'
+              onChange={setShowExactTime}
+              label='Exact time'
+              title='Show exact timestamps'
             />
-          </div>
-
-          <button
-            onClick={toggleSort}
-            className='flex items-center text-[13px] text-muted-foreground gap-2'
-            title={sortOrder === 'newest' ? 'Newest to oldest' : 'Oldest to newest'}
-            data-track-category='Tickets'
-            data-track-name='ToggleActivitySort'
-            data-track-metadata={JSON.stringify({ sortOrder })}
-          >
-            <ArrowUpDown size={13} />
-            {sortOrder === 'newest' ? <p>Oldest</p> : <p>Newest</p>}
-          </button>
-        </div>
+            <button
+              type='button'
+              onClick={toggleSort}
+              className='flex h-[26px] items-center gap-1.5 rounded-lg px-1.5 text-[12.5px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
+              title={sortOrder === 'newest' ? 'Newest to oldest' : 'Oldest to newest'}
+              data-track-category='Tickets'
+              data-track-name='ToggleActivitySort'
+              data-track-metadata={JSON.stringify({ sortOrder })}
+            >
+              <ArrowUpDown size={14} />
+              <span className='whitespace-nowrap'>
+                {sortOrder === 'newest' ? 'Newest first' : 'Oldest first'}
+              </span>
+            </button>
+          </>
+        )}
       </div>
 
-      {sortedActivities.length > 0 ? (
+      {!isOpen ? null : sortedActivities.length > 0 ? (
         <div className='relative' data-testid='ticket-activity-list'>
           {sortedActivities.map((activity, index) => (
             <ActivityComponent
@@ -818,19 +980,21 @@ export const ActivityComponent = ({
   return (
     <div
       key={activity.id}
-      className='relative flex items-start gap-3'
+      className='relative flex min-h-[44px] items-stretch gap-3'
       data-testid={`ticket-activity-item-${activity.activityType}`}
     >
       {/* Icon */}
-      <div className='flex flex-col items-center self-stretch mt-2'>
-        {getActivityIcon(activity)}
-        {!isLast && <span className='w-0 flex-1 my-1 border-[0.8px] border-border' />}
+      <div className='flex w-[18px] shrink-0 flex-col items-center'>
+        <span className='mt-[5px] flex items-center justify-center'>
+          {getActivityIcon(activity)}
+        </span>
+        {!isLast && <span className='mt-1.5 w-px flex-1 bg-border' />}
       </div>
 
       {/* Content */}
-      <div className='flex-1 min-w-0 mt-1 pb-6'>
-        <div className='flex items-center justify-between gap-3'>
-          <p className='text-sm text-muted-foreground'>
+      <div className='flex min-w-0 flex-1 flex-col pt-0.5 pb-3.5'>
+        <div className='flex min-w-0 items-start justify-between gap-3.5'>
+          <p className='min-w-0 flex-1 text-[13.5px] leading-[1.6] text-muted-foreground [text-wrap:pretty]'>
             {activity.activityType !== ActivityType.PR &&
               !hideActorName &&
               (isAiActivity
@@ -842,7 +1006,7 @@ export const ActivityComponent = ({
             {details && <span className='text-muted-foreground'> {details}</span>}
           </p>
           <Tooltip content={formatExactTimestamp(activity.timestamp)}>
-            <span className='text-xs text-muted-foreground whitespace-nowrap flex-shrink-0 cursor-default'>
+            <span className='shrink-0 cursor-default whitespace-nowrap pt-0.5 text-[12.5px] tabular-nums text-muted-foreground/70'>
               {showExactTime
                 ? formatExactTimestamp(activity.timestamp)
                 : formatTimestamp(activity.timestamp)}
