@@ -89,7 +89,9 @@ import {
   BarchartDefault as BarChart3,
   UserPlus,
   InformationCircle as InfoIcon,
-  FileText,
+  FileBarGraph,
+  File02Text,
+  File02Plus,
 } from '@xyne/icons';
 import ChannelIcon from '../../components/Chat/ChannelIcon/ChannelIcon';
 import { logger, Event } from '../../utils/logger';
@@ -261,6 +263,9 @@ import {
   setCloudAgentOpenTicket,
 } from '../../components/xyne-desk/CloudAgentDock/CloudAgentDock';
 import { getOzonetelToolbar } from '../../services/clients/telephonyApi';
+import CanvasScreen from '../../components/Canvas/CanvasScreen';
+import DeskCanvasList from '../../components/xyne-desk/DeskCanvasList';
+import { AddThreadToCanvasDialog } from '../../components/xyne-desk/AddThreadToCanvasDialog';
 
 // Unified type for tickets from the supportTicketsFiltered query
 type SupportTicket = QueryResultType<typeof queries.supportTicketsFilteredV4>[number];
@@ -687,6 +692,8 @@ const SupportScreen = (): ReactElement => {
       params.delete('metrics');
       params.delete('topics');
       params.delete('settings');
+      params.delete('view');
+      params.delete('canvasId');
       const qs = params.toString();
       const path = next ? `${supportBase}/${next}` : supportBase;
       void navigate(qs ? `${path}?${qs}` : path, { replace: true });
@@ -1757,6 +1764,10 @@ const SupportScreen = (): ReactElement => {
   useEffect(() => {
     setIsReportOpen(searchParams.get('report') === 'open');
   }, [searchParams]);
+
+  // A search param, not a path segment: `canvases` would collide with :ticketId.
+  const isCanvasesView = searchParams.get('view') === 'canvases';
+  const openCanvasId = isCanvasesView ? searchParams.get('canvasId') : null;
 
   useEffect(() => {
     localStorage.setItem('support-view-mode', viewMode);
@@ -3263,7 +3274,7 @@ const SupportScreen = (): ReactElement => {
                               data-track-name='OpenDeskReport'
                               data-track-metadata={JSON.stringify({ channelId: selectedChannelId })}
                             >
-                              <FileText size={16} />
+                              <FileBarGraph size={16} />
                             </button>
                           </Tooltip>
                         )}
@@ -3290,6 +3301,49 @@ const SupportScreen = (): ReactElement => {
                           </button>
                         </Tooltip>
                       )}
+                      {isSelectedChannelJoined &&
+                        selectedChannelId &&
+                        selectedChannelId !== ALL_CHANNELS_ID && (
+                          <Tooltip
+                            content={
+                              openCanvasId
+                                ? 'Back to canvases'
+                                : isCanvasesView
+                                  ? 'Back to tickets'
+                                  : 'Canvases'
+                            }
+                            side='bottom'
+                          >
+                            <button
+                              onClick={() =>
+                                setSearchParams(
+                                  prev => {
+                                    // Steps back one level: canvas → list → tickets.
+                                    const p = new URLSearchParams(prev);
+                                    p.delete('canvasId');
+                                    if (!openCanvasId) {
+                                      if (isCanvasesView) p.delete('view');
+                                      else p.set('view', 'canvases');
+                                    }
+                                    return p;
+                                  },
+                                  { replace: true },
+                                )
+                              }
+                              className={cn(
+                                'p-1.5 rounded transition-colors',
+                                isCanvasesView
+                                  ? 'bg-muted text-foreground'
+                                  : 'text-muted-foreground hover:text-foreground hover:bg-accent',
+                              )}
+                              data-track-category='Support'
+                              data-track-name='ToggleDeskCanvases'
+                              data-track-metadata={JSON.stringify({ channelId: selectedChannelId })}
+                            >
+                              <File02Text size={16} />
+                            </button>
+                          </Tooltip>
+                        )}
                       {isSelectedChannelJoined && (
                         <button
                           onClick={() => {
@@ -3319,7 +3373,11 @@ const SupportScreen = (): ReactElement => {
                   </div>
                   <div
                     ref={filterRowRef}
-                    className='relative flex h-14 shrink-0 items-center justify-between gap-2 px-4 min-w-0'
+                    className={cn(
+                      'relative flex h-14 shrink-0 items-center justify-between gap-2 px-4 min-w-0',
+                      // Ticket-list chrome — nothing in it applies to canvases.
+                      isCanvasesView && 'hidden',
+                    )}
                   >
                     {isSelectedChannelJoined && (
                       <div
@@ -4130,6 +4188,25 @@ const SupportScreen = (): ReactElement => {
                         : {})}
                     />
                   </div>
+                ) : isCanvasesView ? (
+                  // Same split as the chat panel's canvas tab: list, then editor.
+                  openCanvasId ? (
+                    <CanvasScreen canvasId={openCanvasId} />
+                  ) : (
+                    <DeskCanvasList
+                      channelId={selectedChannelId}
+                      onSelect={canvasId =>
+                        setSearchParams(
+                          prev => {
+                            const p = new URLSearchParams(prev);
+                            p.set('canvasId', canvasId);
+                            return p;
+                          },
+                          { replace: true },
+                        )
+                      }
+                    />
+                  )
                 ) : (
                   <>
                     {/* Drafts banner — visible when there are saved-but-closed drafts */}
@@ -5362,6 +5439,7 @@ export const SupportTicketDetail = ({
   const [isScheduleCallModalOpen, setIsScheduleCallModalOpen] = useState(false);
   const [moreMenuOpen, setMoreMenuOpen] = useState(false);
   const [labelPickerOpen, setLabelPickerOpen] = useState(false);
+  const [showAddToCanvasDialog, setShowAddToCanvasDialog] = useState(false);
   if (!ticketIdParam) {
     return (
       <div className='h-full flex items-center justify-center'>
@@ -5621,6 +5699,16 @@ export const SupportTicketDetail = ({
                             <Wand2 size={14} className='shrink-0' />
                           )}
                           Summarize thread
+                        </DropdownMenuItem>
+                      )}
+                      {(emails.length > 0 || !!conversationId) && (
+                        <DropdownMenuItem
+                          onSelect={() => setShowAddToCanvasDialog(true)}
+                          data-track-category='Support'
+                          data-track-name='AddThreadToCanvas'
+                        >
+                          <File02Plus size={14} className='shrink-0' />
+                          Add to canvas
                         </DropdownMenuItem>
                       )}
                       <DropdownMenuItem
@@ -6246,6 +6334,19 @@ export const SupportTicketDetail = ({
                   {...(channelId ? { channelId } : {})}
                   {...(conversationId ? { conversationId } : {})}
                 />
+                {ticket?.id && (
+                  <AddThreadToCanvasDialog
+                    open={showAddToCanvasDialog}
+                    onOpenChange={setShowAddToCanvasDialog}
+                    ticket={ticket}
+                    onSuccess={canvasId => {
+                      toast.success('Building canvas from this thread');
+                      void navigate(
+                        `${supportBase}/${channelId}?view=canvases&canvasId=${canvasId}`,
+                      );
+                    }}
+                  />
+                )}
                 {showArchiveConfirmDialog && (
                   <Dialog
                     open={showArchiveConfirmDialog}
