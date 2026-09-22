@@ -104,7 +104,7 @@ export const useConversationTabs = (channelScopeType?: ChannelScopeType) => {
     for (const id of ids) {
       const appId = appIdOf(id);
       if (appId) {
-        const snapshot = snapshots[appId];
+        const snapshot = snapshots.get(appId);
         if (!snapshot) continue;
         tabs.push({
           label: snapshot.title,
