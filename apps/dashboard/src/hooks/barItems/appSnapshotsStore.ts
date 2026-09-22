@@ -8,6 +8,15 @@ import { useSyncExternalStore } from 'react';
  *
  * A stale value on another device only means the old mark — the app itself is
  * always fetched fresh by ArtifactAppHost when opened.
+ *
+ * Held as a `Map`, not a plain object, because the keys come from parsed
+ * localStorage and are therefore untrusted input. `JSON.parse` makes
+ * `__proto__` an OWN property, so populating an object with `map[id] = value`
+ * routes that entry to `Object.prototype`'s setter: the map's prototype is
+ * replaced and every `snapshots[unknownId]` lookup then inherits a truthy
+ * snapshot — a phantom app row in every bar. A Map has no prototype chain to
+ * poison and no dynamic property write, so the whole class of bug is gone by
+ * construction rather than by a guard someone has to remember.
  */
 
 export const APP_SNAPSHOTS_KEY = 'xyne:bar-app-snapshots';
@@ -18,14 +27,13 @@ export interface AppSnapshot {
   icon: string | null;
 }
 
-export type AppSnapshots = Readonly<Record<string, AppSnapshot>>;
+export type AppSnapshots = ReadonlyMap<string, AppSnapshot>;
+
+const EMPTY: AppSnapshots = new Map();
 
 const listeners = new Set<() => void>();
 let cachedRaw: string | null | undefined;
-let cachedMap: AppSnapshots = {};
-
-/** Keys that would reach `Object.prototype` rather than the map itself. */
-const UNSAFE_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+let cachedMap: AppSnapshots = EMPTY;
 
 const isSnapshot = (value: unknown): value is AppSnapshot =>
   !!value &&
@@ -43,18 +51,17 @@ const getSnapshot = (): AppSnapshots => {
   if (raw === cachedRaw) return cachedMap;
   cachedRaw = raw;
 
-  let next: Record<string, AppSnapshot> = Object.create(null) as Record<string, AppSnapshot>;
+  const next = new Map<string, AppSnapshot>();
   if (raw) {
     try {
       const parsed: unknown = JSON.parse(raw);
       if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
         for (const [id, value] of Object.entries(parsed as Record<string, unknown>)) {
-          if (UNSAFE_KEYS.has(id)) continue;
-          if (isSnapshot(value)) next[id] = { title: value.title, icon: value.icon };
+          if (isSnapshot(value)) next.set(id, { title: value.title, icon: value.icon });
         }
       }
     } catch {
-      next = Object.create(null) as Record<string, AppSnapshot>;
+      next.clear();
     }
   }
   cachedMap = next;
@@ -66,11 +73,11 @@ const subscribe = (listener: () => void): (() => void) => {
   return () => listeners.delete(listener);
 };
 
-const getServerSnapshot = (): AppSnapshots => ({});
+const getServerSnapshot = (): AppSnapshots => EMPTY;
 
 const write = (map: AppSnapshots): void => {
   try {
-    localStorage.setItem(APP_SNAPSHOTS_KEY, JSON.stringify(map));
+    localStorage.setItem(APP_SNAPSHOTS_KEY, JSON.stringify(Object.fromEntries(map)));
   } catch {
     cachedRaw = null;
     cachedMap = map;
@@ -83,22 +90,19 @@ export const useAppSnapshots = (): AppSnapshots =>
 
 export const getAppSnapshots = getSnapshot;
 
-const withEntry = (base: AppSnapshots, appId: string, snapshot: AppSnapshot): AppSnapshots => {
-  const next = Object.create(null) as Record<string, AppSnapshot>;
-  for (const [id, value] of Object.entries(base)) next[id] = value;
-  if (!UNSAFE_KEYS.has(appId)) next[appId] = snapshot;
-  return next;
-};
-
 /** Records (or replaces) an app's snapshot. */
 export const setAppSnapshot = (appId: string, snapshot: AppSnapshot): void => {
-  write(withEntry(getSnapshot(), appId, { title: snapshot.title, icon: snapshot.icon }));
+  const next = new Map(getSnapshot());
+  next.set(appId, { title: snapshot.title, icon: snapshot.icon });
+  write(next);
 };
 
 /** Patches an existing snapshot; no-op when the app was never recorded. */
 export const updateAppSnapshot = (appId: string, patch: Partial<AppSnapshot>): void => {
   const current = getSnapshot();
-  const existing = current[appId];
+  const existing = current.get(appId);
   if (!existing) return;
-  write(withEntry(current, appId, { ...existing, ...patch }));
+  const next = new Map(current);
+  next.set(appId, { ...existing, ...patch });
+  write(next);
 };

@@ -36,7 +36,7 @@ export const useInboxNavItems = (radarEnabled: boolean): ChatNavItem[] => {
     for (const id of ids) {
       const appId = appIdOf(id);
       if (appId) {
-        const snapshot = snapshots[appId];
+        const snapshot = snapshots.get(appId);
         if (!snapshot) continue;
         items.push({
           key: appItemId(appId),
