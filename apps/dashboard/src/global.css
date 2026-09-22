@@ -43,6 +43,12 @@
     --border: 240 5.9% 90%;
     --input: 240 5.9% 90%;
     --ring: 240 5.9% 80%;
+    /* WCAG 2.4.11 / 1.4.11: --ring is a decorative hairline (1.65:1 against
+       --background) and is not usable as a focus indicator. --focus-ring is
+       the keyboard focus colour and must stay >= 3:1 against --background;
+       it tracks --foreground, which the theme already guarantees.
+       Verified by scripts/a11y-contrast-audit.mjs. */
+    --focus-ring: 248.57 9.33% 14.71%;
     --radius: 0.5rem;
     --chart-1: 12 76% 61%;
     --chart-2: 173 58% 39%;
@@ -197,6 +203,12 @@
     --border: 240 5.9% 90%;
     --input: 240 5.9% 90%;
     --ring: 240 5.9% 80%;
+    /* WCAG 2.4.11 / 1.4.11: --ring is a decorative hairline (1.65:1 against
+       --background) and is not usable as a focus indicator. --focus-ring is
+       the keyboard focus colour and must stay >= 3:1 against --background;
+       it tracks --foreground, which the theme already guarantees.
+       Verified by scripts/a11y-contrast-audit.mjs. */
+    --focus-ring: 248.57 9.33% 14.71%;
     --radius: 0.5rem;
     --chart-1: 12 76% 61%;
     --chart-2: 173 58% 39%;
@@ -342,6 +354,12 @@
     --border: 233 8% 23%; /* #36373F */
     --input: 231 5% 26%; /* #3F4046 */
     --ring: 213 6% 28%;
+    /* WCAG 2.4.11 / 1.4.11: --ring is a decorative hairline (1.65:1 against
+       --background) and is not usable as a focus indicator. --focus-ring is
+       the keyboard focus colour and must stay >= 3:1 against --background;
+       it tracks --foreground, which the theme already guarantees.
+       Verified by scripts/a11y-contrast-audit.mjs. */
+    --focus-ring: 220 18% 90%;
     --radius: 0.5rem;
     --chart-1: 12 76% 65%;
     --chart-2: 173 58% 50%;
@@ -5405,3 +5423,37 @@ img.inline-emoji,
 [data-ticket-context-row] [role="combobox"] {
   height: 34px !important;
 }
+
+/* ---------------------------------------------------------------------------
+   WCAG 2.4.7 Focus Visible (AA) — global keyboard focus indicator.
+
+   `focus:outline-none` appears in ~620 class strings across src/ and only ~140
+   of them paint a `focus-visible:` ring of their own, so for the rest a
+   keyboard user had no idea where they were. This is the safety net: every
+   element that the browser considers keyboard-focused gets a visible outline.
+
+   Deliberately UNLAYERED and last in the file. Tailwind's `.focus\:outline-none:focus`
+   lives in @layer utilities, and unlayered rules beat layered ones regardless
+   of specificity — so this cannot be switched off accidentally by a utility
+   class, which is the whole point of a safety net.
+
+   :focus-visible (not :focus) means pointer users still see nothing.
+
+   A component that paints its own, better indicator can opt out with
+   data-focus-ring="custom". Do that rather than reaching for !important, and
+   only when the replacement itself meets 3:1 against its background.
+   --------------------------------------------------------------------------- */
+:focus-visible {
+  outline: 2px solid hsl(var(--focus-ring));
+  outline-offset: 2px;
+}
+
+[data-focus-ring="custom"]:focus-visible {
+  outline: none;
+}
+
+/* Note on tabindex="-1" targets (the skip-link destination, scroll containers):
+   they DO get the ring, and that is intended — it is the only feedback a
+   keyboard user gets that focus moved. :focus-visible does not match when the
+   same element is focused as the result of a mouse click, so pointer users are
+   unaffected. */

@@ -255,6 +255,7 @@ import {
   SkipToMainContent,
   MAIN_CONTENT_ID,
 } from '../components/SkipToMainContent/SkipToMainContent';
+import { RouteAnnouncer } from '../components/RouteAnnouncer/RouteAnnouncer';
 import { EncryptionBootstrapProvider } from '../providers/EncryptionBootstrapProvider';
 import { EncryptionInit } from '../components/EncryptionInit';
 import UserGuideScreen from './UserGuideScreen';
@@ -901,6 +902,7 @@ const AppRoot = (): ReactElement => {
                                     className={`flex h-full ${shouldShowMobileHeader ? 'pt-[60px]' : ''}`}
                                   >
                                     <SkipToMainContent />
+                                    <RouteAnnouncer />
                                     <AppSidebar />
                                     <main
                                       id={MAIN_CONTENT_ID}
@@ -930,6 +932,7 @@ const AppRoot = (): ReactElement => {
                             className={`flex h-full ${shouldShowMobileHeader ? 'pt-[60px]' : ''}`}
                           >
                             <SkipToMainContent />
+                            <RouteAnnouncer />
                             <AppSidebar />
                             <main
                               id={MAIN_CONTENT_ID}
