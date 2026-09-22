@@ -1,3 +1,10 @@
+## [1.372.0](https://github.com/juspay/xyne-spaces/compare/v1.371.0...v1.372.0) (2026-09-22)
+
+
+### Features
+
+* add Radar table view and server-paged Pending others ([#2180](https://github.com/juspay/xyne-spaces/issues/2180)) ([7bf84be](https://github.com/juspay/xyne-spaces/commit/7bf84be01dea72644df9945177913bce08ab06b9))
+
 ## [1.371.0](https://github.com/juspay/xyne-spaces/compare/v1.370.0...v1.371.0) (2026-09-22)
 
 
