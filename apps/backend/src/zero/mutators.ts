@@ -14371,6 +14371,8 @@ export function createMutators(
                 id: ticket.id,
                 stageName: stage.name,
                 ...(stage.defaultTicketStatusV2 && { statusV2: stage.defaultTicketStatusV2 }),
+                ...(stage.defaultTicketStatusV2 &&
+                  stage.defaultTicketStatusV2 !== ticket.statusV2 && { statusUpdatedAt: updatedAt }),
                 updatedAt,
               });
             } else {
@@ -14378,6 +14380,8 @@ export function createMutators(
                 id: ticket.id,
                 stageName: stage.name,
                 ...(stage.defaultTicketStatusV2 && { statusV2: stage.defaultTicketStatusV2 }),
+                ...(stage.defaultTicketStatusV2 &&
+                  stage.defaultTicketStatusV2 !== ticket.statusV2 && { statusUpdatedAt: updatedAt }),
                 updatedAt,
               });
             }
@@ -18372,6 +18376,8 @@ export function createMutators(
             ...(targetStage.defaultTicketStatusV2 && {
               statusV2: targetStage.defaultTicketStatusV2,
             }),
+            ...(targetStage.defaultTicketStatusV2 &&
+              targetStage.defaultTicketStatusV2 !== ticket.statusV2 && { statusUpdatedAt: now }),
             updatedAt: now,
             ...(finalEtaMs !== undefined && finalEtaMs !== null ? { eta: finalEtaMs } : {}),
             metadata: mergedMetadata as ReadonlyJSONValue,
