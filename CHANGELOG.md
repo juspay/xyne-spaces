@@ -1,3 +1,10 @@
+## [1.362.0-release-20260922.4](https://github.com/juspay/xyne-spaces/compare/v1.362.0-release-20260922.3...v1.362.0-release-20260922.4) (2026-09-22)
+
+
+### Features
+
+* added-queries-for-agent-and-apps-also-added-search-o… ([#2183](https://github.com/juspay/xyne-spaces/issues/2183)) ([eee1904](https://github.com/juspay/xyne-spaces/commit/eee1904618e47807c9b9c0ca55e73fdaedb47fc6))
+
 ## [1.362.0-release-20260922.3](https://github.com/juspay/xyne-spaces/compare/v1.362.0-release-20260922.2...v1.362.0-release-20260922.3) (2026-09-22)
 
 
