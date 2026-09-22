@@ -34,6 +34,7 @@ import { wrapTransactionWithACL } from './acl';
 import { config } from '@/config/env';
 import { checkRateLimit } from '@/services/zeroRateLimiter';
 import { superpositionClient } from '@/services/superpositionClient';
+import { runCompiledZqlSql } from '@/bypassAcl/zeroServices';
 
 const mustGetBackendQuery = (name: string): AnyCustomQuery =>
   mustGetQuery(queries as never, name) as AnyCustomQuery;
@@ -638,10 +639,7 @@ export async function handleQueriesZqlToSql(request: Request): Promise<any> {
           logger.info(`Executing SQL via Prisma:`, sqlQuery.text);
 
           // Execute via Prisma
-          const pgResult = await prisma.$queryRawUnsafe(
-            sqlQuery.text,
-            ...sqlQuery.values
-          );
+          const pgResult = await runCompiledZqlSql(prisma, sqlQuery.text, sqlQuery.values);
 
           // Handle empty results for singular queries
           const pgArrayResult = Array.isArray(pgResult) ? pgResult : [pgResult];

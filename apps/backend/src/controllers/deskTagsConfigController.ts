@@ -15,6 +15,7 @@ import { EmailRepository } from '@/database/repositories/emailRepository';
 import { generateLlmTags } from '@/tags/generators/llm';
 import { tagRepository } from '@/database/repositories/tagRepository';
 import { syncTicketTagsFromEmail } from '@/tags/deskTicket';
+import { advisoryXactLock } from '@/bypassAcl/lockServices';
 
 /**
  * Epoch-ms query param as a Date, or null when it is missing or unusable. The
@@ -418,7 +419,9 @@ export class DeskTagsConfigController {
       // Advisory lock scoped to (sourceType, sourceId, category) serializes concurrent
       // manual tag adds for the same entity+category without requiring serializable isolation.
       await db.$transaction(async (tx) => {
-        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`tag-add:${DESK_EMAIL_SOURCE_TYPE}:${emailId}:${category}`}))`;
+        await advisoryXactLock(tx, ['Tag'],
+          'desk tags: serialize concurrent manual tag adds for the same entity+category',
+          `tag-add:${DESK_EMAIL_SOURCE_TYPE}:${emailId}:${category}`);
 
         const existing = await tx.tag.findFirst({
           where: { sourceId: emailId, sourceType: DESK_EMAIL_SOURCE_TYPE, tagCategory: category, tag, isDeleted: false },

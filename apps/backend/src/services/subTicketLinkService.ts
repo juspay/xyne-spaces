@@ -16,6 +16,8 @@ import { activityService } from '@/services/activity/activityService';
 import { notificationService } from '@/services/notificationService';
 import { logger } from '@/utils/logger';
 import { getFormFieldUserActors } from '@/utils/ticketActorUtils';
+import { subTicketLinkClosesLoop } from '@/bypassAcl/subTicketServices';
+import { tryAdvisoryXactLock } from '@/bypassAcl/lockServices';
 
 type PrismaTx = Prisma.TransactionClient;
 
@@ -220,19 +222,9 @@ async function assertNoCycle(
   ticketId: string,
   mappedTicketId: string,
 ): Promise<void> {
-  const closesLoop = await tx.$queryRaw<Array<{ found: number }>>`
-    WITH RECURSIVE ancestors AS (
-      SELECT ${ticketId}::text AS ticket_id
-      UNION
-      SELECT m."ticketId"
-      FROM ancestors a
-      JOIN "public"."sub_tickets" s ON s."mappedTicketId" = a.ticket_id
-      JOIN "public"."ticket_sub_ticket_mappings" m ON m."subTicketId" = s.id
-    )
-    SELECT 1 AS found FROM ancestors WHERE ticket_id = ${mappedTicketId} LIMIT 1
-  `;
+  const closesLoop = await subTicketLinkClosesLoop(tx, ticketId, mappedTicketId);
 
-  if (closesLoop.length > 0) {
+  if (closesLoop) {
     throw new SubTicketLinkError('Cannot link a ticket to one of its own sub-tickets', 409);
   }
 }
@@ -372,10 +364,10 @@ export async function linkExistingSubTicket({
       // endpoints: the ancestor walk reads edges at arbitrary depth, so two links with
       // disjoint endpoints could still close a cycle. try_ so a contended request returns
       // immediately instead of holding a pooled connection until the transaction times out.
-      const [lock] = await tx.$queryRaw<Array<{ locked: boolean }>>`
-        SELECT pg_try_advisory_xact_lock(hashtext(${'link-subticket:ws:' + actor.workspaceId})) AS locked
-      `;
-      if (!lock?.locked) {
+      const locked = await tryAdvisoryXactLock(tx, ['SubTicket', 'TicketSubTicketMapping'],
+        'sub-ticket link: workspace-wide lock because the ancestor walk reads edges at arbitrary depth',
+        'link-subticket:ws:' + actor.workspaceId);
+      if (!locked) {
         throw new SubTicketLinkError('Another sub-ticket link is in progress, try again', 409);
       }
 

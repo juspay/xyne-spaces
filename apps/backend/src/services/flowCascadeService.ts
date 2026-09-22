@@ -30,6 +30,7 @@ import {
   ensureFlowStageTransition,
   findBackloggedCascadeTicketId,
 } from '@/services/flowStageTransitionRecovery';
+import { lockTicketStatusV2 } from '@/bypassAcl/rowLockServices';
 
 export interface FlowTicketMetadata {
   planNodeId?: string;
@@ -902,12 +903,7 @@ async function createFlowStepTicket(params: {
   try {
     const ticket = await db.$transaction(async (tx) => {
       if (requireActiveRoot) {
-        const [lockedRoot] = await tx.$queryRaw<{ statusV2: TicketStatusV2 }[]>`
-          SELECT "statusV2"
-          FROM "tickets"
-          WHERE "id" = ${rootTicketId}
-          FOR UPDATE
-        `;
+        const lockedRoot = await lockTicketStatusV2(tx, rootTicketId);
         if (lockedRoot?.statusV2 !== TicketStatusV2.STARTED) {
           throw new AppError('Only an active Flow run can move a group to backlog', 409);
         }

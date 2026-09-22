@@ -73,6 +73,7 @@ import {
   etaSignalsFromResult,
   writeEtaActivitiesPrisma,
 } from '@/services/etaManagement';
+import { lockTicketMetadataAndEta } from '@/bypassAcl/rowLockServices';
 
 const externalSourceRepo = new ExternalSourceRepository();
 const externalMessageRepo = new ExternalMessageRepository();
@@ -471,12 +472,7 @@ const transferTicketToBoard = async (params: {
     // FOR UPDATE locks the row so that can't happen. Both locked values feed evaluateEta:
     // eta is the extend-only baseline and a fingerprint input, so a stale one could decide
     // against - and then overwrite - a due date someone else just moved.
-    const [lockedTicket] = await tx.$queryRaw<{ metadata: unknown; eta: Date | null }[]>`
-      SELECT "metadata", "eta"
-      FROM "tickets"
-      WHERE "id" = ${ticketId}
-      FOR UPDATE
-    `;
+    const lockedTicket = await lockTicketMetadataAndEta(tx, ticketId);
     const lockedEta = lockedTicket?.eta ?? null;
     const boardEtaCtx = await loadBoardEtaContext(tx, targetBoardId);
     const currentTicketEtaManagement = parseTicketEtaManagement(lockedTicket?.metadata);
