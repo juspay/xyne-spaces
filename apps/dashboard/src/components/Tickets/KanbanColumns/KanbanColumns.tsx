@@ -335,11 +335,13 @@ const PaginatedStageList: React.FC<{
   onTicketClick: (e: React.MouseEvent | KeyboardEvent, ticket: Ticket) => void;
   onAddTicket?: (() => void) | undefined;
   slaPolicies?: BoardSlaPolicy[];
+  expectedCount?: number | undefined;
 }> = ({
   stage,
   columnKey,
   paginationArgs,
   columnType,
+  expectedCount,
   allKnownTickets,
   onTicketsChange,
   availableTags,
@@ -361,6 +363,7 @@ const PaginatedStageList: React.FC<{
       ...paginationArgs,
       columnType,
       stageName: columnValue,
+      ...(expectedCount !== undefined ? { expectedCount } : {}),
     });
   const renderedTickets = React.useMemo(() => {
     const isGroupByActive = groupBy && groupBy !== 'none';
@@ -693,6 +696,10 @@ export const KanbanColumns: React.FC<KanbanColumnsProps> = ({
         const stageTickets = ticketsByStage[stage.id] || [];
         const ticketIds = stageTickets.map(t => t.id);
         const stageCount = stageCountById[stage.id] ?? stageTickets.length;
+        const serverStageCount =
+          countsAreReliable && stageCounts
+            ? (stageCounts[stage.id] ?? stageCounts[stage.name] ?? 0)
+            : undefined;
         const columnKey = `${keyPrefix}${stage.id}`;
         const handleAddTicket = onAddTicketInColumn
           ? (): void =>
@@ -770,6 +777,7 @@ export const KanbanColumns: React.FC<KanbanColumnsProps> = ({
                     columnKey={columnKey}
                     paginationArgs={paginatedColumnConfig.baseArgs}
                     columnType={paginatedColumnConfig.columnType}
+                    {...(serverStageCount !== undefined ? { expectedCount: serverStageCount } : {})}
                     allKnownTickets={knownTicketsForOptimisticMerge}
                     {...(onTicketsChange !== undefined ? { onTicketsChange } : {})}
                     availableTags={availableTags}

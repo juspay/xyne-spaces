@@ -44,6 +44,15 @@ export interface MessageReceivedEventPayload {
   channelId: string;
   authorId: string;
   msgType: MessageType;
+  /** True when an edit produced this event rather than a new message. */
+  isEdit?: boolean;
+  /**
+   * Fields that must never be persisted or logged. The router drops `_transient`
+   * before serialising the execution context — whether or not the trigger
+   * projected the payload — so a registry miss degrades to "no transition
+   * detection" rather than writing a message body onto the execution row.
+   */
+  _transient?: { previousContent?: string };
 }
 
 export interface CallEventPayload {

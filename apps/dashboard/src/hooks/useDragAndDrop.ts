@@ -10,6 +10,8 @@ import { queries } from '../zero/queries';
 import type { Stage } from '../routes/KanbanBoardScreen/KanbanBoardScreen.types';
 import { sortByKanbanPosition } from '../routes/KanbanBoardScreen/KanbanBoardScreen.utils';
 import { useAuth } from './useAuth';
+import { trackTicketOutcome } from '../services/Analytics/ticketTracking';
+import { logger, Event as LoggerEvent } from '../utils/logger';
 import { useCurrentUserRoleIds } from './useRoles';
 import { v4 as uuidv4 } from 'uuid';
 import { findMatchingTransition } from '../utils/stageTransitionUtils';
@@ -571,7 +573,18 @@ export const useDragAndDrop = ({
                     return;
                   }
                   await handleFormRequiredRecovery(result.error.message);
+                  return;
                 }
+                trackTicketOutcome('TICKET_STAGE_CHANGED', capturedTicket, {
+                  surface: 'kanban_drag',
+                  to: newStageName,
+                  previous: preMoveStageName ?? null,
+                  nonLinear: true,
+                  ...(typeof capturedTargetStage?.sequenceNumber === 'number' &&
+                    typeof currentStage?.sequenceNumber === 'number' && {
+                      isBackward: capturedTargetStage.sequenceNumber < currentStage.sequenceNumber,
+                    }),
+                });
               })
               .catch(async (err: unknown) => {
                 // Catch unexpected rejections (network errors, etc.)
@@ -593,15 +606,38 @@ export const useDragAndDrop = ({
             }
           } else {
             // DEFAULT/RELEASE boards: use Zero mutation for optimistic, instant updates.
-            void zero.mutate(
-              mutators.ticket.update({
-                id: activeTicket.id,
-                stageName: newStageName,
-                ...(newStatus && { statusV2: newStatus }),
-                ...(kanbanPosition !== undefined && { kanbanPosition }),
-                updatedAt: Date.now(),
-              }),
-            );
+            void zero
+              .mutate(
+                mutators.ticket.update({
+                  id: activeTicket.id,
+                  stageName: newStageName,
+                  ...(newStatus && { statusV2: newStatus }),
+                  ...(kanbanPosition !== undefined && { kanbanPosition }),
+                  updatedAt: Date.now(),
+                }),
+              )
+              .server.then(result => {
+                if (result?.type === 'error') return;
+                trackTicketOutcome('TICKET_STAGE_CHANGED', activeTicket, {
+                  surface: 'kanban_drag',
+                  to: newStageName,
+                  previous: preMoveStageName ?? null,
+                  ...(newStatus && { toStatus: newStatus }),
+                  ...(typeof targetStage?.sequenceNumber === 'number' &&
+                    typeof currentStage?.sequenceNumber === 'number' && {
+                      isBackward: targetStage.sequenceNumber < currentStage.sequenceNumber,
+                    }),
+                });
+              })
+              .catch((err: unknown) => {
+                // Transport failure: the optimistic move still stands locally,
+                // matching the pre-tracking `void` behaviour. Log, don't throw.
+                logger.error(LoggerEvent.ZERO_MUTATION_ERROR, {
+                  hook: 'useDragAndDrop',
+                  mutator: 'ticket.update',
+                  error: err instanceof Error ? err.message : String(err),
+                });
+              });
           }
         }
         // Handle reordering within the same stage
@@ -657,13 +693,29 @@ export const useDragAndDrop = ({
           );
 
           // Update database
-          void zero.mutate(
-            mutators.ticket.update({
-              id: activeTicket.id,
-              statusV2: newStatus,
-              updatedAt: Date.now(),
-            }),
-          );
+          void zero
+            .mutate(
+              mutators.ticket.update({
+                id: activeTicket.id,
+                statusV2: newStatus,
+                updatedAt: Date.now(),
+              }),
+            )
+            .server.then(result => {
+              if (result?.type === 'error') return;
+              trackTicketOutcome('TICKET_STATUS_CHANGED', activeTicket, {
+                surface: 'kanban_drag',
+                to: newStatus,
+                previous: activeTicket.statusV2 ?? null,
+              });
+            })
+            .catch((err: unknown) => {
+              logger.error(LoggerEvent.ZERO_MUTATION_ERROR, {
+                hook: 'useDragAndDrop',
+                mutator: 'ticket.update',
+                error: err instanceof Error ? err.message : String(err),
+              });
+            });
         }
         // Handle reordering within the same status
         else if (

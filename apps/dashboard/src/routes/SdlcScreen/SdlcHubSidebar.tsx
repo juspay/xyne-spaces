@@ -1,14 +1,5 @@
-import { useEffect, useMemo, useState, type ReactElement, type ReactNode } from 'react';
-import {
-  ChevronDown,
-  ChevronRight,
-  ExternalLink,
-  GitBranch,
-  Hash,
-  Lock,
-  Plus,
-  Settings2,
-} from 'lucide-react';
+import { useEffect, useMemo, type ReactElement, type ReactNode } from 'react';
+import { ChevronDown, Hash, Lock, Plus } from 'lucide-react';
 import { Panel, Separator, usePanelRef } from '../../components/ui/Resizable/Resizable';
 import { cn } from '../../utils/classNames';
 import {
@@ -18,17 +9,15 @@ import {
 } from '../../machines/userPreferencesMachine';
 import { EntitySelector } from '../../components/ui/EntitySelector/EntitySelector';
 import type { SelectorOption } from '../../components/ui/EntitySelector/EntitySelector.types';
-import { Popover } from '../../components/ui/Popover';
 
 const SECTION_HEADER_HEIGHT = 28;
 const DEFAULT_SECTION_HEIGHT = 170;
 const MIN_OPEN_SECTION_HEIGHT = 150;
 const SECTION_SEPARATOR_HEIGHT = 7;
 export const SDLC_SECTIONS: ReadonlyArray<{ id: string; defaultHeight: number }> = [
-  { id: 'sdlc-sidebar-hub', defaultHeight: 180 },
   { id: 'sdlc-sidebar-tracks', defaultHeight: 200 },
   { id: 'sdlc-sidebar-artifacts', defaultHeight: 180 },
-  { id: 'sdlc-sidebar-repositories', defaultHeight: 180 },
+  { id: 'sdlc-sidebar-repositories', defaultHeight: 150 },
 ];
 
 export interface SdlcHubRepository {
@@ -43,10 +32,6 @@ export interface SdlcHubOption {
   name: string;
   visibility: string;
   repositories: SdlcHubRepository[];
-}
-
-function repositoryHref(repository: SdlcHubRepository): string {
-  return repository.canonicalUrl || repository.url;
 }
 
 export function SdlcHubPicker(props: {
@@ -87,76 +72,12 @@ export function SdlcHubPicker(props: {
   );
 }
 
-/** The hub's repositories, each opening in a new tab. */
-export function SdlcHubRepositories(props: {
-  repositories: SdlcHubRepository[];
-  onManage: () => void;
-}): ReactElement {
-  const [open, setOpen] = useState(false);
-  const count = props.repositories.length;
-
+/** With every section folded the group shrinks to its headers, so they sit at the bottom. */
+export function sdlcFoldedGroupHeight(collapsedSections: Record<string, boolean>): number | null {
+  if (!SDLC_SECTIONS.every(section => collapsedSections[section.id])) return null;
   return (
-    <Popover
-      open={open}
-      onOpenChange={setOpen}
-      side='top'
-      align='start'
-      sideOffset={6}
-      className='w-[260px] p-0'
-      trigger={
-        <button
-          type='button'
-          className='flex w-full items-center gap-2 rounded-lg px-2 py-2 font-medium transition-colors hover:bg-sidebar-accent/50 hover:text-sidebar-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-accent-ring'
-          aria-label='Repositories in this hub'
-          data-track-category='SdlcHub'
-          data-track-name='HubRepositoryListOpened'
-        >
-          <GitBranch className='size-4 shrink-0 text-sidebar-foreground/65' />
-          <span className='min-w-0 flex-1 truncate text-left'>Repositories</span>
-          <span className='shrink-0 text-[11px] tabular-nums text-sidebar-foreground/55'>
-            {count}
-          </span>
-          <ChevronRight className='size-3.5 shrink-0 text-sidebar-foreground/55' />
-        </button>
-      }
-    >
-      <div className='max-h-72 overflow-y-auto py-1'>
-        {count === 0 ? (
-          <p className='px-3 py-4 text-center text-xs text-muted-foreground'>
-            No repositories in this hub.
-          </p>
-        ) : (
-          props.repositories.map(repository => (
-            <a
-              key={repository.id}
-              href={repositoryHref(repository)}
-              target='_blank'
-              rel='noreferrer'
-              className='flex items-center gap-2 px-2.5 py-2 transition-colors hover:bg-muted/60'
-              data-track-category='SdlcHub'
-              data-track-name='HubRepositoryOpened'
-            >
-              <GitBranch className='size-3.5 shrink-0 text-muted-foreground' />
-              <span className='min-w-0 flex-1 truncate text-[12.5px]'>{repository.name}</span>
-              <ExternalLink className='size-3 shrink-0 text-muted-foreground' />
-            </a>
-          ))
-        )}
-      </div>
-      <button
-        type='button'
-        className='flex w-full items-center gap-2 border-t px-2.5 py-2 text-[12.5px] text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground'
-        onClick={() => {
-          setOpen(false);
-          props.onManage();
-        }}
-        data-track-category='SdlcHub'
-        data-track-name='HubRepositoriesOpened'
-      >
-        <Settings2 className='size-3.5' />
-        Manage repositories
-      </button>
-    </Popover>
+    SDLC_SECTIONS.length * SECTION_HEADER_HEIGHT +
+    (SDLC_SECTIONS.length - 1) * SECTION_SEPARATOR_HEIGHT
   );
 }
 
@@ -237,13 +158,67 @@ export function sdlcSectionLayout(
   return heights;
 }
 
-export function SdlcSidebarSection(props: {
+interface SdlcSidebarSectionHeaderProps {
   id: string;
   title: string;
   count?: number | undefined;
-  action?: { label: string; onClick: () => void; trackName: string } | undefined;
-  children: ReactNode;
-}): ReactElement {
+  action?: { label: string; onClick: () => void; trackName: string; icon?: ReactNode } | undefined;
+}
+
+function SdlcSidebarSectionHeader(
+  props: SdlcSidebarSectionHeaderProps & { collapsed: boolean; onToggle: () => void },
+): ReactElement {
+  return (
+    <div
+      className='flex shrink-0 items-center gap-1 px-2'
+      style={{ height: SECTION_HEADER_HEIGHT }}
+    >
+      <button
+        type='button'
+        onClick={props.onToggle}
+        aria-expanded={!props.collapsed}
+        className='flex min-w-0 flex-1 items-center gap-1 rounded-[5px] py-1 pr-1 text-left text-[10.5px] font-bold uppercase tracking-[0.13em] text-foreground/45 transition-colors hover:text-foreground/70'
+        data-track-category='SdlcHub'
+        data-track-name='SidebarSectionToggled'
+        data-track-metadata={JSON.stringify({ section: props.id })}
+      >
+        <ChevronDown
+          className={cn('size-3 shrink-0 transition-transform', props.collapsed && '-rotate-90')}
+        />
+        <span className='truncate'>{props.title}</span>
+        {props.count !== undefined && (
+          <span className='ml-1 shrink-0 text-[10.5px] tabular-nums text-foreground/35'>
+            {props.count}
+          </span>
+        )}
+      </button>
+      {props.action && (
+        <button
+          type='button'
+          title={props.action.label}
+          aria-label={props.action.label}
+          onClick={props.action.onClick}
+          className='-mr-[7px] flex size-[22px] shrink-0 items-center justify-center rounded-[5px] text-foreground/45 transition-colors hover:bg-foreground/[0.06] hover:text-foreground'
+          data-track-category='SdlcHub'
+          data-track-name={props.action.trackName}
+        >
+          {props.action.icon ?? <Plus className='size-3.5' />}
+        </button>
+      )}
+    </div>
+  );
+}
+
+function toggleSection(collapsedSections: Record<string, boolean>, id: string): void {
+  setUserPreference('sdlcSidebarSectionsCollapsed', {
+    ...collapsedSections,
+    [id]: !(collapsedSections[id] ?? false),
+  });
+}
+
+export function SdlcSidebarSection(
+  props: SdlcSidebarSectionHeaderProps & { children: ReactNode },
+): ReactElement {
   const panel = usePanelRef();
   const collapsedSections = useUserPreference('sdlcSidebarSectionsCollapsed');
   const sectionHeights = useUserPreference('sdlcSidebarSectionHeights');
@@ -257,7 +232,7 @@ export function SdlcSidebarSection(props: {
   useEffect(() => {
     const apply = (): void => {
       const element = document.getElementById(props.id);
-      const groupHeight = element?.parentElement?.getBoundingClientRect().height ?? 0;
+      const groupHeight = element?.parentElement?.clientHeight ?? 0;
       if (!groupHeight) return;
       const height = sdlcSectionLayout(groupHeight, collapsedSections, sectionHeights)[props.id];
       if (height !== undefined) panel.current?.resize(`${height}px`);
@@ -266,12 +241,6 @@ export function SdlcSidebarSection(props: {
     const frame = requestAnimationFrame(apply);
     return () => cancelAnimationFrame(frame);
   }, [panel, props.id, collapsed, collapsedSections, sectionHeights]);
-
-  const toggle = (): void =>
-    setUserPreference('sdlcSidebarSectionsCollapsed', {
-      ...collapsedSections,
-      [props.id]: !collapsed,
-    });
 
   return (
     <Panel
@@ -282,47 +251,39 @@ export function SdlcSidebarSection(props: {
       defaultSize={`${collapsed ? SECTION_HEADER_HEIGHT : defaultHeight}px`}
       className='flex min-h-0 flex-col'
     >
-      <div
-        className='flex shrink-0 items-center gap-1 px-2'
-        style={{ height: SECTION_HEADER_HEIGHT }}
-      >
-        <button
-          type='button'
-          onClick={toggle}
-          aria-expanded={!collapsed}
-          className='flex min-w-0 flex-1 items-center gap-1 rounded-[5px] py-1 pr-1 text-left text-[10.5px] font-bold uppercase tracking-[0.13em] text-foreground/45 transition-colors hover:text-foreground/70'
-          data-track-category='SdlcHub'
-          data-track-name='SidebarSectionToggled'
-          data-track-metadata={JSON.stringify({ section: props.id })}
-        >
-          <ChevronDown
-            className={cn('size-3 shrink-0 transition-transform', collapsed && '-rotate-90')}
-          />
-          <span className='truncate'>{props.title}</span>
-          {props.count !== undefined && (
-            <span className='ml-1 shrink-0 text-[10.5px] tabular-nums text-foreground/35'>
-              {props.count}
-            </span>
-          )}
-        </button>
-        {props.action && (
-          <button
-            type='button'
-            title={props.action.label}
-            aria-label={props.action.label}
-            onClick={props.action.onClick}
-            className='-mr-[7px] flex size-[22px] shrink-0 items-center justify-center rounded-[5px] text-foreground/45 transition-colors hover:bg-foreground/[0.06] hover:text-foreground'
-            data-track-category='SdlcHub'
-            data-track-name={props.action.trackName}
-          >
-            <Plus className='size-3.5' />
-          </button>
-        )}
-      </div>
+      <SdlcSidebarSectionHeader
+        id={props.id}
+        title={props.title}
+        count={props.count}
+        action={props.action}
+        collapsed={collapsed}
+        onToggle={() => toggleSection(collapsedSections, props.id)}
+      />
       {!collapsed && (
         <div className='min-h-0 flex-1 overflow-y-auto px-2 pb-2'>{props.children}</div>
       )}
     </Panel>
+  );
+}
+
+export function SdlcSidebarFitSection(props: {
+  id: string;
+  title: string;
+  children: ReactNode;
+}): ReactElement {
+  const collapsedSections = useUserPreference('sdlcSidebarSectionsCollapsed');
+  const collapsed = collapsedSections[props.id] ?? false;
+
+  return (
+    <div id={props.id} className='shrink-0'>
+      <SdlcSidebarSectionHeader
+        id={props.id}
+        title={props.title}
+        collapsed={collapsed}
+        onToggle={() => toggleSection(collapsedSections, props.id)}
+      />
+      {!collapsed && <div className='px-2 pb-2'>{props.children}</div>}
+    </div>
   );
 }
 

@@ -29,6 +29,7 @@ export function AskAiRatingButtons({
   comment,
   onChange,
   className,
+  trackMetadata,
 }: {
   /** Assistant ChatMessage id. Absent only mid-stream (buttons aren't shown
    *  then); once the turn completes it's the server id, so rating always works. */
@@ -38,6 +39,8 @@ export function AskAiRatingButtons({
   /** Lets the parent reflect the new rating in its message state. */
   onChange?: ((feedback: FeedbackNum, comment?: string | null) => void) | undefined;
   className?: string | undefined;
+  /** Run dimensions merged into the LIKE / DISLIKE / RATING_COMMENT_SAVE clicks. */
+  trackMetadata?: Record<string, unknown> | undefined;
 }): ReactElement {
   const [current, setCurrent] = useState<FeedbackNum>(feedback ?? 0);
   const [saving, setSaving] = useState(false);
@@ -97,6 +100,7 @@ export function AskAiRatingButtons({
         )}
         data-track-category='XyneAI'
         data-track-name='LIKE_MESSAGE'
+        data-track-metadata={JSON.stringify({ ...trackMetadata, messageId })}
       >
         <ThumbsUp
           className='size-3.5'
@@ -121,6 +125,7 @@ export function AskAiRatingButtons({
         )}
         data-track-category='XyneAI'
         data-track-name='DISLIKE_MESSAGE'
+        data-track-metadata={JSON.stringify({ ...trackMetadata, messageId })}
       >
         <ThumbsDown
           className='size-3.5'
@@ -159,6 +164,7 @@ export function AskAiRatingButtons({
             disabled={saving}
             data-track-category='XyneAI'
             data-track-name='RATING_COMMENT_SAVE'
+            data-track-metadata={JSON.stringify({ ...trackMetadata, messageId })}
             className='rounded-md bg-secondary px-2 py-0.5 text-[11px] text-foreground transition-colors hover:bg-muted'
           >
             Save

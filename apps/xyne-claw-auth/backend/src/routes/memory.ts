@@ -24,7 +24,7 @@ import { prisma } from "../db.js";
 import { agentRepository } from "../repositories/index.js";
 import { createLogger, createTraceId } from "../logger.js";
 import { requireAuth, requireUserAuth, s2sKeyMatches } from "../middleware/require-auth.js";
-import { isClawAdmin, requireClawAdmin, getOrgId, getRequesterId } from "../middleware/agent-acl.js";
+import { isClawAdmin, requireClawAdmin, getAgentEditAccess, getOrgId, getRequesterId } from "../middleware/agent-acl.js";
 import { curateApprovedTranscript, persistSubsystemReviews, readSessionTranscript, type SessionTranscript } from "../services/memoryCronService.js";
 import { classifySessionSubsystemForBank, distillSessionFile, parseSessionFile } from "../services/sessionCurator.js";
 import { enqueueAgentBackfill, getAgentBackfillQueue } from "../queue/agent-backfill-queue.js";
@@ -37,6 +37,24 @@ import {
   MAX_FILE_CHARS,
 } from "../services/agentMemoryFiles.js";
 import { ensureTwinBank, twinObservationScopes, VERBATIM_IMPORT_STRATEGY } from "../services/userMemoryCuratorClient.js";
+
+/**
+ * Memory-maintenance ACL: the agent's owner, a share holder with EDITOR or
+ * CONTRIBUTOR, or a CLAW_ADMIN.
+ *
+ * The dashboard renders the Memory tab whenever `canEdit` is true — owner OR
+ * editor OR contributor (frontend/src/v3/lib/agentPermissions.ts) — while these
+ * routes used to compare `ownerUserId` alone. The result was a tab that 403'd
+ * for exactly the people it was rendered for. This helper is the same rule the
+ * UI uses, via the canonical ACL helper.
+ *
+ * DESTRUCTIVE memory routes (clear-all, subsystem delete) deliberately do NOT
+ * use this: wiping a shared bank stays owner/admin-only.
+ */
+async function canMaintainAgentMemory(req: Request, agentSlug: string, userId: string): Promise<boolean> {
+  const access = await getAgentEditAccess(userId, agentSlug, getOrgId(req));
+  return Boolean(access?.canEdit);
+}
 
 const logger = createLogger("memory-review", createTraceId());
 
@@ -176,7 +194,7 @@ memoryRouter.post("/agent-file", requireAuth, async (req, res) => {
       const current = await getAgentFile(agentSlug, userId, name);
       finalContent = current?.content ? `${current.content.trimEnd()}\n\n${content.trim()}` : content.trim();
     }
-    const file = await upsertAgentFile({ agentSlug, userId, name, content: finalContent, updatedBy: "agent" });
+    const file = await upsertAgentFile({ agentSlug, owner: userId, name, content: finalContent, updatedBy: "agent" });
     res.json({
       success: true,
       data: { file: { name: file.name, chars: file.content.length, maxChars: MAX_FILE_CHARS } },
@@ -1504,8 +1522,8 @@ memoryRouter.post("/banks/:agentSlug/consolidate", requireUserAuth, async (req, 
         return;
       }
       const admin = await isClawAdmin(requesterId);
-      if (!admin && agent.ownerUserId !== requesterId) {
-        res.status(403).json({ success: false, error: "Only the agent owner or an admin can trigger consolidation." });
+      if (!admin && !(await canMaintainAgentMemory(req, agentSlug, requesterId))) {
+        res.status(403).json({ success: false, error: "Only the agent owner, an editor, or an admin can trigger consolidation." });
         return;
       }
     }
@@ -1613,8 +1631,8 @@ memoryRouter.post("/banks/:agentSlug/memories/import", requireUserAuth, async (r
         return;
       }
       const admin = await isClawAdmin(requesterId);
-      if (!admin && agent.ownerUserId !== requesterId) {
-        res.status(403).json({ success: false, error: "Only the agent owner or an admin can import memories." });
+      if (!admin && !(await canMaintainAgentMemory(req, agentSlug, requesterId))) {
+        res.status(403).json({ success: false, error: "Only the agent owner, an editor, or an admin can import memories." });
         return;
       }
     }
@@ -1766,8 +1784,8 @@ memoryRouter.post("/banks/:agentSlug/upload-md", requireUserAuth, async (req, re
       return;
     }
     const admin = await isClawAdmin(userId);
-    if (!admin && agent.ownerUserId !== userId) {
-      res.status(403).json({ success: false, error: "Only the agent owner or an admin can upload memory documents." });
+    if (!admin && !(await canMaintainAgentMemory(req, agentSlug, userId))) {
+      res.status(403).json({ success: false, error: "Only the agent owner, an editor, or an admin can upload memory documents." });
       return;
     }
 
@@ -2239,8 +2257,8 @@ memoryRouter.post("/banks/:agentSlug/backfill", requireUserAuth, async (req, res
       res.status(404).json({ success: false, error: "Agent not found" });
       return;
     }
-    if (!(await isClawAdmin(requesterId)) && agent.ownerUserId !== requesterId) {
-      res.status(403).json({ success: false, error: "Only the agent owner or an admin can backfill this agent's memory." });
+    if (!(await canMaintainAgentMemory(req, agentSlug, requesterId))) {
+      res.status(403).json({ success: false, error: "Only the agent owner, an editor, or an admin can backfill this agent's memory." });
       return;
     }
     const body = (req.body ?? {}) as { from?: string; to?: string; days?: number };
@@ -2416,8 +2434,8 @@ memoryRouter.post("/banks/:agentSlug/enable", requireUserAuth, async (req, res) 
       res.status(401).json({ success: false, error: "Unauthenticated" });
       return;
     }
-    if (!(await isClawAdmin(requesterId)) && agent.ownerUserId !== requesterId) {
-      res.status(403).json({ success: false, error: "Only the agent owner or an admin can manage this agent's memory." });
+    if (!(await canMaintainAgentMemory(req, agentSlug, requesterId))) {
+      res.status(403).json({ success: false, error: "Only the agent owner, an editor, or an admin can manage this agent's memory." });
       return;
     }
 
@@ -2466,8 +2484,8 @@ memoryRouter.post("/banks/:agentSlug/disable", requireUserAuth, async (req, res)
       res.status(401).json({ success: false, error: "Unauthenticated" });
       return;
     }
-    if (!(await isClawAdmin(requesterId)) && agent.ownerUserId !== requesterId) {
-      res.status(403).json({ success: false, error: "Only the agent owner or an admin can manage this agent's memory." });
+    if (!(await canMaintainAgentMemory(req, agentSlug, requesterId))) {
+      res.status(403).json({ success: false, error: "Only the agent owner, an editor, or an admin can manage this agent's memory." });
       return;
     }
 
@@ -2509,6 +2527,9 @@ memoryRouter.post("/banks/:agentSlug/clear-all", requireUserAuth, async (req, re
       res.status(404).json({ success: false, error: "Agent not found" });
       return;
     }
+    // Deliberately owner/admin-only (NOT canMaintainAgentMemory): clearing the
+    // bank is irreversible and destroys work belonging to every user of the
+    // agent, so an editor must not be able to do it.
     const admin = await isClawAdmin(userId);
     if (!admin && agent.ownerUserId !== userId) {
       res.status(403).json({ success: false, error: "Only the agent owner or an admin can clear all memories." });
@@ -2571,6 +2592,8 @@ memoryRouter.delete("/banks/:agentSlug/subsystems/:subsystem", requireUserAuth, 
       res.status(404).json({ success: false, error: "Agent not found" });
       return;
     }
+    // Deliberately owner/admin-only (NOT canMaintainAgentMemory) — same
+    // rationale as clear-all: irreversible, and shared across the agent's users.
     const admin = await isClawAdmin(userId);
     if (!admin && agent.ownerUserId !== userId) {
       res.status(403).json({ success: false, error: "Only the agent owner or an admin can delete a subsystem." });
@@ -2634,8 +2657,8 @@ memoryRouter.post("/banks/:agentSlug/upload-session", requireUserAuth, async (re
       return;
     }
     const admin = await isClawAdmin(userId);
-    if (!admin && agent.ownerUserId !== userId) {
-      res.status(403).json({ success: false, error: "Only the agent owner or an admin can upload sessions." });
+    if (!admin && !(await canMaintainAgentMemory(req, agentSlug, userId))) {
+      res.status(403).json({ success: false, error: "Only the agent owner, an editor, or an admin can upload sessions." });
       return;
     }
     // The twin bank holds per-user private memories; a "shared" upload into it

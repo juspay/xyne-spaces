@@ -30,14 +30,14 @@ import {
 } from '../utils/searchFilterParser';
 import { sudoQueryService } from '../services/hyperAnalytics/sudoQueryService';
 import { affinityService } from '../services/affinityService';
-import { useCmdkDefaultRankProfiles } from './useCmdkSearchConfig';
+import { useCmdkDefaultRankProfiles, useCmdkFlatAllRankProfiles } from './useCmdkSearchConfig';
 import type { StructuredSearchFilters } from './useSearchResultsScreen';
 import { resolveDateKeyword } from '../search/filterModel';
 import { unwrapExactSearchQuery } from '../utils/exactSearch';
 
 type SearchTrigger = 'keyboard_shortcut' | 'click' | 'auto_focus';
 type SearchLocation = 'global' | 'channel' | 'dm';
-type QuerySource = 'KEYBOARD' | 'CLIPBOARD_PASTE';
+type QuerySource = 'KEYBOARD' | 'CLIPBOARD_PASTE' | 'RECENT';
 
 type SelectedMention = { id: string; type: ChipType; prefix?: string; name?: string };
 
@@ -188,6 +188,14 @@ function dateFiltersFromChips(mentions: SelectedMention[]): StructuredSearchFilt
 export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
   const context = useAuthContextValues();
   const defaultRankProfileFor = useCmdkDefaultRankProfiles();
+  // CAC-driven: which rank profiles render the ALL tab as one flat, score-ordered list.
+  const flatAllRankProfiles = useCmdkFlatAllRankProfiles();
+  // Stable identity for dep arrays / the duplicate-search guard: the CAC value arrives
+  // asynchronously, so a search that ran before it landed has to be re-dispatched.
+  const flatAllRankProfilesKey = useMemo(
+    () => [...flatAllRankProfiles].sort().join(','),
+    [flatAllRankProfiles],
+  );
 
   useEffect(() => {
     void affinityService.prefetch();
@@ -400,6 +408,14 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
     if (querySourceRef.current === 'CLIPBOARD_PASTE') {
       isModifiedRef.current = true;
     }
+  }, []);
+
+  /**
+   * Handle replay of a saved recent search
+   * Tags query_source as RECENT so this session's impression + session-end carry the origin.
+   */
+  const markRecentReplay = useCallback(() => {
+    querySourceRef.current = 'RECENT';
   }, []);
 
   /**
@@ -1143,8 +1159,10 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
               const vespaResponse = await searchService.vespaSearch(
                 {
                   ...searchFilters,
-                  //unified rank profile filters
-                  ...(effectiveRankProfile === 'unified'
+                  // Flat (score-ordered) ALL tab for cross-schema-comparable rank profiles.
+                  // Mail is left out so page 1 matches the load-more continuation below,
+                  // which is pinned to chat/ticket/file (XYNE-54288).
+                  ...(flatAllRankProfiles.has(effectiveRankProfile)
                     ? {
                         groupBy: '',
                         apps: `${VespaApps.CHAT},${VespaApps.TICKET},${VespaApps.FILE}`,
@@ -1274,6 +1292,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
       exactMatch,
       rankProfile,
       allDefaultRankProfile,
+      flatAllRankProfiles,
       includeDebugInfo,
       structuredFilters,
     ],
@@ -1289,6 +1308,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
     exactMatch: boolean;
     rankProfile: string;
     allDefaultRankProfile: string;
+    flatAllRankProfilesKey: string;
     includeDebugInfo: boolean;
     structuredFiltersKey: string;
   }>({
@@ -1300,6 +1320,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
     exactMatch: false,
     rankProfile: '',
     allDefaultRankProfile,
+    flatAllRankProfilesKey: '',
     includeDebugInfo: false,
     structuredFiltersKey: '{}',
   });
@@ -1335,6 +1356,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
       currentMentionsKey === lastSearchedParamsRef.current.mentionsKey &&
       rankProfile === lastSearchedParamsRef.current.rankProfile &&
       allDefaultRankProfile === lastSearchedParamsRef.current.allDefaultRankProfile &&
+      flatAllRankProfilesKey === lastSearchedParamsRef.current.flatAllRankProfilesKey &&
       includeDebugInfo === lastSearchedParamsRef.current.includeDebugInfo &&
       structuredFiltersKey === lastSearchedParamsRef.current.structuredFiltersKey &&
       normalizedText !== ''
@@ -1357,6 +1379,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
         exactMatch,
         rankProfile,
         allDefaultRankProfile,
+        flatAllRankProfilesKey,
         includeDebugInfo,
         structuredFiltersKey,
         mentionsKey: currentMentionsKey,
@@ -1401,6 +1424,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
     exactMatch,
     rankProfile,
     allDefaultRankProfile,
+    flatAllRankProfilesKey,
     includeDebugInfo,
     structuredFiltersKey,
   ]);
@@ -1753,6 +1777,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
     // Clipboard tracking callbacks
     onPasteDetected: handlePasteDetected,
     onManualKeystroke: handleManualKeystroke,
+    markRecentReplay,
 
     searchResults,
     isGrouped,

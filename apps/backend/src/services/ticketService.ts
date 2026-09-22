@@ -414,6 +414,11 @@ export class TicketService {
         ticket: currentCountsSnapshot,
         previousTicket: previousCountsSnapshot,
       });
+      // Desk label badges depend on the same ticket fields — invalidate the
+      // channel room whenever a channel-backed ticket changes.
+      if (currentCountsSnapshot.channelId) {
+        websocketService.broadcastLabelUnreadCountsUpdate(currentCountsSnapshot.channelId);
+      }
     }
 
     logger.info(`[TicketService] Updated ticket ${ticketId}: ${updates.join(', ')}`);

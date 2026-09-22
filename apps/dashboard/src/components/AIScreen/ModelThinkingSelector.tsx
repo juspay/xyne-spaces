@@ -6,7 +6,7 @@
  * Recommended row.
  */
 import { useCallback, useMemo, useState } from 'react';
-import { Brain, Check, ChevronDown, ChevronRight, Search, Sparkles } from 'lucide-react';
+import { Brain, Check, ChevronDown, ChevronRight, Laptop, Search, Sparkles } from 'lucide-react';
 import { Popover } from '../ui/Popover';
 import { cn } from '../../utils/classNames';
 import type { ClawAgentModel } from '../../services/clawAgentModelsService';
@@ -87,11 +87,19 @@ export function ModelThinkingSelector({
     () => models.find(m => m.id === selectedModel) ?? null,
     [models, selectedModel],
   );
+  const harnessModels = useMemo(() => models.filter(m => m.provider === 'local-harness'), [models]);
+  const serverModels = useMemo(() => models.filter(m => m.provider !== 'local-harness'), [models]);
+  const recommendedHarness = useMemo(
+    () => harnessModels.find(m => m.recommended) ?? null,
+    [harnessModels],
+  );
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return models;
-    return models.filter(m => m.name.toLowerCase().includes(q) || m.id.toLowerCase().includes(q));
-  }, [models, query]);
+    if (!q) return serverModels;
+    return serverModels.filter(
+      m => m.name.toLowerCase().includes(q) || m.id.toLowerCase().includes(q),
+    );
+  }, [serverModels, query]);
   const thinkingLabel =
     THINKING_LEVEL_OPTIONS.find(o => o.value === thinkingLevel)?.label ?? 'Default';
 
@@ -133,7 +141,7 @@ export function ModelThinkingSelector({
             data-track-category='XyneAI'
             data-track-name='OPEN_MODEL_SELECTOR'
             className={cn(
-              'flex h-7 items-center gap-1.5 rounded-lg border border-border px-2 text-sm transition-colors',
+              'flex h-7 min-w-0 shrink items-center gap-1.5 rounded-lg border border-border px-2 text-sm transition-colors',
               disabled ? 'cursor-not-allowed opacity-60' : 'hover:bg-accent cursor-pointer',
             )}
           >
@@ -142,12 +150,16 @@ export function ModelThinkingSelector({
               aria-hidden
               strokeWidth={1.75}
             />
-            <span className='font-medium text-foreground truncate max-w-[160px]'>
+            <span className='min-w-0 truncate font-medium text-foreground'>
               {selected
-                ? formatModelLabel(selected.name)
-                : defaultModel
-                  ? formatModelLabel(defaultModel)
-                  : 'Recommended'}
+                ? selected.provider === 'local-harness'
+                  ? selected.name
+                  : formatModelLabel(selected.name)
+                : recommendedHarness
+                  ? recommendedHarness.name
+                  : defaultModel
+                    ? formatModelLabel(defaultModel)
+                    : 'Recommended'}
             </span>
             {thinkingLevel && <span className='text-muted-foreground'>{thinkingLabel}</span>}
             <ChevronDown className='h-3 w-3 shrink-0 text-muted-foreground' aria-hidden />
@@ -157,6 +169,44 @@ export function ModelThinkingSelector({
       className='w-80 p-0 bg-popover border border-border rounded-lg shadow-lg overflow-visible'
     >
       <div className='flex flex-col py-1 px-1'>
+        {harnessModels.length > 0 && (
+          <>
+            {harnessModels.map(h => (
+              <button
+                key={h.id}
+                type='button'
+                title={h.deviceName ? `${h.name} — ${h.deviceName}` : h.name}
+                onClick={() => {
+                  onSelectModel(h.id);
+                  setOpen(false);
+                }}
+                data-track-category='XyneAI'
+                data-track-name='SELECT_MODEL'
+                data-track-metadata={JSON.stringify({ model: h.id })}
+                className={rowClass(selectedModel === h.id)}
+              >
+                <span className='flex items-center gap-1.5 min-w-0'>
+                  <Laptop
+                    className='h-3.5 w-3.5 shrink-0 text-muted-foreground'
+                    aria-hidden
+                    strokeWidth={1.75}
+                  />
+                  <span className='flex flex-col items-start gap-0.5 min-w-0'>
+                    <span className='font-medium truncate max-w-full'>{h.name}</span>
+                    <span className='text-[11px] text-muted-foreground truncate max-w-full'>
+                      {h.recommended ? 'Runs on this Mac (Recommended)' : 'Runs on this Mac'}
+                    </span>
+                  </span>
+                </span>
+                {selectedModel === h.id && <Check className='h-3.5 w-3.5 shrink-0' aria-hidden />}
+              </button>
+            ))}
+            <div className='my-1 h-px bg-border mx-1' />
+            <div className='px-2.5 pb-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground'>
+              Run on server
+            </div>
+          </>
+        )}
         {/* Recommended — clears the pin; the run uses the model configured in the DB. */}
         <button
           type='button'
@@ -173,7 +223,7 @@ export function ModelThinkingSelector({
             <span className='font-medium'>
               {defaultModel ? formatModelLabel(defaultModel) : 'Recommended'}
             </span>
-            {defaultModel && (
+            {defaultModel && !recommendedHarness && (
               <span className='text-[11px] text-muted-foreground truncate max-w-full'>
                 (Recommended)
               </span>
@@ -182,7 +232,7 @@ export function ModelThinkingSelector({
           {selectedModel === null && <Check className='h-3.5 w-3.5 shrink-0' aria-hidden />}
         </button>
 
-        {models.length > 0 && (
+        {serverModels.length > 0 && (
           <>
             <div className='my-1 h-px bg-border mx-1' />
             {/* Search over the account's allowed model list. */}

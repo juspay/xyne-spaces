@@ -1,4 +1,6 @@
+import { PageSelectionPreview } from './PageSelectionPreview';
 import { logger, Event as LogEvent } from '../../../../utils/logger';
+import { lengthBucket } from '../../../../services/Analytics/trackSource';
 import {
   ReactElement,
   useState,
@@ -622,6 +624,8 @@ interface MessageContentProps {
     channelIdMapping?: Record<string, string>,
   ) => void;
   onSummarizerCitationClick: (citation: SummarizerCitation) => void;
+  /** Run dimensions merged into tracked clicks (see MessageItemProps). */
+  trackContext?: Record<string, unknown> | undefined;
 }
 
 interface SingleStatObject {
@@ -636,6 +640,8 @@ interface SingleStatSectionProps {
 interface SummarizerContentProps {
   message: Message;
   onSummarizerCitationClick: (citation: SummarizerCitation) => void;
+  /** Run dimensions merged into tracked clicks (see MessageItemProps). */
+  trackContext?: Record<string, unknown> | undefined;
 }
 
 interface GeniusKeyPointsProps {
@@ -648,6 +654,8 @@ interface GeniusKeyPointsProps {
     messageIdMapping: Record<string, string>,
     channelIdMapping?: Record<string, string>,
   ) => void;
+  /** Run dimensions merged into tracked clicks (see MessageItemProps). */
+  trackContext?: Record<string, unknown> | undefined;
 }
 
 interface MessageActionsProps {
@@ -662,6 +670,8 @@ interface MessageActionsProps {
   onRatingChange?:
     | ((messageId: string, feedback: 0 | 1 | 2, comment?: string | null) => void)
     | undefined;
+  /** Run dimensions merged into tracked clicks (see MessageItemProps). */
+  trackContext?: Record<string, unknown> | undefined;
 }
 
 /**
@@ -705,6 +715,9 @@ interface MessageItemProps {
   /** Open the debug panel focused on a specific tool call — used by generic
    *  auto-citation chips (which have no link target). */
   onOpenToolDebug?: ((toolCallId: string) => void) | undefined;
+  /** Run dimensions (surface, conversationId, agentSlug, model) merged into
+   *  every act-on-answer click so it joins back to the run that produced it. */
+  trackContext?: Record<string, unknown> | undefined;
 }
 
 // Image preview component that fetches with auth and creates blob URL
@@ -1135,6 +1148,7 @@ export const MessageItem = React.memo(
     onBranchNavigate,
     onDebug,
     onFollowUpSuggestionClick,
+    trackContext,
   }: MessageItemProps): ReactElement => {
     const [copied, setCopied] = useState(false);
     const [isEditing, setIsEditing] = useState(false);
@@ -1403,6 +1417,11 @@ export const MessageItem = React.memo(
                     ))}
                   </div>
                 )}
+                {message.pageSelection && (
+                  <div className='mb-3'>
+                    <PageSelectionPreview selection={message.pageSelection} />
+                  </div>
+                )}
                 {/* Attachment previews */}
                 {message.attachments && message.attachments.length > 0 && (
                   <div className='mb-3 space-y-2'>
@@ -1488,6 +1507,7 @@ export const MessageItem = React.memo(
               </>
             ) : (
               <MessageContent
+                trackContext={trackContext}
                 message={message}
                 displayContent={displayContent}
                 hasKeypoints={hasKeypoints}
@@ -1621,6 +1641,7 @@ export const MessageItem = React.memo(
                       )}
                       <MessageActions
                         message={message}
+                        trackContext={trackContext}
                         copied={copied}
                         onCopy={handleCopy}
                         onFeedback={onFeedback}
@@ -1641,7 +1662,7 @@ export const MessageItem = React.memo(
           onFollowUpSuggestionClick &&
           message.followUpSuggestions?.length ? (
             <div className='mt-3 flex flex-wrap gap-2' data-testid='ask-ai-follow-ups'>
-              {message.followUpSuggestions.map(suggestion => (
+              {message.followUpSuggestions.map((suggestion, suggestionIndex) => (
                 <button
                   key={suggestion}
                   type='button'
@@ -1649,7 +1670,12 @@ export const MessageItem = React.memo(
                   className='rounded-full border border-border bg-card px-3 py-1.5 text-left text-xs font-medium leading-5 text-muted-foreground transition-colors hover:bg-accent'
                   data-track-category='AskAI'
                   data-track-name='FollowUpSuggestion'
-                  data-track-metadata={JSON.stringify({ suggestion })}
+                  data-track-metadata={JSON.stringify({
+                    ...trackContext,
+                    messageId: message.id,
+                    index: suggestionIndex,
+                    lengthBucket: lengthBucket(suggestion.length),
+                  })}
                 >
                   {suggestion}
                 </button>
@@ -1741,6 +1767,7 @@ const MessageContent = ({
   onCitationClick,
   onSummarizerCitationClick,
   onOpenToolDebug,
+  trackContext,
 }: MessageContentProps): ReactElement => {
   const resolveMention = useMentionResolver(message.userTags);
 
@@ -1989,6 +2016,7 @@ const MessageContent = ({
         <SummarizerContent
           message={message}
           onSummarizerCitationClick={onSummarizerCitationClick}
+          trackContext={trackContext}
         />
       )}
 
@@ -1997,6 +2025,7 @@ const MessageContent = ({
         <GeniusKeyPoints
           parsedContent={parsedContent}
           message={message}
+          trackContext={trackContext}
           resolveMention={resolveMention}
           onCitationClick={onCitationClick}
         />
@@ -2166,6 +2195,7 @@ const SingleStatSection = ({ singleStat }: SingleStatSectionProps): ReactElement
 const SummarizerContent = ({
   message,
   onSummarizerCitationClick,
+  trackContext,
 }: SummarizerContentProps): ReactElement => {
   const resolveMention = useMentionResolver(message.userTags);
   // Memoize markdown components to prevent re-renders on parent updates
@@ -2418,6 +2448,8 @@ const SummarizerContent = ({
                               data-track-category='XyneAI'
                               data-track-name='SUMMARIZER_CITATION_CLICK'
                               data-track-metadata={JSON.stringify({
+                                ...trackContext,
+                                citationType: 'summarizer',
                                 messageIndex: keyPoint.citation.messageIndex,
                               })}
                             >
@@ -2443,6 +2475,7 @@ const GeniusKeyPoints = ({
   message,
   resolveMention,
   onCitationClick,
+  trackContext,
 }: GeniusKeyPointsProps): ReactElement => (
   <div className='space-y-2'>
     <h3 className='text-sm font-semibold text-muted-foreground'>Key Points</h3>
@@ -2542,7 +2575,11 @@ const GeniusKeyPoints = ({
                   title={`Jump to message ${keypointNum}`}
                   data-track-category='XyneAI'
                   data-track-name='KEY_POINT_CITATION_CLICK'
-                  data-track-metadata={JSON.stringify({ keypointNum })}
+                  data-track-metadata={JSON.stringify({
+                    ...trackContext,
+                    citationType: 'key_point',
+                    keypointNum,
+                  })}
                 >
                   {keypointNum}
                 </button>
@@ -2662,6 +2699,7 @@ const MessageActions = ({
   isV2,
   onRatingChange,
   onRegenerate,
+  trackContext,
 }: MessageActionsProps): ReactElement => (
   <div className='flex justify-between items-center gap-3'>
     <div className='flex items-center gap-1'>
@@ -2672,6 +2710,7 @@ const MessageActions = ({
         title={copied ? 'Copied!' : 'Copy'}
         data-track-category='XyneAI'
         data-track-name='COPY_MESSAGE'
+        data-track-metadata={JSON.stringify({ ...trackContext, messageId: message.id })}
       >
         {copied ? (
           <img src='/svgs/icons/check-success.svg' alt='Copied' width='16' height='16' />
@@ -2689,7 +2728,7 @@ const MessageActions = ({
           title='Regenerate response'
           data-track-category='XyneAI'
           data-track-name='REGENERATE_MESSAGE'
-          data-track-metadata={JSON.stringify({ messageId: message.id })}
+          data-track-metadata={JSON.stringify({ ...trackContext, messageId: message.id })}
         >
           <RefreshCw size={16} className='text-current' />
         </button>
@@ -2703,6 +2742,7 @@ const MessageActions = ({
           feedback={message.feedback}
           comment={message.ratingComment}
           onChange={(fb, c): void => onRatingChange?.(message.id, fb, c)}
+          trackMetadata={trackContext}
         />
       ) : (
         <>
@@ -2714,7 +2754,7 @@ const MessageActions = ({
             title='Like'
             data-track-category='XyneAI'
             data-track-name='LIKE_MESSAGE'
-            data-track-metadata={JSON.stringify({ messageId: message.id })}
+            data-track-metadata={JSON.stringify({ ...trackContext, messageId: message.id })}
           >
             <svg
               xmlns='http://www.w3.org/2000/svg'
@@ -2757,7 +2797,7 @@ const MessageActions = ({
             title='Dislike'
             data-track-category='XyneAI'
             data-track-name='DISLIKE_MESSAGE'
-            data-track-metadata={JSON.stringify({ messageId: message.id })}
+            data-track-metadata={JSON.stringify({ ...trackContext, messageId: message.id })}
           >
             <svg
               xmlns='http://www.w3.org/2000/svg'

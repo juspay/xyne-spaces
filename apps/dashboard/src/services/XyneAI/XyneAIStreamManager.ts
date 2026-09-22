@@ -1,3 +1,6 @@
+import type { DesignSelectionPayload } from '../../components/AIScreen/Workspace/design/designStudioContext';
+import type { PageSelectionPayload } from '../../components/AIScreen/Workspace/pageSelectionContext';
+import { consumePendingPassage, readOpenItems } from '../../components/workspaceItems';
 import { logger, Event as LogEvent } from '../../utils/logger';
 /**
  * Global Stream Manager for XyneAI
@@ -8,6 +11,8 @@ import { logger, Event as LogEvent } from '../../utils/logger';
 import { apiInstance, BASE_URL } from '../clients/apiClient';
 import { consumeConversationLiveStream } from './liveConversationStream';
 import { trackCitationsGenerated } from '../otel/xyneAIMetrics';
+import { globalClickTracker } from '../Analytics/globalClickTracker';
+import { lengthBucket } from '../Analytics/trackSource';
 import { parsePartialSummarizerJSON } from '../../utils/partialJsonParser';
 import {
   parseStreamingContent,
@@ -69,6 +74,12 @@ export interface StreamState {
   debugArtifactsReadyVersion: number;
   followUpsPending?: boolean;
   startedAt: number;
+  /** When the first content delta arrived — time-to-first-token for RESPONSE_* events. */
+  firstTokenAt?: number;
+  /** Model pin sent with the request, for RESPONSE_* event dimensions. */
+  model?: string;
+  /** Guards the analytics terminal event so one run reports exactly one outcome. */
+  runOutcomeReported?: boolean;
   version?: 'v1' | 'v2';
   agentSlug?: string;
   showInSidebar: boolean;
@@ -90,13 +101,6 @@ export interface StreamRequest {
   query: string;
   displayQuery?: string;
   channelIds: string[];
-  collectionIds?: string[];
-  fileIds?: string[];
-  /** Folder scopes from the composer picker. Sent to claw-auth as a single
-   *  'folder' attached_context pointer per id — xyneAIControllerV2.ts does
-   *  NOT expand this to a recursive file list; claw-auth resolves it itself,
-   *  at Vespa-query time. */
-  folderIds?: string[];
   canvasIds?: string[] | undefined;
   ticketIds?: string[] | undefined;
   callIds?: string[] | undefined;
@@ -117,6 +121,11 @@ export interface StreamRequest {
   thinkingLevel?: 'off' | 'minimal' | 'low' | 'medium' | 'high';
   researchContext?: ResearchContext | null | undefined;
   attachments: MessageAttachment[];
+  sandboxMode?: 'remote' | 'local' | 'container' | undefined;
+  studioMode?: 'design' | undefined;
+  designArtifactAttachmentId?: string | undefined;
+  designSelection?: DesignSelectionPayload | undefined;
+  pageSelection?: PageSelectionPayload | undefined;
   parentMessageId?: string | undefined;
   isRegenerate?: boolean | undefined;
   /** Branching: edit-user signals that the new user message is a sibling of
@@ -139,7 +148,7 @@ export interface StreamRequest {
   /** Which provider the model pin rides ("litellm" = the agent's own
    *  credential, "spaces" = the platform allowed list). Only meaningful
    *  alongside `model`. */
-  modelProvider?: 'litellm' | 'spaces';
+  modelProvider?: 'litellm' | 'spaces' | 'local-harness';
   showInSidebar?: boolean | undefined;
 }
 
@@ -213,6 +222,9 @@ function truncateForToast(text: string, max: number): string {
   const flat = text.replace(/\s+/g, ' ').trim();
   return flat.length > max ? `${flat.slice(0, max).trimEnd()}…` : flat;
 }
+
+const HANDOFF_KEY_PREFIX = 'handoff:';
+const HANDOFF_STATUS_MESSAGE = 'Wrapping up before your new message';
 
 class XyneAIStreamManager {
   private static instance: XyneAIStreamManager;
@@ -618,6 +630,7 @@ class XyneAIStreamManager {
       data['content'] &&
       typeof data['content'] === 'string'
     ) {
+      if (!streamState.firstTokenAt) streamState.firstTokenAt = Date.now();
       const pending = this.pendingDeltaMap.get(streamId) ?? '';
       this.pendingDeltaMap.set(streamId, pending + data['content']);
       this.scheduleDeltaFlush(streamId);
@@ -969,6 +982,18 @@ class XyneAIStreamManager {
     this.pendingCompletionNotifications.delete(threadId);
   }
 
+  private parkStreamForHandoff(threadId: string, state: StreamState): void {
+    this.activeStreams.delete(threadId);
+    state.streamSlotKey = `${HANDOFF_KEY_PREFIX}${state.streamId}`;
+    state.showInSidebar = false;
+    state.messages = state.messages.map(msg =>
+      msg.type === 'bot' && msg.isStreaming
+        ? { ...msg, isStreaming: false, statusMessage: HANDOFF_STATUS_MESSAGE }
+        : msg,
+    );
+    this.activeStreams.set(`${HANDOFF_KEY_PREFIX}${state.streamId}`, state);
+  }
+
   /**
    * Start a new stream
    */
@@ -989,8 +1014,18 @@ class XyneAIStreamManager {
         // subscriber notifications that clobber the new stream's React state)
         this.activeStreams.delete(threadId);
         this.abortControllers.delete(existingStream.streamId);
+      } else if (
+        existingStream.status === 'streaming' &&
+        existingStream.streamId.startsWith('stream-')
+      ) {
+        this.parkStreamForHandoff(threadId, existingStream);
+        initialMessages = initialMessages.map(msg =>
+          msg.type === 'bot' && msg.isStreaming
+            ? { ...msg, isStreaming: false, statusMessage: HANDOFF_STATUS_MESSAGE }
+            : msg,
+        );
       } else {
-        this.abortStream(existingStream.streamId);
+        this.abortStream(existingStream.streamId, 'replaced');
       }
     }
 
@@ -1000,7 +1035,7 @@ class XyneAIStreamManager {
         .sort((a, b) => a.startedAt - b.startedAt);
       while (streamingSidebar.length >= XyneAIStreamManager.MAX_CONCURRENT_SIDEBAR_STREAMS) {
         const oldest = streamingSidebar.shift();
-        if (oldest) this.abortStream(oldest.streamId);
+        if (oldest) this.abortStream(oldest.streamId, 'replaced');
       }
     }
 
@@ -1027,6 +1062,7 @@ class XyneAIStreamManager {
       startedOnAIPage: this.isOnAIPage,
       ...(request.version && { version: request.version }),
       ...(request.agentSlug && { agentSlug: request.agentSlug }),
+      ...(request.model && { model: request.model }),
       ...(request.suppressCompletionToast && { suppressCompletionToast: true }),
     };
 
@@ -1070,6 +1106,23 @@ class XyneAIStreamManager {
       ...(request.localUserMessageId && { localUserMessageId: request.localUserMessageId }),
     });
 
+    const openItemsNow = readOpenItems() ?? undefined;
+    // A passage picked on this surface travels as a structured selection, the
+    // same shape the AI screen's composer sends, so the run frames it as "the
+    // page they are reading" rather than as text they happened to type.
+    const pendingPassage = consumePendingPassage();
+    const passageSelection =
+      request.pageSelection ??
+      (pendingPassage
+        ? {
+            text: pendingPassage.text,
+            url: pendingPassage.url,
+            title: pendingPassage.title,
+            ...(pendingPassage.provider ? { provider: pendingPassage.provider } : {}),
+            intent: pendingPassage.intent,
+          }
+        : undefined);
+
     // Send message to worker to start streaming
     const message: WorkerIncomingMessage = {
       type: 'START_STREAM',
@@ -1080,11 +1133,6 @@ class XyneAIStreamManager {
           query: request.query,
           ...(request.displayQuery && { displayQuery: request.displayQuery }),
           channelIds: request.channelIds,
-          ...(request.collectionIds &&
-            request.collectionIds.length > 0 && { collectionIds: request.collectionIds }),
-          ...(request.fileIds && request.fileIds.length > 0 && { fileIds: request.fileIds }),
-          ...(request.folderIds &&
-            request.folderIds.length > 0 && { folderIds: request.folderIds }),
           ...(request.canvasIds &&
             request.canvasIds.length > 0 && { canvasIds: request.canvasIds }),
           ...(request.ticketIds &&
@@ -1124,6 +1172,18 @@ class XyneAIStreamManager {
                 filename: att.filename,
               })),
           }),
+          ...(request.sandboxMode &&
+            request.sandboxMode !== 'remote' && { sandboxMode: request.sandboxMode }),
+          ...(request.studioMode && { studioMode: request.studioMode }),
+          ...(request.designArtifactAttachmentId && {
+            designArtifactAttachmentId: request.designArtifactAttachmentId,
+          }),
+          ...(request.designSelection && { designSelection: request.designSelection }),
+          ...(passageSelection && { pageSelection: passageSelection }),
+          // What the reader has open on this surface, read at send time so a
+          // question about "this page" is answered from the tabs in front of
+          // them. Published by whichever workspace is on screen.
+          ...(openItemsNow ? { openItems: openItemsNow } : {}),
           ...(request.parentMessageId && { parentMessageId: request.parentMessageId }),
           ...(request.isRegenerate && { isRegenerate: request.isRegenerate }),
           ...(request.isEditUserMessage && { isEditUserMessage: request.isEditUserMessage }),
@@ -1280,6 +1340,23 @@ class XyneAIStreamManager {
         break;
       }
 
+      case 'plan': {
+        const todos = Array.isArray(data['todos'])
+          ? (data['todos'] as Message['planTodos'])
+          : undefined;
+        if (todos) {
+          const planTitle = typeof data['title'] === 'string' ? data['title'] : undefined;
+          updateMessages(prev =>
+            prev.map(msg =>
+              msg.id === botMessageId
+                ? { ...msg, planTodos: todos, ...(planTitle ? { planTitle } : {}) }
+                : msg,
+            ),
+          );
+        }
+        break;
+      }
+
       case 'tool_invocation': {
         const toolInvocation = data['toolInvocation'] as
           | {
@@ -1413,6 +1490,10 @@ class XyneAIStreamManager {
 
         // Mark stream as errored so completeStream doesn't overwrite it
         currentState.status = 'error';
+        this.reportRunOutcome(currentState, 'RESPONSE_FAILED', {
+          errorKind: errorInfo.code,
+          ...(httpStatus !== undefined && { httpStatus }),
+        });
 
         updateMessages(prev =>
           prev.map(msg =>
@@ -1760,6 +1841,56 @@ class XyneAIStreamManager {
   }
 
   /**
+   * One analytics outcome per run (`XyneAI/RESPONSE_COMPLETED | _FAILED |
+   * _CANCELLED`). Lives here because this is the only place every surface's
+   * stream terminates — the panel, the /ai page and embedded instances all
+   * drive the same manager. Carries counts, ids and durations only; never the
+   * answer text. Live viewers (`live-` streams re-attached after navigation)
+   * are skipped: the driving tab already reported that run.
+   */
+  private reportRunOutcome(
+    state: StreamState,
+    name: 'RESPONSE_COMPLETED' | 'RESPONSE_FAILED' | 'RESPONSE_CANCELLED',
+    extra: Record<string, unknown>,
+  ): void {
+    if (state.runOutcomeReported) return;
+    if (state.streamId.startsWith('live-')) return;
+    state.runOutcomeReported = true;
+
+    const now = Date.now();
+    const lastBot = [...state.messages].reverse().find(m => m.type === 'bot');
+    const invocations = lastBot?.toolInvocations ?? [];
+    const responseText =
+      (lastBot?.content && lastBot.content.length > 0
+        ? lastBot.content
+        : typeof lastBot?.streamingContent === 'string'
+          ? lastBot.streamingContent
+          : '') ?? '';
+    const citationsCount =
+      Object.keys(lastBot?.parsedContent?.citations ?? {}).length +
+      invocations.reduce((n, inv) => n + (inv.citations?.length ?? 0), 0);
+    const sessionId =
+      state.sessionId && !state.sessionId.startsWith('draft-') ? state.sessionId : null;
+
+    globalClickTracker.trackManualEvent('XyneAI', name, undefined, {
+      surface: state.startedOnAIPage ? 'page' : 'panel',
+      agentSlug: state.agentSlug ?? 'ask-ai',
+      ...(state.model && { model: state.model }),
+      ...(sessionId && { conversationId: sessionId }),
+      ...(lastBot?.id && !lastBot.id.startsWith('bot-') && { messageId: lastBot.id }),
+      latencyMs: now - state.startedAt,
+      ...(state.firstTokenAt && { timeToFirstTokenMs: state.firstTokenAt - state.startedAt }),
+      toolInvocationsCount: invocations.length,
+      toolErrorsCount: invocations.filter(inv => inv.status === 'error' || inv.isError).length,
+      citationsCount,
+      hadReasoning: !!lastBot?.reasoning,
+      responseLengthBucket: lengthBucket(responseText.length),
+      producedArtifact: invocations.some(inv => /canvas|artifact/i.test(inv.toolName)),
+      ...extra,
+    });
+  }
+
+  /**
    * Mark stream as completed
    */
   private completeStream(streamId: string, threadId: string, finalResponse: string): void {
@@ -1792,6 +1923,9 @@ class XyneAIStreamManager {
       return { ...m, isStreaming: false, content: finalContent };
     });
     this.notifySubscribers({ ...currentState });
+    this.reportRunOutcome(currentState, 'RESPONSE_COMPLETED', {
+      followUpsPending: currentState.followUpsPending === true,
+    });
 
     // Persist completion
     void xyneAIStreamStorage.completeStream(streamId, finalResponse);
@@ -2083,6 +2217,19 @@ class XyneAIStreamManager {
             );
           break;
         }
+        case 'plan': {
+          if (!started) ensureViewerStream();
+          this.processStreamEvent(
+            { type: 'plan', todos: data['todos'], title: data['title'] },
+            botMessageId,
+            '',
+            [],
+            streamId,
+            threadId,
+          );
+          break;
+        }
+
         case 'label': {
           if (!started) ensureViewerStream();
           const toolLabel = data['toolLabel'] as string | undefined;
@@ -2386,6 +2533,7 @@ class XyneAIStreamManager {
     currentState.error = error;
 
     const errorInfo = getAskAIErrorInfo(error);
+    this.reportRunOutcome(currentState, 'RESPONSE_FAILED', { errorKind: errorInfo.code });
 
     // Update messages to show error
     currentState.messages = currentState.messages.map(msg => {
@@ -2420,7 +2568,7 @@ class XyneAIStreamManager {
    * `state.sessionId` — because the backend looks up agent_runs by claw's
    * run UUID, which lives on traceId; sessionId here is the conversation id.
    */
-  public abortStream(streamId: string): void {
+  public abortStream(streamId: string, reason: 'user' | 'replaced' = 'user'): void {
     // Snapshot the cancel key before we mutate state below. The state lookup
     // below may not happen if the stream is no longer in activeStreams (e.g.
     // late retry), but we still want to fire the backend cancel.
@@ -2459,7 +2607,20 @@ class XyneAIStreamManager {
     // Find and update the stream state
     for (const [threadId, state] of this.activeStreams.entries()) {
       if (state.streamId === streamId) {
+        const wasStreaming = state.status === 'streaming';
         state.status = 'aborted';
+        if (wasStreaming) {
+          this.reportRunOutcome(state, 'RESPONSE_CANCELLED', {
+            reason,
+            hadPartialContent: state.messages.some(
+              m =>
+                m.type === 'bot' &&
+                m.isStreaming &&
+                ((m.content && m.content.length > 0) ||
+                  (typeof m.streamingContent === 'string' && m.streamingContent.length > 0)),
+            ),
+          });
+        }
 
         // Preserve whatever was streamed so far — tool rows + partial assistant
         // text. The backend persists the same content to chat_messages with

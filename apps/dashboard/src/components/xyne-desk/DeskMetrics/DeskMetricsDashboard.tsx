@@ -1,6 +1,10 @@
-import React, { ReactElement, useMemo, useState, useCallback, useEffect } from 'react';
+import React, { ReactElement, useMemo, useState, useCallback, useEffect, useRef } from 'react';
 import { useAuth } from '../../../hooks/useAuth';
-import { usePersistedDeskMetricsFilters } from '../../../hooks/usePersistedDeskMetricsFilters';
+import {
+  CHART_VIEW_LABELS,
+  usePersistedDeskMetricsFilters,
+  type ChartView,
+} from '../../../hooks/usePersistedDeskMetricsFilters';
 import {
   RefreshCw,
   X,
@@ -26,6 +30,7 @@ import {
 } from 'lucide-react';
 import * as PopoverPrimitive from '@radix-ui/react-popover';
 import { Popover } from '../../ui/Popover';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../ui/Select';
 import {
   AICategorySubmenu,
   DynamicFieldSubmenu,
@@ -36,7 +41,8 @@ import {
 } from '../../Tickets/TicketFilters/Submenus';
 import { classificationApi } from '../../../api/classificationApi';
 import { getIconForFieldType } from '../../Tickets/TicketFilters/fieldTypeIcons';
-import { DeskMetricsDateRangePicker } from './DeskMetricsDateRangePicker';
+import { DeskMetricsDateRangePicker, matchPreset } from './DeskMetricsDateRangePicker';
+import { globalClickTracker } from '../../../services/Analytics/globalClickTracker';
 import {
   Bar,
   BarChart,
@@ -63,8 +69,9 @@ import {
   type TicketStatusV2,
 } from '@xyne/shared';
 import type { ResolvedDisplayFormField } from '../../../utils/board/resolveDisplayFormFields';
-import { Dialog } from '../../ui/Dialog/Dialog';
+import { DeskInsightsShell } from '../DeskInsights/DeskInsightsPanel';
 import { cn } from '../../../utils/classNames';
+import { getStageStatusMeta } from '../../../utils/board/stageStatusIcon';
 import { useAggregateDeskMetrics } from '../../../hooks/useDeskMetrics';
 import { showDownloadCompleteToast } from '../../../utils/downloadToast';
 import { CHART_COLORS as VIZ_CHART_COLORS } from '../../QueryVisualizations/constants';
@@ -93,6 +100,10 @@ export interface DeskMetricsDashboardProps {
   customFieldDefinitions?: readonly ResolvedDisplayFormField[];
   availableStages?: readonly DeskMetricsStageOption[];
   onTicketClick: (ticket: DeskMetricsTicketRow) => void;
+  /** Which surface opened the dashboard — DESK_METRICS_VIEWED `source`. */
+  trackSource?: 'toolbar' | 'settings_tab';
+  /** Render inline inside the Insights panel instead of its own dialog. */
+  embedded?: boolean;
 }
 
 /** Shows a checklist of tags for a category, derived from already-fetched breakdown data. */
@@ -444,10 +455,15 @@ const MetricsAgentTable = ({
   agents,
   onDownload,
   onAgentClick,
+  canDownload,
+  trackMetadata,
 }: {
   agents: DeskMetricsAgentRow[];
   onDownload: () => void;
   onAgentClick: (assigneeId: string | null) => void;
+  canDownload: boolean;
+  /** JSON dimensions (desk count, range) for the export click. */
+  trackMetadata?: string;
 }): ReactElement => {
   const [sortKey, setSortKey] = useState<AgentSortKey>('assigned');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
@@ -507,9 +523,13 @@ const MetricsAgentTable = ({
           <button
             type='button'
             onClick={onDownload}
-            className='flex items-center gap-1 rounded-[8px] border border-desk-border px-2 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground dark:border-border'
+            className={cn(
+              'flex items-center gap-1 rounded-[8px] border border-desk-border px-2 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground dark:border-border',
+              !canDownload && 'hidden',
+            )}
             data-track-category='DeskMetrics'
             data-track-name='DownloadAgentCsv'
+            data-track-metadata={trackMetadata}
           >
             <Download size={12} />
             CSV
@@ -689,19 +709,22 @@ const MetricsTicketTable = ({
   onDownload,
   onTicketClick,
   onAssigneeClick,
-  basic = false,
+  canSee,
+  trackMetadata,
 }: {
   tickets: DeskMetricsTicketRow[];
   onDownload: () => void;
   onTicketClick: (ticket: DeskMetricsTicketRow) => void;
   onAssigneeClick: (assigneeId: string) => void;
-  /** Only ID, Title, Assignee, Priority and Stage (the first five columns), no CSV export. */
-  basic?: boolean;
+  canSee: (key: string) => boolean;
+  /** JSON dimensions (desk count, range) for the export click. */
+  trackMetadata?: string;
 }): ReactElement => {
   const [page, setPage] = useState(0);
   const totalPages = Math.ceil(tickets.length / PAGE_SIZE);
   const pageRows = tickets.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
   const customFieldKeys = useMemo(() => getCustomFieldKeys(tickets), [tickets]);
+  const hide = (column: string): boolean => !canSee(`column:${column}`);
 
   useEffect(() => {
     setPage(0);
@@ -717,10 +740,11 @@ const MetricsTicketTable = ({
             onClick={onDownload}
             className={cn(
               'flex items-center gap-1 rounded-[8px] border border-desk-border px-2 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground dark:border-border',
-              basic && 'hidden',
+              !canSee('csvDownload') && 'hidden',
             )}
             data-track-category='DeskMetrics'
             data-track-name='DownloadCsv'
+            data-track-metadata={trackMetadata}
           >
             <Download size={12} />
             CSV
@@ -758,7 +782,17 @@ const MetricsTicketTable = ({
         <table
           className={cn(
             'w-full text-sm',
-            basic && '[&_td:nth-child(n+6)]:hidden [&_th:nth-child(n+6)]:hidden',
+            hide('id') && '[&_td:nth-child(1)]:hidden [&_th:nth-child(1)]:hidden',
+            hide('title') && '[&_td:nth-child(2)]:hidden [&_th:nth-child(2)]:hidden',
+            hide('assignee') && '[&_td:nth-child(3)]:hidden [&_th:nth-child(3)]:hidden',
+            hide('priority') && '[&_td:nth-child(4)]:hidden [&_th:nth-child(4)]:hidden',
+            hide('stage') && '[&_td:nth-child(5)]:hidden [&_th:nth-child(5)]:hidden',
+            hide('frt') && '[&_td:nth-child(6)]:hidden [&_th:nth-child(6)]:hidden',
+            hide('rt') && '[&_td:nth-child(7)]:hidden [&_th:nth-child(7)]:hidden',
+            hide('csat') && '[&_td:nth-child(8)]:hidden [&_th:nth-child(8)]:hidden',
+            hide('tags') && '[&_td:nth-child(9)]:hidden [&_th:nth-child(9)]:hidden',
+            hide('createdAt') && '[&_td:nth-last-child(2)]:hidden [&_th:nth-last-child(2)]:hidden',
+            hide('age') && '[&_td:nth-last-child(1)]:hidden [&_th:nth-last-child(1)]:hidden',
           )}
         >
           <thead>
@@ -794,6 +828,7 @@ const MetricsTicketTable = ({
                 <th
                   key={key}
                   className='whitespace-nowrap px-4 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground'
+                  hidden={hide(`field:${key}`)}
                 >
                   {key}
                 </th>
@@ -916,6 +951,7 @@ const MetricsTicketTable = ({
                   <td
                     key={key}
                     className='whitespace-nowrap px-4 py-2 text-xs text-muted-foreground'
+                    hidden={hide(`field:${key}`)}
                   >
                     <div className='max-w-[160px] truncate'>{row.customFields?.[key] || '—'}</div>
                   </td>
@@ -940,15 +976,7 @@ const MetricsTicketTable = ({
   );
 };
 
-const KpiCard = ({
-  label,
-  value,
-  sub,
-}: {
-  label: string;
-  value: string;
-  sub?: string;
-}): ReactElement => (
+const KpiCard = ({ label, value }: { label: string; value: string }): ReactElement => (
   <div className='flex flex-col gap-1 rounded-[12px] border border-desk-border bg-background p-4 dark:border-border'>
     <div className='text-[10px] font-medium uppercase tracking-[0.16em] text-muted-foreground'>
       {label}
@@ -956,7 +984,6 @@ const KpiCard = ({
     <div className='font-mono text-2xl font-semibold leading-none tabular-nums text-foreground'>
       {value}
     </div>
-    {sub && <div className='text-xs text-muted-foreground'>{sub}</div>}
   </div>
 );
 
@@ -969,9 +996,10 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
   customFieldDefinitions = [],
   availableStages = [],
   onTicketClick,
+  trackSource = 'toolbar',
+  embedded,
 }) => {
   const { user } = useAuth();
-  // Guests see a trimmed view: overview only, created vs resolved chart, basic ticket table.
   const isGuest = user?.role === WorkspaceRole.GUEST;
   const {
     dateRange,
@@ -1001,7 +1029,6 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
     activeTab,
     setActiveTab,
   } = usePersistedDeskMetricsFilters(user?.id, channelId);
-  const chartView = isGuest ? 'trend' : persistedChartView;
 
   const [deskPickerOpen, setDeskPickerOpen] = useState(false);
   const [deskSearch, setDeskSearch] = useState('');
@@ -1033,9 +1060,7 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
     [channelId, comparedChannelIds, selectedDeskIds.length, setComparedChannelIds],
   );
 
-  const [expandedChart, setExpandedChart] = useState<
-    'priority' | 'trend' | 'assignee' | 'tags' | null
-  >(null);
+  const [expandedChart, setExpandedChart] = useState<ChartView | null>(null);
   const rangeStartMs = dateTimeMs(dateRange.startDate, startTime, false);
   const rangeEndMs = dateTimeMs(dateRange.endDate, endTime, true);
   const timeRangeParam = `${rangeStartMs}_${rangeEndMs}`;
@@ -1166,6 +1191,9 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
     isMultiDesk ? [] : selectedAiCategories,
   );
 
+  // Guests see what the desk owner didn't turn off (Desk Settings → Metrics); others see everything.
+  const canSee = (key: string): boolean => !isGuest || data?.guestVisibility?.[key] !== false;
+
   useEffect(() => {
     if (selectedTagCategory === null) {
       setStableTagsInCategory([]);
@@ -1224,6 +1252,90 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
     for (const desk of availableDesks) map.set(desk.id, desk.name);
     return map;
   }, [channelId, channelName, availableDesks]);
+
+  // Stage and custom fields differ per board; desk needs several desks; tag:* follows chart:tags.
+  const chartViewOptions: ChartView[] = [
+    ...(['priority', 'trend', 'assignee', 'tags', 'csat'] as const),
+    ...(isMultiDesk ? (['status', 'desk'] as const) : (['stage', 'status'] as const)),
+    ...(data?.tagCategories ?? []).map(c => `tag:${c.tagCategory}` as const),
+    ...(isMultiDesk ? [] : availableCustomFields.map(f => `field:${f.fieldName}` as const)),
+  ].filter(view => canSee(`chart:${view.startsWith('tag:') ? 'tags' : view}`));
+  const chartView = chartViewOptions.includes(persistedChartView)
+    ? persistedChartView
+    : (chartViewOptions[0] ?? 'priority');
+
+  // DESK_METRICS_VIEWED: the dashboard has 42 tracked clicks and no impression,
+  // so nothing said how often it is opened or over what range. One event per
+  // desk-set + range once the aggregate query has data; filter changes inside
+  // the same range are their own clicks and do not refire this.
+  const rangeDays = Math.max(1, Math.round((rangeEndMs - rangeStartMs) / DAY_MS));
+  const activeFilterKeys = useMemo(
+    () =>
+      [
+        selectedAssigneeIds.length > 0 && 'assignee',
+        selectedStageNames.length > 0 && 'stage',
+        selectedPriorities.length > 0 && 'priority',
+        selectedUserGroupIds.length > 0 && 'userGroup',
+        selectedTagValues.length > 0 && 'tags',
+        selectedAiCategories.length > 0 && 'aiCategory',
+        Object.keys(selectedCustomFieldValues).length > 0 && 'customField',
+      ].filter((k): k is string => typeof k === 'string'),
+    [
+      selectedAssigneeIds,
+      selectedStageNames,
+      selectedPriorities,
+      selectedUserGroupIds,
+      selectedTagValues,
+      selectedAiCategories,
+      selectedCustomFieldValues,
+    ],
+  );
+  const metricsViewedKeyRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!open || !data) return;
+    const key = `${[...selectedDeskIds].sort().join(',')}:${timeRangeParam}`;
+    if (metricsViewedKeyRef.current === key) return;
+    metricsViewedKeyRef.current = key;
+    globalClickTracker.trackManualEvent('DeskMetrics', 'DESK_METRICS_VIEWED', undefined, {
+      channelId,
+      deskCount: selectedDeskIds.length,
+      rangeDays,
+      rangePreset: matchPreset(dateRange) ?? 'custom',
+      activeFilterKeys,
+      chartView,
+      isGuest,
+      source: trackSource,
+    });
+  }, [
+    open,
+    data,
+    selectedDeskIds,
+    timeRangeParam,
+    channelId,
+    rangeDays,
+    dateRange,
+    activeFilterKeys,
+    chartView,
+    isGuest,
+    trackSource,
+  ]);
+  useEffect(() => {
+    if (!open) metricsViewedKeyRef.current = null;
+  }, [open]);
+  // Dimensions every filter / chart / export click in this dashboard carries.
+  const metricsClickMetadata = useMemo(
+    () =>
+      JSON.stringify({
+        channelId,
+        deskCount: selectedDeskIds.length,
+        rangeDays,
+        chart: chartView,
+      }),
+    [channelId, selectedDeskIds.length, rangeDays, chartView],
+  );
+  const chartViewLabel = (view: ChartView): string =>
+    (CHART_VIEW_LABELS as Record<string, string>)[view] ?? view.slice(view.indexOf(':') + 1);
+  const isBreakdownView = !['priority', 'trend', 'assignee', 'tags'].includes(chartView);
 
   useEffect(() => {
     if (open) void refetch();
@@ -1308,6 +1420,48 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
       .sort((a, b) => b.count - a.count);
   }, [data?.tickets]);
 
+  const breakdownData = useMemo(() => {
+    if (!isBreakdownView) return [];
+    const fieldName = chartView.startsWith('field:') ? chartView.slice('field:'.length) : '';
+    const valuesOf = (ticket: DeskMetricsTicketRow): string[] => {
+      if (chartView === 'stage') return [ticket.stageName ?? 'No stage'];
+      if (chartView === 'desk') return [deskNameById.get(ticket.channelId) ?? ticket.channelId];
+      if (chartView === 'csat') return [ticket.csatRating ?? 'No response'];
+      if (chartView.startsWith('tag:')) {
+        const tags = (ticket.tags ?? [])
+          .filter(tag => `tag:${tag.tagCategory}` === chartView)
+          .map(tag => tag.tag);
+        return tags.length > 0 ? tags : ['Not tagged'];
+      }
+      if (chartView === 'status') return [getStageStatusMeta(ticket.statusV2).label];
+      const value = ticket.customFields?.[fieldName]?.trim();
+      if (!value) return ['Not set'];
+      return customFieldDefinitionByName.get(fieldName)?.fieldType === FormFieldType.MULTI_SELECT
+        ? value.split(', ')
+        : [value];
+    };
+    const counts = new Map<string, number>();
+    for (const ticket of data?.tickets ?? []) {
+      for (const value of valuesOf(ticket)) counts.set(value, (counts.get(value) ?? 0) + 1);
+    }
+    const rows = [...counts].sort((a, b) => b[1] - a[1]);
+    const rest = rows.slice(9);
+    const result = rows.slice(0, 9).map(([name, value], i) => ({
+      name,
+      value,
+      color: VIZ_CHART_COLORS.series[i % VIZ_CHART_COLORS.series.length] ?? '#94a3b8',
+    }));
+    if (rest.length > 0) {
+      result.push({
+        name: `+${rest.length} more`,
+        value: rest.reduce((s, [, count]) => s + count, 0),
+        color: '#94a3b8',
+      });
+    }
+    return result;
+  }, [isBreakdownView, chartView, customFieldDefinitionByName, deskNameById, data?.tickets]);
+  const pieData = chartView === 'priority' ? priorityData : breakdownData;
+
   // Shuffled once per mount so bar colors are random but don't flicker on re-renders
   const barColors = useMemo(
     () => [...VIZ_CHART_COLORS.series].sort(() => Math.random() - 0.5),
@@ -1322,7 +1476,6 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
     return Math.floor(pointCount / 6);
   }, [trendData.length]);
 
-  const csatTotal = (data?.csat.good ?? 0) + (data?.csat.bad ?? 0);
   const isEmpty = !!data && data.tickets.length === 0 && data.counts.stageCounts.length === 0;
 
   const handleDownload = useCallback(() => {
@@ -1375,15 +1528,16 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
 
   const handleAgentClick = useCallback(
     (assigneeId: string | null) => {
-      if (!assigneeId) return;
+      if (!assigneeId || isGuest) return;
       setSelectedAssigneeIds([assigneeId]);
       setActiveTab('overview');
     },
-    [setSelectedAssigneeIds, setActiveTab],
+    [isGuest, setSelectedAssigneeIds, setActiveTab],
   );
 
   return (
-    <Dialog
+    <DeskInsightsShell
+      embedded={embedded}
       open={open}
       onOpenChange={handleOpenChange}
       title='Desk Metrics'
@@ -1426,7 +1580,7 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                 {(
                   [
                     { id: 'overview', label: 'Overview' },
-                    ...(isGuest ? [] : ([{ id: 'agents', label: 'Agents' }] as const)),
+                    ...(canSee('agentsTab') ? ([{ id: 'agents', label: 'Agents' }] as const) : []),
                     ...(isMultiDesk ? ([{ id: 'desks', label: 'By desk' }] as const) : []),
                   ] as const
                 ).map(({ id, label }) => (
@@ -1660,9 +1814,13 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                     trigger={
                       <button
                         type='button'
-                        className='flex h-[32px] items-center gap-1.5 rounded-[10px] border border-border bg-background px-3 text-sm text-foreground shadow-sm hover:bg-muted'
+                        className={cn(
+                          'flex h-[32px] items-center gap-1.5 rounded-[10px] border border-border bg-background px-3 text-sm text-foreground shadow-sm hover:bg-muted',
+                          !canSee('moreFilters') && 'hidden',
+                        )}
                         data-track-category='DeskMetrics'
                         data-track-name='OpenCustomFieldFilters'
+                        data-track-metadata={metricsClickMetadata}
                       >
                         <ListFilter size={13} className='shrink-0' />
                         <span className='font-medium'>More Filters</span>
@@ -1707,6 +1865,7 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                                 )}
                                 data-track-category='DeskMetrics'
                                 data-track-name='OpenPriorityFilterSubmenu'
+                                data-track-metadata={metricsClickMetadata}
                               >
                                 <div className='flex min-w-0 items-center gap-3'>
                                   <BarChart4 size={16} className='shrink-0' />
@@ -1755,6 +1914,7 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                                 )}
                                 data-track-category='DeskMetrics'
                                 data-track-name='OpenUserGroupFilterSubmenu'
+                                data-track-metadata={metricsClickMetadata}
                               >
                                 <div className='flex min-w-0 items-center gap-3'>
                                   <Users size={16} className='shrink-0' />
@@ -1804,6 +1964,7 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                                 )}
                                 data-track-category='DeskMetrics'
                                 data-track-name='OpenTagCategorySubmenu'
+                                data-track-metadata={metricsClickMetadata}
                               >
                                 <div className='flex min-w-0 items-center gap-3'>
                                   <Tag size={16} className='shrink-0' />
@@ -1896,6 +2057,7 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                                   )}
                                   data-track-category='DeskMetrics'
                                   data-track-name='OpenTagsSubmenu'
+                                  data-track-metadata={metricsClickMetadata}
                                 >
                                   <div className='flex min-w-0 items-center gap-3'>
                                     <Tag size={16} className='shrink-0' />
@@ -1949,6 +2111,7 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                                   )}
                                   data-track-category='DeskMetrics'
                                   data-track-name='OpenStageFilterSubmenu'
+                                  data-track-metadata={metricsClickMetadata}
                                 >
                                   <div className='flex min-w-0 items-center gap-3'>
                                     <Circle size={16} className='shrink-0' />
@@ -1999,6 +2162,7 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                                   )}
                                   data-track-category='DeskMetrics'
                                   data-track-name='OpenAICategoryFilterSubmenu'
+                                  data-track-metadata={metricsClickMetadata}
                                 >
                                   <div className='flex min-w-0 items-center gap-3'>
                                     <Sparkles size={16} className='shrink-0' />
@@ -2065,7 +2229,12 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                                       )}
                                       data-track-category='DeskMetrics'
                                       data-track-name='OpenCustomFieldFilterSubmenu'
-                                      data-track-metadata={JSON.stringify({ fieldName: key })}
+                                      data-track-metadata={JSON.stringify({
+                                        channelId,
+                                        deskCount: selectedDeskIds.length,
+                                        rangeDays,
+                                        fieldName: key,
+                                      })}
                                     >
                                       <div className='flex min-w-0 items-center gap-3'>
                                         <FieldIcon className='h-4 w-4 shrink-0' />
@@ -2305,7 +2474,7 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                   Blended totals in Overview are weighted by these counts.
                 </p>
               </div>
-            ) : activeTab === 'agents' && !isGuest ? (
+            ) : activeTab === 'agents' && canSee('agentsTab') ? (
               <div className='flex flex-col gap-4'>
                 {agents.length === 0 ? (
                   <div className='flex flex-col items-center justify-center gap-2 rounded-[12px] border border-dashed border-desk-border py-16 text-center dark:border-border'>
@@ -2321,30 +2490,10 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                 ) : (
                   <>
                     <div className='grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5'>
-                      <KpiCard
-                        label='Agents'
-                        value={String(agentTotals.count)}
-                        sub='with activity'
-                      />
-                      <KpiCard
-                        label='Total Tickets'
-                        value={String(data.counts.openedInRange)}
-                        sub='created in range'
-                      />
-                      <KpiCard
-                        label='Tickets Resolved'
-                        value={String(agentTotals.resolved)}
-                        {...(agentTotals.assigned > 0
-                          ? {
-                              sub: `${Math.round((agentTotals.resolved / agentTotals.assigned) * 100)}% of assigned`,
-                            }
-                          : {})}
-                      />
-                      <KpiCard
-                        label='Tickets Reopened'
-                        value={String(agentTotals.reopened)}
-                        sub='distinct tickets'
-                      />
+                      <KpiCard label='Agents' value={String(agentTotals.count)} />
+                      <KpiCard label='Total Tickets' value={String(data.counts.openedInRange)} />
+                      <KpiCard label='Tickets Resolved' value={String(agentTotals.resolved)} />
+                      <KpiCard label='Tickets Reopened' value={String(agentTotals.reopened)} />
                       <KpiCard label='Replies Sent' value={String(agentTotals.replies)} />
                     </div>
 
@@ -2400,6 +2549,8 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                       agents={agents}
                       onDownload={handleDownloadAgents}
                       onAgentClick={handleAgentClick}
+                      canDownload={canSee('csvDownload')}
+                      trackMetadata={metricsClickMetadata}
                     />
                   </>
                 )}
@@ -2408,46 +2559,36 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
               <div className='flex flex-col gap-4'>
                 {/* KPI row — FRT / RT / CSAT / Email Replies */}
                 <div className='grid grid-cols-2 gap-3 md:grid-cols-4'>
-                  {isGuest && (
+                  {isGuest && canSee('kpi:ticketsCreated') && (
+                    <KpiCard label='Tickets Created' value={String(data.counts.openedInRange)} />
+                  )}
+                  {canSee('kpi:avgFirstResponse') && (
                     <KpiCard
-                      label='Tickets Created'
-                      value={String(data.counts.openedInRange)}
-                      sub='created in range'
+                      label='Avg First Response'
+                      value={formatDuration(data.frt.avgSeconds)}
                     />
                   )}
-                  <KpiCard
-                    label='Avg First Response'
-                    value={formatDuration(data.frt.avgSeconds)}
-                    sub={`${data.frt.respondedTickets} responded`}
-                  />
-                  <KpiCard
-                    label='Avg Resolution'
-                    value={formatDuration(data.rt.avgSeconds)}
-                    sub={`${data.rt.resolvedTickets} resolved`}
-                  />
-                  {!isGuest && (
-                    <>
-                      <KpiCard
-                        label='CSAT'
-                        value={
-                          data.csat.avgScore !== null ? `${data.csat.avgScore.toFixed(1)}/5` : '—'
-                        }
-                        sub={
-                          csatTotal > 0
-                            ? `${data.csat.good} good · ${data.csat.bad} bad`
-                            : 'No responses'
-                        }
-                      />
-                      <KpiCard
-                        label='Email Replies'
-                        value={String(data.counts.emailRepliesInRange)}
-                      />
-                    </>
+                  {canSee('kpi:avgResolution') && (
+                    <KpiCard label='Avg Resolution' value={formatDuration(data.rt.avgSeconds)} />
+                  )}
+                  {canSee('kpi:csat') && (
+                    <KpiCard
+                      label='CSAT'
+                      value={
+                        data.csat.avgScore !== null ? `${data.csat.avgScore.toFixed(1)}/5` : '—'
+                      }
+                    />
+                  )}
+                  {canSee('kpi:emailReplies') && (
+                    <KpiCard
+                      label='Email Replies'
+                      value={String(data.counts.emailRepliesInRange)}
+                    />
                   )}
                 </div>
 
                 {/* Stage counts */}
-                {data.counts.stageCounts.length > 0 && (
+                {data.counts.stageCounts.length > 0 && canSee('stageCounts') && (
                   <div className='flex flex-col gap-2 rounded-[12px] border border-desk-border bg-background p-4 dark:border-border'>
                     <div className='text-sm font-medium text-foreground'>Tickets by stage</div>
                     <div className='flex flex-wrap gap-2'>
@@ -2479,7 +2620,12 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                 ) : (
                   <>
                     {/* Chart panel with view selector */}
-                    <div className='flex flex-col rounded-[12px] border border-desk-border bg-background p-4 dark:border-border'>
+                    <div
+                      className={cn(
+                        'flex flex-col rounded-[12px] border border-desk-border bg-background p-4 dark:border-border',
+                        chartViewOptions.length === 0 && 'hidden',
+                      )}
+                    >
                       <div className='mb-3 flex items-center justify-between gap-3'>
                         <div className='text-sm font-medium text-foreground'>
                           {chartView === 'priority' && 'Tickets by priority'}
@@ -2490,77 +2636,36 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                             (selectedTagCategory
                               ? `Tags in "${selectedTagCategory}"`
                               : 'Tickets by tag category')}
+                          {isBreakdownView && `Tickets by ${chartViewLabel(chartView)}`}
                         </div>
                         <div className='flex items-center gap-2'>
-                          <div
-                            className={cn(
-                              'flex items-center gap-0.5 rounded-[8px] border border-desk-border bg-muted/30 p-0.5 dark:border-border',
-                              isGuest && 'hidden',
-                            )}
+                          <Select
+                            value={chartView}
+                            onValueChange={view => setChartView(view as ChartView)}
                           >
-                            <button
-                              type='button'
-                              onClick={() => setChartView('priority')}
+                            <SelectTrigger
                               data-track-category='DeskMetrics'
-                              data-track-name='ChartViewPriority'
-                              className={cn(
-                                'rounded-[6px] px-2.5 py-1 text-xs font-medium transition-colors',
-                                chartView === 'priority'
-                                  ? 'bg-background text-foreground shadow-sm'
-                                  : 'text-muted-foreground hover:text-foreground',
-                              )}
+                              data-track-name='ChartBreakdownBy'
+                              className='h-7 gap-1.5 text-xs'
                             >
-                              By Priority
-                            </button>
-                            <button
-                              type='button'
-                              onClick={() => setChartView('trend')}
-                              data-track-category='DeskMetrics'
-                              data-track-name='ChartViewTrend'
-                              className={cn(
-                                'rounded-[6px] px-2.5 py-1 text-xs font-medium transition-colors',
-                                chartView === 'trend'
-                                  ? 'bg-background text-foreground shadow-sm'
-                                  : 'text-muted-foreground hover:text-foreground',
-                              )}
-                            >
-                              Created vs Resolved
-                            </button>
-                            <button
-                              type='button'
-                              onClick={() => setChartView('assignee')}
-                              data-track-category='DeskMetrics'
-                              data-track-name='ChartViewAssignee'
-                              className={cn(
-                                'rounded-[6px] px-2.5 py-1 text-xs font-medium transition-colors',
-                                chartView === 'assignee'
-                                  ? 'bg-background text-foreground shadow-sm'
-                                  : 'text-muted-foreground hover:text-foreground',
-                              )}
-                            >
-                              By Assignee
-                            </button>
-                            <button
-                              type='button'
-                              onClick={() => setChartView('tags')}
-                              data-track-category='DeskMetrics'
-                              data-track-name='ChartViewTags'
-                              className={cn(
-                                'rounded-[6px] px-2.5 py-1 text-xs font-medium transition-colors',
-                                chartView === 'tags'
-                                  ? 'bg-background text-foreground shadow-sm'
-                                  : 'text-muted-foreground hover:text-foreground',
-                              )}
-                            >
-                              By Tags
-                            </button>
-                          </div>
+                              <span className='text-muted-foreground'>Breakdown by</span>
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {chartViewOptions.map(view => (
+                                <SelectItem key={view} value={view} className='text-xs'>
+                                  {chartViewLabel(view)}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
                           <button
                             type='button'
                             onClick={() => setExpandedChart(chartView)}
                             title='Expand'
                             data-track-category='DeskMetrics'
                             data-track-name='ExpandChart'
+                            data-track-metadata={metricsClickMetadata}
                             className='flex h-7 w-7 items-center justify-center rounded-[6px] text-muted-foreground hover:bg-accent hover:text-foreground'
                           >
                             <Maximize2 size={13} />
@@ -2568,8 +2673,8 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                         </div>
                       </div>
 
-                      {chartView === 'priority' &&
-                        (priorityData.length === 0 ? (
+                      {(chartView === 'priority' || isBreakdownView) &&
+                        (pieData.length === 0 ? (
                           <div className='flex h-[280px] items-center justify-center text-xs text-muted-foreground'>
                             No tickets in range
                           </div>
@@ -2578,14 +2683,14 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                             <ResponsiveContainer width='100%' height='100%'>
                               <PieChart>
                                 <Pie
-                                  data={priorityData}
+                                  data={pieData}
                                   dataKey='value'
                                   nameKey='name'
                                   innerRadius={70}
                                   outerRadius={105}
                                   paddingAngle={3}
                                 >
-                                  {priorityData.map(entry => (
+                                  {pieData.map(entry => (
                                     <Cell key={entry.name} fill={entry.color} />
                                   ))}
                                 </Pie>
@@ -2728,13 +2833,14 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                     </div>
 
                     {/* Ticket table */}
-                    {data.tickets.length > 0 && (
+                    {data.tickets.length > 0 && canSee('ticketTable') && (
                       <MetricsTicketTable
                         tickets={data.tickets}
                         onDownload={handleDownload}
                         onTicketClick={onTicketClick}
                         onAssigneeClick={handleAssigneeClick}
-                        basic={isGuest}
+                        canSee={canSee}
+                        trackMetadata={metricsClickMetadata}
                       />
                     )}
                   </>
@@ -2772,6 +2878,7 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                   (selectedTagCategory
                     ? `Tags in "${selectedTagCategory}"`
                     : 'Tickets by tag category')}
+                {isBreakdownView && `Tickets by ${chartViewLabel(chartView)}`}
               </h2>
               <button
                 type='button'
@@ -2784,8 +2891,8 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
               </button>
             </div>
             <div className='min-h-0 flex-1'>
-              {expandedChart === 'priority' &&
-                (priorityData.length === 0 ? (
+              {(expandedChart === 'priority' || isBreakdownView) &&
+                (pieData.length === 0 ? (
                   <div className='flex h-full items-center justify-center text-sm text-muted-foreground'>
                     No tickets in range
                   </div>
@@ -2793,14 +2900,14 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                   <ResponsiveContainer width='100%' height='100%'>
                     <PieChart>
                       <Pie
-                        data={priorityData}
+                        data={pieData}
                         dataKey='value'
                         nameKey='name'
                         innerRadius='30%'
                         outerRadius='55%'
                         paddingAngle={3}
                       >
-                        {priorityData.map(entry => (
+                        {pieData.map(entry => (
                           <Cell key={entry.name} fill={entry.color} />
                         ))}
                       </Pie>
@@ -2915,6 +3022,6 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
           </div>
         </div>
       )}
-    </Dialog>
+    </DeskInsightsShell>
   );
 };

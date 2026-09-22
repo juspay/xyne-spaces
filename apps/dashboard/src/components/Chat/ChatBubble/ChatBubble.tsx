@@ -123,7 +123,6 @@ interface ChatBubbleProps {
   context?: 'channel' | 'thread';
   isFirstInThread?: boolean;
   isTicketThread?: boolean;
-  isFlowStep?: boolean;
   onEmojiPickerOpenChange?: (isOpen: boolean) => void;
   allThreadAttachments?: AttachmentRef[];
   workflowNumber?: number | undefined;
@@ -139,7 +138,6 @@ interface ChatBubbleProps {
   /** Tag being inspected from the thread header; messages carrying it show a chip. */
   inspectedTag?: string | null;
   afterTextContent?: React.ReactNode;
-  isThreadTicketSubTicket?: boolean;
 }
 
 export const ChatBubble: React.FC<ChatBubbleProps> = ({
@@ -147,7 +145,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   channelId,
   projectId,
   channelScopeType,
-  replies,
+  replies: repliesProp,
   showAvatar,
   conversation,
   draft,
@@ -156,7 +154,6 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   context = 'channel',
   isFirstInThread = false,
   isTicketThread = false,
-  isFlowStep = false,
   onEmojiPickerOpenChange,
   allThreadAttachments,
   workflowNumber,
@@ -170,7 +167,6 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   highlightMessageId,
   inspectedTag = null,
   afterTextContent,
-  isThreadTicketSubTicket = false,
 }) => {
   const { user } = useAuthContext();
   const { copyImage } = useClipboard();
@@ -270,6 +266,26 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
 
   const metadata = message?.metadata as Record<string, unknown> | null;
 
+  // An ephemeral card has no thread to open. A channel-level one carries a
+  // conversationId synthesized at post time that names no row in the database, so
+  // the thread view would come up empty and any reply would be rejected by the
+  // messages ACL ("conversation or channel does not exist"); a thread-posted one
+  // is already inside its thread. Either way the affordance is wrong, so drop it.
+  //
+  // Dropped here rather than at each call site because `replies.onOpenThread` is
+  // the single gate for every entry point — hover toolbar, mobile long-press, the
+  // reply-count strip and the bubble action all read it — so removing it once
+  // closes all of them and cannot be missed when another is added.
+  //
+  // Matches Slack, where a channel-level ephemeral message has no thread
+  // affordance at all.
+  const replies = ((): typeof repliesProp => {
+    if (!repliesProp || metadata?.['__xyneEphemeral'] !== true) return repliesProp;
+    const withoutThread = { ...repliesProp };
+    delete withoutThread.onOpenThread;
+    return withoutThread;
+  })();
+
   // Shared recording and call anchors both use entity-specific actions.
   const isSharedEntityMessage =
     metadata?.['isRecordingMessage'] === true || metadata?.['isCallShareMessage'] === true;
@@ -294,8 +310,6 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
     const initMsg = getInitialMessageFromConversation(conversation) ?? conversation.initialMessage;
     return ((initMsg?.metadata as Record<string, unknown>)?.['ticketId'] as string) || '';
   }, [context, isTicketThread, conversation]);
-
-  const canNestSubTicket = !isThreadTicketSubTicket || isFlowStep;
 
   // Mark activities as read when message becomes visible
   // const observerRef = useIntersectionObserver(() => {
@@ -385,6 +399,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
     // This shows the thread header but doesn't load old conversation
     xyneAIActor.send({
       type: 'OPEN',
+      trackSource: 'message_bubble',
       channelId,
       threadInfo,
       startFreshChat: true,
@@ -819,11 +834,12 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   const handleCopyImage = (): void => {
     const attachment = imageAttachments[0];
     if (!attachment) return;
-    fetchFile(attachment.id, attachment.originalFilename, attachment.mimetype)
-      .then(file => copyImage(file))
-      .catch(() => {
-        toast.error('Failed to copy image');
-      });
+    // Hand copyImage a thunk instead of awaiting the download first: the clipboard
+    // write must be issued inside this click's task or the browser blocks it.
+    // copyImage reports its own failure toast, including the underlying reason.
+    void copyImage(() =>
+      fetchFile(attachment.id, attachment.originalFilename, attachment.mimetype),
+    );
   };
 
   const canModifyMessage = user?.id ? isMessageEditable(message, user.id) : false;
@@ -1048,7 +1064,6 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
       ...(context === 'thread' &&
         !isMessageDeleted &&
         isTicketThread &&
-        canNestSubTicket &&
         !isFirstInThread &&
         !spawnedTicketMessageIds?.has(message.messageId) && {
           onCreateSubTicket: handleCreateSubTicket,
@@ -1510,19 +1525,16 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
       )}
 
       {/* SubTicket Modal for ticket threads */}
-      {conversation &&
-        context === 'thread' &&
-        isTicketThread &&
-        canNestSubTicket &&
-        isSubTicketModalOpen && (
-          <SubTicketModal
-            isOpen
-            onClose={() => setIsSubTicketModalOpen(false)}
-            ticketId={threadTicketId}
-            conversationId={conversation.conversationId}
-            sourceMessageId={message.messageId}
-          />
-        )}
+      {conversation && context === 'thread' && isTicketThread && isSubTicketModalOpen && (
+        <SubTicketModal
+          isOpen
+          onClose={() => setIsSubTicketModalOpen(false)}
+          ticketId={threadTicketId}
+          conversationId={conversation.conversationId}
+          sourceMessageId={message.messageId}
+          trackSource='chat_message'
+        />
+      )}
 
       {isReminderOptionsOpen && (
         <Dialog

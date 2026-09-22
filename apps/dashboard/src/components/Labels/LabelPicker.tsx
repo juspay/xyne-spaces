@@ -35,6 +35,8 @@ const SUGGESTION_CHIP_CLASS_NAME = cn(
   'border border-dashed border-muted-foreground/40',
 );
 
+const LOADING_CHIP_CLASS_NAME = 'h-6 w-14 shrink-0 animate-pulse rounded-lg bg-muted';
+
 const LIST_INHERITS_POPOVER_CLASS_NAME =
   '[[data-theme=midnight]_&_[role=listbox][aria-multiselectable]]:!bg-transparent';
 
@@ -124,22 +126,26 @@ export function LabelPicker({
 }: LabelPickerProps): ReactElement | null {
   const [isOpen, setIsOpen] = useState(false);
   const resolvable = useMemo(() => [...labels, ...suggestions], [labels, suggestions]);
-  const { resolveLabel, resolveMethod } = useResolvedRecordingLabels(resolvable);
+  const { resolveLabel, resolveMethod, isResolved } = useResolvedRecordingLabels(resolvable);
 
   // Confirmed labels (TagMethod.MANUAL) vs still-pending suggestions (LLM or AUTOMATED).
+  // Both wait for resolution: until then resolveMethod defaults to MANUAL and
+  // resolveLabel to the raw id, so unresolved ids render as loading chips instead.
   const confirmedLabels = useMemo(
-    () => labels.filter(id => resolveMethod(id) === TagMethod.MANUAL),
-    [labels, resolveMethod],
+    () => labels.filter(id => isResolved(id) && resolveMethod(id) === TagMethod.MANUAL),
+    [labels, isResolved, resolveMethod],
   );
   const suggestedLabels = useMemo(
-    () => (canEdit ? labels.filter(id => resolveMethod(id) !== TagMethod.MANUAL) : []),
-    [labels, canEdit, resolveMethod],
+    () =>
+      canEdit ? labels.filter(id => isResolved(id) && resolveMethod(id) !== TagMethod.MANUAL) : [],
+    [labels, canEdit, isResolved, resolveMethod],
   );
+  const loadingLabels = useMemo(() => labels.filter(id => !isResolved(id)), [labels, isResolved]);
 
   const options = useMemo<SearchableMultiSelectOption[]>(
     () =>
       normalizeRecordingTags([...suggestions, ...labels])
-        .filter(label => resolveMethod(label) === TagMethod.MANUAL)
+        .filter(label => isResolved(label) && resolveMethod(label) === TagMethod.MANUAL)
         .map(label => ({ value: label, displayLabel: resolveLabel(label) }))
         .sort((left, right) => left.displayLabel.localeCompare(right.displayLabel))
         .map(({ value, displayLabel }) => ({
@@ -154,7 +160,7 @@ export function LabelPicker({
             />
           ),
         })),
-    [labels, suggestions, resolveLabel, resolveMethod],
+    [labels, suggestions, isResolved, resolveLabel, resolveMethod],
   );
 
   const handleCreate = (label: string): void => {
@@ -208,6 +214,10 @@ export function LabelPicker({
         ))
       : null;
 
+  const loadingPills = loadingLabels.map(label => (
+    <span key={label} className={LOADING_CHIP_CLASS_NAME} aria-hidden='true' />
+  ));
+
   if (!canEdit) {
     if (labels.length === 0) return null;
 
@@ -218,6 +228,7 @@ export function LabelPicker({
         {confirmedLabels.map(label => (
           <LabelChip key={label} label={resolveLabel(label)} />
         ))}
+        {loadingPills}
       </>
     );
   }
@@ -232,6 +243,7 @@ export function LabelPicker({
           trackCategory={trackCategory}
         />
       ))}
+      {loadingPills}
       <SearchableMultiSelect
         options={options}
         selectedValues={labels}

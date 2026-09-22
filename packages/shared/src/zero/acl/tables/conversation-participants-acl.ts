@@ -43,18 +43,21 @@ export class ConversationParticipantsACL extends BaseQueryACL<'conversation_part
       );
     }
 
+    // Pin both channel-exists join directions — see tickets-acl.ts for the rationale.
     return query.where(({ or, exists }) =>
       or(
         exists('channel', (ch) =>
           ch
             .where('workspaceId', '=', this.ctx.workspaceId)
             .whereExists('participants', (p) => p.where('userId', this.ctx.userID)),
+          { flip: false },
         ),
         exists('conversation', (conversation) =>
           conversation.whereExists('channel', (ch) =>
             ch
               .where('workspaceId', '=', this.ctx.workspaceId)
               .whereExists('participants', (p) => p.where('userId', this.ctx.userID)),
+            { flip: false },
           ),
         ),
       ),

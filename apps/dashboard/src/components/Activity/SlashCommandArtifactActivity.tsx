@@ -8,6 +8,39 @@ import { ActivityItemCard } from './ActivityItemCard';
 import { buildSlashCommandArtifactRoute } from '../Chat/SlashCommandArtifacts';
 import { TextNode } from '../flowUI/nodes/TextNode';
 
+/** Badge that marks an activity row as belonging to a slash-command artifact. */
+export const SlashCommandArtifactBadge = ({ badge }: { badge: string }): ReactElement => (
+  <span className='rounded bg-orange-500 px-1.5 py-0.5 text-[10px] font-bold leading-none text-white'>
+    {badge}
+  </span>
+);
+
+/**
+ * Body every activity row shows for an artifact message. Rendering the FlowJSON
+ * card instead would repeat the artifact's own header out of context, and the
+ * flat preview drops the `<userid:…>` tokens — including the mention that
+ * produced the activity in the first place.
+ */
+export const SlashCommandArtifactActivityBody = ({
+  messageId,
+  body,
+}: {
+  messageId: string;
+  body: string;
+}): ReactElement => {
+  const bodyNode: FlowComponent = {
+    id: `${messageId}:activity-body`,
+    type: 'text',
+    props: { content: body },
+  };
+
+  return (
+    <div className='text-sm text-foreground'>
+      <TextNode node={bodyNode} />
+    </div>
+  );
+};
+
 export const SlashCommandArtifactActivity = ({
   activity,
   isExpanded,
@@ -31,11 +64,6 @@ export const SlashCommandArtifactActivity = ({
     messageId: message.messageId,
     isInitialMessage,
   });
-  const bodyNode: FlowComponent = {
-    id: `${message.messageId}:activity-body`,
-    type: 'text',
-    props: { content: artifact.body },
-  };
 
   return (
     <ActivityItemCard
@@ -45,11 +73,7 @@ export const SlashCommandArtifactActivity = ({
       channelId={conversation.channelId}
       badgeIcon={<span className='text-[10px] font-bold text-white'>!</span>}
       badgeColorClass='border-background bg-orange-500'
-      titlePrefix={
-        <span className='rounded bg-orange-500 px-1.5 py-0.5 text-[10px] font-bold leading-none text-white'>
-          {artifact.definition.badge}
-        </span>
-      }
+      titlePrefix={<SlashCommandArtifactBadge badge={artifact.definition.badge} />}
       description={
         <span className='text-sm text-muted-foreground'>
           {artifact.definition.activityActionLabel}
@@ -64,9 +88,7 @@ export const SlashCommandArtifactActivity = ({
       className='flex items-start'
       actorAction={activity.actorAction}
     >
-      <div className='text-sm text-foreground'>
-        <TextNode node={bodyNode} />
-      </div>
+      <SlashCommandArtifactActivityBody messageId={message.messageId} body={artifact.body} />
     </ActivityItemCard>
   );
 };

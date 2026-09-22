@@ -9,6 +9,8 @@ import {
   parseAutomationMetadata,
   triggerTypeToEventType,
 } from '../types/workflow-adapter';
+import { triggerRegistry } from '../triggers/trigger-registry';
+import type { TriggerType } from '../types/trigger-types';
 import { AutomationStatus, AutomationRunStatus } from '../types/status';
 import { automationQueue } from '../queue/automation.queue';
 import type { AutomationEvent } from '../types/automation-events';
@@ -121,13 +123,31 @@ class EventRouter {
       }
       try {
         const metadata = parseAutomationMetadata(workflow.metadata);
+
+        const triggerImpl = triggerRegistry.has(event.type as TriggerType)
+          ? triggerRegistry.get(event.type as TriggerType)
+          : null;
+        const triggerConfig = (parseAutomationConfig(workflow.context).trigger.config ?? {}) as Record<
+          string,
+          unknown
+        >;
+        const projected = triggerImpl?.projectPayload?.(
+          triggerConfig,
+          payload as unknown as Record<string, unknown>,
+        );
+        // null means the trigger doesn't want this event for this automation —
+        // skip before an execution row or queue job exists.
+        if (projected === null) continue;
+        // `_transient` never persists, projection or not: a registry miss must
+        // degrade to "no projection", never to writing transient data here.
+        const { _transient: _drop, ...data } = (projected ?? payload) as Record<string, unknown>;
         const initialContext = {
           automation: {
             id: workflow.id,
             workspaceId: workflow.workspaceId,
             createdById: metadata.createdById,
           },
-          trigger: { type: eventType, ...payload, data: payload },
+          trigger: { type: eventType, ...data, data },
           steps: {},
           __meta: { error: null, chain },
         };
@@ -155,7 +175,12 @@ class EventRouter {
             }),
         );
 
-        await automationQueue.enqueueRun({ executionId: execution.id });
+        // Priority runs get put near the front of the queue. Normal runs pass no
+        // priority, so they just join the back of the line like always.
+        await automationQueue.enqueueRun(
+          { executionId: execution.id },
+          metadata.priority ? { priority: 1 } : {},
+        );
         enqueued += 1;
       } catch (err) {
         logger.error(

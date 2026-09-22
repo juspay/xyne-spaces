@@ -122,9 +122,16 @@ export const ActivityItemCard = ({
       baseRoute === '/chat/activity' && supportTargetPath
         ? supportTargetPath.replace(/^\/support\//, `${baseRoute}/ticket/`)
         : undefined;
+    // Same idea for recordings: the Activity panel has its own outlet route for
+    // them, so opening one keeps the activity list mounted on the left instead of
+    // navigating the whole page to /recordings/:id.
+    const embeddedRecordingPath =
+      baseRoute === '/chat/activity' && targetPath.startsWith('/recordings/')
+        ? targetPath.replace(/^\/recordings\//, `${baseRoute}/recording/`)
+        : undefined;
     const defaultPath = isDeskChannel
       ? (embeddedTicketPath ?? supportTargetPath ?? (channelId ? `/support/${channelId}` : ''))
-      : targetPath;
+      : (embeddedRecordingPath ?? targetPath);
     const path = resolveSdlcActivityTarget({
       activity,
       channelType: channel?.type,
@@ -138,6 +145,9 @@ export const ActivityItemCard = ({
           : appendSelectedActivity(path);
       const state = {
         activityNavigationNonce: Date.now(),
+        // Arrival attribution for *_VIEWED events (SupportScreen's deep-link
+        // resolver carries this state through to the ticket route).
+        trackSource: 'activity_feed',
         ...(linkedItemCreatedAt !== undefined ? { linkedItemCreatedAt } : {}),
         ...(useActivityCutoff && activity.conversationSeenCutoffAt
           ? { linkedCutoffCreatedAt: activity.conversationSeenCutoffAt }
