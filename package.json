@@ -28,6 +28,11 @@
     "bootstrap:infra:raw": "pnpm run env:setup && pnpm run setup && pnpm run secrets && pnpm run services:raw",
     "bootstrap:raw": "pnpm run bootstrap:infra:raw && pnpm run dev:all:plain",
     "up": "node scripts/xyne-doctor.mjs bootstrap-infra && node scripts/dev-interactive.mjs",
+    "up:lite": "node tools/lite-infra/src/index.mjs up",
+    "down:lite": "node tools/lite-infra/src/index.mjs down",
+    "status:lite": "node tools/lite-infra/src/index.mjs status",
+    "reset:lite": "node tools/lite-infra/src/index.mjs reset",
+    "cleanup:lite": "node tools/lite-infra/src/index.mjs cleanup",
     "services:vespa": "chmod +x vespa-core/scripts/deploy-dev.sh && ./vespa-core/scripts/deploy-dev.sh",
     "sandbox": "chmod +x scripts/sandbox.sh && ./scripts/sandbox.sh",
     "cleanup": "chmod +x scripts/cleanup-storage.sh && ./scripts/cleanup-storage.sh",
@@ -206,7 +211,12 @@
   "packageManager": "pnpm@10.15.0",
   "pnpm": {
     "onlyBuiltDependencies": [
-      "@getgauge/cli"
+      "@getgauge/cli",
+      "@embedded-postgres/darwin-arm64",
+      "@embedded-postgres/darwin-x64",
+      "@embedded-postgres/linux-arm64",
+      "@embedded-postgres/linux-x64",
+      "@rocicorp/zero-sqlite3"
     ],
     "packageExtensions": {
       "@semantic-release/commit-analyzer": {

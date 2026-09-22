@@ -243,3 +243,6 @@ security-reports/
 
 # Build exports (make export-dashboard-bundle)
 out/
+
+# Binaries downloaded by pnpm run up:lite (fake-gcs-server)
+tools/lite-infra/bin/

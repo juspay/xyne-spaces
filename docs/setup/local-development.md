@@ -136,6 +136,16 @@ whatever process holds a busy one), brings the containers up, waits for health
 checks, applies Prisma migrations, and seeds baseline data. Expect a few minutes
 on the first run while images download.
 
+### Without containers: `pnpm run up:lite`
+
+If you cannot or would rather not run Docker/Podman, `pnpm run up:lite` starts the
+core services (Postgres, Redis, fake-gcs, zero-cache) as plain processes using
+`embedded-postgres`, your system `redis-server`, a downloaded `fake-gcs-server`
+binary, and the `@rocicorp/zero` package. It seeds the database the same way
+`pnpm run up` does, then starts the apps in the same terminal with the same picker.
+It covers Chat & Tickets and Xyne-Claw; Calls, Search, Transcription, Observability, and
+Feature Flags still need containers. See `tools/lite-infra/README.md`.
+
 Scripted runs skip the prompt: `XYNE_FEATURES=1,4,7 pnpm run services` starts
 Chat & Tickets, Calls, and Search directly (the numbers match the picker's order).
 

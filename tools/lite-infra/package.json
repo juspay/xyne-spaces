@@ -1,0 +1,21 @@
+{
+  "name": "xyne-lite-infra",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Container-free core infrastructure for local development: embedded Postgres, Redis, fake-gcs and zero-cache as plain processes.",
+  "type": "module",
+  "scripts": {
+    "up": "node src/index.mjs up",
+    "down": "node src/index.mjs down",
+    "status": "node src/index.mjs status",
+    "db-setup": "node src/index.mjs db-setup",
+    "reset": "node src/index.mjs reset",
+    "cleanup": "node src/index.mjs cleanup"
+  },
+  "engines": { "node": ">=20" },
+  "dependencies": {
+    "@rocicorp/zero": "1.9.0",
+    "embedded-postgres": "16.14.0-beta.17",
+    "pg": "^8.13.0"
+  }
+}
