@@ -1,3 +1,16 @@
+## [1.367.0](https://github.com/juspay/xyne-spaces/compare/v1.366.0...v1.367.0) (2026-09-22)
+
+
+### Features
+
+* move parent tickets into the relationships section ([#2168](https://github.com/juspay/xyne-spaces/issues/2168)) ([46fc657](https://github.com/juspay/xyne-spaces/commit/46fc6579ef2f91ed04693b35ccf094c5e7f394dc))
+* show 5 lines of ticket description before Show more ([#2163](https://github.com/juspay/xyne-spaces/issues/2163)) ([e30a2f8](https://github.com/juspay/xyne-spaces/commit/e30a2f8e810b96965c596a7f022149cca30a950b))
+
+
+### Reverts
+
+* Revert "fix: XYNE-63866 Implement API fallback + query for desk loading perf (#2014)" (#2170) ([f243a1a](https://github.com/juspay/xyne-spaces/commit/f243a1a1ea5e64b3feff5ae666c838ccec3e3877)), closes [#2014](https://github.com/juspay/xyne-spaces/issues/2014) [#2170](https://github.com/juspay/xyne-spaces/issues/2170)
+
 ## [1.366.0](https://github.com/juspay/xyne-spaces/compare/v1.365.1...v1.366.0) (2026-09-22)
 
 
