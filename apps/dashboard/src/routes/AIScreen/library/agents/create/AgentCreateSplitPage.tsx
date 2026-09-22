@@ -137,20 +137,26 @@ export function AgentCreateSplitPage({
       createForm.clearHighlights();
 
       if (action.type === 'rename') {
+        const sourceId = `hub-rename-${Date.now()}`;
         try {
-          const changed = createForm.applyChatPatch(
-            `hub-rename-${Date.now()}`,
-            {
-              name: action.name,
-              slug: slugify(action.name),
-            },
+          createForm.setWritingField('name');
+          const changedName = createForm.applyChatPatch(
+            sourceId,
+            { name: action.name },
             { highlight: false },
           );
-          if (changed.includes('name')) {
-            createForm.setWritingField('name');
+          if (changedName.includes('name')) {
             await sleep(WRITE_MS);
           }
-          createForm.setWritingField(null);
+          createForm.setWritingField('slug');
+          const changedSlug = createForm.applyChatPatch(
+            `${sourceId}-slug`,
+            { slug: slugify(action.name) },
+            { highlight: false },
+          );
+          if (changedSlug.includes('slug')) {
+            await sleep(WRITE_MS);
+          }
           setPhase('draft');
         } finally {
           createForm.setWritingField(null);
