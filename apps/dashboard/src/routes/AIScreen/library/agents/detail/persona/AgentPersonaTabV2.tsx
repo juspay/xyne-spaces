@@ -3,9 +3,11 @@ import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/Button/index';
 import { clawAgentDetailKey } from '@/hooks/useClawAgentDetail';
+import { clawPromptVersionsKey } from '@/hooks/useClawPromptVersions';
 import { updateClawAgent } from '@/services/claw/clawAuthAgentsService';
 import { clawErrorText } from '@/services/claw/clawRequest';
 import { PROSE_BOX_HEIGHT, ProseBox } from '../../../shared/primitives/ProseBox';
+import { AgentPromptVersions } from './AgentPromptVersions';
 import { CredentialsCard } from './credentials/CredentialsCard';
 import { ModelCard } from './model/ModelCard';
 import type { Agent, UpdateAgentPayload } from '@/services/claw/clawAuthAgentTypes';
@@ -112,6 +114,9 @@ export function AgentPersonaTabV2({
     try {
       const updated = await updateClawAgent(agent.slug, payload);
       queryClient.setQueryData(clawAgentDetailKey(agent.slug), updated);
+      if (promptChanged) {
+        void queryClient.invalidateQueries({ queryKey: clawPromptVersionsKey(agent.slug) });
+      }
       setDescription(updated.description);
       setSystemPrompt(updated.systemPrompt);
       setEditingDescription(false);
@@ -213,6 +218,17 @@ export function AgentPersonaTabV2({
           )}
         </DetailSection>
       </div>
+
+      {canManageCredentials && (
+        <AgentPromptVersions
+          agentSlug={agent.slug}
+          canRestore={canEdit}
+          onRestored={restored => {
+            setSystemPrompt(restored);
+            setEditingPrompt(false);
+          }}
+        />
+      )}
 
       <ModelCard agent={agent} canEdit={canEdit} />
 

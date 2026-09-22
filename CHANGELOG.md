@@ -1,3 +1,17 @@
+## [1.362.0](https://github.com/juspay/xyne-spaces/compare/v1.361.3...v1.362.0) (2026-09-22)
+
+
+### Features
+
+* add version history to agent detail ([#2109](https://github.com/juspay/xyne-spaces/issues/2109)) ([eea2818](https://github.com/juspay/xyne-spaces/commit/eea28183e1f1b9953cb47a3ad6ec24c91ee10e59))
+
+## [1.361.3](https://github.com/juspay/xyne-spaces/compare/v1.361.2...v1.361.3) (2026-09-22)
+
+
+### Bug Fixes
+
+* address review findings and collapse label chips ([#2144](https://github.com/juspay/xyne-spaces/issues/2144)) ([5988638](https://github.com/juspay/xyne-spaces/commit/5988638515253d4835fec302a7f6d7550770d3e8))
+
 ## [1.361.2](https://github.com/juspay/xyne-spaces/compare/v1.361.1...v1.361.2) (2026-09-22)
 
 
