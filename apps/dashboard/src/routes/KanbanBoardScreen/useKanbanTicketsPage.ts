@@ -30,6 +30,7 @@ export type KanbanPageGroupBy =
   | 'createdBy'
   | 'status'
   | 'priority'
+  | 'merchantId'
   | {
       type: 'formField';
       fieldId: string;
@@ -633,6 +634,13 @@ export const useKanbanTicketsPage = (
         }
         if (options.groupBy === 'status' && options.groupKey) {
           if ((ticket.statusV2 as string) !== options.groupKey) return false;
+        }
+        if (options.groupBy === 'merchantId' && options.groupKey) {
+          if (options.groupKey === 'No Merchant') {
+            if (ticket.merchantId) return false;
+          } else {
+            if (ticket.merchantId !== options.groupKey) return false;
+          }
         }
 
         return true;

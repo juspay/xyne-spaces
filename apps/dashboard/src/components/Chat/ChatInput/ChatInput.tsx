@@ -338,6 +338,7 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
       searchMentions,
     } = useMentionSearch(channelId, threadParticipantIds, conversationId, {
       includeSpecialMentions: !conversationId || allowThreadBroadcastMentions,
+      excludeSelf: false,
     });
     const channel = useChannel(channelId);
     // Tickets need a board to land on, and a channel's boards come from

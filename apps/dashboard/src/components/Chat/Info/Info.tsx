@@ -59,14 +59,27 @@ import { useCallConfirmation } from '../../../hooks/useCallConfirmation';
 import { CallConfirmationModal } from '../../Call/CallConfirmationModal';
 import { useGetChannelUserStatus } from '../../../hooks/useChannels';
 import { mutators } from '../../../zero/mutators';
-import { useUser, useUsers } from '../../../hooks/useUsers';
+import { useUser, useUsers, useUsersById } from '../../../hooks/useUsers';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { v4 as uuidv4 } from 'uuid';
 import { VisibleChannel } from '../../../machines/stateMachine';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
 import { channelTrackingMetadata } from '../../../services/Analytics/channelTracking';
 
-export type ChannelTab = 'about' | 'members' | 'notifications' | 'settings' | 'ai-features';
+export type ChannelTab =
+  | 'about'
+  | 'members'
+  | 'agents-apps'
+  | 'notifications'
+  | 'settings'
+  | 'ai-features';
+
+const APP_USER_EMAIL_SUFFIXES = ['@app.xyne.ai', '@bot.xyne.ai'];
+const isAppUserEmail = (email: string | null | undefined): boolean => {
+  if (!email) return false;
+  const lower = email.toLowerCase();
+  return APP_USER_EMAIL_SUFFIXES.some(suffix => lower.endsWith(suffix));
+};
 interface InfoProps {
   channel: VisibleChannel;
   previousChannelId?: string | null;
@@ -95,6 +108,18 @@ const Info = ({
   const [showPromoteDialog, setShowPromoteDialog] = useState(false);
 
   const [participants] = useCachedQuery(queries.channelParticipants({ channelId: channel.id }));
+  const usersById = useUsersById();
+
+  const { humanMemberCount, agentAppCount } = useMemo(() => {
+    let human = 0;
+    let agentApp = 0;
+    for (const p of participants) {
+      const user = usersById.get(p.userId);
+      if (isAppUserEmail(user?.email)) agentApp++;
+      else human++;
+    }
+    return { humanMemberCount: human, agentAppCount: agentApp };
+  }, [participants, usersById]);
 
   const currentUserParticipant = useMemo(
     () => participants.find(p => p.userId === context.userID),
@@ -413,7 +438,12 @@ const Info = ({
           </Tabs.Trigger>
           {!isDM && (
             <Tabs.Trigger value='members' className={tabTriggerClass('members')}>
-              Members {channel.channelStats?.participantCount || 0}
+              Members {humanMemberCount}
+            </Tabs.Trigger>
+          )}
+          {!isDM && (
+            <Tabs.Trigger value='agents-apps' className={tabTriggerClass('agents-apps')}>
+              Agents & Apps {agentAppCount}
             </Tabs.Trigger>
           )}
           {isParticipant && !isSelfDM && (isDM || isGroupDM || !!channelUserStatus) && (
@@ -456,6 +486,21 @@ const Info = ({
               participants={participants}
               channelDisplayName={channelDisplayName}
               popoverContainer={popoverContainerRef.current}
+              filterMode='members'
+            />
+          </Tabs.Content>
+        )}
+        {!isDM && (
+          <Tabs.Content
+            value='agents-apps'
+            className='outline-none flex-1 min-h-0 rounded-b-lg overflow-hidden'
+          >
+            <ChannelMembers
+              channel={channel}
+              participants={participants}
+              channelDisplayName={channelDisplayName}
+              popoverContainer={popoverContainerRef.current}
+              filterMode='agents-apps'
             />
           </Tabs.Content>
         )}
@@ -683,11 +728,13 @@ const ChannelMembers = ({
   channel,
   channelDisplayName,
   popoverContainer,
+  filterMode = 'members',
 }: {
   channel: Channel;
   participants: NonNullable<QueryResultType<typeof queries.channelParticipants>>;
   channelDisplayName: string;
   popoverContainer?: HTMLElement | null;
+  filterMode?: 'members' | 'agents-apps';
 }): ReactElement => {
   const context = useAuthContextValues();
   const zero = useZero();
@@ -744,9 +791,12 @@ const ChannelMembers = ({
 
   const allUsers = useUsers();
   const usersById = useMemo(() => {
-    const map = new Map<string, { name: string; displayName?: string | null }>();
+    const map = new Map<
+      string,
+      { name: string; displayName?: string | null; email?: string | null }
+    >();
     for (const u of allUsers) {
-      map.set(u.id, { name: u.name, displayName: u.displayName });
+      map.set(u.id, { name: u.name, displayName: u.displayName, email: u.email });
     }
     return map;
   }, [allUsers]);
@@ -857,6 +907,15 @@ const ChannelMembers = ({
   const isAuthorizedToRemoveParticipant =
     channel.scopeType === ChannelScopeType.DEFAULT && currentUserIsAdmin;
 
+  const matchesFilterMode = useCallback(
+    (userId: string): boolean => {
+      const user = usersById.get(userId);
+      const isApp = isAppUserEmail(user?.email);
+      return filterMode === 'agents-apps' ? isApp : !isApp;
+    },
+    [usersById, filterMode],
+  );
+
   const filteredParticipants = useMemo(() => {
     // Helper to check if name starts with query (first or any word)
     const nameStartsWith = (name: string, query: string): boolean => {
@@ -873,25 +932,27 @@ const ChannelMembers = ({
 
     if (searchQuery.trim()) {
       // When searching, sort results so that users whose names start with the query appear first
-      return [...searchResults].sort((a, b) => {
-        const userA = usersById.get(a.userId);
-        const userB = usersById.get(b.userId);
-        const displayA = getUserDisplayName(userA);
-        const displayB = getUserDisplayName(userB);
-        const aStartsWith = userA ? nameStartsWith(displayA, searchQuery) : false;
-        const bStartsWith = userB ? nameStartsWith(displayB, searchQuery) : false;
+      return [...searchResults]
+        .filter(p => matchesFilterMode(p.userId))
+        .sort((a, b) => {
+          const userA = usersById.get(a.userId);
+          const userB = usersById.get(b.userId);
+          const displayA = getUserDisplayName(userA);
+          const displayB = getUserDisplayName(userB);
+          const aStartsWith = userA ? nameStartsWith(displayA, searchQuery) : false;
+          const bStartsWith = userB ? nameStartsWith(displayB, searchQuery) : false;
 
-        if (aStartsWith && !bStartsWith) return -1;
-        if (!aStartsWith && bStartsWith) return 1;
+          if (aStartsWith && !bStartsWith) return -1;
+          if (!aStartsWith && bStartsWith) return 1;
 
-        const nameA = displayA;
-        const nameB = displayB;
-        return nameA.localeCompare(nameB);
-      });
+          const nameA = displayA;
+          const nameB = displayB;
+          return nameA.localeCompare(nameB);
+        });
     }
 
-    return accumulatedParticipants;
-  }, [accumulatedParticipants, searchQuery, searchResults, usersById]);
+    return accumulatedParticipants.filter(p => matchesFilterMode(p.userId));
+  }, [accumulatedParticipants, searchQuery, searchResults, usersById, matchesFilterMode]);
 
   return (
     <div className='relative h-full min-h-0 flex flex-col'>
@@ -901,7 +962,7 @@ const ChannelMembers = ({
           <Input
             ref={searchInputRef}
             type='text'
-            placeholder='Find members'
+            placeholder={filterMode === 'agents-apps' ? 'Find agents & apps' : 'Find members'}
             autoFocus={!isMobile}
             value={searchQuery}
             onChange={handleSearchChange}

@@ -64,6 +64,7 @@ import {
   deriveEtaManagementView,
   parseTicketEtaManagement,
   parseBoardEtaManagement,
+  resolveTicketDescription,
 } from '@xyne/shared';
 import { useNavigate, Link, useLocation, useNavigationType } from 'react-router-dom';
 import { usePlatform } from '../../../hooks/usePlatform';
@@ -2020,7 +2021,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
   }, [ticket, editingTitle]);
   useEffect(() => {
     if (ticket && !editingDescription) {
-      setDescriptionValue(ticket.description);
+      setDescriptionValue(resolveTicketDescription(ticket));
     }
   }, [ticket, editingDescription]);
   // Initialize stage ETA edit value when current stage changes
@@ -2191,7 +2192,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
   useEffect(() => {
     if (!ticket || !editingDescription) return;
     const next = descriptionValue.trim();
-    if (next === ticket.description) return;
+    if (next === resolveTicketDescription(ticket)) return;
     const ticketId = ticket.id;
     const timeoutId = setTimeout(() => {
       void applyTicketUpdate(
@@ -2516,7 +2517,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
   };
 
   const handleSaveDescription = (): void => {
-    if (descriptionValue !== ticket.description) {
+    if (descriptionValue !== resolveTicketDescription(ticket)) {
       void applyTicketUpdate(
         {
           id: ticket.id,
@@ -3712,8 +3713,8 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
   return (
     <div className='mx-auto px-[20px] pb-[72px] h-full overflow-auto no-scrollbar bg-background'>
       {expandedView && (
-        <div className='flex items-center justify-between pt-[20px] mb-6'>
-          <div className='flex items-center gap-x-1/2'>
+        <div className='flex items-center justify-between pt-[4px]'>
+          <div className='-ml-[6px] flex items-center gap-x-0.5'>
             {!hideBackNav && (
               <>
                 <button
@@ -3945,7 +3946,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
         )}
 
         {/* Title Section */}
-        <div className='flex items-start gap-3 pt-[22px]'>
+        <div className={cn('flex items-start gap-3', expandedView ? 'pt-[8px]' : 'pt-[24px]')}>
           {editingTitle ? (
             <div className='flex-1 flex items-center gap-2'>
               <input
@@ -3987,7 +3988,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
           )}
         </div>
 
-        <div className='mt-[14px] -mx-[5px] flex flex-wrap items-center gap-2 text-[13.5px] text-muted-foreground'>
+        <div className='mt-[6px] -mx-[5px] flex flex-wrap items-center gap-2 text-[13.5px] text-muted-foreground'>
           <span className='px-[5px]'>
             Created {formatTimestamp(ticket.createdAt)} by{' '}
             {getUserDisplayName(createdByUser) || 'Merchant User'}
@@ -4037,7 +4038,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
           )}
         </div>
         {/* Ticket MetaData Key Value */}
-        <div className='mt-[14px] mb-[18px] flex w-full flex-wrap items-center gap-2'>
+        <div className='mt-[6px] mb-[8px] flex w-full flex-wrap items-center gap-2'>
           <DetailChip
             className='pl-2 pr-[11px]'
             data-testid='ticket-detail-status-selector'
@@ -4592,7 +4593,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                     return;
                   }
                   if (e.key === 'Escape') {
-                    setDescriptionValue(ticket.description);
+                    setDescriptionValue(resolveTicketDescription(ticket));
                     setEditingDescription(false);
                   }
                 }}
@@ -4613,7 +4614,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                   type='button'
                   onMouseDown={e => e.preventDefault()}
                   onClick={() => {
-                    setDescriptionValue(ticket.description);
+                    setDescriptionValue(resolveTicketDescription(ticket));
                     setEditingDescription(false);
                   }}
                   className='text-[12.5px] font-medium text-muted-foreground transition-colors hover:text-foreground'
@@ -4646,7 +4647,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
               data-track-category='Tickets'
               data-track-name='StartEditDescription'
             >
-              {!ticket.description ? (
+              {!resolveTicketDescription(ticket) ? (
                 <p className='text-sm text-muted-foreground italic'>Add description</p>
               ) : (
                 <>
@@ -4658,7 +4659,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                         !showFullDescription && 'overflow-hidden line-clamp-3 sm:line-clamp-3',
                       )}
                     >
-                      <RenderMessageWithHTML message={ticket.description} />
+                      <RenderMessageWithHTML message={resolveTicketDescription(ticket)} />
                     </p>
                     {!showFullDescription && needsReadMore && (
                       <div className='pointer-events-none absolute inset-x-0 bottom-0 h-[62px] bg-gradient-to-b from-transparent to-background' />

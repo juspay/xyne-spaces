@@ -38,6 +38,7 @@ export type KanbanCountsGroupBy =
   | 'createdBy'
   | 'status'
   | 'priority'
+  | 'merchantId'
   | {
       type: 'formField';
       fieldId: string;

@@ -3,6 +3,9 @@ import EmojiPicker, { EmojiStyle } from 'emoji-picker-react';
 import { Drawer } from 'vaul';
 import { parseReactionsMd } from '@xyne/shared';
 import { MobileAddReactionDrawerProps } from './types';
+import { FrequentEmojiRow } from '../FrequentEmojis/FrequentEmojiRow';
+import { EMOJI_PICKER_CATEGORIES } from '../../../utils/emojiPickerCategories';
+import { toEmojiToken } from '../../../utils/customEmojiUtils';
 
 const AddReactionDrawerMobile = ({
   messageId,
@@ -26,6 +29,16 @@ const AddReactionDrawerMobile = ({
         searchInput.blur();
       }
     }
+  };
+
+  // Shared by the picker grid and the Frequently Used row. The hasReacted lookup lives in
+  // `useApplyReaction`; this drawer is handed `toggleReaction` by its parent, so it keeps
+  // the parent's reactions map and only adds the close behaviour.
+  const applyReaction = (emojiName: string): void => {
+    const hasReacted = !!user && (reactionsData[emojiName] || []).includes(user.id);
+
+    toggleReaction({ messageId, emoji: emojiName, hasReacted });
+    setEmojiPickerOpen(false);
   };
 
   return (
@@ -63,32 +76,22 @@ const AddReactionDrawerMobile = ({
           <Drawer.Handle className='mt-2 !h-2 !w-[100px] !bg-gray-300 !dark:bg-gray-600' />
           <div
             ref={emojiPickerContainerRef}
-            className='h-full'
+            className='flex h-full flex-col'
             onTouchStart={handleEmojiPickerTouchStart}
           >
+            <FrequentEmojiRow onSelect={applyReaction} messageId={messageId} />
             <EmojiPicker
               emojiStyle={EmojiStyle.NATIVE}
               style={{
                 ['--epr-emoji-size' as string]: '22px',
                 ['--epr-emoji-gap' as string]: '4px',
               }}
-              onEmojiClick={emoji => {
-                const emojiName = emoji.isCustom
-                  ? `custom:${emoji.emoji}:${emoji.names[0] || 'custom'}`
-                  : emoji.emoji;
-                const hasReacted = !!user && (reactionsData[emojiName] || []).includes(user.id);
-
-                toggleReaction({
-                  messageId,
-                  emoji: emojiName,
-                  hasReacted,
-                });
-                setEmojiPickerOpen(false);
-              }}
+              onEmojiClick={emoji => applyReaction(toEmojiToken(emoji))}
+              categories={EMOJI_PICKER_CATEGORIES}
               customEmojis={customEmojis || []}
               previewConfig={{ showPreview: true }}
               autoFocusSearch={false}
-              className='!w-full !h-full !rounded-[inherit] ![--epr-picker-border-color:transparent]'
+              className='!w-full !min-h-0 !flex-1 !rounded-[inherit] ![--epr-picker-border-color:transparent]'
             />
           </div>
         </Drawer.Content>
