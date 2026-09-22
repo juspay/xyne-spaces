@@ -20,21 +20,14 @@ import {
 import { AgentCreateFooter } from '@/components/flowUI/nodes/agent/create/AgentCreateFooter';
 import { DiscardDraftDialog } from '@/components/flowUI/nodes/agent/create/DiscardDraftDialog';
 import {
-  descriptionFromIntent,
-  nameFromGeneratedPrompt,
-  nameFromIntent,
-} from '@/components/flowUI/nodes/agent/create/canvasFromIdentity';
-import { type CreateTurnField } from '@/components/flowUI/nodes/agent/create/classifyCreateTurn';
-import {
+  applyCreateHubDraft,
   decideCreateCanvasAction,
   type CreateCanvasSnapshot,
 } from '@/components/flowUI/nodes/agent/create/createChatMode';
-import { slicePatch } from '@/components/flowUI/nodes/agent/create/mergeChatPatch';
 import { toolboxFromSuggestion } from '@/components/flowUI/nodes/agent/create/toolboxFromSuggestion';
 import {
   EMPTY_CREATE_FORM,
   type AgentCreateChatPatch,
-  type AgentCreateField,
   type AgentCreatePhase,
 } from '@/components/flowUI/nodes/agent/create/types';
 import { useAgentCreateForm } from '@/components/flowUI/nodes/agent/create/useAgentCreateForm';
@@ -45,15 +38,6 @@ import {
 import { useScriptedCreatePlayer } from '@/components/flowUI/nodes/agent/create/useScriptedCreatePlayer';
 
 const WRITE_MS = 1100;
-const FIELD_ORDER: AgentCreateField[] = [
-  'name',
-  'slug',
-  'description',
-  'systemPrompt',
-  'tools',
-  'skills',
-  'knowledge',
-];
 
 function sleep(ms: number): Promise<void> {
   return new Promise(resolve => {
@@ -63,14 +47,6 @@ function sleep(ms: number): Promise<void> {
 
 function canvasIsEmpty(form: { name: string; systemPrompt: string }): boolean {
   return !form.name.trim() && !form.systemPrompt.trim();
-}
-
-function pickPatch(patch: AgentCreateChatPatch, fields: CreateTurnField[]): AgentCreateChatPatch {
-  const next: AgentCreateChatPatch = {};
-  for (const field of fields) {
-    Object.assign(next, slicePatch(patch, field));
-  }
-  return next;
 }
 
 export function AgentCreateSplitPage({
@@ -182,77 +158,56 @@ export function AgentCreateSplitPage({
         return;
       }
 
+      if (action.type !== 'draft') {
+        return;
+      }
+
       const firstDescribe = canvasEmpty;
       if (firstDescribe) {
         setSkeletonIdentity(true);
       }
 
       try {
-        const incoming: AgentCreateChatPatch = {};
-        const generate = action.fields.includes('systemPrompt') || firstDescribe;
-
-        if (generate) {
-          const prompt = await generateAgentPrompt({
-            intent: action.intent,
-            ...(createForm.form.systemPrompt.trim()
-              ? { existingPrompt: createForm.form.systemPrompt.trim() }
-              : {}),
-          });
-          if (action.fields.includes('systemPrompt')) {
-            incoming.systemPrompt = prompt;
-          }
-          if (action.fields.includes('name')) {
-            incoming.name = nameFromGeneratedPrompt(prompt) || nameFromIntent(action.intent);
-          }
-          if (action.fields.includes('slug') && incoming.name) {
-            incoming.slug = slugify(incoming.name);
-          }
-          if (action.fields.includes('description') && canvasEmpty) {
-            incoming.description = descriptionFromIntent(action.intent);
-          }
-        }
-
-        if (action.fields.includes('tools')) {
-          try {
-            const [suggestion, catalog] = await Promise.all([
-              suggestTools({
-                systemPrompt: incoming.systemPrompt || createForm.form.systemPrompt || undefined,
-                description: action.intent,
-              }),
-              getAvailableTools().catch(() => null),
-            ]);
-            incoming.tools = toolboxFromSuggestion(createForm.form.tools, suggestion, catalog);
-          } catch {
-            // Prompt still applies if tool suggest fails.
-          }
-        }
-
-        const patch = pickPatch(incoming, action.fields);
-        setSkeletonIdentity(false);
         const sourceId = `hub-${Date.now()}`;
-        const reveal = FIELD_ORDER.filter(field => action.fields.includes(field));
-        for (const field of reveal) {
-          const slice = slicePatch(patch, field);
-          if (Object.keys(slice).length === 0) continue;
-          const hubRow =
-            field === 'tools'
-              ? 'mcp'
-              : field === 'skills'
-                ? 'skills'
-                : field === 'knowledge'
-                  ? 'knowledge'
-                  : null;
-          createForm.setWritingField(field, hubRow);
-          const changed = createForm.applyChatPatch(`${sourceId}-${field}`, slice, {
-            highlight: false,
-          });
-          if (!changed.includes(field)) {
-            createForm.setWritingField(null);
-            continue;
-          }
-          await sleep(WRITE_MS);
-        }
-        createForm.setWritingField(null);
+        await applyCreateHubDraft({
+          action,
+          canvasEmpty,
+          existingSystemPrompt: createForm.form.systemPrompt,
+          writeMs: WRITE_MS,
+          sourceId,
+          generateAgentPrompt: async (intent, existingPrompt) =>
+            generateAgentPrompt({
+              intent,
+              ...(existingPrompt ? { existingPrompt } : {}),
+            }),
+          setWritingField: createForm.setWritingField,
+          applyChatPatch: createForm.applyChatPatch,
+          sleep,
+          ...(action.fields.includes('tools')
+            ? {
+                fillTools: async (incoming: AgentCreateChatPatch) => {
+                  try {
+                    const [suggestion, catalog] = await Promise.all([
+                      suggestTools({
+                        systemPrompt:
+                          incoming.systemPrompt || createForm.form.systemPrompt || undefined,
+                        description: action.intent,
+                      }),
+                      getAvailableTools().catch(() => null),
+                    ]);
+                    incoming.tools = toolboxFromSuggestion(
+                      createForm.form.tools,
+                      suggestion,
+                      catalog,
+                    );
+                  } catch {
+                    // Prompt still applies if tool suggest fails.
+                  }
+                },
+              }
+            : {}),
+        });
+        setSkeletonIdentity(false);
         setPhase('draft');
       } catch (err) {
         createForm.clearHighlights();
