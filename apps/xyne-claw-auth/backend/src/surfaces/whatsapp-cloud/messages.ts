@@ -12,15 +12,28 @@ interface CloudContact {
   profile?: { name?: string };
 }
 
+/** Every media node Meta sends shares this shape; only `document` names the
+ *  file, and only `audio` flags a voice note. The id is a handle, not a URL —
+ *  the bytes take two authenticated Graph calls to fetch. */
+interface CloudMedia {
+  id?: string;
+  mime_type?: string;
+  caption?: string;
+  filename?: string;
+  voice?: boolean;
+}
+
 interface CloudMessage {
   from?: string;
   id?: string;
   timestamp?: string;
   type?: string;
   text?: { body?: string };
-  image?: { caption?: string };
-  video?: { caption?: string };
-  document?: { caption?: string; filename?: string };
+  image?: CloudMedia;
+  video?: CloudMedia;
+  audio?: CloudMedia;
+  sticker?: CloudMedia;
+  document?: CloudMedia;
   button?: { text?: string; payload?: string };
   interactive?: {
     type?: string;
@@ -29,6 +42,42 @@ interface CloudMessage {
   };
   /** Present when the user replied to one of our messages. */
   context?: { id?: string; from?: string };
+}
+
+/** What the plugin needs to go and fetch a message's file. Mirrors the
+ *  Baileys plugin's MediaDescriptor: the core never sees it, only the
+ *  `attachments` the plugin produces from it. */
+export interface CloudMediaRef {
+  mediaId: string;
+  kind: "image" | "video" | "document" | "audio" | "sticker";
+  mimeType: string;
+  fileName: string;
+}
+
+export interface CloudInbound extends InboundMessage {
+  media?: CloudMediaRef;
+}
+
+const MEDIA_DEFAULTS: Record<string, { mimeType: string; fileName: string }> = {
+  image: { mimeType: "image/jpeg", fileName: "image.jpg" },
+  video: { mimeType: "video/mp4", fileName: "video.mp4" },
+  audio: { mimeType: "audio/ogg", fileName: "audio.ogg" },
+  sticker: { mimeType: "image/webp", fileName: "sticker.webp" },
+  document: { mimeType: "application/octet-stream", fileName: "document" },
+};
+
+function mediaOf(message: CloudMessage): CloudMediaRef | null {
+  const kind = message.type ?? "";
+  if (!(kind in MEDIA_DEFAULTS)) return null;
+  const node = (message as unknown as Record<string, CloudMedia | undefined>)[kind];
+  if (!node?.id) return null;
+  const fallback = MEDIA_DEFAULTS[kind]!;
+  return {
+    mediaId: node.id,
+    kind: kind as CloudMediaRef["kind"],
+    mimeType: node.mime_type || fallback.mimeType,
+    fileName: node.filename || fallback.fileName,
+  };
 }
 
 function asObject(value: unknown): Record<string, unknown> | null {
@@ -67,10 +116,10 @@ function extractCardReplyId(message: CloudMessage): string | undefined {
   return message.interactive?.button_reply?.id ?? message.interactive?.list_reply?.id ?? undefined;
 }
 
-export function parseCloudWebhook(payload: unknown): InboundMessage[] {
+export function parseCloudWebhook(payload: unknown): CloudInbound[] {
   const root = asObject(payload);
   if (!root || root["object"] !== "whatsapp_business_account") return [];
-  const out: InboundMessage[] = [];
+  const out: CloudInbound[] = [];
 
   for (const entryRaw of asArray(root["entry"])) {
     const entry = asObject(entryRaw);
@@ -92,12 +141,16 @@ export function parseCloudWebhook(payload: unknown): InboundMessage[] {
         if (!from || !id) continue;
         const text = extractText(messageRaw).trim();
         const cardReplyId = extractCardReplyId(messageRaw);
-        // A tap carries its own meaning even when the title is somehow empty.
-        if (!text && !cardReplyId) continue;
+        const media = mediaOf(messageRaw);
+        // A tap carries its own meaning even when the title is somehow empty,
+        // and a photo sent without a caption is the whole message rather than
+        // an empty one — dropping it here used to ignore it silently.
+        if (!text && !cardReplyId && !media) continue;
         const name = names.get(from);
         const timestamp = Number(messageRaw.timestamp);
 
         out.push({
+          ...(media ? { media } : {}),
           messageId: id,
           // Cloud API is one-to-one only: the chat IS the person.
           chatId: from,

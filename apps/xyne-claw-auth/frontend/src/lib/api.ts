@@ -7348,35 +7348,17 @@ export async function getChannelLoginArtifact(
 
 // ── my numbers (self-service linking) ──
 
-export interface LinkableChannelAccount {
-  id: string;
-  label: string;
-  number: string | null;
-  connected: boolean;
-}
-
 export interface LinkedChannelNumber {
   senderId: string;
-  accountLabel: string | null;
-  accountId: string | null;
   linkedAt: string;
   lastSeenAt: string | null;
 }
 
 export interface ChannelNumberLink {
   senderId: string;
-  accountId: string;
-  accountLabel: string;
-  /** The number to message, once the account knows its own. */
+  /** The number to message, when the org has exactly one to offer. */
   sendTo: string | null;
   linkedAt: string;
-}
-
-export async function listLinkableChannelAccounts(channel: MessagingChannelKey): Promise<LinkableChannelAccount[]> {
-  const data = await request<{ success: boolean; accounts: LinkableChannelAccount[] }>(
-    `${channelBase(channel)}/my-numbers/accounts`,
-  );
-  return data.accounts;
 }
 
 export async function listMyChannelNumbers(channel: MessagingChannelKey): Promise<LinkedChannelNumber[]> {
@@ -7384,14 +7366,10 @@ export async function listMyChannelNumbers(channel: MessagingChannelKey): Promis
   return data.numbers;
 }
 
-export async function linkChannelNumber(
-  channel: MessagingChannelKey,
-  phone: string,
-  accountId?: string,
-): Promise<ChannelNumberLink> {
+export async function linkChannelNumber(channel: MessagingChannelKey, phone: string): Promise<ChannelNumberLink> {
   const data = await request<{ success: boolean; linked: ChannelNumberLink }>(`${channelBase(channel)}/my-numbers`, {
     method: "POST",
-    body: JSON.stringify(accountId ? { phone, accountId } : { phone }),
+    body: JSON.stringify({ phone }),
   });
   return data.linked;
 }

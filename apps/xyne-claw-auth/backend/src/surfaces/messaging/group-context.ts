@@ -12,7 +12,7 @@
  *    be linked to any Claw user at all, and the run they land in executes as
  *    whoever triggered it. The rendered block says so in as many words, so the
  *    model treats them as overheard conversation rather than as instructions.
- *  - Context is not state. It lives in Redis with a TTL and is drained when
+ *  - Context is not state. It lives in Redis with a TTL and is consumed once
  *    used; losing it costs a little conversational memory and nothing else.
  */
 import { redisService } from "../../redis.js";
@@ -64,14 +64,13 @@ export async function rememberGroupMessage(input: {
   }
 }
 
-/** Take everything buffered for this chat and clear it, so the same lines are
- *  never quoted into two different runs. */
-export async function drainGroupContext(accountId: string, chatId: string): Promise<BufferedMessage[]> {
+/** Everything buffered for this chat, left in place. The lines are only
+ *  removed once the run that quotes them has actually been accepted — see
+ *  consumeGroupContext — so a failed dispatch does not silently destroy the
+ *  conversation the retry still needs. */
+export async function readGroupContext(accountId: string, chatId: string): Promise<BufferedMessage[]> {
   try {
-    const redis = redisService.getConnection();
-    const k = key(accountId, chatId);
-    const [range] = (await redis.multi().lrange(k, 0, -1).del(k).exec()) ?? [];
-    const raw = (range?.[1] ?? []) as string[];
+    const raw = await redisService.getConnection().lrange(key(accountId, chatId), 0, -1);
     return raw.flatMap((line) => {
       try {
         return [JSON.parse(line) as BufferedMessage];
@@ -80,8 +79,20 @@ export async function drainGroupContext(accountId: string, chatId: string): Prom
       }
     });
   } catch (err) {
-    log.warn(`[group-context] drain failed account=${accountId}: ${err instanceof Error ? err.message : err}`);
+    log.warn(`[group-context] read failed account=${accountId}: ${err instanceof Error ? err.message : err}`);
     return [];
+  }
+}
+
+/** Drop the `count` oldest lines — exactly the ones just quoted into a run.
+ *  Trimming by count rather than clearing the key keeps anything that arrived
+ *  while the run was being dispatched. */
+export async function consumeGroupContext(accountId: string, chatId: string, count: number): Promise<void> {
+  if (count <= 0) return;
+  try {
+    await redisService.getConnection().ltrim(key(accountId, chatId), count, -1);
+  } catch (err) {
+    log.warn(`[group-context] consume failed account=${accountId}: ${err instanceof Error ? err.message : err}`);
   }
 }
 

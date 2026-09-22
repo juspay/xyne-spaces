@@ -11,22 +11,9 @@ import { resolveAgentProviderConfigs, resolveSubagentProviderMode } from "../../
 import { runAttachmentRefsEnabled, uploadRunAttachment } from "../../lib/run-attachment-store.js";
 import { setSession } from "../../lib/session-context.js";
 import { getChannel, type ChannelDeliveryTarget, type MessagingChannelKey } from "./plugin.js";
-import { sanitizeId } from "./schema.js";
+import { channelConversationId } from "./ids.js";
 import type { BoundAgent } from "./store.js";
 
-/**
- * Deterministic conversation id: DMs collapse per sender, groups per chat,
- * and each agent keeps its own history (OpenClaw's per-agent session keying)
- * so `/other-agent` does not inherit the default agent's transcript.
- */
-export function channelConversationId(
-  channel: MessagingChannelKey,
-  accountKey: string,
-  agentSlug: string,
-  chatId: string,
-): string {
-  return `${channel}-${sanitizeId(accountKey)}-${sanitizeId(agentSlug)}-${sanitizeId(chatId)}`;
-}
 
 /**
  * What the agent must know about answering here.
@@ -76,7 +63,17 @@ function channelSurfaceInstructions(channel: MessagingChannelKey): string {
     "- Bold the names you hand back — a channel, a person, a ticket, a file — so they are findable in a wall of phone text.",
     `- Be brief. Replies longer than ${limit} characters are split across several messages.`,
   ];
-  if (plugin?.capabilities.media) lines.push("- Files you produce are sent as attachments, so you may refer to those.");
+  if (plugin?.capabilities.media) {
+    // The old wording here ("files you produce are sent as attachments") was
+    // read as a promise that writing a file delivers it. It does not: only a
+    // file handed to a delivery tool ever reaches the chat, so the model
+    // announced attachments that were never sent.
+    lines.push(
+      "- A file reaches them only if you DELIVER it with a tool that sends files (sandbox-deliver-files and the like). Writing a file into your workspace sends nothing.",
+      "- Never say something is attached unless you delivered it in this reply. If you could not send it, say so and paste the content as text when it is short enough.",
+    );
+  }
+  lines.push("- They can send /new to start a fresh conversation, /stop to give up on a slow answer, /status to ask what you are doing, and /agents to see who else they can talk to. Mention these only if they ask how to do one of those things.");
   if (plugin && !plugin.capabilities.groups) lines.push("- This is a one-to-one conversation. There are no groups or threads here.");
   return lines.join("\n");
 }
