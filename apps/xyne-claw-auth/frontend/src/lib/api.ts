@@ -2637,6 +2637,33 @@ export async function removeAgentShare(slug: string, requesterId: string, target
 }
 
 /**
+ * Transfer agent ownership to another user. Immediate — there is no acceptance
+ * step — and owner/admin-only, same-org only (enforced server side).
+ *
+ * The agent row itself is kept, so the Spaces app identity, every channel
+ * install and all existing schedules survive the transfer. By default the
+ * outgoing owner is kept on as an EDITOR; without that they would lose sight of
+ * a personal-scope agent entirely, since visibility is derived from ownership
+ * OR a share row.
+ */
+export async function transferAgentOwnership(
+  slug: string,
+  requesterId: string,
+  newOwnerUserId: string,
+  keepPreviousOwnerAsEditor = true,
+): Promise<{ ownerUserId: string; previousOwnerUserId: string | null }> {
+  const data = await request<{ success: boolean; data: { ownerUserId: string; previousOwnerUserId: string | null } }>(
+    `${AUTH_API_URL}/api/v1/agents/${slug}/transfer-ownership`,
+    {
+      method: "POST",
+      headers: { "x-user-id": requesterId, "Content-Type": "application/json" },
+      body: JSON.stringify({ newOwnerUserId, keepPreviousOwnerAsEditor }),
+    },
+  );
+  return data.data;
+}
+
+/**
  * Health-check a single agent-pinned MCP instance. Hits the agent-scoped
  * health route (mirrors checkConnectionHealth for global connections) so the
  * agent MCP tab can show a real reachability status instead of a hardcoded
@@ -7093,4 +7120,162 @@ export async function resyncChannelEntityTypes(
     `${AUTH_API_URL}/api/v1/entity-extraction/channels/${channelId}/resync-types`,
     { method: "POST", headers: { "x-user-id": userId } },
   );
+}
+
+// ── Agent index ────────────────────────────────────────────────────────────
+// The per-org Hindsight bank holding one searchable document per agent.
+
+export type AgentIndexKind = "identity" | "persona" | "usage";
+
+export interface AgentIndexStatus {
+  slug: string;
+  name: string;
+  agentId: string;
+  indexed: AgentIndexKind[];
+  missing: AgentIndexKind[];
+  stale: boolean;
+  liveUpdatedAt: string;
+  indexedUpdatedAt: string | null;
+  promptVersion: number | null;
+  indexedPromptVersion: number | null;
+  chars: number;
+}
+
+/** One stored document. The provider splits long content into chunks; `chunks`
+ *  reports how many it took, and `text` is the reassembled whole. */
+export interface AgentIndexDocument {
+  kind: AgentIndexKind | "unknown";
+  slug: string;
+  contentHash: string | null;
+  text: string;
+  chars: number;
+  chunks: number;
+  indexedAt: string | null;
+}
+
+export interface AgentIndexOverview {
+  agents: AgentIndexStatus[];
+  indexed: number;
+  total: number;
+  stale: number;
+  entries: number;
+  chars: number;
+  bankId: string;
+  bankConfig: Record<string, unknown>;
+}
+
+export interface AgentIndexMatch {
+  slug: string;
+  agentId: string | null;
+  score: number;
+  matchedKinds: AgentIndexKind[];
+  evidence: string;
+}
+
+export async function getAgentIndexOverview(): Promise<AgentIndexOverview> {
+  const data = await request<{ success: boolean; data: AgentIndexOverview }>(
+    `${AUTH_API_URL}/api/v1/agent-index/overview`,
+  );
+  return data.data;
+}
+
+export async function getAgentIndexDetail(
+  slug: string,
+): Promise<{ status: AgentIndexStatus; documents: AgentIndexDocument[] }> {
+  const data = await request<{
+    success: boolean;
+    data: { status: AgentIndexStatus; documents: AgentIndexDocument[] };
+  }>(`${AUTH_API_URL}/api/v1/agent-index/agents/${encodeURIComponent(slug)}`);
+  return data.data;
+}
+
+export async function syncAgentIndex(slug: string): Promise<void> {
+  await request(`${AUTH_API_URL}/api/v1/agent-index/agents/${encodeURIComponent(slug)}/sync`, {
+    method: "POST",
+  });
+}
+
+export async function rebuildAgentIndex(): Promise<{ synced: number; failed: number; purged: number }> {
+  const data = await request<{
+    success: boolean;
+    data: { synced: number; failed: number; purged: number };
+  }>(`${AUTH_API_URL}/api/v1/agent-index/rebuild`, { method: "POST" });
+  return data.data;
+}
+
+export async function searchAgentIndex(need: string, limit = 10): Promise<AgentIndexMatch[]> {
+  const data = await request<{ success: boolean; data: { matches: AgentIndexMatch[] } }>(
+    `${AUTH_API_URL}/api/v1/agent-index/search`,
+    { method: "POST", body: JSON.stringify({ need, limit }) },
+  );
+  return data.data.matches;
+}
+
+export interface UsagePatternFile {
+  content: string;
+  updatedBy: string | null;
+  updatedAt: string;
+  chars: number;
+  /** Server-owned: it is the same flag the synthesizer checks before it writes,
+   *  so the UI cannot promise a protection the backend will not honour. */
+  humanEdited: boolean;
+}
+
+export interface UsagePatternSynthesis {
+  slug: string;
+  runCount: number;
+  distinctUsers: number;
+  patternsWritten: number;
+  skipped?: string;
+  chars: number;
+  window: { start: string; end: string };
+}
+
+/** Synthesis runs longer than a gateway will hold a connection, so the POST
+ *  starts a pass and returns immediately. Poll {@link getUsagePatternJob}. */
+export type UsagePatternJob =
+  | { status: "running"; startedAt: string }
+  | { status: "busy"; running: number }
+  | { status: "done"; startedAt: string; finishedAt: string; outcome: Omit<UsagePatternSynthesis, "window"> }
+  | { status: "error"; startedAt: string; finishedAt: string; error: string };
+
+export async function triggerUsagePatternSynthesis(
+  slug: string,
+  start?: string,
+  end?: string,
+): Promise<{ job: UsagePatternJob; window: { start: string; end: string } }> {
+  const data = await request<{
+    success: boolean;
+    data: { job: UsagePatternJob; window: { start: string; end: string } };
+  }>(
+    `${AUTH_API_URL}/api/v1/agent-index/agents/${encodeURIComponent(slug)}/usage-patterns`,
+    { method: "POST", body: JSON.stringify({ start, end }) },
+  );
+  return data.data;
+}
+
+export async function getUsagePatternFile(slug: string): Promise<UsagePatternFile | null> {
+  const data = await request<{ success: boolean; data: UsagePatternFile | null }>(
+    `${AUTH_API_URL}/api/v1/agent-index/agents/${encodeURIComponent(slug)}/usage-patterns`,
+  );
+  return data.data;
+}
+
+/** Progress of a pass started on the server this request lands on. Null when
+ *  nothing ran there, which includes a poll reaching a different replica. */
+export async function getUsagePatternJob(slug: string): Promise<UsagePatternJob | null> {
+  const data = await request<{ success: boolean; job: UsagePatternJob | null }>(
+    `${AUTH_API_URL}/api/v1/agent-index/agents/${encodeURIComponent(slug)}/usage-patterns`,
+  );
+  return data.job ?? null;
+}
+
+/** Hand-edit the shared usage-pattern file. Marks it human-written, which stops
+ *  the synthesizer overwriting it. Admin only. */
+export async function writeUsagePatternFile(slug: string, content: string): Promise<UsagePatternFile | null> {
+  const data = await request<{ success: boolean; data: UsagePatternFile | null }>(
+    `${AUTH_API_URL}/api/v1/agent-index/agents/${encodeURIComponent(slug)}/usage-patterns`,
+    { method: "PUT", body: JSON.stringify({ content }) },
+  );
+  return data.data;
 }

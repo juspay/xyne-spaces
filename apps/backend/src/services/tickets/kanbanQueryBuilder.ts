@@ -23,7 +23,14 @@ export type KanbanFormFieldGroup = {
   fieldType: string;
 };
 
-export type KanbanGroupBy = 'none' | 'assignee' | 'status' | 'priority' | KanbanFormFieldGroup;
+export type KanbanGroupBy =
+  | 'none'
+  | 'assignee'
+  | 'createdBy'
+  | 'status'
+  | 'priority'
+  | 'merchantId'
+  | KanbanFormFieldGroup;
 
 export type KanbanTicketFilters = {
   priority?: TicketPriority[];
@@ -44,6 +51,7 @@ export type KanbanTicketFilters = {
   created?: boolean;
   stages?: string[];
   ticketTypes?: string[];
+  merchantIds?: string[];
   dynamicFields?: Record<string, string[] | { start?: number; end?: number }>;
 };
 
@@ -264,6 +272,7 @@ export const buildKanbanTicketWhere = (
       hasItems(filters.tags) ? { tags: { some: { name: { in: [...filters.tags] } } } } : undefined,
       hasItems(filters.stages) ? { stageName: { in: [...filters.stages] } } : undefined,
       hasItems(filters.ticketTypes) ? { ticketType: { in: [...filters.ticketTypes] } } : undefined,
+      hasItems(filters.merchantIds) ? { merchantId: { in: [...filters.merchantIds] } } : undefined,
       context.showOverdueOnly
         ? ({
             statusV2: { notIn: [TicketStatusV2.COMPLETED, TicketStatusV2.CANCELLED] },

@@ -19,6 +19,7 @@ import {
   X,
   FileText,
   Folder,
+  FolderGit2,
   BookOpen,
   Ticket,
   Phone,
@@ -26,6 +27,9 @@ import {
   Hash,
   Lock,
   Zap,
+  AudioLines,
+  Sparkles,
+  MousePointerClick,
 } from 'lucide-react';
 import { PlusDefault } from '@xyne/icons';
 import { toast } from 'sonner';
@@ -39,6 +43,11 @@ import { ComposerCollectionPicker } from './ComposerCollectionPicker';
 import { ComposerVoiceButton } from './ComposerVoiceButton';
 
 import { cn } from '../../utils/classNames';
+import { commandsForSurface, type CommandDef } from '@xyne/shared/commands';
+import { CommandMenu } from './CommandMenu';
+import { useVoiceMode } from './voice/useVoiceMode';
+import { VoiceModeBar } from './voice/VoiceModeBar';
+import { detectStudioIntent } from './voice/studioIntent';
 import { apiInstance } from '../../services/clients/apiClient';
 import {
   ContextPickerPanel,
@@ -48,6 +57,9 @@ import {
 } from '../Chat/XyneAISidebar/components/ContextPickerPanel';
 import { XyneAIPlusMenu } from '../Chat/XyneAISidebar/components/XyneAIPlusMenu';
 import { EMPTY_COMPOSER_CONTEXT, type ComposerContext } from './composerContext';
+import { SandboxModeSwitch, useSandboxMode } from './SandboxModeSwitch';
+import { useDesignStudio } from './Workspace/design/designStudioContext';
+import { usePageSelection } from './Workspace/pageSelectionContext';
 import { fetchAccessibleClawAgents } from '../../services/clawAgentListService';
 import { useSelectedAgent } from '../../hooks/useSelectedAgent';
 import useMeasure from '../../hooks/useMeasure';
@@ -132,7 +144,7 @@ const blockedExtensions = new Set(DANGEROUS_EXTENSIONS.map(ext => ext.toLowerCas
  * max-w-3xl (768px) and the landing one max-w-2xl (672px), so at this threshold
  * neither folds at its natural size; only a genuinely squeezed one does.
  */
-const COMPACT_TOOLBAR_WIDTH = 600;
+const COMPACT_TOOLBAR_WIDTH = 760;
 
 const isValidBase64 = (str: string): boolean => {
   if (!str || str.length === 0) return false;
@@ -159,7 +171,7 @@ function ContextPill({
       {icon}
       <span
         className={cn(
-          'max-w-[140px] truncate text-sm font-medium',
+          'max-w-[110px] truncate text-sm font-medium',
           accent ? 'text-claw-ai-fg' : 'text-foreground',
         )}
       >
@@ -247,7 +259,17 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
   // ── Extra composer context/toggles (seeded from initialExtras once) ──────────
   const seed = initialExtras ?? EMPTY_COMPOSER_CONTEXT;
   const [showContextModal, setShowContextModal] = useState(false);
+  const [showCommandMenu, setShowCommandMenu] = useState(false);
   const [showCollectionPicker, setShowCollectionPicker] = useState(false);
+  const aiScreenCommands = useMemo(() => commandsForSurface('ai-screen'), []);
+  const handleCommandSelect = useCallback((command: CommandDef): void => {
+    setShowCommandMenu(false);
+    setValue(prev => {
+      const trimmed = prev.replace(/^\s*\/\S*\s?/, '');
+      return `/${command.name} ${trimmed}`.replace(/\s+$/, ' ');
+    });
+    window.setTimeout(() => textareaRef.current?.focus(), 0);
+  }, []);
   // Popovers for the agent / model selectors. Only used while compact, where
   // the pills are hidden and the "+" menu opens them instead.
   const [showAgentPicker, setShowAgentPicker] = useState(false);
@@ -258,6 +280,7 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
     canvases: seed.canvases,
     transcripts: seed.transcripts,
     recordings: seed.recordings,
+    localFolders: seed.localFolders,
   }));
   const [collections, setCollections] = useState(() => seed.collections);
   const [fileScopes, setFileScopes] = useState(() => seed.fileScopes);
@@ -265,6 +288,8 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
   const [webSearchEnabled, setWebSearchEnabled] = useState(() => seed.webSearchEnabled);
   const [deepResearchEnabled, setDeepResearchEnabled] = useState(() => seed.deepResearchEnabled);
   const [createCanvasEnabled, setCreateCanvasEnabled] = useState(() => seed.createCanvasEnabled);
+  const [voiceMode, setVoiceMode] = useState(() => seed.voiceMode);
+  const [voiceStudioMode, setVoiceStudioMode] = useState<string | null>(() => seed.voiceStudioMode);
   // Per-run model pin + thinking level. The model list is the account's allowed
   // models off the selected agent's shared LiteLLM key; "Default" = the model
   // configured in the DB. Both reset when the agent changes — a pick from one
@@ -273,6 +298,12 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
   const [thinkingLevel, setThinkingLevel] = useState<
     'off' | 'minimal' | 'low' | 'medium' | 'high' | null
   >(() => seed.thinkingLevel);
+  const [sandboxMode, setSandboxMode] = useSandboxMode();
+  const designStudio = useDesignStudio();
+  const designMode = designStudio?.designMode ?? null;
+  const pendingSelection = designStudio?.pendingSelection ?? null;
+  const pageSelection = usePageSelection();
+  const pageSelectionValue = pageSelection?.selection ?? null;
 
   // Locked, not a toggle — see xyne-claw-auth's AgentDetailLeftColumn.tsx
   // "Instant Agent" setting and ChatPageV3.tsx's matching indicator. Every
@@ -328,6 +359,7 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
       canvases: selections.canvases,
       transcripts: selections.transcripts,
       recordings: selections.recordings,
+      localFolders: selections.localFolders,
       collections,
       fileScopes,
       folderScopes,
@@ -335,10 +367,17 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
       webSearchEnabled: webSearchAccessible ? webSearchEnabled : false,
       deepResearchEnabled: deepResearchAccessible ? deepResearchEnabled : false,
       createCanvasEnabled,
+      voiceMode,
+      voiceStudioMode,
       instant,
       model: selectedModel,
-      modelProvider: selectedModel ? modelPinProvider : null,
+      modelProvider: !selectedModel
+        ? null
+        : selectedModel.startsWith('local-harness:')
+          ? 'local-harness'
+          : modelPinProvider,
       thinkingLevel,
+      sandboxMode,
     }),
     [
       selections,
@@ -348,8 +387,11 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
       webSearchEnabled,
       deepResearchEnabled,
       createCanvasEnabled,
+      voiceMode,
+      voiceStudioMode,
       instant,
       selectedModel,
+      sandboxMode,
       modelPinProvider,
       thinkingLevel,
       webSearchAccessible,
@@ -514,6 +556,7 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
           canvases: next.canvases,
           transcripts: next.transcripts,
           recordings: next.recordings,
+          localFolders: next.localFolders,
         });
         setCollections(next.collections);
         setFileScopes(next.fileScopes);
@@ -527,9 +570,15 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
     if (pending) return;
     const trimmed = value.trim();
     if (!trimmed) return;
-    onSubmit?.(trimmed, attachments.length > 0 ? attachments : undefined, buildContext(), trigger);
+    onSubmit?.(
+      applyStudioMode(trimmed),
+      attachments.length > 0 ? attachments : undefined,
+      buildContext(),
+      trigger,
+    );
     setValue('');
     setAttachments([]);
+    setDismissedStudioIntent(null);
     // Toggles/context persist across turns (mirrors the sidebar), so they are
     // intentionally NOT reset here.
   };
@@ -589,6 +638,40 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
     fileInputRef.current?.click();
   };
 
+  const submitTranscript = useCallback(
+    (text: string): void => {
+      const trimmed = text.trim();
+      if (!trimmed) return;
+      const intent = detectStudioIntent(trimmed);
+      const studioLabel = intent?.label ?? null;
+      setVoiceStudioMode(studioLabel);
+      const task = intent ? `/${intent.name} ${trimmed}` : trimmed;
+      onSubmit?.(task, undefined, {
+        ...buildContext(),
+        voiceMode: true,
+        voiceStudioMode: studioLabel,
+      });
+    },
+    [onSubmit, buildContext],
+  );
+  const voice = useVoiceMode({ enabled: voiceMode, submit: submitTranscript });
+
+  const [dismissedStudioIntent, setDismissedStudioIntent] = useState<string | null>(null);
+  const studioSuggestion = useMemo(() => detectStudioIntent(value), [value]);
+  const showStudioSuggestion =
+    !!studioSuggestion &&
+    dismissedStudioIntent !== studioSuggestion.name &&
+    !(designMode?.active && studioSuggestion.name === 'design');
+  const activeStudioMode = showStudioSuggestion ? studioSuggestion : null;
+  const applyStudioMode = useCallback(
+    (text: string): string => {
+      if (!activeStudioMode) return text;
+      if (text.trimStart().startsWith('/')) return text;
+      return `/${activeStudioMode.name} ${text.trim()}`;
+    },
+    [activeStudioMode],
+  );
+
   const handleFileInputChange = (e: ChangeEvent<HTMLInputElement>): void => {
     const files = e.target.files;
     if (files && files.length > 0) {
@@ -624,6 +707,8 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
     setSelections(s => ({ ...s, transcripts: s.transcripts.filter(t => t.id !== id) }));
   const removeRecording = (id: string): void =>
     setSelections(s => ({ ...s, recordings: s.recordings.filter(r => r.id !== id) }));
+  const removeLocalFolder = (path: string): void =>
+    setSelections(s => ({ ...s, localFolders: s.localFolders.filter(f => f.path !== path) }));
 
   const hasPills = useMemo(
     () =>
@@ -633,6 +718,7 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
       selections.canvases.length > 0 ||
       selections.transcripts.length > 0 ||
       selections.recordings.length > 0 ||
+      selections.localFolders.length > 0 ||
       collections.length > 0 ||
       fileScopes.length > 0 ||
       folderScopes.length > 0,
@@ -674,6 +760,14 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
     />
   );
 
+  const harnessAvailable = (agentModelsData?.models ?? []).some(
+    m => m.provider === 'local-harness',
+  );
+
+  const sandboxSwitchNode = harnessAvailable ? (
+    <SandboxModeSwitch mode={sandboxMode} onModeChange={setSandboxMode} disabled={pending} />
+  ) : null;
+
   // Anything the "+" menu owns that is currently on. Collections/files/folders
   // count even though they also show as pills — the menu is where they're
   // cleared from, so the trigger should point back at it.
@@ -685,9 +779,23 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
     fileScopes.length > 0 ||
     folderScopes.length > 0;
 
+  if (voiceMode) {
+    return (
+      <div className='relative'>
+        <VoiceModeBar
+          phase={voice.phase}
+          studioMode={voiceStudioMode}
+          onHoldStart={voice.startRecording}
+          onHoldEnd={voice.stopRecording}
+          onExit={() => setVoiceMode(false)}
+        />
+      </div>
+    );
+  }
+
   return (
     <form onSubmit={handleSubmit} className='relative'>
-      {/* "/" context picker overlay */}
+      {/* "@" context picker overlay */}
       {showContextModal && (
         <>
           <button
@@ -706,6 +814,41 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
               onClose={closeContextModal}
               onConfirm={setSelections}
               initialSelections={selections}
+            />
+          </div>
+        </>
+      )}
+
+      {/* "/" command menu overlay */}
+      {showCommandMenu && (
+        <>
+          <button
+            type='button'
+            className='fixed inset-0 z-10 cursor-default border-none bg-transparent p-0'
+            onClick={() => setShowCommandMenu(false)}
+            onKeyDown={e => {
+              if (e.key === 'Escape') setShowCommandMenu(false);
+            }}
+            aria-label='Close command menu'
+            data-track-category='XyneAI'
+            data-track-name='CLOSE_COMMAND_MENU_BACKDROP'
+          />
+          <div className='absolute bottom-full left-0 right-0 z-20 px-2 pb-2'>
+            <CommandMenu
+              commands={aiScreenCommands}
+              onSelect={handleCommandSelect}
+              onClose={() => setShowCommandMenu(false)}
+              lockedCommand={
+                designMode?.active
+                  ? {
+                      name: 'design',
+                      onUnlock: () => {
+                        designMode.exit();
+                        setShowCommandMenu(false);
+                      },
+                    }
+                  : undefined
+              }
             />
           </div>
         </>
@@ -786,6 +929,19 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
                   onRemove={() => removeRecording(recording.id)}
                 />
               ))}
+              {selections.localFolders.map(folder => (
+                <ContextPill
+                  key={`lf-${folder.path}`}
+                  icon={
+                    <FolderGit2
+                      className='h-3.5 w-3.5 shrink-0 text-muted-foreground'
+                      aria-hidden
+                    />
+                  }
+                  label={folder.branch ? `${folder.name} · ${folder.branch}` : folder.name}
+                  onRemove={() => removeLocalFolder(folder.path)}
+                />
+              ))}
               {collections.map(collection => (
                 <ContextPill
                   key={`co-${collection.id}`}
@@ -864,7 +1020,7 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
               XyneAI sidebar uses — so the row stays two buttons wide however
               many options exist. Not scroll-clipped, so the collection picker
               can overflow upward freely. */}
-            <div className='flex flex-nowrap items-center gap-0.5'>
+            <div className='flex shrink-0 flex-nowrap items-center gap-0.5'>
               <div className='relative flex items-center'>
                 <XyneAIPlusMenu
                   onAttachFiles={handleAttachClick}
@@ -927,12 +1083,38 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
                 {compactToolbar && modelSelectorNode}
               </div>
               <ToolbarButton
-                icon={<span className='text-sm font-semibold leading-none'>/</span>}
-                label='Add context'
+                icon={<span className='text-sm font-semibold leading-none'>@</span>}
+                label='Mention a source'
                 onClick={() => setShowContextModal(v => !v)}
                 active={showContextModal}
                 trackName='OPEN_CONTEXT_MODAL'
               />
+              {designMode?.active ? (
+                <button
+                  type='button'
+                  onClick={() => setShowCommandMenu(v => !v)}
+                  aria-label='Commands (design locked)'
+                  title='Design is locked: every message runs /design. Open to unlock.'
+                  aria-pressed={showCommandMenu}
+                  className={cn(
+                    'inline-flex h-8 shrink-0 items-center gap-1 rounded-full px-2.5 text-sm font-semibold transition',
+                    'bg-primary/10 text-primary hover:bg-primary/20',
+                  )}
+                  data-track-category='XyneAI'
+                  data-track-name='OPEN_COMMAND_MENU'
+                >
+                  <Lock className='h-3 w-3' aria-hidden='true' />
+                  <span className='font-mono'>/design</span>
+                </button>
+              ) : (
+                <ToolbarButton
+                  icon={<span className='text-sm font-semibold leading-none'>/</span>}
+                  label='Commands'
+                  onClick={() => setShowCommandMenu(v => !v)}
+                  active={showCommandMenu}
+                  trackName='OPEN_COMMAND_MENU'
+                />
+              )}
               {/* Locked indicator, not a toggle — only rendered when the
                   selected agent is configured as an "Instant Agent"
                   (agent.config.instantAgent, see xyne-claw-auth's
@@ -953,13 +1135,79 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
               )}
             </div>
 
-            <div className='flex shrink-0 items-center gap-1.5'>
+            <div className='flex min-w-0 flex-1 items-center justify-end gap-1.5'>
               {!compactToolbar && agentSelectorNode}
               {!compactToolbar && modelSelectorNode}
+              {pendingSelection && (
+                <span
+                  className='flex h-7 min-w-0 shrink items-center gap-1 rounded-lg border border-primary/40 bg-primary/10 px-2 text-xs font-medium text-primary'
+                  title={`Your next message applies to this ${pendingSelection.scope}: <${pendingSelection.tagName}> ${pendingSelection.label}`}
+                >
+                  <MousePointerClick className='h-3 w-3 shrink-0' aria-hidden />
+                  <span className='min-w-0 truncate'>{pendingSelection.label}</span>
+                  <button
+                    type='button'
+                    onClick={() => designStudio?.clearPendingSelection()}
+                    aria-label='Clear selected element'
+                    className='ml-0.5 grid h-4 w-4 shrink-0 place-items-center rounded hover:bg-primary/20'
+                    data-track-category='XyneAI'
+                    data-track-name='DESIGN_SELECTION_CLEAR'
+                  >
+                    <X className='h-3 w-3' aria-hidden />
+                  </button>
+                </span>
+              )}
+              {pageSelectionValue && (
+                <span
+                  className='flex h-7 min-w-0 shrink items-center gap-1 rounded-lg border border-primary/40 bg-primary/10 px-2 text-xs font-medium text-primary'
+                  title={`Your next message applies to this passage from ${pageSelectionValue.title}:\n\n${pageSelectionValue.text.slice(0, 400)}`}
+                >
+                  <MousePointerClick className='h-3 w-3 shrink-0' aria-hidden />
+                  <span className='min-w-0 truncate'>{pageSelectionValue.text}</span>
+                  <span className='shrink-0 opacity-70'>{pageSelectionValue.text.length}</span>
+                  <button
+                    type='button'
+                    onClick={() => pageSelection?.clearSelection()}
+                    aria-label='Clear selected text'
+                    className='ml-0.5 grid h-4 w-4 shrink-0 place-items-center rounded hover:bg-primary/20'
+                    data-track-category='XyneAI'
+                    data-track-name='PAGE_SELECTION_CLEAR'
+                  >
+                    <X className='h-3 w-3' aria-hidden />
+                  </button>
+                </span>
+              )}
+              {activeStudioMode && (
+                <span
+                  className='flex h-7 shrink-0 items-center gap-1 rounded-lg border border-claw-ai-fg/40 bg-claw-ai-fg/10 px-2 text-xs font-medium text-claw-ai-fg'
+                  title={`This message will run as /${activeStudioMode.name}. Click × to send it as a normal message.`}
+                >
+                  <Sparkles className='h-3 w-3' aria-hidden />
+                  <span className='hidden sm:inline'>{activeStudioMode.label}</span>
+                  <span className='font-mono sm:hidden'>/{activeStudioMode.name}</span>
+                  <button
+                    type='button'
+                    onClick={() => setDismissedStudioIntent(activeStudioMode.name)}
+                    aria-label={`Do not run as ${activeStudioMode.name}`}
+                    className='ml-0.5 grid h-4 w-4 place-items-center rounded hover:bg-claw-ai-fg/20'
+                    data-track-category='XyneAI'
+                    data-track-name='STUDIO_INTENT_DISMISS'
+                  >
+                    <X className='h-3 w-3' aria-hidden />
+                  </button>
+                </span>
+              )}
+              {sandboxSwitchNode}
               <ComposerVoiceButton
                 onTranscript={handleTranscript}
                 onStateChange={({ isRecording }) => setIsVoiceRecording(isRecording)}
                 disabled={pending}
+              />
+              <ToolbarButton
+                icon={<AudioLines className='h-4 w-4' aria-hidden />}
+                label='Voice mode'
+                onClick={() => setVoiceMode(true)}
+                trackName='ENTER_VOICE_MODE'
               />
 
               {pending ? (

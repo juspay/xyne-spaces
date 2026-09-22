@@ -21,7 +21,16 @@ import { useLocation, useNavigate, useOutlet } from 'react-router-dom';
 import { Virtuoso } from 'react-virtuoso';
 import { useAuth } from '../../hooks/useAuth';
 import { useCallHistory } from './useCallHistory';
-import { CallStatus, TagMethod } from '@xyne/shared';
+import {
+  CallOrigin,
+  CallStatus,
+  CallType,
+  CallVisibility,
+  ChannelScopeType,
+  InvitationResponse,
+  MeetingStatus,
+  TagMethod,
+} from '@xyne/shared';
 import { logger, Event } from '../../utils/logger';
 import { dataLoadDuration, safeRecordMetric } from '../../services/otel';
 import AppNavigator from '../../components/AppNavigator/AppNavigator';
@@ -43,12 +52,9 @@ import { isSameDay } from '../../utils/dateUtils';
 import { mutators } from '../../zero/mutators';
 import { CallCard } from './CallCard';
 import {
-  hasExternalChatAccess,
-  isDmScope,
+  Call,
   isMissedCallForUser,
   isExternalCalendarEvent,
-  isVisibleInCallList,
-  mapVespaCallResultToCall,
   isScheduledCallJoinable,
   RecentCallFilter,
   FILTER_LABELS,
@@ -67,6 +73,7 @@ import MeetWithPanel from './MeetWithPanel';
 import { useOtherUserCalls } from '../../hooks/useOtherUserCalls';
 import { UpcomingCallsList } from '../../components/Call/UpcomingCallsList';
 import { useSearchMetrics } from '../../hooks/useSearchMetrics';
+import type { DisplaySearchResult } from '../../types/search';
 import { getUserDisplayName } from '../../utils/userDisplayName';
 import { ChipType, TabType } from '../../components/Chat/ChatDirectory/ChannelCommandMenu.types';
 import { type InitialQueryData } from '../../components/Chat/ChatDirectory/LexicalSearchInput';
@@ -84,6 +91,138 @@ interface EmptyStateProps {
 
 function isSameMonth(a: Date, b: Date): boolean {
   return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth();
+}
+
+function hasExternalChatAccess(call: Call): boolean {
+  return (
+    call.participants?.some(p => p.isExternal && p.response !== InvitationResponse.INVITED) ?? false
+  );
+}
+
+function isDmScope(scopeType: ChannelScopeType | string | null | undefined): boolean {
+  return scopeType === ChannelScopeType.DM || scopeType === ChannelScopeType.GROUP_DM;
+}
+
+function isVisibleInCallList(
+  call: Call,
+  currentUserId: string | undefined,
+  showChannelCalls: boolean,
+): boolean {
+  if (isExternalCalendarEvent(call)) return true;
+  if (showChannelCalls) return true;
+  return call.participants?.some(p => p.userId === currentUserId) ?? false;
+}
+
+function stripSearchHighlight(value: string | undefined): string {
+  return (value || '').replace(/<\/?hi>/g, '');
+}
+
+function timestampOrUndefined(value: number | undefined): number | undefined {
+  return value && value > 0 ? value : undefined;
+}
+
+function isJoinedInvitationResponse(response: string): boolean {
+  return (
+    response === String(InvitationResponse.ACCEPTED) || response === String(InvitationResponse.LEFT)
+  );
+}
+
+function mapVespaCallResultToCall(result: DisplaySearchResult, workspaceId: string): Call {
+  const context = result.searchContext;
+  const callId = context?.callId || result.id;
+  const startedAt =
+    timestampOrUndefined(context?.startedAt) ||
+    timestampOrUndefined(context?.startsAt) ||
+    Date.now();
+  const now = Date.now();
+  const participantResponses = context?.participantResponses || [];
+  const participantUserIds = context?.userIds || [];
+  const participantNames = context?.participantNames || [];
+  const participantEmails = context?.participantEmails || [];
+  const participantCount = Math.max(
+    participantUserIds.length,
+    participantResponses.length,
+    participantNames.length,
+    participantEmails.length,
+  );
+
+  return {
+    workspaceId,
+    id: callId,
+    externalId: context?.externalId || callId,
+    title: stripSearchHighlight(context?.title || result.title) || null,
+    createdByUserId: context?.createdByUserId || '',
+    organizerId: null,
+    channelId: context?.channelId || null,
+    orgName: null,
+    description: null,
+    callType: CallType.VIDEO,
+    callOrigin: (context?.callOrigin as CallOrigin | undefined) ?? CallOrigin.CHANNEL,
+    status: (context?.status as CallStatus | undefined) ?? CallStatus.ENDED,
+    roomLink: context?.roomLink || null,
+    startsAt: timestampOrUndefined(context?.startsAt) ?? null,
+    endsAt: timestampOrUndefined(context?.endsAt) ?? null,
+    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+    isRecurring: Boolean(context?.recurringSeriesId),
+    recurringSeriesId: context?.recurringSeriesId || null,
+    recurrenceRule: null,
+    instanceDate: null,
+    recordingEnabled: false,
+    recordingUrl: null,
+    recordingParticipants: '[]',
+    transcript: context?.hasTranscript ? 'available' : undefined,
+    aiSummary: null,
+    startedAt,
+    endedAt: timestampOrUndefined(context?.endedAt) ?? null,
+    lastActivityAt: timestampOrUndefined(context?.endedAt) || startedAt,
+    createdAt: startedAt,
+    updatedAt: now,
+    metadata: null,
+    callUpdatesChannel: null,
+    participantCount,
+    participantPreviewUserIds: JSON.stringify(
+      participantUserIds
+        .map((userId, index) =>
+          userId
+            ? {
+                userId,
+                hasJoined: isJoinedInvitationResponse(participantResponses[index] || ''),
+              }
+            : null,
+        )
+        .filter((entry): entry is { userId: string; hasJoined: boolean } => entry !== null),
+    ),
+    summaryTemplateId: null,
+    labels: [],
+    markedItems: [],
+    xyneManaged: false,
+    visibility: CallVisibility.PRIVATE,
+    participants: Array.from({ length: participantCount }, (_, index) => {
+      const userId = participantUserIds[index] || '';
+      const displayName = stripSearchHighlight(participantNames[index]);
+      const email = stripSearchHighlight(participantEmails[index]);
+      const isExternal = !userId;
+
+      return {
+        workspaceId,
+        id: `${callId}:${userId || `external-${index}`}`,
+        callId,
+        userId,
+        invitedBy: context?.createdByUserId || '',
+        invitedAt: startedAt,
+        response: (participantResponses[index] as InvitationResponse | undefined) || null,
+        meetingStatus: MeetingStatus.PENDING,
+        respondedAt: null,
+        joinedAt: null,
+        leftAt: null,
+        metadata: null,
+        displayName: displayName || null,
+        email: email || null,
+        isExternal,
+        ringStatus: null,
+      };
+    }),
+  } as Call;
 }
 
 const CallHistoryScreen = (): ReactElement => {
@@ -168,7 +307,7 @@ const CallHistoryScreen = (): ReactElement => {
     closeEditModal,
     showChannelCalls,
     setShowChannelCalls,
-  } = useCallHistory(user?.id);
+  } = useCallHistory(user?.id, { isCalendarView: viewMode === 'calendar' });
 
   const allUsers = useUsers();
   const activeUsers = useActiveUsers();
@@ -413,7 +552,20 @@ const CallHistoryScreen = (): ReactElement => {
   const callHistoryLoadStartTimeRef = useRef<number | null>(null);
   const [scrollContainer, setScrollContainer] = useState<HTMLDivElement | null>(null);
 
-  const showRecentCallsLoader = isLoading;
+  // Show a loader for at least 10 seconds (or until calls load) so the screen
+  // doesn't flash the empty state while the Zero query is still warming up.
+  const [showMinLoader, setShowMinLoader] = useState(true);
+  useEffect(() => {
+    if (!isLoading) {
+      setShowMinLoader(false);
+      return;
+    }
+    setShowMinLoader(true);
+    const timer = setTimeout(() => setShowMinLoader(false), 10000);
+    return () => clearTimeout(timer);
+  }, [isLoading]);
+
+  const showRecentCallsLoader = isLoading || (showMinLoader && (calls?.length ?? 0) === 0);
 
   const endedCallsCount = calls?.filter(c => c.status === CallStatus.ENDED).length ?? 0;
 
@@ -700,11 +852,15 @@ const CallHistoryScreen = (): ReactElement => {
   // call.labels stores Tag ids (no FK), not display text — resolve them once so
   // the dropdown shows real names. Every id is passed in, including generated
   // ones, since resolving is also what reveals the method.
-  const { resolveLabel: resolveCallLabel, resolveMethod: resolveCallLabelMethod } =
-    useResolvedRecordingLabels(availableCallLabels);
+  const {
+    resolveLabel: resolveCallLabel,
+    resolveMethod: resolveCallLabelMethod,
+    isResolved: isCallLabelResolved,
+  } = useResolvedRecordingLabels(availableCallLabels);
   const isManualCallLabel = useCallback(
-    (label: string): boolean => resolveCallLabelMethod(label) !== TagMethod.LLM,
-    [resolveCallLabelMethod],
+    (label: string): boolean =>
+      isCallLabelResolved(label) && resolveCallLabelMethod(label) !== TagMethod.LLM,
+    [isCallLabelResolved, resolveCallLabelMethod],
   );
   const manualCallLabels = useMemo(
     () =>
@@ -1220,11 +1376,12 @@ const CallHistoryScreen = (): ReactElement => {
                       }
                     }}
                     computeItemKey={(_, call) => call.id}
-                    itemContent={(_, call) => (
+                    itemContent={(i, call) => (
                       <div className='pb-3'>
                         <CallCard
                           call={call}
                           currentUserId={user?.id}
+                          isLastItem={i === displayRecentCalls.length - 1}
                           onCallClick={() => handleCallRowClick(call)}
                           onParticipantsClick={() => handleParticipantsClick(call)}
                           handleGotoTranscript={getGotoTranscriptHandler(call)}

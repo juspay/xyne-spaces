@@ -80,6 +80,27 @@ const DeactivatedDmArchiveBanner = (): ReactElement => {
   );
 };
 
+// Channel Tickets tab. Boards are sourced from the channel's PROJECT. A projectless
+// channel (projectId '' — projects are decoupled from channels) has no project to
+// source boards from, so render a graceful empty state (no board view, no ticket
+// creation) instead of the Kanban board.
+const ChannelTicketsTab = ({ channelId }: { channelId: string }): ReactElement => {
+  const channel = useChannel(channelId);
+  if (channel && !channel.projectId) {
+    return (
+      <div className='flex h-full flex-col items-center justify-center gap-1 p-8 text-center'>
+        <p className='text-sm font-medium text-foreground'>
+          No boards are configured for this channel
+        </p>
+        <p className='text-sm text-muted-foreground'>
+          Link this channel to a project to start creating and tracking tickets.
+        </p>
+      </div>
+    );
+  }
+  return <KanbanBoardScreen channelId={channelId} />;
+};
+
 const ConversationPanelV2 = ({
   channelId,
   previousChannelId,
@@ -89,11 +110,15 @@ const ConversationPanelV2 = ({
   showHeader = true,
   hideComposer = false,
   skipMarkAsRead = false,
+  suppressInputAutoFocus = false,
+  listLoadingFallback,
+  skipSubscription = false,
   conversationIds,
   onOpenThread,
   useLocalTabState = false,
   unreadsOnly,
   onThreadClick,
+  onTotalHeightChange,
 }: {
   channelId: string;
   previousChannelId: string | null;
@@ -109,12 +134,35 @@ const ConversationPanelV2 = ({
   // Used by read-only surfaces such as the Unreads inbox.
   hideComposer?: boolean;
   skipMarkAsRead?: boolean;
+  // Never take the keyboard on mount.
+  //
+  // The composer's autofocus is not just a focus: TipTap's focus command runs
+  // ProseMirror's `scrollRectIntoView`, which writes `scrollLeft` on every
+  // scrollable ancestor to reveal the caret. In a single-panel screen that
+  // ancestor is the page and the write is a no-op. Inside a Streams column it is
+  // the strip, and the write drags the whole stream sideways by however much of
+  // that column the viewport was clipping — hundreds of pixels, once per column,
+  // arriving whenever each channel happens to resolve.
+  //
+  // Streams mounts six of these at once and the user picked none of them, so
+  // there is nothing here for the keyboard to claim.
+  suppressInputAutoFocus?: boolean;
+  /**
+   * Placeholder for the message list's first load, passed straight through to
+   * `ChatListV4`. For hosts that already painted their own placeholder before
+   * this panel mounted — see `loadingFallback` there.
+   */
+  listLoadingFallback?: React.ReactNode;
+  // Skips the websocket channel subscription — messages render via Zero regardless.
+  skipSubscription?: boolean;
   // When true (e.g. rendered in the search-results pane, which owns its own `?tab=`
   // for the doc-type filter), keep the active tab in local state instead of the URL —
   // otherwise a foreign `tab=all` matches no conversation tab and blanks the body.
   useLocalTabState?: boolean;
   unreadsOnly?: boolean;
   onThreadClick?: (channelId: string, conversationId: string) => void;
+  // Reports the message list's real total content height (px).
+  onTotalHeightChange?: (height: number) => void;
 }): ReactElement => {
   const { baseRoute } = useRouteContext();
   const channel = useChannel(channelId);
@@ -124,7 +172,7 @@ const ConversationPanelV2 = ({
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
   const routerLocation = useLocation();
-  const skipInputAutoFocus = searchParams.get('nofocus') === '1';
+  const skipInputAutoFocus = suppressInputAutoFocus || searchParams.get('nofocus') === '1';
 
   // Strip the `nofocus` param from the URL after each channel navigation so it
   // doesn't persist on subsequent interactions (composing, tab switches).
@@ -210,7 +258,7 @@ const ConversationPanelV2 = ({
     skipMarkAsReadRef.current = skip;
   }, []);
 
-  useChannelSubscription(channelId, NO_CONVERSATION_IDS);
+  useChannelSubscription(skipSubscription ? undefined : channelId, NO_CONVERSATION_IDS);
   useScope('channel', !!channelId);
   useShortcutById('global.openCanvasTab', () => {
     handleTabChange('canvas');
@@ -280,6 +328,9 @@ const ConversationPanelV2 = ({
                 </div>
               ) : (
                 <ChatListV4
+                  {...(listLoadingFallback !== undefined && {
+                    loadingFallback: listLoadingFallback,
+                  })}
                   {...(urlConversationId && { linkedConversationId: urlConversationId })}
                   {...(urlCreatedAt && { linkedItemCreatedAt: { createdAt: urlCreatedAt } })}
                   {...(stateLinkedCutoffCreatedAt && {
@@ -287,13 +338,14 @@ const ConversationPanelV2 = ({
                   })}
                   cachedConversations={cachedConversations}
                   channelId={channelId}
-                  projectId={channel?.projectId}
+                  projectId={channel?.projectId ?? undefined}
                   channelScopeType={channel?.scopeType}
                   skipMarkAsReadRef={skipMarkAsReadRef}
                   {...(conversationIds && { conversationIds })}
                   {...(onOpenThread && { onOpenThread })}
                   unreadsOnly={unreadsOnly ?? false}
                   {...(onThreadClick && { onThreadClick })}
+                  {...(onTotalHeightChange && { onTotalHeightChange })}
                 />
               )}
               {hideComposer ? null : shouldShowJoinChannel ? (
@@ -323,7 +375,7 @@ const ConversationPanelV2 = ({
                 conversationId={conversationId}
               />
             ) : (
-              <KanbanBoardScreen channelId={channelId} />
+              <ChannelTicketsTab channelId={channelId} />
             ))}
           {tab === 'canvas' &&
             (canvasId ? <CanvasScreen canvasId={canvasId} /> : <CanvasTab channelId={channelId} />)}

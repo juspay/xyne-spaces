@@ -1,0 +1,234 @@
+global:
+  imageRegistry: ""
+  imagePullSecrets: []
+
+nameOverride: ""
+fullnameOverride: ""
+
+image:
+  registry: ghcr.io
+  repository: juspay/xyne-spaces-dashboard-edge
+  tag: ""
+  digest: ""
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+
+version: ""
+versionedName: false
+
+replicaCount: 2
+revisionHistoryLimit: 3
+strategy:
+  type: RollingUpdate
+  rollingUpdate:
+    maxSurge: 25%
+    maxUnavailable: 0
+
+command: []
+args: []
+
+containerPorts:
+  - name: http
+    containerPort: 8080
+    protocol: TCP
+
+service:
+  enabled: true
+  type: ClusterIP
+  annotations: {}
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+    - name: http-app
+      port: 8080
+      targetPort: http
+
+env:
+  LOG_LEVEL: info
+  CACHE_MAX_SIZE: 2g
+  CACHE_INACTIVE: 7d
+  CACHE_TTL: 30d
+  STORAGE_BACKEND: gcs
+  STORAGE_BUCKET: xyne-frontend-bundles
+  STORAGE_ENDPOINT: ""
+  STORAGE_AUTH: sdk
+  EDGE_RELOAD_INTERVAL: "5"
+  ENABLE_OTEL_METRICS: "false"
+  OTEL_BASE_URL: http://localhost:4318
+  OTEL_EXPORT_INTERVAL_MS: "60000"
+
+secretEnv: {}
+
+envFromSecrets: []
+envFromConfigMaps: []
+extraEnv: []
+
+startupProbe: {}
+livenessProbe:
+  httpGet:
+    path: /_edge/healthz
+    port: http
+  initialDelaySeconds: 10
+  periodSeconds: 10
+  timeoutSeconds: 3
+  failureThreshold: 3
+readinessProbe:
+  httpGet:
+    path: /_edge/ready
+    port: http
+  initialDelaySeconds: 5
+  periodSeconds: 10
+  timeoutSeconds: 3
+  failureThreshold: 3
+lifecycle: {}
+
+resources:
+  requests:
+    cpu: 250m
+    memory: 512Mi
+  limits:
+    memory: 1Gi
+
+podSecurityContext:
+  fsGroup: 1001
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 1001
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
+  seccompProfile:
+    type: RuntimeDefault
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+  automount: false
+
+commonLabels: {}
+podLabels: {}
+podAnnotations: {}
+deploymentAnnotations: {}
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+podAntiAffinityPreset: soft
+topologySpreadConstraints: []
+priorityClassName: ""
+runtimeClassName: ""
+terminationGracePeriodSeconds: 30
+hostAliases: []
+dnsPolicy: ""
+dnsConfig: {}
+
+initContainers: []
+sidecars: []
+
+volumes:
+  - name: cache
+    emptyDir:
+      sizeLimit: 3Gi
+  - name: rules
+    configMap:
+      name: '{{ include "xyne-common.fullname" . }}-rules'
+volumeMounts:
+  - name: cache
+    mountPath: /var/cache/edge
+  - name: rules
+    mountPath: /etc/edge/rules
+    readOnly: true
+
+persistence:
+  enabled: false
+  existingClaim: ""
+  storageClass: ""
+  accessModes:
+    - ReadWriteOnce
+  size: 10Gi
+  mountPath: /data
+  subPath: ""
+  annotations: {}
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 4
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 80
+  metrics: []
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 0
+      selectPolicy: Max
+      policies:
+        - type: Pods
+          value: 4
+          periodSeconds: 15
+        - type: Percent
+          value: 100
+          periodSeconds: 15
+    scaleDown:
+      selectPolicy: Max
+      policies:
+        - type: Percent
+          value: 5
+          periodSeconds: 120
+
+pdb:
+  enabled: true
+  minAvailable: 1
+  unhealthyPodEvictionPolicy: ""
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: spaces.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+istio:
+  virtualService:
+    enabled: false
+    hosts: []
+    gateways: []
+    timeout: 50s
+    retries: {}
+    http: []
+  destinationRule:
+    enabled: false
+    exportTo: []
+    trafficPolicy: {}
+    subsets: []
+
+networkPolicy:
+  enabled: false
+  policyTypes:
+    - Ingress
+  ingress: []
+  egress: []
+
+serviceMonitor:
+  enabled: false
+  namespace: ""
+  labels: {}
+  port: http
+  path: /metrics
+  interval: 30s
+  scrapeTimeout: ""
+
+extraObjects: []
+
+rules:
+  rules:
+    - id: default
+      match:
+        path_prefix: /
+      lane: main

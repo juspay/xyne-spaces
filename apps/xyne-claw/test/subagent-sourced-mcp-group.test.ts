@@ -135,15 +135,15 @@ describe("empty tool catalog meta tools", () => {
     expect(text).toContain("paymentlinks, payouts");
   });
 
-  it("mentions the same note from list-tools", async () => {
+  it("mentions the same note from search-tools", async () => {
     const metaTools = buildFastModeMetaTools({
       catalog: [],
       controller: {},
       emptyCatalogNote: "Configured subagents: paymentlinks — they resolved to 0 tools.",
     });
-    const listTools = metaTools.find((t) => t.name === "list-tools")!;
+    const searchTools = metaTools.find((t) => t.name === "search-tools")!;
 
-    const text = await runTool(listTools, {});
+    const text = await runTool(searchTools, {});
 
     expect(text).toContain("The tool catalog is empty.");
     expect(text).toContain("paymentlinks");

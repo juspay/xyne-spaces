@@ -1,0 +1,17 @@
+apiVersion: v2
+name: xyne-dashboard-external
+description: Xyne Spaces external dashboard (public call-join SPA) - static bundle served by nginx under /external
+type: application
+version: 0.1.0
+appVersion: "1.349.0"
+keywords:
+  - xyne
+  - dashboard
+  - frontend
+home: https://github.com/juspay/xyne-spaces
+sources:
+  - https://github.com/juspay/xyne-spaces/tree/main/apps/dashboard-external
+dependencies:
+  - name: xyne-common
+    version: 0.1.0
+    repository: file://../xyne-common

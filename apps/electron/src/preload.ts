@@ -186,6 +186,12 @@ const electronAPI = {
     return () => ipcRenderer.removeListener('recording:stop-for-teardown', listener);
   },
 
+  onCallStopForTeardown: (callback: () => void) => {
+    const listener = () => callback();
+    ipcRenderer.on('call:stop-for-teardown', listener);
+    return () => ipcRenderer.removeListener('call:stop-for-teardown', listener);
+  },
+
   onRecordingResumeRequest: (callback: () => void) => {
     const listener = () => callback();
     ipcRenderer.on('recording:resume-requested', listener);
@@ -247,6 +253,11 @@ const electronAPI = {
   getBrowserSettings: () => ipcRenderer.invoke('get-browser-settings'),
   setBrowserSettings: (settings: any) => ipcRenderer.invoke('set-browser-settings', settings),
   clearSiteData: () => ipcRenderer.invoke('clear-site-data'),
+  captureAppWindow: (maxWidth?: number) => ipcRenderer.invoke('app-window:capture', maxWidth),
+  readClipboardText: () => ipcRenderer.invoke('clipboard:read-text'),
+  writeClipboardText: (text: string) => ipcRenderer.invoke('clipboard:write-text', text),
+  browserImportAvailable: () => ipcRenderer.invoke('browser-import:available'),
+  importChromeCookies: () => ipcRenderer.invoke('browser-import:chrome'),
 
   // File Management APIs
   openDownloadsFolder: () => ipcRenderer.invoke('open-downloads-folder'),
@@ -508,6 +519,23 @@ const electronAPI = {
     disconnect: () => ipcRenderer.invoke('local-harness:disconnect'),
     setProviderEnabled: (provider: string, enabled: boolean) =>
       ipcRenderer.invoke('local-harness:set-provider', provider, enabled),
+    pickFolder: (): Promise<{ path: string; name: string; branch?: string; remote?: string } | null> =>
+      ipcRenderer.invoke('local-harness:pick-folder'),
+    listFolders: (): Promise<Array<{ path: string; name: string }>> =>
+      ipcRenderer.invoke('local-harness:list-folders'),
+    onPageToolRequest: (
+      callback: (req: { id: string; toolName: string; args: Record<string, unknown> }) => void,
+    ) => {
+      const listener = (
+        _event: unknown,
+        req: { id: string; toolName: string; args: Record<string, unknown> },
+      ) => callback(req);
+      ipcRenderer.on('local-harness:page-tool', listener);
+      return () => ipcRenderer.removeListener('local-harness:page-tool', listener);
+    },
+    sendPageToolResult: (id: string, result: { ok: boolean; content: string; image?: { data: string; mimeType: string } }) => {
+      ipcRenderer.send('local-harness:page-tool-result', { id, result });
+    },
   },
 };
 

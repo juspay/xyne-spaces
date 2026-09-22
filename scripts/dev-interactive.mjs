@@ -100,7 +100,8 @@ const coreIds = APPS.filter((app) => app.core).map((app) => app.id);
 // containers and this lane needs none. See docs/sdlc-fast-lane.md.
 const sdlcIds = APPS.filter((app) => app.feature === "sdlc").map((app) => app.id);
 
-const commandFor = (app) => `pnpm --filter ${app.filter} ${app.script}`;
+const FILE_LIMIT_PREFIX = process.platform === "win32" ? "" : "ulimit -n 65536; ";
+const commandFor = (app) => `${FILE_LIMIT_PREFIX}pnpm --filter ${app.filter} ${app.script}`;
 
 export function parseAppSpec(value) {
   const trimmed = (value ?? "").trim();

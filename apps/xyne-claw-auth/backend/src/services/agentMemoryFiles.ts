@@ -1,7 +1,7 @@
 /**
  * Agent memory files — deterministic, file-based memory (Memory v2).
  *
- * Generic across agents: scoped by (agentSlug, userId, name). Unlike the
+ * Generic across agents: scoped by (orgId, agentSlug, userId, name). Unlike the
  * Hindsight-backed candidate memories (semantic recall), these are NAMED
  * documents fetched by key. The Digital Twin uses them for an always-loaded
  * persona (soul.md, people.md, projects.md, …) so it works well with zero tool
@@ -12,9 +12,13 @@
  *     blow the context window;
  *   - at most MAX_LOADED_FILES (3) files per (agent, user) may be loadInPrompt.
  *
- * userId NULL = a file shared across all users of that agent. Per-user rows are
- * unique via the DB constraint; shared (NULL) uniqueness is enforced here in
- * upsert (findFirst + create/update), since Postgres treats NULLs as distinct.
+ * Every file names a tenant. A user id implies one, so per-user call sites pass
+ * the id alone; a shared file (`{ orgId }`) has no owner to inherit from and
+ * must say which org it belongs to — see FileOwner.
+ *
+ * Per-user rows are unique via the DB constraint; shared uniqueness is enforced
+ * here in upsert (findFirst + create/update), since Postgres treats NULLs as
+ * distinct and every shared row has a NULL userId.
  */
 
 import type { UserMemorySubsystem } from "xyne-claw-shared";
@@ -32,8 +36,23 @@ export const MAX_LOADED_FILES = 3;
 /** The Digital Twin's agent slug (matches DIGITAL_TWIN_SLUG in xyne-claw). */
 export const TWIN_AGENT_SLUG = "digital-twin";
 
+/**
+ * Who a memory file belongs to.
+ *
+ * A user id is enough by itself: a user belongs to exactly one org, so the
+ * tenant travels with them and reads never have to name it. A file shared
+ * across an agent's users has no owner to inherit from, and agent slugs repeat
+ * across orgs by design, so that case has to state the org.
+ *
+ * A union rather than a nullable id on purpose — there is no way to address a
+ * shared file without answering whose it is, and the compiler asks at every
+ * call site instead of the question being forgotten at one of them.
+ */
+export type FileOwner = string | { orgId: string };
+
 export interface AgentMemoryFileDTO {
   id: string;
+  orgId: string;
   agentSlug: string;
   userId: string | null;
   name: string;
@@ -139,12 +158,32 @@ export const DEFAULT_TWIN_FILES: readonly DefaultFileSpec[] = [
   },
 ];
 
+function isUserOwned(owner: FileOwner): owner is string {
+  return typeof owner === "string";
+}
+
+/** Row selector for an owner. A user id identifies its rows on its own; shared
+ *  rows are identified by the org, which is why the column exists. */
+function ownerWhere(owner: FileOwner): { userId: string } | { userId: null; orgId: string } {
+  return isUserOwned(owner) ? { userId: owner } : { userId: null, orgId: owner.orgId };
+}
+
+/** Tenant + owner for a new row. The user lookup happens on create only — reads
+ *  are keyed on the user id itself, so the hot path never pays for it. */
+async function newRowScope(owner: FileOwner): Promise<{ orgId: string; userId: string | null }> {
+  if (!isUserOwned(owner)) return { orgId: owner.orgId, userId: null };
+  const user = await prisma.user.findUnique({ where: { id: owner }, select: { orgId: true } });
+  if (!user) throw new Error(`cannot create a memory file for unknown user ${owner}`);
+  return { orgId: user.orgId, userId: owner };
+}
+
 function clampContent(content: string): string {
   return (content ?? "").slice(0, MAX_FILE_CHARS);
 }
 
 interface FileRow {
   id: string;
+  orgId: string;
   agentSlug: string;
   userId: string | null;
   name: string;
@@ -158,6 +197,7 @@ interface FileRow {
 function toDTO(row: FileRow): AgentMemoryFileDTO {
   return {
     id: row.id,
+    orgId: row.orgId,
     agentSlug: row.agentSlug,
     userId: row.userId,
     name: row.name,
@@ -184,10 +224,11 @@ export async function ensureDefaultFiles(
   const missing = defaults.filter((d) => !have.has(d.name));
   if (missing.length === 0) return;
 
+  const scope = await newRowScope(userId);
   await prisma.agentMemoryFile.createMany({
     data: missing.map((d) => ({
+      ...scope,
       agentSlug,
-      userId,
       name: d.name,
       content: clampContent(d.seed),
       loadInPrompt: d.loadInPrompt,
@@ -199,30 +240,30 @@ export async function ensureDefaultFiles(
   logger.info("[agent-memory-files] seeded defaults", { agentSlug, userId, seeded: missing.map((m) => m.name) });
 }
 
-export async function listFiles(agentSlug: string, userId: string | null): Promise<AgentMemoryFileDTO[]> {
+export async function listFiles(agentSlug: string, owner: FileOwner): Promise<AgentMemoryFileDTO[]> {
   const rows = (await prisma.agentMemoryFile.findMany({
-    where: { agentSlug, userId: userId ?? null },
+    where: { agentSlug, ...ownerWhere(owner) },
     orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
   })) as FileRow[];
   return rows.map(toDTO);
 }
 
-async function getFileRow(agentSlug: string, userId: string | null, name: string): Promise<FileRow | null> {
+async function getFileRow(agentSlug: string, owner: FileOwner, name: string): Promise<FileRow | null> {
   return (await prisma.agentMemoryFile.findFirst({
-    where: { agentSlug, userId: userId ?? null, name },
+    where: { agentSlug, ...ownerWhere(owner), name },
   })) as FileRow | null;
 }
 
-export async function getFile(agentSlug: string, userId: string | null, name: string): Promise<AgentMemoryFileDTO | null> {
-  const row = await getFileRow(agentSlug, userId, name);
+export async function getFile(agentSlug: string, owner: FileOwner, name: string): Promise<AgentMemoryFileDTO | null> {
+  const row = await getFileRow(agentSlug, owner, name);
   return row ? toDTO(row) : null;
 }
 
-/** Create or replace a file's content (findFirst + create/update so a NULL
- *  userId is handled uniformly). Content is clamped to MAX_FILE_CHARS. */
+/** Create or replace a file's content (findFirst + create/update so a shared
+ *  file's NULL userId is handled uniformly). Clamped to MAX_FILE_CHARS. */
 export async function upsertFile(args: {
   agentSlug: string;
-  userId: string | null;
+  owner: FileOwner;
   name: string;
   content: string;
   updatedBy: string;
@@ -230,9 +271,9 @@ export async function upsertFile(args: {
   loadInPrompt?: boolean;
   sortOrder?: number;
 }): Promise<AgentMemoryFileDTO> {
-  const { agentSlug, userId, name, updatedBy } = args;
+  const { agentSlug, owner, name, updatedBy } = args;
   const content = clampContent(args.content);
-  const existing = await getFileRow(agentSlug, userId, name);
+  const existing = await getFileRow(agentSlug, owner, name);
   if (existing) {
     const updated = (await prisma.agentMemoryFile.update({
       where: { id: existing.id },
@@ -242,8 +283,8 @@ export async function upsertFile(args: {
   }
   const created = (await prisma.agentMemoryFile.create({
     data: {
+      ...(await newRowScope(owner)),
       agentSlug,
-      userId,
       name,
       content,
       updatedBy,
@@ -257,16 +298,16 @@ export async function upsertFile(args: {
 /** Toggle whether a file is injected into the prompt. Enforces MAX_LOADED_FILES. */
 export async function setLoadInPrompt(
   agentSlug: string,
-  userId: string | null,
+  owner: FileOwner,
   name: string,
   load: boolean,
 ): Promise<AgentMemoryFileDTO> {
-  const row = await getFileRow(agentSlug, userId, name);
+  const row = await getFileRow(agentSlug, owner, name);
   if (!row) throw new Error("not-found");
 
   if (load && !row.loadInPrompt) {
     const loadedCount = await prisma.agentMemoryFile.count({
-      where: { agentSlug, userId: userId ?? null, loadInPrompt: true },
+      where: { agentSlug, ...ownerWhere(owner), loadInPrompt: true },
     });
     if (loadedCount >= MAX_LOADED_FILES) {
       throw new MaxLoadedFilesError(
@@ -282,8 +323,8 @@ export async function setLoadInPrompt(
   return toDTO(updated);
 }
 
-export async function deleteFile(agentSlug: string, userId: string | null, name: string): Promise<boolean> {
-  const row = await getFileRow(agentSlug, userId, name);
+export async function deleteFile(agentSlug: string, owner: FileOwner, name: string): Promise<boolean> {
+  const row = await getFileRow(agentSlug, owner, name);
   if (!row) return false;
   await prisma.agentMemoryFile.delete({ where: { id: row.id } });
   return true;
@@ -292,9 +333,9 @@ export async function deleteFile(agentSlug: string, userId: string | null, name:
 /** The files to inject into the agent's system prompt (loadInPrompt), ordered,
  *  capped at MAX_LOADED_FILES, each already ≤ MAX_FILE_CHARS. This is what claw
  *  fetches at run start. Skips empty files (nothing useful to inject). */
-export async function getPromptFiles(agentSlug: string, userId: string | null): Promise<AgentMemoryFileDTO[]> {
+export async function getPromptFiles(agentSlug: string, owner: FileOwner): Promise<AgentMemoryFileDTO[]> {
   const rows = (await prisma.agentMemoryFile.findMany({
-    where: { agentSlug, userId: userId ?? null, loadInPrompt: true },
+    where: { agentSlug, ...ownerWhere(owner), loadInPrompt: true },
     orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
     take: MAX_LOADED_FILES,
   })) as FileRow[];

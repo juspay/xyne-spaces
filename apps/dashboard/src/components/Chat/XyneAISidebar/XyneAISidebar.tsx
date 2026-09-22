@@ -147,10 +147,34 @@ interface XyneAISidebarProps {
   initialQuery?: string | undefined;
   autoSendNonce?: number;
   researchContext?: XyneAIResearchContext | null;
+  // Seed text that is *not* sent — bump seedNonce to place it in the composer and
+  // leave it there to be edited. For hosts that hand the user a prepared question
+  // rather than a finished one.
+  seedQuery?: string;
+  seedNonce?: number;
   // Reports whether the active conversation is streaming, so an embedding caller can mute its own controls.
   onStreamingChange?: (isStreaming: boolean) => void;
   // Reports the latest completed bot message's final text (no reasoning), for embedding callers.
   onFinalResponse?: (content: string) => void;
+  // Drops the tilted suggestion cards from the empty state, leaving the heading.
+  // Set by hosts that embed this in a narrow slot (e.g. a Streams column).
+  hideEmptyStateSuggestions?: boolean;
+  // Drops the header row entirely. For hosts whose own chrome already carries a
+  // title and a close, where this one is a second bar under the first however
+  // little it contains.
+  hideHeader?: boolean;
+  /**
+   * Never take the keyboard on mount.
+   *
+   * The effect below focuses the composer as soon as the editor exists. A
+   * programmatic focus makes the browser reveal the caret by scrolling every
+   * scrollable ancestor — harmless in a sidebar that owns the screen, and not
+   * harmless in a Streams column, where the ancestor is the horizontal strip and
+   * the reveal drags the whole stream sideways by whatever the viewport was
+   * clipping off that column. Several of these mount at once and the reader
+   * asked none of them for a composer.
+   */
+  suppressInputAutoFocus?: boolean;
   /** Analytics `source` for XYNE_AI_OPENED when this instance is embedded
    *  directly (not opened through xyneAIActor OPEN, which carries its own). */
   trackSource?: string;
@@ -185,8 +209,13 @@ const XyneAISidebar = ({
   initialQuery,
   autoSendNonce,
   researchContext,
+  seedQuery,
+  seedNonce,
   onStreamingChange,
   onFinalResponse,
+  hideEmptyStateSuggestions = false,
+  hideHeader = false,
+  suppressInputAutoFocus = false,
   trackSource: trackSourceProp,
 }: XyneAISidebarProps): ReactElement => {
   const isFullscreen = variant === 'fullscreen';
@@ -302,6 +331,19 @@ const XyneAISidebar = ({
     autoSendPendingQueryRef.current = initialQuery;
     setInputValue(initialQuery);
   }, [autoSendNonce, initialQuery]);
+  // Seed *without* sending, which `autoSendNonce` above deliberately cannot do —
+  // it exists for callers that already know the whole question. A host that hands
+  // over a starting point instead needs the text in the box and the cursor after
+  // it, and firing a model call on the caller's behalf would be the wrong trade:
+  // the gestures that produce a seed (dropping a thread onto an Ask AI column)
+  // are far cheaper than the request they would otherwise trigger.
+  const lastSeedNonceRef = useRef<number | undefined>(undefined);
+  useEffect(() => {
+    if (seedNonce === undefined || seedNonce === lastSeedNonceRef.current) return;
+    if (!seedQuery?.trim()) return;
+    lastSeedNonceRef.current = seedNonce;
+    setInputValue(seedQuery);
+  }, [seedNonce, seedQuery]);
   const [webSearchEnabled, setWebSearchEnabled] = useState(false);
   const [deepResearchEnabled, setDeepResearchEnabled] = useState(false);
   const [createCanvasEnabled, setCreateCanvasEnabled] = useState(false);
@@ -335,7 +377,6 @@ const XyneAISidebar = ({
     setSelectedCanvases(initialContextSelections.canvases);
     setSelectedTickets(initialContextSelections.tickets ?? []);
     setSelectedRecordings(initialContextSelections.recordings);
-    setSelectedTranscripts(initialContextSelections.calls ?? []);
   }, [initialContextSelections, contextOpenNonce]);
   // Track the original channel where the current conversation was started
   // This prevents duplicate history entries when user switches channels during a query
@@ -465,7 +506,7 @@ const XyneAISidebar = ({
   // Find the ProseMirror editor element and focus it once it exists.
   // Retry via rAF because editor mount timing can vary across renders/routes.
   useEffect(() => {
-    if (isMobile) return;
+    if (isMobile || suppressInputAutoFocus) return;
     let rafId: number | null = null;
     let attempts = 0;
 
@@ -489,7 +530,7 @@ const XyneAISidebar = ({
         cancelAnimationFrame(rafId);
       }
     };
-  }, [dragAndDropAreaRef, isMobile]);
+  }, [dragAndDropAreaRef, isMobile, suppressInputAutoFocus]);
 
   // Update activeThreadInfo when threadInfo prop changes
   const prevThreadConversationIdRef = useRef(threadInfo?.conversationId);
@@ -843,15 +884,32 @@ const XyneAISidebar = ({
     }
   }, [browserContext, webSearchAccessible, webSearchEnabled]);
 
+  // KB scopes shared by the sent attachedContext and the richer display set
+  // below. Every picker (composer "+" and the KB file viewer's "Ask AI") now
+  // stores CollectionItem.id (cuid) as fileScopes[].id — the id attached_context
+  // 'file' items carry, same as collections/folders — so files ride directly
+  // here too; no server-side id-shape resolution needed for this call site.
+  const kbContextSelections = {
+    channels: selectedChannels,
+    tickets: selectedTickets,
+    canvases: selectedCanvases,
+    transcripts: selectedTranscripts,
+    recordings: selectedRecordings,
+    localFolders: [],
+    folders: folderScopes,
+    files: fileScopes,
+    collections: selectedCollectionIds
+      .map(id => collectionsList.find(c => c.id === id))
+      .filter((c): c is CollectionSummary => c !== undefined)
+      .map(c => ({ id: c.id, name: c.name })),
+  };
+
   // Use the streaming hook with selected channel IDs, research context, and active thread info
   const { submitQuery, abortCurrentRequest } = useXyneAIStream({
     surface: 'panel',
     contextType: xyneAIActor.getSnapshot().context.contextType,
     channelIds: selectedChannels.map(ch => ch.id),
     activities: selectedActivities,
-    collectionIds: selectedCollectionIds ?? [],
-    fileIds: fileScopes.map(f => f.id),
-    folderIds: folderScopes.map(f => f.id),
     conversationId,
     streamSessionKey: streamThreadKey,
     threadConversationId: activeThreadInfo?.conversationId,
@@ -873,16 +931,18 @@ const XyneAISidebar = ({
     ticketIds: selectedTickets.map(t => t.id),
     canvasIds: selectedCanvases.map(c => c.id),
     callIds: [...selectedTranscripts.map(t => t.id), ...selectedRecordings.map(r => r.id)],
-    attachedContext: toAttachedContext({
-      channels: selectedChannels,
-      tickets: selectedTickets,
-      canvases: selectedCanvases,
-      transcripts: selectedTranscripts,
-      recordings: selectedRecordings,
-    }),
+    attachedContext: toAttachedContext(kbContextSelections),
+    // Same content as attachedContext now that files ride in kbContextSelections
+    // directly — kept as a separate field for the optimistic message pill so it
+    // matches what reload shows once the backend persists the sent context.
+    displayAttachedContext: toAttachedContext(kbContextSelections),
     agentSlug: effectiveAgentSlug,
     model: selectedModel,
-    modelProvider: selectedModel ? (agentModelsData?.pinProvider ?? 'litellm') : null,
+    modelProvider: !selectedModel
+      ? null
+      : selectedModel.startsWith('local-harness:')
+        ? 'local-harness'
+        : (agentModelsData?.pinProvider ?? 'litellm'),
     thinkingLevel,
   });
 
@@ -2035,6 +2095,7 @@ const XyneAISidebar = ({
     canvases: selectedCanvases,
     transcripts: selectedTranscripts,
     recordings: selectedRecordings,
+    localFolders: [],
   };
 
   const sharedInputSectionProps = {
@@ -2202,7 +2263,7 @@ const XyneAISidebar = ({
           <div ref={sidebarContentRef} className='flex h-full min-h-0 flex-col'>
             {aiOnboarding.isActive ? (
               <XyneAIOnboardingHeader onClose={completeOnboarding} />
-            ) : isFullscreen && messages.length === 0 ? null : (
+            ) : hideHeader ? null : isFullscreen && messages.length === 0 ? null : (
               <XyneAIHeader
                 onNewChat={handleNewChat}
                 onShowHistory={() => setShowHistorySidebar(true)}
@@ -2351,7 +2412,7 @@ const XyneAISidebar = ({
                       </div>
                     </div>
                   ) : (
-                    <XyneAIEmptyState />
+                    <XyneAIEmptyState hideSuggestions={hideEmptyStateSuggestions} />
                   )
                 ) : (
                   <div className={cn(isFullscreen ? 'flex justify-center' : '')}>

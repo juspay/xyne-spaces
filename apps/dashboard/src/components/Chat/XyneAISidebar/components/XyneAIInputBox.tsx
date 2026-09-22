@@ -530,10 +530,15 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
       // CollectionItem has TWO ids:
       //   • `id`     — the row id (cuid). Claw-auth stores THIS in
       //                AgentCollection.fileId when the user picks a file in
-      //                the KB picker (see xyne-claw-auth/.../KnowledgeBasePicker.tsx).
-      //   • `fileId` — the stable UUID across versions. The dashboard's
-      //                fileScope / Vespa lookup uses this downstream.
-      // We need both: `rowId` for grant matching, `fileId` for downstream.
+      //                the KB picker (see xyne-claw-auth/.../KnowledgeBasePicker.tsx),
+      //                and it's the id attached_context 'file' items carry —
+      //                see toAttachedContext in ContextPickerPanel.tsx.
+      //   • `fileId` — the stable UUID across versions. Equals the Vespa docId
+      //                (see treeTypes.ts) and is used for content-fetch calls
+      //                like CitationDocsPanel's /collections/items/:fileId/download.
+      // We need both: `rowId` for grant matching + as the id fileScopes stores
+      // (so it can go straight into attached_context), `fileId` only for grant
+      // filtering below.
       const all = (currentFolderItems ?? [])
         .map(it => ({
           rowId: (it as { id?: string }).id ?? '',
@@ -541,18 +546,18 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
           name: (it as { name: string }).name,
         }))
         .filter(it => it.fileId && (!fileQuery || it.name.toLowerCase().includes(fileQuery)));
-      if (!hasAgentGating) return all.map(({ fileId, name }) => ({ fileId, name }));
+      if (!hasAgentGating) return all.map(({ rowId, name }) => ({ rowId, name }));
       // Whole-grant coverage of the current folder (or any ancestor) lets
       // every file pass through.
       if (folderCoveredByWholeGrant(currentFolderId)) {
-        return all.map(({ fileId, name }) => ({ fileId, name }));
+        return all.map(({ rowId, name }) => ({ rowId, name }));
       }
       const allowedRowIds = new Set(
         grantsForCurrentRoot.filter(g => g.fileId !== null).map(g => g.fileId as string),
       );
       return all
         .filter(it => allowedRowIds.has(it.rowId))
-        .map(({ fileId, name }) => ({ fileId, name }));
+        .map(({ rowId, name }) => ({ rowId, name }));
     }, [
       currentFolderItems,
       fileQuery,
@@ -612,12 +617,12 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
     // file, ensure its (root) collection is selected so the KB tool stays enabled
     // + the collection filter applies.
     const handleToggleFile = useCallback(
-      (file: { fileId: string; name: string }) => {
-        const isSelected = fileScopes.some(f => f.id === file.fileId);
+      (file: { rowId: string; name: string }) => {
+        const isSelected = fileScopes.some(f => f.id === file.rowId);
         onFileScopesChange?.(
           isSelected
-            ? fileScopes.filter(f => f.id !== file.fileId)
-            : [...fileScopes, { id: file.fileId, name: file.name }],
+            ? fileScopes.filter(f => f.id !== file.rowId)
+            : [...fileScopes, { id: file.rowId, name: file.name }],
         );
         if (!isSelected) {
           // Same rationale as handleCollectionSingleClick: explicit file pick is
@@ -1639,6 +1644,7 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
       canvases: selectedCanvases,
       transcripts: selectedTranscripts,
       recordings: selectedRecordings,
+      localFolders: [],
     });
 
     const handlePickerToggleChannel = (channel: Channel, displayName: string): void => {
@@ -1660,6 +1666,45 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
         ];
       }
       onContextSelectionsChange?.(next);
+    };
+
+    /**
+     * Fold a whole list of channels into the selection in one push.
+     *
+     * Not a loop over `handlePickerToggleChannel`: that reads `selectedChannels`
+     * from the render it was created in, so every iteration would start from the
+     * same state and the last write would win — attaching one channel out of N.
+     * Building the array once and pushing it once is the only correct shape while
+     * the selection lives above this component.
+     *
+     * The 5-channel cap is applied to the combined list, and a list that overruns
+     * it attaches what fits rather than failing whole — the button says "attach
+     * all 5 from this stream", so attaching four of them is the honest outcome.
+     */
+    const handlePickerAttachChannels = (
+      items: readonly { channel: Channel; displayName: string }[],
+    ): void => {
+      const next = currentSelections();
+      const have = new Set(selectedChannels.map(c => c.id));
+      const room = 5 - selectedChannels.length;
+      if (room <= 0) {
+        toast.error('Maximum 5 channels can be selected', { duration: 2000 });
+        return;
+      }
+      const additions = items
+        .filter(({ channel }) => !have.has(channel.id))
+        .slice(0, room)
+        .map(({ channel, displayName }) => ({
+          id: channel.id,
+          name: displayName,
+          isPrivate: channel.visibility === ChannelVisibility.PRIVATE,
+        }));
+      if (additions.length === 0) return;
+      next.channels = [...selectedChannels, ...additions];
+      onContextSelectionsChange?.(next);
+      if (additions.length < items.length) {
+        toast.error('Maximum 5 channels can be selected', { duration: 2000 });
+      }
     };
 
     const handlePickerToggleResult = (result: DisplaySearchResult, tab: TabType): void => {
@@ -1747,6 +1792,7 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
           showContextPicker={showContextPicker}
           onCloseContextPicker={closeContextPicker}
           onPickerToggleChannel={handlePickerToggleChannel}
+          onPickerAttachChannels={handlePickerAttachChannels}
           onPickerToggleResult={handlePickerToggleResult}
           threadInfo={activeThreadInfo}
           onThreadClick={handleThreadPillClick}
@@ -2073,10 +2119,10 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
                       );
                     })}
                     {currentFiles.map(file => {
-                      const isSelected = fileScopes.some(f => f.id === file.fileId);
+                      const isSelected = fileScopes.some(f => f.id === file.rowId);
                       return (
                         <button
-                          key={file.fileId}
+                          key={file.rowId}
                           type='button'
                           onClick={() => handleToggleFile(file)}
                           className={`w-full px-3 py-2 text-left text-sm flex items-center gap-2 hover:bg-accent ${
@@ -2084,7 +2130,7 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
                           }`}
                           data-track-category='XyneAI'
                           data-track-name='SELECT_FILE_SCOPE'
-                          data-track-metadata={JSON.stringify({ fileId: file.fileId })}
+                          data-track-metadata={JSON.stringify({ fileId: file.rowId })}
                         >
                           <FileText className='w-4 h-4 text-claw-ai-fg flex-shrink-0' />
                           <span className='flex-1 truncate'>{file.name}</span>

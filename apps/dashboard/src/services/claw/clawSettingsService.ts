@@ -106,6 +106,26 @@ export async function pollCopilotGitHubLogin(userId: string): Promise<{ status: 
   return data.data;
 }
 
+export type CredentialHealthStatus = 'ok' | 'invalid' | 'model-unavailable' | 'unknown' | 'missing';
+
+export interface CredentialHealth {
+  provider: string;
+  status: CredentialHealthStatus;
+  message?: string;
+  models?: number;
+}
+
+export async function verifyProviderCredentialForUser(
+  userId: string,
+  provider: string,
+): Promise<CredentialHealth> {
+  const data = await clawRequest<{ success: boolean; data: CredentialHealth }>(
+    `/api/v1/settings/provider-credentials/${encodeURIComponent(provider)}/verify`,
+    { ...withUser(userId), method: 'POST' },
+  );
+  return data.data;
+}
+
 export async function listCopilotModelsForUser(userId: string): Promise<ProviderModelOption[]> {
   const data = await clawRequest<{ success: boolean; data: ProviderModelOption[] }>(
     '/api/v1/settings/copilot/models',

@@ -2,7 +2,7 @@ import { NextFunction, Request, Response } from 'express';
 import { Ticket, MessageAttachment } from '@prisma/client';
 import { currentWorkspaceId, withWorkspaceScope } from '@/database/tenant/context';
 import { PrismaClientKnownRequestError } from '@prisma/client/runtime/library';
-import { TicketRepository } from '../database/repositories/ticketRepository';
+import { TicketRepository, emitTicketCreated } from '../database/repositories/ticketRepository';
 import { ConversationRepository } from '../database/repositories/conversationRepository';
 import { BoardRepository } from '../database/repositories/boardRepository';
 import { ResourceRepository } from '../database/repositories/resources';
@@ -375,6 +375,10 @@ export class TicketController {
       void maybeCreateEntryApprovalRequest(ticket.id, createdBy, ticket.stageName);
     }
 
+    // Automations re-read the ticket on their own connection, so the event must
+    // not be published before the transaction above commits.
+    void emitTicketCreated(ticket, undefined, createdBy);
+
     ticketDuplicateService.persistDuplicateReferences({
       ticketId: ticket.id,
       ticketCreatedBy: ticket.createdBy,
@@ -687,25 +691,6 @@ export class TicketController {
             res.status(403).json({
               error: 'Release repositories must be release boards in your workspace and belong to one project.',
             });
-            return;
-          }
-        }
-      }
-
-      // Unlimited nesting is reserved for FLOW run graphs. Normal boards keep
-      // the existing one-level sub-ticket contract.
-      if (parentTicketId) {
-        const parent = await prisma.ticket.findUnique({
-          where: { id: parentTicketId },
-          select: { board: { select: { boardType: true } } },
-        });
-        if (parent?.board.boardType !== BoardType.FLOW) {
-          const parentAsSubTicket = await prisma.subTicket.findFirst({
-            where: { mappedTicketId: parentTicketId },
-            select: { id: true },
-          });
-          if (parentAsSubTicket) {
-            res.status(400).json({ error: 'Cannot create a sub-ticket under a sub-ticket.' });
             return;
           }
         }
@@ -1305,6 +1290,10 @@ export class TicketController {
       if (ticket.stageName) {
         void maybeCreateEntryApprovalRequest(ticket.id, ticket.createdBy, ticket.stageName);
       }
+
+      // Automations re-read the ticket on their own connection, so the event must
+      // not be published before the transaction above commits.
+      void emitTicketCreated(ticket, formFieldChangesForEmit, ticket.createdBy);
 
       if (sourceConversationId) {
         void activityService.fillSdlcOwner(sourceConversationId, validatedConversation.channelId);

@@ -35,8 +35,10 @@ export type KanbanCountsViewMode = 'project' | 'board' | 'my-tickets';
 export type KanbanCountsGroupBy =
   | 'none'
   | 'assignee'
+  | 'createdBy'
   | 'status'
   | 'priority'
+  | 'merchantId'
   | {
       type: 'formField';
       fieldId: string;
@@ -61,6 +63,7 @@ export interface KanbanCountsFilters {
   created?: boolean;
   stages?: string[];
   ticketTypes?: string[];
+  merchantIds?: string[];
   dynamicFields?: Record<string, string[] | { start?: number; end?: number }>;
 }
 
@@ -92,4 +95,33 @@ export const getKanbanCounts = async (
 ): Promise<KanbanCountsResponse> => {
   const response = await apiInstance.post<KanbanCountsResponse>('/tickets/kanban/counts', payload);
   return response.data;
+};
+
+export interface Merchant {
+  mid: string;
+}
+
+export interface MerchantsResponse {
+  merchants: Merchant[];
+  hasMore: boolean;
+}
+
+/**
+ * Search merchants for the tickets Merchant ID filter. Bounded by `limit` server-side,
+ * so the caller searches as the user types instead of holding the whole table.
+ */
+export const getMerchants = async (
+  params: { q?: string; limit?: number } = {},
+): Promise<MerchantsResponse> => {
+  const response = await apiInstance.get<{
+    success: boolean;
+    merchants: Merchant[];
+    hasMore: boolean;
+  }>('/merchants', {
+    params: {
+      ...(params.q ? { q: params.q } : {}),
+      ...(params.limit ? { limit: params.limit } : {}),
+    },
+  });
+  return { merchants: response.data.merchants ?? [], hasMore: response.data.hasMore ?? false };
 };

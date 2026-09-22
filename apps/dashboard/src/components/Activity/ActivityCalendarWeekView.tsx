@@ -64,7 +64,7 @@ export const ActivityCalendarWeekView = (): ReactElement => {
     deleteModalCall,
     handleDeleteConfirm,
     closeDeleteModal,
-  } = useCallHistory(user?.id);
+  } = useCallHistory(user?.id, { isCalendarView: true });
 
   // Week view isn't day-scoped, so it needs calls + scheduled calls merged, deduped by id.
   const allCalls = useMemo(

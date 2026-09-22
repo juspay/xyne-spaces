@@ -630,16 +630,19 @@ const CallsSection: FC<{ state: PreferencesState }> = ({ state }) => {
 
       <div className='flex items-center justify-between gap-4 p-3 rounded-lg border border-border bg-muted/30'>
         <div>
-          <p className='text-sm font-medium text-foreground'>Use new calls experience</p>
+          <p className='text-sm font-medium text-foreground'>Use new recording experience</p>
           <p className='text-xs text-muted-foreground mt-0.5'>
-            Switch between the classic and redesigned calls list on this device.
+            {state.canSwitchRecordingVersion
+              ? 'Switch between the classic and redesigned recording interface on this device.'
+              : 'Stop the active recording before switching experiences.'}
           </p>
         </div>
         <Switch
-          id='calls-version-v2'
-          aria-label='Use new calls experience'
-          checked={state.callsVersion === 'v2'}
-          onCheckedChange={checked => state.setCallsVersion(checked ? 'v2' : 'v1')}
+          id='recording-version-v2'
+          aria-label='Use new recording experience'
+          checked={state.recordingVersion === 'v2'}
+          disabled={!state.canSwitchRecordingVersion}
+          onCheckedChange={checked => state.setRecordingVersion(checked ? 'v2' : 'v1')}
         />
       </div>
 
@@ -683,24 +686,6 @@ const RecordingsSection: FC<{ state: PreferencesState }> = ({ state }) => (
       title='Recordings'
       subtitle='Configure how your recording summaries are generated'
     />
-
-    <div className='flex items-center justify-between gap-4 p-3 rounded-lg border border-border bg-muted/30'>
-      <div>
-        <p className='text-sm font-medium text-foreground'>Use new recording experience</p>
-        <p className='text-xs text-muted-foreground mt-0.5'>
-          {state.canSwitchRecordingVersion
-            ? 'Switch between the classic and redesigned recording interface on this device.'
-            : 'Stop the active recording before switching experiences.'}
-        </p>
-      </div>
-      <Switch
-        id='recording-version-v2'
-        aria-label='Use new recording experience'
-        checked={state.recordingVersion === 'v2'}
-        disabled={!state.canSwitchRecordingVersion}
-        onCheckedChange={checked => state.setRecordingVersion(checked ? 'v2' : 'v1')}
-      />
-    </div>
 
     <div className='p-3 rounded-lg border border-border bg-muted/30 space-y-3'>
       <div>
@@ -995,7 +980,6 @@ const PasswordSection: FC = () => {
 
 // ─── Developer ──────────────────────────────────────────────────────────────
 const DeveloperSection: FC<{ state: PreferencesState }> = ({ state }) => {
-  const { isMobile } = usePlatform();
   return (
     <div className='space-y-4'>
       <SectionHeader title='Developer' subtitle='Debug settings and app information' />
@@ -1011,21 +995,21 @@ const DeveloperSection: FC<{ state: PreferencesState }> = ({ state }) => {
           />
         </div>
 
-        {!isMobile && (
-          <div className='flex items-center justify-between gap-4 p-3 rounded-lg border border-border bg-muted/30'>
-            <div>
-              <p className='text-sm font-medium text-foreground'>Show Claw Agents</p>
-              <p className='text-xs text-muted-foreground mt-0.5'>
-                Show the Claw Agents option in the Spaces sidebar.
-              </p>
-            </div>
-            <Switch
-              id='show-claw-agents'
-              checked={state.showClawDashboard}
-              onCheckedChange={state.setShowClawDashboard}
-            />
+        <div className='flex items-center justify-between gap-4 p-3 rounded-lg border border-border bg-muted/30'>
+          <div>
+            <p className='text-sm font-medium text-foreground'>Streams</p>
+            <p className='text-xs text-muted-foreground mt-0.5'>
+              Arrange channels, boards, tickets and threads side by side in one scrolling deck. Off
+              while it is new — turning it on adds Streams to the Toolbar list, where you can put it
+              in the sidebar.
+            </p>
           </div>
-        )}
+          <Switch
+            id='show-streams'
+            checked={state.showStreams}
+            onCheckedChange={state.setShowStreams}
+          />
+        </div>
 
         {detectReactNativeWebView() && (
           <Button

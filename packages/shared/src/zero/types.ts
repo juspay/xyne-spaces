@@ -465,6 +465,13 @@ export enum InvitationResponse {
 }
 
 // @ts-ignore TS1294
+export enum RingStatus {
+  CALLING = 'CALLING',
+  RINGING = 'RINGING',
+  BUSY = 'BUSY',
+}
+
+// @ts-ignore TS1294
 export enum MeetingStatus {
   PENDING = 'PENDING',
   ACCEPTED = 'ACCEPTED',
@@ -797,6 +804,7 @@ export enum FormFieldType {
   MULTI_SELECT = 'MULTI_SELECT',
   USER = 'USER',
   DOC = 'DOC',
+  TICKET = 'TICKET',
 }
 
 // @ts-ignore TS1294
@@ -1072,6 +1080,7 @@ export enum AppPermissionType {
   READ = 'READ',
   WRITE = 'WRITE',
   DELETE = 'DELETE',
+  START = 'START',
 }
 
 // @ts-ignore TS1294
@@ -1207,6 +1216,7 @@ export const ShareableEntityType = {
   NOTE_TAKER: 'NOTE_TAKER',
   SUMMARY_TEMPLATE: 'SUMMARY_TEMPLATE',
   CALL: 'CALL',
+  WORKFLOW: 'WORKFLOW',
 } as const;
 
 export type ShareableEntityType = typeof ShareableEntityType[keyof typeof ShareableEntityType];
