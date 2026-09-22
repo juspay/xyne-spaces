@@ -1,17 +1,3 @@
-export type ChatCacheEntityKind = 'channel' | 'thread';
-
-/**
- * One persisted chat window: a channel's rows, or a whole thread. Stored per
- * entity so a cold start reads only the window it opens instead of parsing an
- * all-channels blob that grows with every channel ever visited.
- */
-export type ChatCacheEntity = {
-  kind: ChatCacheEntityKind;
-  id: string;
-  value: unknown;
-  fingerprint: string;
-};
-
 /**
  * Platform-agnostic storage adapter interface.
  * Abstracts IndexedDB (web) vs AsyncStorage/SQLite (native).
@@ -34,25 +20,4 @@ export interface StorageAdapter {
   readShadowValue?(key: string): Promise<unknown>;
   writeShadowValue?(key: string, value: unknown): Promise<void>;
   removeShadowValue?(key: string): Promise<void>;
-
-  // Optional synchronous readers. A cold open from a notification paints
-  // before any async hydration resolves, so an adapter backed by synchronous
-  // storage (e.g. MMKV) can serve that window immediately. Adapters without
-  // synchronous storage omit them and keep the async path.
-  readChannelConversationsSync?(channelId: string): unknown[] | null;
-  readChatEntitySync?(kind: ChatCacheEntityKind, id: string): unknown | null;
-
-  // Optional bounded per-entity chat storage. Implement all three or none:
-  // a partial implementation keeps the legacy single-blob path for both
-  // persistence and hydration. loadChatEntities() returns each kind in
-  // most-recent-first order so the shared actor can restore its oldest-first
-  // insertion-order LRU without platform-specific assumptions.
-  loadChatEntities?(): Promise<ChatCacheEntity[]>;
-  writeChatEntity?(
-    kind: ChatCacheEntityKind,
-    id: string,
-    value: unknown,
-    fingerprint: string,
-  ): Promise<void> | void;
-  removeChatEntity?(kind: ChatCacheEntityKind, id: string): Promise<void> | void;
 }

@@ -53,6 +53,14 @@ export type PendingMessage = {
 
 export type PendingStatus = 'connecting' | 'failed';
 
+/**
+ * A disconnected connection is still recoverable: Zero continues trying to
+ * reconnect, so a local message can be replayed once it reaches connected.
+ */
+function isConnectionRetryable(state: ZeroStateName): boolean {
+  return state === 'connecting' || state === 'disconnected';
+}
+
 const currentSessionId: string = uuidv4();
 
 const listeners = new Set<() => void>();
@@ -138,6 +146,7 @@ export function getStatus(entry: PendingMessage): PendingStatus | null {
   }
   switch (entry.zeroStateAtSend) {
     case 'connecting':
+    case 'disconnected':
       // Auto-retry-eligible clock: fires once Zero transitions to connected.
       return 'connecting';
     case 'connected':
@@ -145,7 +154,7 @@ export function getStatus(entry: PendingMessage): PendingStatus | null {
       // the messagesByIds reconcile drops the entry when isSent=true.
       return null;
     default:
-      // disconnected / needs-auth / error / closed → manual-retry failed.
+      // needs-auth / error / closed remain manual-retry failures.
       return 'failed';
   }
 }
@@ -222,7 +231,7 @@ export function firePendingMutator(zero: Zero, entry: PendingMessage): void {
 export function isAutoRetryEligible(entry: PendingMessage): boolean {
   return (
     entry.sessionId === currentSessionId &&
-    entry.zeroStateAtSend === 'connecting' &&
+    isConnectionRetryable(entry.zeroStateAtSend) &&
     !entry.mutatorFired &&
     !entry.mutatorAppError
   );

@@ -1,5 +1,5 @@
 import { setup, assign, createActor } from 'xstate';
-import type { ChatCacheEntity, ChatCacheEntityKind, StorageAdapter } from '../platform/storage.js';
+import type { StorageAdapter } from '../platform/storage.js';
 import { queries } from '../zero/queries.js';
 import type { QueryResultType } from '@rocicorp/zero';
 import type { QueryResult } from '@rocicorp/zero/react';
@@ -605,169 +605,11 @@ export const getRecordingsQueryHash = (): string => {
 // would never fire before the page dies).
 let persistNow: (() => void) | null = null;
 
-const lastPersistedChannelRefs = new Map<string, unknown>();
-const lastPersistedThreadRefs = new Map<string, unknown>();
-
-type PendingEntityOperation = {
-  token: symbol;
-  remove: boolean;
-  value?: unknown;
-  fingerprint?: string;
-};
-
-type EntityOperationRefs = Map<string, unknown>;
-type EntityOperationState = Map<string, PendingEntityOperation>;
-type EntityOperationChains = Map<string, Promise<void>>;
-
-const pendingChannelOperations: EntityOperationState = new Map();
-const pendingThreadOperations: EntityOperationState = new Map();
-const channelOperationChains: EntityOperationChains = new Map();
-const threadOperationChains: EntityOperationChains = new Map();
-
-// Incrementing this prevents a delayed flush from an old user/workspace
-// session from writing into the storage scope established by a later setup.
-let chatPersistenceGeneration = 0;
-
-const hasChatEntityStorage = (storage: StorageAdapter): boolean =>
-  Boolean(storage.loadChatEntities && storage.writeChatEntity && storage.removeChatEntity);
-
-const queueChatEntityOperation = (
-  storage: StorageAdapter,
-  kind: ChatCacheEntityKind,
-  id: string,
-  operation: Omit<PendingEntityOperation, 'token'>,
-  persistedRefs: EntityOperationRefs,
-  pendingOperations: EntityOperationState,
-  operationChains: EntityOperationChains,
-  generation: number,
-): void => {
-  const previous = pendingOperations.get(id);
-  if (
-    previous &&
-    previous.remove === operation.remove &&
-    (operation.remove ||
-      (previous.value === operation.value && previous.fingerprint === operation.fingerprint))
-  ) {
-    return;
-  }
-
-  const token = Symbol(`${kind}:${id}`);
-  const current: PendingEntityOperation = { ...operation, token };
-  pendingOperations.set(id, current);
-  const priorChain = operationChains.get(id) ?? Promise.resolve();
-  const markSucceeded = (): void => {
-    if (generation !== chatPersistenceGeneration) return;
-    // Track the last acknowledged disk value even when a newer operation is
-    // already queued. This preserves deletion intent when that newer removal
-    // fails and allows the next flush to retry it.
-    if (current.remove) persistedRefs.delete(id);
-    else persistedRefs.set(id, current.value);
-    if (pendingOperations.get(id)?.token === token) pendingOperations.delete(id);
-  };
-  const markFailed = (): void => {
-    if (generation !== chatPersistenceGeneration) return;
-    // A failed operation remains dirty because the acknowledged ref is not
-    // advanced; the next flush will queue it again.
-    if (pendingOperations.get(id)?.token === token) pendingOperations.delete(id);
-  };
-  const execute = (): void | Promise<void> => {
-    // Keep this check immediately adjacent to the adapter call. In particular,
-    // do not insert Promise.resolve().then() here: mobile's MMKV adapter is
-    // synchronous and flushQueryCachePersistence must write before lifecycle
-    // code can disable the outgoing storage scope.
-    if (generation !== chatPersistenceGeneration) return;
-    try {
-      const result = current.remove
-        ? storage.removeChatEntity!(kind, id)
-        : storage.writeChatEntity!(kind, id, current.value, current.fingerprint ?? '');
-      return Promise.resolve(result).then(markSucceeded, markFailed);
-    } catch {
-      markFailed();
-    }
-  };
-
-  const nextChain = operationChains.has(id)
-    ? priorChain.catch(() => {}).then(execute)
-    : Promise.resolve(execute());
-
-  operationChains.set(id, nextChain);
-  void nextChain.finally(() => {
-    if (operationChains.get(id) === nextChain) operationChains.delete(id);
-  });
-};
-
-/**
- * Write each changed chat window as its own record, and delete records for
- * windows the cache dropped. Successful refs are tracked only after the
- * adapter operation completes; this makes a failed native write retryable.
- */
-function persistChatEntities(
-  storage: StorageAdapter,
-  kind: ChatCacheEntityKind,
-  entries: Record<string, unknown>,
-  fingerprint: string,
-  persistedRefs: EntityOperationRefs,
-  pendingOperations: EntityOperationState,
-  operationChains: EntityOperationChains,
-  generation: number,
-): boolean {
-  if (!hasChatEntityStorage(storage)) return false;
-
-  for (const [id, value] of Object.entries(entries)) {
-    const pending = pendingOperations.get(id);
-    if (
-      !pending &&
-      persistedRefs.get(id) === value
-    ) {
-      continue;
-    }
-    if (
-      pending &&
-      !pending.remove &&
-      pending.value === value &&
-      pending.fingerprint === fingerprint
-    ) {
-      continue;
-    }
-    queueChatEntityOperation(
-      storage,
-      kind,
-      id,
-      { remove: false, value, fingerprint },
-      persistedRefs,
-      pendingOperations,
-      operationChains,
-      generation,
-    );
-  }
-  for (const id of [...persistedRefs.keys()]) {
-    if (id in entries) continue;
-    queueChatEntityOperation(
-      storage,
-      kind,
-      id,
-      { remove: true },
-      persistedRefs,
-      pendingOperations,
-      operationChains,
-      generation,
-    );
-  }
-  for (const [id, pending] of pendingOperations) {
-    if (id in entries || pending.remove) continue;
-    queueChatEntityOperation(
-      storage,
-      kind,
-      id,
-      { remove: true },
-      persistedRefs,
-      pendingOperations,
-      operationChains,
-      generation,
-    );
-  }
-  return true;
-}
+// The actor subscription driving debounced persistence, and the setup that
+// owns it. Each setup replaces both, so a user/workspace switch cannot leave
+// the previous persister running alongside the new one.
+let persistenceSubscription: { unsubscribe(): void } | null = null;
+let activeSetup: object | null = null;
 
 /**
  * Setup persistence middleware for query cache.
@@ -779,20 +621,18 @@ export const setupQueryCachePersistence = (
   schemaVersion: string,
 ): void => {
   setStorageAdapter(storage);
-  const generation = ++chatPersistenceGeneration;
-  lastPersistedRefs.clear();
-  // Entity references belong to the storage scope this setup establishes, so a
-  // previous user/workspace session must never suppress writes in a new one.
-  lastPersistedChannelRefs.clear();
-  lastPersistedThreadRefs.clear();
-  pendingChannelOperations.clear();
-  pendingThreadOperations.clear();
-  channelOperationChains.clear();
-  threadOperationChains.clear();
+
+  persistenceSubscription?.unsubscribe();
+  persistenceSubscription = null;
+  persistNow = null;
+  if (persistTimeout) {
+    clearTimeout(persistTimeout);
+    persistTimeout = null;
+  }
+  const thisSetup = {};
+  activeSetup = thisSetup;
 
   const doPersist = (): void => {
-    if (generation !== chatPersistenceGeneration) return;
-
     // Read the LATEST snapshot at flush time (not the one that scheduled
     // the flush) so dirty-tracking compares against current state.
     const {
@@ -829,21 +669,10 @@ export const setupQueryCachePersistence = (
       }
     }
 
-    const conversationHash = getChannelConversationsQueryHash({ userID: userId });
-    if (hasChatEntityStorage(storage)) {
-      persistChatEntities(
-        storage,
-        'channel',
-        channelConversations,
-        conversationHash,
-        lastPersistedChannelRefs,
-        pendingChannelOperations,
-        channelOperationChains,
-        generation,
-      );
+    if (lastPersistedRefs.get('channelConversations') !== channelConversations) {
       lastPersistedRefs.set('channelConversations', channelConversations);
-    } else if (lastPersistedRefs.get('channelConversations') !== channelConversations) {
-      lastPersistedRefs.set('channelConversations', channelConversations);
+      const conversationHash = getChannelConversationsQueryHash({ userID: userId });
+
       const payload: Record<string, unknown> = {
         ...channelConversations,
         [FINGERPRINT_FIELD]: conversationHash,
@@ -852,27 +681,20 @@ export const setupQueryCachePersistence = (
       storage.saveContextProperty('channelConversations', payload).catch(() => {});
     }
 
-    const threadHash = getThreadConversationQueryHash({ userID: userId });
-    if (hasChatEntityStorage(storage)) {
-      persistChatEntities(
-        storage,
-        'thread',
-        threadConversations,
-        threadHash,
-        lastPersistedThreadRefs,
-        pendingThreadOperations,
-        threadOperationChains,
-        generation,
-      );
+    if (
+      lastPersistedRefs.get(THREAD_CONVERSATIONS_KEY) !== threadConversations
+    ) {
       lastPersistedRefs.set(THREAD_CONVERSATIONS_KEY, threadConversations);
-    } else if (lastPersistedRefs.get(THREAD_CONVERSATIONS_KEY) !== threadConversations) {
-      lastPersistedRefs.set(THREAD_CONVERSATIONS_KEY, threadConversations);
+      const threadHash = getThreadConversationQueryHash({ userID: userId });
+
       const threadPayload: Record<string, unknown> = {
         ...threadConversations,
         [THREAD_FINGERPRINT_FIELD]: threadHash,
       };
 
-      storage.saveContextProperty(THREAD_CONVERSATIONS_KEY, threadPayload).catch(() => {});
+      storage
+        .saveContextProperty(THREAD_CONVERSATIONS_KEY, threadPayload)
+        .catch(() => {});
     }
 
     if (lastPersistedRefs.get(CALL_HISTORY_KEY) !== callHistory) {
@@ -899,9 +721,11 @@ export const setupQueryCachePersistence = (
   storage
     .init(userId, schemaVersion)
     .then(() => {
-      if (generation !== chatPersistenceGeneration) return;
+      // A newer setup started while this storage was initialising; it owns
+      // persistence now.
+      if (activeSetup !== thisSetup) return;
       persistNow = doPersist;
-      queryCacheActor.subscribe(() => {
+      persistenceSubscription = queryCacheActor.subscribe(() => {
         if (persistTimeout) {
           clearTimeout(persistTimeout);
         }
@@ -929,20 +753,6 @@ export const flushQueryCachePersistence = (): void => {
   persistNow?.();
 };
 
-const capHydratedEntries = <T>(
-  entries: Record<string, T>,
-  preferredIds: Set<string>,
-  maxEntries: number,
-): Record<string, T> => {
-  const allEntries = Object.entries(entries);
-  const preferred = allEntries.filter(([id]) => preferredIds.has(id));
-  const fallback = allEntries.filter(([id]) => !preferredIds.has(id));
-  // Entity adapters return most-recent-first. The actor's object-key LRU is
-  // oldest-first, so reverse the entity portion before hydration and retain
-  // the newest legacy entries when the two sources are mixed.
-  return Object.fromEntries([...fallback, ...preferred.reverse()].slice(-maxEntries));
-};
-
 /**
  * Hydrate query cache and conversations from storage.
  * Accepts a StorageAdapter for platform-agnostic persistence.
@@ -956,25 +766,9 @@ export const hydrateQueryCacheFromStorage = async (
   try {
     await storage.init(userId, schemaVersion);
 
-    // Adapters with per-entity chat storage keep their windows outside the
-    // context blob, so a session with only entities must still hydrate. A
-    // failed entity read must not discard a usable legacy blob.
-    let chatEntities: ChatCacheEntity[] = [];
-    if (hasChatEntityStorage(storage)) {
-      try {
-        chatEntities = (await storage.loadChatEntities!()) ?? [];
-      } catch {
-        chatEntities = [];
-      }
-    }
-    let context: Record<string, unknown> | null = null;
-    try {
-      context = await storage.loadContext();
-    } catch {
-      context = null;
-    }
+    const context = await storage.loadContext();
 
-    if (!context && chatEntities.length === 0) {
+    if (!context) {
       return false;
     }
 
@@ -982,32 +776,13 @@ export const hydrateQueryCacheFromStorage = async (
     // Generic cache entries are lazy-loaded from IndexedDB on demand via useCachedQuery.
     const conversationsData: Record<string, Conversation[]> = {};
     const threadConversationsData: Record<string, ThreadConversation> = {};
-    const entityChannelIds = new Set<string>();
-    const entityThreadIds = new Set<string>();
     let callHistoryHydrated = false;
     let recordingsHydrated = false;
 
     const currentConversationHash = getChannelConversationsQueryHash({ userID: userId });
     const currentThreadHash = getThreadConversationQueryHash({ userID: userId });
 
-    for (const entity of chatEntities) {
-      if (entity.kind !== 'channel' && entity.kind !== 'thread') continue;
-      const expectedHash =
-        entity.kind === 'channel' ? currentConversationHash : currentThreadHash;
-      if (entity.fingerprint && entity.fingerprint !== expectedHash) continue;
-
-      if (entity.kind === 'channel') {
-        if (Array.isArray(entity.value)) {
-          conversationsData[entity.id] = entity.value as Conversation[];
-          entityChannelIds.add(entity.id);
-        }
-      } else if (entity.value && typeof entity.value === 'object' && !Array.isArray(entity.value)) {
-        threadConversationsData[entity.id] = entity.value as ThreadConversation;
-        entityThreadIds.add(entity.id);
-      }
-    }
-
-    for (const [key, value] of Object.entries(context ?? {})) {
+    for (const [key, value] of Object.entries(context)) {
       if (key === 'channelConversations') {
         const raw = value as Record<string, unknown>;
 
@@ -1017,16 +792,9 @@ export const hydrateQueryCacheFromStorage = async (
           continue;
         }
 
-        // The blob is unbounded on disk; the actor is not. Keep the newest
-        // entries so hydration can never exceed the in-memory LRU bound.
-        const channelEntries = Object.entries(raw).filter(
-          ([channelId, conversations]) =>
-            channelId !== FINGERPRINT_FIELD &&
-            Array.isArray(conversations) &&
-            (conversations as unknown[]).length > 0,
-        );
-        for (const [channelId, conversations] of channelEntries.slice(-MAX_CACHED_CHANNELS)) {
-          if (!Object.prototype.hasOwnProperty.call(conversationsData, channelId)) {
+        for (const [channelId, conversations] of Object.entries(raw)) {
+          if (channelId === FINGERPRINT_FIELD) continue;
+          if (Array.isArray(conversations) && conversations.length > 0) {
             conversationsData[channelId] = conversations as Conversation[];
           }
         }
@@ -1036,15 +804,11 @@ export const hydrateQueryCacheFromStorage = async (
         if (storedHash !== undefined && storedHash !== currentThreadHash) {
           continue;
         }
-        const threadEntries = Object.entries(raw).filter(
-          ([conversationId, conversation]) =>
-            conversationId !== THREAD_FINGERPRINT_FIELD &&
-            conversation &&
-            typeof conversation === 'object',
-        );
-        for (const [conversationId, conversation] of threadEntries.slice(-MAX_CACHED_THREADS)) {
-          if (!Object.prototype.hasOwnProperty.call(threadConversationsData, conversationId)) {
-            threadConversationsData[conversationId] = conversation as ThreadConversation;
+        for (const [conversationId, conversation] of Object.entries(raw)) {
+          if (conversationId === THREAD_FINGERPRINT_FIELD) continue;
+          if (conversation && typeof conversation === "object") {
+            threadConversationsData[conversationId] =
+              conversation as ThreadConversation;
           }
         }
       } else if (key === CALL_HISTORY_KEY) {
@@ -1083,34 +847,23 @@ export const hydrateQueryCacheFromStorage = async (
       // They will be lazy-loaded from IndexedDB when useCachedQuery requests them.
     }
 
-    const cappedConversationsData = capHydratedEntries(
-      conversationsData,
-      entityChannelIds,
-      MAX_CACHED_CHANNELS,
-    );
-    const cappedThreadConversationsData = capHydratedEntries(
-      threadConversationsData,
-      entityThreadIds,
-      MAX_CACHED_THREADS,
-    );
-
-    if (Object.keys(cappedConversationsData).length > 0) {
+    if (Object.keys(conversationsData).length > 0) {
       queryCacheActor.send({
         type: 'HYDRATE_CONVERSATIONS',
-        conversationsData: cappedConversationsData,
+        conversationsData,
       });
     }
 
-    if (Object.keys(cappedThreadConversationsData).length > 0) {
+    if (Object.keys(threadConversationsData).length > 0) {
       queryCacheActor.send({
         type: "HYDRATE_THREAD_CONVERSATIONS",
-        threadConversationsData: cappedThreadConversationsData,
+        threadConversationsData,
       });
     }
 
     return (
-      Object.keys(cappedConversationsData).length > 0 ||
-      Object.keys(cappedThreadConversationsData).length > 0 ||
+      Object.keys(conversationsData).length > 0 ||
+      Object.keys(threadConversationsData).length > 0 ||
       callHistoryHydrated ||
       recordingsHydrated
     );
