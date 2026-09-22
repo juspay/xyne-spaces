@@ -24,6 +24,7 @@ import {
   decideCreateCanvasAction,
   type CreateCanvasSnapshot,
 } from '@/components/flowUI/nodes/agent/create/createChatMode';
+import { sanitizeAgentCanvasName } from '@/components/flowUI/nodes/agent/create/canvasFromIdentity';
 import { toolboxFromSuggestion } from '@/components/flowUI/nodes/agent/create/toolboxFromSuggestion';
 import {
   EMPTY_CREATE_FORM,
@@ -140,9 +141,10 @@ export function AgentCreateSplitPage({
         const sourceId = `hub-rename-${Date.now()}`;
         try {
           createForm.setWritingField('name');
+          await sleep(48);
           const changedName = createForm.applyChatPatch(
             sourceId,
-            { name: action.name },
+            { name: sanitizeAgentCanvasName(action.name) },
             { highlight: false },
           );
           if (changedName.includes('name')) {

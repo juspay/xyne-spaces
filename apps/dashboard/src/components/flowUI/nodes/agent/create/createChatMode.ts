@@ -108,7 +108,7 @@ export async function revealCreatePatchFields(args: {
             ? 'knowledge'
             : null;
     args.setWritingField(field, hubRow);
-    await args.sleep(0);
+    await args.sleep(Math.max(48, Math.min(args.writeMs, 120)));
     const changed = args.applyChatPatch(`${args.sourceId}-${field}`, slice, { highlight: false });
     if (!changed.includes(field)) {
       args.setWritingField(null);

@@ -5,6 +5,7 @@ import type {
   AgentCreateFormState,
 } from './types';
 import { toolIdsFromForm } from './types';
+import { sanitizeAgentCanvasName } from './canvasFromIdentity.ts';
 
 export interface FieldLock {
   focused: AgentCreateField | null;
@@ -87,8 +88,13 @@ function applyField(
   field: AgentCreateField,
 ): AgentCreateFormState {
   switch (field) {
-    case 'name':
-      return { ...current, name: patch.name ?? current.name };
+    case 'name': {
+      const nextName = patch.name ?? current.name;
+      return {
+        ...current,
+        name: typeof nextName === 'string' ? sanitizeAgentCanvasName(nextName) : nextName,
+      };
+    }
     case 'slug':
       return {
         ...current,

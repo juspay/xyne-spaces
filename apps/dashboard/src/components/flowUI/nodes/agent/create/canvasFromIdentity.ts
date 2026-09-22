@@ -74,6 +74,14 @@ function cleanDraftLine(value: string, max = 500): string {
     .slice(0, max);
 }
 
+/** Strip list markers and "Name:" labels from canvas identity fields. */
+export function sanitizeAgentCanvasName(raw: string): string {
+  let value = raw.replace(/\*\*/g, '').replace(/\*/g, '').trim();
+  value = value.replace(/^[-•]+\s*/, '').trim();
+  value = value.replace(/^(?:name|handle)\s*:\s*/i, '').trim();
+  return cleanDraftLine(value, 80);
+}
+
 /** Prefer explicit name / @handle from the model's chat draft over prompt heuristics. */
 export function draftIdentityFromModelReply(visibleReply: string): ParsedDraftIdentity | null {
   const text = visibleReply.replace(/\r\n/g, '\n').trim();
@@ -90,16 +98,26 @@ export function draftIdentityFromModelReply(visibleReply: string): ParsedDraftId
   for (const nameRe of patterns) {
     const match = text.match(nameRe);
     if (!match?.[1] || !match[2]) continue;
-    const name = cleanDraftLine(match[1], 80);
+    const name = sanitizeAgentCanvasName(match[1]);
     const slug = match[2].trim().toLowerCase();
     if (name.length > 0 && slug.length > 0) {
       return { name, slug };
     }
   }
 
+  const nameLine = text.match(
+    /(?:^|\n)\s*[-*•]+\s*(?:\*\*)?Name(?:\*\*)?\s*:\s*([^\n@/]+)/i,
+  );
+  if (nameLine?.[1]) {
+    const name = sanitizeAgentCanvasName(nameLine[1]);
+    if (name.length > 0) {
+      return { name, slug: slugify(name) };
+    }
+  }
+
   const titledDraft = text.match(/\byour\s+\*\*([^*]+)\*\*\s+draft\b/i);
   if (titledDraft?.[1]) {
-    const name = cleanDraftLine(titledDraft[1], 80);
+    const name = sanitizeAgentCanvasName(titledDraft[1]);
     if (name.length > 0) {
       return { name, slug: slugify(name) };
     }
@@ -167,10 +185,11 @@ export function buildDraftCanvasPatch(args: {
 
   if (args.fillName) {
     if (explicit.name) {
-      patch.name = explicit.name;
+      patch.name = sanitizeAgentCanvasName(explicit.name);
     } else {
       const fromPrompt = nameFromGeneratedPrompt(args.generatedPrompt);
-      patch.name = fromPrompt || nameFromIntent(args.intent) || undefined;
+      const raw = fromPrompt || nameFromIntent(args.intent) || '';
+      patch.name = raw ? sanitizeAgentCanvasName(raw) : undefined;
     }
   }
   if (args.fillSlug) {
