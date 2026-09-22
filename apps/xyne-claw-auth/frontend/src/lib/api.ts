@@ -1,4 +1,4 @@
-import type { User, McpServer, UserConnection, HealthResult, CredentialField, Gateway, GatewayIdentity, Agent, AgentLight, ScheduledJob, ScheduledJobRun } from "./types";
+import type { User, McpServer, UserConnection, HealthResult, CredentialField, Gateway, GatewayIdentity, GatewayServiceRow, GatewayServiceRequest, Agent, AgentLight, ScheduledJob, ScheduledJobRun } from "./types";
 
 import { frontendConfig } from "./config";
 
@@ -7567,4 +7567,105 @@ export async function writeUsagePatternFile(slug: string, content: string): Prom
     { method: "PUT", body: JSON.stringify({ content }) },
   );
   return data.data;
+}
+
+// ── MCP Gateway service registry (session-authed UI surface) ──────────────
+// The secret x-s2s-key / tenant are injected server-side by the
+// /gateway-registry route; the browser only sends its session cookie.
+
+export interface GatewayToolInput {
+  name: string;
+  description?: string;
+  method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+  path?: string;
+  requiresApproval?: boolean;
+  isWriteTool?: boolean;
+  inputSchema?: Record<string, unknown>;
+  outputSchema?: Record<string, unknown>;
+}
+
+export interface RegisterGatewayServiceInput {
+  serviceName: string;
+  backendId: string;
+  backendUrl: string;
+  tokenEndpointUrl: string;
+  xAuthHeaderName?: string;
+  tools: GatewayToolInput[];
+}
+
+/** Submit an MCP-gateway service registration for admin approval (does not go live). */
+export async function registerGatewayService(
+  input: RegisterGatewayServiceInput,
+): Promise<{ success: boolean; message: string; status?: string; requestId?: string }> {
+  const data = await request<{ success: boolean; data: { success: boolean; message: string; status?: string; requestId?: string } }>(
+    `${AUTH_API_URL}/api/v1/gateway-registry`,
+    { method: "POST", body: JSON.stringify(input) },
+  );
+  return data.data;
+}
+
+/** The caller's own registration requests (pending/approved/rejected). */
+export async function listMyGatewayRequests(): Promise<GatewayServiceRequest[]> {
+  const data = await request<{ success: boolean; data: GatewayServiceRequest[] }>(
+    `${AUTH_API_URL}/api/v1/gateway-registry/my-requests`,
+  );
+  return data.data;
+}
+
+/** Pending registration requests awaiting review (admin only). */
+export async function listGatewayRequests(): Promise<GatewayServiceRequest[]> {
+  const data = await request<{ success: boolean; data: GatewayServiceRequest[] }>(
+    `${AUTH_API_URL}/api/v1/gateway-registry/requests`,
+  );
+  return data.data;
+}
+
+/** Approve a pending request → registers it live (admin only). */
+export async function approveGatewayRequest(id: string): Promise<void> {
+  await request<{ success: boolean }>(
+    `${AUTH_API_URL}/api/v1/gateway-registry/requests/${encodeURIComponent(id)}/approve`,
+    { method: "POST", body: JSON.stringify({}) },
+  );
+}
+
+/** Reject a pending request (admin only). */
+export async function rejectGatewayRequest(id: string): Promise<void> {
+  await request<{ success: boolean }>(
+    `${AUTH_API_URL}/api/v1/gateway-registry/requests/${encodeURIComponent(id)}/reject`,
+    { method: "POST", body: JSON.stringify({}) },
+  );
+}
+
+export interface GatewayServiceDetail {
+  serviceName: string;
+  backendId: string;
+  backendUrl: string;
+  xAuthHeaderName: string | null;
+  tokenEndpointUrl: string | null;
+  tools: GatewayToolInput[];
+}
+
+/** Fetch one registered service with its full tool definitions (for editing). */
+export async function getGatewayService(serviceName: string, backendId?: string): Promise<GatewayServiceDetail> {
+  const q = backendId ? `?backendId=${encodeURIComponent(backendId)}` : "";
+  const data = await request<{ success: boolean; data: GatewayServiceDetail }>(
+    `${AUTH_API_URL}/api/v1/gateway-registry/${encodeURIComponent(serviceName)}${q}`,
+  );
+  return data.data;
+}
+
+/** List MCP-gateway services registered for the workspace tenant. */
+export async function listGatewayServices(): Promise<GatewayServiceRow[]> {
+  const data = await request<{ success: boolean; data: GatewayServiceRow[] }>(
+    `${AUTH_API_URL}/api/v1/gateway-registry`,
+  );
+  return data.data;
+}
+
+/** Deregister all backends for a service under the workspace tenant. */
+export async function deregisterGatewayService(serviceName: string): Promise<void> {
+  await request<{ success: boolean }>(
+    `${AUTH_API_URL}/api/v1/gateway-registry/${encodeURIComponent(serviceName)}`,
+    { method: "DELETE" },
+  );
 }
