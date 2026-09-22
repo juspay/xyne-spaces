@@ -69,6 +69,7 @@ import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { queries } from '../../../zero/queries';
 import { useUsers } from '../../../hooks/useUsers';
 import { useAuthContextValues } from '../../../hooks/useAuth';
+import { useCanSendDeskEmail } from '../../../hooks/usePermissions';
 import { useComposeSubjectAI } from '../../../hooks/useComposeSubjectAI';
 import { AutoDraftStatus, type EmailChannelPreference } from '@xyne/shared';
 import { useEmailDraftOperations, type EmailDraftRecord } from '../../../hooks/useEmailDraft';
@@ -642,6 +643,7 @@ export const EmailComposer = ({
   // Recipient state
   const [toEmails, setToEmails] = useState<string[]>(initialTo ?? []);
   const [ccEmails, setCcEmails] = useState<string[]>([]);
+  const canSendDeskEmail = useCanSendDeskEmail();
   const [bccEmails, setBccEmails] = useState<string[]>([]);
   const [showCc, setShowCc] = useState<boolean>(true);
   const [showBcc, setShowBcc] = useState<boolean>(false);
@@ -1565,6 +1567,9 @@ export const EmailComposer = ({
   );
 
   const handleSendEmail = async (): Promise<void> => {
+    // Single chokepoint for every send path — primary button, two-step confirm
+    // dialog, and any future caller. SUPPORT READ is view-only.
+    if (!canSendDeskEmail) return;
     const hasContent = hasEmailBody;
     const hasAttachments = attachments.length > 0;
     if (
@@ -3310,6 +3315,7 @@ export const EmailComposer = ({
                 className='size-8 flex items-center justify-center rounded-full bg-primary text-primary-foreground hover:bg-primary/90 disabled:bg-muted disabled:text-muted-foreground disabled:cursor-not-allowed transition-colors'
                 onClick={runSendEmail}
                 disabled={
+                  !canSendDeskEmail ||
                   (!hasEmailBody && attachments.length === 0 && !hasInlineImages) ||
                   (isComposeMode
                     ? !channelId || composeSubject.trim().length === 0
@@ -3319,7 +3325,13 @@ export const EmailComposer = ({
                   aiDraft.isDraftActive
                 }
                 aria-label='Send email'
-                title={aiDraft.isDraftActive ? 'Accept the AI draft to enable Send' : 'Send'}
+                title={
+                  !canSendDeskEmail
+                    ? 'You have read-only access to Support'
+                    : aiDraft.isDraftActive
+                      ? 'Accept the AI draft to enable Send'
+                      : 'Send'
+                }
                 data-track-category='Support'
                 data-track-name='SendEmailReply'
                 data-track-metadata={JSON.stringify({
