@@ -3965,6 +3965,65 @@ export const queries: AnyQueryRegistry = defineQueries({
     }
   ),
 
+  // All app/bot participants of a channel — used at the parent for the
+  // Agents & Apps tab count.
+  channelAppParticipants: defineQuery(
+    z.object({ channelId: z.string() }),
+    ({ args: { channelId } }) => {
+      return zql.channel_participants
+        .where('channelId', channelId)
+        .whereExists('user', (u) =>
+          u.where('userType', 'IN', [UserType.APP, UserType.BOT]),
+        );
+    }
+  ),
+
+  // Paginated human members of a channel — excludes apps/bots server-side so
+  // the Members tab never leaks them into its list.
+  channelHumanParticipantsPaginated: defineQuery(
+    z.object({
+      channelId: z.string(),
+      limit: z.number(),
+      start: z.object({ role: z.nativeEnum(ChannelRole), userId: z.string() }).nullable(),
+    }),
+    ({ args: { channelId, limit, start } }) => {
+      let query = zql.channel_participants
+        .where('channelId', channelId)
+        .whereExists('user', (u) => u.where('userType', '=', UserType.USER))
+        .orderBy('role', 'asc')
+        .orderBy('userId', 'asc');
+
+      if (start) {
+        query = query.start({ role: start.role, userId: start.userId }, { inclusive: false });
+      }
+
+      return query.limit(limit);
+    }
+  ),
+
+  // Paginated app/bot participants of a channel — mirrors the human paginated
+  // query so the Agents & Apps tab can page-load the same way.
+  channelAppParticipantsPaginated: defineQuery(
+    z.object({
+      channelId: z.string(),
+      limit: z.number(),
+      start: z.object({ role: z.nativeEnum(ChannelRole), userId: z.string() }).nullable(),
+    }),
+    ({ args: { channelId, limit, start } }) => {
+      let query = zql.channel_participants
+        .where('channelId', channelId)
+        .whereExists('user', (u) => u.where('userType', 'IN', [UserType.APP, UserType.BOT]))
+        .orderBy('role', 'asc')
+        .orderBy('userId', 'asc');
+
+      if (start) {
+        query = query.start({ role: start.role, userId: start.userId }, { inclusive: false });
+      }
+
+      return query.limit(limit);
+    }
+  ),
+
   channelParticipantsPaginated: defineQuery(
     z.object({
       channelId: z.string(),
