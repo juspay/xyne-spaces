@@ -42,7 +42,8 @@ export type SlashCommand =
   // `/debug` — attach one HTML file with the latest run's execution trace.
   // `/debug all` — every checkpointed session in the thread, newest first,
   // each expandable, so an issue can be traced across runs.
-  | { kind: "debug"; scope?: "latest" | "all" }
+  // `/debug chain` — why the agent workflow bound to this channel did (not) hand off.
+  | { kind: "debug"; scope?: "latest" | "all" | "chain" }
   // `/fast` / `/fast off` — thread-scoped fast-mode toggle. Start-anchored only.
   | { kind: "fastMode"; enabled: boolean }
   | { kind: "fastModeUsage" };
@@ -129,6 +130,9 @@ function parseFromSlash(trimmed: string): SlashCommand | null {
   }
   if (lower === "/debug all" || lower === "/debug sessions") {
     return { kind: "debug", scope: "all" };
+  }
+  if (lower === "/debug chain" || lower === "/debug workflow") {
+    return { kind: "debug", scope: "chain" };
   }
   if (lower === "/fast" || lower === "/fast on") {
     return { kind: "fastMode", enabled: true };

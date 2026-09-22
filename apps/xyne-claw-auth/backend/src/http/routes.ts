@@ -1,4 +1,4 @@
-import { type Express, type Request, type Response } from "express";
+import { type Express, type NextFunction, type Request, type Response } from "express";
 import { requestLogger } from "../middleware/requestLogger.js";
 import { errorMiddleware } from "../lib/http.js";
 import { serversRouter } from "../routes/servers.js";
@@ -81,6 +81,8 @@ import { requireAuth, requireNoAccessToken, allowReadAccessToken, allowScopedAcc
 import { requireClawAdmin, requireSearchEvalAccess } from "../middleware/agent-acl.js";
 import { apiLimiter } from "../middleware/rate-limiters.js";
 
+const SIGNED_INGRESS_PREFIXES = ["/webhook"] as const;
+
 const BASE = "/claw/api/v1";
 
 function mountRequestContext(app: Express): void {
@@ -115,7 +117,13 @@ function mountRequestContext(app: Express): void {
     res.json({ status: "ok", service: "xyne-claw-auth", uptime: process.uptime() });
   });
 
-  app.use(BASE, apiLimiter);
+  app.use(BASE, (req: Request, res: Response, next: NextFunction) => {
+    if (SIGNED_INGRESS_PREFIXES.some((prefix) => req.path === prefix || req.path.startsWith(`${prefix}/`))) {
+      next();
+      return;
+    }
+    apiLimiter(req, res, next);
+  });
 }
 
 function mountCoreApi(app: Express): void {
