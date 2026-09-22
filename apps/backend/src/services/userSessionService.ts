@@ -93,7 +93,10 @@ export class UserSessionService {
     this.prisma = DatabaseClient.getInstance();
   }
 
-  private trackLogout(session: SessionCandidate, reason: LogoutReason): void {
+  // Public so callers that observe a session ending without themselves being
+  // the one to end it (e.g. a denied refresh) can log it without touching the
+  // session row — this never writes to UserSession, only to the activity log.
+  trackLogout(session: SessionCandidate, reason: LogoutReason): void {
     void userActivityTrackingService.trackLogout(session.userId, {
       sessionId: session.id,
       reason,
@@ -376,34 +379,6 @@ export class UserSessionService {
     } catch (error) {
       logger.error('Error revoking all user sessions:', error);
       throw new Error('Failed to revoke all user sessions');
-    }
-  }
-
-  /**
-   * Mark a live session whose refresh token ran out as EXPIRED, so the denial
-   * that already happens on refresh can be logged as a LOGOUT once (a session
-   * already EXPIRED is skipped, so repeated requests with the same dead
-   * cookie don't log it again).
-   */
-  async expireSession(sessionId: string): Promise<void> {
-    try {
-      const { count } = await this.prisma.userSession.updateMany({
-        where: { id: sessionId, status: SessionStatus.ACTIVE },
-        data: {
-          status: SessionStatus.EXPIRED,
-          updatedAt: new Date(),
-        },
-      });
-      if (count === 0) return;
-
-      const session = await this.prisma.userSession.findUnique({
-        where: { id: sessionId },
-        select: { id: true, userId: true, deviceInfo: true, createdAt: true },
-      });
-      if (session) this.trackLogout(session, 'TOKEN_EXPIRED');
-    } catch (error) {
-      logger.error('Error expiring session:', error);
-      throw new Error('Failed to expire session');
     }
   }
 
