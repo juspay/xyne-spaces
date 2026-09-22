@@ -1,14 +1,10 @@
-import { Prisma, PrismaClient, UserSession } from '@prisma/client';
+import { PrismaClient, UserSession } from '@prisma/client';
 import { AuthProvider, Platform, SessionStatus } from '@xyne/shared';
 import { logger } from '../utils/logger';
 import { DatabaseClient } from '@/database/client';
 import { userActivityTrackingService } from './userActivityTrackingService';
 
 // Why a session ended — stored as the AUTH/LOGOUT activity event's label.
-// MEMBER_LEFT is deliberately not here: a refresh denied for that reason
-// leaves the session row untouched (see sessionRefreshValidator.ts), so
-// nothing ever emits it. Reintroduce it once reinstatement can selectively
-// restore only member-left-revoked sessions (needs an endedReason column).
 export type LogoutReason =
   | 'USER_LOGOUT'
   | 'PASSWORD_CHANGED'
@@ -19,7 +15,7 @@ export type LogoutReason =
 
 // How the session was minted — stored as the AUTH/LOGIN activity event's
 // label. A closed union so a typo'd method can't silently fragment the
-// login-by-method breakdown the way an open `string` would.
+// login-by-method breakdown.
 export type LoginMethod =
   | AuthProvider
   | 'TEST'
@@ -49,6 +45,7 @@ export interface UpdateSessionData {
   accessToken?: string;
   accessTokenExpiry?: Date;
   lastActivity?: Date;
+  status?: SessionStatus;
   deviceId?: string;
   fcmToken?: string;
 }
@@ -105,50 +102,6 @@ export class UserSessionService {
         sessionDurationSec: Math.round((Date.now() - session.createdAt.getTime()) / 1000),
       },
     });
-  }
-
-  /**
-   * The single place a session's status is ever moved to a terminal state.
-   * Every row's flip is individually guarded (`updateMany` on `id` + the
-   * current status), so:
-   *  - concurrent callers racing the same session never emit more than one
-   *    LOGOUT — only the call whose guarded update actually matched the row
-   *    tracks it;
-   *  - a row that's already EXPIRED/REVOKED (or was flipped by a concurrent
-   *    call moments ago) is left alone and re-fetching it never throws;
-   *  - only rows this call actually touched are rewritten, not every
-   *    historical row matching `where`.
-   * revokeSession, revokeAllUserSessions, expireSession and
-   * cleanupExpiredSessions all go through this so a session can only ever
-   * end here — updateSession() intentionally cannot set `status`.
-   */
-  private async endSessions(
-    where: Prisma.UserSessionWhereInput,
-    toStatus: SessionStatus,
-    reason: LogoutReason | null,
-  ): Promise<number> {
-    const candidates = await this.prisma.userSession.findMany({
-      where: { ...where, status: SessionStatus.ACTIVE },
-      select: { id: true, userId: true, deviceInfo: true, createdAt: true },
-    });
-    if (candidates.length === 0) return 0;
-
-    const flipped = (
-      await Promise.all(
-        candidates.map(async (session) => {
-          const { count } = await this.prisma.userSession.updateMany({
-            where: { id: session.id, status: SessionStatus.ACTIVE },
-            data: { status: toStatus, updatedAt: new Date() },
-          });
-          return count > 0 ? session : null;
-        }),
-      )
-    ).filter((session): session is SessionCandidate => session !== null);
-
-    if (reason) {
-      flipped.forEach((session) => this.trackLogout(session, reason));
-    }
-    return flipped.length;
   }
 
   /**
@@ -344,7 +297,25 @@ export class UserSessionService {
    */
   async revokeSession(sessionId: string, reason: LogoutReason): Promise<void> {
     try {
-      await this.endSessions({ id: sessionId }, SessionStatus.REVOKED, reason);
+      // Read the status before flipping it, purely to decide whether this is
+      // a logout worth logging (re-revoking an already-ended session is not).
+      const previous = await this.prisma.userSession.findUnique({
+        where: { id: sessionId },
+        select: { status: true },
+      });
+
+      const session = await this.prisma.userSession.update({
+        where: { id: sessionId },
+        data: {
+          status: SessionStatus.REVOKED,
+          updatedAt: new Date(),
+        },
+      });
+
+      if (previous?.status === SessionStatus.ACTIVE) {
+        this.trackLogout(session, reason);
+      }
+
       logger.info(`Revoked session`);
     } catch (error) {
       logger.error('Error revoking session:', error);
@@ -353,11 +324,54 @@ export class UserSessionService {
   }
 
   /**
+   * Revoke session by refresh token
+   */
+  async revokeSessionByRefreshToken(refreshToken: string, reason: LogoutReason): Promise<void> {
+    try {
+      const liveSessions = await this.prisma.userSession.findMany({
+        where: { refreshToken, status: SessionStatus.ACTIVE },
+        select: { id: true, userId: true, deviceInfo: true, createdAt: true },
+      });
+
+      await this.prisma.userSession.updateMany({
+        where: { refreshToken },
+        data: {
+          status: SessionStatus.REVOKED,
+          updatedAt: new Date(),
+        },
+      });
+
+      liveSessions.forEach((session) => this.trackLogout(session, reason));
+
+      logger.info(`Revoked session by refresh token`);
+    } catch (error) {
+      logger.error('Error revoking session by refresh token:', error);
+      throw new Error('Failed to revoke session by refresh token');
+    }
+  }
+
+  /**
    * Revoke all sessions for a user
    */
   async revokeAllUserSessions(userId: string, reason: LogoutReason): Promise<void> {
     try {
-      await this.endSessions({ userId }, SessionStatus.REVOKED, reason);
+      // Read which sessions are live before the bulk update, purely to know
+      // which ones to log a LOGOUT for.
+      const liveSessions = await this.prisma.userSession.findMany({
+        where: { userId, status: SessionStatus.ACTIVE },
+        select: { id: true, userId: true, deviceInfo: true, createdAt: true },
+      });
+
+      await this.prisma.userSession.updateMany({
+        where: { userId },
+        data: {
+          status: SessionStatus.REVOKED,
+          updatedAt: new Date(),
+        },
+      });
+
+      liveSessions.forEach((session) => this.trackLogout(session, reason));
+
       logger.info(`Revoked all sessions for user: ${userId}`);
     } catch (error) {
       logger.error('Error revoking all user sessions:', error);
@@ -366,13 +380,27 @@ export class UserSessionService {
   }
 
   /**
-   * Mark a live session whose refresh token ran out as EXPIRED. Flipping the
-   * status is what keeps the LOGOUT row to one per session, however many
-   * requests keep arriving with the dead cookie.
+   * Mark a live session whose refresh token ran out as EXPIRED, so the denial
+   * that already happens on refresh can be logged as a LOGOUT once (a session
+   * already EXPIRED is skipped, so repeated requests with the same dead
+   * cookie don't log it again).
    */
   async expireSession(sessionId: string): Promise<void> {
     try {
-      await this.endSessions({ id: sessionId }, SessionStatus.EXPIRED, 'TOKEN_EXPIRED');
+      const { count } = await this.prisma.userSession.updateMany({
+        where: { id: sessionId, status: SessionStatus.ACTIVE },
+        data: {
+          status: SessionStatus.EXPIRED,
+          updatedAt: new Date(),
+        },
+      });
+      if (count === 0) return;
+
+      const session = await this.prisma.userSession.findUnique({
+        where: { id: sessionId },
+        select: { id: true, userId: true, deviceInfo: true, createdAt: true },
+      });
+      if (session) this.trackLogout(session, 'TOKEN_EXPIRED');
     } catch (error) {
       logger.error('Error expiring session:', error);
       throw new Error('Failed to expire session');
@@ -409,13 +437,21 @@ export class UserSessionService {
    */
   async cleanupExpiredSessions(): Promise<number> {
     try {
-      const count = await this.endSessions(
-        { refreshTokenExpiry: { lt: new Date() } },
-        SessionStatus.EXPIRED,
-        'TOKEN_EXPIRED',
-      );
-      logger.info(`Marked ${count} expired sessions`);
-      return count;
+      const result = await this.prisma.userSession.updateMany({
+        where: {
+          refreshTokenExpiry: {
+            lt: new Date(),
+          },
+          status: SessionStatus.ACTIVE,
+        },
+        data: {
+          status: SessionStatus.EXPIRED,
+          updatedAt: new Date(),
+        },
+      });
+
+      logger.info(`Marked ${result.count} expired sessions`);
+      return result.count;
     } catch (error) {
       logger.error('Error cleaning up expired sessions:', error);
       throw new Error('Failed to clean up expired sessions');

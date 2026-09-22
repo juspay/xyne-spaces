@@ -2410,11 +2410,7 @@ export class AuthV2Controller {
           refreshTokenExpiry.setDate(refreshTokenExpiry.getDate() + config.session.expiryDays);
           const newSession = await this.userSessionService.createSession({
             userId: workspaceUser.id,
-            // refreshToken is globally @unique — currentSession's token is
-            // still held by that row, so reusing it verbatim here always
-            // throws P2002. Mint a fresh one for this workspace's session
-            // instead of touching (or revoking) the original session's row.
-            refreshToken: randomUUID(),
+            refreshToken: currentSession.refreshToken,
             refreshTokenExpiry,
             accessToken: currentSession.accessToken ?? undefined,
             deviceInfo: JSON.stringify({ userAgent: req.headers['user-agent'], timestamp: new Date().toISOString(), appVersion: req.headers['x-app-version'] }),
