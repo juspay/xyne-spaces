@@ -480,6 +480,11 @@ class NoteTakerTranscriptService {
           action: 'grant',
           targets: [{ type: 'channel', id: channelId }],
           access: EntityUserAccess.VIEW,
+          // Access grant only. The recording already has its anchor message in
+          // the thread it was started from; posting here would additionally
+          // create a top-level conversation in the channel for the same
+          // recording (the duplicate users see in both thread and channel).
+          post: false,
         },
       );
     } catch (error) {
