@@ -6,7 +6,7 @@ import type { BusinessHours } from '../../../../api/automationsApi';
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const DAY_ORDER = [1, 2, 3, 4, 5, 6, 0];
 
-const DEFAULT_BUSINESS_HOURS: BusinessHours = {
+export const DEFAULT_BUSINESS_HOURS: BusinessHours = {
   days: [1, 2, 3, 4, 5],
   startTime: `${String(WORKING_HOUR_START).padStart(2, '0')}:00`,
   endTime: `${String(WORKING_HOUR_END).padStart(2, '0')}:00`,
@@ -20,11 +20,13 @@ export function BusinessHoursFields({
   onChange: (next: BusinessHours) => void;
 }): React.ReactElement {
   const hours = value ?? DEFAULT_BUSINESS_HOURS;
-  const toggleDay = (day: number): void =>
+  const toggleDay = (day: number): void => {
+    if (hours.days.length === 1 && hours.days.includes(day)) return;
     onChange({
       ...hours,
       days: hours.days.includes(day) ? hours.days.filter(d => d !== day) : [...hours.days, day],
     });
+  };
 
   return (
     <div className='flex flex-wrap items-center gap-1.5'>

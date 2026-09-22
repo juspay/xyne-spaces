@@ -3,7 +3,10 @@ import { Clock, Zap } from 'lucide-react';
 import { cn } from '../../../../utils/classNames';
 import Input from '../../../ui/Input/Input';
 import { Checkbox } from '../../../ui/Checkbox/Checkbox';
-import { BusinessHoursFields } from '../BusinessHoursFields/BusinessHoursFields';
+import {
+  BusinessHoursFields,
+  DEFAULT_BUSINESS_HOURS,
+} from '../BusinessHoursFields/BusinessHoursFields';
 import {
   Select,
   SelectContent,
@@ -216,7 +219,13 @@ export function ScheduleCard({
             <Checkbox
               label='Business hours only'
               checked={sched.businessHoursOnly ?? false}
-              onChange={checked => onChange({ ...sched, businessHoursOnly: checked })}
+              onChange={checked =>
+                onChange({
+                  ...sched,
+                  businessHoursOnly: checked,
+                  businessHours: sched.businessHours ?? DEFAULT_BUSINESS_HOURS,
+                })
+              }
               size='sm'
             />
             {sched.businessHoursOnly && (
