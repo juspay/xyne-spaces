@@ -156,14 +156,6 @@ const ClawAgentDetailV2 = (): ReactElement => {
                       <span>Last updated on: {updated}</span>
                     </>
                   )}
-                  <button
-                    type='button'
-                    data-track-category='Claw Agents'
-                    data-track-name='Agent detail v2: version history'
-                    className='underline underline-offset-2'
-                  >
-                    Version history
-                  </button>
                 </div>
               </div>
             </div>
