@@ -4656,7 +4656,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                       ref={descriptionRef}
                       className={cn(
                         'whitespace-pre-wrap break-words text-[14px] leading-[1.7] text-muted-foreground [text-wrap:pretty]',
-                        !showFullDescription && 'overflow-hidden line-clamp-3 sm:line-clamp-3',
+                        !showFullDescription && 'overflow-hidden line-clamp-5 sm:line-clamp-5',
                       )}
                     >
                       <RenderMessageWithHTML message={resolveTicketDescription(ticket)} />
