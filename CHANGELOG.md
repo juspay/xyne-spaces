@@ -1,3 +1,24 @@
+## [1.361.1](https://github.com/juspay/xyne-spaces/compare/v1.361.0...v1.361.1) (2026-09-22)
+
+
+### Bug Fixes
+
+* participant popover fix ([#2143](https://github.com/juspay/xyne-spaces/issues/2143)) ([add4f81](https://github.com/juspay/xyne-spaces/commit/add4f8160242792c16b81d999f4e9faa9f849864))
+
+## [1.361.0](https://github.com/juspay/xyne-spaces/compare/v1.360.1...v1.361.0) (2026-09-21)
+
+
+### Features
+
+* fix label ids ([#2137](https://github.com/juspay/xyne-spaces/issues/2137)) ([ba5811f](https://github.com/juspay/xyne-spaces/commit/ba5811f33797dbd4c2611ab3965c309ec23a1a74))
+
+## [1.360.1](https://github.com/juspay/xyne-spaces/compare/v1.360.0...v1.360.1) (2026-09-21)
+
+
+### Bug Fixes
+
+* app ACL fix ([#1542](https://github.com/juspay/xyne-spaces/issues/1542)) ([a4982df](https://github.com/juspay/xyne-spaces/commit/a4982dfd9be69f7176c9dbbe6c4164adfdc3735e))
+
 ## [1.360.0](https://github.com/juspay/xyne-spaces/compare/v1.359.0...v1.360.0) (2026-09-21)
 
 
