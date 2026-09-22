@@ -30,6 +30,8 @@ import {
   TicketStatusV2,
   DelayedMessageStatus,
   RecapEntityType,
+  EmailType,
+  MailboxState,
 } from './schema.js';
 
 export const zql = createBuilder(schema);
@@ -107,6 +109,81 @@ const toActualFieldValueQueryValue = (
   value: string | number | boolean,
 ): string | number | boolean =>
   typeof value === 'string' ? JSON.stringify(value) : value;
+
+// Sentinel value in the assignee filter meaning "tickets with no assignee".
+export const UNASSIGNED_FILTER_VALUE = 'unassigned';
+
+// Marker entry in the assignee filter meaning "exclude the selected assignees
+// instead of matching them". It lives inside the ids array so it survives every
+// transport (query args, saved views, counts requests) without schema changes.
+export const ASSIGNEE_INVERT_MARKER = '!invert';
+
+export interface ParsedAssigneeFilter {
+  inverted: boolean;
+  includeUnassigned: boolean;
+  ids: string[];
+}
+
+export const parseAssigneeFilter = (values: readonly string[]): ParsedAssigneeFilter => {
+  const inverted = values.includes(ASSIGNEE_INVERT_MARKER);
+  const rest = values.filter(value => value !== ASSIGNEE_INVERT_MARKER);
+  return {
+    inverted,
+    includeUnassigned: rest.includes(UNASSIGNED_FILTER_VALUE),
+    ids: rest.filter(value => value !== UNASSIGNED_FILTER_VALUE),
+  };
+};
+
+const supportDynamicFieldFiltersSchema = z
+  .array(
+    z.object({
+      fieldId: z.string(),
+      values: z.array(z.union([z.string(), z.number(), z.boolean()])).optional(),
+    }),
+  )
+  .optional();
+
+type SupportDynamicFieldFilters = z.infer<typeof supportDynamicFieldFiltersSchema>;
+
+const applySupportDynamicFieldFilters = (
+  query: any,
+  dynamicFieldFilters: SupportDynamicFieldFilters,
+) => {
+  if (!dynamicFieldFilters?.length) return query;
+  for (const fieldFilter of dynamicFieldFilters) {
+    const { fieldId, values } = fieldFilter;
+    query = query.whereExists('formEntityValues', (formEntityValue: any) => {
+      let fevQuery = formEntityValue.where('entityType', 'TICKET').where('fieldId', fieldId);
+      if (values && values.length > 0) {
+        fevQuery = fevQuery.where((helpers: any) =>
+          helpers.or(
+            ...values.map((value: string | number | boolean) =>
+              helpers.cmp('actualFieldValue', '=', toActualFieldValueQueryValue(value)),
+            ),
+          ),
+        );
+      }
+      return fevQuery;
+    });
+  }
+  return query;
+};
+
+const relateSupportDynamicFieldValues = (
+  fev: any,
+  dynamicFieldFilters: SupportDynamicFieldFilters,
+  formEntityValueFieldIds?: string[],
+) => {
+  const fieldIds = [
+    ...new Set([
+      ...(dynamicFieldFilters ?? []).map(fieldFilter => fieldFilter.fieldId),
+      ...(formEntityValueFieldIds ?? []),
+    ]),
+  ];
+  return fieldIds.length > 0
+    ? fev.where('entityType', 'TICKET').where('fieldId', 'IN', fieldIds)
+    : fev.where('fieldId', '__no_dynamic_field_filters__');
+};
 
 const applyKanbanTicketPageConditions = (
   query: any,
@@ -1093,29 +1170,165 @@ export const queries = defineQueries({
       channelId: z.string(),
       isMember: z.boolean(),
       assignedTo: z.array(z.string()).optional(),
+      createdBy: z.array(z.string()).optional(),
       priority: z.array(z.nativeEnum(TicketPriority)).optional(),
       stageName: z.array(z.string()).optional(),
+      aiCategory: z.array(z.string()).optional(),
+      conversationIds: z.array(z.string()).optional(),
+      hasAiDraft: z.boolean().optional(),
+      hasSubTickets: z.boolean().optional(),
+      mailboxFolder: z.enum(['inbox', 'all', 'starred', 'spam', 'sent', 'drafts']).optional(),
+      userGroups: z.array(z.string()).optional(),
+      lastEmailAtStart: z.number().optional(),
+      lastEmailAtEnd: z.number().optional(),
+      createdAtStart: z.number().optional(),
+      createdAtEnd: z.number().optional(),
+      // Accepted for mobile/public parity; apply once conversation_labels + mappings land.
+      conversationLabelId: z.string().optional(),
+      dynamicFieldFilters: supportDynamicFieldFiltersSchema,
       limit: z.number(),
       start: z.object({ id: z.string(), lastEmailAt: z.number() }).nullable(),
       dir: z.literal('forward').or(z.literal('backward')),
-    }),
-    ({ ctx, args: { channelId, assignedTo, priority, stageName, limit, start, dir } }) => {
+    }).refine(
+      args => args.createdAtStart === undefined || args.createdAtEnd === undefined || args.createdAtStart <= args.createdAtEnd,
+      'createdAtStart must be less than or equal to createdAtEnd',
+    ),
+    ({ ctx, args: { channelId, assignedTo, createdBy, priority, stageName, aiCategory, conversationIds, hasAiDraft, hasSubTickets, mailboxFolder, userGroups, lastEmailAtStart, lastEmailAtEnd, createdAtStart, createdAtEnd, conversationLabelId, dynamicFieldFilters, limit, start, dir } }) => {
+      void conversationLabelId;
+
       let query = zql.tickets.where('channelId', channelId);
+      query = query.where('isArchived', false);
 
       if (assignedTo && assignedTo.length > 0) {
-        query = query.where(({ or, cmp }) => or(...assignedTo.map((id) => cmp('assignedTo', id))));
+        // Desk tickets store a raw user id in assignedTo (no user:/group: prefixing).
+        // The shared 'Unassigned' sentinel filters tickets with no assignee
+        // (zero stores nullable strings, so unassigned = IS null OR '').
+        const { inverted, includeUnassigned, ids } = parseAssigneeFilter(assignedTo);
+        if (!inverted) {
+          query = query.where(({ or, cmp }) =>
+            or(
+              ...(ids.length ? [cmp('assignedTo', 'IN', ids)] : []),
+              ...(includeUnassigned ? [cmp('assignedTo', 'IS', null), cmp('assignedTo', '')] : []),
+            ),
+          );
+        } else if (includeUnassigned) {
+          query = query.where(({ and, cmp }) =>
+            and(
+              ...(ids.length ? [cmp('assignedTo', 'NOT IN', ids)] : []),
+              cmp('assignedTo', 'IS NOT', null),
+              cmp('assignedTo', '!=', ''),
+            ),
+          );
+        } else {
+          query = query.where(({ or, cmp }) =>
+            or(
+              cmp('assignedTo', 'NOT IN', ids),
+              cmp('assignedTo', 'IS', null),
+              cmp('assignedTo', ''),
+            ),
+          );
+        }
+      }
+
+      if (createdBy && createdBy.length > 0) {
+        query = query.where('createdBy', 'IN', createdBy);
       }
 
       if (priority && priority.length > 0) {
-        query = query.where(({ or, cmp }) => or(...priority.map((p) => cmp('priority', p))));
+        query = query.where('priority', 'IN', priority);
       }
 
       if (stageName && stageName.length > 0) {
-        query = query.where(({ or, cmp }) => or(...stageName.map((s) => cmp('stageName', s))));
+        query = query.where('stageName', 'IN', stageName);
       }
+
+      if (aiCategory && aiCategory.length > 0) {
+        query = query.where('aiCategory', 'IN', aiCategory);
+      }
+
+      if (conversationIds !== undefined) {
+        query = query.where('conversationId', 'IN', conversationIds.length > 0 ? conversationIds : ['']);
+      }
+
+      if (hasAiDraft) {
+        query = query.where(({ exists }) =>
+          exists('emailDrafts', (draft) => draft.where('userId', 'IS', null)),
+        );
+      }
+
+      if (hasSubTickets) {
+        query = query.where(({ exists }) => exists('subTicketMappings'));
+      }
+
+      // Mailbox folder server-side filtering. Spam and Starred REQUIRE an overlay row, so they
+      // can be filtered with a positive exists() (works on the client too, unlike not(exists)),
+      // making pagination meaningful instead of scanning the whole channel client-side. Inbox /
+      // All Mail include no-overlay tickets (default = Inbox) and stay client-side.
+      if (mailboxFolder === 'spam') {
+        query = query.where(({ exists }) =>
+          exists('userMailbox', m =>
+            m.where('userId', ctx.userID).where('state', MailboxState.SPAM),
+          ),
+        );
+      } else if (mailboxFolder === 'starred') {
+        query = query.where(({ exists }) =>
+          exists('userMailbox', m =>
+            m
+              .where('userId', ctx.userID)
+              .where('starred', true)
+              .where(({ or, cmp }) =>
+                or(cmp('state', MailboxState.INBOX), cmp('state', MailboxState.ARCHIVED)),
+              ),
+          ),
+        );
+      } else if (mailboxFolder === 'sent') {
+        // "Sent" = tickets the current user has sent an outbound email on (REPLY /
+        // REPLY_ALL / COMPOSE). A positive exists() runs client-side too, so pagination
+        // stays meaningful and the list is one-row-per-ticket (no email-level collapse).
+        query = query.where(({ exists }) =>
+          exists('emails', e =>
+            e
+              .where('type', 'IN', [EmailType.REPLY, EmailType.REPLY_ALL, EmailType.COMPOSE])
+              .where('sentByUserId', ctx.userID),
+          ),
+        );
+      } else if (mailboxFolder === 'drafts') {
+        // "Drafts" = tickets the current user has a saved reply draft on (conversationId
+        // set → tied to a ticket). Compose drafts (no conversationId, no ticket yet) are
+        // surfaced separately via the Drafts chip banner, not in this list.
+        query = query.where(({ exists }) =>
+          exists('emailDrafts', d =>
+            d.where('userId', ctx.userID).where('conversationId', 'IS NOT', null),
+          ),
+        );
+      }
+
+      if (userGroups && userGroups.length > 0) {
+        query = query.where('userGroupId', 'IN', userGroups);
+      }
+
+      if (lastEmailAtStart !== undefined) {
+        query = query.where('lastEmailAt', '>=', lastEmailAtStart);
+      }
+
+      if (lastEmailAtEnd !== undefined) {
+        query = query.where('lastEmailAt', '<=', lastEmailAtEnd);
+      }
+
+      if (createdAtStart !== undefined) {
+        query = query.where('createdAt', '>=', createdAtStart);
+      }
+
+      if (createdAtEnd !== undefined) {
+        query = query.where('createdAt', '<=', createdAtEnd);
+      }
+
+      query = applySupportDynamicFieldFilters(query, dynamicFieldFilters);
 
       const orderDirection = dir === 'forward' ? 'desc' : 'asc';
       query = query.orderBy('lastEmailAt', orderDirection);
+      // id tiebreak keeps the (lastEmailAt, id) keyset cursor deterministic on ties.
+      query = query.orderBy('id', orderDirection);
 
       if (start) {
         query = query.start(
@@ -1124,19 +1337,23 @@ export const queries = defineQueries({
         );
       }
 
-      return query
-        .limit(limit)
-        .related('project')
-        .related('tagMappings')
-        .related('entity')
-        .related('emails', q => q.related('attachments'))
-        .related('emailDrafts', q =>
-          q.where(({ or, cmp }) =>
-            or(cmp('userId', '=', ctx.userID), cmp('userId', 'IS', null)),
-          ),
-        )
-        .related('emailReads', q => q.where('userId', ctx.userID))
-        .related('conversation');
+      return (
+        query
+          .limit(limit)
+          .related('emailDrafts', q =>
+            q.where(({ or, cmp }) =>
+              or(cmp('userId', '=', ctx.userID), cmp('userId', 'IS', null)),
+            ),
+          )
+          .related('emailReads', q => q.where('userId', ctx.userID))
+          // Caller's per-user mailbox overlay so the list can be filtered into mailbox
+          // folders (Inbox / All Mail / Starred / Spam) client-side. A ticket with no
+          // overlay row defaults to Inbox.
+          .related('userMailbox', q => q.where('userId', ctx.userID))
+          .related('formEntityValues', fev =>
+            relateSupportDynamicFieldValues(fev, dynamicFieldFilters),
+          )
+      );
     },
   ),
 
@@ -2696,6 +2913,10 @@ export const queries = defineQueries({
         .orderBy('name', 'asc');
     },
   ),
+  // The caller's mailbox overlay for a single ticket (ACL scopes to userId = me).
+  myTicketMailbox: defineQuery(z.object({ ticketId: z.string() }), ({ args: { ticketId } }) => {
+    return zql.ticket_user_mailbox.where('ticketId', ticketId);
+  }),
   // Query for ticket entity mappings by ticket ID
   getTicketEntityMappingsByTicketId: defineQuery(
     z.object({ ticketId: z.string() }),

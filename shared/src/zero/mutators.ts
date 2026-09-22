@@ -59,6 +59,7 @@ import {
   Schema,
   CollectionRole,
   DeskType,
+  MailboxState,
 
   VCSProviderType,
   ReleaseTrackingMode,
@@ -7483,6 +7484,91 @@ export const mutators = defineMutators({
         );
         if (existing) {
           await tx.mutate.email_drafts.delete({ id: existing.id });
+        }
+      },
+    ),
+  },
+  // Gmail-style mailbox overlay (per-user, per-desk) over shared desk tickets. Sparse:
+  // a row exists only once the agent acts; absence means { INBOX, not starred }. The
+  // ticket stays shared at the channel level.
+  ticketMailbox: {
+    // Upsert the caller's mailbox state for a ticket (archive/spam/trash/restore-to-inbox).
+    setState: defineMutator(
+      z.object({
+        id: z.string(),
+        ticketId: z.string(),
+        channelId: z.string(),
+        state: z.nativeEnum(MailboxState),
+        timestamp: z.number(),
+      }),
+      async ({ tx, ctx, args: { id, ticketId, channelId, state, timestamp } }) => {
+        const channel = await tx.run(zql.channels.where('id', channelId).one());
+        if (!channel) throw new Error('Channel not found');
+
+        const existing = await tx.run(
+          zql.ticket_user_mailbox
+            .where('ticketId', ticketId)
+            .where('userId', ctx.userID)
+            .one(),
+        );
+        if (existing) {
+          await tx.mutate.ticket_user_mailbox.update({
+            id: existing.id,
+            state,
+            updatedAt: timestamp,
+          });
+        } else {
+          await tx.mutate.ticket_user_mailbox.insert({
+            id,
+            ticketId,
+            userId: ctx.userID,
+            channelId,
+            workspaceId: channel.workspaceId,
+            state,
+            starred: false,
+            createdAt: timestamp,
+            updatedAt: timestamp,
+          });
+        }
+      },
+    ),
+    // Upsert the caller's star flag for a ticket (additive — keeps the mailbox state).
+    setStarred: defineMutator(
+      z.object({
+        id: z.string(),
+        ticketId: z.string(),
+        channelId: z.string(),
+        starred: z.boolean(),
+        timestamp: z.number(),
+      }),
+      async ({ tx, ctx, args: { id, ticketId, channelId, starred, timestamp } }) => {
+        const channel = await tx.run(zql.channels.where('id', channelId).one());
+        if (!channel) throw new Error('Channel not found');
+
+        const existing = await tx.run(
+          zql.ticket_user_mailbox
+            .where('ticketId', ticketId)
+            .where('userId', ctx.userID)
+            .one(),
+        );
+        if (existing) {
+          await tx.mutate.ticket_user_mailbox.update({
+            id: existing.id,
+            starred,
+            updatedAt: timestamp,
+          });
+        } else {
+          await tx.mutate.ticket_user_mailbox.insert({
+            id,
+            ticketId,
+            userId: ctx.userID,
+            channelId,
+            workspaceId: channel.workspaceId,
+            state: MailboxState.INBOX,
+            starred,
+            createdAt: timestamp,
+            updatedAt: timestamp,
+          });
         }
       },
     ),
