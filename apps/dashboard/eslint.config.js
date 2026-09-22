@@ -82,8 +82,13 @@ export default tseslint.config(
       ...reactPlugin.configs.recommended.rules,
       ...reactHooksPlugin.configs.recommended.rules,
       ...jsxA11yPlugin.configs.recommended.rules,
-      // Autofocus is intentional for modals, comboboxes, and editors (see Canvas, chat input).
-      "jsx-a11y/no-autofocus": "off",
+      // Autofocus inside a dialog/popover/combobox the user just opened is correct
+      // and expected; autofocus on a screen the user merely navigated to steals
+      // focus and fails WCAG 3.2.1. The rule cannot tell those apart, so it is a
+      // warning rather than off: every new `autoFocus` shows up in `pnpm lint`
+      // and has to be justified in review, without blocking the build on the
+      // existing (mostly legitimate, dialog-scoped) usages. See docs/accessibility.md.
+      "jsx-a11y/no-autofocus": "warn",
       "react/react-in-jsx-scope": "off",
       "react/prop-types": "off",
       "local-rules/no-fetch-use-axios": "error",

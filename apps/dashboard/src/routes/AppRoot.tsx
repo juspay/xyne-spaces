@@ -251,6 +251,10 @@ import AIKnowledgeScreen from './AIScreen/screens/AIKnowledgeScreen';
 import AIOrganizationScreen from './AIScreen/screens/AIOrganizationScreen';
 import AIDigitalTwinScreen from './AIScreen/screens/AIDigitalTwinScreen';
 import AISectionLayout from './AIScreen/AISectionLayout';
+import {
+  SkipToMainContent,
+  MAIN_CONTENT_ID,
+} from '../components/SkipToMainContent/SkipToMainContent';
 import { EncryptionBootstrapProvider } from '../providers/EncryptionBootstrapProvider';
 import { EncryptionInit } from '../components/EncryptionInit';
 import UserGuideScreen from './UserGuideScreen';
@@ -896,8 +900,13 @@ const AppRoot = (): ReactElement => {
                                   <div
                                     className={`flex h-full ${shouldShowMobileHeader ? 'pt-[60px]' : ''}`}
                                   >
+                                    <SkipToMainContent />
                                     <AppSidebar />
-                                    <main className='flex-1 no-scrollbar overflow-auto'>
+                                    <main
+                                      id={MAIN_CONTENT_ID}
+                                      tabIndex={-1}
+                                      className='flex-1 no-scrollbar overflow-auto focus:outline-none'
+                                    >
                                       <EditWarningModal />
                                       <Outlet />
                                     </main>
@@ -920,8 +929,13 @@ const AppRoot = (): ReactElement => {
                           <div
                             className={`flex h-full ${shouldShowMobileHeader ? 'pt-[60px]' : ''}`}
                           >
+                            <SkipToMainContent />
                             <AppSidebar />
-                            <main className='flex-1 no-scrollbar overflow-auto'>
+                            <main
+                              id={MAIN_CONTENT_ID}
+                              tabIndex={-1}
+                              className='flex-1 no-scrollbar overflow-auto focus:outline-none'
+                            >
                               <EditWarningModal />
                               <Outlet />
                             </main>
