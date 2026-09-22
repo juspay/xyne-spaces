@@ -7,6 +7,7 @@ const prisma = DatabaseClient.getInstance();
 import { Application } from '@prisma/client';
 import { ActivityType, TicketPriority } from '@xyne/shared';
 import { dualWriteTicketTag } from '@/services/ticketTagDualWriteService';
+import { advisoryXactLock } from '@/bypassAcl/lockServices';
 
 type CreateApplicationSubTicketsOpts = {
   parentTicketId: string;
@@ -135,7 +136,9 @@ export class ApplicationRepository {
   ): Promise<Map<string, { subTicketId: string; mappedTicketId: string; xyneId: string }>> {
     return prisma.$transaction(
       async (tx) => {
-        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${'release-subtickets:' + opts.parentTicketId}))`;
+        await advisoryXactLock(tx, ['Ticket'],
+          'release sub-tickets: serialize sub-ticket creation for one parent ticket',
+          'release-subtickets:' + opts.parentTicketId);
         return this.createApplicationSubTicketsLocked(opts);
       },
       { maxWait: 10_000, timeout: 60_000 },
