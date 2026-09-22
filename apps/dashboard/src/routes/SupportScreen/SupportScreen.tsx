@@ -1769,6 +1769,20 @@ const SupportScreen = (): ReactElement => {
   const isCanvasesView = searchParams.get('view') === 'canvases';
   const openCanvasId = isCanvasesView ? searchParams.get('canvasId') : null;
 
+  // Steps back one level: canvas → list → tickets.
+  const stepBackFromCanvas = useCallback((): void => {
+    setSearchParams(
+      prev => {
+        const p = new URLSearchParams(prev);
+        const hadCanvas = p.has('canvasId');
+        p.delete('canvasId');
+        if (!hadCanvas) p.delete('view');
+        return p;
+      },
+      { replace: true },
+    );
+  }, [setSearchParams]);
+
   useEffect(() => {
     localStorage.setItem('support-view-mode', viewMode);
   }, [viewMode]);
@@ -3305,26 +3319,19 @@ const SupportScreen = (): ReactElement => {
                         selectedChannelId &&
                         selectedChannelId !== ALL_CHANNELS_ID && (
                           <Tooltip
-                            content={
-                              openCanvasId
-                                ? 'Back to canvases'
-                                : isCanvasesView
-                                  ? 'Back to tickets'
-                                  : 'Canvases'
-                            }
+                            content={isCanvasesView ? 'Back to tickets' : 'Canvases'}
                             side='bottom'
                           >
                             <button
+                              // Enters and leaves the canvases area outright; the
+                              // back row inside it is what steps one level.
                               onClick={() =>
                                 setSearchParams(
                                   prev => {
-                                    // Steps back one level: canvas → list → tickets.
                                     const p = new URLSearchParams(prev);
                                     p.delete('canvasId');
-                                    if (!openCanvasId) {
-                                      if (isCanvasesView) p.delete('view');
-                                      else p.set('view', 'canvases');
-                                    }
+                                    if (isCanvasesView) p.delete('view');
+                                    else p.set('view', 'canvases');
                                     return p;
                                   },
                                   { replace: true },
@@ -4189,24 +4196,43 @@ const SupportScreen = (): ReactElement => {
                     />
                   </div>
                 ) : isCanvasesView ? (
-                  // Same split as the chat panel's canvas tab: list, then editor.
-                  openCanvasId ? (
-                    <CanvasScreen canvasId={openCanvasId} />
-                  ) : (
-                    <DeskCanvasList
-                      channelId={selectedChannelId}
-                      onSelect={canvasId =>
-                        setSearchParams(
-                          prev => {
-                            const p = new URLSearchParams(prev);
-                            p.set('canvasId', canvasId);
-                            return p;
-                          },
-                          { replace: true },
-                        )
-                      }
-                    />
-                  )
+                  <div className='flex h-full min-h-0 flex-col'>
+                    {/* One row for both levels: canvas → canvases, list → tickets. */}
+                    <div className='flex shrink-0 items-center gap-2 px-4 pt-3'>
+                      <button
+                        onClick={stepBackFromCanvas}
+                        className='p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0'
+                        aria-label={openCanvasId ? 'Back to canvases' : 'Back to tickets'}
+                        data-track-category='Support'
+                        data-track-name='BackFromDeskCanvases'
+                      >
+                        <ArrowLeft size={18} />
+                      </button>
+                      <span className='text-sm text-muted-foreground'>
+                        {openCanvasId ? 'Canvases' : 'Tickets'}
+                      </span>
+                    </div>
+                    <div className='min-h-0 flex-1'>
+                      {/* Same split as the chat panel's canvas tab: list, then editor. */}
+                      {openCanvasId ? (
+                        <CanvasScreen canvasId={openCanvasId} />
+                      ) : (
+                        <DeskCanvasList
+                          channelId={selectedChannelId}
+                          onSelect={canvasId =>
+                            setSearchParams(
+                              prev => {
+                                const p = new URLSearchParams(prev);
+                                p.set('canvasId', canvasId);
+                                return p;
+                              },
+                              { replace: true },
+                            )
+                          }
+                        />
+                      )}
+                    </div>
+                  </div>
                 ) : (
                   <>
                     {/* Drafts banner — visible when there are saved-but-closed drafts */}
