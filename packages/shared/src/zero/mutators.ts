@@ -3396,13 +3396,34 @@ export const mutators = defineMutators({
         channelId: z.string(),
         conversationId: z.string().optional(),
         timestamp: z.number(),
+        /** Attachments handed to the queued message, re-pointed off the draft. */
+        claimedAttachmentIds: z.array(z.string()).optional(),
+        /** The message those attachments now belong to. */
+        messageId: z.string().optional(),
       }),
-      async ({ tx, ctx, args: { channelId, conversationId, timestamp } }) => {
+      async ({
+        tx,
+        ctx,
+        args: { channelId, conversationId, timestamp, claimedAttachmentIds, messageId },
+      }) => {
         // Called at send-time to detach the draft from the queued message:
         // zeroes content and hasAttachment so `markChannelAsViewed` can
-        // garbage-collect the row on channel exit. The DRAFT-typed attachment
-        // rows are left in place; the send mutator claims them by id when
-        // it fires (immediate or on retry).
+        // garbage-collect the row on channel exit.
+
+        // Transfer the attachments to the queued message. draft_messages relates
+        // to message_attachments on `entityId`, so re-pointing it detaches them
+        // from the composer while leaving them claimable by id.
+        //
+        // This runs in its OWN mutation, which is why it survives the send being
+        // rolled back. The send mutator's DRAFT -> CHAT claim is part of the send,
+        // so a server rejection reverts it and the files reappear in the composer —
+        // where a later message would promote them and the failed message's retry
+        // would reference attachments it no longer owns.
+        if (messageId && claimedAttachmentIds && claimedAttachmentIds.length > 0) {
+          for (const attachmentId of claimedAttachmentIds) {
+            await tx.mutate.message_attachments.update({ id: attachmentId, entityId: messageId });
+          }
+        }
         const channelDrafts = await tx.run(
           zql.draft_messages
             .where('channelId', channelId)

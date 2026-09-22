@@ -4,6 +4,7 @@ import { QueryResultType } from '@rocicorp/zero';
 import { useAuthContext } from '../../../providers/AuthProvider';
 import { useLocation } from 'react-router-dom';
 import { ChatBubble } from '../ChatBubble/ChatBubble';
+import { PendingSendStatus } from '../PendingSendStatus/PendingSendStatus';
 import { MessageHoverToolbar } from '../HoverActionsToolbar/MessageHoverToolbar';
 import { useThreadListInitialScroll } from './useThreadListInitialScroll';
 import type { ThreadListItemWithSeparator } from '../../../utils/chatUtils';
@@ -616,6 +617,7 @@ const ThreadList = ({
                     highlightMessageId={matchedMessageId ?? null}
                     inspectedTag={inspectedTag}
                   />
+                  <PendingSendStatus messageId={threadMessage.messageId} className='pl-10' />
                 </div>
                 {!enableCollapsing &&
                   !isThreadsRoute &&
