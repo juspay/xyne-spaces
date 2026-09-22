@@ -16,7 +16,11 @@ import {
   type AIComposerHandle,
 } from '@/components/AIScreen/AIComposer';
 import { AIEmptyState } from '@/components/AIScreen/AIEmptyState';
-import { AnimatedLabel, BrailleLoader } from '@/components/AIScreen/ReasoningLoader';
+import {
+  AnimatedLabel,
+  BrailleLoader,
+  useStableLabel,
+} from '@/components/AIScreen/ReasoningLoader';
 import { type ComposerContext, toStreamOverrides } from '@/components/AIScreen/composerContext';
 import type { Message, MessageAttachment } from '@/components/Chat/XyneAISidebar/utils/XyneAITypes';
 import { useXyneAIStream } from '@/hooks/useXyneAIStream';
@@ -31,6 +35,26 @@ import {
   type CreateCanvasSnapshot,
   type ParsedCreateChatAction,
 } from './createChatMode';
+
+const SCRIPTED_STREAMING_PHASES = ['Thinking', 'Weighing it up', 'Reasoning'] as const;
+const SCRIPTED_PHASE_MS = 1500;
+
+function useScriptedStreamingPhase(active: boolean): string {
+  const [index, setIndex] = useState(0);
+  useEffect(() => {
+    if (!active) {
+      setIndex(0);
+      return;
+    }
+    const id = window.setInterval((): void => {
+      setIndex(current => (current + 1) % SCRIPTED_STREAMING_PHASES.length);
+    }, SCRIPTED_PHASE_MS);
+    return (): void => {
+      window.clearInterval(id);
+    };
+  }, [active]);
+  return SCRIPTED_STREAMING_PHASES[index] ?? SCRIPTED_STREAMING_PHASES[0];
+}
 
 const toMessageAttachments = (attachments: AIComposerAttachment[]): MessageAttachment[] =>
   attachments.map(att => ({
@@ -292,6 +316,18 @@ function CreateChatLayout({
   onReplay?: () => void;
   onEngage?: () => void;
 }): ReactElement {
+  const scriptedEmptyStreaming =
+    scripted &&
+    messages.some(message => {
+      if (message.type !== 'bot' || !message.isStreaming) return false;
+      return (
+        visibleCreateReply(message.content || message.streamingContent || '', true).trim()
+          .length === 0
+      );
+    });
+  const scriptedPhaseDesired = useScriptedStreamingPhase(scriptedEmptyStreaming);
+  const stableScriptedThinking = useStableLabel(scriptedPhaseDesired);
+
   return (
     <div
       className='flex h-full min-w-0 flex-col bg-background'
@@ -346,6 +382,7 @@ function CreateChatLayout({
                 typeof message.statusMessage === 'string' && message.statusMessage.trim().length > 0
                   ? message.statusMessage
                   : 'Thinking…';
+              const scriptedThinkLabel = thinking ? `${stableScriptedThinking}…` : thinkLabel;
               return (
                 <li
                   key={message.stableKey ?? message.id}
@@ -369,7 +406,7 @@ function CreateChatLayout({
                         >
                           <BrailleLoader />
                           <span className='select-none'>
-                            <AnimatedLabel text={thinkLabel} />
+                            <AnimatedLabel text={scriptedThinkLabel} />
                           </span>
                         </div>
                       ) : null}

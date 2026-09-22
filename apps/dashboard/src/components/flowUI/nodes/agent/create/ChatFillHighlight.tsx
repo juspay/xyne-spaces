@@ -17,9 +17,9 @@ const SHIMMER_TEXT =
   '[&_input]:bg-clip-text [&_textarea]:bg-clip-text [&_label]:bg-clip-text ' +
   '[&_input]:[-webkit-text-fill-color:transparent] [&_textarea]:[-webkit-text-fill-color:transparent] [&_label]:[-webkit-text-fill-color:transparent] ' +
   '[&_input]:[caret-color:hsl(var(--foreground))] [&_textarea]:[caret-color:hsl(var(--foreground))] ' +
-  '[&_input]:[background-image:linear-gradient(90deg,hsl(var(--foreground))_0%,hsl(var(--foreground)/0.38)_48%,hsl(var(--foreground))_100%)] ' +
-  '[&_textarea]:[background-image:linear-gradient(90deg,hsl(var(--foreground))_0%,hsl(var(--foreground)/0.38)_48%,hsl(var(--foreground))_100%)] ' +
-  '[&_label]:[background-image:linear-gradient(90deg,hsl(var(--muted-foreground))_0%,hsl(var(--muted-foreground)/0.35)_48%,hsl(var(--muted-foreground))_100%)] ' +
+  '[&_input]:[background-image:linear-gradient(100deg,hsl(var(--foreground))_0%,hsl(var(--foreground))_42%,#fff_50%,hsl(var(--foreground))_58%,hsl(var(--foreground))_100%)] ' +
+  '[&_textarea]:[background-image:linear-gradient(100deg,hsl(var(--foreground))_0%,hsl(var(--foreground))_42%,#fff_50%,hsl(var(--foreground))_58%,hsl(var(--foreground))_100%)] ' +
+  '[&_label]:[background-image:linear-gradient(100deg,hsl(var(--muted-foreground))_0%,hsl(var(--muted-foreground))_42%,#fff_50%,hsl(var(--muted-foreground))_58%,hsl(var(--muted-foreground))_100%)] ' +
   '[&_input]:[background-position:var(--create-shimmer)_50%] [&_textarea]:[background-position:var(--create-shimmer)_50%] [&_label]:[background-position:var(--create-shimmer)_50%]';
 
 /**
@@ -44,8 +44,8 @@ export function ChatFillHighlight({
       return;
     }
     const playback = animate(0, 100, {
-      duration: 1.35,
-      ease: 'linear',
+      duration: 0.9,
+      ease: 'easeInOut',
       repeat: Infinity,
       onUpdate: (latest: number): void => {
         host.style.setProperty('--create-shimmer', `${latest}%`);
