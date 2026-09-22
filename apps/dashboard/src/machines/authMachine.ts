@@ -6,6 +6,7 @@ import { reactNativeBridge } from '../utils/reactNativeBridge';
 import { posthogService } from '../services/Analytics/posthogService';
 import { API_BASE_URL, isSdlcSurface, isTestEnv } from '../config';
 import { logger } from '../utils/logger';
+import { clearSessionHint, hasSessionHint, markSessionHint } from '../utils/sessionHint';
 import {
   CommunityJoinResultStatus,
   WorkspaceType,
@@ -236,21 +237,7 @@ export const authMachine = createMachine(
     states: {
       checkingSession: {
         entry: assign(({ context: _context }) => {
-          const userId = localStorage.getItem('user_id');
           const userEmail = localStorage.getItem('user_email');
-
-          let user = null;
-
-          if (userId) {
-            user = {
-              id: userId,
-              workspaceId: '',
-              role: '',
-              orgRole: '',
-              memberId: '',
-              ...(userEmail && { email: userEmail }),
-            };
-          }
 
           const lastActiveWorkspaceId = userEmail ? getLastActiveWorkspaceId(userEmail) : null;
 
@@ -259,7 +246,7 @@ export const authMachine = createMachine(
           const isNewUser = isNewUserCookie === 'true';
 
           return {
-            user: user,
+            user: null,
             error: null,
             isNewUser: isNewUser,
             selectedWorkspaceId: lastActiveWorkspaceId,
@@ -322,7 +309,7 @@ export const authMachine = createMachine(
                 assign(({ context, event }) => {
                   const output = (event as XStateEvent).output;
                   if (output?.user) {
-                    localStorage.setItem('user_id', output.user.id);
+                    markSessionHint();
                     if (output.user.email) {
                       localStorage.setItem('user_email', output.user.email);
                       if (window.electronAPI?.setUserEmail) {
@@ -492,7 +479,7 @@ export const authMachine = createMachine(
                 assign(({ context, event }) => {
                   const output = (event as XStateEvent).output;
                   if (output?.user) {
-                    localStorage.setItem('user_id', output.user.id);
+                    markSessionHint();
                     if (output.user.email) {
                       localStorage.setItem('user_email', output.user.email);
                       if (window.electronAPI?.setUserEmail) {
@@ -576,7 +563,7 @@ export const authMachine = createMachine(
               assign(({ context, event }) => {
                 const output = (event as XStateEvent).output;
                 if (output?.user) {
-                  localStorage.setItem('user_id', output.user.id);
+                  markSessionHint();
                   if (output.user.email) {
                     localStorage.setItem('user_email', output.user.email);
                     if (window.electronAPI?.setUserEmail) {
@@ -650,7 +637,7 @@ export const authMachine = createMachine(
               assign(({ context, event }) => {
                 const output = (event as XStateEvent).output;
                 if (output?.user) {
-                  localStorage.setItem('user_id', output.user.id);
+                  markSessionHint();
                   if (output.user.email) {
                     localStorage.setItem('user_email', output.user.email);
                     if (window.electronAPI?.setUserEmail) {
@@ -699,7 +686,7 @@ export const authMachine = createMachine(
               actions: assign(({ context, event }) => {
                 const output = (event as XStateEvent).output;
                 if (output?.user?.id) {
-                  localStorage.setItem('user_id', output.user.id);
+                  markSessionHint();
                 }
 
                 return {
@@ -719,7 +706,7 @@ export const authMachine = createMachine(
                 const output = (event as XStateEvent).output;
 
                 if (output?.user) {
-                  localStorage.setItem('user_id', output.user.id);
+                  markSessionHint();
                 }
 
                 // Session tokens are set via HTTP-only cookies from backend
@@ -1102,7 +1089,7 @@ export const authMachine = createMachine(
               assign(({ context, event }) => {
                 const output = (event as XStateEvent).output;
                 if (output?.user) {
-                  localStorage.setItem('user_id', output.user.id);
+                  markSessionHint();
                   if (output.user.email) {
                     localStorage.setItem('user_email', output.user.email);
                     if (window.electronAPI?.setUserEmail) {
@@ -1144,10 +1131,7 @@ export const authMachine = createMachine(
 
         return hasCallback;
       },
-      hasStoredSession: () => {
-        const userId = localStorage.getItem('user_id');
-        return !!userId;
-      },
+      hasStoredSession: () => hasSessionHint(),
       isTestEnvironment: () => isTestEnv,
       hasUserInOutput: ({ event }) => {
         const e = event as { output?: OAuthCallbackOutput };
@@ -1202,7 +1186,7 @@ export const authMachine = createMachine(
     actions: {
       clearSessionCookies: () => {
         clearPersistedSession();
-        localStorage.removeItem('user_id');
+        clearSessionHint();
         localStorage.removeItem('user_email');
         localStorage.removeItem(PENDING_WORKSPACE_ID_KEY);
         localStorage.removeItem(PENDING_WORKSPACE_NAME_KEY);
@@ -1324,7 +1308,7 @@ export const authMachine = createMachine(
 
         try {
           if (event.user?.id) {
-            localStorage.setItem('user_id', event.user.id);
+            markSessionHint();
           }
           if (event.user?.email) {
             localStorage.setItem('user_email', event.user.email);

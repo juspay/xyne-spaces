@@ -5,6 +5,7 @@ import { Button } from '../../components/ui/Button/Button';
 import axios from 'axios';
 import Cookies from 'js-cookie';
 import { API_BASE_URL } from '../../config';
+import { markSessionHint } from '../../utils/sessionHint';
 import {
   authActor,
   PENDING_WORKSPACE_ID_KEY,
@@ -171,7 +172,7 @@ export const AcceptInvitation = (): ReactElement => {
       const { user } = loginResponse.data;
 
       // Step 3: Prime localStorage so authMachine's hasStoredSession guard fires on reload
-      localStorage.setItem('user_id', user.id);
+      markSessionHint();
       if (user.email) {
         localStorage.setItem('user_email', user.email);
         // Update last active workspace so re-login also lands in the correct workspace
@@ -317,7 +318,7 @@ export const AcceptInvitation = (): ReactElement => {
 
     if (isInElectron) {
       // In Electron: JWT cookies are already set in session — go directly to the workspace.
-      // authMachine will run validateSession (user_id is in localStorage) and land authenticated.
+      // authMachine will run validateSession (session hint is in localStorage) and land authenticated.
       window.location.href = targetPath;
     } else {
       // In browser: open Electron app via /launch deep-link so the user lands in the desktop app.

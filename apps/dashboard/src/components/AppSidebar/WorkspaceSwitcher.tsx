@@ -12,6 +12,7 @@ import {
   setLastActiveWorkspaceId,
 } from '../../machines/authMachine';
 import { queryClient } from '../../services/clients/queryClient';
+import { markSessionHint } from '../../utils/sessionHint';
 import { useCanCreateWorkspace } from '../../hooks/usePermissions';
 import { confirmRecordingInterrupt } from '../Recording/RecordingInterruptGuard/RecordingInterruptGuard';
 
@@ -247,7 +248,7 @@ export const WorkspaceSwitcher: React.FC = () => {
         setLastActiveWorkspaceId(email, newWorkspaceId);
         setLastActiveWorkspaceName(email, workspaceName.trim());
       }
-      localStorage.setItem('user_id', res.data.user.id);
+      markSessionHint();
       setIsOpen(false);
       window.location.href = `/${newWorkspaceId}/chat/dir`;
     } catch (err) {

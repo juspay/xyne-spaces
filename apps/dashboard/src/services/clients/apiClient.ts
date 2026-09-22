@@ -1,6 +1,7 @@
 import axios, { AxiosInstance, InternalAxiosRequestConfig, AxiosResponse, AxiosError } from 'axios';
 import { v4 as uuidv4 } from 'uuid';
 import { reactNativeBridge } from '../../utils/reactNativeBridge';
+import { clearSessionHint } from '../../utils/sessionHint';
 import { API_BASE_URL, APP_BASE_PATH, isExternalApp } from '../../config';
 import { logger, Logger } from '../../utils/logger';
 import {
@@ -329,7 +330,7 @@ export function clearAuthTokens(): void {
     });
   });
 
-  localStorage.removeItem('user_id');
+  clearSessionHint();
 
   reactNativeBridge.notifySignOut('Session cleared by API client');
 }

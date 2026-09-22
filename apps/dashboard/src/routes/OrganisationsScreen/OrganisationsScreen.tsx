@@ -41,6 +41,7 @@ import axios from 'axios';
 import { API_BASE_URL } from '../../config';
 import { usePlatform } from '../../hooks/usePlatform';
 import { setLastActiveWorkspaceId, setLastActiveWorkspaceName } from '../../machines/authMachine';
+import { markSessionHint } from '../../utils/sessionHint';
 import { apiInstance } from '../../services/clients/apiClient';
 import { JoinRequestsSection } from './JoinRequestsSection';
 
@@ -560,7 +561,7 @@ export const OrganisationsScreen = (): ReactElement => {
         setLastActiveWorkspaceId(email, newWorkspaceId);
         setLastActiveWorkspaceName(email, communityWorkspaceName.trim());
       }
-      localStorage.setItem('user_id', response.data.user.id);
+      markSessionHint();
       toast.success('Community workspace created');
       window.location.href = `/${newWorkspaceId}`;
     } catch (error) {

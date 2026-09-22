@@ -12,6 +12,7 @@ import { Loader2, Building2, ArrowRight } from 'lucide-react';
 import { ShineBorder } from '../../components/ui/shine-border';
 import { ThemeProvider } from '@juspay/blend-design-system';
 import { reactNativeBridge } from '../../utils/reactNativeBridge';
+import { markSessionHint } from '../../utils/sessionHint';
 import { usePlatform } from '../../hooks/usePlatform';
 import { PENDING_WORKSPACE_ID_KEY, PENDING_WORKSPACE_NAME_KEY } from '../../machines/authMachine';
 import { WorkspaceType } from '@xyne/shared';
@@ -336,7 +337,7 @@ const AuthScreen = (): ReactElement | null => {
         },
       );
       const newWorkspaceId = res.data.user.workspaceId;
-      localStorage.setItem('user_id', res.data.user.id);
+      markSessionHint();
       window.location.href = `/${newWorkspaceId}`;
     } catch (err) {
       if (err instanceof AxiosError) {

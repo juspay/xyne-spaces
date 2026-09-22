@@ -4,6 +4,7 @@ import Cookies from 'js-cookie';
 import { AxiosError } from 'axios';
 import { ArrowRight, Building2, Loader2, LogOut, Plus, Users, X } from 'lucide-react';
 import { apiInstance } from '../../services/clients/apiClient';
+import { markSessionHint } from '../../utils/sessionHint';
 import { useAuth } from '../../hooks/useAuth';
 import type { Workspace } from '../../machines/authMachine';
 import { WorkspaceType } from '@xyne/shared';
@@ -112,7 +113,7 @@ export const WorkspaceSelectionScreen = (): ReactElement => {
       }>('/auth/login-workspace', { workspaceId });
 
       const targetWorkspaceId = response.data.user?.workspaceId || workspaceId;
-      localStorage.setItem('user_id', response.data.user?.id ?? '');
+      if (response.data.user?.id) markSessionHint();
       window.location.href = `/${targetWorkspaceId}`;
     } catch (err) {
       if (err instanceof AxiosError) {
@@ -137,7 +138,7 @@ export const WorkspaceSelectionScreen = (): ReactElement => {
         { workspaceName: newWorkspaceName.trim(), workspaceType: WorkspaceType.ENTERPRISE },
       );
       const newWorkspaceId = response.data.user.workspaceId;
-      localStorage.setItem('user_id', response.data.user.id);
+      markSessionHint();
       window.location.href = `/${newWorkspaceId}`;
     } catch (err) {
       if (err instanceof AxiosError) {

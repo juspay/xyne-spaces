@@ -9,6 +9,7 @@ import {
   reactNativeBridge,
 } from '../utils/reactNativeBridge';
 import { setupElectronAuthListeners } from '../utils/electronAuth';
+import { clearSessionHint } from '../utils/sessionHint';
 import { usePlatform } from '../hooks/usePlatform';
 import { apiInstance } from '../services/clients/apiClient';
 import {
@@ -315,7 +316,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         }
       },
       () => {
-        localStorage.removeItem('user_id');
+        clearSessionHint();
         authActor.send({ type: 'LOGOUT' });
       },
     );

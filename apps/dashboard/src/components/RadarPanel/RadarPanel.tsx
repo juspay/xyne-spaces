@@ -523,7 +523,7 @@ const RadarPanel = (): ReactElement => {
     const channel = channelById.get(channelId);
     if (!channel) return '#thread';
     if (isDirectMessage(channel.scopeType)) {
-      const me = localStorage.getItem('user_id');
+      const me = user?.id ?? null;
       const ids = (channel.name ?? '')
         .split(',')
         .map(v => v.trim())
@@ -555,12 +555,12 @@ const RadarPanel = (): ReactElement => {
     if (!needChannelLabels) return [];
     // Read here rather than through selfId, which is declared further down;
     // this memo has to sit above filterChannelLabel's other readers.
-    const me = localStorage.getItem('user_id') ?? '';
+    const me = user?.id ?? '';
     return channels.map(channel => {
       const names = getDMNames(channel, me, usersById);
       return { channel, searchableNames: names.display, searchNames: names.search };
     });
-  }, [channels, usersById, needChannelLabels]);
+  }, [channels, usersById, needChannelLabels, user?.id]);
 
   // Channel id → the label it renders to, and each label → every id behind it.
   // Several channels can render to one label, so the picker offers one row per
@@ -631,7 +631,7 @@ const RadarPanel = (): ReactElement => {
     ...new Set(card.items.flatMap(i => [...i.requestedBy, ...i.pendingOn])),
   ];
 
-  const selfId = localStorage.getItem('user_id');
+  const selfId = user?.id ?? null;
 
   // Mock-style meta line: waiting cards say who the ball is with; pending
   // cards say who asked and who holds it.
@@ -1289,7 +1289,7 @@ const RadarPanel = (): ReactElement => {
   // By label, not id: several DM channels render to the same name and cannot
   // be told apart, so one row toggles all of them.
   const channelGroups = (() => {
-    const me = localStorage.getItem('user_id');
+    const me = user?.id ?? null;
     const byLabel = new Map<
       string,
       {
