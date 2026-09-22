@@ -1,3 +1,29 @@
+## [1.365.0](https://github.com/juspay/xyne-spaces/compare/v1.364.0...v1.365.0) (2026-09-22)
+
+
+### Features
+
+* redirect xyne links to electron ([#2146](https://github.com/juspay/xyne-spaces/issues/2146)) ([e5e2406](https://github.com/juspay/xyne-spaces/commit/e5e24060b71f41ae73af823ba91b5eab344044e8))
+
+## [1.364.0](https://github.com/juspay/xyne-spaces/compare/v1.363.0...v1.364.0) (2026-09-22)
+
+
+### Features
+
+* add search to board selection in the create ticket modal ([#2148](https://github.com/juspay/xyne-spaces/issues/2148)) ([1a3c824](https://github.com/juspay/xyne-spaces/commit/1a3c824ad5a6dd5c0dce5cbdef13fe936da4b41b))
+
+
+### Bug Fixes
+
+* clear tickets search when leaving the tickets module ([#2147](https://github.com/juspay/xyne-spaces/issues/2147)) ([2a1b85c](https://github.com/juspay/xyne-spaces/commit/2a1b85c2fc2c55dc66f1224cbbf34eb92da8a83f))
+
+## [1.363.0](https://github.com/juspay/xyne-spaces/compare/v1.362.0...v1.363.0) (2026-09-22)
+
+
+### Features
+
+* add Cmd+K recent searches with results-page capture ([#2094](https://github.com/juspay/xyne-spaces/issues/2094)) ([7089f90](https://github.com/juspay/xyne-spaces/commit/7089f90628c89ed8ba7740894d55403ce301d71e))
+
 ## [1.362.0](https://github.com/juspay/xyne-spaces/compare/v1.361.3...v1.362.0) (2026-09-22)
 
 

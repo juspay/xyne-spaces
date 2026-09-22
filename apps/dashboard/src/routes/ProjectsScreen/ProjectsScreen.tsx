@@ -72,7 +72,13 @@ const ProjectsScreen = (): ReactElement => {
     if (redirectTo) return;
     setEntryRedirect(null);
     if (!ticketId) {
-      localStorage.setItem(lastTicketsPathKey, `${location.pathname}${location.search}`);
+      const params = new URLSearchParams(location.search);
+      params.delete('search');
+      const query = params.toString();
+      localStorage.setItem(
+        lastTicketsPathKey,
+        query ? `${location.pathname}?${query}` : location.pathname,
+      );
     }
   }, [redirectTo, ticketId, lastTicketsPathKey, location.pathname, location.search]);
 
