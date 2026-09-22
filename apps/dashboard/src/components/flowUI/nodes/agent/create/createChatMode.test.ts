@@ -154,4 +154,16 @@ void describe('decideCreateCanvasAction', () => {
       assert.deepEqual(action.fields, ['systemPrompt']);
     }
   });
+
+  void it('applies hub capability edits when the model ends with XYNE_CREATE_IDLE', () => {
+    const action = decideCreateCanvasAction({
+      userText: 'Add one useful MCP integration to the agent hub for standups.',
+      canvasEmpty: false,
+      marker: parseCreateChatAction('Added Slack MCP for standups.\nXYNE_CREATE_IDLE'),
+    });
+    assert.equal(action.type, 'draft');
+    if (action.type === 'draft') {
+      assert.deepEqual(action.fields, ['tools']);
+    }
+  });
 });

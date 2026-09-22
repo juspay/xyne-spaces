@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type ReactElement } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { Panel, ResizableGroup, Separator } from '@/components/ui/Resizable/Resizable';
 import { useAuth } from '@/hooks/useAuth';
@@ -12,6 +12,7 @@ import {
 } from '@/services/claw/clawAgentWizardService';
 import { getAvailableTools, suggestTools } from '@/services/claw/clawToolsService';
 import { effectiveSlug, slugify } from '@/routes/ClawAgentsScreen/create/wizardState';
+import { parseGatewaySource } from '@/components/ClawAgents/gatewayKeys';
 import { AgentCreateCanvas } from '@/components/flowUI/nodes/agent/create/AgentCreateCanvas';
 import {
   AgentCreateChatPanel,
@@ -26,6 +27,7 @@ import {
 } from '@/components/flowUI/nodes/agent/create/createChatMode';
 import { sanitizeAgentCanvasName } from '@/components/flowUI/nodes/agent/create/canvasFromIdentity';
 import { toolboxFromSuggestion } from '@/components/flowUI/nodes/agent/create/toolboxFromSuggestion';
+import { toolIdsFromForm } from '@/components/flowUI/nodes/agent/create/types';
 import {
   EMPTY_CREATE_FORM,
   type AgentCreateChatPatch,
@@ -63,6 +65,7 @@ export function AgentCreateSplitPage({
   const [discardOpen, setDiscardOpen] = useState(false);
   const [createdSlug, setCreatedSlug] = useState<string | null>(null);
   const [skeletonIdentity, setSkeletonIdentity] = useState(false);
+  const canvasTurnChainRef = useRef(Promise.resolve());
 
   const slug = effectiveSlug({
     name: createForm.form.name,
@@ -117,8 +120,9 @@ export function AgentCreateSplitPage({
   };
 
   const onTurnComplete = useCallback(
-    async (turn: CreateChatTurn): Promise<void> => {
-      if (scripted) return;
+    (turn: CreateChatTurn): Promise<void> => {
+      if (scripted) return Promise.resolve();
+      const run = canvasTurnChainRef.current.then(async (): Promise<void> => {
       const canvasEmpty = canvasIsEmpty(createForm.form);
       const userText = turn.userText;
 
@@ -207,11 +211,38 @@ export function AgentCreateSplitPage({
                       }),
                       getAvailableTools().catch(() => null),
                     ]);
+                    const beforeIds = toolIdsFromForm(createForm.form);
                     incoming.tools = toolboxFromSuggestion(
                       createForm.form.tools,
                       suggestion,
                       catalog,
                     );
+                    const afterIds = toolIdsFromForm({ tools: incoming.tools });
+                    if (
+                      afterIds.length === beforeIds.length &&
+                      afterIds.every((id, index) => id === beforeIds[index]) &&
+                      catalog
+                    ) {
+                      const fallbackGateway = catalog.integrations.find(
+                        integration =>
+                          integration.kind === 'gateway' &&
+                          integration.writeTools.length + integration.readTools.length > 0,
+                      );
+                      if (fallbackGateway) {
+                        const parsed = parseGatewaySource(fallbackGateway.slug);
+                        if (parsed?.serviceName) {
+                          incoming.tools = {
+                            ...incoming.tools,
+                            gateway: [
+                              ...new Set([
+                                ...(incoming.tools.gateway ?? []),
+                                parsed.serviceName,
+                              ]),
+                            ],
+                          };
+                        }
+                      }
+                    }
                   } catch {
                     // Prompt still applies if tool suggest fails.
                   }
@@ -229,6 +260,9 @@ export function AgentCreateSplitPage({
         setPhase(canvasIsEmpty(createForm.form) ? 'empty' : 'draft');
         throw err;
       }
+      });
+      canvasTurnChainRef.current = run.catch(() => {});
+      return run;
     },
     [createForm, scripted],
   );

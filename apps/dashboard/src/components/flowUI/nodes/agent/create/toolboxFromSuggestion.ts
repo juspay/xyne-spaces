@@ -24,6 +24,21 @@ export function toolboxFromSuggestion(
   }
   const directSet = new Set(current.direct);
   const customSet = new Set(current.custom);
+  const gatewaySet = new Set(current.gateway ?? []);
+  for (const sugg of suggestion.integrations ?? []) {
+    const integration = availableTools.integrations.find(entry => entry.slug === sugg.slug);
+    if (!integration) continue;
+    if (integration.kind === 'gateway') {
+      const parsed = parseGatewaySource(integration.slug);
+      if (parsed?.serviceName) gatewaySet.add(parsed.serviceName);
+      continue;
+    }
+    if (integration.kind === 'mcp') {
+      for (const tool of [...integration.readTools, ...integration.writeTools]) {
+        directSet.add(tool.name);
+      }
+    }
+  }
   for (const tool of availableTools.writeTools) {
     if (suggestedNames.has(tool.name)) directSet.add(tool.name);
   }
@@ -43,7 +58,7 @@ export function toolboxFromSuggestion(
     subagents: Array.from(subagentSet),
     direct: Array.from(directSet),
     custom: Array.from(customSet),
-    gateway: current.gateway ?? EMPTY_TOOLS.gateway,
+    gateway: Array.from(gatewaySet),
     callableAgents: current.callableAgents,
   };
 }

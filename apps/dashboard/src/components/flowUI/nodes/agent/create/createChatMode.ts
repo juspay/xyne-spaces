@@ -3,6 +3,7 @@ import {
   firstDraftFields,
   parseLocalRename,
   shouldGeneratePrompt,
+  type CreateTurnClassification,
   type CreateTurnField,
 } from './classifyCreateTurn.ts';
 import { buildDraftCanvasPatch, draftFromModelReply } from './canvasFromIdentity.ts';
@@ -119,6 +120,8 @@ export async function revealCreatePatchFields(args: {
     await args.sleep(args.writeMs);
     if (field === 'name') {
       await args.sleep(Math.max(48, Math.min(args.writeMs, 120)));
+    } else if (field !== 'tools') {
+      args.setWritingField(null);
     }
   }
 }
@@ -215,6 +218,16 @@ function fieldsForDraft(userText: string, canvasEmpty: boolean): CreateTurnField
  * The model chooses reply / ask / edit via markers. Classifier only maps
  * which fields to write — never whether to interview before drafting.
  */
+const HUB_CAPABILITY_FIELDS = new Set<CreateTurnField>(['tools', 'skills', 'knowledge']);
+
+function hubCapabilityFieldsFromEdit(
+  classification: CreateTurnClassification,
+): CreateTurnField[] | null {
+  if (classification.kind !== 'edit' || classification.fields.length === 0) return null;
+  if (!classification.fields.every(field => HUB_CAPABILITY_FIELDS.has(field))) return null;
+  return classification.fields;
+}
+
 export function decideCreateCanvasAction(args: {
   userText: string;
   canvasEmpty: boolean;
@@ -255,6 +268,17 @@ export function decideCreateCanvasAction(args: {
   }
 
   if (marker.idle || marker.ask) {
+    if (!canvasEmpty && marker.idle && !marker.ask) {
+      const hubFields = hubCapabilityFieldsFromEdit(classifyCreateTurn(userText, canvasEmpty));
+      if (hubFields) {
+        return {
+          type: 'draft',
+          intent: userText.trim().slice(0, 500),
+          visibleReply: marker.visible,
+          fields: hubFields,
+        };
+      }
+    }
     return { type: 'idle' };
   }
 
