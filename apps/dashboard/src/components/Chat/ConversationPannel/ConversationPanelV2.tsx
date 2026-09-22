@@ -6,7 +6,7 @@ import {
   getChannelConversationsSnapshot,
   useGetChannelUserStatus,
 } from '../../../hooks/useChannels';
-import { useChannelBoards } from '../../../hooks/useChannelBoards';
+import { useChannelHasBoards } from '../../../hooks/useChannelBoards';
 import { ChannelNoBoardsEmptyState } from '../ChannelInformation/ChannelNoBoardsEmptyState';
 import { useDragAndDropAreaRef } from '../../../hooks/useDragAndDropAreaRef';
 import { useConversationTabs } from './ConversationPannel.utils';
@@ -90,7 +90,7 @@ const DeactivatedDmArchiveBanner = (): ReactElement => {
 // from a genuinely empty one, and acting early would flash this state over a channel
 // that does have boards.
 const ChannelTicketsTab = ({ channelId }: { channelId: string }): ReactElement => {
-  const { isSynced, hasBoards } = useChannelBoards(channelId);
+  const { isSynced, hasBoards } = useChannelHasBoards(channelId);
 
   // KanbanBoardScreen renders the same empty state for hosts that mount it with a
   // channelId directly; this short-circuit just avoids mounting the whole screen.
@@ -169,7 +169,7 @@ const ConversationPanelV2 = ({
   // constant per channel, and ChatBubble renders once per message, so subscribing
   // per bubble would put hundreds of identical queries on a long conversation.
   // Only DEFAULT channels can create tickets, so DMs skip the query entirely.
-  const { hasBoards: channelHasBoards } = useChannelBoards(
+  const { hasBoards: channelHasBoards } = useChannelHasBoards(
     channel?.scopeType === ChannelScopeType.DEFAULT ? channelId : undefined,
   );
   const channelParticipation = useGetChannelUserStatus(channelId);

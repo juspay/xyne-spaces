@@ -17,6 +17,33 @@ export interface UseChannelBoardsResult {
   hasBoards: boolean;
 }
 
+export interface UseChannelHasBoardsResult {
+  hasBoards: boolean;
+  /** Same caveat as isSynced above: an unsynced empty result is not "no boards". */
+  isSynced: boolean;
+}
+
+/**
+ * Cheap "does this channel have any boards" probe — one mapping row, no board join.
+ *
+ * For callers that only gate a control on the answer (chat composer, message
+ * actions, the tickets-tab empty state). Anything that actually lists or picks
+ * boards wants useChannelBoards instead.
+ */
+export const useChannelHasBoards = (channelId: string | undefined): UseChannelHasBoardsResult => {
+  const [rows, details] = useCachedQuery(queries.channelHasBoards({ channelId: channelId ?? '' }), {
+    enabled: !!channelId,
+  });
+
+  return useMemo(
+    () => ({
+      hasBoards: (rows?.length ?? 0) > 0,
+      isSynced: !channelId || details.type === 'complete',
+    }),
+    [rows, details.type, channelId],
+  );
+};
+
 /**
  * Channel → boards, read exclusively from `channel_board_mappings`.
  *
@@ -24,6 +51,9 @@ export interface UseChannelBoardsResult {
  * deliberately NOT consulted here, and there is no fallback to
  * `boardsListByProject`: a channel with no mapping rows genuinely has no boards
  * and callers should render the "no boards are configured" empty state.
+ *
+ * Pulls every mapping with its board row — use useChannelHasBoards when only the
+ * boolean is needed.
  */
 export const useChannelBoards = (channelId: string | undefined): UseChannelBoardsResult => {
   const [mappings, mappingDetails] = useCachedQuery(

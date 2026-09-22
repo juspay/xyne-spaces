@@ -5,36 +5,6 @@ import { MutationACLError, TableSchema } from '../core/types';
 import { hasProjectAdminAccess } from '../core/admin-access';
 import { zql } from '../../queries';
 
-/**
- * Per-transaction memo for the checks that don't vary per row.
- *
- * Linking is a batch operation (up to 100 boards), and the transaction wrapper
- * runs canInsert on EVERY insert with a fresh ACL instance — so without this the
- * channel, participant and projects-admin lookups repeat once per board, holding
- * the write transaction open for hundreds of reads.
- *
- * Keyed on the Transaction object, so entries die with the transaction and an
- * authorization decision can never be reused across requests.
- */
-const txMemo = new WeakMap<object, Map<string, Promise<unknown>>>();
-
-function memoizeForTx<T>(
-  tx: Transaction<Schema>,
-  key: string,
-  compute: () => Promise<T>,
-): Promise<T> {
-  let perTx = txMemo.get(tx as unknown as object);
-  if (!perTx) {
-    perTx = new Map();
-    txMemo.set(tx as unknown as object, perTx);
-  }
-  const cached = perTx.get(key);
-  if (cached) return cached as Promise<T>;
-  const pending = compute();
-  perTx.set(key, pending);
-  return pending;
-}
-
 export class ChannelBoardMappingsACL extends BaseACL<'channel_board_mappings'> {
   async canInsert(
     args: InsertValue<TableSchema<'channel_board_mappings'>>,
@@ -47,9 +17,7 @@ export class ChannelBoardMappingsACL extends BaseACL<'channel_board_mappings'> {
       );
     }
 
-    const channel = await memoizeForTx(tx, `channel:${args.channelId}`, () =>
-      tx.run(zql.channels.where('id', args.channelId).one()),
-    );
+    const channel = await tx.run(zql.channels.where('id', args.channelId).one());
     if (!channel) {
       throw new MutationACLError(
         'Channel-board mapping insert failed: channel does not exist',
@@ -82,15 +50,11 @@ export class ChannelBoardMappingsACL extends BaseACL<'channel_board_mappings'> {
     }
 
     // Linking is open to a channel's own admins, and to LISTPROJECTS resource
-    // admins, who administer boards across the workspace. Both are per-user, not
-    // per-board, so they resolve once per transaction.
+    // admins, who administer boards across the workspace.
     if (await this.isChannelAdmin(args.channelId, tx)) {
       return;
     }
-    const isProjectAdmin = await memoizeForTx(tx, `projectAdmin:${this.ctx.userID}`, () =>
-      hasProjectAdminAccess(this.ctx, tx),
-    );
-    if (isProjectAdmin) {
+    if (await hasProjectAdminAccess(this.ctx, tx)) {
       return;
     }
     throw new MutationACLError(
@@ -100,16 +64,11 @@ export class ChannelBoardMappingsACL extends BaseACL<'channel_board_mappings'> {
   }
 
   private async isChannelAdmin(channelId: string, tx: Transaction<Schema>): Promise<boolean> {
-    const participant = await memoizeForTx(
-      tx,
-      `participant:${channelId}:${this.ctx.userID}`,
-      () =>
-        tx.run(
-          zql.channel_participants
-            .where('channelId', channelId)
-            .where('userId', this.ctx.userID)
-            .one(),
-        ),
+    const participant = await tx.run(
+      zql.channel_participants
+        .where('channelId', channelId)
+        .where('userId', this.ctx.userID)
+        .one(),
     );
     return participant?.role === ChannelRole.ADMIN;
   }

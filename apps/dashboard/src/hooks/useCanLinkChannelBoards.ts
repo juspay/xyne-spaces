@@ -1,31 +1,22 @@
-import { useMemo } from 'react';
-import { ChannelRole } from '@xyne/shared';
-import { useCachedQuery } from './useCachedQuery';
-import { queries } from '../zero/queries';
-import { useHasResourceAccess } from './usePermissions';
+import { useQuery } from '@tanstack/react-query';
+import { channelService } from '../services/Chat/channelService';
 
 /**
  * Whether the current user may link boards to a channel.
  *
- * Mirrors ChannelBoardMappingsACL.canInsert: a channel admin, or a LISTPROJECTS
- * resource admin. The ACL is the real gate — this only decides whether to render
- * the control, so the two must agree or users get a button that always errors.
+ * Answered by the backend (`GET /channels/:id/can-link-boards`) rather than by
+ * client-side queries: it decides whether to render one control, so it does not
+ * warrant a live Zero subscription, and a single server answer cannot drift from
+ * ChannelBoardMappingsACL the way two parallel implementations would.
+ *
+ * The ACL is the enforcement boundary; this only governs what is shown.
  */
 export const useCanLinkChannelBoards = (channelId: string | undefined): boolean => {
-  const isProjectsAdmin = useHasResourceAccess('LISTPROJECTS');
-
-  // Only asked when the cheaper check misses. Returns the current user's ADMIN
-  // participations across all channels, so it is a single small query.
-  const [adminParticipations] = useCachedQuery(queries.myChannelParticipations({}), {
-    enabled: !!channelId && !isProjectsAdmin,
+  const { data } = useQuery({
+    queryKey: ['channel-can-link-boards', channelId],
+    enabled: !!channelId,
+    queryFn: (): Promise<boolean> => channelService.canLinkBoards(channelId!),
   });
 
-  return useMemo(() => {
-    if (!channelId) return false;
-    if (isProjectsAdmin) return true;
-    return (adminParticipations ?? []).some(
-      participation =>
-        participation.channelId === channelId && participation.role === ChannelRole.ADMIN,
-    );
-  }, [channelId, isProjectsAdmin, adminParticipations]);
+  return data ?? false;
 };

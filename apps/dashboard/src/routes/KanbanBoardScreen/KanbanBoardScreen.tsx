@@ -415,6 +415,25 @@ function uniqueProjectIds(boards: readonly { projectId?: string | null }[]): str
   return Array.from(ids);
 }
 
+/**
+ * Projects behind a set of boards, narrowed to the selected ones when the user has
+ * a board filter applied (no selection = every board in scope).
+ *
+ * Project-scoped data — tags, source channels — is looked up from the boards on
+ * screen rather than from a channel's own project, which is no longer read. Every
+ * view answers this the same way; only the board set differs.
+ */
+function projectIdsForBoardSelection(
+  boards: readonly { id: string; projectId?: string | null }[],
+  selectedBoardIds: readonly string[],
+): string[] {
+  return uniqueProjectIds(
+    selectedBoardIds.length === 0
+      ? boards
+      : boards.filter(board => selectedBoardIds.includes(board.id)),
+  );
+}
+
 // Bucket for tickets with no merchant link when grouping by Merchant ID.
 // Mirrors the backend's NO_MERCHANT_GROUP in services/tickets/kanbanCountsService.ts.
 const NO_MERCHANT_GROUP = 'No Merchant';
@@ -483,7 +502,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
 
   const logEntityTiming = (entityName: string): void => {
     // Lazy reset: when context changes, reset timings without a useEffect
-    const sessionKey = `${viewMode}-${channelId}-${effectiveProjectId}`;
+    const sessionKey = `${viewMode}-${channelId}-${projectIdParam}`;
     if (latencySessionKeyRef.current !== sessionKey) {
       latencySessionKeyRef.current = sessionKey;
       mountTimeRef.current = performance.now();
@@ -498,7 +517,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     if (ref[entityName]) return;
     ref[entityName] = true;
     const elapsed = performance.now() - mountTimeRef.current;
-    const ctx = { viewMode, channelId, projectId: effectiveProjectId };
+    const ctx = { viewMode, channelId, projectId: projectIdParam };
     logger.info(Event.KANBAN_ENTITY_LOADED, { entity: entityName, latency: elapsed, ...ctx });
   };
 
@@ -1313,11 +1332,10 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     useSensor(KeyboardSensor),
   );
 
-  // Determine effective project ID (must be before queries that depend on it).
-  // NOTE: deliberately does NOT fall back to channel.projectId. A channel's board
-  // scope comes from channel_board_mappings (see channelBoards above), so a channel
-  // view is board-scoped and carries no projectId at all.
-  const effectiveProjectId = projectIdParam;
+  // NOTE: project scope is the route param and nothing else. It deliberately does
+  // NOT fall back to channel.projectId — a channel's boards come from
+  // channel_board_mappings (see channelBoards above), so a channel view is
+  // board-scoped and carries no projectId at all.
 
   // Determine if we should show board-wise view or stage-based grouping
   const shouldShowBoardWiseView = useMemo(() => {
@@ -1338,8 +1356,8 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
 
   // A project scope holding exactly one board is that board, even under "All Boards".
   const [projectScopeBoards] = useCachedQuery(
-    queries.boardsListByProject({ projectId: effectiveProjectId || '' }),
-    { enabled: !!effectiveProjectId && !explicitBoardId && !filters.boards?.length },
+    queries.boardsListByProject({ projectId: projectIdParam || '' }),
+    { enabled: !!projectIdParam && !explicitBoardId && !filters.boards?.length },
   );
 
   // A channel's scope is its linked boards, never its project's.
@@ -1350,28 +1368,16 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
 
   const filteredSingleBoardId = explicitBoardId ?? soleScopeBoardId ?? null;
 
-  // Some features still need a single project id (ticket reports, the create-ticket
-  // modal's fallback project). A channel no longer has one of its own, so resolve it
-  // from the board in view — a linked board can belong to any project.
-  const scopedProjectId =
-    effectiveProjectId ??
-    channelBoards.boards.find(board => board.id === filteredSingleBoardId)?.projectId ??
-    null;
-
-  // A create-ticket modal can be seeded from this view only when there is a live
-  // channel AND something to source boards from: the route's project, or the
-  // channel's own linked boards.
-  // isSynced matters: on a cold load hasBoards is false until the mappings arrive,
-  // and this value decides WHICH CreateTicketModal instance renders. Flipping it
-  // mid-session swaps one instance for the other, and React discards whatever the
-  // user had typed. channelContextReady below holds the modal shut until then.
+  // Can the create-ticket modal be pre-seeded from this view? Needs a live channel
+  // and somewhere to source boards from — the route's project, or the channel's own
+  // linked boards. It picks WHICH modal instance renders (seeded vs channel-picker),
+  // so it must not flip mid-session: React would swap the instances and discard
+  // whatever the user had typed. Hence both guards wait for isSynced.
+  const channelContextReady = !channelId || channelBoards.isSynced;
   const hasSeedableChannelContext =
     !!channel &&
     !channel.isArchived &&
-    (!!effectiveProjectId || (channelBoards.isSynced && channelBoards.hasBoards));
-
-  // A channel's modal must not open before its boards are known, for the same reason.
-  const channelContextReady = !channelId || channelBoards.isSynced;
+    (!!projectIdParam || (channelBoards.isSynced && channelBoards.hasBoards));
 
   // Get all boards for the project (needed for channel stage view and create ticket modal)
   // In my-tickets, fetch ALL boards (no project filter) since tickets can span projects
@@ -1385,6 +1391,19 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     },
   );
 
+  // The one project this view belongs to: the route's project, or — where there is
+  // none — the project of the single board in view. A channel has no project of its
+  // own any more, so this is how ticket reports, flow actions and the create-ticket
+  // modal still resolve one. Two sources for the same board: channelBoards answers
+  // immediately from the mappings already loaded, selectedBoardDetail covers the
+  // non-channel views. Null means no single project applies (my-tickets, a workspace
+  // view, or a channel showing several boards at once).
+  const scopedProjectId =
+    projectIdParam ??
+    channelBoards.boards.find(board => board.id === filteredSingleBoardId)?.projectId ??
+    selectedBoardDetail?.projectId ??
+    null;
+
   // Split board form metadata into two independent views:
   // - groupable fields: only the subset that can be used for group-by
   // - dynamic fields: all board fields used to drive Vespa-backed filters
@@ -1396,11 +1415,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   // Detect non-linear board type
   const isNonLinearBoard = selectedBoardDetail?.boardType === BoardType.NON_LINEAR;
 
-  // Flow actions need a project id even where the URL has none (e.g. the
-  // my-tickets view with a flow board selected in the filter) — fall back to
-  // the board's own project.
   const isFlowBoard = selectedBoardDetail?.boardType === BoardType.FLOW;
-  const flowProjectId = effectiveProjectId || selectedBoardDetail?.projectId || null;
   const flowModel = useMemo((): FlowPlanModel | null => {
     if (!isFlowBoard) return null;
     const flowPlan = selectedBoardDetail?.flowPlan;
@@ -1776,7 +1791,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     stagesDataForFilteredBoard,
     channelId,
     channelViewType,
-    effectiveProjectId,
+    projectIdParam,
     filters.boards,
   ]);
 
@@ -1845,8 +1860,8 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     // Pass projectId ONLY if:
     // 1. No boardId exists (boardId is more specific and implies project)
     // 2. viewMode is not 'my-tickets' (should be cross-project)
-    if (!params.boardId && viewMode !== 'my-tickets' && effectiveProjectId) {
-      params.projectId = effectiveProjectId;
+    if (!params.boardId && viewMode !== 'my-tickets' && projectIdParam) {
+      params.projectId = projectIdParam;
     }
 
     // rootId is reserved for materialized FLOW step tickets. Aggregate board
@@ -1867,7 +1882,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     isWorkspaceView,
     channelId,
     boardId,
-    effectiveProjectId,
+    projectIdParam,
     filteredSingleBoardId,
     fevFieldIds,
     filters.boards,
@@ -1879,10 +1894,9 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
       enabled:
         legacyTicketsEnabled &&
         ((viewMode === 'board' && !!boardId) ||
-          (viewMode === 'project' && !!effectiveProjectId) ||
-          // A channel is a 'project' view with no projectId — its scope is the
-          // selected board, so gate on that being seeded instead.
-          (viewMode === 'project' && !!channelId && channelScopeReady) ||
+          // A channel is also a 'project' view, but with no projectId — its scope is
+          // the selected board, so it gates on that being seeded instead.
+          (viewMode === 'project' && (!!projectIdParam || (!!channelId && channelScopeReady))) ||
           // A workspace view has no channel or project to key on; `workspaceViewReady`
           // is the equivalent guard (at least one board picked), the same one the
           // kanban pagination path uses. Without this clause the table, calendar and
@@ -2010,26 +2024,15 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   );
 
   const sourceChannelProjectIds = useMemo(() => {
+    const selected = filters.boards ?? [];
     if (isMyTicketsView) {
-      const selected = filters.boards ?? [];
-      const details = availableBoardDetails ?? [];
-      // No board selected -> all projects behind the boards dropdown; otherwise only the selected boards' projects.
-      return uniqueProjectIds(
-        selected.length === 0 ? details : details.filter(board => selected.includes(board.id)),
-      );
+      return projectIdsForBoardSelection(availableBoardDetails ?? [], selected);
     }
     if (isWorkspaceView) {
       return uniqueProjectIds(workspaceSelectedBoards ?? []);
     }
-    // A channel's linked boards can span projects, so derive the set from the
-    // boards themselves rather than from the (no longer read) channel.projectId.
     if (channelId) {
-      const selected = filters.boards ?? [];
-      return uniqueProjectIds(
-        selected.length === 0
-          ? channelBoards.boards
-          : channelBoards.boards.filter(board => selected.includes(board.id)),
-      );
+      return projectIdsForBoardSelection(channelBoards.boards, selected);
     }
     return [];
   }, [
@@ -2076,25 +2079,19 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   // Determine project IDs for tag search
   // For my-tickets and workspace views, we may have multiple projects
   const tagsProjectIds = useMemo(() => {
+    const selected = filters.boards ?? [];
     if (isMyTicketsView) {
-      const selected = filters.boards ?? [];
-      const details = availableBoardDetails ?? [];
-      // No board selected -> all projects; otherwise only selected boards' projects
-      return uniqueProjectIds(
-        selected.length === 0 ? details : details.filter(board => selected.includes(board.id)),
-      );
+      return projectIdsForBoardSelection(availableBoardDetails ?? [], selected);
     }
     if (isWorkspaceView) {
       // Use workspaceSelectedBoards which is always enabled for workspace views
       return uniqueProjectIds(workspaceSelectedBoards ?? []);
     }
-    // A channel's linked boards can span projects, so take every project they
-    // belong to rather than assuming one.
     if (channelId) {
-      return uniqueProjectIds(channelBoards.boards);
+      return projectIdsForBoardSelection(channelBoards.boards, selected);
     }
     // Single project view
-    const singleProjectId = effectiveProjectId || availableBoardDetails?.[0]?.projectId;
+    const singleProjectId = projectIdParam || availableBoardDetails?.[0]?.projectId;
     return singleProjectId ? [singleProjectId] : [];
   }, [
     isMyTicketsView,
@@ -2102,7 +2099,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     filters.boards,
     availableBoardDetails,
     workspaceSelectedBoards,
-    effectiveProjectId,
+    projectIdParam,
     channelId,
     channelBoards.boards,
   ]);
@@ -3881,7 +3878,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   const viewedListKeyRef = useRef<string | null>(null);
   useEffect(() => {
     if (isTicketsSyncing) return;
-    const listKey = `${viewMode}:${layoutView}:${channelId ?? ''}:${effectiveProjectId ?? ''}:${boardId ?? ''}`;
+    const listKey = `${viewMode}:${layoutView}:${channelId ?? ''}:${projectIdParam ?? ''}:${boardId ?? ''}`;
     if (viewedListKeyRef.current === listKey) return;
     viewedListKeyRef.current = listKey;
 
@@ -3898,7 +3895,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
       viewMode: layoutView,
       scope: viewMode,
       ...(channelId && { channelId }),
-      ...(effectiveProjectId && { projectId: effectiveProjectId }),
+      ...(projectIdParam && { projectId: projectIdParam }),
       ...(boardId && { boardId }),
       groupBy: groupBy || null,
       activeFilterKeys,
@@ -3913,7 +3910,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     viewMode,
     layoutView,
     channelId,
-    effectiveProjectId,
+    projectIdParam,
     boardId,
     groupBy,
     filters,
@@ -4269,7 +4266,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     setVisibleColumns(new Set(DEFAULT_VISIBLE_COLUMNS));
   }, []);
   const handleOpenTicketReport = useCallback((): void => {
-    // scopedProjectId, not effectiveProjectId: a channel has no project of its own
+    // scopedProjectId, not projectIdParam: a channel has no project of its own
     // any more, so the report's project comes from the board currently in view.
     if (channelId && scopedProjectId) {
       setSearchParams(previous => {
@@ -4304,7 +4301,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   });
   const headerPickerContext = useMemo(
     () => ({
-      projectId: isMyTicketsView ? '' : effectiveProjectId || '',
+      projectId: isMyTicketsView ? '' : projectIdParam || '',
       channelId,
       availablePriorities,
       availableUsers,
@@ -4331,7 +4328,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     }),
     [
       isMyTicketsView,
-      effectiveProjectId,
+      projectIdParam,
       channelId,
       availablePriorities,
       availableUsers,
@@ -4381,7 +4378,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     return <ChannelNoBoardsEmptyState channelId={channelId} />;
   }
 
-  // scopedProjectId, not effectiveProjectId: a channel no longer carries a project
+  // scopedProjectId, not projectIdParam: a channel no longer carries a project
   // of its own, so the report's locked project comes from the board in view.
   if (showTicketReport && channelId && scopedProjectId) {
     return (
@@ -4448,7 +4445,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
         savedFilters={headerSavedFilters}
         showFilters={
           !!(
-            effectiveProjectId ||
+            projectIdParam ||
             channelBoards.hasBoards ||
             viewMode === 'my-tickets' ||
             isWorkspaceView
@@ -4622,12 +4619,12 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                       {flowExportDropdownMenu}
                     </DropdownMenu.Root>
                   )}
-                  {isFlowBoard && filteredSingleBoardId && flowProjectId && (
+                  {isFlowBoard && filteredSingleBoardId && scopedProjectId && (
                     <button
                       type='button'
                       onClick={() =>
                         void navigate(
-                          `/listProjects/${flowProjectId}?editBoard=${filteredSingleBoardId}`,
+                          `/listProjects/${scopedProjectId}?editBoard=${filteredSingleBoardId}`,
                         )
                       }
                       data-track-category='flow_board'
@@ -5146,7 +5143,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                     />
                   </div>
                 )}
-                {flowSelection && filteredSingleBoardId && flowProjectId && (
+                {flowSelection && filteredSingleBoardId && scopedProjectId && (
                   <div className='absolute bottom-4 right-4 top-4 z-10 flex items-start'>
                     <FlowNodeSidePanel
                       node={flowSelection}

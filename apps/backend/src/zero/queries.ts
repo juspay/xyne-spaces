@@ -3913,6 +3913,14 @@ export const queries: AnyQueryRegistry = defineQueries({
   // Boards mapped to a channel via ChannelBoardMapping.
   // Preferred path for resolving channel → boards; consumer falls back to
   // boardsListByProject if the mapping is empty.
+  // Existence probe for "does this channel have any boards". Deliberately does not
+  // load the related board rows: chat surfaces ask this on every channel just to
+  // decide whether to render a control, and boardsByChannel would pull the whole
+  // mapping set with its joins for a question a single row answers.
+  channelHasBoards: defineQuery(z.object({ channelId: z.string() }), ({ args: { channelId } }) => {
+    return zql.channel_board_mappings.where('channelId', channelId).limit(1);
+  }),
+
   boardsByChannel: defineQuery(
     z.object({ channelId: z.string() }),
     ({ args: { channelId } }) => {
