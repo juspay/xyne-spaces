@@ -5,6 +5,9 @@ import {
   shouldGeneratePrompt,
   type CreateTurnField,
 } from './classifyCreateTurn.ts';
+import { buildDraftCanvasPatch } from './canvasFromIdentity.ts';
+import type { AgentCreateChatPatch, AgentCreateField } from './types.ts';
+import { pickPatch, slicePatch } from './mergeChatPatch.ts';
 
 export interface CreateCanvasSnapshot {
   empty: boolean;
@@ -28,8 +31,81 @@ export type CreateCanvasAction =
   | {
       type: 'draft';
       intent: string;
+      visibleReply: string;
       fields: CreateTurnField[];
     };
+
+export const CREATE_REVEAL_FIELD_ORDER: readonly CreateTurnField[] = [
+  'name',
+  'slug',
+  'description',
+  'systemPrompt',
+  'tools',
+  'skills',
+  'knowledge',
+];
+
+export function incomingPatchForCreateDraft(args: {
+  visibleReply: string;
+  intent: string;
+  generatedPrompt: string;
+  fields: readonly CreateTurnField[];
+  canvasEmpty: boolean;
+}): AgentCreateChatPatch {
+  const { visibleReply, intent, generatedPrompt, fields, canvasEmpty } = args;
+  const draft = buildDraftCanvasPatch({
+    visibleReply,
+    intent,
+    generatedPrompt,
+    fillName: fields.includes('name'),
+    fillSlug: fields.includes('slug'),
+    fillDescription: fields.includes('description') && canvasEmpty,
+    fillInstructions: fields.includes('systemPrompt'),
+  });
+  const incoming: AgentCreateChatPatch = {};
+  if (draft.name) incoming.name = draft.name;
+  if (draft.slug) incoming.slug = draft.slug;
+  if (draft.description) incoming.description = draft.description;
+  if (draft.systemPrompt) incoming.systemPrompt = draft.systemPrompt;
+  return incoming;
+}
+
+export async function revealCreatePatchFields(args: {
+  fields: readonly CreateTurnField[];
+  incoming: AgentCreateChatPatch;
+  sourceId: string;
+  writeMs: number;
+  setWritingField: (field: AgentCreateField | null, hubRow?: 'mcp' | 'skills' | 'knowledge' | null) => void;
+  applyChatPatch: (
+    sourceId: string,
+    patch: AgentCreateChatPatch,
+    options: { highlight: boolean },
+  ) => AgentCreateField[];
+  sleep: (ms: number) => Promise<void>;
+}): Promise<void> {
+  const patch = pickPatch(args.incoming, [...args.fields]);
+  const reveal = CREATE_REVEAL_FIELD_ORDER.filter(field => args.fields.includes(field));
+  for (const field of reveal) {
+    const slice = slicePatch(patch, field);
+    if (Object.keys(slice).length === 0) continue;
+    const hubRow =
+      field === 'tools'
+        ? 'mcp'
+        : field === 'skills'
+          ? 'skills'
+          : field === 'knowledge'
+            ? 'knowledge'
+            : null;
+    args.setWritingField(field, hubRow);
+    const changed = args.applyChatPatch(`${args.sourceId}-${field}`, slice, { highlight: false });
+    if (!changed.includes(field)) {
+      args.setWritingField(null);
+      continue;
+    }
+    await args.sleep(args.writeMs);
+  }
+  args.setWritingField(null);
+}
 
 const DRAFT_RE = /^\s*XYNE_CREATE_DRAFT:\s*(.+?)\s*$/im;
 const RENAME_RE = /^\s*XYNE_CREATE_RENAME:\s*(.+?)\s*$/im;
@@ -136,6 +212,7 @@ export function decideCreateCanvasAction(args: {
     return {
       type: 'draft',
       intent: marker.draftIntent,
+      visibleReply: marker.visible,
       fields: fieldsForDraft(userText, canvasEmpty),
     };
   }
@@ -171,6 +248,7 @@ export function decideCreateCanvasAction(args: {
   return {
     type: 'draft',
     intent: userText,
+    visibleReply: marker.visible,
     fields: classification.fields,
   };
 }
