@@ -41,7 +41,10 @@ export interface OzonetelToolbarView {
 }
 
 export function getPhoneFieldNames(
-  source?: { phoneFieldNames?: string[]; customerPhoneFieldName?: string | null | undefined } | null,
+  source?: {
+    phoneFieldNames?: string[];
+    customerPhoneFieldName?: string | null | undefined;
+  } | null,
 ): string[] {
   if (source?.phoneFieldNames) return source.phoneFieldNames;
   const legacy = source?.customerPhoneFieldName?.trim();
