@@ -59,7 +59,7 @@ import { useCallConfirmation } from '../../../hooks/useCallConfirmation';
 import { CallConfirmationModal } from '../../Call/CallConfirmationModal';
 import { useGetChannelUserStatus } from '../../../hooks/useChannels';
 import { mutators } from '../../../zero/mutators';
-import { useUser, useUsers, useUsersById } from '../../../hooks/useUsers';
+import { useUser, useUsers } from '../../../hooks/useUsers';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { v4 as uuidv4 } from 'uuid';
 import { VisibleChannel } from '../../../machines/stateMachine';
@@ -74,12 +74,6 @@ export type ChannelTab =
   | 'settings'
   | 'ai-features';
 
-const APP_USER_EMAIL_SUFFIXES = ['@app.xyne.ai', '@bot.xyne.ai'];
-const isAppUserEmail = (email: string | null | undefined): boolean => {
-  if (!email) return false;
-  const lower = email.toLowerCase();
-  return APP_USER_EMAIL_SUFFIXES.some(suffix => lower.endsWith(suffix));
-};
 interface InfoProps {
   channel: VisibleChannel;
   previousChannelId?: string | null;
@@ -108,18 +102,16 @@ const Info = ({
   const [showPromoteDialog, setShowPromoteDialog] = useState(false);
 
   const [participants] = useCachedQuery(queries.channelParticipants({ channelId: channel.id }));
-  const usersById = useUsersById();
 
-  const { humanMemberCount, agentAppCount } = useMemo(() => {
-    let human = 0;
-    let agentApp = 0;
-    for (const p of participants) {
-      const user = usersById.get(p.userId);
-      if (isAppUserEmail(user?.email)) agentApp++;
-      else human++;
-    }
-    return { humanMemberCount: human, agentAppCount: agentApp };
-  }, [participants, usersById]);
+  // Authoritative app/bot list for this channel — server-filtered by
+  // users.userType so we don't depend on the workspace users map hydrating
+  // with userType before the tab-label counts render.
+  const [appParticipantsForCount] = useCachedQuery(
+    queries.channelAppParticipants({ channelId: channel.id }),
+  );
+
+  const agentAppCount = appParticipantsForCount.length;
+  const humanMemberCount = Math.max(0, participants.length - agentAppCount);
 
   const currentUserParticipant = useMemo(
     () => participants.find(p => p.userId === context.userID),
@@ -312,7 +304,7 @@ const Info = ({
   // Pill-style tab trigger, matching the ConversationHeader channel tabs.
   const tabTriggerClass = (value: ChannelTab): string =>
     cn(
-      'flex items-center justify-center gap-2 px-2.5 py-1.5 rounded-lg text-sm font-medium tracking-[-0.28px] transition-colors duration-100 cursor-pointer',
+      'flex items-center justify-center gap-2 px-2.5 py-1.5 rounded-lg text-sm font-medium tracking-[-0.28px] transition-colors duration-100 cursor-pointer whitespace-nowrap',
       activeTab === value
         ? 'bg-muted text-foreground'
         : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground',
@@ -515,10 +507,11 @@ const Info = ({
           >
             <ChannelMembers
               channel={channel}
-              participants={participants}
               channelDisplayName={channelDisplayName}
               popoverContainer={popoverContainerRef.current}
               filterMode='members'
+              allParticipants={participants}
+              appParticipants={appParticipantsForCount}
             />
           </Tabs.Content>
         )}
@@ -529,10 +522,11 @@ const Info = ({
           >
             <ChannelMembers
               channel={channel}
-              participants={participants}
               channelDisplayName={channelDisplayName}
               popoverContainer={popoverContainerRef.current}
               filterMode='agents-apps'
+              allParticipants={participants}
+              appParticipants={appParticipantsForCount}
             />
           </Tabs.Content>
         )}
@@ -761,12 +755,15 @@ const ChannelMembers = ({
   channelDisplayName,
   popoverContainer,
   filterMode = 'members',
+  allParticipants,
+  appParticipants,
 }: {
   channel: Channel;
-  participants: NonNullable<QueryResultType<typeof queries.channelParticipants>>;
   channelDisplayName: string;
   popoverContainer?: HTMLElement | null;
   filterMode?: 'members' | 'agents-apps';
+  allParticipants: NonNullable<QueryResultType<typeof queries.channelParticipants>>;
+  appParticipants: NonNullable<QueryResultType<typeof queries.channelAppParticipants>>;
 }): ReactElement => {
   const context = useAuthContextValues();
   const zero = useZero();
@@ -798,20 +795,18 @@ const ChannelMembers = ({
   );
   const [hasMore, setHasMore] = useState(true);
 
-  // Query for paginated participants using useQuery hook
+  // Paginated fetch — humans for the Members tab, apps for the Agents & Apps
+  // tab. Both queries filter by users.userType server-side; the client never
+  // needs to re-check membership.
+  const paginatedQueryArgs = {
+    channelId: channel.id,
+    limit: PAGE_SIZE,
+    start: currentCursor,
+  };
   const [participants] = useQuery(
-    queries.channelParticipantsPaginated({
-      channelId: channel.id,
-      limit: PAGE_SIZE,
-      start: currentCursor,
-    }),
-  );
-
-  const [searchResults] = useCachedQuery(
-    queries.searchChannelParticipants({ channelId: channel.id, searchQuery }),
-    {
-      enabled: !!searchQuery.trim(),
-    },
+    filterMode === 'agents-apps'
+      ? queries.channelAppParticipantsPaginated(paginatedQueryArgs)
+      : queries.channelHumanParticipantsPaginated(paginatedQueryArgs),
   );
 
   const currentUserParticipant = useMemo(
@@ -939,13 +934,11 @@ const ChannelMembers = ({
   const isAuthorizedToRemoveParticipant =
     channel.scopeType === ChannelScopeType.DEFAULT && currentUserIsAdmin;
 
-  const matchesFilterMode = useCallback(
-    (userId: string): boolean => {
-      const user = usersById.get(userId);
-      const isApp = isAppUserEmail(user?.email);
-      return filterMode === 'agents-apps' ? isApp : !isApp;
-    },
-    [usersById, filterMode],
+  // Server-authoritative set of app/bot user IDs in this channel. Used to
+  // bucket search results without depending on usersById.userType hydration.
+  const appUserIdSet = useMemo(
+    () => new Set(appParticipants.map(p => p.userId)),
+    [appParticipants],
   );
 
   const filteredParticipants = useMemo(() => {
@@ -962,29 +955,38 @@ const ChannelMembers = ({
       return words.some(word => word.startsWith(queryLower));
     };
 
-    if (searchQuery.trim()) {
-      // When searching, sort results so that users whose names start with the query appear first
-      return [...searchResults]
-        .filter(p => matchesFilterMode(p.userId))
-        .sort((a, b) => {
-          const userA = usersById.get(a.userId);
-          const userB = usersById.get(b.userId);
-          const displayA = getUserDisplayName(userA);
-          const displayB = getUserDisplayName(userB);
-          const aStartsWith = userA ? nameStartsWith(displayA, searchQuery) : false;
-          const bStartsWith = userB ? nameStartsWith(displayB, searchQuery) : false;
+    const trimmedQuery = searchQuery.trim();
 
+    // Search runs client-side over the parent's fully-loaded participant list.
+    // app/human classification uses the server-filtered appUserIdSet so it
+    // doesn't depend on usersById.userType being hydrated.
+    if (trimmedQuery) {
+      const queryLower = trimmedQuery.toLowerCase();
+      return allParticipants
+        .filter(p => {
+          const isApp = appUserIdSet.has(p.userId);
+          if (filterMode === 'agents-apps' ? !isApp : isApp) return false;
+          const user = usersById.get(p.userId);
+          if (!user) return false;
+          const display = getUserDisplayName(user).toLowerCase();
+          const rawName = (user.name ?? '').toLowerCase();
+          return display.includes(queryLower) || rawName.includes(queryLower);
+        })
+        .sort((a, b) => {
+          const displayA = getUserDisplayName(usersById.get(a.userId));
+          const displayB = getUserDisplayName(usersById.get(b.userId));
+          const aStartsWith = nameStartsWith(displayA, searchQuery);
+          const bStartsWith = nameStartsWith(displayB, searchQuery);
           if (aStartsWith && !bStartsWith) return -1;
           if (!aStartsWith && bStartsWith) return 1;
-
-          const nameA = displayA;
-          const nameB = displayB;
-          return nameA.localeCompare(nameB);
+          return displayA.localeCompare(displayB);
         });
     }
 
-    return accumulatedParticipants.filter(p => matchesFilterMode(p.userId));
-  }, [accumulatedParticipants, searchQuery, searchResults, usersById, matchesFilterMode]);
+    // No search — render the paginated page (already server-filtered by
+    // userType for the current tab).
+    return accumulatedParticipants;
+  }, [accumulatedParticipants, allParticipants, appUserIdSet, filterMode, searchQuery, usersById]);
 
   return (
     <div className='relative h-full min-h-0 flex flex-col'>
