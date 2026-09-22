@@ -2019,13 +2019,20 @@ export class AuthV2Controller {
 
       const currentUser = req.user!;
 
+      // Get existing session from global session cookie
+      // We reuse the same session across workspaces (session belongs to user, not workspace)
+      const sessionId = req.cookies?.user_session_id;
+
       // Switching workspaces is inherently cross-tenant: everything below acts on the
       // TARGET workspace while the ambient session context is still the caller's current
       // (old) one — the per-model ACLs' "must match your current workspace" rule can never
       // be satisfied by definition. Safe to bypass because every lookup here is keyed off
       // `currentUser.email` (the caller's own verified session), never attacker-supplied —
-      // this can only ever act on the caller's own identity in the target workspace.
-      const data = await switchWorkspaceData(currentUser.email, workspaceId);
+      // this can only ever act on the caller's own identity in the target workspace. The
+      // session lookup is included here too (not read separately below) since the reused
+      // session's workspaceId is stale relative to the ambient (old) workspace by the second
+      // switch, which would wrongly ACL-block an out-of-band lookup.
+      const data = await switchWorkspaceData(currentUser.email, workspaceId, sessionId);
       if (!data) {
         res.status(403).json({
           error: 'Forbidden',
@@ -2033,25 +2040,18 @@ export class AuthV2Controller {
         });
         return;
       }
-      const { targetUser, selfDmChannelId, workspace } = data;
-
-      // Get existing session from global session cookie
-      // We reuse the same session across workspaces (session belongs to user, not workspace)
-      const sessionId = req.cookies?.user_session_id;
+      const { targetUser, selfDmChannelId, workspace, currentSession } = data;
 
       // Verify session exists and is valid
       let validSessionId: string | null = null;
       let sessionRefreshExpiry: Date | null = null;
-      if (sessionId) {
-        const currentSession = await this.userSessionService.getSessionById(sessionId);
-        if (currentSession && currentSession.status === 'ACTIVE') {
-          validSessionId = currentSession.id;
-          // Reusing the session (fixed window): the DB refreshTokenExpiry is NOT
-          // extended on switch, so the cookies must reflect its remaining life,
-          // never a fresh now+expiryDays (which would outlive the DB record).
-          sessionRefreshExpiry = currentSession.refreshTokenExpiry;
-          logger.info(`[SWITCH-WORKSPACE] Reusing existing session: ${validSessionId}`);
-        }
+      if (currentSession && currentSession.status === 'ACTIVE') {
+        validSessionId = currentSession.id;
+        // Reusing the session (fixed window): the DB refreshTokenExpiry is NOT
+        // extended on switch, so the cookies must reflect its remaining life,
+        // never a fresh now+expiryDays (which would outlive the DB record).
+        sessionRefreshExpiry = currentSession.refreshTokenExpiry;
+        logger.info(`[SWITCH-WORKSPACE] Reusing existing session: ${validSessionId}`);
       }
 
       if (!validSessionId) {
