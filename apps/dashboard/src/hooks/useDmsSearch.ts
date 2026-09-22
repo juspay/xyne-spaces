@@ -3,6 +3,7 @@ import { useAllChannels } from './useChannels';
 import { useUsers, searchUsers } from './useUsers';
 import { useAuthContextValues } from './useAuth';
 import { useAffinityCallback } from './useAffinityCallback';
+import { useDebouncedValue } from './useDebouncedValue';
 import { filterChannelsBySearchableNames } from '../utils/rankingUtils';
 import {
   isDMChannel,
@@ -38,6 +39,7 @@ interface UseDmsSearchReturn {
 
 export const useDmsSearch = (): UseDmsSearchReturn => {
   const [dmSearchQuery, setDmSearchQuery] = useState('');
+  const debouncedDmSearchQuery = useDebouncedValue(dmSearchQuery, 120);
   const [showDmSearchDropdown, setShowDmSearchDropdown] = useState(false);
   const [selectedDmSearchIndex, setSelectedDmSearchIndex] = useState(0);
   const dmSearchInputRef = useRef<HTMLInputElement>(null);
@@ -58,12 +60,12 @@ export const useDmsSearch = (): UseDmsSearchReturn => {
    * so no cross-type ordering is needed here.
    */
   const { oneToOneDmResults, groupDmResults } = useMemo(() => {
-    if (!dmSearchQuery.trim()) return { oneToOneDmResults: [], groupDmResults: [] };
+    if (!debouncedDmSearchQuery.trim()) return { oneToOneDmResults: [], groupDmResults: [] };
 
     // Referenced so this memo re-runs when affinity weights land (read imperatively below).
     void affinityVersion;
 
-    const query = dmSearchQuery.trim().toLowerCase();
+    const query = debouncedDmSearchQuery.trim().toLowerCase();
     const currentUserName = usersById.get(currentUserId)?.name?.toLowerCase() ?? '';
     const shouldMatchSelfDm = query
       .split(/[\s,]+/)
@@ -93,7 +95,7 @@ export const useDmsSearch = (): UseDmsSearchReturn => {
     // Keep filterChannelsBySearchableNames' own ordering (fuseScore − affinity), the SAME blended
     // relevance cmd+k uses, so a strong prefix match ("Rajesh") outranks a weak fuzzy match to a
     // higher-affinity contact. Re-ranking the matched set by pure affinity buried clean matches.
-    const nameMatched = filterChannelsBySearchableNames(dmItems, dmSearchQuery);
+    const nameMatched = filterChannelsBySearchableNames(dmItems, debouncedDmSearchQuery);
     const nameMatchedIds = new Set(nameMatched.map(item => item.channel.id));
 
     // Email-only matches (participant email substring, no name match): cmd+k finds emails via People,
@@ -127,7 +129,7 @@ export const useDmsSearch = (): UseDmsSearchReturn => {
       oneToOneDmResults: shouldMatchSelfDm ? [...selfDms, ...oneToOneMatches] : oneToOneMatches,
       groupDmResults: orderedMatches.filter(dm => isGroupDMChannel(dm.scopeType)),
     };
-  }, [allChannels, dmSearchQuery, usersById, currentUserId, affinityVersion]);
+  }, [allChannels, debouncedDmSearchQuery, usersById, currentUserId, affinityVersion]);
 
   /** Combined channel list in render order (1:1 then group) — drives keyboard nav + Enter dispatch. */
   const dmChannelResults = useMemo(
@@ -153,25 +155,25 @@ export const useDmsSearch = (): UseDmsSearchReturn => {
 
   /** Workspace users with no existing 1:1 DM, matching the query via Fuse.js */
   const userResults = useMemo(() => {
-    if (!dmSearchQuery.trim()) return [];
+    if (!debouncedDmSearchQuery.trim()) return [];
 
-    const isSelfSearch = dmSearchQuery.trim().toLowerCase() === 'self';
+    const isSelfSearch = debouncedDmSearchQuery.trim().toLowerCase() === 'self';
 
-    const baseResults = searchUsers(allUsers, dmSearchQuery, 10).filter(
+    const baseResults = searchUsers(allUsers, debouncedDmSearchQuery, 10).filter(
       u => u.id !== currentUserId && !usersWithExistingDm.has(u.id),
     );
 
     // Include current user when searching by their name or "self" keyword
     const currentUser = allUsers.find(u => u.id === currentUserId);
     if (currentUser && !usersWithExistingDm.has(currentUserId)) {
-      const nameMatches = searchUsers([currentUser], dmSearchQuery, 1).length > 0;
+      const nameMatches = searchUsers([currentUser], debouncedDmSearchQuery, 1).length > 0;
       if (isSelfSearch || nameMatches) {
         return [currentUser, ...baseResults];
       }
     }
 
     return baseResults;
-  }, [allUsers, dmSearchQuery, currentUserId, usersWithExistingDm]);
+  }, [allUsers, debouncedDmSearchQuery, currentUserId, usersWithExistingDm]);
 
   const totalResultCount = dmChannelResults.length + userResults.length;
 
