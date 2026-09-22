@@ -15,15 +15,10 @@ export const dedupeAndSortConversations = (
   return Array.from(byId.values()).sort(compareConversations);
 };
 
-/**
- * Replaces one live viewport window without disturbing rows outside that window.
- * `includedAnchorId` is the anchor of a cursor query that returns its anchor:
- * when the anchor is missing from the result it was deleted, so it is removed.
- */
+/** Replaces one live viewport window without disturbing rows outside that window. */
 export const reconcileConversationWindow = (
   current: Conversation[],
   incomingWindow: Conversation[],
-  includedAnchorId?: string,
 ): Conversation[] => {
   if (incomingWindow.length === 0) return current;
 
@@ -38,9 +33,9 @@ export const reconcileConversationWindow = (
   const reconciled = current
     .filter(
       conversation =>
-        incomingById.has(conversation.conversationId) ||
-        (conversation.conversationId !== includedAnchorId &&
-          (conversation.createdAt < first.createdAt || conversation.createdAt > last.createdAt)),
+        conversation.createdAt < first.createdAt ||
+        conversation.createdAt > last.createdAt ||
+        incomingById.has(conversation.conversationId),
     )
     .map(conversation => incomingById.get(conversation.conversationId) ?? conversation);
 
@@ -61,20 +56,18 @@ export const reconcileConversationWindow = (
  *     window sits far above `latest` and eager merging would drag the
  *     bottom of the list onto the tail and hide the anchor context.
  *   - Empty latest: pass fetched through unchanged.
- *   - Empty fetched: promote latest after initial load, or immediately when
- *     the caller opted into provisional promotion for an unanchored open.
+ *   - Empty fetched: post-initial-load only, promote latest to the main list.
  */
 export const mergeConversationsWithLatest = (
   fetched: Conversation[],
   latest: Conversation[],
   isInitialLoadComplete: boolean,
-  allowProvisionalPromotion = false,
 ): { merged: Conversation[]; latestClear: boolean } => {
   if (latest.length === 0) {
     return { merged: dedupeAndSortConversations(fetched, []), latestClear: false };
   }
   if (fetched.length === 0) {
-    return isInitialLoadComplete || allowProvisionalPromotion
+    return isInitialLoadComplete
       ? { merged: dedupeAndSortConversations(latest, []), latestClear: true }
       : { merged: [], latestClear: false };
   }
