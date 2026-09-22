@@ -10,6 +10,25 @@ import { subscribeSendLifecycle } from './mutationLifecycle.js';
 
 const PENDING_STORAGE_KEY = 'pendingMessages';
 
+/**
+ * How long a fired send may stay unacknowledged before we stop believing the
+ * ack is coming.
+ *
+ * A send fired while Zero reports `connected` used to have no clock at all: no
+ * status, no retry, no error. If the socket died between `zero.mutate()` and
+ * the server ack (or the client group was rebuilt, which makes Zero discard its
+ * unacked queue), the optimistic row disappeared and nothing replayed it — the
+ * message was silently lost until the next app session.
+ */
+export const SEND_ACK_TIMEOUT_MS = 15_000;
+
+/**
+ * Cap on unattended replays of one message. Past this the entry stays `failed`
+ * and only an explicit user retry fires it again, so a mutator that keeps
+ * losing its ack cannot turn into an endless background resend loop.
+ */
+export const MAX_AUTO_RETRIES = 3;
+
 export type ZeroStateName =
   | 'connected'
   | 'connecting'
@@ -48,6 +67,10 @@ export type PendingMessage = {
   sessionId: string;
   zeroStateAtSend: ZeroStateName;
   mutatorFired: boolean;
+  /** Wall clock of the last mutator fire. Absent on entries queued offline. */
+  firedAt?: number;
+  /** Unattended replays so far. Reset by an explicit user retry. */
+  autoRetryCount?: number;
   mutatorAppError: boolean;
 };
 
@@ -73,6 +96,17 @@ function writeAll(all: Record<string, PendingMessage>): void {
   } catch {
     /* storage unavailable */
   }
+  notifyPendingSubscribers();
+}
+
+/**
+ * Re-run every pending subscriber without mutating storage.
+ *
+ * {@linkcode getStatus} is time-dependent (see {@linkcode SEND_ACK_TIMEOUT_MS}),
+ * so a stuck send only flips to `failed` when something re-reads it. The sweep
+ * in `usePendingQueue` calls this on a timer.
+ */
+export function notifyPendingSubscribers(): void {
   for (const cb of listeners) {
     try {
       cb();
@@ -131,6 +165,21 @@ export function subscribePending(cb: () => void): () => void {
   };
 }
 
+/**
+ * True when the mutator was fired but the server ack never arrived inside
+ * {@linkcode SEND_ACK_TIMEOUT_MS}. The reconcile in `usePendingQueue` removes
+ * the entry as soon as the server confirms `isSent`, so an entry that is still
+ * here past the deadline was never persisted.
+ */
+export function isAckOverdue(
+  entry: PendingMessage,
+  now: number = Date.now(),
+): boolean {
+  if (!entry.mutatorFired) return false;
+  const firedAt = entry.firedAt ?? entry.timestamp;
+  return now - firedAt > SEND_ACK_TIMEOUT_MS;
+}
+
 export function getStatus(entry: PendingMessage): PendingStatus | null {
   // Anything from a previous session or with a mutator app-error is failed.
   if (entry.sessionId !== currentSessionId || entry.mutatorAppError) {
@@ -141,9 +190,11 @@ export function getStatus(entry: PendingMessage): PendingStatus | null {
       // Auto-retry-eligible clock: fires once Zero transitions to connected.
       return 'connecting';
     case 'connected':
-      // Mutator was fired (or will be, momentarily). Awaiting server ack;
-      // the messagesByIds reconcile drops the entry when isSent=true.
-      return null;
+      // Mutator was fired (or will be, momentarily). Awaiting server ack; the
+      // messagesByIds reconcile drops the entry when isSent=true. Past the ack
+      // deadline the write is treated as lost: surface the same failed UI as an
+      // offline send so the user gets retry/delete instead of a silent drop.
+      return isAckOverdue(entry) ? 'failed' : 'connecting';
     default:
       // disconnected / needs-auth / error / closed → manual-retry failed.
       return 'failed';
@@ -155,12 +206,18 @@ export function getStatus(entry: PendingMessage): PendingStatus | null {
  * server-side per user's note). Updates entry state through the send lifecycle
  * and removes on success.
  */
-export function firePendingMutator(zero: Zero, entry: PendingMessage): void {
+export function firePendingMutator(
+  zero: Zero,
+  entry: PendingMessage,
+  options: { manual?: boolean } = {},
+): void {
   const fireTimestamp = Date.now();
   updatePending(entry.messageId, {
     mutatorFired: true,
     mutatorAppError: false,
     timestamp: fireTimestamp,
+    firedAt: fireTimestamp,
+    autoRetryCount: options.manual ? 0 : (entry.autoRetryCount ?? 0) + 1,
     sessionId: currentSessionId,
     zeroStateAtSend: zero.connection.state.current.name as ZeroStateName,
   });
@@ -219,11 +276,25 @@ export function firePendingMutator(zero: Zero, entry: PendingMessage): void {
   );
 }
 
+/**
+ * Entries the reconnect sweep may replay without user action.
+ *
+ * Two cases, both scoped to the current session (older entries surface the
+ * manual retry UI instead):
+ *  - queued while Zero was not connected and never attempted;
+ *  - fired while `connected` but never acknowledged before the deadline —
+ *    i.e. the socket or the client group died mid-flight. Zero drops its own
+ *    unacked queue on `ClientStateNotFound`, so this replay is the only thing
+ *    that lands the message.
+ *
+ * Replay is safe because the server mutator is idempotent per `messageId`
+ * (`firePendingMutator` deliberately reuses the original id).
+ */
 export function isAutoRetryEligible(entry: PendingMessage): boolean {
-  return (
-    entry.sessionId === currentSessionId &&
-    entry.zeroStateAtSend === 'connecting' &&
-    !entry.mutatorFired &&
-    !entry.mutatorAppError
-  );
+  if (entry.sessionId !== currentSessionId || entry.mutatorAppError) {
+    return false;
+  }
+  if ((entry.autoRetryCount ?? 0) >= MAX_AUTO_RETRIES) return false;
+  if (!entry.mutatorFired) return true;
+  return isAckOverdue(entry);
 }
