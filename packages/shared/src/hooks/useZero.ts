@@ -8,7 +8,7 @@ import type {
   Query,
   HumanReadable,
 } from '@rocicorp/zero';
-import { createContext, useContext, useMemo } from 'react';
+import { createContext, useContext } from 'react';
 import type { Logger, MetricsRecorder } from '../logger/index.js';
 import { noopLogger, noopMetrics } from '../logger/index.js';
 import { Event } from '../logger/events.js';
@@ -387,10 +387,5 @@ export function useZero(): Zero {
     },
   };
 
-  // A new Proxy per render would change `zero` identity and re-run every
-  // effect keyed on it. The handler closes over exactly these dependencies.
-  return useMemo(
-    () => new Proxy(originalZero, handler),
-    [originalZero, logger, metrics, encryptionKey, clientEncryptionEnabled],
-  );
+  return new Proxy(originalZero, handler);
 }
