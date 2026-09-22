@@ -20,6 +20,34 @@ const isDeactivated = (user: UserLike): boolean => user.status === UserStatus.IN
 // at/above weak fuzzy matches. Mirrors the score-0 convention used for channel token matches.
 const TOKEN_MATCH_SCORE = 0;
 
+const USER_FUSE_OPTIONS = {
+  keys: [
+    { name: 'displayName', weight: 2 },
+    { name: 'name', weight: 2 },
+    { name: 'email', weight: 1 },
+  ],
+  threshold: 0.2,
+  ignoreLocation: true,
+  includeScore: true,
+  minMatchCharLength: 2,
+  isCaseSensitive: false,
+};
+
+// Per-array-reference Fuse cache. The DM search re-runs this on every keystroke; building a
+// fresh Fuse over the full workspace user list each time was pinning the tab on large
+// workspaces (bitap cost scales with corpus × query breadth). Zero's useUsers returns a stable
+// reference until the underlying data changes, so keyed reuse eliminates the rebuild in the
+// hot path while still refreshing when the user list actually turns over.
+const _userFuseCache = new WeakMap<UserLike[], Fuse<UserLike>>();
+
+function getUsersFuse<T extends UserLike>(users: T[]): Fuse<T> {
+  const cached = _userFuseCache.get(users as unknown as UserLike[]);
+  if (cached) return cached as unknown as Fuse<T>;
+  const fuse = new Fuse(users, USER_FUSE_OPTIONS);
+  _userFuseCache.set(users as unknown as UserLike[], fuse as unknown as Fuse<UserLike>);
+  return fuse;
+}
+
 /**
  * Search users and return scored results, mirroring `searchChannelsWithScores`.
  *
@@ -47,18 +75,7 @@ export function searchUsersWithScores<T extends UserLike>(
 
   const q = query.toLowerCase();
 
-  const fuse = new Fuse(users, {
-    keys: [
-      { name: 'displayName', weight: 2 },
-      { name: 'name', weight: 2 },
-      { name: 'email', weight: 1 },
-    ],
-    threshold: 0.2,
-    ignoreLocation: true,
-    includeScore: true,
-    minMatchCharLength: 2,
-    isCaseSensitive: false,
-  });
+  const fuse = getUsersFuse(users);
 
   const results = fuse.search(query);
 
