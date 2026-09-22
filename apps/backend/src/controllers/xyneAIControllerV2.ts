@@ -113,6 +113,10 @@ const XyneAIRequestSchemaV2 = z.object({
   // word, so camelCase and snake_case are identical — no dual key needed
   // (unlike webSearchEnabled/web_search_enabled above).
   instant: z.boolean().optional().default(false),
+  // Worker sends snake_case; agent-chat uses camelCase. Either pin strips
+  // tools on the claw-auth run-stream (same empty-tools instant path).
+  disableTools: z.boolean().optional().default(false),
+  disable_tools: z.boolean().optional().default(false),
   // Per-run thinking level from the composer's dropdown. Absent = the agent's
   // configured default (modelSettings.thinkingLevel or provider default).
   thinkingLevel: z.enum(['off', 'minimal', 'low', 'medium', 'high']).optional(),
@@ -249,6 +253,8 @@ export class XyneAIControllerV2 {
       deepResearchEnabled: deepResearchEnabledCC,
       deep_research_enabled: deepResearchEnabledSC,
       instant,
+      disableTools: disableToolsCC,
+      disable_tools: disableToolsSC,
       thinkingLevel,
       researchContext,
       research_context,
@@ -291,6 +297,7 @@ export class XyneAIControllerV2 {
     const createCanvasEnabled = createCanvasEnabledCC || createCanvasEnabledSC;
     const webSearchEnabled = webSearchEnabledCC || webSearchEnabledSC;
     const deepResearchEnabled = deepResearchEnabledCC || deepResearchEnabledSC;
+    const disableTools = disableToolsCC || disableToolsSC;
 
     // Snake-case fallback for IDs sent by Web Worker
     const effectiveCanvasIds = canvasIds?.length ? canvasIds : canvas_ids;
@@ -502,6 +509,7 @@ export class XyneAIControllerV2 {
           webSearchEnabled,
           deepResearchEnabled,
           instant,
+          ...(disableTools ? { disableTools: true } : {}),
           ...(thinkingLevel ? { thinkingLevel } : {}),
           researchContext: effectiveResearchContext,
           ...(sdlcDashboardContext && { dashboardContext: sdlcDashboardContext }),

@@ -409,6 +409,10 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
       /** Per-message thinking level (Spaces composer dropdown). Merged over the
        *  agent's modelSettings for this run; invalid values are ignored. */
       thinkingLevel: rawThinkingLevel,
+      /** Skip the agentic tool loop (Ask AI Instant / agent-create). Same
+       *  empty-tools pin as agent-chat.ts `disableTools`. */
+      instant,
+      disableTools,
       agentConfig,
       additionalInstructions,
       generateFollowUpSuggestions,
@@ -1005,6 +1009,27 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
       }
     }
 
+    // Instant / no-tools: pin an empty tools config so tool-resolution
+    // grants nothing (absent tools = all tools). Mirrors agent-chat.ts.
+    if (instant === true || disableTools === true) {
+      enrichedAgentConfig["tools"] = { subagents: [], direct: [], custom: [], gateway: [] };
+      enrichedAgentConfig["toolPermissions"] = {};
+      log.info(`[run-stream] instant/no-tools for ${slug}`);
+    }
+
+    if (instant === true || thinkingOverride === "off") {
+      const prev = enrichedAgentConfig["modelSettings"];
+      const base =
+        prev && typeof prev === "object" && !Array.isArray(prev)
+          ? (prev as Record<string, unknown>)
+          : {};
+      enrichedAgentConfig["modelSettings"] = {
+        ...base,
+        thinkingLevel: thinkingOverride ?? "off",
+        reasoning_effort: "none",
+      };
+    }
+
     const fastModeEnabled = await resolveFastMode(
       convId,
       slug,
@@ -1041,6 +1066,9 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
       agentConfig: enrichedAgentConfig,
       additionalInstructions,
       ...(generateFollowUpSuggestions === true ? { generateFollowUpSuggestions: true } : {}),
+      ...(instant === true ? { instant: true } : {}),
+      ...(disableTools === true ? { disableTools: true } : {}),
+      ...(thinkingOverride ? { thinkingLevel: thinkingOverride } : {}),
       __persistedByCaller: true,
       fastMode: fastModeEnabled,
     };

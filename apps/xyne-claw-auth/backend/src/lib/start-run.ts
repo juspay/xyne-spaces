@@ -1415,6 +1415,11 @@ export async function prepareRun(
         ? { planContinuation: true }
         : {}),
       ...(generateFollowUpSuggestions === true ? { generateFollowUpSuggestions: true } : {}),
+      ...((body as { instant?: boolean }).instant === true ? { instant: true } : {}),
+      ...((body as { disableTools?: boolean }).disableTools === true ? { disableTools: true } : {}),
+      ...(typeof (body as { thinkingLevel?: unknown }).thinkingLevel === "string"
+        ? { thinkingLevel: (body as { thinkingLevel: string }).thinkingLevel }
+        : {}),
       // /experiment epoch context (id/epoch/deadlineAt/focus) — set only by
       // dispatchExperimentEpoch (lib/experiment.ts) via this same S2S proxy.
       // Must be threaded through the allowlist or the runtime never injects the

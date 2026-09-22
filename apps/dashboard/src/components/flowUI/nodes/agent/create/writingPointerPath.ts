@@ -164,6 +164,13 @@ export function pointerParkPoint(box: FieldBox): PointerPoint {
   return pointerCaretPoint(null, box, '');
 }
 
+/** Rest on a Hub capability row (chips / toggles), not the section title. */
+export function pointerHubRowPoint(box: FieldBox): PointerPoint {
+  const y = box.top + Math.min(32, Math.max(22, box.height * 0.38));
+  const x = box.left + Math.min(Math.max(48, box.width * 0.28), box.width - 40);
+  return { x, y };
+}
+
 /** Resting position on the field text line (optionally tracks typed width). */
 export function pointerCaretPoint(
   control: HTMLInputElement | HTMLTextAreaElement | null,

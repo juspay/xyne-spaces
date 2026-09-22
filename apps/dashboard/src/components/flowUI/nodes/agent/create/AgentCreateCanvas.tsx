@@ -16,6 +16,7 @@ import type {
   AgentCreateConflict,
   AgentCreateField,
   AgentCreateFormState,
+  AgentCreateHubRow,
   AgentCreatePhase,
 } from './types';
 
@@ -42,6 +43,8 @@ interface AgentCreateCanvasProps {
   skeletonIdentity?: boolean;
   /** Field currently being written by chat. Drives the traveling write pointer. */
   writingField?: AgentCreateField | null;
+  /** Hub row under `writingField` when filling MCP / tools / skills / knowledge. */
+  writingHubRow?: AgentCreateHubRow | null;
 }
 
 function ConflictChooser({
@@ -123,6 +126,7 @@ export function AgentCreateCanvas({
   onClose,
   skeletonIdentity,
   writingField = null,
+  writingHubRow = null,
 }: AgentCreateCanvasProps): ReactElement {
   const conflictByField = useMemo(
     () => new Map(conflicts.map(conflict => [conflict.field, conflict])),
@@ -319,15 +323,17 @@ export function AgentCreateCanvas({
                 onFocus={() => onFieldFocus('tools')}
                 onBlur={() => onFieldFocus(null)}
               >
-                <McpCapabilityRow
-                  selection={form.tools}
-                  onSelectionChange={tools =>
-                    onFormChange({
-                      tools: { ...tools, callableAgents: form.tools.callableAgents },
-                    })
-                  }
-                  suggestContext={suggestContext}
-                />
+                <div data-create-hub-row='mcp'>
+                  <McpCapabilityRow
+                    selection={form.tools}
+                    onSelectionChange={tools =>
+                      onFormChange({
+                        tools: { ...tools, callableAgents: form.tools.callableAgents },
+                      })
+                    }
+                    suggestContext={suggestContext}
+                  />
+                </div>
                 <SubagentCapabilityRow
                   selection={form.tools}
                   onSelectionChange={tools =>
@@ -337,15 +343,17 @@ export function AgentCreateCanvas({
                   }
                   suggestContext={suggestContext}
                 />
-                <BuiltinCapabilityRow
-                  selection={form.tools}
-                  onSelectionChange={tools =>
-                    onFormChange({
-                      tools: { ...tools, callableAgents: form.tools.callableAgents },
-                    })
-                  }
-                  suggestContext={suggestContext}
-                />
+                <div data-create-hub-row='builtin'>
+                  <BuiltinCapabilityRow
+                    selection={form.tools}
+                    onSelectionChange={tools =>
+                      onFormChange({
+                        tools: { ...tools, callableAgents: form.tools.callableAgents },
+                      })
+                    }
+                    suggestContext={suggestContext}
+                  />
+                </div>
                 {renderConflict('tools')}
               </div>
             </ChatFillHighlight>
@@ -353,6 +361,7 @@ export function AgentCreateCanvas({
             <ChatFillHighlight active={isWriting('skills')} field='skills'>
               <div
                 className={cn(disabled && 'pointer-events-none opacity-60')}
+                data-create-hub-row='skills'
                 onFocus={() => onFieldFocus('skills')}
                 onBlur={() => onFieldFocus(null)}
               >
@@ -367,6 +376,7 @@ export function AgentCreateCanvas({
             <ChatFillHighlight active={isWriting('knowledge')} field='knowledge'>
               <div
                 className={cn(disabled && 'pointer-events-none opacity-60')}
+                data-create-hub-row='knowledge'
                 onFocus={() => onFieldFocus('knowledge')}
                 onBlur={() => onFieldFocus(null)}
               >
@@ -382,7 +392,11 @@ export function AgentCreateCanvas({
 
             {note ? <p className='text-sm leading-5 text-muted-foreground'>{note}</p> : null}
           </>
-          <WritingFieldPointer field={writingField} originRef={columnRef} />
+          <WritingFieldPointer
+            field={writingField}
+            hubRow={writingHubRow}
+            originRef={columnRef}
+          />
         </div>
       </div>
       {footer ? (

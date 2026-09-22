@@ -212,6 +212,7 @@ function LiveAgentCreateChatPanel({
           ...(context ? toStreamOverrides(context) : {}),
           ...(trigger ? { trigger } : {}),
           instant: true,
+          disableTools: true,
           thinkingLevel: 'off',
         },
       );

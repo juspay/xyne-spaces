@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactElement, type RefObject } from 'react';
 import { animate, motion, useMotionValue, useReducedMotion } from 'motion/react';
 import { useTheme } from '@/hooks/useTheme';
-import type { AgentCreateField } from './types';
+import type { AgentCreateField, AgentCreateHubRow } from './types';
 import {
   caretTrackDurationMs,
   mouseTravelDurationMs,
@@ -9,6 +9,7 @@ import {
   pickTravelPath,
   pointerCaretPoint,
   pointerEntryPoint,
+  pointerHubRowPoint,
   pointerParkPoint,
   type FieldBox,
   type PointerPoint,
@@ -21,8 +22,15 @@ const SIZE = 20;
 const TRAVEL_EASE = [0.42, 0, 0.2, 1] as const;
 const FADE_SECONDS = 0.16;
 
-function measureBox(origin: HTMLElement, field: AgentCreateField): FieldBox | null {
-  const host = origin.querySelector(`[data-create-field="${field}"]`);
+function measureBox(
+  origin: HTMLElement,
+  field: AgentCreateField,
+  hubRow: AgentCreateHubRow | null,
+): FieldBox | null {
+  const host =
+    (hubRow
+      ? origin.querySelector(`[data-create-hub-row="${hubRow}"]`)
+      : null) ?? origin.querySelector(`[data-create-field="${field}"]`);
   if (!host) return null;
   const box = host.getBoundingClientRect();
   const root = origin.getBoundingClientRect();
@@ -57,6 +65,7 @@ function pathArrays(
 
 interface WritingFieldPointerProps {
   field: AgentCreateField | null;
+  hubRow?: AgentCreateHubRow | null;
   originRef: RefObject<HTMLDivElement | null>;
 }
 
@@ -67,6 +76,7 @@ interface WritingFieldPointerProps {
  */
 export function WritingFieldPointer({
   field,
+  hubRow = null,
   originRef,
 }: WritingFieldPointerProps): ReactElement | null {
   const reduceMotion = useReducedMotion() === true;
@@ -76,6 +86,7 @@ export function WritingFieldPointer({
   const opacity = useMotionValue(0);
   const lastPointRef = useRef<PointerPoint | null>(null);
   const activeFieldRef = useRef<AgentCreateField | null>(null);
+  const activeHubRowRef = useRef<AgentCreateHubRow | null>(null);
   const [shown, setShown] = useState(false);
   const [settled, setSettled] = useState(false);
 
@@ -92,6 +103,7 @@ export function WritingFieldPointer({
 
     if (!field || !origin) {
       activeFieldRef.current = field;
+      activeHubRowRef.current = null;
       setSettled(false);
       if (lastPointRef.current === null) {
         opacity.set(0);
@@ -123,11 +135,19 @@ export function WritingFieldPointer({
 
     const travelKind = (): TravelKind => {
       if (reduceMotion) return 'reduced';
-      if (activeFieldRef.current && activeFieldRef.current !== field && lastPointRef.current) {
-        return 'field-down';
-      }
+      const sameField = activeFieldRef.current === field;
+      const sameRow = activeHubRowRef.current === hubRow;
       if (!lastPointRef.current) return 'entry';
+      if (sameField && sameRow) return 'entry';
       return 'field-down';
+    };
+
+    const restPoint = (box: FieldBox): PointerPoint => {
+      if (hubRow) {
+        return pointerHubRowPoint(box);
+      }
+      const control = fieldControl(origin, field);
+      return pointerCaretPoint(control, box, control?.value ?? '');
     };
 
     const moveTo = (
@@ -155,14 +175,13 @@ export function WritingFieldPointer({
 
     const arrive = (): void => {
       if (cancelled) return;
-      const box = measureBox(origin, field);
+      const box = measureBox(origin, field, hubRow);
       if (!box) {
         frame = window.requestAnimationFrame(arrive);
         return;
       }
       stopTravel();
-      const control = fieldControl(origin, field);
-      const target = pointerCaretPoint(control, box, control?.value ?? '');
+      const target = restPoint(box);
       const kind = travelKind();
       const from =
         kind === 'entry' || !lastPointRef.current
@@ -170,12 +189,13 @@ export function WritingFieldPointer({
           : lastPointRef.current;
 
       if (reduceMotion) {
-        const park = pointerParkPoint(box);
+        const park = hubRow ? pointerHubRowPoint(box) : pointerParkPoint(box);
         x.set(park.x);
         y.set(park.y);
         opacity.set(1);
         lastPointRef.current = park;
         activeFieldRef.current = field;
+        activeHubRowRef.current = hubRow;
         setSettled(true);
         return;
       }
@@ -187,6 +207,7 @@ export function WritingFieldPointer({
       animate(opacity, 1, { duration: FADE_SECONDS, ease: 'easeOut' });
       moveTo(from, target, kind, (): void => {
         activeFieldRef.current = field;
+        activeHubRowRef.current = hubRow;
         setSettled(true);
       });
     };
@@ -197,10 +218,10 @@ export function WritingFieldPointer({
       window.cancelAnimationFrame(frame);
       stopTravel();
     };
-  }, [field, originRef, opacity, reduceMotion, x, y]);
+  }, [field, hubRow, originRef, opacity, reduceMotion, x, y]);
 
   useEffect(() => {
-    if (!field || !settled || reduceMotion) return;
+    if (!field || !settled || reduceMotion || hubRow) return;
     const origin = originRef.current;
     if (!origin) return;
 
@@ -210,7 +231,7 @@ export function WritingFieldPointer({
 
     const syncCaret = (): void => {
       if (cancelled) return;
-      const box = measureBox(origin, field);
+      const box = measureBox(origin, field, null);
       if (!box) return;
       const control = fieldControl(origin, field);
       const value = control?.value ?? '';

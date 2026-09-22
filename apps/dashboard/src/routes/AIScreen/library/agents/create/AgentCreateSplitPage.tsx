@@ -234,13 +234,22 @@ export function AgentCreateSplitPage({
         for (const field of reveal) {
           const slice = slicePatch(patch, field);
           if (Object.keys(slice).length === 0) continue;
+          const hubRow =
+            field === 'tools'
+              ? 'mcp'
+              : field === 'skills'
+                ? 'skills'
+                : field === 'knowledge'
+                  ? 'knowledge'
+                  : null;
+          createForm.setWritingField(field, hubRow);
           const changed = createForm.applyChatPatch(`${sourceId}-${field}`, slice, {
             highlight: false,
           });
           if (!changed.includes(field)) {
+            createForm.setWritingField(null);
             continue;
           }
-          createForm.setWritingField(field);
           await sleep(WRITE_MS);
         }
         createForm.setWritingField(null);
@@ -373,6 +382,7 @@ export function AgentCreateSplitPage({
       onResolveConflict={createForm.resolveConflict}
       skeletonIdentity={skeletonIdentity}
       writingField={createForm.writingField}
+      writingHubRow={createForm.writingHubRow}
       phase={phase === 'created' ? 'created' : phase === 'empty' ? 'empty' : 'draft'}
       builtBy={builtBy}
       handleError={handleError}

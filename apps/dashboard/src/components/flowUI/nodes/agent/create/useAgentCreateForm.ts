@@ -4,6 +4,7 @@ import type {
   AgentCreateConflict,
   AgentCreateField,
   AgentCreateFormState,
+  AgentCreateHubRow,
 } from './types';
 import { EMPTY_CREATE_FORM, isFormDirty } from './types';
 import { applyConflictChoice, mergeChatPatch, type FieldLock } from './mergeChatPatch';
@@ -16,6 +17,7 @@ export function useAgentCreateForm(initial: AgentCreateFormState = EMPTY_CREATE_
   const [conflicts, setConflicts] = useState<AgentCreateConflict[]>([]);
   const [highlights, setHighlights] = useState<ReadonlySet<AgentCreateField>>(new Set());
   const [writingField, setWritingFieldState] = useState<AgentCreateField | null>(null);
+  const [writingHubRow, setWritingHubRowState] = useState<AgentCreateHubRow | null>(null);
   const highlightTimer = useRef<number | null>(null);
   const lastSourceRef = useRef<string | null>(null);
   const formRef = useRef(form);
@@ -46,16 +48,21 @@ export function useAgentCreateForm(initial: AgentCreateFormState = EMPTY_CREATE_
     }
     setHighlights(new Set());
     setWritingFieldState(null);
+    setWritingHubRowState(null);
   }, []);
 
-  const setWritingField = useCallback((field: AgentCreateField | null) => {
-    if (highlightTimer.current !== null) {
-      window.clearTimeout(highlightTimer.current);
-      highlightTimer.current = null;
-    }
-    setWritingFieldState(field);
-    setHighlights(field ? new Set([field]) : new Set());
-  }, []);
+  const setWritingField = useCallback(
+    (field: AgentCreateField | null, hubRow: AgentCreateHubRow | null = null) => {
+      if (highlightTimer.current !== null) {
+        window.clearTimeout(highlightTimer.current);
+        highlightTimer.current = null;
+      }
+      setWritingFieldState(field);
+      setWritingHubRowState(field ? hubRow : null);
+      setHighlights(field ? new Set([field]) : new Set());
+    },
+    [],
+  );
 
   const patchForm = useCallback(
     (patch: Partial<AgentCreateFormState>, field?: AgentCreateField) => {
@@ -135,6 +142,7 @@ export function useAgentCreateForm(initial: AgentCreateFormState = EMPTY_CREATE_
     setConflicts([]);
     setHighlights(new Set());
     setWritingFieldState(null);
+    setWritingHubRowState(null);
     if (sourceId) lastSourceRef.current = sourceId;
   }, []);
 
@@ -151,6 +159,7 @@ export function useAgentCreateForm(initial: AgentCreateFormState = EMPTY_CREATE_
     conflicts,
     highlights,
     writingField,
+    writingHubRow,
     canvasDirty: isFormDirty(form, baseline),
     patchForm,
     applyChatPatch,
