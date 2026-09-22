@@ -1,7 +1,7 @@
 import { type RefObject, useEffect, useRef } from 'react';
 import { useShortcutById } from '../../../shortcuts';
 import type { ShortcutId } from '../../../shortcuts';
-import { hoveredMessage } from '../ChatBubble/hoveredMessageRef';
+import { hoveredMessage, messageInteractionModality } from '../ChatBubble/hoveredMessageRef';
 import {
   getMessageHoverActions,
   getMessageHoverActionsByMessageId,
@@ -14,6 +14,10 @@ import {
  * registered (mobile/pinned/search rows).
  */
 const resolveHoveredEntry = (): MessageHoverToolbarActions | undefined => {
+  // Last input wins: a pointer the user has not moved since their last
+  // keystroke does not own the shortcuts, however many rows have scrolled
+  // underneath it.
+  if (messageInteractionModality.current !== 'pointer') return undefined;
   const hovered = hoveredMessage.current;
   if (!hovered) return undefined;
   return getMessageHoverActionsByMessageId(hovered.messageId);
@@ -98,7 +102,11 @@ export const useMessageHoverShortcuts = (
   }, []);
 
   const isOwner = (): boolean => {
-    if (hoveredMessage.current !== null) return owners[0] === instanceIdRef.current;
+    // Mirrors resolveHoveredEntry: a hover that no longer owns the shortcuts
+    // must not decide ownership either.
+    const pointerOwns =
+      messageInteractionModality.current === 'pointer' && hoveredMessage.current !== null;
+    if (pointerOwns) return owners[0] === instanceIdRef.current;
     if (keyboardSelectedMessageId) return true;
     return owners[0] === instanceIdRef.current;
   };
