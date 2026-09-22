@@ -1,4 +1,5 @@
 import Joi from 'joi';
+import { MAX_BULK_TICKETS } from '@/services/tickets/bulkTicketBatchService';
 
 const etaSchema = Joi.date().allow(null).messages({
   'date.base': 'ETA must be a valid date',
@@ -58,9 +59,8 @@ export const bulkTicketSchemaValidator = Joi.object({
   /** Client-supplied and stable across retries; makes a double-submit a no-op. */
   idempotencyKey: Joi.string().max(200).optional(),
   parent: parentSchema.optional(),
-  // Matches MAX_BULK_TICKETS in the controller: one transaction per request.
-  subTickets: Joi.array().items(subTicketSchema).max(20).optional(),
-  tickets: Joi.array().items(bulkTicketSchema).max(20).optional(),
+  subTickets: Joi.array().items(subTicketSchema).max(MAX_BULK_TICKETS).optional(),
+  tickets: Joi.array().items(bulkTicketSchema).max(MAX_BULK_TICKETS).optional(),
   projectId: Joi.string().optional(),
   channelId: Joi.string().optional(),
   boardId: Joi.string().optional(),

@@ -48,7 +48,14 @@ type BatchTransaction = Parameters<Parameters<typeof prisma.$transaction>[0]>[0]
  */
 const BULK_TICKET_ID_NAMESPACE = '6f8d1a52-7b3c-4c19-9a4e-2f0f5c1d8e37';
 
-/** Postgres handles a 100-row batch comfortably; Prisma's 5s default does not. */
+/**
+ * Rows per request. One transaction is held open for the whole batch, so this
+ * bounds request duration and pool pressure rather than payload size.
+ * The controller and the Joi validator both enforce it.
+ */
+export const MAX_BULK_TICKETS = 20;
+
+/** Comfortable for a batch this size; Prisma's 5s default is not. */
 const BATCH_TRANSACTION_TIMEOUT_MS = 120_000;
 const BATCH_TRANSACTION_MAX_WAIT_MS = 15_000;
 
@@ -71,6 +78,8 @@ export interface BatchTicketInput {
 
 export interface BatchTicketContext {
   createdBy: string;
+  /** Tenant the batch belongs to. Salts every derived id — see {@link scopedKey}. */
+  workspaceId: string;
   /**
    * Stable per-batch string (the queue job id). Row ids are derived from it, so
    * the same batch replayed produces the same ids and inserts nothing twice.
@@ -112,8 +121,23 @@ interface PreparedRow {
 const deriveId = (batchKey: string, index: number, entity: string): string =>
   uuidv5(`${batchKey}:${index}:${entity}`, BULK_TICKET_ID_NAMESPACE);
 
+/**
+ * Mirrors TicketIdService's project-scoped format. Deliberately local: that
+ * one is private, and bulk creation only needs to render numbers it already
+ * reserved as a block — not to allocate any.
+ */
 const formatXyneId = (projectCode: string, sequenceNumber: number): string =>
   `${projectCode.toUpperCase()}-${String(sequenceNumber).padStart(4, '0')}`;
+
+/**
+ * The key ids are actually derived from. `batchKey` is client-supplied, so it is
+ * salted with the tenant and the actor: without this, two callers in different
+ * workspaces sending the same idempotency key derive identical primary keys, and
+ * the second batch is silently swallowed whole by `skipDuplicates` — which also
+ * hands any caller a way to burn another tenant's keys.
+ */
+const scopedKey = (ctx: BatchTicketContext): string =>
+  `${ctx.workspaceId}:${ctx.createdBy}:${ctx.batchKey}`;
 
 const distinct = <T>(values: T[]): T[] => Array.from(new Set(values));
 
@@ -299,10 +323,10 @@ const prepareRows = async (
     const sequenceNumber = sequenceCursors.get(input.projectId)!;
     sequenceCursors.set(input.projectId, sequenceNumber + 1);
 
-    const ticketId = deriveId(ctx.batchKey, index, 'ticket');
-    const conversationId = deriveId(ctx.batchKey, index, 'conversation');
-    const messageId = deriveId(ctx.batchKey, index, 'message');
-    const participantId = deriveId(ctx.batchKey, index, 'participant');
+    const ticketId = deriveId(scopedKey(ctx), index, 'ticket');
+    const conversationId = deriveId(scopedKey(ctx), index, 'conversation');
+    const messageId = deriveId(scopedKey(ctx), index, 'message');
+    const participantId = deriveId(scopedKey(ctx), index, 'participant');
 
     const statusV2 = (input.statusV2 as TicketStatusV2) || TicketStatusV2.TODO;
     const priority = (input.priority?.toUpperCase() as TicketPriority) || TicketPriority.MEDIUM;
@@ -311,7 +335,7 @@ const prepareRows = async (
     // id must exist before evaluateEta runs — that call reads it as the active
     // visit it is deciding about.
     const tracksStageEta = selectedStage.eta !== null && selectedStage.eta > 0;
-    const stageVisitId = tracksStageEta ? deriveId(ctx.batchKey, index, 'stageEta') : null;
+    const stageVisitId = tracksStageEta ? deriveId(scopedKey(ctx), index, 'stageEta') : null;
     const stageEtaDeadline = tracksStageEta ? calculateETADeadline(now, selectedStage.eta!) : null;
 
     const stepEstimate = resolveStepEstimate(
@@ -568,7 +592,10 @@ const commitRows = async (
   const hotfixRows = prepared.filter((r) => r.input.ticketType === BaseTicketType.Hotfix);
   if (hotfixRows.length > 0) {
     await tx.ticketTag.createMany({
+      // TicketTag has no unique on (ticketId, name), so skipDuplicates has nothing
+      // to conflict against — the id has to carry the idempotency itself.
       data: hotfixRows.map((r) => ({
+        id: deriveId(scopedKey(ctx), r.index, 'hotfixTag'),
         ticketId: r.ticketId,
         workspaceId: r.workspaceId,
         name: 'hotfix',
@@ -717,8 +744,8 @@ const commitSubTicketLinks = async (
   // ones the first attempt used.
   const rows = children.map((child) => ({
     child,
-    subTicketId: deriveId(ctx.batchKey, child.index, 'subTicket'),
-    mappingId: deriveId(ctx.batchKey, child.index, 'subTicketMapping'),
+    subTicketId: deriveId(scopedKey(ctx), child.index, 'subTicket'),
+    mappingId: deriveId(scopedKey(ctx), child.index, 'subTicketMapping'),
   }));
 
   await tx.subTicket.createMany({
@@ -824,7 +851,9 @@ export const createBulkTicketBatch = async (
   // Callers pair results back to their inputs positionally, and `findMany` does
   // not honour the order of an `in` list.
   const created = await prisma.ticket.findMany({
-    where: { id: { in: childRows.map((r) => r.ticketId) } },
+    // workspaceId is redundant with the ACL extension's read scoping and stated
+    // anyway: this read decides what goes back to the caller.
+    where: { id: { in: childRows.map((r) => r.ticketId) }, workspaceId: ctx.workspaceId },
   });
   const byId = new Map(created.map((ticket) => [ticket.id, ticket]));
 
@@ -837,4 +866,4 @@ export const createBulkTicketBatch = async (
 };
 
 /** Exported for tests: id derivation must stay stable across releases. */
-export const __testing = { deriveId, formatXyneId, randomUUID };
+export const __testing = { deriveId, scopedKey, formatXyneId, randomUUID };
