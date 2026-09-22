@@ -2,8 +2,8 @@ apiVersion: v2
 name: xyne-dashboard-external
 description: Xyne Spaces external dashboard (public call-join SPA) - static bundle served by nginx under /external
 type: application
-version: 0.1.0-app.1.362.0-release-20260922.3
-appVersion: "1.362.0-release-20260922.3"
+version: 0.1.0-app.1.348.0-release-20260921.5
+appVersion: "1.348.0-release-20260921.5"
 keywords:
   - xyne
   - dashboard
