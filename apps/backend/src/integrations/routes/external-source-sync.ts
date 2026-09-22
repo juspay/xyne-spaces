@@ -435,6 +435,17 @@ router.post(
             skippedSources: actionable.filter(t => t !== mailboxTarget).map(t => t.source.id),
           });
         }
+        // Surface the deferred app targets the same way adapter-unsupported
+        // skips are — otherwise the client shows a plain success toast while
+        // app history was never pulled.
+        for (const deferred of actionable) {
+          if (deferred === mailboxTarget) continue;
+          skippedUnsupported.push({
+            sourceId: deferred.source.id,
+            sourceType: deferred.source.sourceType,
+            reason: 'App history fetch requires ENABLE_EMAIL_FETCH_WORKER=true',
+          });
+        }
         const adapter = adapterRegistry.getAdapter(mailboxTarget.source.sourceType);
         const result = await adapter.refetch!(mailboxTarget.source, {
           startDate,
@@ -477,6 +488,8 @@ router.post(
         success: true,
         queued: true,
         jobs,
+        // Pre-fan-out compat: single-job responses keep the old top-level jobId.
+        ...(jobs.length === 1 && { jobId: jobs[0].jobId }),
         ...(skippedUnsupported.length > 0 && { skippedUnsupported }),
       });
     } catch (error) {
