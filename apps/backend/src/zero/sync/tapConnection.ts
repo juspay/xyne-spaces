@@ -11,6 +11,7 @@ import type { ClientSchema } from './clientSchema';
 import type { QueryMeta } from './queryMeta';
 import { mintSecProtocolToken, buildCookieHeader, SYNC_SERVICE_SUB } from './serviceIdentity';
 import { obsEmit } from './obs';
+import { syncMetrics } from './metrics';
 
 export interface PackConnectionOptions {
   zeroCacheUrl: string;
@@ -186,7 +187,14 @@ export class PackConnection {
     return Date.now() - this.#lastPokeAt;
   }
 
+  #disposeDepthGauge?: () => void;
+
   async start(): Promise<void> {
+    this.#disposeDepthGauge ??= syncMetrics.gauge(
+      'sync_engine_persist_queue_depth',
+      { group: this.#opts.clientGroupID },
+      () => this.#persistDepth,
+    );
     // A fence-lost connection is single-use: its guard token, cookie and #got/#seeded state are
     // stale, so restarting it would reconnect, have every fenced write return stale, and (since
     // #demoteFenceLost is idempotent) run forever persisting nothing. The manager must discard
@@ -210,6 +218,8 @@ export class PackConnection {
 
   stop(): void {
     this.#closed = true;
+    this.#disposeDepthGauge?.();
+    this.#disposeDepthGauge = undefined;
     if (this.#reconnectTimer) clearTimeout(this.#reconnectTimer);
     if (this.#fatalTimer) {
       clearInterval(this.#fatalTimer);
@@ -227,6 +237,7 @@ export class PackConnection {
    * an interval) so the silent-death surfaces until the process is redeployed. Cleared in stop().
    */
   #raiseFatal(kind: string): void {
+    syncMetrics.count('sync_engine_tap_events_total', { event: 'fatal' });
     const fire = (): void => {
       logger.error('sync_pack_fatal', {
         clientGroupID: this.#opts.clientGroupID,
@@ -252,6 +263,7 @@ export class PackConnection {
     this.#fenceLost = true;
     this.#stopped = true;
     logger.error('sync_pack_fence_lost', { clientGroupID: this.#opts.clientGroupID });
+    syncMetrics.count('sync_engine_tap_events_total', { event: 'fence_lost' });
     if (this.#reconnectTimer) {
       clearTimeout(this.#reconnectTimer);
       this.#reconnectTimer = null;
@@ -471,9 +483,11 @@ export class PackConnection {
     }
     if (RESET_KINDS.has(kind)) {
       this.#pendingReset = true;
+      syncMetrics.count('sync_engine_tap_events_total', { event: 'reset' });
       return;
     }
     if (BACKOFF_KINDS.has(kind)) {
+      syncMetrics.count('sync_engine_tap_events_total', { event: 'backoff' });
       this.#pendingBackoff = {
         minMs: Number(body.minBackoffMs ?? BASE_BACKOFF_MS),
         maxMs: Number(body.maxBackoffMs ?? MAX_BACKOFF_MS),
@@ -494,7 +508,11 @@ export class PackConnection {
     const gotOps = this.#pendingGot.get(pokeID) ?? [];
     this.#pending.delete(pokeID);
     this.#pendingGot.delete(pokeID);
-    if (body.cancel) return;
+    if (body.cancel) {
+      syncMetrics.count('sync_engine_tap_pokes_total', { result: 'cancelled' });
+      return;
+    }
+    syncMetrics.count('sync_engine_tap_pokes_total', { result: 'applied' });
 
     const cookie = String(body.cookie);
     // zero-cache's makeRowPatch is put/del-only; an `update` should never arrive. If one does,
@@ -539,6 +557,7 @@ export class PackConnection {
   ): Promise<void> {
     this.#persistDepth -= 1; // dequeued
     if (epoch !== this.#persistEpoch) return;
+    const persistStart = Date.now();
     try {
       const outcome = await this.#opts.store.applyPoke(
         {
@@ -570,6 +589,8 @@ export class PackConnection {
       for (const hash of newlyGot) {
         obsEmit('tap', { action: 'hydrated', instanceKey: hash, clientGroupID: this.#opts.clientGroupID });
       }
+      syncMetrics.observe('sync_engine_persist_latency', Date.now() - persistStart);
+      syncMetrics.count('sync_engine_tap_persist_total', { result: 'ok' });
     } catch (error) {
       // Persist failed → the poke never reached Redis but the demux already applied it (dels
       // dropped their #owner entries). Roll back: bump the epoch (skips queued persists), undo the
@@ -577,6 +598,8 @@ export class PackConnection {
       // resume from the last SAVED cookie replays the poke with correct attribution. (`#baseCookie`
       // was not advanced, so it already points at the last durable cookie.)
       logger.error('sync_pack_persist_failed', { clientGroupID: this.#opts.clientGroupID, error });
+      syncMetrics.observe('sync_engine_persist_latency', Date.now() - persistStart);
+      syncMetrics.count('sync_engine_tap_persist_total', { result: 'failed' });
       this.#invalidatePersist();
       for (const hash of newlyGot) this.#got.delete(hash);
       this.#ws?.close();

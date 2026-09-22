@@ -8,6 +8,7 @@ import { allPkFields } from './clientSchema';
 import { seedRowLevel, routeDelta, projectDeltaForUser, type RowLevelMeta } from './rowLevelRouting';
 import { decryptRowsForEmit } from './rowDecrypt';
 import { BoundedMemo, estimateRowsBytes } from './boundedMemo';
+import { syncMetrics } from './metrics';
 import { obsEmit } from './obs';
 import { SerialQueue } from './serialQueue';
 
@@ -157,6 +158,22 @@ export class Fanout {
   /** `store` is injectable for tests (a fake stream store); production uses the real Redis-backed one. */
   constructor(store: RedisStreamStore = new RedisStreamStore()) {
     this.#store = store;
+    syncMetrics.gauge('sync_engine_memo_bytes', { memo: 'gate' }, () => this.#snapshotMemo.totalWeight);
+    syncMetrics.gauge('sync_engine_memo_entries', { memo: 'gate' }, () => this.#snapshotMemo.size);
+    syncMetrics.gauge('sync_engine_memo_bytes', { memo: 'rowlevel' }, () => this.#rowLevelBuckets.totalWeight);
+    syncMetrics.gauge('sync_engine_memo_entries', { memo: 'rowlevel' }, () => this.#rowLevelBuckets.size);
+    syncMetrics.gauge('sync_engine_instances', { plane: 'gate' }, () => this.#dataSubs.size);
+    syncMetrics.gauge('sync_engine_instances', { plane: 'rowlevel' }, () => this.#rowLevelSubs.size);
+    syncMetrics.gauge('sync_engine_data_subscribers', { plane: 'gate' }, () => {
+      let n = 0;
+      for (const s of this.#dataSubs.values()) n += s.size;
+      return n;
+    });
+    syncMetrics.gauge('sync_engine_data_subscribers', { plane: 'rowlevel' }, () => {
+      let n = 0;
+      for (const s of this.#rowLevelSubs.values()) n += s.size;
+      return n;
+    });
   }
 
   setBroadcast(fn: SyncBroadcast): void {
@@ -401,6 +418,7 @@ export class Fanout {
       }
       grantRows.set(table, rows);
     }
+    const regateStart = Date.now();
     let admitted: boolean;
     try {
       admitted = client.gate.evaluate(
@@ -420,6 +438,8 @@ export class Fanout {
       });
       admitted = false;
     }
+    syncMetrics.observe('sync_engine_regate_latency', Date.now() - regateStart);
+    syncMetrics.count('sync_engine_admission_total', { result: admitted ? 'admit' : 'deny' });
     if (admitted && !client.admitted) {
       // Re-check after the snapshot-read awaits above: an unsubscribe landing during them
       // reset `client.admitted` to false, which would otherwise let this flip it back true
@@ -435,6 +455,7 @@ export class Fanout {
       // reaches this client. Ordered against data dispatches via the shared data-key SerialQueue.
       client.socket.leave(roomFor(client.dataInstanceKey));
       this.#emit(client, 'sync:revoke', { instanceKey: client.dataInstanceKey });
+      syncMetrics.count('sync_engine_frames_total', { plane: 'gate', type: 'revoke' });
     }
   }
 
@@ -459,6 +480,7 @@ export class Fanout {
    */
   async #hydrate(client: ClientSub): Promise<void> {
     const instanceKey = client.dataInstanceKey;
+    const hydrateStart = Date.now();
     if (client.sinceOffset) {
       const firstId = await this.#store.firstId(instanceKey);
       const retained = firstId !== null && compareStreamId(firstId, client.sinceOffset) <= 0;
@@ -488,6 +510,10 @@ export class Fanout {
           // so without this the client sits at `unknown` after a switch-return. `complete` must mean
           // "synced to server", not "painted a local seed", so this is the resume's completion signal.
           this.#emit(client, 'sync:current', { instanceKey });
+          syncMetrics.observe('sync_engine_hydrate_latency', Date.now() - hydrateStart, { plane: 'gate', mode: 'resume' });
+          syncMetrics.count('sync_engine_hydrate_total', { plane: 'gate', mode: 'resume' });
+          syncMetrics.count('sync_engine_frames_total', { plane: 'gate', type: 'delta' }, diffs.length);
+          syncMetrics.count('sync_engine_frames_total', { plane: 'gate', type: 'current' });
           obsEmit('fanout', { event: 'sync:resume', socketId: client.id, instanceKey, deltas: diffs.length });
           return;
         }
@@ -499,18 +525,23 @@ export class Fanout {
     // misses and refreshes. headWithVersion is a cheap XREVRANGE-1; only the big snapshot is saved.
     const { id: head, version } = await this.#store.headWithVersion(instanceKey);
     const memo = this.#snapshotMemo.get(instanceKey);
+    const memoHit = !!(memo && memo.head === head);
+    syncMetrics.count('sync_engine_memo_total', { memo: 'gate', event: memoHit ? 'hit' : 'miss' });
     // The memo holds the DECRYPTED rows (RAM only — Redis keeps ciphertext): decrypt once per
     // head change, and a reconnect storm reuses it without touching the encryption provider.
-    const rows =
-      memo && memo.head === head
-        ? memo.rows
-        : ((await decryptRowsForEmit(await this.#store.snapshot(instanceKey))) as CompactedRow[]);
-    if (!memo || memo.head !== head) {
+    const rows = memoHit
+      ? memo!.rows
+      : ((await decryptRowsForEmit(await this.#store.snapshot(instanceKey))) as CompactedRow[]);
+    if (!memoHit) {
       this.#snapshotMemo.set(instanceKey, { head, rows }, estimateRowsBytes(rows));
     }
     client.hydrated = true;
     this.#emit(client, 'sync:snapshot', { instanceKey, rows, offset: head, version });
     client.socket.join(roomFor(instanceKey)); // now live → future deltas via the room broadcast
+    syncMetrics.observe('sync_engine_hydrate_latency', Date.now() - hydrateStart, { plane: 'gate', mode: 'snapshot' });
+    syncMetrics.count('sync_engine_hydrate_total', { plane: 'gate', mode: 'snapshot' });
+    syncMetrics.count('sync_engine_frames_total', { plane: 'gate', type: 'snapshot' });
+    syncMetrics.count('sync_engine_rows_emitted_total', { plane: 'gate', kind: 'upsert' }, rows.length);
   }
 
   #emit(client: ClientSub, event: string, payload: unknown): void {
@@ -574,6 +605,7 @@ export class Fanout {
 
     const dataSubs = this.#dataSubs.get(instanceKey);
     if (dataSubs) {
+      const dispatchStart = Date.now();
       // Decrypt once per delta per instance — BEFORE the room broadcast, so the single-encode
       // optimization is preserved and every recipient shares one decrypt.
       const delta = {
@@ -599,6 +631,12 @@ export class Fanout {
       const deferred = [...dataSubs].filter((c) => c.admitted && !c.hydrated);
       if (deferred.length > 0 && !diff?.cleared) {
         for (const c of deferred) await this.#hydrate(c);
+      }
+      syncMetrics.observe('sync_engine_dispatch_latency', Date.now() - dispatchStart, { plane: 'gate' });
+      if (!diff?.cleared) {
+        syncMetrics.count('sync_engine_frames_total', { plane: 'gate', type: 'delta' });
+        syncMetrics.count('sync_engine_rows_emitted_total', { plane: 'gate', kind: 'upsert' }, delta.upserts.length);
+        syncMetrics.count('sync_engine_rows_emitted_total', { plane: 'gate', kind: 'delete' }, delta.deletes.length);
       }
       obsEmit('stream-diff', {
         instanceKey,
@@ -696,6 +734,7 @@ export class Fanout {
     const inst = this.#rowLevel.get(instanceKey);
     const subs = this.#rowLevelSubs.get(instanceKey);
     if (!inst || !subs) return;
+    const dispatchStart = Date.now();
 
     // A `cleared` reset: the instance re-materializes from scratch. Drop the owner map + bucket memo and
     // mark everyone unhydrated, then re-hydrate whoever the (possibly re-materialized) instance can serve
@@ -736,6 +775,9 @@ export class Fanout {
         if (c.hydrated) {
           deliveredToHydrated = true;
           this.#emitRowLevel(c, 'sync:delta', { instanceKey, upserts: ud.upserts, deletes: ud.deletes, offset: id, version });
+          syncMetrics.count('sync_engine_frames_total', { plane: 'rowlevel', type: 'delta' });
+          syncMetrics.count('sync_engine_rows_emitted_total', { plane: 'rowlevel', kind: 'upsert' }, ud.upserts.length);
+          syncMetrics.count('sync_engine_rows_emitted_total', { plane: 'rowlevel', kind: 'delete' }, ud.deletes.length);
         }
       }
     }
@@ -751,6 +793,7 @@ export class Fanout {
     if (deliveredToHydrated && (unroutablePuts > 0 || unroutableDels > 0)) {
       obsEmit('sync-rowlevel', { event: 'unroutable', instanceKey, unroutablePuts, unroutableDels });
     }
+    syncMetrics.observe('sync_engine_dispatch_latency', Date.now() - dispatchStart, { plane: 'rowlevel' });
     obsEmit('stream-diff', {
       instanceKey,
       upserts: streamDiff.upserts.length,
@@ -778,11 +821,17 @@ export class Fanout {
     const instanceKey = client.dataInstanceKey;
     const inst = this.#rowLevel.get(instanceKey);
     if (!inst) return;
+    const hydrateStart = Date.now();
 
-    if (client.sinceOffset && (await this.#tryResumeRowLevel(client, inst))) return;
+    if (client.sinceOffset && (await this.#tryResumeRowLevel(client, inst))) {
+      syncMetrics.observe('sync_engine_hydrate_latency', Date.now() - hydrateStart, { plane: 'rowlevel', mode: 'resume' });
+      syncMetrics.count('sync_engine_hydrate_total', { plane: 'rowlevel', mode: 'resume' });
+      return;
+    }
 
     const { id: head, version } = await this.#store.headWithVersion(instanceKey);
     const memo = this.#rowLevelBuckets.get(instanceKey);
+    syncMetrics.count('sync_engine_memo_total', { memo: 'rowlevel', event: memo && memo.head === head ? 'hit' : 'miss' });
     let buckets: Map<string, CompactedRow[]>;
     if (memo && memo.head === head) {
       buckets = memo.buckets;
@@ -798,12 +847,17 @@ export class Fanout {
       }
     }
     client.hydrated = true;
+    const userRows = buckets.get(client.userId) ?? [];
     this.#emitRowLevel(client, 'sync:snapshot', {
       instanceKey,
-      rows: buckets.get(client.userId) ?? [],
+      rows: userRows,
       offset: head,
       version,
     });
+    syncMetrics.observe('sync_engine_hydrate_latency', Date.now() - hydrateStart, { plane: 'rowlevel', mode: 'snapshot' });
+    syncMetrics.count('sync_engine_hydrate_total', { plane: 'rowlevel', mode: 'snapshot' });
+    syncMetrics.count('sync_engine_frames_total', { plane: 'rowlevel', type: 'snapshot' });
+    syncMetrics.count('sync_engine_rows_emitted_total', { plane: 'rowlevel', kind: 'upsert' }, userRows.length);
   }
 
   /**
@@ -843,10 +897,14 @@ export class Fanout {
         offset: p.id,
         version: p.version,
       });
+      syncMetrics.count('sync_engine_frames_total', { plane: 'rowlevel', type: 'delta' });
+      syncMetrics.count('sync_engine_rows_emitted_total', { plane: 'rowlevel', kind: 'upsert' }, p.upserts.length);
+      syncMetrics.count('sync_engine_rows_emitted_total', { plane: 'rowlevel', kind: 'delete' }, p.deletes.length);
     }
     // Resume-complete marker (see the gate #hydrate resume): flip the client to `complete` even when
     // zero deltas were projected — a resume has no other terminal signal.
     this.#emitRowLevel(client, 'sync:current', { instanceKey });
+    syncMetrics.count('sync_engine_frames_total', { plane: 'rowlevel', type: 'current' });
     obsEmit('fanout', { event: 'sync:resume', socketId: client.id, instanceKey, deltas: projected.length });
     return true;
   }

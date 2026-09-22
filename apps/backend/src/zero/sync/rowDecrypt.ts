@@ -21,6 +21,7 @@
  * ciphertexts (≈ the write rate on encrypted tables), not with deliveries.
  */
 import { encryptedFieldsConfig } from '@xyne/shared';
+import { syncMetrics } from './metrics';
 
 /** Lazy logger: `@/utils/logger` pulls config/env at load, which env-free unit tests must not. */
 function logDecryptFailure(fields: Record<string, unknown>): void {
@@ -55,6 +56,7 @@ const CACHE_MAX = 5_000;
 
 /** cipher → plain, LRU via Map insertion order (get re-inserts, put evicts the oldest). */
 const cache = new Map<string, string>();
+syncMetrics.gauge('sync_engine_decrypt_cache_entries', {}, () => cache.size);
 
 function cacheGet(cipher: string): string | undefined {
   const hit = cache.get(cipher);
@@ -124,6 +126,7 @@ export async function decryptRowsForEmit<T extends EmitRow>(
       if (typeof v === 'string' && v.startsWith(ENC_PREFIX)) {
         any = true;
         if (cacheGet(v) === undefined) misses.add(v);
+        else syncMetrics.count('sync_engine_decrypt_values_total', { result: 'cache_hit' });
       }
     }
   }
@@ -137,13 +140,18 @@ export async function decryptRowsForEmit<T extends EmitRow>(
     const pending = [...misses];
     for (let i = 0; i < pending.length; i += chunkSize) {
       const slice = pending.slice(i, i + chunkSize);
+      const batchStart = Date.now();
       try {
         const out = await withTimeout(d.decryptBatch([...slice]), timeoutMs);
         if (!Array.isArray(out) || out.length !== slice.length) {
           throw new Error(`decryptBatch returned ${Array.isArray(out) ? out.length : typeof out} results for ${slice.length} values`);
         }
         slice.forEach((cipher, j) => cachePut(cipher, out[j]));
+        syncMetrics.observe('sync_engine_decrypt_batch_latency', Date.now() - batchStart);
+        syncMetrics.count('sync_engine_decrypt_values_total', { result: 'decrypted' }, slice.length);
       } catch (e) {
+        syncMetrics.observe('sync_engine_decrypt_batch_latency', Date.now() - batchStart);
+        syncMetrics.count('sync_engine_decrypt_values_total', { result: 'failed' }, slice.length);
         logDecryptFailure({
           values: slice.length,
           error: e instanceof Error ? e.message : String(e),

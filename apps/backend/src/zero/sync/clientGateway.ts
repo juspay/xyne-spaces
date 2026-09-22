@@ -11,6 +11,7 @@ import { isRowLevelQuery, routeColumnOf, rowLevelEligibility } from './rowLevelQ
 import { resolveSharedBase, isWorkspacePartitioned } from './baseQueries';
 import { syncContext } from './serviceIdentity';
 import { obsEmit } from './obs';
+import { syncMetrics } from './metrics';
 
 /**
  * An authenticated app socket. Matches the shape websocketService's auth middleware
@@ -111,6 +112,7 @@ export function attachSyncHandlers(socket: SyncIoSocket): () => void {
   ): void {
     const workspaceId = socket.workspaceId;
     if (!workspaceId) return; // guaranteed set once `ready`; guard for safety
+    const subStart = Date.now();
     // FAIL-CLOSED role gate. The gate is derived under a NON-GUEST sentinel (sentinelCtx.role = MEMBER),
     // so it encodes the non-guest ACL branch. A GUEST evaluated under it would be admitted to things the
     // guest ACL (guestChannelAccessWhere) denies — a LEAK — so guests are refused → native Zero. Every
@@ -120,13 +122,14 @@ export function attachSyncHandlers(socket: SyncIoSocket): () => void {
     if (!socket.workspaceRole || !NON_GUEST_ROLES.includes(socket.workspaceRole)) {
       obsEmit('sync-sub', { action: 'reject', socketId: connId, userId, queryName, reason: 'guest-or-unknown-role' });
       socket.emit('sync:error', { queryName, message: 'sync engine does not serve guest-role principals' });
+      syncMetrics.count('sync_engine_subscribe_total', { plane: isRowLevelQuery(queryName) ? 'rowlevel' : 'gate', queryName, outcome: 'refused_role' });
       return;
     }
     // Row-level queries take a wholly separate path: the workspace partition is forced from the SOCKET
     // (never client args — it IS the tenant boundary, there is no gate), rows route by socket.userId,
     // no gate/grants. Reached only for an admitted non-guest role (guarded above).
     if (isRowLevelQuery(queryName)) {
-      subscribeRowLevel(queryName, ack, sinceOffset);
+      subscribeRowLevel(queryName, ack, sinceOffset, subStart);
       return;
     }
     // Workspace-partitioned GATE queries (partition = workspaceId): FORCE the partition from the
@@ -147,6 +150,7 @@ export function attachSyncHandlers(socket: SyncIoSocket): () => void {
     if (!dataInstanceKey) {
       obsEmit('sync-sub', { action: 'reject', socketId: connId, userId, queryName });
       socket.emit('sync:error', { queryName, message: 'not a shareable query' });
+      syncMetrics.count('sync_engine_subscribe_total', { plane: 'gate', queryName, outcome: 'refused_query' });
       return;
     }
     // Idempotent: the client may (re)send the same subscribe (optimistic send races the
@@ -182,6 +186,7 @@ export function attachSyncHandlers(socket: SyncIoSocket): () => void {
         error,
       });
       socket.emit('sync:error', { queryName, message: 'query ACL is not shareable' });
+      syncMetrics.count('sync_engine_subscribe_total', { plane: 'gate', queryName, outcome: 'refused_query' });
       return;
     }
     // GATE-ONLY shareability (defense in depth behind the build-time CI guard): refuse a query whose
@@ -198,6 +203,7 @@ export function attachSyncHandlers(socket: SyncIoSocket): () => void {
         reason: collapse.reason,
       });
       socket.emit('sync:error', { queryName, message: 'query ACL is not shareable' });
+      syncMetrics.count('sync_engine_subscribe_total', { plane: 'gate', queryName, outcome: 'refused_query' });
       return;
     }
     // Cursor pagination is per-subscriber (scroll position) → it fragments into per-subscriber
@@ -212,6 +218,7 @@ export function attachSyncHandlers(socket: SyncIoSocket): () => void {
       obsEmit('sync-sub', { action: 'reject', socketId: connId, userId, queryName, reason: 'cursor-paginated' });
       logger.error('[SyncGateway] cursor-paginated query — refusing subscribe (not shareable)', { queryName });
       socket.emit('sync:error', { queryName, message: 'query is cursor-paginated (not shareable)' });
+      syncMetrics.count('sync_engine_subscribe_total', { plane: 'gate', queryName, outcome: 'refused_query' });
       return;
     }
     const grantByTable = new Map<string, string>();
@@ -243,6 +250,8 @@ export function attachSyncHandlers(socket: SyncIoSocket): () => void {
     });
     // Reply with the instanceKey so the client can release the instance's rows on unsubscribe.
     ack?.({ instanceKey: dataInstanceKey });
+    syncMetrics.count('sync_engine_subscribe_total', { plane: 'gate', queryName, outcome: 'accepted' });
+    syncMetrics.observe('sync_engine_subscribe_latency', Date.now() - subStart, { plane: 'gate' });
     void fanout.addClient({
       id: connId,
       socket: emitter,
@@ -261,7 +270,7 @@ export function attachSyncHandlers(socket: SyncIoSocket): () => void {
    * SOCKET's workspace (forced — never the client's, since the partition is the tenant boundary), so a
    * client cannot reach another tenant's rows; delivery routes each row to socket.userId at the fan-out.
    */
-  function subscribeRowLevel(queryName: string, ack?: SubscribeAckFn, sinceOffset?: string): void {
+  function subscribeRowLevel(queryName: string, ack?: SubscribeAckFn, sinceOffset?: string, subStart = Date.now()): void {
     const workspaceId = socket.workspaceId;
     if (!workspaceId) return;
     // Runtime eligibility refuse (defense in depth behind the CI guard — the spec's third enforcement
@@ -273,6 +282,7 @@ export function attachSyncHandlers(socket: SyncIoSocket): () => void {
       obsEmit('sync-sub', { action: 'reject', socketId: connId, userId, queryName, reason: 'row-level-not-eligible' });
       logger.error('[SyncGateway] row-level query failed eligibility — refusing subscribe', { queryName, reason: eligible.reason });
       socket.emit('sync:error', { queryName, message: 'not a shareable query' });
+      syncMetrics.count('sync_engine_subscribe_total', { plane: 'rowlevel', queryName, outcome: 'refused_query' });
       return;
     }
     const wsArgs: ReadonlyJSONValue[] = [{ workspaceId }]; // FORCED from the socket
@@ -280,6 +290,7 @@ export function attachSyncHandlers(socket: SyncIoSocket): () => void {
     if (!dataInstanceKey) {
       obsEmit('sync-sub', { action: 'reject', socketId: connId, userId, queryName, reason: 'row-level-not-shareable' });
       socket.emit('sync:error', { queryName, message: 'not a shareable query' });
+      syncMetrics.count('sync_engine_subscribe_total', { plane: 'rowlevel', queryName, outcome: 'refused_query' });
       return;
     }
     // Idempotent re-subscribe (optimistic send races the handler attach / re-fires on sync:ready).
@@ -297,6 +308,8 @@ export function attachSyncHandlers(socket: SyncIoSocket): () => void {
     // teardown release it uniformly (fanout.removeClient branches to the row-level path by instanceKey).
     subs.set(dataInstanceKey, { grantInstanceKeys: [] });
     ack?.({ instanceKey: dataInstanceKey });
+    syncMetrics.count('sync_engine_subscribe_total', { plane: 'rowlevel', queryName, outcome: 'accepted' });
+    syncMetrics.observe('sync_engine_subscribe_latency', Date.now() - subStart, { plane: 'rowlevel' });
     obsEmit('sync-sub', {
       action: 'subscribe-rowlevel',
       socketId: connId,
