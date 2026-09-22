@@ -40,13 +40,6 @@ const prisma = DatabaseClient.getInstance();
 /** The interactive-transaction client every commit step writes through. */
 type BatchTransaction = Parameters<Parameters<typeof prisma.$transaction>[0]>[0];
 
-/**
- * Rows per request. One transaction is held open for the whole batch, so this
- * bounds request duration and pool pressure rather than payload size.
- * The controller and the Joi validator both enforce it.
- */
-export const MAX_BULK_TICKETS = 20;
-
 /** Comfortable for a batch this size; Prisma's 5s default is not. */
 const BATCH_TRANSACTION_TIMEOUT_MS = 120_000;
 const BATCH_TRANSACTION_MAX_WAIT_MS = 15_000;

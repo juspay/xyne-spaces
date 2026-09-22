@@ -28,10 +28,8 @@ export interface BulkTicketCreationInput {
   priority?: string;
   statusV2?: string;
   eta?: Date;
-  tags?: string[];
   ticketType?: string;
   stageName?: string;
-  dynamicFields?: Record<string, string>;
   merchantId?: string;
   clientRowId?: string;
   createdBy: string;
@@ -39,3 +37,4 @@ export interface BulkTicketCreationInput {
 }
 
 export type { CreateBulkTicketResponse } from '@xyne/shared';
+export { MAX_BULK_TICKETS } from '@xyne/shared';

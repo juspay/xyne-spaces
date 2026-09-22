@@ -11,6 +11,7 @@ import {
   TicketPriority,
   TicketStatusV2,
   type ExistingParentTicket,
+  MAX_BULK_TICKETS,
 } from '@xyne/shared';
 import { useAllVisibleChannels } from '../../../hooks/useChannels';
 import { useActiveUserSearch } from '../../../hooks/useUsers';
@@ -63,7 +64,6 @@ interface BulkRow {
   boardId: string;
   status: TicketStatusV2;
   assigneeId: string | null;
-  tags: string[];
   ticketType: BaseTicketType;
   eta: Date | null;
 }
@@ -88,7 +88,6 @@ const newSubRow = (title: string, channelId: string, boardId: string): BulkRow =
   boardId,
   status: TicketStatusV2.TODO,
   assigneeId: null,
-  tags: [],
   ticketType: BaseTicketType.Fix,
   eta: null,
 });
@@ -231,7 +230,6 @@ export const BulkCreateTicketsModal: React.FC<BulkCreateTicketsModalProps> = ({
       boardId: defaultBoardId,
       status: TicketStatusV2.TODO,
       assigneeId: null,
-      tags: [],
       ticketType: BaseTicketType.Fix,
       eta: null,
     };
@@ -322,8 +320,6 @@ export const BulkCreateTicketsModal: React.FC<BulkCreateTicketsModalProps> = ({
   };
 
   const filledRows = rows.filter(r => r.title.trim().length > 0);
-  // Server writes the batch in one transaction and rejects anything larger.
-  const MAX_BULK_TICKETS = 20;
   const validCount = filledRows.filter(r => r.description.trim().length > 0).length;
   const minimumRows = isAllParentsMode || hasExistingParent ? 1 : 2;
   const blockingReason = ((): string | null => {
@@ -347,7 +343,8 @@ export const BulkCreateTicketsModal: React.FC<BulkCreateTicketsModalProps> = ({
     if (!allValid || !user || filledRows.length === 0) return;
     setIsSubmitting(true);
     try {
-      const completeRows = filledRows.filter(r => r.description.trim().length > 0);
+      // Every filled row already has a description — allValid blocks submit otherwise.
+      const completeRows = filledRows;
       const resolveAssignee = (
         assigneeId: string | null,
       ): { assignedTo: string | undefined; userGroupId: string | undefined } => {
@@ -368,7 +365,6 @@ export const BulkCreateTicketsModal: React.FC<BulkCreateTicketsModalProps> = ({
           channelId: r.channelId,
           boardId: r.boardId,
           ...resolveAssignee(r.assigneeId),
-          tags: r.tags,
           ticketType: r.ticketType,
           clientRowId: r.clientRowId ?? r.id,
         }));
@@ -397,7 +393,6 @@ export const BulkCreateTicketsModal: React.FC<BulkCreateTicketsModalProps> = ({
           channelId: r.channelId,
           boardId: r.boardId,
           ...resolveAssignee(r.assigneeId),
-          tags: r.tags,
           ticketType: r.ticketType,
           clientRowId: r.clientRowId ?? r.id,
         }));
@@ -435,7 +430,6 @@ export const BulkCreateTicketsModal: React.FC<BulkCreateTicketsModalProps> = ({
         channelId: r.channelId,
         boardId: r.boardId,
         ...resolveAssignee(r.assigneeId),
-        tags: r.tags,
         ticketType: r.ticketType,
         clientRowId: r.clientRowId ?? r.id,
       }));
@@ -463,7 +457,6 @@ export const BulkCreateTicketsModal: React.FC<BulkCreateTicketsModalProps> = ({
           statusV2: parent.status,
           eta: parent.eta ?? undefined,
           ...resolveAssignee(parent.assigneeId),
-          tags: parent.tags,
           ticketType: parent.ticketType,
         },
         subTickets,
