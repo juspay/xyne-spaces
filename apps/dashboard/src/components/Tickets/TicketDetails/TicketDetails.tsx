@@ -5552,30 +5552,28 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                     </div>
                   </>
                 )}
-                {subTickets.length > 0 && (
-                  <div
-                    className={cn(
-                      'flex items-center gap-2 py-0.5',
-                      parentTickets && parentTickets.length > 0 && 'pt-2.5',
-                    )}
+                <div
+                  className={cn(
+                    'flex items-center gap-2 py-0.5',
+                    parentTickets && parentTickets.length > 0 && 'pt-2.5',
+                  )}
+                >
+                  <span className='text-[10px] font-semibold uppercase tracking-[0.4px] text-muted-foreground/80'>
+                    Sub-tickets
+                  </span>
+                  <span
+                    className='font-mono text-[10.5px] tabular-nums text-muted-foreground/60'
+                    data-testid='sub-tickets-count'
                   >
-                    <span className='text-[10px] font-semibold uppercase tracking-[0.4px] text-muted-foreground/80'>
-                      Sub-tickets
+                    {subTickets.length}
+                  </span>
+                  {subTickets.length > 0 && boardData?.boardType !== BoardType.FLOW && (
+                    <span className='inline-flex items-center gap-1 rounded-md bg-muted px-1.5 py-0.5 text-[10.5px] font-medium text-muted-foreground'>
+                      <GitBranch size={11} />
+                      Tree
                     </span>
-                    <span
-                      className='font-mono text-[10.5px] tabular-nums text-muted-foreground/60'
-                      data-testid='sub-tickets-count'
-                    >
-                      {subTickets.length}
-                    </span>
-                    {boardData?.boardType !== BoardType.FLOW && (
-                      <span className='inline-flex items-center gap-1 rounded-md bg-muted px-1.5 py-0.5 text-[10.5px] font-medium text-muted-foreground'>
-                        <GitBranch size={11} />
-                        Tree
-                      </span>
-                    )}
-                  </div>
-                )}
+                  )}
+                </div>
 
                 <div className='flex flex-col gap-1.5' data-testid='sub-tickets-list'>
                   {subTickets.length > 0 && subTicketTreeNodes.map(renderSubTicketNode)}
@@ -5583,16 +5581,14 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                   {addSubTicketPicker}
                 </div>
 
-                {referencesOut.length + referencesIn.length > 0 && (
-                  <div className='flex items-center gap-2 pt-2.5 pb-0.5'>
-                    <span className='text-[10px] font-semibold uppercase tracking-[0.4px] text-muted-foreground/80'>
-                      Linked
-                    </span>
-                    <span className='font-mono text-[10.5px] tabular-nums text-muted-foreground/60'>
-                      {referencesOut.length + referencesIn.length}
-                    </span>
-                  </div>
-                )}
+                <div className='flex items-center gap-2 pt-2.5 pb-0.5'>
+                  <span className='text-[10px] font-semibold uppercase tracking-[0.4px] text-muted-foreground/80'>
+                    Linked
+                  </span>
+                  <span className='font-mono text-[10.5px] tabular-nums text-muted-foreground/60'>
+                    {referencesOut.length + referencesIn.length}
+                  </span>
+                </div>
 
                 <div className='flex flex-col gap-1.5'>
                   {referencesOut.map(reference =>

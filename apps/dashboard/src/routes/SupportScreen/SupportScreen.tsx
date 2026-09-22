@@ -271,7 +271,7 @@ import {
   CloudAgentDock,
   setCloudAgentOpenTicket,
 } from '../../components/xyne-desk/CloudAgentDock/CloudAgentDock';
-import { getOzonetelToolbar } from '../../services/clients/telephonyApi';
+import { getOzonetelToolbar, getPhoneFieldNames } from '../../services/clients/telephonyApi';
 
 // Unified type for tickets from the supportTicketsFiltered query
 type SupportTicket = QueryResultType<typeof queries.supportTicketsFilteredV4>[number];
@@ -4721,21 +4721,22 @@ export const SupportTicketDetail = ({
     queryKey: ['workspace-ozonetel-toolbar'],
     queryFn: getOzonetelToolbar,
   });
-  const customerPhoneFieldName = ozonetelToolbar?.customerPhoneFieldName?.trim() ?? '';
+  const phoneFieldNames = useMemo(() => getPhoneFieldNames(ozonetelToolbar), [ozonetelToolbar]);
+  const hasPhoneFields = phoneFieldNames.length > 0;
   const [ticketFormValues] = useCachedQuery(
     queries.getFormEntityValuesByEntityId({ entityId: ticket?.id ?? '' }),
-    { enabled: !!ticket?.id && !!customerPhoneFieldName },
+    { enabled: !!ticket?.id && hasPhoneFields },
   );
-  // Calls link only when they dialled this number, so other numbers and inbound calls never land here.
-  const customerPhoneNumber = useMemo(() => {
-    if (!customerPhoneFieldName) return '';
-    const row = (ticketFormValues ?? []).find(
-      entry =>
-        (entry.globalField?.fieldName ?? entry.formField?.fieldName) === customerPhoneFieldName,
-    );
-    const value = row?.actualFieldValue ?? row?.fieldValue;
-    return typeof value === 'string' ? value.trim() : '';
-  }, [ticketFormValues, customerPhoneFieldName]);
+  // Calls link only when they dialled one of these numbers, so other numbers and inbound calls never land here.
+  const ticketPhoneNumbers = useMemo(() => {
+    if (phoneFieldNames.length === 0) return [];
+    const names = new Set(phoneFieldNames);
+    return (ticketFormValues ?? [])
+      .filter(entry => names.has(entry.globalField?.fieldName ?? entry.formField?.fieldName ?? ''))
+      .map(entry => entry.actualFieldValue ?? entry.fieldValue)
+      .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+      .map(value => value.trim());
+  }, [ticketFormValues, phoneFieldNames]);
 
   const detailConversationId = ticket?.conversationId ?? stateConversationId;
   const isAppSourcedTicket = getTicketReplyKind(ticket?.metadata) === 'app';
@@ -5325,10 +5326,12 @@ export const SupportTicketDetail = ({
   const openTicketId = ticket?.id;
   const channelType = channel?.type;
   useEffect(() => {
-    if (!openTicketId || !customerPhoneNumber || channelType !== ChannelType.APP) return undefined;
-    setCloudAgentOpenTicket({ ticketId: openTicketId, number: customerPhoneNumber });
+    if (!openTicketId || ticketPhoneNumbers.length === 0 || channelType !== ChannelType.APP) {
+      return undefined;
+    }
+    setCloudAgentOpenTicket({ ticketId: openTicketId, numbers: ticketPhoneNumbers });
     return (): void => setCloudAgentOpenTicket(null);
-  }, [openTicketId, customerPhoneNumber, channelType]);
+  }, [openTicketId, ticketPhoneNumbers, channelType]);
   const [mailboxRows] = useCachedQuery(
     queries.myTicketMailboxV2({
       ticketId: mailboxTicketId ?? '',
