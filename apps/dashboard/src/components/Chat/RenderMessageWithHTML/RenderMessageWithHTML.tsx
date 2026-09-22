@@ -1105,7 +1105,13 @@ const parseNode = (
     });
     if (raw) {
       try {
-        const flowJSON = JSON.parse(raw) as FlowDefinition;
+        // Flow cards may contain Slack mrkdwn fragments such as `\\1` or
+        // `\\6` in text props. Those are invalid JSON escapes, but they are
+        // valid persisted message content and are already handled by the
+        // shared flow-text parser. Repair only backslashes that are not part
+        // of a JSON escape before parsing so the card is not silently dropped.
+        const parseableRaw = raw.replace(/\\\\(?!["\\\\/bfnrtu])/g, '\\\\\\\\');
+        const flowJSON = JSON.parse(parseableRaw) as FlowDefinition;
         logger.info(Event.FRONTEND_ERROR, {
           type: 'migrated_console_log',
           message: String('[RenderMsg] parsed flowJSON ok, screenId:'),
