@@ -2,7 +2,7 @@ apiVersion: v2
 name: xyne-tei-batch-proxy
 description: Batching proxy in front of the GPU embedder
 type: application
-version: 0.1.0-app.1.337.0-release-20260918.14
+version: 0.1.0-app.1.362.0-release-20260922.3
 appVersion: "0.0.0"
 keywords:
   - xyne
