@@ -67,8 +67,12 @@ export function useAgentCreateForm(initial: AgentCreateFormState = EMPTY_CREATE_
 
   const patchForm = useCallback(
     (patch: Partial<AgentCreateFormState>, field?: AgentCreateField) => {
+      const normalized =
+        typeof patch.name === 'string'
+          ? { ...patch, name: sanitizeAgentCanvasName(patch.name) }
+          : patch;
       setForm(prev => {
-        const next = { ...prev, ...patch };
+        const next = { ...prev, ...normalized };
         formRef.current = next;
         return next;
       });
