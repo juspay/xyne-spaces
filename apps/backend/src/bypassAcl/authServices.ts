@@ -2,17 +2,14 @@ import { UserService } from '@/services/userService';
 import { channelService } from '@/services/channelService';
 import { DatabaseClient } from '@/database/client';
 import { logger } from '@/utils/logger';
-import { asSystem, asService } from './base';
+import { asSystem } from './base';
 
 const userService = new UserService();
 const prisma = DatabaseClient.getInstance();
 
-/**
- * Relocated from controllers/authV2Controller.ts's private ensureSelfDmForUser — used by
- * switchWorkspace (below) and by the login flow's presence-bootstrap call sites. Not itself a
- * bypass primitive; it's called from within both asSystem (here) and asService (login) blocks.
- */
-export async function ensureSelfDmForUser(userId: string, workspaceId: string): Promise<string | null> {
+/** Used only by switchWorkspaceData below — same logic as authV2Controller.ts's private
+ *  ensureSelfDmForUser, kept local since that method can't be called across modules. */
+async function ensureSelfDmForUser(userId: string, workspaceId: string): Promise<string | null> {
   try {
     const selfDmChannelId = await channelService.ensureSelfDmExists(userId, workspaceId);
     logger.info(`[ensureSelfDmForUser] Self-DM ensured for user ${userId}: ${selfDmChannelId}`);
@@ -21,26 +18,6 @@ export async function ensureSelfDmForUser(userId: string, workspaceId: string): 
     logger.error(`[ensureSelfDmForUser] Failed to ensure self-DM for user ${userId}:`, error);
     return null;
   }
-}
-
-/**
- * Relocated (and newly scoped — this was previously unwrapped) from the four login flow call
- * sites in controllers/authV2Controller.ts that run "ensure user presence + ensure self-DM"
- * back to back, before req.user exists yet. Confirmed in production logs as a real no-context
- * bypass (see /ACL_BYPASS_AUDIT.md) — workspaceId is already known at each call site, so this
- * needs workspace scope, not system scope.
- */
-export function ensurePresenceAndSelfDm(userId: string, workspaceId: string): Promise<string | null> {
-  return asService(
-    ['User', 'Channel', 'ChannelParticipant'],
-    'login: presence + self-DM bootstrap runs before req.user exists',
-    userId,
-    workspaceId,
-    async () => {
-      await userService.ensureUserPresence(userId, workspaceId);
-      return ensureSelfDmForUser(userId, workspaceId);
-    },
-  );
 }
 
 export interface SwitchWorkspaceData {

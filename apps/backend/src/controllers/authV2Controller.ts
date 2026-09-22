@@ -8,6 +8,7 @@ import { jwtService } from '../services/jwtService';
 import { oauthStateServiceV2 } from '../services/oauthStateServiceV2';
 import { pkceServiceV2 } from '../services/pkceServiceV2';
 import { MicrosoftAuthController } from './microsoftAuthController';
+import { channelService } from '../services/channelService';
 import { WorkspaceJoinPolicy, WorkspaceType, AuthProvider, UserStatus, OrgRole } from '@xyne/shared';
 import type { WorkspaceJoinPolicy as WorkspaceJoinPolicyValue, WorkspaceType as WorkspaceTypeValue } from '@xyne/shared';
 
@@ -15,7 +16,7 @@ import '../types/express';
 import { config } from '@/config/env';
 import { isRefreshAllowed } from '@/services/sessionRefreshValidator';
 import { DatabaseClient } from '@/database/client';
-import { switchWorkspaceData, ensurePresenceAndSelfDm } from '@/bypassAcl/authServices';
+import { switchWorkspaceData } from '@/bypassAcl/authServices';
 import { getEncryptionProvider } from '@/services/encryption';
 import { getFrontendUrl, resolveConfiguredOAuthRedirectUrl } from '@/utils/publicUrls';
 import {
@@ -111,6 +112,20 @@ export class AuthV2Controller {
       return this.googleClientNew;
     }
     return this.googleClient;
+  }
+
+  private async ensureSelfDmForUser(
+    userId: string,
+    workspaceId: string
+  ): Promise<string | null> {
+    try {
+      const selfDmChannelId = await channelService.ensureSelfDmExists(userId, workspaceId);
+      logger.info(`[ensureSelfDmForUser] Self-DM ensured for user ${userId}: ${selfDmChannelId}`);
+      return selfDmChannelId;
+    } catch (error) {
+      logger.error(`[ensureSelfDmForUser] Failed to ensure self-DM for user ${userId}:`, error);
+      return null;
+    }
   }
 
   /**
@@ -1644,8 +1659,9 @@ export class AuthV2Controller {
         return;
       }
 
-      // Ensure user presence for workspace-scoped user — runs before req.user exists yet
-      const selfDmChannelId = await ensurePresenceAndSelfDm(workspaceUser.id, workspaceId);
+      // Ensure user presence for workspace-scoped user
+      await this.userService.ensureUserPresence(workspaceUser.id, workspaceId);
+      const selfDmChannelId = await this.ensureSelfDmForUser(workspaceUser.id, workspaceId);
 
       const workspace = await this.prisma.workspace.findUnique({
         where: { id: workspaceId },
@@ -1827,8 +1843,9 @@ export class AuthV2Controller {
         return;
       }
 
-      // Ensure user presence for workspace-scoped user — runs before req.user exists yet
-      const selfDmChannelId = await ensurePresenceAndSelfDm(workspaceUser.id, workspace.id);
+      // Ensure user presence for workspace-scoped user
+      await this.userService.ensureUserPresence(workspaceUser.id, workspace.id);
+      const selfDmChannelId = await this.ensureSelfDmForUser(workspaceUser.id, workspace.id);
 
       const workspaceRecord = await this.prisma.workspace.findUnique({
         where: { id: workspace.id },
@@ -2200,7 +2217,8 @@ export class AuthV2Controller {
           },
         );
 
-        const selfDmChannelId = await ensurePresenceAndSelfDm(workspaceUser.id, workspace.id);
+        await this.userService.ensureUserPresence(workspaceUser.id, workspace.id);
+        const selfDmChannelId = await this.ensureSelfDmForUser(workspaceUser.id, workspace.id);
 
         const workspaceRecord = await this.prisma.workspace.findUnique({
           where: { id: workspace.id },
@@ -2358,7 +2376,8 @@ export class AuthV2Controller {
         },
       );
 
-      const selfDmChannelId = await ensurePresenceAndSelfDm(workspaceUser.id, workspace.id);
+      await this.userService.ensureUserPresence(workspaceUser.id, workspace.id);
+      const selfDmChannelId = await this.ensureSelfDmForUser(workspaceUser.id, workspace.id);
 
       const workspaceRecord = await this.prisma.workspace.findUnique({
         where: { id: workspace.id },

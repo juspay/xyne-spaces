@@ -1,9 +1,10 @@
+import { db } from '@/database/client';
 import { invitationService } from '@/services/invitationService';
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service.js';
 import { WorkspaceJoinPolicy, WorkspaceType, OrgRole, ProjectType, WorkspaceRole, Status } from '@xyne/shared';
 import { createCommunityWorkspaceDefaults } from '@/utils/communityWorkspaceDefaults';
 import { getEncryptionProvider } from '@/services/encryption';
-import { asSystem, transaction } from './base';
+import { asSystem } from './base';
 
 /**
  * Relocated from controllers/organizationController.ts's createOrganization. The new
@@ -22,9 +23,7 @@ export function createOrganizationWithWorkspace(
     ['Organization', 'Workspace', 'Project', 'WorkspaceOrganization', 'OrgMember'],
     'new org/workspace has no relation to the caller\'s own workspace — provisioning reads would otherwise be filtered out',
     () =>
-      transaction(
-        ['Organization', 'Workspace', 'Project', 'WorkspaceOrganization', 'OrgMember'],
-        'organization + workspace + DM project + org link + owner member must provision atomically',
+      db.$transaction(
         async (tx) => {
           // 1. Create organization
           const organization = await tx.organization.create({

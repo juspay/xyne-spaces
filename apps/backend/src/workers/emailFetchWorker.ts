@@ -14,9 +14,9 @@ import {
   type CursorCatchupJobData,
 } from '@/queues/emailFetchQueue';
 import { runAsServiceActor } from '@/database/tenant/context';
-import { catchUpFromCursorAsService } from '@/bypassAcl/emailServices';
 import { socialMediaService } from '@/integrations/social-media/socialMediaService';
 import { getHttpStatus } from '@/services/googleService';
+import { catchUpFromCursor } from '@/integrations/adapters/google/refetch';
 import { seedSyncCursor } from '@/services/syncCursorRecovery';
 
 const externalSourceRepo = new ExternalSourceRepository();
@@ -92,7 +92,9 @@ class EmailFetchWorker {
 
     const adapter = adapterRegistry.getAdapter(source.name);
     try {
-      const result = await catchUpFromCursorAsService(source, adapter, cursor, workspaceId);
+      const result = await runAsServiceActor('email-fetch-worker', workspaceId, () =>
+        catchUpFromCursor(source, adapter, cursor),
+      );
 
       logger.info(
         `[EMAIL-FETCH-WORKER] Catchup done — source ${source.name}: processed=${result.processed} new=${result.newTickets} skipped=${result.skipped} errors=${result.errors?.length ?? 0}`,
