@@ -2913,6 +2913,10 @@ export const queries = defineQueries({
         .orderBy('name', 'asc');
     },
   ),
+  // The caller's mailbox overlay for a single ticket (ACL scopes to userId = me).
+  myTicketMailbox: defineQuery(z.object({ ticketId: z.string() }), ({ args: { ticketId } }) => {
+    return zql.ticket_user_mailbox.where('ticketId', ticketId);
+  }),
   // Query for ticket entity mappings by ticket ID
   getTicketEntityMappingsByTicketId: defineQuery(
     z.object({ ticketId: z.string() }),
