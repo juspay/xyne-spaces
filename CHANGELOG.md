@@ -1,3 +1,10 @@
+## [1.348.0-release-20260921.4](https://github.com/juspay/xyne-spaces/compare/v1.348.0-release-20260921.3...v1.348.0-release-20260921.4) (2026-09-22)
+
+
+### Reverts
+
+* Revert "fix: XYNE-63866 Implement API fallback + query for desk loading perf (#2014)" (#2171) ([ec61732](https://github.com/juspay/xyne-spaces/commit/ec617328874b51bb6f48718668483cfb230fa4a4)), closes [#2014](https://github.com/juspay/xyne-spaces/issues/2014) [#2171](https://github.com/juspay/xyne-spaces/issues/2171)
+
 ## [1.348.0-release-20260921.3](https://github.com/juspay/xyne-spaces/compare/v1.348.0-release-20260921.2...v1.348.0-release-20260921.3) (2026-09-21)
 
 
