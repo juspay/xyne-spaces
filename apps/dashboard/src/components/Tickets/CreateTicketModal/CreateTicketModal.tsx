@@ -18,6 +18,7 @@ import {
   FormEntityType,
   FormFieldType,
   LookupType,
+  ReleaseTrackingMode,
   TicketPriority,
   TicketStatusV2,
   isFieldActive,
@@ -552,6 +553,9 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
   );
   const isFlowRootTicket = selectedBoard?.boardType === BoardType.FLOW && !parentTicketId;
   const isReleaseLine = ticketKind === 'release';
+  // Version-mode repos track a releaseVersion, not a per-repo commit range.
+  const isVersionRelease =
+    isReleaseLine && selectedBoard?.releaseTrackingMode === ReleaseTrackingMode.VERSION;
   // Only main release boards are selectable (repos); services show as chips below.
   // Keep the currently-primary board even if it lacks a provider.
   const releaseBoardOptions = useMemo(
@@ -559,8 +563,16 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
       (boards ?? [])
         .filter(b => isMainReleaseBoard(b) || b.id === formValues.boardId)
         .filter(b => isReleaseBoard(b.boardType))
+        // A release spans one tracking mode — the primary repo's. NULL means
+        // COMMIT_RANGE, the same default the backend applies.
+        .filter(
+          b =>
+            !selectedBoard ||
+            (b.releaseTrackingMode ?? ReleaseTrackingMode.COMMIT_RANGE) ===
+              (selectedBoard.releaseTrackingMode ?? ReleaseTrackingMode.COMMIT_RANGE),
+        )
         .map(b => ({ label: b.name, value: b.id, icon: <RepoDot color={repoColor(b.id)} /> })),
-    [boards, formValues.boardId],
+    [boards, formValues.boardId, selectedBoard],
   );
 
   const boardMetadata = selectedBoard?.metadata as BoardMetadata | null;
@@ -687,7 +699,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
   }, [isOpen, resolvedFormFields, selectedBoard, form, formValues?.dynamicFields, markAutoApplied]);
 
   useEffect(() => {
-    if (!isOpen || !isReleaseLine) return;
+    if (!isOpen || !isReleaseLine || isVersionRelease) return;
     for (const boardId of selectedRepoBoardIds) {
       if (hasPopulatedRepoDeployed.current.has(boardId)) continue;
       if (repoRanges[boardId]?.deployedCommit) continue;
@@ -714,7 +726,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
         })
         .catch(() => {});
     }
-  }, [isOpen, isReleaseLine, selectedRepoBoardIds, repoRanges]);
+  }, [isOpen, isReleaseLine, isVersionRelease, selectedRepoBoardIds, repoRanges]);
 
   const [boardSelectorOpen, setBoardSelectorOpen] = useState(false);
 
@@ -1180,6 +1192,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
   const releaseGateMessage = useMemo(() => {
     if (ticketKind !== 'release') return null;
     if (!formValues?.boardId) return 'Select at least one repository';
+    if (isVersionRelease) return null;
     const df = formValues?.dynamicFields ?? {};
     const one = (v: string | string[] | undefined): string =>
       (Array.isArray(v) ? (v[0] ?? '') : (v ?? '')).trim();
@@ -1208,6 +1221,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
     return null;
   }, [
     ticketKind,
+    isVersionRelease,
     formValues?.boardId,
     formValues?.dynamicFields,
     selectedRepoBoardIds,
@@ -1360,7 +1374,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
           : formData.dynamicFields;
 
       const submitDynamicFields: Record<string, string | string[]> =
-        isReleaseLine && !!formData.boardId
+        isReleaseLine && !isVersionRelease && !!formData.boardId
           ? {
               ...filteredDynamicFields,
               releaseRepos: JSON.stringify([
@@ -2568,39 +2582,40 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                             Primary
                           </span>
                         )}
-                        {selected ? (
-                          <div className='flex shrink-0 items-center gap-1.5'>
-                            <input
-                              value={range.deployedCommit}
-                              onChange={e => setField('deployedCommit', e.target.value)}
-                              placeholder='deployed'
-                              className='w-[92px] rounded-md border border-border bg-background px-2 py-1 font-mono text-[11px] text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none'
-                              data-track-category='CreateTicket'
-                              data-track-name='RepoDeployedCommit'
-                            />
-                            <span className='text-muted-foreground'>→</span>
-                            <input
-                              value={range.newCommit}
-                              onChange={e => setField('newCommit', e.target.value)}
-                              placeholder='new'
-                              className='w-[92px] rounded-md border border-border bg-background px-2 py-1 font-mono text-[11px] text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none'
-                              data-track-category='CreateTicket'
-                              data-track-name='RepoNewCommit'
-                            />
-                          </div>
-                        ) : (
-                          <div className='flex shrink-0 items-center gap-1.5 opacity-40'>
-                            <span className='w-[92px] rounded-md border border-border px-2 py-1 text-center font-mono text-[11px] text-muted-foreground'>
-                              —
-                            </span>
-                            <span className='text-muted-foreground'>→</span>
-                            <span className='w-[92px] rounded-md border border-border px-2 py-1 text-center font-mono text-[11px] text-muted-foreground'>
-                              —
-                            </span>
-                          </div>
-                        )}
+                        {!isVersionRelease &&
+                          (selected ? (
+                            <div className='flex shrink-0 items-center gap-1.5'>
+                              <input
+                                value={range.deployedCommit}
+                                onChange={e => setField('deployedCommit', e.target.value)}
+                                placeholder='deployed'
+                                className='w-[92px] rounded-md border border-border bg-background px-2 py-1 font-mono text-[11px] text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none'
+                                data-track-category='CreateTicket'
+                                data-track-name='RepoDeployedCommit'
+                              />
+                              <span className='text-muted-foreground'>→</span>
+                              <input
+                                value={range.newCommit}
+                                onChange={e => setField('newCommit', e.target.value)}
+                                placeholder='new'
+                                className='w-[92px] rounded-md border border-border bg-background px-2 py-1 font-mono text-[11px] text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none'
+                                data-track-category='CreateTicket'
+                                data-track-name='RepoNewCommit'
+                              />
+                            </div>
+                          ) : (
+                            <div className='flex shrink-0 items-center gap-1.5 opacity-40'>
+                              <span className='w-[92px] rounded-md border border-border px-2 py-1 text-center font-mono text-[11px] text-muted-foreground'>
+                                —
+                              </span>
+                              <span className='text-muted-foreground'>→</span>
+                              <span className='w-[92px] rounded-md border border-border px-2 py-1 text-center font-mono text-[11px] text-muted-foreground'>
+                                —
+                              </span>
+                            </div>
+                          ))}
                       </div>
-                      {selected && (
+                      {selected && !isVersionRelease && (
                         <div className='mt-2 flex items-center gap-2 pl-[30px]'>
                           <label
                             htmlFor={`repo-branch-${id}`}
