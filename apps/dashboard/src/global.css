@@ -5371,13 +5371,15 @@ img.inline-emoji,
    EntitySelector hardcodes ChevronRight for every selector in the product, so rotate
    it for this row only rather than changing the shared trigger. */
 [data-ticket-context-row] button > svg:last-child,
-[data-ticket-context-row] [role="button"] > svg:last-child {
+[data-ticket-context-row] [role="button"] > svg:last-child,
+[data-ticket-context-row] [role="combobox"] > svg:last-child {
   transform: rotate(90deg);
 }
 
 /* Canvas gives the channel/board pickers a 34px pill; EntitySelector's shared
    trigger is h-7 (28px) for the rest of the product. */
 [data-ticket-context-row] button,
-[data-ticket-context-row] [role="button"] {
+[data-ticket-context-row] [role="button"],
+[data-ticket-context-row] [role="combobox"] {
   height: 34px !important;
 }
