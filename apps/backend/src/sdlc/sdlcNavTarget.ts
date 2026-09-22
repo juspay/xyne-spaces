@@ -3,6 +3,7 @@ import { sdlcSectionForCanvas, type SdlcNavTarget, type SdlcSection } from '@xyn
 import { db } from '@/database/client';
 import { runAsSystem } from '@/database/tenant/context';
 import { resolveFolderTrackId, resolveItemTrackId, resolveInheritedOwner } from './entityLinkService';
+import { isTrackInChannel } from './sdlcChannelMembership';
 
 export interface SdlcNavIds {
   channelId?: string | null;
@@ -176,12 +177,32 @@ async function resolveChannelId(ids: SdlcNavIds): Promise<string | null> {
   return null;
 }
 
+/**
+ * Whether a resolved place belongs to the hub the caller named. Conversation ids
+ * leave their hub on every forward, so a caller-supplied channelId says which hub
+ * is authorized, never which hub the ids came from. Uncached: entity -> hub is
+ * memoized above, the match is per call.
+ */
+async function placeInChannel(place: SdlcLocation, channelId: string): Promise<boolean> {
+  const { canvasId, trackId, ticketId } = place;
+  if (canvasId) return (await canvasInfo(canvasId))?.channelId === channelId;
+  if (trackId) return runAsSystem(() => isTrackInChannel(db, trackId, channelId));
+  if (ticketId) {
+    const ticket = await runAsSystem(() =>
+      db.ticket.findUnique({ where: { id: ticketId }, select: { channelId: true } }),
+    );
+    return ticket?.channelId === channelId;
+  }
+  return true;
+}
+
 /** Where a notification opens in an SDLC hub. Null for everything outside one. */
 export async function resolveSdlcNavTarget(ids: SdlcNavIds): Promise<SdlcNavTarget | null> {
   const channelId = await resolveChannelId(ids);
   if (!channelId || !(await isSdlcChannel(channelId))) return null;
 
   const place: SdlcLocation = (await locationOf(ids)) ?? { section: 'overview' };
+  if (!(await placeInChannel(place, channelId))) return null;
 
   const conversationId =
     place.discussionId ?? (ids.messageId && ids.conversationId ? ids.conversationId : undefined);
