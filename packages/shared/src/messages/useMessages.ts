@@ -31,7 +31,6 @@ import {
   mergeCachedConversations,
   mergeConversationsWithLatest,
   mergeServerAndPendingConversations,
-  mergeServerAndPendingThreadMessages,
   reconcileConversationWindow,
 } from './channelMessageMerge.js';
 import {
@@ -307,13 +306,9 @@ function useChannelMessagesImpl(
         if (cancelled) return;
         const newer = newerNullable ?? [];
         const fetched = dedupeAndSortConversations(older, newer);
-        const cachedWindow = conversationsRef.current;
         const hadProvisionalWindow = hasProvisionalWindowRef.current;
         const provisionalTail = latestConversationsListRef.current;
-        // Treat a provisional tail as a warm cache, not as an adjacent page.
-        // If it is disjoint from the authoritative window, keep it queued as
-        // the latest tail instead of unioning two windows with an unknown gap.
-        const mergedWithCached = mergeCachedConversations(cachedWindow, fetched);
+        const mergedWithCached = mergeCachedConversations(conversationsRef.current, fetched);
         const { merged, latestClear } = mergeConversationsWithLatest(
           mergedWithCached,
           latestConversationsListRef.current,
@@ -343,7 +338,6 @@ function useChannelMessagesImpl(
 
         setConversationsState(merged);
         hasProvisionalWindowRef.current = false;
-        setInitialLoadError(null);
         setIsInitialLoadComplete(true);
       })
       .catch((err: unknown) => {
@@ -407,14 +401,7 @@ function useChannelMessagesImpl(
     );
 
     setConversationsState(prev => {
-      const merged = reconcileConversationWindow(
-        prev,
-        sortedCutoffConversations,
-        {
-          lowerBound: cutoffAnchor?.createdAt,
-          lowerBoundInclusive: false,
-        },
-      );
+      const merged = reconcileConversationWindow(prev, sortedCutoffConversations);
       if (isSameConversationList(prev, merged)) return prev;
       return merged;
     });
@@ -425,7 +412,6 @@ function useChannelMessagesImpl(
     cutoffConversationsDetails.type,
     isInitialLoadComplete,
     setConversationsState,
-    cutoffAnchor?.createdAt,
   ]);
 
   const loadOlder = useCallback(() => {
@@ -537,13 +523,12 @@ function useChannelMessagesImpl(
     // that the channel is empty — so it must never clear a warm window.
     // Comparing before setState also keeps `messagesWithPending` stable.
     setConversationsState(prev => {
+      // A forward cursor query returns its anchor, so a missing anchor was
+      // deleted. A backward query excludes it; its absence means nothing.
       const reconciled = reconcileConversationWindow(
         prev,
         updatedConversations,
-        {
-          anchorConversationId: inViewAnchor?.conversationId,
-          anchorIncludesResult: inViewAnchor?.direction === 'forward',
-        },
+        inViewAnchor?.direction === 'forward' ? inViewAnchor.conversationId : undefined,
       );
       return isSameConversationList(prev, reconciled) ? prev : reconciled;
     });
@@ -572,10 +557,8 @@ function useChannelMessagesImpl(
     }
     const sortedLatest = [...latestConversations].sort((a, b) => a.createdAt - b.createdAt);
 
-    // Use a functional state update: a viewport reconciliation and a latest
-    // emission can be batched in the same React commit. Computing `merged`
-    // from the closure/ref and writing it directly can resurrect a row that
-    // the reconciliation update just removed.
+    // Read the window before setState: React may run the updater eagerly and
+    // update `conversationsRef` before the side effects below are decided.
     const currentWindow = conversationsRef.current;
     const { latestClear: latestClearForSideEffects } = mergeConversationsWithLatest(
       currentWindow,
@@ -583,14 +566,11 @@ function useChannelMessagesImpl(
       isInitialLoadComplete,
       allowProvisionalPromotion,
     );
-    if (
+    const isProvisionalPromotion =
       latestClearForSideEffects &&
       allowProvisionalPromotion &&
       !isInitialLoadComplete &&
-      currentWindow.length === 0
-    ) {
-      hasProvisionalWindowRef.current = true;
-    }
+      currentWindow.length === 0;
 
     setConversationsState(prev => {
       const { merged, latestClear } = mergeConversationsWithLatest(
@@ -605,15 +585,11 @@ function useChannelMessagesImpl(
       return prev;
     });
 
-    const wasProvisionalPromotion =
-      latestClearForSideEffects &&
-      allowProvisionalPromotion &&
-      !isInitialLoadComplete &&
-      currentWindow.length === 0;
-    if (wasProvisionalPromotion) {
+    if (isProvisionalPromotion) {
       // Keep the tail in the ref for the authoritative initial-load merge, but
       // do not show a duplicate "new conversations" queue while it is already
       // rendered provisionally.
+      hasProvisionalWindowRef.current = true;
       latestConversationsListRef.current = sortedLatest;
       setLatestConversationsList([]);
     } else if (latestClearForSideEffects) {
@@ -693,12 +669,18 @@ function useThreadMessagesImpl(
   return useMemo(() => {
     if (!base) return null;
     if (pendingForThread.length === 0) return base;
+    const pendingByMessageId = new Map(
+      pendingForThread.map(p => [p.messageId, p]),
+    );
+    const filtered = base.messages.filter(
+      m => !pendingByMessageId.has(m.messageId),
+    );
     const pendingRows = [...pendingForThread]
       .sort((a, b) => a.timestamp - b.timestamp)
       .map(buildPendingThreadMessage);
     return {
       ...base,
-      messages: mergeServerAndPendingThreadMessages(base.messages, pendingRows, base.initialMessageId),
+      messages: [...filtered, ...pendingRows],
     } as ThreadConversation;
   }, [base, pendingForThread]);
 }
