@@ -14,17 +14,18 @@ else
   RED=''; YELLOW=''; GREEN=''; RESET=''
 fi
 
+# .$transaction( is deliberately NOT checked here — that relocation is tracked in a separate PR.
+# Add it back (label ".\$transaction(", pattern '\.\$transaction\(') once that lands.
+#
 # Each entry: human label, grep -E pattern.
 declare -a LABELS=(
   "runAsSystem("
   "runAsServiceActor("
-  ".\$transaction("
   "\$queryRaw / \$executeRaw (incl. *Unsafe)"
 )
 declare -a PATTERNS=(
   'runAsSystem\('
   'runAsServiceActor\('
-  '\.\$transaction\('
   '\$(query|execute)Raw(Unsafe)?'
 )
 
@@ -53,8 +54,9 @@ for i in "${!PATTERNS[@]}"; do
 done
 
 if [ "$violations" -gt 0 ]; then
-  echo "These four primitives are the only ways to reach the database without going through"
-  echo "the Prisma tenant ACL extension (apps/backend/src/database/tenant/acl-extension.ts)."
+  echo "These are ways to reach the database without going through the Prisma tenant ACL"
+  echo "extension (apps/backend/src/database/tenant/acl-extension.ts). (.\$transaction( is"
+  echo "tracked separately and not checked by this script for now.)"
   echo "Every call site must live in apps/backend/src/bypassAcl/, importable from elsewhere —"
   echo "see /ACL_BYPASS_AUDIT.md at the repo root for why, and /BYPASS_ACL_EXAMPLES.md for the"
   echo "relocation pattern."

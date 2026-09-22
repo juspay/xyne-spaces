@@ -1,4 +1,5 @@
 import { invitationService } from '@/services/invitationService';
+import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service.js';
 import { WorkspaceJoinPolicy, WorkspaceType, OrgRole, ProjectType, WorkspaceRole, Status } from '@xyne/shared';
 import { createCommunityWorkspaceDefaults } from '@/utils/communityWorkspaceDefaults';
 import { getEncryptionProvider } from '@/services/encryption';
@@ -96,6 +97,19 @@ export function createOrganizationWithWorkspace(
           return { organization, workspace };
         },
       ),
+  );
+}
+
+/**
+ * Relocated from controllers/invitationController.ts's organization-provision handler. The bots
+ * are synced into a workspace the caller has no relation to yet, so tenant ACLs would scope the
+ * sync's User/OrgMember/Workspace reads and writes to the wrong workspace.
+ */
+export function syncAllBotUsersForNewWorkspace(workspaceId: string): Promise<void> {
+  return asSystem(
+    ['User', 'OrgMember', 'Workspace'],
+    'bot sync seeds users into a workspace the caller has no relation to yet',
+    () => unifiedBotUserService.syncAllBotUsers(workspaceId),
   );
 }
 

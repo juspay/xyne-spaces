@@ -25,7 +25,60 @@ export function stampLegacyLinks(repoId: string, channelId: string): Promise<num
   );
 }
 
+import { repositoryHost } from '@/sdlc/vcs/repositoryHost';
+import { SDLC_VCS_EXTERNAL_SOURCE_TYPE } from '@/sdlc/vcs/SdlcVcsCredentialStore';
+import { SDLC_GITHUB_HOST } from '@xyne/shared';
+
 const MULTIREPO_BACKFILL_TAG = '[SdlcMultirepoBackfill]';
+
+/**
+ * Relocated from routes/sdlcRepoCredentialBackfill.ts's backfill. Links GitHub repositories to
+ * the workspace's legacy single credential, across every workspace. Only null links are touched.
+ */
+export function backfillSdlcRepoCredentials(dryRun: boolean) {
+  return asSystem(
+    ['ExternalSource', 'Repo'],
+    'repo-credential backfill links legacy credentials across every workspace',
+    async () => {
+      const legacy = await db.externalSource.findMany({
+        where: {
+          sourceType: SDLC_VCS_EXTERNAL_SOURCE_TYPE,
+          externalIdentifier: 'GITHUB',
+          name: { endsWith: ':github' },
+        },
+        select: { id: true, workspaceId: true },
+      });
+      const workspaces = [];
+      let pending = 0;
+      let updated = 0;
+      for (const credential of legacy) {
+        const repos = await db.repo.findMany({
+          where: { workspaceId: credential.workspaceId, vcsCredentialId: null, projectId: { not: null } },
+          select: { id: true, url: true, canonicalUrl: true },
+        });
+        const repoIds = repos
+          .filter((repo) => {
+            try {
+              return repositoryHost(repo.canonicalUrl || repo.url) === SDLC_GITHUB_HOST;
+            } catch {
+              return false;
+            }
+          })
+          .map((repo) => repo.id);
+        pending += repoIds.length;
+        if (!dryRun && repoIds.length > 0) {
+          const result = await db.repo.updateMany({
+            where: { id: { in: repoIds }, vcsCredentialId: null },
+            data: { vcsCredentialId: credential.id },
+          });
+          updated += result.count;
+        }
+        workspaces.push({ workspaceId: credential.workspaceId, credentialId: credential.id, repoIds });
+      }
+      return { dryRun, legacyCredentials: legacy.length, pending, updated, workspaces };
+    },
+  );
+}
 
 /**
  * Hubs still carrying a channel, oldest first. Ordering by id keeps paging stable; nothing

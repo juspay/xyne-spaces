@@ -1,13 +1,11 @@
 import { db } from '@/database/client';
-import { tagRepository, MirrorTagRow } from '@/database/repositories/tagRepository';
 import { vespaQueue } from '@/queues/vespaQueue';
 import { ticketSchema } from '@/vespa/src/types';
 import { logger } from '@/utils/logger';
 import { config as appConfig } from '@/config/env';
-import { TagMethod } from '@xyne/shared';
-import { DESK_EMAIL_SOURCE_TYPE, deskEmailConfigKey } from './deskEmail';
+import { syncTicketTagsForConversationTx } from '@/bypassAcl/tagServices';
 
-export const DESK_TICKET_SOURCE_TYPE = 'desk-ticket';
+export { DESK_TICKET_SOURCE_TYPE } from '@/bypassAcl/tagServices';
 
 export async function enqueueTicketTagRefeed(ticketId: string): Promise<void> {
   try {
@@ -59,45 +57,8 @@ export async function syncTicketTagsFromEmail(emailId: string): Promise<void> {
 export async function syncTicketTagsForConversation(conversationId: string): Promise<void> {
   if (!appConfig.enableTagGenerationPipeline) return;
 
-  let ticketId: string | null = null;
-
   try {
-    await db.$transaction(async (tx) => {
-      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${'tag-mirror:' + conversationId}))`;
-
-      const ticket = await tx.ticket.findFirst({
-        where: { conversationId },
-        select: { id: true, channelId: true, workspaceId: true },
-      });
-      if (!ticket) return;
-
-      const latest = await tx.email.findFirst({
-        where: { conversationId },
-        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-        select: { id: true },
-      });
-
-      const sourceRows: MirrorTagRow[] = latest
-        ? (await tx.tag.findMany({
-            where: { sourceId: latest.id, sourceType: DESK_EMAIL_SOURCE_TYPE, isDeleted: false },
-            select: { tagCategory: true, tag: true, method: true, reason: true },
-          })).map(r => ({ ...r, method: r.method as TagMethod }))
-        : [];
-
-      const changed = await tagRepository.replaceAllTagsForSource(
-        {
-          sourceId: ticket.id,
-          sourceType: DESK_TICKET_SOURCE_TYPE,
-          workspaceId: ticket.workspaceId,
-          configKey: deskEmailConfigKey(ticket.channelId),
-          rows: sourceRows,
-        },
-        tx,
-      );
-
-      if (changed) ticketId = ticket.id;
-    });
-
+    const ticketId = await syncTicketTagsForConversationTx(conversationId);
     if (ticketId) void enqueueTicketTagRefeed(ticketId);
   } catch (err) {
     logger.error('[TAG][TICKET-MIRROR] syncTicketTagsForConversation failed', { conversationId, err });
