@@ -18,8 +18,10 @@ import {
   type OnboardingActor,
 } from '@/services/onboarding/onboardingService';
 
+const topicName = z.string().trim().min(1).max(200);
+
 const patchBody = z.object({
-  name: z.string().min(1).max(200).optional(),
+  name: topicName.optional(),
   graderAgentSlug: z.string().nullable().optional(),
   ticketIds: z.array(z.string().min(1)).optional(),
   deleted: z.literal(true).optional(),
@@ -69,7 +71,7 @@ export const onboardingController = {
   getState: withActor((_req, actor) => getOnboardingState(actor)),
 
   createTopic: withActor((req, actor) =>
-    createTopic(actor, z.object({ name: z.string().min(1).max(200) }).parse(req.body).name)
+    createTopic(actor, z.object({ name: topicName }).parse(req.body).name)
   ),
 
   updateTopic: withActor((req, actor) =>

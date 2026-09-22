@@ -14,6 +14,11 @@ import { logger } from '@/utils/logger';
 export const MAX_TICKETS_PER_TOPIC = 20;
 export const MAX_SCORE_PER_ANSWER = 10;
 export const MAX_REPLY_CHARS = 20000;
+/**
+ * Finished attempts kept per trainee per topic. The whole column is re-read and re-written on
+ * every change, and one attempt can hold up to 20 replies of 20k characters each.
+ */
+export const MAX_FINISHED_ATTEMPTS_PER_TOPIC = 5;
 
 export const nowIso = (): string => new Date().toISOString();
 
@@ -40,6 +45,8 @@ const attemptSchema = stored({
   status: z.enum(['IN_PROGRESS', 'GRADING', 'GRADED', 'FAILED']),
   startedAt: str,
   submittedAt: nstr,
+  /** When the latest grading round was dispatched: submit, or an admin's Retry grading. */
+  gradingStartedAt: nstr,
   durationSeconds: nnum,
   totalScore: nnum,
   maxScore: nnum,

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { ArrowLeft, ChevronRight, Plus, RotateCcw, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import Textarea from '../../../ui/Textarea/Textarea';
@@ -8,6 +8,7 @@ import {
   ONBOARDING_MAX_REPLY_CHARS,
   ONBOARDING_MAX_TICKETS_PER_TOPIC as MAX,
   createOnboardingTopic,
+  isGradingRecently,
   onboardingErrorMessage,
   retryOnboardingGrading,
   startOnboardingAttempt,
@@ -164,7 +165,8 @@ const TopicRow: React.FC<{
     .sort((a, b) => (b.submittedAt ?? b.startedAt).localeCompare(a.submittedAt ?? a.startedAt));
   const mine = attempts.filter(a => a.userId === userId);
   const open = mine.find(a => a.status === 'IN_PROGRESS');
-  const grading = mine.find(a => a.status === 'GRADING');
+  // A grading run older than the server's limit is presumed lost, and a retake is allowed.
+  const grading = mine.find(isGradingRecently);
   const last = mine.find(a => a.status === 'GRADED' || a.status === 'FAILED');
 
   const save = async (patch: OnboardingTopicPatch, failure: string): Promise<void> => {
@@ -459,7 +461,7 @@ const AttemptRow: React.FC<{
             type='button'
             className={`${secondaryButtonClass} self-start`}
             onClick={() => void retry()}
-            disabled={retrying || attempt.status === 'GRADING'}
+            disabled={retrying || isGradingRecently(attempt)}
             data-track-category='DeskSettings'
             data-track-name='OnboardingRetryGrading'
           >
@@ -516,6 +518,24 @@ const scoreOrStatus = (a: OnboardingAttempt): string =>
   a.status === 'GRADED' && a.totalScore !== null
     ? `${a.totalScore}/${a.maxScore}`
     : STATUS[a.status];
+
+/** Unsubmitted replies stay in this browser, so leaving and coming back resumes them. */
+const draftKey = (attemptId: string): string => `desk-onboarding-draft:${attemptId}`;
+
+function readDraft(exam: OnboardingExam): string[] {
+  const fromServer = exam.answers.map(a => a.replyText);
+  try {
+    const saved: unknown = JSON.parse(localStorage.getItem(draftKey(exam.id)) ?? 'null');
+    return Array.isArray(saved) &&
+      saved.length === fromServer.length &&
+      saved.every(r => typeof r === 'string')
+      ? saved
+      : fromServer;
+  } catch {
+    return fromServer;
+  }
+}
+
 /** One paper: every ticket's first email with the reply box under it, and one Submit. */
 const OnboardingExamScreen: React.FC<{
   channelId: string;
@@ -524,9 +544,18 @@ const OnboardingExamScreen: React.FC<{
   onClose: () => void;
   onChanged: () => Promise<void>;
 }> = ({ channelId, exam, topicName, onClose, onChanged }) => {
-  const [replies, setReplies] = useState<string[]>(() => exam.answers.map(a => a.replyText));
+  const [replies, setReplies] = useState<string[]>(() => readDraft(exam));
   const [submitting, setSubmitting] = useState(false);
   const answered = replies.filter(r => r.trim()).length;
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(draftKey(exam.id), JSON.stringify(replies));
+    } catch {
+      // Storage full or blocked: the replies still live in this screen until it closes.
+    }
+  }, [exam.id, replies]);
+
   const submit = async (): Promise<void> => {
     const blanks = replies.length - answered;
     if (
@@ -540,6 +569,11 @@ const OnboardingExamScreen: React.FC<{
     setSubmitting(true);
     try {
       await submitOnboardingAttempt(channelId, exam.id, replies);
+      try {
+        localStorage.removeItem(draftKey(exam.id));
+      } catch {
+        // Nothing to clean up if storage is unavailable.
+      }
       await onChanged();
       toast.success('Submitted. Your score appears here once grading finishes.');
       onClose();
@@ -566,8 +600,8 @@ const OnboardingExamScreen: React.FC<{
         <div className='flex min-w-0 flex-1 flex-col'>
           <span className='truncate text-base font-semibold text-foreground'>{topicName}</span>
           <span className='text-desk-helper'>
-            {answered} of {replies.length} answered · replies are kept only while this screen is
-            open and can’t be changed after submitting.
+            {answered} of {replies.length} answered · replies are saved in this browser until you
+            submit, and can’t be changed after submitting.
           </span>
         </div>
         <button

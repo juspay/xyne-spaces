@@ -14,6 +14,7 @@ export interface OnboardingAttempt {
   status: 'IN_PROGRESS' | 'GRADING' | 'GRADED' | 'FAILED';
   startedAt: string;
   submittedAt: string | null;
+  gradingStartedAt?: string | null;
   durationSeconds: number | null;
   totalScore: number | null;
   maxScore: number | null;
@@ -108,12 +109,19 @@ export function onboardingErrorMessage(err: unknown, fallback: string): string {
 }
 
 const GRADING_POLL_MS = 10_000;
+/** Matches GRADING_BLOCK_MS on the server: an older GRADING run is presumed lost. */
+const GRADING_STALE_MS = 30 * 60_000;
+
+/** Whether an attempt is in a grading run recent enough to still finish. */
+export const isGradingRecently = (a: OnboardingAttempt): boolean =>
+  a.status === 'GRADING' &&
+  Date.now() - Date.parse(a.gradingStartedAt ?? a.submittedAt ?? a.startedAt) < GRADING_STALE_MS;
 
 const onboardingStateQueryKey = (channelId: string) => ['desk-onboarding', channelId] as const;
 
 /**
  * The Onboarding tab's state for one desk. Nothing syncs live, so while any visible attempt is
- * being graded the query re-fetches every 10 seconds until grading finishes.
+ * being graded the query re-fetches every 10 seconds until grading finishes or is presumed lost.
  */
 export function useDeskOnboardingState(channelId: string) {
   return useQuery({
@@ -121,7 +129,7 @@ export function useDeskOnboardingState(channelId: string) {
     queryFn: () => fetchOnboardingState(channelId),
     enabled: !!channelId,
     refetchInterval: query =>
-      query.state.data?.attempts.some(a => a.status === 'GRADING') ? GRADING_POLL_MS : false,
+      query.state.data?.attempts.some(isGradingRecently) ? GRADING_POLL_MS : false,
   });
 }
 
