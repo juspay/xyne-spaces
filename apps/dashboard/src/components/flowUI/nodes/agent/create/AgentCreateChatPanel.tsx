@@ -36,24 +36,31 @@ import {
   type ParsedCreateChatAction,
 } from './createChatMode';
 
-const SCRIPTED_STREAMING_PHASES = ['Thinking', 'Weighing it up', 'Reasoning'] as const;
-const SCRIPTED_PHASE_MS = 1500;
+const SCRIPTED_THINK_PHASES = ['Thinking', 'Weighing it up', 'Reasoning'] as const;
+const SCRIPTED_THINK_PHASE_MS = 1600;
 
-function useScriptedStreamingPhase(active: boolean): string {
-  const [index, setIndex] = useState(0);
-  useEffect(() => {
-    if (!active) {
-      setIndex(0);
-      return;
-    }
+function ScriptedThinkLabel(): ReactElement {
+  const [phase, setPhase] = useState(0);
+  useEffect((): (() => void) => {
     const id = window.setInterval((): void => {
-      setIndex(current => (current + 1) % SCRIPTED_STREAMING_PHASES.length);
-    }, SCRIPTED_PHASE_MS);
+      setPhase(current => (current + 1) % SCRIPTED_THINK_PHASES.length);
+    }, SCRIPTED_THINK_PHASE_MS);
     return (): void => {
       window.clearInterval(id);
     };
-  }, [active]);
-  return SCRIPTED_STREAMING_PHASES[index] ?? SCRIPTED_STREAMING_PHASES[0];
+  }, []);
+  const label = useStableLabel(`${SCRIPTED_THINK_PHASES[phase]}…`);
+  return (
+    <div
+      className='-ml-1 inline-flex items-center gap-1.5 rounded-md px-1.5 py-1 text-xs text-muted-foreground'
+      data-testid='agent-create-chat-thinking'
+    >
+      <BrailleLoader />
+      <span className='select-none'>
+        <AnimatedLabel text={label} />
+      </span>
+    </div>
+  );
 }
 
 const toMessageAttachments = (attachments: AIComposerAttachment[]): MessageAttachment[] =>
@@ -316,18 +323,6 @@ function CreateChatLayout({
   onReplay?: () => void;
   onEngage?: () => void;
 }): ReactElement {
-  const scriptedEmptyStreaming =
-    scripted &&
-    messages.some(message => {
-      if (message.type !== 'bot' || !message.isStreaming) return false;
-      return (
-        visibleCreateReply(message.content || message.streamingContent || '', true).trim()
-          .length === 0
-      );
-    });
-  const scriptedPhaseDesired = useScriptedStreamingPhase(scriptedEmptyStreaming);
-  const stableScriptedThinking = useStableLabel(scriptedPhaseDesired);
-
   return (
     <div
       className='flex h-full min-w-0 flex-col bg-background'
@@ -382,7 +377,6 @@ function CreateChatLayout({
                 typeof message.statusMessage === 'string' && message.statusMessage.trim().length > 0
                   ? message.statusMessage
                   : 'Thinking…';
-              const scriptedThinkLabel = thinking ? `${stableScriptedThinking}…` : thinkLabel;
               return (
                 <li
                   key={message.stableKey ?? message.id}
@@ -399,14 +393,16 @@ function CreateChatLayout({
                     </div>
                   ) : scripted ? (
                     <div className='flex min-w-0 flex-col gap-2'>
-                      {thinking || message.isStreaming ? (
+                      {thinking ? (
+                        <ScriptedThinkLabel />
+                      ) : message.isStreaming ? (
                         <div
                           className='-ml-1 inline-flex items-center gap-1.5 rounded-md px-1.5 py-1 text-xs text-muted-foreground'
                           data-testid='agent-create-chat-thinking'
                         >
                           <BrailleLoader />
                           <span className='select-none'>
-                            <AnimatedLabel text={scriptedThinkLabel} />
+                            <AnimatedLabel text={thinkLabel} />
                           </span>
                         </div>
                       ) : null}
