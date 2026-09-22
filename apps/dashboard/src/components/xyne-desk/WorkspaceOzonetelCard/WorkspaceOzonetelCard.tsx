@@ -6,6 +6,7 @@ import { toast } from 'sonner';
 import {
   getOzonetelCampaigns,
   getOzonetelConfig,
+  getPhoneFieldNames,
   saveOzonetelConfig,
   subscribeOzonetelLiveEvents,
   type OzonetelAgentMap,
@@ -101,7 +102,7 @@ export const WorkspaceOzonetelCard = (): ReactElement => {
     setTicketSubjectTemplate(
       data.ticketRules?.ticketSubjectTemplate ?? '{callType} call from {callerId} ({monitorUcid})',
     );
-    setPhoneFieldNames(data.ticketRules?.phoneFieldNames ?? []);
+    setPhoneFieldNames(getPhoneFieldNames(data.ticketRules));
     setTicketRules(data.ticketRules ?? {});
     setDefaultChannelId(data.ticketRules?.defaultChannelId ?? '');
     setCampaignRoutes(
@@ -184,7 +185,7 @@ export const WorkspaceOzonetelCard = (): ReactElement => {
       normalizedRoutes.map(route => [route.campaignName, route.channelId]),
     );
 
-    // Always sent, even empty, so removing a field clears it on the server.
+    // Always sent, even empty, so removing a field clears it on the server; customerPhoneFieldName is sent for older backends.
     const trimmedPhoneFieldNames = [
       ...new Set(phoneFieldNames.map(name => name.trim()).filter(Boolean)),
     ];
@@ -201,6 +202,7 @@ export const WorkspaceOzonetelCard = (): ReactElement => {
         campaignRouting,
         ...(ticketSubjectTemplate ? { ticketSubjectTemplate } : {}),
         phoneFieldNames: trimmedPhoneFieldNames,
+        customerPhoneFieldName: trimmedPhoneFieldNames[0],
       },
     });
   };
