@@ -27,6 +27,14 @@ void describe('classifyCreateTurn', () => {
     assert.equal(shouldGeneratePrompt(result, false, 'how do I add MCP?'), false);
   });
 
+  void it('allows hub MCP adds on a filled canvas without regenning instructions', () => {
+    const text = 'Add one useful MCP integration to the agent hub for standups.';
+    const result = classifyCreateTurn(text, false);
+    assert.equal(result.kind, 'edit');
+    assert.deepEqual(result.fields, ['tools']);
+    assert.equal(shouldGeneratePrompt(result, false, text), true);
+  });
+
   void it('maps a thin job to identity fields, not tools', () => {
     const result = classifyCreateTurn('build a standup agent', true);
     assert.equal(result.kind, 'edit');

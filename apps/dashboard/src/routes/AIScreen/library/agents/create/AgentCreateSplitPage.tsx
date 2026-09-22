@@ -105,7 +105,8 @@ export function AgentCreateSplitPage({
     createForm.form.name.trim().length > 0 &&
     slug.length > 0 &&
     createForm.form.systemPrompt.trim().length > 0 &&
-    (scripted || (!nameCheck.checking && nameCheck.nameValid && createForm.conflicts.length === 0));
+    createForm.conflicts.length === 0 &&
+    (scripted || !nameCheck.checking);
 
   const canvasSnapshot: CreateCanvasSnapshot = {
     empty: canvasIsEmpty(createForm.form),

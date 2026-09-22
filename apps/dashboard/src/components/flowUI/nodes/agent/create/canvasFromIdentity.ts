@@ -91,6 +91,7 @@ export function draftIdentityFromModelReply(visibleReply: string): ParsedDraftId
   if (!text) return null;
 
   const patterns: RegExp[] = [
+    /(?:^|\n)\s*[-*]?\s*(?:\*\*)?Name\s*\/\s*handle(?:\*\*)?\s*:\s*([^/\n@]+?)\s*\/\s*@([a-z0-9][a-z0-9-]{0,62})\b/i,
     /\*\*([^*]+)\*\*\s*\(@([a-z0-9][a-z0-9-]{0,62})\)/i,
     /(?:^|\n)\s*[-*]?\s*(?:\*\*Name\*\*|name)\s*[:\/]\s*([^/\n@]+?)\s*\/\s*@([a-z0-9][a-z0-9-]{0,62})/i,
     /(?:name\/handle|name\s*\/\s*handle)\s*:\s*([^/\n@]+?)\s*\/\s*@([a-z0-9][a-z0-9-]{0,62})/i,

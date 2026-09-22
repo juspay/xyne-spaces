@@ -111,7 +111,7 @@ export async function revealCreatePatchFields(args: {
     await args.sleep(Math.max(48, Math.min(args.writeMs, 120)));
     const changed = args.applyChatPatch(`${args.sourceId}-${field}`, slice, { highlight: false });
     if (!changed.includes(field)) {
-      if (field !== 'name') {
+      if (field !== 'name' && field !== 'tools') {
         args.setWritingField(null);
       }
       continue;
@@ -369,6 +369,8 @@ export async function applyCreateHubDraft(args: {
   }
 
   if (action.fields.includes('tools') && args.fillTools) {
+    args.setWritingField('tools', 'mcp');
+    await args.sleep(Math.max(48, Math.min(args.writeMs, 120)));
     await args.fillTools(incoming);
   }
 

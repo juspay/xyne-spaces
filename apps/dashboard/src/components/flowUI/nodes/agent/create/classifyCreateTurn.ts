@@ -279,6 +279,12 @@ export function shouldGeneratePrompt(
 ): boolean {
   if (classification.kind !== 'edit') return false;
   if (parseLocalRename(text)) return false;
+  if (
+    (classification.fields.includes('tools') || classification.fields.includes('knowledge')) &&
+    !classification.fields.includes('systemPrompt')
+  ) {
+    return true;
+  }
   if (classification.fields.every(field => field === 'skills')) return false;
   if (classification.fields.includes('systemPrompt')) return true;
   return canvasEmpty;
