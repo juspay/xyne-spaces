@@ -1,3 +1,10 @@
+## [1.368.0](https://github.com/juspay/xyne-spaces/compare/v1.367.0...v1.368.0) (2026-09-22)
+
+
+### Features
+
+* Log logout reasons and timestamps ([#2119](https://github.com/juspay/xyne-spaces/issues/2119)) ([8303853](https://github.com/juspay/xyne-spaces/commit/8303853ccad6a949278b3bf26e6679e665da7d6d))
+
 ## [1.367.0](https://github.com/juspay/xyne-spaces/compare/v1.366.0...v1.367.0) (2026-09-22)
 
 
