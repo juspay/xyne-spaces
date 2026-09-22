@@ -1,5 +1,4 @@
 import { randomUUID } from 'crypto';
-import { v5 as uuidv5 } from 'uuid';
 import { Prisma, type Ticket } from '@prisma/client';
 import { generateNKeysBetween } from 'fractional-indexing';
 import {
@@ -42,13 +41,6 @@ const prisma = DatabaseClient.getInstance();
 type BatchTransaction = Parameters<Parameters<typeof prisma.$transaction>[0]>[0];
 
 /**
- * Namespace for deriving row ids from (batchKey, rowIndex). Fixed forever: a
- * retry must re-derive byte-identical ids for `skipDuplicates` to turn a replay
- * into a no-op. Changing it would make every in-flight job create duplicates.
- */
-const BULK_TICKET_ID_NAMESPACE = '6f8d1a52-7b3c-4c19-9a4e-2f0f5c1d8e37';
-
-/**
  * Rows per request. One transaction is held open for the whole batch, so this
  * bounds request duration and pool pressure rather than payload size.
  * The controller and the Joi validator both enforce it.
@@ -78,13 +70,8 @@ export interface BatchTicketInput {
 
 export interface BatchTicketContext {
   createdBy: string;
-  /** Tenant the batch belongs to. Salts every derived id — see {@link scopedKey}. */
+  /** Tenant the batch belongs to; scopes the read that builds the response. */
   workspaceId: string;
-  /**
-   * Stable per-batch string (the queue job id). Row ids are derived from it, so
-   * the same batch replayed produces the same ids and inserts nothing twice.
-   */
-  batchKey: string;
   fromTicketsTab?: boolean | undefined;
 }
 
@@ -118,9 +105,6 @@ interface PreparedRow {
   initialMessageMd: string | null;
 }
 
-const deriveId = (batchKey: string, index: number, entity: string): string =>
-  uuidv5(`${batchKey}:${index}:${entity}`, BULK_TICKET_ID_NAMESPACE);
-
 /**
  * Mirrors TicketIdService's project-scoped format. Deliberately local: that
  * one is private, and bulk creation only needs to render numbers it already
@@ -128,16 +112,6 @@ const deriveId = (batchKey: string, index: number, entity: string): string =>
  */
 const formatXyneId = (projectCode: string, sequenceNumber: number): string =>
   `${projectCode.toUpperCase()}-${String(sequenceNumber).padStart(4, '0')}`;
-
-/**
- * The key ids are actually derived from. `batchKey` is client-supplied, so it is
- * salted with the tenant and the actor: without this, two callers in different
- * workspaces sending the same idempotency key derive identical primary keys, and
- * the second batch is silently swallowed whole by `skipDuplicates` — which also
- * hands any caller a way to burn another tenant's keys.
- */
-const scopedKey = (ctx: BatchTicketContext): string =>
-  `${ctx.workspaceId}:${ctx.createdBy}:${ctx.batchKey}`;
 
 const distinct = <T>(values: T[]): T[] => Array.from(new Set(values));
 
@@ -323,10 +297,10 @@ const prepareRows = async (
     const sequenceNumber = sequenceCursors.get(input.projectId)!;
     sequenceCursors.set(input.projectId, sequenceNumber + 1);
 
-    const ticketId = deriveId(scopedKey(ctx), index, 'ticket');
-    const conversationId = deriveId(scopedKey(ctx), index, 'conversation');
-    const messageId = deriveId(scopedKey(ctx), index, 'message');
-    const participantId = deriveId(scopedKey(ctx), index, 'participant');
+    const ticketId = randomUUID();
+    const conversationId = randomUUID();
+    const messageId = randomUUID();
+    const participantId = randomUUID();
 
     const statusV2 = (input.statusV2 as TicketStatusV2) || TicketStatusV2.TODO;
     const priority = (input.priority?.toUpperCase() as TicketPriority) || TicketPriority.MEDIUM;
@@ -335,7 +309,7 @@ const prepareRows = async (
     // id must exist before evaluateEta runs — that call reads it as the active
     // visit it is deciding about.
     const tracksStageEta = selectedStage.eta !== null && selectedStage.eta > 0;
-    const stageVisitId = tracksStageEta ? deriveId(scopedKey(ctx), index, 'stageEta') : null;
+    const stageVisitId = tracksStageEta ? randomUUID() : null;
     const stageEtaDeadline = tracksStageEta ? calculateETADeadline(now, selectedStage.eta!) : null;
 
     const stepEstimate = resolveStepEstimate(
@@ -470,6 +444,8 @@ const commitRows = async (
 
   if (merchantIds.length > 0) {
     await tx.merchant.createMany({
+      // Shared rows, not batch rows: a merchant may legitimately already exist.
+      // This is the only createMany here that can meet an existing row.
       data: merchantIds.map((mid) => ({ mid })),
       skipDuplicates: true,
     });
@@ -494,7 +470,6 @@ const commitRows = async (
       lastActivityAt: r.stageEnteredAt,
       createdAt: r.stageEnteredAt,
     })),
-    skipDuplicates: true,
   });
 
   await tx.ticket.createMany({
@@ -524,7 +499,6 @@ const commitRows = async (
       createdAt: r.stageEnteredAt,
       lastEmailAt: r.stageEnteredAt,
     })),
-    skipDuplicates: true,
   });
 
   await tx.ticketDescription.createMany({
@@ -536,7 +510,6 @@ const commitRows = async (
       createdAt: r.stageEnteredAt,
       updatedAt: r.stageEnteredAt,
     })),
-    skipDuplicates: true,
   });
 
   await tx.message.createMany({
@@ -551,7 +524,6 @@ const commitRows = async (
       createdAt: r.stageEnteredAt,
       metadata: r.messageMetadata as Prisma.InputJsonValue,
     })),
-    skipDuplicates: true,
   });
 
   // Fresh conversations have no participants yet, so the creator row is
@@ -569,7 +541,6 @@ const commitRows = async (
       lastReplyAt: r.stageEnteredAt,
       channelId: r.input.channelId,
     })),
-    skipDuplicates: true,
   });
 
   const stageEtaRows = prepared.filter((r) => r.stageVisitId && r.stageEtaDeadline);
@@ -585,22 +556,17 @@ const commitRows = async (
         stageEta: r.stageEtaDeadline!,
         updatedBy: ctx.createdBy,
       })),
-      skipDuplicates: true,
     });
   }
 
   const hotfixRows = prepared.filter((r) => r.input.ticketType === BaseTicketType.Hotfix);
   if (hotfixRows.length > 0) {
     await tx.ticketTag.createMany({
-      // TicketTag has no unique on (ticketId, name), so skipDuplicates has nothing
-      // to conflict against — the id has to carry the idempotency itself.
       data: hotfixRows.map((r) => ({
-        id: deriveId(scopedKey(ctx), r.index, 'hotfixTag'),
         ticketId: r.ticketId,
         workspaceId: r.workspaceId,
         name: 'hotfix',
       })),
-      skipDuplicates: true,
     });
   }
 
@@ -744,8 +710,8 @@ const commitSubTicketLinks = async (
   // ones the first attempt used.
   const rows = children.map((child) => ({
     child,
-    subTicketId: deriveId(scopedKey(ctx), child.index, 'subTicket'),
-    mappingId: deriveId(scopedKey(ctx), child.index, 'subTicketMapping'),
+    subTicketId: randomUUID(),
+    mappingId: randomUUID(),
   }));
 
   await tx.subTicket.createMany({
@@ -762,7 +728,6 @@ const commitSubTicketLinks = async (
       createdAt: child.stageEnteredAt,
       updatedAt: child.stageEnteredAt,
     })),
-    skipDuplicates: true,
   });
 
   await tx.ticketSubTicketMapping.createMany({
@@ -772,7 +737,6 @@ const commitSubTicketLinks = async (
       subTicketId,
       workspaceId: parent.workspaceId,
     })),
-    skipDuplicates: true,
   });
 };
 
@@ -786,8 +750,10 @@ const commitSubTicketLinks = async (
  * validated against shared context first and anything unusable throws before
  * the transaction opens.
  *
- * Replaying the same `batchKey` is a no-op: row ids are derived from it, so
- * `skipDuplicates` swallows rows a previous attempt already committed.
+ * Not idempotent, and deliberately so: a caller that submits the same batch
+ * twice gets two batches, exactly as single-ticket creation does. Because the
+ * request either commits whole or writes nothing, retrying a *failed* request
+ * is always safe.
  */
 export const createBulkTicketBatch = async (
   request: BulkBatchRequest,
@@ -842,7 +808,6 @@ export const createBulkTicketBatch = async (
   fanOut(prepared, ctx);
 
   logger.info('[BulkTicketBatch] Batch committed', {
-    batchKey: ctx.batchKey,
     children: childRows.length,
     createdParent: parentRow !== null,
     parentTicketId: parentLink?.id ?? null,
@@ -866,4 +831,5 @@ export const createBulkTicketBatch = async (
 };
 
 /** Exported for tests: id derivation must stay stable across releases. */
-export const __testing = { deriveId, scopedKey, formatXyneId, randomUUID };
+/** Exported for tests. */
+export const __testing = { formatXyneId };
