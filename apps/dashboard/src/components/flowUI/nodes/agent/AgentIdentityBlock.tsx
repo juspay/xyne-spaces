@@ -3,7 +3,7 @@ import { MultipleCrossCancelDefault, PlusDefault } from '@xyne/icons';
 import type { AgentCapability, AgentIdentity } from '@xyne/shared';
 import { cn } from '../../../../utils/classNames';
 import useMeasure from '../../../../hooks/useMeasure';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import { CapabilityIcon } from './CapabilityIcon';
 
 /**
@@ -96,7 +96,7 @@ const CapabilityChip: React.FC<{
  *  is the same edit, because both write the same flow-state key. */
 export interface AgentCapabilityInteraction {
   selected: Set<string>;
-  onToggle: (id: string) => void;
+  onToggle: (ids: string[]) => void;
   disabled?: boolean;
 }
 
@@ -179,7 +179,7 @@ const CapabilityGroup: React.FC<{
       key={capability.id}
       capability={capability}
       selected={interactive ? interactive.selected.has(capability.id) : true}
-      {...(interactive ? { onToggle: (): void => interactive.onToggle(capability.id) } : {})}
+      {...(interactive ? { onToggle: (): void => interactive.onToggle([capability.id]) } : {})}
       {...(interactive?.disabled ? { disabled: true } : {})}
     />
   );
@@ -253,10 +253,17 @@ export const AgentCapabilities: React.FC<{
     return null;
   }
 
+  const groupOf = (capability: AgentCapability): string =>
+    capability.group ?? (capability.kind === 'subagent' ? 'subagent' : 'builtin');
+
   const groups: Array<{ key: string; label: string; items: AgentCapability[] }> = [
-    { key: 'mcp', label: 'MCP', items: capabilities.filter(c => c.kind === 'subagent') },
-    { key: 'builtin', label: 'Built in tools', items: capabilities.filter(c => c.kind === 'tool') },
-  ].filter(group => group.items.length > 0);
+    { key: 'subagent', label: 'Subagents' },
+    { key: 'agent', label: 'Agents' },
+    { key: 'mcp', label: 'MCP Tools' },
+    { key: 'builtin', label: 'Built-In tools' },
+  ]
+    .map(group => ({ ...group, items: capabilities.filter(c => groupOf(c) === group.key) }))
+    .filter(group => group.items.length > 0);
 
   return (
     <div className='flex flex-col gap-4'>
@@ -293,13 +300,15 @@ export const AgentConnectPrompt: React.FC<{
   className?: string;
 }> = ({ agent, agentExists = false, className }) => {
   const navigate = useNavigate();
+  const { workspaceId } = useParams<{ workspaceId?: string }>();
   const unconnected = (agent.capabilities ?? []).filter(c => c.requiresConnection);
   if (unconnected.length === 0) {
     return null;
   }
+  const libraryPath = workspaceId ? `/${workspaceId}/ai/library` : '/ai/library';
   const target = agentExists
-    ? `/claw-agents/agents/${agent.slug}?tab=connections`
-    : '/claw-agents/mcp';
+    ? `${libraryPath}/agent/${agent.slug}?tab=tools`
+    : `${libraryPath}?tab=mcp`;
 
   return (
     <div className={cn('min-w-0 shrink-0', className)}>
