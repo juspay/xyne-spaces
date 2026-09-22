@@ -22,9 +22,10 @@ const SHIMMER_TEXT =
   '[&_label]:[background-image:linear-gradient(100deg,hsl(var(--muted-foreground))_0%,hsl(var(--muted-foreground))_38%,hsl(var(--primary))_48%,hsl(var(--muted-foreground))_58%,hsl(var(--muted-foreground))_100%)] ' +
   '[html[data-theme=midnight]_&_input]:[background-image:linear-gradient(100deg,hsl(var(--foreground))_0%,hsl(var(--foreground))_36%,hsl(210_90%_72%)_50%,hsl(var(--foreground))_64%,hsl(var(--foreground))_100%)] ' +
   '[html[data-theme=midnight]_&_textarea]:[background-image:linear-gradient(100deg,hsl(var(--foreground))_0%,hsl(var(--foreground))_36%,hsl(210_90%_72%)_50%,hsl(var(--foreground))_64%,hsl(var(--foreground))_100%)] ' +
-  'dark:[&_input]:[background-image:linear-gradient(100deg,hsl(var(--foreground))_0%,hsl(var(--foreground))_32%,hsl(199_89%_68%)_50%,hsl(var(--foreground))_68%,hsl(var(--foreground))_100%)] ' +
-  'dark:[&_textarea]:[background-image:linear-gradient(100deg,hsl(var(--foreground))_0%,hsl(var(--foreground))_32%,hsl(199_89%_68%)_50%,hsl(var(--foreground))_68%,hsl(var(--foreground))_100%)] ' +
-  'dark:[&_label]:[background-image:linear-gradient(100deg,hsl(var(--muted-foreground))_0%,hsl(var(--muted-foreground))_32%,hsl(199_89%_68%)_50%,hsl(var(--muted-foreground))_68%,hsl(var(--muted-foreground))_100%)] ' +
+  'dark:[&_input]:[background-image:linear-gradient(100deg,hsl(var(--foreground))_0%,hsl(var(--foreground))_42%,hsl(187_92%_62%)_50%,hsl(var(--foreground))_58%,hsl(var(--foreground))_100%)] ' +
+  'dark:[&_textarea]:[background-image:linear-gradient(100deg,hsl(var(--foreground))_0%,hsl(var(--foreground))_42%,hsl(187_92%_62%)_50%,hsl(var(--foreground))_58%,hsl(var(--foreground))_100%)] ' +
+  'dark:[&_label]:[background-image:linear-gradient(100deg,hsl(var(--muted-foreground))_0%,hsl(var(--muted-foreground))_42%,hsl(187_92%_62%)_50%,hsl(var(--muted-foreground))_58%,hsl(var(--muted-foreground))_100%)] ' +
+  '[html[data-theme=midnight]_&_label]:[background-image:linear-gradient(100deg,hsl(var(--muted-foreground))_0%,hsl(var(--muted-foreground))_36%,hsl(210_90%_72%)_50%,hsl(var(--muted-foreground))_64%,hsl(var(--muted-foreground))_100%)] ' +
   '[&_input]:[background-position:var(--create-shimmer)_50%] [&_textarea]:[background-position:var(--create-shimmer)_50%] [&_label]:[background-position:var(--create-shimmer)_50%]';
 
 /**

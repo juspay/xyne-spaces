@@ -168,6 +168,8 @@ export function buildDraftCanvasPatch(args: {
   if (args.fillSlug) {
     if (explicit.slug) {
       patch.slug = explicit.slug;
+    } else if (explicit.name) {
+      patch.slug = slugify(explicit.name);
     } else if (patch.name) {
       patch.slug = slugify(patch.name);
     }
