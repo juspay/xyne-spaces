@@ -12,7 +12,7 @@ import { DeskMetricsDateRangePicker } from '../DeskMetrics/DeskMetricsDateRangeP
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import { ChevronLeft, ChevronRight, MultipleCrossCancelDefault } from '@xyne/icons';
-import { Dialog } from '../../ui/Dialog/Dialog';
+import { DeskInsightsShell } from '../DeskInsights/DeskInsightsPanel';
 import { cn } from '../../../utils/classNames';
 import { queries } from '../../../zero/queries';
 // Not useCachedQuery: this rollup is throwaway, not warm-start state.
@@ -150,6 +150,8 @@ export interface TopicsExplorerProps {
    */
   availableAiCategories: string[];
   availableStages: { name: string; status?: TicketStatusV2 }[];
+  /** Render inline inside the Insights panel instead of its own dialog. */
+  embedded?: boolean;
 }
 
 export const TopicsExplorer = ({
@@ -160,6 +162,7 @@ export const TopicsExplorer = ({
   supportBase,
   availableAiCategories,
   availableStages,
+  embedded,
 }: TopicsExplorerProps): ReactElement => {
   const navigate = useNavigate();
   // Drilling into a group unmounts the panel, so the view is saved on every
@@ -586,7 +589,8 @@ export const TopicsExplorer = ({
     'rounded-md border border-border bg-background px-2 py-1 text-sm text-foreground';
 
   return (
-    <Dialog
+    <DeskInsightsShell
+      embedded={embedded}
       open={open}
       onOpenChange={next => {
         if (!next) onClose();
@@ -909,6 +913,6 @@ export const TopicsExplorer = ({
           </div>
         </div>
       </div>
-    </Dialog>
+    </DeskInsightsShell>
   );
 };
