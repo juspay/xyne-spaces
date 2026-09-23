@@ -360,7 +360,18 @@ const ConversationPanelV2 = ({
             // An artifact app the user added as a tab. Keyed on the app so
             // switching between two app tabs boots a fresh sandbox instead of
             // handing one app's iframe another app's payload.
-            <ArtifactAppHost key={tab} appId={appIdOf(tab) ?? ''} />
+            <ArtifactAppHost
+              key={tab}
+              appId={appIdOf(tab) ?? ''}
+              placement={{
+                surface: 'channel',
+                channel: {
+                  id: channelId,
+                  name: channel?.name ?? '',
+                  scopeType: channel?.scopeType ?? '',
+                },
+              }}
+            />
           )}
         </div>
       </div>
