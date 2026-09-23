@@ -17,6 +17,7 @@ const ArtifactAppScreen = (): ReactElement => {
     <ArtifactAppHost
       key={appId}
       appId={appId}
+      placement={{ surface: 'library' }}
       showPayloadTitle
       onBack={(): void => {
         // navigate() has separate overloads for a path and a history delta,
