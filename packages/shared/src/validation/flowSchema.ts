@@ -1197,6 +1197,7 @@ export const actionRequestSchema = z.object({
     conversationId: z.string().min(1),
     token: z.string().optional(),
   }),
+  applyToDraft: z.boolean().optional(),
 });
 
 // ============================================================================

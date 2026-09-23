@@ -1,5 +1,5 @@
 import { createContext, useContext } from 'react';
-import type { FlowState, FlowAction, AppActionResponse } from '@xyne/shared';
+import type { FlowState, FlowAction, AppActionResponse, FlowDefinition } from '@xyne/shared';
 
 export interface FlowMessageContext {
   channelId?: string;
@@ -25,6 +25,15 @@ export interface FlowContextValue {
   conversationId: string;
   messageContext?: FlowMessageContext;
 }
+
+export interface FlowDraftScope {
+  claims: (flow: FlowDefinition) => boolean;
+  onApplied: (actionId: string, flow: FlowDefinition) => void;
+}
+
+export const FlowDraftScopeContext = createContext<FlowDraftScope | null>(null);
+
+export const useFlowDraftScope = (): FlowDraftScope | null => useContext(FlowDraftScopeContext);
 
 export const FlowContext = createContext<FlowContextValue | null>(null);
 

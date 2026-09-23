@@ -19,6 +19,7 @@ export const flowActionService = {
     flowJSON: FlowDefinition;
     messageId: string;
     conversationId: string;
+    applyToDraft?: boolean;
   }): Promise<AppActionResponse> => {
     // Ephemeral cards are never persisted, so the server cannot look up which app
     // owns this one. It signs a token into the flow's `data` at post time and
@@ -36,6 +37,7 @@ export const flowActionService = {
         conversationId: params.conversationId,
         ...(typeof token === 'string' && token ? { token } : {}),
       },
+      ...(params.applyToDraft ? { applyToDraft: true } : {}),
     };
 
     const response = await apiInstance.post('/apps/flow/action', body);

@@ -1,7 +1,12 @@
 import { logger, Event as LogEvent } from '../../utils/logger';
 import React, { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import { ChevronDown } from 'lucide-react';
-import { FlowContext, FlowContextValue, type FlowMessageContext } from './FlowContext';
+import {
+  FlowContext,
+  FlowContextValue,
+  useFlowDraftScope,
+  type FlowMessageContext,
+} from './FlowContext';
 import { NodeRegistry } from './nodes/NodeRegistry';
 import type {
   FlowComponent,
@@ -165,6 +170,9 @@ export const FlowRenderer: React.FC<FlowRendererProps> = ({
     return isValid;
   }, [validatedFlow, state.values]);
 
+  const draftScope = useFlowDraftScope();
+  const draftClaimsFlow = validatedFlow !== null && (draftScope?.claims(validatedFlow) ?? false);
+
   const executeAction = useCallback(
     async (action: FlowAction): Promise<boolean> => {
       if (!validatedFlow) {
@@ -253,6 +261,7 @@ export const FlowRenderer: React.FC<FlowRendererProps> = ({
           flowJSON: validatedFlow,
           messageId,
           conversationId,
+          ...(draftClaimsFlow ? { applyToDraft: true } : {}),
         });
 
         logger.info(LogEvent.INFO, {
@@ -264,6 +273,11 @@ export const FlowRenderer: React.FC<FlowRendererProps> = ({
         if (response.type === 'error') {
           toast.error(response.message);
           return false;
+        }
+        // The server resolved the card without performing the write; the params
+        // it skipped are still on the card, so hand it back for the draft.
+        if (draftClaimsFlow && action.type === 'submit') {
+          draftScope?.onApplied(action.actionId, validatedFlow);
         }
         onAppAction(response);
         return true;
@@ -292,7 +306,7 @@ export const FlowRenderer: React.FC<FlowRendererProps> = ({
         }
       }
     },
-    [validatedFlow, messageId, conversationId, onAppAction],
+    [validatedFlow, messageId, conversationId, onAppAction, draftScope, draftClaimsFlow],
   );
 
   const isVisible = (component: FlowComponent): boolean => {

@@ -2,6 +2,7 @@ import { useMutation, useQueryClient, type UseMutationResult } from '@tanstack/r
 import { useNavigate, useParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { useAuth } from './useAuth';
+import { clawAgentDetailKey } from './useClawAgentDetail';
 import { createAgent, updateAgent } from '../services/claw/clawAgentWizardService';
 import type { Agent } from '../services/claw/clawAuthAgentTypes';
 import type { KbSelection } from '../services/claw/clawKnowledgeBaseTypes';
@@ -117,8 +118,9 @@ export const useCreateClawAgent = (): UseMutationResult<Agent, Error, WizardSubm
     },
     onSuccess: agent => {
       void queryClient.invalidateQueries({ queryKey: ['claw-auth-agents', userId] });
+      void queryClient.invalidateQueries({ queryKey: clawAgentDetailKey(agent.slug) });
       toast.success('Agent created');
-      void navigate(detailPath(agent.slug), { state: { justCreated: true } });
+      void navigate(detailPath(agent.slug));
     },
     onError: err => {
       // Agent exists but config failed: land the user on the detail screen so

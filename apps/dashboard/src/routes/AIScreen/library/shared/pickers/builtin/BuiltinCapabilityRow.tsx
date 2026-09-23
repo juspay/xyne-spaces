@@ -1,5 +1,5 @@
 import { useMemo, useState, type ReactElement } from 'react';
-import { Ai01, InformationCircle, PlusDefault } from '@xyne/icons';
+import { Ai01, PlusDefault } from '@xyne/icons';
 import { Tooltip } from '@/components/ui/Tooltip/Tooltip';
 import { DotGridLoader } from '../mcp/DotGridLoader';
 import { BrowseBuiltinToolsDialog } from './BrowseBuiltinToolsDialog';
@@ -14,12 +14,14 @@ interface BuiltinCapabilityRowProps {
   selection: BuiltinSelection;
   onSelectionChange: (next: BuiltinSelection) => void;
   suggestContext: { systemPrompt: string; description: string };
+  showSuggestions?: boolean;
 }
 
 export function BuiltinCapabilityRow({
   selection,
   onSelectionChange,
   suggestContext,
+  showSuggestions = true,
 }: BuiltinCapabilityRowProps): ReactElement {
   const [browseOpen, setBrowseOpen] = useState(false);
   const [browseSource, setBrowseSource] = useState<string | null>(null);
@@ -94,16 +96,11 @@ export function BuiltinCapabilityRow({
       <div className='flex w-full items-center justify-between gap-4'>
         <div className='flex min-w-0 items-center gap-4'>
           <div className='flex shrink-0 items-center gap-2'>
-            <span className='text-sm font-medium leading-[1.2] tracking-[-0.1px] text-foreground'>
+            <span className='text-sm font-semibold leading-[1.2] tracking-[-0.1px] text-foreground'>
               Built in tools
             </span>
-            <Tooltip side='top' content={CAPTION}>
-              <span className='inline-flex'>
-                <InformationCircle className='size-4 text-muted-foreground' aria-hidden />
-              </span>
-            </Tooltip>
           </div>
-          {renderSuggestAction()}
+          {showSuggestions && renderSuggestAction()}
         </div>
 
         <button
@@ -121,7 +118,7 @@ export function BuiltinCapabilityRow({
         </button>
       </div>
 
-      <p className='text-sm leading-5 text-muted-foreground'>{CAPTION}</p>
+      <p className='text-[13px] leading-5 text-muted-foreground'>{CAPTION}</p>
 
       {(selectedEntries.length > 0 || suggestedChips.length > 0) && (
         <div className='flex flex-wrap items-start gap-2 pt-1'>

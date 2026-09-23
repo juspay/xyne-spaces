@@ -516,6 +516,11 @@ router.post("/", asyncHandler(async (req: Request, res: Response) => {
     throw badRequest("orgId is required");
   }
 
+  const slugCollision = await agentRepository.findBySlug(slug.trim(), createOrgId);
+  if (slugCollision) {
+    throw conflict(`Handle "${slug.trim()}" is already taken.`, "SLUG_TAKEN");
+  }
+
   const data: Prisma.AgentCreateInput = {
     slug: slug.trim(),
     name: name.trim(),
@@ -531,7 +536,15 @@ router.post("/", asyncHandler(async (req: Request, res: Response) => {
   if (effectiveOwner) {
     data.owner = { connect: { id: effectiveOwner } };
   }
-  const agent = await agentRepository.create(data);
+  let agent;
+  try {
+    agent = await agentRepository.create(data);
+  } catch (e) {
+    if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
+      throw conflict(`Handle "${data.slug}" is already taken.`, "SLUG_TAKEN");
+    }
+    throw e;
+  }
 
   // Attach skills by ID if provided
   if (skills && Array.isArray(skills) && skills.length > 0) {
