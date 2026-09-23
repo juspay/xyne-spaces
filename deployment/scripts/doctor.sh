@@ -151,6 +151,26 @@ check_placeholders() {
   done < "$PLACEHOLDER_TMP"
 }
 
+check_hindsight() {
+  local enabled url
+  [ -f "$PLATFORM_TFVARS" ] || return 0
+  enabled="$(tfvar_value "$PLATFORM_TFVARS" enable_hindsight)"
+  url="$(tfvar_value "$PLATFORM_TFVARS" url)"
+
+  if [ "$enabled" = "true" ]; then
+    record PASS "hindsight" "deployed by this install"
+    if tfvar_set "$PLATFORM_TFVARS" hindsight_llm_api_key; then
+      record PASS "hindsight_llm_api_key" "set"
+    else
+      record WARN "hindsight_llm_api_key" "unset; Hindsight starts but cannot extract facts without an LLM key"
+    fi
+  elif [ -n "$url" ]; then
+    record PASS "hindsight" "using an existing instance at $url"
+  else
+    record WARN "hindsight" "no instance: claw long-term memory stays off (enable_hindsight, or hindsight.url)"
+  fi
+}
+
 check_network() {
   [ -f "$INFRA_TFVARS" ] || return 0
 
@@ -287,6 +307,7 @@ check_required_vars "$INFRA_STACK" "$INFRA_TFVARS"
 check_required_vars "$PLATFORM_STACK" "$PLATFORM_TFVARS"
 check_network
 check_ingress
+check_hindsight
 check_placeholders "$ENV_CONF"
 check_placeholders "$INFRA_TFVARS"
 check_placeholders "$PLATFORM_TFVARS"

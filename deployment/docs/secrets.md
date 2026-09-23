@@ -50,6 +50,7 @@ later; read it before step 8 of a cloud guide and whenever a value must change.
 | `ysweet_server_token` | non-empty; the `server_token` from the same run | the token the backend presents to y-sweet | `Y_SWEET_SERVER_TOKEN` in `xyne-backend-secrets` |
 | `transcription_agent_api_key` | >= 32 | backend ↔ transcription agent | `TRANSCRIPTION_AGENT_API_KEY` in `xyne-transcription-agent-secrets` |
 | `litellm_api_key` | optional | model access for claw | `LITELLM_API_KEY` in `xyne-claw-secrets` |
+| `hindsight_api_key` | optional | claw's key for the Hindsight memory API; leave empty when the deployed addon needs no auth | `HINDSIGHT_API_KEY` in `xyne-claw-secrets` |
 | `google_client_id`, `google_client_secret` | optional | the Google OAuth client the backend and claw-auth sign in with | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` in `xyne-backend-secrets` and `xyne-claw-auth-secrets` |
 
 `ysweet_auth` and `ysweet_server_token` must come from the **same** `gen-auth` run; the token is
