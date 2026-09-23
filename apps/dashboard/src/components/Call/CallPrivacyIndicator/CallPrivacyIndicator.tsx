@@ -4,13 +4,11 @@ import { Bot, Captions, ChevronDown, CircleDot, Info } from 'lucide-react';
 import { RecordingType } from '@xyne/shared';
 import { cn } from '../../../utils/classNames';
 import { roomActor } from '../../../machines/roomMachine';
+import { useHostAuthority } from '../hooks/useHostAuthority';
 
 interface CallPrivacyIndicatorProps {
   isTranscriptionEnabled?: boolean | undefined;
-  isHost?: boolean | undefined;
   onToggleTranscription?: (() => void) | undefined;
-  /** Display name of the call host, shown to non-hosts in the "who can remove" note. */
-  hostName?: string | null | undefined;
   /** Lists the active recording alongside the transcript. */
   isRecordingActive?: boolean | undefined;
   /** A `RecordingType` value; room metadata delivers it as a plain string. */
@@ -75,13 +73,12 @@ function ActivityRow({
  */
 export function CallPrivacyIndicator({
   isTranscriptionEnabled = true,
-  isHost = false,
   onToggleTranscription,
-  hostName,
   isRecordingActive = false,
   recordingType,
   trackMetadata,
 }: CallPrivacyIndicatorProps): React.ReactElement {
+  const { isHost: canControl, activeHostName: controllerName } = useHostAuthority();
   const containerRef = useRef<HTMLDivElement>(null);
   const isOpen = useSelector(roomActor, state => state.context.privacyPopoverOpen);
   // A toggle is in-flight, awaiting the agent's authoritative confirmation.
@@ -199,9 +196,9 @@ export function CallPrivacyIndicator({
             )}
           </div>
 
-          {/* Host: one-click stop/resume (awaits the agent). Non-host: who can stop it. */}
+          {/* Controller (host or delegate): one-click stop/resume. Others: who can. */}
           <div className='p-4'>
-            {isHost && onToggleTranscription ? (
+            {canControl && onToggleTranscription ? (
               <button
                 type='button'
                 onClick={onToggleTranscription}
@@ -236,8 +233,8 @@ export function CallPrivacyIndicator({
               <p className='flex items-start gap-2 text-xs leading-relaxed text-[#9aa0a6]'>
                 <Info className='mt-0.5 h-3.5 w-3.5 flex-shrink-0' />
                 <span>
-                  Only <span className='font-medium text-[#e3e3e3]'>{hostName ?? 'the host'}</span>{' '}
-                  (host) can control transcription.
+                  Only <span className='font-medium text-[#e3e3e3]'>{controllerName ?? 'the host'}</span>{' '}
+                  can control transcription.
                 </span>
               </p>
             )}

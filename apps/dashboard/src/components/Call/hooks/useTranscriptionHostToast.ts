@@ -1,21 +1,25 @@
-import { useEffect, useRef } from 'react';
+import { useEffect } from 'react';
 import { toast } from 'sonner';
 import { roomActor } from '../../../machines/roomMachine';
 
+interface TranscriptionToggleNotice {
+  enabled: boolean;
+  byName: string;
+  byIdentity?: string;
+}
+
 /**
- * Host-only confirmation toast shown when they stop transcription, with an Undo
- * action to bring the agent back (see the "Transcription off … Undo" design).
- * Fires on the local on -> off transition, only for the host.
+ * "Transcription off … Undo" toast for whoever performed the toggle (host or
+ * delegate). Caller passes `isActor`, falling back to a role check if `by` is absent.
  */
-export function useTranscriptionHostToast(isTranscriptionEnabled: boolean, isHost: boolean): void {
-  const prevEnabled = useRef(isTranscriptionEnabled);
-
+export function useTranscriptionHostToast(
+  notice: TranscriptionToggleNotice | null,
+  isActor: boolean,
+): void {
   useEffect(() => {
-    const was = prevEnabled.current;
-    prevEnabled.current = isTranscriptionEnabled;
-    if (!isHost) return;
+    if (!notice || !isActor) return;
 
-    if (was && !isTranscriptionEnabled) {
+    if (!notice.enabled) {
       toast('Transcription off', {
         id: 'transcription-host-toast',
         description: 'Everyone in the call was notified. You can add Xyne Automatic back anytime.',
@@ -26,9 +30,9 @@ export function useTranscriptionHostToast(isTranscriptionEnabled: boolean, isHos
           onClick: () => roomActor.send({ type: 'TOGGLE_TRANSCRIPTION' }),
         },
       });
-    } else if (!was && isTranscriptionEnabled) {
+    } else {
       // Resumed — clear the "off" toast.
       toast.dismiss('transcription-host-toast');
     }
-  }, [isTranscriptionEnabled, isHost]);
+  }, [notice, isActor]);
 }

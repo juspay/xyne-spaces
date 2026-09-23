@@ -3,23 +3,20 @@ import { toast } from 'sonner';
 import { roomActor } from '../../../machines/roomMachine';
 
 /**
- * Surfaces a toast to every participant when the host pauses/resumes the
- * transcription agent mid-call. The host who performed the action does not get
- * the toast (LiveKit does not echo published data to the sender), they see the
- * banner + tile change directly.
+ * Toast to everyone but the actor (host or delegate) when transcription is
+ * paused/resumed. The actor gets useTranscriptionHostToast's Undo toast instead.
  */
 export function useTranscriptionToggleNotice(
-  notice: { enabled: boolean; byName: string } | null,
-  isHost: boolean,
+  notice: { enabled: boolean; byName: string; byIdentity?: string } | null,
+  isActor: boolean,
 ): void {
   const dismiss = useCallback(() => {
     roomActor.send({ type: 'DISMISS_TRANSCRIPTION_NOTICE' });
   }, []);
 
   useEffect(() => {
-    // The host gets their own "Transcription off … Undo" toast (useTranscriptionHostToast),
-    // so skip the peer notice for them to avoid a double toast.
-    if (!notice || isHost) return;
+    // The actor gets their own toast (useTranscriptionHostToast) — skip it here.
+    if (!notice || isActor) return;
 
     if (notice.enabled) {
       toast.info('Transcription resumed', {
@@ -40,5 +37,5 @@ export function useTranscriptionToggleNotice(
         onAutoClose: dismiss,
       });
     }
-  }, [notice, isHost, dismiss]);
+  }, [notice, isActor, dismiss]);
 }
