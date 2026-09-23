@@ -1,3 +1,10 @@
+## [1.375.0](https://github.com/juspay/xyne-spaces/compare/v1.374.0...v1.375.0) (2026-09-23)
+
+
+### Features
+
+* kata runtime support ([#2216](https://github.com/juspay/xyne-spaces/issues/2216)) ([b5a3e0d](https://github.com/juspay/xyne-spaces/commit/b5a3e0d4a949805643da144854935daa7d99d989))
+
 ## [1.374.0](https://github.com/juspay/xyne-spaces/compare/v1.373.0...v1.374.0) (2026-09-23)
 
 
