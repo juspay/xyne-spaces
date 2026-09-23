@@ -7595,6 +7595,10 @@ export function createMutators(
           mainBoardName: z.string(),
           releaseTrackingMode: z.nativeEnum(ReleaseTrackingMode),
           channelId: z.string(),
+          // Ids for the dev-board releaseVersion field provisioned in VERSION mode.
+          devVersionFieldId: z.string().optional(),
+          devFormId: z.string().optional(),
+          devFormMappingId: z.string().optional(),
           applications: z.array(
             z.object({
               id: z.string(),
@@ -7617,6 +7621,9 @@ export function createMutators(
             mainBoardName: rawMainBoardName,
             releaseTrackingMode,
             channelId,
+            devVersionFieldId,
+            devFormId,
+            devFormMappingId,
             applications: rawApplications,
           },
         }) => {
@@ -7837,6 +7844,67 @@ export function createMutators(
             });
           };
 
+          // A version release collects dev tickets whose own board carries a
+          // `releaseVersion` field holding the release's exact value. Only the
+          // release board is bound to the seeded version form, so without this a
+          // project has no field to tag work with and every version release is
+          // empty. Optional so it can never block ticket creation on the dev board.
+          const ensureDevBoardVersionField = async (): Promise<void> => {
+            if (releaseTrackingMode !== ReleaseTrackingMode.VERSION || !devVersionFieldId) return;
+
+            const projectBoards = await tx.run(zql.boards.where('projectId', projectId));
+            const devBoard = projectBoards.find(b => b.boardType === BoardType.DEFAULT);
+            if (!devBoard) return;
+
+            const devMapping = await tx.run(
+              zql.forms_context_mapping
+                .where('contextId', devBoard.id)
+                .where('contextType', FormContextType.BOARD)
+                .where('entityType', FormEntityType.TICKET)
+                .one(),
+            );
+
+            let devBoardFormId = devMapping?.formId;
+            if (!devBoardFormId) {
+              // Dev boards often have no form at all; give this one its own.
+              if (!devFormId || !devFormMappingId) return;
+              await tx.mutate.forms.insert({
+                id: devFormId,
+                formName: `${devBoard.name} Custom Fields`,
+                entityType: FormEntityType.TICKET,
+                contextType: FormContextType.BOARD,
+                workspaceId: project.workspaceId,
+                createdBy: authData.sub,
+                createdAt: Date.now(),
+                updatedAt: Date.now(),
+              });
+              await tx.mutate.forms_context_mapping.insert({
+                id: devFormMappingId,
+                workspaceId: project.workspaceId,
+                formId: devFormId,
+                contextId: devBoard.id,
+                contextType: FormContextType.BOARD,
+                entityType: FormEntityType.TICKET,
+              });
+              devBoardFormId = devFormId;
+            }
+
+            const devFields = await tx.run(zql.form_fields.where('formId', devBoardFormId));
+            if (devFields.some(field => field.fieldName === 'releaseVersion')) return;
+
+            await tx.mutate.form_fields.insert({
+              id: devVersionFieldId,
+              workspaceId: project.workspaceId,
+              formId: devBoardFormId,
+              fieldName: 'releaseVersion',
+              fieldType: FormFieldType.STRING,
+              isOptional: true,
+              sequenceNumber: devFields.length,
+              createdAt: Date.now(),
+              updatedAt: Date.now(),
+            });
+          };
+
           const deleteApplicationBoard = async (
             application: { id: string; boardId: string },
           ): Promise<void> => {
@@ -7905,6 +7973,7 @@ export function createMutators(
               updatedAt: Date.now(),
             });
             await ensureBoardFormMapping(existingMainBoard.id);
+            await ensureDevBoardVersionField();
           } else {
             const projectBoardTs = Date.now();
             await tx.mutate.boards.insert({
@@ -7920,6 +7989,7 @@ export function createMutators(
             });
             await seedReleaseStages(mainBoardId, projectBoardTs);
             await ensureBoardFormMapping(mainBoardId);
+            await ensureDevBoardVersionField();
           }
 
           // Group-scoped edits only load applications owned by this main board.

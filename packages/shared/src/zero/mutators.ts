@@ -4654,6 +4654,10 @@ export const mutators = defineMutators({
         mainBoardName: z.string(),
         releaseTrackingMode: z.nativeEnum(ReleaseTrackingMode),
         channelId: z.string(),
+        // Ids for the dev-board releaseVersion field provisioned in VERSION mode.
+        devVersionFieldId: z.string().optional(),
+        devFormId: z.string().optional(),
+        devFormMappingId: z.string().optional(),
         applications: z.array(
           z.object({
             id: z.string(),
