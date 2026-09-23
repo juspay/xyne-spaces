@@ -1,3 +1,15 @@
+## [1.377.0](https://github.com/juspay/xyne-spaces/compare/v1.376.0...v1.377.0) (2026-09-23)
+
+
+### Features
+
+* accept multiple keywords in message trigger Content Contains ([#2218](https://github.com/juspay/xyne-spaces/issues/2218)) ([a177cb9](https://github.com/juspay/xyne-spaces/commit/a177cb98ce8193bd40b01dad3ee04732815df441))
+
+
+### Bug Fixes
+
+* copy image from the preview blob instead of re-fetching the blob URL ([#2213](https://github.com/juspay/xyne-spaces/issues/2213)) ([a265ffd](https://github.com/juspay/xyne-spaces/commit/a265ffd68da7105be059edba6b1fb6f53a5614be)), closes [#2023](https://github.com/juspay/xyne-spaces/issues/2023) [#2023](https://github.com/juspay/xyne-spaces/issues/2023)
+
 ## [1.376.0](https://github.com/juspay/xyne-spaces/compare/v1.375.0...v1.376.0) (2026-09-23)
 
 
