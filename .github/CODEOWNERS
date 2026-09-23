@@ -50,6 +50,10 @@
 /apps/backend/src/routes/livekit*.ts @juspay/xyne-call-guardians
 /apps/backend/src/validators/call*.ts @juspay/xyne-call-guardians
 
+# Transcription agent — LiveKit worker that transcribes calls and serves the
+# voice-input HTTP endpoints (deployed as the xyne-transcription-agent chart)
+/apps/backend/python-agent/ @juspay/xyne-call-guardians
+
 # Call client
 /apps/dashboard/src/services/Call/ @juspay/xyne-call-guardians
 /apps/dashboard/src/components/Call/ @juspay/xyne-call-guardians
