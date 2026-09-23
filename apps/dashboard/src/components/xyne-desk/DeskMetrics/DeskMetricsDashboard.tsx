@@ -291,7 +291,6 @@ const EMPTY_SERIES_CHART: SeriesChart = { rows: [], series: [] };
 
 const IST_TZ = 'Asia/Kolkata';
 
-/** 'sixHour' is card-only (see cardGranularity) — the range picker itself stays day-granular. */
 type TrendGranularity = 'hour' | 'sixHour' | 'day';
 
 /** Mirrors the bucket strings trendByDay emits, so both charts share an x axis. */
@@ -308,10 +307,9 @@ const istBucketKey = (epochMs: number, granularity: TrendGranularity): string =>
 };
 
 const SIX_HOUR_MS = 6 * HOUR_MS;
-// IST has a fixed UTC+5:30 offset (no DST), so aligning once and stepping by a
-// constant 6h keeps every step on an IST 00/06/12/18 boundary.
+// Fixed UTC+5:30, no DST — so a constant 6h step stays on IST 00/06/12/18 boundaries.
 const IST_OFFSET_MS = 5.5 * HOUR_MS;
-// Past this, 6h buckets are mostly empty flat line — the fixed cards fall back to daily.
+// Past this, 6h buckets are mostly empty flat line — the card falls back to daily.
 const SIX_HOURLY_MAX_RANGE_MS = 3 * DAY_MS;
 
 /** Client-built skeleton for 6h buckets — trendByDay only emits hourly/daily rows. */
@@ -328,12 +326,8 @@ const sixHourlySkeleton = (startMs: number, endMs: number): Array<{ date: string
 
 const RESOLUTION_SERIES = 'Avg resolution time';
 
-/**
- * One blended line: every resolved ticket in a bucket averaged together regardless of agent.
- * Rows follow the gap-filled trend buckets so the x axis stays evenly spaced. A bucket with no
- * resolved tickets is left absent (not 0) — connectNulls bridges it, since "no resolutions" has
- * no meaningful duration.
- */
+/** One line, pooled across agents. Buckets with nothing resolved stay absent, not 0 — a
+ *  zero would read as "resolved instantly"; connectNulls bridges the gap instead. */
 const buildResolutionTrend = (
   tickets: readonly DeskMetricsTicketRow[],
   trend: ReadonlyArray<{ date: string }>,
@@ -396,11 +390,7 @@ const formatTrendLabel = (dateStr: string, granularity: 'day' | 'hour'): string 
   return `${hour % 12 || 12}${suffix}`;
 };
 
-/**
- * One label per bucket. sixHour buckets show the date only where the day changes
- * (including the first point) and just the time otherwise, so "Aug 11" isn't
- * repeated on every tick; hour/day buckets are unchanged.
- */
+/** sixHour shows the date only where the day changes, so "Aug 11" isn't on every tick. */
 const trendLabels = (
   points: ReadonlyArray<{ date: string }>,
   granularity: TrendGranularity,
@@ -1138,7 +1128,6 @@ const KpiCard = ({ label, value }: { label: string; value: string }): ReactEleme
   </div>
 );
 
-/** Duration-valued trend line: y values are seconds, rendered on the formatDuration tick ladder. */
 const SeriesLineChart = ({
   rows,
   series,
@@ -1196,7 +1185,6 @@ const SeriesLineChart = ({
   );
 };
 
-/** The fixed trend card below the ticket table — always visible, no "Breakdown by" picker. */
 const FixedTrendCard = ({
   title,
   chart,
@@ -1752,10 +1740,7 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
     [data?.trend, isHourly],
   );
 
-  // The fixed trend card reads finer than the "Breakdown by" charts, but only while the range is
-  // still short enough for 6h buckets to be readable (a 90-day range at 4 points/day is mostly
-  // empty flat line). Past SIX_HOURLY_MAX_RANGE_MS it falls back to the same daily view as
-  // every other chart. trendByDay only emits hourly/daily rows, so the 6h skeleton is client-side.
+  // 6h only while the range is short enough to stay readable; beyond that, plain daily.
   const isSixHourly = !isHourly && rangeEndMs - rangeStartMs <= SIX_HOURLY_MAX_RANGE_MS;
   const cardGranularity: TrendGranularity = isHourly ? 'hour' : isSixHourly ? 'sixHour' : 'day';
   const cardGranularityLabel = isHourly ? '(hourly)' : isSixHourly ? '(every 6h)' : '(daily)';
@@ -1763,16 +1748,13 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
     () => (isSixHourly ? sixHourlySkeleton(rangeStartMs, rangeEndMs) : (data?.trend ?? [])),
     [isSixHourly, data?.trend, rangeStartMs, rangeEndMs],
   );
-  // sixHour is capped at 3 days (≤13 short labels) — no thinning needed, and thinning by
-  // index would risk skipping exactly the day-boundary tick that carries trendLabels' date,
-  // leaving orphaned time-only ticks with no date ("6am"/"12pm" with no day in sight).
+  // sixHour caps at 13 labels, so skip thinning — it drops ticks by index and would eat
+  // the day-boundary tick that carries the date, leaving orphaned "6am"/"12pm".
   const cardTickInterval = useMemo(
     () => (isSixHourly ? 0 : tickIntervalFor(cardTrendSkeleton.length)),
     [isSixHourly, cardTrendSkeleton.length],
   );
 
-  // Always-on: renders as its own fixed card below the ticket table, not behind the
-  // "Breakdown by" dropdown, so — unlike breakdownData — it computes on every render.
   const resolutionTrendChart = useMemo(
     () => buildResolutionTrend(data?.tickets ?? [], cardTrendSkeleton, cardGranularity),
     [data?.tickets, cardTrendSkeleton, cardGranularity],
