@@ -7,7 +7,12 @@
  * Opt-in via `VITE_ENABLE_SYNC_ENGINE=true` (must match the backend's ENABLE_SYNC_ENGINE);
  * when off, shared queries fall back to Zero unchanged.
  */
-import { initSyncEngine, configureObs, configureShadow, type SyncTransport } from '@xyne/shared/sync';
+import {
+  initSyncEngine,
+  configureObs,
+  configureShadow,
+  type SyncTransport,
+} from '@xyne/shared/sync';
 import { websocketService } from './clients/socketClient';
 import { idbSyncStore } from './syncStore';
 

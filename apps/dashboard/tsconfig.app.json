@@ -22,6 +22,8 @@
       "@xyne/icons/*": ["../../packages/icons/dist/*"],
       "@xyne/shared": ["../../packages/shared/dist/index.d.ts"],
       "@xyne/shared/*": ["../../packages/shared/dist/*"],
+      "#zql/*": ["../../packages/shared/node_modules/@rocicorp/zero/out/zql/src/*"],
+      "#zero-client/*": ["../../packages/shared/node_modules/@rocicorp/zero/out/zero-client/src/*"],
       "react-router-dom-actual": ["./node_modules/react-router-dom"]
     },
 

@@ -54,8 +54,8 @@ class IdbSyncStore implements SyncStore {
     return new Promise((resolve, reject) => {
       const tx = db.transaction(STORES, mode);
       tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error);
-      tx.onabort = () => reject(tx.error);
+      tx.onerror = () => reject(tx.error ?? new Error('IndexedDB transaction failed'));
+      tx.onabort = () => reject(tx.error ?? new Error('IndexedDB transaction failed'));
       body(tx);
     });
   }
@@ -99,7 +99,12 @@ class IdbSyncStore implements SyncStore {
     const getReq = meta.get(inst);
     getReq.onsuccess = () => {
       const m = getReq.result as MetaRecord | undefined;
-      const rec: MetaRecord = { inst, offset: offset ?? m?.offset, lastActiveAt: Date.now() };
+      const off = offset ?? m?.offset;
+      const rec: MetaRecord = {
+        inst,
+        lastActiveAt: Date.now(),
+        ...(off !== undefined && { offset: off }),
+      };
       meta.put(rec);
     };
   }
@@ -111,7 +116,7 @@ class IdbSyncStore implements SyncStore {
     offset: string | undefined,
     version: string | undefined,
   ): Promise<void> {
-    return this.#tx('readwrite', (tx) => {
+    return this.#tx('readwrite', tx => {
       const rows = tx.objectStore(SYNC_ROWS_STORE);
       const members = tx.objectStore(SYNC_MEMBERS_STORE);
       const meta = tx.objectStore(SYNC_META_STORE);
@@ -127,7 +132,7 @@ class IdbSyncStore implements SyncStore {
     offset: string | undefined,
     version: string | undefined,
   ): Promise<void> {
-    return this.#tx('readwrite', (tx) => {
+    return this.#tx('readwrite', tx => {
       const rows = tx.objectStore(SYNC_ROWS_STORE);
       const members = tx.objectStore(SYNC_MEMBERS_STORE);
       const meta = tx.objectStore(SYNC_META_STORE);
@@ -164,7 +169,7 @@ class IdbSyncStore implements SyncStore {
         offset = req.result?.offset;
       };
       tx.oncomplete = () => resolve(offset);
-      tx.onerror = () => reject(tx.error);
+      tx.onerror = () => reject(tx.error ?? new Error('IndexedDB transaction failed'));
     });
   }
 
@@ -187,7 +192,8 @@ class IdbSyncStore implements SyncStore {
         for (const m of mems) {
           const rReq = rows.get([m.table, m.pk]) as IDBRequest<RowRecord | undefined>;
           rReq.onsuccess = () => {
-            if (rReq.result) out.push({ tableName: m.table, row: rReq.result.row, version: rReq.result.version });
+            if (rReq.result)
+              out.push({ tableName: m.table, row: rReq.result.row, version: rReq.result.version });
           };
         }
       };
@@ -197,12 +203,12 @@ class IdbSyncStore implements SyncStore {
       };
 
       tx.oncomplete = () => resolve(found ? { rows: out, offset } : null);
-      tx.onerror = () => reject(tx.error);
+      tx.onerror = () => reject(tx.error ?? new Error('IndexedDB transaction failed'));
     });
   }
 
   dropInstance(inst: string): Promise<void> {
-    return this.#tx('readwrite', (tx) => {
+    return this.#tx('readwrite', tx => {
       const rows = tx.objectStore(SYNC_ROWS_STORE);
       const members = tx.objectStore(SYNC_MEMBERS_STORE);
       const meta = tx.objectStore(SYNC_META_STORE);
