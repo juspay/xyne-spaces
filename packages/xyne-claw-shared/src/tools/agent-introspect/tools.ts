@@ -97,13 +97,21 @@ export const getAgentRunsTool: ToolDefinition = {
   name: "get_agent_runs",
   description:
     "Run history evidence for routing: aggregates show whether the agent delivers (success rate, latency); " +
-    "samples show what query shapes it solves. Samples are limited to runs you can see.",
+    "samples show what query shapes it solves. Samples are limited to runs you can see.\n\n" +
+    "LATENCY. `aggregates` carries p50/p95 wall-clock plus the median split between model time " +
+    "(`p50LlmMs`) and tool time (`p50ToolMs`) — that split says whether a slow agent is waiting on the " +
+    "model or on its own tool loop. `perDay` gives the same p50/p95 per calendar day over the window, " +
+    "so drift is visible instead of averaged away. Pass `days` to size the window.",
   source: "custom:agent-introspect",
   inputSchema: {
     type: "object",
     properties: {
       agentSlug: { type: "string", description: "The agent slug to inspect run history for." },
       limit: { type: "number", description: "Maximum visible task samples to return. Default 5, max 10." },
+      days: {
+        type: "number",
+        description: "Window in days for aggregates and perDay. Default 30, min 1, max 90.",
+      },
     },
     required: ["agentSlug"],
   },

@@ -8,6 +8,7 @@ import { CONFIG } from "../config.js";
 import { decrypt } from "../crypto.js";
 import { spacesAppFetch } from "../lib/spaces-api.js";
 import { agentRepository, chatMessageRepository, agentRunRepository, chatAttachmentRepository, userProviderCredentialsRepository, userAgentInstructionRepository } from "../repositories/index.js";
+import type { FinalizeRunInput } from "../repositories/agentRunRepository.js";
 import { resolveBriefAgentSlug } from "../services/dailyBrief.js";
 import { buildAgentCatalog } from "../services/agentCatalogService.js";
 import { gcsService } from "../services/storageService.js";
@@ -258,6 +259,131 @@ router.get("/callable-agent-spec", requireStrictS2S, async (req: Request, res: R
     });
   } catch (err) {
     log.error("[run] callable-agent-spec error:", err);
+    res.status(500).json({ success: false, error: "Internal server error" });
+  }
+});
+
+/**
+ * Delegated-run lifecycle. A `call-agent` callee runs in-process inside
+ * xyne-claw and never passes through `startRun`, so these give it the same row
+ * and transcript a user-invoked run gets, tagged with the caller.
+ */
+router.post("/delegated-run/start", requireStrictS2S, async (req: Request, res: Response) => {
+  try {
+    const body = (req.body ?? {}) as {
+      sessionId?: string; userId?: string; agentSlug?: string; task?: string;
+      conversationId?: string;
+      parentSessionId?: string; parentAgentSlug?: string; parentToolCallId?: string;
+    };
+    const { sessionId, userId, agentSlug, task, conversationId, parentSessionId } = body;
+    if (!sessionId || !userId || !agentSlug || !task || !conversationId || !parentSessionId) {
+      res.status(400).json({
+        success: false,
+        error: "sessionId, userId, agentSlug, task, conversationId and parentSessionId are required",
+      });
+      return;
+    }
+
+    // The org is the running user's, never the caller's claim — a delegated run
+    // must land in the same tenant as the human it is ultimately answering.
+    const user = await prisma.user.findUnique({ where: { id: userId }, select: { orgId: true } });
+    if (!user?.orgId) {
+      res.status(404).json({ success: false, error: "user not found" });
+      return;
+    }
+
+    // The delegating agent asked the question, so it opens the callee's thread
+    // exactly as a human-typed turn would. Chained onto the previous turn so a
+    // follow-up extends one linear thread instead of forking it.
+    const parentId = await chatMessageRepository
+      .latestMessageId(conversationId, agentSlug)
+      .catch(() => null);
+    await chatMessageRepository.create({
+      conversationId,
+      agentSlug,
+      userId,
+      role: "user",
+      content: task,
+      orgId: user.orgId,
+      ...(parentId ? { parentId } : {}),
+    });
+
+    await agentRunRepository.start({
+      sessionId,
+      userId,
+      agentSlug,
+      orgId: user.orgId,
+      triggerSource: "delegation",
+      task,
+      conversationId,
+      parentSessionId,
+      ...(body.parentAgentSlug ? { parentAgentSlug: body.parentAgentSlug } : {}),
+      ...(body.parentToolCallId ? { parentToolCallId: body.parentToolCallId } : {}),
+    });
+    res.json({ success: true });
+  } catch (err) {
+    log.error("[run] delegated-run/start error:", err);
+    res.status(500).json({ success: false, error: "Internal server error" });
+  }
+});
+
+router.post("/delegated-run/finish", requireStrictS2S, async (req: Request, res: Response) => {
+  try {
+    const body = (req.body ?? {}) as {
+      sessionId?: string;
+      status?: "completed" | "failed" | "cancelled";
+      result?: string; error?: string;
+      provider?: string; model?: string;
+      toolsUsed?: string[]; toolInvocations?: unknown;
+      tokenUsage?: { input?: number; output?: number; cacheRead?: number; cacheWrite?: number };
+      latency?: FinalizeRunInput["latency"];
+    };
+    if (!body.sessionId) {
+      res.status(400).json({ success: false, error: "sessionId is required" });
+      return;
+    }
+    const status = body.status ?? "completed";
+    // Close the callee's thread with its answer, linked so the messages endpoint
+    // pairs this run's tool invocations to that reply instead of guessing by
+    // chronology.
+    const run = await agentRunRepository.findBySessionId(body.sessionId);
+    let chatMessageId: string | undefined;
+    if (run?.conversationId) {
+      const content =
+        status === "completed"
+          ? (body.result ?? "")
+          : `Delegation ${status}: ${body.error ?? "no error reported"}`;
+      const parentId = await chatMessageRepository
+        .latestMessageId(run.conversationId, run.agentSlug)
+        .catch(() => null);
+      const message = await chatMessageRepository.create({
+        conversationId: run.conversationId,
+        agentSlug: run.agentSlug,
+        userId: run.userId,
+        role: "assistant",
+        content,
+        status: status === "completed" ? "completed" : "failed",
+        orgId: run.orgId,
+        ...(parentId ? { parentId } : {}),
+      });
+      chatMessageId = message.id;
+    }
+
+    await agentRunRepository.finalize(body.sessionId, {
+      status,
+      ...(body.result !== undefined ? { result: body.result } : {}),
+      ...(body.error !== undefined ? { error: body.error } : {}),
+      ...(body.provider ? { provider: body.provider } : {}),
+      ...(body.model ? { model: body.model } : {}),
+      ...(body.toolsUsed ? { toolsUsed: body.toolsUsed } : {}),
+      ...(body.toolInvocations !== undefined ? { toolInvocations: body.toolInvocations } : {}),
+      ...(body.tokenUsage ? { tokenUsage: body.tokenUsage } : {}),
+      ...(body.latency ? { latency: body.latency } : {}),
+      ...(chatMessageId ? { chatMessageId } : {}),
+    });
+    res.json({ success: true });
+  } catch (err) {
+    log.error("[run] delegated-run/finish error:", err);
     res.status(500).json({ success: false, error: "Internal server error" });
   }
 });
