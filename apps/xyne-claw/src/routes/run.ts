@@ -56,6 +56,8 @@ import { loadMcpToolsForUser,
 import { packSdlcRunMeta, SDLC_META_KEYS, trustedSdlcToolBindings } from "xyne-claw-shared";
 import { loadCustomTools } from "../custom-tools.js";
 import { buildCopilotTool } from "../copilot.js";
+import { pinRunJudgeBackend } from "../judge-backend.js";
+import { optEnabled, pinRunOptimizations } from "../optimizations.js";
 import { buildExperimentTools, buildExperimentReviewTools, type ExperimentContext } from "../experiment.js";
 import {
   executeRunFromPayload,
@@ -92,6 +94,10 @@ import {
   loadContext7Tools,
   type SkillTrigger,
 } from "../subagent-tools.js";
+import { createChildTaskRegistry } from "../child-tasks.js";
+import { childRunIdFor } from "../debug/index.js";
+import { buildChildTaskTools } from "../child-task-tools.js";
+import { reportDelegatedRunStart, reportDelegatedRunFinish } from "../delegated-run.js";
 import {
   buildFastModeDirectTools,
   buildFastModeMetaTools,
@@ -101,6 +107,7 @@ import {
   describeMcpServers,
   renderToolCatalogForPrompt,
   type FastToolRuntimeController,
+  type ToolCatalogEntry,
   type ToolCatalogItem,
 } from "../tool-catalog.js";
 import {
@@ -542,6 +549,8 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
     detached,
     fastMode,
     resumedFromHandoff,
+    judgeBackend,
+    optimizations,
     memoryBankId,
     twinDestinations,
     senderName,
@@ -554,6 +563,8 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
   } = req.body as InternalRunPayload;
 
   const experiment = normalizeExperimentContext(rawExperiment);
+  pinRunJudgeBackend(judgeBackend);
+  pinRunOptimizations(optimizations, agentConfig?.["optimizations"]);
 
   // [AUTODBG] claw-side receipt of every /run forward (esp. automations). Confirms
   // the request crossed claw-auth → claw and which session id it arrived under
@@ -1881,7 +1892,8 @@ export async function processTask(
       const subagents = Array.isArray(toolsObj["subagents"])
         ? (toolsObj["subagents"] as unknown[]).filter((value): value is string => typeof value === "string")
         : [];
-      if (!subagents.includes("spaces")) {
+      const wrapperRedundant = optEnabled("lean_palette") && openPaletteModeFromTools(toolsObj) === "all";
+      if (!subagents.includes("spaces") && !wrapperRedundant) {
         effectiveConfig["tools"] = { ...toolsObj, subagents: [...subagents, "spaces"] };
       }
     }
@@ -2186,7 +2198,10 @@ export async function processTask(
     // reference with the subagent tools (via the progressCtx below) and with
     // runTask (opts), so a detached spawn registered inside a tool's execute()
     // is drained by runTask after the model loop settles. See agent.ts.
-    const backgroundSubagentRegistry: import("../subagent-tools.js").BackgroundSubagentRegistry = new Map();
+    const childTaskRegistry = createChildTaskRegistry();
+    // Filled in by runTask once this run's trace is open; the subagent tools
+    // below only close over the object.
+    const parentDebugHandle: import("../subagent-tools.js").ParentDebugHandle = {};
 
     const fastModeEnabled = effectiveFastMode(fastMode, agentConfig);
     const fastToolController: FastToolRuntimeController = {};
@@ -2209,6 +2224,8 @@ export async function processTask(
       // admitted straight into the always-active set instead of the catalog —
       // bigger prompt, not wider reach.
       catalogUnwrapped: paletteMode !== "off",
+      catalogUnwrappedWrites: paletteMode !== "off" && optEnabled("lean_palette"),
+      includeSubagentReadTools: optEnabled("subagent_read_tools"),
     });
     const fastCatalogCandidateByName = new Map(fastCatalogCandidateItems.map((item) => [item.entry.name, item]));
     let fastCatalogItems: ToolCatalogItem[] = [];
@@ -2253,7 +2270,8 @@ export async function processTask(
             // hits Stop, instead of running for its full duration and orphaning
             // the result back to a parent that's already thrown RunCancelledError.
             ...(abortSignal ? { abortSignal } : {}),
-            backgroundRegistry: backgroundSubagentRegistry,
+            backgroundRegistry: childTaskRegistry,
+            parentDebug: parentDebugHandle,
           },
           undefined, // bonusToolsBySubagent — removed with the sandbox subagent
           customSubagents,
@@ -2357,7 +2375,7 @@ export async function processTask(
       });
     };
 
-    const buildNestedRunner = (): NestedAgentRunner => async ({ spec, question, childGovernor, signal, onProgress }) => {
+    const buildNestedRunner = (): NestedAgentRunner => async ({ spec, question, childGovernor, toolCallId, followUpId, signal, onProgress }) => {
       const calleeSessionToken = spec.sessionToken ?? sessionToken;
       const label = spec.progressLabels?.[0] ?? `Delegating to ${spec.name}...`;
       onProgress?.(label);
@@ -2421,6 +2439,7 @@ export async function processTask(
             : "spaces";
         const calleeDirectPickSuffixes = calleeToolsConfig?.direct ?? [];
         const calleeInnerTools: string[] = [];
+        const calleeDebugHandle: import("../subagent-tools.js").ParentDebugHandle = {};
         const calleeSubagents = buildSubagentTools(
           calleeGroups,
           calleeCustom.tools,
@@ -2448,6 +2467,7 @@ export async function processTask(
               userId,
             },
             ...(signal ? { abortSignal: signal } : {}),
+            parentDebug: calleeDebugHandle,
           },
           undefined,
           spec.customSubagents as import("../subagent-tools.js").CustomSubagentSpec[] | undefined,
@@ -2476,29 +2496,140 @@ export async function processTask(
         }
 
         const providerConfig = spec.provider ? spec.providerConfigs?.[spec.provider] : undefined;
-        const result = await runTask({
-          userId,
-          task: question,
-          userName,
-          userEmail,
-          customTools: calleePalette,
-          systemPromptOverride: spec.systemPrompt,
-          cwd: workspaceDir,
-          provider: spec.provider,
-          providerConfig,
-          progressUrl: undefined,
-          sessionId: `${sessionId}-a2a-${spec.slug}`,
-          skills: spec.skills,
-          abortSignal: signal,
-          progressMeta: {
-            ...(conversationId ? { conversationId } : {}),
-            agentSlug: spec.slug,
+
+        // A delegation is a real run in a thread of its OWN, keyed per follow-up
+        // handle so a follow-up resumes it. Filed under the CALLER's conversation
+        // it would point at a thread holding none of its messages. `a2a_` marks
+        // it machine-initiated the way `app_` marks artifact-app threads: real
+        // and openable, but kept out of the chat sidebar.
+        const calleeFollowUpId = followUpId ?? randomUUID();
+        const calleeChatConversationId = `a2a_${calleeFollowUpId}`;
+        const calleeConversationId =
+          buildSandboxStoreKey(userId, calleeChatConversationId, spec.slug) ?? calleeChatConversationId;
+
+        // File the callee's trace inside the CALLER's run, so reading the
+        // parent's trace already contains the delegated session.
+        const parentStoreKey =
+          parentDebugHandle.storeKey ??
+          (conversationId ? buildSandboxStoreKey(userId, conversationId, agentSlug) : undefined);
+        const calleeSessionId = `${sessionId}-a2a-${toolCallId}`;
+        const calleeRunId = childRunIdFor(Date.now(), spec.slug, toolCallId);
+        const calleeChildRun = parentStoreKey
+          ? {
+              storeKey: parentStoreKey,
+              runId: calleeRunId,
+              ...(parentDebugHandle.runId ? { parentRunId: parentDebugHandle.runId } : {}),
+              parentSessionId: sessionId,
+              parentToolCallId: toolCallId,
+              label: spec.slug,
+              kind: "agent" as const,
+              ...(parentDebugHandle.captureLevel ? { captureLevel: parentDebugHandle.captureLevel } : {}),
+              ...(progressUrl ? { liveMirror: progressUrl } : {}),
+            }
+          : undefined;
+
+        parentDebugHandle.recorder?.record(
+          "subagent_start",
+          {
+            subagentName: spec.slug,
+            childKind: "agent",
+            ...(calleeChildRun ? { childRunId: calleeRunId } : {}),
+            question,
+            questionChars: question.length,
+            provider: spec.provider ?? "spaces",
+            model: providerConfig?.model ?? "shared",
+            toolNames: calleePalette.map((t) => t.name),
           },
+          { toolCallId },
+        );
+
+        const calleeStartedAt = Date.now();
+        await reportDelegatedRunStart({
+          sessionId: calleeSessionId,
+          userId,
+          agentSlug: spec.slug,
+          task: question,
+          conversationId: calleeChatConversationId,
+          parentSessionId: sessionId,
+          ...(agentSlug ? { parentAgentSlug: agentSlug } : {}),
+          parentToolCallId: toolCallId,
         });
-        if (calleeInnerTools.length > 0) {
-          subagentInnerTools.push(...calleeInnerTools.map((toolName) => `${spec.slug}.${toolName}`));
+        try {
+          const result = await runTask({
+            userId,
+            task: question,
+            userName,
+            userEmail,
+            customTools: calleePalette,
+            systemPromptOverride: spec.systemPrompt,
+            cwd: workspaceDir,
+            provider: spec.provider,
+            providerConfig,
+            progressUrl: undefined,
+            conversationId: calleeConversationId,
+            sessionId: calleeSessionId,
+            skills: spec.skills,
+            abortSignal: signal,
+            parentDebug: calleeDebugHandle,
+            ...(calleeChildRun ? { childRun: calleeChildRun } : {}),
+            progressMeta: {
+              ...(conversationId ? { conversationId } : {}),
+              agentSlug: spec.slug,
+            },
+          });
+          if (calleeInnerTools.length > 0) {
+            subagentInnerTools.push(...calleeInnerTools.map((toolName) => `${spec.slug}.${toolName}`));
+          }
+          parentDebugHandle.recorder?.record(
+            "subagent_end",
+            {
+              subagentName: spec.slug,
+              childKind: "agent",
+              ...(calleeChildRun ? { childRunId: calleeRunId } : {}),
+              status: "completed",
+              durationMs: Date.now() - calleeStartedAt,
+              textLength: result.text.length,
+              toolsUsed: result.toolsUsed,
+            },
+            { toolCallId },
+          );
+          await reportDelegatedRunFinish({
+            sessionId: calleeSessionId,
+            status: "completed",
+            result: result.text,
+            ...(spec.provider ? { provider: spec.provider } : {}),
+            ...(providerConfig?.model ? { model: providerConfig.model } : {}),
+            toolsUsed: result.toolsUsed,
+            toolInvocations: result.toolInvocations,
+            tokenUsage: result.tokenUsage,
+            ...(result.latency ? { latency: result.latency } : {}),
+          });
+          return {
+            text: result.text,
+            toolsUsed: result.toolsUsed,
+            followUpId: calleeFollowUpId,
+          };
+        } catch (err) {
+          parentDebugHandle.recorder?.record(
+            "subagent_end",
+            {
+              subagentName: spec.slug,
+              childKind: "agent",
+              ...(calleeChildRun ? { childRunId: calleeRunId } : {}),
+              status: signal?.aborted ? "cancelled" : "error",
+              durationMs: Date.now() - calleeStartedAt,
+              providerError: err instanceof Error ? err.message : String(err),
+            },
+            { toolCallId },
+          );
+          await reportDelegatedRunFinish({
+            sessionId: calleeSessionId,
+            status: signal?.aborted ? "cancelled" : "failed",
+            error: err instanceof Error ? err.message : String(err),
+            ...(spec.provider ? { provider: spec.provider } : {}),
+          });
+          throw err;
         }
-        return { text: result.text, toolsUsed: result.toolsUsed };
       } finally {
         await calleeMcp.cleanup().catch(() => {});
       }
@@ -2564,15 +2695,30 @@ export async function processTask(
             delegationGovernor,
             hydrateOrchestratorCallee,
             buildNestedRunner(),
-            { ...(abortSignal ? { signal: abortSignal } : {}), onProgress: emitDelegationProgress },
+            {
+              ...(abortSignal ? { signal: abortSignal } : {}),
+              onProgress: emitDelegationProgress,
+              registry: childTaskRegistry,
+            },
           ) as unknown as ToolDefinition[]
         : buildCallableAgentTools(
             callableAgents as CallableAgentSpec[],
             delegationGovernor,
             buildNestedRunner(),
-            { ...(abortSignal ? { signal: abortSignal } : {}), onProgress: emitDelegationProgress },
+            {
+              ...(abortSignal ? { signal: abortSignal } : {}),
+              onProgress: emitDelegationProgress,
+              registry: childTaskRegistry,
+            },
           ) as unknown as ToolDefinition[]
       : [];
+
+    // Only worth exposing when something in this run can actually spawn
+    // background work to inspect.
+    const childTaskTools =
+      subagentTools.length > 0 || callableAgentTools.length > 0
+        ? buildChildTaskTools(childTaskRegistry)
+        : [];
 
     const fastAlwaysActiveToolNames = new Set([
       ...directTools,
@@ -2580,6 +2726,7 @@ export async function processTask(
       ...parentHoistedTools,
       ...kbHoistedTools,
       ...callableAgentTools,
+      ...childTaskTools,
     ].map((tool) => tool.name));
 
     let allTools = [
@@ -2587,6 +2734,7 @@ export async function processTask(
       ...fastMetaTools, // search-tools/load-tools in fast mode only
       ...fastCatalogCandidateItems.map((item) => item.tool), // narrowed after all standard filters, dormant until load-tools activates them
       ...callableAgentTools, // A2A governed full-agent delegation tools
+      ...childTaskTools, // task-status / task-stop over background children
       ...directTools, // write tools (create-ticket, send-message)
       ...remainingCustomTools, // custom tools not wrapped in a subagent
       ...parentHoistedTools, // sandbox tools mounted directly on the parent
@@ -3176,9 +3324,27 @@ export async function processTask(
       );
       fastCatalogNames = fastCatalogItems.map((item) => item.entry.name);
       const finalFastCatalogNameSet = new Set(fastCatalogNames);
+      const activeToolEntries: ToolCatalogEntry[] | undefined =
+        optEnabled("catalog_full_index") || optEnabled("subagent_read_tools")
+          ? allTools
+              .filter((tool) =>
+                !duplicatesMetaTool(tool.name) &&
+                tool.name !== "search-tools" &&
+                tool.name !== "load-tools" &&
+                !finalFastCatalogNameSet.has(tool.name) &&
+                (!fastCatalogCandidateByName.has(tool.name) || fastAlwaysActiveToolNames.has(tool.name)),
+              )
+              .map((tool) => ({
+                name: tool.name,
+                oneLineDescription: String(tool.description ?? "").replace(/\s+/g, " ").trim().slice(0, 300),
+                source: "active",
+                catalog: "active",
+              }))
+          : undefined;
       allTools = dedupeToolsByName([
         ...buildFastModeMetaTools({
           catalog: fastCatalogItems.map((item) => item.entry),
+          ...(activeToolEntries ? { activeTools: activeToolEntries } : {}),
           controller: fastToolController,
           // Injected here (needs the run's session) rather than imported by the
           // catalog module; absent without a session — scope:"claw" reports why.
@@ -3776,6 +3942,8 @@ export async function processTask(
           // Only fast mode actually turns delegation off; asserting it on a
           // normal run would be a lie the model acts on.
           subagentDelegationDisabled: fastModeEnabled,
+          fullIndex: optEnabled("catalog_full_index") || optEnabled("subagent_read_tools"),
+          preferDirect: optEnabled("subagent_read_tools"),
         })
       : "";
     if (fastModeCatalogPrompt) {
@@ -3942,7 +4110,8 @@ export async function processTask(
         // surface keep ALL turns so the stored answer matches the streamed one.
         finalAnswerMaxTurns: channelId ? 2 : undefined,
         ...(isRegenerate ? { isRegenerate: true } : {}),
-        backgroundRegistry: backgroundSubagentRegistry,
+        backgroundRegistry: childTaskRegistry,
+        parentDebug: parentDebugHandle,
         fastMode: fastModeEnabled,
         ...(catalogActive ? { fastToolCatalogNames: fastCatalogNames } : {}),
         ...(catalogActive ? { fastToolController } : {}),
@@ -4397,8 +4566,20 @@ export async function processTask(
       pendingResponses.length === 0 &&
       pendingActions.length === 0 &&
       pendingQuestions.length === 0;
-    const emptyReason =
-      finalProducedNothing && providerFellBack ? "provider_capacity" : undefined;
+    // Reaching the success path having produced NOTHING — no text, no
+    // attachment, no pending anything — is an anomaly, not an outcome. A user
+    // stop is caught above (userCancelled) and a handoff throws, so the
+    // remaining cause is a turn that ended without writing: an aborted or
+    // stalled LLM request whose stopReason the loop treats as benign. Naming
+    // it here means the surfaces stop guessing why the answer was blank.
+    const emptyReason = finalProducedNothing
+      ? providerFellBack
+        ? "provider_capacity"
+        : "no_output"
+      : undefined;
+    if (emptyReason === "no_output") {
+      logErr(`[run] completed with no output at all session=${sessionId} agentSlug=${agentSlug ?? ""}`);
+    }
     const emptyReasonDetail =
       emptyReason && lastFallbackUnderlying
         ? lastFallbackUnderlying

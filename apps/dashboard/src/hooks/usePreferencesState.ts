@@ -3,7 +3,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { toast } from 'sonner';
 
 import { useTheme } from './useTheme';
-import { useAILandingDefault } from './useAILandingDefault';
+import { useAiLaunchPreference } from './useAiLaunchPreference';
 import { useAppModeCollapseSidebar } from './useAppModeCollapseSidebar';
 import { useDebugSettings } from './useDebugSettings';
 import { useEnterSendsMessage } from './useEnterSendsMessage';
@@ -44,7 +44,7 @@ export function usePreferencesState(enabled: boolean) {
     serverCalendarVisibility,
   );
   const { theme, changeTheme } = useTheme();
-  const { aiLandingDefault, setAiLandingDefault } = useAILandingDefault();
+  const { aiLandingDefault, setAiLandingDefault } = useAiLaunchPreference();
   const { appModeCollapseSidebar, setAppModeCollapseSidebar } = useAppModeCollapseSidebar();
   const { settings: debugSettings, toggleSendIndicators } = useDebugSettings();
   const { enterSendsMessage, setEnterSendsMessage } = useEnterSendsMessage();

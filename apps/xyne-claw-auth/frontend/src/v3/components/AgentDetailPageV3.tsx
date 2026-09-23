@@ -85,6 +85,17 @@ function sameSet(a: string[], b: string[]): boolean {
   return b.every((v) => s.has(v));
 }
 
+function readAgentOptimizations(config: Record<string, unknown> | undefined | null): Record<string, boolean> {
+  const raw = config?.["optimizations"];
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  return Object.fromEntries(Object.entries(raw).filter((e): e is [string, boolean] => typeof e[1] === "boolean"));
+}
+
+function sameOptimizations(a: Record<string, boolean>, b: Record<string, boolean>): boolean {
+  const keys = Object.keys(a);
+  return keys.length === Object.keys(b).length && keys.every((k) => a[k] === b[k]);
+}
+
 /* ── props ─────────────────────────────────────────────────────────── */
 
 interface Props {
@@ -203,6 +214,7 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
   // Plan mode opt-in (agent.config.planMode). When on, non-twin thread mentions
   // propose a plan and wait for approval before multi-step work. Default false.
   const [draftPlanMode, setDraftPlanMode] = useState(false);
+  const [draftOptimizations, setDraftOptimizations] = useState<Record<string, boolean>>({});
   // Editable plan-mode primer (agent.config.planModePrompt) — how the agent scopes
   // a plan. Pre-filled with the default; only a CUSTOM value is persisted. Never
   // changes the propose→approve gate (enforced by the tool palette).
@@ -332,6 +344,7 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
         setDraftPlanTracking((agentData.config as { planTracking?: boolean }).planTracking !== false);
         setDraftAutoGoal((agentData.config as { autoGoal?: boolean }).autoGoal === true);
         setDraftPlanMode((agentData.config as { planMode?: boolean }).planMode === true);
+        setDraftOptimizations(readAgentOptimizations(agentData.config));
         {
           const pmp = (agentData.config as { planModePrompt?: string }).planModePrompt;
           setDraftPlanModePrompt(typeof pmp === "string" && pmp.trim() ? pmp : DEFAULT_PLAN_MODE_PROMPT);
@@ -441,6 +454,7 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
     const basePlanTracking = (agent.config as { planTracking?: boolean }).planTracking !== false;
     const baseAutoGoal = (agent.config as { autoGoal?: boolean }).autoGoal === true;
     const basePlanMode = (agent.config as { planMode?: boolean }).planMode === true;
+    const baseOptimizations = readAgentOptimizations(agent.config);
     const basePlanModePromptRaw = (agent.config as { planModePrompt?: string }).planModePrompt;
     const basePlanModePrompt =
       typeof basePlanModePromptRaw === "string" && basePlanModePromptRaw.trim()
@@ -487,6 +501,7 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
       draftPlanTracking !== basePlanTracking ||
       draftAutoGoal !== baseAutoGoal ||
       draftPlanMode !== basePlanMode ||
+      !sameOptimizations(draftOptimizations, baseOptimizations) ||
       // Only counts as a change when plan mode is on (a prompt with no plan mode
       // is never persisted).
       (draftPlanMode && draftPlanModePrompt !== basePlanModePrompt) ||
@@ -502,7 +517,7 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
       draftOutputRequireTools !== baseOutputRequireTools ||
       triggersChanged
     );
-  }, [agent, config, draftName, draftDescription, prompt, draftTools, draftSkillIds, draftKbResources, draftKbScope, draftProvider, draftModel, draftPromptInjection, draftSandboxRepo, draftForceReadOnlySandbox, draftSbxGitRepos, draftResearchAgentProductId, draftResearchAgentRepositoryId, draftSuggestGoal, draftPrefetchContext, draftPostTodos, draftPlanTracking, draftAutoGoal, draftPlanMode, draftPlanModePrompt, draftMaxDelegations, draftVerifyResponses, draftCitationReflection, draftAutoToolCitations, draftVerifyResponseCriteria, draftOutputFormatEnabled, draftOutputType, draftOutputSchema, draftOutputTemplate, draftOutputRequireTools, skillTriggers]);
+  }, [agent, config, draftName, draftDescription, prompt, draftTools, draftSkillIds, draftKbResources, draftKbScope, draftProvider, draftModel, draftPromptInjection, draftSandboxRepo, draftForceReadOnlySandbox, draftSbxGitRepos, draftResearchAgentProductId, draftResearchAgentRepositoryId, draftSuggestGoal, draftPrefetchContext, draftPostTodos, draftPlanTracking, draftAutoGoal, draftPlanMode, draftOptimizations, draftPlanModePrompt, draftMaxDelegations, draftVerifyResponses, draftCitationReflection, draftAutoToolCitations, draftVerifyResponseCriteria, draftOutputFormatEnabled, draftOutputType, draftOutputSchema, draftOutputTemplate, draftOutputRequireTools, skillTriggers]);
 
   /* ── handlers ──────────────────────────────────────────────────── */
 
@@ -644,6 +659,11 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
         delete nextConfig.planMode;
         delete nextConfig.planModePrompt;
       }
+      if (Object.keys(draftOptimizations).length) {
+        nextConfig.optimizations = draftOptimizations;
+      } else {
+        delete nextConfig.optimizations;
+      }
       // Per-run delegation budget. Persist only a non-default value; DEFAULT
       // drops the key so the runtime falls back to its own default (kept in
       // sync in xyne-claw/src/agent-delegation.ts).
@@ -737,7 +757,7 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
     } finally {
       setSavingConfig(false);
     }
-  }, [agent, draftName, draftDescription, prompt, draftTools, draftSkillIds, draftKbResources, draftKbScope, draftProvider, draftModel, draftPromptInjection, draftSandboxRepo, draftForceReadOnlySandbox, draftSbxGitRepos, draftResearchAgentProductId, draftResearchAgentRepositoryId, draftSuggestGoal, draftPrefetchContext, draftPostTodos, draftPlanTracking, draftAutoGoal, draftPlanMode, draftPlanModePrompt, draftMaxDelegations, draftVerifyResponses, draftCitationReflection, draftAutoToolCitations, draftVerifyResponseCriteria, draftOutputFormatEnabled, draftOutputType, draftOutputSchema, draftOutputTemplate, draftOutputRequireTools, skillTriggers, config, savingConfig, dirty, userId, showSnackbar]);
+  }, [agent, draftName, draftDescription, prompt, draftTools, draftSkillIds, draftKbResources, draftKbScope, draftProvider, draftModel, draftPromptInjection, draftSandboxRepo, draftForceReadOnlySandbox, draftSbxGitRepos, draftResearchAgentProductId, draftResearchAgentRepositoryId, draftSuggestGoal, draftPrefetchContext, draftPostTodos, draftPlanTracking, draftAutoGoal, draftPlanMode, draftOptimizations, draftPlanModePrompt, draftMaxDelegations, draftVerifyResponses, draftCitationReflection, draftAutoToolCitations, draftVerifyResponseCriteria, draftOutputFormatEnabled, draftOutputType, draftOutputSchema, draftOutputTemplate, draftOutputRequireTools, skillTriggers, config, savingConfig, dirty, userId, showSnackbar]);
 
   const persistToolsConfig = useCallback(async (nextTools: AgentToolSelection): Promise<Agent> => {
     if (!agent) throw new Error("Agent not loaded");
@@ -1139,6 +1159,8 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
             onDraftAutoGoalChange={setDraftAutoGoal}
             draftPlanMode={draftPlanMode}
             onDraftPlanModeChange={setDraftPlanMode}
+            draftOptimizations={draftOptimizations}
+            onDraftOptimizationsChange={setDraftOptimizations}
             draftPlanModePrompt={draftPlanModePrompt}
             onDraftPlanModePromptChange={setDraftPlanModePrompt}
             draftMaxDelegations={draftMaxDelegations}

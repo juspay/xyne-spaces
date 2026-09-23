@@ -87,7 +87,6 @@ const TWIN_BANK_ID = bankIdForAgent("digital-twin");
 
 /** Hard limits on backfill window (user can pick anything between these). */
 const MAX_BACKFILL_MONTHS = 24;
-const MIN_BACKFILL_MONTHS = 0;
 
 /** Per-record curator cost estimate. Haiku 4.5 at ~$0.001 per request for
  *  a 50-record batch ≈ $0.000020 per record. Used for the consent screen. */
@@ -369,8 +368,14 @@ digitalTwinRouter.post("/enable", requireUserAuth, async (req, res) => {
         res.status(400).json({ success: false, error: "Invalid backfill range" });
         return;
       }
-      const monthsBack = (to.getTime() - from.getTime()) / (30 * 24 * 3600 * 1000);
-      if (monthsBack < MIN_BACKFILL_MONTHS || monthsBack > MAX_BACKFILL_MONTHS) {
+      // Calendar months, NOT 30-day months. A true 24-calendar-month span is
+      // 730/731 days = 24.33 "30-day months", so the old arithmetic rejected
+      // the UI's own "Last 24 months" preset with a 400 every single time.
+      // Mirrors parseAdminBackfillWindow() in adminDigitalTwinControl.ts so the
+      // user-facing and admin validators cannot drift again.
+      const earliestAllowed = new Date(to);
+      earliestAllowed.setUTCMonth(earliestAllowed.getUTCMonth() - MAX_BACKFILL_MONTHS);
+      if (from < earliestAllowed) {
         res.status(400).json({ success: false, error: `Backfill must span ≤ ${MAX_BACKFILL_MONTHS} months` });
         return;
       }

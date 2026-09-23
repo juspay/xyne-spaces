@@ -205,10 +205,21 @@ export const analyzeSkillRecording: ToolDefinition = {
         source = createReadStream(hostPath!);
       }
 
-      const streamed = await session.files.writeStream(inputPath, source, {
-        maxBytes: MAX_RECORDING_BYTES,
-        chunkBytes: 4 * 1024 * 1024,
+      // A local read stream reports ENOENT through an async 'error' event that
+      // writeStream does not surface, so it would escape this function's catch
+      // and reach the process handler. Race it so a missing recording fails
+      // this one call instead of the pod.
+      const sourceFailure = new Promise<never>((_, reject) => {
+        (source as { once?: (e: string, cb: (err: unknown) => void) => void }).once?.("error", reject);
       });
+      void sourceFailure.catch(() => {});
+      const streamed = await Promise.race([
+        session.files.writeStream(inputPath, source, {
+          maxBytes: MAX_RECORDING_BYTES,
+          chunkBytes: 4 * 1024 * 1024,
+        }),
+        sourceFailure,
+      ]);
       if (downloadTimeout) clearTimeout(downloadTimeout);
       abortDownload?.abort();
       // expectedBytes is webhook-carried metadata, which for Spaces attachments

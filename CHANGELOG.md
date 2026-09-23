@@ -1,3 +1,79 @@
+## [1.382.0](https://github.com/juspay/xyne-spaces/compare/v1.381.0...v1.382.0) (2026-09-23)
+
+
+### Features
+
+* sync claw to main ([#2242](https://github.com/juspay/xyne-spaces/issues/2242)) ([0106807](https://github.com/juspay/xyne-spaces/commit/0106807c63d98164b96af096f1f7926b39dd1586))
+
+## [1.381.0](https://github.com/juspay/xyne-spaces/compare/v1.380.1...v1.381.0) (2026-09-23)
+
+
+### Features
+
+* open tickets in place on the Projects screen ([#2243](https://github.com/juspay/xyne-spaces/issues/2243)) ([8573ce4](https://github.com/juspay/xyne-spaces/commit/8573ce4b65bdd1032d165fe8f72f877676641ea4))
+
+## [1.380.1](https://github.com/juspay/xyne-spaces/compare/v1.380.0...v1.380.1) (2026-09-23)
+
+
+### Bug Fixes
+
+* keep Open AI on launch and the toolbar Xyne AI item in sync ([#1924](https://github.com/juspay/xyne-spaces/issues/1924)) ([dfe21a7](https://github.com/juspay/xyne-spaces/commit/dfe21a7d5200badbdc42a6538252b1c2dd5065fb))
+
+## [1.380.0](https://github.com/juspay/xyne-spaces/compare/v1.379.2...v1.380.0) (2026-09-23)
+
+
+### Features
+
+* rank DM search people like the Activity picker ([#2237](https://github.com/juspay/xyne-spaces/issues/2237)) ([19fb524](https://github.com/juspay/xyne-spaces/commit/19fb524ef4e4cca9a6f74db9e46ee341f1d3ab6e))
+
+## [1.379.2](https://github.com/juspay/xyne-spaces/compare/v1.379.1...v1.379.2) (2026-09-23)
+
+
+### Bug Fixes
+
+* gate release hotfix sync on the release branch ([#2222](https://github.com/juspay/xyne-spaces/issues/2222)) ([6b8b3d6](https://github.com/juspay/xyne-spaces/commit/6b8b3d65cc50a2b8ecb073be059fea793104499c))
+
+## [1.379.1](https://github.com/juspay/xyne-spaces/compare/v1.379.0...v1.379.1) (2026-09-23)
+
+
+### Bug Fixes
+
+* making workspaceID column mandatory in the canvasComm… ([#2209](https://github.com/juspay/xyne-spaces/issues/2209)) ([6e5849c](https://github.com/juspay/xyne-spaces/commit/6e5849c6fa79b303b17844550493dbde4cae3e3b))
+
+## [1.379.0](https://github.com/juspay/xyne-spaces/compare/v1.378.1...v1.379.0) (2026-09-23)
+
+
+### Features
+
+* prefill create-ticket context from ticket views ([#2224](https://github.com/juspay/xyne-spaces/issues/2224)) ([cfcb256](https://github.com/juspay/xyne-spaces/commit/cfcb2560be83c044c740efa1ef21bbc06675c824))
+
+## [1.378.1](https://github.com/juspay/xyne-spaces/compare/v1.378.0...v1.378.1) (2026-09-23)
+
+
+### Bug Fixes
+
+* moving runAsSystem to single place to increase visibility ([#2149](https://github.com/juspay/xyne-spaces/issues/2149)) ([794f8ee](https://github.com/juspay/xyne-spaces/commit/794f8eea63c984a2e2462625b9e3d867d36cd82e))
+
+## [1.378.0](https://github.com/juspay/xyne-spaces/compare/v1.377.1...v1.378.0) (2026-09-23)
+
+
+### Features
+
+* add specific reviewers for call infrastructure files ([#2215](https://github.com/juspay/xyne-spaces/issues/2215)) ([f52c131](https://github.com/juspay/xyne-spaces/commit/f52c1315145304c851103e787917358334767fe3))
+
+
+### Bug Fixes
+
+* deliver the mention held back until "Add them" ([#2140](https://github.com/juspay/xyne-spaces/issues/2140)) ([da90b1c](https://github.com/juspay/xyne-spaces/commit/da90b1cf801701c0367d60a5d87771ede1173e19))
+
+## [1.377.1](https://github.com/juspay/xyne-spaces/compare/v1.377.0...v1.377.1) (2026-09-23)
+
+
+### Bug Fixes
+
+* clickable SDLC overview activity ([#2160](https://github.com/juspay/xyne-spaces/issues/2160)) ([473c23b](https://github.com/juspay/xyne-spaces/commit/473c23b2eeb742393df1c930705c826c1fa6f8ca))
+* open forwarded SDLC messages in the hub ([#2132](https://github.com/juspay/xyne-spaces/issues/2132)) ([43f4425](https://github.com/juspay/xyne-spaces/commit/43f4425c22d9ef5f8e8209fe6a3dec5dbb3b5bc0))
+
 ## [1.377.0](https://github.com/juspay/xyne-spaces/compare/v1.376.0...v1.377.0) (2026-09-23)
 
 

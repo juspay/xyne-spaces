@@ -19,7 +19,7 @@ type OrgScopeRule = (query: ScopableQuery, ctx: Context) => ScopableQuery;
 /**
  * Tables without a workspaceId column that need a bespoke scope rule — either the
  * caller's organisation membership (org-level tables) or a parent row that does
- * carry workspaceId (e.g. canvas comments, scoped through their canvas).
+ * carry workspaceId.
  */
 const CUSTOM_SCOPES: Record<string, OrgScopeRule> = {
   // An organisation is visible to its own members and to the members of a
@@ -42,13 +42,6 @@ const CUSTOM_SCOPES: Record<string, OrgScopeRule> = {
         cmp('id', '=', ctx.workspaceId),
         exists('orgMembers', (m: ScopableQuery) => m.where('memberId', ctx.memberId)),
       ),
-    ),
-  // Canvas comment tables carry canvasId, not workspaceId; scope through the canvas.
-  canvas_comment_threads: (query, ctx) =>
-    query.whereExists('canvas', (c: ScopableQuery) => c.where('workspaceId', ctx.workspaceId)),
-  canvas_comments: (query, ctx) =>
-    query.whereExists('thread', (t: ScopableQuery) =>
-      t.whereExists('canvas', (c: ScopableQuery) => c.where('workspaceId', ctx.workspaceId)),
     ),
 };
 

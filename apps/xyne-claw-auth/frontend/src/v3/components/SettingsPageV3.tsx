@@ -10,6 +10,8 @@ import { SelectField } from "./ui/SelectField";
 import { Dialog } from "./ui/Dialog";
 import { TextField } from "./ui/TextField";
 import { useAuth } from "../../hooks/useAuth";
+import { LinkNumberPanel } from "./LinkNumberPanel";
+import { MessagingChannelsCard } from "./MessagingChannelsCard";
 import {
   listProviderCredentials,
   listSubagentRouting,
@@ -194,6 +196,23 @@ export function SettingsPageV3() {
             onError={(msg) => setError(msg)}
             onSaving={(key) => setSaving(key)}
           />
+
+          {/* Both halves of "WhatsApp is mine", and both are per-user config:
+              tell the org's business number who you are, or hand the agent your
+              own number outright. */}
+          {auth.status === "authenticated" && (
+            <section className="rounded-xl border border-xyne-border-subtle bg-xyne-surface p-4">
+              <h2 className="text-[13px] font-semibold text-xyne-fg-primary">Your WhatsApp number</h2>
+              <p className="mt-0.5 text-[12px] text-xyne-fg-muted">
+                Add the number you message from so the assistant answers as you, with your own access.
+              </p>
+              <div className="mt-2.5">
+                <LinkNumberPanel channel={["whatsapp-cloud", "whatsapp"]} channelName="WhatsApp" userEmail={auth.user.email} />
+              </div>
+            </section>
+          )}
+
+          {auth.status === "authenticated" && <MessagingChannelsCard userId={auth.user.id} scope="user" />}
 
           <AdvancedSettingsSection />
         </div>

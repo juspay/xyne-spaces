@@ -191,7 +191,7 @@ describe("cli-auth routes", () => {
       client: "xyne-cli",
       tokenHash: "hashed_1",
       prefix: "xyne_cli_raw",
-      scopes: ["agents:read", "runs:read", "runs:write"],
+      scopes: ["agents:read", "runs:read", "runs:write", "agents:write", "skills:write", "subagents:write"],
     });
 
     const secondPoll = await requestJson("/auth/token", { clientId: "xyne-cli", deviceCode });
