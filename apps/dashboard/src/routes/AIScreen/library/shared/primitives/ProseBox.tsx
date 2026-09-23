@@ -10,22 +10,26 @@ import { cn } from '@/utils/classNames';
 
 export const PROSE_BOX_HEIGHT = 298;
 
+const FIT_MIN_HEIGHT = 96;
+
 interface ScrollFadeBoxProps {
   children: ReactNode;
   height?: number;
   className?: string;
+  fit?: boolean;
   /** Re-measures when the content behind these changes. */
   resetKeys?: DependencyList;
 }
 
 /**
- * Fixed-height scroll area with a bottom fade that only appears while there is
- * more to scroll — so a short body doesn't sit under a pointless gradient.
+ * Scroll area with a bottom fade that only appears while there is more to
+ * scroll — so a short body doesn't sit under a pointless gradient.
  */
 export function ScrollFadeBox({
   children,
   height = PROSE_BOX_HEIGHT,
   className,
+  fit = false,
   resetKeys = [],
 }: ScrollFadeBoxProps): ReactElement {
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -41,14 +45,16 @@ export function ScrollFadeBox({
   useLayoutEffect(sync, [height, ...resetKeys]);
 
   return (
-    <div className='relative w-full' style={{ height }}>
+    <div className='relative w-full' style={fit ? undefined : { height }}>
       <div
         ref={scrollRef}
         onScroll={sync}
         className={cn(
-          'h-full w-full overflow-y-auto rounded-2xl border-[0.8px] border-border bg-muted/30 p-4',
+          'w-full overflow-y-auto rounded-2xl border-[0.8px] border-border bg-muted/30 p-4',
+          fit ? '' : 'h-full',
           className,
         )}
+        style={fit ? { maxHeight: height, minHeight: FIT_MIN_HEIGHT } : undefined}
       >
         {children}
       </div>
@@ -66,13 +72,20 @@ export function ProseBox({
   children,
   height = PROSE_BOX_HEIGHT,
   className,
+  fit = false,
 }: {
   children: string;
   height?: number;
   className?: string;
+  fit?: boolean;
 }): ReactElement {
   return (
-    <ScrollFadeBox height={height} {...(className ? { className } : {})} resetKeys={[children]}>
+    <ScrollFadeBox
+      height={height}
+      fit={fit}
+      {...(className ? { className } : {})}
+      resetKeys={[children]}
+    >
       <p className='whitespace-pre-wrap break-words text-sm font-normal leading-5 tracking-[-0.28px] text-foreground'>
         {children}
       </p>

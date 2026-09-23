@@ -86,6 +86,7 @@ import type {
   SelectionContext,
   ToolInvocation as ToolInvocationType,
   ClawCitation,
+  PendingAction,
 } from '../utils/XyneAITypes';
 import { ActivityBlock } from './ActivityBlock';
 import { FlowScreenManager } from '../../../flowUI/FlowScreenManager';
@@ -95,7 +96,10 @@ import {
   unpresentedPendingActions,
 } from '../utils/XyneAITypes';
 import { PendingActionBlock } from './PendingActionBlock';
-import { respondToPendingAction } from '../../../../services/XyneAI/XyneAIPendingActionService';
+import {
+  respondToPendingAction,
+  resolvePendingActionLocally,
+} from '../../../../services/XyneAI/XyneAIPendingActionService';
 import { Link2 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { AskAiRatingButtons } from '../../../AIScreen/AskAiRatingButtons';
@@ -641,6 +645,7 @@ interface MessageContentProps {
   trackContext?: Record<string, unknown> | undefined;
   /** See MessageItemProps.flowCards — absence means render no cards. */
   flowCards?: { conversationId: string; onActionComplete: () => void } | undefined;
+  onInterceptPendingAction?: ((action: PendingAction, approved: boolean) => boolean) | undefined;
 }
 
 interface SingleStatObject {
@@ -737,6 +742,10 @@ interface MessageItemProps {
    *  is the off switch, so a surface that cannot service a flow action never
    *  shows a card it would leave stuck. */
   flowCards?: { conversationId: string; onActionComplete: () => void } | undefined;
+  /** Let the host claim a pending action instead of sending it to the server.
+   *  Returning true means "handled here" — used by the agent draft builder,
+   *  where the agent does not exist yet so there is nothing to call. */
+  onInterceptPendingAction?: ((action: PendingAction, approved: boolean) => boolean) | undefined;
 }
 
 // Image preview component that fetches with auth and creates blob URL
@@ -1169,6 +1178,7 @@ export const MessageItem = React.memo(
     onFollowUpSuggestionClick,
     trackContext,
     flowCards,
+    onInterceptPendingAction,
   }: MessageItemProps): ReactElement => {
     const [copied, setCopied] = useState(false);
     const [isEditing, setIsEditing] = useState(false);
@@ -1315,7 +1325,7 @@ export const MessageItem = React.memo(
               message.type === 'user'
                 ? isEditing
                   ? 'rounded-2xl bg-accent p-3'
-                  : 'flex flex-col items-start gap-3 overflow-hidden px-5 py-3 [border-radius:16px_16px_4px_16px] bg-accent text-foreground md:block md:w-fit'
+                  : 'xyne-user-bubble flex flex-col items-start gap-3 overflow-hidden px-5 py-3 [border-radius:16px_16px_4px_16px] bg-accent text-foreground md:block md:w-fit'
                 : 'bg-transparent text-foreground max-w-full'
             }`}
           >
@@ -1434,7 +1444,7 @@ export const MessageItem = React.memo(
                     ))}
                   </div>
                 )}
-                <div className="text-sm font-['Inter'] whitespace-pre-wrap break-words font-[450] tracking-[0] md:leading-relaxed">
+                <div className="xyne-message-text text-sm font-['Inter'] whitespace-pre-wrap break-words font-[450] tracking-[0] md:leading-relaxed">
                   <ReactMarkdown
                     remarkPlugins={[remarkGfm]}
                     components={{
@@ -1521,6 +1531,7 @@ export const MessageItem = React.memo(
                 onSummarizerCitationClick={onSummarizerCitationClick}
                 onOpenToolDebug={onOpenToolDebug}
                 flowCards={flowCards}
+                onInterceptPendingAction={onInterceptPendingAction}
               />
             )}
           </div>
@@ -1812,6 +1823,7 @@ const MessageContent = ({
   onOpenToolDebug,
   trackContext,
   flowCards,
+  onInterceptPendingAction,
 }: MessageContentProps): ReactElement => {
   const resolveMention = useMentionResolver(message.userTags);
 
@@ -2039,20 +2051,20 @@ const MessageContent = ({
         <PendingActionBlock
           actions={visiblePendingActions}
           onApprove={async action => {
-            await respondToPendingAction(
-              message,
-              action,
-              requirePendingActionIndex(message.pendingActions, action),
-              true,
-            );
+            const index = requirePendingActionIndex(message.pendingActions, action);
+            if (onInterceptPendingAction?.(action, true)) {
+              resolvePendingActionLocally(message, action, index, 'approved');
+              return;
+            }
+            await respondToPendingAction(message, action, index, true);
           }}
           onDecline={async action => {
-            await respondToPendingAction(
-              message,
-              action,
-              requirePendingActionIndex(message.pendingActions, action),
-              false,
-            );
+            const index = requirePendingActionIndex(message.pendingActions, action);
+            if (onInterceptPendingAction?.(action, false)) {
+              resolvePendingActionLocally(message, action, index, 'declined');
+              return;
+            }
+            await respondToPendingAction(message, action, index, false);
           }}
         />
       )}
@@ -2777,33 +2789,18 @@ const MessageActions = ({
       {/* Copy Button */}
       <button
         onClick={onCopy}
-        className='p-1.5 rounded transition-colors hover:bg-accent'
+        className='inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground'
         title={copied ? 'Copied!' : 'Copy'}
         data-track-category='XyneAI'
         data-track-name='COPY_MESSAGE'
         data-track-metadata={JSON.stringify({ ...trackContext, messageId: message.id })}
       >
         {copied ? (
-          <img src='/svgs/icons/check-success.svg' alt='Copied' width='16' height='16' />
+          <Check className='size-3.5 text-status-success' strokeWidth={1.75} aria-label='Copied' />
         ) : (
-          <img src='/svgs/icons/copy.svg' alt='Copy' width='16' height='16' />
+          <Copy className='size-3.5' strokeWidth={1.75} aria-label='Copy' />
         )}
       </button>
-
-      {/* Regenerate Button - only on the latest bot message */}
-      {onRegenerate && (
-        <button
-          onClick={onRegenerate}
-          data-ph-capture-attribute-track-id='regenerate_message'
-          className='p-1.5 rounded transition-colors hover:bg-accent'
-          title='Regenerate response'
-          data-track-category='XyneAI'
-          data-track-name='REGENERATE_MESSAGE'
-          data-track-metadata={JSON.stringify({ ...trackContext, messageId: message.id })}
-        >
-          <RefreshCw size={16} className='text-current' />
-        </button>
-      )}
 
       {isV2 ? (
         // v2 (claw): persist to agent_runs.rating (metrics + reload) with an
@@ -2821,7 +2818,7 @@ const MessageActions = ({
           <button
             onClick={() => onFeedback(message.id, 'LIKE')}
             data-ph-capture-attribute-track-id='like_message'
-            className='p-1.5 rounded transition-colors hover:bg-accent'
+            className='inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground'
             title='Like'
             data-track-category='XyneAI'
             data-track-name='LIKE_MESSAGE'
@@ -2864,7 +2861,7 @@ const MessageActions = ({
           <button
             onClick={() => onFeedback(message.id, 'DISLIKE')}
             data-ph-capture-attribute-track-id='dislike_message'
-            className='p-1.5 rounded transition-colors hover:bg-accent'
+            className='inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground'
             title='Dislike'
             data-track-category='XyneAI'
             data-track-name='DISLIKE_MESSAGE'
@@ -2909,6 +2906,22 @@ const MessageActions = ({
           </button>
         </>
       )}
+
+      {/* Regenerate Button - only on the latest bot message */}
+      {onRegenerate && (
+        <button
+          onClick={onRegenerate}
+          data-ph-capture-attribute-track-id='regenerate_message'
+          className='inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground'
+          title='Regenerate response'
+          data-track-category='XyneAI'
+          data-track-name='REGENERATE_MESSAGE'
+          data-track-metadata={JSON.stringify({ ...trackContext, messageId: message.id })}
+        >
+          <RefreshCw className='h-3.5 w-3.5' aria-hidden strokeWidth={1.75} />
+        </button>
+      )}
+
       {/* Participants avatars - shown for Summarizer messages */}
       {(message.agentType === 'summarizer' || message.agentType === 'genius') &&
         message.participants &&
