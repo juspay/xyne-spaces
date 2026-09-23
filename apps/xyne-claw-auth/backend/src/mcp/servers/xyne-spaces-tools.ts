@@ -9080,19 +9080,6 @@ const spacesDeskMetrics: ToolDef = {
     }),
 };
 
-// ── spaces-radar ──────────────────────────────────────────────────────
-//
-// Radar's ledger ("execution items") is derived, non_zero data. It is read
-// ONLY through the radar feed API, never through interact({ model:
-// "executionItem" }): that model resolves to BaseQueryACL (workspaceId and
-// nothing else), so a direct query would return items from channels the
-// caller cannot open. The channel rule lives in radarFeedService/radarAcl,
-// which is exactly what these endpoints run.
-//
-// Read-only by design. resolve / dismiss / reassign are ledger writes
-// attributed to a human in execution_item_mutations; an agent writing them
-// would corrupt that audit trail.
-
 const RADAR_FEEDS = ["pending-me", "waiting-on", "pending-others"] as const;
 
 interface RadarFeedItem {
