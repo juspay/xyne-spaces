@@ -261,7 +261,7 @@ export const SurfaceNudgeCard: React.FC<SurfaceNudgeCardProps> = ({
     const route = `${baseRoute}/${targetChannelId}?tab=tickets&ticketId=${ticketId}${
       conversationId ? `&conversationId=${conversationId}` : ''
     }`;
-    standaloneNavigate(navigate, route);
+    standaloneNavigate(navigate, route, { state: { trackSource: 'nudge' } });
     toast.success('Opened related ticket');
   };
 
@@ -509,6 +509,7 @@ export const SurfaceNudgeCard: React.FC<SurfaceNudgeCardProps> = ({
           initialSubTickets={initialSubTickets}
           initialPriority={initialPriority}
           sourceConversation={sourceConversation}
+          trackSource='nudge'
           onTicketCreated={ticket => {
             setIsEditModalOpen(false);
             trackNudgeActed(nudge.nudgeKind);

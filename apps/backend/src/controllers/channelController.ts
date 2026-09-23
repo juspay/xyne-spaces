@@ -2,6 +2,10 @@ import { Request, Response } from 'express';
 import { WORKSPACE_LEVEL } from '@/integrations/core/sourceScope';
 import { ExternalSourcePlatform } from '@/integrations/core/types';
 import {
+  SOCIAL_MEDIA_PLATFORMS,
+  isSocialMediaPlatform,
+} from '@/integrations/social-media/constants';
+import {
   buildSlackDeskSourceName,
   resolveAppDeskInstalledAppId,
   extractSlackChannelId,
@@ -16,6 +20,7 @@ import { UserGroupRepository } from '../database/repositories/userGroups';
 import { ProjectRepository } from '../database/repositories/projectRepository';
 import { Prisma, type User } from '@prisma/client';
 import { v4 as uuidv4 } from 'uuid';
+import { dlAddressesFor } from '@/services/dlResolver';
 import {
   createForwardedMessageXml,
   parseForwardedMessageXml,
@@ -845,7 +850,7 @@ export class ChannelController {
         name?: string;
         description?: string;
         visibility?: ChannelVisibility;
-        projectId: string;
+        projectId?: string;
         participants?: string[];
         type?: 'DEFAULT' | 'EMAIL' | 'SUPPORT' | 'SLACK' | 'APP' | 'CALL';
         assigneeUserGroupId?: string;
@@ -858,13 +863,21 @@ export class ChannelController {
 
       const userId = req.user!.id;
 
-      // Validate required fields
-      if (!scopeType || !projectId) {
+      // Validate required fields. projectId is OPTIONAL only for a NATIVE channel
+      // (scopeType DEFAULT + type DEFAULT/unset). Everything else still requires a
+      // project: every desk type (EMAIL/SLACK/APP/CALL/SUPPORT/SOCIAL_MEDIA/SDLC — and
+      // any future type), plus DM/GROUP_DM/TICKET/DOCUMENT. Inverted on purpose so a
+      // new desk type is projectId-required by default without editing this check.
+      const isNativeChannel =
+        scopeType === ChannelScopeType.DEFAULT &&
+        (channelType === undefined || channelType === 'DEFAULT');
+      const projectIdRequired = !isNativeChannel;
+      if (!scopeType || (projectIdRequired && !projectId)) {
         res.status(400).json({
-          error: 'ScopeType and projectId are required',
+          error: projectIdRequired ? 'ScopeType and projectId are required' : 'ScopeType is required',
           details: {
             scopeType: !scopeType ? 'ScopeType is required' : undefined,
-            projectId: !projectId ? 'ProjectId is required' : undefined,
+            projectId: projectIdRequired && !projectId ? 'ProjectId is required' : undefined,
           }
         });
         return;
@@ -924,11 +937,12 @@ export class ChannelController {
             res.status(409).json({ error: 'Shared mailbox is disconnected' });
             return;
           }
-          const alreadyClaimed = await db.emailChannelPreference.findUnique({
-            where: { workspaceId_dlEmail: { workspaceId, dlEmail } },
-            select: { channelId: true },
+          const claimants = await db.emailChannelPreference.findMany({
+            where: { workspaceId, OR: [{ dlEmail: { not: null } }, { NOT: { dlAliases: null } }] },
+            select: { dlEmail: true, dlAliases: true },
           });
-          if (alreadyClaimed) {
+          const target = dlEmail.trim().toLowerCase();
+          if (claimants.some(pref => dlAddressesFor(pref).includes(target))) {
             res.status(409).json({ error: 'A desk already exists for this DL' });
             return;
           }
@@ -1059,6 +1073,8 @@ export class ChannelController {
         projectId,
         workspaceId: req.user!.workspaceId!,
         type: (channelType || 'DEFAULT') as ChannelType,
+        // Desk channels: honour the requested board as the default mapping (else oldest).
+        ...(boardId && { defaultBoardId: boardId }),
       };
 
       const channel = await this.channelRepository.create(channelData);
@@ -1124,13 +1140,13 @@ export class ChannelController {
         let resolvedBoardId: string | undefined = boardId;
         if (isDl && !resolvedBoardId) {
           const firstBoard = await db.board.findFirst({
-            where: { projectId: channel.projectId },
+            where: { projectId: projectId },
             orderBy: { createdAt: 'asc' },
             select: { id: true },
           });
           resolvedBoardId = firstBoard?.id;
           if (!resolvedBoardId) {
-            logger.error('Cannot create DL desk: project has no boards', { projectId: channel.projectId });
+            logger.error('Cannot create DL desk: project has no boards', { projectId: projectId });
             await db.channel.delete({ where: { id: channel.id } }).catch(() => {});
             res.status(409).json({ error: 'Project has no boards configured — cannot create DL desk' });
             return;
@@ -1173,7 +1189,7 @@ export class ChannelController {
           let callBoardId = boardId;
           if (!callBoardId) {
             const firstBoard = await db.board.findFirst({
-              where: { projectId: channel.projectId },
+              where: { projectId: projectId },
               orderBy: { createdAt: 'asc' },
               select: { id: true },
             });
@@ -1209,7 +1225,7 @@ export class ChannelController {
           let slackBoardId = boardId;
           if (!slackBoardId) {
             const firstBoard = await db.board.findFirst({
-              where: { projectId: channel.projectId },
+              where: { projectId: projectId },
               orderBy: { createdAt: 'asc' },
               select: { id: true },
             });
@@ -1291,7 +1307,7 @@ export class ChannelController {
           let appBoardId = boardId;
           if (!appBoardId) {
             const firstBoard = await db.board.findFirst({
-              where: { projectId: channel.projectId },
+              where: { projectId: projectId },
               orderBy: { createdAt: 'asc' },
               select: { id: true },
             });
@@ -1373,7 +1389,7 @@ export class ChannelController {
         scopeType: channel.scopeType as ChannelScopeType,
         description: channel.description,
         visibility: channel.visibility as ChannelVisibility,
-        projectId: channel.projectId,
+        projectId: projectId ?? '',
         createdAt: channel.createdAt,
       };
 
@@ -1539,9 +1555,10 @@ export class ChannelController {
 
       let connectedLabel: string | null = null;
       let outboundConfigured = true;
-      let googlePlayApps: Array<{
+      let deskApps: Array<{
         id: string;
         displayName: string;
+        externalIdentifier: string | null;
         packageName: string | null;
         isActive: boolean;
       }> = [];
@@ -1557,9 +1574,9 @@ export class ChannelController {
         );
       } else if (source?.sourceType === ExternalSourcePlatform.SLACK_DESK) {
         connectedLabel = extractSlackChannelId(source.name);
-      } else if (source?.sourceType === ExternalSourcePlatform.GOOGLE_PLAY) {
+      } else if (sourceType && isSocialMediaPlatform(sourceType)) {
         const reviewSources = await db.externalSource.findMany({
-          where: { channelId, workspaceId, sourceType: ExternalSourcePlatform.GOOGLE_PLAY },
+          where: { channelId, workspaceId, sourceType: { in: [...SOCIAL_MEDIA_PLATFORMS] } },
           select: {
             id: true,
             displayName: true,
@@ -1570,15 +1587,16 @@ export class ChannelController {
         });
         const activeReviewSources = reviewSources.filter(reviewSource => reviewSource.isActive);
         isConnected = activeReviewSources.length > 0;
-        googlePlayApps = reviewSources.map(reviewSource => ({
+        deskApps = reviewSources.map(reviewSource => ({
           id: reviewSource.id,
           displayName: reviewSource.displayName,
+          externalIdentifier: reviewSource.externalIdentifier,
           packageName: reviewSource.externalIdentifier,
           isActive: reviewSource.isActive,
         }));
         connectedLabel = activeReviewSources
           .map(reviewSource => reviewSource.displayName)
-          .join(', ') || 'No active Google Play apps';
+          .join(', ') || 'No active apps';
       }
 
       const fromDisplay = (source?.displayName ?? '').match(/[\w.+-]+@[\w.-]+\.[\w.-]+/)?.[0];
@@ -1586,7 +1604,7 @@ export class ChannelController {
         const email = fromDisplay.toLowerCase();
         res
           .status(200)
-          .json({ email, isConnected, hasSource, sourceType, connectedLabel: connectedLabel ?? email, outboundConfigured, googlePlayApps });
+          .json({ email, isConnected, hasSource, sourceType, connectedLabel: connectedLabel ?? email, outboundConfigured, deskApps, googlePlayApps: deskApps });
         return;
       }
 
@@ -1603,12 +1621,12 @@ export class ChannelController {
           const email = owner.email.toLowerCase();
           res
             .status(200)
-            .json({ email, isConnected, hasSource, sourceType, connectedLabel: connectedLabel ?? email, outboundConfigured, googlePlayApps });
+            .json({ email, isConnected, hasSource, sourceType, connectedLabel: connectedLabel ?? email, outboundConfigured, deskApps, googlePlayApps: deskApps });
           return;
         }
       }
 
-      res.status(200).json({ email: null, isConnected, hasSource, sourceType, connectedLabel, outboundConfigured, googlePlayApps });
+      res.status(200).json({ email: null, isConnected, hasSource, sourceType, connectedLabel, outboundConfigured, deskApps, googlePlayApps: deskApps });
     } catch (error) {
       logger.error('Error in getConnectedEmail:', error);
       res.status(500).json({ error: 'Internal server error' });
@@ -2594,13 +2612,14 @@ export class ChannelController {
           orgRole: req.user!.orgRole,
           memberId: req.user!.memberId,
         });
-        for (const participant of result.addedParticipants) {
+        // Awaited so "added" lands before the mention the client's prompt delete delivers next.
+        await Promise.all(result.addedParticipants.map(participant =>
           handler.onInsert({
             entityId: participant.participantId,
             entityType: 'channel_participants',
             operation: 'insert'
-          }).catch(err => logger.error('Side-effect handler error: channel_participants onInsert', err));
-        }
+          }).catch(err => logger.error('Side-effect handler error: channel_participants onInsert', err))
+        ));
       }
 
       const response: AddGroupDmParticipantsResponse = {

@@ -41,7 +41,8 @@ import {
 } from '@/services/googleCalendarApi';
 import { buildGoogleEventBody, hashEventBody } from '@/services/calendarEventPayload';
 import { normalizeCalendarOwnerEmail } from '@/services/calendarCallStore.utils';
-import { runAsServiceActor, runAsSystem } from '@/database/tenant/context';
+import { runAsServiceActor } from '@/database/tenant/context';
+import { findCallForCalendarPush } from '@/bypassAcl/callServices';
 import { buildCallInviteUrl } from '@/utils/urlUtils';
 import { logger } from '@/utils/logger';
 
@@ -133,8 +134,10 @@ async function removePushedEvent(
     return;
   }
 
+  // sendUpdates:'none' — Xyne notifies participants itself; Google must not
+  // also email a cancellation for a call that was cancelled inside Xyne.
   await deleteGoogleEvent(resolved.credentials.accessToken, pushState.eventId, {
-    sendUpdates: 'all',
+    sendUpdates: 'none',
   });
   await repositories.calls.setGoogleCalendarPushState(callId, null);
 
@@ -152,7 +155,7 @@ async function removePushedEvent(
 export async function syncCallToGoogleCalendar(callId: string): Promise<Date | null> {
   // The job carries only a call id, so the row's own workspaceId is read
   // cross-workspace first and every later query runs inside that scope.
-  const call = await runAsSystem(() => repositories.calls.findForCalendarPush(callId));
+  const call = await findCallForCalendarPush(callId);
 
   if (!call) {
     logger.warn(`${TAG} Call not found; nothing to sync`, { callId });
@@ -207,11 +210,10 @@ export async function syncCallToGoogleCalendar(callId: string): Promise<Date | n
 
     const contentHash = hashEventBody(body);
 
-    // Nothing about the event changed since the last push. Returning here is
-    // not just an optimisation: `sendUpdates: 'all'` makes Google email every
-    // attendee on an update, and reconciles run for reasons that have nothing
-    // to do with the calendar (a series cascade, a buffer replenishment, a
-    // retry). Those must not surface as "this meeting changed".
+    // Nothing about the event changed since the last push. Reconciles run for
+    // reasons that have nothing to do with the calendar (a series cascade, a
+    // buffer replenishment, a retry), so skipping a no-op write also avoids
+    // needless churn on every attendee's calendar entry.
     if (pushState?.eventId && pushState.contentHash === contentHash) {
       logger.info(`${TAG} Event already matches call; skipping update`, {
         callId,
@@ -220,13 +222,14 @@ export async function syncCallToGoogleCalendar(callId: string): Promise<Date | n
       return;
     }
 
-    // sendUpdates:'all' on every write — unlike the inbound reconciler these
-    // ARE the organizer's own changes, so invitees should be told about them.
+    // sendUpdates:'none' on every write. The event (and the Xyne join link)
+    // still lands on each invitee's calendar; Google just does not send the
+    // invitation/update emails — Xyne owns participant notification.
     let event;
     if (pushState?.eventId) {
       try {
         event = await patchGoogleEvent(resolved.credentials.accessToken, pushState.eventId, body, {
-          sendUpdates: 'all',
+          sendUpdates: 'none',
         });
       } catch (err) {
         if (!(err instanceof GoogleCalendarEventGoneError)) throw err;
@@ -237,12 +240,12 @@ export async function syncCallToGoogleCalendar(callId: string): Promise<Date | n
           eventId: pushState.eventId,
         });
         event = await insertGoogleEvent(resolved.credentials.accessToken, body, {
-          sendUpdates: 'all',
+          sendUpdates: 'none',
         });
       }
     } else {
       event = await insertGoogleEvent(resolved.credentials.accessToken, body, {
-        sendUpdates: 'all',
+        sendUpdates: 'none',
       });
     }
 

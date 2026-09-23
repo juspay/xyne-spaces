@@ -17,6 +17,8 @@ export interface CreateChannelFormData {
   description?: string;
   visibility: 'public' | 'private';
   topicTags: string[];
+  // Native channels may pass '' (no project); channelService omits it from the request.
+  // Desk channels always pass a real id.
   projectId: string;
   assigneeUserGroupId?: string;
   boardId?: string;
@@ -29,7 +31,8 @@ export interface CreateChannelRequest {
   description?: string;
   topicTags?: string[];
   visibility?: 'PUBLIC' | 'PRIVATE';
-  projectId: string;
+  // Optional for native channels (decoupling); required for desk channels.
+  projectId?: string;
   participants?: string[];
   type?: 'DEFAULT' | 'EMAIL' | 'SUPPORT' | 'SLACK' | 'APP' | 'CALL';
   assigneeUserGroupId?: string;
@@ -127,7 +130,8 @@ export class ChannelService {
       scopeType: ChannelScopeType.DEFAULT,
       description: formData.description || '',
       visibility: formData.visibility === 'public' ? 'PUBLIC' : 'PRIVATE',
-      projectId: formData.projectId,
+      // Omit when no project (native channels may be projectless); backend requires it only for desks.
+      ...(formData.projectId ? { projectId: formData.projectId } : {}),
       type: channelType,
       ...(formData.assigneeUserGroupId && { assigneeUserGroupId: formData.assigneeUserGroupId }),
       ...(formData.boardId && { boardId: formData.boardId }),

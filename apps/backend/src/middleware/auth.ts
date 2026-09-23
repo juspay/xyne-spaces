@@ -11,6 +11,7 @@ import { jwtService } from '../services/jwtService';
 import { verifySyncServiceToken } from '@/zero/sync/serviceIdentity';
 import '../types/express'; // Import the Express type extensions
 import { config } from '@/config/env';
+import { isRefreshAllowed } from '../services/sessionRefreshValidator';
 
 export class AuthMiddleware {
   // private googleClient?: OAuth2Client;
@@ -592,24 +593,33 @@ export class AuthMiddleware {
         return { success: false, error: 'Invalid session' };
       }
 
-      // Check if session is still active and not expired
-      const now = new Date();
-      const isSessionExpired = now > session.refreshTokenExpiry;
-      logger.info(`[AUTH] refreshTokenBySession validating session state`, {
-        userId: session.user.id,
-        sessionStatus: session.status,
-        refreshTokenExpiry: session.refreshTokenExpiry.toISOString(),
-        isSessionExpired,
-      });
-
-      if (session.status !== 'ACTIVE' || isSessionExpired) {
-        logger.warn(`[AUTH] refreshTokenBySession failed: session inactive or expired`, {
+      // ENABLE_PROVIDER_REVOCATION_CHECK gates the refresh-validity decision.
+      // Disabled → v1's original inline check (session status + expiry only)
+      // runs verbatim, calling nothing new. Enabled → the shared isRefreshAllowed
+      // decision (status/expiry/leftAt + provider revocation + deactivation
+      // cleanup), same as v2 authV2Middleware.
+      if (!config.enableProviderRevocationCheck) {
+        // Check if session is still active and not expired
+        const now = new Date();
+        const isSessionExpired = now > session.refreshTokenExpiry;
+        logger.info(`[AUTH] refreshTokenBySession validating session state`, {
           userId: session.user.id,
           sessionStatus: session.status,
           refreshTokenExpiry: session.refreshTokenExpiry.toISOString(),
-          now: now.toISOString(),
+          isSessionExpired,
         });
-        return { success: false, error: 'Session expired' };
+
+        if (session.status !== 'ACTIVE' || isSessionExpired) {
+          logger.warn(`[AUTH] refreshTokenBySession failed: session inactive or expired`, {
+            userId: session.user.id,
+            sessionStatus: session.status,
+            refreshTokenExpiry: session.refreshTokenExpiry.toISOString(),
+            now: now.toISOString(),
+          });
+          return { success: false, error: 'Session expired' };
+        }
+      } else if (!(await isRefreshAllowed(session))) {
+        return { success: false, error: 'Session invalid or revoked' };
       }
 
       // Generate a new custom JWT token for the user

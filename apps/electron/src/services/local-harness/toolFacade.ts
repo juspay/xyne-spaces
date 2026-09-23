@@ -13,7 +13,7 @@ interface JsonRpcRequest {
 
 export interface ToolFacadeHandlers {
   listTools: () => Promise<LocalHarnessToolSpec[]>;
-  callTool: (spec: LocalHarnessToolSpec, args: Record<string, unknown>) => Promise<{ ok: boolean; content: string }>;
+  callTool: (spec: LocalHarnessToolSpec, args: Record<string, unknown>) => Promise<{ ok: boolean; content: string; image?: { data: string; mimeType: string } }>;
   onToolStarted?: (toolName: string) => void;
 }
 
@@ -22,8 +22,14 @@ export class ToolFacadeServer {
   private port = 0;
   private readonly token = randomBytes(32).toString('base64url');
   private toolsByName = new Map<string, LocalHarnessToolSpec>();
+  private cachedTools: LocalHarnessToolSpec[] = [];
 
   constructor(private readonly handlers: ToolFacadeHandlers) {}
+
+  primeTools(tools: LocalHarnessToolSpec[]): void {
+    this.cachedTools = tools;
+    this.toolsByName = new Map(tools.map((t) => [t.name, t]));
+  }
 
   async start(): Promise<{ url: string; token: string }> {
     if (this.server) return { url: this.url(), token: this.token };
@@ -47,6 +53,7 @@ export class ToolFacadeServer {
     if (!server) return;
     this.server = null;
     this.toolsByName.clear();
+    this.cachedTools = [];
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
 
@@ -136,8 +143,8 @@ export class ToolFacadeServer {
         return {};
 
       case 'tools/list': {
-        const tools = await this.handlers.listTools();
-        this.toolsByName = new Map(tools.map((t) => [t.name, t]));
+        const tools = this.cachedTools.length > 0 ? this.cachedTools : await this.handlers.listTools();
+        this.primeTools(tools);
         return {
           tools: tools.map((t) => ({
             name: t.name,
@@ -163,7 +170,10 @@ export class ToolFacadeServer {
           args && typeof args === 'object' && !Array.isArray(args) ? (args as Record<string, unknown>) : {},
         );
         return {
-          content: [{ type: 'text', text: result.content }],
+          content: [
+            { type: 'text', text: result.content },
+            ...(result.image ? [{ type: 'image', data: result.image.data, mimeType: result.image.mimeType }] : []),
+          ],
           ...(result.ok ? {} : { isError: true }),
         };
       }

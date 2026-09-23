@@ -302,6 +302,21 @@ export class GitHubService implements VcsClient {
     throw lastError || new Error('GitHub API request failed after max retries');
   }
 
+  // Every file path in the repo tree at the given ref (recursive, blobs only).
+  async listRepoTree(owner: string, repo: string, ref: string): Promise<string[]> {
+    const data = await this.restRequest<{
+      tree?: { path: string; type: string }[];
+      truncated?: boolean;
+    }>(
+      `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/git/trees/${encodeURIComponent(ref)}?recursive=1`,
+    );
+    if (data.truncated) {
+      // GitHub caps recursive trees (~100k entries / 7MB); the list is partial.
+      logger.warn('[GitHubService] repo tree truncated, file list is partial', { owner, repo, ref });
+    }
+    return (data.tree ?? []).filter(entry => entry.type === 'blob').map(entry => entry.path);
+  }
+
   // Map GitHub file status → ChangeEntry.type so downstream code (ChangeDetector,
   // diffParser) stays provider-agnostic.
   private mapGitHubFileStatus(
@@ -458,8 +473,7 @@ export class GitHubService implements VcsClient {
       logger.info(
         `GitHub: found ${ids.length} commit(s) between ${sinceCommitId}..${untilCommitId} in ${owner}/${repo}`,
       );
-      // Match Bitbucket's contract: include the since-commit at the tail.
-      return [...ids, sinceCommitId];
+      return ids;
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
       logger.error(

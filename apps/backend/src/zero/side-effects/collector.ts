@@ -55,6 +55,7 @@ export async function collectSideEffectJobs(
         isDeleted: message.isDeleted,
         channelId: conversation?.channelId ?? undefined,
         isThreadReply: !!conversation && conversation.initialMessageId !== message.messageId,
+        metadata: message.metadata,
       };
     }
   }
@@ -180,11 +181,35 @@ export async function collectSideEffectJobs(
     }
   }
 
+  // Capture the mapping's channel/label/conversation before it is deleted so the
+  // handler can invalidate the channel's label-unread-counts room.
+  if (operation === 'delete' && table === 'conversation_label_mappings') {
+    const mapping = await tx.run(zql.conversation_label_mappings.where('id', entityId).one());
+    if (mapping) {
+      previousValue = {
+        channelId: mapping.channelId,
+        labelId: mapping.labelId,
+        conversationId: mapping.conversationId,
+      };
+    }
+  }
+
   if (operation === 'update' && table === 'email_reads') {
     const entity = await tx.run(zql.email_reads.where('id', entityId).one());
     if (entity) {
       previousValue = {
         lastReadEmailId: entity.lastReadEmailId,
+      };
+    }
+  }
+
+  if (operation === 'delete' && table === 'email_reads') {
+    const entity = await tx.run(zql.email_reads.where('id', entityId).one());
+    if (entity) {
+      previousValue = {
+        lastReadEmailId: entity.lastReadEmailId,
+        ticketId: entity.ticketId,
+        userId: entity.userId,
       };
     }
   }
@@ -279,6 +304,7 @@ function extractEntityId(table: TableName, args: any): string | null {
     case 'models':
     case 'tools':
     case 'agent_tools_mappings':
+    case 'conversation_label_mappings':
     case 'tickets':
     case 'sub_tickets':
     case 'ticket_sub_ticket_mappings':

@@ -7,10 +7,10 @@ import jwt from 'jsonwebtoken';
 import { Request, Response } from 'express';
 import { invitationService } from '@/services/invitationService';
 import { DatabaseClient } from '@/database/client';
-import { withWorkspaceScope, runAsSystem } from '@/database/tenant/context';
+import { withWorkspaceScope } from '@/database/tenant/context';
+import { createOwnerInvitation, syncAllBotUsersForNewWorkspace } from '@/bypassAcl/orgServices';
 import { logger } from '@/utils/logger';
 import { config } from '@/config/env';
-import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service.js';
 import { WorkspaceJoinPolicy, WorkspaceType, ProjectType, Status, WorkspaceRole, OrgRole } from '@xyne/shared';
 import { aiProvisioningService } from '@/services/aiProvisioningService';
 import { isOrganizationPolicyError, organizationDomainService } from '@/services/organizationDomainService';
@@ -551,20 +551,12 @@ export class InvitationController {
       });
 
       // Sync all hardcoded bots into the newly provisioned workspace
-      await runAsSystem(() => unifiedBotUserService.syncAllBotUsers(workspace.id));
+      await syncAllBotUsersForNewWorkspace(workspace.id);
 
       // Create invitation outside the transaction (sends email — non-DB side-effect)
-      // Run as system because the new org/workspace is not the caller's own —
+      // Runs as system because the new org/workspace is not the caller's own —
       // the OrganizationsACL would filter out the org lookup inside createInvitation.
-      const invitation = await runAsSystem(() =>
-        invitationService.createInvitation({
-          email: normalizedOwnerEmail,
-          role: WorkspaceRole.OWNER,
-          workspaceId: workspace.id,
-          orgId: org.orgId,
-          invitedBy,
-        }),
-      );
+      const invitation = await createOwnerInvitation(normalizedOwnerEmail, workspace.id, invitedBy, org.orgId);
       invitationId = invitation.invitationId ?? invitation.id;
 
       const provisionInvitationLink = await buildInvitationLink({ req, workspaceId: workspace.id, invitationId });

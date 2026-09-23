@@ -1,6 +1,6 @@
 <div align="center">
 
-# Xyne Spaces
+# [Xyne Spaces](https://xyne.ai)
 
 **The org OS — your organization's context layer, with collaborative apps built
 around it. Real-time, permission-aware and built for agents.**
@@ -16,7 +16,7 @@ Automations · Customer Support Desk · Chat · Canvas · Tickets — adopted as
 choose, where your team can do the work directly. Work done in them lands straight in the same context store —
 with each read and write filtered through the same permission model.
 
-[![Xyne Spaces](docs/assets/spaces-badge.svg)](https://spaces.xyne.ai) [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE) [![CI](https://github.com/juspay/xyne-spaces/actions/workflows/CI-push.yml/badge.svg?branch=main)](https://github.com/juspay/xyne-spaces/actions/workflows/CI-push.yml) [![TypeScript](https://img.shields.io/badge/TypeScript-5-3178c6.svg)](https://www.typescriptlang.org/) [![PRs welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
+[Quickstart](#quickstart) · [Community](https://spaces.xyne.ai/community) ·  [Architecture](#architecture) · [Agents](#agents-and-the-sandbox) · [MCP tools](#mcp-tools) · [Documentation](#documentation) · [Contributing](#contributing) · [License](LICENSE) · [PRs welcome](CONTRIBUTING.md)
 
 </div>
 
@@ -42,6 +42,8 @@ with each read and write filtered through the same permission model.
 
 ---
 
+<a id="why-xyne-spaces"></a>
+
 ## Why Xyne Spaces?
 
 **Context is the foundation.** Every conversation, decision, ticket, document, and call adds to your organization’s understanding of what it knows, how it works, and where it’s going. Query responses, automation, and agents are only as good as the context they can reach.
@@ -57,6 +59,8 @@ Accessing context — through search or agents — must respect the permissions 
 * **Agents inherit the user’s access.** Agents act as the person invoking them, so they can only search, read, and act on context that person can access. There is no privileged bypass.
 
 ---
+
+<a id="what-can-i-do-with-xyne-spaces"></a>
 
 ## What can I do with Xyne Spaces?
 
@@ -122,11 +126,15 @@ someone has to remember.
 
 ---
 
+<a id="architecture"></a>
+
 ## Architecture
 
 <div align="center">
   <img src="docs/assets/architecture.svg" alt="Xyne Spaces layered architecture" width="960">
 </div>
+
+<a id="agents-and-the-sandbox"></a>
 
 ## Agents and the sandbox
 
@@ -166,11 +174,24 @@ acting as you needs your consent.
 
 ---
 
+<a id="quickstart"></a>
+
 ## Quickstart
 
-**Prerequisites** — Node.js 22.x, pnpm 10.15.0, and Docker (or OrbStack / Podman) with
-Compose. Details in [Prerequisites](docs/setup/prerequisites.md) — or, for a machine
-with nothing installed yet, follow [Local Setup](docs/setup/local-setup.md) end to end.
+**Prerequisites** — Node.js 22.x, pnpm 10.15.0, and a container runtime with Compose.
+
+On macOS we recommend **OrbStack** — lighter and faster than Docker Desktop. Install it
+with Homebrew (or download from [orbstack.dev](https://orbstack.dev)) and launch it once
+so the daemon starts:
+
+```bash
+brew install orbstack
+open -a OrbStack
+```
+
+Docker Desktop and Podman also work. Details in
+[Prerequisites](docs/setup/prerequisites.md) — or, for a machine with nothing installed
+yet, follow [Local Setup](docs/setup/local-setup.md) end to end.
 
 ```bash
 git clone https://github.com/juspay/xyne-spaces.git
@@ -221,6 +242,8 @@ Stuck? → [Troubleshooting](docs/setup/troubleshooting.md). Configuring model p
 
 ---
 
+<a id="connectors"></a>
+
 ## Connectors
 
 Context arrives two ways. **Live sync** is continuous — webhooks in, scheduled pulls out.
@@ -244,6 +267,8 @@ the moment of use.
 
 ---
 
+<a id="org-apps"></a>
+
 ## Org apps
 
 Eight apps, adopted independently. All of them read and write through the same context
@@ -261,6 +286,8 @@ store and permission model.
 | **Tickets** | Tickets and boards for planning and tracking work. |
 
 ---
+
+<a id="mcp-tools"></a>
 
 ## MCP tools
 
@@ -284,6 +311,8 @@ rather than handing every run the full catalogue.
 
 ---
 
+<a id="demos"></a>
+
 ## Demos
 
 > 📹 Walkthroughs are being recorded. Links land here as they are published.
@@ -298,6 +327,8 @@ rather than handing every run the full catalogue.
 | Migrating from Jira / Confluence | Preview, mapping and import | _coming soon_ |
 
 ---
+
+<a id="repository-map"></a>
 
 ## Repository map
 
@@ -335,6 +366,19 @@ xyne-spaces/
 
 ---
 
+<a id="deploy"></a>
+
+## Deploy
+
+Run Xyne Spaces on your own GCP, AWS or Azure account with Terraform and Argo CD: one command
+brings up the network, cluster, managed Postgres/Redis/object storage, TLS ingress and every
+service. Start at [deployment/README.md](deployment/README.md), then follow the guide for your
+cloud ([GCP](deployment/docs/gcp.md), [AWS](deployment/docs/aws.md), [Azure](deployment/docs/azure.md)).
+
+---
+
+<a id="documentation"></a>
+
 ## Documentation
 
 | Guide | |
@@ -350,6 +394,8 @@ xyne-spaces/
 
 ---
 
+<a id="contributing"></a>
+
 ## Contributing
 
 Read [CONTRIBUTING.md](CONTRIBUTING.md) first — it covers what the tooling enforces, so a
@@ -361,12 +407,16 @@ For anything larger than a small fix, open an issue first so the approach can be
 before it is written. Participation is governed by our
 [Code of Conduct](CODE_OF_CONDUCT.md).
 
+<a id="feature-requests-and-bugs"></a>
+
 ## Feature requests and bugs
 
 - **Bug** — [open a bug report](https://github.com/juspay/xyne-spaces/issues/new?template=bug_report.yml)
   with what you ran, what happened, and the output.
 - **Feature** — [open a feature request](https://github.com/juspay/xyne-spaces/issues/new?template=feature_request.yml)
   describing the problem before the solution.
+
+<a id="license"></a>
 
 ## License
 

@@ -72,7 +72,7 @@ in
         Environment variables to set in the container.
       '';
       example = {
-        API_KEY = "devkey";
+        API_KEY = "localdevkey";
         LOG_LEVEL = "info";
       };
     };

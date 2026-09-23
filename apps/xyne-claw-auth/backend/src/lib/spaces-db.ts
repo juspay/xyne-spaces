@@ -178,6 +178,7 @@ export type SpacesAuthCaller =
   | "artifact-apps"
   | "artifact-app-agents"
   | "artifact-app-storage"
+  | "conversation-artifacts"
   | "unknown";
 
 export async function getSpacesAuthForUser(

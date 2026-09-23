@@ -74,6 +74,7 @@ import {
 import { useMaxCameraHeight, filterQualityOptionsByMax } from '../../../hooks/useMaxCameraQuality';
 import { useVisibleNavigationItems } from '../../../hooks/useVisibleNavigationItems';
 import { useToolbarItems } from '../../../hooks/useToolbarItems';
+import { AI_TOOLBAR_PATH, useAiLaunchPreference } from '../../../hooks/useAiLaunchPreference';
 import type { PreferenceSection, PreferencesProps, NavItem } from '.';
 import { disconnectCalendar } from '../../../services/clients/calendarApi';
 import { toast } from 'sonner';
@@ -980,7 +981,6 @@ const PasswordSection: FC = () => {
 
 // ─── Developer ──────────────────────────────────────────────────────────────
 const DeveloperSection: FC<{ state: PreferencesState }> = ({ state }) => {
-  const { isMobile } = usePlatform();
   return (
     <div className='space-y-4'>
       <SectionHeader title='Developer' subtitle='Debug settings and app information' />
@@ -996,21 +996,21 @@ const DeveloperSection: FC<{ state: PreferencesState }> = ({ state }) => {
           />
         </div>
 
-        {!isMobile && (
-          <div className='flex items-center justify-between gap-4 p-3 rounded-lg border border-border bg-muted/30'>
-            <div>
-              <p className='text-sm font-medium text-foreground'>Show Claw Agents</p>
-              <p className='text-xs text-muted-foreground mt-0.5'>
-                Show the Claw Agents option in the Spaces sidebar.
-              </p>
-            </div>
-            <Switch
-              id='show-claw-agents'
-              checked={state.showClawDashboard}
-              onCheckedChange={state.setShowClawDashboard}
-            />
+        <div className='flex items-center justify-between gap-4 p-3 rounded-lg border border-border bg-muted/30'>
+          <div>
+            <p className='text-sm font-medium text-foreground'>Streams</p>
+            <p className='text-xs text-muted-foreground mt-0.5'>
+              Arrange channels, boards, tickets and threads side by side in one scrolling deck. Off
+              while it is new — turning it on adds Streams to the Toolbar list, where you can put it
+              in the sidebar.
+            </p>
           </div>
-        )}
+          <Switch
+            id='show-streams'
+            checked={state.showStreams}
+            onCheckedChange={state.setShowStreams}
+          />
+        </div>
 
         {detectReactNativeWebView() && (
           <Button
@@ -1071,6 +1071,7 @@ const DeveloperSection: FC<{ state: PreferencesState }> = ({ state }) => {
 const ToolbarSection: FC<{ state: PreferencesState }> = () => {
   const items = useVisibleNavigationItems();
   const { toolbarPaths, setInToolbar } = useToolbarItems();
+  const { setAiInToolbar } = useAiLaunchPreference();
 
   return (
     <div className='space-y-4'>
@@ -1097,7 +1098,11 @@ const ToolbarSection: FC<{ state: PreferencesState }> = () => {
                 <Switch
                   aria-label={`Show ${item.label} in toolbar`}
                   checked={checked}
-                  onCheckedChange={value => setInToolbar(item.path, value)}
+                  onCheckedChange={value =>
+                    item.path === AI_TOOLBAR_PATH
+                      ? setAiInToolbar(value)
+                      : setInToolbar(item.path, value)
+                  }
                 />
               </div>
             </div>

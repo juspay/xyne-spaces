@@ -12,7 +12,7 @@ import { hasConnectorDefinition, resolveConnectorDefinition } from "../mcp/conne
 import { BITBUCKET_CUSTOM_TOOLS, handleUploadPrScreenshot, handleGetPrComments, handleGetPrTemplate, handleListPullRequests, buildUpstreamBitbucketCitation } from "../mcp/adapters/bitbucket.js";
 import { GITHUB_CUSTOM_TOOLS, handleUploadPrAttachment } from "../mcp/adapters/github.js";
 import { GRAFANA_CUSTOM_TOOLS, handleGrafanaQueryLogs, handleGrafanaListMetrics, handleGrafanaQueryMetrics, handleGrafanaQueryDatabase, buildUpstreamGrafanaCitation, prefixChunk } from "../mcp/adapters/grafana.js";
-import { SDLC_TOOL_NAMES, type Citation } from "xyne-claw-shared";
+import { type Citation } from "xyne-claw-shared";
 import { SLACK_CUSTOM_TOOLS, handleSlackFindChannel } from "../mcp/adapters/slack.js";
 import { POSTMAN_CUSTOM_TOOLS, handleRunMonitor } from "../mcp/adapters/postman.js";
 import {
@@ -46,7 +46,6 @@ import {
   injectDefaults as injectAttachedContextDefaults,
 } from "../mcp/attached-context-injector.js";
 import { loadRunScalars } from "../mcp/run-scalars.js";
-import { injectSdlcBaselineRunContext } from "../mcp/sdlc-baseline-run-context.js";
 import { KB_TOOLS, KB_TOOL_NAMES, type KbToolName } from "../mcp/kb-tools.js";
 import {
   handleKbListResources,
@@ -78,12 +77,9 @@ import {
   subagentReferencingTool,
   type SubagentToolRefs,
 } from "./mcp-agent-tools.js";
+import { listTools, searchTools } from "../services/tool-index/index.js";
 
 const log = createLogger("mcp");
-
-function sanitizeForLog(value: unknown): string {
-  return String(value).replace(/[\r\n]+/g, " ");
-}
 
 function sanitizeForLog(value: unknown): string {
   return String(value).replace(/[\r\n]+/g, " ");
@@ -417,12 +413,46 @@ async function resolveServerNameForMcpCall(serverType: string, backendId?: strin
   return server?.name ?? serverType;
 }
 
-export function signAction(action: Record<string, unknown>): string {
-  return crypto.createHmac("sha256", CONFIG.actionSigningKey).update(JSON.stringify(action)).digest("hex");
+function canonicalize(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonicalize);
+  if (value && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    return Object.keys(record)
+      .sort()
+      .reduce<Record<string, unknown>>((acc, key) => {
+        acc[key] = canonicalize(record[key]);
+        return acc;
+      }, {});
+  }
+  return value;
 }
 
-function signLegacyAction(action: Record<string, unknown>): string {
-  return crypto.createHmac("sha256", CONFIG.legacyActionSigningKey).update(JSON.stringify(action)).digest("hex");
+export function canonicalActionPayload(action: Record<string, unknown>): string {
+  return JSON.stringify(canonicalize(action));
+}
+
+function hmac(key: string | Buffer, payload: string): string {
+  return crypto.createHmac("sha256", key).update(payload).digest("hex");
+}
+
+export function signAction(action: Record<string, unknown>): string {
+  return hmac(CONFIG.actionSigningKey, canonicalActionPayload(action));
+}
+
+function candidateSignatures(action: Record<string, unknown>): string[] {
+  const canonical = canonicalActionPayload(action);
+  const raw = JSON.stringify(action);
+  const payloads = canonical === raw ? [canonical] : [canonical, raw];
+  const keys = [CONFIG.actionSigningKey, CONFIG.legacyActionSigningKey].filter((k) => Boolean(k));
+  return keys.flatMap((key) => payloads.map((payload) => hmac(key, payload)));
+}
+
+function matchesAny(action: Record<string, unknown>, signature: string): boolean {
+  const given = Buffer.from(signature, "hex");
+  return candidateSignatures(action).some((candidate) => {
+    const current = Buffer.from(candidate, "hex");
+    return current.length === given.length && crypto.timingSafeEqual(current, given);
+  });
 }
 
 /**
@@ -854,9 +884,8 @@ async function loadEffectiveCredentialsWithSpacesFallback(
 }
 
 export function verifyActionSignature(action: Record<string, unknown>, signature: string): boolean {
-  const expected = signAction(action);
   try {
-    return crypto.timingSafeEqual(Buffer.from(expected, "hex"), Buffer.from(signature, "hex"));
+    return matchesAny(action, signature);
   } catch {
     return false;
   }
@@ -867,13 +896,7 @@ export function verifyActionSignatureAny(
   signature: string,
 ): boolean {
   try {
-    const given = Buffer.from(signature, "hex");
-    return actions.some((action) => {
-      const current = Buffer.from(signAction(action), "hex");
-      if (current.length === given.length && crypto.timingSafeEqual(current, given)) return true;
-      const legacy = Buffer.from(signLegacyAction(action), "hex");
-      return legacy.length === given.length && crypto.timingSafeEqual(legacy, given);
-    });
+    return actions.some((action) => matchesAny(action, signature));
   } catch {
     return false;
   }
@@ -1549,6 +1572,9 @@ router.post("/:sessionId/mcp/call", async (req: Request<{ sessionId: string }>, 
         callServerName,
         tool,
         parseGatewayServerType,
+        // Connector is the source of record for write tools, so the call gate's
+        // open-palette check matches what the listing already showed.
+        (await resolveConnectorDefinition(serverType).catch(() => undefined))?.writeTools?.includes(tool),
       ) &&
       // Custom-subagent escape hatch: tools referenced by the agent's enabled
       // subagent definitions are callable even though the agent's own config
@@ -1776,17 +1802,6 @@ router.post("/:sessionId/mcp/call", async (req: Request<{ sessionId: string }>, 
     // attached, this is a no-op fast path.
     const attachedItems = await loadAttachedContextForSession(req.params.sessionId);
     let effectiveParams = injectAttachedContextDefaults(serverType, tool, params ?? {}, attachedItems);
-
-    // Baseline identity is trusted run state, not model memory. Compaction can
-    // remove the original task, so force-inject persisted values on every call.
-    if (
-      serverType === "xyne-spaces" &&
-      tool === SDLC_TOOL_NAMES.mutateArtifact &&
-      effectiveParams["artifactType"] === "BASELINE"
-    ) {
-      const run = await agentRunRepository.findBySessionId(req.params.sessionId).catch(() => null);
-      effectiveParams = injectSdlcBaselineRunContext(effectiveParams, run?.metadata);
-    }
 
     // xyne-dashboard: force-set the run's dashboard scalars (stored in /run,
     // see mcp/run-scalars.ts). Authoritative — overwrites anything the model
@@ -2363,6 +2378,43 @@ router.post("/:sessionId/actions/sign", async (req: Request<{ sessionId: string 
     res.json({ success: true, data: { ...signedAction, signature: signedSignature } });
   } catch (err) {
     log.error("[actions/sign] error:", err);
+    res.status(500).json({ success: false, error: "Internal server error" });
+  }
+});
+
+/**
+ * GET /:sessionId/mcp/tools/search
+ *
+ * Backs the `search-tools` meta-tool for whole-deployment queries. Org comes
+ * from the session, not a query param a caller could set.
+ *
+ * Must stay nested under `/mcp/`: `requireStrictS2S` + `requireSessionToken`
+ * are registered on that prefix — a sibling path would be unauthenticated.
+ */
+router.get("/:sessionId/mcp/tools/search", async (req: Request<{ sessionId: string }>, res: Response) => {
+  try {
+    const userId = req.session!.userId;
+    const orgId = await resolveSessionAgentOrgId(userId, req.session?.spacesAppId);
+
+    const query = typeof req.query["q"] === "string" ? req.query["q"].trim() : "";
+    const integrations = typeof req.query["integrations"] === "string"
+      ? req.query["integrations"].split(",").map((s) => s.trim()).filter(Boolean)
+      : [];
+    const rawRisk = typeof req.query["maxRisk"] === "string" ? req.query["maxRisk"] : "";
+    const maxRisk = (["read", "write", "destructive"] as const).find((r) => r === rawRisk);
+    const limit = Number(req.query["limit"]) || 10;
+
+    const opts = {
+      ...(integrations.length ? { integrations } : {}),
+      ...(maxRisk ? { maxRisk } : {}),
+      ...(orgId ? { orgId } : {}),
+      limit,
+    };
+
+    const matches = query ? await searchTools(query, opts) : await listTools(opts);
+    res.json({ success: true, data: { mode: query ? "search" : "list", matches } });
+  } catch (err) {
+    log.error("[tools/search] error:", err);
     res.status(500).json({ success: false, error: "Internal server error" });
   }
 });

@@ -179,7 +179,7 @@ export class TicketService {
 
   async asignUserGroupToTicket(ticketId: string, userId: string, groupId: string): Promise<void> {
     try {
-      await this.ticketRepository.assignUserGroupToTicket(ticketId, userId, groupId);
+      await this.ticketRepository.assignUserGroupToTicket(ticketId, groupId, userId);
       logger.debug(`[TicketService] Successfully assigned user group ${groupId} to ticket ${ticketId}.`);
     } catch (error) {
       logger.error(`[TicketService] Error assigning user group to ticket:`, error);
@@ -414,6 +414,11 @@ export class TicketService {
         ticket: currentCountsSnapshot,
         previousTicket: previousCountsSnapshot,
       });
+      // Desk label badges depend on the same ticket fields — invalidate the
+      // channel room whenever a channel-backed ticket changes.
+      if (currentCountsSnapshot.channelId) {
+        websocketService.broadcastLabelUnreadCountsUpdate(currentCountsSnapshot.channelId);
+      }
     }
 
     logger.info(`[TicketService] Updated ticket ${ticketId}: ${updates.join(', ')}`);

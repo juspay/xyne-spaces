@@ -1,9 +1,12 @@
 import { PrismaClient, User } from '@prisma/client';
-import { PrismaClientKnownRequestError } from '@prisma/client/runtime/library';
 import { logger } from '../utils/logger';
 import { repositories } from '../database/repositories/index';
 import { DatabaseClient } from '@/database/client';
-import { runAsSystem } from '@/database/tenant/context';
+import {
+  createWorkspaceInOrgData,
+  hasCompletedOnboardingQuery,
+  getWorkspacesByEmailData,
+} from '@/bypassAcl/userServices';
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service.js';
 import { grantPermissionsForRole, syncOrgResourceAdminAccess } from './permissionMatrix';
 import { USER_PREFERENCE_NOTIFICATION_DEFAULTS } from '@/constants/userPreferenceDefaults';
@@ -54,18 +57,7 @@ export class UserService {
   }
 
   async hasCompletedOnboarding(email: string): Promise<boolean> {
-    const normalizedEmail = email.toLowerCase().trim();
-    return await runAsSystem(async () => {
-      const onboardingResponse = await this.prisma.questionnaireResponse.findFirst({
-        where: {
-          questionnaireType: 'onboarding',
-          email: normalizedEmail,
-        },
-        select: { id: true },
-      });
-
-      return Boolean(onboardingResponse);
-    });
+    return hasCompletedOnboardingQuery(email);
   }
 
   /**
@@ -648,111 +640,7 @@ export class UserService {
     memberCount: number;
   }>> {
     try {
-      return await runAsSystem(async () => {
-        logger.info(`[getWorkspacesByEmail] Querying workspaces for email: ${email}`);
-        const workspaceUsers = await this.prisma.user.findMany({
-          where: {
-            email: { equals: email, mode: 'insensitive' },
-            status: UserStatus.ACTIVE,
-            leftAt: null,
-          },
-          include: {
-            workspace: {
-              include: {
-                organization: true
-              }
-            }
-          }
-        });
-
-        const visibleWorkspaceUsers = workspaceUsers;
-
-        logger.info(`[getWorkspacesByEmail] Found ${visibleWorkspaceUsers.length} active workspace users for email: ${email}`);
-        visibleWorkspaceUsers.forEach(u => {
-          logger.info(`[getWorkspacesByEmail] - User ${u.id} in workspace ${u.workspace?.id}`);
-        });
-
-        const existingWorkspaceIds = new Set(
-          visibleWorkspaceUsers
-            .map(wsUser => wsUser.workspaceId)
-            .filter((workspaceId): workspaceId is string => Boolean(workspaceId)),
-        );
-
-        const approvedJoinRequests = await this.prisma.workspaceJoinRequest.findMany({
-          where: {
-            email: { equals: email, mode: 'insensitive' },
-            status: WorkspaceJoinRequestStatus.APPROVED,
-          },
-          orderBy: { updatedAt: 'desc' },
-        });
-
-        const approvedJoinRequestWorkspaces = approvedJoinRequests.length > 0
-          ? await this.prisma.workspace.findMany({
-              where: {
-                id: { in: approvedJoinRequests.map(request => request.workspaceId) },
-                status: Status.ACTIVE,
-                OR: [{ workspaceType: WorkspaceType.ENTERPRISE }, { workspaceType: null }],
-              },
-              include: {
-                organization: true,
-              },
-            })
-          : [];
-        const approvedJoinRequestWorkspacesById = new Map(
-          approvedJoinRequestWorkspaces.map(workspace => [workspace.id, workspace]),
-        );
-
-        const workspaceIds = [
-          ...new Set([
-            ...visibleWorkspaceUsers.map(wsUser => wsUser.workspaceId),
-            ...approvedJoinRequestWorkspaces.map(ws => ws.id),
-          ].filter((id): id is string => Boolean(id))),
-        ];
-
-        const memberCounts = await this.prisma.user.groupBy({
-          by: ['workspaceId'],
-          where: {
-            workspaceId: { in: workspaceIds },
-            status: UserStatus.ACTIVE,
-            leftAt: null,
-          },
-          _count: { workspaceId: true },
-        });
-
-        const memberCountByWorkspaceId = new Map(
-          memberCounts.map(group => [group.workspaceId, group._count.workspaceId]),
-        );
-
-        // Return flat list of workspaces for frontend
-        const activeWorkspaces = visibleWorkspaceUsers.map(wsUser => ({
-          id: wsUser.workspace!.id,
-          name: wsUser.workspace!.name,
-          role: wsUser.role || 'MEMBER',
-          orgId: wsUser.workspace!.organization.orgId,
-          orgName: wsUser.workspace!.organization.name,
-          workspaceType: wsUser.workspace!.workspaceType,
-          memberCount: memberCountByWorkspaceId.get(wsUser.workspace!.id) ?? 0,
-        }));
-
-        const approvedRequestWorkspaces = approvedJoinRequests
-          .filter(request => !existingWorkspaceIds.has(request.workspaceId))
-          .map(request => approvedJoinRequestWorkspacesById.get(request.workspaceId))
-          .filter(
-            (workspace): workspace is (typeof approvedJoinRequestWorkspaces)[number] =>
-              Boolean(workspace),
-          )
-          .map(workspace => ({
-            id: workspace.id,
-            name: workspace.name,
-            role: 'MEMBER',
-            orgId: workspace.organization.orgId,
-            orgName: workspace.organization.name,
-            workspaceType: workspace.workspaceType,
-            memberCount: memberCountByWorkspaceId.get(workspace.id) ?? 0,
-          }));
-
-        return [...activeWorkspaces, ...approvedRequestWorkspaces];
-      });
+      return await getWorkspacesByEmailData(email);
     } catch (error) {
       logger.error('Error getting workspaces by email:', error);
       throw new Error('Failed to get workspaces');
@@ -1213,117 +1101,7 @@ export class UserService {
     // workspace for something that doesn't exist yet). Bootstrap it as `system` — every
     // write below already carries its own workspaceId explicitly, so nothing relies on the
     // ambient-context stamper this bypasses. See WorkspacesACL.getMutateWhere / runAsSystem.
-    return runAsSystem(async () => {
-      // Step 1: Create workspace under existing org with temporary createdBy
-      let workspace;
-      try {
-        workspace = await this.prisma.$transaction(async (tx) => {
-          const createdWorkspace = await tx.workspace.create({
-            data: {
-              orgId: org.orgId,
-              name: workspaceName,
-              createdBy: userData.providerUserId, // Temporary: will update after user creation
-              status: Status.ACTIVE,
-              workspaceType,
-              joinPolicy,
-            },
-          });
-          await getEncryptionProvider().provisionEntity({
-            entityId: createdWorkspace.id,
-            orgId: createdWorkspace.orgId,
-            entityType: 'WORKSPACE',
-          });
-          return createdWorkspace;
-        });
-      } catch (error) {
-        if (error instanceof PrismaClientKnownRequestError && error.code === 'P2002') {
-          this.raiseWorkspaceCreateError('A workspace with this name already exists. Please choose a different name.', 409);
-        }
-        throw error;
-      }
-
-      // Step 2: Link workspace to organization
-      await this.prisma.workspaceOrganization.create({
-        data: {
-          orgId: org.orgId,
-          workspaceId: workspace.id,
-          role: WorkspaceRole.ADMIN,
-        },
-      });
-
-      // Step 3: Fetch orgMember for the user (reuse existing orgMember if available)
-      const userOrgMember = orgMember || await this.prisma.orgMember.findUnique({
-        where: { email: userData.email },
-        select: { memberId: true }
-      });
-
-      if (!userOrgMember) {
-        throw new Error(`orgMember not found for email ${userData.email}. User must be added to the organization first.`);
-      }
-
-      // Step 4: Create workspace-scoped user as OWNER
-      const workspaceUser = await this.prisma.user.create({
-        data: {
-          providerUserId: userData.providerUserId,
-          email: userData.email,
-          name: userData.name,
-          picture: userData.picture,
-          authProvider: AuthProvider.GOOGLE,
-          workspace: { connect: { id: workspace.id } },
-          role: WorkspaceRole.OWNER,
-          orgMember: { connect: { memberId: orgMember.memberId } },
-        },
-      });
-
-      // Step 5: Update workspace with correct createdBy (actual user ID)
-      await this.prisma.workspace.update({
-        where: { id: workspace.id },
-        data: { createdBy: workspaceUser.id }
-      });
-
-      // Step 6: Create DM project for the workspace with correct createdBy
-      await this.prisma.project.create({
-        data: {
-          name: 'Direct Messages',
-          code: 'DM',
-          description: 'DM project for direct message channels',
-          type: ProjectType.DM,
-          workspaceId: workspace.id,
-          createdBy: workspaceUser.id,
-        }
-      });
-
-      const defaults = await createCommunityWorkspaceDefaults({
-        db: this.prisma,
-        workspaceId: workspace.id,
-        workspaceName,
-        createdBy: workspaceUser.id,
-      });
-
-      workspace = { ...workspace, landingChannelId: defaults.workspace.landingChannelId };
-      await repositories.channelParticipants.addParticipant(defaults.channel.id, workspaceUser.id, ChannelRole.ADMIN);
-
-      // Grant full admin resource access to the workspace owner
-      await grantPermissionsForRole(workspaceUser.id, workspaceUser.email, WorkspaceRole.OWNER, workspace.id);
-
-      // Sync all hardcoded bots into the new workspace
-      await unifiedBotUserService.syncAllBotUsers(workspace.id);
-
-      try {
-        await aiProvisioningService.enqueueWorkspaceSync(workspace.id);
-        await aiProvisioningService.enqueueUserSync(workspaceUser.orgMemberId);
-      } catch (error) {
-        logger.error('[UserService] Failed to enqueue AI provisioning jobs for new workspace', {
-          orgId: org.orgId,
-          workspaceId: workspace.id,
-          userId: workspaceUser.id,
-          error,
-        });
-      }
-
-      logger.info(`Created workspace "${workspaceName}" under org "${org.name}" for ${userData.email}`);
-      return { organization: org, workspace, workspaceUser };
-    });
+    return createWorkspaceInOrgData(org, userData, workspaceName, workspaceType, joinPolicy, orgMember);
   }
 
   /**

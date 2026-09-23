@@ -2,6 +2,7 @@ import { ReactElement, useState } from 'react';
 import { Plug, Unplug } from 'lucide-react';
 import { DisconnectConfirmDialog } from '../DisconnectConfirmDialog';
 import { cn } from '../../../utils/classNames';
+import { globalClickTracker } from '../../../services/Analytics/globalClickTracker';
 
 interface DeskConnectionCardProps {
   label: string;
@@ -13,6 +14,8 @@ interface DeskConnectionCardProps {
   disconnectPrompt: string;
   disconnectBullets: string[];
   trackCategory: string;
+  /** Which integration this card fronts — INTEGRATION_DISCONNECTED dimension. */
+  provider?: string;
 }
 
 export const DeskConnectionCard = ({
@@ -25,6 +28,7 @@ export const DeskConnectionCard = ({
   disconnectPrompt,
   disconnectBullets,
   trackCategory,
+  provider,
 }: DeskConnectionCardProps): ReactElement => {
   const [showDisconnectConfirm, setShowDisconnectConfirm] = useState(false);
   const [isDisconnecting, setIsDisconnecting] = useState(false);
@@ -32,9 +36,30 @@ export const DeskConnectionCard = ({
 
   const handleDisconnect = async (): Promise<void> => {
     setIsDisconnecting(true);
+    // Outcome of confirm-disconnect: the click is intent, this is the result.
+    // Callers rethrow on failure so the dialog stays open, which is also what
+    // routes the failure branch here.
+    const startedAt = Date.now();
+    const disconnectDims = { provider: provider ?? 'unknown', scope: 'channel' };
     try {
       await onDisconnect();
+      globalClickTracker.trackManualEvent(trackCategory, 'INTEGRATION_DISCONNECTED', undefined, {
+        ...disconnectDims,
+        latencyMs: Date.now() - startedAt,
+      });
       setShowDisconnectConfirm(false);
+    } catch (err) {
+      globalClickTracker.trackManualEvent(
+        trackCategory,
+        'INTEGRATION_DISCONNECT_FAILED',
+        undefined,
+        {
+          ...disconnectDims,
+          latencyMs: Date.now() - startedAt,
+          errorKind: err instanceof Error ? err.name : 'unknown',
+        },
+      );
+      throw err;
     } finally {
       setIsDisconnecting(false);
     }

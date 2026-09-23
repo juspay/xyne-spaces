@@ -24,6 +24,7 @@ export type CallHistoryEntry = QueryResultType<typeof queries.userCallHistoryV2>
 export type RecordingEntry = QueryResultType<typeof queries.userRecordings>[number];
 
 export const CALL_HISTORY_KEY = 'callHistory';
+export const CALL_HISTORY_PARTICIPANT_ONLY_KEY = 'callHistoryParticipantOnly';
 export const RECORDINGS_KEY = 'recordings';
 
 export interface CallHistoryState {
@@ -61,6 +62,8 @@ export interface QueryCacheContext {
     [conversationId: string]: ThreadConversation;
   };
   callHistory: CallHistoryState;
+  // Participant-only call history (used when "Include all channel calls" toggle is OFF)
+  callHistoryParticipantOnly: CallHistoryState;
   recordings: RecordingsState;
 }
 
@@ -88,6 +91,8 @@ export type QueryCacheEvent =
   | { type: 'MERGE_CONVERSATION'; channelId: string; conversation: Conversation }
   | { type: 'MERGE_CALL_HISTORY_PAGE'; page: CallHistoryEntry[]; hasMore: boolean }
   | { type: 'HYDRATE_CALL_HISTORY'; data: CallHistoryState }
+  | { type: 'MERGE_CALL_HISTORY_PARTICIPANT_ONLY_PAGE'; page: CallHistoryEntry[]; hasMore: boolean }
+  | { type: 'HYDRATE_CALL_HISTORY_PARTICIPANT_ONLY'; data: CallHistoryState }
   | {
       type: 'SET_THREAD_CONVERSATION';
       conversationId: string;
@@ -274,6 +279,23 @@ export const queryCacheMachine = setup({
         return event.data;
       },
     }),
+    mergeCallHistoryParticipantOnlyPage: assign({
+      callHistoryParticipantOnly: ({ context, event }) => {
+        if (event.type !== 'MERGE_CALL_HISTORY_PARTICIPANT_ONLY_PAGE') return context.callHistoryParticipantOnly;
+        const map = new Map(context.callHistoryParticipantOnly.calls.map(c => [c.id, c]));
+        for (const call of event.page) map.set(call.id, call);
+        const calls = [...map.values()].sort(
+          (a, b) => b.startedAt - a.startedAt || b.id.localeCompare(a.id),
+        );
+        return { calls, hasMore: event.hasMore };
+      },
+    }),
+    hydrateCallHistoryParticipantOnly: assign({
+      callHistoryParticipantOnly: ({ event }) => {
+        if (event.type !== 'HYDRATE_CALL_HISTORY_PARTICIPANT_ONLY') return { calls: [], hasMore: true };
+        return event.data;
+      },
+    }),
     mergeRecordingsPage: assign({
       recordings: ({ context, event }) => {
         if (event.type !== 'MERGE_RECORDINGS_PAGE') return context.recordings;
@@ -345,6 +367,7 @@ export const queryCacheMachine = setup({
     channelConversations: {},
     threadConversations: {},
     callHistory: { calls: [], hasMore: true },
+    callHistoryParticipantOnly: { calls: [], hasMore: true },
     recordings: { recordings: [], hasMore: true },
   },
   on: {
@@ -374,6 +397,12 @@ export const queryCacheMachine = setup({
     },
     HYDRATE_CALL_HISTORY: {
       actions: 'hydrateCallHistory',
+    },
+    MERGE_CALL_HISTORY_PARTICIPANT_ONLY_PAGE: {
+      actions: 'mergeCallHistoryParticipantOnlyPage',
+    },
+    HYDRATE_CALL_HISTORY_PARTICIPANT_ONLY: {
+      actions: 'hydrateCallHistoryParticipantOnly',
     },
     MERGE_RECORDINGS_PAGE: {
       actions: 'mergeRecordingsPage',
@@ -590,6 +619,24 @@ export const getCallHistoryQueryHash = (): string => {
 };
 
 /**
+ * Get the AST-based hash for the userCallHistoryParticipantOnly query.
+ * This hash changes automatically when the query structure changes.
+ */
+export const getCallHistoryParticipantOnlyQueryHash = (): string => {
+  try {
+    const query = queries.userCallHistoryParticipantOnly.fn({
+      args: { limit: 1, start: null },
+      ctx: {} as Context,
+    });
+    // @ts-expect-error - hash() is part of QueryImpl, not public Query interface
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-call
+    return query.hash() as string;
+  } catch {
+    return '';
+  }
+};
+
+/**
  * Get the AST-based hash for the userRecordings query.
  */
 export const getRecordingsQueryHash = (): string => {
@@ -630,6 +677,7 @@ export const setupQueryCachePersistence = (
       channelConversations,
       threadConversations,
       callHistory,
+      callHistoryParticipantOnly,
       recordings,
     } = queryCacheActor.getSnapshot().context;
 
@@ -654,6 +702,7 @@ export const setupQueryCachePersistence = (
         key !== 'channelConversations' &&
         key !== THREAD_CONVERSATIONS_KEY &&
         key !== CALL_HISTORY_KEY &&
+        key !== CALL_HISTORY_PARTICIPANT_ONLY_KEY &&
         key !== RECORDINGS_KEY
       ) {
         lastPersistedRefs.delete(key);
@@ -694,6 +743,16 @@ export const setupQueryCachePersistence = (
         .saveContextProperty(CALL_HISTORY_KEY, {
           ...callHistory,
           [FINGERPRINT_FIELD]: getCallHistoryQueryHash(),
+        })
+        .catch(() => {});
+    }
+
+    if (lastPersistedRefs.get(CALL_HISTORY_PARTICIPANT_ONLY_KEY) !== callHistoryParticipantOnly) {
+      lastPersistedRefs.set(CALL_HISTORY_PARTICIPANT_ONLY_KEY, callHistoryParticipantOnly);
+      storage
+        .saveContextProperty(CALL_HISTORY_PARTICIPANT_ONLY_KEY, {
+          ...callHistoryParticipantOnly,
+          [FINGERPRINT_FIELD]: getCallHistoryParticipantOnlyQueryHash(),
         })
         .catch(() => {});
     }
@@ -765,6 +824,7 @@ export const hydrateQueryCacheFromStorage = async (
     const conversationsData: Record<string, Conversation[]> = {};
     const threadConversationsData: Record<string, ThreadConversation> = {};
     let callHistoryHydrated = false;
+    let callHistoryParticipantOnlyHydrated = false;
     let recordingsHydrated = false;
 
     const currentConversationHash = getChannelConversationsQueryHash({ userID: userId });
@@ -815,6 +875,22 @@ export const hydrateQueryCacheFromStorage = async (
           data: { calls: raw.calls, hasMore: raw.hasMore },
         });
         callHistoryHydrated = true;
+      } else if (key === CALL_HISTORY_PARTICIPANT_ONLY_KEY) {
+        const raw = value as CallHistoryState & { [FINGERPRINT_FIELD]?: string };
+
+        const storedHash = raw[FINGERPRINT_FIELD];
+
+        const currentCallHistoryParticipantOnlyHash = getCallHistoryParticipantOnlyQueryHash();
+
+        if (storedHash !== undefined && storedHash !== currentCallHistoryParticipantOnlyHash) {
+          continue;
+        }
+
+        queryCacheActor.send({
+          type: 'HYDRATE_CALL_HISTORY_PARTICIPANT_ONLY',
+          data: { calls: raw.calls, hasMore: raw.hasMore },
+        });
+        callHistoryParticipantOnlyHydrated = true;
       } else if (key === RECORDINGS_KEY) {
         const raw = value as RecordingsState & { [FINGERPRINT_FIELD]?: string };
 
@@ -853,6 +929,7 @@ export const hydrateQueryCacheFromStorage = async (
       Object.keys(conversationsData).length > 0 ||
       Object.keys(threadConversationsData).length > 0 ||
       callHistoryHydrated ||
+      callHistoryParticipantOnlyHydrated ||
       recordingsHydrated
     );
   } catch {

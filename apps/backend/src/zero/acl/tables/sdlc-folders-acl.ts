@@ -1,5 +1,5 @@
 import type { DeleteID, InsertValue, Transaction, UpdateValue, UpsertValue } from '@rocicorp/zero';
-import type { Schema } from '@xyne/shared';
+import { SDLC_HUB_ITEM_RELATION, type Schema } from '@xyne/shared';
 import { BaseACL } from '../core/base-acl';
 import { MutationACLError, type TableSchema } from '../core/types';
 import { assertWorkspaceMatch } from '../core/workspace-match';
@@ -22,6 +22,15 @@ export class SdlcFoldersACL extends BaseACL<'sdlc_folders'> {
       throw new MutationACLError('SDLC folder does not exist', 'sdlc_folders');
     }
     assertWorkspaceMatch(this.ctx, row.workspaceId, 'sdlc_folders');
+    const hubItem = await tx.run(
+      zql.sdlc_entity_links
+        .where('targetId', args.id)
+        .where('relationType', SDLC_HUB_ITEM_RELATION)
+        .one(),
+    );
+    if (hubItem) {
+      throw new MutationACLError('Wiki and Hub Knowledge folders are managed by the server', 'sdlc_folders');
+    }
   }
 
   async canDelete(

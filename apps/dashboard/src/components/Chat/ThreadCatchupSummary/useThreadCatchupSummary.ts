@@ -5,6 +5,8 @@ import {
   fetchThreadSummary,
   type ThreadSummaryResponse,
 } from './threadSummaryApi';
+import { globalClickTracker } from '../../../services/Analytics/globalClickTracker';
+import { lengthBucket } from '../../../services/Analytics/trackSource';
 
 interface ThreadCatchupSummaryState {
   isAvailable: boolean;
@@ -75,6 +77,12 @@ export function useThreadCatchupSummary(
   const capturedRef = useRef(false);
   const preGeneratedRef = useRef(false);
   const [unreadBaseline, setUnreadBaseline] = useState<number | null>(null);
+  // For CATCHUP_SUMMARY_SHOWN: when the request that produced the visible
+  // content left, and whether it came from the recommendation call or the
+  // on-demand refresh. Cache reads set neither.
+  const fetchStartedAtRef = useRef<number | null>(null);
+  const contentSourceRef = useRef<'recommended' | 'refresh' | 'cache'>('cache');
+  const shownForMessageIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (expanded) setScrollSignal(s => s + 1);
@@ -120,12 +128,17 @@ export function useThreadCatchupSummary(
       setContentAsOfMessageId(cached.asOfMessageId);
     }
 
+    const recommendationStartedAt = Date.now();
     fetchThreadRecommendation(conversationId)
       .then(({ recommended, enabled, summary }) => {
         setIsFeatureEnabled(enabled);
         setIsFirstVisitWithSummary(recommended);
         if (!recommended) return;
         setExpanded(true);
+        if (summary?.content) {
+          fetchStartedAtRef.current = recommendationStartedAt;
+          contentSourceRef.current = 'recommended';
+        }
         applyResult(summary);
       })
       .catch(() => {
@@ -137,6 +150,8 @@ export function useThreadCatchupSummary(
   const refresh = useCallback(async () => {
     if (!conversationId) return;
     setLoading(true);
+    fetchStartedAtRef.current = Date.now();
+    contentSourceRef.current = 'refresh';
     try {
       const result = await fetchThreadSummary(conversationId);
       applyResult(result);
@@ -174,6 +189,34 @@ export function useThreadCatchupSummary(
     }
     return count;
   }, [messages, userId, unreadBaseline]);
+
+  // Impression: the panel is open with a summary in it. TOGGLE / DISMISS clicks
+  // have no denominator without this. Latched on the message the summary is
+  // current as of, so a re-render is silent and a refreshed summary is a new
+  // impression. Category matches the panel's own clicks (THREAD_PANEL).
+  useEffect(() => {
+    if (!expanded || !content || !contentAsOfMessageId) return;
+    if (shownForMessageIdRef.current === contentAsOfMessageId) return;
+    shownForMessageIdRef.current = contentAsOfMessageId;
+    const startedAt = fetchStartedAtRef.current;
+    globalClickTracker.trackManualEvent('THREAD_PANEL', 'CATCHUP_SUMMARY_SHOWN', undefined, {
+      conversationId,
+      unreadCount: unreadFromOthers,
+      trigger: contentSourceRef.current,
+      isRecommended: isFirstVisitWithSummary,
+      summaryLengthBucket: lengthBucket(content.length),
+      latencyMs: startedAt === null ? null : Date.now() - startedAt,
+    });
+    fetchStartedAtRef.current = null;
+    contentSourceRef.current = 'cache';
+  }, [
+    expanded,
+    content,
+    contentAsOfMessageId,
+    conversationId,
+    unreadFromOthers,
+    isFirstVisitWithSummary,
+  ]);
   const hasEnoughUnread = unreadFromOthers >= MIN_UNREAD_FOR_RECAP;
 
   const userSentLatest =

@@ -1,0 +1,14 @@
+#cloud-config
+package_update: true
+packages:
+  - ca-certificates
+  - curl
+  - apt-transport-https
+  - lsb-release
+  - gnupg
+  - postgresql-client
+  - redis-tools
+runcmd:
+  - curl -sL https://aka.ms/InstallAzureCLIDeb | bash
+  - az aks install-cli --install-location /usr/local/bin/kubectl --kubelogin-install-location /usr/local/bin/kubelogin
+  - curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash

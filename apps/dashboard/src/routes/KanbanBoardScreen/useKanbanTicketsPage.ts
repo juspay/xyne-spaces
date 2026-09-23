@@ -22,13 +22,15 @@ export type KanbanTicketsPageRow = Ticket & {
   formEntityValues?: Array<FormEntityValues & { formField?: unknown }>;
 };
 
-export type KanbanViewMode = 'project' | 'board' | 'my-tickets' | 'user-tickets' | 'group-tickets';
+export type KanbanViewMode = 'project' | 'board' | 'my-tickets';
 
 export type KanbanPageGroupBy =
   | 'none'
   | 'assignee'
+  | 'createdBy'
   | 'status'
   | 'priority'
+  | 'merchantId'
   | {
       type: 'formField';
       fieldId: string;
@@ -41,8 +43,6 @@ export type KanbanTicketsPageBaseArgs = FlowStepVisibilityOptions & {
   channelId?: string;
   projectId?: string;
   boardId?: string;
-  userId?: string;
-  groupId?: string;
   searchTerm?: string;
   groupBy?: KanbanPageGroupBy;
   groupKey?: string;
@@ -79,6 +79,17 @@ type UseKanbanTicketsPageOptions = KanbanTicketsPageBaseArgs & {
   stageName: string;
   enabled?: boolean;
   pageSize?: number;
+  /**
+   * This column's server-side total from the counts API, which applies the same filters
+   * but NOT the sliding `createdAfter` window. Used only to tell an empty page caused by
+   * a too-narrow window from a column that is genuinely empty — never to render.
+   *
+   * `undefined` means the count is unusable: still loading, or describing a different set
+   * than the page (a Vespa-narrowed search, or a dynamic-field filter the counts API does
+   * not model). The ladder falls back to probing in that case, so correctness never
+   * depends on the count being present or accurate.
+   */
+  expectedCount?: number;
 };
 
 type UseKanbanTicketsPageResult = {
@@ -185,6 +196,9 @@ const canRepresentGroupInVespa = (
   if (groupBy === 'priority') {
     return Boolean(groupKey) && groupKey !== 'No Priority';
   }
+  if (groupBy === 'createdBy') {
+    return Boolean(groupKey) && groupKey !== 'Unknown';
+  }
   if (groupBy === 'status') {
     return Boolean(groupKey);
   }
@@ -195,7 +209,7 @@ const canRepresentGroupInVespa = (
   return true;
 };
 
-const getDynamicFieldScalarFilters = (
+export const getDynamicFieldScalarFilters = (
   filters: TicketFilters | undefined,
   zeroOnlyDynamicFieldIds: string[] | undefined,
 ): DynamicFieldScalarFilter[] | undefined => {
@@ -217,7 +231,7 @@ const getDynamicFieldScalarFilters = (
   return scalarFilters.length > 0 ? scalarFilters : undefined;
 };
 
-const getFormFieldValue = (
+export const getFormFieldValue = (
   groupBy: KanbanPageGroupBy | undefined,
   groupKey: string | undefined,
 ): string | number | boolean | undefined => {
@@ -234,7 +248,7 @@ const getFormFieldValue = (
   return groupKey;
 };
 
-const toQueryFilters = (
+export const toQueryFilters = (
   filters: TicketFilters | undefined,
 ): KanbanTicketsPageQueryArgs['filters'] => {
   if (!filters) return undefined;
@@ -255,6 +269,7 @@ const toQueryFilters = (
     created: filters.created,
     stages: filters.stages,
     ticketTypes: filters.ticketTypes,
+    merchantIds: filters.merchantIds,
     sourceChannels: filters.sourceChannels,
   };
 };
@@ -268,8 +283,6 @@ export const buildKanbanTicketsPageArgs = (
       viewMode: options.viewMode,
       projectId: options.projectId,
       boardId: options.boardId,
-      userId: options.userId,
-      groupId: options.groupId,
       excludeFlowSteps: options.excludeFlowSteps,
       columnType: options.columnType,
       stageName: options.stageName,
@@ -326,6 +339,8 @@ const hasFiltersVespaCannotApply = (
   // (ticketTypes is absent on purpose: it is not indexed in Vespa either, but the Zero
   // overlay in overlaidDirectVespaPage applies it on top of the search results instead.)
   if (filters?.sourceChannels?.length) return true;
+  // merchantId is not indexed in Vespa (search rows carry merchantId: null).
+  if (filters?.merchantIds?.length) return true;
   // Sent only in representable cases (single board, non-inverted assignee, ...); when the
   // pushdown value is undefined the filter is active but absent from the query.
   if (filters?.boards?.length && !pushdown.boardId) return true;
@@ -356,6 +371,7 @@ export const useKanbanTicketsPage = (
   // Mirrors ticketsState so the page merge can be computed in the effect body rather
   // than inside a setState updater (updaters must stay pure — StrictMode calls them twice).
   const ticketsStateRef = useRef<TicketsState>({ queryKey: '', tickets: [] });
+  const expectedCountRef = useRef<number | undefined>(undefined);
   const [nextCursor, setNextCursor] = useState<KanbanCursor | null>(null);
   const [hasMore, setHasMore] = useState(true);
   const isLoadingMoreRef = useRef(false);
@@ -424,7 +440,12 @@ export const useKanbanTicketsPage = (
 
   // Compute group-specific filter for Vespa based on groupBy/groupKey
   // This ensures search results are filtered to only show in the correct group
-  const vespaGroupFilter: { priority?: string; assignee?: string; status?: string } = (() => {
+  const vespaGroupFilter: {
+    priority?: string;
+    assignee?: string;
+    createdBy?: string;
+    status?: string;
+  } = (() => {
     if (!options.groupBy || options.groupBy === 'none' || !options.groupKey) {
       return {};
     }
@@ -439,6 +460,10 @@ export const useKanbanTicketsPage = (
       // Send bare ID - the backend expands to all identity forms for Vespa matching.
       const bareId = options.groupKey.replace(/^(user:|group:|userGroup:)/, '');
       return { assignee: bareId };
+    }
+    if (options.groupBy === 'createdBy') {
+      if (options.groupKey === 'Unknown') return {};
+      return { createdBy: options.groupKey.replace(/^(user:|group:|userGroup:)/, '') };
     }
     if (options.groupBy === 'status') {
       // Filter by the group's status value
@@ -514,6 +539,7 @@ export const useKanbanTicketsPage = (
         boards: options.filters?.boards ?? [],
         stages: options.filters?.stages ?? [],
         ticketTypes: options.filters?.ticketTypes ?? [],
+        merchantIds: options.filters?.merchantIds ?? [],
         sourceChannels: options.filters?.sourceChannels ?? [],
         userGroups: options.filters?.userGroups ?? [],
         dynamicFields: options.filters?.dynamicFields ?? {},
@@ -601,8 +627,20 @@ export const useKanbanTicketsPage = (
             if ((ticket.priority as string) !== options.groupKey) return false;
           }
         }
+        if (options.groupBy === 'createdBy' && options.groupKey) {
+          if (normalizeIdentity(ticket.createdBy) !== normalizeIdentity(options.groupKey)) {
+            return false;
+          }
+        }
         if (options.groupBy === 'status' && options.groupKey) {
           if ((ticket.statusV2 as string) !== options.groupKey) return false;
+        }
+        if (options.groupBy === 'merchantId' && options.groupKey) {
+          if (options.groupKey === 'No Merchant') {
+            if (ticket.merchantId) return false;
+          } else {
+            if (ticket.merchantId !== options.groupKey) return false;
+          }
         }
 
         return true;
@@ -646,6 +684,7 @@ export const useKanbanTicketsPage = (
   const fetchCursor = fetchCursorState?.queryKey === queryKey ? fetchCursorState.cursor : null;
   const tickets = ticketsState.queryKey === queryKey ? ticketsState.tickets : [];
   ticketsStateRef.current = ticketsState;
+  expectedCountRef.current = options.expectedCount;
 
   if (windowAnchorRef.current?.queryKey !== queryKey) {
     windowAnchorRef.current = {
@@ -776,6 +815,26 @@ export const useKanbanTicketsPage = (
       }
     }
     if (rawPageRows.length === 0) {
+      // An empty page inside a bounded window does NOT mean the column is empty — its rows
+      // may simply all be older than the current rung. Concluding here is what left a
+      // column rendering nothing under a header count of N: the widening below is only
+      // reached by a page with at least one row, so a column whose entire matching set
+      // predates the 30d rung never climbed off it.
+      //
+      // The counts API applies the same filters without the window, so it separates the
+      // two cases for free: a positive count over an empty page is always a window that is
+      // too narrow. When it says zero the column really is empty and stops on this first
+      // probe, instead of climbing every rung to prove it.
+      //
+      // An absent count (loading, or a set the counts API does not model) falls back to
+      // climbing. The ladder is bounded and monotonic, so a count that over-reports costs
+      // a few no-op probes and never loops.
+      const expectedCount = expectedCountRef.current;
+      const countAllowsMoreRows = expectedCount === undefined || expectedCount > 0;
+      if (countAllowsMoreRows && !shouldUseDirectVespaRows && windowStep < WINDOW_STEPS_MS.length) {
+        setWindowStep(step => step + 1);
+        return;
+      }
       if (fetchCursor === null) {
         setTicketsState(prev =>
           prev.queryKey === queryKey && prev.tickets.length === 0
@@ -845,6 +904,21 @@ export const useKanbanTicketsPage = (
     shouldUseDirectVespaRows,
     preserveRelevanceOrder,
   ]);
+
+  const previousExpectedCountRef = useRef<number | undefined>(undefined);
+  useEffect(() => {
+    const previous = previousExpectedCountRef.current;
+    const next = options.expectedCount;
+    previousExpectedCountRef.current = next;
+
+    if (next === undefined || next <= 0) return;
+    if (previous !== undefined && previous > 0) return; // not a 0 -> positive transition
+    if (shouldUseDirectVespaRows) return;
+    // Anything still paging, or already holding rows, does not need re-entry.
+    if (hasMore || ticketsStateRef.current.tickets.length > 0) return;
+
+    setWindowStep(step => (step < WINDOW_STEPS_MS.length ? step + 1 : step));
+  }, [options.expectedCount, shouldUseDirectVespaRows, hasMore]);
 
   const loadMore = useCallback(() => {
     if (isLoadingMoreRef.current || !hasMore || !nextCursor) return;

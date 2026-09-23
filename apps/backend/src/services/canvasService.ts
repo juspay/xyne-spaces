@@ -7,12 +7,14 @@ import { v4 as uuidv4 } from 'uuid';
 import { DatabaseClient } from '@/database/client';
 import type { KnowledgeLearning } from '@/workflows/utils/knowledge-generator';
 import { logger } from '@/utils/logger';
+import { config } from '@/config/env';
 import { withServerEditor } from '@/utils/serverBlockNoteEditor';
 import type { BlockNoteBlock } from '@/types/blockNoteTypes';
 import { vespaQueue } from '@/queues/vespaQueue';
 import { fileSchema, SubApp } from '@/vespa/src/types';
 import { CanvasRole, CanvasVisibility } from '@xyne/shared';
 import { toJsonSafeValue } from './jsonSafe';
+import { readFromYSweetStrict, syncToYSweet } from '@/utils/ysweetUtils';
 // Y-Sweet XML fragment name used by the frontend collaborative editor
 export const YSWEET_XML_FRAGMENT = 'document-store';
 
@@ -232,13 +234,19 @@ export async function createKnowledgeCanvas(
     // Format learnings to BlockNote content
     const content = formatLearningsToBlockNote(learnings, workflowExecutionId, finalTitle);
 
+    const synced = await syncToYSweet(canvasId, content as BlockNoteBlock[], createdByUserId);
+    if (!synced) {
+      throw new Error(`Failed to save knowledge canvas ${canvasId} to Y-Sweet`);
+    }
+
     // Create the canvas with PUBLIC visibility
     await prisma.canvas.create({
       data: {
         id: canvasId,
         title: finalTitle,
         workspaceId,
-        content: content as any, // BlockNote JSON array
+        content: [],
+        isCollaborative: true,
         createdBy: createdByUserId,
         visibility: CanvasVisibility.PUBLIC,
         isTemplate: false,
@@ -309,6 +317,20 @@ export function getCanvasUrl(canvasId: string, workspaceId?: string): string {
   const frontendUrl = process.env.FRONTEND_URL || 'https://spaces.xyne.juspay.net';
   const path = workspaceId ? `/${workspaceId}/chat/canvas/${canvasId}` : `/chat/canvas/${canvasId}`;
   return `${frontendUrl}${path}`;
+}
+
+/**
+ * Workspace-scoped canvas deep link on the app's own origin (FRONTEND_URL), so
+ * the dashboard's same-origin check can open it as an overlay. The workspace
+ * prefix is required — the bare `/chat/canvas/:id` route 404s on a hard load.
+ *
+ * Ticket links (`/chat/:channelId?tab=tickets...`) still build inline on
+ * `config.slackFrontendUrl` — deliberately left alone here; moving them onto
+ * FRONTEND_URL is its own pass.
+ */
+export function buildWorkspaceCanvasUrl(workspaceId: string, canvasId: string): string {
+  const frontendUrl = (config.frontendUrl ?? '').replace(/\/+$/, '');
+  return `${frontendUrl}/${workspaceId}/chat/canvas/${canvasId}`;
 }
 
 type LooseInline = {
@@ -760,6 +782,7 @@ export async function approveKnowledgeCanvas(
         id: true,
         title: true,
         content: true,
+        isCollaborative: true,
         metadata: true,
         workspaceId: true,
         createdBy: true,
@@ -833,7 +856,9 @@ export async function approveKnowledgeCanvas(
     const learningIds = metadata.learningIds as string[] | undefined;
 
     // Convert BlockNote content to Markdown
-    const blocks = canvas.content as unknown[];
+    const blocks = canvas.isCollaborative
+      ? await readFromYSweetStrict(canvas.id, approvedByUserId)
+      : canvas.content as unknown[];
     const markdownContent = await convertBlockNoteToMarkdown(blocks);
 
     // Get original learnings metadata if available (for filePaths, learningType, etc.)

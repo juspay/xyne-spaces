@@ -77,96 +77,104 @@ export function SkillDetailPanel({
   const email = entry.skill.owner?.email ?? null;
 
   return (
-    <div className='flex min-h-0 flex-1 flex-col gap-8 overflow-y-auto px-[22px] pb-9 pt-2'>
-      <div className='flex w-full items-center justify-between gap-4'>
-        <div className='flex min-w-0 items-center gap-2.5'>
-          <span
-            className='flex size-11 shrink-0 items-center justify-center rounded-xl border border-border bg-card text-muted-foreground shadow-sm'
-            aria-hidden
-          >
-            <Staroflife className='size-6' />
-          </span>
-          <div className='flex min-w-0 flex-col gap-1.5 py-px'>
-            <span className='truncate text-sm font-semibold leading-[1.3] tracking-[-0.28px] text-foreground'>
-              /{entry.label}
+    <div className='flex min-h-0 flex-1 flex-col'>
+      <div className='flex shrink-0 flex-col gap-4 px-[22px] pb-4 pt-2'>
+        <div className='flex w-full items-center justify-between gap-4'>
+          <div className='flex min-w-0 items-center gap-2.5'>
+            <span
+              className='flex size-11 shrink-0 items-center justify-center rounded-xl border border-border bg-card text-muted-foreground shadow-sm'
+              aria-hidden
+            >
+              <Staroflife className='size-6' />
             </span>
-            <span className='truncate text-xs font-normal leading-4 tracking-[-0.24px] text-muted-foreground'>
-              Created by{' '}
-              {email ? (
-                <a href={`mailto:${email}`} className='underline underline-offset-2'>
-                  {entry.ownerName ?? email}
-                </a>
-              ) : (
-                <span className='underline underline-offset-2'>{entry.ownerName ?? 'Unknown'}</span>
-              )}
-            </span>
+            <div className='flex min-w-0 flex-col gap-1.5 py-px'>
+              <span className='truncate text-sm font-semibold leading-[1.3] tracking-[-0.28px] text-foreground'>
+                /{entry.label}
+              </span>
+              <span className='truncate text-xs font-normal leading-4 tracking-[-0.24px] text-muted-foreground'>
+                Created by{' '}
+                {email ? (
+                  <a href={`mailto:${email}`} className='underline underline-offset-2'>
+                    {entry.ownerName ?? email}
+                  </a>
+                ) : (
+                  <span className='underline underline-offset-2'>
+                    {entry.ownerName ?? 'Unknown'}
+                  </span>
+                )}
+              </span>
+            </div>
           </div>
+          <button
+            type='button'
+            onClick={() =>
+              onChange(
+                selected ? disableSkill(selectedIds, entry) : enableSkill(selectedIds, entry),
+              )
+            }
+            data-track-category='Claw Agents'
+            data-track-name='Create agent v2: toggle skill from detail'
+            className={cn(
+              'flex h-7 shrink-0 items-center justify-center rounded-lg border px-2 text-sm font-medium leading-[1.2] transition-colors',
+              selected
+                ? 'border-border bg-card text-foreground hover:bg-muted'
+                : 'border-transparent bg-primary text-primary-foreground hover:bg-primary/90',
+            )}
+          >
+            {selected ? 'Remove' : 'Add'}
+          </button>
         </div>
-        <button
-          type='button'
-          onClick={() =>
-            onChange(selected ? disableSkill(selectedIds, entry) : enableSkill(selectedIds, entry))
-          }
-          data-track-category='Claw Agents'
-          data-track-name='Create agent v2: toggle skill from detail'
-          className={cn(
-            'flex h-7 shrink-0 items-center justify-center rounded-lg border px-2 text-sm font-medium leading-[1.2] transition-colors',
-            selected
-              ? 'border-border bg-card text-foreground hover:bg-muted'
-              : 'border-transparent bg-primary text-primary-foreground hover:bg-primary/90',
-          )}
-        >
-          {selected ? 'Remove' : 'Add'}
-        </button>
+
+        {entry.description && (
+          <p className='w-full text-sm font-normal leading-[1.3] tracking-[-0.28px] text-foreground'>
+            {entry.description}
+          </p>
+        )}
       </div>
 
-      {entry.description && (
-        <p className='w-full text-sm font-normal leading-[1.3] tracking-[-0.28px] text-foreground'>
-          {entry.description}
-        </p>
-      )}
+      <div className='flex min-h-0 flex-1 flex-col gap-8 overflow-y-auto px-[22px] pb-9'>
+        <div className='flex w-full flex-col gap-4'>
+          <section className='flex w-full flex-col gap-4'>
+            <SectionHeading label='Files' />
 
-      <div className='flex w-full flex-col gap-4'>
-        <section className='flex w-full flex-col gap-4'>
-          <SectionHeading label='Files' />
-
-          {files.isLoading ? (
-            <div className='flex w-full flex-col gap-2'>
-              <Skeleton className='h-9 w-48' />
-              <Skeleton className='h-9 w-40' />
-            </div>
-          ) : (
-            <div className='flex w-full items-stretch gap-4'>
-              <div className='w-[190px] shrink-0'>
-                <SkillFileTree
-                  nodes={tree}
-                  selectedPath={openFile.path}
-                  onSelect={setOpenFile}
-                  openFolders={expanded}
-                  onToggleFolder={toggleFolder}
-                />
+            {files.isLoading ? (
+              <div className='flex w-full flex-col gap-2'>
+                <Skeleton className='h-9 w-48' />
+                <Skeleton className='h-9 w-40' />
               </div>
+            ) : (
+              <div className='flex w-full items-stretch gap-4'>
+                <div className='w-[190px] shrink-0'>
+                  <SkillFileTree
+                    nodes={tree}
+                    selectedPath={openFile.path}
+                    onSelect={setOpenFile}
+                    openFolders={expanded}
+                    onToggleFolder={toggleFolder}
+                  />
+                </div>
 
-              <div className='min-w-0 flex-1'>
-                <ScrollFadeBox height={PANE_HEIGHT} resetKeys={[preview, openFile.path]}>
-                  {!isSkillMd && fileContent.loading ? (
-                    <div className='flex flex-col gap-2'>
-                      <Skeleton className='h-4 w-full' />
-                      <Skeleton className='h-4 w-4/5' />
-                      <Skeleton className='h-4 w-2/3' />
-                    </div>
-                  ) : !isSkillMd && fileContent.isError ? (
-                    <Muted>Couldn&apos;t load {openFile.name}.</Muted>
-                  ) : preview ? (
-                    <Body>{preview}</Body>
-                  ) : (
-                    <Muted>{openFile.name} is empty.</Muted>
-                  )}
-                </ScrollFadeBox>
+                <div className='min-w-0 flex-1'>
+                  <ScrollFadeBox height={PANE_HEIGHT} resetKeys={[preview, openFile.path]}>
+                    {!isSkillMd && fileContent.loading ? (
+                      <div className='flex flex-col gap-2'>
+                        <Skeleton className='h-4 w-full' />
+                        <Skeleton className='h-4 w-4/5' />
+                        <Skeleton className='h-4 w-2/3' />
+                      </div>
+                    ) : !isSkillMd && fileContent.isError ? (
+                      <Muted>Couldn&apos;t load {openFile.name}.</Muted>
+                    ) : preview ? (
+                      <Body>{preview}</Body>
+                    ) : (
+                      <Muted>{openFile.name} is empty.</Muted>
+                    )}
+                  </ScrollFadeBox>
+                </div>
               </div>
-            </div>
-          )}
-        </section>
+            )}
+          </section>
+        </div>
       </div>
     </div>
   );

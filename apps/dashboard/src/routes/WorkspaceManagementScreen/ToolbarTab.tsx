@@ -1,4 +1,5 @@
 import { ReactElement, useState } from 'react';
+import { useStreamsVisibility } from '../../hooks/useStreamsVisibility';
 import { Search, Shield } from 'lucide-react';
 import Input from '../../components/ui/Input/Input';
 import { useSelf } from '../../hooks/useUsers';
@@ -41,7 +42,15 @@ export const ToolbarTab = ({ isActive: _isActive = false }: ToolbarTabProps): Re
   // Permission-gated items (e.g. Roles, Workspace Management) are already restricted by the
   // user/role permission system — a regular member can never see them regardless of this
   // workspace-wide toggle, so surfacing them here would be misleading.
-  const manageableItems = NAVIGATION_ITEMS.filter(item => !(item.path in PATH_TO_RESOURCE));
+  // Streams is behind its own flag until release (Preferences > Developer), so it
+  // is not yet something a workspace can be told it has. Same gate the sidebar,
+  // the toolbar preference and /goto read — this screen builds from
+  // NAVIGATION_ITEMS directly rather than useVisibleNavigationItems, so it needs
+  // the filter applied here too.
+  const { showStreams } = useStreamsVisibility();
+  const manageableItems = NAVIGATION_ITEMS.filter(
+    item => !(item.path in PATH_TO_RESOURCE) && (showStreams || item.path !== '/streams'),
+  );
 
   const [searchQuery, setSearchQuery] = useState('');
   const visibleItems = manageableItems.filter(item =>
