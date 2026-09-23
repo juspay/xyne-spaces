@@ -1,3 +1,10 @@
+## [1.373.0-release-20260923.1](https://github.com/juspay/xyne-spaces/compare/v1.372.1-release-20260923.1...v1.373.0-release-20260923.1) (2026-09-23)
+
+
+### Features
+
+* accept multiple keywords in message trigger Content Contains ([#2219](https://github.com/juspay/xyne-spaces/issues/2219)) ([fb3ba2b](https://github.com/juspay/xyne-spaces/commit/fb3ba2b7ff04ac2effffeeaca89f1526687b84a6))
+
 ## [1.372.1-release-20260923.1](https://github.com/juspay/xyne-spaces/compare/v1.372.0...v1.372.1-release-20260923.1) (2026-09-23)
 
 
