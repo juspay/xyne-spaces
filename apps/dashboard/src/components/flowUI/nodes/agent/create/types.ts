@@ -12,7 +12,7 @@ export type AgentCreateField =
   | 'knowledge';
 
 /** Hub capability row the write pointer should rest on during scripted fills. */
-export type AgentCreateHubRow = 'mcp' | 'builtin' | 'skills' | 'knowledge';
+export type AgentCreateHubRow = 'mcp' | 'builtin' | 'subagent' | 'skills' | 'knowledge';
 
 export type AgentCreatePhase = 'empty' | 'loading' | 'draft' | 'created' | 'rejected';
 

@@ -48,6 +48,36 @@ void describe('classifyCreateTurn', () => {
     ]);
   });
 
+  void it('adds tools when the request implies email / X.com capabilities', () => {
+    const text =
+      'Build an agent that posts to X.com and sends a daily email digest of mentions.';
+    assert.deepEqual(firstDraftFields(text), [
+      'name',
+      'slug',
+      'description',
+      'systemPrompt',
+      'tools',
+    ]);
+    const result = classifyCreateTurn(text, true);
+    assert.equal(result.kind, 'edit');
+    assert.deepEqual(result.fields, [
+      'name',
+      'slug',
+      'description',
+      'systemPrompt',
+      'tools',
+    ]);
+  });
+
+  void it('keeps vague make-a-bot identity-only', () => {
+    assert.deepEqual(firstDraftFields('make a bot'), [
+      'name',
+      'slug',
+      'description',
+      'systemPrompt',
+    ]);
+  });
+
   void it('adds tools only when the user named them', () => {
     const text = 'Build a standup scribe that posts a Slack summary every morning.';
     const result = classifyCreateTurn(text, true);

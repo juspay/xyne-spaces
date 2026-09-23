@@ -21,22 +21,50 @@ export interface CreateTurnClassification {
 
 export const IDENTITY_FIELDS: CreateTurnField[] = ['name', 'slug', 'description', 'systemPrompt'];
 
-/** First-draft identity only. Tools/MCP/skills/knowledge stay empty unless named. */
+/** First-draft identity fields. Hub rows append when the request implies them. */
 export const FIRST_DESCRIBE_FIELDS: CreateTurnField[] = IDENTITY_FIELDS;
 
+/**
+ * Hub capabilities implied by the user request (not vague “make a bot”).
+ * Order: tools (MCP / builtin / subagent) → skills → knowledge.
+ */
 export function namedCapabilityFields(text: string): CreateTurnField[] {
   const lower = text.toLowerCase();
   const extra: CreateTurnField[] = [];
-  if (/\bskills?\b/.test(lower)) extra.push('skills');
-  if (
-    /\b(mcp|tools?|integrations?|servers?|slack|github|jira|notion|linear|gmail|calendars?)\b/.test(
+  const impliesTools =
+    /\b(mcp|tools?|integrations?|servers?|slack|github|jira|notion|linear|gmail|outlook|email|e-?mail|discord|teams|calendars?|browse|search|web\s*search|x\.com|\btwitter\b)\b/i.test(
       lower,
-    )
-  ) {
+    ) ||
+    /\b(sub-?agents?|delegate|delegat(?:e|ion))\b/i.test(lower);
+  if (/\bskills?\b/.test(lower) || /\b(workflow|recipe|playbook)\b/.test(lower)) {
+    extra.push('skills');
+  }
+  if (impliesTools) {
     extra.push('tools');
   }
-  if (/\bknowledge(?:\s+base)?\b|\bkb\b/.test(lower)) extra.push('knowledge');
+  if (
+    /\bknowledge(?:\s+base)?\b|\bkb\b/.test(lower) ||
+    /\b(my\s+docs?|our\s+docs?|documentation|confluence|wiki)\b/.test(lower)
+  ) {
+    extra.push('knowledge');
+  }
   return extra;
+}
+
+/** Preferred Hub row when tools are implied (MCP vs builtin vs subagent). */
+export function preferredToolsHubRow(text: string): 'mcp' | 'builtin' | 'subagent' {
+  const lower = text.toLowerCase();
+  if (/\b(sub-?agents?|delegate|delegat(?:e|ion))\b/i.test(lower)) {
+    return 'subagent';
+  }
+  const mcpCue =
+    /\b(mcp|integrations?|servers?|slack|github|jira|notion|linear|gmail|outlook|email|e-?mail|discord|teams|x\.com|\btwitter\b)\b/i.test(
+      lower,
+    );
+  const builtinCue =
+    /\b(browse|search|web\s*search|calendars?|code|terminal|filesystem)\b/i.test(lower);
+  if (builtinCue && !mcpCue) return 'builtin';
+  return 'mcp';
 }
 
 export function firstDraftFields(text: string): CreateTurnField[] {

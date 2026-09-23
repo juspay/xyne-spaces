@@ -45,6 +45,9 @@ interface AgentCreateCanvasProps {
   writingField?: AgentCreateField | null;
   /** Hub row under `writingField` when filling MCP / tools / skills / knowledge. */
   writingHubRow?: AgentCreateHubRow | null;
+  /** Upcoming or active section (anticipating shimmer when writingField is empty). */
+  attentionField?: AgentCreateField | null;
+  attentionHubRow?: AgentCreateHubRow | null;
 }
 
 function ConflictChooser({
@@ -127,6 +130,8 @@ export function AgentCreateCanvas({
   skeletonIdentity,
   writingField = null,
   writingHubRow = null,
+  attentionField = null,
+  attentionHubRow = null,
 }: AgentCreateCanvasProps): ReactElement {
   const conflictByField = useMemo(
     () => new Map(conflicts.map(conflict => [conflict.field, conflict])),
@@ -150,9 +155,18 @@ export function AgentCreateCanvas({
 
   const columnRef = useRef<HTMLDivElement | null>(null);
   const showIdentitySkeleton = Boolean(skeletonIdentity);
+  const isAnticipating = (field: AgentCreateField): boolean =>
+    attentionField === field && writingField !== field;
   const isWriting = (field: AgentCreateField): boolean =>
     writingField === field || highlights.has(field);
-  const activeWrite = writingField ?? [...highlights][0] ?? '';
+  const isShimmering = (field: AgentCreateField): boolean =>
+    isWriting(field) || isAnticipating(field);
+  const isHubShimmering = (row: AgentCreateHubRow): boolean => {
+    if (writingHubRow === row) return true;
+    if (attentionHubRow === row && writingHubRow !== row) return true;
+    return false;
+  };
+  const activeWrite = writingField ?? attentionField ?? [...highlights][0] ?? '';
   const fieldClass =
     'w-full resize-y border-0 border-b border-border bg-transparent px-0 py-2 text-sm leading-6 text-foreground placeholder:text-muted-foreground/70 focus:outline-none focus:ring-0 disabled:opacity-60';
 
@@ -161,6 +175,7 @@ export function AgentCreateCanvas({
       className='flex h-full min-w-0 flex-col bg-background'
       data-component='AgentCreateCanvas'
       data-writing-field={activeWrite}
+      data-attention-field={attentionField ?? ''}
       data-canvas-idle={skeletonIdentity || activeWrite ? 'false' : 'true'}
     >
       <div className='flex h-11 flex-shrink-0 items-center justify-between px-5'>
@@ -187,7 +202,12 @@ export function AgentCreateCanvas({
           ) : (
             <>
               <div className='flex min-w-0 flex-col gap-2'>
-                <ChatFillHighlight active={isWriting('name')} placement='inline' field='name'>
+                <ChatFillHighlight
+                  active={isShimmering('name')}
+                  anticipating={isAnticipating('name')}
+                  placement='inline'
+                  field='name'
+                >
                   <div className='flex w-full items-center gap-2'>
                     <AutoWidthInput
                       id='agent-create-name'
@@ -211,7 +231,12 @@ export function AgentCreateCanvas({
                   </div>
                 </ChatFillHighlight>
 
-                <ChatFillHighlight active={isWriting('slug')} placement='inline' field='slug'>
+                <ChatFillHighlight
+                  active={isShimmering('slug')}
+                  anticipating={isAnticipating('slug')}
+                  placement='inline'
+                  field='slug'
+                >
                   <div className='flex items-center gap-1.5'>
                     <div className='flex items-center gap-0.5 py-0.5'>
                       <AtMark className='size-4 shrink-0 text-muted-foreground' aria-hidden />
@@ -258,7 +283,8 @@ export function AgentCreateCanvas({
               </div>
 
               <ChatFillHighlight
-                active={isWriting('description')}
+                active={isShimmering('description')}
+                anticipating={isAnticipating('description')}
                 placement='block'
                 field='description'
               >
@@ -286,7 +312,8 @@ export function AgentCreateCanvas({
               </ChatFillHighlight>
 
               <ChatFillHighlight
-                active={isWriting('systemPrompt')}
+                active={isShimmering('systemPrompt')}
+                anticipating={isAnticipating('systemPrompt')}
                 placement='block'
                 field='systemPrompt'
               >
@@ -317,11 +344,15 @@ export function AgentCreateCanvas({
           )}
 
           <>
-            <ChatFillHighlight active={isWriting('tools')} field='tools'>
-              <div
-                className={cn('flex flex-col gap-8', disabled && 'pointer-events-none opacity-60')}
-                onFocus={() => onFieldFocus('tools')}
-                onBlur={() => onFieldFocus(null)}
+            <div
+              className={cn('flex flex-col gap-8', disabled && 'pointer-events-none opacity-60')}
+              onFocus={() => onFieldFocus('tools')}
+              onBlur={() => onFieldFocus(null)}
+            >
+              <ChatFillHighlight
+                active={isHubShimmering('mcp')}
+                anticipating={attentionHubRow === 'mcp' && writingHubRow !== 'mcp'}
+                field='tools'
               >
                 <div data-create-hub-row='mcp'>
                   <McpCapabilityRow
@@ -334,15 +365,29 @@ export function AgentCreateCanvas({
                     suggestContext={suggestContext}
                   />
                 </div>
-                <SubagentCapabilityRow
-                  selection={form.tools}
-                  onSelectionChange={tools =>
-                    onFormChange({
-                      tools: { ...tools, callableAgents: form.tools.callableAgents },
-                    })
-                  }
-                  suggestContext={suggestContext}
-                />
+              </ChatFillHighlight>
+              <ChatFillHighlight
+                active={isHubShimmering('subagent')}
+                anticipating={attentionHubRow === 'subagent' && writingHubRow !== 'subagent'}
+                field='tools'
+              >
+                <div data-create-hub-row='subagent'>
+                  <SubagentCapabilityRow
+                    selection={form.tools}
+                    onSelectionChange={tools =>
+                      onFormChange({
+                        tools: { ...tools, callableAgents: form.tools.callableAgents },
+                      })
+                    }
+                    suggestContext={suggestContext}
+                  />
+                </div>
+              </ChatFillHighlight>
+              <ChatFillHighlight
+                active={isHubShimmering('builtin')}
+                anticipating={attentionHubRow === 'builtin' && writingHubRow !== 'builtin'}
+                field='tools'
+              >
                 <div data-create-hub-row='builtin'>
                   <BuiltinCapabilityRow
                     selection={form.tools}
@@ -354,11 +399,15 @@ export function AgentCreateCanvas({
                     suggestContext={suggestContext}
                   />
                 </div>
-                {renderConflict('tools')}
-              </div>
-            </ChatFillHighlight>
+              </ChatFillHighlight>
+              {renderConflict('tools')}
+            </div>
 
-            <ChatFillHighlight active={isWriting('skills')} field='skills'>
+            <ChatFillHighlight
+              active={isShimmering('skills') || isHubShimmering('skills')}
+              anticipating={isAnticipating('skills')}
+              field='skills'
+            >
               <div
                 className={cn(disabled && 'pointer-events-none opacity-60')}
                 data-create-hub-row='skills'
@@ -373,7 +422,11 @@ export function AgentCreateCanvas({
               </div>
             </ChatFillHighlight>
 
-            <ChatFillHighlight active={isWriting('knowledge')} field='knowledge'>
+            <ChatFillHighlight
+              active={isShimmering('knowledge') || isHubShimmering('knowledge')}
+              anticipating={isAnticipating('knowledge')}
+              field='knowledge'
+            >
               <div
                 className={cn(disabled && 'pointer-events-none opacity-60')}
                 data-create-hub-row='knowledge'

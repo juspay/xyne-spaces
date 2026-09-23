@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactElement,
+} from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { Panel, ResizableGroup, Separator } from '@/components/ui/Resizable/Resizable';
 import { useAuth } from '@/hooks/useAuth';
@@ -27,10 +34,13 @@ import { DiscardDraftDialog } from '@/components/flowUI/nodes/agent/create/Disca
 import {
   applyCreateHubDraft,
   decideCreateCanvasAction,
+  parseCreateChatAction,
   resolveWalkCreateAction,
   WALK_BUILTIN_HUB_USER_TEXT,
   type CreateCanvasSnapshot,
 } from '@/components/flowUI/nodes/agent/create/createChatMode';
+import { preferredToolsHubRow } from '@/components/flowUI/nodes/agent/create/classifyCreateTurn';
+import { PROGRESS_THINKING } from '@/components/flowUI/nodes/agent/create/createProgressLabel';
 import {
   buildBuiltinCatalog,
   enableEntry as enableBuiltinEntry,
@@ -77,7 +87,9 @@ export function AgentCreateSplitPage({
   const [discardOpen, setDiscardOpen] = useState(false);
   const [createdSlug, setCreatedSlug] = useState<string | null>(null);
   const [skeletonIdentity, setSkeletonIdentity] = useState(false);
+  const [progressLabel, setProgressLabel] = useState<string | null>(null);
   const canvasTurnChainRef = useRef(Promise.resolve());
+  const onTurnCompleteRef = useRef<(turn: CreateChatTurn) => Promise<void>>(async () => undefined);
 
   const slug = effectiveSlug({
     name: createForm.form.name,
@@ -151,18 +163,24 @@ export function AgentCreateSplitPage({
       if (action.type === 'idle') {
         createForm.clearHighlights();
         createForm.setWritingField(null);
+        createForm.setAttentionField(null);
+        setProgressLabel(null);
         setSkeletonIdentity(false);
         return;
       }
 
       setCreateError(null);
       createForm.clearHighlightMarks();
+      setProgressLabel(PROGRESS_THINKING);
 
       if (action.type === 'rename') {
         const sourceId = `hub-rename-${Date.now()}`;
         const renameName = sanitizeAgentCanvasName(action.name);
         const nameBeforeRename = createForm.form.name.trim();
         try {
+          createForm.setAttentionField('name');
+          setProgressLabel('Drafting name…');
+          await sleep(320);
           createForm.setWritingField('name');
           await sleep(48);
           const changedName = createForm.applyChatPatch(
@@ -191,11 +209,14 @@ export function AgentCreateSplitPage({
           setPhase('draft');
         } finally {
           createForm.setWritingField(null);
+          createForm.setAttentionField(null);
+          setProgressLabel(null);
         }
         return;
       }
 
       if (action.type !== 'draft') {
+        setProgressLabel(null);
         return;
       }
 
@@ -209,19 +230,25 @@ export function AgentCreateSplitPage({
         if (firstDescribe) {
           setSkeletonIdentity(false);
         }
+        const toolsHubRow =
+          userText === WALK_BUILTIN_HUB_USER_TEXT
+            ? 'builtin'
+            : preferredToolsHubRow(userText);
         await applyCreateHubDraft({
           action,
           canvasEmpty,
           existingSystemPrompt: createForm.form.systemPrompt,
           writeMs: WRITE_MS,
           sourceId,
-          toolsHubRow: userText === WALK_BUILTIN_HUB_USER_TEXT ? 'builtin' : 'mcp',
+          toolsHubRow,
           generateAgentPrompt: async (intent, existingPrompt) =>
             generateAgentPrompt({
               intent,
               ...(existingPrompt ? { existingPrompt } : {}),
             }),
           setWritingField: createForm.setWritingField,
+          setAttentionField: createForm.setAttentionField,
+          setProgressLabel,
           applyChatPatch: createForm.applyChatPatch,
           sleep,
           ...(action.fields.includes('tools')
@@ -234,7 +261,10 @@ export function AgentCreateSplitPage({
                       const built = buildBuiltinCatalog(catalog);
                       const pick = built.find(entry => entry.tools.length > 0);
                       if (pick) {
-                        incoming.tools = enableBuiltinEntry(createForm.form.tools, pick);
+                        incoming.tools = {
+                          ...enableBuiltinEntry(createForm.form.tools, pick),
+                          callableAgents: createForm.form.tools.callableAgents,
+                        };
                       }
                       return;
                     }
@@ -258,7 +288,10 @@ export function AgentCreateSplitPage({
                         mcpCatalog.find(entry => entry.isGateway && entry.selectable) ??
                         mcpCatalog.find(entry => entry.selectable);
                       if (pick) {
-                        selection = enableEntry(mcpCatalog, selection, pick);
+                        selection = {
+                          ...enableEntry(mcpCatalog, selection, pick),
+                          callableAgents: selection.callableAgents ?? [],
+                        };
                       }
                     }
                     incoming.tools = selection;
@@ -332,10 +365,14 @@ export function AgentCreateSplitPage({
         });
         await sleep(WRITE_MS * 2);
         createForm.setWritingField(null);
+        createForm.setAttentionField(null);
+        setProgressLabel(null);
         setSkeletonIdentity(false);
         setPhase('draft');
       } catch (err) {
         createForm.clearHighlights();
+        createForm.setAttentionField(null);
+        setProgressLabel(null);
         setSkeletonIdentity(false);
         setPhase(canvasIsEmpty(createForm.form) ? 'empty' : 'draft');
         throw err;
@@ -344,8 +381,31 @@ export function AgentCreateSplitPage({
       canvasTurnChainRef.current = run.catch(() => {});
       return run;
     },
-    [createForm, scripted],
+    [createForm, scripted, user?.id],
   );
+
+  onTurnCompleteRef.current = onTurnComplete;
+
+  useEffect(() => {
+    if (scripted || !import.meta.env.DEV) return undefined;
+    const host = window as Window & {
+      __xyneCreateProofTurn?: (userText: string, visibleReply?: string) => Promise<void>;
+    };
+    host.__xyneCreateProofTurn = async (userText, visibleReply) => {
+      const walk = resolveWalkCreateAction(userText);
+      const raw =
+        walk && walk.type === 'draft'
+          ? `${walk.visibleReply || visibleReply || 'Drafted on the canvas.'}\nXYNE_CREATE_DRAFT: ${walk.intent}`
+          : `${visibleReply ?? 'Drafted on the canvas.'}\nXYNE_CREATE_DRAFT: ${userText}`;
+      await onTurnCompleteRef.current({
+        userText,
+        marker: parseCreateChatAction(raw),
+      });
+    };
+    return (): void => {
+      delete host.__xyneCreateProofTurn;
+    };
+  }, [scripted]);
 
   const persist = useCallback(async (): Promise<void> => {
     if (scripted || !canCreate || creating) return;
@@ -464,6 +524,8 @@ export function AgentCreateSplitPage({
       skeletonIdentity={skeletonIdentity}
       writingField={createForm.writingField}
       writingHubRow={createForm.writingHubRow}
+      attentionField={createForm.attentionField}
+      attentionHubRow={createForm.attentionHubRow}
       phase={phase === 'created' ? 'created' : phase === 'empty' ? 'empty' : 'draft'}
       builtBy={builtBy}
       handleError={handleError}
@@ -499,6 +561,7 @@ export function AgentCreateSplitPage({
               canvas={canvasSnapshot}
               onTurnComplete={onTurnComplete}
               disabled={phase === 'created'}
+              progressLabel={scripted ? null : progressLabel}
               {...(scripted
                 ? {
                     scripted: true,

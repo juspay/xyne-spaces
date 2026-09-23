@@ -19,6 +19,8 @@ export function useAgentCreateForm(initial: AgentCreateFormState = EMPTY_CREATE_
   const [highlights, setHighlights] = useState<ReadonlySet<AgentCreateField>>(new Set());
   const [writingField, setWritingFieldState] = useState<AgentCreateField | null>(null);
   const [writingHubRow, setWritingHubRowState] = useState<AgentCreateHubRow | null>(null);
+  const [attentionField, setAttentionFieldState] = useState<AgentCreateField | null>(null);
+  const [attentionHubRow, setAttentionHubRowState] = useState<AgentCreateHubRow | null>(null);
   const highlightTimer = useRef<number | null>(null);
   const lastSourceRef = useRef<string | null>(null);
   const formRef = useRef(form);
@@ -50,6 +52,8 @@ export function useAgentCreateForm(initial: AgentCreateFormState = EMPTY_CREATE_
     setHighlights(new Set());
     setWritingFieldState(null);
     setWritingHubRowState(null);
+    setAttentionFieldState(null);
+    setAttentionHubRowState(null);
   }, []);
 
   const clearHighlightMarks = useCallback(() => {
@@ -60,6 +64,14 @@ export function useAgentCreateForm(initial: AgentCreateFormState = EMPTY_CREATE_
     setHighlights(new Set());
   }, []);
 
+  const setAttentionField = useCallback(
+    (field: AgentCreateField | null, hubRow: AgentCreateHubRow | null = null) => {
+      setAttentionFieldState(field);
+      setAttentionHubRowState(field ? hubRow : null);
+    },
+    [],
+  );
+
   const setWritingField = useCallback(
     (field: AgentCreateField | null, hubRow: AgentCreateHubRow | null = null) => {
       if (highlightTimer.current !== null) {
@@ -68,6 +80,10 @@ export function useAgentCreateForm(initial: AgentCreateFormState = EMPTY_CREATE_
       }
       setWritingFieldState(field);
       setWritingHubRowState(field ? hubRow : null);
+      if (field) {
+        setAttentionFieldState(field);
+        setAttentionHubRowState(hubRow);
+      }
       setHighlights(field ? new Set([field]) : new Set());
     },
     [],
@@ -156,6 +172,8 @@ export function useAgentCreateForm(initial: AgentCreateFormState = EMPTY_CREATE_
     setHighlights(new Set());
     setWritingFieldState(null);
     setWritingHubRowState(null);
+    setAttentionFieldState(null);
+    setAttentionHubRowState(null);
     if (sourceId) lastSourceRef.current = sourceId;
   }, []);
 
@@ -173,6 +191,8 @@ export function useAgentCreateForm(initial: AgentCreateFormState = EMPTY_CREATE_
     highlights,
     writingField,
     writingHubRow,
+    attentionField,
+    attentionHubRow,
     canvasDirty: isFormDirty(form, baseline),
     patchForm,
     applyChatPatch,
@@ -184,5 +204,6 @@ export function useAgentCreateForm(initial: AgentCreateFormState = EMPTY_CREATE_
     clearHighlights,
     clearHighlightMarks,
     setWritingField,
+    setAttentionField,
   };
 }

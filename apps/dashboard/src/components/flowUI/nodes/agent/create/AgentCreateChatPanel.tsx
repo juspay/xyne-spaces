@@ -9,7 +9,6 @@ import {
   type Ref,
   type RefObject,
 } from 'react';
-import { Loader2 } from 'lucide-react';
 import {
   AIComposer,
   type AIComposerAttachment,
@@ -31,7 +30,6 @@ import { buildXyneAIStreamThreadId, newStreamSlotKey } from '@/utils/xyneAIStrea
 import {
   createModeQuery,
   compactCreateDraftChatReply,
-  decideCreateCanvasAction,
   parseCreateChatAction,
   visibleCreateReply,
   type CreateCanvasSnapshot,
@@ -40,6 +38,22 @@ import {
 
 const SCRIPTED_THINK_PHASES = ['Thinking', 'Weighing it up', 'Reasoning'] as const;
 const SCRIPTED_THINK_PHASE_MS = 1600;
+
+function WorkingProgressRow({ label }: { label: string }): ReactElement {
+  const stable = useStableLabel(label);
+  return (
+    <div
+      className='-ml-1 inline-flex items-center gap-1.5 rounded-md px-1.5 py-1 text-xs text-muted-foreground'
+      data-testid='agent-create-progress'
+      data-progress-label={label}
+    >
+      <BrailleLoader />
+      <span className='select-none'>
+        <AnimatedLabel text={stable} />
+      </span>
+    </div>
+  );
+}
 
 function ScriptedThinkLabel(): ReactElement {
   const [phase, setPhase] = useState(0);
@@ -81,6 +95,8 @@ interface AgentCreateChatPanelProps {
   canvas: CreateCanvasSnapshot;
   onTurnComplete: (turn: CreateChatTurn) => Promise<void>;
   disabled?: boolean;
+  /** Live draft pipeline phase — Braille + AnimatedLabel, not chat bubbles. */
+  progressLabel?: string | null;
   scripted?: boolean;
   scriptedMessages?: Message[];
   scriptedDraft?: string;
@@ -102,6 +118,7 @@ function LiveAgentCreateChatPanel({
   canvas,
   onTurnComplete,
   disabled,
+  progressLabel = null,
 }: AgentCreateChatPanelProps): ReactElement {
   const [messages, setMessages] = useState<Message[]>([]);
   const [conversationId, setConversationId] = useState('');
@@ -244,7 +261,8 @@ function LiveAgentCreateChatPanel({
       canvasError={canvasError}
       messages={messages}
       bottomRef={bottomRef}
-      pending={streaming || Boolean(disabled)}
+      pending={streaming || Boolean(disabled) || Boolean(progressLabel)}
+      progressLabel={progressLabel}
       {...(streaming ? { onStop: abortCurrentRequest } : {})}
       onSubmit={(text, attachments, context, trigger) => {
         void handleSubmit(text, attachments, context, trigger);
@@ -319,6 +337,7 @@ function CreateChatLayout({
   locked = false,
   onReplay,
   onEngage,
+  progressLabel = null,
 }: {
   empty: boolean;
   canvasError: string | null;
@@ -339,6 +358,7 @@ function CreateChatLayout({
   locked?: boolean;
   onReplay?: () => void;
   onEngage?: () => void;
+  progressLabel?: string | null;
 }): ReactElement {
   return (
     <div
@@ -369,7 +389,7 @@ function CreateChatLayout({
         ) : null}
       </div>
       <div className='flex-1 overflow-y-auto'>
-        {empty ? (
+        {empty && !progressLabel ? (
           <div className='flex h-full min-h-[12rem] flex-col items-center justify-center px-6'>
             <AIEmptyState />
             <p
@@ -389,7 +409,8 @@ function CreateChatLayout({
               const thinking =
                 message.type === 'bot' &&
                 Boolean(message.isStreaming) &&
-                streamingText.trim().length === 0;
+                streamingText.trim().length === 0 &&
+                !progressLabel;
               const thinkLabel =
                 typeof message.statusMessage === 'string' && message.statusMessage.trim().length > 0
                   ? message.statusMessage
@@ -437,13 +458,7 @@ function CreateChatLayout({
                       ) : null}
                     </div>
                   ) : thinking ? (
-                    <div
-                      className='flex items-center gap-2 text-sm text-muted-foreground'
-                      data-testid='agent-create-chat-thinking'
-                    >
-                      <Loader2 className='size-4 animate-spin' aria-hidden />
-                      <span>{thinkLabel}</span>
-                    </div>
+                    <WorkingProgressRow label={thinkLabel} />
                   ) : (
                     <div>
                       {message.errorInfo ? (
@@ -463,6 +478,11 @@ function CreateChatLayout({
                 </li>
               );
             })}
+            {progressLabel ? (
+              <li className='px-2 py-3'>
+                <WorkingProgressRow label={progressLabel} />
+              </li>
+            ) : null}
             {canvasError ? (
               <li className='px-2 pb-4'>
                 <p className='text-sm leading-5 text-destructive' role='alert'>

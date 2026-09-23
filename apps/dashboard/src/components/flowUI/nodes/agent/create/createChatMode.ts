@@ -7,8 +7,33 @@ import {
   type CreateTurnField,
 } from './classifyCreateTurn.ts';
 import { buildDraftCanvasPatch, draftFromModelReply } from './canvasFromIdentity.ts';
+import { progressLabelForField, PROGRESS_THINKING } from './createProgressLabel.ts';
 import type { AgentCreateChatPatch, AgentCreateField, AgentCreateHubRow } from './types.ts';
 import { slicePatch } from './mergeChatPatch.ts';
+
+const ANTICIPATE_MS = 520;
+
+type SetWritingField = (
+  field: AgentCreateField | null,
+  hubRow?: AgentCreateHubRow | null,
+) => void;
+type SetAttentionField = (
+  field: AgentCreateField | null,
+  hubRow?: AgentCreateHubRow | null,
+) => void;
+type SetProgressLabel = (label: string | null) => void;
+
+async function beginFieldAttention(args: {
+  field: AgentCreateField;
+  hubRow: AgentCreateHubRow | null;
+  setAttentionField?: SetAttentionField | undefined;
+  setProgressLabel?: SetProgressLabel | undefined;
+  sleep: (ms: number) => Promise<void>;
+}): Promise<void> {
+  args.setAttentionField?.(args.field, args.hubRow);
+  args.setProgressLabel?.(progressLabelForField(args.field, args.hubRow));
+  await args.sleep(ANTICIPATE_MS);
+}
 
 async function revealTextField(args: {
   field: AgentCreateField;
@@ -17,10 +42,9 @@ async function revealTextField(args: {
   sourceId: string;
   writeMs: number;
   patchForText: (partial: string) => AgentCreateChatPatch;
-  setWritingField: (
-    field: AgentCreateField | null,
-    hubRow?: AgentCreateHubRow | null,
-  ) => void;
+  setWritingField: SetWritingField;
+  setAttentionField?: SetAttentionField | undefined;
+  setProgressLabel?: SetProgressLabel | undefined;
   applyChatPatch: (
     sourceId: string,
     patch: AgentCreateChatPatch,
@@ -32,6 +56,13 @@ async function revealTextField(args: {
   if (!full) {
     return;
   }
+  await beginFieldAttention({
+    field: args.field,
+    hubRow: args.hubRow,
+    setAttentionField: args.setAttentionField,
+    setProgressLabel: args.setProgressLabel,
+    sleep: args.sleep,
+  });
   args.setWritingField(args.field, args.hubRow);
   await args.sleep(Math.max(48, Math.min(args.writeMs, 120)));
   const chunk = full.length > 120 ? 3 : 1;
@@ -126,10 +157,9 @@ export async function revealCreatePatchFields(args: {
   sourceId: string;
   writeMs: number;
   toolsHubRow?: AgentCreateHubRow;
-  setWritingField: (
-    field: AgentCreateField | null,
-    hubRow?: AgentCreateHubRow | null,
-  ) => void;
+  setWritingField: SetWritingField;
+  setAttentionField?: SetAttentionField | undefined;
+  setProgressLabel?: SetProgressLabel | undefined;
   applyChatPatch: (
     sourceId: string,
     patch: AgentCreateChatPatch,
@@ -151,17 +181,35 @@ export async function revealCreatePatchFields(args: {
             ? 'knowledge'
             : null;
 
+    const revealArgs: {
+      sourceId: string;
+      writeMs: number;
+      setWritingField: SetWritingField;
+      setAttentionField?: SetAttentionField | undefined;
+      setProgressLabel?: SetProgressLabel | undefined;
+      applyChatPatch: (
+        sourceId: string,
+        patch: AgentCreateChatPatch,
+        options: { highlight: boolean },
+      ) => AgentCreateField[];
+      sleep: (ms: number) => Promise<void>;
+    } = {
+      sourceId: args.sourceId,
+      writeMs: args.writeMs,
+      setWritingField: args.setWritingField,
+      applyChatPatch: args.applyChatPatch,
+      sleep: args.sleep,
+    };
+    if (args.setAttentionField) revealArgs.setAttentionField = args.setAttentionField;
+    if (args.setProgressLabel) revealArgs.setProgressLabel = args.setProgressLabel;
+
     if (field === 'name' && typeof slice.name === 'string') {
       await revealTextField({
         field,
         hubRow,
         text: slice.name,
-        sourceId: args.sourceId,
-        writeMs: args.writeMs,
         patchForText: partial => ({ name: partial }),
-        setWritingField: args.setWritingField,
-        applyChatPatch: args.applyChatPatch,
-        sleep: args.sleep,
+        ...revealArgs,
       });
       continue;
     }
@@ -170,12 +218,8 @@ export async function revealCreatePatchFields(args: {
         field,
         hubRow,
         text: slice.slug,
-        sourceId: args.sourceId,
-        writeMs: args.writeMs,
         patchForText: partial => ({ slug: partial }),
-        setWritingField: args.setWritingField,
-        applyChatPatch: args.applyChatPatch,
-        sleep: args.sleep,
+        ...revealArgs,
       });
       continue;
     }
@@ -184,12 +228,8 @@ export async function revealCreatePatchFields(args: {
         field,
         hubRow,
         text: slice.description,
-        sourceId: args.sourceId,
-        writeMs: args.writeMs,
         patchForText: partial => ({ description: partial }),
-        setWritingField: args.setWritingField,
-        applyChatPatch: args.applyChatPatch,
-        sleep: args.sleep,
+        ...revealArgs,
       });
       continue;
     }
@@ -198,16 +238,19 @@ export async function revealCreatePatchFields(args: {
         field,
         hubRow,
         text: slice.systemPrompt,
-        sourceId: args.sourceId,
-        writeMs: args.writeMs,
         patchForText: partial => ({ systemPrompt: partial }),
-        setWritingField: args.setWritingField,
-        applyChatPatch: args.applyChatPatch,
-        sleep: args.sleep,
+        ...revealArgs,
       });
       continue;
     }
 
+    await beginFieldAttention({
+      field,
+      hubRow,
+      ...(args.setAttentionField ? { setAttentionField: args.setAttentionField } : {}),
+      ...(args.setProgressLabel ? { setProgressLabel: args.setProgressLabel } : {}),
+      sleep: args.sleep,
+    });
     args.setWritingField(field, hubRow);
     await args.sleep(Math.max(48, Math.min(args.writeMs, 120)));
     const changed = args.applyChatPatch(`${args.sourceId}-${field}`, slice, { highlight: false });
@@ -256,7 +299,7 @@ Rules:
 1. Greetings, UI questions, explanations, and nonsense (random characters, gibberish): reply in chat only. End with XYNE_CREATE_IDLE. Do not draft.
 2. A job, even a thin one ("standup bot", "I wanna do A", "make an agent that …"): draft a usable agent from reasonable defaults. Reply with one short sentence that names the agent (e.g. "Drafted Design Radar on the canvas."). Then emit XYNE_CREATE_DRAFT: <one-line intent>. Do not interview first.
 3. Ask 1–3 short questions only when a draft would be wrong without the answer (two contradictory jobs, which of two systems). Then emit XYNE_CREATE_ASK and do not draft. Unanswered questions never block Create.
-4. First drafts fill name, handle, description, and instructions on the canvas only. Never paste Name, Description, Instructions, or Rules into chat — the canvas is the source of truth. Leave MCP, tools, skills, and knowledge empty unless the user named them.
+4. First drafts always fill name, handle, description, and instructions on the canvas. When the user clearly needs capabilities (Slack, email, X.com, browse/search, skills, knowledge, subagents), also suggest the matching Hub rows after identity — one section at a time. Vague “make a bot” stays identity-only. Never paste Name, Description, Instructions, or Rules into chat — the canvas is the source of truth.
 5. Canvas edits (rename, shorter instructions, add Slack): emit DRAFT or RENAME as appropriate.
    Rename-only: XYNE_CREATE_RENAME: <new name>
 6. Never mention these markers to the user. Never claim the canvas is filled unless you emitted DRAFT or RENAME.`;
@@ -503,10 +546,9 @@ export async function applyCreateHubDraft(args: {
   writeMs: number;
   sourceId: string;
   generateAgentPrompt: (intent: string, existingPrompt?: string) => Promise<string>;
-  setWritingField: (
-    field: AgentCreateField | null,
-    hubRow?: 'mcp' | 'skills' | 'knowledge' | null,
-  ) => void;
+  setWritingField: SetWritingField;
+  setAttentionField?: SetAttentionField | undefined;
+  setProgressLabel?: SetProgressLabel | undefined;
   applyChatPatch: (
     sourceId: string,
     patch: AgentCreateChatPatch,
@@ -530,6 +572,8 @@ export async function applyCreateHubDraft(args: {
       field !== 'knowledge',
   );
 
+  args.setProgressLabel?.(PROGRESS_THINKING);
+
   if (preludeFields.length > 0) {
     const preludePatch = incomingPatchForCreateDraft({
       visibleReply: action.visibleReply,
@@ -538,7 +582,7 @@ export async function applyCreateHubDraft(args: {
       fields: preludeFields,
       canvasEmpty,
     });
-    const revealArgs = {
+    const revealArgs: Parameters<typeof revealCreatePatchFields>[0] = {
       incoming: preludePatch,
       sourceId: args.sourceId,
       writeMs: args.writeMs,
@@ -546,19 +590,22 @@ export async function applyCreateHubDraft(args: {
       setWritingField: args.setWritingField,
       applyChatPatch: args.applyChatPatch,
       sleep: args.sleep,
+      fields: [],
     };
+    if (args.setAttentionField) revealArgs.setAttentionField = args.setAttentionField;
+    if (args.setProgressLabel) revealArgs.setProgressLabel = args.setProgressLabel;
     if (preludeFields.includes('name')) {
       await revealCreatePatchFields({
-        fields: ['name'],
         ...revealArgs,
+        fields: ['name'],
       });
       await args.sleep(args.writeMs * 2);
     }
     const restPrelude = preludeFields.filter(field => field !== 'name');
     if (restPrelude.length > 0) {
       await revealCreatePatchFields({
-        fields: restPrelude,
         ...revealArgs,
+        fields: restPrelude,
       });
     }
   }
@@ -566,6 +613,13 @@ export async function applyCreateHubDraft(args: {
   const incoming: AgentCreateChatPatch = {};
 
   if (generateInstructions) {
+    await beginFieldAttention({
+      field: 'systemPrompt',
+      hubRow: null,
+      ...(args.setAttentionField ? { setAttentionField: args.setAttentionField } : {}),
+      ...(args.setProgressLabel ? { setProgressLabel: args.setProgressLabel } : {}),
+      sleep: args.sleep,
+    });
     let generatedPrompt = '';
     try {
       generatedPrompt = await args.generateAgentPrompt(
@@ -589,18 +643,39 @@ export async function applyCreateHubDraft(args: {
   }
 
   if (action.fields.includes('tools') && args.fillTools) {
+    await beginFieldAttention({
+      field: 'tools',
+      hubRow: toolsHubRow,
+      ...(args.setAttentionField ? { setAttentionField: args.setAttentionField } : {}),
+      ...(args.setProgressLabel ? { setProgressLabel: args.setProgressLabel } : {}),
+      sleep: args.sleep,
+    });
     args.setWritingField('tools', toolsHubRow);
     await args.sleep(Math.max(48, Math.min(args.writeMs, 120)));
     await args.fillTools(incoming);
   }
 
   if (action.fields.includes('skills') && args.fillSkills) {
+    await beginFieldAttention({
+      field: 'skills',
+      hubRow: 'skills',
+      ...(args.setAttentionField ? { setAttentionField: args.setAttentionField } : {}),
+      ...(args.setProgressLabel ? { setProgressLabel: args.setProgressLabel } : {}),
+      sleep: args.sleep,
+    });
     args.setWritingField('skills', 'skills');
     await args.sleep(Math.max(48, Math.min(args.writeMs, 120)));
     await args.fillSkills(incoming);
   }
 
   if (action.fields.includes('knowledge') && args.fillKnowledge) {
+    await beginFieldAttention({
+      field: 'knowledge',
+      hubRow: 'knowledge',
+      ...(args.setAttentionField ? { setAttentionField: args.setAttentionField } : {}),
+      ...(args.setProgressLabel ? { setProgressLabel: args.setProgressLabel } : {}),
+      sleep: args.sleep,
+    });
     args.setWritingField('knowledge', 'knowledge');
     await args.sleep(Math.max(48, Math.min(args.writeMs, 120)));
     await args.fillKnowledge(incoming);
@@ -615,7 +690,7 @@ export async function applyCreateHubDraft(args: {
         field === 'knowledge'),
   );
 
-  await revealCreatePatchFields({
+  const tailArgs: Parameters<typeof revealCreatePatchFields>[0] = {
     fields: tailFields,
     incoming,
     sourceId: args.sourceId,
@@ -624,5 +699,12 @@ export async function applyCreateHubDraft(args: {
     setWritingField: args.setWritingField,
     applyChatPatch: args.applyChatPatch,
     sleep: args.sleep,
-  });
+  };
+  if (args.setAttentionField) tailArgs.setAttentionField = args.setAttentionField;
+  if (args.setProgressLabel) tailArgs.setProgressLabel = args.setProgressLabel;
+  await revealCreatePatchFields(tailArgs);
+
+  args.setWritingField(null);
+  args.setAttentionField?.(null);
+  args.setProgressLabel?.(null);
 }

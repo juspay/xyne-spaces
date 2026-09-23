@@ -10,6 +10,8 @@ interface ChatFillHighlightProps {
   /** inline = identity row; block = description / instructions. */
   placement?: 'inline' | 'block';
   field?: AgentCreateField;
+  /** Anticipating next write (attention set, not yet streaming characters). */
+  anticipating?: boolean;
 }
 
 const SHIMMER_TEXT =
@@ -38,6 +40,7 @@ export function ChatFillHighlight({
   className,
   placement = 'block',
   field,
+  anticipating = false,
 }: ChatFillHighlightProps): ReactElement {
   const reduceMotion = useReducedMotion() === true;
   const hostRef = useRef<HTMLDivElement | null>(null);
@@ -66,11 +69,12 @@ export function ChatFillHighlight({
     <div
       ref={hostRef}
       className={cn('relative', active && SHIMMER_TEXT, className)}
-      data-agent-writing={active ? 'true' : 'false'}
+      data-agent-writing={active && !anticipating ? 'true' : 'false'}
+      data-create-anticipate={anticipating && active ? 'true' : 'false'}
       data-create-placement={placement}
       data-create-shimmer={active ? 'true' : 'false'}
       {...(field ? { 'data-create-field': field } : {})}
-      {...(active ? { 'data-testid': 'create-writing-shimmer' } : {})}
+      {...(active ? { 'data-testid': anticipating ? 'create-anticipate-shimmer' : 'create-writing-shimmer' } : {})}
     >
       {children}
     </div>

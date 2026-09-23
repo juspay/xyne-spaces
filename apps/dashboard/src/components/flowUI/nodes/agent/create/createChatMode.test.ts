@@ -22,7 +22,7 @@ void describe('parseCreateChatAction', () => {
     assert.match(q, /XYNE_CREATE_DRAFT/);
     assert.match(q, /standup bot/);
     assert.match(q, /XYNE_CREATE_ASK/);
-    assert.match(q, /Never paste Name, Description, Instructions, or Rules into chat/);
+    assert.match(q, /also suggest the matching Hub rows/);
     assert.doesNotMatch(q, /In chat, state them explicitly as \*\*Name\*\*/);
   });
 
