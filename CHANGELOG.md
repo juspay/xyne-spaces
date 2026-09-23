@@ -1,3 +1,15 @@
+## [1.378.0](https://github.com/juspay/xyne-spaces/compare/v1.377.1...v1.378.0) (2026-09-23)
+
+
+### Features
+
+* add specific reviewers for call infrastructure files ([#2215](https://github.com/juspay/xyne-spaces/issues/2215)) ([f52c131](https://github.com/juspay/xyne-spaces/commit/f52c1315145304c851103e787917358334767fe3))
+
+
+### Bug Fixes
+
+* deliver the mention held back until "Add them" ([#2140](https://github.com/juspay/xyne-spaces/issues/2140)) ([da90b1c](https://github.com/juspay/xyne-spaces/commit/da90b1cf801701c0367d60a5d87771ede1173e19))
+
 ## [1.377.1](https://github.com/juspay/xyne-spaces/compare/v1.377.0...v1.377.1) (2026-09-23)
 
 
