@@ -428,6 +428,9 @@ const envSchema = Joi.object({
   API_CLIENT_ENCRYPTION_ENABLED: Joi.boolean().default(false),
   ENABLE_DB_ENCRYPTION: Joi.boolean().default(false),
   ENABLE_DB_DECRYPTION: Joi.boolean().default(false),
+  // How long the encrypted-fields config fetched from the encryption service is
+  // cached before a background refresh; the rollout latency of a config change.
+  ENCRYPTED_FIELDS_CACHE_TTL_MS: Joi.number().integer().min(1000).default(15 * 60 * 1000),
   ENC_ORG_PROVISION: Joi.boolean().default(false),
   ENC_WORKSPACE_PROVISION: Joi.boolean().default(false),
   JIRA_MIGRATION_USER_MAP_CSV_LOCATION: Joi.string()
@@ -1152,6 +1155,7 @@ export const config = {
     apiClientEncryptionEnabled: envVars.API_CLIENT_ENCRYPTION_ENABLED as boolean,
     enableDbEncryption: envVars.ENABLE_DB_ENCRYPTION as boolean,
     enableDbDecryption: envVars.ENABLE_DB_DECRYPTION as boolean,
+    encryptedFieldsCacheTtlMs: envVars.ENCRYPTED_FIELDS_CACHE_TTL_MS as number,
     orgProvisionEnabled: envVars.ENC_ORG_PROVISION as boolean,
     workspaceProvisionEnabled: envVars.ENC_WORKSPACE_PROVISION as boolean,
   },
