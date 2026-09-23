@@ -8,7 +8,7 @@ import { repositories } from '@/database/repositories';
 import { evaluateAssignmentRule } from '@/utils/assignmentEngine';
 import { ticketService } from '@/services/ticketService';
 import { ticketAssignmentService, primaryUserIdOf } from '@/services/ticketAssignmentService';
-import { ticketDuplicateService } from '@/services/ticketDuplicateService';
+import { ticketDuplicateService, type DuplicateScopeFieldValue } from '@/services/ticketDuplicateService';
 import { DatabaseClient } from '@/database/client';
 import type { BoardMetadata } from '@xyne/shared';
 import {
@@ -757,6 +757,11 @@ export class TicketController {
         return;
       }
 
+      const duplicateScopeValues: DuplicateScopeFieldValue[] | undefined =
+        customFieldValues && customFieldValues.fieldValues.length > 0
+          ? customFieldValues.fieldValues.map(fv => ({ fieldId: fv.fieldId, value: fv.actualFieldValue }))
+          : undefined;
+
       // Resolve channelId from channelName if not provided
       const resolvedChannelId = await resolveChannelId(channelId, undefined, channelName);
 
@@ -847,6 +852,8 @@ export class TicketController {
           description,
           projectId,
           userId,
+          channelId: resolvedChannelId,
+          scopeFieldValues: duplicateScopeValues,
         }).catch(error => {
           logger.error('[Apps Ticket Creation] Failed to persist duplicate references for ticket', {
             ticketId: result.ticketId,
@@ -2788,6 +2795,13 @@ export class TicketController {
         additionalFormFieldValidationErrors.push(...partialResult.validationErrors);
       }
 
+      // Duplicate detection fires inside createConversationWithEmail BEFORE the
+      // field sync below (timing constraint) — hand it the precomputed payload.
+      const scopeFieldValues: DuplicateScopeFieldValue[] | undefined =
+        customFieldValues && customFieldValues.fieldValues.length > 0
+          ? customFieldValues.fieldValues.map(fv => ({ fieldId: fv.fieldId, value: fv.actualFieldValue }))
+          : undefined;
+
       const result = await emailService.createConversationWithEmail({
         channelId,
         userId,
@@ -2812,6 +2826,7 @@ export class TicketController {
         },
         receivedAt: new Date(),
         boardId: effectiveBoardId,
+        scopeFieldValues,
       });
 
       if (result && 'blocked' in result && result.blocked) {
