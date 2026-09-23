@@ -840,7 +840,7 @@ model UserRoleMapping {
   user User @relation(fields: [userId], references: [id])
   role Role @relation(fields: [roleId], references: [id])
 
-  @@unique([userId, roleId, entityType, entityId])
+  @@unique([userId, roleId, entityId]) 
   @@index([userId])
   @@index([roleId])
   @@index([entityType, entityId])
