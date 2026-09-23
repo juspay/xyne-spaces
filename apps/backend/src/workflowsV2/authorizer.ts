@@ -11,9 +11,7 @@ import {
   FOLDER_ACTIONS,
   WORKFLOW_ACTIONS,
 } from '@xyne/workflow-sdk';
-import { db } from '@/database/client';
-import { runAsSystem } from '@/database/tenant/context';
-import { WORKFLOWS_SCOPE } from './constants';
+import { executionWorkspacesQuery } from '@/bypassAcl/workflowServices';
 import { attrsOf } from './utils';
 import type { XyneCtx, XyneFilter } from './types';
 
@@ -74,12 +72,7 @@ export class XyneWorkflowAuthorizer implements WorkflowAuthorizer<XyneCtx, XyneF
    */
   private async executionWorkspaces(ids: readonly string[]): Promise<ReadonlyMap<string, string>> {
     if (ids.length === 0) return new Map();
-    const rows = await runAsSystem(() =>
-      db.workflowExecution.findMany({
-        where: { id: { in: [...new Set(ids)] }, ...WORKFLOWS_SCOPE },
-        select: { id: true, workspaceId: true },
-      }),
-    );
+    const rows = await executionWorkspacesQuery(ids);
     return new Map(rows.map((row) => [row.id, row.workspaceId]));
   }
 
