@@ -1,3 +1,10 @@
+## [1.372.1-release-20260923.1](https://github.com/juspay/xyne-spaces/compare/v1.372.0...v1.372.1-release-20260923.1) (2026-09-23)
+
+
+### Bug Fixes
+
+* copy image from the preview blob instead of re-fetching the blob URL ([#2214](https://github.com/juspay/xyne-spaces/issues/2214)) ([b70461e](https://github.com/juspay/xyne-spaces/commit/b70461eef4147c6c9c264739161356bec0fe0f05)), closes [#2023](https://github.com/juspay/xyne-spaces/issues/2023) [#2023](https://github.com/juspay/xyne-spaces/issues/2023)
+
 ## [1.372.0](https://github.com/juspay/xyne-spaces/compare/v1.371.0...v1.372.0) (2026-09-22)
 
 
