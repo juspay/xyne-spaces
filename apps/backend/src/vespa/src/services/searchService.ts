@@ -16,11 +16,12 @@ import {
   fileSchema,
   mailSchema,
   callSchema,
+  projectTagSchema,
 } from '../types';
 import VespaClient from '../client/vespaClient';
 import { getErrorMessage } from '../utils';
 import config from '../config';
-import { YqlBuilder, type SlackFilters, type TicketFilters, type FileFilters, type MeetingFilters, type MailFilters, type CallFilters } from '../utils/YqlBuilder';
+import { YqlBuilder, type SlackFilters, type TicketFilters, type FileFilters, type MeetingFilters, type MailFilters, type CallFilters, type ProjectTagFilters } from '../utils/YqlBuilder';
 import {
   filterByNativeRank,
 } from '../utils/responseProcessor';
@@ -97,6 +98,7 @@ interface SearchOptions {
   meeting?: MeetingFilters;
   mail?: MailFilters;
   call?: CallFilters;
+  projectTag?: ProjectTagFilters;
   prefixBoostWeight?: number;
   /** Vespa document-summary class to request. Defaults to `lean` when not set. */
   presentationSummary?: string;
@@ -298,6 +300,7 @@ export class SearchService {
         meeting = {},
         mail = {},
         call = {},
+        projectTag = {},
         prefixBoostWeight = 0.2,
         presentationSummary = DEFAULT_PRESENTATION_SUMMARY,
         mentionHighlights = [],
@@ -338,6 +341,7 @@ export class SearchService {
           `Range: ${formatTimeRange(parsedQuery.config.timeRange)}`
         );
       }
+      const isProjectTagSearch = app.length === 1 && app[0].toLowerCase() === 'projecttag';
 
       // Get schemas for the apps
       const appSchemaMap = this.yqlBuilder.getAppSchemaMapping(app);
@@ -361,6 +365,7 @@ export class SearchService {
         [VespaDocType.USER]: userSchema,
         [VespaDocType.MAIL]: mailSchema,
         [VespaDocType.CALL]: callSchema,
+        [VespaDocType.PROJECT_TAG]: projectTagSchema,
       };
       const docTypesOf = (f: { docType?: string[] }): string[] => f?.docType ?? [];
       const requestedDocTypes = [
@@ -430,6 +435,9 @@ export class SearchService {
           isExactMatch,
           rankProfile,
           personalizationUserEmail,
+          // rawQuery = the pre-escape text. The prefix term is a bound param and
+          // matched verbatim, so it must not carry userInput-grammar escaping.
+          { ...projectTag, rawQuery: searchQuery },
         );
 
         const hasQuery = !!(searchQuery && searchQuery.trim());
@@ -500,7 +508,7 @@ export class SearchService {
         true,
         {}
       );
-      const payload = buildPayload(false, useSemanticAnyway, enableWorkspaceFiltering ? effectiveWorkspaceId : undefined);
+      const payload = buildPayload(false, useSemanticAnyway, (enableWorkspaceFiltering || isProjectTagSearch) ? effectiveWorkspaceId : undefined);
       this.logger.info(`Payload: ${JSON.stringify(payload)}`);
       if (captureDebug) {
         captureDebug({
@@ -554,7 +562,12 @@ export class SearchService {
       // Below this many results the exact pass is considered insufficient and we broaden with
       // the 3-gram fuzzy pass. Tunable at runtime via the `vespa_min_good_results` flag.
       const MIN_RESULTS = await superpositionClient.getNumberValue('vespa_min_good_results', 5, {});
-      const oldFallback = strongExactResultCount < MIN_RESULTS && searchQuery?.trim() && !isTranscriptOnly && !isFileSearch
+      // project_tag is excluded from the 3-gram fallback: that pass is hard-wired to
+      // LEXICAL_FUZZY_FIELDS plus nearestNeighbor(text|chunk|combined_embeddings, e),
+      // none of which exist on this schema, so Vespa answers HTTP 400 and
+      // vespaClient.search turns that into a throw. A tag query almost always returns
+      // fewer than MIN_RESULTS, so the fallback would otherwise fire on every keystroke.
+      const oldFallback = strongExactResultCount < MIN_RESULTS && searchQuery?.trim() && !isTranscriptOnly && !isFileSearch && !isProjectTagSearch
 
       const FALLBACK_SCORE_THRESHOLD = await superpositionClient.getNumberValue(
         'vespa_fallback_score_threshold',
@@ -576,6 +589,7 @@ export class SearchService {
         searchQuery?.trim() &&
         !isTranscriptOnly &&
         !isFileSearch &&
+        !isProjectTagSearch &&
         goodResults.length < MIN_RESULTS;
 
 
@@ -588,7 +602,7 @@ export class SearchService {
         const fallbackResult = await executeFuzzyFallback(
         response,
         async () => {
-          const fuzzyPayload = buildPayload(true, useSemanticAnyway, enableWorkspaceFiltering ? effectiveWorkspaceId : undefined);
+          const fuzzyPayload = buildPayload(true, useSemanticAnyway, (enableWorkspaceFiltering || isProjectTagSearch) ? effectiveWorkspaceId : undefined);
           this.logger.info(`Fuzzy Search Payload: ${JSON.stringify(fuzzyPayload)}`);
           if (captureDebug) {
             captureDebug({
@@ -704,93 +718,4 @@ export class SearchService {
     }
   };
 
-  /**
-   * Search for distinct ticket tags from Vespa.
-   * Uses grouping to aggregate unique tag values from ticket documents.
-   *
-   * @param workspaceId - Workspace ID for isolation
-   * @param options - Search options (projectId, boardIds, query prefix, limit)
-   * @returns Array of distinct tag strings sorted alphabetically
-   */
-  async searchTicketTags(
-    workspaceId: string,
-    options: {
-      projectId?: string;
-      boardIds?: string[];
-      query?: string;
-      limit?: number;
-    } = {},
-  ): Promise<{ tags: string[]; total: number }> {
-    const { projectId, boardIds, query, limit = 100 } = options;
-
-    // Build WHERE conditions
-    const conditions: string[] = [
-      `docType contains "ticket"`,
-      `workspaceId contains "${workspaceId}"`,
-    ];
-
-    if (projectId) {
-      conditions.push(`projectId contains "${projectId}"`);
-    }
-
-    if (boardIds && boardIds.length > 0) {
-      const boardConditions = boardIds.map(id => `boardId contains "${id}"`).join(' or ');
-      conditions.push(`(${boardConditions})`);
-    }
-
-    // If query is provided, filter tags that contain the search term
-    // This is done post-grouping since Vespa doesn't support substring filtering on array elements in WHERE
-    const queryLower = query?.trim().toLowerCase();
-
-    // YQL with grouping on the tags array
-    // Vespa automatically expands array fields in grouping, returning each unique tag value with its count
-    const yql = `select * from ticket where ${conditions.join(' and ')} | all(group(tags) max(${limit}) order(-count()) each(output(count())))`;
-
-    try {
-      const response = await this.vespa.search<VespaSearchResponse>({
-        yql,
-        hits: 0, // We only want grouping results, not individual docs
-        timeout: '10s',
-      } as any);
-
-      // Parse grouped results
-      const tags: string[] = [];
-      const root = (response?.root ?? {}) as any;
-      const rootChildren = (root?.children ?? []) as Array<any>;
-
-      // Navigate the grouping structure: group:root -> grouplist:tags -> group:string:* -> value
-      for (const rootChild of rootChildren) {
-        // First level: group:root:0
-        if (rootChild.id?.startsWith('group:root:')) {
-          const groupListChildren = rootChild.children ?? [];
-          for (const groupList of groupListChildren) {
-            // Second level: grouplist:tags
-            if (groupList.id?.startsWith('grouplist:')) {
-              const groups = groupList.children ?? [];
-              for (const group of groups) {
-                // Third level: group:string:tagname
-                if (group.id?.startsWith('group:')) {
-                  const tagValue = group.value;
-                  if (typeof tagValue === 'string' && tagValue.trim()) {
-                    // Apply substring filter if query provided
-                    if (!queryLower || tagValue.toLowerCase().includes(queryLower)) {
-                      tags.push(tagValue);
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-
-      // Sort alphabetically
-      tags.sort((a, b) => a.localeCompare(b));
-
-      return { tags, total: tags.length };
-    } catch (error) {
-      this.logger.error(`Error searching ticket tags: ${getErrorMessage(error)}`);
-      return { tags: [], total: 0 };
-    }
-  }
 }

@@ -5,6 +5,7 @@ export const messageSchema = 'chat_message';
 export const attachmentSchema = 'chat_attachment';
 export const channelSchema = 'chat_container';
 export const projectSchema = 'project';
+export const projectTagSchema = 'project_tag';
 export const userSchema = 'user';
 export const fileSchema = 'file'
 export const memorySchema = 'memory';
@@ -19,6 +20,7 @@ export type VespaSchema =
   | typeof channelSchema
   | typeof userSchema
   | typeof projectSchema
+  | typeof projectTagSchema
   | typeof fileSchema
   | typeof memorySchema
   | typeof samTranscriptSchema
@@ -32,6 +34,7 @@ export const VESPA_SCHEMAS: VespaSchema[] = [
   attachmentSchema,
   channelSchema,
   projectSchema,
+  projectTagSchema,
   userSchema,
   fileSchema,
   memorySchema,
@@ -102,6 +105,7 @@ export enum VespaDocType {
   ATTACHMENT = 'attachment',
   CHANNEL = 'channel',
   PROJECT = 'project',
+  PROJECT_TAG = 'project_tag',
   USER = 'user',
   FILE = 'file',
   MEMORY = 'memory',
@@ -263,6 +267,18 @@ export interface VespaProjectDocument extends VespaDocument {
   updatedBy: string;
   createdAt: number;
   updatedAt: number;
+}
+
+/**
+ * One `project_tags` row. `nameLower` is derived inside Vespa by the schema's
+ * indexing statement (`input name | lowercase`), so feeders never send it --
+ * it exists here only because reads surface it.
+ */
+export interface VespaProjectTagDocument extends VespaDocument {
+  name: string;
+  nameLower?: string;
+  projectId: string;
+  createdAt: number;
 }
 
 export interface VespaTicketDocument extends Omit<VespaDocument, 'orgId' | 'workspaceId'> {
@@ -561,6 +577,7 @@ export type VespaSearchResult =
   | VespaChatMessageDocument
   | VespaTicketDocument
   | VespaProjectDocument
+  | VespaProjectTagDocument
   | VespaUserDocument
   | VespaFileDocument
   | VespaMemoryDocument
@@ -608,6 +625,7 @@ export type InsertDocument =
   | VespaChatContainerDocument
   | VespaChatMessageDocument
   | VespaProjectDocument
+  | VespaProjectTagDocument
   | VespaTicketDocument
   | VespaUserDocument
   | VespaFileDocument
@@ -622,6 +640,7 @@ export type SchemaDataMap = {
   [attachmentSchema]: VespaChatAttachmentDocument;
   [channelSchema]: VespaChatContainerDocument;
   [projectSchema]: VespaProjectDocument;
+  [projectTagSchema]: VespaProjectTagDocument;
   [ticketSchema]: VespaTicketDocument;
   [userSchema]: VespaUserDocument;
   [fileSchema]: VespaFileDocument;
@@ -636,6 +655,7 @@ export const schemaToDocType: Partial<Record<VespaSchema, VespaDocType>> = {
   [channelSchema]: VespaDocType.CHANNEL,
   [messageSchema]: VespaDocType.MESSAGE,
   [projectSchema]: VespaDocType.PROJECT,
+  [projectTagSchema]: VespaDocType.PROJECT_TAG,
   [ticketSchema]: VespaDocType.TICKET,
   [userSchema]: VespaDocType.USER,
   [attachmentSchema]: VespaDocType.ATTACHMENT,

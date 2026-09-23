@@ -1,7 +1,7 @@
 import { readFromYSweetStrict } from '@/utils/ysweetUtils';
 import { extractMentionsFromContent } from '@/utils/mentionUtils';
 import { extractChannelMentions, extractGroupMentions } from '@/utils/mentionParser';
-import { appSchema, callSchema, channelSchema, InsertDocument, mailSchema, messageSchema, projectSchema, schemaToDocType, SubApp, ticketSchema, userSchema, VespaAppDocument, VespaCallDocument, VespaChatContainerDocument, VespaChatMessageDocument, VespaDocType, VespaFileDocument, VespaMailDocument, VespaProjectDocument, VespaSchema, VespaTicketDocument, samTranscriptSchema } from '@/vespa/src/types';
+import { appSchema, callSchema, channelSchema, InsertDocument, mailSchema, messageSchema, projectSchema, projectTagSchema, schemaToDocType, SubApp, ticketSchema, userSchema, VespaAppDocument, VespaCallDocument, VespaChatContainerDocument, VespaChatMessageDocument, VespaDocType, VespaFileDocument, VespaMailDocument, VespaProjectDocument, VespaProjectTagDocument, VespaSchema, VespaTicketDocument, samTranscriptSchema } from '@/vespa/src/types';
 import { NAMESPACE } from '@/vespa/vespaConfig';
 import type { InsertValue } from '@rocicorp/zero';
 import {
@@ -22,6 +22,7 @@ import {
   Channel,
   Message,
   Project,
+  ProjectTag,
   Ticket,
   Email,
   User,
@@ -50,6 +51,7 @@ import { DESK_EMAIL_SOURCE_TYPE } from '@/tags';
 type ChannelsSchema = Schema['tables']['channels'];
 type MessagesSchema = Schema['tables']['messages'];
 type ProjectsSchema = Schema['tables']['projects'];
+type ProjectTagsSchema = Schema['tables']['project_tags'];
 type TicketsSchema = Schema['tables']['tickets'];
 type CanvasesSchema = Schema['tables']['canvases'];
 type TranscriptsSchema = Schema['tables']['calls'];
@@ -550,6 +552,28 @@ export const mapProject = async (args: InsertValue<ProjectsSchema>, workspaceId?
     createdAt: toTimestamp(args.createdAt),
     updatedAt: toTimestamp(args.updatedAt),
     updatedBy: args.updatedBy || "",
+    workspaceId: effectiveWorkspaceId,
+    orgId: effectiveOrgId,
+  };
+}
+
+/**
+ * Map a `project_tags` row (one entry of a project's tag catalog) to its Vespa
+ * document. `nameLower` is NOT set here -- the schema derives it at index time
+ * from `name`, and sending it would just be a second source of truth.
+ */
+export const mapProjectTag = async (args: InsertValue<ProjectTagsSchema>, workspaceId?: string, orgId?: string): Promise<VespaProjectTagDocument> => {
+  const { workspaceId: effectiveWorkspaceId, orgId: effectiveOrgId } = await resolveOrgAndWorkspace(
+    ('workspaceId' in args && args.workspaceId) ? args.workspaceId : workspaceId,
+    () => db.project.findUnique({ where: { id: args.projectId }, select: { workspaceId: true } }).then(r => r?.workspaceId),
+    orgId
+  );
+  return {
+    docId: args.id,
+    docType: VespaDocType.PROJECT_TAG,
+    name: args.name,
+    projectId: args.projectId,
+    createdAt: toTimestamp(args.createdAt),
     workspaceId: effectiveWorkspaceId,
     orgId: effectiveOrgId,
   };
@@ -1560,6 +1584,8 @@ export const mapBySchema = async (
         return mapMessage(args as InsertValue<MessagesSchema>);
       case projectSchema:
         return mapProject(args as InsertValue<ProjectsSchema>, workspaceId, orgId);
+      case projectTagSchema:
+        return mapProjectTag(args as InsertValue<ProjectTagsSchema>, workspaceId, orgId);
       case ticketSchema:
         return mapTicket(args as InsertValue<TicketsSchema>);
       case callSchema:
@@ -1617,7 +1643,7 @@ export const fetchDataBySchema = async (
   schema: VespaSchema,
   docId: string,
   app?: SubApp
-): Promise<Channel | Message | Project | Ticket | Email | RCAWithRelations | Canvas | Call | CollectionItem | Apps | User | null> => {
+): Promise<Channel | Message | Project | ProjectTag | Ticket | Email | RCAWithRelations | Canvas | Call | CollectionItem | Apps | User | null> => {
   switch (schema) {
     case userSchema:
       return await db.user.findUnique({
@@ -1686,6 +1712,11 @@ export const fetchDataBySchema = async (
 
     case appSchema:
       return await db.apps.findUnique({
+        where: { id: docId },
+      });
+
+    case projectTagSchema:
+      return await db.projectTag.findUnique({
         where: { id: docId },
       });
 
