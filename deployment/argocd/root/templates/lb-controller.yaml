@@ -1,0 +1,16 @@
+{{- $lb := .Values.addons.lbController }}
+{{- if include "xyne-root.awsDefault" (dict "root" $ "value" $lb.enabled) }}
+{{- $cluster := .Values.infra.cluster | default dict }}
+{{- $identity := (.Values.infra.identities | default dict).lbController | default dict }}
+{{- $base := dict
+  "clusterName" $cluster.name
+  "region" $cluster.region
+  "vpcId" $cluster.networkId
+  "serviceAccount" (dict "create" true "name" $lb.serviceAccountName "annotations" ($identity.annotations | default dict))
+}}
+{{- with $identity.labels }}
+{{- $_ := set $base "podLabels" . }}
+{{- end }}
+{{- $values := include "xyne-root.merge" (dict "base" $base "layers" (list $lb.values)) | fromYaml }}
+{{- include "xyne-root.application" (dict "root" $ "name" "aws-load-balancer-controller" "namespace" $lb.namespace "wave" -4 "source" (include "xyne-root.helmSource" (dict "root" $ "repoURL" "https://aws.github.io/eks-charts" "chart" "aws-load-balancer-controller" "targetRevision" $lb.version "releaseName" "aws-load-balancer-controller" "values" $values) | fromYaml) "ignoreDifferences" (include "xyne-root.deploymentIgnore" . | fromYamlArray)) }}
+{{- end }}

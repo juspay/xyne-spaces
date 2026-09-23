@@ -36,3 +36,9 @@ xyne-vespa-embedder:
   enabled: true
 xyne-tei-batch-proxy:
   enabled: true
+xyne-redis:
+  enabled: true
+xyne-sandbox-router:
+  enabled: true
+xyne-egress-proxy:
+  enabled: true

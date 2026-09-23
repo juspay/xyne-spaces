@@ -113,6 +113,7 @@ interface CreateTicketModalProps {
   };
   enableUrlSync?: boolean;
   channelId: string;
+  initialChannelId?: string | undefined;
   projectId?: string;
   defaultStageId?: string | undefined;
   selectedBoardId?: string | null;
@@ -126,6 +127,8 @@ interface CreateTicketModalProps {
   initialStatus?: TicketStatusV2 | null;
   initialStageName?: string | null;
   initialTags?: string[];
+  initialMerchantId?: string | undefined;
+  initialDynamicFields?: Record<string, string | string[]> | undefined;
   initialTicketKind?: 'task' | 'release';
   releaseOnly?: boolean;
   releaseChannelIds?: string[];
@@ -213,6 +216,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
   isOpen,
   onClose,
   channelId,
+  initialChannelId,
   projectId,
   selectedBoardId,
   initialTitle = '',
@@ -224,6 +228,8 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
   initialStatus = null,
   initialStageName = null,
   initialTags = EMPTY_TAGS,
+  initialMerchantId,
+  initialDynamicFields,
   initialTicketKind = 'task',
   releaseOnly = false,
   releaseChannelIds,
@@ -486,11 +492,11 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
       assignee: initialAssignee,
       userGroupId: null,
       boardId: selectedBoardId || '',
-      channelId: channelId,
+      channelId: initialChannelId || channelId,
       workflowType: standaloneSeed?.workflowType ?? '',
       files: [],
-      dynamicFields: {},
-      merchantId: '',
+      dynamicFields: initialDynamicFields ?? {},
+      merchantId: initialMerchantId ?? '',
       ticketType: BaseTicketType.Fix,
     } as CreateTicketFormData,
     onSubmit: async ({ value }) => {
@@ -620,13 +626,21 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
   useEffect(() => {
     if (ticketKind === 'release') return;
     if (formValues.boardId) {
-      form.setFieldValue('dynamicFields', {});
-      markAutoApplied({ dynamicFields: serializeDynamicFields({}) });
+      const seeded = formValues.boardId === selectedBoardId ? (initialDynamicFields ?? {}) : {};
+      form.setFieldValue('dynamicFields', seeded);
+      markAutoApplied({ dynamicFields: serializeDynamicFields(seeded) });
     }
     setSelectedRepoBoardIds([]);
     setRepoRanges({});
     hasPopulatedRepoDeployed.current = new Set();
-  }, [formValues.boardId, form, markAutoApplied, ticketKind]);
+  }, [
+    formValues.boardId,
+    form,
+    markAutoApplied,
+    ticketKind,
+    selectedBoardId,
+    initialDynamicFields,
+  ]);
 
   useEffect(() => {
     if (!isOpen) {

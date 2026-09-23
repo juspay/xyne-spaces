@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { ChannelType, UserType } from '@xyne/shared';
+import { ChannelScopeType, ChannelType, UserType, type Channel } from '@xyne/shared';
 import {
   Bot,
   Hash,
@@ -14,7 +14,7 @@ import { useCachedQuery } from '../../../../hooks/useCachedQuery';
 import { queries } from '../../../../zero/queries';
 import { useActiveUserSearch, useUser, useUsers } from '../../../../hooks/useUsers';
 import { useUserGroups } from '../../../../hooks/useUserGroup';
-import { useAllChannels, useChannel } from '../../../../hooks/useChannels';
+import { searchChannels, useAllChannels, useChannel } from '../../../../hooks/useChannels';
 import UserAvatar, { AvatarShape, AvatarSize } from '../../../UserAvatar/UserAvatar';
 import { EntitySelector } from '../../../ui/EntitySelector/EntitySelector';
 import { EntityMultiSelector } from '../../../ui/EntitySelector/EntityMultiSelector';
@@ -263,6 +263,29 @@ function UserGroupField({ value, onChange, placeholder }: FieldProps): React.Rea
   );
 }
 
+/** Scope filters run before the cap, so the cap never crowds out in-scope channels. */
+function useAutomationChannelSearch(
+  search: string,
+  limit: number,
+  scopeProjectIds: string[],
+): Channel[] {
+  const channels = useAllChannels();
+  return useMemo(
+    () =>
+      searchChannels(
+        channels.filter(
+          c =>
+            c.scopeType !== ChannelScopeType.DM &&
+            c.scopeType !== ChannelScopeType.GROUP_DM &&
+            (scopeProjectIds.length === 0 || scopeProjectIds.includes(c.projectId)),
+        ),
+        search,
+        limit,
+      ),
+    [channels, search, limit, scopeProjectIds],
+  );
+}
+
 function channelIcon(type: string | null | undefined): React.ReactElement {
   return type === ChannelType.EMAIL ? (
     <Mail className='size-4 text-muted-foreground' />
@@ -279,22 +302,17 @@ function ChannelField({
   boardIds,
 }: FieldProps & { projectIds: string[]; boardIds: string[] }): React.ReactElement {
   const [search, setSearch] = useState('');
-  const channels = useAllChannels();
   const selectedChannel = useChannel(value ?? '');
   const scopeProjectIds = useChannelProjectScope(projectIds, boardIds);
+  const channels = useAutomationChannelSearch(search, 15, scopeProjectIds);
 
   const baseOptions: SelectorOption[] = useMemo(() => {
-    if (!channels) return [];
-    const lower = search.trim().toLowerCase();
-    return channels
-      .filter(c => (scopeProjectIds.length > 0 ? scopeProjectIds.includes(c.projectId) : true))
-      .filter(c => (lower ? (c.name ?? '').toLowerCase().includes(lower) : true))
-      .map(c => ({
-        value: c.id,
-        label: c.name || '(unnamed channel)',
-        icon: channelIcon(c.type),
-      }));
-  }, [channels, search, scopeProjectIds]);
+    return channels.map(c => ({
+      value: c.id,
+      label: c.name || '(unnamed channel)',
+      icon: channelIcon(c.type),
+    }));
+  }, [channels]);
 
   const options = useMemo(() => {
     if (!value || !selectedChannel) return baseOptions;
@@ -655,28 +673,20 @@ function MultiChannels({
   boardIds,
 }: MultiFieldProps & { projectIds: string[]; boardIds: string[] }): React.ReactElement {
   const [search, setSearch] = useState('');
-  const channels = useAllChannels();
   const scopeProjectIds = useChannelProjectScope(projectIds, boardIds);
+  const channels = useAutomationChannelSearch(search, 10, scopeProjectIds);
+  const allChannels = useAllChannels();
   const options: SelectorOption[] = useMemo(() => {
     const byId = new Map<
       string,
       { id: string; name?: string | null; type: string | null | undefined }
     >();
-    for (const c of channels ?? []) byId.set(c.id, { id: c.id, name: c.name, type: c.type });
-    const lower = search.trim().toLowerCase();
-    const inScope = new Set(
-      (channels ?? [])
-        .filter(c => (scopeProjectIds.length > 0 ? scopeProjectIds.includes(c.projectId) : true))
-        .map(c => c.id),
-    );
-    const base = Array.from(byId.values())
-      .filter(c => inScope.has(c.id))
-      .filter(c => (lower ? (c.name ?? '').toLowerCase().includes(lower) : true))
-      .map(c => ({
-        value: c.id,
-        label: c.name || '(unnamed channel)',
-        icon: channelIcon(c.type),
-      }));
+    for (const c of allChannels ?? []) byId.set(c.id, { id: c.id, name: c.name, type: c.type });
+    const base = channels.map(c => ({
+      value: c.id,
+      label: c.name || '(unnamed channel)',
+      icon: channelIcon(c.type),
+    }));
     const present = new Set(base.map(o => o.value));
     const selectedExtra: SelectorOption[] = value
       .filter(v => !present.has(v))
@@ -689,7 +699,7 @@ function MultiChannels({
         };
       });
     return [...selectedExtra, ...base];
-  }, [channels, search, value, scopeProjectIds]);
+  }, [allChannels, channels, value]);
   return (
     <EntityMultiSelector
       options={options}

@@ -228,15 +228,25 @@ export const CONFIG = {
   gcsProjectId: process.env["GCS_PROJECT_ID"] ?? "",
   gcsBucketName: process.env["GCS_BUCKET_NAME"] ?? "xyne-claw-chat-attachments",
   fakeGcsHost: process.env["FAKE_GCS_HOST"] ?? "",
-  // Object storage provider — 'gcs' (default) or 's3'; see @xyne/storage.
+  // Object storage provider — 'gcs' (default), 's3' or 'azure'; see @xyne/storage.
   // Env names match the Spaces backend (config/env.ts) and xyne-claw so one
-  // set of envs configures all three apps.
-  storageProvider: (process.env["STORAGE_PROVIDER"] === "s3" ? "s3" : "gcs") as "gcs" | "s3",
+  // set of envs configures all three apps. Azure needs no key in the normal
+  // path: AZURE_STORAGE_ACCOUNT alone lets DefaultAzureCredential use the AKS
+  // workload-identity token.
+  storageProvider: (process.env["STORAGE_PROVIDER"] === "s3" ||
+  process.env["STORAGE_PROVIDER"] === "azure"
+    ? process.env["STORAGE_PROVIDER"]
+    : "gcs") as "gcs" | "s3" | "azure",
   s3Region: process.env["AWS_REGION"] ?? "ap-south-1",
   s3BucketName: process.env["S3_BUCKET_NAME"] ?? "xyne-claw-chat-attachments",
   s3Endpoint: process.env["S3_ENDPOINT"] ?? "",
   s3AccessKeyId: process.env["AWS_ACCESS_KEY_ID"] ?? "",
   s3SecretAccessKey: process.env["AWS_SECRET_ACCESS_KEY"] ?? "",
+  azureAccountName: process.env["AZURE_STORAGE_ACCOUNT"] ?? "",
+  azureContainerName: process.env["AZURE_STORAGE_CONTAINER"] ?? "xyne-claw-chat-attachments",
+  azureEndpoint: process.env["AZURE_STORAGE_ENDPOINT"] ?? "",
+  azureConnectionString: process.env["AZURE_STORAGE_CONNECTION_STRING"] ?? "",
+  azureSasToken: process.env["AZURE_STORAGE_SAS_TOKEN"] ?? "",
   isProduction: process.env["NODE_ENV"] === "production",
   /**
    * Bitbucket Server creds used by the admin dashboard to count PRs/commits

@@ -79,19 +79,31 @@ export const GCS = {
 } as const;
 
 /**
- * Object storage provider selection — 'gcs' (default) or 's3'. Consumed by
- * storage.ts via the shared @xyne/storage factory. Env names match the Spaces
+ * Object storage provider selection — 'gcs' (default), 's3' or 'azure'. Consumed
+ * by storage.ts via the shared @xyne/storage factory. Env names match the Spaces
  * backend (config/env.ts) and claw-auth so one set of envs configures all
  * three apps: STORAGE_PROVIDER, AWS_REGION, AWS_ACCESS_KEY_ID,
- * AWS_SECRET_ACCESS_KEY, S3_BUCKET_NAME, S3_ENDPOINT.
+ * AWS_SECRET_ACCESS_KEY, S3_BUCKET_NAME, S3_ENDPOINT, AZURE_STORAGE_ACCOUNT,
+ * AZURE_STORAGE_CONTAINER, AZURE_STORAGE_ENDPOINT,
+ * AZURE_STORAGE_CONNECTION_STRING, AZURE_STORAGE_SAS_TOKEN.
+ *
+ * Azure needs no key in the normal path: with only AZURE_STORAGE_ACCOUNT set the
+ * SDK's DefaultAzureCredential picks up the AKS workload-identity token.
  */
 export const STORAGE = {
-  provider: (process.env["STORAGE_PROVIDER"] === "s3" ? "s3" : "gcs") as "gcs" | "s3",
+  provider: (process.env["STORAGE_PROVIDER"] === "s3" || process.env["STORAGE_PROVIDER"] === "azure"
+    ? process.env["STORAGE_PROVIDER"]
+    : "gcs") as "gcs" | "s3" | "azure",
   s3Region: process.env["AWS_REGION"] ?? "ap-south-1",
   s3BucketName: process.env["S3_BUCKET_NAME"] ?? GCS.bucketName,
   s3Endpoint: process.env["S3_ENDPOINT"] ?? "",
   s3AccessKeyId: process.env["AWS_ACCESS_KEY_ID"] ?? "",
   s3SecretAccessKey: process.env["AWS_SECRET_ACCESS_KEY"] ?? "",
+  azureAccountName: process.env["AZURE_STORAGE_ACCOUNT"] ?? "",
+  azureContainerName: process.env["AZURE_STORAGE_CONTAINER"] ?? GCS.bucketName,
+  azureEndpoint: process.env["AZURE_STORAGE_ENDPOINT"] ?? "",
+  azureConnectionString: process.env["AZURE_STORAGE_CONNECTION_STRING"] ?? "",
+  azureSasToken: process.env["AZURE_STORAGE_SAS_TOKEN"] ?? "",
 } as const;
 
 function normalizeFakeGcsHost(): string {
