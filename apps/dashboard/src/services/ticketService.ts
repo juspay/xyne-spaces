@@ -35,8 +35,10 @@ export type KanbanCountsViewMode = 'project' | 'board' | 'my-tickets';
 export type KanbanCountsGroupBy =
   | 'none'
   | 'assignee'
+  | 'createdBy'
   | 'status'
   | 'priority'
+  | 'merchantId'
   | {
       type: 'formField';
       fieldId: string;

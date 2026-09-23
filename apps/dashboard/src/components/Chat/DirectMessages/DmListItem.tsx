@@ -16,12 +16,12 @@ import { useAuthContextValues } from '../../../hooks/useAuth';
 import { useChannelDisplayName } from '../../../hooks/useChannelDisplayName';
 import { formatElapsedTime } from '../../../utils/dateUtils';
 import { usePlatform } from '../../../hooks/usePlatform';
-import { useUser } from '../../../hooks/useUsers';
+import { useUser, useUsersById } from '../../../hooks/useUsers';
 import { StatusIndicator } from '../../ui/StatusIndicator';
 import { getInitialMessageFromConversation } from '../../../utils/conversationMessageHelpers';
 import { RenderMessageWithHTML } from '../../Chat/RenderMessageWithHTML/RenderMessageWithHTML';
 import { sanitizeHtmlString, htmlToPlainText } from '../../../utils/sanitizer';
-import { getFlowJsonPreviewText } from '../../../utils/flowPreview';
+import { getFlowJsonPreviewText, stripFlowMarkup } from '../../../utils/flowPreview';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
 import { getSlashCommandArtifactPreviewText } from '@xyne/shared';
 import { channelTrackingMetadata } from '../../../services/Analytics/channelTracking';
@@ -110,10 +110,20 @@ export const DmListItem = ({
     () => (previewSourceContent ? getFlowJsonPreviewText(previewSourceContent) : null),
     [previewSourceContent],
   );
-  const slashCommandArtifactPreviewText = useMemo(
-    () => (previewSourceContent ? getSlashCommandArtifactPreviewText(previewSourceContent) : null),
-    [previewSourceContent],
-  );
+  const usersById = useUsersById();
+  const slashCommandArtifactPreviewText = useMemo(() => {
+    const preview = previewSourceContent
+      ? getSlashCommandArtifactPreviewText(previewSourceContent)
+      : null;
+    // The artifact preview is the raw Flow body; resolve its tokens so the row
+    // never shows `<broadcast:channel>` / `<userid:…>` verbatim.
+    return preview
+      ? stripFlowMarkup(preview, userId => {
+          const user = usersById.get(userId);
+          return user ? getUserDisplayName(user) : undefined;
+        })
+      : null;
+  }, [previewSourceContent, usersById]);
 
   // Memoize message preview with RenderMessageWithHTML component
   const messagePreview = useMemo(() => {

@@ -91,6 +91,7 @@ const TicketSchema = z.object({
 const BoardSchema = z.object({
   id: z.string(),
   name: z.string().nullable(),
+  createdBy: z.string().nullable(),
 });
 
 const ProjectSchema = z.object({
@@ -195,7 +196,10 @@ export async function buildTicketContext(ticket: TicketLike): Promise<TicketCont
   const lastEmails = await loadLastEmails(ticket);
   const [board, project, channel, assignee, creator, group] = await Promise.all([
     db.board
-      .findUnique({ where: { id: ticket.boardId }, select: { id: true, name: true } })
+      .findUnique({
+        where: { id: ticket.boardId },
+        select: { id: true, name: true, createdBy: true },
+      })
       .catch(() => null),
     db.project
       .findUnique({
@@ -278,7 +282,13 @@ export async function buildTicketContext(ticket: TicketLike): Promise<TicketCont
 
   return {
     ticket: ticketRow,
-    board: board ? ({ id: board.id, name: board.name ?? null } satisfies BoardRow) : null,
+    board: board
+      ? ({
+          id: board.id,
+          name: board.name ?? null,
+          createdBy: board.createdBy ?? null,
+        } satisfies BoardRow)
+      : null,
     project: project
       ? ({
           id: project.id,

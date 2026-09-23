@@ -12,8 +12,8 @@
 import type Bull from 'bull';
 import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
-import { db } from '@/database/client';
-import { runAsServiceActor, runAsSystem } from '@/database/tenant/context';
+import { runAsServiceActor } from '@/database/tenant/context';
+import { workspaceForExecution, workspaceForWorkflow } from '@/bypassAcl/workflowServices';
 import {
   WORKFLOWS_JOB_NAME,
   workflowsQueue,
@@ -26,41 +26,12 @@ import {
 } from '@/queues/workflowsCronQueue';
 import { workflowRuntime, initWorkflows, persistence } from '@/workflowsV2/runtime';
 import { BullSchedulerAdapter } from '@/workflowsV2/adapters/scheduler';
-import { DEFAULT_CRON_TIMEZONE, WORKFLOWS_TYPE } from '@/workflowsV2/constants';
+import { DEFAULT_CRON_TIMEZONE } from '@/workflowsV2/constants';
 
 /** Inert marker for the tenant context — only `workspaceId` is read by the stamper. */
 const SERVICE_ACTOR = 'workflows-worker';
 
 const CONCURRENCY = config.workflows.workerConcurrency;
-
-/**
- * Resolve which workspace a job acts as, BEFORE any tenant context is open.
- *
- * This is the ordering constraint that makes the whole worker correct. `db` scopes every
- * read to the ambient workspace and stamps every write with it, but a job arrives with
- * nothing but an id — the process cannot know which tenant to become until it has read a
- * row, and it cannot read that row while scoped. Hence `runAsSystem` here, and only here.
- *
- * Both rows carry `workspaceId` directly (the adapter stamps it), so this is one indexed
- * read, not a join.
- */
-const workspaceForExecution = (executionId: string): Promise<string | null> =>
-  runAsSystem(async () => {
-    const row = await db.workflowExecution.findFirst({
-      where: { id: executionId, workflowType: WORKFLOWS_TYPE },
-      select: { workspaceId: true },
-    });
-    return row?.workspaceId ?? null;
-  });
-
-const workspaceForWorkflow = (workflowId: string): Promise<string | null> =>
-  runAsSystem(async () => {
-    const row = await db.workflow.findFirst({
-      where: { id: workflowId, workflowType: WORKFLOWS_TYPE },
-      select: { workspaceId: true },
-    });
-    return row?.workspaceId ?? null;
-  });
 
 const scheduler = new BullSchedulerAdapter();
 

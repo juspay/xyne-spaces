@@ -7,8 +7,10 @@ export type HeaderLayoutView = 'kanban' | 'table' | 'calendar' | 'flow';
 export interface HeaderGroupingOption {
   value:
     | 'assignee'
+    | 'createdBy'
     | 'status'
     | 'priority'
+    | 'merchantId'
     | { type: 'formField'; fieldId: string; fieldName: string };
   label: string;
   icon: ReactNode;

@@ -3,13 +3,24 @@ import { useMemo } from "react";
 import { stateMachineActor } from "../machines/stateMachine.js";
 import type { User } from "../machines/stateMachine.js";
 import { useSharedAuthContext } from "./context.js";
-import { searchUsers as _searchUsers } from "../utils/search.js";
+import {
+  searchUsers as _searchUsers,
+  searchUsersWithScores as _searchUsersWithScores,
+} from "../utils/search.js";
 import { UserStatus } from "../zero/schema.js";
 
 export { type User } from "../machines/stateMachine.js";
 
 export function searchUsers(users: User[], query: string, limit = 10): User[] {
   return _searchUsers(users, query, limit);
+}
+
+export function searchUsersWithScores(
+  users: User[],
+  query: string,
+  limit = 10,
+): { item: User; score: number }[] {
+  return _searchUsersWithScores(users, query, limit);
 }
 
 // Shared users-by-id Map, rebuilt only when users array reference changes.

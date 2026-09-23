@@ -1,8 +1,7 @@
 import type { Request, Response } from 'express';
-import { db } from '@/database/client';
+import { findWorkflowExecutionForCallback } from '@/bypassAcl/workflowServices';
 import { logger } from '@/utils/logger';
-import { runAsServiceActor, runAsSystem } from '@/database/tenant/context';
-import { WORKFLOWS_TYPE } from '../constants';
+import { runAsServiceActor } from '@/database/tenant/context';
 import { persistence, workflowRuntime } from '../runtime';
 import { readAgentDispatch } from './claw-provider';
 
@@ -42,6 +41,8 @@ export async function handleWorkflowClawCallback(
   const { executionId } = req.params;
   const nodePath = typeof req.query['nodePath'] === 'string' ? req.query['nodePath'] : undefined;
   const attempt = Number(req.query['attempt']);
+  // Which turn of a step's conversation this answers, when the step keeps one.
+  const turn = typeof req.query['turn'] === 'string' ? Number(req.query['turn']) : undefined;
   const payload = (req.body ?? {}) as Record<string, unknown>;
 
   if (!nodePath || !Number.isInteger(attempt)) {
@@ -53,12 +54,7 @@ export async function handleWorkflowClawCallback(
     // Resolve which tenant to become BEFORE opening a scope. `db` scopes every
     // read to the ambient workspace, and a callback arrives with nothing but an
     // id — the same ordering constraint the worker has.
-    const execution = await runAsSystem(() =>
-      db.workflowExecution.findFirst({
-        where: { id: executionId, workflowType: WORKFLOWS_TYPE },
-        select: { workspaceId: true, createdBy: true },
-      }),
-    );
+    const execution = await findWorkflowExecutionForCallback(executionId);
 
     if (!execution) {
       // Not ours, or deleted mid-run. Both are legitimate; 404 so claw stops
@@ -91,7 +87,24 @@ export async function handleWorkflowClawCallback(
       // the attempt we already rejected would otherwise be accepted here and
       // the workflow would proceed on a response that failed validation.
       const parked = readAgentDispatch(gate.data);
-      if (parked && parked.attempt !== attempt) {
+      if (!parked) {
+        logger.info(
+          `[workflows] claw-callback: ${nodePath} on execution ${executionId} is not waiting on an agent run — ignoring`,
+        );
+        res.json({ success: true, ignored: 'not waiting on an agent run' });
+        return;
+      }
+      // Same for a step that waits for replies: each turn re-parks the same
+      // node, so an answer to an earlier turn must not land on a later one.
+      if (parked.conversation && turn !== undefined && parked.conversation.turn !== turn) {
+        logger.info(
+          `[workflows] claw-callback: ${nodePath} on execution ${executionId} is on turn `
+          + `${String(parked.conversation.turn)}, callback is for turn ${String(turn)} — superseded, ignoring`,
+        );
+        res.json({ success: true, ignored: 'superseded turn' });
+        return;
+      }
+      if (parked.attempt !== attempt) {
         logger.info(
           `[workflows] claw-callback: ${nodePath} on execution ${executionId} is on attempt `
           + `${String(parked.attempt)}, callback is for ${String(attempt)} — superseded, ignoring`,

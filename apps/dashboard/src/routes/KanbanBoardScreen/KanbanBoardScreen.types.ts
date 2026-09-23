@@ -53,4 +53,11 @@ export interface FormFieldGroup {
   fieldType: FormFieldType;
 }
 
-export type GroupByType = 'none' | 'assignee' | 'status' | 'priority' | FormFieldGroup;
+export type GroupByType =
+  | 'none'
+  | 'assignee'
+  | 'createdBy'
+  | 'status'
+  | 'priority'
+  | 'merchantId'
+  | FormFieldGroup;

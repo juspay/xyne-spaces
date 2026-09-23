@@ -23,7 +23,14 @@ export type KanbanFormFieldGroup = {
   fieldType: string;
 };
 
-export type KanbanGroupBy = 'none' | 'assignee' | 'status' | 'priority' | KanbanFormFieldGroup;
+export type KanbanGroupBy =
+  | 'none'
+  | 'assignee'
+  | 'createdBy'
+  | 'status'
+  | 'priority'
+  | 'merchantId'
+  | KanbanFormFieldGroup;
 
 export type KanbanTicketFilters = {
   priority?: TicketPriority[];

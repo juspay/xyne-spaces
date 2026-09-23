@@ -1,5 +1,6 @@
+import { readFromYSweetStrict } from '@/utils/ysweetUtils';
 import { extractMentionsFromContent } from '@/utils/mentionUtils';
-import { extractChannelMentions } from '@/utils/mentionParser';
+import { extractChannelMentions, extractGroupMentions } from '@/utils/mentionParser';
 import { appSchema, callSchema, channelSchema, InsertDocument, mailSchema, messageSchema, projectSchema, schemaToDocType, SubApp, ticketSchema, userSchema, VespaAppDocument, VespaCallDocument, VespaChatContainerDocument, VespaChatMessageDocument, VespaDocType, VespaFileDocument, VespaMailDocument, VespaProjectDocument, VespaSchema, VespaTicketDocument, samTranscriptSchema } from '@/vespa/src/types';
 import { NAMESPACE } from '@/vespa/vespaConfig';
 import type { InsertValue } from '@rocicorp/zero';
@@ -524,6 +525,7 @@ export const mapMessage = async (
     replyUsersCount: 0, // TODO
     mentions: mentions?.map(v => v.userId) || [],
     channelMentions: extractChannelMentions(args.content || ''),
+    groupMentions: extractGroupMentions(args.content || ''),
     metadata: JSON.stringify(args.metadata || {}),
     threadMentions: threadInfo.threadMentions,
     threadSenders: threadInfo.threadSenders,
@@ -927,11 +929,13 @@ export const mapCanvas = async (args: InsertValue<CanvasesSchema>, workspaceId?:
 
   let chunks: string[] = [];
 
-  // Focus only on manually created canvases (stored in DB as BlockNote JSON)
+  // Collaborative canvases store their content in Y-Sweet; legacy canvases use DB JSON.
   try {
-    const content = (args as any).content;
+    const content = args.isCollaborative
+      ? await readFromYSweetStrict(args.id, args.lastEditedBy || args.createdBy)
+      : args.content;
 
-    if (content) {
+    if (Array.isArray(content) && content.length > 0) {
       const markdown = await convertBlockNoteToMarkdown(content);
       const textStrategy = new TextStrategy();
       const result = await textStrategy.parse(Buffer.from(markdown), args.id);
@@ -943,6 +947,7 @@ export const mapCanvas = async (args: InsertValue<CanvasesSchema>, workspaceId?:
     }
   } catch (error) {
     logger.error(`[Mapper] Failed to extract text from canvas ${args.id}:`, error);
+    if (args.isCollaborative) throw error;
   }
 
   // Denormalized ACL: direct users + members of every channel/group the canvas is shared to.

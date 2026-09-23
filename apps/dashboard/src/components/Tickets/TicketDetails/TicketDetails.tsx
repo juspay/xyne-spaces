@@ -23,6 +23,7 @@ import {
   AlertCircle,
   ClipboardCheck,
   ArrowRight,
+  ArrowTurnLeftUp,
   ExternalLink as SquareArrowOutUpRight,
   GitBranch,
   LinkBrokenSlant as Unlink,
@@ -64,6 +65,7 @@ import {
   deriveEtaManagementView,
   parseTicketEtaManagement,
   parseBoardEtaManagement,
+  resolveTicketDescription,
 } from '@xyne/shared';
 import { useNavigate, Link, useLocation, useNavigationType } from 'react-router-dom';
 import { usePlatform } from '../../../hooks/usePlatform';
@@ -2020,7 +2022,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
   }, [ticket, editingTitle]);
   useEffect(() => {
     if (ticket && !editingDescription) {
-      setDescriptionValue(ticket.description);
+      setDescriptionValue(resolveTicketDescription(ticket));
     }
   }, [ticket, editingDescription]);
   // Initialize stage ETA edit value when current stage changes
@@ -2191,7 +2193,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
   useEffect(() => {
     if (!ticket || !editingDescription) return;
     const next = descriptionValue.trim();
-    if (next === ticket.description) return;
+    if (next === resolveTicketDescription(ticket)) return;
     const ticketId = ticket.id;
     const timeoutId = setTimeout(() => {
       void applyTicketUpdate(
@@ -2516,7 +2518,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
   };
 
   const handleSaveDescription = (): void => {
-    if (descriptionValue !== ticket.description) {
+    if (descriptionValue !== resolveTicketDescription(ticket)) {
       void applyTicketUpdate(
         {
           id: ticket.id,
@@ -3663,6 +3665,118 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     );
   };
 
+  const renderParentTicketRow = (
+    parentTicket: NonNullable<typeof parentTickets>[number],
+  ): React.ReactElement => {
+    const boardStages = parentTicket.boardId
+      ? stagesByBoardId.get(parentTicket.boardId)
+      : undefined;
+    const stageIndex = boardStages?.findIndex(stage => stage.name === parentTicket.stageName) ?? -1;
+    const priorityIcon = parentTicket.priority ? getPriorityIcon(parentTicket.priority) : null;
+    const assigneeId = parentTicket.assignedTo?.replace(/^(user:|group:)/, '') || '';
+
+    const navigateToParentTicket = (): void => {
+      const channelType = channelTypeMap.get(parentTicket.channelId);
+      if (isDeskChannelType(channelType) && parentTicket.xyneId) {
+        const pathParts = location.pathname.split('/');
+        const workspaceId = pathParts[1];
+        void navigate(
+          `/${workspaceId}/support/${parentTicket.channelId}/${parentTicket.xyneId}?selectedTab=thread`,
+          { state: { trackSource: 'ticket_details' } },
+        );
+      } else {
+        const workspaceId = location.pathname.split('/')[1];
+        const base = buildChannelRoute(
+          `${parentTicket.channelId}/${parentTicket.conversationId}/${parentTicket.id}`,
+          { selectedTab: 'thread' },
+        );
+        void navigate(`/${workspaceId}${base}#origin=${parentTicket.conversationId}`, {
+          state: { trackSource: 'parent_ticket' },
+        });
+      }
+    };
+
+    const openParentTicket = (): void => {
+      if (onNavigateToTicket) {
+        onNavigateToTicket(parentTicket.id);
+      } else {
+        setMappedTicketId(parentTicket.id);
+      }
+    };
+
+    return (
+      <div
+        key={parentTicket.id}
+        role='button'
+        tabIndex={0}
+        onClick={navigateToParentTicket}
+        onKeyDown={event => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            navigateToParentTicket();
+          }
+        }}
+        data-testid={`parent-ticket-item-${parentTicket.id}`}
+        className='flex h-11 cursor-pointer items-center justify-between gap-3 rounded-[11px] border border-border bg-background px-3 transition-[border-color,box-shadow] duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] hover:border-muted-foreground/40 hover:shadow-[0_1px_3px_rgba(20,22,26,0.06)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
+        data-track-category='Tickets'
+        data-track-name='ViewParentTicket'
+        data-track-metadata={JSON.stringify({ parentTicketId: parentTicket.id })}
+      >
+        <div className='flex min-w-0 flex-1 items-center gap-2'>
+          <span className='flex h-5 w-5 shrink-0 items-center justify-center text-muted-foreground/70'>
+            <ArrowTurnLeftUp size={14} />
+          </span>
+          <span className='shrink-0 whitespace-nowrap font-mono text-[12.5px] tracking-[0.2px] text-muted-foreground'>
+            {parentTicket.xyneId || parentTicket.id.substring(0, 8).toUpperCase()}
+          </span>
+          <span className='truncate text-[13.5px] font-semibold text-foreground'>
+            {parentTicket.title || 'Untitled Ticket'}
+          </span>
+        </div>
+        <div className='flex shrink-0 items-center gap-3'>
+          <Tooltip content='Open ticket'>
+            <button
+              type='button'
+              className='flex h-7 w-7 items-center justify-center rounded-md text-blue-600 transition-colors hover:bg-background'
+              onClick={event => {
+                event.stopPropagation();
+                openParentTicket();
+              }}
+              aria-label='Open parent ticket'
+              data-track-category='Tickets'
+              data-track-name='OpenParentTicket'
+              data-track-metadata={JSON.stringify({ parentTicketId: parentTicket.id })}
+            >
+              <FileText size={14} />
+            </button>
+          </Tooltip>
+          {boardStages && boardStages.length > 0 && (
+            <div className='flex items-center gap-1.5'>
+              <StageIndicator stages={boardStages} stageName={parentTicket.stageName} size={18} />
+              <span className='whitespace-nowrap text-[11px] font-semibold uppercase tracking-[0.3px] text-foreground'>
+                {parentTicket.stageName ?? '—'}
+              </span>
+              <span className='whitespace-nowrap font-mono text-[11px] tabular-nums text-muted-foreground/80'>
+                {stageIndex + 1}/{boardStages.length}
+              </span>
+            </div>
+          )}
+          {priorityIcon && <span className='flex items-center'>{priorityIcon}</span>}
+          {assigneeId ? (
+            <UserAvatar
+              userId={assigneeId}
+              size={AvatarSize.SM}
+              shape={AvatarShape.ROUNDED}
+              showActiveStatus={false}
+            />
+          ) : (
+            <span className='h-[22px] w-[22px] shrink-0 rounded-md border border-border bg-muted' />
+          )}
+        </div>
+      </div>
+    );
+  };
+
   // Hidden only on machine-owned boards. A sub-ticket can take sub-tickets of its own —
   // trees nest, and the server rejects anything that would close a loop.
   const addSubTicketPicker = !canManageSubTicketLinks ? null : (
@@ -3712,8 +3826,8 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
   return (
     <div className='mx-auto px-[20px] pb-[72px] h-full overflow-auto no-scrollbar bg-background'>
       {expandedView && (
-        <div className='flex items-center justify-between pt-[20px] mb-6'>
-          <div className='flex items-center gap-x-1/2'>
+        <div className='flex items-center justify-between pt-[4px]'>
+          <div className='-ml-[6px] flex items-center gap-x-0.5'>
             {!hideBackNav && (
               <>
                 <button
@@ -3945,7 +4059,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
         )}
 
         {/* Title Section */}
-        <div className='flex items-start gap-3 pt-[22px]'>
+        <div className={cn('flex items-start gap-3', expandedView ? 'pt-[8px]' : 'pt-[24px]')}>
           {editingTitle ? (
             <div className='flex-1 flex items-center gap-2'>
               <input
@@ -3987,7 +4101,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
           )}
         </div>
 
-        <div className='mt-[14px] -mx-[5px] flex flex-wrap items-center gap-2 text-[13.5px] text-muted-foreground'>
+        <div className='mt-[6px] -mx-[5px] flex flex-wrap items-center gap-2 text-[13.5px] text-muted-foreground'>
           <span className='px-[5px]'>
             Created {formatTimestamp(ticket.createdAt)} by{' '}
             {getUserDisplayName(createdByUser) || 'Merchant User'}
@@ -4037,7 +4151,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
           )}
         </div>
         {/* Ticket MetaData Key Value */}
-        <div className='mt-[14px] mb-[18px] flex w-full flex-wrap items-center gap-2'>
+        <div className='mt-[6px] mb-[8px] flex w-full flex-wrap items-center gap-2'>
           <DetailChip
             className='pl-2 pr-[11px]'
             data-testid='ticket-detail-status-selector'
@@ -4592,7 +4706,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                     return;
                   }
                   if (e.key === 'Escape') {
-                    setDescriptionValue(ticket.description);
+                    setDescriptionValue(resolveTicketDescription(ticket));
                     setEditingDescription(false);
                   }
                 }}
@@ -4613,7 +4727,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                   type='button'
                   onMouseDown={e => e.preventDefault()}
                   onClick={() => {
-                    setDescriptionValue(ticket.description);
+                    setDescriptionValue(resolveTicketDescription(ticket));
                     setEditingDescription(false);
                   }}
                   className='text-[12.5px] font-medium text-muted-foreground transition-colors hover:text-foreground'
@@ -4646,7 +4760,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
               data-track-category='Tickets'
               data-track-name='StartEditDescription'
             >
-              {!ticket.description ? (
+              {!resolveTicketDescription(ticket) ? (
                 <p className='text-sm text-muted-foreground italic'>Add description</p>
               ) : (
                 <>
@@ -4655,10 +4769,10 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                       ref={descriptionRef}
                       className={cn(
                         'whitespace-pre-wrap break-words text-[14px] leading-[1.7] text-muted-foreground [text-wrap:pretty]',
-                        !showFullDescription && 'overflow-hidden line-clamp-3 sm:line-clamp-3',
+                        !showFullDescription && 'overflow-hidden line-clamp-5 sm:line-clamp-5',
                       )}
                     >
-                      <RenderMessageWithHTML message={ticket.description} />
+                      <RenderMessageWithHTML message={resolveTicketDescription(ticket)} />
                     </p>
                     {!showFullDescription && needsReadMore && (
                       <div className='pointer-events-none absolute inset-x-0 bottom-0 h-[62px] bg-gradient-to-b from-transparent to-background' />
@@ -5383,130 +5497,6 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
             </div>
           )}
 
-        {parentTickets && parentTickets.length > 0 && (
-          <div className='mt-6 space-y-4' data-testid='parent-tickets-section'>
-            <div className='flex items-center gap-3'>
-              <p className='text-base font-semibold text-foreground'>Parent Tickets</p>
-              <span className='inline-flex items-center justify-center rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground'>
-                {parentTickets.length}
-              </span>
-            </div>
-            <div className='space-y-2'>
-              {parentTickets.map(parentTicket => {
-                const priorityIcon = parentTicket.priority
-                  ? getPriorityIcon(parentTicket.priority)
-                  : null;
-                const boardStages = parentTicket.boardId
-                  ? stagesByBoardId.get(parentTicket.boardId)
-                  : undefined;
-                const stageIndex =
-                  boardStages?.findIndex(stage => stage.name === parentTicket.stageName) ?? -1;
-                const assigneeId = parentTicket.assignedTo?.replace(/^(user:|group:)/, '') || '';
-                const navigateToParentTicket = (): void => {
-                  const channelType = channelTypeMap.get(parentTicket.channelId);
-                  if (isDeskChannelType(channelType) && parentTicket.xyneId) {
-                    const pathParts = location.pathname.split('/');
-                    const workspaceId = pathParts[1];
-                    void navigate(
-                      `/${workspaceId}/support/${parentTicket.channelId}/${parentTicket.xyneId}?selectedTab=thread`,
-                      { state: { trackSource: 'ticket_details' } },
-                    );
-                  } else {
-                    const workspaceId = location.pathname.split('/')[1];
-                    const base = buildChannelRoute(
-                      `${parentTicket.channelId}/${parentTicket.conversationId}/${parentTicket.id}`,
-                      { selectedTab: 'thread' },
-                    );
-                    void navigate(`/${workspaceId}${base}#origin=${parentTicket.conversationId}`, {
-                      state: { trackSource: 'parent_ticket' },
-                    });
-                  }
-                };
-
-                const openParentTicket = (): void => {
-                  if (onNavigateToTicket) {
-                    onNavigateToTicket(parentTicket.id);
-                  } else {
-                    setMappedTicketId(parentTicket.id);
-                  }
-                };
-
-                return (
-                  <div
-                    key={parentTicket.id}
-                    role='button'
-                    tabIndex={0}
-                    onClick={navigateToParentTicket}
-                    onKeyDown={event => {
-                      if (event.key === 'Enter' || event.key === ' ') {
-                        event.preventDefault();
-                        navigateToParentTicket();
-                      }
-                    }}
-                    className='flex cursor-pointer items-center justify-between gap-3 rounded-lg bg-muted p-3 transition-colors hover:bg-muted/80'
-                    data-track-category='Tickets'
-                    data-track-name='ViewParentTicket'
-                    data-track-metadata={JSON.stringify({ parentTicketId: parentTicket.id })}
-                  >
-                    <div className='flex min-w-0 flex-1 items-center gap-2'>
-                      <span className='h-5 w-5 shrink-0' />
-                      <span className='shrink-0 whitespace-nowrap text-xs font-medium text-muted-foreground'>
-                        {parentTicket.xyneId || parentTicket.id.substring(0, 8).toUpperCase()}
-                      </span>
-                      <span className='truncate text-sm text-foreground'>
-                        {parentTicket.title || 'Untitled Ticket'}
-                      </span>
-                    </div>
-                    <div className='flex shrink-0 items-center gap-3'>
-                      <Tooltip content='Open ticket'>
-                        <button
-                          type='button'
-                          className='flex h-7 w-7 items-center justify-center rounded-md text-blue-600 transition-colors hover:bg-background'
-                          onClick={event => {
-                            event.stopPropagation();
-                            openParentTicket();
-                          }}
-                          aria-label='Open parent ticket'
-                          data-track-category='Tickets'
-                          data-track-name='OpenParentTicket'
-                          data-track-metadata={JSON.stringify({
-                            parentTicketId: parentTicket.id,
-                          })}
-                        >
-                          <FileText size={14} />
-                        </button>
-                      </Tooltip>
-                      {boardStages && boardStages.length > 0 && (
-                        <div className='flex items-center gap-1.5'>
-                          <StageIndicator
-                            stages={boardStages}
-                            stageName={parentTicket.stageName}
-                            size={18}
-                          />
-                          <span className='whitespace-nowrap text-xs font-medium text-foreground'>
-                            {stageIndex + 1}/{boardStages.length}
-                          </span>
-                        </div>
-                      )}
-                      {priorityIcon && <span className='flex items-center'>{priorityIcon}</span>}
-                      {assigneeId ? (
-                        <UserAvatar
-                          userId={assigneeId}
-                          size={AvatarSize.SM}
-                          shape={AvatarShape.ROUNDED}
-                          showActiveStatus={false}
-                        />
-                      ) : (
-                        <div className='h-7 w-7 rounded-lg border border-border bg-muted' />
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
-
         {/* Relationships — sub-tickets and linked tickets, the panel's own tab. */}
         {!hideRelationships && (
           <div className={relationshipsOnly ? '' : 'pt-6'} data-testid='relationships-section'>
@@ -5532,7 +5522,10 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                     Relationships
                   </span>
                   <span className='font-mono text-[11px] tabular-nums text-muted-foreground/70'>
-                    {subTickets.length + referencesOut.length + referencesIn.length}
+                    {subTickets.length +
+                      (parentTickets?.length ?? 0) +
+                      referencesOut.length +
+                      referencesIn.length}
                   </span>
                 </button>
                 <div className='h-px flex-1 bg-border/60' />
@@ -5541,25 +5534,46 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
 
             {(relationshipsOnly || relationshipsOpen) && (
               <div className='flex flex-col gap-1.5 pt-2'>
-                {subTickets.length > 0 && (
-                  <div className='flex items-center gap-2 py-0.5'>
-                    <span className='text-[10px] font-semibold uppercase tracking-[0.4px] text-muted-foreground/80'>
-                      Sub-tickets
-                    </span>
-                    <span
-                      className='font-mono text-[10.5px] tabular-nums text-muted-foreground/60'
-                      data-testid='sub-tickets-count'
-                    >
-                      {subTickets.length}
-                    </span>
-                    {boardData?.boardType !== BoardType.FLOW && (
-                      <span className='inline-flex items-center gap-1 rounded-md bg-muted px-1.5 py-0.5 text-[10.5px] font-medium text-muted-foreground'>
-                        <GitBranch size={11} />
-                        Tree
+                {parentTickets && parentTickets.length > 0 && (
+                  <>
+                    <div className='flex items-center gap-2 py-0.5'>
+                      <span className='text-[10px] font-semibold uppercase tracking-[0.4px] text-muted-foreground/80'>
+                        Parent
                       </span>
-                    )}
-                  </div>
+                      <span
+                        className='font-mono text-[10.5px] tabular-nums text-muted-foreground/60'
+                        data-testid='parent-tickets-count'
+                      >
+                        {parentTickets.length}
+                      </span>
+                    </div>
+                    <div className='flex flex-col gap-1.5' data-testid='parent-tickets-section'>
+                      {parentTickets.map(renderParentTicketRow)}
+                    </div>
+                  </>
                 )}
+                <div
+                  className={cn(
+                    'flex items-center gap-2 py-0.5',
+                    parentTickets && parentTickets.length > 0 && 'pt-2.5',
+                  )}
+                >
+                  <span className='text-[10px] font-semibold uppercase tracking-[0.4px] text-muted-foreground/80'>
+                    Sub-tickets
+                  </span>
+                  <span
+                    className='font-mono text-[10.5px] tabular-nums text-muted-foreground/60'
+                    data-testid='sub-tickets-count'
+                  >
+                    {subTickets.length}
+                  </span>
+                  {subTickets.length > 0 && boardData?.boardType !== BoardType.FLOW && (
+                    <span className='inline-flex items-center gap-1 rounded-md bg-muted px-1.5 py-0.5 text-[10.5px] font-medium text-muted-foreground'>
+                      <GitBranch size={11} />
+                      Tree
+                    </span>
+                  )}
+                </div>
 
                 <div className='flex flex-col gap-1.5' data-testid='sub-tickets-list'>
                   {subTickets.length > 0 && subTicketTreeNodes.map(renderSubTicketNode)}
@@ -5567,16 +5581,14 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                   {addSubTicketPicker}
                 </div>
 
-                {referencesOut.length + referencesIn.length > 0 && (
-                  <div className='flex items-center gap-2 pt-2.5 pb-0.5'>
-                    <span className='text-[10px] font-semibold uppercase tracking-[0.4px] text-muted-foreground/80'>
-                      Linked
-                    </span>
-                    <span className='font-mono text-[10.5px] tabular-nums text-muted-foreground/60'>
-                      {referencesOut.length + referencesIn.length}
-                    </span>
-                  </div>
-                )}
+                <div className='flex items-center gap-2 pt-2.5 pb-0.5'>
+                  <span className='text-[10px] font-semibold uppercase tracking-[0.4px] text-muted-foreground/80'>
+                    Linked
+                  </span>
+                  <span className='font-mono text-[10.5px] tabular-nums text-muted-foreground/60'>
+                    {referencesOut.length + referencesIn.length}
+                  </span>
+                </div>
 
                 <div className='flex flex-col gap-1.5'>
                   {referencesOut.map(reference =>

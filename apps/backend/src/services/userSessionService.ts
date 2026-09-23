@@ -1,7 +1,27 @@
 import { PrismaClient, UserSession } from '@prisma/client';
-import { SessionStatus } from '@xyne/shared';
+import { AuthProvider, Platform, SessionStatus } from '@xyne/shared';
 import { logger } from '../utils/logger';
 import { DatabaseClient } from '@/database/client';
+import { userActivityTrackingService } from './userActivityTrackingService';
+
+// Why a session ended — stored as the AUTH/LOGOUT activity event's label.
+export type LogoutReason =
+  | 'USER_LOGOUT'
+  | 'PASSWORD_CHANGED'
+  | 'PASSWORD_RESET'
+  | 'PROVIDER_REVOKED'
+  | 'TOKEN_EXPIRED'
+  | 'TEST_CLEANUP';
+
+// How the session was minted — stored as the AUTH/LOGIN activity event's
+// label. A closed union so a typo'd method can't silently fragment the
+// login-by-method breakdown.
+export type LoginMethod =
+  | AuthProvider
+  | 'TEST'
+  | 'WORKSPACE_CREATED' // already signed in — a session for a workspace they just created
+  | 'WORKSPACE_JOINED' // already signed in — a session for a community workspace they just joined
+  | 'AUTO_LOGIN'; // reused an existing session to auto-log into a single workspace
 
 export interface CreateSessionData {
   userId: string;
@@ -13,6 +33,8 @@ export interface CreateSessionData {
   deviceId?: string;
   fcmToken?: string;
   ipAddress?: string;
+  // Reported on the AUTH/LOGIN activity event; defaults to the user's authProvider.
+  loginMethod?: LoginMethod;
 }
 
 export interface UpdateSessionData {
@@ -24,11 +46,46 @@ export interface UpdateSessionData {
   fcmToken?: string;
 }
 
+// Sessions don't store a platform column; recover it from the deviceInfo JSON
+// (explicit `platform` key first, then the user agent).
+function resolveSessionPlatform(deviceInfo?: string | null): Platform {
+  let hint = '';
+  let userAgent = '';
+  if (deviceInfo) {
+    try {
+      const parsed = JSON.parse(deviceInfo) as { platform?: unknown; userAgent?: unknown };
+      if (typeof parsed.platform === 'string') hint = parsed.platform.toLowerCase();
+      if (typeof parsed.userAgent === 'string') userAgent = parsed.userAgent.toLowerCase();
+    } catch {
+      // deviceInfo is best-effort JSON
+    }
+  }
+  if (hint === 'electron' || userAgent.includes('electron')) return Platform.ELECTRON;
+  if (hint === 'mobile' || userAgent.includes('mobile')) return Platform.MOBILE;
+  return Platform.WEB;
+}
+
+type SessionCandidate = Pick<UserSession, 'id' | 'userId' | 'deviceInfo' | 'createdAt'>;
+
 export class UserSessionService {
   private prisma: PrismaClient;
 
   constructor() {
     this.prisma = DatabaseClient.getInstance();
+  }
+
+  // Public so callers that observe a session ending without themselves being
+  // the one to end it (e.g. a denied refresh) can log it without touching the
+  // session row — this never writes to UserSession, only to the activity log.
+  trackLogout(session: SessionCandidate, reason: LogoutReason): void {
+    void userActivityTrackingService.trackLogout(session.userId, {
+      sessionId: session.id,
+      reason,
+      platform: resolveSessionPlatform(session.deviceInfo),
+      metadata: {
+        sessionDurationSec: Math.round((Date.now() - session.createdAt.getTime()) / 1000),
+      },
+    });
   }
 
   /**
@@ -90,6 +147,15 @@ export class UserSessionService {
       logger.info(`✅ [${sessionCreateId}] === Session Creation Complete ===`);
       
       logger.info(`Created new session for user: ${session.userId}`);
+
+      const loginMethod = sessionData.loginMethod ?? (session.user.authProvider as LoginMethod);
+      void userActivityTrackingService.trackLogin(session.userId, {
+        sessionId: session.id,
+        method: loginMethod,
+        platform: resolveSessionPlatform(session.deviceInfo),
+        metadata: { authProvider: session.user.authProvider },
+      });
+
       return session;
     } catch (error) {
       const endTime = Date.now();
@@ -109,7 +175,7 @@ export class UserSessionService {
   async getSessionByRefreshToken(refreshToken: string): Promise<(UserSession & { user: any }) | null> {
     try {
       return await this.prisma.userSession.findUnique({
-        where: { 
+        where: {
           refreshToken,
           status: SessionStatus.ACTIVE,
         },
@@ -212,15 +278,26 @@ export class UserSessionService {
   /**
    * Revoke a specific session
    */
-  async revokeSession(sessionId: string): Promise<void> {
+  async revokeSession(sessionId: string, reason: LogoutReason): Promise<void> {
     try {
-      await this.prisma.userSession.update({
+      // Read the status before flipping it, purely to decide whether this is
+      // a logout worth logging (re-revoking an already-ended session is not).
+      const previous = await this.prisma.userSession.findUnique({
+        where: { id: sessionId },
+        select: { status: true },
+      });
+
+      const session = await this.prisma.userSession.update({
         where: { id: sessionId },
         data: {
           status: SessionStatus.REVOKED,
           updatedAt: new Date(),
         },
       });
+
+      if (previous?.status === SessionStatus.ACTIVE) {
+        this.trackLogout(session, reason);
+      }
 
       logger.info(`Revoked session`);
     } catch (error) {
@@ -232,8 +309,13 @@ export class UserSessionService {
   /**
    * Revoke session by refresh token
    */
-  async revokeSessionByRefreshToken(refreshToken: string): Promise<void> {
+  async revokeSessionByRefreshToken(refreshToken: string, reason: LogoutReason): Promise<void> {
     try {
+      const liveSessions = await this.prisma.userSession.findMany({
+        where: { refreshToken, status: SessionStatus.ACTIVE },
+        select: { id: true, userId: true, deviceInfo: true, createdAt: true },
+      });
+
       await this.prisma.userSession.updateMany({
         where: { refreshToken },
         data: {
@@ -241,6 +323,8 @@ export class UserSessionService {
           updatedAt: new Date(),
         },
       });
+
+      liveSessions.forEach((session) => this.trackLogout(session, reason));
 
       logger.info(`Revoked session by refresh token`);
     } catch (error) {
@@ -252,8 +336,15 @@ export class UserSessionService {
   /**
    * Revoke all sessions for a user
    */
-  async revokeAllUserSessions(userId: string): Promise<void> {
+  async revokeAllUserSessions(userId: string, reason: LogoutReason): Promise<void> {
     try {
+      // Read which sessions are live before the bulk update, purely to know
+      // which ones to log a LOGOUT for.
+      const liveSessions = await this.prisma.userSession.findMany({
+        where: { userId, status: SessionStatus.ACTIVE },
+        select: { id: true, userId: true, deviceInfo: true, createdAt: true },
+      });
+
       await this.prisma.userSession.updateMany({
         where: { userId },
         data: {
@@ -261,6 +352,8 @@ export class UserSessionService {
           updatedAt: new Date(),
         },
       });
+
+      liveSessions.forEach((session) => this.trackLogout(session, reason));
 
       logger.info(`Revoked all sessions for user: ${userId}`);
     } catch (error) {

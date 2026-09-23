@@ -4,10 +4,13 @@ import {
   ChevronBigLeft,
   CopyDefault,
   DeleteDustbin01,
+  Globe,
   ThreeDotsMenuHorizontal,
+  UserDefault,
 } from '@xyne/icons';
 import { Loader2 } from 'lucide-react';
 import { cn } from '@/utils/classNames';
+import { Tooltip } from '@/components/ui/Tooltip/Tooltip';
 import { Popover } from '@/components/ui/Popover/index';
 import { CloneAgentDialog } from '@/components/ClawAgents/CloneAgentDialog';
 import { ConfirmDialog } from '@/components/ClawAgents/ConfirmDialog';
@@ -21,6 +24,7 @@ const Action = ({
   primary = false,
   busy = false,
   disabled = false,
+  hint,
   onClick,
 }: {
   label: string;
@@ -28,25 +32,40 @@ const Action = ({
   primary?: boolean;
   busy?: boolean;
   disabled?: boolean;
+  hint?: string;
   onClick: () => void;
-}): ReactElement => (
-  <button
-    type='button'
-    onClick={onClick}
-    disabled={disabled || busy}
-    data-track-category='Claw Agents'
-    data-track-name={`Agent detail v2: ${label}`}
-    className={cn(
-      'flex h-7 shrink-0 items-center gap-1.5 rounded-lg border px-2 text-sm font-medium leading-[1.2] transition-colors disabled:pointer-events-none disabled:opacity-50',
-      primary
-        ? 'border-transparent bg-primary text-primary-foreground hover:bg-primary/90'
-        : 'border-transparent text-foreground hover:bg-muted',
-    )}
-  >
-    {busy ? <Loader2 className='size-3.5 animate-spin' aria-hidden /> : icon}
-    {label}
-  </button>
-);
+}): ReactElement => {
+  const button = (
+    <button
+      type='button'
+      onClick={onClick}
+      disabled={disabled || busy}
+      data-track-category='Claw Agents'
+      data-track-name={`Agent detail v2: ${label}`}
+      className={cn(
+        'flex h-7 shrink-0 items-center gap-1.5 rounded-lg border px-2 text-sm font-medium leading-[1.2] transition-colors disabled:pointer-events-none disabled:opacity-50',
+        primary
+          ? 'border-transparent bg-primary text-primary-foreground hover:bg-primary/90'
+          : 'border-transparent text-foreground hover:bg-muted',
+      )}
+    >
+      {busy ? <Loader2 className='size-3.5 animate-spin' aria-hidden /> : icon}
+      {label}
+    </button>
+  );
+
+  return hint === undefined ? (
+    button
+  ) : (
+    <Tooltip
+      content={hint}
+      side='bottom'
+      className='max-w-[220px] rounded-lg px-2 py-1 text-[11px] leading-4'
+    >
+      <span className='flex'>{button}</span>
+    </Tooltip>
+  );
+};
 
 const MenuItem = ({
   label,
@@ -99,8 +118,8 @@ export function AgentDetailHeaderV2({
   const canEdit = permissions?.canEdit ?? false;
   const isGlobal = agent.scope === 'global';
 
-  const showModerate = isAdmin;
-  const showPublish = !isAdmin && isOwner && !isGlobal;
+  const showModerate = isAdmin && (isGlobal || !isOwner);
+  const showPublish = isOwner && !isGlobal;
 
   const hasMenu = canEdit || isOwner;
 
@@ -124,13 +143,31 @@ export function AgentDetailHeaderV2({
       <div className='flex shrink-0 items-center gap-1.5'>
         {showModerate && (
           <Action
-            label={isGlobal ? 'Unpublish' : 'Publish'}
+            label={isGlobal ? 'Demote to personal' : 'Promote to global'}
+            icon={
+              isGlobal ? (
+                <UserDefault className='size-4' aria-hidden />
+              ) : (
+                <Globe className='size-4' aria-hidden />
+              )
+            }
+            hint={
+              isGlobal
+                ? 'Make this agent personal again — it leaves the shared library'
+                : 'Make this agent global — everyone in the workspace can use it'
+            }
             busy={busy.moderating !== null}
             onClick={() => setModerateOpen(isGlobal ? 'demote' : 'promote')}
           />
         )}
         {showPublish && (
-          <Action label='Publish' busy={busy.publishing} onClick={() => void actions.publish()} />
+          <Action
+            label='Request to publish'
+            icon={<Globe className='size-4' aria-hidden />}
+            hint='Ask an admin to make this agent global. It stays personal until they approve.'
+            busy={busy.publishing}
+            onClick={() => void actions.publish()}
+          />
         )}
 
         {canChat && (
@@ -142,8 +179,13 @@ export function AgentDetailHeaderV2({
         )}
 
         <Action
-          label='Clone'
+          label={canEdit ? 'Clone agent' : 'Request clone'}
           icon={<CopyDefault className='size-4' aria-hidden />}
+          hint={
+            canEdit
+              ? 'Create your own copy — prompt, tools, skills and knowledge'
+              : "Ask this agent's owner for a copy"
+          }
           busy={busy.cloning}
           onClick={() => setCloneOpen(true)}
         />

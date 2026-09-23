@@ -359,7 +359,14 @@ export function ParticipantTile({
               />
               {/* Holds the wash well below the avatar and keeps the name pill and
                   badges legible over whatever the picture happens to contain. */}
-              <div aria-hidden className='pointer-events-none absolute inset-0 bg-black/55' />
+              <div
+                aria-hidden
+                className='pointer-events-none absolute inset-0'
+                style={{
+                  background:
+                    'radial-gradient(115% 95% at 50% 45%, rgba(30,31,32,0.35) 0%, rgba(30,31,32,0.92) 75%)',
+                }}
+              />
             </>
           ) : (
             /* Faint halo so the avatar sits *in* the wash instead of floating on top

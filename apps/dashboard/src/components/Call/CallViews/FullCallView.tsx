@@ -21,6 +21,7 @@ import { ControlRequestDialog } from '../CallModals/ControlRequestDialog';
 import { ParticipantsSidebar } from '../ParticipantsSidebar/ParticipantsSidebar';
 import { ParticipantsPill } from '../ParticipantsPill/ParticipantsPill';
 import { CallNotesPanel } from '../CallNotesPanel/CallNotesPanel';
+import { getRingingInvitees, useIsDmCall } from '../ringStatus.utils';
 import { ConnectionStatusIndicators } from '../ConnectionStatusIndicators/ConnectionStatusIndicators';
 import { sendDrawEvent } from '../../../hooks/useDrawStore';
 import { useCallWhiteboardStore } from '../../../stores/callWhiteboardStore';
@@ -97,6 +98,7 @@ interface FullCallViewProps {
         readonly metadata: unknown;
         readonly displayName?: string | null | undefined;
         readonly isExternal?: boolean | undefined;
+        readonly ringStatus?: string | null | undefined;
       }>
     | undefined;
   /** Optional: override host detection */
@@ -423,6 +425,20 @@ export function FullCallView({
     return hasJoinedExternalParticipant(callParticipants);
   }, [callParticipants]);
 
+  // Ring tiles are DM-only; elsewhere the sidebar carries ring status.
+  const isDmCall = useIsDmCall(channelId);
+  const ringingInvitees = useMemo(
+    () =>
+      isExternalUser || !isDmCall
+        ? []
+        : getRingingInvitees(
+            callParticipants,
+            new Set(participants.map(p => p.identity)),
+            currentUserId !== undefined ? currentUserId : user?.id,
+          ),
+    [isExternalUser, isDmCall, callParticipants, participants, currentUserId, user?.id],
+  );
+
   const canUseCallChat = isExternalUser || hasExternalJoined;
   const isCallChatVisible = canUseCallChat && isCallChatOpen;
 
@@ -502,6 +518,7 @@ export function FullCallView({
     return (
       <ParticipantGrid
         participants={participants}
+        ringingInvitees={ringingInvitees}
         aiController={aiController}
         requestedAiController={requestedAiController}
         raisedHands={raisedHands}

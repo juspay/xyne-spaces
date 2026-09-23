@@ -1,0 +1,14 @@
+{{- $charts := list "xyne-backend" "xyne-dashboard" "xyne-dashboard-external" "xyne-dashboard-edge" "xyne-zero" "xyne-ysweet" "xyne-claw" "xyne-claw-auth" "xyne-claw-auth-frontend" "xyne-transcription-agent" "xyne-lighton-ocr" }}
+{{- range $chart := $charts }}
+{{- $app := index $.Values.apps $chart | default dict }}
+{{- if $app.enabled }}
+{{- include "xyne-root.app" (dict "root" $ "name" $chart "chart" $chart "wave" 0) }}
+{{- end }}
+{{- end }}
+{{- $repl := index .Values.apps "xyne-zero-replication" | default dict }}
+{{- if $repl.enabled }}
+{{- include "xyne-root.app" (dict "root" $ "name" "xyne-zero-replication" "chart" "xyne-zero" "builder" "xyne-zero-replication" "wave" 0) }}
+{{- end }}
+{{- range $w := .Values.apps.workers }}
+{{- include "xyne-root.app" (dict "root" $ "name" (printf "xyne-worker-%s" $w.name) "chart" "xyne-worker" "wave" 0 "worker" $w "workerValues" $w.values) }}
+{{- end }}

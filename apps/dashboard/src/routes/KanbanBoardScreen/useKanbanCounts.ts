@@ -79,6 +79,8 @@ const sortUniqueValues = <T extends string>(values?: readonly T[]): T[] | undefi
 const SUPPORT_TICKET_TYPE = BaseTicketType.Support;
 const ALL_TICKETS_GROUP = 'All Tickets';
 const UNASSIGNED_GROUP = 'Unassigned';
+const NO_MERCHANT_GROUP = 'No Merchant';
+const UNKNOWN_CREATOR_GROUP = 'Unknown';
 
 const normalizeIdentity = (value: string | null | undefined): string | null => {
   if (!value) return null;
@@ -150,8 +152,11 @@ const getGroupKeys = (
 ): string[] => {
   if (!groupBy || groupBy === 'none') return [ALL_TICKETS_GROUP];
   if (groupBy === 'assignee') return [normalizeIdentity(snapshot.assignedTo) ?? UNASSIGNED_GROUP];
+  if (groupBy === 'createdBy')
+    return [normalizeIdentity(snapshot.createdBy) ?? UNKNOWN_CREATOR_GROUP];
   if (groupBy === 'status') return [snapshot.statusV2 ?? ''];
   if (groupBy === 'priority') return [snapshot.priority ?? ''];
+  if (groupBy === 'merchantId') return [snapshot.merchantId ?? NO_MERCHANT_GROUP];
   if (typeof groupBy === 'object' && groupBy.type === 'formField') {
     return getFormFieldGroupKeys(snapshot, groupBy);
   }

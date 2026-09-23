@@ -11,6 +11,7 @@ import {
   RecurringCallSeriesStatus,
   CallOrigin,
   InvitationResponse,
+  RingStatus,
   MeetingStatus,
   NotificationLevel,
   Schema,
@@ -109,6 +110,7 @@ import {
   parseTicketEtaManagement,
   mergeTicketEtaManagement,
   type EtaRiskAcknowledgedActivityValue,
+  resolveTicketDescription,
 } from '@xyne/shared';
 import {
   normalizeThreadTypeName,
@@ -282,8 +284,11 @@ const serializeCanvasCommentMentionedUserIds = (mentionedUserIds: string[]): str
 async function getCanvasThreadCommentCount(
   tx: Transaction<Schema>,
   threadId: string,
+  workspaceId: string,
 ): Promise<number> {
-  const comments = await tx.run(zql.canvas_comments.where('threadId', threadId));
+  const comments = await tx.run(
+    zql.canvas_comments.where('workspaceId', workspaceId).where('threadId', threadId),
+  );
   return comments.filter(comment => comment.deletedAt == null).length;
 }
 
@@ -685,8 +690,11 @@ async function assertCanvasCommentEditAccess(
   tx: Transaction<Schema>,
   canvasId: string,
   userId: string,
+  workspaceId: string,
 ): Promise<{ id: string; createdBy: string }> {
-  const canvas = await tx.run(zql.canvases.where('id', canvasId).one());
+  const canvas = await tx.run(
+    zql.canvases.where('workspaceId', workspaceId).where('id', canvasId).one(),
+  );
   if (!canvas) {
     throw new Error('Canvas not found');
   }
@@ -703,12 +711,13 @@ async function assertCanvasThreadManageAccess(
   tx: Transaction<Schema>,
   thread: { canvasId: string; createdBy: string },
   userId: string,
+  workspaceId: string,
 ): Promise<void> {
   if (thread.createdBy === userId) {
     return;
   }
 
-  await assertCanvasCommentEditAccess(tx, thread.canvasId, userId);
+  await assertCanvasCommentEditAccess(tx, thread.canvasId, userId, workspaceId);
 }
 
 /**
@@ -854,6 +863,7 @@ async function createNonParticipantSystemMessages(
   isThreadReply: boolean,
   scopeType: string,
   workspaceId: string,
+  sourceMessageId: string,
 ): Promise<void> {
   try {
     if (mentionedUserIds.length === 0 && mentionedGroupIds.length === 0) {
@@ -959,6 +969,7 @@ async function createNonParticipantSystemMessages(
           })),
           channelId,
           canAddUsers: !cannotAddUsers,
+          sourceMessageId,
         } as unknown as ReadonlyJSONValue,
       });
 
@@ -1006,6 +1017,7 @@ async function createNonParticipantSystemMessages(
           })),
           channelId,
           canAddUsers: !cannotAddUsers,
+          sourceMessageId,
         } as unknown as ReadonlyJSONValue,
       });
 
@@ -2873,6 +2885,7 @@ export function createMutators(
             false, // isThreadReply = false for initial channel messages
             channel.scopeType,
             authData.workspaceId,
+            message.messageId,
           );
 
 
@@ -3736,6 +3749,7 @@ export function createMutators(
             true, // isThreadReply = true for thread messages
             channel.scopeType,
             authData.workspaceId,
+            message.messageId,
           );
 
 
@@ -4765,6 +4779,7 @@ export function createMutators(
                   invitedBy: authData.sub,
                   invitedAt: now,
                   response: InvitationResponse.INVITED,
+                  ringStatus: RingStatus.CALLING,
                   respondedAt: null,
                   joinedAt: null,
                   leftAt: null,
@@ -4790,6 +4805,7 @@ export function createMutators(
                   invitedAt: now,
                   isExternal: false,
                   response: InvitationResponse.INVITED,
+                  ringStatus: RingStatus.CALLING,
                   respondedAt: null,
                   joinedAt: null,
                   leftAt: null,
@@ -5064,6 +5080,25 @@ export function createMutators(
           }
         },
       ),
+      updateRingStatus: defineMutator(
+        z.object({ callId: z.string(), ringStatus: z.enum([RingStatus.RINGING, RingStatus.BUSY]) }),
+        async ({ tx, args: { callId, ringStatus } }) => {
+          const call = await tx.run(zql.calls.where('externalId', callId).one());
+          if (!call) return;
+
+          const participant = await tx.run(zql.call_participants
+            .where('callId', call.id)
+            .where('userId', authData.sub)
+            .one());
+          if (!participant || participant.response !== InvitationResponse.INVITED) return;
+
+          if (participant.ringStatus === ringStatus) return;
+          // BUSY is sticky: an idle second device reporting RINGING must not undo it.
+          if (participant.ringStatus === RingStatus.BUSY) return;
+
+          await tx.mutate.call_participants.update({ id: participant.id, ringStatus });
+        },
+      ),
       invite: defineMutator(
         z.object({ callId: z.string(), userIds: z.array(z.string()), timestamp: z.number(), participantIds: z.record(z.string(), z.string()) }),
         async ({ tx, args: { callId, userIds, timestamp, participantIds = {} } }) => {
@@ -5088,6 +5123,7 @@ export function createMutators(
                 await tx.mutate.call_participants.update({
                   id: existingParticipant.id,
                   response: InvitationResponse.INVITED,
+                  ringStatus: RingStatus.CALLING,
                   invitedBy: authData.sub,
                   invitedAt: now,
                   respondedAt: null,
@@ -5109,6 +5145,7 @@ export function createMutators(
                 invitedBy: authData.sub,
                 invitedAt: now,
                 response: InvitationResponse.INVITED,
+                ringStatus: RingStatus.CALLING,
                 respondedAt: null,
                 joinedAt: null,
                 leftAt: null,
@@ -5934,8 +5971,9 @@ export function createMutators(
           // Optional optimistic-concurrency guard + audit reason for a manual `eta` edit.
         }),
         async ({ tx, args: params }) => {
-          const ticket = await tx.run(zql.tickets.where('id', params.id).one());
+          const ticket = await tx.run(zql.tickets.where('id', params.id).related('ticketDescription').one());
           if (!ticket) throw new Error('Ticket not found');
+          const currentDescription = resolveTicketDescription(ticket);
           const currentBoard = await tx.run(zql.boards.where('id', ticket.boardId).one());
           if (
             currentBoard?.boardType === BoardType.FLOW &&
@@ -6331,8 +6369,10 @@ export function createMutators(
             updateData.statusUpdatedAt = params.updatedAt;
           }
 
+          const ticketRecord = ticket as Record<string, unknown>;
           for (const field of fields) {
-            if (params[field] !== undefined && params[field] !== ticket[field]) {
+            const previousValue = field === 'description' ? currentDescription : ticketRecord[field];
+            if (params[field] !== undefined && params[field] !== previousValue) {
               updateData[field] = params[field];
               if (field === 'kanbanPosition') continue;
               let activityType = field.toUpperCase();
@@ -6348,8 +6388,8 @@ export function createMutators(
               activities.push({
                 activityType,
                 value: field === 'stageName'
-                  ? { field: 'stageName', oldValue: ticket[field], newValue: params[field] }
-                  : { oldValue: ticket[field], newValue: params[field] },
+                  ? { field: 'stageName', oldValue: previousValue, newValue: params[field] }
+                  : { oldValue: previousValue, newValue: params[field] },
               });
             }
           }
@@ -6646,6 +6686,28 @@ export function createMutators(
           }
 
           await tx.mutate.tickets.update({ id: params.id, ...updateData });
+
+          if (params.description !== undefined && params.description !== currentDescription) {
+            const existingDescription = await tx.run(
+              zql.ticket_descriptions.where('ticketId', params.id).one()
+            );
+            if (existingDescription) {
+              await tx.mutate.ticket_descriptions.update({
+                ticketId: params.id,
+                description: params.description,
+                updatedAt: params.updatedAt,
+              });
+            } else {
+              await tx.mutate.ticket_descriptions.insert({
+                ticketId: params.id,
+                workspaceId: ticket.workspaceId,
+                channelId: ticket.channelId,
+                description: params.description,
+                createdAt: params.updatedAt,
+                updatedAt: params.updatedAt,
+              });
+            }
+          }
 
           if (
             params.statusV2 === TicketStatusV2.COMPLETED
@@ -10267,7 +10329,12 @@ export function createMutators(
           timestamp: z.number(),
         }),
         async ({ tx, args: { threadId, commentId, canvasId, blockId, anchorText, body, mentionedUserIds, timestamp } }) => {
-          await assertCanvasCommentEditAccess(tx, canvasId, authData.sub);
+          await assertCanvasCommentEditAccess(
+            tx,
+            canvasId,
+            authData.sub,
+            authData.workspaceId,
+          );
 
           await tx.mutate.canvas_comment_threads.insert({
             id: threadId,
@@ -10309,12 +10376,22 @@ export function createMutators(
           timestamp: z.number(),
         }),
         async ({ tx, args: { commentId, threadId, canvasId, body, mentionedUserIds, timestamp } }) => {
-          const thread = await tx.run(zql.canvas_comment_threads.where('id', threadId).one());
+          const thread = await tx.run(
+            zql.canvas_comment_threads
+              .where('workspaceId', authData.workspaceId)
+              .where('id', threadId)
+              .one(),
+          );
           if (!thread || thread.canvasId !== canvasId) {
             throw new Error('Comment thread not found');
           }
 
-          await assertCanvasCommentEditAccess(tx, canvasId, authData.sub);
+          await assertCanvasCommentEditAccess(
+            tx,
+            canvasId,
+            authData.sub,
+            authData.workspaceId,
+          );
 
           await tx.mutate.canvas_comments.insert({
             id: commentId,
@@ -10330,7 +10407,11 @@ export function createMutators(
             createdAt: timestamp,
           });
 
-          const commentCount = await getCanvasThreadCommentCount(tx, threadId);
+          const commentCount = await getCanvasThreadCommentCount(
+            tx,
+            threadId,
+            authData.workspaceId,
+          );
 
           if (thread.status === CanvasCommentThreadStatus.RESOLVED) {
             await tx.mutate.canvas_comment_threads.update({
@@ -10357,7 +10438,10 @@ export function createMutators(
         }),
         async ({ tx, args: { commentId, body, mentionedUserIds, timestamp } }) => {
           const comment = await tx.run(
-            zql.canvas_comments.where('id', commentId).one(),
+            zql.canvas_comments
+              .where('workspaceId', authData.workspaceId)
+              .where('id', commentId)
+              .one(),
           );
           if (!comment) {
             throw new Error('Comment not found');
@@ -10384,7 +10468,10 @@ export function createMutators(
         }),
         async ({ tx, args: { commentId, timestamp } }) => {
           const comment = await tx.run(
-            zql.canvas_comments.where('id', commentId).one(),
+            zql.canvas_comments
+              .where('workspaceId', authData.workspaceId)
+              .where('id', commentId)
+              .one(),
           );
           if (!comment) {
             throw new Error('Comment not found');
@@ -10403,9 +10490,18 @@ export function createMutators(
             deletedAt: timestamp,
           });
 
-          const thread = await tx.run(zql.canvas_comment_threads.where('id', comment.threadId).one());
+          const thread = await tx.run(
+            zql.canvas_comment_threads
+              .where('workspaceId', authData.workspaceId)
+              .where('id', comment.threadId)
+              .one(),
+          );
           if (thread) {
-            const commentCount = await getCanvasThreadCommentCount(tx, comment.threadId);
+            const commentCount = await getCanvasThreadCommentCount(
+              tx,
+              comment.threadId,
+              authData.workspaceId,
+            );
             await tx.mutate.canvas_comment_threads.update({
               id: comment.threadId,
               commentCount,
@@ -10420,12 +10516,22 @@ export function createMutators(
           timestamp: z.number(),
         }),
         async ({ tx, args: { threadId, status, timestamp } }) => {
-          const thread = await tx.run(zql.canvas_comment_threads.where('id', threadId).one());
+          const thread = await tx.run(
+            zql.canvas_comment_threads
+              .where('workspaceId', authData.workspaceId)
+              .where('id', threadId)
+              .one(),
+          );
           if (!thread) {
             throw new Error('Comment thread not found');
           }
 
-          await assertCanvasThreadManageAccess(tx, thread, authData.sub);
+          await assertCanvasThreadManageAccess(
+            tx,
+            thread,
+            authData.sub,
+            authData.workspaceId,
+          );
 
           await tx.mutate.canvas_comment_threads.update({
             id: threadId,

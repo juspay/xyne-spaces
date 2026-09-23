@@ -158,10 +158,12 @@ class AutomationWorker {
 
     if (triggerImpl) {
       const filterConfig = (config.trigger.config ?? {}) as Record<string, unknown>;
-      if (!triggerImpl.matchFilters(filterConfig, hydratedTriggerData)) {
+      const filterMatch = triggerImpl.matchFiltersDetailed(filterConfig, hydratedTriggerData);
+      if (!filterMatch.matched) {
         const hydratedTicket = (hydratedTriggerData as { ticket?: Record<string, unknown> }).ticket;
         logger.info(
           `[AUTOMATION-WORKER] filter mismatch detail — execution=${executionId} ` +
+            `reason=${filterMatch.failed ?? 'unspecified'} ` +
             `filterConfig=${JSON.stringify(filterConfig)} ` +
             `hydratedTicketPresent=${hydratedTicket ? 'yes' : 'no'} ` +
             `ticket.channelId=${(hydratedTicket?.channelId as string | undefined) ?? '∅'} ` +
@@ -173,7 +175,7 @@ class AutomationWorker {
           data: { status: AutomationRunStatus.SKIPPED },
         });
         logger.info(
-          `[AUTOMATION-WORKER] filter mismatched at intake — execution=${executionId} automation=${workflow.id}, skipping`,
+          `[AUTOMATION-WORKER] filter mismatched at intake — execution=${executionId} automation=${workflow.id} reason=${filterMatch.failed ?? 'unspecified'}, skipping`,
         );
         return;
       }

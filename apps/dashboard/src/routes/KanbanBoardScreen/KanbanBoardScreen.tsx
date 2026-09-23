@@ -84,12 +84,13 @@ import { useDragAndDrop, type StageTransitionInfo } from '../../hooks/useDragAnd
 import { useVespaTagSearch } from '../../hooks/useVespaTagSearch';
 import {
   useAllChannels,
+  useAllVisibleChannels,
   useChannel,
   useChannelsByProjectId,
   useGetChannelUserStatus,
 } from '../../hooks/useChannels';
 import { getUserDisplayName } from '../../utils/userDisplayName';
-import { queries } from '../../zero/queries';
+import { queries, parseAssigneeFilter } from '../../zero/queries';
 import { mutators } from '../../zero/mutators';
 import { surfaceMutationError } from '../../utils/zeroMutationToast';
 import { apiInstance } from '../../services/clients/apiClient';
@@ -109,6 +110,7 @@ import {
   FormEntityType,
   FormFieldType,
   ChannelType,
+  ChannelScopeType,
   BoardType,
   TicketStageRequestStatus,
   isDeskChannelType,
@@ -176,6 +178,7 @@ import {
   downloadTextFile,
 } from '../../components/Tickets/TicketTable/ticketTableExport';
 import { copyTextToClipboard } from '../../utils/clipboardUtils';
+import { isReleaseBoard } from '../../utils/boardUtils';
 import {
   getActivityDescription,
   getActivityIcon,
@@ -350,6 +353,18 @@ type KanbanLocalTicket = Ticket & {
   >;
 };
 
+type CreateTicketSeed = {
+  status?: TicketStatusV2 | undefined;
+  stageName?: string | undefined;
+  assignee?: { type: 'assigneeTo' | 'userGroup'; value: string } | null;
+  priority?: TicketPriority | null;
+  tags?: string[];
+  merchantId?: string;
+  dynamicFields?: Record<string, string | string[]>;
+  boardId?: string;
+  channelId?: string;
+};
+
 // 'flow' is the dedicated mode for FLOW boards (plan-driven run graph); it is
 // never offered in the layout toggle and only reachable on flow boards.
 type LayoutView = 'kanban' | 'table' | 'calendar' | 'flow';
@@ -411,6 +426,10 @@ function uniqueProjectIds(boards: readonly { projectId?: string | null }[]): str
   return Array.from(ids);
 }
 
+// Bucket for tickets with no merchant link when grouping by Merchant ID.
+// Mirrors the backend's NO_MERCHANT_GROUP in services/tickets/kanbanCountsService.ts.
+const NO_MERCHANT_GROUP = 'No Merchant';
+
 const availableColumns = [
   { key: 'assignee', label: 'Assignee', icon: <User className='h-4 w-4' /> },
   { key: 'dueDate', label: 'Due Date', icon: <Calendar className='h-4 w-4' /> },
@@ -423,6 +442,7 @@ const availableColumns = [
   { key: 'board', label: 'Board', icon: <SquareKanban className='h-4 w-4' /> },
   { key: 'channel', label: 'Channel', icon: <Hashtag className='h-4 w-4' /> },
   { key: 'type', label: 'Type', icon: <LayersTo className='h-4 w-4' /> },
+  { key: 'merchantId', label: 'Merchant ID', icon: <Hashtag className='h-4 w-4' /> },
 ];
 
 const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
@@ -495,11 +515,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
 
   // ────────────────────────────────────────────────────────────────────
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
-  const [createTicketSeed, setCreateTicketSeed] = useState<{
-    status?: TicketStatusV2 | undefined;
-    stageName?: string | undefined;
-    assignee?: { type: 'assigneeTo' | 'userGroup'; value: string } | null;
-  } | null>(null);
+  const [createTicketSeed, setCreateTicketSeed] = useState<CreateTicketSeed | null>(null);
   const [localTickets, setLocalTickets] = useState<Ticket[] | null>([]);
   const [kanbanTicketsByColumn, setKanbanTicketsByColumn] = useState<Record<string, Ticket[]>>({});
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
@@ -615,15 +631,19 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
       return groupTicketsByFormField(tickets, criterion, formValuesByTicketId, userNamesById);
     }
 
-    // Original logic for assignee, status, priority
+    // Original logic for assignee, status, priority (+ merchantId)
     return tickets.reduce(
       (acc, ticket) => {
         const key =
           criterion === 'assignee'
             ? (ticket.assignedTo ?? 'Unassigned')
-            : criterion === 'status'
-              ? ticket.statusV2
-              : (ticket.priority ?? 'No Priority');
+            : criterion === 'createdBy'
+              ? ticket.createdBy || 'Unknown'
+              : criterion === 'status'
+                ? ticket.statusV2
+                : criterion === 'merchantId'
+                  ? (ticket.merchantId ?? NO_MERCHANT_GROUP)
+                  : (ticket.priority ?? 'No Priority');
 
         (acc[key] ??= []).push(ticket);
         return acc;
@@ -1491,6 +1511,11 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
         icon: <User className='h-4 w-4' />,
       },
       {
+        value: 'createdBy' as const,
+        label: 'Group by: Created By',
+        icon: <User className='h-4 w-4' />,
+      },
+      {
         value: 'status' as const,
         label: 'Group by: Status Category',
         icon: <CircleCheckBig className='h-4 w-4' />,
@@ -1499,6 +1524,11 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
         value: 'priority' as const,
         label: 'Group by: Priority',
         icon: <Vote className='h-4 w-4' />,
+      },
+      {
+        value: 'merchantId' as const,
+        label: 'Group by: Merchant ID',
+        icon: <Hashtag className='h-4 w-4' />,
       },
     ];
 
@@ -3610,17 +3640,86 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     [navigate, channel, isMobile, baseRoute, buildChannelRoute, allChannels, channelsById],
   );
 
+  const visibleChannels = useAllVisibleChannels();
+  const viewCreateTicketSeed = useMemo((): CreateTicketSeed | null => {
+    if (!isWorkspaceView) return null;
+    const board =
+      selectedBoardDetail &&
+      selectedBoardDetail.id === filteredSingleBoardId &&
+      !isReleaseBoard(selectedBoardDetail.boardType)
+        ? selectedBoardDetail
+        : undefined;
+    const candidateChannels = visibleChannels.filter(
+      c =>
+        c.scopeType === ChannelScopeType.DEFAULT &&
+        !c.isArchived &&
+        !!c.projectId &&
+        (!board || c.projectId === board.projectId),
+    );
+    const sourceChannelId =
+      filters.sourceChannels?.length === 1 ? filters.sourceChannels[0] : undefined;
+    const channelId =
+      candidateChannels.find(c => c.id === sourceChannelId)?.id ??
+      (board ? candidateChannels[0]?.id : undefined);
+    const { inverted, includeUnassigned, ids } = parseAssigneeFilter(filters.assignee ?? []);
+    const assigneeId = !inverted && !includeUnassigned && ids.length === 1 ? ids[0] : undefined;
+    const userGroupId = filters.userGroups?.length === 1 ? filters.userGroups[0] : undefined;
+    const merchantId = filters.merchantIds?.length === 1 ? filters.merchantIds[0] : undefined;
+    return {
+      assignee: assigneeId
+        ? { type: 'assigneeTo', value: assigneeId }
+        : userGroupId
+          ? { type: 'userGroup', value: userGroupId }
+          : null,
+      priority: filters.priority?.length === 1 ? (filters.priority[0] ?? null) : null,
+      ...(filters.tags?.length === 1 ? { tags: filters.tags } : {}),
+      ...(merchantId ? { merchantId } : {}),
+      ...(channelId ? { channelId } : {}),
+      ...(channelId && board ? { boardId: board.id } : {}),
+    };
+  }, [isWorkspaceView, selectedBoardDetail, filteredSingleBoardId, visibleChannels, filters]);
+
   const openCreateForColumn = useCallback(
-    (seed: {
-      status?: TicketStatusV2 | undefined;
-      stageName?: string | undefined;
-      assignee?: { type: 'assigneeTo' | 'userGroup'; value: string } | null;
-    }): void => {
-      setCreateTicketSeed(seed);
+    (
+      group: {
+        key: string;
+        entityType: 'user' | 'group' | null;
+        entityId: string | null;
+        priority: TicketPriority | null;
+      },
+      column: { status?: TicketStatusV2 | undefined; stageName?: string | undefined },
+    ): void => {
+      const groupAssignee =
+        groupBy !== 'createdBy' && group.entityType === 'user' && group.entityId
+          ? { type: 'assigneeTo' as const, value: group.entityId }
+          : group.entityType === 'group' && group.entityId
+            ? { type: 'userGroup' as const, value: group.entityId }
+            : null;
+      const groupStatus =
+        groupBy === 'status' && (Object.values(TicketStatusV2) as string[]).includes(group.key)
+          ? (group.key as TicketStatusV2)
+          : undefined;
+      const hasGroupValue = !['No Value', 'Unassigned', NO_MERCHANT_GROUP].includes(group.key);
+      setCreateTicketSeed({
+        ...viewCreateTicketSeed,
+        status: groupStatus ?? column.status,
+        stageName: column.stageName,
+        assignee: groupAssignee ?? viewCreateTicketSeed?.assignee ?? null,
+        priority: group.priority ?? viewCreateTicketSeed?.priority ?? null,
+        ...(groupBy === 'merchantId' && hasGroupValue ? { merchantId: group.key } : {}),
+        ...(isFormFieldGroup(groupBy) && hasGroupValue
+          ? {
+              dynamicFields: {
+                [groupBy.fieldName]:
+                  groupBy.fieldType === FormFieldType.SINGLE_SELECT ? group.key : [group.key],
+              },
+            }
+          : {}),
+      });
       setCreateTicketSource('kanban_column');
       setIsCreateModalOpen(true);
     },
-    [],
+    [groupBy, viewCreateTicketSeed],
   );
 
   // Handle ticket creation success
@@ -3899,9 +3998,18 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
           entityId = normalizedId;
           displayName = userNamesById.get(normalizedId) || displayName;
         }
+      } else if (groupBy === 'createdBy' && groupName !== 'Unknown') {
+        const normalizedId = groupName.replace(/^user:/, '');
+        entityType = 'user';
+        entityId = normalizedId;
+        displayName = userNamesById.get(normalizedId) || displayName;
       } else if (groupBy === 'priority' && groupName !== 'No Priority') {
         priority = groupName as TicketPriority;
         displayName = groupName.charAt(0).toUpperCase() + groupName.slice(1).toLowerCase();
+      } else if (groupBy === 'merchantId') {
+        // A MID is an opaque identifier — show it exactly as stored, with no
+        // prefix stripping or case normalization.
+        displayName = groupName;
       } else if (
         isFormFieldGroup(groupBy) &&
         groupBy.fieldType === FormFieldType.USER &&
@@ -3914,7 +4022,8 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
           .replace('group:', '')
           .replace('Unassigned', 'Unassigned');
       }
-      const isSpecialMissingGroup = groupName === 'No Value' || groupName === 'Unassigned';
+      const isSpecialMissingGroup =
+        groupName === 'No Value' || groupName === 'Unassigned' || groupName === NO_MERCHANT_GROUP;
       const fallbackCount = isSpecialMissingGroup ? 0 : groupTickets.length;
       const count = hasSearchTerm
         ? groupTickets.length
@@ -3935,11 +4044,20 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
 
     const isAssigneeGrouping =
       groupBy === 'assignee' ||
+      groupBy === 'createdBy' ||
       (isFormFieldGroup(groupBy) && groupBy.fieldType === FormFieldType.USER);
     if (isAssigneeGrouping) {
-      const isUnassigned = (key: string): boolean => key === 'Unassigned';
+      const isUnassigned = (key: string): boolean => key === 'Unassigned' || key === 'Unknown';
       mapped.sort((a, b) => {
         if (isUnassigned(a.key) !== isUnassigned(b.key)) return isUnassigned(a.key) ? 1 : -1;
+        return a.displayName.localeCompare(b.displayName, undefined, { sensitivity: 'base' });
+      });
+    }
+
+    if (groupBy === 'merchantId') {
+      const isNoMerchant = (key: string): boolean => key === NO_MERCHANT_GROUP;
+      mapped.sort((a, b) => {
+        if (isNoMerchant(a.key) !== isNoMerchant(b.key)) return isNoMerchant(a.key) ? 1 : -1;
         return a.displayName.localeCompare(b.displayName, undefined, { sensitivity: 'base' });
       });
     }
@@ -4104,10 +4222,10 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     [setSearchParams, layoutStorageKey],
   );
   const handleHeaderCreateTicket = useCallback((): void => {
-    setCreateTicketSeed(null);
+    setCreateTicketSeed(viewCreateTicketSeed);
     setCreateTicketSource('kanban_header');
     setIsCreateModalOpen(true);
-  }, []);
+  }, [viewCreateTicketSeed]);
   const handleHeaderClearFilters = useCallback((): void => {
     setFilters(filters.boards?.length ? { boards: filters.boards } : {});
     if (showOverdueOnly) setShowOverdueOnly(false);
@@ -5052,7 +5170,12 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                             {getPriorityIcon(group.priority)}
                           </div>
                         )}
-                        <h3 className='font-semibold text-foreground capitalize  text-sm'>
+                        <h3
+                          className={cn(
+                            'font-semibold text-foreground text-sm',
+                            groupBy !== 'merchantId' && 'capitalize',
+                          )}
+                        >
                           {group.displayName}
                         </h3>
                       </div>
@@ -5085,6 +5208,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                     pageSize={groupBy === 'none' ? 50 : 20}
                     totalCount={group.count}
                     internalScroll={groupBy !== 'none'}
+                    onTicketOpen={ticket => handleTicketClick({} as React.MouseEvent, ticket)}
                     scrollElement={tableScrollElement}
                     visibleColumns={tableVisibleColumns}
                     isComfortView={isComfortView}
@@ -5192,7 +5316,12 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                                 {getPriorityIcon(group.priority)}
                               </div>
                             )}
-                            <h3 className='font-semibold text-foreground capitalize  text-sm'>
+                            <h3
+                              className={cn(
+                                'font-semibold text-foreground text-sm',
+                                groupBy !== 'merchantId' && 'capitalize',
+                              )}
+                            >
                               {group.displayName}
                             </h3>
                           </div>
@@ -5240,24 +5369,13 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                           allKnownTickets={group.allTickets}
                           {...(paginatedColumnConfig ? { paginatedColumnConfig } : {})}
                           {...(canCreateTicket &&
-                          channel &&
-                          !channel.isArchived &&
-                          effectiveProjectId
+                          ((channel && !channel.isArchived && effectiveProjectId) ||
+                            isWorkspaceView)
                             ? {
                                 onAddTicketInColumn: (col: {
                                   status?: TicketStatusV2 | undefined;
                                   stageName?: string | undefined;
-                                }) =>
-                                  openCreateForColumn({
-                                    status: col.status,
-                                    stageName: col.stageName,
-                                    assignee:
-                                      group.entityType === 'user' && group.entityId
-                                        ? { type: 'assigneeTo', value: group.entityId }
-                                        : group.entityType === 'group' && group.entityId
-                                          ? { type: 'userGroup', value: group.entityId }
-                                          : null,
-                                  }),
+                                }) => openCreateForColumn(group, col),
                               }
                             : {})}
                           slaPolicies={kanbanSlaPolicies}
@@ -5309,6 +5427,9 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
           initialStatus={createTicketSeed?.status ?? null}
           initialStageName={createTicketSeed?.stageName ?? null}
           initialAssignee={createTicketSeed?.assignee ?? null}
+          initialPriority={createTicketSeed?.priority ?? null}
+          initialMerchantId={createTicketSeed?.merchantId}
+          initialDynamicFields={createTicketSeed?.dynamicFields}
           onTicketCreated={handleTicketCreated}
         />
       )}
@@ -5323,11 +5444,17 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
             setCreateTicketSeed(null);
           }}
           channelId=''
+          initialChannelId={createTicketSeed?.channelId}
+          selectedBoardId={createTicketSeed?.boardId ?? null}
           isFromSubTicket
           trackSource={createTicketSource}
           initialStatus={createTicketSeed?.status ?? null}
           initialStageName={createTicketSeed?.stageName ?? null}
           initialAssignee={createTicketSeed?.assignee ?? null}
+          initialPriority={createTicketSeed?.priority ?? null}
+          {...(createTicketSeed?.tags ? { initialTags: createTicketSeed.tags } : {})}
+          initialMerchantId={createTicketSeed?.merchantId}
+          initialDynamicFields={createTicketSeed?.dynamicFields}
           onTicketCreated={handleTicketCreated}
         />
       )}

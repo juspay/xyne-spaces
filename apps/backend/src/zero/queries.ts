@@ -98,7 +98,7 @@ const kanbanTicketsPageArgsSchema = z.object({
     .nullable(),
   groupBy: z
     .union([
-      z.enum(['none', 'assignee', 'status', 'priority']),
+      z.enum(['none', 'assignee', 'createdBy', 'status', 'priority', 'merchantId']),
       z.object({
         type: z.literal('formField'),
         fieldId: z.string(),
@@ -192,10 +192,6 @@ const toActualFieldValueQueryValue = (
 ): string | number | boolean =>
   typeof value === 'string' ? JSON.stringify(value) : value;
 
-const toDeskActualFieldValueQueryValue = (
-  value: string | number | boolean,
-): string | number | boolean => value;
-
 const supportDynamicFieldFiltersSchema = z
   .array(
     z.object({
@@ -220,7 +216,7 @@ const applySupportDynamicFieldFilters = (
         fevQuery = fevQuery.where((helpers: any) =>
           helpers.or(
             ...values.map((value: string | number | boolean) =>
-              helpers.cmp('actualFieldValue', '=', toDeskActualFieldValueQueryValue(value)),
+              helpers.cmp('actualFieldValue', '=', toActualFieldValueQueryValue(value)),
             ),
           ),
         );
@@ -489,10 +485,19 @@ const applyKanbanTicketPageConditions = (
       groupKey === 'Unassigned'
         ? query.where('assignedTo', 'IS', null)
         : query.where('assignedTo', groupKey);
+  } else if (groupBy === 'createdBy' && groupKey) {
+    query = query.where('createdBy', groupKey);
   } else if (groupBy === 'status' && groupKey) {
     query = query.where('statusV2', groupKey as TicketStatusV2);
   } else if (groupBy === 'priority' && groupKey) {
     query = query.where('priority', groupKey as TicketPriority);
+  } else if (groupBy === 'merchantId' && groupKey) {
+    // merchantId is nullable, so the catch-all bucket maps to IS NULL rather
+    // than an equality match — same shape as the 'Unassigned' assignee bucket.
+    query =
+      groupKey === 'No Merchant'
+        ? query.where('merchantId', 'IS', null)
+        : query.where('merchantId', groupKey);
   } else if (typeof groupBy === 'object' && groupBy.type === 'formField' && formFieldValue !== undefined) {
     query = query.whereExists('formEntityValues', (formEntityValue: any) =>
       formEntityValue
@@ -1557,7 +1562,34 @@ export const queries: AnyQueryRegistry = defineQueries({
       }
 
       if (assignedTo && assignedTo.length > 0) {
-        query = query.where('assignedTo', 'IN', assignedTo);
+        // Desk tickets store a raw user id in assignedTo (no user:/group: prefixing).
+        // The shared 'Unassigned' sentinel filters tickets with no assignee
+        // (zero stores nullable strings, so unassigned = IS null OR '').
+        const { inverted, includeUnassigned, ids } = parseAssigneeFilter(assignedTo);
+        if (!inverted) {
+          query = query.where(({ or, cmp }) =>
+            or(
+              ...(ids.length ? [cmp('assignedTo', 'IN', ids)] : []),
+              ...(includeUnassigned ? [cmp('assignedTo', 'IS', null), cmp('assignedTo', '')] : []),
+            ),
+          );
+        } else if (includeUnassigned) {
+          query = query.where(({ and, cmp }) =>
+            and(
+              ...(ids.length ? [cmp('assignedTo', 'NOT IN', ids)] : []),
+              cmp('assignedTo', 'IS NOT', null),
+              cmp('assignedTo', '!=', ''),
+            ),
+          );
+        } else {
+          query = query.where(({ or, cmp }) =>
+            or(
+              cmp('assignedTo', 'NOT IN', ids),
+              cmp('assignedTo', 'IS', null),
+              cmp('assignedTo', ''),
+            ),
+          );
+        }
       }
 
       if (createdBy && createdBy.length > 0) {
@@ -2110,7 +2142,34 @@ export const queries: AnyQueryRegistry = defineQueries({
       query = query.where('isArchived', false);
 
       if (assignedTo && assignedTo.length > 0) {
-        query = query.where('assignedTo', 'IN', assignedTo);
+        // Desk tickets store a raw user id in assignedTo (no user:/group: prefixing).
+        // The shared 'Unassigned' sentinel filters tickets with no assignee
+        // (zero stores nullable strings, so unassigned = IS null OR '').
+        const { inverted, includeUnassigned, ids } = parseAssigneeFilter(assignedTo);
+        if (!inverted) {
+          query = query.where(({ or, cmp }) =>
+            or(
+              ...(ids.length ? [cmp('assignedTo', 'IN', ids)] : []),
+              ...(includeUnassigned ? [cmp('assignedTo', 'IS', null), cmp('assignedTo', '')] : []),
+            ),
+          );
+        } else if (includeUnassigned) {
+          query = query.where(({ and, cmp }) =>
+            and(
+              ...(ids.length ? [cmp('assignedTo', 'NOT IN', ids)] : []),
+              cmp('assignedTo', 'IS NOT', null),
+              cmp('assignedTo', '!=', ''),
+            ),
+          );
+        } else {
+          query = query.where(({ or, cmp }) =>
+            or(
+              cmp('assignedTo', 'NOT IN', ids),
+              cmp('assignedTo', 'IS', null),
+              cmp('assignedTo', ''),
+            ),
+          );
+        }
       }
 
       if (createdBy && createdBy.length > 0) {
@@ -2421,6 +2480,7 @@ export const queries: AnyQueryRegistry = defineQueries({
   ticketByIdV2: defineQuery(z.object({ ticketId: z.string() }), ({ args: { ticketId } }) => {
     return zql.tickets
       .where('id', ticketId)
+      .related('ticketDescription')
       .related('project')
       .related('tagMappings')
       .related('assignments', a => a.related('role'))
@@ -2451,6 +2511,7 @@ export const queries: AnyQueryRegistry = defineQueries({
   ticketDetailsByIdV2: defineQuery(z.object({ ticketId: z.string() }), ({ args: { ticketId } }) => {
     return zql.tickets
       .where('id', ticketId)
+      .related('ticketDescription')
       .related('project')
       .related('tagMappings')
       .related('assignments', a => a.related('role'))
@@ -2492,6 +2553,7 @@ export const queries: AnyQueryRegistry = defineQueries({
     return zql.tickets
       .where('xyneId', xyneId)
       .where('workspaceId', workspaceId)
+      .related('ticketDescription')
       .related('project')
       .related('tagMappings')
       .related('referencesOut', (ref) => ref.related('targetTicket'))
@@ -3687,18 +3749,22 @@ export const queries: AnyQueryRegistry = defineQueries({
 
   canvasCommentThreads: defineQuery(
     z.object({ canvasId: z.string() }),
-    ({ args: { canvasId } }) => {
+    ({ ctx, args: { canvasId } }) => {
       return zql.canvas_comment_threads
+        .where('workspaceId', ctx.workspaceId)
         .where('canvasId', canvasId)
         .orderBy('createdAt', 'asc')
-        .related('initialComment');
+        .related('initialComment', comment =>
+          comment.where('workspaceId', ctx.workspaceId),
+        );
     },
   ),
 
   canvasThreadComments: defineQuery(
     z.object({ threadId: z.string() }),
-    ({ args: { threadId } }) => {
+    ({ ctx, args: { threadId } }) => {
       return zql.canvas_comments
+        .where('workspaceId', ctx.workspaceId)
         .where('threadId', threadId)
         .orderBy('createdAt', 'asc');
     },
@@ -3896,6 +3962,42 @@ export const queries: AnyQueryRegistry = defineQueries({
             ),
           ),
         );
+    }
+  ),
+
+  // All app/bot participants of a channel — used at the parent for the
+  // Agents & Apps tab count.
+  channelAppParticipants: defineQuery(
+    z.object({ channelId: z.string() }),
+    ({ args: { channelId } }) => {
+      return zql.channel_participants
+        .where('channelId', channelId)
+        .whereExists('user', (u) =>
+          u.where('userType', 'IN', [UserType.APP, UserType.BOT]),
+        );
+    }
+  ),
+
+  // Paginated human members of a channel — excludes apps/bots server-side so
+  // the Members tab never leaks them into its list.
+  channelHumanParticipantsPaginated: defineQuery(
+    z.object({
+      channelId: z.string(),
+      limit: z.number(),
+      start: z.object({ role: z.nativeEnum(ChannelRole), userId: z.string() }).nullable(),
+    }),
+    ({ args: { channelId, limit, start } }) => {
+      let query = zql.channel_participants
+        .where('channelId', channelId)
+        .whereExists('user', (u) => u.where('userType', '=', UserType.USER))
+        .orderBy('role', 'asc')
+        .orderBy('userId', 'asc');
+
+      if (start) {
+        query = query.start({ role: start.role, userId: start.userId }, { inclusive: false });
+      }
+
+      return query.limit(limit);
     }
   ),
 

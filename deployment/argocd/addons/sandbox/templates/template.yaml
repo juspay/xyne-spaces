@@ -1,0 +1,74 @@
+{{- $t := .Values.template }}
+{{- if and $t.enabled $t.image }}
+apiVersion: extensions.agents.x-k8s.io/v1alpha1
+kind: SandboxTemplate
+metadata:
+  name: {{ $t.name }}
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "sandbox.labels" . | nindent 4 }}
+spec:
+  podTemplate:
+    metadata:
+      annotations:
+        io.katacontainers.config.hypervisor.default_vcpus: {{ $t.vcpus | quote }}
+        io.katacontainers.config.hypervisor.default_memory: {{ $t.memory | quote }}
+        {{- with $t.annotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      runtimeClassName: {{ $t.runtimeClassName }}
+      {{- with .Values.scheduling.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.scheduling.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: workspace
+          image: {{ $t.image }}
+          imagePullPolicy: {{ $t.imagePullPolicy }}
+          ports:
+            - containerPort: {{ $t.port }}
+          env:
+            - name: HTTP_PROXY
+              value: {{ include "sandbox.proxyUrl" . }}
+            - name: HTTPS_PROXY
+              value: {{ include "sandbox.proxyUrl" . }}
+            - name: http_proxy
+              value: {{ include "sandbox.proxyUrl" . }}
+            - name: https_proxy
+              value: {{ include "sandbox.proxyUrl" . }}
+            - name: NO_PROXY
+              value: {{ $t.noProxy | quote }}
+            - name: no_proxy
+              value: {{ $t.noProxy | quote }}
+            {{- range $k, $v := $t.env }}
+            - name: {{ $k }}
+              value: {{ $v | quote }}
+            {{- end }}
+          {{- with $t.readinessProbe }}
+          readinessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          resources:
+            {{- toYaml $t.resources | nindent 12 }}
+          securityContext:
+            privileged: {{ $t.privileged }}
+{{- end }}
+{{- if and .Values.warmPool.enabled $t.image }}
+---
+apiVersion: extensions.agents.x-k8s.io/v1alpha1
+kind: SandboxWarmPool
+metadata:
+  name: {{ .Values.warmPool.name }}
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "sandbox.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.warmPool.replicas }}
+  sandboxTemplateRef:
+    name: {{ $t.name }}
+{{- end }}
