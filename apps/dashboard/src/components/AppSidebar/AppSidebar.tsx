@@ -52,6 +52,8 @@ import { AppIcon } from '../AppIcon/AppIcon';
 import { useToolbarItems } from '../../hooks/useToolbarItems';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
 import { queries } from '../../zero/queries';
+import { useRovingFocus, ROVING_ITEM_ATTR } from '../../hooks/useRovingFocus';
+import { LANDMARK_ATTR } from '../../hooks/useLandmarkCycle';
 import type { NavigationItem } from './navigationConfig';
 import {
   RAIL_SHORTCUT_LIMIT,
@@ -171,6 +173,8 @@ const SUPPORT_REUSED_ROUTES = [
 const AppSidebar = (): ReactElement => {
   const location = useLocation();
   const navigate = useNavigate();
+  // The rail is one Tab stop; Up/Down (and Home/End) move between its items.
+  const { containerRef: railRef } = useRovingFocus<HTMLElement>({ orientation: 'vertical' });
   const { workspaceId } = useParams<{ workspaceId?: string }>();
   const prefixWs = (path: string): string => (workspaceId ? `/${workspaceId}${path}` : path);
   const { user } = useAuth();
@@ -390,7 +394,12 @@ const AppSidebar = (): ReactElement => {
   }
 
   return (
-    <aside className='h-full w-[60px] flex flex-col bg-sidebar'>
+    <aside
+      aria-label='Workspace navigation'
+      tabIndex={-1}
+      {...{ [LANDMARK_ATTR]: 'Workspace navigation' }}
+      className='h-full w-[60px] flex flex-col bg-sidebar focus:outline-none'
+    >
       {/* Top spacer aligns with the header strip / macOS traffic lights; make it a
           drag region so the window can be moved by its top-left corner in Electron. */}
       <div className='w-full h-[52px] shrink-0' style={APP_DRAG_STYLE} />
@@ -405,7 +414,7 @@ const AppSidebar = (): ReactElement => {
               activeRoute={activeRoute}
             />
           ) : (
-            <nav>
+            <nav aria-label='Primary' ref={railRef}>
               <ul className='relative flex flex-col gap-4'>
                 {toolbarItems.map((item, index) => {
                   const shortcutIndex =
@@ -444,6 +453,8 @@ const AppSidebar = (): ReactElement => {
                         }
                       }}
                       aria-label={showPendingDmDot ? 'DMs unread' : item.label}
+                      aria-current={isActive ? 'page' : undefined}
+                      {...{ [ROVING_ITEM_ATTR]: '' }}
                       data-testid={testId}
                       data-track-category='App_Sidebar'
                       data-track-name='Sidebar_Nav_Item'
@@ -523,6 +534,8 @@ const AppSidebar = (): ReactElement => {
                           to={prefixWs(path)}
                           onClick={() => handleNavigationClick(app.title)}
                           aria-label={app.title}
+                          aria-current={isActive ? 'page' : undefined}
+                          {...{ [ROVING_ITEM_ATTR]: '' }}
                           data-testid={`nav-artifact-app-${app.id}`}
                           data-track-category='App_Sidebar'
                           data-track-name='Sidebar_Pinned_App'
@@ -560,6 +573,8 @@ const AppSidebar = (): ReactElement => {
                       <button
                         type='button'
                         aria-label='More'
+                        aria-expanded={isMoreOpen}
+                        {...{ [ROVING_ITEM_ATTR]: '' }}
                         data-testid='nav-more'
                         data-track-category='App_Sidebar'
                         data-track-name='Sidebar_More_Toggle'

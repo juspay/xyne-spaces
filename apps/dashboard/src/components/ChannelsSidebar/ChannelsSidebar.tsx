@@ -69,6 +69,7 @@ const ChannelsSidebar = ({
       tabIndex={0}
       role='region'
       aria-label='Desks'
+      data-landmark='Desks'
       className='h-full flex flex-col bg-sidebar outline-none'
     >
       {/* Header - matches ProjectSidebar structure */}

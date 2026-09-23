@@ -162,3 +162,72 @@ much they affect a real user, most first.
 Not conformant. This is a foundation, not a certification. The automated layer
 (`pnpm lint`, `pnpm run a11y:contrast`) covers a minority of the WCAG 2.1 AA
 success criteria; the rest need the manual work listed above.
+
+## Keyboard navigation
+
+WCAG 2.1.1 (Keyboard, A) is about _reachability_; 2.4.3 (Focus Order) and 2.4.7
+(Focus Visible) are about whether reaching it is bearable. The app rail was
+Tab-reachable before this pass but not usable: twelve icon links meant twelve
+Tab presses just to get past the sidebar, with no way to move inside it and no
+announcement of which one was current.
+
+### The three levels
+
+| Level            | Keys                                | Behaviour                                                                          |
+| ---------------- | ----------------------------------- | ---------------------------------------------------------------------------------- |
+| Between regions  | `F6` / `Shift+F6`                   | Cycles focus through the app rail → channel/desk sidebar → main content, and back. |
+| Into the content | `Tab` (first press on a fresh page) | Reveals **Skip to main content**, which jumps straight past the nav.               |
+| Within the rail  | `↑` `↓` `Home` `End`                | Moves between rail items. The rail as a whole is a single Tab stop.                |
+
+### Roving tabindex
+
+`useRovingFocus` (`src/hooks/useRovingFocus.ts`) implements the ARIA Authoring
+Practices composite-widget pattern: exactly one item in the group is tabbable at
+a time, arrows move focus _and_ the tabbable position, and `Tab` leaves the
+group rather than stepping through it.
+
+Opting an item in is one attribute — spread `{...{ [ROVING_ITEM_ATTR]: '' }}`
+onto the focusable element itself (the `<a>` / `<button>`, not a wrapper). The
+hook owns the `tabIndex` attributes imperatively rather than through React
+state, because the rail re-renders on every route change and on Zero pushes;
+threading an index through that would reset the tabbable item under the user
+mid-interaction.
+
+Entry point: if an item carries `aria-current="page"` the hook makes _that_ one
+the tabbable one, so Tabbing into the rail lands on where the user already is.
+
+### F6 region cycling
+
+`useLandmarkCycle` (`src/hooks/useLandmarkCycle.ts`) is mounted once in
+`AppRoot`. A region opts in with `data-landmark="<name>"` **and**
+`tabIndex={-1}` (it has to be programmatically focusable). Focus lands on the
+region element itself; the global `:focus-visible` ring is the feedback that the
+jump happened, and the region's accessible name is what a screen reader
+announces.
+
+Currently registered: `Workspace navigation` (the rail),
+`Channels and direct messages` (ChatDirectory), `Desks` (ChannelsSidebar),
+`Main content`.
+
+Add a new one when you add a new persistent pane — not for transient panels,
+which should trap and restore focus instead.
+
+F6 is deliberately unmodified: it is unclaimed by browsers and by this app's own
+shortcut catalog, and it is the long-standing platform convention for "next
+pane".
+
+### `aria-current`
+
+Rail items and pinned apps now set `aria-current="page"` when active. Before,
+the active item was distinguished by background colour alone — invisible to a
+screen reader and a WCAG 1.4.1 (Use of Colour) problem for everyone else.
+
+### Still open
+
+- **Radix `HoverCard` quick-menus on the rail are pointer-only.**
+  `RailQuickNavEntry` opens the quick menu on hover, and `HoverCard` has no
+  keyboard equivalent — a keyboard user can follow the link but cannot reach the
+  menu. Fixing this means swapping those to `Popover` with an explicit trigger
+  affordance, which is a UX change and needs design input.
+- Roving focus is applied to the app rail only. The channel list, ticket lists
+  and board columns are still one Tab stop per row.

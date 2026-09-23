@@ -255,6 +255,7 @@ import {
   SkipToMainContent,
   MAIN_CONTENT_ID,
 } from '../components/SkipToMainContent/SkipToMainContent';
+import { useLandmarkCycle, LANDMARK_ATTR } from '../hooks/useLandmarkCycle';
 import { RouteAnnouncer } from '../components/RouteAnnouncer/RouteAnnouncer';
 import { EncryptionBootstrapProvider } from '../providers/EncryptionBootstrapProvider';
 import { EncryptionInit } from '../components/EncryptionInit';
@@ -339,6 +340,8 @@ const WorkspaceRedirect = (): ReactElement => {
 };
 
 const AppRoot = (): ReactElement => {
+  // F6 / Shift+F6 jumps focus between the rail, the sidebar and the content.
+  useLandmarkCycle();
   useWorkspacePageTools();
   const { recordingVersion } = useRecordingVersion();
   // Create panel refs for WebView
@@ -907,6 +910,8 @@ const AppRoot = (): ReactElement => {
                                     <main
                                       id={MAIN_CONTENT_ID}
                                       tabIndex={-1}
+                                      aria-label='Main content'
+                                      {...{ [LANDMARK_ATTR]: 'Main content' }}
                                       className='flex-1 no-scrollbar overflow-auto focus:outline-none'
                                     >
                                       <EditWarningModal />
@@ -937,6 +942,8 @@ const AppRoot = (): ReactElement => {
                             <main
                               id={MAIN_CONTENT_ID}
                               tabIndex={-1}
+                              aria-label='Main content'
+                              {...{ [LANDMARK_ATTR]: 'Main content' }}
                               className='flex-1 no-scrollbar overflow-auto focus:outline-none'
                             >
                               <EditWarningModal />

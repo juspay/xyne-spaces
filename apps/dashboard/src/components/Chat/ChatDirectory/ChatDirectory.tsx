@@ -727,6 +727,7 @@ const ChatDirectory = ({
           tabIndex={0}
           role='region'
           aria-label='Channels and direct messages'
+          data-landmark='Channels and direct messages'
           className='flex-1 h-full overflow-y-scroll no-scrollbar pb-[calc(2.5rem+env(safe-area-inset-bottom))] px-0.5 pt-1 outline-none'
         >
           <div className='hidden md:block'>
