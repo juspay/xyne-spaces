@@ -1,3 +1,11 @@
+## [1.377.1](https://github.com/juspay/xyne-spaces/compare/v1.377.0...v1.377.1) (2026-09-23)
+
+
+### Bug Fixes
+
+* clickable SDLC overview activity ([#2160](https://github.com/juspay/xyne-spaces/issues/2160)) ([473c23b](https://github.com/juspay/xyne-spaces/commit/473c23b2eeb742393df1c930705c826c1fa6f8ca))
+* open forwarded SDLC messages in the hub ([#2132](https://github.com/juspay/xyne-spaces/issues/2132)) ([43f4425](https://github.com/juspay/xyne-spaces/commit/43f4425c22d9ef5f8e8209fe6a3dec5dbb3b5bc0))
+
 ## [1.377.0](https://github.com/juspay/xyne-spaces/compare/v1.376.0...v1.377.0) (2026-09-23)
 
 
