@@ -20,14 +20,12 @@ import JoinChannel from '../JoinChannel/JoinChannel';
 import { ChatInput } from '../ChatInput';
 import FileListV2 from '../FileListV2';
 import PinListV2 from '../PinListV2';
-import { ThreadMessages } from '../ThreadPannel';
 import KanbanBoardScreen from '../../../routes/KanbanBoardScreen';
 import CanvasTab from '../../Canvas/CanvasTab';
 import CanvasScreen from '../../Canvas/CanvasScreen';
-import { Panel, ResizableGroup, Separator } from '../../ui/Resizable/Resizable';
 import { queries } from '../../../zero/queries';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
-import { TicketDetails } from '../../Tickets/TicketDetails/TicketDetails';
+import { ExpandedTicketView } from '../../Tickets/ExpandedTicketView/ExpandedTicketView';
 import ChatListV4 from '../ChatList/ChatListV4';
 import LinksTab from '../LinksTab/LinksTab';
 import { Archive } from 'lucide-react';
@@ -40,34 +38,6 @@ import { parseDMParticipantIds } from '../ChatDirectory/ChatDirectory.utils';
 // render, causing useChannelSubscription's effect to unsubscribe/resubscribe
 // the websocket channel on each render (measured as constant subscribe churn).
 const NO_CONVERSATION_IDS: string[] = [];
-
-const ExpandedTicketView = ({
-  ticketId,
-  channelId,
-  conversationId,
-}: {
-  ticketId: string;
-  channelId: string;
-  conversationId: string;
-}): ReactElement => {
-  return (
-    <ResizableGroup orientation='horizontal'>
-      <Panel minSize='60%'>
-        <TicketDetails ticketId={ticketId} expandedView={true} />
-      </Panel>
-      <Separator className='w-1 hover:bg-sidebar-divider active:bg-sidebar-divider transition-colors duration-200 cursor-col-resize flex items-center justify-center group'>
-        <div id='panel-resize-divider' className='w-[1px] h-full bg-border'></div>
-      </Separator>
-      <Panel minSize='40%'>
-        <ThreadMessages
-          channelId={channelId}
-          conversationId={conversationId}
-          underTicketView={true}
-        />
-      </Panel>
-    </ResizableGroup>
-  );
-};
 
 const DeactivatedDmArchiveBanner = (): ReactElement => {
   return (

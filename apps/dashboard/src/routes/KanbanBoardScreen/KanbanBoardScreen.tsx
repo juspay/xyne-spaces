@@ -3317,13 +3317,13 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     ],
   );
   useEffect(() => {
-    if (!isKanbanLayout || !channelId) return;
+    if (!isKanbanLayout || (!channelId && !projectsScreenContext?.openTicket)) return;
     setBoardNavParams({
-      channelId,
+      channelId: channelId ?? null,
       baseArgs: navBaseArgs,
       columnType: shouldUseStatusColumns ? 'status' : 'stage',
     });
-  }, [isKanbanLayout, channelId, navBaseArgs, shouldUseStatusColumns]);
+  }, [isKanbanLayout, channelId, projectsScreenContext, navBaseArgs, shouldUseStatusColumns]);
 
   const kanbanColumnQueryKey = useMemo(
     () =>
@@ -3601,6 +3601,11 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
         ? `/support/${ticket.channelId}/${ticket.xyneId}`
         : `/support/${ticket.channelId}`;
 
+      if (!isDeskTicket && projectsScreenContext?.openTicket) {
+        projectsScreenContext.openTicket(ticket, { newTab: isCmdClick, trackSource });
+        return;
+      }
+
       // Only open in new tab on desktop when Cmd/Ctrl+Click is pressed
       if (!isMobile && isCmdClick) {
         const relativeUrl = isDeskTicket
@@ -3637,7 +3642,16 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
         );
       }
     },
-    [navigate, channel, isMobile, baseRoute, buildChannelRoute, allChannels, channelsById],
+    [
+      navigate,
+      channel,
+      isMobile,
+      baseRoute,
+      buildChannelRoute,
+      allChannels,
+      channelsById,
+      projectsScreenContext,
+    ],
   );
 
   const visibleChannels = useAllVisibleChannels();
@@ -3730,7 +3744,16 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
         action: {
           label: 'View Details',
           onClick: () => {
-            if (ticketChannelId && ticket.conversationId) {
+            if (
+              projectsScreenContext?.openTicket &&
+              ticket.conversationId &&
+              !isDeskChannelType(channelsById.get(ticketChannelId ?? '')?.type)
+            ) {
+              projectsScreenContext.openTicket(
+                { id: ticket.id, conversationId: ticket.conversationId },
+                { newTab: false, trackSource: 'create_ticket_toast' },
+              );
+            } else if (ticketChannelId && ticket.conversationId) {
               void navigate(
                 buildChannelRoute(`${ticketChannelId}/${ticket.conversationId}/${ticket.id}`, {
                   selectedTab: 'details',
@@ -3752,7 +3775,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
         duration: 5000,
       });
     },
-    [navigate, channel, buildChannelRoute, baseRoute],
+    [navigate, channel, buildChannelRoute, baseRoute, projectsScreenContext, channelsById],
   );
 
   // Board context for create ticket modal. When creating from a board route or
