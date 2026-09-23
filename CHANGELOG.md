@@ -1,3 +1,10 @@
+## [1.382.0](https://github.com/juspay/xyne-spaces/compare/v1.381.0...v1.382.0) (2026-09-23)
+
+
+### Features
+
+* sync claw to main ([#2242](https://github.com/juspay/xyne-spaces/issues/2242)) ([0106807](https://github.com/juspay/xyne-spaces/commit/0106807c63d98164b96af096f1f7926b39dd1586))
+
 ## [1.381.0](https://github.com/juspay/xyne-spaces/compare/v1.380.1...v1.381.0) (2026-09-23)
 
 
