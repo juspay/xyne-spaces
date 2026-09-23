@@ -76,6 +76,14 @@ interface CanvasSideEffectContext {
 import { executeStreamingLlmRequest, type SummaryModelType } from './callLlmRetry';
 import { initializeYSweetDoc, syncToYSweet } from '@/utils/ysweetUtils.js';
 
+export interface RecordingSummaryTemplateSelection<T extends SummaryTemplateCandidate = SummaryTemplate> {
+  template: T | null;
+  fellBack: boolean;
+  reason: string | null;
+}
+
+export const DRAFT_SUMMARY_TEMPLATE_ID = 'draft';
+
 /**
  * Sanitize input strings to prevent injection attacks
  * Removes control characters and limits length
@@ -985,13 +993,66 @@ export class CallDocumentService {
     userId: string,
     callId: string,
   ): Promise<SummaryTemplate | null> {
+    const selection = await this.resolveRecordingSummaryTemplateSelection(
+      transcript,
+      workspaceId,
+      userId,
+      callId,
+    );
+    return selection.template;
+  }
+
+  async resolveRecordingSummaryTemplateSelection(
+    transcript: string,
+    workspaceId: string,
+    userId: string,
+    callId: string,
+  ): Promise<RecordingSummaryTemplateSelection> {
     const templates = await summaryTemplateService.list(workspaceId, userId);
     const defaultTemplate = await summaryTemplateService.findAccessibleById(
       DEFAULT_RECORDING_SUMMARY_TEMPLATE.id,
       workspaceId,
       userId,
     );
-    if (templates.length === 0) return defaultTemplate;
+    return this.pickRecordingSummaryTemplate(transcript, templates, defaultTemplate, callId);
+  }
+
+  /**
+   * Same selection as production, but with an unsaved draft standing in for its saved
+   * version (or added as a new candidate). A draft id the user can't see is treated as new.
+   */
+  async previewRecordingSummaryTemplateSelection(
+    transcript: string,
+    workspaceId: string,
+    userId: string,
+    callId: string,
+    draft: SummaryTemplateCandidate,
+  ): Promise<RecordingSummaryTemplateSelection<SummaryTemplateCandidate>> {
+    const templates = await summaryTemplateService.list(workspaceId, userId);
+    const defaultTemplate = await summaryTemplateService.findAccessibleById(
+      DEFAULT_RECORDING_SUMMARY_TEMPLATE.id,
+      workspaceId,
+      userId,
+    );
+    const draftId = templates.some(template => template.id === draft.id)
+      ? draft.id
+      : DRAFT_SUMMARY_TEMPLATE_ID;
+    const candidates: SummaryTemplateCandidate[] = [
+      ...templates.filter(template => template.id !== draftId),
+      { ...draft, id: draftId },
+    ];
+    return this.pickRecordingSummaryTemplate(transcript, candidates, defaultTemplate, callId);
+  }
+
+  private async pickRecordingSummaryTemplate<T extends SummaryTemplateCandidate>(
+    transcript: string,
+    templates: T[],
+    defaultTemplate: T | null,
+    callId: string,
+  ): Promise<RecordingSummaryTemplateSelection<T>> {
+    if (templates.length === 0) {
+      return { template: defaultTemplate, fellBack: true, reason: 'no_templates' };
+    }
 
     const result = await executeStreamingLlmRequest({
       userPrompt: buildSummaryTemplateSelectionPrompt(transcript, templates),
@@ -1009,15 +1070,16 @@ export class CallDocumentService {
           template_id: template.id,
           template_name: template.name,
         });
-        return template;
+        return { template, fellBack: false, reason: null };
       }
     }
 
+    const reason = result.ok ? 'invalid_selection' : result.reason;
     logger.warn(`[${callId}] recording_summary_template_selection_fallback`, {
       template_id: defaultTemplate?.id,
-      reason: result.ok ? 'invalid_selection' : result.reason,
+      reason,
     });
-    return defaultTemplate;
+    return { template: defaultTemplate, fellBack: true, reason };
   }
 
   /** Generate a headless-recording summary using a saved or code-backed template. */
