@@ -1,8 +1,9 @@
 import { PrismaClient } from '@prisma/client';
-import { ActivityClassification, ActivityClassificationJobType, UserStatus } from '@xyne/shared';
+import { ActivityClassification, ActivityClassificationJobType } from '@xyne/shared';
 import { db } from '@/database/client';
 import { repositories } from '@/database/repositories';
-import { currentWorkspaceId, withWorkspaceScope, runAsSystem } from '@/database/tenant/context';
+import { currentWorkspaceId, withWorkspaceScope } from '@/database/tenant/context';
+import { fillSdlcOwnerActivities, getWorkspaceActivityCountsQuery } from '@/bypassAcl/activityServices';
 import { logger } from '@/utils/logger';
 import {
   isSdlcChannel,
@@ -281,12 +282,7 @@ export class ActivityService {
     const { canvasId, trackId, ticketId } = await this.sdlcOwner({ channelId, conversationId });
     if (!canvasId && !trackId && !ticketId) return;
     try {
-      await runAsSystem(() =>
-        this.prisma.activity.updateMany({
-          where: { conversationId, canvasId: null, trackId: null, ticketId: null },
-          data: { canvasId, trackId, ticketId },
-        }),
-      );
+      await fillSdlcOwnerActivities(conversationId, canvasId, trackId, ticketId);
     } catch (error) {
       logger.error('[ActivityService] SDLC owner fill failed', { conversationId, error });
     }
@@ -506,6 +502,7 @@ export class ActivityService {
         data: {
           actorId: actorId,
           isRead: false,
+          updatedAt: new Date(), // intentional: re-surface in the feed
           ...(isThreadActivity !== undefined ? { isThreadActivity } : {}),
           ...(conversationSeenCutoffAt ? { conversationSeenCutoffAt } : {}),
           ...owned,
@@ -585,21 +582,23 @@ export class ActivityService {
   }
 
 
-  async updateReactionActivityActorIdOnlyV2(params: {       //using only in case of reaction deletion where updateAt is not to be updated
+  /** Re-points the reaction activity at the remaining reactor without re-surfacing it in the feed. */
+  async updateReactionActivityActorIdOnlyV2(params: {
     messageId: string;
     messageAuthorId: string;
     actorId: string;
   }): Promise<void> {
     const { messageId, messageAuthorId, actorId } = params;
 
-    await this.prisma.$executeRaw`
-      UPDATE "activities"
-      SET "actorId" = ${actorId}
-      WHERE "userId" = ${messageAuthorId}
-        AND "messageId" = ${messageId}
-        AND "actorAction" = 'added_v2'
-        AND "actionSource" = 'message'
-    `;
+    await this.prisma.activity.updateMany({
+      where: {
+        userId: messageAuthorId,
+        messageId,
+        actorAction: 'added_v2',
+        actionSource: 'message',
+      },
+      data: { actorId },
+    });
   }
 
 
@@ -652,6 +651,7 @@ export class ActivityService {
             isRead: false,
             messageId: latestReplyMessageId,
             actionSourceId: latestReplyMessageId,
+            updatedAt: new Date(), // intentional: re-surface in the feed
             ...(conversationSeenCutoffAt ? { conversationSeenCutoffAt } : {}),
             ...owned,
           },
@@ -751,48 +751,7 @@ export class ActivityService {
       count: number;
     }>
   > {
-    // Spans the caller's own identities across workspaces.
-    return runAsSystem(async () => {
-      const users = await this.prisma.user.findMany({
-        where: {
-          orgMemberId: memberId,
-          leftAt: null,
-          status: UserStatus.ACTIVE,
-        },
-        select: {
-          id: true,
-          workspaceId: true,
-        },
-      });
-
-      if (users.length === 0) {
-        return [];
-      }
-
-      const userIds = users.map(u => u.id);
-
-      const activityCounts = await this.prisma.activity.groupBy({
-        by: ['userId'],
-        where: {
-          userId: { in: userIds },
-          isRead: false,
-        },
-        _count: {
-          id: true,
-        },
-      });
-
-      const countMap = new Map<string, number>();
-      for (const ac of activityCounts) {
-        countMap.set(ac.userId, ac._count.id);
-      }
-
-      return users.map(u => ({
-        workspaceId: u.workspaceId,
-        userId: u.id,
-        count: countMap.get(u.id) ?? 0,
-      }));
-    });
+    return getWorkspaceActivityCountsQuery(memberId);
   }
 }
 

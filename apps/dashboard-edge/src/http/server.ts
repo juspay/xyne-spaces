@@ -29,6 +29,10 @@ export function createEdgeServer(store: RulesStore, origin: Origin, config: Conf
       await statusHandlers.reload(req, res);
       return;
     }
+    if (req.method === 'POST' && pathname === '/_edge/validate') {
+      await statusHandlers.validate(req, res);
+      return;
+    }
     if (req.method === 'GET' || req.method === 'HEAD') {
       switch (pathname) {
         case '/_edge/healthz':

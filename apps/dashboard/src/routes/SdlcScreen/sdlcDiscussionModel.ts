@@ -1,4 +1,4 @@
-import { isBaselineCanvasType } from '@xyne/shared/sdlc';
+import { isHubKnowledgeArtifactType } from '@xyne/shared/sdlc';
 import type { SdlcDiscussion, SdlcEntityType, SdlcRelationType } from '@xyne/shared';
 
 interface CanvasSummary {
@@ -17,7 +17,7 @@ interface LinkSummary {
 }
 
 export interface SdlcDiscussionContext {
-  owner: { canvasId: string; title: string; kind: 'PIPELINE' | 'REPO_KNOWLEDGE' | 'WIKI' };
+  owner: { canvasId: string; title: string; kind: 'PIPELINE' | 'HUB_KNOWLEDGE' | 'WIKI' };
   surface: { type: NonNullable<SdlcDiscussion['surfaceType']>; id: string };
 }
 
@@ -28,8 +28,8 @@ export function resolveCanvasDiscussionOwner(
   const canvas = canvases.find(item => item.id === canvasId);
   if (!canvas?.sdlcArtifact) return null;
   const artifactType = canvas.sdlcArtifact.artifactType;
-  if (isBaselineCanvasType(artifactType)) {
-    return { canvasId: canvas.id, title: canvas.title, kind: 'REPO_KNOWLEDGE' };
+  if (isHubKnowledgeArtifactType(artifactType)) {
+    return { canvasId: canvas.id, title: canvas.title, kind: 'HUB_KNOWLEDGE' };
   }
   if (artifactType === 'WIKI') {
     return { canvasId: canvas.id, title: canvas.title, kind: 'WIKI' };

@@ -1,6 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { CopyCopied, CopyDefault } from '@xyne/icons';
-import { toast } from 'sonner';
 import type { FlowComponent } from '@xyne/shared';
 import { DownloadButton } from '../../Chat/MessageAttachment/DownloadButton';
 import { useClipboard } from '../../../hooks/useClipboard';
@@ -68,13 +67,11 @@ export const ImageNode: React.FC<ImageNodeProps> = ({ node }) => {
 
   const handleCopyImage = async (): Promise<void> => {
     if (!blobRef.current) return;
-    try {
-      await copyImage(blobRef.current);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 1200);
-    } catch {
-      toast.error('Failed to copy image');
-    }
+    // copyImage never throws — it returns false and surfaces the reason in a toast.
+    const didCopy = await copyImage(blobRef.current);
+    if (!didCopy) return;
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1200);
   };
 
   const deriveMimeType = (fileSrc: string): string => {

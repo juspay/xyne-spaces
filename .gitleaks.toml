@@ -66,6 +66,11 @@ paths = [
 # Matched against the detected secret ANYWHERE it appears → no line numbers, merge-proof.
 # A brand-new/different secret in the same file is still caught.
 regexes = [
+  # Deployment docs and example tfvars spell out what the operator must generate rather than
+  # showing a realistic-looking value someone could paste into production. Every one of these
+  # placeholders starts with "replace-with-" (deployment/docs/*.md,
+  # deployment/environments/*/02-platform.tfvars, deployment/terraform/stacks/*/*/*.tfvars.example).
+  '''replace-with-[a-z0-9_-]+''',
   # Mixpanel client-side analytics token (apps/xyne-spaces/.env.*, lotus/.env.*, Jenkinsfile)
   '''ca5b322f4175470400f68cddf319f2d5''',
   # Firebase Storage download token on the public "download the app" page (apps/public-web/public/index.html)

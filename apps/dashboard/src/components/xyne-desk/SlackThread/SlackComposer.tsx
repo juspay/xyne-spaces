@@ -255,11 +255,6 @@ const SlackComposer = ({
 
   return (
     <div className='px-4 py-3 border-t border-border'>
-      {recordOnly && (
-        <div className='mb-2 text-xs text-muted-foreground'>
-          Receive-only desk — this is saved to the ticket but not sent to the app.
-        </div>
-      )}
       {/* Auth status (Slack send-as-user — not applicable to app desks) */}
       {variant === 'slack' && !authLoading && (
         <div className='flex items-center gap-2 mb-2 text-xs text-muted-foreground'>

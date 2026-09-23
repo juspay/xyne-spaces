@@ -1,3 +1,5 @@
+import { syncToYSweet } from '@/utils/ysweetUtils';
+import type { BlockNoteBlock } from '@/types/blockNoteTypes';
 import { randomUUID } from 'crypto';
 import { Request, Response } from 'express';
 import { jiraMigrationPreviewService } from '@/services/jiraMigrationPreviewService';
@@ -118,15 +120,15 @@ export class JiraMigrationController {
         db.board.findUnique({ where: { id: sourceBoardId }, select: { id: true, projectId: true, name: true } }),
         db.board.findUnique({ where: { id: targetBoardId }, select: { id: true, projectId: true, name: true, workspaceId: true } }),
         // The migration target is resolved by workspace, not by the operator's own membership.
-        db.channel.findUnique({ where: { id: channelId }, select: { id: true, projectId: true, name: true } }),
+        db.channel.findUnique({ where: { id: channelId }, select: { id: true, name: true } }),
       ]);
 
       if (!sourceBoard || !targetBoard || !channel) {
         res.status(404).json({ error: 'sourceBoardId, targetBoardId, or channelId not found' });
         return;
       }
-      if (sourceBoard.projectId !== targetBoard.projectId || channel.projectId !== targetBoard.projectId) {
-        res.status(400).json({ error: 'Boards and channel must belong to same project' });
+      if (sourceBoard.projectId !== targetBoard.projectId) {
+        res.status(400).json({ error: 'Source and target boards must belong to the same project' });
         return;
       }
 
@@ -462,11 +464,11 @@ export class JiraMigrationController {
             }),
             db.channel.findUnique({
               where: { id: sourceChannelId },
-              select: { id: true, name: true, projectId: true, workspaceId: true },
+              select: { id: true, name: true, workspaceId: true },
             }),
             db.channel.findUnique({
               where: { id: targetChannelId },
-              select: { id: true, name: true, projectId: true, workspaceId: true },
+              select: { id: true, name: true, workspaceId: true },
             }),
           ]);
 
@@ -477,11 +479,6 @@ export class JiraMigrationController {
 
       if (!sourceChannel || !targetChannel) {
         res.status(404).json({ error: 'sourceChannelId or targetChannelId not found' });
-        return;
-      }
-
-      if (sourceChannel.projectId !== targetChannel.projectId) {
-        res.status(400).json({ error: 'Source and target channels must belong to the same project' });
         return;
       }
 
@@ -707,6 +704,24 @@ export class JiraMigrationController {
       const resolvedUpdatedAt = updatedAt ? new Date(updatedAt) : new Date();
       if (Number.isNaN(resolvedUpdatedAt.getTime())) {
         res.status(400).json({ error: 'updatedAt must be a valid ISO datetime string' });
+        return;
+      }
+
+      // channel.projectId is nullable (decoupling). This move only applies to channels
+      // that currently HAVE a project — a projectless channel is skipped (no-op), not moved.
+      const existingChannel = await db.channel.findUnique({
+        where: { id: channelId },
+        select: { projectId: true },
+      });
+      if (!existingChannel) {
+        res.status(404).json({ error: 'Channel not found for the provided channelId' });
+        return;
+      }
+      if (!existingChannel.projectId) {
+        res.json({
+          success: true,
+          data: { updatedCount: 0, skipped: true, reason: 'Channel has no project; nothing to move' },
+        });
         return;
       }
 
@@ -969,6 +984,52 @@ export class JiraMigrationController {
         }
       }
 
+      await jiraMigrationProgressService.patchJob(jobId, { currentStep: 'purging_tickets' });
+
+      // Phase 2: ticket-related deletes in chunks with throttle. Runs before the conversation
+      // purge: Ticket.conversation is a required relation, so Prisma Client refuses (P2014) to
+      // delete a conversation while its ticket still exists.
+      const ticketChunks = chunkArray(ticketIds, ticketChunkSize);
+      for (let index = 0; index < ticketChunks.length; index += 1) {
+        const chunk = ticketChunks[index];
+        if (chunk.length === 0) continue;
+
+        const ticketTxnResults = await db.$transaction([
+          db.ticketReferenceMapping.deleteMany({
+            where: { OR: [{ sourceTicketId: { in: chunk } }, { targetTicketId: { in: chunk } }] },
+          }),
+          db.ticketActivity.deleteMany({ where: { ticketId: { in: chunk } } }),
+          db.ticketAssignment.deleteMany({ where: { ticketId: { in: chunk } } }),
+          db.ticketEntityMapping.deleteMany({ where: { ticketId: { in: chunk } } }),
+          db.ticketTag.deleteMany({ where: { ticketId: { in: chunk } } }),
+          db.ticketTagMapping.deleteMany({ where: { ticketId: { in: chunk } } }),
+          db.ticketStageEta.deleteMany({ where: { ticketId: { in: chunk } } }),
+          db.ticketStageRequest.deleteMany({ where: { ticketId: { in: chunk } } }),
+          db.ticketSubTicketMapping.deleteMany({ where: { ticketId: { in: chunk } } }),
+          db.subTicket.updateMany({ where: { mappedTicketId: { in: chunk } }, data: { mappedTicketId: null } }),
+          db.formEntityValues.deleteMany({ where: { entityId: { in: chunk }, entityType: 'TICKET' } }),
+          db.emailRead.deleteMany({ where: { ticketId: { in: chunk } } }),
+          db.workflow.deleteMany({ where: { ticketId: { in: chunk } } }),
+          db.ticket.deleteMany({ where: { id: { in: chunk } } }),
+        ]);
+        const ticketDeleteResult = ticketTxnResults[ticketTxnResults.length - 1];
+        deletedTickets += ticketDeleteResult.count;
+
+        // Best-effort: remove tickets from Vespa search index so UI/search doesn't show stale results.
+        for (const ticketId of chunk) {
+          queueJiraPurgeTicketVespaDeleteJob(ticketId, actorUserId);
+        }
+
+        processedUnits += chunk.length;
+        await jiraMigrationProgressService.patchJob(jobId, {
+          processedIssues: processedUnits,
+        });
+
+        if (index < ticketChunks.length - 1) {
+          await sleep(ticketChunkDelayMs);
+        }
+      }
+
       await jiraMigrationProgressService.patchJob(jobId, { currentStep: 'purging_conversations' });
 
       // Phase 1c: conversation graph.
@@ -1008,50 +1069,6 @@ export class JiraMigrationController {
 
           processedUnits += chunk.length;
           await jiraMigrationProgressService.patchJob(jobId, { processedIssues: processedUnits });
-        }
-      }
-
-      await jiraMigrationProgressService.patchJob(jobId, { currentStep: 'purging_tickets' });
-
-      // Phase 2: ticket-related deletes in chunks with throttle.
-      const ticketChunks = chunkArray(ticketIds, ticketChunkSize);
-      for (let index = 0; index < ticketChunks.length; index += 1) {
-        const chunk = ticketChunks[index];
-        if (chunk.length === 0) continue;
-
-        const ticketTxnResults = await db.$transaction([
-          db.ticketReferenceMapping.deleteMany({
-            where: { OR: [{ sourceTicketId: { in: chunk } }, { targetTicketId: { in: chunk } }] },
-          }),
-          db.ticketActivity.deleteMany({ where: { ticketId: { in: chunk } } }),
-          db.ticketAssignment.deleteMany({ where: { ticketId: { in: chunk } } }),
-          db.ticketEntityMapping.deleteMany({ where: { ticketId: { in: chunk } } }),
-          db.ticketTag.deleteMany({ where: { ticketId: { in: chunk } } }),
-          db.ticketTagMapping.deleteMany({ where: { ticketId: { in: chunk } } }),
-          db.ticketStageEta.deleteMany({ where: { ticketId: { in: chunk } } }),
-          db.ticketStageRequest.deleteMany({ where: { ticketId: { in: chunk } } }),
-          db.ticketSubTicketMapping.deleteMany({ where: { ticketId: { in: chunk } } }),
-          db.subTicket.updateMany({ where: { mappedTicketId: { in: chunk } }, data: { mappedTicketId: null } }),
-          db.formEntityValues.deleteMany({ where: { entityId: { in: chunk }, entityType: 'TICKET' } }),
-          db.emailRead.deleteMany({ where: { ticketId: { in: chunk } } }),
-          db.workflow.deleteMany({ where: { ticketId: { in: chunk } } }),
-          db.ticket.deleteMany({ where: { id: { in: chunk } } }),
-        ]);
-        const ticketDeleteResult = ticketTxnResults[ticketTxnResults.length - 1];
-        deletedTickets += ticketDeleteResult.count;
-
-        // Best-effort: remove tickets from Vespa search index so UI/search doesn't show stale results.
-        for (const ticketId of chunk) {
-          queueJiraPurgeTicketVespaDeleteJob(ticketId, actorUserId);
-        }
-
-        processedUnits += chunk.length;
-        await jiraMigrationProgressService.patchJob(jobId, {
-          processedIssues: processedUnits,
-        });
-
-        if (index < ticketChunks.length - 1) {
-          await sleep(ticketChunkDelayMs);
         }
       }
 
@@ -1892,18 +1909,23 @@ export class JiraMigrationController {
       select: { workspaceId: true },
     });
     try {
+      const blocks = this.buildMigrationReportCanvasBlocks(result) as BlockNoteBlock[];
+      const synced = await syncToYSweet(canvasId, blocks, actorUserId);
+      if (!synced) {
+        throw new Error(`Failed to save Jira migration report canvas ${canvasId} to Y-Sweet`);
+      }
       await db.$transaction(async tx => {
         await tx.canvas.create({
           data: {
             id: canvasId,
             workspaceId: canvasChannel.workspaceId,
             title: `Jira Migration Report: ${result.jiraProjectKey}`,
-            content: this.buildMigrationReportCanvasBlocks(result) as any,
+            content: [],
             channelId,
             createdBy: actorUserId,
             visibility: CanvasVisibility.PUBLIC,
             isTemplate: false,
-            isCollaborative: false,
+            isCollaborative: true,
             lastEditedBy: actorUserId,
             lastEditedAt: now,
             createdAt: now,

@@ -5,6 +5,8 @@ import { config } from '@/config/env';
 import { authorize } from '@/middleware/authorize';
 import { OzonetelConfigValidationError, ozonetelConfigService } from '@/services/ozonetel/ozonetelConfigService';
 import { OzonetelError, ozonetelService } from '@/services/ozonetel/ozonetelService';
+import { db } from '@/database/client';
+import { redisService } from '@/services/redisService';
 import { logger } from '@/utils/logger';
 
 const router = Router();
@@ -38,6 +40,8 @@ const saveConfigSchema = z.object({
     createTicketOnProgressive: z.boolean().optional(),
     createTicketOnPredictive: z.boolean().optional(),
     ticketSubjectTemplate: z.string().optional(),
+    phoneFieldNames: z.array(z.string()).optional(),
+    customerPhoneFieldName: z.string().optional(),
   }).optional(),
 });
 
@@ -176,9 +180,13 @@ router.get('/toolbar', supportReadAuth, async (req: Request, res: Response): Pro
   if (!workspaceId) return;
 
   const cfg = await ozonetelConfigService.getConfig(workspaceId);
+  const phoneFieldNames = cfg?.ticketRules?.phoneFieldNames ?? [];
   res.json({
     configured: !!cfg,
     toolbarUrl: cfg?.toolbarUrl ?? null,
+    phoneFieldNames,
+    // Legacy single field, still read by dashboards built before phoneFieldNames.
+    customerPhoneFieldName: phoneFieldNames[0] ?? null,
   });
 });
 
@@ -216,7 +224,12 @@ router.get('/config', supportAdminAuth, async (req: Request, res: Response): Pro
     toolbarUrl: cfg.toolbarUrl ?? null,
     postCallWebhookURL,
     agentMapping: cfg.agentMapping,
-    ticketRules: cfg.ticketRules ?? {},
+    ticketRules: {
+      ...(cfg.ticketRules ?? {}),
+      ...(cfg.ticketRules?.phoneFieldNames?.[0]
+        ? { customerPhoneFieldName: cfg.ticketRules.phoneFieldNames[0] }
+        : {}),
+    },
     ...(channelId
       ? {
           channelRouting: {
@@ -312,6 +325,42 @@ router.post('/subscribe-live-events', supportAdminAuth, async (req: Request, res
     if (respondOzonetelError(res, error)) return;
     throw error;
   }
+});
+
+const linkCallSchema = z.object({
+  ticketId: z.string().min(1),
+  monitorUcid: z.string().min(1),
+  ucid: z.string().optional(),
+});
+
+// Toolbar-dialled calls carry no ticket id, so the page records which ticket a call belongs to.
+router.post('/link-call', supportReadAuth, async (req: Request, res: Response): Promise<void> => {
+  const workspaceId = ensureWorkspaceId(req, res);
+  if (!workspaceId) return;
+
+  const parsed = linkCallSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: 'invalid request', details: parsed.error.flatten() });
+    return;
+  }
+  const { ticketId, monitorUcid, ucid } = parsed.data;
+
+  const ticket = await db.ticket.findFirst({
+    where: { id: ticketId, workspaceId },
+    select: { id: true },
+  });
+  if (!ticket) {
+    res.status(404).json({ message: 'Ticket not found.' });
+    return;
+  }
+
+  // The webhook keys on monitorUCID but falls back to ucid, so store both.
+  const callIds = new Set([monitorUcid, ucid?.trim()].filter((id): id is string => !!id));
+  await Promise.all(
+    [...callIds].map(callId => redisService.setOzonetelCallTicket(workspaceId, callId, ticket.id)),
+  );
+  logger.info('[telephony] call_linked_to_ticket', { workspaceId, ticketId, monitorUcid, ucid });
+  res.json({ ok: true });
 });
 
 export default router;

@@ -1,11 +1,4 @@
-import {
-  useEffect,
-  useMemo,
-  useState,
-  type KeyboardEvent,
-  type MouseEvent,
-  type ReactElement,
-} from 'react';
+import { useEffect, useMemo, useState, type ReactElement } from 'react';
 import { Bell } from 'lucide-react';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
 import { queries } from '../../zero/queries';
@@ -38,15 +31,6 @@ export function SdlcActivityPreview({ channelId }: SdlcActivityPreviewProps): Re
       return Array.from(new Map(next.map(activity => [activity.id, activity])).values());
     });
   }, [cursor, pageRows, queryDetails.type]);
-  const stopClick = (event: MouseEvent): void => {
-    event.preventDefault();
-    event.stopPropagation();
-  };
-  const stopActivation = (event: KeyboardEvent): void => {
-    if (event.key !== 'Enter' && event.key !== ' ') return;
-    event.preventDefault();
-    event.stopPropagation();
-  };
 
   return (
     <section
@@ -59,13 +43,16 @@ export function SdlcActivityPreview({ channelId }: SdlcActivityPreviewProps): Re
             Your repository activity
           </h3>
           <p className='mt-1 text-sm text-muted-foreground'>
-            View-only Activity filtered to this repository channel.
+            Activity filtered to this repository channel.
           </p>
         </div>
         <Bell className='size-4 text-muted-foreground' />
       </div>
 
-      <div className='mt-4 space-y-3'>
+      {/* The card's hover is bg-sidebar-accent, which is pure white in the light
+          theme — invisible on this panel's bg-background. Point it at the accent
+          token, which is a hover surface over background in both themes. */}
+      <div className='mt-4 space-y-3 [--sidebar-accent:hsl(var(--accent))]'>
         {queryDetails.type !== 'complete' && accumulated.length === 0 ? (
           <div className='rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground'>
             Loading activity…
@@ -76,15 +63,7 @@ export function SdlcActivityPreview({ channelId }: SdlcActivityPreviewProps): Re
           </div>
         ) : (
           accumulated.map(activity => (
-            <div
-              key={activity.id}
-              className='rounded-lg [&_a]:pointer-events-none [&_button]:pointer-events-none'
-              onClickCapture={stopClick}
-              onKeyDownCapture={stopActivation}
-              aria-label='View-only activity item'
-            >
-              <ActivityItem activity={activity} isExpanded={false} />
-            </div>
+            <ActivityItem key={activity.id} activity={activity} isExpanded={false} />
           ))
         )}
         {hasMore ? (

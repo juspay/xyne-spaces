@@ -57,6 +57,10 @@ import {
 import { useShortcutById } from '../../../shortcuts';
 import { isTestEnv } from '../../../config';
 import { createTicket, CreateTicketRequest } from '../../../services/ticketService';
+import {
+  trackTicketCreateFailed,
+  trackTicketCreateSucceeded,
+} from '../../../services/Analytics/ticketTracking';
 import { renderEmoji } from '../../../utils/customEmojiUtils';
 import { useUser } from '../../../hooks/useUsers';
 import { isDMChannel } from '../ChatDirectory/ChatDirectory.utils';
@@ -309,6 +313,8 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
     const [typingUsers, setTypingUsers] = useState<Array<{ userId: string; username: string }>>([]);
     const [alsoSendToChannel, setAlsoSendToChannel] = useState(false);
     const [isCreateTicketModalOpen, setIsCreateTicketModalOpen] = useState(false);
+    // Which surface opened the create form (composer button vs intent toast).
+    const [createTicketSource, setCreateTicketSource] = useState('chat_composer');
     const [scheduleCallOpen, setScheduleCallOpen] = useState(false);
     const [addPeopleOpen, setAddPeopleOpen] = useState(false);
     // On-device intent detections surface as a toast; its action opens the modal below.
@@ -316,7 +322,10 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
     // suggestion opens exactly the same modal the toolbar does.
     useIntentSuggestionToast({
       openScheduleCall: () => setScheduleCallOpen(true),
-      openCreateTicket: () => setIsCreateTicketModalOpen(true),
+      openCreateTicket: () => {
+        setCreateTicketSource('intent_toast');
+        setIsCreateTicketModalOpen(true);
+      },
       openAddPeople: () => setAddPeopleOpen(true),
     });
     const [ticketDescription, setTicketDescription] = useState('');
@@ -328,6 +337,7 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
       searchMentions,
     } = useMentionSearch(channelId, threadParticipantIds, conversationId, {
       includeSpecialMentions: !conversationId || allowThreadBroadcastMentions,
+      excludeSelf: false,
     });
     const channel = useChannel(channelId);
     const isSupportChannel = channel?.type === ChannelType.SUPPORT;
@@ -764,18 +774,6 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
             });
         };
 
-        // Restores draft content back to both the state machine and the editor
-        const restoreDraft = () => {
-          const restoredHtml = artifactDraft ? bodyHtml : processedHtml;
-          saveDraft(lookupId, restoredHtml, '');
-          inputBoxRef.current?.clearContent();
-          inputBoxRef.current?.insertContent(restoredHtml);
-          if (artifactDraft) setActiveArtifactCommand(artifactDraft.definition.command);
-          toast.error('Failed to send message', {
-            description: 'Message restored as draft. Please try again.',
-          });
-        };
-
         // On-device intent classification. Fire-and-forget and never awaited — it must
         // not add a single millisecond to the send path. Gated inside the service on the
         // user preference and public-channel visibility, both fail closed. A detection
@@ -820,34 +818,43 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
           try {
             const messageCreatedAt = Date.now();
             const newMessageId = uuidv4();
-            const result = zero.mutate(
-              mutators.messages.send({
-                conversationId,
-                content: processedHtml,
-                type: MessageType.USER,
-                showInChannel: alsoSendToChannel,
-                timestamp: messageCreatedAt,
-                messageId: newMessageId,
-                ...(alsoSendToChannel && { childConversationId: uuidv4() }),
-              }),
-            );
+            // Thread replies go through the shared pending-message framework, the
+            // same as top-level channel sends below: sendMessage writes a durable
+            // pending entry, fires mutators.messages.send when Zero is connected
+            // (queueing it for auto-retry when it is not), and clears the entry
+            // once the server confirms. A reply the server rejects stays queued
+            // with a retry/discard affordance instead of being restored to the
+            // composer. sendMessage derives childConversationId itself when
+            // alsoSendToChannel is set.
+            const threadRef: ConversationRef = { kind: 'thread', channelId, conversationId };
+            // Carry already-uploaded draft attachments explicitly — sendMessage
+            // detaches the draft as part of queueing, so the mutator's legacy
+            // draft-scan fallback cannot be relied on. useDraftFromDB is keyed by
+            // (channelId, conversationId), so this is the thread's own draft.
+            const replyAttachments: PendingAttachment[] = (
+              channelDraftForSend?.attachments ?? []
+            ).map(a => ({
+              attachmentId: a.id,
+              originalFilename: a.originalFilename,
+              mimetype: a.mimetype,
+              size: a.size,
+              ...(a.width !== null && { width: a.width }),
+              ...(a.height !== null && { height: a.height }),
+            }));
+            sendMessage(zero as Parameters<typeof sendMessage>[0], threadRef, {
+              content: processedHtml,
+              type: MessageType.USER,
+              messageId: newMessageId,
+              timestamp: messageCreatedAt,
+              alsoSendToChannel,
+              ...(replyAttachments.length > 0 && { attachments: replyAttachments }),
+            });
             saveDraft(lookupId, '', '');
             if (artifactDraft) setActiveArtifactCommand(null);
-            handleMutationResult(
-              result,
-              restoreDraft,
-              undefined,
-              // onServerSuccess, NOT here — waiting for the server ack means we never
-              // classify a message that failed to send. (It also used to matter for the
-              // server suggestion path, which raced Zero's optimistic write and 404'd
-              // as `message-not-found`; that path is gone, this reason is not.)
-              () => classifyIntent(newMessageId),
-              {
-                channelId,
-                conversationId,
-                isReply: true,
-              },
-            );
+            // Called directly rather than from a server ack: sendMessage returns
+            // synchronously and there is no mutation handle to wait on (see the
+            // channel branch below for the same reasoning).
+            classifyIntent(newMessageId);
             // Sender has implicitly read up to their own message
             setThreadLastRead(conversationId, messageCreatedAt);
 
@@ -1217,7 +1224,19 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
                             ...(conversationId && { sourceConversationId: conversationId }),
                           };
 
-                          await createTicket(ticketPayload);
+                          const created = await createTicket(ticketPayload);
+                          // No modal on this path, so the create outcome is reported here.
+                          if (created?.id) {
+                            trackTicketCreateSucceeded(
+                              { id: created.id, ticketType: BaseTicketType.Support, channelId },
+                              {
+                                source: 'chat_composer',
+                                fromSourceMessage: false,
+                                hasAssignee: false,
+                                attachmentsCount: 0,
+                              },
+                            );
+                          }
 
                           inputBoxRef.current?.clearContent();
                           toast.success('Support Ticket Created', {
@@ -1233,9 +1252,11 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
                           toast.error('Failed to create ticket', {
                             description: 'Please try again or contact support.',
                           });
+                          trackTicketCreateFailed(error, { source: 'chat_composer' });
                         }
                       } else {
                         setTicketDescription(description || '');
+                        setCreateTicketSource('chat_composer');
                         setIsCreateTicketModalOpen(true);
                       }
                     })();
@@ -1291,6 +1312,7 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
             }}
             channelId={channelId}
             projectId={(channel.projectId as string | null) || ''}
+            trackSource={createTicketSource}
             initialDescription={ticketDescription}
             sourceConversation={conversation ?? undefined}
             onTicketCreated={handleTicketCreated}

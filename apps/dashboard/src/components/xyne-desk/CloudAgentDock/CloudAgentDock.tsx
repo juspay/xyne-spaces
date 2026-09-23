@@ -10,7 +10,8 @@ import {
 import { createPortal } from 'react-dom';
 import { useQuery } from '@tanstack/react-query';
 import { Phone } from 'lucide-react';
-import { getOzonetelToolbar } from '../../../services/clients/telephonyApi';
+import { toast } from 'sonner';
+import { getOzonetelToolbar, linkOzonetelCall } from '../../../services/clients/telephonyApi';
 import Tooltip from '../../ui/Tooltip';
 
 /**
@@ -73,7 +74,50 @@ function setFloatingDockState(next: FloatingDockState): void {
   emitFloatingDockChange();
 }
 
-function openFloatingDock(url: string, onClose?: () => void): void {
+// The toolbar's own dial sends no ticket id, so a reported call is linked to the ticket open on screen.
+let openTicket: { ticketId: string; numbers: string[] } | null = null;
+// busyAgent can fire more than once per call, and newCall too; act on each call once.
+const handledCallIds = new Set<string>();
+
+export function setCloudAgentOpenTicket(
+  ticket: { ticketId: string; numbers: string[] } | null,
+): void {
+  openTicket = ticket;
+}
+
+function asText(value: unknown): string {
+  return typeof value === 'string' || typeof value === 'number' ? String(value).trim() : '';
+}
+
+function lastDigits(value: unknown): string {
+  return asText(value).replace(/\D/g, '').slice(-10);
+}
+
+function linkCallToOpenTicket(token: unknown): void {
+  const call = (token ?? {}) as { monitorUcid?: unknown; ucid?: unknown; callerId?: unknown };
+  const monitorUcid = asText(call.monitorUcid);
+  if (!openTicket || !monitorUcid || handledCallIds.has(monitorUcid)) return;
+  handledCallIds.add(monitorUcid);
+
+  const dialled = lastDigits(call.callerId);
+  if (!dialled || !openTicket.numbers.some(number => lastDigits(number) === dialled)) {
+    toast.warning('This call is not logged to the open ticket', {
+      description: "It went to a number that isn't on the ticket.",
+    });
+    return;
+  }
+
+  const ucid = asText(call.ucid);
+  linkOzonetelCall({
+    ticketId: openTicket.ticketId,
+    monitorUcid,
+    ...(ucid ? { ucid } : {}),
+  }).catch(() => {
+    toast.error('Could not log this call to the ticket');
+  });
+}
+
+export function openFloatingDock(url: string, onClose?: () => void): void {
   setFloatingDockState({
     isOpen: true,
     url,
@@ -158,6 +202,21 @@ function FloatingCloudAgentPanel({
   const positionRef = useRef(position);
   const dragOffsetRef = useRef<{ x: number; y: number } | null>(null);
   const cleanupDragRef = useRef<(() => void) | null>(null);
+  const iframeRef = useRef<HTMLIFrameElement | null>(null);
+
+  // The toolbar posts with targetOrigin "*", so trust only our own iframe.
+  useEffect(() => {
+    const onMessage = (event: MessageEvent): void => {
+      const frame = iframeRef.current?.contentWindow;
+      if (!frame || event.source !== frame) return;
+      const action = (event.data as { action?: unknown } | null)?.action;
+      if (action === 'busyAgent' || action === 'newCall') {
+        linkCallToOpenTicket((event.data as { token?: unknown }).token);
+      }
+    };
+    window.addEventListener('message', onMessage);
+    return (): void => window.removeEventListener('message', onMessage);
+  }, []);
 
   const close = useCallback(() => {
     onRequestClose();
@@ -256,6 +315,7 @@ function FloatingCloudAgentPanel({
           </button>
         </div>
         <iframe
+          ref={iframeRef}
           title='Ozonetel CloudAgent'
           src={url}
           allow='microphone'

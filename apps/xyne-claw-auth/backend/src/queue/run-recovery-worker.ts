@@ -91,6 +91,7 @@ export interface RecoverySessionContext {
   conversationId: string;
   task: string;
   agentSlug?: string | undefined;
+  agentName?: string | undefined;
   responseMode: "conversation" | "approval";
   appToken: string;
   spacesAppId: string;

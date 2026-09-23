@@ -1,8 +1,9 @@
 import { ChannelType } from '@xyne/shared';
 import { sdlcSectionForCanvas, type SdlcNavTarget, type SdlcSection } from '@xyne/shared/sdlc';
 import { db } from '@/database/client';
-import { runAsSystem } from '@/database/tenant/context';
-import { resolveFolderTrackId, resolveInheritedOwner } from './entityLinkService';
+import { memoizeAsSystem as memoize } from '@/bypassAcl/tenantUtils';
+import { isTrackReachableInChannel, ticketChannelIdForNavTarget } from '@/bypassAcl/sdlcServices';
+import { resolveFolderTrackId, resolveItemTrackId, resolveInheritedOwner } from './entityLinkService';
 
 export interface SdlcNavIds {
   channelId?: string | null;
@@ -23,41 +24,6 @@ interface SdlcLocation {
   discussionId?: string;
 }
 
-/** Raised once per recipient, so a 200-member hub would otherwise pay 200 identical lookups. */
-const TTL_MS = 60_000;
-const MAX_ENTRIES = 5_000;
-
-/**
- * Keyed on the entity id alone, so every load runs as system: under a caller's own
- * scope the same id answers differently per user, and one of those answers would be
- * served to everyone. A null is dropped rather than cached — it usually means a row
- * that has not been written yet, and a write-time stamp is permanent.
- */
-function memoize<A, T>(
-  keyOf: (arg: A) => string,
-  load: (arg: A) => Promise<T>,
-): (arg: A) => Promise<T> {
-  const entries = new Map<string, { at: number; value: Promise<T> }>();
-  return arg => {
-    const key = keyOf(arg);
-    const hit = entries.get(key);
-    if (hit && Date.now() - hit.at <= TTL_MS) return hit.value;
-    if (entries.size >= MAX_ENTRIES) entries.clear();
-    const value = runAsSystem(() => load(arg)).then(
-      resolved => {
-        if (resolved == null) entries.delete(key);
-        return resolved;
-      },
-      (error: unknown) => {
-        entries.delete(key);
-        throw error;
-      },
-    );
-    entries.set(key, { at: Date.now(), value });
-    return value;
-  };
-}
-
 interface CanvasInfo {
   channelId: string | null;
   section: SdlcSection;
@@ -65,6 +31,8 @@ interface CanvasInfo {
 }
 
 export const isSdlcChannel = memoize(
+  ['Channel'],
+  'keyed on entity id alone — same id must answer identically for every caller, not per-user',
   (channelId: string) => channelId,
   async (channelId: string): Promise<boolean> => {
     const channel = await db.channel.findUnique({
@@ -76,6 +44,8 @@ export const isSdlcChannel = memoize(
 );
 
 const canvasInfo = memoize(
+  ['Canvas'],
+  'keyed on entity id alone — same id must answer identically for every caller, not per-user',
   (canvasId: string) => canvasId,
   async (canvasId: string): Promise<CanvasInfo | null> => {
     const canvas = await db.canvas.findUnique({
@@ -98,22 +68,30 @@ async function canvasLocation(canvasId: string): Promise<SdlcLocation | null> {
 }
 
 export const sdlcConversationOwner = memoize(
+  ['SdlcEntityLink'],
+  'keyed on entity id alone — same id must answer identically for every caller, not per-user',
   (conversationId: string) => conversationId,
   (conversationId: string) => resolveInheritedOwner(db, conversationId),
 );
 
 export const sdlcFolderTrackId = memoize(
+  ['SdlcEntityLink'],
+  'keyed on entity id alone — same id must answer identically for every caller, not per-user',
   (folderId: string) => folderId,
   (folderId: string) => resolveFolderTrackId(db, folderId),
 );
 
 export const sdlcConversationTicket = memoize(
+  ['Ticket'],
+  'keyed on entity id alone — same id must answer identically for every caller, not per-user',
   (conversationId: string) => conversationId,
   async (conversationId: string): Promise<string | null> =>
     (await db.ticket.findFirst({ where: { conversationId }, select: { id: true } }))?.id ?? null,
 );
 
 export const sdlcTicketConversation = memoize(
+  ['Ticket'],
+  'keyed on entity id alone — same id must answer identically for every caller, not per-user',
   (ticketId: string) => ticketId,
   async (ticketId: string): Promise<string | null> =>
     (await db.ticket.findUnique({ where: { id: ticketId }, select: { conversationId: true } }))
@@ -129,8 +107,14 @@ async function conversationLocation(conversationId: string): Promise<SdlcLocatio
   if (owner.sourceType === 'TRACK') {
     return { section: 'tracks', trackId: owner.sourceId, discussionId: conversationId };
   }
-  if (owner.sourceType === 'FOLDER') {
-    const trackId = await resolveFolderTrackId(db, owner.sourceId);
+  // A folder, an uploaded file and a link have no page of their own; their
+  // conversations are read from the track they are filed in.
+  if (
+    owner.sourceType === 'FOLDER' ||
+    owner.sourceType === 'ATTACHMENT' ||
+    owner.sourceType === 'LINK'
+  ) {
+    const trackId = await resolveItemTrackId(db, owner.sourceType, owner.sourceId);
     return trackId ? { section: 'tracks', trackId, discussionId: conversationId } : null;
   }
   const canvas = await canvasLocation(owner.sourceId);
@@ -144,6 +128,8 @@ async function ticketLocation(ticketId: string): Promise<SdlcLocation> {
 }
 
 const locationOf = memoize(
+  ['Canvas', 'SdlcEntityLink', 'Ticket'],
+  'composes canvasLocation/conversationLocation/ticketLocation, keyed on entity id alone',
   (ids: SdlcNavIds) =>
     `${ids.canvasId ?? ''}|${ids.ticketId ?? ''}|${ids.conversationId ?? ''}`,
   async (ids: SdlcNavIds): Promise<SdlcLocation | null> =>
@@ -170,12 +156,30 @@ async function resolveChannelId(ids: SdlcNavIds): Promise<string | null> {
   return null;
 }
 
+/**
+ * Whether a resolved place belongs to the hub the caller named. Conversation ids
+ * leave their hub on every forward, so a caller-supplied channelId says which hub
+ * is authorized, never which hub the ids came from. Uncached: entity -> hub is
+ * memoized above, the match is per call.
+ */
+async function placeInChannel(place: SdlcLocation, channelId: string): Promise<boolean> {
+  const { canvasId, trackId, ticketId } = place;
+  if (canvasId) return (await canvasInfo(canvasId))?.channelId === channelId;
+  if (trackId) return isTrackReachableInChannel(trackId, channelId);
+  if (ticketId) {
+    const ticket = await ticketChannelIdForNavTarget(ticketId);
+    return ticket?.channelId === channelId;
+  }
+  return true;
+}
+
 /** Where a notification opens in an SDLC hub. Null for everything outside one. */
 export async function resolveSdlcNavTarget(ids: SdlcNavIds): Promise<SdlcNavTarget | null> {
   const channelId = await resolveChannelId(ids);
   if (!channelId || !(await isSdlcChannel(channelId))) return null;
 
   const place: SdlcLocation = (await locationOf(ids)) ?? { section: 'overview' };
+  if (!(await placeInChannel(place, channelId))) return null;
 
   const conversationId =
     place.discussionId ?? (ids.messageId && ids.conversationId ? ids.conversationId : undefined);

@@ -211,8 +211,8 @@ export const CanvasLabelManager = ({
     <div
       className={cn(
         'flex min-w-0 flex-wrap items-center gap-1.5',
-        revealTriggerOnParentHover && labels.length === 0 && !pickerOpen && 'mt-2 h-6',
-        revealTriggerOnParentHover && (labels.length > 0 || pickerOpen) && 'mt-2',
+        revealTriggerOnParentHover && labels.length === 0 && !pickerOpen && 'mb-2 h-6',
+        revealTriggerOnParentHover && (labels.length > 0 || pickerOpen) && 'mb-2',
       )}
     >
       {labels.map(label => {

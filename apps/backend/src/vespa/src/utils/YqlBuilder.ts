@@ -52,6 +52,7 @@ const userInputClause = (defaultIndex?: string, grammar = 'grammar:"tokenize"'):
  * recall on 5-10 word queries. No term annotations: implicitTransforms:false disables
  * segmentation, which "JP_008" needs to match as phrase("JP","008").
  */
+
 const lexicalClause = (query: string, params: VespaQueryParams): string => {
   // Deduped: bind() reuses one placeholder per (field, value), so a repeated token would
   // otherwise emit the same @placeholder twice and count twice in weakAnd's scoring.
@@ -60,6 +61,93 @@ const lexicalClause = (query: string, params: VespaQueryParams): string => {
   const clauses = tokens.map((token) => `default contains ${params.bind('qtok', token)}`);
   // weakAnd of a single term is just the term; keeps the YQL readable in traces.
   return clauses.length === 1 ? clauses[0] : `weakAnd(${clauses.join(', ')})`;
+};
+
+// `unified` only. Each schema's `default` fieldset bundles body text plus 3-gram
+// "_fuzzy" fields, so searching it matches on body content and on substrings inside
+// hashes. These schemas are searched in the listed fields instead.
+const UNIFIED_FIELD_SCOPE: Record<string, string[]> = {
+  [fileSchema]: ['fileName'],
+  [ticketSchema]: ['title', 'xyneId'],
+  [messageSchema]: ['text'],
+};
+
+const scopedLexicalClause = (
+  query: string,
+  params: VespaQueryParams,
+  schemas: VespaSchema[],
+): string => {
+  // Split on every non-letter/non-digit, so "xyne-327" becomes ["xyne", "327"] and both
+  // are required below. As one token Vespa splits it anyway and "xyne" alone matches.
+  const rawWords = query.trim().split(/[^\p{L}\p{N}]+/u);
+  const words: string[] = [];
+  for (const word of rawWords) {
+    if (word !== '' && !words.includes(word)) {
+      words.push(word);
+    }
+  }
+  if (words.length === 0) {
+    return userInputClause();
+  }
+
+  // `and`, not weakAnd: every word must match, which is queryCompleteness == 1.
+  const mustContainEveryWord = (fieldName: string): string => {
+    const clauses: string[] = [];
+    for (const word of words) {
+      clauses.push(`${fieldName} contains ${params.bind('qtok', word)}`);
+    }
+    if (clauses.length === 1) {
+      return clauses[0];
+    }
+    return `(${clauses.join(' and ')})`;
+  };
+
+  const scopedSchemas: VespaSchema[] = [];
+  const otherSchemas: VespaSchema[] = [];
+  for (const schema of schemas) {
+    if (UNIFIED_FIELD_SCOPE[schema]) {
+      scopedSchemas.push(schema);
+    } else {
+      otherSchemas.push(schema);
+    }
+  }
+
+  const branches: string[] = [];
+
+  // sddocname scopes a branch to one schema, since a query spans several at once.
+  for (const schema of scopedSchemas) {
+    const perField: string[] = [];
+    for (const fieldName of UNIFIED_FIELD_SCOPE[schema]) {
+      perField.push(mustContainEveryWord(fieldName));
+    }
+    let fieldClause: string;
+    if (perField.length === 1) {
+      fieldClause = perField[0];
+    } else {
+      fieldClause = `(${perField.join(' or ')})`;
+    }
+    branches.push(`(sddocname contains "${schema}" and ${fieldClause})`);
+  }
+
+  if (otherSchemas.length > 0) {
+    const defaultClause = mustContainEveryWord('default');
+    if (scopedSchemas.length === 0) {
+      branches.push(defaultClause);
+    } else {
+      // Must exclude the schemas above: an `or` branch only adds documents, so
+      // without this they come back through `default`.
+      const exclusions: string[] = [];
+      for (const schema of scopedSchemas) {
+        exclusions.push(`!(sddocname contains "${schema}")`);
+      }
+      branches.push(`(${exclusions.join(' and ')} and ${defaultClause})`);
+    }
+  }
+
+  if (branches.length === 1) {
+    return branches[0];
+  }
+  return `(\n      ${branches.join('\n   or ')}\n    )`;
 };
 
 export interface SlackFilters {
@@ -72,6 +160,7 @@ export interface SlackFilters {
   // or reference a channel (channelMentions field). Both are exact attribute membership filters.
   mentionedUserIds?: string[];
   mentionedChannelIds?: string[];
+  mentionedGroupIds?: string[];
   // Thread classification. threadType lives ONLY on a thread's root message, so filtering it
   // yields one hit per matching thread — "show me the ISSUE threads". messageActs lives on
   // each message the classifier cited as evidence, so filtering that yields the individual
@@ -294,23 +383,31 @@ export class YqlBuilder {
       } else {
         // `lexicalClause` on both sides: the digit-token fix it carries is about how the lexical
         // half is parsed, so it must not depend on whether the vector half runs.
+        const mainLexical =
+          rankProfile === RankProfile.unifiedRank
+            ? scopedLexicalClause(query, params, schemas)
+            : lexicalClause(query, params);
         if (useSemantic) {
           // approximate:false — combined_embeddings' HNSW returns 0 hits under any filter; drop after index rebuild.
           whereConditions.push(`(
-          ${lexicalClause(query, params)}
+          ${mainLexical}
         or ({targetHits:${safeLimit}} nearestNeighbor(text_embeddings, e))
         or ({targetHits:${safeLimit}} nearestNeighbor(chunk_embeddings, e))
         or ({targetHits:${safeLimit}, approximate:false} nearestNeighbor(combined_embeddings, e))
         )`);
         } else {
-          whereConditions.push(lexicalClause(query, params));
+          whereConditions.push(mainLexical);
         }
       }
 
-      // `personalized` only: caller as rank-only terms so each profile's involvement tier can
-      // read matches(<field>). rank()'s extra args never change what matches; each group is
-      // gated on its schema being selected (Vespa rejects fields absent from every source).
-      if (rankProfile === RankProfile.personalizedRank && userId) {
+      // `personalized` and `unified`: caller as rank-only terms so each profile's involvement
+      // tier can read matches(<field>). rank()'s extra args never change what matches; each group
+      // is gated on its schema being selected (Vespa rejects fields absent from every source).
+      if (
+        (rankProfile === RankProfile.personalizedRank ||
+          rankProfile === RankProfile.unifiedRank) &&
+        userId
+      ) {
         const rankTerms = new Set<string>();
         let meId: string | undefined;
         const me = () => (meId ??= params.bind('involvedUser', userId));
@@ -848,6 +945,14 @@ export class YqlBuilder {
         .map((id) => `channelMentions contains ${params.bind('mentionedChannelId', id.trim())}`)
         .join(' or ');
       conditions.push(`(${mentionedChannels})`);
+    }
+
+    // Group-mention filter - messages that mention these user-group(s)
+    if (filters.mentionedGroupIds && filters.mentionedGroupIds.length > 0) {
+      const mentionedGroups = filters.mentionedGroupIds
+        .map((id) => `groupMentions contains ${params.bind('mentionedGroupId', id.trim())}`)
+        .join(' and ');
+      conditions.push(`(${mentionedGroups})`);
     }
 
     // Thread-type filter - the root messages of threads carrying these types.

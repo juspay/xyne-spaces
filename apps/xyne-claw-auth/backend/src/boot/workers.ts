@@ -24,8 +24,13 @@ import { initEntityExtractionWorker, closeEntityExtractionWorker } from "../queu
 import { closeEntityExtractionQueue } from "../queue/entity-extraction-queue.js";
 import { initEvalJudgeWorker, closeEvalJudgeWorker } from "../queue/eval-judge-worker.js";
 import { initFailureCuratorWorker, closeFailureCuratorWorker } from "../services/failure-curator-worker.js";
+import { initUsagePatternWorker, closeUsagePatternWorker } from "../queue/usage-pattern-worker.js";
+import { closeUsagePatternQueue } from "../queue/usage-pattern-queue.js";
+import { initUsagePatternCron, closeUsagePatternCron } from "../services/usagePatternCron.js";
 import { closeBackfillQueue } from "../queue/digital-twin-backfill-queue.js";
 import { bootstrapCustomTools } from "../bootstrap-tools.js";
+import { beginLocalHarnessDrain } from "../routes/local-harness.js";
+import { initLocalHarnessExpirySweep } from "../services/localHarnessExpiry.js";
 import { initMemoryCron } from "../services/memoryCronService.js";
 import { initSlackConfigTokenCron } from "../surfaces/slack/config-token-cron.js";
 import { initDigitalTwinDaily } from "../services/digitalTwinDaily.js";
@@ -44,6 +49,9 @@ type WorkerEntry = {
 };
 
 const WORKERS: WorkerEntry[] = [
+  // Stop parking new local-harness long-polls first so in-flight bridge
+  // connections return idle and the pod can exit without dropping a run.
+  { name: "local-harness-bridge", closeSync: beginLocalHarnessDrain },
   { name: "bitbucket-stats", closeSync: stopBitbucketStatsBackgroundRefresh },
   { name: "scheduled-jobs-worker", init: initScheduledJobsWorker, close: closeWorker },
   { name: "scheduled-jobs-queue", close: closeQueue },
@@ -69,6 +77,12 @@ const WORKERS: WorkerEntry[] = [
   { name: "daily-brief-queue", close: closeDailyBriefQueue },
   { name: "daily-brief-cron", init: initDailyBriefCron },
   { name: "failure-curator-worker", init: initFailureCuratorWorker, closeSync: closeFailureCuratorWorker },
+  // Usage patterns: weekly leader-locked cron enqueues one job per ACTIVE
+  // agent, bounded worker drains them. Same two-stage shape as Daily Brief,
+  // and the reason synthesis is no longer only whatever a human clicks.
+  { name: "usage-pattern-worker", init: initUsagePatternWorker, close: closeUsagePatternWorker },
+  { name: "usage-pattern-queue", close: closeUsagePatternQueue },
+  { name: "usage-pattern-cron", init: initUsagePatternCron, closeSync: closeUsagePatternCron },
   // Awakened agents: one fleet-wide tick fans out to per-agent window jobs.
   // ensureTickScheduler is idempotent, so every pod calling it converges on
   // a single scheduler — which is also what makes a Redis wipe self-heal on
@@ -77,9 +91,11 @@ const WORKERS: WorkerEntry[] = [
   { name: "awakening-window-worker", init: initAwakeningWindowWorker, close: closeAwakeningWindowWorker },
   { name: "awakening-reflex-worker", init: initAwakeningReflexWorker, close: closeAwakeningReflexWorker },
   { name: "awakening-queues", close: closeAwakeningQueues },
+  { name: "local-harness-expiry", init: initLocalHarnessExpirySweep },
 ];
 
 const SHUTDOWN_SEQUENCE: string[] = [
+  "local-harness-bridge",
   "bitbucket-stats",
   "scheduled-jobs-worker",
   "run-recovery-worker",
@@ -92,6 +108,9 @@ const SHUTDOWN_SEQUENCE: string[] = [
   "entity-extraction-worker",
   "entity-extraction-queue",
   "failure-curator-worker",
+  "usage-pattern-cron",
+  "usage-pattern-worker",
+  "usage-pattern-queue",
   "awakening-tick-worker",
   "awakening-window-worker",
   "awakening-reflex-worker",

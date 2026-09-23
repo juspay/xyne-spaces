@@ -37,6 +37,7 @@ const DEFAULT_TITLE_GENERATOR_MODEL = 'glm-flash-experimental';
 const DEFAULT_TAG_GENERATION_MODEL = 'private-large';
 const DEFAULT_TICKET_BOARD_MODEL = 'glm-flash-experimental';
 const DEFAULT_RELEASE_NOTES_GENERATOR_MODEL = 'glm-latest';
+const DEFAULT_RELEASE_AI_MODEL = 'glm-flash-experimental';
 const DEFAULT_SUMMARISER_MODEL = 'glm-flash-experimental';
 const DEFAULT_ATTACHMENT_SUMMARISER_MODEL = 'kimi-latest';
 const DEFAULT_CLASSIFICATION_MODEL = 'glm-flash-experimental';
@@ -81,6 +82,7 @@ const CAC_KEYS = {
   tagGenerationModel: 'tag_generation_model_name',
   ticketBoardModel: 'ticket_board_model_name',
   releaseNotesGeneratorModel: 'release_notes_generator_model_name',
+  releaseAiModel: 'release_ai_model_name',
   summariserModel: 'summariser_model_name',
   attachmentSummariserModel: 'attachment_summariser_model_name',
   nudgeCreateTicketModel: 'nudge_create_ticket_model_name',
@@ -123,6 +125,7 @@ export class AgentsConfig {
   public readonly tagGenerationModelName: string;
   public readonly ticketBoardModelName: string;
   public readonly releaseNotesGeneratorModelName: string;
+  public readonly releaseAiModelName: string;
   public readonly summariserModelName: string;
   public readonly attachmentSummariserModelName: string;
 
@@ -178,6 +181,7 @@ export class AgentsConfig {
     xyneAiHistoryCompactionTrigger: number,
     xyneAiHistoryCompactionTarget: number,
     dataSourceIngestTableLimit: number,
+    releaseAiModelName: string,
   ) {
     this.xyneAiTracingEnabled = xyneAiTracingEnabled;
     this.xyneAiMaskingEnabled = xyneAiMaskingEnabled;
@@ -204,6 +208,7 @@ export class AgentsConfig {
     this.xyneAiHistoryCompactionTrigger = xyneAiHistoryCompactionTrigger;
     this.xyneAiHistoryCompactionTarget = xyneAiHistoryCompactionTarget;
     this.dataSourceIngestTableLimit = dataSourceIngestTableLimit;
+    this.releaseAiModelName = releaseAiModelName;
   }
 
   /**
@@ -250,6 +255,7 @@ export class AgentsConfig {
       const tagGenerationModelName = getValue<string>(CAC_KEYS.tagGenerationModel, DEFAULT_TAG_GENERATION_MODEL);
       const ticketBoardModelName = getValue<string>(CAC_KEYS.ticketBoardModel, DEFAULT_TICKET_BOARD_MODEL);
       const releaseNotesGeneratorModelName = getValue<string>(CAC_KEYS.releaseNotesGeneratorModel, DEFAULT_RELEASE_NOTES_GENERATOR_MODEL);
+      const releaseAiModelName = getValue<string>(CAC_KEYS.releaseAiModel, DEFAULT_RELEASE_AI_MODEL);
       const summariserModelName = getValue<string>(CAC_KEYS.summariserModel, DEFAULT_SUMMARISER_MODEL);
       const attachmentSummariserModelName = getValue<string>(CAC_KEYS.attachmentSummariserModel, DEFAULT_ATTACHMENT_SUMMARISER_MODEL);
 
@@ -515,6 +521,7 @@ export class AgentsConfig {
         xyneAiHistoryCompactionTrigger,
         xyneAiHistoryCompactionTarget,
         dataSourceIngestTableLimit,
+        releaseAiModelName,
       );
     } catch (error) {
       logger.error('[Agents Config] Error fetching CAC config, using DEFAULTS:', error);
@@ -545,6 +552,7 @@ export class AgentsConfig {
         DEFAULT_XYNE_AI_HISTORY_COMPACTION_TRIGGER,
         DEFAULT_XYNE_AI_HISTORY_COMPACTION_TARGET,
         DEFAULT_DATA_SOURCE_INGEST_TABLE_LIMIT,
+        DEFAULT_RELEASE_AI_MODEL,
       );
     }
   }
@@ -576,6 +584,7 @@ export class AgentsConfig {
       DEFAULT_XYNE_AI_HISTORY_COMPACTION_TRIGGER,
       DEFAULT_XYNE_AI_HISTORY_COMPACTION_TARGET,
       DEFAULT_DATA_SOURCE_INGEST_TABLE_LIMIT,
+      DEFAULT_RELEASE_AI_MODEL,
     );
   }
 }

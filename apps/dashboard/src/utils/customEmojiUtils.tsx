@@ -21,6 +21,19 @@ const parseCustomEmoji = (emojiName: string): { emojiId: string; name: string } 
   };
 };
 
+/**
+ * Builds the reaction token the app stores for an emoji picked from a picker: the unicode
+ * char for a standard emoji, or `custom:<emojiId>:<name>` for a workspace custom emoji.
+ * Every picker surface must produce the identical string — this is the one place that
+ * decides the shape, and `parseCustomEmoji` is its inverse.
+ */
+const toEmojiToken = (emoji: {
+  emoji: string;
+  isCustom: boolean;
+  names?: string[] | undefined;
+}): string =>
+  emoji.isCustom ? `custom:${emoji.emoji}:${emoji.names?.[0] || 'custom'}` : emoji.emoji;
+
 // Helper to get display name for emoji
 const getEmojiDisplayName = (emojiName: string): string => {
   const customEmoji = parseCustomEmoji(emojiName);
@@ -101,6 +114,7 @@ const renderEmoji = (
 };
 
 export {
+  toEmojiToken,
   getEmojiDisplayName,
   parseCustomEmoji,
   isCustomEmoji,

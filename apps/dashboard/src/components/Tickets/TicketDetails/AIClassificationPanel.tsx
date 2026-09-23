@@ -4,6 +4,8 @@ import type {
   ClassificationMapping,
 } from '../../../types/classification';
 import { classificationApi } from '../../../api/classificationApi';
+import { globalClickTracker } from '../../../services/Analytics/globalClickTracker';
+import { lengthBucket } from '../../../services/Analytics/trackSource';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { queries } from '../../../zero/queries';
 import {
@@ -86,6 +88,25 @@ export const AIClassificationPanel: React.FC<AIClassificationPanelProps> = ({
         editCategory.trim(),
         editSubCategory.trim() || null,
       );
+      // Outcome after the override lands. Category values are the desk's
+      // configured enum-like ids, so `to` / `previousAi` are safe to store.
+      const nextCategory = editCategory.trim();
+      const nextSub = editSubCategory.trim() || null;
+      globalClickTracker.trackManualEvent(
+        'AIClassification',
+        'CLASSIFICATION_OVERRIDDEN',
+        undefined,
+        {
+          ticketId,
+          channelId,
+          field: nextCategory !== category ? 'category' : 'subCategory',
+          to: nextCategory !== category ? nextCategory : nextSub,
+          previousAi: nextCategory !== category ? category : (subCategory ?? null),
+          categoryChanged: nextCategory !== category,
+          subCategoryChanged: nextSub !== (subCategory ?? null),
+          wasAlreadyOverridden: !!isManualOverride,
+        },
+      );
       onOverride?.(result.resolvedGroupId ?? '');
       setIsEditing(false);
     } finally {
@@ -97,6 +118,20 @@ export const AIClassificationPanel: React.FC<AIClassificationPanelProps> = ({
     setSavingField(true);
     try {
       await classificationApi.patchRawField(channelId, ticketId, fieldName, editingFieldValue);
+      // Raw fields are free text: report the field key and a length bucket only.
+      globalClickTracker.trackManualEvent(
+        'AIClassification',
+        'CLASSIFICATION_OVERRIDDEN',
+        undefined,
+        {
+          ticketId,
+          channelId,
+          field: 'raw',
+          rawFieldKey: fieldName,
+          valueLengthBucket: lengthBucket(editingFieldValue.length),
+          wasAlreadyOverridden: !!isManualOverride,
+        },
+      );
       setEditingField(null);
     } finally {
       setSavingField(false);

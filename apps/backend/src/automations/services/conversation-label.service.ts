@@ -109,7 +109,7 @@ export async function applyConversationLabel(
 
   const channel = await client.channel.findUnique({
     where: { id: channelId },
-    select: { id: true, projectId: true, workspaceId: true },
+    select: { id: true, workspaceId: true },
   });
   if (!channel) {
     throw Object.assign(new Error('Channel not found'), { code: 'channel_not_found' as const });
@@ -183,7 +183,8 @@ export async function applyConversationLabel(
       name: labelName,
       ...(input.color ? { color: input.color } : {}),
       channelId,
-      projectId: channel.projectId,
+      // projectId intentionally omitted — conversationLabel.projectId is nullable
+      // (channel.projectId is being decoupled); labels are scoped by channel.
       workspaceId: channel.workspaceId,
       createdBy: createdById,
       createdAt: now,
