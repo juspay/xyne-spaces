@@ -96,9 +96,9 @@ import { useUsers } from '../../../hooks/useUsers';
 import { useUserGroups } from '../../../hooks/useUserGroup';
 import { useAuth } from '../../../hooks/useAuth';
 import {
-  useProjectTicketSearch,
+  useSubTicketLinkSearch,
   VESPA_MAX_BOARD_FILTER_VALUES,
-} from '../../../hooks/useProjectTicketSearch';
+} from '../../../hooks/useSubTicketLinkSearch';
 import { getSubTicketLinkErrorMessage, subTicketService } from '../../../services/subTicketService';
 import { globalClickTracker } from '../../../services/Analytics/globalClickTracker';
 import {
@@ -1351,7 +1351,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
   const [boards] = useCachedQuery(
     queries.boardsListByProject({ projectId: ticket?.projectId || '' }),
     {
-      // Also needed by the sub-ticket picker, which must know each board's type.
+      // Eager on manual boards too: TicketActivity names boards from this list.
       enabled:
         !!ticket?.projectId &&
         (hasBoardDropdownOpened || isManualSubTicketBoard(boardData?.boardType)),
@@ -2299,10 +2299,18 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
 
   const canManageSubTicketLinks = isManualSubTicketBoard(boardData?.boardType);
 
+  // Workspace-wide, like Create Sub-Ticket: a linked sub-ticket may live in any project.
+  const [workspaceBoards] = useCachedQuery(queries.getAllBoardsList(), {
+    enabled: canManageSubTicketLinks,
+  });
+
   // FLOW/RELEASE boards own their mappings, so their tickets are never linkable by hand.
   const manualBoardIds = useMemo(
-    () => (boards ?? []).filter(board => isManualSubTicketBoard(board.boardType)).map(b => b.id),
-    [boards],
+    () =>
+      (workspaceBoards ?? [])
+        .filter(board => isManualSubTicketBoard(board.boardType))
+        .map(b => b.id),
+    [workspaceBoards],
   );
   // Past the API's cap the filter is dropped; subTicketPickerOptions filters instead.
   const manualBoardIdsFilter = useMemo(
@@ -2317,8 +2325,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
   const [isAddSubTicketMenuOpen, setIsAddSubTicketMenuOpen] = useState(false);
   const [isLinkingSubTicket, setIsLinkingSubTicket] = useState(false);
   const [unlinkingMappingIds, setUnlinkingMappingIds] = useState<Set<string>>(new Set());
-  const subTicketSearch = useProjectTicketSearch({
-    projectId: ticket?.projectId ?? undefined,
+  const subTicketSearch = useSubTicketLinkSearch({
     boardIds: manualBoardIdsFilter,
     isActive: isAddSubTicketMenuOpen,
   });

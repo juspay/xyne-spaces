@@ -5,7 +5,7 @@ import { useDebouncedValue } from './useDebouncedValue';
 import { stripHighlightMarkup } from './useVespaTicketSearch';
 import { logger, Event as LogEvent } from '../utils/logger';
 
-export type ProjectTicketSearchResult = {
+export type SubTicketLinkCandidate = {
   id: string;
   title?: string;
   xyneId?: string | null;
@@ -13,23 +13,22 @@ export type ProjectTicketSearchResult = {
 };
 
 // Vespa never pages past this offset, so stop asking.
-const VESPA_PROJECT_TICKET_MAX_OFFSET = 1000;
-const VESPA_PROJECT_TICKET_PAGE_SIZE = 200;
+const VESPA_MAX_OFFSET = 1000;
+const VESPA_PAGE_SIZE = 200;
 // The search API rejects any filter carrying more values than this.
 export const VESPA_MAX_BOARD_FILTER_VALUES = 50;
 // EntitySelector fires onSearchChange on every keystroke.
-const PROJECT_TICKET_SEARCH_DEBOUNCE_MS = 300;
+const SEARCH_DEBOUNCE_MS = 300;
 
-interface UseProjectTicketSearchParams {
-  projectId?: string | undefined;
+interface UseSubTicketLinkSearchParams {
   /** Comma-separated board ids to confine the search to; empty means every board. */
   boardIds?: string | undefined;
   /** Only fetch while the dropdown that owns this search is open. */
   isActive: boolean;
 }
 
-interface UseProjectTicketSearchResult {
-  tickets: ProjectTicketSearchResult[] | null;
+interface UseSubTicketLinkSearchResult {
+  tickets: SubTicketLinkCandidate[] | null;
   isLoading: boolean;
   hasMore: boolean;
   handleSearchChange: (searchValue: string) => void;
@@ -38,12 +37,11 @@ interface UseProjectTicketSearchResult {
 }
 
 const fetchPage = async (
-  projectId: string,
   boardIds: string,
   query: string,
   offset: number,
 ): Promise<{
-  results: ProjectTicketSearchResult[];
+  results: SubTicketLinkCandidate[];
   totalCount: number;
   offset: number;
   limit: number;
@@ -52,9 +50,8 @@ const fetchPage = async (
     query: query || '*',
     type: 'tickets',
     apps: 'ticket',
-    projectId,
     ...(boardIds ? { board: boardIds } : {}),
-    limit: VESPA_PROJECT_TICKET_PAGE_SIZE,
+    limit: VESPA_PAGE_SIZE,
     offset,
   });
 
@@ -75,19 +72,18 @@ const fetchPage = async (
   };
 };
 
-/** Paged Vespa search over a project's tickets, scoped to one dropdown. */
-export const useProjectTicketSearch = ({
-  projectId,
+/** Paged, workspace-wide ticket search behind the "+ Add existing sub-ticket" picker. */
+export const useSubTicketLinkSearch = ({
   boardIds = '',
   isActive,
-}: UseProjectTicketSearchParams): UseProjectTicketSearchResult => {
-  const [tickets, setTickets] = useState<ProjectTicketSearchResult[] | null>(null);
+}: UseSubTicketLinkSearchParams): UseSubTicketLinkSearchResult => {
+  const [tickets, setTickets] = useState<SubTicketLinkCandidate[] | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(false);
   const [search, setSearch] = useState('');
   // `search` drives the input; `debouncedSearch` drives the fetch, paging included.
-  const debouncedSearch = useDebouncedValue(search, PROJECT_TICKET_SEARCH_DEBOUNCE_MS);
+  const debouncedSearch = useDebouncedValue(search, SEARCH_DEBOUNCE_MS);
   const [nextOffset, setNextOffset] = useState(0);
   // Bumped on every reset so a superseded response cannot overwrite newer results.
   const requestIdRef = useRef(0);
@@ -104,10 +100,6 @@ export const useProjectTicketSearch = ({
 
   const loadPage = useCallback(
     async (offset: number, replace: boolean): Promise<void> => {
-      if (!projectId) {
-        return;
-      }
-
       const normalizedQuery = debouncedSearch.trim();
       const requestId = ++requestIdRef.current;
       const isInitialLoad = replace || offset === 0;
@@ -119,7 +111,7 @@ export const useProjectTicketSearch = ({
       }
 
       try {
-        const response = await fetchPage(projectId, boardIds, normalizedQuery, offset);
+        const response = await fetchPage(boardIds, normalizedQuery, offset);
 
         if (requestId !== requestIdRef.current) {
           return;
@@ -129,7 +121,7 @@ export const useProjectTicketSearch = ({
         const hasMorePages =
           response.results.length > 0 &&
           rawNextOffset < response.totalCount &&
-          rawNextOffset < VESPA_PROJECT_TICKET_MAX_OFFSET;
+          rawNextOffset < VESPA_MAX_OFFSET;
 
         setTickets(previous => {
           const base = replace ? [] : (previous ?? []);
@@ -137,7 +129,7 @@ export const useProjectTicketSearch = ({
             new Map([...base, ...response.results].map(ticket => [ticket.id, ticket])).values(),
           );
         });
-        setNextOffset(Math.min(rawNextOffset, VESPA_PROJECT_TICKET_MAX_OFFSET));
+        setNextOffset(Math.min(rawNextOffset, VESPA_MAX_OFFSET));
         setHasMore(hasMorePages);
       } catch (error) {
         if (requestId !== requestIdRef.current) {
@@ -146,13 +138,13 @@ export const useProjectTicketSearch = ({
 
         logger.warn(LogEvent.FRONTEND_ERROR, {
           type: 'migrated_console_warn',
-          message: String('[useProjectTicketSearch] Failed to load Vespa project tickets'),
-          context: [{ projectId, offset, query: normalizedQuery || '*', error }],
+          message: String('[useSubTicketLinkSearch] Failed to load Vespa tickets'),
+          context: [{ offset, query: normalizedQuery || '*', error }],
         });
 
         // EntitySelector has no error state - an empty list reads as "No results found".
         toast.error(isInitialLoad ? 'Failed to load tickets' : 'Failed to load more tickets', {
-          id: 'project-ticket-search-error',
+          id: 'sub-ticket-link-search-error',
         });
 
         // A paging failure keeps hasMore, so the next scroll-end retries this offset.
@@ -169,12 +161,12 @@ export const useProjectTicketSearch = ({
         }
       }
     },
-    [projectId, boardIds, debouncedSearch],
+    [boardIds, debouncedSearch],
   );
 
   // Re-query whenever the dropdown opens or the debounced term settles.
   useEffect(() => {
-    if (!isActive || !projectId) {
+    if (!isActive) {
       return;
     }
 
@@ -190,11 +182,7 @@ export const useProjectTicketSearch = ({
       setIsLoading(false);
       setIsLoadingMore(false);
     }
-  }, [isActive, projectId, debouncedSearch, loadPage]);
-
-  useEffect(() => {
-    reset();
-  }, [projectId, reset]);
+  }, [isActive, debouncedSearch, loadPage]);
 
   // Term only. Clearing results here would strand the dropdown: a term that round-trips
   // inside the debounce window settles unchanged, so the effect above never re-runs.
@@ -210,7 +198,7 @@ export const useProjectTicketSearch = ({
       return;
     }
 
-    if (nextOffset >= VESPA_PROJECT_TICKET_MAX_OFFSET) {
+    if (nextOffset >= VESPA_MAX_OFFSET) {
       setHasMore(false);
       return;
     }
