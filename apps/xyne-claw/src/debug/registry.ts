@@ -264,6 +264,7 @@ export const EVENTS = defineEvents({
   subagent_start: {
     fields: {
       subagentName: plain(),
+      childKind: plain(),
       childRunId: plain(),
       questionChars: plain(),
       provider: plain(),
@@ -275,6 +276,7 @@ export const EVENTS = defineEvents({
   subagent_end: {
     fields: {
       subagentName: plain(),
+      childKind: plain(),
       childRunId: plain(),
       status: plain(),
       durationMs: plain(),

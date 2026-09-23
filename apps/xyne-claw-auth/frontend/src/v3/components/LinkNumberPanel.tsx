@@ -5,16 +5,17 @@
  * type says which sender id that identity answers to — so the link exists the
  * moment they submit, and the very next message they send is answered as them.
  * Nothing is asked of the phone.
+ *
+ * The number belongs to the person, not to one assistant, so there is nothing
+ * to pick: it is linked on every channel passed in, and any assistant in the
+ * org — a business number or a colleague's personal one — knows who they are.
  */
 import { useCallback, useEffect, useState } from "react";
 import {
   linkChannelNumber,
-  listLinkableChannelAccounts,
   listMyChannelNumbers,
   unlinkMyChannelNumber,
   type ChannelNumberLink,
-  type LinkableChannelAccount,
-  type LinkedChannelNumber,
   type MessagingChannelKey,
 } from "../../lib/api";
 
@@ -23,18 +24,28 @@ function formatNumber(senderId: string): string {
   return digits ? `+${digits}` : senderId;
 }
 
+/** One number the person has linked, and the channels it is linked on. */
+interface Mine {
+  display: string;
+  entries: Array<{ channel: MessagingChannelKey; senderId: string }>;
+}
+
 export function LinkNumberPanel({
   channel,
   channelName,
   userEmail,
 }: {
-  channel: MessagingChannelKey;
+  /** One channel, or every channel this person could be reached on. An org may
+   *  run a business number, personal numbers, or both, and the person linking
+   *  neither knows nor cares which — they have one number either way. */
+  channel: MessagingChannelKey | MessagingChannelKey[];
   channelName: string;
   userEmail: string;
 }) {
-  const [accounts, setAccounts] = useState<LinkableChannelAccount[]>([]);
-  const [linked, setLinked] = useState<LinkedChannelNumber[]>([]);
-  const [accountId, setAccountId] = useState("");
+  const channels = Array.isArray(channel) ? channel : [channel];
+  // Stable across renders so the effect below does not loop on a fresh array.
+  const channelKey = channels.join(",");
+  const [linked, setLinked] = useState<Mine[]>([]);
   const [phone, setPhone] = useState("");
   const [justLinked, setJustLinked] = useState<ChannelNumberLink | null>(null);
   const [busy, setBusy] = useState(false);
@@ -42,15 +53,26 @@ export function LinkNumberPanel({
   const [loaded, setLoaded] = useState(false);
 
   const refresh = useCallback(async () => {
-    const [available, mine] = await Promise.all([
-      listLinkableChannelAccounts(channel).catch(() => [] as LinkableChannelAccount[]),
-      listMyChannelNumbers(channel).catch(() => [] as LinkedChannelNumber[]),
-    ]);
-    setAccounts(available);
-    setLinked(mine);
-    setAccountId((current) => current || (available.length === 1 ? (available[0]?.id ?? "") : ""));
+    const results = await Promise.all(
+      channels.map((key) =>
+        listMyChannelNumbers(key)
+          .then((rows) => rows.map((row) => ({ channel: key, senderId: row.senderId })))
+          .catch(() => []),
+      ),
+    );
+    // The same number is stored once per channel, in each channel's own
+    // format; the person sees it once.
+    const byDisplay = new Map<string, Mine>();
+    for (const entry of results.flat()) {
+      const display = formatNumber(entry.senderId);
+      const mine = byDisplay.get(display) ?? { display, entries: [] };
+      mine.entries.push(entry);
+      byDisplay.set(display, mine);
+    }
+    setLinked([...byDisplay.values()]);
     setLoaded(true);
-  }, [channel]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [channelKey]);
 
   useEffect(() => {
     void refresh();
@@ -60,8 +82,15 @@ export function LinkNumberPanel({
     setBusy(true);
     setError(null);
     try {
-      const result = await linkChannelNumber(channel, phone, accountId || undefined);
-      setJustLinked(result);
+      // A channel this deployment does not run refuses; that is fine as long
+      // as one of them took it.
+      const results = await Promise.allSettled(channels.map((key) => linkChannelNumber(key, phone)));
+      const ok = results.flatMap((r) => (r.status === "fulfilled" ? [r.value] : []));
+      if (ok.length === 0) {
+        const first = results.find((r): r is PromiseRejectedResult => r.status === "rejected");
+        throw first?.reason ?? new Error("Could not link this number. Please try again.");
+      }
+      setJustLinked(ok.find((link) => link.sendTo) ?? ok[0]!);
       setPhone("");
       await refresh();
     } catch (err) {
@@ -69,15 +98,17 @@ export function LinkNumberPanel({
     } finally {
       setBusy(false);
     }
-  }, [channel, phone, accountId, refresh]);
+  }, [channels, phone, refresh]);
 
   const unlink = useCallback(
-    async (senderId: string) => {
-      await unlinkMyChannelNumber(channel, senderId).catch(() => undefined);
-      setJustLinked((current) => (current?.senderId === senderId ? null : current));
+    async (mine: Mine) => {
+      await Promise.all(
+        mine.entries.map((entry) => unlinkMyChannelNumber(entry.channel, entry.senderId).catch(() => undefined)),
+      );
+      setJustLinked((current) => (current && formatNumber(current.senderId) === mine.display ? null : current));
       await refresh();
     },
-    [channel, refresh],
+    [refresh],
   );
 
   if (justLinked) {
@@ -101,61 +132,37 @@ export function LinkNumberPanel({
 
   return (
     <div className="space-y-2">
-      {loaded && accounts.length === 0 && (
-        <p className="text-[12px] text-xyne-fg-muted">No {channelName} assistant is available for you to link to yet.</p>
-      )}
+      {!loaded && <p className="text-[12px] text-xyne-fg-muted">Loading…</p>}
 
-      {accounts.length > 0 && (
-        <>
-          <div className="flex items-center gap-2">
-            {accounts.length > 1 && (
-              <select
-                value={accountId}
-                onChange={(event) => setAccountId(event.target.value)}
-                className="h-8 shrink-0 rounded-md border border-xyne-border-subtle bg-transparent px-2 text-[12px] text-xyne-fg-primary"
-              >
-                <option value="">Assistant…</option>
-                {accounts.map((account) => (
-                  <option key={account.id} value={account.id}>
-                    {account.label}
-                    {account.number ? ` (${account.number})` : ""}
-                  </option>
-                ))}
-              </select>
-            )}
-            <input
-              value={phone}
-              onChange={(event) => setPhone(event.target.value)}
-              placeholder="+91 98765 43210"
-              inputMode="tel"
-              className="h-8 min-w-0 flex-1 rounded-md border border-xyne-border-subtle bg-transparent px-2.5 font-mono text-[12px] text-xyne-fg-primary placeholder:text-xyne-fg-muted"
-            />
-            <button
-              onClick={submit}
-              disabled={busy || phone.trim().length < 6 || (accounts.length > 1 && !accountId)}
-              className="h-8 shrink-0 rounded-md bg-xyne-brand px-3 text-[12px] font-medium text-white transition hover:opacity-90 disabled:opacity-60"
-            >
-              {busy ? "Connecting…" : "Connect"}
-            </button>
-          </div>
-          <p className="text-[11px] text-xyne-fg-muted">+91 assumed unless you add a country code.</p>
+      <div className="flex items-center gap-2">
+        <input
+          value={phone}
+          onChange={(event) => setPhone(event.target.value)}
+          placeholder="+91 98765 43210"
+          inputMode="tel"
+          className="h-8 min-w-0 flex-1 rounded-md border border-xyne-border-subtle bg-transparent px-2.5 font-mono text-[12px] text-xyne-fg-primary placeholder:text-xyne-fg-muted"
+        />
+        <button
+          onClick={submit}
+          disabled={busy || phone.trim().length < 6}
+          className="h-8 shrink-0 rounded-md bg-xyne-brand px-3 text-[12px] font-medium text-xyne-fg-inverse transition hover:opacity-90 disabled:opacity-60"
+        >
+          {busy ? "Connecting…" : "Connect"}
+        </button>
+      </div>
+      <p className="text-[11px] text-xyne-fg-muted">+91 assumed unless you add a country code.</p>
 
-          {error && <p className="text-[12px] text-xyne-error-fg">{error}</p>}
-        </>
-      )}
+      {error && <p className="text-[12px] text-xyne-error-fg">{error}</p>}
 
       {linked.length > 0 && (
         <ul className="space-y-1.5">
-          {linked.map((number) => (
+          {linked.map((mine) => (
             <li
-              key={number.senderId}
+              key={mine.display}
               className="flex items-center justify-between gap-2 rounded-md border border-xyne-border-subtle px-2.5 py-1.5 text-[12px]"
             >
-              <span className="font-mono text-xyne-fg-primary">{formatNumber(number.senderId)}</span>
-              <button
-                onClick={() => void unlink(number.senderId)}
-                className="text-[11px] text-xyne-fg-muted hover:text-xyne-error-fg"
-              >
+              <span className="font-mono text-xyne-fg-primary">{mine.display}</span>
+              <button onClick={() => void unlink(mine)} className="text-[11px] text-xyne-fg-muted hover:text-xyne-error-fg">
                 Unlink
               </button>
             </li>

@@ -3624,7 +3624,10 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     // below tell the user it was a provider capacity issue — with the safe
     // underlying detail (e.g. "HTTP 429 quota_exceeded") — instead of the
     // generic "I wasn't able to produce a response". See xyne-claw run.ts.
-    emptyReason?: "provider_capacity";
+    // "no_output" is the other shape: the run reached the success path having
+    // produced nothing at all — usually a turn that ended mid-thought without
+    // writing. Reported so a blank answer is diagnosable instead of a mystery.
+    emptyReason?: "provider_capacity" | "no_output";
     emptyReasonDetail?: string;
     // Digital Twin mention flow: the structured delivery produced by the
     // mandatory twin_deliver tool (react and/or reply, and where). Absent when
@@ -4197,9 +4200,16 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     const channelUserId = ctx.targetUserId ?? ctx.mentionedUserId ?? "";
     const channelPendingActions = (payload as { pendingActions?: Array<Record<string, unknown>> }).pendingActions;
     await deleteSession(sessionId);
+    // A run that produced nothing is not a success worth reporting as one.
+    // Downgrading here rather than in claw keeps the change to this surface:
+    // the person gets "couldn't complete — try again", which is both true and
+    // actionable, instead of a blank or a shrug.
+    if (payload.emptyReason === "no_output") {
+      clog.warn(`[webhook/result] channel run produced no output session=${sessionId}`);
+    }
     await deliverChannelResult({
       target: channelTarget,
-      status: payload.status ?? "failed",
+      status: payload.emptyReason === "no_output" ? "failed" : (payload.status ?? "failed"),
       result: resultWithCitations,
       ...(payload.attachments?.length ? { attachments: payload.attachments } : {}),
     }).catch((err) => {

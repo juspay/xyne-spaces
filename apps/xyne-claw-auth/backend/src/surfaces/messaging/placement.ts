@@ -52,13 +52,24 @@ export async function acquireLease(accountId: string, ttlMs = LEASE_TTL_MS): Pro
   }
 }
 
-export async function renewLease(accountId: string, ttlMs = LEASE_TTL_MS): Promise<boolean> {
+/**
+ * "renewed" — still ours. "lost" — Redis answered and the key is gone or
+ * held by someone else, so another pod is already running this account.
+ * "error" — we could not ask, which says nothing about who holds it.
+ *
+ * The distinction is the whole point: a blip must not drop a healthy socket,
+ * and a definite loss must not be waited out, because during that wait two
+ * pods hold a socket for the same number and WhatsApp closes one of them.
+ */
+export type LeaseRenewal = "renewed" | "lost" | "error";
+
+export async function renewLease(accountId: string, ttlMs = LEASE_TTL_MS): Promise<LeaseRenewal> {
   try {
     const result = await redis().eval(RENEW_LUA, 1, leaseKey(accountId), HOLDER_ID, String(ttlMs));
-    return Number(result) === 1;
+    return Number(result) === 1 ? "renewed" : "lost";
   } catch (err) {
     log.warn(`[placement] renew failed for ${accountId} (fail-closed):`, err instanceof Error ? err.message : err);
-    return false;
+    return "error";
   }
 }
 

@@ -82,7 +82,7 @@ webhookRouter.post("/webhook/:accountId", async (req: Request, res: Response) =>
   }
   let messages;
   try {
-    messages = plugin.parseInbound(req.body, account);
+    messages = plugin.parseInbound(req.body, account, authStateFor(account.id));
   } catch (err) {
     log.warn(`[channel-webhook] parse failed account=${account.id}: ${errMsg(err)}`);
     res.sendStatus(200);

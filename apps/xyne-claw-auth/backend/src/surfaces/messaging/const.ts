@@ -27,6 +27,27 @@ export const OUTBOX_TTL_S = 6 * 60 * 60;
 /** Blocking pop timeout of the outbox drain loop (seconds). */
 export const OUTBOX_POP_TIMEOUT_S = 5;
 
+/** Typing keeps refreshing until the reply is delivered. This is only the
+ *  backstop for a run that never reports back at all — without it a lost
+ *  result would leave a number typing into someone's chat indefinitely. */
+export const TYPING_MAX_MS = 15 * 60 * 1_000;
+
+/** How long we remember which run is working in a chat, for /stop and
+ *  /status. Longer than any run should take, short enough that a lost result
+ *  does not leave a stale answer forever. */
+export const ACTIVE_RUN_TTL_S = 30 * 60;
+
+/** How long a chat's typing count survives without a result. Generous, but
+ *  bounded: a run whose result never arrives must not leave a number typing. */
+export const TYPING_COUNT_TTL_S = 20 * 60;
+
+/** Largest inbound file any channel will pull through the run pipeline.
+ *  Core, not per-plugin: what a number will accept should not depend on which
+ *  transport happens to be carrying it. Above this the message still reaches
+ *  the agent with its caption and a note, which is more useful than silence
+ *  and cheaper than dragging a phone video through a run. */
+export const MAX_INBOUND_BYTES = 12 * 1024 * 1024;
+
 export const REDIS_PREFIX = "claw:channel";
 export const CONTROL_CHANNEL = `${REDIS_PREFIX}:control`;
 
@@ -37,6 +58,12 @@ export const AGENTS_COMMAND_RE = /^[@/]agents\s*$/i;
 export const DEFAULT_RATE_LIMIT_PER_MINUTE = 10;
 /** Reaction dropped on the triggering message so the sender can see the run
  *  started before any text comes back. */
+/** Replaces the ack once the run ends. WhatsApp allows one reaction per
+ *  message, so this is a replacement, not a second emoji — which makes the
+ *  reaction a progress signal rather than a receipt. */
+export const DONE_REACTION = "\u2705";
+export const ERROR_REACTION = "\u26A0\uFE0F";
+
 export const DEFAULT_ACK_REACTION = "\u{1F440}";
 /** How often a business number repeats "add your number in Claw" to one sender. */
 export const UNLINKED_NOTICE_TTL_S = 60 * 60;
@@ -48,6 +75,17 @@ export const GROUP_HISTORY_LIMIT = 50;
 export const GROUP_CONTEXT_TTL_S = 12 * 60 * 60;
 
 export const FAILURE_TEXT = "The agent couldn't complete this request. Please try again.";
+/** A run that succeeded and said nothing. Rare, and almost always the model
+ *  reasoning its way to an answer and then ending its turn without writing
+ *  it — so the person is told what to do next rather than what happened. */
+export const EMPTY_RESULT_TEXT =
+  "I worked through that but didn't come back with anything. Ask again, or send /new to start fresh.";
+/** Tell a flooding sender they were throttled at most once per window, so the
+ *  notice cannot itself become the flood. */
+export const RATE_LIMIT_NOTICE_TTL_S = 60;
+export const RATE_LIMITED_TEXT =
+  "That's a lot at once — I've paused on the last few. Give me a minute and send it again.";
+
 export const NOT_LINKED_TEXT =
   "Your number isn't linked to a Xyne Claw user yet. Sign in to Xyne Claw and add this number, and I'll know who you are next time.";
 

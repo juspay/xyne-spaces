@@ -158,11 +158,20 @@ export function toInbound(msg: WAMessage, self: SelfIdentity, opts: ToInboundOpt
   // A fact about the message, not a setting: whether the account answers here
   // is the plugin's call (see plugin.ts), and policy still applies either way.
   const selfChat = fromOwner && !isGroup && sameUser(remoteJid, self);
-  const rawSender = selfChat ? self.jid : isGroup ? (key?.participant ?? "") : remoteJid;
+  // In a one-to-one chat remoteJid is the OTHER party, so it is only the
+  // sender when they were the one who wrote. A message the owner typed is
+  // from the owner wherever it was sent — their own chat or a contact's —
+  // and attributing it to the contact would run it with that person's Xyne
+  // access and answer them as if they had asked.
+  const ownDm = fromOwner && !isGroup;
   // Newer WhatsApp servers add the phone-number twin of a LID sender on the
-  // key; prefer it so allowlists written as phone numbers keep matching.
+  // key; prefer it so allowlists written as phone numbers keep matching. It
+  // describes the other party, so it has no say over a message we know the
+  // owner wrote.
   const altSender = (key as { senderPn?: string | null; participantPn?: string | null } | null | undefined);
-  const senderId = normalize(altSender?.senderPn || altSender?.participantPn || rawSender);
+  const senderId = ownDm
+    ? normalize(self.jid)
+    : normalize(altSender?.senderPn || altSender?.participantPn || (isGroup ? (key?.participant ?? "") : remoteJid));
 
   const ctx = contextInfoOf(content);
   const mentionedSelf = (ctx?.mentionedJid ?? []).some((jid) => sameUser(jid, self));

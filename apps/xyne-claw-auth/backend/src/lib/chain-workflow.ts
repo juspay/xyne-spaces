@@ -233,9 +233,8 @@ export function summarizeChainToolInvocations(raw: unknown): ChainToolInvocation
       ...(command ? { command: command.slice(0, CHAIN_JUDGE_COMMAND_EXCERPT_LENGTH) } : {}),
       ...(typeof inv["isError"] === "boolean" ? { isError: inv["isError"] } : {}),
     });
-    if (out.length >= CHAIN_JUDGE_INVOCATION_LIMIT) break;
   }
-  return out;
+  return out.length > CHAIN_JUDGE_INVOCATION_LIMIT ? out.slice(-CHAIN_JUDGE_INVOCATION_LIMIT) : out;
 }
 
 const NESTED_QUANTIFIER_RE = /\((?:[^()\\]|\\.)*[+*{](?:[^()\\]|\\.)*\)[+*{]/;

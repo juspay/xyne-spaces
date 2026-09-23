@@ -1242,8 +1242,18 @@ model AgentRun {
   /// runs ↔ assistant messages is ambiguous. Populated in the chat-callback.
   chatMessageId    String?
   orgId            String
+  /// Set when another run spawned this one through A2A `call-agent`: the
+  /// caller's sessionId. Null for a user-invoked run.
+  parentSessionId  String?
+  /// The caller's slug, denormalized so listing child runs needs no second
+  /// lookup per row.
+  parentAgentSlug  String?
+  /// The `call-agent` tool call that spawned this run, lining a child row up
+  /// with its row in the caller's trace.
+  parentToolCallId String?
 
   @@index([userId, status, startedAt])
+  @@index([parentSessionId])
   @@index([agentSlug, startedAt])
   @@index([provider, completedAt])
   @@index([chatMessageId])
@@ -2751,6 +2761,34 @@ model ServiceRegistry {
   @@index([serviceName])
   @@index([tenantUniqueId, serviceName])
   @@map("service_registry")
+}
+
+/// Pending self-service MCP-gateway registrations awaiting admin approval.
+/// A UI registration lands here as `pending`; on approval it is written to
+/// `service_registry` (which is therefore always "approved and live").
+/// Scoped by `tenantUniqueId` (the gateway tenant), like `service_registry` —
+/// this is platform gateway config, not spaces workspace/org data.
+// workspace-check:ignore
+model GatewayServiceRequest {
+  id                String    @id @default(uuid())
+  tenantUniqueId    String    @map("tenant_unique_id")
+  orgId             String?   @map("org_id")
+  serviceName       String    @map("service_name")
+  backendId         String    @map("backend_id")
+  backendUrl        String    @map("backend_url")
+  tokenEndpointUrl  String?   @map("token_endpoint_url")
+  xAuthHeaderName   String?   @map("x_auth_header_name")
+  tools             Json
+  status            String    @default("pending") // pending | approved | rejected
+  requestedByUserId String    @map("requested_by_user_id")
+  reviewedByUserId  String?   @map("reviewed_by_user_id")
+  reviewedAt        DateTime? @map("reviewed_at")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+
+  @@index([tenantUniqueId, status])
+  @@index([requestedByUserId])
+  @@map("gateway_service_requests")
 }
 
 // Error-pipeline bucket taxonomy + routing rules (Grafana → Claw auto-fix).

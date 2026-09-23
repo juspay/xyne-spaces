@@ -71,6 +71,7 @@ import {
   emptyLatency,
   emptyTokenUsage,
   type CaptureHandles,
+  type CaptureLevel,
   type RunHeader,
   type RunStatus,
   type DebugEventKind,
@@ -1824,12 +1825,35 @@ export interface RunTaskOptions {
    *  the subagent tools via SubagentProgressCtx. After the model loop settles,
    *  runTask drains it, injecting each completed subagent result back into the
    *  session so the model can incorporate it before finishing. */
-  backgroundRegistry?: import("./subagent-tools.js").BackgroundSubagentRegistry | undefined;
+  backgroundRegistry?: import("./child-tasks.js").ChildTaskRegistry | undefined;
   /** Slot the run fills in with its own trace handles, shared with the subagent
    *  tools via SubagentProgressCtx. The tools are built before this run opens
    *  its trace, so a child can only learn where to write itself — and which
    *  recorder to announce itself on — through this object. */
   parentDebug?: import("./subagent-tools.js").ParentDebugHandle | undefined;
+  /** Set when this run is a child of another run. Its trace is written into the
+   *  PARENT's store and stamped with the parentage the retrieval route nests on,
+   *  so the child shows up inside the caller's trace rather than orphaned under
+   *  a store key nobody reads. */
+  childRun?: {
+    storeKey: string;
+    /** Minted by the caller so its timeline row and this header agree. */
+    runId: string;
+    parentRunId?: string | undefined;
+    /** The caller's session: what the debug bundle matches this trace to, and
+     *  the address `liveMirror` pushes to. */
+    parentSessionId: string;
+    parentToolCallId: string;
+    /** Callee slug — surfaced as `subagentName` on the child's header. */
+    label: string;
+    kind: "subagent" | "agent";
+    captureLevel?: CaptureLevel | undefined;
+    /** Mirror this run's tool calls as they happen. A child has no live viewer
+     *  of its own — the human watches the CALLER's chat — so without this the
+     *  caller sees an empty spinner until the whole child returns. Omit when the
+     *  caller has no live stream. */
+    liveMirror?: ProgressDest;
+  } | undefined;
   fastMode?: boolean | undefined;
   fastToolCatalogNames?: string[] | undefined;
   fastToolController?: FastToolRuntimeController | undefined;
@@ -1949,6 +1973,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
     isRegenerate,
     backgroundRegistry,
     parentDebug,
+    childRun,
     fastMode,
     fastToolCatalogNames,
     fastToolController,
@@ -2809,9 +2834,10 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
   //
   // The store key falls back to the sessionId when there is no conversationId —
   // runs without one used to produce no artifact whatsoever.
-  const debugStoreKey = conversationId ?? (sessionId && isSafeId(sessionId) ? sessionId : undefined);
-  const debugRunId = runIdFor(runStartedAt, sessionId);
-  const debugCaptureLevel = resolveCaptureLevel();
+  const debugStoreKey =
+    childRun?.storeKey ?? conversationId ?? (sessionId && isSafeId(sessionId) ? sessionId : undefined);
+  const debugRunId = childRun?.runId ?? runIdFor(runStartedAt, sessionId);
+  const debugCaptureLevel = childRun?.captureLevel ?? resolveCaptureLevel();
   if (debugStoreKey) {
     debugRunStore = await RunStore.open({
       storeKey: debugStoreKey,
@@ -2862,6 +2888,16 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
     ...(context ? { context } : {}),
     ...(systemPromptOverride ? { systemPromptOverride: true } : {}),
     mode: mode ?? "auto",
+    ...(childRun?.parentRunId ? { parentRunId: childRun.parentRunId } : {}),
+    ...(childRun ? { parentSessionId: childRun.parentSessionId } : {}),
+    ...(childRun
+      ? {
+          parentToolCallId: childRun.parentToolCallId,
+          subagentName: childRun.label,
+          childKind: childRun.kind,
+          question: task,
+        }
+      : {}),
     counts: { events: 0, blobs: 0, messages: 0, toolCalls: 0 },
     tokenUsage: emptyTokenUsage(),
     latency: emptyLatency(),
@@ -2870,12 +2906,16 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
     store: debugRunStore,
     recorder,
     header: debugHeader,
+    // A child writes into the parent's debug dir, where the v1 files live one
+    // per directory — materializing would overwrite the parent's own trace. It
+    // needs no discovery marker either; readers reach it through the parent.
+    ...(childRun ? { materializeV1: false } : {}),
     // Off-pod discovery marker. Written at START, not at finish, and it carries
     // the run's REAL store key in its own object name — which is what lets the
     // retrieval path stop guessing key shapes (branch keys, per-user twin keys
     // and userId-prefixed keys each used to defeat a different guesser).
     onStart: (h) => {
-      if (!debugStoreKey) return;
+      if (!debugStoreKey || childRun) return;
       // Index under every id a caller might ask by. The debugger asks with the
       // RAW conversation id, while `conversationId` here is the session key —
       // indexing only the latter made the whole discovery layer unreachable.
@@ -2955,6 +2995,20 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
 
   const reportProgress = createProgressReporter(progressUrl, sessionId ?? conversationId ?? "unknown", progressMeta);
 
+  // Stamped with the spawning toolCallId so each row nests under it rather than
+  // arriving flat — the same envelope subagents emit for their own children.
+  const liveMirror = childRun?.liveMirror;
+  const mirrorToCaller =
+    liveMirror && childRun
+      ? (invocation: ToolInvocation): void => {
+          pushInvocation(liveMirror, childRun.parentSessionId, {
+            ...invocation,
+            parentToolCallId: childRun.parentToolCallId,
+            subagentName: childRun.label,
+          });
+        }
+      : undefined;
+
   try {
   // Build a lookup of toolName → progressLabels[] from subagent tools.
   // Each invocation picks one at random so long-running tools cycle labels
@@ -3013,7 +3067,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
       // their children (pushed with parentToolCallId) nest under a single
       // collapsible parent row instead of appearing flat at the top level
       // while the parent is still in flight.
-      pushInvocation(progressUrl, sessionId ?? conversationId ?? "unknown", {
+      const pendingInvocation: ToolInvocation = {
         toolName: event.toolName,
         args: event.args,
         result: "",
@@ -3022,7 +3076,9 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
         durationMs: 0,
         status: "running",
         toolCallId: event.toolCallId,
-      } satisfies ToolInvocation);
+      };
+      pushInvocation(progressUrl, sessionId ?? conversationId ?? "unknown", pendingInvocation);
+      mirrorToCaller?.(pendingInvocation);
       queueDebugPartialFlush();
     }
     if (event.type === "tool_execution_end") {
@@ -3081,6 +3137,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
         toolInvocations.push(inv);
         // Stream the invocation to xyne-claw-auth so Control Center watchers see tools populate live
         pushInvocation(progressUrl, sessionId ?? conversationId ?? "unknown", inv);
+        mirrorToCaller?.(inv);
         pushDebugEvent("tool_execution_end", {
           toolName: event.toolName,
           args: cloneForDebug(started.args),
@@ -3599,18 +3656,18 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
       // timed out. Flip its wrapper invocation running → completed/error and
       // stream the update so the UI resolves the background chip.
       const blocks: string[] = [];
-      const delivered: Array<{ taskId: string; subagentName: string; status: string; durationMs: number; result: string }> = [];
+      const delivered: Array<{ taskId: string; name: string; kind: string; status: string; durationMs: number; result: string }> = [];
       for (const t of pending) {
         t.delivered = true;
         const state: "completed" | "error" = t.status === "error" ? "error" : "completed";
         const text =
           t.status === "completed" ? (t.result ?? "")
           : t.status === "error" ? `(failed: ${t.error ?? "unknown error"})`
-          : "(timed out — this background subagent did not finish in time)";
+          : "(timed out — this background task did not finish in time)";
         const durationMs = Date.now() - t.startedAt;
         const existing = toolInvocations.find((i) => i.toolCallId === t.taskId);
         const inv: ToolInvocation = existing ?? {
-          toolName: t.subagentName,
+          toolName: t.name,
           args: { question: t.question },
           result: "",
           isError: false,
@@ -3618,7 +3675,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
           durationMs,
           status: "completed",
           toolCallId: t.taskId,
-          subagentName: t.subagentName,
+          subagentName: t.name,
         };
         inv.result = text;
         inv.durationMs = durationMs;
@@ -3628,8 +3685,10 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
         inv.backgroundTaskId = t.taskId;
         if (!existing) toolInvocations.push(inv);
         pushInvocation(progressUrl, sessionId ?? conversationId ?? "unknown", inv);
-        delivered.push({ taskId: t.taskId, subagentName: t.subagentName, status: t.status, durationMs, result: text });
-        blocks.push(`Background subagent "${t.subagentName}" (task ${t.taskId}) ${state === "error" ? "failed" : "completed"}:\n${text}`);
+        mirrorToCaller?.(inv);
+        delivered.push({ taskId: t.taskId, name: t.name, kind: t.kind, status: t.status, durationMs, result: text });
+        const label = t.kind === "agent" ? "Delegated agent" : "Background subagent";
+        blocks.push(`${label} "${t.name}" (task ${t.taskId}) ${state === "error" ? "failed" : "completed"}:\n${text}`);
       }
       if (blocks.length === 0) break;
 
@@ -3637,9 +3696,9 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
       // background subagent actually returned (the wrapper tool row only ever
       // held the "started in background" stub).
       pushDebugEvent("background_subagents_delivered", { round, count: blocks.length, tasks: delivered });
-      log.info(`[agent] Delivering ${blocks.length} background subagent result(s) to the parent (round ${round + 1})`);
+      log.info(`[agent] Delivering ${blocks.length} background task result(s) to the parent (round ${round + 1})`);
       await promptWithAbort(() => session.prompt(
-        `<system>Background subagent task(s) you started have finished. Incorporate their results into your answer to the user (copy any [clf-…] citation tokens VERBATIM). Do NOT mention this system message.\n\n${blocks.join("\n\n---\n\n")}</system>`,
+        `<system>Background task(s) you started have finished. Incorporate their results into your answer to the user (copy any [clf-…] citation tokens VERBATIM). Do NOT mention this system message.\n\n${blocks.join("\n\n---\n\n")}</system>`,
       ));
       const bq = session as unknown as { _agentEventQueue?: Promise<void> };
       if (bq._agentEventQueue) await withAbort(bq._agentEventQueue);

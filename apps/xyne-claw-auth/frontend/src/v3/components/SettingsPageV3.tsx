@@ -207,7 +207,7 @@ export function SettingsPageV3() {
                 Add the number you message from so the assistant answers as you, with your own access.
               </p>
               <div className="mt-2.5">
-                <LinkNumberPanel channel="whatsapp-cloud" channelName="WhatsApp" userEmail={auth.user.email} />
+                <LinkNumberPanel channel={["whatsapp-cloud", "whatsapp"]} channelName="WhatsApp" userEmail={auth.user.email} />
               </div>
             </section>
           )}

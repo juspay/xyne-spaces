@@ -295,13 +295,13 @@ export function authStateFor(connectedSurfaceId: string): AuthStateStore {
 // ── identities ──
 
 /**
- * Link a sender id to a user. The self-service path: the signed-in session is
- * the only proof, and there is nothing to approve. Upsert rather than create
- * so re-adding your own number is idempotent.
+ * Link a sender id to a user for the whole org. The self-service path: the
+ * signed-in session is the only proof, and there is nothing to approve.
+ * Keyed by org rather than by account, so one link is recognised by every
+ * account on the channel. Upsert so re-adding your own number is idempotent.
  */
 export async function linkSenderToUser(input: {
   surfaceId: string;
-  accountKey: string;
   senderId: string;
   orgId: string;
   userId: string;
@@ -311,13 +311,13 @@ export async function linkSenderToUser(input: {
     where: {
       surfaceId_surfaceWorkspaceId_surfaceUserId: {
         surfaceId: input.surfaceId,
-        surfaceWorkspaceId: input.accountKey,
+        surfaceWorkspaceId: input.orgId,
         surfaceUserId: input.senderId,
       },
     },
     create: {
       surfaceId: input.surfaceId,
-      surfaceWorkspaceId: input.accountKey,
+      surfaceWorkspaceId: input.orgId,
       surfaceUserId: input.senderId,
       orgId: input.orgId,
       userId: input.userId,
@@ -329,22 +329,6 @@ export async function linkSenderToUser(input: {
     select: { linkedAt: true },
   });
   return row.linkedAt ?? now;
-}
-
-/** The raw identity row for a sender, whoever it belongs to — `resolveIdentity`
- *  hides rows from other orgs, which is exactly what a "is this number already
- *  taken?" check must NOT do. */
-export function findIdentityBySender(input: { surfaceId: string; accountKey: string; senderId: string }) {
-  return prisma.userSurfaceIdentity.findUnique({
-    where: {
-      surfaceId_surfaceWorkspaceId_surfaceUserId: {
-        surfaceId: input.surfaceId,
-        surfaceWorkspaceId: input.accountKey,
-        surfaceUserId: input.senderId,
-      },
-    },
-    select: { id: true, userId: true, orgId: true, status: true, linkedAt: true },
-  });
 }
 
 /** Every number this user has linked on one channel, newest first. */

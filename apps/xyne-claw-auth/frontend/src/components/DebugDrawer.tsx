@@ -772,8 +772,10 @@ function eventTitle(kind: string, data: Record<string, unknown>): string {
   if (kind === "session_prompt" || kind === "llm_request") return "LLM request";
   if (kind === "tool_palette_change") return "Tool palette changed";
   if (kind === "skill_loaded") return "Skill loaded";
-  if (kind === "subagent_start") return "Subagent started";
-  if (kind === "subagent_end") return "Subagent finished";
+  if (kind === "subagent_start" || kind === "subagent_end") {
+    const noun = data.childKind === "agent" ? "Agent" : "Subagent";
+    return `${noun} ${kind === "subagent_start" ? "started" : "finished"}`;
+  }
   if (kind === "provider_fallback") return "Provider fallback";
   if (kind === "delegation") return "Agent delegation";
   if (kind === "thinking") return "Thinking";
@@ -812,7 +814,7 @@ function eventIcon(kind: string): { Icon: typeof Bug; color: string } {
  */
 type EventVisual = { Icon: typeof Bug; label: string; rail: string; chip: string; quiet?: boolean };
 
-function eventVisual(kind: string, isError: boolean): EventVisual {
+function eventVisual(kind: string, isError: boolean, childKind?: string): EventVisual {
   if (isError) return { Icon: AlertCircle, label: kind === "session_cancelled" ? "CANCEL" : "ERROR", rail: "border-red-500", chip: "bg-red-500/10 text-red-700 dark:text-red-300" };
   if (kind.startsWith("tool_execution")) return { Icon: Wrench, label: "TOOL", rail: "border-amber-500", chip: "bg-amber-500/10 text-amber-700 dark:text-amber-300" };
   switch (kind) {
@@ -822,7 +824,10 @@ function eventVisual(kind: string, isError: boolean): EventVisual {
     case "tool_palette_change": return { Icon: Wrench, label: "PALETTE", rail: "border-amber-400", chip: "bg-amber-400/10 text-amber-700 dark:text-amber-300" };
     case "skill_loaded": return { Icon: Sparkles, label: "SKILL", rail: "border-indigo-500", chip: "bg-indigo-500/10 text-indigo-700 dark:text-indigo-300" };
     case "subagent_start":
-    case "subagent_end": return { Icon: Workflow, label: "SUB", rail: "border-cyan-500", chip: "bg-cyan-500/10 text-cyan-700 dark:text-cyan-300" };
+    case "subagent_end":
+      return childKind === "agent"
+        ? { Icon: Workflow, label: "AGENT", rail: "border-blue-500", chip: "bg-blue-500/10 text-blue-700 dark:text-blue-300" }
+        : { Icon: Workflow, label: "SUB", rail: "border-cyan-500", chip: "bg-cyan-500/10 text-cyan-700 dark:text-cyan-300" };
     case "delegation": return { Icon: Workflow, label: "A2A", rail: "border-blue-500", chip: "bg-blue-500/10 text-blue-700 dark:text-blue-300" };
     case "provider_fallback": return { Icon: RotateCcw, label: "FALLBACK", rail: "border-orange-500", chip: "bg-orange-500/10 text-orange-700 dark:text-orange-300" };
     case "thinking": return { Icon: Lightbulb, label: "THINK", rail: "border-violet-500", chip: "bg-violet-500/10 text-violet-700 dark:text-violet-300" };
@@ -1399,7 +1404,8 @@ function DebugEventItem({
   // redundant "Sending N messages" preview.
   const showSummary = Boolean(summary) && !isPromptEvent;
   const timestamp = isTool ? (at || startedAt) : at;
-  const visual = eventVisual(kind, isError);
+  const childKind = asString(data.childKind);
+  const visual = eventVisual(kind, isError, childKind);
   const VisualIcon = visual.Icon;
 
   // Title: tool name (mono) for tools; LLM request carries its msg count; the
@@ -1457,7 +1463,9 @@ function DebugEventItem({
             <span className="shrink-0 rounded bg-cyan-500/10 px-1 text-[9px] text-cyan-700 dark:text-cyan-300">{subagentName}</span>
           )}
           {subagentTraces.length > 0 && (
-            <span className="shrink-0 text-[10px] text-cyan-600 dark:text-cyan-400">+{subagentTraces.length} sub</span>
+            <span className="shrink-0 text-[10px] text-cyan-600 dark:text-cyan-400">
+              +{subagentTraces.length} {childKind === "agent" ? "agent" : "sub"}
+            </span>
           )}
           <span className="ml-auto flex shrink-0 items-center font-mono text-[10.5px] tabular-nums">
             <span className="w-[50px] text-right text-xyne-fg-secondary" title={timeTitle}>{timeText}</span>
@@ -1845,6 +1853,8 @@ function eventSummary(kind: string, data: Record<string, unknown>): string {
 type SubagentTraceGroup = {
   subagentName: string;
   parentToolCallId: string;
+  /** A full agent reached through `call-agent`, not a subagent tool. */
+  isDelegatedAgent?: boolean;
   trace: Record<string, unknown>;
 };
 
@@ -1853,6 +1863,7 @@ function groupSubagentTraces(traces: DebugArtifactBundle["subagents"]): Subagent
     .map((sub) => ({
       subagentName: asString(sub.data.subagentName) || sub.fileName,
       parentToolCallId: asString(sub.data.parentToolCallId),
+      isDelegatedAgent: asString(sub.data.childKind) === "agent",
       trace: sub.data,
     }))
     .filter((item) => item.parentToolCallId);
@@ -1860,17 +1871,21 @@ function groupSubagentTraces(traces: DebugArtifactBundle["subagents"]): Subagent
 
 function SubagentTraceInline({ traces, live = false }: { traces: SubagentTraceGroup[]; live?: boolean }) {
   if (traces.length === 0) return null;
+  // Agent and subagent are different things to the reader; mixed groups fall
+  // back to the neutral term.
+  const delegated = traces.filter((t) => t.isDelegatedAgent).length;
+  const noun = delegated === traces.length ? "Agent" : delegated === 0 ? "Subagent" : "Child";
   return (
     <div className="mt-1 space-y-1.5">
       <p className="flex items-center gap-1.5 text-[12px] font-semibold text-xyne-fg-secondary">
         <Workflow size={12} className="text-cyan-600 dark:text-cyan-400" />
-        Subagent trace{traces.length === 1 ? "" : "s"}
+        {noun} trace{traces.length === 1 ? "" : "s"}
       </p>
       <div className="space-y-1.5">
         {traces.map((sub) => (
           <div key={`${sub.parentToolCallId}:${sub.subagentName}`} className="rounded-md bg-xyne-surface px-2">
             <DebugTimelineSection
-              title={`${sub.subagentName}: ${truncate(asString(sub.trace.question) || "Subagent task", 80)}`}
+              title={`${sub.subagentName}: ${truncate(asString(sub.trace.question) || (sub.isDelegatedAgent ? "Delegated task" : "Subagent task"), 80)}`}
               data={sub.trace}
               live={live}
             />

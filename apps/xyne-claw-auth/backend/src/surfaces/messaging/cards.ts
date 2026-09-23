@@ -55,6 +55,10 @@ export interface ParkedOption {
   /** Conversation the run used, so a follow-up lands in the same history. */
   conversationId?: string;
   agentSlug?: string;
+  /** The other options of the same card. Answering a card answers all of it,
+   *  so redeeming one must retire the rest — otherwise "Decline" then
+   *  "Approve" still runs the write. */
+  siblings?: string[];
 }
 
 function redis() {
@@ -84,22 +88,27 @@ export async function parkOptions(
   if (options.length === 0) return;
   const pipe = redis().multi();
   for (const { token, option } of options) {
-    pipe.set(optionKey(accountId, token), JSON.stringify(option), "EX", CARD_TTL_S);
+    const siblings = options.map((o) => o.token).filter((t) => t !== token);
+    const stored: ParkedOption = { ...option, ...(siblings.length ? { siblings } : {}) };
+    pipe.set(optionKey(accountId, token), JSON.stringify(stored), "EX", CARD_TTL_S);
   }
-  // The numbered fallback: "1" means the first token of the newest menu.
+  // The numbered fallback: "1" means the first token of the newest menu. The
+  // sender is stored with it because a group's numbered menu is visible to
+  // everyone, and a bystander's "1" must not be read as an answer to it.
   const chatId = options[0]!.option.chatId;
-  pipe.set(menuKey(accountId, chatId), JSON.stringify(options.map((o) => o.token)), "EX", CARD_MENU_TTL_S);
+  const menu: StoredMenu = { tokens: options.map((o) => o.token), senderId: options[0]!.option.senderId };
+  pipe.set(menuKey(accountId, chatId), JSON.stringify(menu), "EX", CARD_MENU_TTL_S);
   await pipe.exec();
 }
 
 /**
- * Resolve a tapped id, single-use. A token survives exactly one redemption so
- * a forwarded message or a double-tap cannot run a write twice.
+ * Read a parked option without spending it, so the caller can check who is
+ * answering before anything is destroyed. A stranger typing "1" in a group
+ * must not be able to retire someone else's pending approval.
  */
-export async function consumeOption(accountId: string, token: string): Promise<ParkedOption | null> {
-  const key = optionKey(accountId, token);
+export async function peekOption(accountId: string, token: string): Promise<ParkedOption | null> {
   try {
-    const raw = await redis().getdel(key);
+    const raw = await redis().get(optionKey(accountId, token));
     return raw ? (JSON.parse(raw) as ParkedOption) : null;
   } catch (err) {
     log.warn(`[cards] option lookup failed account=${accountId}: ${String(err)}`);
@@ -107,13 +116,59 @@ export async function consumeOption(accountId: string, token: string): Promise<P
   }
 }
 
-/** Resolve a typed "2" against the newest menu in this chat. */
-export async function tokenForMenuChoice(accountId: string, chatId: string, choice: number): Promise<string | null> {
+/**
+ * Claim a card, atomically. Reading the tapped option and retiring the rest of
+ * the card in one script is what makes "Approve" and "Decline" mutually
+ * exclusive: done in two round trips, both taps read their own option before
+ * either delete lands, and both succeed. Redis runs scripts serially, so the
+ * second tap finds its key already gone.
+ */
+const CLAIM_LUA = `
+local raw = redis.call("GET", KEYS[1])
+if not raw then return nil end
+for i = 1, #KEYS do redis.call("DEL", KEYS[i]) end
+return raw`;
+
+export async function consumeOption(accountId: string, token: string): Promise<ParkedOption | null> {
+  try {
+    // Siblings come from the stored payload, so peek first to learn them —
+    // the claim itself is still one atomic step, and a peek that races a
+    // winning claim simply finds nothing to delete.
+    const parked = await peekOption(accountId, token);
+    const keys = [optionKey(accountId, token), ...(parked?.siblings ?? []).map((t) => optionKey(accountId, t))];
+    const raw = (await redis().eval(CLAIM_LUA, keys.length, ...keys)) as string | null;
+    return raw ? (JSON.parse(raw) as ParkedOption) : null;
+  } catch (err) {
+    log.warn(`[cards] option claim failed account=${accountId}: ${String(err)}`);
+    return null;
+  }
+}
+
+interface StoredMenu {
+  tokens: string[];
+  senderId: string;
+}
+
+/**
+ * Resolve a typed "2" against the newest menu in this chat — but only for the
+ * person it was offered to. Returns null for anyone else, so their "2" is
+ * treated as the ordinary message it almost certainly is.
+ */
+export async function tokenForMenuChoice(
+  accountId: string,
+  chatId: string,
+  choice: number,
+  senderId: string,
+): Promise<string | null> {
   try {
     const raw = await redis().get(menuKey(accountId, chatId));
     if (!raw) return null;
-    const tokens = JSON.parse(raw) as string[];
-    return tokens[choice - 1] ?? null;
+    const parsed = JSON.parse(raw) as StoredMenu | string[];
+    // Menus parked before this field existed carry no owner; treat them as
+    // anyone's rather than breaking a card that is already on someone's screen.
+    const menu: StoredMenu = Array.isArray(parsed) ? { tokens: parsed, senderId } : parsed;
+    if (menu.senderId && menu.senderId !== senderId) return null;
+    return menu.tokens[choice - 1] ?? null;
   } catch {
     return null;
   }

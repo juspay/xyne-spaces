@@ -94,7 +94,7 @@ export interface StartRunInput {
   userId: string;
   agentSlug: string;
   orgId: string;
-  triggerSource: "spaces" | "scheduled" | "chat" | "api" | "automation" | "slack" | "heartbeat" | "reflex" | "app" | MessagingChannelKey;
+  triggerSource: "spaces" | "scheduled" | "chat" | "api" | "automation" | "slack" | "heartbeat" | "reflex" | "app" | "delegation" | MessagingChannelKey;
   task: string;
   conversationId?: string | null;
   scheduledJobId?: string | null;
@@ -103,6 +103,10 @@ export interface StartRunInput {
   projectName?: string | null;
   fastMode?: boolean | null;
   metadata?: unknown;
+  /** Delegated runs only: the caller's session, agent and tool call. */
+  parentSessionId?: string | null;
+  parentAgentSlug?: string | null;
+  parentToolCallId?: string | null;
 }
 
 export interface FinalizeRunInput {
@@ -253,6 +257,9 @@ const RUN_LIST_SELECT = {
   tokensIn: true,
   tokensOut: true,
   rating: true,
+  // Who delegated this run, so the panel can mark it as a child and link back.
+  parentSessionId: true,
+  parentAgentSlug: true,
 } satisfies Prisma.AgentRunSelect;
 
 /** Upper bound on task text shipped per list row. Not `listByAgentSlug`'s 240:
@@ -287,6 +294,9 @@ export const agentRunRepository = {
           ...(input.projectId ? { projectId: input.projectId } : {}),
           ...(input.projectName ? { projectName: input.projectName } : {}),
           ...(input.metadata !== undefined ? { metadata: input.metadata as Prisma.InputJsonValue } : {}),
+          ...(input.parentSessionId ? { parentSessionId: input.parentSessionId } : {}),
+          ...(input.parentAgentSlug ? { parentAgentSlug: input.parentAgentSlug } : {}),
+          ...(input.parentToolCallId ? { parentToolCallId: input.parentToolCallId } : {}),
         },
       });
       log.info(
@@ -566,6 +576,8 @@ export const agentRunRepository = {
         startedAt: true,
         completedAt: true,
         chatMessageId: true,
+        parentSessionId: true,
+        parentAgentSlug: true,
         // Included because routes/agent-chat.ts and routes/runs.ts pair
         // assistant messages with their tool invocations from a listByUser
         // call. If a future caller needs the cheaper variant (no JSON blob),
@@ -611,6 +623,8 @@ export const agentRunRepository = {
         currentToolLabel: true,
         task: true,
         conversationId: true,
+        parentSessionId: true,
+        parentAgentSlug: true,
         scheduledJobId: true,
         channelId: true,
         projectId: true,
@@ -848,6 +862,8 @@ export const agentRunRepository = {
         triggerSource: true,
         task: true,
         conversationId: true,
+        parentSessionId: true,
+        parentAgentSlug: true,
         channelId: true,
         toolsUsed: true,
         tokensIn: true,
@@ -932,6 +948,8 @@ export const agentRunRepository = {
         // build chat-deep-links from them. Adding 2 short text columns
         // doesn't meaningfully change the payload size.
         conversationId: true,
+        parentSessionId: true,
+        parentAgentSlug: true,
         channelId: true,
       },
       orderBy: { startedAt: "desc" },
@@ -966,6 +984,8 @@ export const agentRunRepository = {
         startedAt: true,
         completedAt: true,
         conversationId: true,
+        parentSessionId: true,
+        parentAgentSlug: true,
         channelId: true,
         task: true,
       },

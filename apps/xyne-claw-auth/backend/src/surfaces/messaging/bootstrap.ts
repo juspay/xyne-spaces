@@ -5,6 +5,7 @@
  * messenger and another pod takes over within one sweep.
  */
 import { accountManager } from "./account-manager.js";
+import { closeOutboxWaiters } from "./delivery.js";
 import { registerChannel } from "./plugin.js";
 import { whatsappCloudPlugin } from "../whatsapp-cloud/plugin.js";
 import { whatsappPlugin } from "../whatsapp/plugin.js";
@@ -25,4 +26,5 @@ export function initMessagingAccountManager(): void {
 
 export async function closeMessagingAccountManager(): Promise<void> {
   await accountManager.stop();
+  await closeOutboxWaiters();
 }
