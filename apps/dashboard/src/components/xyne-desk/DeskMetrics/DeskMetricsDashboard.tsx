@@ -3090,7 +3090,9 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                   <div className='flex flex-col items-center justify-center gap-2 rounded-[12px] border border-dashed border-desk-border py-16 text-center dark:border-border'>
                     <BarChart3 size={28} className='text-muted-foreground/70' />
                     <p className='text-sm font-medium text-foreground'>
-                      No activity in this time range
+                      {dateBasis === 'resolved'
+                        ? 'No tickets resolved in this time range'
+                        : 'No activity in this time range'}
                     </p>
                     <p className='max-w-[420px] text-xs text-muted-foreground'>
                       Metrics are collected from when desk metrics were enabled for this desk.

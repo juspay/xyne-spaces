@@ -354,9 +354,9 @@ export class DeskMetricsRepository {
       )`;
 
     // Tickets without TICKET_CREATED may have replies from before EMAIL_SENT was recorded, so
-    // their first recorded reply isn't their first response — leave them out of FRT.
+    // their first recorded reply isn't their first response. Stage moves were logged before that.
     const frtStop =
-      params.dateBasis === 'resolved'
+      params.dateBasis === 'resolved' && includeEmailReply
         ? Prisma.sql`CASE WHEN c.tracked THEN ${frtStopSql()} END`
         : frtStopSql();
 
@@ -991,7 +991,8 @@ export class DeskMetricsRepository {
         LEFT JOIN "public"."users" u ON u.id = t."assignedTo"
         LEFT JOIN form_vals fv ON fv.ticket_id = c."ticketId"
         LEFT JOIN ticket_tags_agg tta ON tta.ticket_id = c."ticketId"
-        CROSS JOIN LATERAL (SELECT ${resolvedAtSql} AS resolved_at) ra
+        -- OFFSET 0 stops Postgres inlining this into both uses, so the lookup runs once per row.
+        CROSS JOIN LATERAL (SELECT ${resolvedAtSql} AS resolved_at OFFSET 0) ra
         ORDER BY c.created_at DESC${limitSql}
       `
     );
