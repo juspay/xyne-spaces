@@ -1,3 +1,10 @@
+## [1.318.0-release-20260915.5](https://github.com/juspay/xyne-spaces/compare/v1.318.0-release-20260915.4...v1.318.0-release-20260915.5) (2026-09-23)
+
+
+### Bug Fixes
+
+* KB-scoped Ask AI attachment + Vespa chunk access for public collections ([#1784](https://github.com/juspay/xyne-spaces/issues/1784)) ([#2235](https://github.com/juspay/xyne-spaces/issues/2235)) ([d7d29d4](https://github.com/juspay/xyne-spaces/commit/d7d29d4f5498e1760d1810c0e7c5eb353aed5e18))
+
 ## [1.318.0-release-20260915.4](https://github.com/juspay/xyne-spaces/compare/v1.318.0-release-20260915.3...v1.318.0-release-20260915.4) (2026-09-16)
 
 
