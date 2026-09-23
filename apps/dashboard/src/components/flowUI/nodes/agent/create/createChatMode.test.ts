@@ -5,6 +5,8 @@ import {
   compactCreateDraftChatReply,
   decideCreateCanvasAction,
   parseCreateChatAction,
+  sectionCompleteChatLine,
+  shouldHoldDraftChatAck,
   stripCreateMarkers,
   visibleCreateReply,
 } from './createChatMode.ts';
@@ -23,7 +25,29 @@ void describe('parseCreateChatAction', () => {
     assert.match(q, /standup bot/);
     assert.match(q, /XYNE_CREATE_ASK/);
     assert.match(q, /also suggest the matching Hub rows/);
+    assert.match(q, /# Agent authoring/);
+    assert.match(q, /Ask AI chat/);
+    assert.doesNotMatch(q, /propose-agent/);
     assert.doesNotMatch(q, /In chat, state them explicitly as \*\*Name\*\*/);
+  });
+
+  void it('holds draft chat ack until canvas sections land', () => {
+    const draft =
+      'Drafted Design Radar on the canvas.\nXYNE_CREATE_DRAFT: design radar';
+    assert.equal(shouldHoldDraftChatAck(draft), true);
+    assert.equal(visibleCreateReply(draft, true), '');
+    assert.equal(visibleCreateReply(draft, false), '');
+    assert.equal(
+      shouldHoldDraftChatAck('Hi — the canvas on the right is the agent.\nXYNE_CREATE_IDLE'),
+      false,
+    );
+    assert.equal(
+      visibleCreateReply('Hi — the canvas on the right is the agent.\nXYNE_CREATE_IDLE', false),
+      'Hi — the canvas on the right is the agent.',
+    );
+    assert.equal(sectionCompleteChatLine({ field: 'name', name: 'Standup Scribe' }), 'Name set to Standup Scribe.');
+    assert.equal(sectionCompleteChatLine({ field: 'systemPrompt' }), 'Instructions are on the canvas.');
+    assert.equal(sectionCompleteChatLine({ field: 'tools', hubRow: 'mcp' }), 'Also suggested MCP for email / X.');
   });
 
   void it('strips draft markers from the visible reply', () => {
@@ -45,7 +69,7 @@ void describe('parseCreateChatAction', () => {
     assert.equal(compactCreateDraftChatReply(wall), 'Drafted Design Radar on the canvas.');
     assert.equal(
       visibleCreateReply(`${wall}\nXYNE_CREATE_DRAFT: design radar`, false),
-      'Drafted Design Radar on the canvas.',
+      '',
     );
     assert.equal(
       compactCreateDraftChatReply('Drafted Design Radar on the canvas.'),

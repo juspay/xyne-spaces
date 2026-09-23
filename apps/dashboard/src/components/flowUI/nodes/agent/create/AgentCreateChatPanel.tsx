@@ -29,8 +29,10 @@ import { cn } from '@/utils/classNames';
 import { buildXyneAIStreamThreadId, newStreamSlotKey } from '@/utils/xyneAIStreamThreadId';
 import {
   createModeQuery,
-  compactCreateDraftChatReply,
+  decideCreateCanvasAction,
   parseCreateChatAction,
+  resolveWalkCreateAction,
+  shouldHoldDraftChatAck,
   visibleCreateReply,
   type CreateCanvasSnapshot,
   type ParsedCreateChatAction,
@@ -89,6 +91,8 @@ const toMessageAttachments = (attachments: AIComposerAttachment[]): MessageAttac
 export interface CreateChatTurn {
   userText: string;
   marker: ParsedCreateChatAction;
+  /** Append a short line after a canvas section lands (canvas-first order). */
+  announceSection?: (line: string) => void;
 }
 
 interface AgentCreateChatPanelProps {
@@ -178,6 +182,52 @@ function LiveAgentCreateChatPanel({
     }
   }, [conversationId, messages, streamThreadKey]);
 
+  const canvasStartedForUserRef = useRef<string | null>(null);
+
+  const announceOnBot = useCallback((botId: string, line: string): void => {
+    const trimmed = line.trim();
+    if (!trimmed) return;
+    setMessages(prev =>
+      prev.map(message => {
+        if (message.id !== botId) return message;
+        const prior = (message.content || message.streamingContent || '').trim();
+        const next = prior ? `${prior}\n${trimmed}` : trimmed;
+        return {
+          ...message,
+          content: next,
+          streamingContent: next,
+          isStreaming: false,
+        };
+      }),
+    );
+  }, []);
+
+  const runCanvasTurn = useCallback(
+    async (userText: string, raw: string, botId: string): Promise<void> => {
+      const marker = parseCreateChatAction(raw);
+      const holdAck = shouldHoldDraftChatAck(raw);
+      if (holdAck) {
+        // Canvas first: clear premature draft ack from the bot bubble.
+        setMessages(prev =>
+          prev.map(message =>
+            message.id === botId
+              ? { ...message, content: '', streamingContent: '', isStreaming: false }
+              : message,
+          ),
+        );
+      }
+      await onTurnCompleteRef.current({
+        userText,
+        marker,
+        announceSection: (line: string) => {
+          announceOnBot(botId, line);
+        },
+      });
+    },
+    [announceOnBot],
+  );
+
+  // Canvas-first on turn complete: hold draft ack during stream, then write canvas before chat lines.
   useEffect(() => {
     if (streaming) return;
     const lastUser = [...messages].reverse().find(message => message.type === 'user');
@@ -188,25 +238,80 @@ function LiveAgentCreateChatPanel({
     handledUserIdsRef.current.add(lastUser.id);
     if (lastBot.errorInfo || lastBot.isAborted) return;
     const raw = lastBot.content || lastBot.streamingContent || '';
-    const marker = parseCreateChatAction(raw);
-    const compacted = compactCreateDraftChatReply(marker.visible);
-    if (compacted.trim() && compacted.trim() !== marker.visible.trim()) {
-      setMessages(prev =>
-        prev.map(message =>
-          message.id === lastBot.id
-            ? {
-                ...message,
-                content: compacted,
-                streamingContent: compacted,
-              }
-            : message,
-        ),
+    // Reply-only: keep streamed answer. Draft: canvas pipeline first, then section lines.
+    if (!shouldHoldDraftChatAck(raw)) {
+      void onTurnCompleteRef.current({ userText: lastUser.content, marker: parseCreateChatAction(raw) }).catch(
+        (err: unknown) => {
+          setCanvasError(clawErrorText(err, 'Could not draft from chat. Try again.'));
+        },
       );
+      return;
     }
-    void onTurnCompleteRef.current({ userText: lastUser.content, marker }).catch((err: unknown) => {
+    canvasStartedForUserRef.current = lastUser.id;
+    void runCanvasTurn(lastUser.content, raw, lastBot.id).catch((err: unknown) => {
       setCanvasError(clawErrorText(err, 'Could not draft from chat. Try again.'));
     });
-  }, [messages, streaming]);
+  }, [messages, streaming, runCanvasTurn]);
+
+  // DEV proof hook: seed user/bot rows then run canvas-first pipeline (no live LLM).
+  useEffect(() => {
+    if (!import.meta.env.DEV) return undefined;
+    const host = window as Window & {
+      __xyneCreateProofTurn?: (userText: string, visibleReply?: string) => Promise<void>;
+    };
+    host.__xyneCreateProofTurn = async (userText, visibleReply) => {
+      setCanvasError(null);
+      const walk = resolveWalkCreateAction(userText);
+      const raw =
+        walk && walk.type === 'draft'
+          ? `${walk.visibleReply || visibleReply || ''}\nXYNE_CREATE_DRAFT: ${walk.intent}`
+          : (visibleReply ?? userText);
+      const marker = parseCreateChatAction(raw);
+      const action =
+        walk ??
+        decideCreateCanvasAction({
+          userText,
+          canvasEmpty: canvasRef.current.empty,
+          marker,
+        });
+      const userId = `proof-user-${Date.now()}`;
+      const botId = `proof-bot-${Date.now()}`;
+      const holdAck = action.type === 'draft' || action.type === 'rename' || shouldHoldDraftChatAck(raw);
+      const replyOnly = !holdAck;
+      setMessages([
+        {
+          id: userId,
+          type: 'user',
+          content: userText,
+          timestamp: new Date(),
+        },
+        {
+          id: botId,
+          type: 'bot',
+          content: replyOnly ? marker.visible : '',
+          streamingContent: replyOnly ? marker.visible : '',
+          isStreaming: false,
+          timestamp: new Date(),
+        },
+      ]);
+      handledUserIdsRef.current.add(userId);
+      canvasStartedForUserRef.current = userId;
+      await onTurnCompleteRef.current({
+        userText,
+        marker,
+        ...(holdAck
+          ? {
+              announceSection: (line: string) => {
+                announceOnBot(botId, line);
+              },
+            }
+          : {}),
+      });
+    };
+    return (): void => {
+      delete host.__xyneCreateProofTurn;
+    };
+  }, [announceOnBot]);
 
   const handleSubmit = useCallback(
     async (

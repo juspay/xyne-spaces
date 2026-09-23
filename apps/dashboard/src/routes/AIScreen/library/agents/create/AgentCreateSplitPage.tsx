@@ -34,7 +34,6 @@ import { DiscardDraftDialog } from '@/components/flowUI/nodes/agent/create/Disca
 import {
   applyCreateHubDraft,
   decideCreateCanvasAction,
-  parseCreateChatAction,
   resolveWalkCreateAction,
   WALK_BUILTIN_HUB_USER_TEXT,
   type CreateCanvasSnapshot,
@@ -89,7 +88,6 @@ export function AgentCreateSplitPage({
   const [skeletonIdentity, setSkeletonIdentity] = useState(false);
   const [progressLabel, setProgressLabel] = useState<string | null>(null);
   const canvasTurnChainRef = useRef(Promise.resolve());
-  const onTurnCompleteRef = useRef<(turn: CreateChatTurn) => Promise<void>>(async () => undefined);
 
   const slug = effectiveSlug({
     name: createForm.form.name,
@@ -251,6 +249,7 @@ export function AgentCreateSplitPage({
           setProgressLabel,
           applyChatPatch: createForm.applyChatPatch,
           sleep,
+          ...(turn.announceSection ? { onSectionComplete: turn.announceSection } : {}),
           ...(action.fields.includes('tools')
             ? {
                 fillTools: async (incoming: AgentCreateChatPatch) => {
@@ -384,28 +383,6 @@ export function AgentCreateSplitPage({
     [createForm, scripted, user?.id],
   );
 
-  onTurnCompleteRef.current = onTurnComplete;
-
-  useEffect(() => {
-    if (scripted || !import.meta.env.DEV) return undefined;
-    const host = window as Window & {
-      __xyneCreateProofTurn?: (userText: string, visibleReply?: string) => Promise<void>;
-    };
-    host.__xyneCreateProofTurn = async (userText, visibleReply) => {
-      const walk = resolveWalkCreateAction(userText);
-      const raw =
-        walk && walk.type === 'draft'
-          ? `${walk.visibleReply || visibleReply || 'Drafted on the canvas.'}\nXYNE_CREATE_DRAFT: ${walk.intent}`
-          : `${visibleReply ?? 'Drafted on the canvas.'}\nXYNE_CREATE_DRAFT: ${userText}`;
-      await onTurnCompleteRef.current({
-        userText,
-        marker: parseCreateChatAction(raw),
-      });
-    };
-    return (): void => {
-      delete host.__xyneCreateProofTurn;
-    };
-  }, [scripted]);
 
   const persist = useCallback(async (): Promise<void> => {
     if (scripted || !canCreate || creating) return;

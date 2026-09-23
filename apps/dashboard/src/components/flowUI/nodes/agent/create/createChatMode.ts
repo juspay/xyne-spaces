@@ -166,6 +166,7 @@ export async function revealCreatePatchFields(args: {
     options: { highlight: boolean },
   ) => AgentCreateField[];
   sleep: (ms: number) => Promise<void>;
+  onFieldComplete?: (field: CreateTurnField, hubRow: AgentCreateHubRow | null) => void;
 }): Promise<void> {
   const patch = pickPatch(args.incoming, [...args.fields]);
   const reveal = CREATE_REVEAL_FIELD_ORDER.filter(field => args.fields.includes(field));
@@ -211,6 +212,7 @@ export async function revealCreatePatchFields(args: {
         patchForText: partial => ({ name: partial }),
         ...revealArgs,
       });
+      args.onFieldComplete?.(field, hubRow);
       continue;
     }
     if (field === 'slug' && typeof slice.slug === 'string') {
@@ -221,6 +223,7 @@ export async function revealCreatePatchFields(args: {
         patchForText: partial => ({ slug: partial }),
         ...revealArgs,
       });
+      args.onFieldComplete?.(field, hubRow);
       continue;
     }
     if (field === 'description' && typeof slice.description === 'string') {
@@ -231,6 +234,7 @@ export async function revealCreatePatchFields(args: {
         patchForText: partial => ({ description: partial }),
         ...revealArgs,
       });
+      args.onFieldComplete?.(field, hubRow);
       continue;
     }
     if (field === 'systemPrompt' && typeof slice.systemPrompt === 'string') {
@@ -241,6 +245,7 @@ export async function revealCreatePatchFields(args: {
         patchForText: partial => ({ systemPrompt: partial }),
         ...revealArgs,
       });
+      args.onFieldComplete?.(field, hubRow);
       continue;
     }
 
@@ -260,6 +265,7 @@ export async function revealCreatePatchFields(args: {
     }
     await args.sleep(args.writeMs);
     args.setWritingField(null);
+    args.onFieldComplete?.(field, hubRow);
   }
 }
 
@@ -268,6 +274,24 @@ const RENAME_RE = /^\s*XYNE_CREATE_RENAME:\s*(.+?)\s*$/im;
 const IDLE_RE = /^\s*XYNE_CREATE_IDLE\b/im;
 const ASK_RE = /^\s*XYNE_CREATE_ASK\b/im;
 const PARTIAL_MARKER_TAIL = /\n?\s*XYNE_CREATE_[A-Z]*\s*:?\s*[^\n]*$/i;
+const PARTIAL_DRAFT_MARKER = /\bXYNE_CREATE_DRAFT\b/i;
+
+/**
+ * Hub-adapted Xyne Agent authoring brain (from seed-xyne-agent AUTHORING_PROMPT_APPENDIX).
+ * Tools stay disabled on Hub create — markers drive the canvas instead of propose-agent cards.
+ */
+export const HUB_AUTHORING_PROMPT_APPENDIX = `
+
+# Agent authoring
+
+You author agents the same way as Xyne Agent, but this screen uses canvas markers — not propose-agent cards.
+
+When the user asks to create a new agent:
+1. Infer the job, a crisp name, a one-line description, and a real system prompt (role, procedure, which capabilities to use when, output format, limits) — not a one-liner.
+2. Prefer a usable draft over interviewing. Call nothing; tools are off here.
+3. Emit XYNE_CREATE_DRAFT: <one-line intent> as soon as the draft is decided. Do not narrate "Drafted …" or paste Name/Description/Instructions/Rules into chat — the client writes the canvas and announces each section after it lands.
+4. Do not claim the agent exists until the user hits Create. Do not mention markers.
+`;
 
 function markerLineRe(): RegExp {
   return /^\s*XYNE_CREATE_(?:DRAFT|RENAME|IDLE|ASK)\s*(?::\s*.+)?\s*$/gim;
@@ -288,16 +312,17 @@ export function buildCreateModeInstructions(snapshot: CreateCanvasSnapshot): str
           : '- instructions: (empty)',
       ].join('\n');
 
-  return `You are Xyne AI on the agent-create screen — the same chat as /ai/chat.
+  return `You are Xyne AI on the agent-create screen — the same Ask AI chat as /ai/chat, with Xyne Agent authoring judgment.
 Left pane is this conversation. The canvas on the right is the agent spec (name, handle, description, instructions, MCP, tools, skills, knowledge). You do not write the canvas yourself; the client writes it only when you emit a draft marker.
 
 ${canvas}
+${HUB_AUTHORING_PROMPT_APPENDIX}
 
 Default to a usable draft. The user can discover and edit the rest on the canvas.
 
 Rules:
 1. Greetings, UI questions, explanations, and nonsense (random characters, gibberish): reply in chat only. End with XYNE_CREATE_IDLE. Do not draft.
-2. A job, even a thin one ("standup bot", "I wanna do A", "make an agent that …"): draft a usable agent from reasonable defaults. Reply with one short sentence that names the agent (e.g. "Drafted Design Radar on the canvas."). Then emit XYNE_CREATE_DRAFT: <one-line intent>. Do not interview first.
+2. A job, even a thin one ("standup bot", "I wanna do A", "make an agent that …"): draft a usable agent from reasonable defaults. Emit XYNE_CREATE_DRAFT: <one-line intent> with little or no prose — the client fills the canvas and speaks after each section lands. Do not interview first. Do not say "Drafted … on the canvas."
 3. Ask 1–3 short questions only when a draft would be wrong without the answer (two contradictory jobs, which of two systems). Then emit XYNE_CREATE_ASK and do not draft. Unanswered questions never block Create.
 4. First drafts always fill name, handle, description, and instructions on the canvas. When the user clearly needs capabilities (Slack, email, X.com, browse/search, skills, knowledge, subagents), also suggest the matching Hub rows after identity — one section at a time. Vague “make a bot” stays identity-only. Never paste Name, Description, Instructions, or Rules into chat — the canvas is the source of truth.
 5. Canvas edits (rename, shorter instructions, add Slack): emit DRAFT or RENAME as appropriate.
@@ -307,6 +332,36 @@ Rules:
 
 export function createModeQuery(userText: string, snapshot: CreateCanvasSnapshot): string {
   return `${userText}\n\n---\n${buildCreateModeInstructions(snapshot)}`;
+}
+
+/** True when the model is (or will be) driving a canvas draft — hold chat ack until sections land. */
+export function shouldHoldDraftChatAck(text: string): boolean {
+  if (PARTIAL_DRAFT_MARKER.test(text)) return true;
+  const marker = parseCreateChatAction(text);
+  return Boolean(marker.draftIntent);
+}
+
+export function sectionCompleteChatLine(args: {
+  field: CreateTurnField;
+  hubRow?: AgentCreateHubRow | null;
+  name?: string | null;
+}): string | null {
+  const { field, hubRow = null, name = null } = args;
+  if (field === 'name') {
+    const trimmed = name?.trim();
+    return trimmed ? `Name set to ${trimmed}.` : 'Name is on the canvas.';
+  }
+  if (field === 'systemPrompt') {
+    return 'Instructions are on the canvas.';
+  }
+  if (field === 'tools') {
+    if (hubRow === 'builtin') return 'Also suggested tools on the canvas.';
+    if (hubRow === 'subagent') return 'Also suggested a subagent on the canvas.';
+    return 'Also suggested MCP for email / X.';
+  }
+  if (field === 'skills') return 'Also suggested skills on the canvas.';
+  if (field === 'knowledge') return 'Also suggested knowledge on the canvas.';
+  return null;
 }
 
 export function stripCreateMarkers(text: string, streaming = false): string {
@@ -335,6 +390,20 @@ export function parseCreateChatAction(text: string): ParsedCreateChatAction {
 }
 
 export function visibleCreateReply(text: string, streaming: boolean): string {
+  // Draft / rename: hold premature ack while streaming. After markers are cleared,
+  // section-complete lines (appended by the client) are shown as normal chat text.
+  if (shouldHoldDraftChatAck(text)) {
+    if (streaming) return '';
+    const stripped = stripCreateMarkers(text, false).trim();
+    if (
+      !stripped ||
+      looksLikeCreateProfileDump(stripped) ||
+      /^Drafted .+ on the canvas\.?$/i.test(stripped)
+    ) {
+      return '';
+    }
+    return stripped;
+  }
   const stripped = stripCreateMarkers(text, streaming);
   const compacted = compactCreateDraftChatReply(stripped);
   return streaming ? compacted : compacted.trim();
@@ -559,6 +628,8 @@ export async function applyCreateHubDraft(args: {
   fillSkills?: (incoming: AgentCreateChatPatch) => Promise<void>;
   fillKnowledge?: (incoming: AgentCreateChatPatch) => Promise<void>;
   toolsHubRow?: AgentCreateHubRow;
+  /** Chat announces after each section write settles (canvas-first). */
+  onSectionComplete?: (line: string) => void;
 }): Promise<void> {
   const { action, canvasEmpty } = args;
   const toolsHubRow = args.toolsHubRow ?? 'mcp';
@@ -594,6 +665,18 @@ export async function applyCreateHubDraft(args: {
     };
     if (args.setAttentionField) revealArgs.setAttentionField = args.setAttentionField;
     if (args.setProgressLabel) revealArgs.setProgressLabel = args.setProgressLabel;
+    const announceField = (field: CreateTurnField, hubRow: AgentCreateHubRow | null): void => {
+      if (field !== 'name' && field !== 'systemPrompt' && field !== 'tools' && field !== 'skills' && field !== 'knowledge') {
+        return;
+      }
+      const line = sectionCompleteChatLine({
+        field,
+        hubRow,
+        name: typeof preludePatch.name === 'string' ? preludePatch.name : null,
+      });
+      if (line) args.onSectionComplete?.(line);
+    };
+    if (args.onSectionComplete) revealArgs.onFieldComplete = announceField;
     if (preludeFields.includes('name')) {
       await revealCreatePatchFields({
         ...revealArgs,
@@ -702,6 +785,19 @@ export async function applyCreateHubDraft(args: {
   };
   if (args.setAttentionField) tailArgs.setAttentionField = args.setAttentionField;
   if (args.setProgressLabel) tailArgs.setProgressLabel = args.setProgressLabel;
+  if (args.onSectionComplete) {
+    tailArgs.onFieldComplete = (field, hubRow) => {
+      if (field !== 'systemPrompt' && field !== 'tools' && field !== 'skills' && field !== 'knowledge') {
+        return;
+      }
+      const line = sectionCompleteChatLine({
+        field,
+        hubRow,
+        name: typeof incoming.name === 'string' ? incoming.name : null,
+      });
+      if (line) args.onSectionComplete?.(line);
+    };
+  }
   await revealCreatePatchFields(tailArgs);
 
   args.setWritingField(null);
