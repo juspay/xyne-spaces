@@ -135,6 +135,8 @@ export const writeConversationAnchor = async (
   conversationId: string,
   summary: ParentMessageSummary,
 ): Promise<void> => {
+  if (summary.conversationId && summary.conversationId === conversationId) return;
+
   const conversation = await tx.conversation.findUnique({
     where: { conversationId },
     select: { parent_message_md: true },
@@ -185,6 +187,8 @@ export const linkSubTicketConversationToParent = async (
     },
   });
   if (!parent?.conversationId) return;
+
+  if (child.conversationId === parent.conversationId) return;
 
   const parentConversation = await tx.conversation.findUnique({
     where: { conversationId: parent.conversationId },

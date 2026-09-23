@@ -26,7 +26,7 @@ export function AgentCreatedBanner({
   }, [onDismiss, pendingRegistration]);
 
   const summary = pendingRegistration
-    ? "An admin still has to register it in Spaces, so it can't be @mentioned there yet."
+    ? "An admin still has to register this agent. Until that is done it can't be mentioned in a chat."
     : agent.description.trim() ||
       'Add tools, skills and knowledge here, or start a chat and put it to work.';
 
@@ -57,7 +57,7 @@ export function AgentCreatedBanner({
         <p className='text-[13px] font-normal leading-[18px] text-foreground/80'>{summary}</p>
         <p className='text-[12px] leading-[16px] text-muted-foreground'>
           {pendingRegistration
-            ? 'You can already chat with it here in Ask AI.'
+            ? 'You can still chat with the agent from here.'
             : `Mention @${agent.slug} in any chat, or start one below.`}
         </p>
 

@@ -37,7 +37,7 @@ import { unwrapExactSearchQuery } from '../utils/exactSearch';
 
 type SearchTrigger = 'keyboard_shortcut' | 'click' | 'auto_focus';
 type SearchLocation = 'global' | 'channel' | 'dm';
-type QuerySource = 'KEYBOARD' | 'CLIPBOARD_PASTE';
+type QuerySource = 'KEYBOARD' | 'CLIPBOARD_PASTE' | 'RECENT';
 
 type SelectedMention = { id: string; type: ChipType; prefix?: string; name?: string };
 
@@ -408,6 +408,14 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
     if (querySourceRef.current === 'CLIPBOARD_PASTE') {
       isModifiedRef.current = true;
     }
+  }, []);
+
+  /**
+   * Handle replay of a saved recent search
+   * Tags query_source as RECENT so this session's impression + session-end carry the origin.
+   */
+  const markRecentReplay = useCallback(() => {
+    querySourceRef.current = 'RECENT';
   }, []);
 
   /**
@@ -1769,6 +1777,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
     // Clipboard tracking callbacks
     onPasteDetected: handlePasteDetected,
     onManualKeystroke: handleManualKeystroke,
+    markRecentReplay,
 
     searchResults,
     isGrouped,

@@ -16,6 +16,7 @@ import {
   Bug,
   Check,
   ChevronDown,
+  ChevronLeft,
   ChevronRight,
   Hash,
   Hourglass,
@@ -36,7 +37,7 @@ import {
   fetchRadarDebugRuns,
   fetchRadarItemTrail,
   fetchRadarPendingMe,
-  fetchRadarPendingOthers,
+  fetchRadarPendingOthersPage,
   fetchRadarWaitingOn,
   dismissAllRadarItems,
   dismissRadarItem,
@@ -47,11 +48,16 @@ import {
   RadarRunsResult,
   RadarThreadCard,
   RadarFeedItem,
+  type RadarPendingOthersPage,
+  type RadarPendingOthersPageParams,
 } from '../../api/radarApi';
-import { ChannelScopeType, type User } from '@xyne/shared';
+import { ChannelScopeType, parseInitialMessageMd, type User } from '@xyne/shared';
 import { useAuth } from '../../hooks/useAuth';
 import { useRadarEnabled } from '../../hooks/radarCacConfig';
-import { usePersistedRadarFilters } from '../../hooks/usePersistedRadarFilters';
+import {
+  usePersistedRadarFilters,
+  type RadarTimeRange,
+} from '../../hooks/usePersistedRadarFilters';
 import {
   MAX_TEAM_MEMBERS,
   usePersistedRadarTeams,
@@ -151,9 +157,40 @@ const TEAM_PICKER_RESULTS = 25;
  *  narrowing the result to one picker's own people still fills a page. */
 const RANKED_PEOPLE_LIMIT = 200;
 
-/** Feed cards drawn per page. The next page is fetched into view before the
- *  reader reaches the end, so the feed still reads as one continuous list. */
-const FEED_PAGE = 20;
+/** Thread groups per page of the TABLE feed. */
+const FEED_PAGE = 5;
+/** Cards keep the feed they have always had: drawn in blocks as the reader
+ *  scrolls, never paged. */
+const CARDS_PAGE = 20;
+
+/**
+ * The creation window a time filter stands for, or null for any time. Shared
+ * by the in-browser filter and the Pending Others page request so the two can
+ * never disagree about what "today" means.
+ */
+const createdWindow = (
+  range: RadarTimeRange,
+  customFrom: string,
+  customTo: string,
+): { from: number; to: number } | null => {
+  if (range === 'any') return null;
+  const dayStart = new Date();
+  dayStart.setHours(0, 0, 0, 0);
+  const from =
+    range === 'today'
+      ? dayStart.getTime()
+      : range === '7d'
+        ? Date.now() - 7 * 864e5
+        : range === '30d'
+          ? Date.now() - 30 * 864e5
+          : customFrom
+            ? new Date(customFrom).getTime()
+            : 0;
+  // The picker gives a date, not an instant — an inclusive end means the
+  // whole of that day, otherwise "to today" silently excludes today.
+  const to = range === 'custom' && customTo ? new Date(customTo).getTime() + 864e5 : Infinity;
+  return { from, to };
+};
 
 /**
  * Radar — the execution feed. Card-based views over the open-item ledger:
@@ -175,6 +212,9 @@ const RadarPanel = (): ReactElement => {
   const [pending, setPending] = useState<RadarThreadCard[]>([]);
   const [waiting, setWaiting] = useState<RadarThreadCard[]>([]);
   const [loading, setLoading] = useState(true);
+  // Which layout draws the feed — a view preference, not part of what's
+  // fetched or filtered, so it doesn't need to survive a reload.
+  const [viewMode, setViewMode] = useState<'cards' | 'table'>('table');
   const [busyKey, setBusyKey] = useState<string | null>(null);
   // One debug surface: the card's Debug button opens this thread-scoped view
   // (watermark position, per-item trails with the model's reasoning, runs).
@@ -191,10 +231,11 @@ const RadarPanel = (): ReactElement => {
   } | null>(null);
   const [debugLookup, setDebugLookup] = useState('');
   const [filtersOpen, setFiltersOpen] = useState(false);
-  // How much of the filtered feed is currently drawn. A card is not a cheap
-  // row — avatars, a meta line and one body per item — so drawing every match
-  // at once is what the reader feels as lag on a busy radar.
-  const [feedLimit, setFeedLimit] = useState(FEED_PAGE);
+  // Table: zero-based page of the live feed and of the muted group.
+  const [feedPage, setFeedPage] = useState(0);
+  const [mutedPage, setMutedPage] = useState(0);
+  // Cards: how much of the feed is drawn, grown by the scroll sentinel.
+  const [feedLimit, setFeedLimit] = useState(CARDS_PAGE);
   const feedEndRef = useRef<HTMLDivElement>(null);
   const [filterCategory, setFilterCategory] = useState<'pending' | 'channels' | 'time'>('pending');
   // "Pending on" replaces the old tabs: me maps to the pending feed, others to
@@ -257,6 +298,9 @@ const RadarPanel = (): ReactElement => {
   // Muted items are kept, not dropped, so the reader can check what a rule is
   // doing — but shut, because the point of the rule was not to look at them.
   const [mutedOpen, setMutedOpen] = useState(false);
+  // Table view: threads collapsed by the reader, keyed by scopeKey. Starts
+  // empty — every group opens expanded, same as the cards feed always has.
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
   // Radix restores focus to its own trigger on close; this dialog has none,
   // and more than one control opens it, so whichever was clicked is remembered
   // here and given focus back by hand.
@@ -333,6 +377,69 @@ const RadarPanel = (): ReactElement => {
   // — which can be team A's. Only the newest request may touch state.
   const requestSeq = useRef(0);
 
+  // Pending Others ("anyone") is workspace-wide, so it is read from the server a
+  // page at a time with its filters applied there, instead of shipped whole to
+  // be filtered and paged here. "Requested by me" stays a whole-feed read: it
+  // is scoped to the viewer and small.
+  const othersPaged = othersMode === 'all';
+  const [othersPageData, setOthersPageData] = useState<RadarPendingOthersPage | null>(null);
+  const othersParams = useMemo((): RadarPendingOthersPageParams => {
+    // A ticked team is shorthand for its members, unioned with ticked people.
+    const holders = new Set(pendingUsers);
+    for (const team of teams) {
+      if (!teamIds.has(team.id)) continue;
+      for (const memberId of team.memberIds) holders.add(memberId);
+    }
+    const window = createdWindow(timeRange, customFrom, customTo);
+    // Only the Pending others tab pages through it; the other tab reads page 0
+    // for its badge count.
+    const onOthersTab = pendingOthers && !pendingMe;
+    // Cards scroll rather than page, so they ask for everything drawn so far.
+    const cards = viewMode === 'cards';
+    return {
+      page: onOthersTab && !cards ? feedPage : 0,
+      mutedPage: onOthersTab && !cards ? mutedPage : 0,
+      pageSize: cards ? feedLimit : FEED_PAGE,
+      holderIds: [...holders].sort(),
+      channelIds: [...filterChannels].sort(),
+      createdFrom: window && window.from > 0 ? new Date(window.from) : null,
+      createdTo: window && Number.isFinite(window.to) ? new Date(window.to) : null,
+    };
+  }, [
+    pendingUsers,
+    teams,
+    teamIds,
+    timeRange,
+    customFrom,
+    customTo,
+    pendingOthers,
+    pendingMe,
+    feedPage,
+    mutedPage,
+    feedLimit,
+    viewMode,
+    filterChannels,
+  ]);
+  const othersKey = JSON.stringify(othersParams);
+  const othersParamsRef = useRef(othersParams);
+  othersParamsRef.current = othersParams;
+  const othersSeq = useRef(0);
+  const othersRequestedKey = useRef<string | null>(null);
+  const loadOthersPage = useCallback(async (): Promise<RadarPendingOthersPage | null> => {
+    const seq = ++othersSeq.current;
+    const params = othersParamsRef.current;
+    othersRequestedKey.current = JSON.stringify(params);
+    try {
+      const data = await fetchRadarPendingOthersPage(params);
+      if (seq !== othersSeq.current) return null;
+      setOthersPageData(data);
+      setWaiting(data.threads);
+      return data;
+    } catch {
+      return null;
+    }
+  }, []);
+
   const load = useCallback(
     async (background = false) => {
       const seq = ++requestSeq.current;
@@ -349,11 +456,14 @@ const RadarPanel = (): ReactElement => {
         // it used to be a client-side view switch over feeds already held.
         const [p, w] = await Promise.all([
           fetchRadarPendingMe(),
-          othersMode === 'all' ? fetchRadarPendingOthers() : fetchRadarWaitingOn(),
+          othersPaged ? loadOthersPage() : fetchRadarWaitingOn(),
         ]);
         if (!isCurrent()) return;
         setPending(p);
-        setWaiting(w);
+        if (!othersPaged) {
+          setOthersPageData(null);
+          setWaiting(w as RadarThreadCard[]);
+        }
       } catch {
         if (!background && isCurrent()) {
           setPending([]);
@@ -363,9 +473,10 @@ const RadarPanel = (): ReactElement => {
         if (!background && isCurrent()) setLoading(false);
       }
     },
-    // othersMode alone: it picks which endpoint Others reads. The tick states
-    // only choose what is rendered from what is already here.
-    [othersMode],
+    // othersMode alone: it picks which endpoint Others reads. The page and
+    // filters of the paged read are taken from a ref, so changing them does not
+    // re-read Pending me — the effect below fetches just the page.
+    [othersPaged, loadOthersPage],
   );
 
   // Impression: the feed has loaded and is on screen. Resolve / dismiss / open
@@ -432,6 +543,24 @@ const RadarPanel = (): ReactElement => {
       document.removeEventListener('visibilitychange', refresh);
     };
   }, [load, radarEnabled]);
+
+  // The header tabs are exclusive; a stored "both" (or "neither") from the old
+  // checkboxes opens on Pending me rather than a merged list the paged Pending
+  // others feed cannot be merged into.
+  useEffect(() => {
+    if (pendingMe === pendingOthers) {
+      setPendingMe(true);
+      setPendingOthers(false);
+    }
+  }, [pendingMe, pendingOthers, setPendingMe, setPendingOthers]);
+
+  // A new page or filter of Pending Others is one paged read, nothing else.
+  // Skipped when load() has already asked for exactly this page.
+  useEffect(() => {
+    if (!radarEnabled || !othersPaged) return;
+    if (othersRequestedKey.current === othersKey) return;
+    void loadOthersPage();
+  }, [othersKey, othersPaged, radarEnabled, loadOthersPage]);
 
   // A saved rule re-answers "is this muted" for every item, and only the server
   // can answer it — so a write has to be followed by a read. Keyed on the
@@ -637,11 +766,7 @@ const RadarPanel = (): ReactElement => {
   // cards say who asked and who holds it.
   /** Compact age: 8m, 5h, 3d, 2w. Long enough to place a card, short enough to
    *  never be the reason the channel gets truncated. */
-  const shortAgo = (card: RadarThreadCard): string => {
-    const latest = card.items.reduce(
-      (max, i) => Math.max(max, new Date(i.updatedAt).getTime()),
-      card.lastActivityAt ? new Date(card.lastActivityAt).getTime() : 0,
-    );
+  const shortAgoFrom = (latest: number): string => {
     if (!latest) return '';
     const mins = Math.max(0, Math.round((Date.now() - latest) / 60000));
     if (mins < 60) return `${mins}m`;
@@ -650,9 +775,49 @@ const RadarPanel = (): ReactElement => {
     return days < 14 ? `${days}d` : `${Math.round(days / 7)}w`;
   };
 
+  const shortAgo = (card: RadarThreadCard): string =>
+    shortAgoFrom(
+      card.items.reduce(
+        (max, i) => Math.max(max, new Date(i.updatedAt).getTime()),
+        card.lastActivityAt ? new Date(card.lastActivityAt).getTime() : 0,
+      ),
+    );
+
+  const shortAgoItem = (item: RadarFeedItem): string =>
+    shortAgoFrom(new Date(item.updatedAt).getTime());
+
+  // Some threads' preview/title text is a raw `:::initialMessage ... :::`
+  // metadata block (a forwarded message's carrier format, meant to be parsed
+  // before display, never shown as-is) rather than the human text it wraps.
+  // Unwrap it to that real content when present.
+  const cleanText = (text: string): string => {
+    if (!text.trimStart().startsWith(':::initialMessage')) return text;
+    const parsed = parseInitialMessageMd(text);
+    return parsed?.content || text;
+  };
+
+  // The card's headline: what a reader scans first. Falls back through the
+  // thread preview to the lead item's own title so a card never renders
+  // blank above the numbered list.
+  const threadTitle = (card: RadarThreadCard): string => {
+    // threadPreview is truncated to a single line server-side, so when the
+    // source message itself was a `:::initialMessage` block, the truncated
+    // copy never reaches the closing `:::` — cleanText can't parse a block
+    // it can't fully see, and hands the raw marker text back unchanged.
+    // That's worse than no preview: fall through to the item's own title,
+    // which is never truncated mid-block.
+    const cleaned = card.threadPreview && cleanText(card.threadPreview);
+    if (cleaned && !cleaned.trimStart().startsWith(':::initialMessage')) return cleaned;
+    return cleanText(card.items[0]?.title || 'Thread');
+  };
+
   const cardMeta = (card: RadarThreadCard): string =>
     [channelLabel(card.channelId), shortAgo(card)].filter(Boolean).join(' · ');
 
+  // Cards can mix both kinds when viewing the merged feed, so each one still
+  // names its side. The table view dropped this — every row there already
+  // sits under an exclusive Pending me / Pending others tab, so it would
+  // only ever repeat the tab you're already on.
   const badge = (kind: 'pending' | 'waiting', count: number) => (
     <span
       className={cn(
@@ -665,6 +830,154 @@ const RadarPanel = (): ReactElement => {
       {count > 1 ? ` (${count} Items)` : ''}
     </span>
   );
+
+  // "Me" reads faster than your own name in a list of other people's.
+  const selfAwareName = (userId: string): string => (userId === selfId ? 'Me' : nameOf(userId));
+
+  // First holder / first requester, or null. Indexing is checked under the
+  // dashboard's tsconfig, so the lookup is bound once rather than re-indexed
+  // behind a length test the compiler cannot use to narrow.
+  const holderOf = (item: RadarFeedItem): string | null => item.pendingOn[0] ?? null;
+  const requesterOf = (item: RadarFeedItem): string | null => item.requestedBy[0] ?? null;
+
+  // Shared by the card and table item rows: title, source-message bullet, and
+  // who it's pending on. Every consumer supplies its own wrapper element and
+  // spacing — this owns content only. showPendingOn is off in the table,
+  // where Pending On is already its own column — repeating it inline here
+  // would be the row saying the same thing twice.
+  const itemMainBlock = (
+    card: RadarThreadCard,
+    item: RadarFeedItem,
+    index: number,
+    showPendingOn = true,
+  ) => (
+    <>
+      <button
+        data-track-category='RADAR'
+        data-track-name='OPEN_THREAD_FROM_ITEM'
+        className={cn(
+          'text-left text-foreground',
+          // The table drops the inline pending-on line, and with it the
+          // card's heavy headline weight and the hover underline.
+          showPendingOn ? 'font-bold text-[15px] hover:underline' : 'font-medium text-sm',
+        )}
+        onClick={e => {
+          e.stopPropagation();
+          openThread(card, item.conversationId, item.sourceMessageId);
+        }}
+      >
+        {index + 1}. {cleanText(item.title)}
+      </button>
+      {item.contextSummary && (
+        <ul className='mt-2 space-y-1'>
+          {/* The bullet opens the message that produced this item, not the
+              top of the thread — on a card of several items they are
+              different places. */}
+          <li
+            className='group/bullet flex items-start gap-2 text-sm text-muted-foreground rounded cursor-pointer hover:text-foreground'
+            data-track-category='RADAR'
+            data-track-name='OPEN_SOURCE_MESSAGE'
+            {...openOnClick(() => openThread(card, item.conversationId, item.sourceMessageId))}
+          >
+            <span className='mt-[7px] size-1 rounded-full bg-muted-foreground shrink-0' />
+            <span>{item.contextSummary}</span>
+          </li>
+        </ul>
+      )}
+      {/* Who this item is actually pending on — the card-level avatar
+          stack up top says who's involved across every item; this says
+          which one of them is holding this one. */}
+      {showPendingOn && holderOf(item) && (
+        <div className='mt-2 flex items-center gap-1.5'>
+          <Avatar userId={holderOf(item)} size='xs' className='shrink-0 rounded-full' />
+          <span className='text-xs font-medium text-muted-foreground'>
+            {selfAwareName(holderOf(item)!)}
+            {item.pendingOn.length > 1 ? ` +${item.pendingOn.length - 1}` : ''}
+          </span>
+        </div>
+      )}
+    </>
+  );
+
+  // Resolve / Dismiss, shared by the card and table item rows.
+  const itemActions = (card: RadarThreadCard, item: RadarFeedItem, compact = false) => {
+    // The table shows these as bare icons on row hover; cards keep the pills.
+    const actionClass = compact
+      ? 'inline-flex items-center justify-center size-7 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors disabled:opacity-50'
+      : 'inline-flex items-center gap-1 px-2.5 py-1 rounded-full border border-border text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-accent transition-colors disabled:opacity-50';
+    const itemKey = `item:${item.id}`;
+    const dismissKey = `dismiss:${item.id}`;
+    // Same dimensions on open / resolve / dismiss so the three can be compared
+    // per item age and per side of the ledger. Ids only — no title text.
+    const itemTrackMetadata = JSON.stringify({
+      itemId: item.id,
+      channelId: card.channelId,
+      itemAgeHours: Math.max(
+        0,
+        Math.round((Date.now() - new Date(item.createdAt).getTime()) / 3_600_000),
+      ),
+      isPendingMe: !!selfId && item.pendingOn.includes(selfId),
+      isRequestedByMe: !!selfId && item.requestedBy.includes(selfId),
+      itemsOnCard: card.items.length,
+    });
+    return (
+      <>
+        {/* Resolve closes the item for everyone, so it is offered only to
+            the people who asked for it — matching the parser's own rule
+            that a requester's confirmation is what closes an item. */}
+        {selfId && (item.requestedBy.includes(selfId) || item.pendingOn.includes(selfId)) ? (
+          <Tooltip content='Mark this item done' className='px-2 py-1 text-[11px]'>
+            <button
+              data-track-category='RADAR'
+              data-track-name='RESOLVE_ITEM'
+              data-track-metadata={itemTrackMetadata}
+              aria-label='Resolve'
+              className={actionClass}
+              disabled={busyKey === itemKey}
+              onClick={e => {
+                e.stopPropagation();
+                void withBusy(itemKey, () => resolveRadarItem(item.id));
+              }}
+            >
+              {busyKey === itemKey ? (
+                <Loader2 className='size-3.5 animate-spin' />
+              ) : (
+                <Check className='size-3.5' />
+              )}
+              {!compact && 'Resolve'}
+            </button>
+          </Tooltip>
+        ) : (
+          compact && <span aria-hidden className='size-7 shrink-0' />
+        )}
+        {selfId && item.pendingOn.includes(selfId) ? (
+          <Tooltip content='Remove from my list' className='px-2 py-1 text-[11px]'>
+            <button
+              data-track-category='RADAR'
+              data-track-name='DISMISS_ITEM'
+              data-track-metadata={itemTrackMetadata}
+              aria-label='Dismiss'
+              className={actionClass}
+              disabled={busyKey === dismissKey}
+              onClick={e => {
+                e.stopPropagation();
+                void withBusy(dismissKey, () => dismissRadarItem(item.id));
+              }}
+            >
+              {busyKey === dismissKey ? (
+                <Loader2 className='size-3.5 animate-spin' />
+              ) : (
+                <X className='size-3.5' />
+              )}
+              {!compact && 'Dismiss'}
+            </button>
+          </Tooltip>
+        ) : (
+          compact && <span aria-hidden className='size-7 shrink-0' />
+        )}
+      </>
+    );
+  };
 
   const renderItemBody = (card: RadarThreadCard, item: RadarFeedItem, index: number | null) => {
     const itemKey = `item:${item.id}`;
@@ -770,16 +1083,110 @@ const RadarPanel = (): ReactElement => {
     );
   };
 
+  // The card's "⋯" bulk menu: Resolve all / Dismiss all.
+  const threadMenu = (card: RadarThreadCard, key: string) => {
+    const busy = busyKey === key;
+    const menuOpen = cardMenu === key;
+    const dismissable = selfId ? card.items.filter(i => i.pendingOn.includes(selfId)).length : 0;
+    const resolvable = selfId
+      ? card.items.filter(i => i.requestedBy.includes(selfId) || i.pendingOn.includes(selfId))
+          .length
+      : 0;
+    return (
+      <span className='relative'>
+        {menuOpen && (
+          <button
+            type='button'
+            aria-label='Close menu'
+            className='fixed inset-0 z-30 cursor-default'
+            data-track-category='RADAR'
+            data-track-name='CLOSE_CARD_MENU'
+            onClick={() => setCardMenu(null)}
+          />
+        )}
+        <button
+          className={cn(
+            'flex items-center justify-center size-8 rounded-full border border-border transition-colors',
+            menuOpen
+              ? 'bg-accent text-foreground'
+              : 'text-muted-foreground hover:bg-accent hover:text-foreground',
+          )}
+          aria-haspopup='menu'
+          aria-expanded={menuOpen}
+          aria-label='Bulk actions for this thread'
+          disabled={busy}
+          data-track-category='RADAR'
+          data-track-name='TOGGLE_CARD_MENU'
+          onClick={e => {
+            e.stopPropagation();
+            setCardMenu(open => (open === key ? null : key));
+          }}
+        >
+          {busy ? (
+            <Loader2 className='size-4 animate-spin' />
+          ) : (
+            <MoreHorizontal className='size-4' />
+          )}
+        </button>
+        {menuOpen && (
+          <div
+            role='menu'
+            className='absolute right-0 top-full mt-1.5 z-40 w-64 rounded-xl border border-border bg-popover text-popover-foreground shadow-lg py-1'
+          >
+            {resolvable > 0 && (
+              <button
+                role='menuitem'
+                className='w-full flex flex-col items-start gap-0.5 text-left px-3 py-2 hover:bg-accent'
+                data-track-category='RADAR'
+                data-track-name='RESOLVE_ALL_ITEMS'
+                onClick={() => {
+                  setCardMenu(null);
+                  void withBusy(key, () => resolveAllRadarItems(card.scopeKey));
+                }}
+              >
+                <span className='flex items-center gap-2 text-sm font-medium'>
+                  <Check className='size-4' />
+                  Resolve all ({resolvable})
+                </span>
+                <span className='pl-6 text-xs text-muted-foreground'>
+                  Marks these done and closes them for everyone.
+                </span>
+              </button>
+            )}
+            {dismissable > 0 && (
+              <button
+                role='menuitem'
+                className='w-full flex flex-col items-start gap-0.5 text-left px-3 py-2 hover:bg-accent'
+                data-track-category='RADAR'
+                data-track-name='DISMISS_ALL_ITEMS'
+                onClick={() => {
+                  setCardMenu(null);
+                  void withBusy(key, () => dismissAllRadarItems(card.scopeKey));
+                }}
+              >
+                <span className='flex items-center gap-2 text-sm font-medium'>
+                  <X className='size-4' />
+                  Dismiss all ({dismissable})
+                </span>
+                <span className='pl-6 text-xs text-muted-foreground'>
+                  Clears these from your Radar without replying.
+                </span>
+              </button>
+            )}
+          </div>
+        )}
+      </span>
+    );
+  };
+
   const renderCard = (card: RadarThreadCard, kind: 'pending' | 'waiting') => {
     const key = `${kind}:${card.scopeKey}`;
-    const busy = busyKey === key;
     const multi = card.items.length > 1;
     const dismissable = selfId ? card.items.filter(i => i.pendingOn.includes(selfId)).length : 0;
     const resolvable = selfId
       ? card.items.filter(i => i.requestedBy.includes(selfId) || i.pendingOn.includes(selfId))
           .length
       : 0;
-    const menuOpen = cardMenu === key;
     const involved = cardUsers(card);
     const involvedNames = involved.map(nameOf).join(', ');
 
@@ -841,91 +1248,7 @@ const RadarPanel = (): ReactElement => {
             every item at once, which is not something to put a stray click
             away from the per-item buttons directly above it. */}
           {multi && (dismissable > 0 || resolvable > 0) && (
-            <span className='ml-auto flex items-center'>
-              <span className='relative'>
-                {menuOpen && (
-                  <button
-                    type='button'
-                    aria-label='Close menu'
-                    className='fixed inset-0 z-30 cursor-default'
-                    data-track-category='RADAR'
-                    data-track-name='CLOSE_CARD_MENU'
-                    onClick={() => setCardMenu(null)}
-                  />
-                )}
-                <button
-                  className={cn(
-                    'flex items-center justify-center size-8 rounded-full border border-border transition-colors',
-                    menuOpen
-                      ? 'bg-accent text-foreground'
-                      : 'text-muted-foreground hover:bg-accent hover:text-foreground',
-                  )}
-                  aria-haspopup='menu'
-                  aria-expanded={menuOpen}
-                  aria-label='Bulk actions for this thread'
-                  disabled={busy}
-                  data-track-category='RADAR'
-                  data-track-name='TOGGLE_CARD_MENU'
-                  onClick={e => {
-                    e.stopPropagation();
-                    setCardMenu(open => (open === key ? null : key));
-                  }}
-                >
-                  {busy ? (
-                    <Loader2 className='size-4 animate-spin' />
-                  ) : (
-                    <MoreHorizontal className='size-4' />
-                  )}
-                </button>
-                {menuOpen && (
-                  <div
-                    role='menu'
-                    className='absolute right-0 top-full mt-1.5 z-40 w-64 rounded-xl border border-border bg-popover text-popover-foreground shadow-lg py-1'
-                  >
-                    {resolvable > 0 && (
-                      <button
-                        role='menuitem'
-                        className='w-full flex flex-col items-start gap-0.5 text-left px-3 py-2 hover:bg-accent'
-                        data-track-category='RADAR'
-                        data-track-name='RESOLVE_ALL_ITEMS'
-                        onClick={() => {
-                          setCardMenu(null);
-                          void withBusy(key, () => resolveAllRadarItems(card.scopeKey));
-                        }}
-                      >
-                        <span className='flex items-center gap-2 text-sm font-medium'>
-                          <Check className='size-4' />
-                          Resolve all ({resolvable})
-                        </span>
-                        <span className='pl-6 text-xs text-muted-foreground'>
-                          Marks these done and closes them for everyone.
-                        </span>
-                      </button>
-                    )}
-                    {dismissable > 0 && (
-                      <button
-                        role='menuitem'
-                        className='w-full flex flex-col items-start gap-0.5 text-left px-3 py-2 hover:bg-accent'
-                        data-track-category='RADAR'
-                        data-track-name='DISMISS_ALL_ITEMS'
-                        onClick={() => {
-                          setCardMenu(null);
-                          void withBusy(key, () => dismissAllRadarItems(card.scopeKey));
-                        }}
-                      >
-                        <span className='flex items-center gap-2 text-sm font-medium'>
-                          <X className='size-4' />
-                          Dismiss all ({dismissable})
-                        </span>
-                        <span className='pl-6 text-xs text-muted-foreground'>
-                          Clears these from your Radar without replying.
-                        </span>
-                      </button>
-                    )}
-                  </div>
-                )}
-              </span>
-            </span>
+            <span className='ml-auto flex items-center'>{threadMenu(card, key)}</span>
           )}
         </div>
 
@@ -949,8 +1272,193 @@ const RadarPanel = (): ReactElement => {
     );
   };
 
+  // Table view's columns — shared by the header and every item row so they
+  // line up. Each tab drops the person column that would only ever say "Me":
+  // Pending me hides Pending on, Pending others hides Asked by.
+  const tableShowsAskedBy = (): boolean => tab !== 'waiting';
+  const tableShowsPendingOn = (): boolean => tab !== 'pending';
+  const tableGrid = (): string =>
+    tableShowsAskedBy() && tableShowsPendingOn()
+      ? 'grid min-w-[860px] grid-cols-[minmax(240px,1fr)_120px_130px_130px_56px_64px] gap-x-4 px-5'
+      : 'grid min-w-[724px] grid-cols-[minmax(240px,1fr)_120px_140px_56px_64px] gap-x-4 px-5';
+  const tableMinWidth = (): string =>
+    tableShowsAskedBy() && tableShowsPendingOn() ? 'min-w-[862px]' : 'min-w-[726px]';
+  // Item titles and the Item header sit under the thread title, past the
+  // thread row's chevron (16px icon + 8px gap).
+  const TABLE_ITEM_INDENT = 'pl-6';
+
+  // A small "avatar + name" display, shared by the Asked-by and Pending-on
+  // cells.
+  const personCell = (userId: string, extra: number) => (
+    <span className='flex items-center gap-1.5 min-w-0'>
+      <Avatar userId={userId} size='xs' className='shrink-0 rounded-full' />
+      <span className='text-sm text-muted-foreground truncate'>
+        {selfAwareName(userId)}
+        {extra > 0 ? ` +${extra}` : ''}
+      </span>
+    </span>
+  );
+
+  const renderTableItemRow = (card: RadarThreadCard, item: RadarFeedItem, index: number) => (
+    <div key={item.id} className={cn(tableGrid(), 'group items-start py-3 hover:bg-accent/40')}>
+      <div className={cn('min-w-0', TABLE_ITEM_INDENT)}>
+        {itemMainBlock(card, item, index, false)}
+      </div>
+      <div className='min-w-0 pt-0.5'>
+        <span className='block text-sm text-muted-foreground truncate'>
+          {channelLabel(card.channelId)}
+        </span>
+      </div>
+      {tableShowsAskedBy() && (
+        <div className='min-w-0 pt-0.5'>
+          {requesterOf(item) && personCell(requesterOf(item)!, item.requestedBy.length - 1)}
+        </div>
+      )}
+      {tableShowsPendingOn() && (
+        <div className='min-w-0 pt-0.5'>
+          {holderOf(item) && personCell(holderOf(item)!, item.pendingOn.length - 1)}
+        </div>
+      )}
+      <div className='pt-0.5 text-right text-sm text-muted-foreground'>{shortAgoItem(item)}</div>
+      {/* Unlabelled last column: Resolve / Dismiss, shown while the row is
+          hovered or focused. */}
+      <div className='flex items-start justify-end gap-1 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100'>
+        {itemActions(card, item, true)}
+      </div>
+    </div>
+  );
+
+  // Resolve all / Dismiss all at the right of a thread's title row, shown while it is
+  // hovered. Each counts only the items the viewer may act on, matching the
+  // per-row buttons.
+  const threadBulkActions = (card: RadarThreadCard, key: string) => {
+    const dismissable = selfId ? card.items.filter(i => i.pendingOn.includes(selfId)).length : 0;
+    const resolvable = selfId
+      ? card.items.filter(i => i.requestedBy.includes(selfId) || i.pendingOn.includes(selfId))
+          .length
+      : 0;
+    const busy = busyKey === key;
+    // Same bare icons as the item rows' Resolve / Dismiss, so the thread row
+    // reads as their "all" version.
+    const icon =
+      'inline-flex items-center justify-center size-7 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors disabled:opacity-50';
+    if (resolvable === 0 && dismissable === 0) return null;
+    return (
+      <span
+        className={cn(
+          'ml-auto flex items-center gap-1 shrink-0 transition-opacity',
+          busy
+            ? 'opacity-100'
+            : 'opacity-0 group-hover/thread:opacity-100 focus-within:opacity-100',
+        )}
+      >
+        {resolvable > 0 ? (
+          <Tooltip content='Resolve all' className='px-2 py-1 text-[11px]'>
+            <button
+              className={icon}
+              aria-label='Resolve all'
+              disabled={busy}
+              data-track-category='RADAR'
+              data-track-name='RESOLVE_ALL_ITEMS'
+              onClick={() => void withBusy(key, () => resolveAllRadarItems(card.scopeKey))}
+            >
+              {busy ? (
+                <Loader2 className='size-3.5 animate-spin' />
+              ) : (
+                <Check className='size-3.5' />
+              )}
+            </button>
+          </Tooltip>
+        ) : (
+          <span aria-hidden className='size-7 shrink-0' />
+        )}
+        {dismissable > 0 ? (
+          <Tooltip content='Dismiss all' className='px-2 py-1 text-[11px]'>
+            <button
+              className={icon}
+              aria-label='Dismiss all'
+              disabled={busy}
+              data-track-category='RADAR'
+              data-track-name='DISMISS_ALL_ITEMS'
+              onClick={() => void withBusy(key, () => dismissAllRadarItems(card.scopeKey))}
+            >
+              <X className='size-3.5' />
+            </button>
+          </Tooltip>
+        ) : (
+          <span aria-hidden className='size-7 shrink-0' />
+        )}
+      </span>
+    );
+  };
+
+  const renderTableGroup = (card: RadarThreadCard, kind: 'pending' | 'waiting') => {
+    const collapsed = collapsedGroups.has(card.scopeKey);
+    const key = `table:${kind}:${card.scopeKey}`;
+    return (
+      <div key={key} className='border-b border-border last:border-b-0'>
+        <div className='group/thread flex items-center gap-2 px-5 py-2 bg-muted/30'>
+          <button
+            className='flex items-center justify-center size-4 shrink-0 rounded text-muted-foreground hover:text-foreground transition-colors'
+            aria-expanded={!collapsed}
+            aria-label={collapsed ? 'Expand thread' : 'Collapse thread'}
+            data-track-category='RADAR'
+            data-track-name='TOGGLE_TABLE_GROUP'
+            onClick={() =>
+              setCollapsedGroups(prev => {
+                const next = new Set(prev);
+                if (next.has(card.scopeKey)) next.delete(card.scopeKey);
+                else next.add(card.scopeKey);
+                return next;
+              })
+            }
+          >
+            <ChevronDown className={cn('size-4 transition-transform', collapsed && '-rotate-90')} />
+          </button>
+          {/* Only the title opens the thread — matching the item rows below,
+              where a row is never a single giant click target either. */}
+          <button
+            className='min-w-0 font-semibold text-foreground text-sm truncate text-left'
+            data-track-category='RADAR'
+            data-track-name='OPEN_THREAD_FROM_TABLE_GROUP'
+            onClick={() =>
+              openThread(
+                card,
+                card.items[0]?.conversationId ?? card.conversationId,
+                card.items[0]?.sourceMessageId,
+              )
+            }
+          >
+            {threadTitle(card)}
+          </button>
+          {threadBulkActions(card, key)}
+        </div>
+        {!collapsed && card.items.map((item, i) => renderTableItemRow(card, item, i))}
+      </div>
+    );
+  };
+
+  const tableHeader = () => (
+    <div
+      className={cn(
+        tableGrid(),
+        'items-center py-2 rounded-t-2xl text-[11px] font-semibold tracking-wide text-muted-foreground uppercase border-b border-border',
+      )}
+    >
+      <span className={TABLE_ITEM_INDENT}>Item</span>
+      <span>Channel</span>
+      {tableShowsAskedBy() && <span>Asked by</span>}
+      {tableShowsPendingOn() && <span>Pending on</span>}
+      <span className='text-right'>Updated</span>
+      <span />
+    </div>
+  );
+
   // Neither box ticked reads the same as both: no narrowing.
   const tab: RadarTab = pendingMe === pendingOthers ? 'all' : pendingMe ? 'pending' : 'waiting';
+  // On the Pending others tab with the paged feed, what arrived is already the
+  // filtered page — the in-browser filters and paging stand aside.
+  const othersFromServer = tab === 'waiting' && othersPaged && othersPageData !== null;
 
   // Each half is narrowed on its own feed before the two are merged. The
   // requester picker describes who has asked ME, the holder picker describes
@@ -971,7 +1479,9 @@ const RadarPanel = (): ReactElement => {
   ];
   const otherHolders = [
     ...new Set([
-      ...waiting.flatMap(c => c.items.flatMap(i => i.pendingOn)),
+      ...(othersPageData
+        ? othersPageData.facets.holderIds
+        : waiting.flatMap(c => c.items.flatMap(i => i.pendingOn))),
       ...pendingUsers,
       // A ticked team's members, so the row they are ticked on exists even
       // when they hold nothing in the current feed.
@@ -1001,7 +1511,7 @@ const RadarPanel = (): ReactElement => {
     for (const memberId of team.memberIds) effectivePendingUsers.add(memberId);
   }
   const waitingCards =
-    pendingOthers && effectivePendingUsers.size
+    pendingOthers && effectivePendingUsers.size && !othersFromServer
       ? waiting.filter(card =>
           card.items.some(i => i.pendingOn.some(id => effectivePendingUsers.has(id))),
         )
@@ -1025,35 +1535,26 @@ const RadarPanel = (): ReactElement => {
   // Time is left out on purpose: a channel holding nothing in the current
   // range is still worth offering. Channel too, or the list would shrink to
   // the one option already ticked.
-  const channelFacet = new Set(cards.map(c => c.card.channelId));
+  const channelFacet = new Set(
+    othersFromServer && othersPageData
+      ? othersPageData.facets.channelIds
+      : cards.map(c => c.card.channelId),
+  );
 
-  if (timeRange !== 'any') {
+  const clientTimeWindow = othersFromServer ? null : createdWindow(timeRange, customFrom, customTo);
+  if (clientTimeWindow) {
     // When the item was raised, not when the thread was last touched: a
     // months-old ask does not become recent because someone replied today.
     const createdOf = (card: RadarThreadCard): number =>
       card.items.reduce((min, i) => Math.min(min, new Date(i.createdAt).getTime()), Infinity);
-    const dayStart = new Date();
-    dayStart.setHours(0, 0, 0, 0);
-    const from =
-      timeRange === 'today'
-        ? dayStart.getTime()
-        : timeRange === '7d'
-          ? Date.now() - 7 * 864e5
-          : timeRange === '30d'
-            ? Date.now() - 30 * 864e5
-            : customFrom
-              ? new Date(customFrom).getTime()
-              : 0;
-    // The picker gives a date, not an instant — an inclusive end means the
-    // whole of that day, otherwise "to today" silently excludes today.
-    const to = timeRange === 'custom' && customTo ? new Date(customTo).getTime() + 864e5 : Infinity;
+    const { from, to } = clientTimeWindow;
     cards = cards.filter(({ card }) => {
       const t = createdOf(card);
       return Number.isFinite(t) && t >= from && t <= to;
     });
   }
 
-  if (filterChannels.size) {
+  if (filterChannels.size && !othersFromServer) {
     cards = cards.filter(({ card }) => filterChannels.has(card.channelId));
   }
   // The server has already said which items this viewer's rules mute; the panel
@@ -1083,12 +1584,23 @@ const RadarPanel = (): ReactElement => {
     }
     cards = live;
   }
+  if (othersFromServer && othersPageData) {
+    // The server split its page the same way; its muted half is its own page.
+    mutedCards.splice(
+      0,
+      mutedCards.length,
+      ...othersPageData.mutedThreads.map(card => ({ card, kind: 'waiting' as const })),
+    );
+    mutedItemCount = othersPageData.mutedItemCount;
+  }
 
   // A new filter or tab is a different list, so it starts from the first page.
   // A refresh of the same list deliberately does not: the reader may be deep
   // in it, and collapsing back to one page under them would lose their place.
   useEffect(() => {
-    setFeedLimit(FEED_PAGE);
+    setFeedPage(0);
+    setMutedPage(0);
+    setFeedLimit(CARDS_PAGE);
   }, [
     tab,
     pendingUsers,
@@ -1104,25 +1616,97 @@ const RadarPanel = (): ReactElement => {
     rules,
   ]);
 
-  // The sentinel sits after the last drawn card and is only rendered while
-  // there is more to draw, so this observes nothing once the feed is whole.
-  // The margin reaches a screenful past the end, so the next page is in place
-  // before it is scrolled to and the list never visibly stops.
-  // Both lists share one page budget, so expanding Muted cannot mount every
-  // match at once.
-  const moreToDraw = feedLimit < cards.length || (mutedOpen && feedLimit < mutedCards.length);
+  // Resolving or dismissing can empty the last page; fall back to the new
+  // last page rather than showing an empty one.
+  // A server page arrives already cut to size; its totals come with it.
+  const feedTotal = othersFromServer && othersPageData ? othersPageData.totalThreads : cards.length;
+  const mutedTotal =
+    othersFromServer && othersPageData ? othersPageData.mutedTotalThreads : mutedCards.length;
+  const feedPageCount = Math.max(1, Math.ceil(feedTotal / FEED_PAGE));
+  const mutedPageCount = Math.max(1, Math.ceil(mutedTotal / FEED_PAGE));
+  const safeFeedPage = Math.min(feedPage, feedPageCount - 1);
+  const safeMutedPage = Math.min(mutedPage, mutedPageCount - 1);
+  const feedSlice = othersFromServer
+    ? cards
+    : cards.slice(safeFeedPage * FEED_PAGE, (safeFeedPage + 1) * FEED_PAGE);
+  const mutedSlice = othersFromServer
+    ? mutedCards
+    : mutedCards.slice(safeMutedPage * FEED_PAGE, (safeMutedPage + 1) * FEED_PAGE);
+
+  // Cards only: the sentinel sits after the last drawn card and is rendered
+  // only while there is more to draw. On the paged feed "more" means the
+  // server said so, and growing feedLimit re-reads a longer page.
+  const moreToDraw = othersFromServer
+    ? feedLimit < feedTotal || (mutedOpen && feedLimit < mutedTotal)
+    : feedLimit < cards.length || (mutedOpen && feedLimit < mutedCards.length);
   useEffect(() => {
+    if (viewMode !== 'cards') return;
     const sentinel = feedEndRef.current;
     if (!sentinel || !moreToDraw) return;
     const observer = new IntersectionObserver(
       entries => {
-        if (entries.some(e => e.isIntersecting)) setFeedLimit(n => n + FEED_PAGE);
+        if (entries.some(e => e.isIntersecting)) setFeedLimit(n => n + CARDS_PAGE);
       },
       { rootMargin: '600px' },
     );
     observer.observe(sentinel);
     return () => observer.disconnect();
-  }, [moreToDraw, feedLimit]);
+  }, [moreToDraw, feedLimit, viewMode]);
+
+  const renderPager = (
+    page: number,
+    pageCount: number,
+    total: number,
+    setPage: (page: number) => void,
+    trackName: string,
+  ) => {
+    if (pageCount <= 1) return null;
+    const from = page * FEED_PAGE + 1;
+    const to = Math.min(total, (page + 1) * FEED_PAGE);
+    return (
+      <div className='flex items-center justify-between gap-3 pt-3 text-xs text-muted-foreground'>
+        <span>
+          {from}–{to} of {total} threads
+        </span>
+        <div className='flex items-center gap-1'>
+          <button
+            className='inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 hover:bg-accent disabled:opacity-40 disabled:pointer-events-none'
+            disabled={page === 0}
+            aria-label='Previous page'
+            data-track-category='RADAR'
+            data-track-name={`${trackName}_PREV`}
+            onClick={() => setPage(page - 1)}
+          >
+            <ChevronLeft className='size-3.5' /> Prev
+          </button>
+          <span className='px-2 tabular-nums'>
+            Page {page + 1} of {pageCount}
+          </span>
+          <button
+            className='inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 hover:bg-accent disabled:opacity-40 disabled:pointer-events-none'
+            disabled={page >= pageCount - 1}
+            aria-label='Next page'
+            data-track-category='RADAR'
+            data-track-name={`${trackName}_NEXT`}
+            onClick={() => setPage(page + 1)}
+          >
+            Next <ChevronRight className='size-3.5' />
+          </button>
+        </div>
+      </div>
+    );
+  };
+
+  // Tab counts: total open items on each side, muted excluded — independent
+  // of the channel/time/requester pickers, which narrow what's drawn, not
+  // what the tab itself claims to hold.
+  const pendingMeTabCount = pending.reduce(
+    (n, card) => n + card.items.filter(i => !i.muted).length,
+    0,
+  );
+  const pendingOthersTabCount = othersPageData
+    ? othersPageData.openItemCount
+    : waiting.reduce((n, card) => n + card.items.filter(i => !i.muted).length, 0);
 
   const runBadge = (run: RadarRunLog) =>
     run.error ? (
@@ -1337,11 +1921,12 @@ const RadarPanel = (): ReactElement => {
   // How many things are narrowing the feed. The panel itself says which — the
   // Me and Others rows read back their own selection — so this is a count on
   // the button, not a row of chips repeating what is one click away.
+  // Which side of the feed (pending me / pending others) is the tab above,
+  // not a filter — only the narrowing actually applied within that side
+  // counts here.
   const activeFilterCount =
-    (pendingMe ? 1 : 0) +
-    (pendingMe ? excludedRequesters.size : 0) +
-    (pendingOthers ? 1 : 0) +
-    (pendingOthers ? teams.filter(t => teamIds.has(t.id)).length + pendingUsers.size : 0) +
+    (tab !== 'waiting' ? excludedRequesters.size : 0) +
+    (tab === 'waiting' ? teams.filter(t => teamIds.has(t.id)).length + pendingUsers.size : 0) +
     channelGroups.filter(g => g.ids.some(id => filterChannels.has(id))).length +
     (timeRange !== 'any' ? 1 : 0);
 
@@ -2634,26 +3219,24 @@ const RadarPanel = (): ReactElement => {
           <div className='px-3 pt-1 pb-2 text-[11px] font-bold tracking-wide text-muted-foreground uppercase'>
             All filters
           </div>
-          {railItem('pending', 'Pending', (pendingMe ? 1 : 0) + (pendingOthers ? 1 : 0))}
+          {railItem(
+            'pending',
+            'Pending',
+            tab === 'waiting' ? teamIds.size + pendingUsers.size : excludedRequesters.size,
+          )}
           {railItem('channels', 'Channels', filterChannels.size)}
           {railItem('time', 'Time', timeRange === 'any' ? 0 : 1)}
         </div>
 
         <div className='flex-1 min-w-0 p-6 max-h-[38rem] overflow-y-auto'>
-          {filterCategory === 'pending' && (
-            <>
-              <div className='text-sm font-semibold text-muted-foreground mb-3'>Pending on</div>
-              <button
-                className='w-full flex items-center gap-3 pl-2 pr-[13px] py-2.5 rounded-lg text-sm hover:bg-accent'
-                data-track-category='RADAR'
-                data-track-name='FILTER_PENDING_ME'
-                onClick={() => setPendingMe(v => !v)}
-              >
-                <span className='flex-1 min-w-0 text-left font-bold'>Me</span>
-                {checkbox(pendingMe)}
-              </button>
-              {pendingMe &&
-                userPicker(
+          {filterCategory === 'pending' &&
+            (tab !== 'waiting' ? (
+              // Pending me tab: the only thing left to narrow is who asked.
+              // Which side of the feed this is comes from the tab above, not
+              // a checkbox here.
+              <>
+                <div className='text-sm font-semibold text-muted-foreground mb-3'>Requested by</div>
+                {userPicker(
                   'Requested by',
                   requesterOptions,
                   excludedRequesters,
@@ -2678,28 +3261,14 @@ const RadarPanel = (): ReactElement => {
                     })(),
                   },
                 )}
-              <button
-                className={cn(
-                  'w-full flex items-center gap-3 pl-2 pr-[13px] py-2.5 rounded-lg text-sm hover:bg-accent',
-                  // Clear of the picker above, so the two halves read as two.
-                  pendingMe && 'mt-8',
-                )}
-                data-track-category='RADAR'
-                data-track-name='FILTER_PENDING_OTHERS'
-                onClick={() => {
-                  setPendingOthers(v => !v);
-                  if (pendingOthers) {
-                    setPendingUsers(new Set());
-                    setTeamIds(new Set());
-                  }
-                }}
-              >
-                <span className='flex-1 min-w-0 text-left font-bold'>Others</span>
-                {checkbox(pendingOthers)}
-              </button>
-              {pendingOthers && teamsPicker}
-              {pendingOthers &&
-                userPicker(
+              </>
+            ) : (
+              // Pending others tab: narrow by who's holding it, and whether
+              // that means "asked of me" or everyone else's asks.
+              <>
+                <div className='text-sm font-semibold text-muted-foreground mb-3'>Pending on</div>
+                {teamsPicker}
+                {userPicker(
                   'Pending on · people',
                   otherHolders,
                   pendingUsers,
@@ -2710,9 +3279,9 @@ const RadarPanel = (): ReactElement => {
                   rankedHolders,
                   lockedByTeam,
                 )}
-              {pendingOthers && othersModePicker}
-            </>
-          )}
+                {othersModePicker}
+              </>
+            ))}
 
           {filterCategory === 'channels' && (
             <>
@@ -2856,25 +3425,86 @@ const RadarPanel = (): ReactElement => {
           >
             <Settings className='size-4' />
           </button>
-          <div className='ml-auto flex items-center gap-1.5'>
-            <Bug className='size-3.5 text-muted-foreground' />
-            <input
-              className='w-56 px-2.5 py-1 rounded-lg border border-border bg-card text-xs text-foreground placeholder:text-muted-foreground'
-              data-track-category='RADAR'
-              data-track-name='DEBUG_THREAD_LOOKUP'
-              placeholder='Debug a thread id… ⏎'
-              title='Paste a conversation id and press Enter to open its thread debug'
-              value={debugLookup}
-              onChange={e => setDebugLookup(e.target.value)}
-              onKeyDown={e => {
-                if (e.key === 'Enter' && debugLookup.trim()) {
-                  openThreadDebugById(debugLookup.trim());
-                }
-              }}
-            />
+          <div className='ml-auto flex items-center gap-3'>
+            <span className='flex items-center gap-0.5 p-0.5 rounded-full border border-border bg-card'>
+              {(['cards', 'table'] as const).map(mode => (
+                <button
+                  key={mode}
+                  className={cn(
+                    'px-3 py-1 rounded-full text-xs font-semibold capitalize transition-colors',
+                    viewMode === mode
+                      ? 'bg-foreground text-background'
+                      : 'text-muted-foreground hover:text-foreground',
+                  )}
+                  aria-pressed={viewMode === mode}
+                  data-track-category='RADAR'
+                  data-track-name='SET_RADAR_VIEW_MODE'
+                  data-track-metadata={JSON.stringify({ viewMode: mode })}
+                  onClick={() => setViewMode(mode)}
+                >
+                  {mode}
+                </button>
+              ))}
+            </span>
+            <span className='flex items-center gap-1.5'>
+              <Bug className='size-3.5 text-muted-foreground' />
+              <input
+                className='w-56 px-2.5 py-1 rounded-lg border border-border bg-card text-xs text-foreground placeholder:text-muted-foreground'
+                data-track-category='RADAR'
+                data-track-name='DEBUG_THREAD_LOOKUP'
+                placeholder='Debug a thread id… ⏎'
+                title='Paste a conversation id and press Enter to open its thread debug'
+                value={debugLookup}
+                onChange={e => setDebugLookup(e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === 'Enter' && debugLookup.trim()) {
+                    openThreadDebugById(debugLookup.trim());
+                  }
+                }}
+              />
+            </span>
           </div>
         </div>
-        <div className='flex items-center flex-wrap gap-2 px-6 pb-5'>
+        <div className='flex items-center gap-5 px-6 border-b border-border'>
+          {(
+            [
+              { id: 'pending' as const, label: 'Pending me', count: pendingMeTabCount },
+              { id: 'waiting' as const, label: 'Pending others', count: pendingOthersTabCount },
+            ] as const
+          ).map(t => {
+            const active = t.id === 'pending' ? tab !== 'waiting' : tab === 'waiting';
+            return (
+              <button
+                key={t.id}
+                className={cn(
+                  'flex items-center gap-2 pb-3 pt-1 -mb-px border-b-2 text-sm font-semibold transition-colors',
+                  active
+                    ? 'border-foreground text-foreground'
+                    : 'border-transparent text-muted-foreground hover:text-foreground',
+                )}
+                aria-current={active ? 'true' : undefined}
+                data-track-category='RADAR'
+                data-track-name='SET_RADAR_TAB'
+                data-track-metadata={JSON.stringify({ tab: t.id })}
+                onClick={() => {
+                  setPendingMe(t.id === 'pending');
+                  setPendingOthers(t.id === 'waiting');
+                }}
+              >
+                {t.label}
+                <span
+                  className={cn(
+                    'min-w-5 h-5 px-1.5 rounded-full text-[11px] font-bold flex items-center justify-center',
+                    active ? 'bg-foreground text-background' : 'bg-muted text-muted-foreground',
+                  )}
+                >
+                  {t.count}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+        <div className='flex items-center flex-wrap gap-2 px-6 py-5'>
           <span className='relative'>
             {filtersOpen && (
               <button
@@ -2925,10 +3555,23 @@ const RadarPanel = (): ReactElement => {
                   : 'Nothing on the radar.'}
             </div>
           ) : (
-            <div className='space-y-4 max-w-3xl'>
-              {cards.slice(0, feedLimit).map(({ card, kind }) => renderCard(card, kind))}
-              {moreToDraw && <div ref={feedEndRef} aria-hidden className='h-px' />}
-              {/* Below everything, including the paging sentinel: the muted
+            <div className={viewMode === 'table' ? 'max-w-5xl' : 'space-y-4 max-w-3xl'}>
+              {viewMode === 'table' ? (
+                <>
+                  <div className={cn(tableMinWidth(), 'rounded-2xl border border-border')}>
+                    {tableHeader()}
+                    {feedSlice.map(({ card, kind }) => renderTableGroup(card, kind))}
+                  </div>
+                </>
+              ) : (
+                cards.slice(0, feedLimit).map(({ card, kind }) => renderCard(card, kind))
+              )}
+              {viewMode === 'table' &&
+                renderPager(safeFeedPage, feedPageCount, feedTotal, setFeedPage, 'RADAR_PAGE')}
+              {viewMode === 'cards' && moreToDraw && (
+                <div ref={feedEndRef} aria-hidden className='h-px' />
+              )}
+              {/* Below everything, including the pager: the muted
                   group is the floor of the feed, not a page of it. It says how
                   much it is holding, because a rule that turns out to be too
                   wide is only findable if its cost is visible. */}
@@ -2953,13 +3596,33 @@ const RadarPanel = (): ReactElement => {
                       )}
                     />
                   </button>
-                  {mutedOpen && (
-                    <div className='mt-4 space-y-4 opacity-70'>
-                      {mutedCards
-                        .slice(0, feedLimit)
-                        .map(({ card, kind }) => renderCard(card, kind))}
-                    </div>
-                  )}
+                  {mutedOpen &&
+                    (viewMode === 'table' ? (
+                      <div
+                        className={cn(
+                          tableMinWidth(),
+                          'mt-4 rounded-2xl border border-border opacity-70',
+                        )}
+                      >
+                        {tableHeader()}
+                        {mutedSlice.map(({ card, kind }) => renderTableGroup(card, kind))}
+                      </div>
+                    ) : (
+                      <div className='mt-4 space-y-4 opacity-70'>
+                        {mutedCards
+                          .slice(0, feedLimit)
+                          .map(({ card, kind }) => renderCard(card, kind))}
+                      </div>
+                    ))}
+                  {mutedOpen &&
+                    viewMode === 'table' &&
+                    renderPager(
+                      safeMutedPage,
+                      mutedPageCount,
+                      mutedTotal,
+                      setMutedPage,
+                      'RADAR_MUTED_PAGE',
+                    )}
                 </div>
               )}
             </div>

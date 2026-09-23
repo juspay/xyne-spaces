@@ -29,12 +29,12 @@ export interface UseCachedQueryOptions {
   updatedAtEnabled?: boolean;
   /** Enable cursor pagination mode. Cursor fields are automatically derived from the query's orderBy. */
   cursorEnabled?: boolean;
+  /** Return source metadata as a third tuple item for cursor pagination. */
   includeMeta?: boolean;
 }
 
 export interface UseCachedQueryMeta {
   source: 'cache' | 'fresh';
-  live: boolean;
 }
 
 export type CachedQueryResult<TReturn> = readonly [
@@ -153,15 +153,13 @@ export function useCachedQuery<
   const direction = queryArgs?.['direction'] as 'forward' | 'backward' | undefined;
   const isInitialCursorPage = cursor === null || cursor === undefined;
 
-  let zeroIsLive = false;
-
   const withMeta = (
     result: QueryResult<TReturn>,
     source: UseCachedQueryMeta['source'],
   ): QueryResult<TReturn> | CachedQueryResult<TReturn> => {
-    if (!includeMeta) return result;
-    if (cursorEnabled && !isInitialCursorPage) return result;
-    return [result[0], result[1], { source, live: zeroIsLive }] as CachedQueryResult<TReturn>;
+    return includeMeta && cursorEnabled && isInitialCursorPage
+      ? ([result[0], result[1], { source }] as CachedQueryResult<TReturn>)
+      : result;
   };
 
   const zero = useZero();
@@ -319,7 +317,6 @@ export function useCachedQuery<
     modifiedQueryRequest as typeof query,
     zeroCompatibleOptions,
   );
-  zeroIsLive = freshDetails.type === 'complete';
 
   // Compute cursor pagination window (pure function, no side effects)
   const cursorWindow = useMemo(() => {

@@ -2506,14 +2506,13 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                   }
                   return (
                     <EntitySelector
-                      showSearch={false}
                       options={boardOptions}
                       selectedValue={field.state.value || ''}
                       onSelect={(value: string | null) => {
                         field.handleChange(value as CreateTicketFormData['boardId']);
                         setBoardSelectorOpen(false);
                       }}
-                      searchPlaceholder='board'
+                      searchPlaceholder='Search boards'
                       placeholder='Select a board'
                       inputIcon={<SquareKanban className='size-3.5' strokeWidth={2.33} />}
                       inputClassName='!h-8 rounded-lg'
