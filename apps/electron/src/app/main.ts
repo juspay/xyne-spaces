@@ -63,6 +63,29 @@ if (config.USER_DATA_SUFFIX) {
   app.setPath('userData', `${currentUserData}${config.USER_DATA_SUFFIX}`);
 }
 
+// Let hidden windows actually go hidden (frames stop), while keeping the timer
+// guarantees Zero and the sync socket rely on: the 1/min intensive clamp after 5min
+// hidden would trip Zero's 10s ping / 20s detection into reconnect churn.
+const addDisabledFeatures = (features: string[]): void => {
+  const existing = app.commandLine.getSwitchValue('disable-features');
+  const merged = Array.from(
+    new Set(existing.split(',').filter(Boolean).concat(features)),
+  );
+  app.commandLine.appendSwitch('disable-features', merged.join(','));
+};
+
+app.commandLine.appendSwitch('disable-renderer-backgrounding');
+addDisabledFeatures(
+  [
+    'IntensiveWakeUpThrottling',
+    'AllowAggressiveThrottlingWithWebSocket',
+  ].concat(
+    // Windows occlusion tracking has a live blank-client-area bug; macOS needs
+    // nothing here, Electron already disables MacWebContentsOcclusion.
+    process.platform === 'win32' ? ['CalculateNativeWinOcclusion'] : [],
+  ),
+);
+
 // Register deep links BEFORE app is ready (required for Windows/Linux)
 // This must be called before app.whenReady() for proper protocol handling
 const gotTheLock = setupDeepLinks(createMainWindow);
