@@ -13,7 +13,9 @@ import { createWithUsersTx } from '@/bypassAcl/transactions/userGroups';
 
 export interface CreateUserGroupWithUsersInput extends CreateUserGroupInput {
   userIds?: string[];
-  userRoleUpdates?: Record<string, string>;
+  // userId -> the roleIds to assign that user in this group. Written to user_role_mappings
+  // (entityType=USER_GROUP), NOT to the legacy user_group_mappings.roleId column.
+  userRoleUpdates?: Record<string, string[]>;
 }
 
 export class UserGroupRepository extends BaseRepository<UserGroup, CreateUserGroupInput, UpdateUserGroupInput> {
@@ -59,7 +61,8 @@ export class UserGroupRepository extends BaseRepository<UserGroup, CreateUserGro
       await this.validateAliasUnique(data.alias, workspaceId);
     }
 
-    // Use transaction to create user group and user mappings together
+    // Use transaction to create user group and user mappings together (see createWithUsersTx,
+    // which also writes the multi-role user_role_mappings rows).
     return await createWithUsersTx(this, data, actorUserId);
   }
 

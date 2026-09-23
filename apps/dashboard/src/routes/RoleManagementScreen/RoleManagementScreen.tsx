@@ -499,7 +499,12 @@ export const RoleManagementScreen = (): ReactElement => {
   );
   const displayName = selectedRole?.name ?? listRole?.name ?? '';
   const displayDesc = selectedRole?.description ?? listRole?.description ?? null;
-  const members = useMemo(() => selectedRole?.userMappings ?? [], [selectedRole]);
+  // Role Management manages workspace-level role members; group-scoped bindings
+  // (entityType='USER_GROUP') are managed from the user group screen, so exclude them here.
+  const members = useMemo(
+    () => (selectedRole?.userMappings ?? []).filter(m => m.entityType === 'WORKSPACE'),
+    [selectedRole],
+  );
 
   // ── Inline edit (name + description) ───────────────────────────────────────
   const [editing, setEditing] = useState(false);

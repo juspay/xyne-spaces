@@ -1862,6 +1862,8 @@ export const userRoleMappingsTable = table('user_role_mappings')
     id: string(),
     userId: string(),
     roleId: string(),
+    entityType: string(), // 'WORKSPACE' | 'USER_GROUP' (BOARD/PROJECT reserved for future)
+    entityId: string(), // = workspaceId (WORKSPACE) | userGroupId (USER_GROUP)
     createdAt: number(),
     updatedAt: number(),
   })

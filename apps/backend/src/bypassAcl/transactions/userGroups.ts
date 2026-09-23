@@ -4,7 +4,7 @@ import { aclAuditService } from '@/services/aclAuditService';
 
 
 export function createWithUsersTx(self: UserGroupRepository, data: CreateUserGroupWithUsersInput, actorUserId: string | undefined) {
-  return transaction(['UserGroup', 'UserGroupMapping'], 'createWithUsers: user group creation with member mappings must commit atomically; tx is not ACL-wrapped', self.db, async (tx) => {
+  return transaction(['UserGroup', 'UserGroupMapping', 'UserRoleMapping'], 'createWithUsers: user group creation with member mappings must commit atomically; tx is not ACL-wrapped', self.db, async (tx) => {
     const userGroup = await tx.userGroup.create({
       data: {
         name: data.name,
@@ -17,26 +17,41 @@ export function createWithUsersTx(self: UserGroupRepository, data: CreateUserGro
       },
     });
 
-    // Create user mappings if userIds are provided
-    if (data.userIds && data.userIds.length > 0) {
+    // Create membership rows (roles live in user_role_mappings, not on the membership).
+    const memberUserIds =
+      data.userIds && data.userIds.length > 0
+        ? data.userIds
+        : actorUserId
+          ? [actorUserId]
+          : [];
+
+    if (memberUserIds.length > 0) {
       await tx.userGroupMapping.createMany({
-        data: data.userIds.map(userId => ({
+        data: memberUserIds.map(userId => ({
           userGroupId: userGroup.id,
           workspaceId: userGroup.workspaceId,
           userId,
-          ...(data.userRoleUpdates?.[userId] ? { roleId: data.userRoleUpdates[userId] } : {}),
         })),
       });
-    } else if (actorUserId) {
-      // If no userIds provided, add creator as a member
-      await tx.userGroupMapping.create({
-        data: {
-          userGroupId: userGroup.id,
-          workspaceId: userGroup.workspaceId,
-          userId: actorUserId,
-          ...(data.userRoleUpdates?.[actorUserId] ? { roleId: data.userRoleUpdates[actorUserId] } : {}),
-        },
-      });
+
+      // Assign roles via user_role_mappings(entityType=USER_GROUP). One row per (user, role).
+      if (data.userRoleUpdates) {
+        const now = new Date();
+        const roleRows = memberUserIds.flatMap(userId =>
+          (data.userRoleUpdates?.[userId] ?? []).map(roleId => ({
+            workspaceId: userGroup.workspaceId,
+            userId,
+            roleId,
+            entityType: 'USER_GROUP',
+            entityId: userGroup.id,
+            createdAt: now,
+            updatedAt: now,
+          })),
+        );
+        if (roleRows.length > 0) {
+          await tx.userRoleMapping.createMany({ data: roleRows, skipDuplicates: true });
+        }
+      }
     }
 
     // Log audit event

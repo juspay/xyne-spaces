@@ -10,7 +10,7 @@ interface UserManagementProps {
   selectedUsers: User[] | undefined;
   onUsersChange: ((users: User[]) => void) | undefined;
   disabled: boolean | undefined;
-  roleIds: Map<string, string>;
+  roleIds: Map<string, string[]>;
 }
 
 export const UserManagement = ({
