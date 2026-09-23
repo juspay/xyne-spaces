@@ -50,6 +50,9 @@ export class VespaFileWorker {
 			const queueName = process.env.VESPA_FILE_QUEUE_NAME || 'vespa-files';
 			this.queue = new Bull<VespaJob>(queueName, {
 				redis: redisConfig,
+				// Must match the producer's DEPLOY_ENV for this environment — see
+				// the comment in queues/vespaQueue.ts for why this exists.
+				prefix: config.vespaQueuePrefix,
 				defaultJobOptions: {
 					attempts: 3,
 					backoff: {

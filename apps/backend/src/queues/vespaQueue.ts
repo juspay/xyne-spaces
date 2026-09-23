@@ -68,6 +68,12 @@ class VespaQueue {
 
 			const bullOptions = {
 				redis: redisConfig,
+				// Namespaces every Redis key this queue touches (default Bull prefix is the
+				// literal string "bull"). MUST be set to a distinct value per deployment
+				// environment (e.g. prod vs pre-prod) so that if two environments ever end up
+				// pointing at the same Redis instance/host, their queues cannot cross-consume
+				// each other's jobs. See DEPLOY_ENV in .env.example.
+				prefix: config.vespaQueuePrefix,
 				defaultJobOptions: {
 					attempts: 3,
 					backoff: {
