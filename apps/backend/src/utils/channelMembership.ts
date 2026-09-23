@@ -1,8 +1,10 @@
 import { Request } from 'express';
 import { Channel } from '@prisma/client';
-import { ChannelRole } from '@xyne/shared';
+import { ChannelRole, meetsDeskInsightsAccess } from '@xyne/shared';
+import { repositories } from '@/database/repositories';
 import { ChannelRepository } from '@/database/repositories/channelRepository';
 import { ChannelParticipantRepository } from '@/database/repositories/channelParticipantRepository';
+import { EmailChannelPreferenceRepository } from '@/database/repositories/emailChannelPreferenceRepository';
 
 export type ChannelAccessGranted = {
   ok: true;
@@ -21,6 +23,7 @@ export type ChannelAccessResult = ChannelAccessGranted | ChannelAccessDenied;
 
 const channelRepo = new ChannelRepository();
 const channelParticipantRepo = new ChannelParticipantRepository();
+const emailChannelPreferenceRepo = new EmailChannelPreferenceRepository();
 
 /**
  * Desk endpoints require unconditional channel participation, which is stricter than
@@ -62,10 +65,7 @@ export function assertDeskOwner(
   return { ok: false, status: 403, error: denyMessage };
 }
 
-/**
- * Desk-insights ACL shared by metrics, the topics feed and desk reports so the
- * surfaces cannot drift: desk owner OR channel admin — NOT channel.createdBy.
- */
+/** Desk owner OR channel admin — NOT channel.createdBy. */
 export async function isDeskOwnerOrChannelAdmin(
   channelId: string,
   userId: string | undefined,
@@ -75,4 +75,27 @@ export async function isDeskOwnerOrChannelAdmin(
   if (preferenceOwnerUserId && preferenceOwnerUserId === userId) return true;
   const participant = await channelParticipantRepo.findParticipant(channelId, userId);
   return participant?.role === ChannelRole.ADMIN;
+}
+
+/** Caller's SUPPORT access types, direct or via user groups. */
+export async function getSupportAccessTypes(userId: string | undefined): Promise<string[]> {
+  if (!userId) return [];
+  const resource = await repositories.resources.findByName('SUPPORT');
+  if (!resource) return [];
+  const rows = await repositories.resourceAccess.findUserResourceAccess(userId, resource.id);
+  return rows.map(row => row.accessType);
+}
+
+/** Desk-insights ACL (metrics, topics, reports): owner/admin, or the desk's SUPPORT tier. */
+export async function canViewDeskInsights(
+  channelId: string,
+  userId: string | undefined,
+  preferenceOwnerUserId: string | null | undefined,
+): Promise<boolean> {
+  if (await isDeskOwnerOrChannelAdmin(channelId, userId, preferenceOwnerUserId)) return true;
+  const [supportAccessTypes, minAccessByChannel] = await Promise.all([
+    getSupportAccessTypes(userId),
+    emailChannelPreferenceRepo.findMetricsMinAccess([channelId]),
+  ]);
+  return meetsDeskInsightsAccess(supportAccessTypes, minAccessByChannel.get(channelId));
 }

@@ -2338,6 +2338,7 @@ model EmailChannelPreference {
   metricsEnabled         Boolean? // Gates the desk metrics dashboard
   frtStageNames          String?  // JSON-serialised string[] of stage names whose first entry stops the FRT clock
   metricsGuestVisibility String?  // JSON DeskMetricsResponse.guestVisibility: what guests see on the metrics dashboard
+  metricsMinAccess       String?  // Lowest SUPPORT AccessType that can view desk insights; null = WRITE
   appWebhookDeliveryEnabled Boolean @default(true) // APP desks only: off means replies are stored without ever calling the app webhook
   deskReportEnabled      Boolean? @default(false) // Gates the scheduled desk-report cron + sidebar panel
   deskReportAgentSlug    String?

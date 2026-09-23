@@ -6,7 +6,8 @@
  * cost nothing; the agent-facing query endpoint is not (see queryMetrics).
  *
  * Access rule: no exemptions — every caller, agent or human, must be the
- * desk owner or a channel admin. Sole carve-out: workspace guests keep
+ * desk owner, a channel admin, or meet the desk's metricsMinAccess SUPPORT
+ * tier. Sole carve-out: workspace guests keep
  * trend-only read access on the two dashboard handlers (getMetrics and
  * getAggregateMetrics) per XYNE-63224; they are forbidden on the claw mount.
  */
@@ -19,7 +20,8 @@ import { ChannelRepository } from '../database/repositories/channelRepository.js
 import { ChannelParticipantRepository } from '../database/repositories/channelParticipantRepository.js';
 import {
   assertChannelMembership,
-  isDeskOwnerOrChannelAdmin,
+  canViewDeskInsights,
+  getSupportAccessTypes,
 } from '@/utils/channelMembership';
 import {
   aggregateDeskMetrics,
@@ -34,6 +36,7 @@ import {
   DEFAULT_DESK_METRIC_KEYS,
   DESK_METRIC_KEYS,
   DESK_METRICS_MAX_AGGREGATE_DESKS,
+  meetsDeskInsightsAccess,
   parseDeskMetricsGuestVisibility,
   TicketPriority,
   WorkspaceRole,
@@ -281,7 +284,7 @@ export class DeskMetricsController {
       const isGuestUser = req.user?.role === WorkspaceRole.GUEST;
       if (
         !isGuestUser &&
-        !(await isDeskOwnerOrChannelAdmin(channelId, access.userId, preference.ownerUserId))
+        !(await canViewDeskInsights(channelId, access.userId, preference.ownerUserId))
       ) {
         res.status(403).json({ error: 'Only the desk owner or a channel admin can view metrics for this desk' });
         return;
@@ -324,18 +327,23 @@ export class DeskMetricsController {
     }
   };
 
-  /** Keep only desks the user manages (desk owner or channel admin). */
+  /** Keep only desks the user can view insights for. */
   private async filterToManagedDesks(
     desks: DeskMetricsDeskSummary[],
     userId: string,
   ): Promise<DeskMetricsDeskSummary[]> {
     const channelIds = desks.map(desk => desk.channelId);
-    const [adminChannelIds, ownedChannelIds] = await Promise.all([
+    const [adminChannelIds, ownedChannelIds, minAccessByChannel, supportAccessTypes] = await Promise.all([
       this.channelParticipantRepo.getAdminChannelIds(channelIds, userId),
       this.preferenceRepo.findOwnedChannelIds(channelIds, userId),
+      this.preferenceRepo.findMetricsMinAccess(channelIds),
+      getSupportAccessTypes(userId),
     ]);
     return desks.filter(
-      desk => adminChannelIds.has(desk.channelId) || ownedChannelIds.has(desk.channelId),
+      desk =>
+        adminChannelIds.has(desk.channelId) ||
+        ownedChannelIds.has(desk.channelId) ||
+        meetsDeskInsightsAccess(supportAccessTypes, minAccessByChannel.get(desk.channelId)),
     );
   }
 
@@ -403,14 +411,20 @@ export class DeskMetricsController {
       const userId = req.user?.id;
       let adminChannelIds = new Set<string>();
       let ownedChannelIds = new Set<string>();
+      let minAccessByChannel = new Map<string, string | null>();
+      let supportAccessTypes: string[] = [];
       if (userId) {
-        [adminChannelIds, ownedChannelIds] = await Promise.all([
+        [adminChannelIds, ownedChannelIds, minAccessByChannel, supportAccessTypes] = await Promise.all([
           this.channelParticipantRepo.getAdminChannelIds(channelIds, userId),
           this.preferenceRepo.findOwnedChannelIds(channelIds, userId),
+          this.preferenceRepo.findMetricsMinAccess(channelIds),
+          getSupportAccessTypes(userId),
         ]);
       }
       const deskForbidden = (channelId: string): boolean =>
-        !adminChannelIds.has(channelId) && !ownedChannelIds.has(channelId);
+        !adminChannelIds.has(channelId) &&
+        !ownedChannelIds.has(channelId) &&
+        !meetsDeskInsightsAccess(supportAccessTypes, minAccessByChannel.get(channelId));
 
       const contributions: DeskMetricsContribution[] = [];
       const partials: DeskMetricsPartial[] = [];
@@ -707,10 +721,12 @@ export class DeskMetricsController {
       const userId = req.user?.id;
       let adminChannelIds = new Set<string>();
       let ownedChannelIds = new Set<string>();
+      let supportAccessTypes: string[] = [];
       if (!isGuestUser && userId) {
-        [adminChannelIds, ownedChannelIds] = await Promise.all([
+        [adminChannelIds, ownedChannelIds, supportAccessTypes] = await Promise.all([
           this.channelParticipantRepo.getAdminChannelIds(channelIds, userId),
           this.preferenceRepo.findOwnedChannelIds(channelIds, userId),
+          getSupportAccessTypes(userId),
         ]);
       }
 
@@ -735,7 +751,8 @@ export class DeskMetricsController {
           if (
             !isGuestUser &&
             !adminChannelIds.has(channelId) &&
-            !ownedChannelIds.has(channelId)
+            !ownedChannelIds.has(channelId) &&
+            !meetsDeskInsightsAccess(supportAccessTypes, preference.metricsMinAccess)
           ) {
             skipped.push({ channelId, reason: 'forbidden' });
             continue;

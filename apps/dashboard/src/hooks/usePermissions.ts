@@ -9,7 +9,7 @@ export {
 } from '@xyne/shared/hooks';
 
 import { useHasResourceAccess, usePermissions } from '@xyne/shared/hooks';
-import { AccessType } from '@xyne/shared';
+import { AccessType, meetsDeskInsightsAccess } from '@xyne/shared';
 import { useAuth } from './useAuth';
 
 export const useIsMemoryAdmin = (): boolean => {
@@ -42,6 +42,15 @@ export const useCanSendDeskEmail = (): boolean => {
         p.resourceName === 'SUPPORT' &&
         (p.accessType === AccessType.WRITE || p.accessType === AccessType.ADMIN),
     )
+  );
+};
+
+// Mirrors the backend's canViewDeskInsights SUPPORT-tier check.
+export const useHasDeskInsightsAccess = (minAccess?: string | null): boolean => {
+  const permissions = usePermissions();
+  return meetsDeskInsightsAccess(
+    permissions.filter(p => p.resourceName === 'SUPPORT').map(p => p.accessType),
+    minAccess,
   );
 };
 

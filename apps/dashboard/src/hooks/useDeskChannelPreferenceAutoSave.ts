@@ -1,6 +1,6 @@
 import { logger, Event as LogEvent } from '../utils/logger';
 import { useCallback } from 'react';
-import { EmailMergeMode, AutoDraftMode } from '@xyne/shared';
+import { EmailMergeMode, AutoDraftMode, type AccessType } from '@xyne/shared';
 import { useUpdateEmailChannelPreference } from './useEmailChannelPreference';
 
 export type ChannelPreferencePatch = {
@@ -16,6 +16,7 @@ export type ChannelPreferencePatch = {
   metricsEnabled?: boolean;
   frtStageNames?: string | null;
   metricsGuestVisibility?: string | null;
+  metricsMinAccess?: AccessType | null;
   appWebhookDeliveryEnabled?: boolean;
   deskReportEnabled?: boolean;
   deskReportAgentSlug?: string | null;

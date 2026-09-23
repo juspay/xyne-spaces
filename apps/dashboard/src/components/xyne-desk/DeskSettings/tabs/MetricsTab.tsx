@@ -1,6 +1,13 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { FormFieldType, type FormFields } from '@xyne/shared';
+import { AccessType, FormFieldType, type FormFields } from '@xyne/shared';
 import { Switch } from '../../../ui/Switch';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '../../../ui/Select/Select';
 import { Checkbox } from '../../../ui/Checkbox/Checkbox';
 import { useCachedQuery } from '../../../../hooks/useCachedQuery';
 import { CHART_VIEW_LABELS } from '../../../../hooks/usePersistedDeskMetricsFilters';
@@ -27,6 +34,8 @@ export const MetricsTab: React.FC<MetricsTabProps> = ({ form }) => {
     channelId,
     guestVisibility,
     toggleGuestVisibility,
+    metricsMinAccess,
+    setMetricsMinAccess,
   } = form;
 
   const [fallbackBoardId, setFallbackBoardId] = useState<string | null>(null);
@@ -159,6 +168,29 @@ export const MetricsTab: React.FC<MetricsTabProps> = ({ form }) => {
           disabled={!canManage}
           aria-label='Toggle desk metrics'
         />
+      </div>
+
+      <div className='flex items-start justify-between gap-4'>
+        <div className='flex flex-col gap-[4px]'>
+          <div className='text-desk-label'>Who can view desk insights?</div>
+          <div className='text-desk-helper w-full max-w-[500px]'>
+            Minimum Support access. Desk owner and channel admins always can.
+          </div>
+        </div>
+        <Select
+          value={metricsMinAccess ?? AccessType.WRITE}
+          onValueChange={value => setMetricsMinAccess(value as AccessType)}
+          disabled={!canManage}
+        >
+          <SelectTrigger className='w-[160px] shrink-0 rounded-[10px] border border-border bg-background px-3 py-2 text-sm text-foreground'>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent className='rounded-[10px]'>
+            <SelectItem value={AccessType.READ}>Support Read+</SelectItem>
+            <SelectItem value={AccessType.WRITE}>Support Write+</SelectItem>
+            <SelectItem value={AccessType.ADMIN}>Support Admin</SelectItem>
+          </SelectContent>
+        </Select>
       </div>
 
       {metricsEnabled && (

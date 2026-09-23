@@ -66,6 +66,16 @@ export class EmailChannelPreferenceRepository {
     return new Set(preferences.map(p => p.channelId));
   }
 
+  /** Batch read each desk's metricsMinAccess. */
+  async findMetricsMinAccess(channelIds: string[]): Promise<Map<string, string | null>> {
+    const preferences = await this.db.emailChannelPreference.findMany({
+      where: { channelId: { in: channelIds } },
+      select: { channelId: true, metricsMinAccess: true },
+    });
+
+    return new Map(preferences.map(p => [p.channelId, p.metricsMinAccess]));
+  }
+
   /**
    * Create email channel preference
    * @throws Error if channel is not of type EMAIL
