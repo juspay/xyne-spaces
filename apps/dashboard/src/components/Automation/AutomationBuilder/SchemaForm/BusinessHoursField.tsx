@@ -1,4 +1,5 @@
 import { cn } from '../../../../utils/classNames';
+import { WORKING_HOUR_END, WORKING_HOUR_START } from '../../../../config';
 import {
   Select,
   SelectContent,
@@ -8,7 +9,12 @@ import {
 } from '../../../ui/Select/Select';
 
 const WEEKDAYS = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'] as const;
-const DEFAULT_HOURS = { days: ['MON', 'TUE', 'WED', 'THU', 'FRI'], startHour: 11, endHour: 19 };
+// Mirrors what the backend applies when businessHours is unset (env working hours, Mon-Fri).
+const DEFAULT_HOURS = {
+  days: ['MON', 'TUE', 'WED', 'THU', 'FRI'],
+  startHour: WORKING_HOUR_START,
+  endHour: WORKING_HOUR_END,
+};
 
 interface BusinessHours {
   days: string[];
@@ -29,15 +35,6 @@ function formatHour(hour: number): string {
   return `${whole % 12 === 0 ? 12 : whole % 12}:${hour % 1 === 0 ? '00' : '30'} ${suffix}`;
 }
 
-function readHours(value: unknown): BusinessHours {
-  const v = (value && typeof value === 'object' ? value : {}) as Partial<BusinessHours>;
-  return {
-    days: Array.isArray(v.days) ? v.days : DEFAULT_HOURS.days,
-    startHour: typeof v.startHour === 'number' ? v.startHour : DEFAULT_HOURS.startHour,
-    endHour: typeof v.endHour === 'number' ? v.endHour : DEFAULT_HOURS.endHour,
-  };
-}
-
 /**
  * Working days + daily IST window for the DELAY step. Shows the backend defaults until the
  * user edits, and writes the whole object at once so no field is lost.
@@ -47,13 +44,15 @@ export function BusinessHoursField({
   onChange,
   errorMessage,
 }: BusinessHoursFieldProps): React.ReactElement {
-  const hours = readHours(value);
+  const hours: BusinessHours = {
+    ...DEFAULT_HOURS,
+    ...(value && typeof value === 'object' ? (value as Partial<BusinessHours>) : {}),
+  };
 
+  // Flips `day`, keeps Mon→Sun order, and never clears the last day (the backend needs one).
   const toggleDay = (day: string): void => {
-    const days = hours.days.includes(day)
-      ? hours.days.filter(d => d !== day)
-      : WEEKDAYS.filter(d => d === day || hours.days.includes(d));
-    onChange({ ...hours, days });
+    const days = WEEKDAYS.filter(d => (d === day) !== hours.days.includes(d));
+    if (days.length > 0) onChange({ ...hours, days });
   };
 
   const hourSelect = (
@@ -126,9 +125,7 @@ export function BusinessHoursField({
 
       <span className={cn('text-[11px]', errorMessage ? 'text-red-600' : 'text-muted-foreground')}>
         {errorMessage ??
-          (hours.days.length === 0
-            ? 'Pick at least one day.'
-            : `${hours.endHour - hours.startHour}h a day, ${hours.days.length} day${hours.days.length === 1 ? '' : 's'} a week`)}
+          `${hours.endHour - hours.startHour}h a day, ${hours.days.length} day${hours.days.length === 1 ? '' : 's'} a week`}
       </span>
     </div>
   );
