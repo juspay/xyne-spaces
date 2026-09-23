@@ -14,11 +14,27 @@ const MAX_DELAY_SECONDS = 30 * 24 * 60 * 60;
 
 const DelayUnitSchema = z.enum(['seconds', 'minutes', 'hours']);
 
+const WEEKDAYS = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'] as const;
+const HOUR_MS = 60 * 60 * 1000;
+const DAY_MS = 24 * HOUR_MS;
+const IST_OFFSET_MS = 5.5 * HOUR_MS;
+
+const BusinessHoursSchema = z
+  .object({
+    days: z.array(z.enum(WEEKDAYS)).min(1).default(['MON', 'TUE', 'WED', 'THU', 'FRI']),
+    startHour: z.number().int().min(0).max(23).default(11).describe('Window start hour in IST (0-23)'),
+    endHour: z.number().int().min(1).max(24).default(19).describe('Window end hour in IST (1-24)'),
+  })
+  .refine((b) => b.startHour < b.endHour, { path: ['endHour'], message: 'endHour must be after startHour' });
+
+type BusinessHours = z.infer<typeof BusinessHoursSchema>;
+
 const DelayConfigSchema = z
   .object({
     amount: variableRef(z.number().positive().describe('How long to wait')),
     unit: DelayUnitSchema.default('seconds').describe('Unit for "amount". Default seconds.'),
     businessHoursOnly: z.boolean().default(false).describe('Business Hours Only'),
+    businessHours: BusinessHoursSchema.optional().describe('Custom business hours; omit for the default'),
   })
   .superRefine((data, ctx) => {
     if (typeof data.amount !== 'number') {
@@ -30,6 +46,16 @@ const DelayConfigSchema = z
         code: z.ZodIssueCode.custom,
         path: ['amount'],
         message: `requested delay of ${seconds}s exceeds the maximum of ${MAX_DELAY_SECONDS}s (30 days)`,
+      });
+    }
+    // Any 28 days contain each configured window 4 times, so this keeps the resume within 30 days.
+    const hours = data.businessHoursOnly ? data.businessHours : undefined;
+    const maxBusinessSeconds = hours ? 4 * new Set(hours.days).size * (hours.endHour - hours.startHour) * 3600 : 0;
+    if (maxBusinessSeconds > 0 && seconds > maxBusinessSeconds) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['amount'],
+        message: `requested delay of ${seconds}s exceeds the ${maxBusinessSeconds}s of business hours within 30 days`,
       });
     }
   });
@@ -50,9 +76,14 @@ export function calculateDelayUntil(
   start: Date,
   seconds: number,
   businessHoursOnly: boolean,
+  businessHours?: BusinessHours,
 ): Date {
   if (!businessHoursOnly) {
     return new Date(start.getTime() + seconds * 1000);
+  }
+
+  if (businessHours) {
+    return addBusinessTime(start, seconds, businessHours);
   }
 
   const roundedMinutes = Math.ceil(seconds / 60);
@@ -60,6 +91,25 @@ export function calculateDelayUntil(
   const roundingRemainderMs = (roundedMinutes * 60 - seconds) * 1000;
 
   return new Date(roundedDeadline.getTime() - roundingRemainderMs);
+}
+
+// Adds `seconds` of working time, counting only the IST [startHour, endHour) window on the configured days.
+function addBusinessTime(start: Date, seconds: number, { days, startHour, endHour }: BusinessHours): Date {
+  const workingDays = new Set(days.map((day) => WEEKDAYS.indexOf(day)));
+  let remainingMs = seconds * 1000;
+  let istMidnight = Math.floor((start.getTime() + IST_OFFSET_MS) / DAY_MS) * DAY_MS - IST_OFFSET_MS;
+
+  for (;; istMidnight += DAY_MS) {
+    if (!workingDays.has(new Date(istMidnight + IST_OFFSET_MS).getUTCDay())) {
+      continue;
+    }
+    const windowStart = Math.max(start.getTime(), istMidnight + startHour * HOUR_MS);
+    const availableMs = istMidnight + endHour * HOUR_MS - windowStart;
+    if (remainingMs <= availableMs) {
+      return new Date(windowStart + remainingMs);
+    }
+    remainingMs -= Math.max(0, availableMs);
+  }
 }
 
 export class DelayStep extends BaseActionStep<typeof DelayConfigSchema, DelayOutput> {
@@ -90,7 +140,7 @@ export class DelayStep extends BaseActionStep<typeof DelayConfigSchema, DelayOut
     }
 
     const now = new Date();
-    const resumeAt = calculateDelayUntil(now, seconds, config.businessHoursOnly);
+    const resumeAt = calculateDelayUntil(now, seconds, config.businessHoursOnly, config.businessHours);
     const delayMs = Math.max(0, resumeAt.getTime() - now.getTime());
     const delayedUntil = resumeAt.toISOString();
 
