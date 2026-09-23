@@ -1,3 +1,17 @@
+## [1.385.0](https://github.com/juspay/xyne-spaces/compare/v1.384.1...v1.385.0) (2026-09-23)
+
+
+### Features
+
+* ui for channel board mappings ([#2043](https://github.com/juspay/xyne-spaces/issues/2043)) ([ab38d5b](https://github.com/juspay/xyne-spaces/commit/ab38d5bebec93166cd106dc816f925dc30874397))
+
+## [1.384.1](https://github.com/juspay/xyne-spaces/compare/v1.384.0...v1.384.1) (2026-09-23)
+
+
+### Bug Fixes
+
+* new service of emailReadFlagBackfill ([#2254](https://github.com/juspay/xyne-spaces/issues/2254)) ([387306f](https://github.com/juspay/xyne-spaces/commit/387306fd94b77fac572d10872ac9cd09892d60e6))
+
 ## [1.384.0](https://github.com/juspay/xyne-spaces/compare/v1.383.2...v1.384.0) (2026-09-23)
 
 

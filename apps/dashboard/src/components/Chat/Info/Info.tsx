@@ -18,7 +18,7 @@ import { isOneToOneDMChannel, isGroupDMChannel } from '../ChatDirectory/ChatDire
 import Button from '../../ui/Button';
 import * as Tabs from '@radix-ui/react-tabs';
 import { cn } from '../../../utils/classNames';
-import { logger, Event as LogEvent } from '../../../utils/logger';
+import { useChannelBoards } from '../../../hooks/useChannelBoards';
 import Input from '../../ui/Input';
 import { Dialog } from '../../ui/Dialog/Dialog';
 import { AddPeopleDialog } from '../AddPeopleForm/AddPeopleDialog';
@@ -136,43 +136,11 @@ const Info = ({
   const navigate = useNavigate();
   const location = useLocation();
   const channelUserStatus = useGetChannelUserStatus(channel.id);
-  // channel.projectId is nullable (decoupling). Empty string → no project/board match,
-  // and the panel falls back to the channel's board mappings below.
+  // Only drives the project-name label. Boards no longer come from here — see below.
   const [project] = useCachedQuery(queries.projectById({ projectId: channel.projectId ?? '' }));
-  const [channelBoardMappings, mappingDetails] = useCachedQuery(
-    queries.boardsByChannel({ channelId: channel.id }),
-  );
-  const [projectBoards] = useCachedQuery(
-    queries.boardsListByProject({ projectId: channel.projectId ?? '' }),
-  );
-
-  const boards = useMemo(() => {
-    const mappingSynced = mappingDetails.type === 'complete';
-    const mappedBoards = channelBoardMappings?.map(m => m.board) ?? [];
-    const filtered = mappedBoards.filter((b): b is NonNullable<typeof b> => Boolean(b));
-    const projectBoardsList = projectBoards ?? [];
-    if (filtered.length > 0) {
-      logger.debug(LogEvent.KANBAN_ENTITY_LOADED, {
-        source: 'Info',
-        resolution: 'channel-board-mapping',
-        channelId: channel.id,
-        mappedCount: filtered.length,
-        projectBoardsCount: projectBoardsList.length,
-      });
-      return filtered;
-    }
-    if (!mappingSynced) {
-      return projectBoardsList;
-    }
-    logger.debug(LogEvent.KANBAN_ENTITY_LOADED, {
-      source: 'Info',
-      resolution: 'project-boards-fallback',
-      channelId: channel.id,
-      mappedCount: 0,
-      projectBoardsCount: projectBoardsList.length,
-    });
-    return projectBoardsList;
-  }, [channelBoardMappings, mappingDetails.type, projectBoards, channel.id]);
+  // channel_board_mappings is the only source of channel→board truth; there is no
+  // project fallback, so an empty set means the channel genuinely has no boards.
+  const { boards } = useChannelBoards(channel.id);
 
   // Get target user ID for 1:1 DM calls
   const targetUserId = useMemo(() => {

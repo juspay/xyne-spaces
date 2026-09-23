@@ -4,6 +4,7 @@ import {
   CheckTickSingle as Check,
   ChevronDown,
   DownloadDown as Download,
+  LayerTwo as Layers,
   PlusDefault as Plus,
   SearchDefault as Search,
   Star,
@@ -53,6 +54,8 @@ export const TicketsHeader = (props: TicketsHeaderProps): ReactElement => {
     share,
     onCreateTicket,
     createTicketMetadata,
+    onLinkBoards,
+    linkBoardsMetadata,
     showFilters,
     filters,
     onFiltersChange,
@@ -278,6 +281,21 @@ export const TicketsHeader = (props: TicketsHeaderProps): ReactElement => {
           />
           <span className='mx-0.5 h-[18px] w-px shrink-0 bg-border' />
           {share && <ShareViewPopover viewId={share.viewId} viewName={share.viewName} />}
+          {onLinkBoards && (
+            <button
+              type='button'
+              onClick={onLinkBoards}
+              data-testid='kanban-link-boards-button'
+              data-track-event='BUTTON_CLICK'
+              data-track-category='Channel'
+              data-track-name='OPEN_LINK_BOARDS'
+              data-track-metadata={linkBoardsMetadata}
+              className='ml-0.5 flex h-[30px] shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg border border-border px-3 text-[12.5px] font-semibold text-foreground transition-colors hover:bg-muted'
+            >
+              <Layers className='size-[14px]' strokeWidth={2} />
+              Link boards
+            </button>
+          )}
           {onCreateTicket && (
             <button
               type='button'
