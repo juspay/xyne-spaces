@@ -76,13 +76,3 @@ export const inboxItemsStore = createBarItemsStore({
   defaults: ['new-message', 'threads', 'unreads', 'bookmarks', 'drafts-sent', 'recap', 'radar'],
   locked: ['new-message', 'threads'],
 });
-
-/**
- * Channel header tabs: tab values and `app:<id>`. Starts with every built-in
- * tab; Messages is the fallback for any unknown `?tab=` and never leaves.
- */
-export const channelTabsStore = createBarItemsStore({
-  storageKey: 'xyne:channel-tabs',
-  defaults: ['messages', 'files', 'pins', 'canvas', 'links', 'tickets'],
-  locked: ['messages'],
-});

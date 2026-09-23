@@ -8,4 +8,5 @@ export {
   type AppSnapshots,
 } from './appSnapshotsStore';
 export { appItemId, isAppItemId, appIdOf, type AppItemId } from './appItemId';
-export { toolbarItemsStore, inboxItemsStore, channelTabsStore, MAX_APPS_PER_BAR } from './stores';
+export { toolbarItemsStore, inboxItemsStore, MAX_APPS_PER_BAR } from './stores';
+export { getChannelTabsStore, DEFAULT_CHANNEL_TABS } from './channelTabsStores';

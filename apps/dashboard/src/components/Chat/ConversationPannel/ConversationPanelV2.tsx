@@ -187,8 +187,12 @@ const ConversationPanelV2 = ({
     setSearchParams(next, { replace: true });
   }, [channelId, searchParams, setSearchParams]);
 
-  // Get dynamic tabs based on permissions and channel scope type
-  const { availableTabs, getDefaultTab, isValidTab } = useConversationTabs(channel?.scopeType);
+  // Get this channel's tabs — its own customized set where allowed, otherwise
+  // the built-in list.
+  const { availableTabs, getDefaultTab, isValidTab } = useConversationTabs(
+    channelId,
+    channel?.scopeType,
+  );
 
   const urlHashValue = location.hash.match(/origin=([^&#]+)/);
 

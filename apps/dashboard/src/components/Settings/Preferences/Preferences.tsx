@@ -74,7 +74,14 @@ import {
   type CallMediaQuality,
 } from '../../../hooks/useCallMediaQualitySettings';
 import { useMaxCameraHeight, filterQualityOptionsByMax } from '../../../hooks/useMaxCameraQuality';
-import { toolbarItemsStore, inboxItemsStore, channelTabsStore } from '../../../hooks/barItems';
+import { useParams } from 'react-router-dom';
+import { ChannelScopeType } from '@xyne/shared';
+import { toolbarItemsStore, inboxItemsStore, getChannelTabsStore } from '../../../hooks/barItems';
+import { useAllVisibleChannels } from '../../../hooks/useChannels';
+import { useLastVisitedChannel } from '../../../hooks/useLastVisitedChannel';
+import ChannelIcon from '../../Chat/ChannelIcon/ChannelIcon';
+import { Popover } from '../../ui/Popover/Popover';
+import Input from '../../ui/Input/Input';
 import { useToolbarBuiltIns, useInboxBuiltIns, useChannelTabBuiltIns } from '../../BarCustomize';
 import { BarCustomizer } from './BarCustomizer';
 import type { PreferenceSection, PreferencesProps, NavItem } from '.';
@@ -1100,15 +1107,155 @@ const InboxSection: FC<{ state: PreferencesState }> = () => (
   />
 );
 
-const ChannelTabsSection: FC<{ state: PreferencesState }> = () => (
-  <BarCustomizer
-    title='Channel tabs'
-    subtitle='The tabs at the top of every channel. Tickets only shows in channels where you can read tickets.'
-    store={channelTabsStore}
-    builtIns={useChannelTabBuiltIns()}
-    trackCategory='PREFERENCES_CHANNEL_TABS'
-  />
-);
+type SelectableChannel = ReturnType<typeof useAllVisibleChannels>[number];
+
+/**
+ * Which channel's tabs are being edited. A dropdown rather than the shared
+ * Combobox because that one deliberately never renders its selection (its
+ * `itemToStringLabel` returns ''), and here the current channel is the thing
+ * the user most needs to see.
+ */
+const ChannelSelect: FC<{
+  channels: readonly SelectableChannel[];
+  selected: SelectableChannel;
+  onSelect: (channelId: string) => void;
+}> = ({ channels, selected, onSelect }) => {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
+
+  const matches = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return q ? channels.filter(c => (c.name ?? '').toLowerCase().includes(q)) : channels;
+  }, [channels, query]);
+
+  return (
+    <div className='space-y-1.5'>
+      <span className='block text-sm font-medium text-foreground'>Channel</span>
+      <Popover
+        open={open}
+        onOpenChange={next => {
+          setOpen(next);
+          if (!next) setQuery('');
+        }}
+        side='bottom'
+        align='start'
+        sideOffset={6}
+        className='w-[var(--radix-popover-trigger-width)] rounded-xl p-1.5'
+        trigger={
+          <button
+            type='button'
+            aria-label={`Channel: ${selected.name ?? ''}`}
+            className='flex w-full items-center gap-2 rounded-lg border border-input px-2.5 py-1.5 text-left text-sm text-foreground transition-colors hover:bg-accent'
+            data-track-category='PREFERENCES_CHANNEL_TABS'
+            data-track-name='OpenChannelSelect'
+          >
+            <ChannelIcon channel={selected} avatarSize='xs' />
+            <span className='min-w-0 flex-1 truncate'>{selected.name}</span>
+            <ChevronDown className='size-4 shrink-0 text-muted-foreground' />
+          </button>
+        }
+      >
+        <div className='flex flex-col gap-1.5'>
+          <Input
+            value={query}
+            onChange={e => setQuery(e.target.value)}
+            placeholder='Search channels'
+            data-track-category='PREFERENCES_CHANNEL_TABS'
+            data-track-name='SearchChannels'
+          />
+          <div className='max-h-64 overflow-y-auto'>
+            {matches.length === 0 ? (
+              <p className='px-2 py-1.5 text-xs text-muted-foreground'>No channels found.</p>
+            ) : (
+              matches.map(channel => {
+                const isSelected = channel.id === selected.id;
+                return (
+                  <button
+                    key={channel.id}
+                    type='button'
+                    onClick={() => {
+                      onSelect(channel.id);
+                      setOpen(false);
+                      setQuery('');
+                    }}
+                    className={cn(
+                      'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm text-foreground transition-colors',
+                      isSelected ? 'bg-accent' : 'hover:bg-accent',
+                    )}
+                    data-track-category='PREFERENCES_CHANNEL_TABS'
+                    data-track-name='SelectChannel'
+                  >
+                    <ChannelIcon channel={channel} avatarSize='xs' />
+                    <span className='min-w-0 flex-1 truncate'>{channel.name}</span>
+                    {isSelected && <Check className='size-3.5 shrink-0 text-muted-foreground' />}
+                  </button>
+                );
+              })
+            )}
+          </div>
+        </div>
+      </Popover>
+    </div>
+  );
+};
+
+// Channel tabs are customized one channel at a time, so this section leads
+// with a channel picker; DMs, group DMs and ticket/document channels are not
+// customizable and are deliberately absent from it.
+const ChannelTabsSection: FC<{ state: PreferencesState }> = () => {
+  const { workspaceId, channelId: routeChannelId } = useParams<{
+    workspaceId: string;
+    channelId: string;
+  }>();
+  const lastVisitedChannelId = useLastVisitedChannel(workspaceId ?? '');
+  const allChannels = useAllVisibleChannels();
+  const [picked, setPicked] = useState<string | null>(null);
+
+  const channels = useMemo(
+    () =>
+      allChannels
+        .filter(channel => channel.scopeType === ChannelScopeType.DEFAULT && !channel.isArchived)
+        .sort((a, b) => (a.name ?? '').localeCompare(b.name ?? '')),
+    [allChannels],
+  );
+
+  // The channel the user most likely means: what they picked here, else the one
+  // they have open behind this dialog, else the last one they visited.
+  const selected = useMemo(() => {
+    for (const id of [picked, routeChannelId, lastVisitedChannelId]) {
+      const match = id ? channels.find(channel => channel.id === id) : undefined;
+      if (match) return match;
+    }
+    return channels[0] ?? null;
+  }, [picked, routeChannelId, lastVisitedChannelId, channels]);
+
+  const builtIns = useChannelTabBuiltIns(selected?.scopeType);
+
+  if (!selected) {
+    return (
+      <div className='space-y-2'>
+        <p className='text-base font-semibold text-foreground'>Channel tabs</p>
+        <p className='text-sm text-muted-foreground'>
+          Join or create a channel to customize its tabs.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <BarCustomizer
+      // Remounts on a channel change, so nothing (an open app picker, a drag in
+      // flight) carries over from the channel being left.
+      key={selected.id}
+      title='Channel tabs'
+      subtitle='Tabs are per channel — what you choose here applies to this channel only. DMs always show the standard tabs.'
+      store={getChannelTabsStore(selected.id)}
+      builtIns={builtIns}
+      trackCategory='PREFERENCES_CHANNEL_TABS'
+      headerSlot={<ChannelSelect channels={channels} selected={selected} onSelect={setPicked} />}
+    />
+  );
+};
 
 // ─── Section registry ───────────────────────────────────────────────────────
 const SECTIONS: Record<PreferenceSection, FC<{ state: PreferencesState }>> = {

@@ -1,6 +1,7 @@
 export { BarAddMenu } from './BarAddMenu';
 export { BarRemoveButton } from './BarRemoveButton';
 export { AppPickerDialog } from './AppPickerDialog';
+export { ToggleGlyph } from './ToggleGlyph';
 export {
   useToolbarBuiltIns,
   useInboxBuiltIns,
