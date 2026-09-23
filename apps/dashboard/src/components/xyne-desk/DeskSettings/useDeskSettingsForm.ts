@@ -8,6 +8,7 @@ import {
   DeskType,
   isDeskChannelType,
   parseDeskMetricsGuestVisibility,
+  type AccessType,
 } from '@xyne/shared';
 import { useEmailChannelPreference } from '../../../hooks/useEmailChannelPreference';
 import {
@@ -231,6 +232,7 @@ export function useDeskSettingsForm(
     metricsEnabled: emailChannelPreference?.metricsEnabled ?? false,
     frtStageNames: emailChannelPreference?.frtStageNames ?? '[]',
     metricsGuestVisibility: emailChannelPreference?.metricsGuestVisibility ?? null,
+    metricsMinAccess: (emailChannelPreference?.metricsMinAccess ?? null) as AccessType | null,
     appWebhookDeliveryEnabled: emailChannelPreference?.appWebhookDeliveryEnabled ?? true,
     deskReportEnabled: emailChannelPreference?.deskReportEnabled ?? false,
     deskReportAgentSlug: emailChannelPreference?.deskReportAgentSlug ?? null,
@@ -329,6 +331,7 @@ export function useDeskSettingsForm(
       return JSON.stringify(nextArr);
     });
   };
+  const setMetricsMinAccess = (next: AccessType) => pref.setField('metricsMinAccess', next);
   const toggleGuestVisibility = (key: string) =>
     pref.setField(
       'metricsGuestVisibility',
@@ -452,6 +455,9 @@ export function useDeskSettingsForm(
       }
       if (d.metricsGuestVisibility !== s.metricsGuestVisibility) {
         patch.metricsGuestVisibility = d.metricsGuestVisibility;
+      }
+      if (d.metricsMinAccess !== s.metricsMinAccess) {
+        patch.metricsMinAccess = d.metricsMinAccess;
       }
       if (d.deskReportEnabled !== s.deskReportEnabled) {
         patch.deskReportEnabled = d.deskReportEnabled;
@@ -594,6 +600,8 @@ export function useDeskSettingsForm(
     setFrtStageNames,
     guestVisibility,
     toggleGuestVisibility,
+    metricsMinAccess: pref.draft.metricsMinAccess,
+    setMetricsMinAccess,
     appWebhookDeliveryEnabled,
     setAppWebhookDeliveryEnabled,
     deskReportEnabled,

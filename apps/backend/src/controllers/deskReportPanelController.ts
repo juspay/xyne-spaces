@@ -1,7 +1,11 @@
 import type { Request, Response } from 'express';
 import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
-import { assertChannelMembership, isDeskOwnerOrChannelAdmin } from '@/utils/channelMembership';
+import {
+  assertChannelMembership,
+  canViewDeskInsights,
+  isDeskOwnerOrChannelAdmin,
+} from '@/utils/channelMembership';
 import { AttachmentEntityType, AttachmentUploadStatus } from '@xyne/shared';
 import { deskReportGenerationService, STUCK_PENDING_HOURS } from '@/services/deskReportGenerationService';
 import { storageService } from '@/services/storage/index';
@@ -37,9 +41,9 @@ export class DeskReportPanelController {
         await db.emailChannelPreference.findUnique({ where: { channelId }, select: { ownerUserId: true } })
       )?.ownerUserId;
       const canGenerate = await isDeskOwnerOrChannelAdmin(channelId, req.user?.id, ownerUserId);
-      // Report contents are restricted to the same owner/admin set that can
-      // generate them — members get nothing, not even the latest status.
-      if (!canGenerate) {
+      // Only desk-insights viewers see reports — members get nothing, not even
+      // the latest status. Generating stays owner/admin only.
+      if (!canGenerate && !(await canViewDeskInsights(channelId, req.user?.id, ownerUserId))) {
         res.status(403).json({ success: false, error: 'Only the desk owner or a channel admin can view reports for this desk' });
         return;
       }
@@ -147,7 +151,7 @@ export class DeskReportPanelController {
       const ownerUserId = (
         await db.emailChannelPreference.findUnique({ where: { channelId }, select: { ownerUserId: true } })
       )?.ownerUserId;
-      if (!(await isDeskOwnerOrChannelAdmin(channelId, req.user?.id, ownerUserId))) {
+      if (!(await canViewDeskInsights(channelId, req.user?.id, ownerUserId))) {
         res.status(403).send('Only the desk owner or a channel admin can view reports for this desk');
         return;
       }

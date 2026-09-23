@@ -91,6 +91,15 @@ export const parseDeskMetricsGuestVisibility = (raw?: string | null): Record<str
   }
 };
 
+const ACCESS_RANK: Record<string, number> = { READ: 1, WRITE: 2, ADMIN: 3 };
+
+/** Any SUPPORT access type at or above the desk's metricsMinAccess (null = WRITE). */
+export const meetsDeskInsightsAccess = (
+  supportAccessTypes: readonly string[],
+  metricsMinAccess?: string | null,
+): boolean =>
+  supportAccessTypes.some(type => ACCESS_RANK[type] >= ACCESS_RANK[metricsMinAccess ?? 'WRITE']);
+
 export interface DeskMetricsPerDeskRow {
   channelId: string;
   channelName: string | null;
