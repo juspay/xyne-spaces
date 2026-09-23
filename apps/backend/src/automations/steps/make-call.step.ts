@@ -5,7 +5,8 @@ import { StepCategory } from '../types/categories';
 import { variableRef } from '../engine/variable-ref';
 import type { AutomationContext } from '../types/context';
 import { repositories } from '@/database/repositories';
-import { livekitService } from '@/services/liveKitService';
+import { livekitService, DEFAULT_ROOM_EMPTY_TIMEOUT_SECONDS, PENDING_CALL_LOCK_TTL_SECONDS } from '@/services/liveKitService';
+import { redisService } from '@/services/redisService';
 import { callSideEffectService } from '@/services/callSideEffectService';
 import { CallType, CallOrigin, CallStatus, ProjectType, UserType } from '@xyne/shared';
 import { logger } from '@/utils/logger';
@@ -225,6 +226,58 @@ export class MakeCallStep extends BaseActionStep<typeof MakeCallConfigSchema, Ma
       );
     }
 
+    // Race guard: dedupe concurrent call creation for this channel against BOTH
+    // other automation runs and channel-level human-initiated calls. This step
+    // always creates CallOrigin.CHANNEL calls, and initiateCall claims this exact
+    // same call:pending:<channelId> key for its own channel-level (no
+    // conversationId) calls - so a workflow firing twice, or racing a person
+    // pressing "call" on the channel, can't each create their own room. A
+    // human's thread/conversation-scoped call uses a different, suffixed key
+    // (call:pending:<channelId>:<conversationId>) and is intentionally not
+    // covered here: thread calls are a separate CallOrigin.CONVERSATION track
+    // that can legitimately run alongside a channel-level call.
+    const pendingCallKey = `call:pending:${channelId}`;
+    let claimedCallLock: boolean;
+    try {
+      claimedCallLock = await redisService.set(pendingCallKey, 'pending', PENDING_CALL_LOCK_TTL_SECONDS, true /* NX */);
+    } catch (error) {
+      // Fail CLOSED here: unlike a human-facing join, this step creates a
+      // fully populated, ringing call in one shot. Proceeding unguarded during
+      // a Redis outage risks double-ringing every invitee if a concurrent run
+      // (automation or human) is also mid-flight. Let the workflow engine's
+      // normal retry policy handle it instead.
+      throw new Error(
+        `[MakeCallStep] Unable to acquire call dedupe lock (Redis unavailable): workspaceId=${workspaceId}, automationId=${automationId}, error=${error}`
+      );
+    }
+
+    if (!claimedCallLock) {
+      const existingCall = await repositories.calls.findActiveCallByChannelId(channelId);
+      const existingMetadata = existingCall?.metadata as { conversationId?: string } | null;
+      if (!existingCall || !existingMetadata?.conversationId) {
+        // The winner (another automation run, or a human's initiateCall) hasn't
+        // committed its DB row yet — nothing resolvable to point at. Fail
+        // rather than fabricate output; the workflow engine's retry will pick
+        // it up once the winner's call is visible.
+        throw new Error(
+          `[MakeCallStep] Another call is already being created in this channel; skipping duplicate: channelId=${channelId}, automationId=${automationId}`
+        );
+      }
+
+      logger.info('[MakeCallStep] joining_racing_call', {
+        channelId,
+        callId: existingCall.externalId,
+        automationId,
+      });
+
+      return {
+        callId: existingCall.externalId,
+        roomLink: existingCall.roomLink ?? buildCallInviteUrl(existingCall.externalId),
+        channelId,
+        conversationId: existingMetadata.conversationId,
+      };
+    }
+
     // uuidv4() is synchronous and CPU-local; sequential generation is
     // intentional and avoids pretending there is useful async work to parallelize.
     const externalId = uuidv4();
@@ -256,7 +309,7 @@ export class MakeCallStep extends BaseActionStep<typeof MakeCallConfigSchema, Ma
     await livekitService.createRoom({
       name: externalId,
       maxParticipants: effectiveMaxParticipants,
-      emptyTimeout: config.emptyTimeout ?? 120,
+      emptyTimeout: config.emptyTimeout ?? DEFAULT_ROOM_EMPTY_TIMEOUT_SECONDS,
       metadata: roomMetadata,
     });
 
