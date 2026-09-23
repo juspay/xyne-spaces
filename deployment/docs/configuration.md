@@ -577,6 +577,8 @@ identical on the three clouds; only the state and provider variables differ.
 | `argocd_namespace` | string | `argocd` | |
 | `argocd_values` | string (YAML) | `""` | extra values for the `argo-cd` chart (merged after `fullnameOverride: argocd`, `configs.params.server.insecure: true`) |
 | `enable_vespa` | bool | `false` | `addons.vespa.enabled` |
+| `enable_hindsight` | bool | `false` | `addons.hindsight.enabled`; deploys the upstream Hindsight chart and points claw's long-term memory at it |
+| `hindsight` | object{url, tenant} | `{}` | point claw at a Hindsight you run elsewhere instead. `url` wins over the deployed addon; empty with the addon off disables memory entirely |
 | `enable_monitoring` | bool | `false` | `addons.monitoring.enabled` |
 | `enable_sandbox` | bool | `false` | `addons.sandbox.enabled`; also registers the `quay.io/kata-containers/kata-deploy-charts` OCI repository in Argo CD |
 | `apps` | map(object{enabled, values}) | `{}` | per-chart switch and YAML value overrides, see below |
@@ -642,6 +644,7 @@ reachable:
 | `cnpg` | `enabled`, `version` 0.29.0, `namespace` cnpg-system, `cluster.instances` 2, `cluster.imageName`, `cluster.storage.size` 50Gi, `cluster.storage.storageClass`, `cluster.pooler.{instances 2, maxClientConn 1000, defaultPoolSize 20}`, `cluster.backup.{enabled, destinationPath, endpointURL, credentialsSecret xyne-pg-backup, schedule, retentionPolicy 14d}`, `values` |
 | `redis` | `enabled`, `persistence.size` 10Gi, `persistence.storageClass`, `values` |
 | `minio` | `enabled`, `version` 5.4.0, `persistence.size` 200Gi, `persistence.storageClass`, `resources.requests.memory` 2Gi, `values` |
+| `hindsight` | `enabled`, `repoURL` github.com/vectorize-io/hindsight, `targetRevision` v0.10.1, `path` helm/hindsight, `namespace` hindsight, `service` hindsight-api, `port` 8888, `values` (any upstream chart value: `postgresql.*`, `worker.*`, `tei.*`, `api.env`, `existingSecret`) |
 | `vespa` | `enabled`, `image.{registry, repository vespaengine/vespa, tag}`, `proxyImage.{registry, repository, tag}`, `storageClass`, `configserverStorage` 50Gi, `contentStorage` 200Gi, `embedder.enabled` true, `values.{configserver, content, feed, search, embedder, proxy}` |
 | `monitoring` | `enabled`, `namespace` monitoring, `metricsEndpoint`, `victoriaMetrics.version` 0.93.0, `otelCollector.version` 0.173.1, `values.{victoriaMetrics, otelCollector}` |
 | `sandbox` | `enabled`, `kata.{version 4.1.0, imageTag 4.1.0, namespace kube-system, shim qemu, shims [qemu, qemu-runtime-rs], hypervisorAnnotations}`, `controller.{repoURL, targetRevision v0.4.5, path helm, namespace, image, tag, values}`, `template.{name, image, vcpus, memory, resources}`, `warmPool.replicas`, `policy.{allowedEgress, dns.cidrs}`, `values.{kata, policy, router, egressProxy}` |

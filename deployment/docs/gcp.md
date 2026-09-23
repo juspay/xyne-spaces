@@ -43,6 +43,7 @@ Substitute your own.
 | DNS | `A` records for `xyne.example.com` and `*.xyne.example.com` when `dns_zone` is set | |
 | LiveKit (off by default) | two managed instance groups, global HTTPS load balancer, managed certificate, Secret Manager secrets | `xyne-livekit-*` |
 | Bastion (off by default) | one `e2-small` VM reachable through IAP, OS Login on, `psql` and `redis-cli` installed | `xyne-bastion` |
+| Hindsight (off by default) | claw's long-term memory: the upstream `vectorize-io/hindsight` Helm chart deployed into the cluster in its own namespace, bringing its own pgvector PostgreSQL; `hindsight.url` points claw at an instance you already run instead | `hindsight` |
 | State | one Cloud Storage bucket with versioning | `acme-spaces-prod-tfstate` |
 
 Wall-clock time: about 25–35 minutes for `01-infra` (Cloud SQL `REGIONAL` and GKE dominate),
@@ -266,6 +267,19 @@ are passed by `setup.sh` from `env.conf`; the values in the file only matter whe
   `appVersion`; set them to use a mirror ([recipe](configuration.md#pin-images-to-your-own-registry)).
 - `acme_email`: the contact address on the Let's Encrypt account cert-manager creates.
 - `enable_vespa`, `enable_monitoring`, `enable_sandbox`: the optional addons; off to start.
+- `enable_hindsight`: deploy Hindsight, claw's long-term memory, from the upstream chart into its
+  own `hindsight` namespace; off to start. Claw is pointed at
+  `http://hindsight-api.hindsight:8888` for you.
+  - The chart brings its own pgvector PostgreSQL, separate from the Postgres the rest of the
+    install uses. Point it at a database of yours through `addon_values["hindsight"]`
+    (`postgresql.enabled`, `postgresql.external.*`). The bundled database's default password is
+    the literal `hindsight`, so change it if you keep the bundled one.
+  - The LLM provider, model and base URL Hindsight extracts facts with are chart values as well:
+    `api.env.HINDSIGHT_API_LLM_PROVIDER`, `api.env.HINDSIGHT_API_LLM_MODEL` and
+    `api.env.HINDSIGHT_API_LLM_BASE_URL` in `addon_values["hindsight"]`.
+- `hindsight`: the `url` and `tenant` of a Hindsight you already run elsewhere. A non-empty `url`
+  always wins over the deployed addon. With neither set, claw's long-term memory is off, which is
+  the default.
 - `apps`: per-chart switches and value overrides. `xyne-claw` is off by default already; the
   entry shows the syntax.
 - `workers`: one entry per worker role; `name` must appear in `worker_names` above. Without
@@ -292,6 +306,12 @@ acme_email     = "ops@example.com"
 enable_vespa      = false
 enable_monitoring = false
 enable_sandbox    = false
+enable_hindsight  = false
+
+hindsight = {
+  url    = ""
+  tenant = "default"
+}
 
 apps = {
   xyne-claw = { enabled = false }
@@ -348,6 +368,12 @@ docker run --rm livekit/livekit-server:v1.9.1 generate-keys
 
 Paste `postgres_password` and the LiveKit pair into `01-infra.tfvars`, the rest into
 `app_secrets`. [secrets.md](secrets.md) describes what each one protects and how to rotate it.
+
+Two more entries in `app_secrets` are optional and are not generated here. `hindsight_api_key` is
+the key claw presents when it calls the Hindsight API; leave it empty when the instance needs no
+auth. `hindsight_llm_api_key` is the LLM provider key Hindsight itself uses to extract facts, and
+applies only when you deploy Hindsight with `enable_hindsight`; without it Hindsight starts but
+extracts nothing. Both may be left empty.
 
 ## 9. Run the doctor
 
@@ -652,6 +678,16 @@ The third line is `gateway` mode. In `cloud-lb` and `external` mode the gateway 
 `EXTERNAL-IP` and that is correct; check the edge address the summary printed instead. In
 `external` mode also run `deployment/scripts/lb-config.sh --env prod --format all` and confirm
 your load balancer matches what it prints ([ingress.md](ingress.md#checking-it-works)).
+
+With Hindsight on and claw enabled, also:
+
+```bash
+kubectl -n hindsight get pods
+kubectl -n xyne get deploy xyne-claw -o jsonpath='{.spec.template.spec.containers[0].env[?(@.name=="HINDSIGHT_URL")].value}'
+```
+
+The first shows the API pod Running. The second prints the address claw uses, either the
+in-cluster service or the `hindsight.url` you set; nothing printed means memory is off.
 
 Argo CD UI: `kubectl -n argocd port-forward svc/argocd-server 8080:80`, then
 `http://localhost:8080`, user `admin`, password from the summary command.

@@ -3,7 +3,10 @@ set -euo pipefail
 # Resolve paths relative to the repo root, not the invoking shell's cwd — this runs as a
 # `prebuild` hook, and npm/pnpm invoke package scripts with cwd set to the PACKAGE directory
 # (apps/backend), not the repo root, so hardcoded relative paths would silently scan nothing.
-REPO_ROOT="$(git -C "$(dirname "${BASH_SOURCE[0]}")" rev-parse --show-toplevel)"
+# git is the source of truth when it can answer, but this also runs inside the Docker build,
+# where .dockerignore keeps .git out of the image — so fall back to the parent of scripts/.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel 2>/dev/null || printf '%s' "${SCRIPT_DIR%/*}")"
 ROOT="$REPO_ROOT/apps/backend/src"
 ALLOWED_DIR="apps/backend/src/bypassAcl/"
 EXCLUDED_RE='(^|/)(node_modules|dist|build|generated)/'

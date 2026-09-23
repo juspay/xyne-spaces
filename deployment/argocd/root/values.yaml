@@ -126,6 +126,10 @@ infra:
     url: ""
     httpUrl: ""
     turnHost: ""
+  hindsight:
+    url: ""
+    tenant: default
+    provider: hindsight
 
 addons:
   lbController:
@@ -204,6 +208,16 @@ addons:
     resources:
       requests:
         memory: 2Gi
+    values: {}
+  hindsight:
+    enabled: false
+    repoURL: https://github.com/vectorize-io/hindsight
+    targetRevision: v0.10.1
+    path: helm/hindsight
+    namespace: hindsight
+    service: hindsight-api
+    port: 8888
+    existingSecret: ""
     values: {}
   vespa:
     enabled: false
