@@ -3,6 +3,7 @@ import { UserResponsibility } from '@xyne/shared';
 import { withWorkspaceScope } from '@/database/tenant/context';
 import { notificationService } from '@/services/notificationService';
 import { syncWorkloadForUsers } from './workloadUtils';
+import { getGroupRoleIdsByUser } from './roleFrameworkUtils';
 import { logger } from './logger';
 import type {
   UserGroupMapping,
@@ -932,12 +933,18 @@ export async function evaluateAllRoles(
 
 export type RoleSlotsResult = Record<string, AssignmentResult>;
 
+// A user qualifies for a role slot when their unioned role set for the group
+// (user_role_mappings USER_GROUP rows ∪ legacy user_group_mappings.roleId)
+// contains `roleId`. Membership + ordering come from `userGroupMappings`, so a
+// user must still be a group member (and any prior channel/exclude filtering on
+// that list is preserved) to be a candidate.
 function filterUsersByRoleId(
   userGroupMappings: UserGroupMapping[],
   roleId: string,
+  roleIdsByUserId: Map<string, Set<string>>,
 ): string[] {
   return userGroupMappings
-    .filter(mapping => mapping.roleId === roleId)
+    .filter(mapping => roleIdsByUserId.get(mapping.userId)?.has(roleId) ?? false)
     .map(mapping => mapping.userId);
 }
 
@@ -983,12 +990,13 @@ export async function evaluateRoleSlots(
     }
   }
 
-  let [userStates, expertiseMappings, allWorkloadMappings, allBoardScores, userGroup] = await Promise.all([
+  let [userStates, expertiseMappings, allWorkloadMappings, allBoardScores, userGroup, roleIdsByUserId] = await Promise.all([
     repositories.userAssignmentState.findMany({ where: { userGroupId, userId: { in: allUserIds } } }),
     repositories.userExpertiseMapping.findMany({ where: { userGroupId, boardId, userId: { in: allUserIds } } }),
     loadWorkloadMappings(userGroupId, boardId, allUserIds),
     repositories.boardComplexityScore.findMany({ where: { userGroupId } }),
     repositories.userGroups.findById(userGroupId),
+    getGroupRoleIdsByUser(userGroupId),
   ]);
 
   const maxWorkload = userGroup?.maxWorkload ?? null;
@@ -1037,7 +1045,7 @@ export async function evaluateRoleSlots(
   // (the ticket assignee shouldn't be picked as the PR reviewer).
   const summary: string[] = [];
   for (const roleId of roleIds) {
-    const pool = filterUsersByRoleId(userGroupMappings, roleId);
+    const pool = filterUsersByRoleId(userGroupMappings, roleId, roleIdsByUserId);
     const res = await pickBest(pool, AssignmentType.TICKET_ASSIGNEE, ctx, boardId);
     result[roleId] = res;
     summary.push(`${roleId}:${res.assignedUserId ?? 'none'}`);
