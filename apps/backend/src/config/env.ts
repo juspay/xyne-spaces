@@ -328,6 +328,11 @@ const envSchema = Joi.object({
   XYNE_API_KEY: Joi.string().allow('').default(''),
   // Transcription Agent API Key (for S2S authentication)
   TRANSCRIPTION_AGENT_API_KEY: Joi.string().default(''),
+  // Google Speech-to-Text v2 Configuration — async BatchRecognize (via GCS staging) for call-recording transcription
+  GOOGLE_STT_MODEL: Joi.string().allow('').default('chirp_3'),
+  GOOGLE_STT_LANGUAGE: Joi.string().allow('').default('en-US'),
+  GOOGLE_STT_LOCATION: Joi.string().allow('').default('us'),
+  GOOGLE_STT_GCS_BUCKET_NAME: Joi.string().allow('').default(''),
   // Mettle user sync webhook API Key (for S2S authentication)
   METTLE_USER_SYNC_API_KEY: Joi.string().allow('').default(''),
   // Team intelligence sync API Key (for S2S authentication)
@@ -967,6 +972,14 @@ export const config = {
     apiKey: envVars.XYNE_API_KEY,
   },
   transcriptionAgentApiKey: envVars.TRANSCRIPTION_AGENT_API_KEY,
+  googleStt: {
+    model: envVars.GOOGLE_STT_MODEL,
+    language: envVars.GOOGLE_STT_LANGUAGE,
+    location: envVars.GOOGLE_STT_LOCATION,
+    // Falls back to the general GCS bucket when no dedicated STT-staging bucket is set.
+    bucketName: envVars.GOOGLE_STT_GCS_BUCKET_NAME || envVars.GCS_BUCKET_NAME,
+    projectId: envVars.GCS_PROJECT_ID,
+  },
   mettleUserSyncApiKey: envVars.METTLE_USER_SYNC_API_KEY,
   teamIntelligenceSyncApiKey: envVars.TEAM_INTELLIGENCE_SYNC_API_KEY,
   telepresenceMonitoringApiKey: envVars.TELEPRESENCE_MONITORING_API_KEY,

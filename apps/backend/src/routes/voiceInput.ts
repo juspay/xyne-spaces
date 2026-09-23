@@ -21,4 +21,6 @@ router.post(
   voiceInputController.transcribe,
 );
 
+router.post('/transcribe-recording', voiceInputController.transcribeRecording);
+
 export default router;

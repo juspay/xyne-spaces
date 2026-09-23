@@ -210,6 +210,58 @@ class VoiceInputService {
       throw error;
     }
   }
+
+  async transcribeRecording(
+    emailId: string,
+    language?: string,
+  ): Promise<{ text: string; language?: string }> {
+    logger.info(LogEvent.INFO, {
+      type: 'migrated_console_info',
+      message: String(`[VoiceInputService] Transcribing call recording | emailId=${emailId}`),
+    });
+    const _t0 = Date.now();
+
+    try {
+      const response: AxiosResponse<VoiceInputResponse> = await apiInstance.post(
+        '/voice-input/transcribe-recording',
+        { emailId, ...(language ? { language } : {}) },
+      );
+
+      const elapsed = Date.now() - _t0;
+      logger.info(LogEvent.INFO, {
+        type: 'migrated_console_info',
+        message: String(
+          `[VoiceInputService] Recording transcription success | elapsed=${elapsed}ms` +
+            ` | chars=${response.data.text?.length ?? 0} | language=${response.data.language ?? 'unknown'}`,
+        ),
+      });
+      return {
+        text: response.data.text || '',
+        ...(response.data.language ? { language: response.data.language } : {}),
+      };
+    } catch (error) {
+      const elapsed = Date.now() - _t0;
+      if (isAxiosError(error)) {
+        const backendError =
+          (error.response?.data as VoiceInputResponse | undefined)?.error || error.message;
+        logger.error(LogEvent.FRONTEND_ERROR, {
+          type: 'migrated_console_error',
+          message: String(
+            `[VoiceInputService] Recording transcription failed | elapsed=${elapsed}ms` +
+              ` | status=${error.response?.status ?? 'network'} | error=${backendError}`,
+          ),
+          error,
+        });
+        throw new Error(backendError);
+      }
+      logger.error(LogEvent.FRONTEND_ERROR, {
+        type: 'migrated_console_error',
+        message: String(`[VoiceInputService] Unexpected error | elapsed=${elapsed}ms`),
+        error: error,
+      });
+      throw error;
+    }
+  }
 }
 
 export const voiceInputService = new VoiceInputService();

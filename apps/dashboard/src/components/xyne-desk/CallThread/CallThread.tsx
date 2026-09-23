@@ -1,7 +1,9 @@
 import { ReactElement, useEffect, useMemo, useRef, useState } from 'react';
-import { PhoneIncoming, PhoneOutgoing } from 'lucide-react';
+import { Copy, Loader2, PhoneIncoming, PhoneOutgoing } from 'lucide-react';
+import { toast } from 'sonner';
 import { useMarkEmailRead } from '../../../hooks/useMarkEmailRead';
 import { cn } from '../../../utils/classNames';
+import { voiceInputService } from '../../../services/VoiceInput/voiceInputService';
 
 interface CallThreadEmail {
   id: string;
@@ -196,12 +198,89 @@ function buildTelephonyFields(
   ];
 }
 
+type TranscribeState = 'idle' | 'transcribing' | 'done' | 'error';
+
+function TranscribeControl({ emailId }: { emailId: string }): ReactElement {
+  const [state, setState] = useState<TranscribeState>('idle');
+  const [transcript, setTranscript] = useState<string | null>(null);
+
+  const handleTranscribe = async (): Promise<void> => {
+    if (state === 'transcribing') return;
+    setState('transcribing');
+    try {
+      const result = await voiceInputService.transcribeRecording(emailId);
+      setTranscript(result.text);
+      setState('done');
+    } catch (error) {
+      setState('error');
+      toast.error(error instanceof Error ? error.message : 'Failed to transcribe recording');
+    }
+  };
+
+  const handleCopy = async (): Promise<void> => {
+    if (!transcript) return;
+    try {
+      await navigator.clipboard.writeText(transcript);
+      toast.success('Transcript copied');
+    } catch {
+      toast.error('Failed to copy transcript');
+    }
+  };
+
+  return (
+    <div className='mt-2'>
+      {state !== 'done' && (
+        <button
+          type='button'
+          onClick={() => void handleTranscribe()}
+          disabled={state === 'transcribing'}
+          data-track-category='Support'
+          data-track-name='TranscribeCallEntry'
+          data-track-metadata={JSON.stringify({ state })}
+          className='inline-flex items-center gap-1.5 rounded-lg border border-border bg-background px-2.5 py-1 text-xs font-medium text-foreground hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60'
+        >
+          {state === 'transcribing' ? (
+            <>
+              <Loader2 size={12} className='animate-spin' /> Transcribing…
+            </>
+          ) : (
+            'Transcribe'
+          )}
+        </button>
+      )}
+      {state === 'done' && transcript ? (
+        <div className='mt-2 rounded-lg border border-border bg-background p-2'>
+          <div className='mb-1 flex items-center justify-between'>
+            <span className='text-[11px] uppercase tracking-wide text-muted-foreground'>
+              Transcript
+            </span>
+            <button
+              type='button'
+              onClick={() => void handleCopy()}
+              data-track-category='Support'
+              data-track-name='CopyCallTranscript'
+              className='inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground'
+            >
+              <Copy size={12} /> Copy
+            </button>
+          </div>
+          <div className='max-h-40 overflow-y-auto whitespace-pre-wrap text-sm text-foreground'>
+            {transcript}
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 export function CallEntry({
   body,
   variant = 'full',
+  emailId,
 }: {
   body: string;
   variant?: 'full' | 'compact';
+  emailId?: string;
 }): ReactElement {
   const telephonyMeta = useMemo(() => parseTelephonyMetadata(body), [body]);
 
@@ -230,9 +309,12 @@ export function CallEntry({
         </div>
         {summary ? <div className='mt-0.5 text-xs text-muted-foreground'>{summary}</div> : null}
         {telephonyMeta.recordingUrl ? (
-          <audio controls className='mt-2 h-8 w-full' src={telephonyMeta.recordingUrl}>
-            <track kind='captions' />
-          </audio>
+          <>
+            <audio controls className='mt-2 h-8 w-full' src={telephonyMeta.recordingUrl}>
+              <track kind='captions' />
+            </audio>
+            {emailId ? <TranscribeControl emailId={emailId} /> : null}
+          </>
         ) : (
           <div className='mt-1.5 text-xs italic text-muted-foreground'>
             Recording not available yet
@@ -265,6 +347,7 @@ export function CallEntry({
           <audio controls className='h-8 w-full' src={telephonyMeta.recordingUrl}>
             <track kind='captions' />
           </audio>
+          {emailId ? <TranscribeControl emailId={emailId} /> : null}
         </div>
       ) : null}
     </div>
@@ -314,7 +397,7 @@ const CallThreadItem = ({
         {!isCollapsed && (
           <div>
             {email.body ? (
-              <CallEntry body={email.body} />
+              <CallEntry body={email.body} emailId={email.id} />
             ) : (
               <span className='text-muted-foreground italic'>No content</span>
             )}

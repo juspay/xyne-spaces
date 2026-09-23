@@ -430,6 +430,27 @@ export class TelephonyEmailService {
     });
   }
 
+  /**
+   * Resolves the recording URL for a call from our own stored email row — never accept
+   * a client-supplied URL for this (SSRF guard); workspaceId scoping is the security model.
+   */
+  async getCallRecording(
+    emailId: string,
+    workspaceId: string,
+  ): Promise<{ recordingUrl: string; talkTimeSec?: number } | null> {
+    const email = await this.findCallEmailById(emailId, workspaceId);
+    if (!email) {
+      return null;
+    }
+
+    const meta = parseStoredTelephonyEmailBody(email.body);
+    if (!meta?.recordingUrl) {
+      return null;
+    }
+
+    return { recordingUrl: meta.recordingUrl, talkTimeSec: meta.talkTimeSec };
+  }
+
   private async findTrackedCallEmail(
     sourceId: string,
     externalId: string,

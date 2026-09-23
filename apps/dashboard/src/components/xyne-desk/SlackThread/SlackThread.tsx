@@ -39,7 +39,7 @@ const SlackThread = ({ emails, ticketId }: SlackThreadProps): ReactElement => {
               <Phone size={14} aria-hidden />
             </div>
             <div className='min-w-0 flex-1'>
-              <CallEntry body={email.body} variant='compact' />
+              <CallEntry body={email.body} variant='compact' emailId={email.id} />
             </div>
           </div>
         ) : (
