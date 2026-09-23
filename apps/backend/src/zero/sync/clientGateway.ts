@@ -92,12 +92,20 @@ export function attachSyncHandlers(socket: SyncIoSocket): () => void {
     }
     subscribe(msg.queryName, msg.args, ack, msg.sinceOffset);
   });
-  socket.on('sync:shadow-divergence', (msg: { queryName?: string }) => {
-    // Client-reported shadow divergence (throttled client-side): the promotion/rollback signal
-    // for shadow-mode queries. queryName is metric-attributed only if registry-known (cardinality).
+  socket.on('sync:shadow-check', (msg: { queryName?: string; matched?: boolean; kind?: string }) => {
+    // Client-reported shadow comparison (throttled client-side). Matches are the DENOMINATOR —
+    // a divergence rate needs one, and "no divergences" without checks is false confidence.
     const q = typeof msg?.queryName === 'string' ? msg.queryName : 'unknown';
-    syncMetrics.count('sync_engine_shadow_divergence_total', { queryName: q });
-    obsEmit('sync-sub', { action: 'shadow-divergence', socketId: connId, userId, queryName: q });
+    const matched = msg?.matched === true;
+    const kind = msg?.kind === 'length' || msg?.kind === 'content' ? msg.kind : undefined;
+    syncMetrics.count('sync_engine_shadow_checks_total', {
+      queryName: q,
+      result: matched ? 'match' : 'diverged',
+      ...(kind ? { kind } : {}),
+    });
+    if (!matched) {
+      obsEmit('sync-sub', { action: 'shadow-divergence', socketId: connId, userId, queryName: q, kind });
+    }
   });
   socket.on('sync:unsubscribe', (msg: SyncMessage) => {
     if (msg?.queryName && Array.isArray(msg.args)) unsubscribe(msg.queryName, msg.args);

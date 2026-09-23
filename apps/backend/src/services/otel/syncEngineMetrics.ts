@@ -36,7 +36,7 @@ const COUNTER_DESCRIPTIONS: Record<SyncCounterName, string> = {
   sync_engine_tap_pokes_total: 'Tap pokes by result',
   sync_engine_tap_persist_total: 'Tap poke persists by result',
   sync_engine_tap_events_total: 'Tap lifecycle events (reset/backoff/fatal/fence_lost)',
-  sync_engine_shadow_divergence_total: 'Client-reported shadow-mode divergence (sync vs zero result mismatch)',
+  sync_engine_shadow_checks_total: 'Client-reported shadow comparisons by result (match = denominator) and divergence kind',
 };
 
 const HISTOGRAM_DESCRIPTIONS: Record<SyncHistogramName, string> = {

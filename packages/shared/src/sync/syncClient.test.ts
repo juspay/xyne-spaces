@@ -230,7 +230,7 @@ test('sync:ready payload carries per-query modes; queryMode resolves with defaul
   assert.equal(notified, 1, 'identical modes must not re-notify');
 });
 
-test('shadow-divergence beacon is throttled per query', () => {
+test('shadow-check beacon: per-query throttles, matches and divergences independent', () => {
   const handlers = new Map<string, (payload: unknown) => void>();
   const sent: Array<{ event: string; payload: unknown }> = [];
   const transport: SyncTransport = {
@@ -243,10 +243,18 @@ test('shadow-divergence beacon is throttled per query', () => {
   };
   const client = new SyncClient({} as never, transport, {} as never);
   client.start();
-  client.reportShadowDivergence('q1');
-  client.reportShadowDivergence('q1'); // throttled
-  client.reportShadowDivergence('q2'); // independent query
-  const beacons = sent.filter((s) => s.event === 'sync:shadow-divergence');
-  assert.equal(beacons.length, 2);
-  assert.deepEqual(beacons.map((b) => (b.payload as { queryName: string }).queryName), ['q1', 'q2']);
+  client.reportShadowCheck('q1', false, 'length');
+  client.reportShadowCheck('q1', false, 'content'); // throttled (same query+outcome)
+  client.reportShadowCheck('q1', true); // MATCH is an independent throttle bucket (the denominator)
+  client.reportShadowCheck('q2', false, 'content'); // independent query
+  const beacons = sent.filter((s) => s.event === 'sync:shadow-check');
+  assert.equal(beacons.length, 3);
+  assert.deepEqual(
+    beacons.map((b) => b.payload as { queryName: string; matched: boolean; kind?: string }),
+    [
+      { queryName: 'q1', matched: false, kind: 'length' },
+      { queryName: 'q1', matched: true, kind: undefined },
+      { queryName: 'q2', matched: false, kind: 'content' },
+    ],
+  );
 });

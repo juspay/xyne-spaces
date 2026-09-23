@@ -360,13 +360,20 @@ export class SyncClient {
     return () => this.#modesListeners.delete(cb);
   }
 
-  /** Throttled shadow-divergence beacon (the promotion/rollback signal for shadow mode). */
-  readonly #lastDivergenceAt = new Map<string, number>();
-  reportShadowDivergence(queryName: string): void {
+  /**
+   * Throttled shadow-check beacon — the promotion/rollback signal for shadow mode. BOTH outcomes
+   * report (different throttles): matches give the DENOMINATOR (zero divergences with zero checks
+   * is false confidence, not correctness), divergences carry a kind (length = rows missing/extra;
+   * content = same rows, drifted fields) for triage without log access.
+   */
+  readonly #lastCheckAt = new Map<string, number>();
+  reportShadowCheck(queryName: string, matched: boolean, kind?: 'length' | 'content'): void {
+    const key = `${queryName}:${matched}`;
+    const throttleMs = matched ? 600_000 : 60_000; // liveness ping vs incident signal
     const now = Date.now();
-    if (now - (this.#lastDivergenceAt.get(queryName) ?? 0) < 60_000) return;
-    this.#lastDivergenceAt.set(queryName, now);
-    this.#transport.emit('sync:shadow-divergence', { queryName });
+    if (now - (this.#lastCheckAt.get(key) ?? 0) < throttleMs) return;
+    this.#lastCheckAt.set(key, now);
+    this.#transport.emit('sync:shadow-check', { queryName, matched, kind });
   }
 
   /**

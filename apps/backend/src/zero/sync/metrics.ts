@@ -22,7 +22,7 @@ export type SyncCounterName =
   | 'sync_engine_tap_pokes_total' // {result: applied|cancelled}
   | 'sync_engine_tap_persist_total' // {result: ok|failed}
   | 'sync_engine_tap_events_total' // {event: reset|backoff|fatal|fence_lost}
-  | 'sync_engine_shadow_divergence_total'; // {queryName} — client-reported shadow-vs-zero mismatch
+  | 'sync_engine_shadow_checks_total'; // {queryName, result: match|diverged, kind?: length|content}
 
 export type SyncHistogramName =
   | 'sync_engine_subscribe_latency' // {plane}

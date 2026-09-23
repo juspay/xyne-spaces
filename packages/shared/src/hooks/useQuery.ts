@@ -430,9 +430,9 @@ export function useQuery<
         syncLen,
         ...(match ? {} : { zeroIds: shadowIds(zData), syncIds: shadowIds(sData) }),
       });
-      // Promotion/rollback signal: a settled divergence is reported to the backend (throttled
-      // per-query in the client) and lands as sync_engine_shadow_divergence_total{queryName}.
-      if (!match) getSyncClient()?.reportShadowDivergence(queryName);
+      // Promotion/rollback signal: every settled comparison reports (throttled per-query) →
+      // sync_engine_shadow_checks_total{queryName, result, kind}. Matches are the denominator.
+      getSyncClient()?.reportShadowCheck(queryName, match, match ? undefined : zeroLen !== syncLen ? 'length' : 'content');
     }, 600);
     return () => {
       if (shadowTimer.current) clearTimeout(shadowTimer.current);
