@@ -938,8 +938,9 @@ const ReleaseDetailScreen = (): ReactElement => {
                 {!artRows || artRows.length === 0 ? (
                   <div className='text-center py-8 bg-muted rounded-lg border border-dashed border-border'>
                     <p className='text-sm text-muted-foreground'>
-                      No ART rows yet. They are created during commit analysis when a release
-                      deploys.
+                      {isVersionRelease
+                        ? `No dev tickets are tagged for ${releaseVersion ?? 'this version'}. A dev ticket joins a version release when its releaseVersion field holds exactly this value and it has a linked PR.`
+                        : 'No ART rows yet. They are created during commit analysis when a release deploys.'}
                     </p>
                   </div>
                 ) : (
