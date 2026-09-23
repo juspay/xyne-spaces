@@ -1,3 +1,10 @@
+## [1.381.0](https://github.com/juspay/xyne-spaces/compare/v1.380.1...v1.381.0) (2026-09-23)
+
+
+### Features
+
+* open tickets in place on the Projects screen ([#2243](https://github.com/juspay/xyne-spaces/issues/2243)) ([8573ce4](https://github.com/juspay/xyne-spaces/commit/8573ce4b65bdd1032d165fe8f72f877676641ea4))
+
 ## [1.380.1](https://github.com/juspay/xyne-spaces/compare/v1.380.0...v1.380.1) (2026-09-23)
 
 
