@@ -107,6 +107,7 @@ export function FiltersModal({
       inChannelIds: [],
       mentionUserIds: [],
       mentionChannelIds: [],
+      mentionUserGroupIds: [],
       statuses: [],
       priority: '',
       boardIds: [],
@@ -180,8 +181,13 @@ export function FiltersModal({
           <MentionTargetsField
             users={draft.mentionUserIds}
             channels={draft.mentionChannelIds}
+            userGroups={draft.mentionUserGroupIds}
             onChange={next =>
-              patch({ mentionUserIds: next.users, mentionChannelIds: next.channels })
+              patch({
+                mentionUserIds: next.users,
+                mentionChannelIds: next.channels,
+                mentionUserGroupIds: next.userGroups,
+              })
             }
             placeholder={control.placeholder}
             track={entry.id.toUpperCase()}

@@ -1,6 +1,6 @@
 import { readFromYSweetStrict } from '@/utils/ysweetUtils';
 import { extractMentionsFromContent } from '@/utils/mentionUtils';
-import { extractChannelMentions } from '@/utils/mentionParser';
+import { extractChannelMentions, extractGroupMentions } from '@/utils/mentionParser';
 import { appSchema, callSchema, channelSchema, InsertDocument, mailSchema, messageSchema, projectSchema, schemaToDocType, SubApp, ticketSchema, userSchema, VespaAppDocument, VespaCallDocument, VespaChatContainerDocument, VespaChatMessageDocument, VespaDocType, VespaFileDocument, VespaMailDocument, VespaProjectDocument, VespaSchema, VespaTicketDocument, samTranscriptSchema } from '@/vespa/src/types';
 import { NAMESPACE } from '@/vespa/vespaConfig';
 import type { InsertValue } from '@rocicorp/zero';
@@ -525,6 +525,7 @@ export const mapMessage = async (
     replyUsersCount: 0, // TODO
     mentions: mentions?.map(v => v.userId) || [],
     channelMentions: extractChannelMentions(args.content || ''),
+    groupMentions: extractGroupMentions(args.content || ''),
     metadata: JSON.stringify(args.metadata || {}),
     threadMentions: threadInfo.threadMentions,
     threadSenders: threadInfo.threadSenders,
