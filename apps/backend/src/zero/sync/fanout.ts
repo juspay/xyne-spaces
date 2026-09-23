@@ -9,6 +9,7 @@ import { seedRowLevel, routeDelta, projectDeltaForUser, type RowLevelMeta } from
 import { decryptRowsForEmit } from './rowDecrypt';
 import { BoundedMemo, estimateRowsBytes } from './boundedMemo';
 import { syncMetrics } from './metrics';
+import { grantSentinelFallbackDecision } from './grantSentinel';
 import { obsEmit } from './obs';
 import { SerialQueue } from './serialQueue';
 
@@ -684,15 +685,15 @@ export class Fanout {
         // unadmitted forever. If non-cleared entries have been flowing for longer than any
         // real rebuild takes, adopt the stream as hydrated — loudly. A wrong adoption
         // self-corrects at the next cleared/resync cycle; a permanent silent defer doesn't.
-        const since = this.#grantUnhydratedSince.get(instanceKey);
-        if (since === undefined) {
-          this.#grantUnhydratedSince.set(instanceKey, Date.now());
-          return;
-        }
-        if (Date.now() - since < Fanout.#GRANT_SENTINEL_FALLBACK_MS) return;
-        this.#grantUnhydratedSince.delete(instanceKey);
+        const decision = grantSentinelFallbackDecision(
+          this.#grantUnhydratedSince,
+          instanceKey,
+          Date.now(),
+          Fanout.#GRANT_SENTINEL_FALLBACK_MS,
+        );
+        if (decision === 'defer') return;
         this.#grantHydrated.add(instanceKey);
-        logger.warn('sync_grant_sentinel_fallback', { instanceKey, waitedMs: Date.now() - since });
+        logger.warn('sync_grant_sentinel_fallback', { instanceKey });
         syncMetrics.count('sync_engine_admission_total', { result: 'grant_fallback' });
       }
       // A PER-USER grant delta (`channel_participants{userId:U}`) can only change U's admission —
