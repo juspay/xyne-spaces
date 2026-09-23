@@ -1,3 +1,10 @@
+## [1.379.2](https://github.com/juspay/xyne-spaces/compare/v1.379.1...v1.379.2) (2026-09-23)
+
+
+### Bug Fixes
+
+* gate release hotfix sync on the release branch ([#2222](https://github.com/juspay/xyne-spaces/issues/2222)) ([6b8b3d6](https://github.com/juspay/xyne-spaces/commit/6b8b3d65cc50a2b8ecb073be059fea793104499c))
+
 ## [1.379.1](https://github.com/juspay/xyne-spaces/compare/v1.379.0...v1.379.1) (2026-09-23)
 
 
