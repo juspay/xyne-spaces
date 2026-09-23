@@ -151,18 +151,33 @@ check_placeholders() {
   done < "$PLACEHOLDER_TMP"
 }
 
+# Reads one key from inside a named block, so a `url` nested in apps.*.values,
+# addon_values or overlay_sources is not mistaken for hindsight's own.
+tfvar_block_value() {
+  local file="$1" block="$2" key="$3"
+  [ -f "$file" ] || return 0
+  awk -v block="$block" -v key="$key" '
+    $0 ~ "^[[:space:]]*" block "[[:space:]]*=[[:space:]]*\\{" { inblock = 1; next }
+    inblock && /^[[:space:]]*\}/ { exit }
+    inblock && $0 ~ "^[[:space:]]*" key "[[:space:]]*=" {
+      sub(/^[^=]*=[[:space:]]*/, ""); gsub(/"/, ""); sub(/[[:space:]]*$/, ""); print; exit
+    }
+  ' "$file"
+}
+
 check_hindsight() {
-  local enabled url
+  local enabled url llm_key
   [ -f "$PLATFORM_TFVARS" ] || return 0
   enabled="$(tfvar_value "$PLATFORM_TFVARS" enable_hindsight)"
-  url="$(tfvar_value "$PLATFORM_TFVARS" url)"
+  url="$(tfvar_block_value "$PLATFORM_TFVARS" hindsight url)"
 
   if [ "$enabled" = "true" ]; then
     record PASS "hindsight" "deployed by this install"
-    if tfvar_set "$PLATFORM_TFVARS" hindsight_llm_api_key; then
+    llm_key="$(tfvar_value "$PLATFORM_TFVARS" hindsight_llm_api_key)"
+    if [ -n "$llm_key" ]; then
       record PASS "hindsight_llm_api_key" "set"
     else
-      record WARN "hindsight_llm_api_key" "unset; Hindsight starts but cannot extract facts without an LLM key"
+      record WARN "hindsight_llm_api_key" "empty; Hindsight starts but cannot extract facts without an LLM key"
     fi
   elif [ -n "$url" ]; then
     record PASS "hindsight" "using an existing instance at $url"
