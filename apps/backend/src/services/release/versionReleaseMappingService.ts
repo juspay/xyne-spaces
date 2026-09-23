@@ -2,6 +2,8 @@ import { Application, Prisma, PullRequests } from '@prisma/client';
 import { ApplicationRepository } from '@/database/repositories/applicationRepository';
 import { DatabaseClient } from '@/database/client';
 import { getGitProvider } from '@/git-providers/factory';
+import { ReleaseRepository } from '@/database/repositories/releaseRepository';
+import { upsertCommitAnalysisCanvas } from '@/utils/commitAnalysisCanvas';
 import { BitbucketService } from '@/services/bitbucketService';
 import { CommitAnalysisService, PullRequestDiffFile } from '@/services/commitAnalysisService';
 import { config } from '@/config/env';
@@ -12,6 +14,7 @@ import {
   BaseTicketType,
   BoardType,
   FormEntityType,
+  ReleaseEventType,
   ReleaseTrackingMode,
   isReleaseTicket, PRStatus, TicketStatusV2 } from '@xyne/shared';
 
@@ -27,6 +30,17 @@ type PullRequestDiffContext = {
   repoSlug: string;
   diffFiles: PullRequestDiffFile[];
   filePaths: string[];
+};
+type CanvasEnvChange = { filePath: string; fileName: string; newValue: string; applicationId?: string };
+type CanvasMigrationLink = { filePath: string; diffUrl: string; applicationId?: string };
+type PerAppSubTickets = Map<string, { subTicketId: string; mappedTicketId: string; xyneId: string }>;
+type DevTicketMapping = {
+  devTicket: TicketWithReleaseBoard;
+  affectedApps: AffectedApplication[];
+  perAppSubTickets: PerAppSubTickets;
+  prDiffContexts: PullRequestDiffContext[];
+  envChanges: CanvasEnvChange[];
+  migrationLinks: CanvasMigrationLink[];
 };
 type StaleVersionReleaseMapping = {
   artId: string;
@@ -51,6 +65,7 @@ function buildBitbucketServiceConfig(): BitbucketConfig {
 
 class VersionReleaseMappingService {
   private readonly applicationRepository = new ApplicationRepository();
+  private readonly releaseRepository = new ReleaseRepository();
   private readonly commitAnalysisService = new CommitAnalysisService(
     new BitbucketService(buildBitbucketServiceConfig()),
   );
@@ -110,9 +125,13 @@ class VersionReleaseMappingService {
     }
 
     const devTickets = await this.findDevTicketsByVersion(releaseTicket.projectId, releaseVersion);
+    const mappings: DevTicketMapping[] = [];
     for (const devTicket of devTickets) {
-      await this.mapDevTicketToRelease(devTicket, releaseTicket);
+      const mapping = await this.mapDevTicketToRelease(devTicket, releaseTicket);
+      if (mapping) mappings.push(mapping);
     }
+
+    await this.publishReleaseArtifacts(releaseTicket, releaseVersion, mappings);
   }
 
   private async syncDevTicket(
@@ -125,21 +144,97 @@ class VersionReleaseMappingService {
       return;
     }
 
+    // Re-sync from the release side: the timeline and canvas describe the whole
+    // release, so they have to be rebuilt from every dev ticket on this version,
+    // not just the one that was edited. Mapping is idempotent, so replaying it is safe.
     const releases = await this.findReleaseTicketsByVersion(devTicket.projectId, releaseVersion);
     for (const releaseTicket of releases) {
-      await this.mapDevTicketToRelease(devTicket, releaseTicket);
+      await this.syncReleaseTicket(releaseTicket, releaseVersion);
     }
+  }
+
+  /** Timeline events + the release-analysis canvas for a version release. */
+  private async publishReleaseArtifacts(
+    releaseTicket: TicketWithReleaseBoard,
+    releaseVersion: string,
+    mappings: DevTicketMapping[],
+  ): Promise<void> {
+    const { channelId, conversationId } = releaseTicket;
+    if (!channelId || !conversationId) return;
+
+    const affectedApps = new Map<string, AffectedApplication>();
+    const envChanges: CanvasEnvChange[] = [];
+    const migrationLinks: CanvasMigrationLink[] = [];
+    for (const mapping of mappings) {
+      for (const app of mapping.affectedApps) affectedApps.set(app.id, app);
+      envChanges.push(...mapping.envChanges);
+      migrationLinks.push(...mapping.migrationLinks);
+    }
+
+    const userName = await this.getReleaseEventUserName(releaseTicket.createdBy);
+    const emit = async (
+      eventType: ReleaseEventType,
+      eventName: string,
+      message: string,
+      applicationReleaseId?: string,
+    ): Promise<void> => {
+      try {
+        await this.releaseRepository.createReleaseEvent({
+          releaseId: releaseTicket.id,
+          applicationReleaseId,
+          eventType,
+          eventName,
+          message,
+          userId: releaseTicket.createdBy,
+          userName,
+          channelId,
+          conversationId,
+        });
+      } catch (error) {
+        // Observability only — never fail a sync because the timeline did not write.
+        logger.warn(`[VersionReleaseMapping] failed to emit ${eventName}:`, error);
+      }
+    };
+
+    for (const mapping of mappings) {
+      const apps = mapping.affectedApps.map(app => app.name).join(', ');
+      await emit(
+        ReleaseEventType.TICKET,
+        'DEV_TICKET_LINKED',
+        `${mapping.devTicket.xyneId} joined ${releaseVersion} (${apps})`,
+        mapping.perAppSubTickets.get(mapping.affectedApps[0]?.id ?? '')?.subTicketId,
+      );
+    }
+
+    const migrationCount = new Set(migrationLinks.map(link => link.filePath)).size;
+    await emit(
+      ReleaseEventType.RELEASE,
+      'VERSION_ANALYSIS_COMPLETED',
+      `Version ${releaseVersion}: ${mappings.length} dev ticket${mappings.length === 1 ? '' : 's'}, `
+      + `${affectedApps.size} app${affectedApps.size === 1 ? '' : 's'}, `
+      + `${envChanges.length} env change${envChanges.length === 1 ? '' : 's'}, `
+      + `${migrationCount} migration${migrationCount === 1 ? '' : 's'}`,
+    );
+
+    await this.upsertVersionReleaseCanvas(
+      releaseTicket,
+      releaseVersion,
+      mappings,
+      Array.from(affectedApps.values()),
+      envChanges,
+      migrationLinks,
+    );
   }
 
   private async mapDevTicketToRelease(
     devTicket: TicketWithReleaseBoard,
     releaseTicket: TicketWithReleaseBoard,
-  ): Promise<void> {
+  ): Promise<DevTicketMapping | null> {
     if (
       !releaseTicket.boardId
       || releaseTicket.board?.releaseTrackingMode !== ReleaseTrackingMode.VERSION
     ) {
-      return;
+      return null;
     }
 
     const pullRequests = await prisma.pullRequests.findMany({
@@ -152,7 +247,7 @@ class VersionReleaseMappingService {
 
     if (pullRequests.length === 0) {
       logger.info(`[VersionReleaseMapping] skipped ${devTicket.xyneId}: no linked PR rows`);
-      return;
+      return null;
     }
 
     const { affectedApps, prLinksByApplication, prDiffContexts } = await this.detectAffectedApplicationsFromPRs(
@@ -161,7 +256,7 @@ class VersionReleaseMappingService {
     );
     if (affectedApps.length === 0) {
       logger.info(`[VersionReleaseMapping] skipped ${devTicket.xyneId}: no affected applications from PR diffs`);
-      return;
+      return null;
     }
 
     const perAppSubTickets = await this.ensureApplicationReleaseSubTickets(
@@ -184,7 +279,7 @@ class VersionReleaseMappingService {
 
     if (records.length === 0) {
       logger.info(`[VersionReleaseMapping] skipped ${devTicket.xyneId}: no application sub-tickets available`);
-      return;
+      return null;
     }
 
     const result = await this.applicationRepository.createApplicationReleaseTicketMappings(records);
@@ -193,13 +288,15 @@ class VersionReleaseMappingService {
       `attempted=${records.length}, inserted=${result.count}`,
     );
 
-    await this.saveReleaseChangesForAffectedApps(
+    const { envChanges, migrationLinks } = await this.saveReleaseChangesForAffectedApps(
       releaseTicket,
       devTicket,
       affectedApps,
       perAppSubTickets,
       prDiffContexts,
     );
+
+    return { devTicket, affectedApps, perAppSubTickets, prDiffContexts, envChanges, migrationLinks };
   }
 
   private async detectAffectedApplicationsFromPRs(
@@ -312,10 +409,12 @@ class VersionReleaseMappingService {
     releaseTicket: TicketWithReleaseBoard,
     devTicket: TicketWithReleaseBoard,
     affectedApps: AffectedApplication[],
-    perAppSubTickets: Map<string, { subTicketId: string; mappedTicketId: string; xyneId: string }>,
+    perAppSubTickets: PerAppSubTickets,
     prDiffContexts: PullRequestDiffContext[],
-  ): Promise<void> {
+  ): Promise<{ envChanges: CanvasEnvChange[]; migrationLinks: CanvasMigrationLink[] }> {
     const userName = await this.getReleaseEventUserName(releaseTicket.createdBy);
+    const envChanges: CanvasEnvChange[] = [];
+    const migrationLinks: CanvasMigrationLink[] = [];
 
     for (const app of affectedApps) {
       const perApp = perAppSubTickets.get(app.id);
@@ -347,6 +446,10 @@ class VersionReleaseMappingService {
             diffContext.pr.prUrl,
           );
 
+          // Keep the detail, not just the counts — the release canvas renders it.
+          envChanges.push(...result.envChanges.map(change => ({ ...change, applicationId: app.id })));
+          migrationLinks.push(...result.migrationLinks.map(link => ({ ...link, applicationId: app.id })));
+
           logger.info(
             `[VersionReleaseMapping] saved release changes for ${releaseTicket.xyneId}/${app.name}: ` +
             `${result.envChangeCount} env, ${result.migrationChangeCount} migration`,
@@ -358,6 +461,92 @@ class VersionReleaseMappingService {
           );
         }
       }
+    }
+
+    return { envChanges, migrationLinks };
+  }
+
+  /**
+   * Render the release-analysis canvas from version-mode data. The canvas is
+   * keyed on the release conversation, so this create-or-updates the same one on
+   * every re-sync rather than minting a new canvas per edit.
+   */
+  private async upsertVersionReleaseCanvas(
+    releaseTicket: TicketWithReleaseBoard,
+    releaseVersion: string,
+    mappings: DevTicketMapping[],
+    affectedApps: AffectedApplication[],
+    envChanges: CanvasEnvChange[],
+    migrationLinks: CanvasMigrationLink[],
+  ): Promise<void> {
+    const firstContext = mappings[0]?.prDiffContexts[0];
+    if (!firstContext) return;
+
+    // One canvas "result" per PR: the renderers key on pullRequest.id, and a
+    // version release has no commit range to walk.
+    const results = mappings.flatMap(mapping =>
+      mapping.prDiffContexts.map(context => ({
+        commitId: `pr-${context.pr.prId}`,
+        pullRequest: {
+          id: context.pr.prId,
+          title: mapping.devTicket.title,
+          url: context.pr.prUrl ?? '',
+          author: { displayName: mapping.devTicket.createdBy },
+        },
+        ticket: {
+          id: mapping.devTicket.id,
+          xyneId: mapping.devTicket.xyneId,
+          title: mapping.devTicket.title,
+          status: mapping.devTicket.stageName ?? '',
+          priority: '',
+          assignedTo: null,
+          ticketType: mapping.devTicket.ticketType,
+        },
+        foldersChanged: [],
+        filePaths: context.filePaths,
+        fileChanges: [],
+        diffstat: null,
+        environment: null,
+        migration: null,
+        error: null,
+      })),
+    );
+
+    try {
+      const canvasId = await upsertCommitAnalysisCanvas({
+        section: 'main',
+        results: results as never,
+        affectedApplications: affectedApps.map(app => ({
+          id: app.id,
+          name: app.name,
+          matchedFiles: app.matchedFiles,
+          subTicketId: mappings
+            .map(mapping => mapping.perAppSubTickets.get(app.id)?.subTicketId)
+            .find(Boolean),
+        })),
+        envChanges,
+        migrationLinks,
+        createdByUserId: releaseTicket.createdBy,
+        metadata: {
+          projectId: releaseTicket.projectId,
+          conversationId: releaseTicket.conversationId ?? undefined,
+          channelId: releaseTicket.channelId ?? undefined,
+          workspaceId: releaseTicket.workspaceId,
+          workspace: firstContext.projectKey,
+          repoSlug: firstContext.repoSlug,
+          releaseVersion,
+          deployedCommitId: '',
+          newCommitId: '',
+          affectedApplicationCount: affectedApps.length,
+          migrationCount: new Set(migrationLinks.map(link => link.filePath)).size,
+          envChangeCount: envChanges.length,
+        },
+      });
+      logger.info(
+        `[VersionReleaseMapping] release notes canvas ${canvasId ?? 'not created'} for ${releaseTicket.xyneId}`,
+      );
+    } catch (error) {
+      logger.error(`[VersionReleaseMapping] failed to build canvas for ${releaseTicket.xyneId}:`, error);
     }
   }
 
