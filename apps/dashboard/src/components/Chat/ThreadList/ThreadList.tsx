@@ -63,6 +63,12 @@ const ACTIVITY_BAR_PADDING = 28;
 
 /** Breathing room at both edges before a keyboard-selected row counts as visible. */
 const SELECTION_VIEWPORT_PADDING = 8;
+/**
+ * Where a selection that had to scroll comes to rest, measured from the top of
+ * the panel. No sticky date pill here (thread separators scroll inline), so
+ * this is just the container's own `pt-4` worth of breathing room.
+ */
+const SELECTION_SCROLL_TOP_OFFSET = 16;
 
 const ThreadList = ({
   channelId,
@@ -337,7 +343,7 @@ const ThreadList = ({
     return document.activeElement === focusTarget;
   }, []);
 
-  /** Scrolls only when the row is not already readable, then centres it. */
+  /** Scrolls only when the row is not already readable, then parks it at the top. */
   const scrollSelectionIntoView = useCallback((messageId: string): void => {
     const container = scrollContainerRef.current;
     const row = container?.querySelector<HTMLElement>(
@@ -359,9 +365,9 @@ const ThreadList = ({
 
     // scrollTop rather than scrollIntoView: this panel is mounted inside
     // dialogs and split views, and scrollIntoView walks every ancestor
-    // scroller on its way up.
-    container.scrollTop +=
-      rowRect.top - containerRect.top - (container.clientHeight - rowRect.height) / 2;
+    // scroller on its way up. Assigning past either end is clamped by the
+    // browser, so the last replies land as far down as the content allows.
+    container.scrollTop += rowRect.top - containerRect.top - SELECTION_SCROLL_TOP_OFFSET;
   }, []);
 
   const selectMessageAtIndex = useCallback(
@@ -607,7 +613,10 @@ const ThreadList = ({
   // Render with date separators for ticket threads
   if (isTicketThread && messagesWithSeparators) {
     return (
-      <div ref={hoverToolbarContainerRef} className='relative min-h-0 max-h-full bg-background'>
+      <div
+        ref={hoverToolbarContainerRef}
+        className='relative min-h-0 max-h-full bg-background isolate'
+      >
         {/* ONE shared hover-actions toolbar for the thread (zero-render hover). */}
         <MessageHoverToolbar
           containerRef={hoverToolbarContainerRef}
@@ -741,7 +750,10 @@ const ThreadList = ({
 
   // Default render without date separators
   return (
-    <div ref={hoverToolbarContainerRef} className='relative min-h-0 max-h-full bg-background'>
+    <div
+      ref={hoverToolbarContainerRef}
+      className='relative min-h-0 max-h-full bg-background isolate'
+    >
       {/* ONE shared hover-actions toolbar for the thread (zero-render hover). */}
       <MessageHoverToolbar
         containerRef={hoverToolbarContainerRef}

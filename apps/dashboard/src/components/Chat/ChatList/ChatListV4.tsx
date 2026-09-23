@@ -195,6 +195,12 @@ type CombinedMessage = ReturnType<typeof useCombinedMesseges>['combinedMessages'
 const VISIBLE_CONVERSATION_EPSILON_PX = 1;
 /** Breathing room at both edges before a keyboard-selected row counts as visible. */
 const SELECTION_VIEWPORT_PADDING = 8;
+/**
+ * Where a selection that had to scroll comes to rest, measured from the top of
+ * the list: clear of the sticky date pill (its wrapper's py-2, the pill's own
+ * py-2, and the badge) rather than tucked behind it.
+ */
+const SELECTION_SCROLL_TOP_OFFSET = 56;
 
 function computeNewConvIdx(
   messages: CombinedMessage[],
@@ -1255,8 +1261,9 @@ const ChatListV4: React.FC<ChatListProps> = ({
 
   /**
    * Scrolls only when the row the selection lands on is not already readable,
-   * then centres it. Recentring on every arrow press makes the whole list
-   * lurch under a selection that was perfectly visible where it was.
+   * then parks it at the top, just below the sticky date pill. Scrolling on
+   * every arrow press makes the whole list lurch under a selection that was
+   * perfectly visible where it was.
    *
    * A row taller than the viewport can never be "fully visible", so any
    * overlap counts for those — otherwise every press on a long message would
@@ -1279,11 +1286,11 @@ const ChatListV4: React.FC<ChatListProps> = ({
             : rowRect.top >= top && rowRect.bottom <= bottom;
         if (isReadable) return;
       }
-      virtualizer.scrollToIndex(index, {
-        align: index === combinedMessages.length - 1 ? 'end' : 'center',
-      });
+      const offsetInfo = virtualizer.getOffsetForIndex(index, 'start');
+      if (!offsetInfo) return;
+      virtualizer.scrollToOffset(offsetInfo[0] - SELECTION_SCROLL_TOP_OFFSET);
     },
-    [combinedMessages.length, virtualizer],
+    [virtualizer],
   );
 
   const selectMessageAtIndex = useCallback(
@@ -1601,7 +1608,7 @@ const ChatListV4: React.FC<ChatListProps> = ({
       ref={hoverToolbarContainerRef}
       data-component='ChatListV11'
       data-testid='chat-message-list'
-      className='flex-1 relative no-scrollbar min-h-0'
+      className='flex-1 relative no-scrollbar min-h-0 isolate'
     >
       {/* Sticky date pill overlay */}
       {stickyDate && isFirstItemScrolledOff && (
