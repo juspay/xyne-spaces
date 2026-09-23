@@ -154,3 +154,12 @@ xyne-vespa-embedder:
 
 xyne-tei-batch-proxy:
   enabled: false
+
+xyne-redis:
+  enabled: false
+
+xyne-sandbox-router:
+  enabled: false
+
+xyne-egress-proxy:
+  enabled: false

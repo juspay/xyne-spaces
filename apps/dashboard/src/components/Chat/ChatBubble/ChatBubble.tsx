@@ -10,6 +10,7 @@ import { TicketActivityMessage } from '../TicketActivityMessage/TicketActivityMe
 import { ConversationTabContext } from '../ConversationTabContext';
 
 import { hoveredMessage } from './hoveredMessageRef';
+import { usePendingByMessageId } from '@xyne/shared/messages';
 import {
   registerMessageHoverActions,
   unregisterMessageHoverActions,
@@ -978,6 +979,10 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
 
   const hoverToolbarKey = useId();
 
+  // Non-null while this message still has a pending entry, i.e. the server has
+  // not confirmed it (in flight, or failed and awaiting retry/discard).
+  const hasPendingCopy = usePendingByMessageId(message?.messageId ?? '') !== null;
+
   const appliedThreadTypes = useMemo(
     () => parseThreadTypes(conversation?.threadType),
     [conversation?.threadType],
@@ -1130,6 +1135,16 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
           onShowAllShortcuts: () => setShortcutModalOpen(true),
         }),
     };
+
+    // Nothing in the hover toolbar works on a message the server has not
+    // confirmed — reply, edit, ticket, pin, bookmark, forward and the rest all
+    // target a row that does not exist yet. Registering nothing means the shared
+    // overlay renders no toolbar at all (MessageHoverToolbar bails on an
+    // unregistered key). Retry and discard live on the line under the bubble.
+    if (hasPendingCopy) {
+      unregisterMessageHoverActions(hoverToolbarKey);
+      return;
+    }
 
     registerMessageHoverActions(hoverToolbarKey, actions);
   });

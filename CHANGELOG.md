@@ -1,3 +1,25 @@
+## [1.373.0](https://github.com/juspay/xyne-spaces/compare/v1.372.1...v1.373.0) (2026-09-23)
+
+
+### Features
+
+* added charts in desk metric ([#2189](https://github.com/juspay/xyne-spaces/issues/2189)) ([8255c60](https://github.com/juspay/xyne-spaces/commit/8255c60345cf5fc12b25ccd4e31ca5c627486bef))
+* tf setup for OSS ([#2200](https://github.com/juspay/xyne-spaces/issues/2200)) ([d8943f6](https://github.com/juspay/xyne-spaces/commit/d8943f6c3ea0647f2f4f70a7fe6d6f5712cc8ee0))
+
+## [1.372.1](https://github.com/juspay/xyne-spaces/compare/v1.372.0...v1.372.1) (2026-09-23)
+
+
+### Bug Fixes
+
+* keep pending messages until the server confirms them ([#2156](https://github.com/juspay/xyne-spaces/issues/2156)) ([4f12f48](https://github.com/juspay/xyne-spaces/commit/4f12f48fc350984db0d8c2486d2380fcf5a25050)), closes [#e53935](https://github.com/juspay/xyne-spaces/issues/e53935)
+
+## [1.372.0](https://github.com/juspay/xyne-spaces/compare/v1.371.0...v1.372.0) (2026-09-22)
+
+
+### Features
+
+* add Radar table view and server-paged Pending others ([#2180](https://github.com/juspay/xyne-spaces/issues/2180)) ([7bf84be](https://github.com/juspay/xyne-spaces/commit/7bf84be01dea72644df9945177913bce08ab06b9))
+
 ## [1.371.0](https://github.com/juspay/xyne-spaces/compare/v1.370.0...v1.371.0) (2026-09-22)
 
 

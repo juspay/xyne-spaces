@@ -1,6 +1,6 @@
 /**
  * `StorageAdapter` for `@xyne/workflow-sdk`, over the app's configured object store
- * (`@xyne/storage` — GCS or S3 by `STORAGE_PROVIDER`).
+ * (`@xyne/storage` — GCS, S3 or Azure Blob by `STORAGE_PROVIDER`).
  *
  * The framework never opens `Attachment.data`; it is an opaque host reference carried
  * through workflow context and step config. Here it is the object key.

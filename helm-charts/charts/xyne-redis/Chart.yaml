@@ -1,0 +1,16 @@
+apiVersion: v2
+name: xyne-redis
+description: Single-node Redis (append-only persistence) for Xyne Spaces queues, caches and pub/sub
+type: application
+version: 0.1.0
+appVersion: "7.4"
+keywords:
+  - xyne
+  - redis
+home: https://github.com/juspay/xyne-spaces
+sources:
+  - https://github.com/redis/redis
+dependencies:
+  - name: xyne-common
+    version: 0.1.0
+    repository: file://../xyne-common
