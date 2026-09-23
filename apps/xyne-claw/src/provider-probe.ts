@@ -17,7 +17,7 @@
  *                  say so rather than retry into the same wall.
  */
 
-import { LITELLM } from "./config.js";
+import { LITELLM, ORCAROUTER } from "./config.js";
 import { isQuotaExhaustedError, isTransientProviderError } from "./agent.js";
 import { createHash } from "node:crypto";
 import { createLogger } from "./logger.js";
@@ -71,7 +71,13 @@ function keyFingerprint(apiKey: string): string {
 function resolveTarget(input: ProbeInput): { url: string; apiKey: string; model: string } | null {
   const cfg = input.providerConfig;
   if (cfg?.apiKey && (cfg.baseUrl || cfg.model)) {
-    const base = (cfg.baseUrl ?? LITELLM.url).replace(/\/+$/, "");
+    // A BYO OrcaRouter credential with no explicit baseUrl probes the public
+    // inference origin, never the platform LiteLLM proxy — the run itself goes
+    // to OrcaRouter (agent.ts), so probing anywhere else would answer about a
+    // different provider and either auto-retry into the same wall or give up on
+    // a healthy one.
+    const fallbackBase = input.provider === "orcarouter" ? ORCAROUTER.baseUrl : LITELLM.url;
+    const base = (cfg.baseUrl ?? fallbackBase).replace(/\/+$/, "");
     return { url: `${base}/chat/completions`, apiKey: cfg.apiKey, model: input.model || cfg.model };
   }
   // Platform default (spaces / litellm): claw's own env key.

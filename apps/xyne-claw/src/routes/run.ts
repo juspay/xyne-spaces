@@ -128,7 +128,7 @@ import {
   isReadOnlyJob as isScheduledOrAutomationRun,
   type SetupStep,
 } from "xyne-claw-shared";
-import { SERVER, PATHS, LITELLM, isAllowedCallbackUrl } from "../config.js";
+import { SERVER, PATHS, LITELLM, ORCAROUTER, isAllowedCallbackUrl } from "../config.js";
 import { judgeChainContinuation } from "../chain-judge.js";
 import { isDigitalTwinAgent, listSubsystemTaxonomy, fetchAgentPromptFiles } from "../memory.js";
 import { buildMemorySearchTool } from "../memory-search.js";
@@ -1890,7 +1890,7 @@ export async function processTask(
     // We also reuse it to drive custom:create-ppt so PPT generation uses the
     // same user credential/model instead of shared env keys.
     const parentProviderConfig =
-      provider === "copilot" || provider === "claude" || provider === "codex" || provider === "litellm"
+      provider === "copilot" || provider === "claude" || provider === "codex" || provider === "litellm" || provider === "orcarouter"
         ? providerConfigs?.[provider]
         : undefined;
 
@@ -1910,7 +1910,11 @@ export async function processTask(
         provider,
         baseUrl:
           resolved?.baseUrl ??
-          (provider === "claude" ? "https://api.anthropic.com" : "https://api.openai.com/v1"),
+          (provider === "claude"
+            ? "https://api.anthropic.com"
+            : provider === "orcarouter"
+              ? ORCAROUTER.baseUrl
+              : "https://api.openai.com/v1"),
         apiKey: resolved?.apiKey ?? parentProviderConfig.apiKey,
         model: resolved?.model ?? parentProviderConfig.model,
         ...(provider === "claude"
@@ -2156,7 +2160,7 @@ export async function processTask(
     // Parent agent's provider — used as default for subagents that don't have an override
     const subagentsFollowParent = subagentProviderMode === "parent";
     const parentProvider =
-      subagentsFollowParent && provider && (["copilot", "claude", "codex"] as readonly string[]).includes(provider)
+      subagentsFollowParent && provider && (["copilot", "claude", "codex", "orcarouter"] as readonly string[]).includes(provider)
         ? provider
         : "spaces";
     // Shared ref: subagents append their inner MCP tool names here so chain
@@ -2416,7 +2420,7 @@ export async function processTask(
           ...(context7Group ? [context7Group] : []),
         ];
         const calleeProvider =
-          spec.provider && (["copilot", "claude", "codex"] as readonly string[]).includes(spec.provider)
+          spec.provider && (["copilot", "claude", "codex", "orcarouter"] as readonly string[]).includes(spec.provider)
             ? spec.provider
             : "spaces";
         const calleeDirectPickSuffixes = calleeToolsConfig?.direct ?? [];

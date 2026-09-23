@@ -82,7 +82,10 @@ A `selectionKey` links a listed tool to its config slug so the runtime gates it.
 ## 3. Providers & model selection (and at what LEVEL)
 
 **Provider-agnostic via LiteLLM.** Supported providers: `spaces` (LiteLLM platform
-default), `claude`, `copilot`, `codex`, `openrouter`. Two platform models:
+default), `claude`, `copilot`, `codex`, `openrouter`, `orcarouter`
+(OpenAI-compatible; the user's own `sk-orca-…` key against
+`https://api.orcarouter.ai/v1`, obtained either by pasting a key or by signing in
+with an OrcaRouter account). Two platform models:
 `LITELLM_MODEL` = the **worker** model; `LITELLM_FAST_MODEL` = the cheap **judge/boss**
 model used by chain-judge, goal-judge, eval roles (using the worker model there would
 double per-turn cost for marginal quality).

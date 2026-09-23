@@ -5,6 +5,7 @@ export const CREDENTIAL_PROVIDERS = [
   'claude',
   'copilot',
   'openrouter',
+  'orcarouter',
   'litellm',
 ] as const;
 
@@ -15,6 +16,7 @@ export const CREDENTIAL_PROVIDER_LABELS: Record<string, string> = {
   claude: 'Anthropic Claude',
   copilot: 'GitHub Copilot',
   openrouter: 'OpenRouter',
+  orcarouter: 'OrcaRouter',
   litellm: 'LiteLLM (own key)',
   spaces: 'Spaces',
 };
@@ -70,5 +72,8 @@ export const supportsOauth = (provider: string): provider is 'codex' | 'claude' 
 export const supportsAuthType = (provider: string): boolean => supportsOauth(provider);
 export const supportsReasoning = (provider: string): boolean => provider !== 'litellm';
 
-export const baseUrlPlaceholder = (provider: string): string =>
-  provider === 'litellm' ? 'blank = platform LiteLLM proxy' : 'https://openrouter.ai/api/v1';
+export const baseUrlPlaceholder = (provider: string): string => {
+  if (provider === 'litellm') return 'blank = platform LiteLLM proxy';
+  if (provider === 'orcarouter') return 'https://api.orcarouter.ai/v1';
+  return 'https://openrouter.ai/api/v1';
+};

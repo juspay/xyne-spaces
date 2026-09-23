@@ -75,6 +75,37 @@ describe("probeProvider penny drop", () => {
     expect(global.fetch).not.toHaveBeenCalled();
   });
 
+  it("probes an orcarouter credential against its own base URL, not the platform proxy", async () => {
+    vi.mocked(global.fetch).mockResolvedValueOnce(res(200));
+    await probeProvider({
+      provider: "orcarouter",
+      model: "openai/gpt-5.5",
+      providerConfig: { apiKey: "sk-orca-fake", model: "openai/gpt-5.5", baseUrl: "https://api.orcarouter.ai/v1" },
+    });
+    const call = vi.mocked(global.fetch).mock.calls[0]!;
+    expect(call[0]).toBe("https://api.orcarouter.ai/v1/chat/completions");
+    expect((call[1] as { headers: Record<string, string> }).headers.Authorization).toBe("Bearer sk-orca-fake");
+  });
+
+  it("defaults an orcarouter credential with no baseUrl to the public inference origin", async () => {
+    vi.mocked(global.fetch).mockResolvedValueOnce(res(200));
+    await probeProvider({
+      provider: "orcarouter",
+      model: "openai/gpt-5.5",
+      providerConfig: { apiKey: "sk-orca-fake", model: "openai/gpt-5.5" },
+    });
+    expect(vi.mocked(global.fetch).mock.calls[0]![0]).toBe("https://api.orcarouter.ai/v1/chat/completions");
+  });
+
+  it("an orcarouter credential with a model but no baseUrl still gets a probe target", async () => {
+    vi.mocked(global.fetch).mockResolvedValueOnce(res(429, "rate limited"));
+    const out = await probeProvider({
+      provider: "orcarouter",
+      providerConfig: { apiKey: "sk-orca-fake", model: "orcarouter/auto" },
+    });
+    expect(out.state).toBe("capacity");
+  });
+
   it("shares one request across concurrent probes of the same target (cache)", async () => {
     vi.mocked(global.fetch).mockResolvedValueOnce(res(429, "rate limited"));
     await probeProvider({ provider: "litellm", model: "m" });

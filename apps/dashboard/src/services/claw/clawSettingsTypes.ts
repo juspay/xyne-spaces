@@ -1,4 +1,4 @@
-export type ProviderId = 'copilot' | 'claude' | 'codex' | 'openrouter' | 'litellm';
+export type ProviderId = 'copilot' | 'claude' | 'codex' | 'openrouter' | 'orcarouter' | 'litellm';
 
 export type AuthType = 'api_key' | 'oauth_token';
 
@@ -47,4 +47,26 @@ export interface CodexOauthStart {
   url: string;
   state: string;
   expiresIn: number;
+}
+
+export interface OrcaRouterOauthStart {
+  url: string;
+  state: string;
+  expiresIn: number;
+  flow: 'oob';
+}
+
+export interface OrcaRouterModelInfo {
+  id: string;
+  name: string;
+  contextLength?: number;
+  inputModalities?: string[];
+  reasoning?: string[];
+}
+
+export interface OrcaRouterCatalog {
+  models: OrcaRouterModelInfo[];
+  source: 'live' | 'fallback';
+  degraded: boolean;
+  capability: string;
 }

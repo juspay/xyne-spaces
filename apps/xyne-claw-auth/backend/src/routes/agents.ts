@@ -4390,7 +4390,7 @@ router.post(
 //   3. "spaces" / LiteLLM platform default
 // ─────────────────────────────────────────────────────────────────────────────
 
-const ALLOWED_PROVIDERS = new Set(["copilot", "claude", "codex", "openrouter", "litellm"]);
+const ALLOWED_PROVIDERS = new Set(["copilot", "claude", "codex", "openrouter", "orcarouter", "litellm"]);
 
 router.get(
   "/:slug/provider-credentials",

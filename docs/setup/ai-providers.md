@@ -87,6 +87,33 @@ Env files are read at process start, so **restart the apps** after editing:
 pnpm run dev:all
 ```
 
+## OrcaRouter as a provider
+
+[OrcaRouter](https://www.orcarouter.ai) is one of the gateways that substitutes
+directly. It speaks the OpenAI wire format, so a personal key works as the
+`LITELLM_API_KEY` above with the base URL set to `https://api.orcarouter.ai/v1`
+(the `/v1` is required).
+
+Agents can also use an OrcaRouter key per user or per agent instead of the
+deployment-wide env vars, configured in the dashboard like any other BYO
+provider. Two ways to obtain a key, both producing an ordinary `sk-orca-…` key
+billed to the user's own account:
+
+- paste an existing key from `https://www.orcarouter.ai/console/token`;
+- sign in with an OrcaRouter account (OAuth 2.0 + PKCE, out-of-band code), which
+  issues a key without the user copying one.
+
+**Two origins, and they are not interchangeable.** Authentication and code
+exchange happen on `https://www.orcarouter.ai`; inference and model discovery
+happen on `https://api.orcarouter.ai/v1`. Do not derive one from the other —
+`https://api.orcarouter.ai/v1/auth/keys` is a 404.
+
+The issued key is **durable**: it is reused on every run until the user revokes
+it. It is not a refresh token, so there is nothing to refresh. A `401` from the
+relay means the key was revoked and the user must connect again. Users manage and
+revoke keys at `https://www.orcarouter.ai/console/token` and
+`https://www.orcarouter.ai/console/authorized-apps`.
+
 ## Your first win
 
 1. Open **http://localhost:5173** and sign in with the credentials printed by

@@ -10,6 +10,7 @@ const OPENAI_BASE_URL = "https://api.openai.com/v1";
 const CODEX_CHATGPT_BACKEND = "https://chatgpt.com/backend-api";
 const COPILOT_MODELS_URL = "https://api.githubcopilot.com/models";
 const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
+const ORCAROUTER_BASE_URL = "https://api.orcarouter.ai/v1";
 
 const VERIFY_TIMEOUT_MS = 15_000;
 
@@ -95,6 +96,8 @@ function providerLabel(provider: string): string {
       return "GitHub Copilot";
     case "openrouter":
       return "OpenRouter";
+    case "orcarouter":
+      return "OrcaRouter";
     case "litellm":
       return "the LiteLLM gateway";
     default:
@@ -283,6 +286,8 @@ function runVerification(
       return verifyCopilot(input);
     case "openrouter":
       return verifyOpenAiCompatible("openrouter", input, OPENROUTER_BASE_URL);
+    case "orcarouter":
+      return verifyOpenAiCompatible("orcarouter", input, ORCAROUTER_BASE_URL);
     case "litellm":
       return verifyOpenAiCompatible("litellm", input, litellmFallbackBase);
     default:

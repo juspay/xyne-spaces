@@ -238,6 +238,9 @@ const PROVIDER_LABELS: Record<string, string> = {
   copilot: "GitHub Copilot",
   claude: "Anthropic Claude",
   codex: "OpenAI Codex",
+  openrouter: "OpenRouter",
+  orcarouter: "OrcaRouter",
+  litellm: "LiteLLM (own key)",
 };
 
 type ConversationWithAgent = ConversationSummary & { agentSlug: string };
