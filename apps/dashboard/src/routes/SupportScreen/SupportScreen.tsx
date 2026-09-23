@@ -94,6 +94,7 @@ import { logger, Event } from '../../utils/logger';
 import Tooltip, { TruncatedTooltip } from '../../components/ui/Tooltip';
 import { useZero } from '../../hooks/useZero';
 import { queries } from '../../zero/queries';
+import { useProjectTagOptions } from '../../hooks/useProjectTagOptions';
 import { useTicketKeysetWindow } from '../../hooks/useTicketKeysetWindow';
 import { QueryResultType } from '@rocicorp/zero';
 import ThreadMessages from '../../components/Chat/ThreadPannel';
@@ -2203,14 +2204,11 @@ const SupportScreen = (): ReactElement => {
   // Every desk ticket lives on the channel's board, so the label catalog can be
   // read off whichever page of tickets is currently loaded.
   const deskProjectId = kanbanTickets[0]?.projectId;
-  const [deskProjectTags] = useCachedQuery(
-    queries.projectTagsByProjectId({ projectId: deskProjectId ?? '' }),
-    { enabled: !!deskProjectId },
-  );
-  const deskAvailableTags = useMemo(
-    () => Array.from(new Set((deskProjectTags ?? []).map(tag => tag.name))).sort(),
-    [deskProjectTags],
-  );
+  const { availableTags: deskAvailableTags } = useProjectTagOptions({
+    projectId: deskProjectId,
+    enabled: !!deskProjectId,
+    autoLoadAll: true,
+  });
   // No Stage control on boards that gate moves client-side (evaluateLinearStageGate) —
   // a bulk bar can't run per-ticket forms/approvals. NON_LINEAR is server-enforced.
   const deskBoardGatesStageMoves = useMemo(() => {

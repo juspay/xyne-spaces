@@ -622,26 +622,46 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
       res.json({ success: true, results, total });
       return;
     }
-
-    // Ticket tags search — uses Vespa grouping to get distinct tag values.
-    // Short-circuits the normal search pipeline and returns just tag strings.
+    // project-scoped and carry no board dimension.
     if (String(type).trim() === 'ticket_tags') {
       const projectIds = projectId ? toFilterValues(projectId, 'projectId') : undefined;
-      const boardIds = board ? toFilterValues(board, 'board') : undefined;
-      const { tags: tagResults, total } = await vespaService.searchService.searchTicketTags(
-        workspaceId,
+      const tagLimit = limit ? Number(limit) : 100;
+      const tagOffset = Math.max(Number(offset) || 0, 0);
+      const tagResponse = await vespaService.searchService.searchVespa(
+        q ? String(q) : '',
+        userId,
+        ['projecttag'],
         {
-          projectId: projectIds?.[0],
-          boardIds,
-          query: q ? String(q) : undefined,
-          limit: limit ? Number(limit) : 100,
+          workspaceId,
+          limit: tagLimit,
+          offset: tagOffset,
+          // Flat hits, not grouping nodes: groupBy defaults to 'docType', which
+          // would wrap every hit in a group shell this caller has to unwrap.
+          groupBy: '',
+          // nativeRank filtering is tuned for prose; a one- or two-word tag name
+          // scores below it, so leaving it on would drop real matches.
+          nativeRankThreshold: 0,
+          projectTag: { projectId: projectIds ?? [] },
         },
       );
+      const seenTags = new Set<string>();
+      for (const child of tagResponse.root?.children ?? []) {
+        const name = (child as any)?.fields?.name;
+        if (typeof name === 'string' && name.trim()) {
+          seenTags.add(name);
+        }
+      }
+      const tagResults = [...seenTags].sort((a, b) => a.localeCompare(b));
+      const rawHitCount = tagResponse.root?.children?.length ?? 0;
+      const tagTotal = tagResponse.root?.fields?.totalCount ?? rawHitCount;
+
       res.json({
         success: true,
         data: {
           tags: tagResults,
-          total,
+          total: tagTotal,
+          offset: tagOffset,
+          hasMore: rawHitCount >= tagLimit && tagOffset + rawHitCount < tagTotal,
         },
       });
       return;

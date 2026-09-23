@@ -146,6 +146,9 @@ import {
 } from '../../../utils/board/boardFormEntityValues';
 import { resolveDisplayFormFields } from '../../../utils/board/resolveDisplayFormFields';
 import { AddToStreamButton } from '../../Streams/components/AddToStreamMenu/AddToStreamMenu';
+import { useVespaTagSearch } from '../../../hooks/useVespaTagSearch';
+import { useProjectTagOptions } from '../../../hooks/useProjectTagOptions';
+import { useDebouncedValue } from '../../../hooks/useDebouncedValue';
 
 type SubTicketTreeMapping = QueryResultType<typeof queries.subTicketMappingsForTickets>[number];
 type SubTicketTreeSubTicket = NonNullable<SubTicketTreeMapping['subTicket']>;
@@ -1218,11 +1221,38 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
   const [projectTicketNextOffset, setProjectTicketNextOffset] = useState(0);
   const projectTicketsRequestIdRef = useRef(0);
 
-  // Project-level tags — lazy-loaded when tag dropdown is opened
-  const [projectTags] = useCachedQuery(
-    queries.projectTagsByProjectId({ projectId: ticket?.projectId ?? '' }),
-    { enabled: !!ticket?.projectId && showTagDropdown },
-  );
+  // Project-level tags — lazy-loaded when tag dropdown is opened, and PAGED: the
+  // raw projectTagsByProjectId query caps at 100, which silently truncated the
+  // catalog on larger projects. Scoped to this ticket's project.
+  const {
+    tagRows: projectTags,
+    hasMore: hasMoreProjectTags,
+    loadMore: loadMoreProjectTags,
+  } = useProjectTagOptions({
+    projectId: ticket?.projectId,
+    enabled: !!ticket?.projectId && showTagDropdown,
+  });
+
+  // Tag search via Vespa, mirroring the kanban tag filter. The Zero query above
+  // returns one page (100 tags, alphabetical), so filtering it in the browser can
+  // only ever find tags inside that page — a project with more tags than that
+  // silently hides the rest from search. Vespa searches the whole catalog.
+  //
+  // Debounced because useVespaTagSearch fetches immediately on every change; the
+  // raw input would otherwise issue a request per keystroke.
+  const debouncedTagSearchQuery = useDebouncedValue(tagSearchQuery, 250);
+  const {
+    tags: vespaTagResults,
+    hasMore: hasMoreVespaTags,
+    loadMore: loadMoreVespaTags,
+    isLoadingMore: isLoadingMoreVespaTags,
+  } = useVespaTagSearch({
+    // A ticket belongs to exactly one project, so this is always a single id.
+    projectIds: ticket?.projectId ? [ticket.projectId] : undefined,
+    searchQuery: debouncedTagSearchQuery,
+    enabled: showTagDropdown && !!ticket?.projectId && !!debouncedTagSearchQuery.trim(),
+    limit: 20,
+  });
 
   useEffect(() => {
     setProjectTickets(null);
@@ -1893,7 +1923,11 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
       }
     });
 
-    return Array.from(tagSet).sort();
+    // localeCompare, not the default .sort(): the default compares UTF-16 code
+    // units, so every uppercase tag sorts before every lowercase one ("URGENT"
+    // above "apple"). Names keep their original casing — only the ORDER is
+    // case-insensitive.
+    return Array.from(tagSet).sort((a, b) => a.localeCompare(b));
   }, [projectTags]);
 
   const priorityItems = useMemo(
@@ -1901,12 +1935,46 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     [],
   );
 
-  // Filter available tags based on search query and exclude already assigned tags
+  // Near-bottom scroll pulls the next Vespa page. Only while searching: without a
+  // query the list is the Zero page, which this dropdown does not paginate.
+  const handleTagListScroll = useCallback(
+    (e: React.UIEvent<HTMLDivElement>) => {
+      const searching = !!tagSearchQuery.trim();
+      // Two pagers behind one scrollbar, matching the two result sources: Vespa
+      // offsets while searching, the Zero cursor otherwise.
+      const canLoad = searching ? hasMoreVespaTags && !isLoadingMoreVespaTags : hasMoreProjectTags;
+      if (!canLoad) return;
+      const el = e.currentTarget;
+      if (el.scrollHeight - el.scrollTop - el.clientHeight < 48) {
+        if (searching) loadMoreVespaTags();
+        else loadMoreProjectTags();
+      }
+    },
+    [
+      tagSearchQuery,
+      hasMoreVespaTags,
+      isLoadingMoreVespaTags,
+      loadMoreVespaTags,
+      hasMoreProjectTags,
+      loadMoreProjectTags,
+    ],
+  );
+
+  // Filter available tags based on search query and exclude already assigned tags.
+  //
+  // With a query, Vespa results win; the client-side filter stays as the fallback
+  // for when Vespa has nothing to say — it is not yet indexed, the request failed
+  // (useVespaTagSearch swallows errors and returns []), or the debounce has not
+  // caught up with the input yet. Without a query, the Zero page is the list.
   const filteredTags = useMemo(() => {
-    return availableTags.filter(tagName =>
+    const clientFiltered = availableTags.filter(tagName =>
       tagName.toLowerCase().includes(tagSearchQuery.toLowerCase()),
     );
-  }, [availableTags, tagSearchQuery]);
+
+    if (!tagSearchQuery.trim()) return clientFiltered;
+    if (vespaTagResults.length > 0) return vespaTagResults;
+    return clientFiltered;
+  }, [availableTags, tagSearchQuery, vespaTagResults]);
   const selectedTagNames = useMemo(() => new Set(tags?.map(t => t.tagName)), [tags]);
 
   const referencesOut = useMemo<TicketReferenceWithTicket[]>(
@@ -3107,7 +3175,22 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
   };
 
   const handleToggleTag = (tagName: string): void => {
-    const existingTag = tags?.find(t => t.tagName === tagName);
+    const typed = tagName.trim();
+    const typedLower = typed.toLowerCase();
+
+    // Matching is case-insensitive everywhere else, so toggling must be too:
+    // with "URGENT" already on the ticket, typing "urgent" + Enter previously
+    // failed this lookup and took the create branch instead of removing it.
+    const existingTag = tags?.find(t => t.tagName.toLowerCase() === typedLower);
+
+    // Create with the catalog's OWN casing when the tag already exists there.
+    // Otherwise "urgent" is inserted alongside "URGENT" as a second project_tag
+    // — the project_tags unique key is (projectId, name), which is case-sensitive,
+    // so it does not stop the duplicate. Genuinely new tags keep the user's casing.
+    const canonicalName =
+      availableTags.find(t => t.toLowerCase() === typedLower) ??
+      vespaTagResults.find(t => t.toLowerCase() === typedLower) ??
+      typed;
 
     const tagMutation = existingTag
       ? zero.mutate(
@@ -3123,7 +3206,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
             projectTagId: uuidv4(),
             mappingId: uuidv4(),
             projectId: ticket.projectId,
-            tagName: tagName.trim(),
+            tagName: canonicalName,
           }),
         );
     // Outcome only once the server confirmed, not on the optimistic apply.
@@ -4504,7 +4587,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                 </div>
 
                 {/* Tag List */}
-                <div className='max-h-48 overflow-y-auto'>
+                <div className='max-h-48 overflow-y-auto' onScroll={handleTagListScroll}>
                   {tagSearchQuery.trim() && !exactMatch && (
                     <button
                       onClick={() => void handleToggleTag(tagSearchQuery)}

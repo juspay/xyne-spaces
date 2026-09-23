@@ -912,6 +912,10 @@ export const TicketCard: React.FC<TicketCardProps> = ({
                       // eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions, local-rules/require-tracking-on-click
                       <div className='min-w-[200px]' onClick={e => e.stopPropagation()}>
                         <TagSelector
+                          // Scope to THIS ticket's project: `availableTags` is the
+                          // board-wide list, which on a multi-project view would offer
+                          // tags from projects this ticket does not belong to.
+                          projectId={ticket.projectId}
                           availableTags={availableTags}
                           selectedTags={selectedTagNames}
                           onTagsChange={handleTagsChange}

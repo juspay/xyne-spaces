@@ -71,16 +71,16 @@ export const TagsListContent = ({
     };
   }, [searchQuery, onSearch]);
 
-  // Scroll detection for infinite loading (only when not searching)
+  // Scroll detection for infinite loading.
   const handleScroll = useCallback(() => {
-    if (!listContainerRef.current || !onLoadMore || !hasMore || searchQuery.trim()) return;
+    if (!listContainerRef.current || !onLoadMore || !hasMore) return;
 
     const { scrollTop, scrollHeight, clientHeight } = listContainerRef.current;
     // Load more when scrolled to within 50px of bottom
     if (scrollHeight - scrollTop - clientHeight < 50) {
       onLoadMore();
     }
-  }, [onLoadMore, hasMore, searchQuery]);
+  }, [onLoadMore, hasMore]);
 
   useEffect(() => {
     const container = listContainerRef.current;

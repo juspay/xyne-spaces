@@ -7,6 +7,7 @@ import { MessagesVespaHandler } from '../tables/messages-handler';
 import { TicketsVespaHandler } from '../tables/tickets-handler';
 import { ChannelsVespaHandler } from '../tables/channels-handler';
 import { ProjectsVespaHandler } from '../tables/projects-handler';
+import { ProjectTagsVespaHandler } from '../tables/project-tags-handler';
 import { RCAVespaHandler } from '../tables/rca-handler';
 import { CanvasesVespaHandler } from '../tables/canvases-handler';
 import { TranscriptsVespaHandler } from '../tables/transcripts-handler';
@@ -52,6 +53,8 @@ export class VespaHandlerFactory {
       // Project tables
       case 'projects':
         return new ProjectsVespaHandler(ctx);
+      case 'project_tags':
+        return new ProjectTagsVespaHandler(ctx);
       case "rcas":
         return new RCAVespaHandler(ctx);
 

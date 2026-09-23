@@ -23,15 +23,18 @@ export interface VespaTagSearchResponse {
   data?: {
     tags: string[];
     total: number;
+    offset?: number;
+    hasMore?: boolean;
   };
   error?: string;
 }
 
 export interface VespaTagSearchFilters {
   query?: string | undefined;
-  projectId?: string | undefined;
-  boardIds?: string[] | undefined;
+  /** Several projects at once for multi-project views (My tickets, custom views). */
+  projectIds?: string[] | undefined;
   limit?: number | undefined;
+  offset?: number | undefined;
 }
 
 export class SearchService {
@@ -321,13 +324,10 @@ export class SearchService {
     return params;
   }
 
-  /**
-   * Search for ticket tags via Vespa grouping
-   */
   async searchTags(
     filters: VespaTagSearchFilters,
     signal?: AbortSignal,
-  ): Promise<{ tags: string[]; total: number }> {
+  ): Promise<{ tags: string[]; total: number; hasMore: boolean }> {
     try {
       const params: Record<string, string> = {
         type: 'ticket_tags',
@@ -337,16 +337,18 @@ export class SearchService {
         params['q'] = sanitizeSearchQuery(filters.query);
       }
 
-      if (filters.projectId) {
-        params['projectId'] = filters.projectId;
-      }
-
-      if (filters.boardIds && filters.boardIds.length > 0) {
-        params['board'] = filters.boardIds.join(',');
+      // Comma-joined: the backend splits this back out via toCommaSeparatedValues
+      // and ORs the ids. Capped at 50 values there (MAX_FILTER_VALUES).
+      if (filters.projectIds && filters.projectIds.length > 0) {
+        params['projectId'] = filters.projectIds.join(',');
       }
 
       if (filters.limit !== undefined) {
         params['limit'] = filters.limit.toString();
+      }
+
+      if (filters.offset !== undefined && filters.offset > 0) {
+        params['offset'] = filters.offset.toString();
       }
 
       const response = await apiInstance.get<VespaTagSearchResponse>(this.vespaBaseUrl, {
@@ -361,6 +363,7 @@ export class SearchService {
       return {
         tags: response.data.data.tags,
         total: response.data.data.total,
+        hasMore: response.data.data.hasMore ?? false,
       };
     } catch (error) {
       if (error instanceof Error) {

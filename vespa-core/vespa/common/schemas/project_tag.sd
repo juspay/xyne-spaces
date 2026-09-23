@@ -1,0 +1,164 @@
+# One document per `project_tags` row (the per-project tag catalog), backing the
+# kanban tag-filter dropdown's type-ahead.
+#
+# This schema is queried through SearchService.searchVespa like any other app, so
+# it has to satisfy that pipeline's fixed expectations:
+#   - a `default` fieldset with INDEXED fields, because every searchVespa query
+#     matches via userInput(@query) against it;
+#   - the rank profiles searchVespa can ask for -- `default_native` (its default),
+#     `default_fuzzy` (its 3-gram fallback), plus `unified`/`personalized`, since
+#     Vespa rejects a query whose profile is missing from ANY queried schema and
+#     this one can be selected alongside others.
+schema project_tag {
+    document project_tag {
+        field docId type string {
+            indexing: attribute | summary
+            attribute: fast-search
+            match: exact
+        }
+
+        field docType type string {
+            indexing: attribute | summary
+            attribute: fast-search
+            match: exact
+        }
+
+        field orgId type string {
+            indexing: attribute | summary
+            attribute: fast-search
+            match: exact
+        }
+
+        field workspaceId type string {
+            indexing: attribute | summary
+            attribute: fast-search
+            match: exact
+        }
+
+        field projectId type string {
+            indexing: attribute | summary
+            attribute: fast-search
+            match: exact
+        }
+
+        # Indexed as well as attribute: the index half is what userInput() matches
+        # on, the attribute half keeps the value available for summary/filtering.
+        field name type string {
+            indexing: index | attribute | summary
+            index: enable-bm25
+        }
+
+        field createdAt type long {
+            indexing: attribute | summary
+        }
+    }
+
+    # Typo-tolerant trigram field, matched by searchVespa's fuzzy fallback pass.
+    field name_fuzzy type string {
+        indexing: input name | tokenize | lowercase | index | summary
+        index: enable-bm25
+        match {
+            gram
+            gram-size: 3
+        }
+    }
+
+    # ONLY the gram field. A fieldset mixing `text` matching (name) with `gram`
+    # matching (name_fuzzy) is resolved by Vespa to TEXT for the whole set -- the
+    # "matching settings in fieldset are inconsistent" warning -- which silently
+    # disables gram matching and leaves the dropdown unable to match anything but
+    # a complete word. Gram-only keeps substring matching working for queries of
+    # 3 characters or more, which is what a type-ahead needs; whole words still
+    # match, since their trigrams are a subset.
+    # Lowercased, ATTRIBUTE-ONLY copy of `name`, carrying prefix matching.
+    #
+    # The absence of `index` here is the whole point and must not be "fixed":
+    # Vespa refuses {prefix:true} against an index field, and says so explicitly --
+    # "'name' is an index field: Prefix matching is not supported even when it is
+    # also an attribute". So prefix needs its own attribute-only field; adding
+    # `index` to this one silently breaks every 1-2 character search.
+    #
+    # Note this is a WHOLE-VALUE prefix, not a per-token one: it matches
+    # "payment gateway" for "pay" but not for "gateway". That is why the query
+    # ORs it with the gram-3 `default` fieldset below rather than replacing it --
+    # prefix covers 1-2 chars from the start, grams cover mid-string from 3.
+    field nameLower type string {
+        indexing: input name | lowercase | attribute
+        attribute: fast-search
+    }
+
+    fieldset default {
+        fields: name_fuzzy
+    }
+
+    rank-profile initial {
+        # query(e) is declared but never referenced: searchVespa sends
+        # input.query(e)=embed(...) whenever the query is longer than 3 chars, and
+        # an undeclared tensor input would be rejected. There is no embedding field
+        # on a tag name -- same arrangement project.sd uses.
+        inputs {
+            query(e) tensor<bfloat16>(v[DIMS])
+            query(alpha) double: 0.5
+        }
+
+        rank-properties {
+            nativeFieldMatch.firstOccurrenceImportance: 0
+        }
+
+        function lexical_score() {
+            expression: nativeRank(name)
+        }
+
+        function fuzzy_lexical_score() {
+            expression: nativeRank(name_fuzzy)
+        }
+    }
+
+    rank-profile default_native inherits initial {
+        first-phase {
+            expression: lexical_score
+        }
+        match-features {
+            lexical_score
+        }
+    }
+
+    rank-profile default_fuzzy inherits initial {
+        first-phase {
+            expression: fuzzy_lexical_score
+        }
+        match-features {
+            fuzzy_lexical_score
+        }
+    }
+
+    # Cross-schema unified profile. A tag name is a single short slot, so the
+    # lexical half IS the whole score and the semantic half is a constant 0 --
+    # the same single-slot arrangement project.sd documents.
+    rank-profile unified inherits initial {
+        inputs {
+            query(w_lex) double: 0.50
+            query(w_sem) double: 0.50
+        }
+        function scale(val) { expression: 2*atan(val/16)/(3.14159) }
+        function title_score()    { expression: scale(bm25(name)) }
+        function lexical_score()  { expression: title_score }
+        function semantic_score() { expression: 0.0 }
+        first-phase {
+            expression: (query(w_lex) + query(w_sem)) * lexical_score
+        }
+        match-features { title_score lexical_score semantic_score }
+    }
+
+    # `personalized` is the backend's default profile in some call paths; Vespa
+    # rejects a query whose profile is missing from any queried schema. There is
+    # nothing to personalize on a tag, so ranking stays default_native.
+    rank-profile personalized inherits default_native {
+    }
+
+    document-summary lean {
+        summary docId {}
+        summary name {}
+        summary projectId {} 
+    }
+}

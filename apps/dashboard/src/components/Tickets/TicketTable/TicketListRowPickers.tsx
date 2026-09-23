@@ -8,6 +8,7 @@ import { DatePicker } from '../../ui/DatePicker/DatePicker';
 import { useZero } from '../../../hooks/useZero';
 import { mutators } from '../../../zero/mutators';
 import { surfaceMutationError } from '../../../utils/zeroMutationToast';
+import { useProjectTagOptions } from '../../../hooks/useProjectTagOptions';
 import { isEtaUrgent } from '../TicketCard/TicketCard.utils';
 import { StatusOptions } from './TicketTableHelper';
 import { dueDateToEta } from './useBulkTicketActions';
@@ -187,11 +188,41 @@ export function LabelPicker({
   const [open, setOpen] = useState(false);
   const zero = useZero();
 
+  // Scoped to the ticket's own project — `availableTags` is the screen-wide list,
+  // which on a multi-project view offers tags this ticket's project does not have.
+  // `enabled: open` matters: this component's body runs for EVERY row in the
+  // table, so an ungated query here would fire once per row on mount.
+  const {
+    availableTags: projectTags,
+    hasMore: hasMoreProjectTags,
+    loadMore: loadMoreProjectTags,
+  } = useProjectTagOptions({
+    projectId: ticket.projectId,
+    enabled: open && !!ticket.projectId,
+  });
+
+  // The catalog arrives a page at a time; without this the picker showed only the
+  // first page and stopped. Pull the next one when the list nears its bottom.
+  const handleTagScroll = (e: React.UIEvent<HTMLDivElement>): void => {
+    if (!hasMoreProjectTags) return;
+    const el = e.currentTarget;
+    if (el.scrollHeight - el.scrollTop - el.clientHeight < 50) {
+      loadMoreProjectTags();
+    }
+  };
+
+  // A ticket can have no project (useBulkTicketActions skips those on create), and
+  // then there is no project catalog to scope to — fall back to the caller's list.
+  const scopedTags = ticket.projectId ? projectTags : availableTags;
+
   const currentNames = useMemo(() => new Set(tags.map(tag => tag.name)), [tags]);
   // A row can carry a tag that's no longer in the project list — keep it toggleable.
   const allNames = useMemo(
-    () => Array.from(new Set([...availableTags, ...tags.map(tag => tag.name)])).sort(),
-    [availableTags, tags],
+    () =>
+      Array.from(new Set([...scopedTags, ...tags.map(tag => tag.name)])).sort((a, b) =>
+        a.localeCompare(b),
+      ),
+    [scopedTags, tags],
   );
 
   const toggle = (name: string): void => {
@@ -218,7 +249,30 @@ export function LabelPicker({
     }
   };
 
-  if (allNames.length === 0) return <>{children}</>;
+  // Previously `if (allNames.length === 0) return children` — that was safe when
+  // the list arrived as a prop, but the scoped list is empty until the popover
+  // opens, so it would render a dead trigger that could never be opened. Only bail
+  // when the row has no tags AND nothing is loading, i.e. there is genuinely
+  // nothing to show and no way to add one.
+  if (allNames.length === 0 && !open) {
+    return (
+      <button
+        type='button'
+        onClick={e => {
+          e.stopPropagation();
+          setOpen(true);
+        }}
+        onKeyDown={e => e.stopPropagation()}
+        title='Edit labels'
+        className='inline-flex items-center gap-2 rounded-md hover:bg-muted'
+        aria-label='Edit labels'
+        data-track-category='Tickets'
+        data-track-name='ToggleRowLabels'
+      >
+        {children}
+      </button>
+    );
+  }
 
   const trigger = (
     <button
@@ -247,9 +301,9 @@ export function LabelPicker({
       onCloseAutoFocus={event => event.preventDefault()}
       align='end'
       sideOffset={4}
-      className='p-1 w-48 max-h-64 overflow-y-auto'
+      className='p-1 w-48'
     >
-      <div className='flex flex-col'>
+      <div className='flex flex-col max-h-64 overflow-y-auto' onScroll={handleTagScroll}>
         {allNames.map(name => (
           <button
             key={name}

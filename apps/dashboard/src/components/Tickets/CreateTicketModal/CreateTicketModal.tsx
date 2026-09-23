@@ -58,6 +58,7 @@ import { cn } from '../../../utils/classNames';
 import { mutators } from '../../../zero/mutators';
 import { surfaceMutationError } from '../../../utils/zeroMutationToast';
 import { queries } from '../../../zero/queries';
+import { useProjectTagOptions } from '../../../hooks/useProjectTagOptions';
 import { SubTicketCountIcon } from '../../../assets/icons';
 import Avatar from '../../ui/Avatar/Avatar';
 import { Button } from '../../ui/Button';
@@ -724,10 +725,14 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
 
   // Project-level tags — lazy-loaded when the label dropdown is first opened
   const [tagsQueried, setTagsQueried] = useState(false);
-  const [projectTags] = useCachedQuery(
-    queries.projectTagsByProjectId({ projectId: selectedBoard?.projectId ?? '' }),
-    { enabled: tagsQueried && !!selectedBoard?.projectId },
-  );
+  // autoLoadAll: the label field is a generic multi-select with no scroll container
+  // to page from, and the raw query caps at 100 tags. Still lazy — `tagsQueried`
+  // only flips when the dropdown is first opened.
+  const { availableTags } = useProjectTagOptions({
+    projectId: selectedBoard?.projectId,
+    enabled: tagsQueried && !!selectedBoard?.projectId,
+    autoLoadAll: true,
+  });
 
   const userGroupOptions = useUserGroups();
 
@@ -1739,20 +1744,6 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
         });
       });
   };
-
-  // get unique tags from project_tags
-  const availableTags = useMemo(() => {
-    if (!projectTags) return [];
-
-    const tagSet = new Set<string>();
-    projectTags.forEach(t => {
-      if (t?.name) {
-        tagSet.add(t.name);
-      }
-    });
-
-    return Array.from(tagSet).sort();
-  }, [projectTags]);
 
   // Helper functions for dynamic field value normalization
   const getSingleStringValue = (value: string | string[]): string => {
