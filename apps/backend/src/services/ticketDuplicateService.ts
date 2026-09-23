@@ -1,12 +1,16 @@
 import { logger } from '@/utils/logger';
-import { TicketReferenceRelation } from '@xyne/shared';
+import { FormFieldType, MAX_DUPLICATE_SCOPE_FIELDS, TicketReferenceRelation } from '@xyne/shared';
 import { extractPlainTextFromHtml } from '@/utils/contentUtils';
 import { resolveWorkspaceIdFromModel } from '@/database/tenant/workspace-utils';
 import { config } from '@/config/env';
 import { DatabaseClient } from '@/database/client';
+import { EmailChannelPreferenceRepository } from '@/database/repositories/emailChannelPreferenceRepository';
 import { transformVespaResults } from '@/services/vespaSearch/resultTransform';
 import { vespaService } from '@/services/vespaSearch';
 import { RankProfile } from '@/vespa/src/types';
+import { z } from 'zod';
+import type { Prisma } from '@prisma/client';
+import { buildFormFields } from '@/zero/vespa-injection/core/form-fields';
 import type {
   TicketDuplicateCandidate,
   TicketDuplicateCheckAnalysis,
@@ -18,7 +22,116 @@ import {
 } from '@/agents/ticket-duplicate';
 
 const prisma = DatabaseClient.getInstance();
+const emailChannelPreferenceRepo = new EmailChannelPreferenceRepository();
 const DUPLICATE_REFERENCE_LIMIT = 10;
+
+/**
+ * One raw scope-field value carried by the NEW ticket, handed to the service as a
+ * 1:1 map of the caller's precomputed custom-field write payload entries (fieldId +
+ * raw actualFieldValue — never re-read from the DB here: desk flows sync form values
+ * only AFTER ticket creation, so reading would race). In-service normalization
+ * (via buildFormFields) and project/type resolution both happen lazily inside
+ * buildScopeDynamicFieldValues.
+ */
+export type DuplicateScopeFieldValue = {
+  fieldId: string;
+  value: unknown;
+};
+
+/**
+ * A configured scope field resolved against the project, ready to become one
+ * `fieldId::value` token.
+ */
+type ResolvedDuplicateScopeField = {
+  globalFieldId: string;
+  values: string[];
+};
+
+// EmailChannelPreference.duplicateScopeConfig (nullable Json). Anything malformed
+// falls back to "disabled" — a bad config must never crash duplicate detection.
+const duplicateScopeConfigSchema = z.object({
+  enabled: z.boolean().optional().default(false),
+  scopeFieldGlobalIds: z.array(z.string()).max(MAX_DUPLICATE_SCOPE_FIELDS).optional().default([]),
+});
+type DuplicateScopeConfig = z.infer<typeof duplicateScopeConfigSchema>;
+
+/**
+ * Map raw custom-field values onto scope fields for duplicate detection.
+ *
+ * Token values come from buildFormFields — the very function the Vespa mapper uses
+ * to write `formFields` — fed the same raw value and the field's real type. Every
+ * field type is therefore supported, and the token can never drift from the indexed
+ * representation: date normalization, per-element rows for multi-select/user, and
+ * scalar normalization all come from one implementation rather than a copy.
+ *
+ * Ids that aren't global fields of THIS project drop silently: a legacy form-only
+ * field can never be a configured scope key, because the settings picker lists
+ * GlobalFields, and scoping must never reach another project's fields.
+ */
+export const buildDuplicateScopeFieldValues = async (params: {
+  projectId: string;
+  fieldValues: ReadonlyArray<DuplicateScopeFieldValue>;
+}): Promise<ResolvedDuplicateScopeField[]> => {
+  const { projectId, fieldValues } = params;
+  if (!projectId || fieldValues.length === 0) {
+    return [];
+  }
+
+  const rawValueByFieldId = new Map<string, unknown>();
+  for (const { fieldId, value } of fieldValues) {
+    if (!fieldId || value === null || value === undefined || rawValueByFieldId.has(fieldId)) continue;
+    rawValueByFieldId.set(fieldId, value);
+  }
+  if (rawValueByFieldId.size === 0) {
+    return [];
+  }
+
+  try {
+    // Restrict to global fields that actually belong to this project so a stray
+    // caller id can never widen the scope to another project's fields.
+    const projectGlobalFields = await prisma.globalField.findMany({
+      where: { id: { in: [...rawValueByFieldId.keys()] }, projectId },
+      select: { id: true, fieldType: true },
+    });
+    if (projectGlobalFields.length === 0) {
+      return [];
+    }
+    const fieldTypeByFieldId = new Map(
+      projectGlobalFields.map(g => [g.id, g.fieldType as FormFieldType] as const),
+    );
+
+    // Same inputs the indexer gets, so the rows come out identical.
+    const indexedRows = buildFormFields(
+      projectGlobalFields.map(({ id }) => ({
+        fieldId: id,
+        actualFieldValue: rawValueByFieldId.get(id) as Prisma.JsonValue,
+      })),
+      fieldTypeByFieldId,
+    );
+
+    const valuesByFieldId = new Map<string, string[]>();
+    for (const row of indexedRows) {
+      const value = row.fieldValue?.trim();
+      if (!value) continue;
+      const values = valuesByFieldId.get(row.fieldId);
+      if (values) {
+        if (!values.includes(value)) values.push(value);
+      } else {
+        valuesByFieldId.set(row.fieldId, [value]);
+      }
+    }
+
+    return [...valuesByFieldId].map(([globalFieldId, values]) => ({ globalFieldId, values }));
+  } catch (error) {
+    // Scope expansion is best-effort: pass nothing scoped rather than risk a
+    // wrongly-built filter — detection falls back to project-wide behavior.
+    logger.warn('[TicketDuplicateService] Failed to build scope field values, falling back to project-wide detection', {
+      projectId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return [];
+  }
+};
 
 // Cap on the text handed to Vespa, mirroring the agent's MAX_DESCRIPTION_LENGTH.
 const VESPA_QUERY_MAX_LENGTH = 4000;
@@ -32,6 +145,116 @@ const buildDuplicateSearchQuery = (title: string, description: string): string =
 };
 
 class TicketDuplicateService {
+  /**
+   * Load the channel's per-channel duplicate-scope config. Null config, disabled
+   * flag, or an unparsable Json payload all resolve to null = today's project-wide
+   * behavior. Any lookup failure also resolves to null (detection must be tolerant).
+   */
+  private async resolveDuplicateScopeConfig(channelId: string | undefined): Promise<DuplicateScopeConfig | null> {
+    if (!channelId) {
+      return null;
+    }
+
+    try {
+      const preference = await emailChannelPreferenceRepo.findByChannelId(channelId);
+      if (!preference?.duplicateScopeConfig) {
+        return null;
+      }
+
+      let rawConfig: unknown = preference.duplicateScopeConfig;
+      if (typeof rawConfig === 'string') {
+        try {
+          rawConfig = JSON.parse(rawConfig);
+        } catch {
+          logger.warn('[TicketDuplicateService] Unparsable duplicateScopeConfig string on channel, treating as disabled', {
+            channelId,
+          });
+          return null;
+        }
+      }
+
+      const parsed = duplicateScopeConfigSchema.safeParse(rawConfig);
+      if (!parsed.success) {
+        logger.warn('[TicketDuplicateService] Malformed duplicateScopeConfig on channel, treating as disabled', {
+          channelId,
+          error: parsed.error.message,
+        });
+        return null;
+      }
+      if (!parsed.data.enabled || parsed.data.scopeFieldGlobalIds.length === 0) {
+        return null;
+      }
+      return parsed.data;
+    } catch (error) {
+      logger.warn('[TicketDuplicateService] Failed to load duplicateScopeConfig, falling back to project-wide detection', {
+        channelId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return null;
+    }
+  }
+
+  /**
+   * Turn the channel config + the caller-supplied raw scope values into Vespa
+   * `fieldId::value` tokens, one per configured global field. YqlBuilder's
+   * dynamicFieldValues ANDs across distinct fieldIds, which is exactly the
+   * "candidate must match every scope field" semantic this feature wants.
+   *
+   * Returns:
+   *  - null      → no scoping applies (project-wide candidates). This is also the
+   *                FALLBACK when the config is enabled but the new ticket lacks a
+   *                configured value — a missing value must never silently drop
+   *                detection.
+   *  - string[]  → tokens to pass as ticket.dynamicFieldValues
+   */
+  private async buildScopeDynamicFieldValues(input: {
+    channelId?: string;
+    projectId: string;
+    scopeFieldValues?: DuplicateScopeFieldValue[];
+    excludeTicketId?: string;
+  }): Promise<string[] | null> {
+    const { channelId, projectId, scopeFieldValues, excludeTicketId } = input;
+    const scopeConfig = await this.resolveDuplicateScopeConfig(channelId);
+    if (!scopeConfig) {
+      return null;
+    }
+
+    const logProjectWideFallback = (missingScopeFieldGlobalIds: string[]): void => {
+      logger.info(
+        '[TicketDuplicateService] Channel scope fields missing on new ticket, using project-wide duplicate search',
+        { ticketId: excludeTicketId, channelId, projectId, missingScopeFieldGlobalIds },
+      );
+    };
+
+    if (!scopeFieldValues || scopeFieldValues.length === 0) {
+      logProjectWideFallback(scopeConfig.scopeFieldGlobalIds);
+      return null;
+    }
+
+    // Lazy resolution: the globalField query runs only here — config enabled +
+    // fields configured (checked above) + raw values present.
+    const resolvedFields = await buildDuplicateScopeFieldValues({
+      projectId,
+      fieldValues: scopeFieldValues,
+    });
+    const valuesByGlobalId = new Map(
+      resolvedFields.map(entry => [entry.globalFieldId, entry.values] as const),
+    );
+
+    const missing = scopeConfig.scopeFieldGlobalIds.filter(id => !valuesByGlobalId.has(id));
+    if (missing.length > 0) {
+      logProjectWideFallback(missing);
+      return null;
+    }
+
+    // One token per indexed value. YqlBuilder buckets by fieldId, so tokens sharing
+    // a fieldId OR together while distinct fields AND — "matches every scope field,
+    // on at least one of its values".
+    return scopeConfig.scopeFieldGlobalIds.flatMap(globalFieldId =>
+      valuesByGlobalId.get(globalFieldId)!.map(value => `${globalFieldId}::${value}`),
+    );
+  }
+
   async checkDuplicates(params: {
     title: string;
     description: string;
@@ -40,8 +263,17 @@ class TicketDuplicateService {
     limit: number;
     excludeTicketId?: string;
     parentTicketId?: string;
+    channelId?: string;
+    scopeFieldValues?: DuplicateScopeFieldValue[];
   }): Promise<{ candidates: TicketDuplicateCandidate[]; analysis: TicketDuplicateCheckAnalysis }> {
-    const { title, description, projectId, userId, limit, excludeTicketId, parentTicketId } = params;
+    const { title, description, projectId, userId, limit, excludeTicketId, parentTicketId, channelId, scopeFieldValues } = params;
+
+    const scopeDynamicFieldValues = await this.buildScopeDynamicFieldValues({
+      channelId,
+      projectId,
+      scopeFieldValues,
+      excludeTicketId,
+    });
 
     const candidates = await this.getDuplicateCandidates({
       title,
@@ -51,6 +283,7 @@ class TicketDuplicateService {
       limit,
       excludeTicketId,
       parentTicketId,
+      dynamicFieldValues: scopeDynamicFieldValues ?? undefined,
     });
 
     if (candidates.length === 0) {
@@ -168,8 +401,9 @@ class TicketDuplicateService {
     limit: number;
     excludeTicketId?: string;
     parentTicketId?: string;
+    dynamicFieldValues?: string[];
   }): Promise<TicketDuplicateCandidate[]> {
-    const { title, description, projectId, userId, limit, excludeTicketId, parentTicketId } = params;
+    const { title, description, projectId, userId, limit, excludeTicketId, parentTicketId, dynamicFieldValues } = params;
     const query = buildDuplicateSearchQuery(title, description);
 
     if (!query) {
@@ -193,6 +427,9 @@ class TicketDuplicateService {
           rankProfile: RankProfile.duplicateDetection,
           ticket: {
             projectId: [projectId],
+            ...(dynamicFieldValues && dynamicFieldValues.length > 0
+              ? { dynamicFieldValues }
+              : {}),
           },
         },
       );
@@ -245,9 +482,11 @@ class TicketDuplicateService {
     projectId: string;
     userId: string;
     parentTicketId?: string;
+    channelId?: string;
+    scopeFieldValues?: DuplicateScopeFieldValue[];
   }): Promise<void> {
     try {
-      const { ticketId, ticketCreatedBy, title, description, projectId, userId, parentTicketId } = params;
+      const { ticketId, ticketCreatedBy, title, description, projectId, userId, parentTicketId, channelId, scopeFieldValues } = params;
       const { candidates, analysis } = await this.checkDuplicates({
         title,
         description,
@@ -256,6 +495,8 @@ class TicketDuplicateService {
         limit: DUPLICATE_REFERENCE_LIMIT,
         excludeTicketId: ticketId,
         parentTicketId,
+        channelId,
+        scopeFieldValues,
       });
 
       if (candidates.length === 0) {
