@@ -295,10 +295,10 @@ export function evaluateChainCommandConditions(
     : [];
 
   if (conditions.commandsMustMatch?.length) {
-    const allMatched = conditions.commandsMustMatch.every((pattern) =>
+    const anyMatched = conditions.commandsMustMatch.some((pattern) =>
       commandTexts.some((text) => chainCommandPatternMatches(pattern, text) === "match"),
     );
-    if (!allMatched) return false;
+    if (!anyMatched) return false;
   }
 
   if (conditions.commandsMustNotMatch?.length) {
