@@ -19,6 +19,7 @@ import {
   CanvasesACL,
   CanvasParticipantsACL,
   CanvasVersionsACL,
+  CanvasSuggestionChangesACL,
   CanvasCommentsACL,
   CanvasCommentThreadsACL,
   ChannelParticipantsACL,
@@ -172,6 +173,8 @@ export class ACLFactory {
       return new CanvasParticipantsACL(ctx, prisma)
     case 'canvasVersion':
       return new CanvasVersionsACL(ctx, prisma)
+    case 'canvasSuggestionChange':
+      return new CanvasSuggestionChangesACL(ctx, prisma)
     case 'canvasComment':
       return new CanvasCommentsACL(ctx, prisma)
     case 'canvasCommentThread':
