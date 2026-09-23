@@ -5509,8 +5509,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                           onTicketsChange={handleKanbanTicketsChange}
                           allKnownTickets={group.allTickets}
                           {...(paginatedColumnConfig ? { paginatedColumnConfig } : {})}
-                          {...(canCreateTicket &&
-                          (hasSeedableChannelContext || isWorkspaceView)
+                          {...(canCreateTicket && (hasSeedableChannelContext || isWorkspaceView)
                             ? {
                                 onAddTicketInColumn: (col: {
                                   status?: TicketStatusV2 | undefined;

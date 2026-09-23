@@ -26,7 +26,7 @@ import {
 } from '@xyne/shared';
 import { BLOCKED_EXTENSIONS } from '../../ui/utils/files';
 import { useChannel, useChannelSearch } from '../../../hooks/useChannels';
-import { useChannelHasBoards } from '../../../hooks/useChannelBoards';
+import { ConversationTabContext } from '../ConversationTabContext';
 import { intentClassifier } from '../../../services/onDeviceIntent';
 import { useIntentSuggestionToast } from '../../../hooks/useIntentSuggestionToast';
 import { ScheduleCallModal } from '../../Call/ScheduleCallModal/ScheduleCallModal';
@@ -343,7 +343,7 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
     const channel = useChannel(channelId);
     // Tickets need a board to land on, and a channel's boards come from
     // channel_board_mappings — a channel with none can't create one.
-    const { hasBoards: channelHasBoards } = useChannelHasBoards(channelId);
+    const { channelHasBoards } = useContext(ConversationTabContext);
     const isSupportChannel = channel?.type === ChannelType.SUPPORT;
     // SDLC channels are hidden from the chat directory, so "also send to
     // channel" has no destination a user could ever see — hide the toggle.
