@@ -6,6 +6,8 @@ import {
   getChannelConversationsSnapshot,
   useGetChannelUserStatus,
 } from '../../../hooks/useChannels';
+import { useChannelHasBoards } from '../../../hooks/useChannelBoards';
+import { ChannelNoBoardsEmptyState } from '../ChannelInformation/ChannelNoBoardsEmptyState';
 import { useDragAndDropAreaRef } from '../../../hooks/useDragAndDropAreaRef';
 import { useConversationTabs } from './ConversationPannel.utils';
 import { appIdOf } from '../../../hooks/barItems';
@@ -52,23 +54,20 @@ const DeactivatedDmArchiveBanner = (): ReactElement => {
   );
 };
 
-// Channel Tickets tab. Boards are sourced from the channel's PROJECT. A projectless
-// channel (projectId '' — projects are decoupled from channels) has no project to
-// source boards from, so render a graceful empty state (no board view, no ticket
-// creation) instead of the Kanban board.
+// Channel Tickets tab. Boards come from channel_board_mappings — the channel's own
+// linked boards, which may span projects. A channel with no linked boards has nothing
+// to show and, more importantly, nothing to scope a ticket query by, so render a
+// graceful empty state (no board view, no ticket creation) instead of the Kanban
+// board. Waiting for isSynced matters: an unsynced empty mapping is indistinguishable
+// from a genuinely empty one, and acting early would flash this state over a channel
+// that does have boards.
 const ChannelTicketsTab = ({ channelId }: { channelId: string }): ReactElement => {
-  const channel = useChannel(channelId);
-  if (channel && !channel.projectId) {
-    return (
-      <div className='flex h-full flex-col items-center justify-center gap-1 p-8 text-center'>
-        <p className='text-sm font-medium text-foreground'>
-          No boards are configured for this channel
-        </p>
-        <p className='text-sm text-muted-foreground'>
-          Link this channel to a project to start creating and tracking tickets.
-        </p>
-      </div>
-    );
+  const { isSynced, hasBoards } = useChannelHasBoards(channelId);
+
+  // KanbanBoardScreen renders the same empty state for hosts that mount it with a
+  // channelId directly; this short-circuit just avoids mounting the whole screen.
+  if (isSynced && !hasBoards) {
+    return <ChannelNoBoardsEmptyState channelId={channelId} />;
   }
   return <KanbanBoardScreen channelId={channelId} />;
 };
@@ -138,6 +137,13 @@ const ConversationPanelV2 = ({
 }): ReactElement => {
   const { baseRoute } = useRouteContext();
   const channel = useChannel(channelId);
+  // Resolved once here and handed down through ConversationTabContext: it is
+  // constant per channel, and ChatBubble renders once per message, so subscribing
+  // per bubble would put hundreds of identical queries on a long conversation.
+  // Only DEFAULT channels can create tickets, so DMs skip the query entirely.
+  const { hasBoards: channelHasBoards } = useChannelHasBoards(
+    channel?.scopeType === ChannelScopeType.DEFAULT ? channelId : undefined,
+  );
   const channelParticipation = useGetChannelUserStatus(channelId);
   const { dragAndDropAreaRef, inputRef, isDragging } = useDragAndDropAreaRef(channelId);
 
@@ -268,8 +274,13 @@ const ConversationPanelV2 = ({
   );
 
   const conversationTabContextValue = useMemo(
-    () => ({ setActiveTab: handleTabChange, setSkipMarkAsRead, skipMarkAsReadRef }),
-    [handleTabChange, setSkipMarkAsRead],
+    () => ({
+      setActiveTab: handleTabChange,
+      setSkipMarkAsRead,
+      skipMarkAsReadRef,
+      channelHasBoards,
+    }),
+    [handleTabChange, setSkipMarkAsRead, channelHasBoards],
   );
 
   return (

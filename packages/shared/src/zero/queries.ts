@@ -3200,12 +3200,25 @@ export const queries = defineQueries({
   // Boards mapped to a channel via ChannelBoardMapping.
   // This is the preferred path for resolving channel → boards.
   // Falls back to boardsListByProject on the consumer side if empty.
+  // Existence probe for "does this channel have any boards". Deliberately does not
+  // load the related board rows: chat surfaces ask this on every channel just to
+  // decide whether to render a control, and boardsByChannel would pull the whole
+  // mapping set with its joins for a question a single row answers.
+  channelHasBoards: defineQuery(z.object({ channelId: z.string() }), ({ args: { channelId } }) => {
+    return zql.channel_board_mappings.where('channelId', channelId).limit(1);
+  }),
+
   boardsByChannel: defineQuery(
     z.object({ channelId: z.string() }),
     ({ args: { channelId } }) => {
+      // isDefault first, then oldest link — identical to the server-side resolver
+      // resolveChannelDefaultBoard (channelDefaultBoard.ts). Consumers treat the
+      // first row as the channel's default board, so the two must agree or the UI
+      // opens on a different board than inbound email/Slack flows write to.
       return zql.channel_board_mappings
         .where('channelId', channelId)
         .related('board')
+        .orderBy('isDefault', 'desc')
         .orderBy('createdAt', 'asc');
     },
   ),
@@ -5329,6 +5342,17 @@ export const queries = defineQueries({
     z.object({ projectId: z.string() }),
     ({ args: { projectId } }) => {
       return zql.applications.where('projectId', projectId);
+    },
+  ),
+  // Multi-project variant, for callers whose boards can span projects (a channel's
+  // linked boards come from channel_board_mappings and are not confined to one
+  // project). The IN-list stays stable for the same reason the single-arg version
+  // above does: it is keyed on the caller's board set, not on the user's current
+  // board selection.
+  applicationsByProjectIds: defineQuery(
+    z.object({ projectIds: z.array(z.string()) }),
+    ({ args: { projectIds } }) => {
+      return zql.applications.where(helpers => helpers.cmp('projectId', 'IN', projectIds));
     },
   ),
   roles: defineQuery(

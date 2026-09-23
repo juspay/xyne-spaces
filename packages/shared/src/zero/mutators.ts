@@ -1406,6 +1406,50 @@ export const mutators = defineMutators({
         });
       },
     ),
+    // Link boards to a channel (channel_board_mappings). Additive only: this never
+    // removes a mapping, so a board that is already linked is silently skipped
+    // rather than erroring — the unique (channelId, boardId) index would reject it,
+    // and a partially-applied batch is worse than an idempotent one.
+    linkBoards: defineMutator(
+      z.object({
+        channelId: z.string(),
+        // Ids are generated client-side (uuid) so the mutation stays idempotent
+        // across optimistic apply + server replay.
+        boards: z
+          .array(z.object({ mappingId: z.string(), boardId: z.string() }))
+          .min(1)
+          .max(100),
+        timestamp: z.number(),
+      }),
+      // Permission and tenancy live in ChannelBoardMappingsACL.canInsert, which the
+      // server's transaction wrapper runs on every insert. This client-side copy is
+      // the optimistic apply only; anything it let through the server still rejects.
+      async ({ tx, ctx, args: { channelId, boards, timestamp } }) => {
+        const existing = await tx.run(zql.channel_board_mappings.where('channelId', channelId));
+        const linkedBoardIds = new Set(existing.map(mapping => mapping.boardId));
+        // At most one row per channel may carry isDefault (enforced by a partial
+        // unique index), so only claim it when the channel has none yet.
+        let claimDefault = !existing.some(mapping => mapping.isDefault);
+
+        for (const { mappingId, boardId } of boards) {
+          if (linkedBoardIds.has(boardId)) continue;
+
+          await tx.mutate.channel_board_mappings.insert({
+            id: mappingId,
+            channelId,
+            boardId,
+            workspaceId: ctx.workspaceId,
+            isDefault: claimDefault,
+            createdBy: ctx.userID,
+            createdAt: timestamp,
+            updatedAt: timestamp,
+          });
+
+          claimDefault = false;
+          linkedBoardIds.add(boardId);
+        }
+      },
+    ),
     updateSelectedBoardId: defineMutator(
       z.object({ channelId: z.string(), boardId: z.string().nullable(), updatedAt: z.number() }),
       async ({ tx, ctx, args: { channelId, boardId, updatedAt } }) => {
