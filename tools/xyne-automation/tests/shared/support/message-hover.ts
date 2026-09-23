@@ -1,32 +1,22 @@
 import { testContext } from '@/tests/shared/runtime/test-context';
 
-// How long to wait for the intended bubble, how long to keep re-arming the hover, how often.
 const MESSAGE_TIMEOUT_MS = 30000;
 const ACTION_TIMEOUT_MS = 15000;
+const CLICK_ATTEMPT_MS = 3000;
 const REARM_INTERVAL_MS = 250;
 
 /**
- * Hover a message and click one of its hover actions.
+ * Each message list mounts ONE shared HoverActionsToolbar, keyed to the last row a delegated
+ * pointerover resolved and positioned outside that row's own box. Three consequences:
  *
- * Why this is delicate:
- * The dashboard renders ONE shared HoverActionsToolbar, mounted only while a message has
- * hover state and positioned at `-top-7 right-4` — outside the message's own bounding box.
- * So a physical `locator.hover()` walks the mouse out of the message on its way to the
- * button, fires `onMouseLeave`, and unmounts the toolbar mid-click. Dispatching synthetic
- * `mouseover`/`mouseenter` on the message node instead sets React's hover state with no
- * mouse involved, so there is no mouseleave to race.
- *
- * Both events are dispatched: React's synthetic system listens to mouseover (delegated),
- * while some components listen to mouseenter. `bubbles: true` on mouseover lets it reach
- * the ChatBubble parent holding the handler.
- *
- * Two further races, both seen as flakes:
- * - Because the toolbar is shared and keyed to whatever was hovered last, hovering the
- *   wrong bubble silently reads a different message's menu — and a menu that legitimately
- *   lacks the action (a ticket card has no Edit) then burns the full timeout. So wait for
- *   the message we were asked for and never substitute another.
- * - Virtuoso remounts rows while it measures and as Zero syncs new messages, dropping the
- *   hover state a single dispatch had set. Re-arm until the action mounts.
+ * - A physical `hover()` walks the mouse out of the row on its way to the button and unmounts the
+ *   toolbar mid-click, so hover synthetically instead.
+ * - Playwright leaves the cursor wherever it last clicked. Parked inside the list, it re-claims the
+ *   toolbar for whatever row slides under it when the layout shifts (pinning inserts a divider),
+ *   which fights the synthetic hover. Park it outside the list first.
+ * - Virtuoso remounts rows while measuring, dropping the hover state and issuing a fresh useId, so
+ *   re-arm and re-read `data-hover-key` every attempt. Matching the toolbar on that key is what
+ *   keeps this on the intended message.
  */
 export async function clickHoverActionOnMessage(
   hoverActionSelector: string,
@@ -34,43 +24,52 @@ export async function clickHoverActionOnMessage(
 ): Promise<void> {
   const page = testContext.activePage;
 
+  // ponytail: `.last()` takes the newest of several substring matches — fine while specs use
+  // distinct message text. Scope to the list container if one ever needs two of the same.
   const message = page.locator(`[data-testid^="chat-message-"]:has-text("${messageText}")`).last();
   await message.waitFor({ state: 'visible', timeout: MESSAGE_TIMEOUT_MS });
   await message.scrollIntoViewIfNeeded();
+  await page.mouse.move(0, 0);
 
-  const actionButton = page.locator(hoverActionSelector).first();
   const deadline = Date.now() + ACTION_TIMEOUT_MS;
+  let lastError = 'the toolbar never mounted for this message';
   for (;;) {
     await message
       .evaluate((el) => {
         // biome-ignore lint/suspicious/noTsIgnore: MouseEvent exists in browser context
-        // @ts-ignore - MouseEvent exists in browser context
+        // @ts-ignore - browser context
         el.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, cancelable: true }));
         // biome-ignore lint/suspicious/noTsIgnore: MouseEvent exists in browser context
-        // @ts-ignore - MouseEvent exists in browser context
+        // @ts-ignore - browser context
         el.dispatchEvent(new MouseEvent('mouseenter', { bubbles: false, cancelable: true }));
       })
-      // The row can be mid-remount; the next poll re-resolves the locator.
       .catch(() => {});
 
-    // The toolbar is shared and keyed to whatever is hovered, and `actionButton` is looked up
-    // page-wide — so a toolbar still mounted for another message would answer here and the
-    // step would act on the wrong menu. The app stamps `data-hovered` on the hovered row, so
-    // require that the row we asked for owns it.
-    const owned = (await message.getAttribute('data-hovered').catch(() => null)) !== null;
-    if (owned && (await actionButton.isVisible().catch(() => false))) break;
+    const hoverKey = await message.getAttribute('data-hover-key').catch(() => null);
+    if (hoverKey === null) {
+      lastError = 'the row carries no data-hover-key';
+    } else {
+      // force skips the actionability re-check; the key scope keeps this on the right message.
+      // Synthetic clicks did not fire React's handler.
+      const clicked = await page
+        .locator(`[data-hover-key="${hoverKey}"]`)
+        .locator(hoverActionSelector)
+        .first()
+        .click({ force: true, timeout: CLICK_ATTEMPT_MS })
+        .then(() => true)
+        .catch((error: Error) => {
+          lastError = error.message.split('\n')[0];
+          return false;
+        });
+      if (clicked) return;
+      await page.mouse.move(0, 0);
+    }
+
     if (Date.now() >= deadline) {
       throw new Error(
-        `Hover action "${hoverActionSelector}" never appeared for message "${messageText}". ` +
-          'The toolbar is shared across messages, so it stayed closed — it did not open on another message.'
+        `Hover action "${hoverActionSelector}" never became clickable on message "${messageText}": ${lastError}`
       );
     }
     await page.waitForTimeout(REARM_INTERVAL_MS);
   }
-
-  // A real click: dispatching pointer/mouse events here did not reliably fire the React
-  // handler (the create-ticket modal never opened). force:true skips the actionability
-  // re-check, and the data-hovered guard above is what keeps the toolbar from belonging to
-  // another message.
-  await actionButton.click({ force: true });
 }

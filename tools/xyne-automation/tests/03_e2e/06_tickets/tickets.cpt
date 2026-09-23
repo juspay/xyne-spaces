@@ -27,6 +27,9 @@
 * clicking on text <priority> in "ul[role='listbox']"
 
 # Verifying ticket <ticketAlias> was created
+ponytail: asserts a card exists, not that <ticketAlias> does — hooks.steps.ts resets storedUsers
+per scenario, so the alias is out of scope here. Real per-ticket checks belong in the creating
+scenario, where the alias is still stored.
 * clicking on "[data-testid='channel-tab-tickets']"
 * waiting for "[data-testid^='ticket-card-']" to appear
 

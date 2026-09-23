@@ -102,10 +102,8 @@ export default class TicketsSteps {
   @Step('opening the ticket relationships tab')
   public async openTicketRelationshipsTab(): Promise<void> {
     const page = testContext.activePage;
-    // The create-sub-ticket button lives on the Relationships tab — Details drops that section
-    // for "hosts that render it in a sibling tab", and Radix unmounts inactive tab content.
-    // Clicking the tab does not hold: the panel opens at ?selectedTab=details and ThreadPannel
-    // re-applies the URL's tab on every change, so select it the way the app itself does.
+    // create-sub-ticket-button only mounts on the Relationships tab, and clicking the tab does
+    // not hold — ThreadPannel re-applies ?selectedTab on every change. Select it via the URL.
     const url = new URL(page.url());
     if (url.searchParams.get('selectedTab') !== 'relationships') {
       url.searchParams.set('selectedTab', 'relationships');

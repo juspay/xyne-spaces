@@ -2,7 +2,6 @@
 > Convert a chat message into a ticket via the send-options-menu, with and without an attachment.
 
 ## Admin creates a ticket from chat
-tags: quarantine
 * Setting up ticket test with user "user-2" in channel "channel-1" for admin "admin-1"
 * Creating ticket "ticket-chat-1" from chat for user "admin-1"
 

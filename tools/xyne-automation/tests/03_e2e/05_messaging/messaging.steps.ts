@@ -12,7 +12,6 @@ import {
 } from '@/tests/shared/support/literal-validation';
 import { clickHoverActionOnMessage } from '@/tests/shared/support/message-hover';
 
-// Re-opening the more-actions menu while waiting for an item's label to flip.
 const MENU_ACTION_OPEN_ATTEMPTS = 3;
 const MENU_ACTION_RECHECK_MS = 3000;
 
@@ -166,34 +165,32 @@ export default class MessagingSteps {
     assertValidChannelAlias(channelAlias);
     assertValidMessageAlias(messageAlias);
     const page = testContext.activePage;
-    const action = page.locator(selector).first();
+    const menu = page.locator('[role="menu"]');
+    // Scoped to the open menu: the same testid also exists on toolbar buttons, and a second
+    // list's toolbar would answer a page-wide lookup.
+    const action = menu.locator(selector).first();
 
-    // These assertions follow an action that flips the item (bookmark -> remove bookmark), so
-    // two things can go wrong with a single open-and-wait: the previous step's menu may still
-    // be open, in which case opening it again toggles it shut and nothing ever becomes
-    // visible; and the flag behind the label travels Zero -> cached query -> effect -> XState
-    // before the label changes, which is several hops past the socket quiet that the spec
-    // waited on. Re-open from a known-closed state and re-check instead.
+    // The label flips only after Zero -> cached query -> effect -> XState, several hops past the
+    // socket quiet the spec waited on. Re-open from a known-closed state and re-check.
     for (let attempt = 1; ; attempt++) {
-      await page.keyboard.press('Escape');
+      await menu
+        .first()
+        .press('Escape', { timeout: 1000 })
+        .catch(() => {});
       await this.openMoreActionsForStoredChannelMessage(userAlias, channelAlias, messageAlias);
-      // Give the dropdown time to mount before judging it — an instantaneous check here
-      // just races the open animation and then Escape closes what was about to render.
       const appeared = await action
         .waitFor({ state: 'visible', timeout: MENU_ACTION_RECHECK_MS })
         .then(() => true)
         .catch(() => false);
       if (appeared) return;
       if (attempt >= MENU_ACTION_OPEN_ATTEMPTS) {
-        // Say which of the two failures this is: an empty list means the menu never opened,
-        // a list containing the un-flipped twin means the state had not propagated yet.
-        const visibleActions = await page
-          .locator('[data-testid^="hover-action-"]:visible')
+        const visible = await menu
+          .locator('[data-testid^="hover-action-"]')
           .evaluateAll((nodes) => nodes.map((n) => n.getAttribute('data-testid')))
           .catch(() => []);
         assert.fail(
           `Menu action "${selector}" never appeared for message "${messageAlias}" after ${MENU_ACTION_OPEN_ATTEMPTS} attempts. ` +
-            `Visible hover actions at failure: ${visibleActions.length > 0 ? visibleActions.join(', ') : '(none — the menu was not open)'}`
+            `Menu items at failure: ${visible.length > 0 ? visible.join(', ') : '(none — the menu was not open)'}`
         );
       }
     }
@@ -214,7 +211,11 @@ export default class MessagingSteps {
     assertValidUserAlias(targetUserAlias);
 
     await this.openMoreActionsForStoredChannelMessage(userAlias, channelAlias, messageAlias);
-    await testContext.activePage.locator("[data-testid='hover-action-forward-message']").click();
+    await testContext.activePage
+      .locator('[role="menu"]')
+      .locator("[data-testid='hover-action-forward-message']")
+      .first()
+      .click();
     await this.pickForwardTargetUser(targetUserAlias);
   }
 
