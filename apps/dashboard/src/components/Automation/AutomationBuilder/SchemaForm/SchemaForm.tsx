@@ -22,6 +22,7 @@ import { ReferenceChip, UseVariableButton } from './VariableFieldParts';
 import { EntityField, MultiEntityField } from './EntityField';
 import { AutomationRichTextField } from './AutomationRichTextField';
 import { ChipArrayField } from './ChipArrayField';
+import { BusinessHoursField } from './BusinessHoursField';
 import {
   coerceNumber,
   detectEntityArrayKind,
@@ -233,6 +234,15 @@ function Field({
       }
     });
   };
+
+  if (fieldKey === 'businessHours') {
+    if (siblingValues['businessHoursOnly'] !== true) return <></>;
+    const target = `${pathPrefix}${fieldKey}`;
+    const nestedIssue = issues?.find(i => i.path === target || i.path.startsWith(`${target}.`));
+    return (
+      <BusinessHoursField value={value} onChange={onChange} errorMessage={nestedIssue?.message} />
+    );
+  }
 
   if (kind === 'variableRef') {
     const inner = getVariableRefInner(schema);
