@@ -351,10 +351,8 @@ class GoogleCalendarSyncQueue {
     const queue = await this.ensureQueue();
     if (this.processorRegistered) return;
 
-    // Drain several sources at once instead of Bull's default of 1. Note Bull
-    // scopes concurrency to each named processor, so the two registrations below
-    // give this queue a ceiling of 2x concurrency in flight. Jobs for the same
-    // source are still serialised by withCalendarSourceLock.
+    // Drain several sources at once instead of Bull's default of 1; same-source
+    // jobs stay serialised by withCalendarSourceLock.
     const concurrency = config.calendarSyncQueueConcurrency;
 
     queue.process('manual-sync', concurrency, async (job) => {

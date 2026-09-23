@@ -115,16 +115,9 @@ const envSchema = Joi.object({
   ENABLE_DELAYED_MESSAGE_WORKER: Joi.boolean().default(false),
   ENABLE_EMAIL_FETCH_WORKER: Joi.boolean().default(false),
   ENABLE_CALENDAR_SYNC_WORKER: Joi.boolean().default(false),
-  // How many calendar sync jobs drain in parallel. Bull defaults to 1, which
-  // serialises every user's sync behind every other user's.
-  //
-  // Bull applies concurrency PER named processor, and each calendar queue
-  // registers two ('manual-sync' and 'incremental-sync'), so the real ceiling is
-  // 2x this per provider — 4x across Google and Microsoft together. Size it
-  // against the worker's DB pool and the providers' rate limits accordingly.
-  //
-  // Jobs for the SAME source are still serialised by a per-source Redis lock
-  // (withCalendarSourceLock), so this only widens parallelism ACROSS sources.
+  // Calendar sync jobs drained in parallel; Bull defaults to 1. Scoped per named
+  // processor, so the real ceiling is 2x this per provider. Same-source jobs stay
+  // serialised by withCalendarSourceLock.
   CALENDAR_SYNC_QUEUE_CONCURRENCY: Joi.number().integer().min(1).max(20).default(5),
   ENABLE_SOCIAL_MEDIA_SYNC_WORKER: Joi.boolean().default(false),
 
