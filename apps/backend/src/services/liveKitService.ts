@@ -12,7 +12,8 @@ import { logger } from '@/utils/logger';
 import { redisService } from '@/services/redisService';
 import { repositories } from '@/database/repositories';
 import { superpositionClient } from '@/services/superpositionClient';
-import { DEFAULT_HOST_CONTROLS, normalizeHostControls, type HostControls } from '@xyne/shared';
+import { resolveActingHost } from '@/services/actingHost';
+import { ACTING_HOST_METADATA_KEY, DEFAULT_HOST_CONTROLS, normalizeHostControls, type HostControls } from '@xyne/shared';
 
 /** Open-ended role/slot name ('default', 'test', or any future canary arm) — not a fixed enum. */
 type TranscriptionAgentRole = string;
@@ -674,8 +675,10 @@ export class LiveKitService {
   /**
    * Notify all participants in a room that the participant list has changed.
    * Updates room metadata with a version timestamp, triggering RoomMetadataChanged on all clients.
+   * Also recomputes the acting host (temp admin when host is absent); pass
+   * `excludeIdentity` after a `participant_left` webhook to exclude the leaver.
    */
-  async sendParticipantsChanged(roomName: string): Promise<void> {
+  async sendParticipantsChanged(roomName: string, opts?: { excludeIdentity?: string }): Promise<void> {
     try {
       const rooms = await this.roomService.listRooms([roomName]);
       if (!rooms || rooms.length === 0) {
@@ -688,13 +691,40 @@ export class LiveKitService {
         rooms[0].metadata,
         'participants_changed',
       );
+
+      const hostId =
+        typeof existingMetadata.createdBy === 'string' ? existingMetadata.createdBy : null;
+
+      let actingHostId: string | null;
+      try {
+        const participants = await this.roomService.listParticipants(roomName);
+        actingHostId = resolveActingHost({
+          hostId,
+          participants,
+          excludeIdentity: opts?.excludeIdentity,
+        });
+      } catch (error) {
+        // Keep the existing value rather than clobbering it with null on a transient failure.
+        logger.warn(
+          `[LiveKit] Failed to resolve acting host, keeping existing value | room=${roomName}, error=${error}`,
+        );
+        actingHostId =
+          typeof existingMetadata[ACTING_HOST_METADATA_KEY] === 'string'
+            ? (existingMetadata[ACTING_HOST_METADATA_KEY] as string)
+            : null;
+      }
+
       const updatedMetadata = {
         ...existingMetadata,
         participantsVersion: Date.now(),
+        [ACTING_HOST_METADATA_KEY]: actingHostId,
       };
 
       await this.roomService.updateRoomMetadata(roomName, JSON.stringify(updatedMetadata));
-      logger.info(`[LiveKit] Sent participants changed notification for room ${roomName}`);
+      logger.info(
+        `[LiveKit] Sent participants changed notification for room ${roomName}`,
+        { actingHostId },
+      );
     } catch (error) {
       // Non-critical — don't throw, just log
       logger.warn(`[LiveKit] Failed to send participants changed for room ${roomName}:`, error);

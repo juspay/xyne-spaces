@@ -324,6 +324,22 @@ async def entrypoint(ctx: JobContext):
     event_bus.subscribe("AI_ACTION", handle_ai_action)
     logger.info(f"event_bus_subscribed | event=AI_ACTION, handler=handle_ai_action")
 
+    # Declared before `data_received` is registered so an early command reads an
+    # empty dict (fail-closed) instead of raising NameError. Real parse is below,
+    # post-connect; `room_metadata_changed` keeps it live afterwards.
+    room_metadata: dict = {}
+
+    def _is_authorized_transcription_controller(sender_id: str | None, metadata: dict) -> bool:
+        """True iff sender is the host (createdBy) or the acting host
+        (actingHostId, backend-computed). Fail closed if neither is set."""
+        if not sender_id or not isinstance(metadata, dict):
+            return False
+        host_id = metadata.get("createdBy")
+        acting_host_id = metadata.get("actingHostId")
+        if not host_id and not acting_host_id:
+            return False
+        return sender_id == host_id or sender_id == acting_host_id
+
     # Handle AI voice toggle and control requests from frontend
     @ctx.room.on("data_received")
     def on_data_received(data_packet: rtc.DataPacket):  # pyright: ignore[reportUnusedFunction]
@@ -342,21 +358,15 @@ async def entrypoint(ctx: JobContext):
                 ai_manager.handle_voice_toggle(new_state, participant_id, participant_name)
 
             elif payload.get("type") == "transcription_toggle":
-                # Host kill-switch. SECURITY: only the call host (createdBy in room
-                # metadata) may toggle, verified against the authenticated sender
-                # identity — never the payload. FAIL CLOSED: if the host id is
-                # unavailable (older room metadata) or the sender is not the host,
-                # reject rather than trusting client-side gating.
-                #
-                # The AGENT is authoritative: it always broadcasts `transcription_state`
-                # with its ACTUAL state so clients never show "off" unless the agent
-                # really stopped. On apply we confirm only AFTER the teardown completes;
-                # on reject we confirm the (unchanged) current state so the UI reverts.
-                def _publish_transcription_state(enabled_now: bool):
+                # Kill-switch, host or acting host only — see _is_authorized_transcription_controller.
+                # Agent is authoritative: always broadcasts its ACTUAL state, tagged
+                # with `by` on apply; untagged (unchanged state) on reject.
+                def _publish_transcription_state(enabled_now: bool, by: dict | None = None):
                     try:
-                        state = json.dumps(
-                            {"type": "transcription_state", "enabled": enabled_now}
-                        ).encode("utf-8")
+                        message: dict = {"type": "transcription_state", "enabled": enabled_now}
+                        if by:
+                            message["by"] = by
+                        state = json.dumps(message).encode("utf-8")
                         asyncio.create_task(
                             ctx.room.local_participant.publish_data(
                                 state, reliable=True, topic="ai-actions"
@@ -365,15 +375,12 @@ async def entrypoint(ctx: JobContext):
                     except Exception as e:  # noqa: BLE001
                         logger.error(f"publish transcription_state failed: {e}")
 
-                host_id = room_metadata.get("createdBy") if isinstance(room_metadata, dict) else None
-                if not host_id:
+                if not _is_authorized_transcription_controller(participant_id, room_metadata):
+                    host_id = room_metadata.get("createdBy") if isinstance(room_metadata, dict) else None
+                    acting_host_id = room_metadata.get("actingHostId") if isinstance(room_metadata, dict) else None
                     logger.warning(
-                        "transcription_toggle rejected: host id unavailable in room metadata (fail-closed)"
-                    )
-                    _publish_transcription_state(multi_user_transcriber.is_enabled())
-                elif participant_id != host_id:
-                    logger.warning(
-                        f"transcription_toggle rejected: sender={participant_id} is not host={host_id}"
+                        f"transcription_toggle rejected: sender={participant_id} is neither "
+                        f"host={host_id} nor acting_host={acting_host_id} (fail-closed)"
                     )
                     _publish_transcription_state(multi_user_transcriber.is_enabled())
                 else:
@@ -385,7 +392,10 @@ async def entrypoint(ctx: JobContext):
 
                     async def _apply_and_confirm(target: bool):
                         await multi_user_transcriber.set_transcription_enabled(target)
-                        _publish_transcription_state(multi_user_transcriber.is_enabled())
+                        _publish_transcription_state(
+                            multi_user_transcriber.is_enabled(),
+                            by={"identity": participant_id, "name": participant_name or participant_id},
+                        )
 
                     asyncio.create_task(_apply_and_confirm(requested))
 
@@ -420,6 +430,16 @@ async def entrypoint(ctx: JobContext):
             pass  # Ignore non-JSON data messages
         except Exception as e:
             logger.error(f"Error handling data message: {e}")
+
+    @ctx.room.on("room_metadata_changed")
+    def on_room_metadata_changed(old_metadata: str, new_metadata: str):  # pyright: ignore[reportUnusedFunction]
+        """Keep room_metadata live (was previously parsed once and never refreshed,
+        so a mid-call acting-host change was invisible until agent restart)."""
+        nonlocal room_metadata
+        try:
+            room_metadata = json.loads(new_metadata) if new_metadata else {}
+        except json.JSONDecodeError:
+            logger.warning("room_metadata_changed: failed to parse new metadata, keeping previous value")
 
     # Connect to room with auto-subscribe to audio only
     await ctx.connect(auto_subscribe=AutoSubscribe.AUDIO_ONLY)
