@@ -34,6 +34,8 @@ interface BarCustomizerProps {
   /** Every built-in the user may show, in canonical order. */
   builtIns: readonly BarBuiltIn[];
   trackCategory: string;
+  /** Rendered under the subtitle — the channel selector, for channel tabs. */
+  headerSlot?: ReactNode;
 }
 
 /**
@@ -48,6 +50,7 @@ export const BarCustomizer = ({
   store,
   builtIns,
   trackCategory,
+  headerSlot,
 }: BarCustomizerProps): ReactElement => {
   const ids = store.useItems();
   const snapshots = useAppSnapshots();
@@ -108,6 +111,7 @@ export const BarCustomizer = ({
       <div>
         <p className='text-base font-semibold text-foreground'>{title}</p>
         <p className='mt-0.5 text-sm text-muted-foreground'>{subtitle}</p>
+        {headerSlot && <div className='mt-3'>{headerSlot}</div>}
       </div>
 
       <section className='space-y-2'>
@@ -193,7 +197,11 @@ export const BarCustomizer = ({
         onOpenChange={setPickerOpen}
         addedAppIds={addedAppIds}
         isFull={appsFull}
-        onPick={app => {
+        onToggle={(app, next) => {
+          if (!next) {
+            store.remove(appItemId(app.id));
+            return;
+          }
           setAppSnapshot(app.id, { title: app.title, icon: app.icon });
           store.add(appItemId(app.id));
         }}
