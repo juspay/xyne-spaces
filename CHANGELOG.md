@@ -1,3 +1,10 @@
+## [1.380.0](https://github.com/juspay/xyne-spaces/compare/v1.379.2...v1.380.0) (2026-09-23)
+
+
+### Features
+
+* rank DM search people like the Activity picker ([#2237](https://github.com/juspay/xyne-spaces/issues/2237)) ([19fb524](https://github.com/juspay/xyne-spaces/commit/19fb524ef4e4cca9a6f74db9e46ee341f1d3ab6e))
+
 ## [1.379.2](https://github.com/juspay/xyne-spaces/compare/v1.379.1...v1.379.2) (2026-09-23)
 
 
