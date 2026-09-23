@@ -264,6 +264,14 @@ export default function CallDetailScreen(): ReactElement {
     enabled: showTranscriptPanel,
   });
 
+  // Deep link `?lang=…` opens the transcript panel on arrival
+  useEffect(() => {
+    const lang = new URLSearchParams(location.search).get('lang');
+    if (!lang) return;
+    setShowTranscriptPanel(true);
+    setSelectedTranscriptLanguage(lang);
+  }, [location.search]);
+
   // Route canvas citations (detailed-summary pills carry callId = externalId) into this
   // screen's own panel instead of the global TranscriptCitationModal.
   const callExternalId = call?.externalId;
