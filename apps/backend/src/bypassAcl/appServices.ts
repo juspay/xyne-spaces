@@ -1,6 +1,6 @@
 import { repositories } from '@/database/repositories';
 import { db } from '@/database/client';
-import { asSystem, rawQuery } from './base';
+import { asSystem, asService, rawQuery } from './base';
 
 /**
  * Relocated from apps/controllers/appController.ts's promoteApp. Promotion is authorised by org
@@ -28,5 +28,20 @@ export async function claimAppSigningSecret(appId: string, fresh: string) {
     () => db.$queryRaw<{ signingSecret: string | null }[]>`
         UPDATE apps SET "signingSecret" = COALESCE("signingSecret", ${fresh})
         WHERE id = ${appId} RETURNING "signingSecret"`,
+  );
+}
+
+/**
+ * Relocated from apps/controllers/incomingWebhookController.ts's handlers (Slack, Sentinel, SNS,
+ * Pingdom, GCP). Unauthenticated webhook — no req.user, so an explicit tenant scope is opened
+ * from the validated :workspaceId URL param so the workspaceId stamper fills downstream writes.
+ */
+export function runIncomingWebhook<T>(workspaceId: string, fn: () => Promise<T>): Promise<T> {
+  return asService(
+    ['Conversation', 'Message', 'Ticket', 'Channel'],
+    'unauthenticated incoming webhook: no req.user, scope opened from the validated :workspaceId URL param',
+    'incoming-webhook',
+    workspaceId,
+    fn,
   );
 }

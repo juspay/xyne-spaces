@@ -12,7 +12,7 @@ import { syncConversationTicketMdFromPrismaTicket } from '@/utils/ticketMd';
 import { activityService } from '@/services/activity/activityService';
 import type { BoardMetadata } from '@xyne/shared';
 import { emitTicketUpdated } from '@/automations/triggers/ticket-updated.trigger';
-import { runAsServiceActor } from '@/database/tenant/context';
+import { runEmailClassificationJob } from '@/bypassAcl/emailFetchServices';
 import { getAutomationsBotUserId } from '@/automations/steps/automations-bot';
 import type { TicketLike } from '@/automations/triggers/ticket-context';
 
@@ -76,7 +76,7 @@ class EmailClassificationWorker {
       });
       throw new Error(`EmailClassificationWorker: channel ${job.data.channelId} not found or has no workspaceId`);
     }
-    return runAsServiceActor('email-classification-worker', channel.workspaceId,
+    return runEmailClassificationJob(channel.workspaceId,
       () => this.classifyAndAssign(job, channel.workspaceId),
     );
   }

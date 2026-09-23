@@ -20,7 +20,7 @@
 import { logger } from '@/utils/logger';
 import { MessageType, TicketPriority, TicketStatusV2 } from '@xyne/shared';
 import { db } from '@/database/client';
-import { runAsServiceActor } from '@/database/tenant/context';
+import { processGcsFileAsServiceActor } from '@/bypassAcl/webhookIngestServices';
 import { config } from '@/config/env';
 import { getStorageService, type StorageService } from './storage';
 import { redisService } from './redisService';
@@ -216,7 +216,7 @@ export class GcsPollingService {
         // support is correct even though today all files share one channel.
         // service actor: systemUserId is a dedicated bot account, not a participant of the
         // channels or tickets this touches, so relational predicates would return nothing.
-        await runAsServiceActor(this.systemUserId, this.workspaceId,
+        await processGcsFileAsServiceActor(this.systemUserId, this.workspaceId,
           () => this.processFile(file),
         );
       }

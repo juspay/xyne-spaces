@@ -18,7 +18,7 @@
  */
 import { db } from '@/database/client';
 import { IngestionStatus, AttachmentEntityType } from '@xyne/shared';
-import { runAsServiceActor } from '@/database/tenant/context';
+import { routeDoclingIntakeAsServiceActor } from '@/bypassAcl/doclingIngestServices';
 import { SubApp } from '@/vespa/src/types';
 import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
@@ -91,7 +91,7 @@ const routeCollection = async (fileId: string): Promise<boolean> => {
 
   const { basePriority } = inferDoclingSourcePriority({ collectionId: item.rootCollectionId });
 
-  const inserted = await runAsServiceActor('docling-intake', attachment.workspaceId,
+  const inserted = await routeDoclingIntakeAsServiceActor(attachment.workspaceId,
     () => upsertDoclingAsyncFileForSplit({
       fileId: item.fileId,
       collectionId: item.rootCollectionId,
@@ -125,7 +125,7 @@ const routeAttachment = async (attachmentId: string, app: SubApp): Promise<boole
 
   const { basePriority } = inferDoclingSourcePriority({ collectionId: '' });
 
-  const inserted = await runAsServiceActor('docling-intake', att.workspaceId,
+  const inserted = await routeDoclingIntakeAsServiceActor(att.workspaceId,
     () => upsertDoclingAsyncFileForSplit({
       fileId: att.id,
       collectionId: '',  // empty sentinel = attachment, not collection

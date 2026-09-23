@@ -2,7 +2,7 @@ import type { Prisma } from '@prisma/client';
 import { repositories } from '@/database/repositories';
 import { DatabaseClient } from '@/database/client';
 import type { GoogleCalendarPushState } from '@/database/repositories/callRepository';
-import { asSystem, rawQuery } from './base';
+import { asSystem, asService, rawQuery } from './base';
 
 /**
  * Relocated from callCalendarPushService.ts's syncCallToGoogleCalendar: the job carries only a
@@ -16,6 +16,40 @@ export function findCallForCalendarPush(
     ['Call'],
     'calendar push job carries only a call id — workspaceId is read cross-workspace, then everything after runs inside it',
     () => repositories.calls.findForCalendarPush(callId),
+  );
+}
+
+/**
+ * Relocated from callCalendarPushService.ts's syncCallToGoogleCalendar. Background push job →
+ * no request context, actor is the call's creator since the calendar event is pushed on their
+ * behalf.
+ */
+export function syncCallToGoogleCalendarAsCreator<T>(
+  createdByUserId: string,
+  workspaceId: string,
+  fn: () => Promise<T>,
+): Promise<T> {
+  return asService(
+    ['Call'],
+    'calendar push job: background job has no request context, pushed on behalf of the call\'s creator',
+    createdByUserId,
+    workspaceId,
+    fn,
+  );
+}
+
+/**
+ * Relocated from controllers/meetCallbackController.ts. SAM webhook → no HTTP tenant context;
+ * opens one from the resolved workspace so the call-summary system message insert gets
+ * workspaceId stamped instead of leaking NULL.
+ */
+export function insertMeetCallbackSummaryMessage<T>(workspaceId: string, fn: () => Promise<T>): Promise<T> {
+  return asService(
+    ['Message'],
+    'meet callback: SAM webhook has no HTTP tenant context, scope opened from the resolved workspace',
+    'meet-callback',
+    workspaceId,
+    fn,
   );
 }
 

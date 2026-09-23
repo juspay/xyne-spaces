@@ -1,7 +1,7 @@
 import { Prisma } from '@prisma/client';
 import { logger } from '@/utils/logger';
 import { db, readReplicaDb } from '@/database/client';
-import { runAsServiceActor } from '@/database/tenant/context';
+import { commitStageEtaDecision, dispatchStageEtaNotifications } from '@/bypassAcl/ticketEtaServices';
 import { stageEtaDeadlineQueue } from '@/queues/stageEtaDeadlineQueue';
 import {
   getTicketBotActorId,
@@ -358,8 +358,7 @@ class StageEtaDeadlineWorker {
         // both write. Without the lock this is check-then-write: two workers could
         // duplicate the risk activities and notify twice for one fingerprint.
         const systemActorId = await getTicketBotActorId(ticket.workspaceId);
-        const committed = await runAsServiceActor(
-          'stage-eta-deadline-worker',
+        const committed = await commitStageEtaDecision(
           ticket.workspaceId,
           async () =>
             db.$transaction(async tx => {
@@ -411,7 +410,7 @@ class StageEtaDeadlineWorker {
         // Post-commit, and never while paused. Only the run that actually won the lock
         // reaches here, so one fingerprint notifies once.
         if (ticket.statusV2 !== 'PAUSED') {
-          await runAsServiceActor('stage-eta-deadline-worker', ticket.workspaceId, () =>
+          await dispatchStageEtaNotifications(ticket.workspaceId, () =>
             dispatchEtaNotifications(
               etaSignalsFromResult({ etaDecision: { newEta: null, changed: false }, planningRisk: decision }),
               {

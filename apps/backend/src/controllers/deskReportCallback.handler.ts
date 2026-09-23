@@ -1,7 +1,7 @@
 import type { Request, Response } from 'express';
 import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
-import { runAsServiceActor } from '@/database/tenant/context';
+import { runDeskReportCallback } from '@/bypassAcl/deskReportServices';
 import { uploadFiles } from '@/services/fileUploadService';
 import { AttachmentEntityType, AttachmentUploadStatus } from '@xyne/shared';
 
@@ -86,7 +86,7 @@ export async function handleDeskReportCallback(
     }
     const workspaceId = channel.workspaceId;
     const runScoped = <T>(fn: () => Promise<T>): Promise<T> =>
-      runAsServiceActor('desk-report-callback', workspaceId, fn);
+      runDeskReportCallback(workspaceId, fn);
 
     // Matched by the exact row id embedded in the callback URL at dispatch time
     const pending = await runScoped(() =>

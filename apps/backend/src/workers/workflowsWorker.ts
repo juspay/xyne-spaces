@@ -12,8 +12,12 @@
 import type Bull from 'bull';
 import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
-import { runAsServiceActor } from '@/database/tenant/context';
-import { workspaceForExecution, workspaceForWorkflow } from '@/bypassAcl/workflowServices';
+import {
+  workspaceForExecution,
+  workspaceForWorkflow,
+  runExecutionUnderServiceActor,
+  runCronTickUnderServiceActor,
+} from '@/bypassAcl/workflowServices';
 import {
   WORKFLOWS_JOB_NAME,
   workflowsQueue,
@@ -24,12 +28,9 @@ import {
   workflowsCronQueue,
   type WorkflowsCronJobData,
 } from '@/queues/workflowsCronQueue';
-import { workflowRuntime, initWorkflows, persistence } from '@/workflowsV2/runtime';
+import { initWorkflows, persistence } from '@/workflowsV2/runtime';
 import { BullSchedulerAdapter } from '@/workflowsV2/adapters/scheduler';
 import { DEFAULT_CRON_TIMEZONE } from '@/workflowsV2/constants';
-
-/** Inert marker for the tenant context — only `workspaceId` is read by the stamper. */
-const SERVICE_ACTOR = 'workflows-worker';
 
 const CONCURRENCY = config.workflows.workerConcurrency;
 
@@ -84,13 +85,11 @@ class WorkflowsWorker {
       return;
     }
 
-    await runAsServiceActor(SERVICE_ACTOR, workspaceId, async () => {
-      const result = await workflowRuntime.processJob(executionId);
-      logger.info(
-        `[WORKFLOWS-WORKER] execution ${executionId} → ${result.status}` +
-          ('reason' in result && result.reason ? ` (${result.reason})` : ''),
-      );
-    });
+    const result = await runExecutionUnderServiceActor(executionId, workspaceId);
+    logger.info(
+      `[WORKFLOWS-WORKER] execution ${executionId} → ${result.status}` +
+        ('reason' in result && result.reason ? ` (${result.reason})` : ''),
+    );
   }
 
   /**
@@ -107,12 +106,10 @@ class WorkflowsWorker {
       return;
     }
 
-    await runAsServiceActor(SERVICE_ACTOR, workspaceId, async () => {
-      const executionId = await workflowRuntime.processCronTick(workflowId);
-      if (executionId) {
-        logger.info(`[WORKFLOWS-WORKER] cron tick for ${workflowId} started ${executionId}`);
-      }
-    });
+    const executionId = await runCronTickUnderServiceActor(workflowId, workspaceId);
+    if (executionId) {
+      logger.info(`[WORKFLOWS-WORKER] cron tick for ${workflowId} started ${executionId}`);
+    }
   }
 
   /**

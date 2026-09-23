@@ -1,5 +1,5 @@
 import { logger } from '@/utils/logger';
-import { runAsServiceActor } from '@/database/tenant/context';
+import { copyBoardConfigAsServiceActor } from '@/bypassAcl/boardServices';
 import {
   boardConfigCopyQueue,
   BoardConfigCopyJobData,
@@ -46,7 +46,7 @@ class BoardConfigCopyWorker {
     // acl-extension.ts's no-context fallback). runAsServiceActor opens one bound to the
     // job's own workspace, matching etaDeadlineWorker.ts / autoDraftWorker.ts.
     queue.process(async job =>
-      runAsServiceActor(job.data.actorUserId, job.data.workspaceId, () => this.processJob(job.data)),
+      copyBoardConfigAsServiceActor(job.data.actorUserId, job.data.workspaceId, () => this.processJob(job.data)),
     );
     this.isStarted = true;
     logger.info(`${TAG} Started, ready to process jobs`);

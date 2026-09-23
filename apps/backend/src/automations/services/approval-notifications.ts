@@ -2,7 +2,7 @@ import { repositories } from '@/database/repositories';
 import { AccessType, MessageType } from '@xyne/shared';
 import { logger } from '@/utils/logger';
 import { conversationService } from '@/services/conversationService';
-import { runAsServiceActor } from '@/database/tenant/context';
+import { sendApprovalNotificationAsUser } from '@/bypassAcl/automationServices';
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service';
 import { config } from '@/config/env';
 import type { AutomationView } from '../types/workflow-adapter';
@@ -71,7 +71,7 @@ async function dmToUser(
   workspaceId: string,
   content: string,
 ): Promise<void> {
-  await runAsServiceActor(fromUserId, workspaceId, async () => {
+  await sendApprovalNotificationAsUser(fromUserId, workspaceId, async () => {
     const channelId = await repositories.channels.findOrCreateDMChannel(
       fromUserId,
       [toUserId],

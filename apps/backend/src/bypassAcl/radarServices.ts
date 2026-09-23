@@ -2,7 +2,7 @@ import type { Prisma } from '@prisma/client';
 import { config } from '@/config/env';
 import { DatabaseClient } from '@/database/client';
 import { logger } from '@/utils/logger';
-import { asSystem, rawQuery } from './base';
+import { asSystem, asService, rawQuery } from './base';
 
 const prisma = DatabaseClient.getInstance();
 
@@ -76,5 +76,20 @@ export async function removeExecutionItemPendingOn(tx: Prisma.TransactionClient,
                   AND "status" = 'OPEN'
                   AND ${actorId} = ANY("pendingOn")
               `,
+  );
+}
+
+/**
+ * Relocated from workers/radarExecutionWorker.ts's processJob. Bull job → no HTTP tenant
+ * context; opens one from the conversation's own workspaceId so the thread-processing writes
+ * (execution items, thread state, messages) get workspaceId stamped.
+ */
+export function processRadarThreadAsServiceActor<T>(workspaceId: string, fn: () => Promise<T>): Promise<T> {
+  return asService(
+    ['ExecutionItem', 'ExecutionThreadState', 'Message', 'MessageAttachment', 'Channel', 'ChannelParticipant', 'User'],
+    'radar execution worker: Bull job has no HTTP tenant context, writes stamped from the conversation\'s own workspaceId',
+    'radar-execution-worker',
+    workspaceId,
+    fn,
   );
 }

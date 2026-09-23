@@ -12,7 +12,7 @@ import { randomUUID } from 'node:crypto';
 import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
-import { runAsServiceActor } from '@/database/tenant/context';
+import { commitDoclingSplitAsServiceActor } from '@/bypassAcl/doclingIngestServices';
 import vespaClient from '@/vespa/client';
 import { fileSchema, type InsertDocument } from '@/vespa/src/types';
 import { runSyncFallbackForFailedFile } from '../../processors/syncFallback';
@@ -479,7 +479,7 @@ const runSplitterWorker = async (id: string, shouldStop: () => boolean) => {
         stagedParts.resultsDir,
       );
       const committed = file.workspaceId
-        ? await runAsServiceActor('docling-splitter', file.workspaceId,
+        ? await commitDoclingSplitAsServiceActor(file.workspaceId,
             commitSplit,
           )
         : await commitSplit();

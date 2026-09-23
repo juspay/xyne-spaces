@@ -3,7 +3,7 @@ import type { Request, Response } from 'express';
 import { z } from 'zod';
 import { Prisma } from '@prisma/client';
 import { repositories } from '@/database/repositories';
-import { runAsServiceActor } from '@/database/tenant/context';
+import { runIncomingWebhook } from '@/bypassAcl/appServices';
 import { logger } from '@/utils/logger';
 import { encrypt, decrypt } from '@/services/encryptionService';
 import { findOrCreateConversation } from '../core/conversationUtils';
@@ -282,7 +282,7 @@ class IncomingWebhookController {
 
       // Unauthenticated webhook: no req.user, so open an explicit tenant scope from the
       // validated :workspaceId URL param so the workspaceId stamper fills downstream writes.
-      await runAsServiceActor('incoming-webhook', context.workspaceId,
+      await runIncomingWebhook(context.workspaceId,
         async () => {
           const bodyResult = IncomingWebhookBodySchema.safeParse(context.body);
           if (!bodyResult.success) {
@@ -343,7 +343,7 @@ class IncomingWebhookController {
 
       // Unauthenticated webhook: no req.user, so open an explicit tenant scope from the
       // validated :workspaceId URL param so the workspaceId stamper fills downstream writes.
-      await runAsServiceActor('incoming-webhook', context.workspaceId,
+      await runIncomingWebhook(context.workspaceId,
         async () => {
           const payload = parseExactSentinelPayload(context.body);
           const webhookAction =
@@ -460,7 +460,7 @@ class IncomingWebhookController {
 
       // Unauthenticated webhook: no req.user, so open an explicit tenant scope from the
       // validated :workspaceId URL param so the workspaceId stamper fills downstream writes.
-      await runAsServiceActor('incoming-webhook', context.workspaceId,
+      await runIncomingWebhook(context.workspaceId,
         async () => {
           let flow: FlowDefinition;
           switch (envelope.Type) {
@@ -537,7 +537,7 @@ class IncomingWebhookController {
 
       // Unauthenticated webhook: no req.user, so open an explicit tenant scope from the
       // validated :workspaceId URL param so the workspaceId stamper fills downstream writes.
-      await runAsServiceActor('incoming-webhook', context.workspaceId, async () => {
+      await runIncomingWebhook(context.workspaceId, async () => {
         const content = this.encodeFlowContent(buildPingdomFlow(normalizePingdom(payload)));
         if (!content) {
           res.status(400).send('invalid_payload');
@@ -590,7 +590,7 @@ class IncomingWebhookController {
 
       // Unauthenticated webhook: no req.user, so open an explicit tenant scope from the
       // validated :workspaceId URL param so the workspaceId stamper fills downstream writes.
-      await runAsServiceActor('incoming-webhook', context.workspaceId, async () => {
+      await runIncomingWebhook(context.workspaceId, async () => {
         const content = this.encodeFlowContent(buildGcpFlow(normalizeGcp(payload)));
         if (!content) {
           res.status(400).send('invalid_payload');

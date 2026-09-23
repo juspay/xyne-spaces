@@ -3,7 +3,7 @@ import { logger } from '@/utils/logger';
 import { config } from '@/config/env';
 import { repositories } from '@/database/repositories';
 import { db } from '@/database/client';
-import { runAsServiceActor } from '@/database/tenant/context';
+import { runAutomationJob } from '@/bypassAcl/automationServices';
 import { automationQueue, type AutomationJobData } from './automation.queue';
 import { automationScheduleQueue } from './automation-schedule.queue';
 import { stepRegistry } from '../steps/step-registry';
@@ -100,7 +100,7 @@ class AutomationWorker {
       return;
     }
 
-    await runAsServiceActor('automation', workspaceId, () =>
+    await runAutomationJob(workspaceId, () =>
       this.runJob(job, execution),
     );
   }

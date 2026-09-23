@@ -41,8 +41,7 @@ import {
 } from '@/services/googleCalendarApi';
 import { buildGoogleEventBody, hashEventBody } from '@/services/calendarEventPayload';
 import { normalizeCalendarOwnerEmail } from '@/services/calendarCallStore.utils';
-import { runAsServiceActor } from '@/database/tenant/context';
-import { findCallForCalendarPush } from '@/bypassAcl/callServices';
+import { findCallForCalendarPush, syncCallToGoogleCalendarAsCreator } from '@/bypassAcl/callServices';
 import { buildCallInviteUrl } from '@/utils/urlUtils';
 import { logger } from '@/utils/logger';
 
@@ -164,7 +163,7 @@ export async function syncCallToGoogleCalendar(callId: string): Promise<Date | n
 
   if (!PUSHABLE_ORIGINS.has(call.callOrigin)) return call.updatedAt;
 
-  await runAsServiceActor(call.createdByUserId, call.workspaceId, async () => {
+  await syncCallToGoogleCalendarAsCreator(call.createdByUserId, call.workspaceId, async () => {
     const pushState = (call.metadata as CallMetadata | null)?.googleCalendarPush ?? null;
 
     if (call.status === CallStatus.CANCELLED) {

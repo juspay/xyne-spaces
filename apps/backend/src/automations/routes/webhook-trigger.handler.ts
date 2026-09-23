@@ -1,7 +1,7 @@
 import { Router, type Request, type Response } from 'express';
 import { WorkflowEventType } from '@xyne/shared';
 import { db } from '@/database/client';
-import { runAsServiceActor } from '@/database/tenant/context';
+import { createAutomationExecutionForWebhook } from '@/bypassAcl/automationServices';
 import { logger } from '@/utils/logger';
 import { automationQueue } from '../queue/automation.queue';
 import { storedSecretMatches } from '../services/webhook-secret.service';
@@ -97,7 +97,7 @@ router.post(
     // Unauthenticated webhook — no HTTP session to derive the tenant from, so open
     // a tenant scope explicitly off the workflow's workspaceId. This stamps
     // workspaceId onto the execution rows (and the downstream job's step writes).
-    const execution = await runAsServiceActor('automation-webhook', workflow.workspaceId,
+    const execution = await createAutomationExecutionForWebhook(workflow.workspaceId,
       () =>
         db.$transaction(async tx => {
           const created = await tx.workflowExecution.create({

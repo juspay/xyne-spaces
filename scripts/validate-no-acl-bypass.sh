@@ -17,19 +17,20 @@ else
   RED=''; YELLOW=''; GREEN=''; RESET=''
 fi
 
-# runAsSystem and the raw SQL primitives are checked here — both categories are fully
-# relocated into bypassAcl/. runAsServiceActor and .$transaction( are each being done as
-# separate PRs; add each back once its relocation lands:
-#   label "runAsServiceActor(",   pattern 'runAsServiceActor\('
+# runAsSystem, runAsServiceActor and the raw SQL primitives are checked here — all three
+# categories are fully relocated into bypassAcl/. .$transaction( is being done as a separate PR;
+# add it back once its relocation lands:
 #   label ".\$transaction(",      pattern '\.\$transaction\('
 #
 # Each entry: human label, grep -E pattern.
 declare -a LABELS=(
   "runAsSystem("
+  "runAsServiceActor("
   "raw query/execute calls (incl. *Unsafe)"
 )
 declare -a PATTERNS=(
   'runAsSystem\('
+  'runAsServiceActor\('
   '\$(query|execute)Raw(Unsafe)?'
 )
 
@@ -59,8 +60,8 @@ done
 
 if [ "$violations" -gt 0 ]; then
   echo "These are ways to reach the database without going through the Prisma tenant ACL"
-  echo "extension (apps/backend/src/database/tenant/acl-extension.ts). (runAsServiceActor and"
-  echo ".\$transaction( are tracked separately and not checked by this script for now.)"
+  echo "extension (apps/backend/src/database/tenant/acl-extension.ts). (.\$transaction( is tracked"
+  echo "separately and not checked by this script for now.)"
   echo "Every call site must live in apps/backend/src/bypassAcl/, importable from elsewhere —"
   echo "see /ACL_BYPASS_AUDIT.md at the repo root for why, and /BYPASS_ACL_EXAMPLES.md for the"
   echo "relocation pattern."

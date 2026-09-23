@@ -3,7 +3,7 @@ import { db } from '@/database/client';
 import { logger } from '@/utils/logger';
 import { UserStatus } from '@xyne/shared';
 import { backfillSchema, type JobStats, type SchemaConfig } from '@/migration/vespaWorkspaceBackfill';
-import { asSystem } from './base';
+import { asSystem, asService } from './base';
 
 const BATCH_SIZE = 50;
 const BATCH_GAP_MS = 3_000; // 3 seconds between batches
@@ -190,5 +190,20 @@ export function runVespaWorkspaceBackfillJob(
         stats.running = false;
       }
     },
+  );
+}
+
+/**
+ * Relocated from migration/self-serve/engine.ts's loadConversation. Self-serve Slack migration
+ * job → no request context; ingest writes (users, channels, participants, conversations) need
+ * workspaceId stamped from the migration job's own workspace.
+ */
+export function loadSlackConversationAsServiceActor<T>(workspaceId: string, fn: () => Promise<T>): Promise<T> {
+  return asService(
+    ['User', 'Channel', 'ChannelParticipant', 'Conversation', 'Message'],
+    'self-serve slack migration: background job has no request context, ingest writes stamped from the job\'s own workspace',
+    'slack-migration',
+    workspaceId,
+    fn,
   );
 }

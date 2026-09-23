@@ -9,7 +9,7 @@ import { config } from '@/config/env';
 import { decrypt } from '@/services/encryptionService';
 import { getStorageService } from '@/services/storage';
 import { createRedisClient } from '@/services/redisFactory';
-import { runAsServiceActor } from '@/database/tenant/context';
+import { loadSlackConversationAsServiceActor } from '@/bypassAcl/migrationServices';
 import { UserRepository } from '@/database/repositories/users';
 import { ChannelRepository } from '@/database/repositories/channelRepository';
 import { ChannelParticipantRepository } from '@/database/repositories/channelParticipantRepository';
@@ -551,7 +551,7 @@ export class SlackMigrationEngine {
 
   async loadConversation(job: MigrationJob, conv: CollectedConversation, ref: SlackOfflineReference, onProgress?: () => void): Promise<{ ingested: number; failed: number }> {
     const cfg = await getMigrationRuntimeConfig();
-    return runAsServiceActor('slack-migration', job.workspaceId, async () => {
+    return loadSlackConversationAsServiceActor(job.workspaceId, async () => {
       const userRepo = new UserRepository();
       const channelRepo = new ChannelRepository();
       const participantRepo = new ChannelParticipantRepository();

@@ -1,6 +1,6 @@
 import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
-import { runAsServiceActor } from '@/database/tenant/context';
+import { createAutomationExecutionForEvent, ticketScopeForAutomationEvent } from '@/bypassAcl/automationServices';
 import { currentUpstreamChain } from './automation-context-storage';
 import {
   AUTOMATION_WORKFLOW_TYPE,
@@ -152,7 +152,7 @@ class EventRouter {
           __meta: { error: null, chain },
         };
 
-        const execution = await runAsServiceActor('automation', workspaceId,
+        const execution = await createAutomationExecutionForEvent(workspaceId,
           () =>
             db.$transaction(async tx => {
               const created = await tx.workflowExecution.create({
@@ -227,14 +227,7 @@ class EventRouter {
       const ticketId = payload['ticketId'];
       if (typeof ticketId !== 'string' || !ticketId) return skip;
       // Same tenant scope the worker hydrates under, so both see the same rows.
-      const ticket = await runAsServiceActor('automation', workspaceId, () =>
-        db.ticket
-          .findUnique({
-            where: { id: ticketId },
-            select: { boardId: true, projectId: true, channelId: true },
-          })
-          .catch(() => null),
-      );
+      const ticket = await ticketScopeForAutomationEvent(workspaceId, ticketId);
       scope = eventScope(eventType, { ...payload, ticket: ticket ?? {} });
     }
     if (!scope) return skip;

@@ -1,6 +1,6 @@
 import type Bull from 'bull';
 import { logger } from '@/utils/logger';
-import { runAsServiceActor } from '@/database/tenant/context';
+import { runDeskLabelBackfillJob } from '@/bypassAcl/automationServices';
 import {
   resolveBackfillRule,
   runDeskLabelBackfill,
@@ -72,7 +72,7 @@ class DeskLabelBackfillWorker {
 
     // Background job → no HTTP tenant scope. Open one from the rule's workspace so
     // every write in the run gets workspaceId stamped.
-    const progress = await runAsServiceActor('desk-label-backfill', rule.workspaceId, () =>
+    const progress = await runDeskLabelBackfillJob(rule.workspaceId, () =>
       runDeskLabelBackfill(rule, next => publishProgress(job, next)),
     );
 

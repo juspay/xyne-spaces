@@ -4,9 +4,8 @@ import { logger } from '@/utils/logger';
 import { radarExecutionQueue, type RadarExecutionJobData } from '@/queues/radarExecutionQueue';
 import { radarExecutionService } from '@/services/radar/radarExecutionService';
 import { DatabaseClient } from '@/database/client';
-import { runAsServiceActor } from '@/database/tenant/context';
 import { radarScopeFor } from '@/services/radar/radarScope';
-import { sweepRunLogsQuery } from '@/bypassAcl/radarServices';
+import { sweepRunLogsQuery, processRadarThreadAsServiceActor } from '@/bypassAcl/radarServices';
 
 const prisma = DatabaseClient.getInstance();
 
@@ -121,7 +120,7 @@ class RadarExecutionWorker {
       return;
     }
     const scope = radarScopeFor(resolved.scopeType, resolved.channelId, conversationId);
-    return runAsServiceActor('radar-execution-worker', conversation.workspaceId, () =>
+    return processRadarThreadAsServiceActor(conversation.workspaceId, () =>
       radarExecutionService.processThread(scope),
     );
   }

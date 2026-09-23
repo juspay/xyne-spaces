@@ -13,7 +13,7 @@ import {
   type EmailFetchQueueJobData,
   type CursorCatchupJobData,
 } from '@/queues/emailFetchQueue';
-import { runAsServiceActor } from '@/database/tenant/context';
+import { runEmailFetchJob, runSocialMediaFetchJob } from '@/bypassAcl/emailFetchServices';
 import { socialMediaService } from '@/integrations/social-media/socialMediaService';
 import { getHttpStatus } from '@/services/googleService';
 import { catchUpFromCursor } from '@/integrations/adapters/google/refetch';
@@ -92,7 +92,7 @@ class EmailFetchWorker {
 
     const adapter = adapterRegistry.getAdapter(source.name);
     try {
-      const result = await runAsServiceActor('email-fetch-worker', workspaceId, () =>
+      const result = await runEmailFetchJob(workspaceId, () =>
         catchUpFromCursor(source, adapter, cursor),
       );
 
@@ -160,7 +160,7 @@ class EmailFetchWorker {
     try {
       // Background job → open a tenant scope from the job's workspaceId so ingested
       // emails/drafts/assignments get workspaceId stamped instead of leaking NULL.
-      result = await runAsServiceActor('email-fetch-worker', job.data.workspaceId,
+      result = await runEmailFetchJob(job.data.workspaceId,
         () => adapter.refetch!(source, options),
       );
     } catch (error) {
@@ -193,8 +193,7 @@ class EmailFetchWorker {
       `[EMAIL-FETCH-WORKER] Processing review sync job ${job.id} — channel ${channelId}`,
     );
 
-    const synced = await runAsServiceActor(
-      'social-media-fetch-worker',
+    const synced = await runSocialMediaFetchJob(
       workspaceId,
       async () => {
         let newInteractionCount = 0;
