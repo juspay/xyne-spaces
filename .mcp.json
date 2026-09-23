@@ -2,15 +2,15 @@
   "mcpServers": {
     "xyne-genius-rca": {
       "type": "http",
-      "url": "https://grafana.spaces.xyne.juspay.net/xyne-mcp/genius/mcp"
+      "url": "https://grafana.example.com/xyne-mcp/genius/mcp"
     },
     "xyne-grafana-logs": {
       "type": "http",
-      "url": "https://grafana.spaces.xyne.juspay.net/xyne-mcp/logs/mcp"
+      "url": "https://grafana.example.com/xyne-mcp/logs/mcp"
     },
     "xyne-victoria-metrics": {
       "type": "http",
-      "url": "https://grafana.spaces.xyne.juspay.net/xyne-mcp/metrics/mcp"
+      "url": "https://grafana.example.com/xyne-mcp/metrics/mcp"
     }
   }
 }
