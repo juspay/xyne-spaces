@@ -196,6 +196,15 @@ export class ChannelService {
     return response.data.data?.userIds ?? [];
   }
 
+  /** UI gate for the Link Boards control; ChannelBoardMappingsACL still enforces. */
+  async canLinkBoards(channelId: string): Promise<boolean> {
+    const response = await apiInstance.get<{
+      success: boolean;
+      data?: { canLinkBoards: boolean };
+    }>(`/channels/${channelId}/can-link-boards`);
+    return response.data.data?.canLinkBoards ?? false;
+  }
+
   async getChannelMembers(channelId: string): Promise<ChannelMember[]> {
     const response = await apiInstance.get<{
       success: boolean;

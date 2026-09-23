@@ -14,6 +14,12 @@ acme_email     = "ops@example.com"
 enable_vespa      = false
 enable_monitoring = false
 enable_sandbox    = false
+enable_hindsight  = false
+
+hindsight = {
+  url    = ""
+  tenant = "default"
+}
 
 apps = {
   xyne-claw = { enabled = false }

@@ -291,6 +291,20 @@ VESPA_CONFIG_SERVER_URL: "http://vespa-configserver:19071"
 {{- end }}
 {{- end }}
 
+{{- define "xyne-root.hindsightEnv" -}}
+{{- $hs := .root.Values.infra.hindsight | default dict }}
+{{- $addon := .root.Values.addons.hindsight | default dict }}
+{{- $url := $hs.url | default "" }}
+{{- if and (eq $url "") $addon.enabled }}
+{{- $url = printf "http://%s.%s:%v" $addon.service $addon.namespace $addon.port }}
+{{- end }}
+{{- with $url }}
+HINDSIGHT_URL: {{ . | quote }}
+HINDSIGHT_TENANT: {{ $hs.tenant | default "default" | quote }}
+MEMORY_PROVIDER: {{ $hs.provider | default "hindsight" | quote }}
+{{- end }}
+{{- end }}
+
 {{- define "xyne-root.livekitEnv" -}}
 {{- $lk := .root.Values.infra.livekit | default dict }}
 {{- if and $lk.enabled $lk.url }}
@@ -472,6 +486,7 @@ pdb:
 {{- $env := dict "SPACES_BACKEND_URL" "http://xyne-backend" "XYNE_CLAW_AUTH_URL" "http://xyne-claw-auth:3003" }}
 {{- $env = mergeOverwrite $env (include "xyne-root.redisEnv" (dict "root" $root) | fromYaml) }}
 {{- $env = mergeOverwrite $env (include "xyne-root.storageEnv" (dict "root" $root "mainBucket" "claw") | fromYaml) }}
+{{- $env = mergeOverwrite $env (include "xyne-root.hindsightEnv" (dict "root" $root) | fromYaml) }}
 {{- if $sb.enabled }}
 {{- $_ := set $env "KATA_ROUTER_URL" "http://xyne-sandbox-router:8080" }}
 {{- $_ := set $env "KATA_NAMESPACE" $root.Values.global.namespace }}

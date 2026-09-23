@@ -1296,6 +1296,46 @@ export function createMutators(
             updatedAt: timestamp,
           });
 
+          // The promoter becomes the new channel's admin, mirroring channel creation
+          // where the creator is ADMIN. Group DM participants are all MEMBER, and any
+          // participant may promote — without this the board-mapping inserts below
+          // would be rejected by ChannelBoardMappingsACL (channel admin or projects
+          // admin), rolling back the whole promotion for ordinary members.
+          if (participant.role !== ChannelRole.ADMIN) {
+            await tx.mutate.channel_participants.update({
+              id: participant.id,
+              role: ChannelRole.ADMIN,
+            });
+          }
+
+          if (projectId) {
+            const projectBoards = await tx.run(
+              zql.boards.where('projectId', projectId).orderBy('createdAt', 'asc'),
+            );
+            const existingMappings = await tx.run(
+              zql.channel_board_mappings.where('channelId', channelId),
+            );
+            const alreadyLinked = new Set(existingMappings.map((mapping) => mapping.boardId));
+            // At most one row per channel may carry isDefault (partial unique index).
+            let claimDefault = !existingMappings.some((mapping) => mapping.isDefault);
+
+            for (const board of projectBoards) {
+              if (alreadyLinked.has(board.id)) continue;
+              await tx.mutate.channel_board_mappings.insert({
+                id: uuidv4(),
+                channelId: channelId,
+                boardId: board.id,
+                workspaceId: authData.workspaceId,
+                isDefault: claimDefault,
+                createdBy: authData.sub,
+                createdAt: timestamp,
+                updatedAt: timestamp,
+              });
+              claimDefault = false;
+              alreadyLinked.add(board.id);
+            }
+          }
+
           await tx.mutate.channel_stats.update({
             channelId,
             lastActivityAt: timestamp,
@@ -2092,6 +2132,49 @@ export function createMutators(
             isClosed: false,
             updatedAt,
           });
+        },
+      ),
+      // Link boards to a channel (channel_board_mappings). Additive only: this never
+      // removes a mapping, so a board that is already linked is silently skipped
+      // rather than erroring — the unique (channelId, boardId) index would reject it,
+      // and a partially-applied batch is worse than an idempotent one.
+      linkBoards: defineMutator(
+        z.object({
+          channelId: z.string(),
+          // Ids are generated client-side (uuid) so the mutation stays idempotent
+          // across optimistic apply + server replay.
+          boards: z
+            .array(z.object({ mappingId: z.string(), boardId: z.string() }))
+            .min(1)
+            .max(100),
+          timestamp: z.number(),
+        }),
+        // Permission and tenancy live in ChannelBoardMappingsACL.canInsert, which the
+        // transaction wrapper runs on every insert below — same as every other table.
+        async ({ tx, args: { channelId, boards, timestamp } }) => {
+          const existing = await tx.run(zql.channel_board_mappings.where('channelId', channelId));
+          const linkedBoardIds = new Set(existing.map(mapping => mapping.boardId));
+          // At most one row per channel may carry isDefault (enforced by a partial
+          // unique index), so only claim it when the channel has none yet.
+          let claimDefault = !existing.some(mapping => mapping.isDefault);
+
+          for (const { mappingId, boardId } of boards) {
+            if (linkedBoardIds.has(boardId)) continue;
+
+            await tx.mutate.channel_board_mappings.insert({
+              id: mappingId,
+              channelId,
+              boardId,
+              workspaceId: authData.workspaceId,
+              isDefault: claimDefault,
+              createdBy: authData.sub,
+              createdAt: timestamp,
+              updatedAt: timestamp,
+            });
+
+            claimDefault = false;
+            linkedBoardIds.add(boardId);
+          }
         },
       ),
       updateSelectedBoardId: defineMutator(

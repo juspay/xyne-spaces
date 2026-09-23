@@ -187,7 +187,9 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   const location = useLocation();
   const { conversationId } = useParams<{ conversationId?: string }>();
   const { isEditingMessage, requestEdit, stopEditing } = useMessageEdit();
-  const { setSkipMarkAsRead } = React.useContext(ConversationTabContext);
+  // channelHasBoards rides on the context rather than a per-bubble query: it is
+  // constant per channel and this component renders once per message.
+  const { setSkipMarkAsRead, channelHasBoards } = React.useContext(ConversationTabContext);
   const { isMobile } = usePlatform();
   const channel = useChannel(channelId);
   // Get sender info from useUser hook
@@ -1071,6 +1073,8 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
         !isSystemMessage &&
         !isMessageDeleted &&
         !hasTicket &&
+        // No linked boards means nowhere to put a ticket, so don't offer it.
+        channelHasBoards &&
         channelScopeType === ChannelScopeType.DEFAULT && {
           onCreateTicket: handleCreateTicket,
         }),
@@ -1418,6 +1422,8 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
                 !isSystemMessage &&
                 !isMessageDeleted &&
                 !hasTicket &&
+                // No linked boards means nowhere to put a ticket, so don't offer it.
+                channelHasBoards &&
                 channelScopeType === ChannelScopeType.DEFAULT && {
                   onCreateTicket: handleCreateTicket,
                 })}
