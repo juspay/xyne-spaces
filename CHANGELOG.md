@@ -1,3 +1,10 @@
+## [1.383.1](https://github.com/juspay/xyne-spaces/compare/v1.383.0...v1.383.1) (2026-09-23)
+
+
+### Bug Fixes
+
+* hindsight in the tf setup ([#2250](https://github.com/juspay/xyne-spaces/issues/2250)) ([7dcc217](https://github.com/juspay/xyne-spaces/commit/7dcc21708ae9d0423c5bcf80caca77be98ad435d))
+
 ## [1.383.0](https://github.com/juspay/xyne-spaces/compare/v1.382.0...v1.383.0) (2026-09-23)
 
 
