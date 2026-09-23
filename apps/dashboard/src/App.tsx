@@ -111,18 +111,33 @@ const App = (): ReactElement => {
         const pathSegments = pathname.split('/').filter(Boolean);
 
         // A workspace-scoped link must switch the authenticated session before
-        // navigation; otherwise the URL and Zero/auth workspace diverge.
+        // navigation; otherwise the URL and Zero/auth workspace diverge — the
+        // address bar shows the target workspace while the sidebar, Zero data
+        // and channel resolution all stay on the old one ("Unknown Channel").
         const hasWorkspaceId = pathSegments[0]?.match(/^[a-z0-9-]{20,}$/i);
-        const currentWorkspaceId = hasWorkspaceId?.[0] || DEFAULT_WORKSPACE_ID || undefined;
+
+        // The ACTIVE workspace must come from where we currently are, never from
+        // the link being clicked. Reading it from `anchor.pathname` compares the
+        // target against itself, so the guard below was false by construction
+        // and the switch never ran.
+        const activeWorkspaceId =
+          router.state.location.pathname
+            .split('/')
+            .filter(Boolean)[0]
+            ?.match(/^[a-z0-9-]{20,}$/i)?.[0] ||
+          DEFAULT_WORKSPACE_ID ||
+          undefined;
+
         const parsedInternalLink = parseInternalXyneLink(anchor.href);
         if (
           parsedInternalLink?.workspaceId &&
-          parsedInternalLink.workspaceId !== currentWorkspaceId
+          parsedInternalLink.workspaceId !== activeWorkspaceId
         ) {
           void crossWorkspaceNavigate({
             href: anchor.href,
-            currentWorkspaceId,
-            navigate: router.navigate,
+            currentWorkspaceId: activeWorkspaceId,
+            // Bound: passing the bare method trips @typescript-eslint/unbound-method.
+            navigate: router.navigate.bind(router),
           }).catch(() => undefined);
           return;
         }
