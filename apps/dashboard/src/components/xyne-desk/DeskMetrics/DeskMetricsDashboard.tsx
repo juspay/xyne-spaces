@@ -61,7 +61,6 @@ import {
 } from 'recharts';
 import {
   DESK_METRICS_MAX_AGGREGATE_DESKS,
-  DeskType,
   FormFieldType,
   parseFieldOptionValues,
   TicketStatusV2,
@@ -82,7 +81,6 @@ import { CHART_COLORS as VIZ_CHART_COLORS } from '../../QueryVisualizations/cons
 export interface DeskMetricsSelectableDesk {
   id: string;
   name: string;
-  deskType?: string;
 }
 
 interface DeskMetricsStageOption {
@@ -283,13 +281,6 @@ const tickIntervalFor = (pointCount: number): number => {
   if (pointCount <= 31) return 4;
   return Math.floor(pointCount / 6);
 };
-
-// Keyed on deskTypeForChannelType's output, which folds DL desks into EMAIL.
-const DESK_TYPE_GROUPS: ReadonlyArray<{ label: string; types: readonly string[] }> = [
-  { label: 'Email', types: [DeskType.EMAIL] },
-  { label: 'Messaging', types: [DeskType.SLACK, DeskType.APP, DeskType.SOCIAL_MEDIA] },
-  { label: 'Voice', types: [DeskType.CALL] },
-];
 
 interface SeriesChart {
   rows: Array<Record<string, number | string>>;
@@ -1407,34 +1398,6 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
     [channelId, comparedChannelIds, selectedDeskIds.length, setComparedChannelIds],
   );
 
-  // Adds rather than replaces: comparedChannelIds is persisted, and the primary
-  // is always selected separately, so compared tops out one below the cap.
-  const visibleDesks = useMemo(() => {
-    const query = deskSearch.trim().toLowerCase();
-    return query
-      ? availableDesks.filter(d => d.name.toLowerCase().includes(query))
-      : availableDesks;
-  }, [availableDesks, deskSearch]);
-
-  const selectDeskGroup = useCallback(
-    (types: readonly string[], desks: DeskMetricsSelectableDesk[]) => {
-      const typeSet = new Set(types);
-      const additions = desks
-        .filter(
-          d =>
-            d.id !== channelId &&
-            d.deskType &&
-            typeSet.has(d.deskType) &&
-            !comparedChannelIds.includes(d.id),
-        )
-        .map(d => d.id);
-      setComparedChannelIds(
-        [...comparedChannelIds, ...additions].slice(0, DESK_METRICS_MAX_AGGREGATE_DESKS - 1),
-      );
-    },
-    [channelId, comparedChannelIds, setComparedChannelIds],
-  );
-
   const [expandedChart, setExpandedChart] = useState<ChartView | null>(null);
   const rangeStartMs = dateTimeMs(dateRange.startDate, startTime, false);
   const rangeEndMs = dateTimeMs(dateRange.endDate, endTime, true);
@@ -2097,46 +2060,23 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                           data-track-name='SearchDesks'
                         />
                       </div>
-                      {visibleDesks.some(d => d.id !== channelId && d.deskType) && (
-                        <div className='flex items-center gap-1 border-b border-border px-2 py-1.5'>
-                          <span className='mr-0.5 text-[10px] uppercase tracking-wide text-muted-foreground'>
-                            All
-                          </span>
-                          {DESK_TYPE_GROUPS.filter(group =>
-                            visibleDesks.some(
-                              d =>
-                                d.id !== channelId &&
-                                d.deskType &&
-                                group.types.includes(d.deskType),
-                            ),
-                          ).map(group => (
-                            <button
-                              key={group.label}
-                              type='button'
-                              onClick={() => selectDeskGroup(group.types, visibleDesks)}
-                              title={`Add every ${group.label.toLowerCase()} desk to the comparison — the desk this dashboard was opened from stays included`}
-                              className='rounded-[6px] border border-desk-border px-2 py-0.5 text-xs text-foreground hover:bg-accent dark:border-border'
-                              data-track-category='DeskMetrics'
-                              data-track-name='SelectDeskGroup'
-                            >
-                              {group.label}
-                            </button>
-                          ))}
-                        </div>
-                      )}
                       <div
                         className='max-h-[260px] overflow-y-auto py-1'
                         onWheel={e => e.stopPropagation()}
                       >
                         {((): ReactElement | ReactElement[] => {
-                          if (visibleDesks.length === 0) {
+                          const query = deskSearch.trim().toLowerCase();
+                          const visible = availableDesks.filter(
+                            d => !query || d.name.toLowerCase().includes(query),
+                          );
+                          if (visible.length === 0) {
                             return (
                               <div className='px-3 py-4 text-center text-sm text-muted-foreground'>
                                 No desks match
                               </div>
                             );
                           }
-                          return visibleDesks.map(desk => {
+                          return visible.map(desk => {
                             const isPrimary = desk.id === channelId;
                             const isSelected = selectedDeskIds.includes(desk.id);
                             const isDisabledByLimit = !isSelected && isDeskSelectionAtLimit;
