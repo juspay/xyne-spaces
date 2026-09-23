@@ -92,6 +92,7 @@ export function draftIdentityFromModelReply(visibleReply: string): ParsedDraftId
 
   const patterns: RegExp[] = [
     /(?:^|\n)\s*[-*]?\s*(?:\*\*)?Name\s*\/\s*handle(?:\*\*)?\s*:\s*([^/\n@]+?)\s*\/\s*@([a-z0-9][a-z0-9-]{0,62})\b/i,
+    /(?:^|\n)\s*[-*]?\s*(?:\*\*)?Name(?:\*\*)?\s*:\s*([^/\n(@]+?)\s*\(@([a-z0-9][a-z0-9-]{0,62})\)/i,
     /\*\*([^*]+)\*\*\s*\(@([a-z0-9][a-z0-9-]{0,62})\)/i,
     /(?:^|\n)\s*[-*]?\s*(?:\*\*Name\*\*|name)\s*[:\/]\s*([^/\n@]+?)\s*\/\s*@([a-z0-9][a-z0-9-]{0,62})/i,
     /(?:name\/handle|name\s*\/\s*handle)\s*:\s*([^/\n@]+?)\s*\/\s*@([a-z0-9][a-z0-9-]{0,62})/i,
@@ -110,7 +111,7 @@ export function draftIdentityFromModelReply(visibleReply: string): ParsedDraftId
   }
 
   const nameLine = text.match(
-    /(?:^|\n)\s*[-*•]+\s*(?:\*\*)?Name(?:\*\*)?\s*:\s*([^\n@/]+)/i,
+    /(?:^|\n)\s*[-*•]?\s*(?:\*\*)?Name(?:\*\*)?\s*:\s*([^\n@/]+)/i,
   );
   if (nameLine?.[1]) {
     const name = sanitizeAgentCanvasName(nameLine[1]);
@@ -146,21 +147,44 @@ function descriptionFromModelReply(visibleReply: string): string {
   return '';
 }
 
-function instructionsFromModelReply(visibleReply: string): string {
-  const text = visibleReply.replace(/\r\n/g, '\n');
+function sectionBody(text: string, label: string): string {
+  const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const block = text.match(
-    /(?:^|\n)\s*[-*]?\s*\*\*Instructions\*\*\s*:\s*\n([\s\S]*?)(?:\n\s*\*\*|\n\s*[-*]\s*\*\*|$)/i,
+    new RegExp(
+      `(?:^|\\n)\\s*[-*•]?\\s*\\*?\\*?${escaped}\\*?\\*?\\s*:\\s*\\n([\\s\\S]*?)(?=\\n\\s*[-*•]?\\s*\\*?\\*?(?:Name|Handle|Description|Instructions|Rules|MCP|Tools|Skills|Knowledge)\\*?\\*?\\s*:|$)`,
+      'i',
+    ),
   );
-  if (block?.[1]) {
-    const body = block[1].trim();
-    if (body.length > 0) return body.slice(0, 8000);
+  if (block?.[1]?.trim()) {
+    return block[1].trim().slice(0, 8000);
   }
-  const line = text.match(/(?:^|\n)\s*[-*]?\s*instructions\s*:\s*([^\n]+)/i);
-  if (line?.[1]) {
-    const compact = cleanDraftLine(line[1], 8000);
-    if (compact) return compact;
+  const sameLine = text.match(
+    new RegExp(`(?:^|\\n)\\s*[-*•]?\\s*\\*?\\*?${escaped}\\*?\\*?\\s*:\\s*([^\\n]+)`, 'i'),
+  );
+  if (sameLine?.[1]) {
+    return cleanDraftLine(sameLine[1], 8000);
   }
   return '';
+}
+
+function instructionsFromModelReply(visibleReply: string): string {
+  const text = visibleReply.replace(/\r\n/g, '\n');
+  const instructions = sectionBody(text, 'Instructions');
+  const rules = sectionBody(text, 'Rules');
+  if (instructions && rules) {
+    return `${instructions}\n\nRules:\n${rules}`.slice(0, 8000);
+  }
+  return instructions || rules;
+}
+
+/** Last-resort system prompt when generate-prompt fails and the model did not state instructions. */
+export function fallbackPromptFromIntent(intent: string): string {
+  const name = nameFromIntent(intent) || 'this agent';
+  const job = descriptionFromIntent(intent);
+  if (job) {
+    return `You are ${name}. ${job} Be clear, concise, and actionable.`;
+  }
+  return `You are ${name}. Help the user with their request. Be clear, concise, and actionable.`;
 }
 
 /** Fields the model stated explicitly in the visible reply (not XYNE_CREATE_DRAFT intent). */
@@ -209,7 +233,13 @@ export function buildDraftCanvasPatch(args: {
     patch.description = explicit.description || descriptionFromIntent(args.intent) || undefined;
   }
   if (args.fillInstructions) {
-    patch.systemPrompt = explicit.systemPrompt || args.generatedPrompt || undefined;
+    // Prefer the dedicated generate-prompt result; fall back to anything the model
+    // stated in chat (Instructions/Rules), then a minimal intent-derived prompt.
+    patch.systemPrompt =
+      args.generatedPrompt.trim() ||
+      explicit.systemPrompt ||
+      fallbackPromptFromIntent(args.intent) ||
+      undefined;
   }
 
   return patch;

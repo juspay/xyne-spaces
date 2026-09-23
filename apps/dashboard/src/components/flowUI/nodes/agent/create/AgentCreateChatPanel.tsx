@@ -30,6 +30,8 @@ import { cn } from '@/utils/classNames';
 import { buildXyneAIStreamThreadId, newStreamSlotKey } from '@/utils/xyneAIStreamThreadId';
 import {
   createModeQuery,
+  compactCreateDraftChatReply,
+  decideCreateCanvasAction,
   parseCreateChatAction,
   visibleCreateReply,
   type CreateCanvasSnapshot,
@@ -170,6 +172,20 @@ function LiveAgentCreateChatPanel({
     if (lastBot.errorInfo || lastBot.isAborted) return;
     const raw = lastBot.content || lastBot.streamingContent || '';
     const marker = parseCreateChatAction(raw);
+    const compacted = compactCreateDraftChatReply(marker.visible);
+    if (compacted.trim() && compacted.trim() !== marker.visible.trim()) {
+      setMessages(prev =>
+        prev.map(message =>
+          message.id === lastBot.id
+            ? {
+                ...message,
+                content: compacted,
+                streamingContent: compacted,
+              }
+            : message,
+        ),
+      );
+    }
     void onTurnCompleteRef.current({ userText: lastUser.content, marker }).catch((err: unknown) => {
       setCanvasError(clawErrorText(err, 'Could not draft from chat. Try again.'));
     });

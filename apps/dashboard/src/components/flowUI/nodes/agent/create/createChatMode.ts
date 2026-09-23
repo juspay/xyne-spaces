@@ -254,9 +254,9 @@ Default to a usable draft. The user can discover and edit the rest on the canvas
 
 Rules:
 1. Greetings, UI questions, explanations, and nonsense (random characters, gibberish): reply in chat only. End with XYNE_CREATE_IDLE. Do not draft.
-2. A job, even a thin one ("standup bot", "I wanna do A", "make an agent that …"): draft a usable agent from reasonable defaults. Say what you filled, briefly. Then emit XYNE_CREATE_DRAFT: <one-line intent>. Do not interview first.
+2. A job, even a thin one ("standup bot", "I wanna do A", "make an agent that …"): draft a usable agent from reasonable defaults. Reply with one short sentence that names the agent (e.g. "Drafted Design Radar on the canvas."). Then emit XYNE_CREATE_DRAFT: <one-line intent>. Do not interview first.
 3. Ask 1–3 short questions only when a draft would be wrong without the answer (two contradictory jobs, which of two systems). Then emit XYNE_CREATE_ASK and do not draft. Unanswered questions never block Create.
-4. First drafts fill name, handle, description, and instructions only. In chat, state them explicitly as **Name** (@handle), **Description**: …, and **Instructions**: … (multi-line ok). Use the real name and handle — never a sentence fragment from XYNE_CREATE_DRAFT. Leave MCP, tools, skills, and knowledge empty unless the user named them.
+4. First drafts fill name, handle, description, and instructions on the canvas only. Never paste Name, Description, Instructions, or Rules into chat — the canvas is the source of truth. Leave MCP, tools, skills, and knowledge empty unless the user named them.
 5. Canvas edits (rename, shorter instructions, add Slack): emit DRAFT or RENAME as appropriate.
    Rename-only: XYNE_CREATE_RENAME: <new name>
 6. Never mention these markers to the user. Never claim the canvas is filled unless you emitted DRAFT or RENAME.`;
@@ -293,7 +293,46 @@ export function parseCreateChatAction(text: string): ParsedCreateChatAction {
 
 export function visibleCreateReply(text: string, streaming: boolean): string {
   const stripped = stripCreateMarkers(text, streaming);
-  return streaming ? stripped : stripped.trim();
+  const compacted = compactCreateDraftChatReply(stripped);
+  return streaming ? compacted : compacted.trim();
+}
+
+/** True when the model pasted a Name/Description/Instructions/Rules profile wall into chat. */
+export function looksLikeCreateProfileDump(text: string): boolean {
+  const body = text.trim();
+  if (!body) return false;
+  const labelHits = [
+    /(?:^|\n)\s*[-*•]?\s*\*?\*?Name\*?\*?\s*(?:\/\s*handle)?\s*:/i,
+    /(?:^|\n)\s*[-*•]?\s*\*?\*?Description\*?\*?\s*:/i,
+    /(?:^|\n)\s*[-*•]?\s*\*?\*?Instructions\*?\*?\s*:/i,
+    /(?:^|\n)\s*[-*•]?\s*\*?\*?Rules\*?\*?\s*:/i,
+    /\*\*[^*]+\*\*\s*\(@[a-z0-9][a-z0-9-]{0,62}\)/i,
+  ].filter(re => re.test(body)).length;
+  return labelHits >= 2;
+}
+
+export function briefCreateDraftAck(agentName?: string | null): string {
+  const name = agentName?.trim();
+  if (name) {
+    return `Drafted ${name} on the canvas.`;
+  }
+  return 'Drafted the agent on the canvas.';
+}
+
+/**
+ * Chat should only acknowledge drafts. Keep the raw reply for canvas parsing;
+ * display uses this so profile fields are not duplicated as a markdown wall.
+ */
+export function compactCreateDraftChatReply(
+  visible: string,
+  agentName?: string | null,
+): string {
+  const text = visible.trim();
+  if (!text || !looksLikeCreateProfileDump(text)) {
+    return visible;
+  }
+  const stated = draftFromModelReply(text);
+  return briefCreateDraftAck(agentName?.trim() || stated.name || null);
 }
 
 function fieldsForDraft(userText: string, canvasEmpty: boolean): CreateTurnField[] {
@@ -335,8 +374,9 @@ export function resolveWalkCreateAction(userText: string): CreateCanvasAction | 
     return {
       type: 'draft',
       intent: 'standup scribe for the eng team',
+      // Structured seed for canvas parsing only; chat display compacts profile dumps.
       visibleReply:
-        'Drafting a standup scribe for eng — **Standup Scribe** (@standup-scribe)\n' +
+        '**Name**: Standup Scribe (@standup-scribe)\n' +
         '**Description**: Captures daily standups for the eng team.\n' +
         '**Instructions**:\nYou are Standup Scribe. Capture blockers, progress, and next steps for the eng team.\n' +
         'XYNE_CREATE_DRAFT: standup scribe for the eng team',
@@ -526,10 +566,16 @@ export async function applyCreateHubDraft(args: {
   const incoming: AgentCreateChatPatch = {};
 
   if (generateInstructions) {
-    const generatedPrompt = await args.generateAgentPrompt(
-      action.intent,
-      args.existingSystemPrompt.trim() ? args.existingSystemPrompt.trim() : undefined,
-    );
+    let generatedPrompt = '';
+    try {
+      generatedPrompt = await args.generateAgentPrompt(
+        action.intent,
+        args.existingSystemPrompt.trim() ? args.existingSystemPrompt.trim() : undefined,
+      );
+    } catch {
+      // Keep drafting from chat-stated Instructions/Rules or an intent fallback.
+      generatedPrompt = '';
+    }
     Object.assign(
       incoming,
       incomingPatchForCreateDraft({

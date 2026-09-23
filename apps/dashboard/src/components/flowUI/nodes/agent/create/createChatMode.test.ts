@@ -2,9 +2,11 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
   createModeQuery,
+  compactCreateDraftChatReply,
   decideCreateCanvasAction,
   parseCreateChatAction,
   stripCreateMarkers,
+  visibleCreateReply,
 } from './createChatMode.ts';
 
 void describe('parseCreateChatAction', () => {
@@ -20,6 +22,8 @@ void describe('parseCreateChatAction', () => {
     assert.match(q, /XYNE_CREATE_DRAFT/);
     assert.match(q, /standup bot/);
     assert.match(q, /XYNE_CREATE_ASK/);
+    assert.match(q, /Never paste Name, Description, Instructions, or Rules into chat/);
+    assert.doesNotMatch(q, /In chat, state them explicitly as \*\*Name\*\*/);
   });
 
   void it('strips draft markers from the visible reply', () => {
@@ -30,6 +34,23 @@ void describe('parseCreateChatAction', () => {
     assert.equal(parsed.draftIntent, 'standup scribe that posts Slack summaries');
     assert.equal(parsed.idle, false);
     assert.equal(parsed.ask, false);
+  });
+
+  void it('compacts profile dumps into a short canvas ack', () => {
+    const wall =
+      '**Name**: Design Radar (@design-radar)\n' +
+      '**Description**: Surfaces design trends.\n' +
+      '**Instructions**:\nYou are Design Radar.\n' +
+      '**Rules**:\nStay concise.';
+    assert.equal(compactCreateDraftChatReply(wall), 'Drafted Design Radar on the canvas.');
+    assert.equal(
+      visibleCreateReply(`${wall}\nXYNE_CREATE_DRAFT: design radar`, false),
+      'Drafted Design Radar on the canvas.',
+    );
+    assert.equal(
+      compactCreateDraftChatReply('Drafted Design Radar on the canvas.'),
+      'Drafted Design Radar on the canvas.',
+    );
   });
 
   void it('treats gibberish without a marker as idle', () => {
