@@ -231,3 +231,59 @@ screen reader and a WCAG 1.4.1 (Use of Colour) problem for everyone else.
   affordance, which is a UX change and needs design input.
 - Roving focus is applied to the app rail only. The channel list, ticket lists
   and board columns are still one Tab stop per row.
+
+## Accessible names (screen-reader support)
+
+WCAG 4.1.2 (Name, Role, Value, Level A). This product is icon-dense — toolbars,
+message hover actions, the sidebar rail and dialog headers are almost all
+icon-only buttons. An icon-only button with no `aria-label` is announced by a
+screen reader as just **"button"**: the user cannot tell reply from delete.
+
+### The gate
+
+`local-rules/require-accessible-name`
+(`eslint-rules/require-accessible-name.cjs`) flags any `<button>`, `<a href>` or
+`role="button" | "link" | "menuitem" | "tab" | "switch" | "checkbox" | ...` that
+has no accessible name.
+
+`eslint-plugin-jsx-a11y` does not cover this in `recommended`, and its
+`control-has-associated-label` treats _any_ nested component as a possible label
+— in a codebase where every button's only child is `<Trash />` it sees almost
+nothing (14 hits, versus 172 for this rule). The difference is that this rule
+resolves each child component back to its import: a component imported from an
+icon module cannot name its parent.
+
+A control passes if it has `aria-label` / `aria-labelledby` / `title`, or
+contains literal text, or an `<img alt="...">`, or a non-icon component (which
+may render its own text), or is `aria-hidden`. It is deliberately conservative —
+it skips anything with a spread prop, because a wrapper may be supplying the
+name. A rule that cries wolf gets switched off.
+
+### Current state
+
+Registered at **`"warn"`**, not `"error"`, because of a pre-existing backlog.
+
+|                                                                          | Count                    |
+| ------------------------------------------------------------------------ | ------------------------ |
+| Unnamed controls when the rule was written                               | 172, across 88 files     |
+| Fixed in this pass (chat, sidebar, calls, support, pickers, file viewer) | 55                       |
+| Remaining backlog                                                        | **117, across 74 files** |
+
+Flip the rule to `"error"` once the backlog reaches zero. List what is left:
+
+```bash
+cd apps/dashboard && pnpm exec eslint src --rule '{"local-rules/require-accessible-name":"error"}' --quiet
+```
+
+### Writing a good label
+
+- Name the **action**, not the icon: `aria-label='Delete message'`, never
+  `aria-label='trash icon'`.
+- Most controls here already carry a `data-track-name` — it is a human-authored
+  description of what the button does and is usually the right starting point
+  (`PrevTicket` → `Previous ticket`).
+- Do not duplicate visible text. If the button already reads "Save", it has a
+  name; adding `aria-label` only overrides it, usually for the worse.
+- A label that is wrong is worse than one that is missing — it sends the user
+  somewhere they did not intend. When you cannot tell what a control does from
+  its surroundings, leave it and flag it rather than guessing.

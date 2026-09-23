@@ -20,6 +20,7 @@ const localRules = {
     'require-is-deleted-filter': require('../../packages/shared/eslint-rules/require-is-deleted-filter.cjs'),
     'require-initial-message-md-in-conversation-insert': require('./eslint-rules/require-initial-message-md-in-conversation-insert.cjs'),
     'no-direct-message-lookup-in-mutators': require('./eslint-rules/no-direct-message-lookup-in-mutators.cjs'),
+    'require-accessible-name': require('./eslint-rules/require-accessible-name.cjs'),
   }
 };
 
@@ -99,6 +100,12 @@ export default tseslint.config(
       "local-rules/require-is-deleted-filter": "error",
       "local-rules/require-initial-message-md-in-conversation-insert": "error",
       "local-rules/no-direct-message-lookup-in-mutators": "error",
+      // WCAG 4.1.2 (Name, Role, Value) — an icon-only control with no
+      // aria-label is announced by a screen reader as just "button".
+      // "warn", not "error", because of a backlog of pre-existing unnamed
+      // controls; docs/accessibility.md has the count and the burn-down
+      // command. Flip to "error" once it reaches zero.
+      "local-rules/require-accessible-name": "warn",
       "local-rules/require-tracking-on-click": ["error", {
         exemptComponents: [],
         exemptDataTestIds: [],

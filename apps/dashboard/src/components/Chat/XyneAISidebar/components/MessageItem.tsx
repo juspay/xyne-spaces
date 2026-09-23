@@ -1093,6 +1093,7 @@ const BranchNavigator = ({
 }): ReactElement => (
   <div className='flex items-center gap-0.5 text-xs text-muted-foreground'>
     <button
+      aria-label='Previous response'
       type='button'
       onClick={() => onNavigate('prev')}
       className='p-0.5 hover:bg-muted rounded transition-colors'
@@ -1105,6 +1106,7 @@ const BranchNavigator = ({
       {index + 1}/{total}
     </span>
     <button
+      aria-label='Next response'
       type='button'
       onClick={() => onNavigate('next')}
       className='p-0.5 hover:bg-muted rounded transition-colors'
@@ -2857,6 +2859,7 @@ const MessageActions = ({
     ) && (
       <Tooltip content='Powered By searXNG' side='left'>
         <a
+          aria-label='Open source'
           href='https://github.com/searxng/searxng'
           target='_blank'
           rel='noopener noreferrer'

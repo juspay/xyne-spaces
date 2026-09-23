@@ -249,6 +249,7 @@ const BrowseChannels = (): ReactElement => {
               </span>
               <div className='flex items-center gap-2'>
                 <button
+                  aria-label='Previous page'
                   onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
                   disabled={currentPage === 1}
                   className='p-1 rounded hover:bg-accent disabled:opacity-50 disabled:cursor-not-allowed'
@@ -262,6 +263,7 @@ const BrowseChannels = (): ReactElement => {
                   {currentPage} / {totalPages}
                 </span>
                 <button
+                  aria-label='Next page'
                   onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
                   disabled={currentPage === totalPages}
                   className='p-1 rounded hover:bg-accent disabled:opacity-50 disabled:cursor-not-allowed'

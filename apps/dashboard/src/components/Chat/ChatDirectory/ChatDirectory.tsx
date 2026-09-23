@@ -954,6 +954,7 @@ const ChatDirectory = ({
                         delayDuration={500}
                       >
                         <button
+                          aria-label='Browse channels'
                           className='group/child text-sidebar-foreground hover:text-sidebar-accent-foreground hover:bg-sidebar-accent transition-colors rounded-md p-1'
                           onClick={(e: React.MouseEvent<HTMLButtonElement>) => {
                             e.preventDefault();
@@ -977,6 +978,7 @@ const ChatDirectory = ({
                         delayDuration={500}
                       >
                         <button
+                          aria-label='Create channel'
                           className='group/child text-sidebar-foreground hover:text-sidebar-accent-foreground hover:bg-sidebar-accent transition-colors rounded-md p-1'
                           onClick={(e: React.MouseEvent<HTMLButtonElement>) => {
                             e.preventDefault();
@@ -1080,6 +1082,7 @@ const ChatDirectory = ({
                       delayDuration={500}
                     >
                       <button
+                        aria-label='New direct message'
                         id='sidebar-add-dm-btn'
                         className='group/child text-sidebar-foreground hover:text-sidebar-accent-foreground opacity-100 md:opacity-0 group-hover:opacity-100 transition-opacity ease-in-out duration-300 hover:bg-sidebar-accent rounded-md p-1 mr-0.5'
                         onClick={(e: React.MouseEvent<HTMLButtonElement>) => {

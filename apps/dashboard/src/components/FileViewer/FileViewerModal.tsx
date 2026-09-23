@@ -779,6 +779,7 @@ const FilePreviewModalInner: React.FC<FilePreviewModalProps> = ({
             </button>
           )}
           <button
+            aria-label='Download file'
             onClick={() => void handleDownload()}
             className='inline-flex items-center gap-2 justify-center w-9 h-9 text-sm font-medium text-white/90 hover:text-white hover:bg-background/10 rounded-md transition-colors'
             data-track-category='FileViewer'
@@ -1526,6 +1527,7 @@ const AttachmentGalleryModalInner: React.FC = () => {
             </button>
           )}
           <button
+            aria-label='Download file'
             onClick={() => void handleDownload()}
             data-track-category='FileViewer'
             data-track-name='DownloadFile'

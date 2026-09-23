@@ -190,6 +190,7 @@ const MobileChatDirectory = ({
                     <Tooltip content='Sort channels' side='top' sideOffset={0} delayDuration={500}>
                       <DropdownMenuTrigger asChild>
                         <button
+                          aria-label='Sort channels'
                           className='text-muted-foreground hover:text-foreground transition-colors focus:outline-none'
                           onClick={(e: React.MouseEvent<HTMLButtonElement>) => {
                             e.preventDefault();
@@ -256,6 +257,7 @@ const MobileChatDirectory = ({
                   </DropdownMenu>
                   <Tooltip content='Add channel' side='top' sideOffset={0} delayDuration={500}>
                     <button
+                      aria-label='Add channel'
                       className='text-muted-foreground hover:text-foreground transition-colors'
                       onClick={(e: React.MouseEvent<HTMLButtonElement>) => {
                         e.preventDefault();
@@ -298,6 +300,7 @@ const MobileChatDirectory = ({
                 </button>
                 <Tooltip content='Add direct message' side='top' sideOffset={0} delayDuration={500}>
                   <button
+                    aria-label='New direct message'
                     className='text-muted-foreground hover:text-foreground transition-colors'
                     onClick={(e: React.MouseEvent<HTMLButtonElement>) => {
                       e.preventDefault();

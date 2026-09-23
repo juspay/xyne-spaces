@@ -3147,6 +3147,7 @@ const SupportScreen = (): ReactElement => {
                               <span>
                                 <Tooltip content={dlMemberSyncTooltip} side='bottom'>
                                   <button
+                                    aria-label='Sync options'
                                     disabled={isRefetching}
                                     className={cn(
                                       'p-1.5 rounded transition-colors text-muted-foreground hover:text-foreground hover:bg-muted',
@@ -3229,6 +3230,7 @@ const SupportScreen = (): ReactElement => {
                             side='bottom'
                           >
                             <button
+                              aria-label='Refetch emails'
                               onClick={() => setShowRefetchDialog(true)}
                               disabled={isRefetching}
                               className={cn(
@@ -3246,6 +3248,7 @@ const SupportScreen = (): ReactElement => {
                       {isSelectedChannelJoined && selectedChannelId !== ALL_CHANNELS_ID && (
                         <Tooltip content='Ask AI' side='bottom'>
                           <button
+                            aria-label='Open Xyne AI'
                             onClick={() => {
                               if (!selectedChannelId) return;
                               xyneAIActor.send({
@@ -3268,6 +3271,7 @@ const SupportScreen = (): ReactElement => {
                         (canManageDeskInsights || isGuest) && (
                           <Tooltip content='Desk metrics' side='bottom'>
                             <button
+                              aria-label='Toggle desk metrics'
                               onClick={() => {
                                 const base = selectedChannelId
                                   ? `${supportBase}/${selectedChannelId}`
@@ -3298,6 +3302,7 @@ const SupportScreen = (): ReactElement => {
                         canManageDeskInsights && (
                           <Tooltip content='Desk report' side='bottom'>
                             <button
+                              aria-label='Toggle desk report'
                               onClick={() => {
                                 const base = selectedChannelId
                                   ? `${supportBase}/${selectedChannelId}`
@@ -3325,6 +3330,7 @@ const SupportScreen = (): ReactElement => {
                       {canExploreTopics && (
                         <Tooltip content='Topics explorer' side='bottom'>
                           <button
+                            aria-label='Toggle topics'
                             type='button'
                             onClick={() => {
                               const base = `${supportBase}/${selectedChannelId}`;
@@ -3449,6 +3455,7 @@ const SupportScreen = (): ReactElement => {
                       {selectedChannelId && selectedChannelId !== ALL_CHANNELS_ID && (
                         <Tooltip content='Search emails' side='bottom'>
                           <button
+                            aria-label='Search desk'
                             onClick={() => invokeShortcut('mod+f')}
                             className='p-1.5 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground transition-colors'
                             data-track-category='Support'
@@ -5508,6 +5515,7 @@ export const SupportTicketDetail = ({
                         }
                       >
                         <button
+                          aria-label='Previous ticket'
                           type='button'
                           onClick={() => void navigateAdjacent('backward')}
                           className='p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors'
@@ -5534,6 +5542,7 @@ export const SupportTicketDetail = ({
                         }
                       >
                         <button
+                          aria-label='Next ticket'
                           type='button'
                           onClick={() => void navigateAdjacent('forward')}
                           className='p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors'
@@ -5602,6 +5611,7 @@ export const SupportTicketDetail = ({
                               <div className='flex items-center justify-between px-3 py-1 text-xs font-medium text-foreground border-b border-border mb-1'>
                                 <span>Labels</span>
                                 <button
+                                  aria-label='Close label picker'
                                   type='button'
                                   onClick={() => setLabelPickerOpen(false)}
                                   className='text-muted-foreground hover:text-foreground transition-colors'
@@ -5973,6 +5983,7 @@ export const SupportTicketDetail = ({
                               }
                             >
                               <button
+                                aria-label='Regenerate email summary'
                                 type='button'
                                 onClick={() => void fetchEmailSummary(true)}
                                 className='p-1 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors'
@@ -5984,6 +5995,7 @@ export const SupportTicketDetail = ({
                             </Tooltip>
                           )}
                           <button
+                            aria-label='Dismiss email summary'
                             type='button'
                             onClick={() => setShowEmailSummary(false)}
                             className='p-1 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors'

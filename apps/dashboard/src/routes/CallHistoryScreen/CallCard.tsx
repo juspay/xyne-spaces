@@ -367,6 +367,7 @@ export const CallCard = ({
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
                       <button
+                        aria-label='Call options'
                         className='size-7 flex items-center justify-center rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent'
                         onClick={e => e.stopPropagation()}
                         data-track-category='CALLS'
@@ -435,6 +436,7 @@ export const CallCard = ({
                         }
                       >
                         <button
+                          aria-label='Go to call message'
                           onClick={e => {
                             e.stopPropagation();
                             handleGotoTranscript?.();
@@ -454,6 +456,7 @@ export const CallCard = ({
                     >
                       <span className={!hasTranscript ? 'cursor-not-allowed' : ''}>
                         <button
+                          aria-label='Download transcript'
                           onClick={e => {
                             e.stopPropagation();
                             handleDownloadTranscript?.();
@@ -470,6 +473,7 @@ export const CallCard = ({
                     {onViewExternalChat && (
                       <Tooltip content='View External Chat' delayDuration={300}>
                         <button
+                          aria-label='Open chat in a new window'
                           onClick={e => {
                             e.stopPropagation();
                             onViewExternalChat();
@@ -484,6 +488,7 @@ export const CallCard = ({
                     )}
                     <Tooltip content='Start Call' delayDuration={300}>
                       <button
+                        aria-label='Join call'
                         onClick={e => {
                           e.stopPropagation();
                           onCallClick();

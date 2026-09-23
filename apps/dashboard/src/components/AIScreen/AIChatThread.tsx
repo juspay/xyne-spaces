@@ -702,6 +702,7 @@ function BranchNavigator({
   return (
     <div className='flex items-center gap-0.5 text-xs text-muted-foreground'>
       <button
+        aria-label='Previous response'
         type='button'
         onClick={() => onNavigate('prev')}
         className='rounded p-0.5 transition-colors hover:bg-muted'
@@ -714,6 +715,7 @@ function BranchNavigator({
         {index + 1}/{total}
       </span>
       <button
+        aria-label='Next response'
         type='button'
         onClick={() => onNavigate('next')}
         className='rounded p-0.5 transition-colors hover:bg-muted'

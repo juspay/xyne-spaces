@@ -105,6 +105,7 @@ const ConversationHeaderMobile = ({
       <div className='absolute top-0 left-0 right-0 z-0 h-16 bg-gradient-to-b from-background to-transparent touch-none' />
       <div className='relative flex items-center gap-x-2'>
         <button
+          aria-label='Back to conversations'
           onClick={() => {
             void navigate(baseRoute);
           }}
@@ -308,6 +309,7 @@ const ConversationHeaderMobile = ({
           </div>
         </div>
         <button
+          aria-label='Open Xyne AI'
           onClick={() => {
             xyneAIActor.send({
               type: 'OPEN',

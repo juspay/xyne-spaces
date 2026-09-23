@@ -184,6 +184,7 @@ export function CallChatPanel({
       <div className='flex items-center justify-between px-4 py-3 border-b border-border min-h-[52px]'>
         <h3 className='text-sm font-semibold text-foreground'>External Chat</h3>
         <button
+          aria-label='Close call chat'
           onClick={onClose}
           className='p-1 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground transition-colors'
           data-track-category='CALLS'
@@ -242,6 +243,7 @@ export function CallChatPanel({
             }}
           />
           <button
+            aria-label='Send message'
             onClick={() => void handleSend()}
             disabled={!input.trim() || isSending}
             data-ph-capture-attribute-track-id='send_call_chat_message'
