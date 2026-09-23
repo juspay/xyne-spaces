@@ -28,6 +28,11 @@ import {
   type DoclingStagedParts,
   type QueueFileForSplitInput,
 } from '@/services/ingestion/docling/types';
+import { rawQuery } from './base';
+import type { TableName } from './base';
+
+/** Every table the raw claim/lease/admission SQL in this file reads or writes. */
+const DOCLING_TABLES: TableName[] = ['DoclingAsyncFile', 'DoclingAsyncPart', 'CollectionItem'];
 
 type RawRow = Record<string, unknown>;
 
@@ -170,7 +175,10 @@ export const claimNextDoclingFileToSplit = async (
   leaseMs: number,
 ): Promise<DoclingFile | null> => {
   const leaseToken = randomUUID();
-  const rows = await db.$queryRaw<RawRow[]>`
+  const rows = await rawQuery(
+    DOCLING_TABLES,
+    'claim next file to split: FOR UPDATE SKIP LOCKED lease claim, oldest-priority-first',
+    () => db.$queryRaw<RawRow[]>`
     UPDATE non_zero.docling_async_files
     SET status = ${DOCLING_FILE_STATUS.Splitting},
         lease_owner = ${workerId},
@@ -187,7 +195,8 @@ export const claimNextDoclingFileToSplit = async (
       FOR UPDATE SKIP LOCKED
       LIMIT 1
     )
-    RETURNING *`;
+    RETURNING *`,
+  );
   return rows[0] ? fileFromRow(rows[0]) : null;
 };
 
@@ -196,8 +205,11 @@ export const markDoclingFileSplitComplete = async (
   stagedParts: DoclingStagedParts,
   resultsDir: string,
 ): Promise<boolean> => {
-  return await db.$transaction(async (tx) => {
-    const claimed = await tx.$queryRaw<RawRow[]>`
+  return await rawQuery(
+    DOCLING_TABLES,
+    'mark split complete: raw claim UPDATE inside the file/parts transition transaction',
+    () => db.$transaction(async (tx) => {
+      const claimed = await tx.$queryRaw<RawRow[]>`
       UPDATE non_zero.docling_async_files
       SET status = ${DOCLING_FILE_STATUS.QueuedForOcr},
           total_pages = ${stagedParts.totalPages},
@@ -218,30 +230,31 @@ export const markDoclingFileSplitComplete = async (
         AND lease_until IS NOT NULL AND lease_until >= NOW()
       RETURNING file_id`;
 
-    if (claimed.length === 0) {
-      return false;
-    }
+      if (claimed.length === 0) {
+        return false;
+      }
 
-    const workspaceId = await resolveWorkspaceIdFromModel(tx, 'doclingAsyncFile', { fileId: file.fileId });
+      const workspaceId = await resolveWorkspaceIdFromModel(tx, 'doclingAsyncFile', { fileId: file.fileId });
 
-    await tx.doclingAsyncPart.deleteMany({ where: { fileId: file.fileId } });
-    await tx.doclingAsyncPart.createMany({
-      data: stagedParts.parts.map((part) => ({
-        fileId: file.fileId,
-        workspaceId,
-        partIndex: part.partIndex,
-        docId: part.partDocId,
-        partPath: part.partPath,
-        startPage: part.startPage,
-        endPage: part.endPage,
-        pageCount: Math.max(part.endPage - part.startPage, 0),
-        partSizeBytes: part.partSizeBytes,
-        status: DOCLING_PART_STATUS.Queued,
-        availableAt: new Date(),
-      })),
-    });
-    return true;
-  });
+      await tx.doclingAsyncPart.deleteMany({ where: { fileId: file.fileId } });
+      await tx.doclingAsyncPart.createMany({
+        data: stagedParts.parts.map((part) => ({
+          fileId: file.fileId,
+          workspaceId,
+          partIndex: part.partIndex,
+          docId: part.partDocId,
+          partPath: part.partPath,
+          startPage: part.startPage,
+          endPage: part.endPage,
+          pageCount: Math.max(part.endPage - part.startPage, 0),
+          partSizeBytes: part.partSizeBytes,
+          status: DOCLING_PART_STATUS.Queued,
+          availableAt: new Date(),
+        })),
+      });
+      return true;
+    }),
+  );
 };
 
 export const markDoclingFileSplitRetry = async (
@@ -249,7 +262,10 @@ export const markDoclingFileSplitRetry = async (
   errorMessage: string,
   availableAt: Date,
 ): Promise<boolean> => {
-  const rows = await db.$queryRaw<RawRow[]>`
+  const rows = await rawQuery(
+    DOCLING_TABLES,
+    'mark split retry: reset a split lease back to pending_split after a worker failure',
+    () => db.$queryRaw<RawRow[]>`
     UPDATE non_zero.docling_async_files
     SET status = ${DOCLING_FILE_STATUS.PendingSplit},
         available_at = ${availableAt},
@@ -264,7 +280,8 @@ export const markDoclingFileSplitRetry = async (
       AND lease_owner = ${file.leaseOwner}
       AND lease_token = ${file.leaseToken}
       AND lease_until IS NOT NULL AND lease_until >= NOW()
-    RETURNING file_id`;
+    RETURNING file_id`,
+  );
   return rows.length > 0;
 };
 
@@ -275,7 +292,10 @@ export const admitDoclingOcrFiles = async (input: {
   if (input.activeFileLimit <= 0 || input.admittedPageBudget <= 0) {
     return 0;
   }
-  const rows = await db.$queryRaw<RawRow[]>`
+  const rows = await rawQuery(
+    DOCLING_TABLES,
+    'admit OCR files: advisory-locked CTE that ranks queued files by priority/age and admits as many as fit the page budget',
+    () => db.$queryRaw<RawRow[]>`
     WITH admit_lock AS (
       SELECT pg_try_advisory_xact_lock(hashtext('docling_ocr_file_admit')) AS locked
     ),
@@ -359,7 +379,8 @@ export const admitDoclingOcrFiles = async (input: {
         updated_at = NOW()
     FROM selected
     WHERE f.file_id = selected.file_id
-    RETURNING f.file_id`;
+    RETURNING f.file_id`,
+  );
   return rows.length;
 };
 
@@ -375,7 +396,10 @@ export const markDoclingPartSubmitted = async (
   partIndex: number,
   jobId: string,
 ): Promise<void> => {
-  await db.$executeRaw`
+  await rawQuery(
+    DOCLING_TABLES,
+    'mark part submitted: transition a claimed part from submitting to submitted',
+    () => db.$executeRaw`
     UPDATE non_zero.docling_async_parts
     SET status = ${DOCLING_PART_STATUS.Submitted},
         submitted_at = NOW(),
@@ -385,7 +409,8 @@ export const markDoclingPartSubmitted = async (
     WHERE file_id = ${fileId}
       AND part_index = ${partIndex}
       AND current_job_id = ${jobId}
-      AND status = ${DOCLING_PART_STATUS.Submitting}`;
+      AND status = ${DOCLING_PART_STATUS.Submitting}`,
+  );
 };
 
 export const markDoclingPartSubmitRetry = async (input: {
@@ -395,7 +420,10 @@ export const markDoclingPartSubmitRetry = async (input: {
   errorMessage: string;
   availableAt: Date;
 }): Promise<void> => {
-  await db.$executeRaw`
+  await rawQuery(
+    DOCLING_TABLES,
+    'mark part submit retry: reset a submit lease back to queued after a worker failure, touch the parent file row so pollers notice',
+    () => db.$executeRaw`
     WITH reset AS (
       UPDATE non_zero.docling_async_parts
       SET status = ${DOCLING_PART_STATUS.Queued},
@@ -414,28 +442,41 @@ export const markDoclingPartSubmitRetry = async (input: {
     UPDATE non_zero.docling_async_files f
     SET updated_at = NOW()
     FROM reset
-    WHERE f.file_id = reset.file_id`;
+    WHERE f.file_id = reset.file_id`,
+  );
 };
 
 export const getDoclingPartByJobId = async (
   jobId: string,
 ): Promise<DoclingPart | null> => {
-  const rows = await db.$queryRaw<RawRow[]>`
-    SELECT * FROM non_zero.docling_async_parts WHERE current_job_id = ${jobId} LIMIT 1`;
+  const rows = await rawQuery(
+    DOCLING_TABLES,
+    'look up a docling part by its current job id',
+    () => db.$queryRaw<RawRow[]>`
+    SELECT * FROM non_zero.docling_async_parts WHERE current_job_id = ${jobId} LIMIT 1`,
+  );
   return rows[0] ? partFromRow(rows[0]) : null;
 };
 
 export const getDoclingFile = async (fileId: string): Promise<DoclingFile | null> => {
-  const rows = await db.$queryRaw<RawRow[]>`
-    SELECT * FROM non_zero.docling_async_files WHERE file_id = ${fileId} LIMIT 1`;
+  const rows = await rawQuery(
+    DOCLING_TABLES,
+    'look up a docling file by id',
+    () => db.$queryRaw<RawRow[]>`
+    SELECT * FROM non_zero.docling_async_files WHERE file_id = ${fileId} LIMIT 1`,
+  );
   return rows[0] ? fileFromRow(rows[0]) : null;
 };
 
 export const getDoclingPartsForFile = async (
   fileId: string,
 ): Promise<DoclingPart[]> => {
-  const rows = await db.$queryRaw<RawRow[]>`
-    SELECT * FROM non_zero.docling_async_parts WHERE file_id = ${fileId} ORDER BY part_index ASC`;
+  const rows = await rawQuery(
+    DOCLING_TABLES,
+    'list every part of a docling file, in split order',
+    () => db.$queryRaw<RawRow[]>`
+    SELECT * FROM non_zero.docling_async_parts WHERE file_id = ${fileId} ORDER BY part_index ASC`,
+  );
   return rows.map(partFromRow);
 };
 
@@ -445,8 +486,11 @@ export const markDoclingPartReady = async (input: {
   jobId: string;
   resultPath: string;
 }): Promise<void> => {
-  await db.$transaction(async (tx) => {
-    const ready = await tx.$queryRaw<RawRow[]>`
+  await rawQuery(
+    DOCLING_TABLES,
+    'mark part ready: claim UPDATE plus the ready-count bump and file-completion check, inside one transaction',
+    () => db.$transaction(async (tx) => {
+      const ready = await tx.$queryRaw<RawRow[]>`
       UPDATE non_zero.docling_async_parts
       SET status = ${DOCLING_PART_STATUS.Ready},
           result_path = ${input.resultPath},
@@ -460,17 +504,17 @@ export const markDoclingPartReady = async (input: {
         AND status IN (${DOCLING_PART_STATUS.Submitting}, ${DOCLING_PART_STATUS.Submitted})
       RETURNING file_id`;
 
-    if (ready.length === 0) {
-      return;
-    }
+      if (ready.length === 0) {
+        return;
+      }
 
-    await tx.$executeRaw`
+      await tx.$executeRaw`
       UPDATE non_zero.docling_async_files
       SET ready_parts_count = ready_parts_count + 1,
           updated_at = NOW()
       WHERE file_id = ${input.fileId}`;
 
-    await tx.$executeRaw`
+      await tx.$executeRaw`
       UPDATE non_zero.docling_async_files
       SET status = ${DOCLING_FILE_STATUS.ReadyToWrite},
           available_at = NOW(),
@@ -478,28 +522,33 @@ export const markDoclingPartReady = async (input: {
       WHERE file_id = ${input.fileId}
         AND status = ${DOCLING_FILE_STATUS.OcrActive}
         AND ready_parts_count >= total_parts`;
-  });
+    }),
+  );
 };
 
 export const failDoclingFile = async (
   fileId: string,
   errorMessage: string,
 ): Promise<void> => {
-  await db.$transaction(async (tx) => {
-    await tx.$executeRaw`
+  await rawQuery(
+    DOCLING_TABLES,
+    'fail file: raw status UPDATEs on the file and every part, inside the terminal-transition transaction',
+    () => db.$transaction(async (tx) => {
+      await tx.$executeRaw`
       UPDATE non_zero.docling_async_files
       SET status = ${DOCLING_FILE_STATUS.Failed},
           lease_owner = NULL, lease_token = NULL, lease_until = NULL,
           error_message = ${errorMessage}, updated_at = NOW()
       WHERE file_id = ${fileId}`;
-    await tx.$executeRaw`
+      await tx.$executeRaw`
       UPDATE non_zero.docling_async_parts
       SET status = ${DOCLING_PART_STATUS.Failed},
           error_message = ${errorMessage},
           lease_owner = NULL, lease_until = NULL, updated_at = NOW()
       WHERE file_id = ${fileId}`;
-    await setCollectionItemStatus(tx, fileId, IngestionStatus.FAILED);
-  });
+      await setCollectionItemStatus(tx, fileId, IngestionStatus.FAILED);
+    }),
+  );
   // Terminal transition committed — check if the whole collection is now done.
   void maybeNotifyCollectionIngestionComplete(fileId).catch(() => {});
   cleanupStageAfterTerminalFailure(fileId);
@@ -510,8 +559,11 @@ export const failDoclingFileIfOwned = async (
   expectedStatus: string,
   errorMessage: string,
 ): Promise<boolean> => {
-  const owned = await db.$transaction(async (tx) => {
-    const claimed = await tx.$queryRaw<RawRow[]>`
+  const owned = await rawQuery(
+    DOCLING_TABLES,
+    'fail file if owned: raw claim UPDATE plus part failure, inside the terminal-transition transaction',
+    () => db.$transaction(async (tx) => {
+      const claimed = await tx.$queryRaw<RawRow[]>`
       UPDATE non_zero.docling_async_files
       SET status = ${DOCLING_FILE_STATUS.Failed},
           lease_owner = NULL, lease_token = NULL, lease_until = NULL,
@@ -523,19 +575,20 @@ export const failDoclingFileIfOwned = async (
         AND lease_until IS NOT NULL AND lease_until >= NOW()
       RETURNING file_id`;
 
-    if (claimed.length === 0) {
-      return false;
-    }
+      if (claimed.length === 0) {
+        return false;
+      }
 
-    await tx.$executeRaw`
+      await tx.$executeRaw`
       UPDATE non_zero.docling_async_parts
       SET status = ${DOCLING_PART_STATUS.Failed},
           error_message = ${errorMessage},
           lease_owner = NULL, lease_until = NULL, updated_at = NOW()
       WHERE file_id = ${file.fileId}`;
-    await setCollectionItemStatus(tx, file.fileId, IngestionStatus.FAILED);
-    return true;
-  });
+      await setCollectionItemStatus(tx, file.fileId, IngestionStatus.FAILED);
+      return true;
+    }),
+  );
   if (owned) {
     void maybeNotifyCollectionIngestionComplete(file.fileId).catch(() => {});
     cleanupStageAfterTerminalFailure(file.fileId);
@@ -548,7 +601,10 @@ export const claimNextDoclingFileToWrite = async (
   leaseMs: number,
 ): Promise<DoclingFile | null> => {
   const leaseToken = randomUUID();
-  const rows = await db.$queryRaw<RawRow[]>`
+  const rows = await rawQuery(
+    DOCLING_TABLES,
+    'claim next file to write: FOR UPDATE SKIP LOCKED lease claim, oldest-priority-first',
+    () => db.$queryRaw<RawRow[]>`
     UPDATE non_zero.docling_async_files
     SET status = ${DOCLING_FILE_STATUS.Writing},
         lease_owner = ${workerId},
@@ -565,7 +621,8 @@ export const claimNextDoclingFileToWrite = async (
       FOR UPDATE SKIP LOCKED
       LIMIT 1
     )
-    RETURNING *`;
+    RETURNING *`,
+  );
   return rows[0] ? fileFromRow(rows[0]) : null;
 };
 
@@ -574,7 +631,10 @@ export const markDoclingFileWriteRetry = async (
   errorMessage: string,
   availableAt: Date,
 ): Promise<boolean> => {
-  const rows = await db.$queryRaw<RawRow[]>`
+  const rows = await rawQuery(
+    DOCLING_TABLES,
+    'mark write retry: reset a write lease back to ready_to_write after a worker failure',
+    () => db.$queryRaw<RawRow[]>`
     UPDATE non_zero.docling_async_files
     SET status = ${DOCLING_FILE_STATUS.ReadyToWrite},
         available_at = ${availableAt},
@@ -585,7 +645,8 @@ export const markDoclingFileWriteRetry = async (
       AND lease_owner = ${file.leaseOwner}
       AND lease_token = ${file.leaseToken}
       AND lease_until IS NOT NULL AND lease_until >= NOW()
-    RETURNING file_id`;
+    RETURNING file_id`,
+  );
   return rows.length > 0;
 };
 
@@ -595,8 +656,11 @@ export const markDoclingFileCompleted = async (input: {
   leaseOwner?: string | null;
   leaseToken?: string | null;
 }): Promise<boolean> => {
-  const completed = await db.$transaction(async (tx) => {
-    const claimed = await tx.$queryRaw<RawRow[]>`
+  const completed = await rawQuery(
+    DOCLING_TABLES,
+    'mark file completed: raw claim UPDATE plus part-written status, inside the terminal-transition transaction',
+    () => db.$transaction(async (tx) => {
+      const claimed = await tx.$queryRaw<RawRow[]>`
       UPDATE non_zero.docling_async_files
       SET status = ${DOCLING_FILE_STATUS.Completed},
           completed_at = NOW(),
@@ -609,17 +673,18 @@ export const markDoclingFileCompleted = async (input: {
         AND lease_until IS NOT NULL AND lease_until >= NOW()
       RETURNING file_id`;
 
-    if (claimed.length === 0) {
-      return false;
-    }
+      if (claimed.length === 0) {
+        return false;
+      }
 
-    await setCollectionItemStatus(tx, input.fileId, IngestionStatus.COMPLETED);
-    await tx.$executeRaw`
+      await setCollectionItemStatus(tx, input.fileId, IngestionStatus.COMPLETED);
+      await tx.$executeRaw`
       UPDATE non_zero.docling_async_parts
       SET status = ${DOCLING_PART_STATUS.Written}, written_at = NOW(), updated_at = NOW()
       WHERE file_id = ${input.fileId}`;
-    return true;
-  });
+      return true;
+    }),
+  );
   if (completed) {
     void maybeNotifyCollectionIngestionComplete(input.fileId).catch(() => {});
   }
@@ -637,26 +702,34 @@ export const completeDoclingFileViaSyncFallback = async (
   fileId: string,
   statusMessage: string,
 ): Promise<void> => {
-  await db.$transaction(async (tx) => {
-    await tx.$executeRaw`
+  await rawQuery(
+    DOCLING_TABLES,
+    'complete file via sync fallback: raw status UPDATEs on the file and every part, inside the terminal-transition transaction',
+    () => db.$transaction(async (tx) => {
+      await tx.$executeRaw`
       UPDATE non_zero.docling_async_files
       SET status = ${DOCLING_FILE_STATUS.Completed},
           completed_at = NOW(),
           lease_owner = NULL, lease_token = NULL, lease_until = NULL,
           error_message = ${statusMessage}, updated_at = NOW()
       WHERE file_id = ${fileId}`;
-    await tx.$executeRaw`
+      await tx.$executeRaw`
       UPDATE non_zero.docling_async_parts
       SET status = ${DOCLING_PART_STATUS.Written}, written_at = NOW(), updated_at = NOW()
       WHERE file_id = ${fileId}`;
-    await setCollectionItemStatus(tx, fileId, IngestionStatus.COMPLETED);
-  });
+      await setCollectionItemStatus(tx, fileId, IngestionStatus.COMPLETED);
+    }),
+  );
   // Terminal transition committed — check if the whole collection is now done.
   void maybeNotifyCollectionIngestionComplete(fileId).catch(() => {});
 };
 
 export const requeueExpiredDoclingLeases = async (now = new Date()): Promise<void> => {
-  await db.$executeRaw`
+  await rawQuery(
+    DOCLING_TABLES,
+    'requeue expired leases: raw status UPDATEs on files and parts whose lease expired without a worker checking in',
+    async () => {
+      await db.$executeRaw`
     UPDATE non_zero.docling_async_files
     SET status = CASE
           WHEN status = ${DOCLING_FILE_STATUS.Splitting} THEN ${DOCLING_FILE_STATUS.PendingSplit}
@@ -669,7 +742,7 @@ export const requeueExpiredDoclingLeases = async (now = new Date()): Promise<voi
       AND lease_until IS NOT NULL
       AND lease_until < NOW()`;
 
-  await db.$executeRaw`
+      await db.$executeRaw`
     WITH expired AS (
       UPDATE non_zero.docling_async_parts
       SET status = ${DOCLING_PART_STATUS.Queued},
@@ -686,19 +759,25 @@ export const requeueExpiredDoclingLeases = async (now = new Date()): Promise<voi
       SELECT file_id FROM expired GROUP BY file_id
     ) expired_counts
     WHERE f.file_id = expired_counts.file_id`;
+    },
+  );
 };
 
 export const listExpiredSubmittingDoclingParts = async (
   limit: number,
 ): Promise<DoclingPart[]> => {
-  const rows = await db.$queryRaw<RawRow[]>`
+  const rows = await rawQuery(
+    DOCLING_TABLES,
+    'list parts stuck submitting past their lease, for lease expiry recovery',
+    () => db.$queryRaw<RawRow[]>`
     SELECT * FROM non_zero.docling_async_parts
     WHERE status = ${DOCLING_PART_STATUS.Submitting}
       AND lease_until IS NOT NULL
       AND lease_until < NOW()
       AND submit_permit_id IS NOT NULL
     ORDER BY lease_until ASC
-    LIMIT ${Math.max(limit, 1)}`;
+    LIMIT ${Math.max(limit, 1)}`,
+  );
   return rows.map(partFromRow);
 };
 
@@ -706,13 +785,17 @@ export const listTimedOutSubmittedDoclingParts = async (
   timeoutMs: number,
   limit: number,
 ): Promise<DoclingPart[]> => {
-  const rows = await db.$queryRaw<RawRow[]>`
+  const rows = await rawQuery(
+    DOCLING_TABLES,
+    'list parts submitted but not confirmed within the timeout window, for stuck-submission recovery',
+    () => db.$queryRaw<RawRow[]>`
     SELECT * FROM non_zero.docling_async_parts
     WHERE status = ${DOCLING_PART_STATUS.Submitted}
       AND submitted_at IS NOT NULL
       AND submitted_at < NOW() - (${timeoutMs}::int * interval '1 millisecond')
     ORDER BY submitted_at ASC
-    LIMIT ${Math.max(limit, 1)}`;
+    LIMIT ${Math.max(limit, 1)}`,
+  );
   return rows.map(partFromRow);
 };
 
@@ -739,7 +822,10 @@ export const claimDoclingPartsForSubmitBatch = async (
   const attemptToken = randomUUID();
   const permitValues = permitIds.map((id, i) => `(${i + 1}, '${id.replace(/'/g, "''")}')`).join(', ');
 
-  const rows = await db.$queryRaw<RawRow[]>`
+  const rows = await rawQuery(
+    DOCLING_TABLES,
+    'claim parts for submit batch: advisory-locked CTE ranking queued parts by file priority/age within per-file and global page budgets',
+    () => db.$queryRaw<RawRow[]>`
     WITH ocr_page_budget_lock AS MATERIALIZED (
       SELECT pg_advisory_xact_lock(672945, 42001)
     ),
@@ -868,7 +954,8 @@ export const claimDoclingPartsForSubmitBatch = async (
       RETURNING p.*
     )
     SELECT * FROM claimed
-    ORDER BY part_index ASC`;
+    ORDER BY part_index ASC`,
+  );
   return rows.map(partFromRow);
 };
 
@@ -879,7 +966,10 @@ export const releaseClaimedDoclingPartForSubmitCapacity = async (input: {
   errorMessage: string;
   availableAt: Date;
 }): Promise<void> => {
-  await db.$executeRaw`
+  await rawQuery(
+    DOCLING_TABLES,
+    'release a claimed-but-unsubmitted part back to queued, freeing its submit capacity',
+    () => db.$executeRaw`
     UPDATE non_zero.docling_async_parts
     SET status = ${DOCLING_PART_STATUS.Queued},
         current_job_id = NULL,
@@ -894,20 +984,25 @@ export const releaseClaimedDoclingPartForSubmitCapacity = async (input: {
       AND part_index = ${input.partIndex}
       AND current_job_id = ${input.jobId}
       AND status = ${DOCLING_PART_STATUS.Submitting}
-      AND submitted_at IS NULL`;
+      AND submitted_at IS NULL`,
+  );
 };
 
 export const listDeletedActiveDoclingFileIds = async (
   limit = 50,
 ): Promise<string[]> => {
-  const rows = await db.$queryRaw<RawRow[]>`
+  const rows = await rawQuery(
+    DOCLING_TABLES,
+    'list files whose owning collection item was deleted while the file was still active, for cleanup',
+    () => db.$queryRaw<RawRow[]>`
     SELECT f.file_id
     FROM non_zero.docling_async_files f
     JOIN collection_items ci ON ci."fileId" = f.file_id
     WHERE ci."deletedAt" IS NOT NULL
       AND f.status NOT IN (${DOCLING_FILE_STATUS.Completed}, ${DOCLING_FILE_STATUS.Failed})
     ORDER BY ci."deletedAt" ASC, f.updated_at ASC
-    LIMIT ${Math.max(limit, 1)}`;
+    LIMIT ${Math.max(limit, 1)}`,
+  );
   return rows.map((row) => String(row.file_id));
 };
 
@@ -916,11 +1011,15 @@ export const listLiveDoclingSubmitPermitIds = async (
 ): Promise<Set<string>> => {
   const unique = Array.from(new Set(permitIds.filter(Boolean)));
   if (unique.length === 0) return new Set();
-  const rows = await db.$queryRaw<RawRow[]>`
+  const rows = await rawQuery(
+    DOCLING_TABLES,
+    'filter submit-permit ids down to the ones still live (part still submitting/submitted)',
+    () => db.$queryRaw<RawRow[]>`
     SELECT DISTINCT submit_permit_id
     FROM non_zero.docling_async_parts
     WHERE submit_permit_id = ANY(${unique}::text[])
-      AND status IN (${DOCLING_PART_STATUS.Submitting}, ${DOCLING_PART_STATUS.Submitted})`;
+      AND status IN (${DOCLING_PART_STATUS.Submitting}, ${DOCLING_PART_STATUS.Submitted})`,
+  );
   return new Set(
     rows
       .map((row) => row.submit_permit_id)
@@ -933,11 +1032,15 @@ export const listLiveDoclingCurrentJobIds = async (
 ): Promise<Set<string>> => {
   const unique = Array.from(new Set(jobIds.filter(Boolean)));
   if (unique.length === 0) return new Set();
-  const rows = await db.$queryRaw<RawRow[]>`
+  const rows = await rawQuery(
+    DOCLING_TABLES,
+    'filter job ids down to the ones still live (part still submitting/submitted)',
+    () => db.$queryRaw<RawRow[]>`
     SELECT DISTINCT current_job_id
     FROM non_zero.docling_async_parts
     WHERE current_job_id = ANY(${unique}::text[])
-      AND status IN (${DOCLING_PART_STATUS.Submitting}, ${DOCLING_PART_STATUS.Submitted})`;
+      AND status IN (${DOCLING_PART_STATUS.Submitting}, ${DOCLING_PART_STATUS.Submitted})`,
+  );
   return new Set(
     rows
       .map((row) => row.current_job_id)
