@@ -1225,8 +1225,18 @@ model AgentRun {
   /// runs ↔ assistant messages is ambiguous. Populated in the chat-callback.
   chatMessageId    String?
   orgId            String
+  /// Set when another run spawned this one through A2A `call-agent`: the
+  /// caller's sessionId. Null for a user-invoked run.
+  parentSessionId  String?
+  /// The caller's slug, denormalized so listing child runs needs no second
+  /// lookup per row.
+  parentAgentSlug  String?
+  /// The `call-agent` tool call that spawned this run, lining a child row up
+  /// with its row in the caller's trace.
+  parentToolCallId String?
 
   @@index([userId, status, startedAt])
+  @@index([parentSessionId])
   @@index([agentSlug, startedAt])
   @@index([provider, completedAt])
   @@index([chatMessageId])

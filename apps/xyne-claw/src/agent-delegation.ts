@@ -52,6 +52,9 @@
  * factory output drops straight into the parent tool array.
  */
 
+import { track, type ChildTaskRegistry } from "./child-tasks.js";
+import { isValidFollowUpHandle } from "./subagent-followup.js";
+
 // ── Structural tool shape (compatible with pi ToolDefinition) ──────────────
 
 export interface ToolResultContent {
@@ -139,9 +142,24 @@ export type NestedAgentRunner = (args: {
   /** Governor to hand the callee so ITS own delegation attempts are governed
    *  (and, at the depth cap, refused). */
   childGovernor: AgentDelegationGovernor;
+  /** The spawning tool call. The runner keys the callee's trace on it so the
+   *  child run nests under this row in the caller's debug tree. */
+  toolCallId: string;
+  /** Resume the callee session this handle names instead of starting cold. */
+  followUpId?: string;
   signal?: AbortSignal;
   onProgress?: (label: string) => void;
-}) => Promise<{ text: string; toolsUsed?: string[] }>;
+}) => Promise<{ text: string; toolsUsed?: string[]; followUpId?: string }>;
+
+/** Runtime wiring handed to the delegation tools. All optional: without a
+ *  registry `run_in_background` is not exposed, and without a signal the only
+ *  cancellation is the per-call one the tool creates for itself. */
+export interface DelegationToolOpts {
+  signal?: AbortSignal;
+  onProgress?: (label: string) => void;
+  /** Present on the top-level run only, where results can be drained back. */
+  registry?: ChildTaskRegistry;
+}
 
 // ── Observability ───────────────────────────────────────────────────────────
 
@@ -369,7 +387,7 @@ export function callableAgentDescription(spec: CallableAgentSpec): string {
   );
 }
 
-const paramSchema = (spec: CallableAgentSpec): unknown => ({
+const paramSchema = (spec: CallableAgentSpec, withBackground: boolean): unknown => ({
   type: "object",
   additionalProperties: false,
   required: [spec.paramName ?? "task"],
@@ -380,17 +398,47 @@ const paramSchema = (spec: CallableAgentSpec): unknown => ({
         spec.paramDescription ??
         `The complete, self-contained task for ${spec.name}. Include all context it needs — it does not see this conversation.`,
     },
+    session_id: {
+      type: "string",
+      description:
+        `Optional. To ask ${spec.name} a follow-up WITH the full context of a previous call, pass the session_id that call returned. Omit to start a fresh session.`,
+    },
+    ...(withBackground
+      ? {
+          run_in_background: {
+            type: "boolean",
+            description:
+              `Run ${spec.name} in the BACKGROUND (non-blocking). You get an immediate acknowledgement and keep working; its answer is delivered to you automatically before you finish your reply. Do NOT poll for it.`,
+          },
+        }
+      : {}),
   },
 });
+
+/** Reads the two control params shared by both delegation tool shapes. A
+ *  malformed handle starts a fresh session rather than failing the call. */
+function readDelegationControls(
+  raw: Record<string, unknown> | null | undefined,
+  opts: DelegationToolOpts,
+): { followUpId?: string; background?: boolean } {
+  const handle = raw?.["session_id"];
+  return {
+    ...(isValidFollowUpHandle(handle) ? { followUpId: handle } : {}),
+    ...(raw?.["run_in_background"] === true && opts.registry ? { background: true } : {}),
+  };
+}
 
 async function runGovernedDelegation(args: {
   spec: CallableAgentSpec;
   question: string;
   governor: AgentDelegationGovernor;
   runner: NestedAgentRunner;
-  opts?: { signal?: AbortSignal; onProgress?: (label: string) => void };
+  toolCallId: string;
+  followUpId?: string | undefined;
+  background?: boolean;
+  opts?: DelegationToolOpts;
 }): Promise<ToolResultContent> {
-  const { spec, question, governor, runner, opts = {} } = args;
+  const { spec, question, governor, runner, toolCallId, followUpId, background, opts = {} } = args;
   const caller = governor.ownerSlug;
   governor.emit({
     ts: Date.now(),
@@ -417,8 +465,16 @@ async function runGovernedDelegation(args: {
 
   // 2) Reserve budget, then serialize behind the concurrency-1 mutex.
   governor.reserve();
-  try {
-    const result = await governor.runExclusive(
+
+  // Per-call cancellation: the run's signal stops every delegation, this stops
+  // just this callee, so `task-stop` can kill one slow agent and leave the
+  // others fanned out alongside it running.
+  const callAbort = new AbortController();
+  if (opts.signal?.aborted) callAbort.abort();
+  else opts.signal?.addEventListener("abort", () => callAbort.abort(), { once: true });
+
+  const invoke = async (): Promise<{ text: string; toolsUsed?: string[]; followUpId?: string }> =>
+    governor.runExclusive(
       () => {
         governor.emit({
           ts: Date.now(), kind: "queued", caller, callee: spec.slug, depth: governor.depth,
@@ -434,7 +490,9 @@ async function runGovernedDelegation(args: {
           question,
           depth: governor.depth + 1,
           childGovernor,
-          ...(opts.signal ? { signal: opts.signal } : {}),
+          toolCallId,
+          ...(followUpId ? { followUpId } : {}),
+          signal: callAbort.signal,
           ...(opts.onProgress ? { onProgress: opts.onProgress } : {}),
         });
         governor.emit({
@@ -444,7 +502,60 @@ async function runGovernedDelegation(args: {
         return out;
       },
     );
-    return { content: [{ type: "text", text: result.text }], details: {} };
+
+  // 3) Background: hand the parent an immediate ack and let the drain loop in
+  //    runTask deliver the answer. Budget is already reserved, so a detached
+  //    delegation still counts against the run.
+  if (background && opts.registry) {
+    const detached = invoke().then(
+      (out) => ({
+        content: [{ type: "text" as const, text: out.text }],
+        details: out.followUpId ? { session_id: out.followUpId } : {},
+      }),
+      (err: unknown) => {
+        // The blocking path emits this from its catch. A detached one has none,
+        // and a delegation missing from the event stream reads as never run.
+        governor.emit({
+          ts: Date.now(),
+          kind: "failed",
+          caller,
+          callee: spec.slug,
+          depth: governor.depth,
+          reason: err instanceof Error ? err.message : String(err),
+        });
+        throw err;
+      },
+    );
+    track(opts.registry, {
+      taskId: toolCallId,
+      kind: "agent",
+      name: spec.slug,
+      question,
+      startedAt: Date.now(),
+      promise: detached,
+      cancel: () => callAbort.abort(),
+    });
+    return {
+      content: [{
+        type: "text",
+        text:
+          `Started "${spec.name}" in the background (task ${toolCallId}). It is running now — ` +
+          `continue with other work. Its answer will be delivered to you automatically before you ` +
+          `finish your reply; do NOT block on it or poll for it.`,
+      }],
+      details: { taskId: toolCallId, background: true },
+    };
+  }
+
+  try {
+    const result = await invoke();
+    const followUpFooter = result.followUpId
+      ? `\n\n---\n_Follow-up:_ to ask ${spec.name} another question WITH the full context of this run, call \`call-agent\` again with \`session_id: "${result.followUpId}"\`. Omit it to start fresh.`
+      : "";
+    return {
+      content: [{ type: "text", text: `${result.text}${followUpFooter}` }],
+      details: result.followUpId ? { session_id: result.followUpId } : {},
+    };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     governor.emit({
@@ -462,7 +573,7 @@ export function buildCallableAgentTools(
   specs: CallableAgentSpec[],
   governor: AgentDelegationGovernor,
   runner: NestedAgentRunner,
-  opts: { signal?: AbortSignal; onProgress?: (label: string) => void } = {},
+  opts: DelegationToolOpts = {},
 ): CallableAgentTool[] {
   if (!governor.canExposeDelegationTools()) return [];
   if (!specs || specs.length === 0) return [];
@@ -474,10 +585,19 @@ export function buildCallableAgentTools(
       label: spec.name,
       description: callableAgentDescription(spec),
       progressLabels: spec.progressLabels ?? [`Delegating to ${spec.name}…`],
-      parameters: paramSchema(spec),
+      parameters: paramSchema(spec, opts.registry !== undefined),
       async execute(_toolCallId: string, params: unknown): Promise<ToolResultContent> {
-        const question = String((params as Record<string, unknown>)?.[paramName] ?? "").trim();
-        return runGovernedDelegation({ spec, question, governor, runner, opts });
+        const raw = params as Record<string, unknown> | null | undefined;
+        const question = String(raw?.[paramName] ?? "").trim();
+        return runGovernedDelegation({
+          spec,
+          question,
+          governor,
+          runner,
+          toolCallId: _toolCallId,
+          ...readDelegationControls(raw, opts),
+          opts,
+        });
       },
     };
   });
@@ -488,7 +608,7 @@ export function buildOrchestratorCallableAgentTool(
   governor: AgentDelegationGovernor,
   hydrateSpec: (calleeSlug: string) => Promise<CallableAgentSpec>,
   runner: NestedAgentRunner,
-  opts: { signal?: AbortSignal; onProgress?: (label: string) => void } = {},
+  opts: DelegationToolOpts = {},
 ): CallableAgentTool[] {
   if (!governor.canExposeDelegationTools()) return [];
   if (!specs || specs.length === 0) return [];
@@ -517,6 +637,20 @@ export function buildOrchestratorCallableAgentTool(
           type: "string",
           description: "The complete, self-contained task for the selected agent. Include all context it needs — it does not see this conversation.",
         },
+        session_id: {
+          type: "string",
+          description:
+            "Optional. To ask THIS SAME agent a follow-up WITH the full context of a previous call, pass the session_id that call returned. Omit to start a fresh session. Never pass a session_id another agent returned.",
+        },
+        ...(opts.registry
+          ? {
+              run_in_background: {
+                type: "boolean",
+                description:
+                  "Run this agent in the BACKGROUND (non-blocking). You get an immediate acknowledgement and keep working; its answer is delivered to you automatically before you finish your reply. Use for slow, independent work. Leave unset when you need the answer to decide your very next step. Do NOT poll for it.",
+              },
+            }
+          : {}),
       },
     },
     async execute(_toolCallId: string, params: unknown): Promise<ToolResultContent> {
@@ -536,7 +670,15 @@ export function buildOrchestratorCallableAgentTool(
       }
       opts.onProgress?.(light.progressLabels?.[0] ?? `Delegating to ${light.name}…`);
       const fullSpec = await hydrateSpec(agentSlug);
-      return runGovernedDelegation({ spec: fullSpec, question, governor, runner, opts });
+      return runGovernedDelegation({
+        spec: fullSpec,
+        question,
+        governor,
+        runner,
+        toolCallId: _toolCallId,
+        ...readDelegationControls(raw, opts),
+        opts,
+      });
     },
   }];
 }

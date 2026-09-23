@@ -697,10 +697,13 @@ async function readLegacySubagentArtifacts(debugDirs: string[]): Promise<Subagen
  * A child run recorded in the new format is a first-class run with a
  * `parentRunId`/`parentToolCallId` header. The drawer only knows the legacy
  * `subagents-*.json` shape, so project it into that shape rather than teaching
- * the UI a second one. `sessionId` on a child header is the PARENT's session
- * (subagent-tools reuses it), which is exactly what `parentSessionId` means here.
+ * the UI a second one.
+ *
+ * `parentSessionId` must be the CALLER's session — it is what the drawer matches
+ * each turn's run against. A subagent's own `sessionId` already is that, but a
+ * delegated agent has a session of its own, so the fallback points it at itself.
  */
-function subagentFromChildRun(h: RunHeader, snapshot: Record<string, unknown>): SubagentArtifact | null {
+export function subagentFromChildRun(h: RunHeader, snapshot: Record<string, unknown>): SubagentArtifact | null {
   if (h.parentRunId === undefined && h.parentToolCallId === undefined) return null;
   const name = h.subagentName ?? "subagent";
   const token = safeRunToken(`${name}-${h.parentToolCallId ?? h.runId}`);
@@ -709,9 +712,10 @@ function subagentFromChildRun(h: RunHeader, snapshot: Record<string, unknown>): 
     data: {
       ...snapshot,
       schemaVersion: 1,
-      parentSessionId: h.sessionId ?? h.parentRunId ?? "",
+      parentSessionId: h.parentSessionId ?? h.sessionId ?? h.parentRunId ?? "",
       ...(h.parentToolCallId !== undefined ? { parentToolCallId: h.parentToolCallId } : {}),
       subagentName: name,
+      ...(h.childKind !== undefined ? { childKind: h.childKind } : {}),
       ...(h.question !== undefined ? { question: h.question } : {}),
     },
   };

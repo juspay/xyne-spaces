@@ -212,6 +212,13 @@ export interface RunHeader {
   mode?: string;
   /** Set on subagent / delegated child runs. */
   parentRunId?: string;
+  /** The CALLER's session id. A subagent shares its parent's session, so its own
+   *  `sessionId` doubles as this; a delegated agent gets a session of its own, so
+   *  without this the bundle cannot tell which turn the child belongs to. */
+  parentSessionId?: string;
+  /** Which kind of child this is: a subagent tool, or a full agent reached
+   *  through A2A delegation. Both nest the same way; only the label differs. */
+  childKind?: "subagent" | "agent";
   parentToolCallId?: string;
   subagentName?: string;
   /** Child-run question, for subagent traces. */

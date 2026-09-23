@@ -3997,7 +3997,7 @@ export interface AgentRun {
   sessionId: string;
   userId: string;
   agentSlug: string;
-  triggerSource: "spaces" | "scheduled" | "chat" | "api" | "automation";
+  triggerSource: "spaces" | "scheduled" | "chat" | "api" | "automation" | "delegation";
   status: "running" | "completed" | "failed" | "cancelled";
   currentToolLabel: string | null;
   task: string;
@@ -4032,6 +4032,10 @@ export interface AgentRun {
    *  branching: once a user message has multiple assistant siblings,
    *  chronology no longer pairs runs ↔ assistants — chatMessageId does. */
   chatMessageId?: string | null;
+  /** Set when another run spawned this one through `call-agent`: the caller's
+   *  session and slug, for telling a child run apart from a top-level one. */
+  parentSessionId?: string | null;
+  parentAgentSlug?: string | null;
   /** Populated only by the elevated "All Runs" (scope=all) listing — null elsewhere. */
   userName?: string | null;
   userEmail?: string | null;
@@ -4194,6 +4198,10 @@ export interface AgentRunListItem {
   tokensIn: number | null;
   tokensOut: number | null;
   rating: "up" | "down" | null;
+  /** Set when another run spawned this one through `call-agent`: the caller's
+   *  session and slug, for telling a child run apart from a top-level one. */
+  parentSessionId?: string | null;
+  parentAgentSlug?: string | null;
   /** Hydrated only by scope=all — null/absent otherwise. */
   userName?: string | null;
   userEmail?: string | null;
