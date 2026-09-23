@@ -1,16 +1,10 @@
-import { useState, type FocusEvent, type ReactElement } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
-import { toast } from 'sonner';
-import { Button } from '@/components/ui/Button/index';
-import { clawAgentDetailKey } from '@/hooks/useClawAgentDetail';
-import { clawPromptVersionsKey } from '@/hooks/useClawPromptVersions';
-import { updateClawAgent } from '@/services/claw/clawAuthAgentsService';
-import { clawErrorText } from '@/services/claw/clawRequest';
+import { useCallback, useRef, type ReactElement } from 'react';
 import { PROSE_BOX_HEIGHT, ProseBox } from '../../../shared/primitives/ProseBox';
 import { AgentPromptVersions } from './AgentPromptVersions';
 import { CredentialsCard } from './credentials/CredentialsCard';
 import { ModelCard } from './model/ModelCard';
-import type { Agent, UpdateAgentPayload } from '@/services/claw/clawAuthAgentTypes';
+import type { Agent } from '@/services/claw/clawAuthAgentTypes';
+import type { AgentDraft } from '../useAgentDraft';
 import {
   DetailCard,
   DetailEmpty,
@@ -19,13 +13,64 @@ import {
 } from '../../../shared/primitives/DetailPrimitives';
 
 const EDITOR =
-  'w-full rounded-2xl border border-border bg-card p-4 text-sm leading-5 text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:ring-1 focus:ring-ring';
+  'w-full rounded-2xl border-border p-4 text-sm leading-5 tracking-[-0.28px] text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:ring-1 focus:ring-ring';
 
-function focusAtEnd(el: HTMLTextAreaElement | null): void {
+const DESCRIPTION_EDITOR = `${EDITOR} border bg-card resize-none overflow-hidden`;
+
+const PROMPT_EDITOR = `${EDITOR} border-[0.8px] bg-muted/30 resize-y`;
+
+interface CaretHint {
+  offset: number;
+  scrollTop: number;
+}
+
+function fitToContent(el: HTMLTextAreaElement | null): void {
   if (!el) return;
+  el.style.height = 'auto';
+  el.style.height = `${el.scrollHeight + (el.offsetHeight - el.clientHeight)}px`;
+}
+
+function caretNodeFromPoint(x: number, y: number): { node: Node; offset: number } | null {
+  const doc = document as Document & {
+    caretPositionFromPoint?: (x: number, y: number) => { offsetNode: Node; offset: number } | null;
+    caretRangeFromPoint?: (x: number, y: number) => Range | null;
+  };
+  const position = doc.caretPositionFromPoint?.(x, y);
+  if (position) return { node: position.offsetNode, offset: position.offset };
+  const range = doc.caretRangeFromPoint?.(x, y);
+  if (range) return { node: range.startContainer, offset: range.startOffset };
+  return null;
+}
+
+function scrollTopOf(node: Node, root: HTMLElement): number {
+  let el = node.nodeType === Node.ELEMENT_NODE ? (node as HTMLElement) : node.parentElement;
+  while (el && root.contains(el)) {
+    if (el.scrollHeight > el.clientHeight) return el.scrollTop;
+    el = el.parentElement;
+  }
+  return 0;
+}
+
+function caretFromClick(root: HTMLElement, x: number, y: number): CaretHint | null {
+  const hit = caretNodeFromPoint(x, y);
+  if (!hit || !root.contains(hit.node)) return null;
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  let before = 0;
+  while (walker.nextNode()) {
+    if (walker.currentNode === hit.node) {
+      return { offset: before + hit.offset, scrollTop: scrollTopOf(hit.node, root) };
+    }
+    before += (walker.currentNode.textContent ?? '').length;
+  }
+  return null;
+}
+
+function placeCaret(el: HTMLTextAreaElement, hint: CaretHint | null): void {
+  if (!hint) return;
   el.focus();
-  el.setSelectionRange(el.value.length, el.value.length);
-  el.scrollTop = el.scrollHeight;
+  const at = Math.min(Math.max(hint.offset, 0), el.value.length);
+  el.setSelectionRange(at, at);
+  el.scrollTop = hint.scrollTop;
 }
 
 function ClickToEdit({
@@ -36,7 +81,7 @@ function ClickToEdit({
 }: {
   enabled: boolean;
   label: string;
-  onEdit: () => void;
+  onEdit: (caret: CaretHint | null) => void;
   children: ReactElement;
 }): ReactElement {
   if (!enabled) return children;
@@ -45,11 +90,11 @@ function ClickToEdit({
       role='button'
       tabIndex={0}
       aria-label={label}
-      onClick={onEdit}
+      onClick={event => onEdit(caretFromClick(event.currentTarget, event.clientX, event.clientY))}
       onKeyDown={event => {
         if (event.key === 'Enter' || event.key === ' ') {
           event.preventDefault();
-          onEdit();
+          onEdit(null);
         }
       }}
       data-track-category='Claw Agents'
@@ -65,94 +110,59 @@ export function AgentPersonaTabV2({
   agent,
   canEdit,
   canManageCredentials,
+  draft,
 }: {
   agent: Agent;
   canEdit: boolean;
   canManageCredentials: boolean;
+  draft: AgentDraft;
 }): ReactElement {
-  const queryClient = useQueryClient();
-  const [loadedSlug, setLoadedSlug] = useState(agent.slug);
-  const [description, setDescription] = useState(agent.description);
-  const [systemPrompt, setSystemPrompt] = useState(agent.systemPrompt);
-  const [editingDescription, setEditingDescription] = useState(false);
-  const [editingPrompt, setEditingPrompt] = useState(false);
-  const [saving, setSaving] = useState(false);
+  const pendingCaret = useRef<CaretHint | null>(null);
 
-  if (loadedSlug !== agent.slug) {
-    setLoadedSlug(agent.slug);
-    setDescription(agent.description);
-    setSystemPrompt(agent.systemPrompt);
-    setEditingDescription(false);
-    setEditingPrompt(false);
-  }
+  const attachDescription = useCallback((el: HTMLTextAreaElement | null): void => {
+    if (!el) return;
+    fitToContent(el);
+    placeCaret(el, pendingCaret.current);
+    pendingCaret.current = null;
+  }, []);
 
-  const descriptionChanged = description !== agent.description;
-  const promptChanged = systemPrompt !== agent.systemPrompt;
-  const dirty = descriptionChanged || promptChanged;
+  const attachPrompt = useCallback((el: HTMLTextAreaElement | null): void => {
+    if (!el) return;
+    placeCaret(el, pendingCaret.current);
+    pendingCaret.current = null;
+  }, []);
 
-  const collapseOnOutsideFocus = (event: FocusEvent<HTMLDivElement>): void => {
-    const next = event.relatedTarget;
-    if (next instanceof Node && event.currentTarget.contains(next)) return;
-    setEditingDescription(false);
-    setEditingPrompt(false);
+  const startWithCaret = (caret: CaretHint | null): void => {
+    pendingCaret.current = caret;
+    draft.start();
   };
 
-  const cancel = (): void => {
-    setDescription(agent.description);
-    setSystemPrompt(agent.systemPrompt);
-    setEditingDescription(false);
-    setEditingPrompt(false);
-  };
-
-  const save = async (): Promise<void> => {
-    if (!dirty || saving) return;
-    setSaving(true);
-    const payload: UpdateAgentPayload = {
-      ...(descriptionChanged ? { description } : {}),
-      ...(promptChanged ? { systemPrompt } : {}),
-    };
-    try {
-      const updated = await updateClawAgent(agent.slug, payload);
-      queryClient.setQueryData(clawAgentDetailKey(agent.slug), updated);
-      if (promptChanged) {
-        void queryClient.invalidateQueries({ queryKey: clawPromptVersionsKey(agent.slug) });
-      }
-      setDescription(updated.description);
-      setSystemPrompt(updated.systemPrompt);
-      setEditingDescription(false);
-      setEditingPrompt(false);
-      toast.success('Changes saved');
-    } catch (err) {
-      toast.error(clawErrorText(err, 'Could not save the changes'));
-    } finally {
-      setSaving(false);
-    }
-  };
+  const editing = canEdit && draft.editing;
 
   return (
     <div className='flex w-full flex-col gap-8'>
-      <div className='flex w-full flex-col gap-8' onBlur={collapseOnOutsideFocus}>
+      <div className='flex w-full flex-col gap-8'>
         <DetailSection label='Description' info='What this agent is for'>
-          {canEdit && editingDescription ? (
+          {editing ? (
             <textarea
-              value={description}
-              onChange={event => setDescription(event.target.value)}
+              value={draft.description}
+              onChange={event => {
+                draft.setDescription(event.target.value);
+                fitToContent(event.target);
+              }}
               placeholder='Add a description so people and agents understand when to use it.'
               aria-label='Agent description'
-              ref={focusAtEnd}
+              rows={1}
+              ref={attachDescription}
               data-track-category='Claw Agents'
               data-track-name='Agent detail v2: edit description'
-              className={`${EDITOR} h-[86px] resize-y`}
+              className={DESCRIPTION_EDITOR}
             />
           ) : (
-            <ClickToEdit
-              enabled={canEdit}
-              label='Edit description'
-              onEdit={() => setEditingDescription(true)}
-            >
+            <ClickToEdit enabled={canEdit} label='Edit description' onEdit={startWithCaret}>
               <DetailCard>
-                {description ? (
-                  <DetailProse>{description}</DetailProse>
+                {draft.description ? (
+                  <DetailProse>{draft.description}</DetailProse>
                 ) : (
                   <DetailEmpty>No description added</DetailEmpty>
                 )}
@@ -162,59 +172,28 @@ export function AgentPersonaTabV2({
         </DetailSection>
 
         <DetailSection label='System Prompt' info='The instructions this agent runs with'>
-          {canEdit && editingPrompt ? (
+          {editing ? (
             <textarea
-              value={systemPrompt}
-              onChange={event => setSystemPrompt(event.target.value)}
+              value={draft.systemPrompt}
+              onChange={event => draft.setSystemPrompt(event.target.value)}
               placeholder='Describe how this agent should behave.'
               aria-label='Agent system prompt'
-              ref={focusAtEnd}
+              ref={attachPrompt}
               style={{ height: PROSE_BOX_HEIGHT }}
               data-track-category='Claw Agents'
               data-track-name='Agent detail v2: edit system prompt'
-              className={`${EDITOR} resize-y`}
+              className={PROMPT_EDITOR}
             />
           ) : (
-            <ClickToEdit
-              enabled={canEdit}
-              label='Edit system prompt'
-              onEdit={() => setEditingPrompt(true)}
-            >
-              {systemPrompt ? (
-                <ProseBox>{systemPrompt}</ProseBox>
+            <ClickToEdit enabled={canEdit} label='Edit system prompt' onEdit={startWithCaret}>
+              {draft.systemPrompt ? (
+                <ProseBox>{draft.systemPrompt}</ProseBox>
               ) : (
                 <DetailCard>
                   <DetailEmpty>No system prompt set</DetailEmpty>
                 </DetailCard>
               )}
             </ClickToEdit>
-          )}
-
-          {canEdit && (editingDescription || editingPrompt || dirty) && (
-            <div className='flex w-full items-center justify-end gap-2'>
-              <Button
-                variant='ghost'
-                size='sm'
-                onClick={cancel}
-                disabled={saving}
-                className='rounded-lg'
-                data-track-category='Claw Agents'
-                data-track-name='Agent detail v2: cancel persona edits'
-              >
-                Cancel
-              </Button>
-              <Button
-                size='sm'
-                onClick={() => void save()}
-                disabled={!dirty}
-                loading={saving}
-                className='rounded-lg'
-                data-track-category='Claw Agents'
-                data-track-name='Agent detail v2: save persona edits'
-              >
-                Save
-              </Button>
-            </div>
           )}
         </DetailSection>
       </div>
@@ -223,10 +202,7 @@ export function AgentPersonaTabV2({
         <AgentPromptVersions
           agentSlug={agent.slug}
           canRestore={canEdit}
-          onRestored={restored => {
-            setSystemPrompt(restored);
-            setEditingPrompt(false);
-          }}
+          onRestored={restored => draft.setSystemPrompt(restored)}
         />
       )}
 
