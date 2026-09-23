@@ -19,8 +19,8 @@ export class SyncEngine {
     logger.info('sync_engine_started', { zeroCacheUrl: zeroCacheUrl() });
   }
 
-  stop(): void {
-    this.#manager?.stopAll();
+  async stop(): Promise<void> {
+    await this.#manager?.stopAll();
     this.#manager = null;
     // Close the dedicated sync-store connection (app.ts stops the fan-out first, so nothing else
     // is using it by now). Lazily recreated if the engine restarts.

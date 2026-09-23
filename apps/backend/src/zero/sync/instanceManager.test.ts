@@ -208,6 +208,51 @@ test('InstanceManager two pods: exactly one owns; non-owner never reclaims; inte
   }
 });
 
+test('graceful stopAll RELEASES owned leases: survivor takes over on next heartbeat, no TTL lapse', { skip }, async () => {
+  const client = redisService!.getClient();
+  const rnd = Math.floor(Math.random() * 1e9);
+  const ownA = new Ownership!(`podA-${rnd}`);
+  const ownB = new Ownership!(`podB-${rnd}`);
+  const createdA: Rec[] = [];
+  const createdB: Rec[] = [];
+  const mk = (own: import('./ownership').Ownership, created: Rec[]) =>
+    new InstanceManager!('http://zero', {
+      multiPod: true,
+      ownership: own,
+      assertRedisSafe: async () => {},
+      heartbeatMs: 25,
+      graceMs: 20,
+      createConnection: fakeFactory(created),
+    });
+  const mgrA = mk(ownA, createdA);
+  const mgrB = mk(ownB, createdB);
+  const channel = `deploy-${rnd}`;
+
+  const ik = mgrA.subscribe(QUERY, argsFor(channel), 'subA')!;
+  await waitFor(() => createdA.length > 0, 'A materializes (owns)');
+  mgrB.subscribe(QUERY, argsFor(channel), 'subB');
+  const G = createdA[0].opts.clientGroupID;
+  try {
+    await waitFor(async () => (await ownA.liveInterest(ik)) === 2, 'both pods registered interest');
+    assert.equal(await ownA.ownsGroup(G), true, 'A owns before the deploy');
+
+    // The rolling-deploy path: graceful shutdown must RELEASE the lease (not let it lapse),
+    // so the survivor acquires on its next heartbeat instead of after LEASE_TTL (10s).
+    const t0 = Date.now();
+    await mgrA.stopAll();
+    assert.equal(await client.get(`sync:owner:${G}`), null, 'lease released at shutdown, not lapsing');
+
+    await waitFor(() => createdB.length > 0, 'survivor materializes the group');
+    const takeoverMs = Date.now() - t0;
+    assert.equal(await ownB.ownsGroup(G), true, 'survivor owns after graceful handoff');
+    assert.ok(takeoverMs < 5000, `handoff took ${takeoverMs}ms - must not wait the 10s lease TTL`);
+  } finally {
+    await mgrB.stopAll();
+    await sleep(40);
+    await client.del(`sync:owner:${G}`, `sync:fence:${G}`, `sync:interest:${ik}`, `sync:snap:${ik}`, `sync:stream:${ik}`, `sync:cookie:${G}`, `sync:ginst:${G}`);
+  }
+});
+
 test('InstanceManager owner reconcile: materialize remote-only interest, sweep on drain', { skip }, async () => {
   const own = ownership!;
   const client = redisService!.getClient();

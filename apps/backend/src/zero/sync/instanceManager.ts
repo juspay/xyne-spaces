@@ -455,13 +455,24 @@ export class InstanceManager {
     }
   }
 
-  stopAll(): void {
+  async stopAll(): Promise<void> {
     this.#stopped = true;
     this.#stopHeartbeat();
     for (const instance of this.#instances.values()) {
       if (instance.idleTimer) clearTimeout(instance.idleTimer);
     }
+    // Stop the taps FIRST (no more fenced writes under our lease), THEN release the leases —
+    // a graceful rolling deploy hands each owned group to the next heartbeat (~2s) instead of
+    // paying the full LEASE_TTL lapse (~10s) per group. Best-effort (allSettled): a failed
+    // release just degrades to the TTL path the crash smoke already proved; the app shutdown
+    // awaits this before closing Redis, so releases actually land.
+    const owned = this.#multiPod
+      ? [...this.#groups.values()].filter((g) => g.owned).map((g) => g.clientGroupID)
+      : [];
     for (const group of this.#groups.values()) group.connection?.stop();
+    if (owned.length > 0) {
+      await Promise.allSettled(owned.map((g) => this.#ownership.releaseGroup(g)));
+    }
     this.#groups.clear();
     this.#instances.clear();
   }

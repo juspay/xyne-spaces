@@ -1220,7 +1220,9 @@ export class App {
 
       if (config.enableSyncEngine) {
         fanout.stop();
-        syncEngine.stop();
+        // Awaited: releases owned group leases for instant takeover on rolling deploys
+        // (Redis closes below, so the releases must land first).
+        await syncEngine.stop();
       }
 
       await DatabaseClient.disconnect();
