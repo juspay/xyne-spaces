@@ -1,6 +1,7 @@
 import { jevEnabled, jevScoreItems, jevThreshold } from "./jev.js";
 import { recordJudgeOutcome } from "./judge-backend.js";
 import { optEnabled } from "./optimizations.js";
+import { looksReadOnly } from "./read-only-tools.js";
 import { metric } from "./metrics.js";
 import { Type } from "@sinclair/typebox";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
@@ -227,6 +228,7 @@ export function buildToolCatalog(params: {
    */
   catalogUnwrapped?: boolean;
   catalogUnwrappedWrites?: boolean;
+  includeSubagentReadTools?: boolean;
 }): ToolCatalogItem[] {
   const items: ToolCatalogItem[] = [];
   const seen = new Set<string>();
@@ -257,6 +259,27 @@ export function buildToolCatalog(params: {
       const palette = resolveCustomSubagentTools(spec.tools, params.groups, params.customTools);
       for (const tool of palette) {
         addUnique(items, seen, tool, `custom-subagent:${spec.name}`);
+      }
+    }
+  }
+
+  if (params.includeSubagentReadTools && !params.includeSubagentTools) {
+    for (const group of params.groups) {
+      if (group.sourceSubagent) continue;
+      const def = findSubagentDefinitionForServer(group.serverType);
+      if (!def) continue;
+      const writeSet = new Set(group.writeTools.map(String));
+      for (const tool of group.tools) {
+        if (!looksReadOnly(tool.name, writeSet.has(extractRuntimeToolName(tool.name)))) continue;
+        addUnique(items, seen, tool, `subagent:${def.name}`, group.serverType);
+      }
+    }
+    if (params.customTools) {
+      for (const def of SUBAGENT_DEFINITIONS) {
+        for (const tool of params.customTools.filter((t) => customToolSource(t) === def.serverType)) {
+          if (!looksReadOnly(tool.name, isCustomWriteTool(tool))) continue;
+          addUnique(items, seen, tool, `subagent:${def.name}`, def.serverType);
+        }
       }
     }
   }
@@ -583,6 +606,7 @@ export function buildFastModeMetaTools(options: {
   openPalette?: boolean;
   /** Connected MCP servers, for `scope:"mcp"`. Empty when none are wired. */
   mcpServers?: McpServerSummary[];
+  activeTools?: ToolCatalogEntry[];
 }): ToolDefinition[] {
   const catalog = [...options.catalog].sort((a, b) => a.name.localeCompare(b.name));
   const emptyCatalogMessage = [
@@ -626,7 +650,9 @@ export function buildFastModeMetaTools(options: {
         'scope="mcp" answers "which MCP servers am I connected to". On its own it lists them with their tool counts; add `mcp` to list one server\'s tools. Use it when the ask names a system ("anything from Heisenberg?") rather than a task.\n' +
         "Omit `query` to browse the whole scope. Pass `query` to narrow it, and describe what you are trying to DO rather than guessing a tool name — \"post a message to a channel\", \"fill in a pdf form\". Agent scope matches on words, so keywords work; claw scope is a semantic search, so a full phrase works better than a single noun.\n" +
         "`catalog` narrows the agent scope to one catalog; `integration` narrows the claw scope to one product (google, sandbox, github). `maxRisk` is a ceiling, not an exact match: \"read\" excludes everything that writes, \"write\" still excludes destructive. Use it when you only need to look something up.\n" +
-        "Call it before guessing a tool name. A wrong name costs a failed call; a search costs one cheap round trip.",
+        (options.activeTools
+          ? "Only for tools you do not already have: if a tool already in your tool list fits, call it directly — no search or load needed. When you do search, matching tools that are already active are listed first."
+          : "Call it before guessing a tool name. A wrong name costs a failed call; a search costs one cheap round trip."),
       parameters: Type.Unsafe({
         type: "object",
         additionalProperties: false,
@@ -750,7 +776,19 @@ export function buildFastModeMetaTools(options: {
 
         const scoped = scopeTo(input.catalog);
         if ("error" in scoped) return text(scoped.error);
+        const activeAllowed = maxRisk ? new Set(riskAtOrBelow(maxRisk as "read" | "write" | "destructive")) : null;
+        const activeHits =
+          query && options.activeTools && !input.catalog && !mcp
+            ? matchScoped(options.activeTools, query).filter((e) => !activeAllowed || activeAllowed.has(entryRisk(e)))
+            : [];
+        const activeSection = activeHits.length
+          ? [
+              `## already active — call directly, no search or load needed (${activeHits.length})`,
+              ...activeHits.slice(0, limit).map((e) => `  - ${e.name}: ${e.oneLineDescription}`),
+            ].join("\n")
+          : "";
         if (scoped.entries.length === 0) {
+          if (activeSection) return text(`${activeHits.length} tool(s) you already have match ${JSON.stringify(query)} — call them directly.\n\n${activeSection}`);
           return text(`The tool catalog is empty. ${emptyCatalogMessage}`);
         }
         if (mcp && !mcpServerTypes.includes(mcp)) {
@@ -761,6 +799,9 @@ export function buildFastModeMetaTools(options: {
         const allowed = maxRisk ? new Set(riskAtOrBelow(maxRisk as "read" | "write" | "destructive")) : null;
         const risked = allowed ? byServer.filter((e) => allowed.has(entryRisk(e))) : byServer;
         const matched = query ? await matchScopedSifted(risked, query) : risked;
+        if (matched.length === 0 && activeSection) {
+          return text(`Nothing to load matches ${JSON.stringify(query)}, but ${activeHits.length} tool(s) you already have do — call them directly.\n\n${activeSection}`);
+        }
         if (matched.length === 0) {
           return text(
             `No tool in this agent's catalog matches ${JSON.stringify(query)}. ` +
@@ -773,7 +814,8 @@ export function buildFastModeMetaTools(options: {
         const header =
           `${shown.length} of ${matched.length} matching tool(s)${query ? ` for ${JSON.stringify(query)}` : ""}. ` +
           'Pick the names you need and call load-tools({ names: [...] }), or load-tools({ catalog: "<name>" }) for a whole catalog.';
-        return text(renderGrouped(shown, header));
+        const grouped = renderGrouped(shown, header);
+        return text(activeSection ? `${activeSection}\n\n${grouped}` : grouped);
       },
     },
     {
@@ -855,9 +897,19 @@ export function buildFastModeMetaTools(options: {
         const resolved: string[] = [];
         const unknown: string[] = [];
         const ambiguous: string[] = [];
+        const alreadyActive: string[] = [];
+        const activeByName = new Map((options.activeTools ?? []).map((e) => [e.name, e]));
+        const activeMatch = (requested: string): string | null => {
+          if (activeByName.has(requested)) return requested;
+          const bare = requested.split("__").pop() ?? requested;
+          const hits = [...activeByName.keys()].filter((n) => (n.split("__").pop() ?? n) === bare);
+          return hits.length === 1 ? hits[0]! : null;
+        };
         for (const requested of names) {
           const hit = resolveCatalogName(requested, byName, catalog);
-          if (hit === null) unknown.push(requested);
+          const active = hit === null ? activeMatch(requested) : null;
+          if (active) alreadyActive.push(active);
+          else if (hit === null) unknown.push(requested);
           else if ("ambiguous" in hit) ambiguous.push(`${requested} (could be ${hit.ambiguous.join(" or ")})`);
           else resolved.push(hit.name);
         }
@@ -870,9 +922,12 @@ export function buildFastModeMetaTools(options: {
         const parts = [
           result.loaded.length > 0 ? `Loaded: ${result.loaded.join(", ")}` : "",
           result.alreadyLoaded.length > 0 ? `Already loaded: ${result.alreadyLoaded.join(", ")}` : "",
+          alreadyActive.length > 0 ? `Already active — nothing to load, call directly: ${alreadyActive.join(", ")}` : "",
           ambiguous.length > 0 ? `Ambiguous, name the server too: ${ambiguous.join("; ")}` : "",
           allUnknown.length > 0 ? unknownExplanation(allUnknown, catalog) : "",
-          `Active tools: ${result.activeToolSet.length}/${result.maxActiveTools}`,
+          options.activeTools
+            ? `Loaded on demand: ${result.activeToolSet.length}/${result.maxActiveTools} (the ${options.activeTools.length} tools you started with are separate and always callable)`
+            : `Active tools: ${result.activeToolSet.length}/${result.maxActiveTools}`,
           "Loaded tools are available starting with the next assistant turn.",
         ].filter(Boolean);
         return { content: [{ type: "text" as const, text: parts.join("\n") }], details: {} };
@@ -902,9 +957,61 @@ const INLINE_LISTING_MAX = 15;
  * replaces delegation and the model must call these tools itself, whereas with
  * delegation on the catalog is purely additive and the claim would be false.
  */
+const INDEX_CHAR_BUDGET_DEFAULT = 24_000;
+const INDEX_ONE_LINER_FULL = 300;
+const INDEX_ONE_LINER_SHORT = 110;
+
+type IndexTier = "full" | "short" | "names" | "header";
+
+function indexCharBudget(): number {
+  const raw = Number(process.env["XYNE_CATALOG_INDEX_BUDGET"]);
+  return Number.isFinite(raw) && raw >= 2_000 ? raw : INDEX_CHAR_BUDGET_DEFAULT;
+}
+
+function clip(text: string, max: number): string {
+  const flat = text.replace(/\s+/g, " ").trim();
+  return flat.length <= max ? flat : `${flat.slice(0, max - 1).trimEnd()}…`;
+}
+
+function renderCatalogSection(name: string, entries: ToolCatalogEntry[], tier: IndexTier): string[] {
+  const header = `- **${name}** (${entries.length} tool${entries.length === 1 ? "" : "s"})`;
+  if (tier === "header") return [`${header} — call search-tools with this catalog to see its tools.`];
+  if (tier === "names") return [`${header}: ${entries.map((e) => e.name).join(", ")}`];
+  const max = tier === "full" ? INDEX_ONE_LINER_FULL : INDEX_ONE_LINER_SHORT;
+  return [header, ...entries.map((e) => `    - ${e.name}: ${clip(e.oneLineDescription, max)}`)];
+}
+
+const TIER_ORDER: IndexTier[] = ["full", "short", "names", "header"];
+
+function fitIndexTiers(byCatalog: Array<[string, ToolCatalogEntry[]]>, budget: number): Map<string, IndexTier> {
+  const tiers = new Map<string, IndexTier>(byCatalog.map(([name]) => [name, "full"]));
+  const sizeAt = (name: string, entries: ToolCatalogEntry[], tier: IndexTier): number =>
+    renderCatalogSection(name, entries, tier).join("\n").length + 1;
+  const sizes = new Map<string, number>(byCatalog.map(([name, entries]) => [name, sizeAt(name, entries, "full")]));
+  let total = [...sizes.values()].reduce((sum, n) => sum + n, 0);
+  const entriesOf = new Map(byCatalog);
+  while (total > budget) {
+    let target: string | undefined;
+    let largest = -1;
+    for (const [name, size] of sizes) {
+      if (tiers.get(name) !== "header" && size > largest) {
+        largest = size;
+        target = name;
+      }
+    }
+    if (!target) break;
+    const next = TIER_ORDER[TIER_ORDER.indexOf(tiers.get(target)!) + 1]!;
+    tiers.set(target, next);
+    const resized = sizeAt(target, entriesOf.get(target)!, next);
+    total += resized - sizes.get(target)!;
+    sizes.set(target, resized);
+  }
+  return tiers;
+}
+
 export function renderToolCatalogForPrompt(
   catalog: ToolCatalogEntry[],
-  opts?: { subagentDelegationDisabled?: boolean },
+  opts?: { subagentDelegationDisabled?: boolean; fullIndex?: boolean; preferDirect?: boolean },
 ): string {
   if (catalog.length === 0) return "";
 
@@ -914,23 +1021,43 @@ export function renderToolCatalogForPrompt(
     list.push(entry);
     byCatalog.set(entry.catalog, list);
   }
-
-  const sections = [...byCatalog.entries()]
+  const ordered = [...byCatalog.entries()]
     .sort(([a], [b]) => a.localeCompare(b))
-    .flatMap(([name, entries]) => {
-      const sorted = entries.slice().sort((a, b) => a.name.localeCompare(b.name));
-      const header = `- **${name}** (${sorted.length} tool${sorted.length === 1 ? "" : "s"})`;
-      if (sorted.length > INLINE_LISTING_MAX) {
-        return [`${header} — call search-tools with this catalog to see its tools.`];
-      }
-      return [header, ...sorted.map((entry) => `    - ${entry.name}: ${entry.oneLineDescription}`)];
-    });
+    .map(([name, entries]): [string, ToolCatalogEntry[]] => [name, entries.slice().sort((a, b) => a.name.localeCompare(b.name))]);
+
+  const subagentCatalogs = [...new Set(catalog.filter((e) => e.source.startsWith("subagent:")).map((e) => e.catalog))].sort();
+  const directFirst =
+    opts?.preferDirect && !opts.subagentDelegationDisabled && subagentCatalogs.length
+      ? [`The ${subagentCatalogs.join(", ")} catalog${subagentCatalogs.length === 1 ? " holds" : "s hold"} the same read tools your subagent${subagentCatalogs.length === 1 ? "" : "s"} of that name use${subagentCatalogs.length === 1 ? "s" : ""}. Call them yourself first: a subagent is a slow nested model run, so delegate only for a write or for open-ended research that needs many queries.`]
+      : [];
+  const intro = opts?.subagentDelegationDisabled
+    ? "Subagent delegation is disabled. The tools below are NOT loaded yet — use `load-tools` to pull in the ones you need, then call them yourself."
+    : "The tools below are NOT loaded yet — their full schemas arrive only when you ask for them.";
+
+  if (opts?.fullIndex) {
+    const tiers = fitIndexTiers(ordered, indexCharBudget());
+    return [
+      "## Tool Catalogs",
+      intro,
+      "Tools already in your tool list are ready to call — they are not listed here and never need searching or loading.",
+      ...directFirst,
+      "Every tool you can load is named below. Pick only the specific tools this task will call and pass their exact names to `load-tools` — no search needed. Do not load a whole catalog: each loaded tool adds its full schema to your context. Use `search-tools` only when nothing listed fits, or with `scope=\"claw\"` to look beyond this agent. Loaded tools are callable from your next turn, so request them in one call.",
+      ...ordered.flatMap(([name, entries]) => renderCatalogSection(name, entries, tiers.get(name)!)),
+    ].join("\n");
+  }
+
+  const sections = ordered.flatMap(([name, sorted]) => {
+    const header = `- **${name}** (${sorted.length} tool${sorted.length === 1 ? "" : "s"})`;
+    if (sorted.length > INLINE_LISTING_MAX) {
+      return [`${header} — call search-tools with this catalog to see its tools.`];
+    }
+    return [header, ...sorted.map((entry) => `    - ${entry.name}: ${entry.oneLineDescription}`)];
+  });
 
   return [
     "## Tool Catalogs",
-    opts?.subagentDelegationDisabled
-      ? "Subagent delegation is disabled. The tools below are NOT loaded yet — use `load-tools` to pull in the ones you need, then call them yourself."
-      : "The tools below are NOT loaded yet — their full schemas arrive only when you ask for them.",
+    intro,
+    ...directFirst,
     "Call `search-tools` to find one — no arguments lists everything here, a `query` narrows it, and `scope=\"claw\"` looks beyond this agent at every tool the deployment has. Then `load-tools` activates the ones you need. Loaded tools are callable from your next turn, so batch everything into one call.",
     ...sections,
   ].join("\n");

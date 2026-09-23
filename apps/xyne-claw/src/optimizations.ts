@@ -26,6 +26,14 @@ export const OPTIMIZATIONS = {
     summary: "large list-shaped results from retrieval tools are relevance-filtered against the user's request before reaching the model; the full result is always saved to a file first",
     defaultOn: false,
   },
+  catalog_full_index: {
+    summary: "the system-prompt tool index names every loadable tool, fitted to a size budget, instead of collapsing catalogs over 15 tools to a single line — so the model loads by exact name rather than guessing search terms",
+    defaultOn: false,
+  },
+  subagent_read_tools: {
+    summary: "the read tools inside an agent's own subagents are also loadable directly through search-tools/load-tools, so it can skip the subagent round trip; write tools stay behind the subagent, and nothing outside the agent's grant is added",
+    defaultOn: false,
+  },
   lean_palette: {
     summary: "with the open palette on, tools it admitted (not ones the agent was granted) stay hidden in the catalog — including write tools — and under a reads+writes palette the forced `spaces` wrapper is dropped since its tools are loadable directly",
     defaultOn: false,
@@ -73,8 +81,8 @@ export function parseOptimizationSpec(input: unknown): OptimizationOverrides {
   return out;
 }
 
-export function pinRunOptimizations(spec: unknown): OptimizationOverrides {
-  const overrides = parseOptimizationSpec(spec);
+export function pinRunOptimizations(spec: unknown, agentSpec?: unknown): OptimizationOverrides {
+  const overrides = { ...parseOptimizationSpec(agentSpec), ...parseOptimizationSpec(spec) };
   store.enterWith({ overrides });
   return overrides;
 }
