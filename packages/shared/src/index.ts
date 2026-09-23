@@ -11,6 +11,7 @@ export * from './activity';
 export * from './types/index';
 export * from './config/index';
 export * from './utils/mentionRanking';
+export * from './channelSectionSuggestions';
 export * from './tags';
 export * from './board-types';
 export * from './types/workflowApproval';
