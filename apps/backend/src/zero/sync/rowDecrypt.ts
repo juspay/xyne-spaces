@@ -21,6 +21,7 @@
  * ciphertexts (≈ the write rate on encrypted tables), not with deliveries.
  */
 import { encryptedFieldsConfig } from '@xyne/shared';
+import { BoundedMemo } from './boundedMemo';
 import { syncMetrics } from './metrics';
 
 /** Lazy logger: `@/utils/logger` pulls config/env at load, which env-free unit tests must not. */
@@ -52,27 +53,24 @@ export interface DecryptDeps {
 const ENC_PREFIX = 'ENC:';
 const DEFAULT_TIMEOUT_MS = 3_000;
 const DEFAULT_CHUNK = 100;
-const CACHE_MAX = 5_000;
+const CACHE_MAX_ENTRIES = 5_000;
+const CACHE_MAX_BYTES = 32 * 1024 * 1024;
 
-/** cipher → plain, LRU via Map insertion order (get re-inserts, put evicts the oldest). */
-const cache = new Map<string, string>();
+/**
+ * cipher → plain, entry- AND byte-bounded LRU: the values are decrypted plaintexts, so
+ * like the fan-out memos this cache is a cap on plaintext held at rest in RAM — an entry
+ * count alone would let 5000 giant message-mds pin unbounded content.
+ */
+const cache = new BoundedMemo<string>(CACHE_MAX_ENTRIES, CACHE_MAX_BYTES);
 syncMetrics.gauge('sync_engine_decrypt_cache_entries', {}, () => cache.size);
+syncMetrics.gauge('sync_engine_decrypt_cache_bytes', {}, () => cache.totalWeight);
 
 function cacheGet(cipher: string): string | undefined {
-  const hit = cache.get(cipher);
-  if (hit !== undefined) {
-    cache.delete(cipher);
-    cache.set(cipher, hit);
-  }
-  return hit;
+  return cache.get(cipher);
 }
 
 function cachePut(cipher: string, plain: string): void {
-  if (cache.size >= CACHE_MAX) {
-    const oldest = cache.keys().next().value;
-    if (oldest !== undefined) cache.delete(oldest);
-  }
-  cache.set(cipher, plain);
+  cache.set(cipher, plain, cipher.length + plain.length);
 }
 
 /** Test seam: the cache is module-global state. */

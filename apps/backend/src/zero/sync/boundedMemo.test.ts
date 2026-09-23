@@ -45,6 +45,18 @@ test('overwrite replaces weight, delete releases it', () => {
   assert.equal(m.totalWeight, 0);
 });
 
+test('clear() empties entries and releases all weight', () => {
+  const m = new BoundedMemo<string>(10, 100);
+  m.set('a', 'A', 30);
+  m.set('b', 'B', 40);
+  m.clear();
+  assert.equal(m.size, 0);
+  assert.equal(m.totalWeight, 0);
+  assert.equal(m.get('a'), undefined);
+  m.set('c', 'C', 10); // usable after clear
+  assert.equal(m.totalWeight, 10);
+});
+
 test('estimateRowsBytes: sampled estimate scales with row count', () => {
   const row = { tableName: 'conversations', row: { id: 'x'.repeat(100) } };
   const small = estimateRowsBytes([row]);

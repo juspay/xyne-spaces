@@ -55,6 +55,7 @@ const GAUGE_DESCRIPTIONS: Record<SyncGaugeName, string> = {
   sync_engine_memo_entries: 'Snapshot memo entries by memo',
   sync_engine_persist_queue_depth: 'Tap persist queue depth by client group',
   sync_engine_decrypt_cache_entries: 'Emit-time decrypt cache entries',
+  sync_engine_decrypt_cache_bytes: 'Emit-time decrypt cache estimated bytes (plaintext held in RAM)',
 };
 
 const counters = new Map<SyncCounterName, Counter>();

@@ -38,7 +38,8 @@ export type SyncGaugeName =
   | 'sync_engine_memo_bytes' // {memo}
   | 'sync_engine_memo_entries' // {memo}
   | 'sync_engine_persist_queue_depth' // {group}
-  | 'sync_engine_decrypt_cache_entries';
+  | 'sync_engine_decrypt_cache_entries'
+  | 'sync_engine_decrypt_cache_bytes';
 
 export type SyncAttrs = Record<string, string>;
 

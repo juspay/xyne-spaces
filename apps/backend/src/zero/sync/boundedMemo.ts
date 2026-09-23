@@ -70,6 +70,11 @@ export class BoundedMemo<V> {
     }
   }
 
+  clear(): void {
+    this.#map.clear();
+    this.#totalWeight = 0;
+  }
+
   delete(key: string): void {
     const entry = this.#map.get(key);
     if (!entry) return;
