@@ -5,7 +5,7 @@ import { getGitProvider } from '@/git-providers/factory';
 import { ReleaseRepository } from '@/database/repositories/releaseRepository';
 import { upsertCommitAnalysisCanvas } from '@/utils/commitAnalysisCanvas';
 import { BitbucketService } from '@/services/bitbucketService';
-import { CommitAnalysisService, PullRequestDiffFile } from '@/services/commitAnalysisService';
+import { CommitAnalysisResult, CommitAnalysisService, PullRequestDiffFile } from '@/services/commitAnalysisService';
 import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
 import { parseBitbucketRepoUrl, parseGitHubRepoUrl } from '@/utils/repoUrlParser';
@@ -41,6 +41,7 @@ type DevTicketMapping = {
   prDiffContexts: PullRequestDiffContext[];
   envChanges: CanvasEnvChange[];
   migrationLinks: CanvasMigrationLink[];
+  insertedCount: number;
 };
 type StaleVersionReleaseMapping = {
   artId: string;
@@ -74,6 +75,12 @@ class VersionReleaseMappingService {
   // run concurrently and interleave SubTicket/ART writes. Each queued run
   // re-reads the current version, so the latest edit always wins.
   private readonly pendingSyncs = new Map<string, Promise<void>>();
+
+  // Every releaseVersion edit replays every dev ticket on the version, so cache
+  // PR diffs across replays instead of refetching each one from the provider.
+  // ponytail: in-process TTL; a new push is picked up once the entry expires.
+  private readonly prDiffCache = new Map<string, { diffFiles: PullRequestDiffFile[]; fetchedAt: number }>();
+  private static readonly PR_DIFF_CACHE_TTL_MS = 5 * 60_000;
 
   async syncTicketById(ticketId: string): Promise<void> {
     const previous = this.pendingSyncs.get(ticketId) ?? Promise.resolve();
@@ -127,8 +134,16 @@ class VersionReleaseMappingService {
     const devTickets = await this.findDevTicketsByVersion(releaseTicket.projectId, releaseVersion);
     const mappings: DevTicketMapping[] = [];
     for (const devTicket of devTickets) {
-      const mapping = await this.mapDevTicketToRelease(devTicket, releaseTicket);
-      if (mapping) mappings.push(mapping);
+      try {
+        const mapping = await this.mapDevTicketToRelease(devTicket, releaseTicket);
+        if (mapping) mappings.push(mapping);
+      } catch (error) {
+        // One bad ticket must not leave the rest of the release unmapped.
+        logger.error(
+          `[VersionReleaseMapping] failed to map ${devTicket.xyneId} to ${releaseTicket.xyneId}:`,
+          error,
+        );
+      }
     }
 
     await this.publishReleaseArtifacts(releaseTicket, releaseVersion, mappings);
@@ -196,7 +211,8 @@ class VersionReleaseMappingService {
       }
     };
 
-    for (const mapping of mappings) {
+    // Replays re-run every mapping; only a ticket that newly joined gets a timeline line.
+    for (const mapping of mappings.filter(m => m.insertedCount > 0)) {
       const apps = mapping.affectedApps.map(app => app.name).join(', ');
       await emit(
         ReleaseEventType.TICKET,
@@ -207,14 +223,18 @@ class VersionReleaseMappingService {
     }
 
     const migrationCount = new Set(migrationLinks.map(link => link.filePath)).size;
-    await emit(
-      ReleaseEventType.RELEASE,
-      'VERSION_ANALYSIS_COMPLETED',
-      `Version ${releaseVersion}: ${mappings.length} dev ticket${mappings.length === 1 ? '' : 's'}, `
+    const summary = `Version ${releaseVersion}: ${mappings.length} dev ticket${mappings.length === 1 ? '' : 's'}, `
       + `${affectedApps.size} app${affectedApps.size === 1 ? '' : 's'}, `
       + `${envChanges.length} env change${envChanges.length === 1 ? '' : 's'}, `
-      + `${migrationCount} migration${migrationCount === 1 ? '' : 's'}`,
-    );
+      + `${migrationCount} migration${migrationCount === 1 ? '' : 's'}`;
+    const lastSummary = await prisma.releaseEvent.findFirst({
+      where: { releaseId: releaseTicket.id, eventName: 'VERSION_ANALYSIS_COMPLETED' },
+      orderBy: { createdAt: 'desc' },
+      select: { message: true },
+    });
+    if (lastSummary?.message !== summary) {
+      await emit(ReleaseEventType.RELEASE, 'VERSION_ANALYSIS_COMPLETED', summary);
+    }
 
     await this.upsertVersionReleaseCanvas(
       releaseTicket,
@@ -296,7 +316,15 @@ class VersionReleaseMappingService {
       prDiffContexts,
     );
 
-    return { devTicket, affectedApps, perAppSubTickets, prDiffContexts, envChanges, migrationLinks };
+    return {
+      devTicket,
+      affectedApps,
+      perAppSubTickets,
+      prDiffContexts,
+      envChanges,
+      migrationLinks,
+      insertedCount: result.count,
+    };
   }
 
   private async detectAffectedApplicationsFromPRs(
@@ -377,8 +405,16 @@ class VersionReleaseMappingService {
     }
 
     try {
-      const diffFiles = await getGitProvider(pr.repositoryUrl)
-        .getPRDiff(parsed.projectKey, parsed.repoSlug, pr.prId);
+      const cacheKey = `${pr.repositoryUrl}#${pr.prId}`;
+      const cached = this.prDiffCache.get(cacheKey);
+      let diffFiles = cached && Date.now() - cached.fetchedAt < VersionReleaseMappingService.PR_DIFF_CACHE_TTL_MS
+        ? cached.diffFiles
+        : null;
+      if (!diffFiles) {
+        diffFiles = await getGitProvider(pr.repositoryUrl)
+          .getPRDiff(parsed.projectKey, parsed.repoSlug, pr.prId);
+        this.prDiffCache.set(cacheKey, { diffFiles, fetchedAt: Date.now() });
+      }
       return {
         pr,
         projectKey: parsed.projectKey,
@@ -482,16 +518,32 @@ class VersionReleaseMappingService {
     const firstContext = mappings[0]?.prDiffContexts[0];
     if (!firstContext) return;
 
+    // PR rows carry no author, so credit the dev ticket's creator; the email lets
+    // the canvas render them as a mention.
+    const creators = new Map(
+      (await prisma.user.findMany({
+        where: { id: { in: mappings.map(mapping => mapping.devTicket.createdBy) } },
+        select: { id: true, email: true, displayName: true, name: true },
+      })).map(user => [user.id, user]),
+    );
+
     // One canvas "result" per PR: the renderers key on pullRequest.id, and a
     // version release has no commit range to walk.
-    const results = mappings.flatMap(mapping =>
-      mapping.prDiffContexts.map(context => ({
+    const results: CommitAnalysisResult[] = mappings.flatMap(mapping => {
+      const creator = creators.get(mapping.devTicket.createdBy);
+      const author = {
+        id: 0,
+        displayName: creator?.displayName ?? creator?.name ?? creator?.email ?? mapping.devTicket.createdBy,
+        emailAddress: creator?.email,
+      };
+      return mapping.prDiffContexts.map(context => ({
         commitId: `pr-${context.pr.prId}`,
         pullRequest: {
           id: context.pr.prId,
           title: mapping.devTicket.title,
           url: context.pr.prUrl ?? '',
-          author: { displayName: mapping.devTicket.createdBy },
+          state: context.pr.status,
+          author,
         },
         ticket: {
           id: mapping.devTicket.id,
@@ -509,13 +561,13 @@ class VersionReleaseMappingService {
         environment: null,
         migration: null,
         error: null,
-      })),
-    );
+      }));
+    });
 
     try {
       const canvasId = await upsertCommitAnalysisCanvas({
         section: 'main',
-        results: results as never,
+        results,
         affectedApplications: affectedApps.map(app => ({
           id: app.id,
           name: app.name,

@@ -67,6 +67,8 @@ import {
   Schema,
   CollectionRole,
   ReleaseTrackingMode,
+  RELEASE_COMMIT_FORM_NAME,
+  RELEASE_VERSION_FORM_NAME,
   MessageArtifactStatus,
 } from './schema.js';
 import { FlowPlanSchema, serializeFlowPlan, validateFlowPlan } from '../board-types/index.js';
@@ -8784,18 +8786,18 @@ export const mutators = defineMutators({
           // The seeded forms are templates every release board is bound to as it is created, so a
           // board must fork off one even while it is the only board currently pointing at it.
           const isTemplate =
-            form.formName === 'xyne_release_specs_form'
-            || form.formName === 'xyne_release_version_specs_form';
+            form.formName === RELEASE_COMMIT_FORM_NAME
+            || form.formName === RELEASE_VERSION_FORM_NAME;
           const isShared = isTemplate || mappings.some(m => m.contextId !== boardId);
           const sharedRows = isShared ? await tx.run(zql.form_fields.where('formId', formId)) : [];
           // boardId is caller-supplied: only fork a board of this form's own workspace, and only
-          // one already bound to it. Without an id per row the copy would not be deterministic.
-          if (
-            ownMapping
-            && isShared
-            && board?.workspaceId === form.workspaceId
-            && sharedRows.every(row => forkFieldIds[row.id])
-          ) {
+          // one already bound to it.
+          if (ownMapping && isShared && board?.workspaceId === form.workspaceId) {
+            // A row this client had not synced yet has no copy id; editing on anyway would write
+            // onto the shared form, so fail and let the client refresh.
+            if (!sharedRows.every(row => forkFieldIds[row.id])) {
+              throw new Error('Form changed since it was loaded — refresh and retry');
+            }
             await tx.mutate.forms.insert({
               id: forkFormId,
               // Name it for the board so a forked copy is not mistaken for the seeded template.

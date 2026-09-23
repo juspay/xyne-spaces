@@ -85,6 +85,8 @@ import {
   parseFieldOptions,
   serializeFieldOptions,
   ReleaseTrackingMode,
+  RELEASE_COMMIT_FORM_NAME,
+  RELEASE_VERSION_FORM_NAME,
   parseRepliesMd,
   addReplyToData,
   serializeRepliesMd,
@@ -7777,12 +7779,10 @@ export function createMutators(
           // The Create Ticket modal reads one BOARD/TICKET mapping per board, so
           // switching modes updates the existing mapping instead of adding a second
           // form. The forms themselves are seed data (scripts/seed-release.ts).
-          const releaseCommitFormName = 'xyne_release_specs_form';
-          const releaseVersionFormName = 'xyne_release_version_specs_form';
           const targetReleaseFormName =
             releaseTrackingMode === ReleaseTrackingMode.VERSION
-              ? releaseVersionFormName
-              : releaseCommitFormName;
+              ? RELEASE_VERSION_FORM_NAME
+              : RELEASE_COMMIT_FORM_NAME;
           let targetReleaseFormId: string | null = null;
           let releaseFormLookedUp = false;
           const ensureBoardFormMapping = async (boardId: string): Promise<void> => {
@@ -7822,9 +7822,9 @@ export function createMutators(
               // seeded templates, and either strands the values already saved against it.
               const boundForm = await tx.run(zql.forms.where('id', existingMapping.formId).one());
               const previousModeFormName =
-                targetReleaseFormName === releaseCommitFormName
-                  ? releaseVersionFormName
-                  : releaseCommitFormName;
+                targetReleaseFormName === RELEASE_COMMIT_FORM_NAME
+                  ? RELEASE_VERSION_FORM_NAME
+                  : RELEASE_COMMIT_FORM_NAME;
               if (boundForm?.formName === previousModeFormName) {
                 await tx.mutate.forms_context_mapping.update({
                   id: existingMapping.id,
@@ -12242,18 +12242,18 @@ export function createMutators(
             // The seeded forms are templates every release board is bound to as it is created, so a
             // board must fork off one even while it is the only board currently pointing at it.
             const isTemplate =
-              form.formName === 'xyne_release_specs_form'
-              || form.formName === 'xyne_release_version_specs_form';
+              form.formName === RELEASE_COMMIT_FORM_NAME
+              || form.formName === RELEASE_VERSION_FORM_NAME;
             const isShared = isTemplate || mappings.some(m => m.contextId !== boardId);
             const sharedRows = isShared ? await tx.run(zql.form_fields.where('formId', formId)) : [];
             // boardId is caller-supplied: only fork a board of this form's own workspace, and only
-            // one already bound to it. Without an id per row the copy would not be deterministic.
-            if (
-              ownMapping
-              && isShared
-              && board?.workspaceId === form.workspaceId
-              && sharedRows.every(row => forkFieldIds[row.id])
-            ) {
+            // one already bound to it.
+            if (ownMapping && isShared && board?.workspaceId === form.workspaceId) {
+              // A row this client had not synced yet has no copy id; editing on anyway would write
+              // onto the shared form, so fail and let the client refresh.
+              if (!sharedRows.every(row => forkFieldIds[row.id])) {
+                throw new Error('Form changed since it was loaded — refresh and retry');
+              }
               await tx.mutate.forms.insert({
                 id: forkFormId,
                 // Name it for the board so a forked copy is not mistaken for the seeded template.
