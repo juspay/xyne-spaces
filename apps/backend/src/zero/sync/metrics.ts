@@ -22,7 +22,8 @@ export type SyncCounterName =
   | 'sync_engine_tap_pokes_total' // {result: applied|cancelled}
   | 'sync_engine_tap_persist_total' // {result: ok|failed}
   | 'sync_engine_tap_events_total' // {event: reset|backoff|fatal|fence_lost}
-  | 'sync_engine_shadow_checks_total'; // {queryName, result: match|diverged, kind?: length|content}
+  | 'sync_engine_shadow_checks_total' // {queryName, result: match|diverged, kind?: length|content}
+  | 'sync_engine_mutation_health_total'; // {kind: fold_failed|wrap_failed|overlay_watchdog}
 
 export type SyncHistogramName =
   | 'sync_engine_subscribe_latency' // {plane}

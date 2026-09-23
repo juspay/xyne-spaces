@@ -11,7 +11,7 @@
 import type { ReadonlyJSONValue } from '@rocicorp/zero';
 import type { IvmHost, WireRow } from './ivmHost.js';
 import type { SyncStore, RowKeyRef } from './store.js';
-import { obsEmit } from './obs.js';
+import { obsEmit, setMutationHealthSink, type MutationHealthKind } from './obs.js';
 
 /**
  * Minimal transport the host app adapts from its existing socket. `emit`'s optional
@@ -199,6 +199,23 @@ export class SyncClient {
     this.#transport.on<{ reason?: string }>(EVT.unavailable, this.#onUnavailable);
     this.#transport.on<{ queryName?: string; message?: string }>(EVT.error, this.#onError);
     this.#transport.on<void>(EVT.disconnect, this.#onDisconnect);
+    // Mutation-health beacons (fold/wrap containment firing, overlay watchdog) must reach
+    // the server in prod — the dev obs tap is inert there. Module-level sink because the
+    // emit sites (mutatorSync/ivmHost) have no reference to this client.
+    setMutationHealthSink((kind) => this.#reportMutationHealth(kind));
+  }
+
+  /**
+   * Throttled per kind: these are incident signals — the first event says everything, the
+   * rate says nothing (a broken fold fires on every mutation). Same 60s window as a shadow
+   * divergence; the server additionally rate-limits all beacon frames per socket.
+   */
+  readonly #lastHealthAt = new Map<MutationHealthKind, number>();
+  #reportMutationHealth(kind: MutationHealthKind): void {
+    const now = Date.now();
+    if (now - (this.#lastHealthAt.get(kind) ?? 0) < 60_000) return;
+    this.#lastHealthAt.set(kind, now);
+    this.#transport.emit('sync:mutation-health', { kind });
   }
 
   /** Reference a shared query-instance; subscribes on the first reference. */

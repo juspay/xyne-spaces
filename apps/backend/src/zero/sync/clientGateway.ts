@@ -94,15 +94,19 @@ export function attachSyncHandlers(socket: SyncIoSocket): () => void {
   });
   // Per-socket rate limit for client-originated beacon frames: the client throttles itself,
   // but the server must not trust that (a hostile/buggy client could spam the metric + log).
+  // ONE budget across all beacon events — the cap bounds the socket, not each signal.
   let beaconWindowStart = 0;
   let beaconCount = 0;
-  socket.on('sync:shadow-check', (msg: { queryName?: string; matched?: boolean; kind?: string }) => {
+  const beaconAllowed = (): boolean => {
     const now = Date.now();
     if (now - beaconWindowStart > 60_000) {
       beaconWindowStart = now;
       beaconCount = 0;
     }
-    if (++beaconCount > 30) return; // drop silently past the per-socket budget
+    return ++beaconCount <= 30; // drop silently past the per-socket budget
+  };
+  socket.on('sync:shadow-check', (msg: { queryName?: string; matched?: boolean; kind?: string }) => {
+    if (!beaconAllowed()) return;
     // Client-reported shadow comparison (throttled client-side). Matches are the DENOMINATOR —
     // a divergence rate needs one, and "no divergences" without checks is false confidence.
     // The label is attributed ONLY for registry-known names — queryName is the one
@@ -120,6 +124,19 @@ export function attachSyncHandlers(socket: SyncIoSocket): () => void {
     if (!matched) {
       obsEmit('sync-sub', { action: 'shadow-divergence', socketId: connId, userId, queryName: q, kind });
     }
+  });
+  // Mutation-path health (fold/wrap containment fired, overlay watchdog): the transient
+  // failure class the shadow diff cannot see (settle-debounced by construction) — the
+  // promotion gate reads this counter alongside shadow_checks. Kind is a fixed enum, so
+  // nothing client-mintable reaches a label.
+  socket.on('sync:mutation-health', (msg: { kind?: string }) => {
+    if (!beaconAllowed()) return;
+    const kind =
+      msg?.kind === 'fold_failed' || msg?.kind === 'wrap_failed' || msg?.kind === 'overlay_watchdog'
+        ? msg.kind
+        : 'unknown';
+    syncMetrics.count('sync_engine_mutation_health_total', { kind });
+    obsEmit('sync-sub', { action: 'mutation-health', socketId: connId, userId, kind });
   });
   socket.on('sync:unsubscribe', (msg: SyncMessage) => {
     if (msg?.queryName && Array.isArray(msg.args)) unsubscribe(msg.queryName, msg.args);

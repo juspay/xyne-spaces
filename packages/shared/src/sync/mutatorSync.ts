@@ -30,7 +30,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { getSyncHost } from './runtime.js';
 import { hostedTables } from './registry.js';
-import { obsEmit } from './obs.js';
+import { obsEmit, reportMutationHealth } from './obs.js';
 import type { OptimisticOp } from './ivmHost.js';
 
 const OP_KIND: Record<string, OptimisticOp['kind']> = {
@@ -102,6 +102,7 @@ export function syncMutatorFn<T extends (opts: any) => Promise<any>>(fn: T): T {
       proxied = makeSyncTx(tx, host, hostedTables(), ops);
     } catch (e) {
       obsEmit('mutation', { action: 'wrap-failed', mutationID: tx.mutationID, error: String(e) });
+      reportMutationHealth('wrap_failed');
       return fn(opts);
     }
     // The real Zero write runs inside `fn` via the proxy, which forwards to Zero FIRST and
@@ -135,6 +136,7 @@ export function syncMutatorFn<T extends (opts: any) => Promise<any>>(fn: T): T {
           ops: ops.length,
           error: String(e),
         });
+        reportMutationHealth('fold_failed');
       }
     }
     return result;

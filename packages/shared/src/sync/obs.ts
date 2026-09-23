@@ -41,3 +41,28 @@ export function obsEmit(kind: string, data: Record<string, unknown>): void {
     /* never throw into the caller */
   }
 }
+
+/**
+ * Mutation-health beacon: unlike the dev-only obs tap above, these three signals must
+ * reach the SERVER in prod — they are the promotion gate's only instrument for the
+ * transient failure class (fold/wrap failures live inside the optimistic window, which
+ * the shadow diff's settle-debounce masks by construction) and the attribution for the
+ * persistent one (overlay-watchdog = confirmation delivery broken). The sink is the
+ * live sync client's throttled socket emit; module-level so the emit sites (mutatorSync,
+ * ivmHost) need no plumbing — mirror of the obs tap's injection pattern.
+ */
+export type MutationHealthKind = 'fold_failed' | 'wrap_failed' | 'overlay_watchdog';
+
+let healthSink: ((kind: MutationHealthKind) => void) | null = null;
+
+export function setMutationHealthSink(fn: ((kind: MutationHealthKind) => void) | null): void {
+  healthSink = fn;
+}
+
+export function reportMutationHealth(kind: MutationHealthKind): void {
+  try {
+    healthSink?.(kind);
+  } catch {
+    /* never throw into the caller */
+  }
+}

@@ -23,7 +23,7 @@ import { buildPipeline } from '#zql/builder/builder.js';
 import { ArrayView } from '#zql/ivm/array-view.js';
 import { makeSourceChangeAdd, makeSourceChangeEdit, makeSourceChangeRemove } from '#zql/ivm/source.js';
 import { consume } from '#zql/ivm/stream.js';
-import { obsEmit } from './obs.js';
+import { obsEmit, reportMutationHealth } from './obs.js';
 import { MemoryStorage } from '#zql/ivm/memory-storage.js';
 import type { ReadonlyJSONValue } from '@rocicorp/zero';
 import { schema } from '../zero/schema.js';
@@ -489,6 +489,7 @@ export class IvmHost {
               `${Math.round((now - at) / 1000)}s (watermark=${lmid}) — confirmation delivery looks broken`,
           );
           obsEmit('overlay-watchdog', { mutationID, lmid, ageMs: now - at });
+          reportMutationHealth('overlay_watchdog');
         }
         continue;
       }

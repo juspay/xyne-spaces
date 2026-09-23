@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { SyncClient, type SyncTransport } from './syncClient.js';
+import { reportMutationHealth, setMutationHealthSink } from './obs.js';
 import type { IvmHost } from './ivmHost.js';
 import type { SyncStore } from './store.js';
 
@@ -257,4 +258,28 @@ test('shadow-check beacon: per-query throttles, matches and divergences independ
       { queryName: 'q2', matched: false, kind: 'content' },
     ],
   );
+});
+
+test('mutation-health beacon: start() registers the module sink, per-kind 60s throttle', () => {
+  const sent: Array<{ event: string; payload: unknown }> = [];
+  const transport: SyncTransport = {
+    emit: <P, A = void>(event: string, payload: P, _ack?: (r: A) => void) => {
+      sent.push({ event, payload });
+    },
+    on: () => {},
+    off: () => {},
+  };
+  const client = new SyncClient({} as never, transport, {} as never);
+  client.start();
+  reportMutationHealth('fold_failed');
+  reportMutationHealth('fold_failed'); // throttled (same kind, same window)
+  reportMutationHealth('overlay_watchdog'); // independent kind
+  const beacons = sent.filter((s) => s.event === 'sync:mutation-health');
+  assert.deepEqual(
+    beacons.map((b) => b.payload),
+    [{ kind: 'fold_failed' }, { kind: 'overlay_watchdog' }],
+  );
+  setMutationHealthSink(null);
+  assert.doesNotThrow(() => reportMutationHealth('wrap_failed'), 'sink cleared → inert, never throws');
+  assert.equal(sent.filter((s) => s.event === 'sync:mutation-health').length, 2);
 });
