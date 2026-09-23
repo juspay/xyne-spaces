@@ -1,3 +1,10 @@
+## [1.383.0](https://github.com/juspay/xyne-spaces/compare/v1.382.0...v1.383.0) (2026-09-23)
+
+
+### Features
+
+* added dm via app and multiselect ([#2246](https://github.com/juspay/xyne-spaces/issues/2246)) ([906d2bc](https://github.com/juspay/xyne-spaces/commit/906d2bceaa5d7cb3e90856c9494c96295a830b90))
+
 ## [1.382.0](https://github.com/juspay/xyne-spaces/compare/v1.381.0...v1.382.0) (2026-09-23)
 
 
