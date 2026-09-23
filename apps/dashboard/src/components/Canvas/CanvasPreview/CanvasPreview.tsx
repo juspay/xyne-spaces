@@ -50,6 +50,12 @@ export const CanvasPreview: React.FC<CanvasPreviewProps> = ({
   );
   const canvas = zeroCanvas as unknown as Canvas;
 
+  // A release-analysis report is regenerated server-side on every sync, so the
+  // snapshot on the row is authoritative and can render inline. Every other
+  // collaborative canvas is edited live in Y-Sweet, where the row goes stale.
+  const isGeneratedReport =
+    (canvas?.metadata as { source?: string } | null)?.source === 'commit_analysis';
+
   // Ensure we have valid content for BlockNote (blocks unknown to the schema stripped)
   const validContent = useMemo(
     () =>
@@ -151,7 +157,7 @@ export const CanvasPreview: React.FC<CanvasPreviewProps> = ({
   }
 
   // Collaborative canvases show a placeholder since content lives in Y-Sweet
-  if (!canvas.content || canvas.isCollaborative) {
+  if (!canvas.content || (canvas.isCollaborative && !isGeneratedReport)) {
     return (
       <div
         className='relative flex items-center gap-3 p-3 bg-card rounded-2xl border border-border w-full max-w-[460px] hover:shadow-sm transition-shadow cursor-pointer'
