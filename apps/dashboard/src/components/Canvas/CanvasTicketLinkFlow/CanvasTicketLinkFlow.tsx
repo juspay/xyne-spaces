@@ -1,6 +1,6 @@
 import { TicketToken } from '@xyne/icons';
 import { Search, X } from 'lucide-react';
-import { useMemo, useState, type ReactElement } from 'react';
+import { useEffect, useMemo, useState, type ReactElement } from 'react';
 
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { useDebouncedValue } from '../../../hooks/useDebouncedValue';
@@ -14,7 +14,7 @@ interface CanvasTicketLinkFlowProps {
   onTicketSelected: (ticket: { id: string }) => void;
 }
 
-const TICKET_SEARCH_LIMIT = 100;
+const TICKET_SEARCH_LIMIT = 20;
 
 export function CanvasTicketLinkFlow({
   anchor,
@@ -23,6 +23,11 @@ export function CanvasTicketLinkFlow({
 }: CanvasTicketLinkFlowProps): ReactElement | null {
   const [search, setSearch] = useState('');
   const debouncedSearch = useDebouncedValue(search, 250);
+
+  useEffect(() => {
+    if (!anchor) setSearch('');
+  }, [anchor]);
+
   const [tickets] = useCachedQuery(
     queries.ticketsSearch({
       search: debouncedSearch.trim() || undefined,
