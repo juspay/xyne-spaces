@@ -695,6 +695,10 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
             type: MessageType.USER,
             timestamp: Date.now(),
             messageId: uuidv4(),
+            // Explicitly none — a canvas link message carries no files.
+            // Omitting this would drop the mutator into its legacy draft-scan
+            // and claim whatever is attached in the composer right now.
+            attachmentIds: [],
           }),
         );
       } else {
@@ -706,6 +710,10 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
             conversationId: uuidv4(),
             messageId: uuidv4(),
             timestamp: Date.now(),
+            // Explicitly none — a canvas link message carries no files.
+            // Omitting this would drop the mutator into its legacy draft-scan
+            // and claim whatever is attached in the composer right now.
+            attachmentIds: [],
           }),
         );
       }

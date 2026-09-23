@@ -10,6 +10,7 @@ export interface HeaderGroupingOption {
     | 'createdBy'
     | 'status'
     | 'priority'
+    | 'merchantId'
     | { type: 'formField'; fieldId: string; fieldName: string };
   label: string;
   icon: ReactNode;

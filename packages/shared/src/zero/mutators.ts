@@ -8,6 +8,7 @@ import {
   CallType,
   RecurringCallSeriesStatus,
   InvitationResponse,
+  RingStatus,
   MeetingStatus,
   ChannelScopeType,
   ChannelAddUserPolicy,
@@ -3395,13 +3396,34 @@ export const mutators = defineMutators({
         channelId: z.string(),
         conversationId: z.string().optional(),
         timestamp: z.number(),
+        /** Attachments handed to the queued message, re-pointed off the draft. */
+        claimedAttachmentIds: z.array(z.string()).optional(),
+        /** The message those attachments now belong to. */
+        messageId: z.string().optional(),
       }),
-      async ({ tx, ctx, args: { channelId, conversationId, timestamp } }) => {
+      async ({
+        tx,
+        ctx,
+        args: { channelId, conversationId, timestamp, claimedAttachmentIds, messageId },
+      }) => {
         // Called at send-time to detach the draft from the queued message:
         // zeroes content and hasAttachment so `markChannelAsViewed` can
-        // garbage-collect the row on channel exit. The DRAFT-typed attachment
-        // rows are left in place; the send mutator claims them by id when
-        // it fires (immediate or on retry).
+        // garbage-collect the row on channel exit.
+
+        // Transfer the attachments to the queued message. draft_messages relates
+        // to message_attachments on `entityId`, so re-pointing it detaches them
+        // from the composer while leaving them claimable by id.
+        //
+        // This runs in its OWN mutation, which is why it survives the send being
+        // rolled back. The send mutator's DRAFT -> CHAT claim is part of the send,
+        // so a server rejection reverts it and the files reappear in the composer —
+        // where a later message would promote them and the failed message's retry
+        // would reference attachments it no longer owns.
+        if (messageId && claimedAttachmentIds && claimedAttachmentIds.length > 0) {
+          for (const attachmentId of claimedAttachmentIds) {
+            await tx.mutate.message_attachments.update({ id: attachmentId, entityId: messageId });
+          }
+        }
         const channelDrafts = await tx.run(
           zql.draft_messages
             .where('channelId', channelId)
@@ -3503,6 +3525,25 @@ export const mutators = defineMutators({
         }
       },
     ),
+    // Callee device reports it is ringing, or BUSY when the ring arrives silenced.
+    updateRingStatus: defineMutator(
+      z.object({ callId: z.string(), ringStatus: z.enum([RingStatus.RINGING, RingStatus.BUSY]) }),
+      async ({ tx, ctx, args: { callId, ringStatus } }) => {
+        const call = await tx.run(zql.calls.where('externalId', callId).one());
+        if (!call) return;
+
+        const participant = await tx.run(
+          zql.call_participants.where('callId', call.id).where('userId', ctx.userID).one(),
+        );
+        if (!participant || participant.response !== InvitationResponse.INVITED) return;
+
+        if (participant.ringStatus === ringStatus) return;
+        // BUSY is sticky: an idle second device reporting RINGING must not undo it.
+        if (participant.ringStatus === RingStatus.BUSY) return;
+
+        await tx.mutate.call_participants.update({ id: participant.id, ringStatus });
+      },
+    ),
     invite: defineMutator(
       z.object({
         callId: z.string(),
@@ -3534,6 +3575,7 @@ export const mutators = defineMutators({
               await tx.mutate.call_participants.update({
                 id: existingParticipant.id,
                 response: InvitationResponse.INVITED,
+                ringStatus: RingStatus.CALLING,
                 meetingStatus: existingParticipant.meetingStatus,
                 invitedBy: ctx.userID,
                 invitedAt: now,
@@ -3556,6 +3598,7 @@ export const mutators = defineMutators({
               invitedBy: ctx.userID,
               invitedAt: now,
               response: InvitationResponse.INVITED,
+              ringStatus: RingStatus.CALLING,
               meetingStatus: MeetingStatus.PENDING,
               respondedAt: null,
               joinedAt: null,
@@ -4356,6 +4399,33 @@ export const mutators = defineMutators({
           id,
           ...updateData,
         });
+        if (description !== undefined) {
+          const existingDescription = await tx.run(
+            zql.ticket_descriptions.where('ticketId', id).one(),
+          );
+          // Same precedence as resolveTicketDescription, assembled from the two reads
+          // already in hand rather than re-querying the ticket with its relation.
+          const currentDescription = existingDescription?.description ?? currentTicket.description ?? '';
+
+          if (description !== currentDescription) {
+            if (existingDescription) {
+              await tx.mutate.ticket_descriptions.update({
+                ticketId: id,
+                description,
+                updatedAt,
+              });
+            } else {
+              await tx.mutate.ticket_descriptions.insert({
+                ticketId: id,
+                workspaceId: currentTicket.workspaceId,
+                channelId: currentTicket.channelId,
+                description,
+                createdAt: updatedAt,
+                updatedAt,
+              });
+            }
+          }
+        }
 
         await updateTicketMdFromZero(tx, zql, id);
       },

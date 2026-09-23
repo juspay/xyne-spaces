@@ -465,6 +465,13 @@ export enum InvitationResponse {
 }
 
 // @ts-ignore TS1294
+export enum RingStatus {
+  CALLING = 'CALLING',
+  RINGING = 'RINGING',
+  BUSY = 'BUSY',
+}
+
+// @ts-ignore TS1294
 export enum MeetingStatus {
   PENDING = 'PENDING',
   ACCEPTED = 'ACCEPTED',

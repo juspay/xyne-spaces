@@ -1,0 +1,70 @@
+subscription_id     = "00000000-0000-0000-0000-000000000000"
+region              = "centralindia"
+resource_group_name = "xyne"
+name                = "xyne"
+domain              = "spaces.example.com"
+
+dns_zone                = "spaces.example.com"
+dns_zone_resource_group = "example-dns"
+namespace               = "xyne"
+worker_names            = ["default"]
+zones                   = ["1", "2", "3"]
+ssh_public_key          = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExampleKeyReplaceMe ops@example.com"
+
+tags = {
+  environment = "production"
+}
+
+vnet_cidr           = "10.10.0.0/16"
+pods_cidr           = "10.20.0.0/16"
+services_cidr       = "10.30.0.0/20"
+nat_gateway_enabled = true
+bastion_enabled     = false
+bastion_vm_size     = "Standard_B2s"
+
+kubernetes_version       = ""
+cluster_sku_tier         = "Standard"
+enable_private_endpoint  = false
+aks_authorized_ip_ranges = ["203.0.113.0/24"]
+deployer_principal_id    = ""
+admin_group_object_ids   = []
+azure_rbac_enabled       = true
+
+node_pools = {
+  general = { vm_size = "Standard_D4s_v5", min_count = 2, max_count = 6 }
+  zero    = { vm_size = "Standard_E4ds_v5", local_storage_temp_disk = true }
+  vespa   = { vm_size = "Standard_D8s_v5", max_count = 3 }
+  sandbox = { vm_size = "Standard_D4s_v3", max_count = 2 }
+}
+
+zero_pool_enabled = false
+vespa_enabled     = false
+sandbox_enabled   = false
+
+postgres_mode              = "managed"
+postgres_server_name       = "xyne-example-postgres"
+postgres_sku_name          = "GP_Standard_D2ds_v5"
+postgres_high_availability = true
+postgres_read_replica      = false
+postgres_username          = "xyne"
+postgres_password          = "replace-with-a-long-random-password"
+
+redis_mode       = "managed"
+redis_cache_name = "xyne-example-redis"
+redis_sku_name   = "Standard"
+redis_capacity   = 1
+
+storage_mode             = "managed"
+storage_account_name     = "xyneexamplestorage"
+storage_bucket_prefix    = "xyne"
+storage_replication_type = "ZRS"
+
+ingress_mode      = "gateway"
+ingress_static_ip = true
+
+livekit_enabled               = false
+livekit_api_key               = "APIexamplekey"
+livekit_api_secret            = "replace-with-the-livekit-api-secret"
+livekit_key_vault_name        = "xyne-example-livekit"
+livekit_certificate_secret_id = ""
+livekit_turn_cert_secret      = ""

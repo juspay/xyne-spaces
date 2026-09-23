@@ -1,0 +1,82 @@
+{{- $db := .Values.databases }}
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: {{ .Values.name }}
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "pg-cluster.labels" . | nindent 4 }}
+spec:
+  instances: {{ .Values.instances }}
+  {{- with .Values.imageName }}
+  imageName: {{ . }}
+  {{- end }}
+  primaryUpdateStrategy: {{ .Values.primaryUpdateStrategy }}
+  storage:
+    size: {{ .Values.storage.size }}
+    {{- with .Values.storage.storageClass }}
+    storageClass: {{ . }}
+    {{- end }}
+  {{- if .Values.walStorage.enabled }}
+  walStorage:
+    size: {{ .Values.walStorage.size }}
+    {{- with .Values.walStorage.storageClass }}
+    storageClass: {{ . }}
+    {{- end }}
+  {{- end }}
+  {{- with .Values.resources }}
+  resources:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  postgresql:
+    parameters:
+      wal_level: logical
+      max_replication_slots: "20"
+      max_wal_senders: "20"
+      {{- range $k, $v := .Values.parameters }}
+      {{ $k }}: {{ $v | quote }}
+      {{- end }}
+  bootstrap:
+    initdb:
+      database: {{ $db.app }}
+      owner: {{ .Values.owner }}
+      secret:
+        name: {{ .Values.appSecret }}
+      postInitApplicationSQL:
+        {{- range $d := list $db.common $db.zeroCvr $db.zeroCdb $db.clawAuth }}
+        - CREATE DATABASE {{ $d }} OWNER {{ $.Values.owner }}
+        {{- end }}
+        - ALTER ROLE {{ .Values.owner }} REPLICATION
+        {{- range .Values.extraSQL }}
+        - {{ . | quote }}
+        {{- end }}
+  inheritedMetadata:
+    annotations:
+      {{- toYaml .Values.podAnnotations | nindent 6 }}
+  affinity:
+    {{- with .Values.nodeSelector }}
+    nodeSelector:
+      {{- toYaml . | nindent 6 }}
+    {{- end }}
+    {{- with .Values.tolerations }}
+    tolerations:
+      {{- toYaml . | nindent 6 }}
+    {{- end }}
+  {{- if .Values.backup.enabled }}
+  backup:
+    retentionPolicy: {{ .Values.backup.retentionPolicy }}
+    barmanObjectStore:
+      destinationPath: {{ .Values.backup.destinationPath }}
+      {{- with .Values.backup.endpointURL }}
+      endpointURL: {{ . }}
+      {{- end }}
+      s3Credentials:
+        accessKeyId:
+          name: {{ .Values.backup.credentialsSecret }}
+          key: {{ .Values.backup.accessKeyIdKey }}
+        secretAccessKey:
+          name: {{ .Values.backup.credentialsSecret }}
+          key: {{ .Values.backup.secretAccessKeyKey }}
+      wal:
+        compression: {{ .Values.backup.walCompression }}
+  {{- end }}

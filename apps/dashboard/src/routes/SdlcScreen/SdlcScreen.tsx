@@ -144,6 +144,7 @@ import { getUserDisplayName } from '../../utils/userDisplayName';
 import { Popover } from '../../components/ui/Popover';
 import { Tooltip } from '../../components/ui/Tooltip';
 import { fileKind } from './fileKind';
+import { getLastSdlcLocation, sdlcHubIdOf } from './lastSdlcLocation';
 import { SdlcFolderPage, SCRATCH_TAB_ID, type FolderTab } from './SdlcFolderPage';
 import { setSdlcCommentContext } from './sdlcCommentStore';
 import { publishPendingPassage, registerSelectionSink } from '../../components/workspaceItems';
@@ -532,10 +533,13 @@ export default function SdlcScreen(): ReactElement {
   const { selectedAgentSlug, setSelectedAgentSlug } = useSelectedAgent();
 
   useEffect(() => {
-    if (!channelId && Array.isArray(channels) && channels[0]) {
-      void navigate(`/sdlc/${channels[0].id}/overview`, { replace: true });
-    }
-  }, [navigate, channelId, channels]);
+    if (channelId || !Array.isArray(channels) || !workspaceId) return;
+    const fallbackId = channels[0]?.id;
+    if (!fallbackId) return;
+    const storedPath = getLastSdlcLocation(workspaceId);
+    const stored = channels.find(item => item.id === (storedPath ? sdlcHubIdOf(storedPath) : null));
+    void navigate(`/sdlc/${stored?.id ?? fallbackId}/overview`, { replace: true });
+  }, [navigate, channelId, channels, workspaceId]);
 
   const canvases = useMemo(() => {
     if (!channel) return [];
@@ -3279,7 +3283,7 @@ export default function SdlcScreen(): ReactElement {
                 <button
                   type='button'
                   onClick={requestSdlcFrameReset}
-                  title='Reload SDLC Hub — discards this session and starts fresh at the hub root'
+                  title='Reload SDLC Hub — discards this session and reloads the current page'
                   aria-label='Reload SDLC Hub'
                   className='rounded-md p-1 text-sidebar-foreground/60 transition-colors hover:bg-sidebar-accent/60 hover:text-sidebar-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-sidebar-accent-ring'
                   data-track-category='SdlcHub'

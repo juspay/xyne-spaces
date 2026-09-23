@@ -10,8 +10,8 @@
  * depends on claw-auth being up. `session-store.ts` uses it as the PRIMARY path
  * and falls back to the claw-auth round-trip when it's unavailable.
  *
- * Storage goes through the shared @xyne/storage provider factory — GCS or S3
- * selected by STORAGE.provider (STORAGE_PROVIDER env), same as claw-auth and
+ * Storage goes through the shared @xyne/storage provider factory — GCS, S3 or
+ * Azure Blob selected by STORAGE.provider (STORAGE_PROVIDER env), same as claw-auth and
  * the Spaces backend. GCS auth: Application Default Credentials — Workload
  * Identity on GKE, `gcloud auth application-default login` / service-account
  * JSON locally. When no credentials are resolvable at all, every function
@@ -43,7 +43,12 @@ setStorageLogger({
   error: (msg, ...meta) => log.error(msg, ...meta),
 });
 
-const BUCKET = STORAGE.provider === "s3" ? STORAGE.s3BucketName : GCS.bucketName;
+const BUCKET =
+  STORAGE.provider === "s3"
+    ? STORAGE.s3BucketName
+    : STORAGE.provider === "azure"
+      ? STORAGE.azureContainerName
+      : GCS.bucketName;
 // MUST equal SESSION_PREFIX in claw-auth/routes/sessions-archive.ts.
 const SESSION_PREFIX = "claw-sessions";
 // Per-run debugger snapshots live OUTSIDE the session prefix on purpose:
@@ -103,6 +108,15 @@ function getStorage(): StorageService | null {
           ...(STORAGE.s3AccessKeyId
             ? { accessKeyId: STORAGE.s3AccessKeyId, secretAccessKey: STORAGE.s3SecretAccessKey }
             : {}),
+        },
+        azure: {
+          containerName: STORAGE.azureContainerName,
+          ...(STORAGE.azureAccountName ? { accountName: STORAGE.azureAccountName } : {}),
+          ...(STORAGE.azureEndpoint ? { endpoint: STORAGE.azureEndpoint } : {}),
+          ...(STORAGE.azureConnectionString
+            ? { connectionString: STORAGE.azureConnectionString }
+            : {}),
+          ...(STORAGE.azureSasToken ? { sasToken: STORAGE.azureSasToken } : {}),
         },
       },
       BUCKET,

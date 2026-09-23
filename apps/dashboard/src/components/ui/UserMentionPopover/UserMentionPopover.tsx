@@ -231,7 +231,12 @@ const UserHoverWrapperInner: React.FC<UserHoverWrapperProps> = ({
             <Button
               variant='secondary'
               size='default'
-              onClick={handleSendMessage}
+              onClick={e => {
+                // The hover card floats over a clickable result card — stop the click from
+                // bubbling (via the portal) to the card, which would open the message pane too.
+                e.stopPropagation();
+                handleSendMessage();
+              }}
               data-track-category='MENTION'
               data-track-name='SEND_MESSAGE_FROM_MENTION'
               className='flex items-center gap-2'
@@ -242,7 +247,10 @@ const UserHoverWrapperInner: React.FC<UserHoverWrapperProps> = ({
             <Button
               variant='secondary'
               size='default'
-              onClick={handleHuddleClick}
+              onClick={e => {
+                e.stopPropagation();
+                handleHuddleClick();
+              }}
               data-track-category='MENTION'
               data-track-name='START_HUDDLE_FROM_MENTION'
               className='flex items-center gap-2'

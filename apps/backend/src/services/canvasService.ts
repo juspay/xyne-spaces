@@ -15,6 +15,7 @@ import { vespaQueue } from '@/queues/vespaQueue';
 import { fileSchema, SubApp } from '@/vespa/src/types';
 import { CanvasRole, CanvasVisibility } from '@xyne/shared';
 import { toJsonSafeValue } from './jsonSafe';
+import { readFromYSweetStrict, syncToYSweet } from '@/utils/ysweetUtils';
 // Y-Sweet XML fragment name used by the frontend collaborative editor
 export const YSWEET_XML_FRAGMENT = 'document-store';
 
@@ -234,6 +235,11 @@ export async function createKnowledgeCanvas(
     // Format learnings to BlockNote content
     const content = formatLearningsToBlockNote(learnings, workflowExecutionId, finalTitle);
 
+    const synced = await syncToYSweet(canvasId, content as BlockNoteBlock[], createdByUserId);
+    if (!synced) {
+      throw new Error(`Failed to save knowledge canvas ${canvasId} to Y-Sweet`);
+    }
+
     // Create the canvas with PUBLIC visibility
     const connectId = newConnectId();
     await prisma.canvas.create({
@@ -241,7 +247,8 @@ export async function createKnowledgeCanvas(
         id: canvasId,
         title: finalTitle,
         workspaceId,
-        content: content as any, // BlockNote JSON array
+        content: [],
+        isCollaborative: true,
         createdBy: createdByUserId,
         visibility: CanvasVisibility.PUBLIC,
         isTemplate: false,
@@ -785,6 +792,7 @@ export async function approveKnowledgeCanvas(
         id: true,
         title: true,
         content: true,
+        isCollaborative: true,
         metadata: true,
         workspaceId: true,
         createdBy: true,
@@ -858,7 +866,9 @@ export async function approveKnowledgeCanvas(
     const learningIds = metadata.learningIds as string[] | undefined;
 
     // Convert BlockNote content to Markdown
-    const blocks = canvas.content as unknown[];
+    const blocks = canvas.isCollaborative
+      ? await readFromYSweetStrict(canvas.id, approvedByUserId)
+      : canvas.content as unknown[];
     const markdownContent = await convertBlockNoteToMarkdown(blocks);
 
     // Get original learnings metadata if available (for filePaths, learningType, etc.)

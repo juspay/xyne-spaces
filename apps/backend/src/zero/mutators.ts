@@ -11,6 +11,7 @@ import {
   RecurringCallSeriesStatus,
   CallOrigin,
   InvitationResponse,
+  RingStatus,
   MeetingStatus,
   NotificationLevel,
   Schema,
@@ -109,6 +110,7 @@ import {
   parseTicketEtaManagement,
   mergeTicketEtaManagement,
   type EtaRiskAcknowledgedActivityValue,
+  resolveTicketDescription,
 } from '@xyne/shared';
 import {
   normalizeThreadTypeName,
@@ -4765,6 +4767,7 @@ export function createMutators(
                   invitedBy: authData.sub,
                   invitedAt: now,
                   response: InvitationResponse.INVITED,
+                  ringStatus: RingStatus.CALLING,
                   respondedAt: null,
                   joinedAt: null,
                   leftAt: null,
@@ -4790,6 +4793,7 @@ export function createMutators(
                   invitedAt: now,
                   isExternal: false,
                   response: InvitationResponse.INVITED,
+                  ringStatus: RingStatus.CALLING,
                   respondedAt: null,
                   joinedAt: null,
                   leftAt: null,
@@ -5064,6 +5068,25 @@ export function createMutators(
           }
         },
       ),
+      updateRingStatus: defineMutator(
+        z.object({ callId: z.string(), ringStatus: z.enum([RingStatus.RINGING, RingStatus.BUSY]) }),
+        async ({ tx, args: { callId, ringStatus } }) => {
+          const call = await tx.run(zql.calls.where('externalId', callId).one());
+          if (!call) return;
+
+          const participant = await tx.run(zql.call_participants
+            .where('callId', call.id)
+            .where('userId', authData.sub)
+            .one());
+          if (!participant || participant.response !== InvitationResponse.INVITED) return;
+
+          if (participant.ringStatus === ringStatus) return;
+          // BUSY is sticky: an idle second device reporting RINGING must not undo it.
+          if (participant.ringStatus === RingStatus.BUSY) return;
+
+          await tx.mutate.call_participants.update({ id: participant.id, ringStatus });
+        },
+      ),
       invite: defineMutator(
         z.object({ callId: z.string(), userIds: z.array(z.string()), timestamp: z.number(), participantIds: z.record(z.string(), z.string()) }),
         async ({ tx, args: { callId, userIds, timestamp, participantIds = {} } }) => {
@@ -5088,6 +5111,7 @@ export function createMutators(
                 await tx.mutate.call_participants.update({
                   id: existingParticipant.id,
                   response: InvitationResponse.INVITED,
+                  ringStatus: RingStatus.CALLING,
                   invitedBy: authData.sub,
                   invitedAt: now,
                   respondedAt: null,
@@ -5109,6 +5133,7 @@ export function createMutators(
                 invitedBy: authData.sub,
                 invitedAt: now,
                 response: InvitationResponse.INVITED,
+                ringStatus: RingStatus.CALLING,
                 respondedAt: null,
                 joinedAt: null,
                 leftAt: null,
@@ -5934,8 +5959,9 @@ export function createMutators(
           // Optional optimistic-concurrency guard + audit reason for a manual `eta` edit.
         }),
         async ({ tx, args: params }) => {
-          const ticket = await tx.run(zql.tickets.where('id', params.id).one());
+          const ticket = await tx.run(zql.tickets.where('id', params.id).related('ticketDescription').one());
           if (!ticket) throw new Error('Ticket not found');
+          const currentDescription = resolveTicketDescription(ticket);
           const currentBoard = await tx.run(zql.boards.where('id', ticket.boardId).one());
           if (
             currentBoard?.boardType === BoardType.FLOW &&
@@ -6331,8 +6357,10 @@ export function createMutators(
             updateData.statusUpdatedAt = params.updatedAt;
           }
 
+          const ticketRecord = ticket as Record<string, unknown>;
           for (const field of fields) {
-            if (params[field] !== undefined && params[field] !== ticket[field]) {
+            const previousValue = field === 'description' ? currentDescription : ticketRecord[field];
+            if (params[field] !== undefined && params[field] !== previousValue) {
               updateData[field] = params[field];
               if (field === 'kanbanPosition') continue;
               let activityType = field.toUpperCase();
@@ -6348,8 +6376,8 @@ export function createMutators(
               activities.push({
                 activityType,
                 value: field === 'stageName'
-                  ? { field: 'stageName', oldValue: ticket[field], newValue: params[field] }
-                  : { oldValue: ticket[field], newValue: params[field] },
+                  ? { field: 'stageName', oldValue: previousValue, newValue: params[field] }
+                  : { oldValue: previousValue, newValue: params[field] },
               });
             }
           }
@@ -6646,6 +6674,28 @@ export function createMutators(
           }
 
           await tx.mutate.tickets.update({ id: params.id, ...updateData });
+
+          if (params.description !== undefined && params.description !== currentDescription) {
+            const existingDescription = await tx.run(
+              zql.ticket_descriptions.where('ticketId', params.id).one()
+            );
+            if (existingDescription) {
+              await tx.mutate.ticket_descriptions.update({
+                ticketId: params.id,
+                description: params.description,
+                updatedAt: params.updatedAt,
+              });
+            } else {
+              await tx.mutate.ticket_descriptions.insert({
+                ticketId: params.id,
+                workspaceId: ticket.workspaceId,
+                channelId: ticket.channelId,
+                description: params.description,
+                createdAt: params.updatedAt,
+                updatedAt: params.updatedAt,
+              });
+            }
+          }
 
           if (
             params.statusV2 === TicketStatusV2.COMPLETED

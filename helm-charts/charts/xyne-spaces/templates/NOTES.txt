@@ -1,0 +1,19 @@
+Xyne Spaces {{ .Chart.AppVersion }} installed as release "{{ .Release.Name }}" in namespace "{{ .Release.Namespace }}".
+
+Enabled components:
+{{- range $name, $values := .Values }}
+{{- if and (kindIs "map" $values) (hasKey $values "enabled") }}
+{{- if $values.enabled }}
+  - {{ $name }}
+{{- end }}
+{{- end }}
+{{- end }}
+
+The charts never create Secrets. Before the pods can start, create the Secrets each enabled
+component references under `secretEnv` / `envFromSecrets`:
+
+  helm show values <chart> | grep -A3 secretEnv
+
+Check rollout:
+
+  kubectl get pods -n {{ .Release.Namespace }} -l app.kubernetes.io/instance={{ .Release.Name }}

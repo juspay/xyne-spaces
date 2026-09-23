@@ -1,4 +1,5 @@
 import { Prisma } from '@prisma/client';
+import { parseAssigneeFilter } from '@xyne/shared/zero/queries';
 import { db } from '@/database/client';
 
 /**
@@ -36,10 +37,31 @@ type AuthScope = { userId: string; workspaceId: string };
 function buildDeskFilterWhere(filters: LabelUnreadFilters): Prisma.TicketWhereInput[] {
   const clauses: Prisma.TicketWhereInput[] = [];
 
-  // Desk V4 filters assignees with a plain `IN` — the 'unassigned'/'!invert'
-  // sentinels handled by parseAssigneeFilter are kanban-only, so they are
-  // intentionally NOT special-cased here. An empty array means "no constraint".
-  if (filters.assignedTo?.length) clauses.push({ assignedTo: { in: filters.assignedTo } });
+  // Mirrors supportTicketsV4 assignee handling (src/zero/queries.ts): the
+  // 'unassigned' sentinel matches tickets with no assignee (null OR ''), the
+  // '!invert' marker negates the selection. An empty array means "no constraint".
+  if (filters.assignedTo?.length) {
+    const { inverted, includeUnassigned, ids } = parseAssigneeFilter(filters.assignedTo);
+    if (!inverted) {
+      const orClauses: Prisma.TicketWhereInput[] = [
+        ...(ids.length ? [{ assignedTo: { in: ids } }] : []),
+        ...(includeUnassigned ? [{ assignedTo: null }, { assignedTo: '' }] : []),
+      ];
+      if (orClauses.length) clauses.push({ OR: orClauses });
+    } else if (includeUnassigned) {
+      clauses.push({
+        AND: [
+          ...(ids.length ? [{ assignedTo: { notIn: ids } }] : []),
+          { assignedTo: { not: null } },
+          { assignedTo: { not: '' } },
+        ],
+      });
+    } else {
+      clauses.push({
+        OR: [{ assignedTo: { notIn: ids } }, { assignedTo: null }, { assignedTo: '' }],
+      });
+    }
+  }
   if (filters.createdBy?.length) clauses.push({ createdBy: { in: filters.createdBy } });
   if (filters.priority?.length) clauses.push({ priority: { in: filters.priority } });
   if (filters.stageName?.length) clauses.push({ stageName: { in: filters.stageName } });
