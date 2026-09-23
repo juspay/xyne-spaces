@@ -137,9 +137,15 @@ export class ChannelController {
       }
 
       const emailChannelPreferenceRepo = new EmailChannelPreferenceRepository();
-      const config = await emailChannelPreferenceRepo.findByChannelId(channel.id);
+      const preference = await emailChannelPreferenceRepo.findByChannelId(channel.id);
+      // Onboarding exam data holds agents' replies and grading — never part of desk config.
+      const config =
+        preference &&
+        Object.fromEntries(
+          Object.entries(preference).filter(([k]) => !k.startsWith('onboarding'))
+        );
 
-      res.status(200).json({ config });
+      res.status(200).json({ config: config ?? null });
     } catch (error) {
       logger.error('[CHANNEL-CONTROLLER] Error getting desk config:', error);
       res.status(500).json({

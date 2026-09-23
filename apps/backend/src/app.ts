@@ -131,6 +131,7 @@ import deskMetricsRoutes from '@/routes/deskMetricsRoutes';
 import deskMetricsAggregateRoutes from '@/routes/deskMetricsAggregateRoutes';
 import deskMetricsClawRoutes from '@/routes/deskMetricsClawRoutes';
 import deskReportPanelRoutes from '@/routes/deskReportPanelRoutes';
+import onboardingRoutes from '@/routes/onboardingRoutes';
 import aiRetriggerRoutes from '@/routes/aiRetriggerRoutes';
 import testAuthRoutes from '@/routes/testAuth';
 import customInstructionRoutes from '@/routes/customInstruction';
@@ -146,6 +147,7 @@ import sdlcArtifactVersionsInternalRoutes from '@/routes/sdlcArtifactVersionsInt
 import sdlcWikiInternalRoutes from '@/routes/sdlcWikiInternal';
 import { handleAutoDraftCallback } from '@/controllers/autodraftCallback.handler';
 import { handleDeskReportCallback } from '@/controllers/deskReportCallback.handler';
+import { handleOnboardingGradeCallback } from '@/controllers/onboardingController';
 import automationWebhookRoutes from '@/automations/routes/webhook-trigger.handler';
 import activityLogRoutes from '@/routes/activityLog';
 import userActivityRoutes from '@/routes/userActivity';
@@ -394,6 +396,7 @@ export class App {
     this.app.use('/api/desk-metrics/claw', authenticateUserOrApp, deskMetricsClawRoutes);
     this.app.use('/api/desk-metrics', authMiddleware.authenticate, deskMetricsAggregateRoutes);
     this.app.use('/api/desk-report', authMiddleware.authenticate, deskReportPanelRoutes);
+    this.app.use('/api/onboarding', authMiddleware.authenticate, onboardingRoutes);
     this.app.use('/api/channels/:channelId/ai-retrigger', authMiddleware.authenticate, aiRetriggerRoutes);
 
     // Meet callback route (API key auth - called by SAM service)
@@ -647,6 +650,11 @@ export class App {
       '/api/internal/desk-report/callback/:channelId/:attachmentId',
       validateS2SKey,
       handleDeskReportCallback,
+    );
+    this.app.post(
+      '/api/internal/onboarding/grade-callback/:channelId/:attemptId/:index/:runId?',
+      validateS2SKey,
+      handleOnboardingGradeCallback,
     );
 
     // Internal canvas read/update (S2S-only, used by MCP tools)
