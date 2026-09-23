@@ -251,6 +251,7 @@ interface ActionRequest {
     conversationId: string;
     userId: string | null;
   };
+  applyToDraft?: boolean;
 }
 
 type AppActionResponse =
@@ -812,7 +813,7 @@ async function finishWriteFailure(opts: {
 
 router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req: Request, res: Response): Promise<void> => {
   const body = req.body as ActionRequest;
-  const { actionId, values, context } = body;
+  const { actionId, values, context, applyToDraft } = body;
   const { flowJSON, messageId, conversationId, userId: rawCallerUserId } = context;
   // Flow's signed context carries the raw Spaces membership ID. Translate it
   // for Claw-owned lookups, but retain the source ID so legacy signed cards
@@ -1199,7 +1200,12 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
       }
 
       if (serverType === "agent-tools" && AGENT_TOOL_SLUGS.has(tool)) {
-        const outcome = await applyAgentToolAction(tool, params, writeClawUserId);
+        // The builder proposes into a client-side draft; nothing is written
+        // until the user saves it themselves.
+        const draftOnly = applyToDraft === true && tool === "create-agent";
+        const outcome = draftOnly
+          ? { ok: true as const, message: "Agent setup updated" }
+          : await applyAgentToolAction(tool, params, writeClawUserId);
         if (!outcome.ok) {
           resp = { type: "close_screen", finalMessage: `${outcome.error}` };
           if (xyneAiCard) {
@@ -1222,10 +1228,38 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
             ...(outcome.note ? { details: [{ label: "Note", value: outcome.note }] } : {}),
           });
           res.json(resp);
+          // This branch never dispatched a continuation, so Approve & Continue
+          // behaved exactly like Approve for every agent tool. Same call the
+          // other write paths make, via finishWriteSuccess.
+          if (actionId === "approve-continue" || actionId === "retry-continue") {
+            await dispatchXyneAiWriteContinuation({
+              writeUserId,
+              agentSlug,
+              spacesAppId,
+              tool,
+              resultText: outcome.message,
+              card: xyneAiCard,
+            }).catch((err: unknown) =>
+              log.warn("[flow-action] agent-tools continuation failed:", errMsg(err)),
+            );
+          }
           return;
         }
         res.json(resp);
         void replaceFlowCardWithText(messageId, agentSlug, `**${outcome.message}**${suffix}`, conversationId, undefined, spacesAppId);
+        if (actionId === "approve-continue" || actionId === "retry-continue") {
+          await dispatchContinuationRun({
+            writeUserId,
+            agentSlug,
+            spacesAppId,
+            conversationId,
+            channelId: continueChannelId,
+            tool,
+            resultText: outcome.message,
+          }).catch((err: unknown) =>
+            log.warn("[flow-action] agent-tools continuation failed:", errMsg(err)),
+          );
+        }
         return;
       }
 

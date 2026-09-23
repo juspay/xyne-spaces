@@ -41,7 +41,7 @@ export class FlowController {
       return;
     }
 
-    const { actionId, type, values, context } = reqResult.data;
+    const { actionId, type, values, context, applyToDraft } = reqResult.data;
     const { messageId, conversationId, flowJSON } = context;
     const userId = req.user?.id;
 
@@ -149,6 +149,7 @@ export class FlowController {
           conversationId,
           userId: userId ?? null,
         },
+        ...(applyToDraft ? { applyToDraft: true } : {}),
       };
       // Serialize exactly once: the HMAC must cover the same bytes fetch sends.
       const body = JSON.stringify(appPayload);

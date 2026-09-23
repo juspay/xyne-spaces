@@ -28,7 +28,10 @@ import { useChannel, useAllVisibleChannels } from '../../../hooks/useChannels';
 import { useXyneAIStream } from '../../../hooks/useXyneAIStream';
 import { ChannelScopeType } from '@xyne/shared';
 import { BASE_URL } from '../../../services/clients/apiClient';
-import type { ConversationHistory as ConversationHistoryType } from './utils/XyneAITypes';
+import type {
+  ConversationHistory as ConversationHistoryType,
+  PendingAction,
+} from './utils/XyneAITypes';
 import { resolveActivePath, getSiblings, BRANCH_ROOT_KEY } from './utils/XyneAIUtils';
 import { useV2SessionInvalidator } from '../../../hooks/useAskAISessionsV2';
 import {
@@ -177,6 +180,10 @@ interface XyneAISidebarProps {
   // Drops the tilted suggestion cards from the empty state, leaving the heading.
   // Set by hosts that embed this in a narrow slot (e.g. a Streams column).
   hideEmptyStateSuggestions?: boolean;
+  hideBackgroundStreamNotice?: boolean;
+  showAgentHeader?: boolean;
+  hideAgentName?: boolean;
+  roomyContent?: boolean;
   // Drops the header row entirely. For hosts whose own chrome already carries a
   // title and a close, where this one is a second bar under the first however
   // little it contains.
@@ -196,6 +203,9 @@ interface XyneAISidebarProps {
   /** Analytics `source` for XYNE_AI_OPENED when this instance is embedded
    *  directly (not opened through xyneAIActor OPEN, which carries its own). */
   trackSource?: string;
+  onInterceptPendingAction?: (action: PendingAction, approved: boolean) => boolean;
+  hiddenContext?: () => string;
+  composerPlaceholder?: string;
 }
 
 const XyneAISidebar = ({
@@ -233,9 +243,16 @@ const XyneAISidebar = ({
   onStreamingChange,
   onFinalResponse,
   hideEmptyStateSuggestions = false,
+  hideBackgroundStreamNotice = false,
+  showAgentHeader = false,
+  hideAgentName = false,
+  roomyContent = false,
   hideHeader = false,
   suppressInputAutoFocus = false,
   trackSource: trackSourceProp,
+  onInterceptPendingAction,
+  hiddenContext,
+  composerPlaceholder,
 }: XyneAISidebarProps): ReactElement => {
   const isFullscreen = variant === 'fullscreen';
   const [inputValue, setInputValue] = useState('');
@@ -1964,6 +1981,9 @@ const XyneAISidebar = ({
         query = query + contextText;
       }
 
+      const hostContext = hiddenContext?.();
+      if (hostContext) query = `${query}\n\n${hostContext}`;
+
       // Note: Selection text is NOT appended to query here - it's handled internally in useXyneAIStream
       // The user message will show original query + selectionContexts as visual cards
 
@@ -2198,6 +2218,9 @@ const XyneAISidebar = ({
 
   // Shared props for the composer (XyneAIInputBox), at both mount points.
   const sharedInputSectionProps = {
+    ...(composerPlaceholder === undefined ? {} : { placeholder: composerPlaceholder }),
+    // Model picker. Empty list (agent has no litellm credential) ⇒ the picker
+    // hides itself, so no extra gating is needed here beyond the v2 check.
     models: isV2 ? (agentModelsData?.models ?? []) : [],
     modelsLoading: agentModelsLoading,
     defaultModel: agentModelsData?.defaultModel ?? null,
@@ -2214,6 +2237,8 @@ const XyneAISidebar = ({
     onRemoveWorkflowInfo: handleRemoveWorkflowInfo,
     selectionInfos: activeSelectionInfos,
     inputValue,
+    showAgentHeader,
+    hideAgentName,
     onInputChange: setInputValue,
     onSubmit: handleComposerSubmit,
     onThreadInfoChange: setActiveThreadInfo,
@@ -2386,7 +2411,7 @@ const XyneAISidebar = ({
               />
             )}
 
-            {hasBackgroundStreamingElsewhere ? (
+            {hasBackgroundStreamingElsewhere && !hideBackgroundStreamNotice ? (
               <div className='flex-shrink-0 border-b border-border bg-muted/35 px-3 py-2 text-xs text-muted-foreground flex flex-wrap items-center gap-x-2 gap-y-1'>
                 <span>Another chat is still generating.</span>
                 <button
@@ -2504,10 +2529,10 @@ const XyneAISidebar = ({
                       className={cn(
                         'py-4',
                         aiOnboarding.isActive && 'bot-markdown-content',
-                        isFullscreen ? 'w-full max-w-2xl px-4' : 'px-3',
+                        isFullscreen ? 'w-full max-w-2xl px-4' : roomyContent ? 'px-6' : 'px-3',
                       )}
                     >
-                      <div className='max-w-full space-y-4'>
+                      <div className={cn('max-w-full', roomyContent ? 'space-y-8' : 'space-y-4')}>
                         {aiOnboarding.isActive && (
                           <div className='mb-2 flex items-start gap-2'>
                             <div className='mt-0.5 flex-shrink-0'>
@@ -2578,6 +2603,7 @@ const XyneAISidebar = ({
                                     isV2={isV2}
                                     trackContext={messageTrackContext}
                                     {...(flowCards ? { flowCards } : {})}
+                                    onInterceptPendingAction={onInterceptPendingAction}
                                     onRatingChange={handleRatingChange}
                                     onRegenerate={
                                       !isLegacyConversation && isLatestBotMessage
@@ -2686,8 +2712,8 @@ const XyneAISidebar = ({
             {!(isFullscreen && messages.length === 0) && (
               <div
                 className={cn(
-                  isFullscreen ? 'flex justify-center px-4 pb-6' : 'px-3',
-                  !isFullscreen && !isMobile && 'pb-3',
+                  isFullscreen ? 'flex justify-center px-4 pb-6' : roomyContent ? 'px-6' : 'px-3',
+                  !isFullscreen && !isMobile && (roomyContent ? 'pb-6' : 'pb-3'),
                 )}
               >
                 <div className={cn(isFullscreen && 'w-full max-w-2xl')}>

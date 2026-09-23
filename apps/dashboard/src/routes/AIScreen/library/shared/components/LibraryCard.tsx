@@ -11,7 +11,7 @@ const getInitials = (name: string): string => {
   }
   return name.slice(0, 2).toUpperCase();
 };
-const TILE_SIZE = { sm: 'size-8', md: 'size-10' } as const;
+const TILE_SIZE = { sm: 'size-8', md: 'size-10', lg: 'size-14 rounded-xl text-base' } as const;
 
 export function LibraryIconTile({
   name,

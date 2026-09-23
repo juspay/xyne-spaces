@@ -146,6 +146,7 @@ export interface ActionRequest {
     messageId: string;
     conversationId: string;
   };
+  applyToDraft?: boolean;
 }
 
 // ============================================================================
