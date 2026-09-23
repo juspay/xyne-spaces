@@ -2,6 +2,7 @@ import { ReactElement, ReactNode, useMemo, useState } from 'react';
 import { Plus } from 'lucide-react';
 import { Popover } from '../ui/Popover/Popover';
 import { AppPickerDialog } from './AppPickerDialog';
+import { ToggleGlyph } from './ToggleGlyph';
 import type { BarBuiltIn } from './useBarBuiltIns';
 import {
   type BarItemsStore,
@@ -23,9 +24,15 @@ interface BarAddMenuProps {
 }
 
 /**
- * The "+" at the end of a bar: built-ins not currently shown, then "Add app…".
- * Same store and same built-ins as the Preferences customizer, so the two
- * places can never disagree about what is available.
+ * The "+" at the end of a bar: every built-in it can hold, each with a switch
+ * showing whether it is currently there, then "Add app…". Same store and same
+ * built-ins as the Preferences customizer, so the two places can never
+ * disagree.
+ *
+ * Rows toggle rather than issuing one-shot "add" commands, and the popover
+ * stays open while they are used — picking three tabs used to mean opening this
+ * menu three times, and an "available only" list moved the remaining rows under
+ * the pointer after every click.
  */
 export const BarAddMenu = ({
   store,
@@ -39,7 +46,7 @@ export const BarAddMenu = ({
   const [open, setOpen] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
 
-  const available = useMemo(() => builtIns.filter(b => !ids.includes(b.id)), [builtIns, ids]);
+  const shown = useMemo(() => new Set(ids), [ids]);
   const addedAppIds = useMemo(
     () => new Set(ids.map(appIdOf).filter((id): id is string => id !== null)),
     [ids],
@@ -70,30 +77,39 @@ export const BarAddMenu = ({
         }
       >
         <div className='flex flex-col gap-0.5'>
-          {available.length === 0 ? (
-            <p className='px-2 py-1.5 text-xs text-muted-foreground'>
-              Everything is already shown.
-            </p>
+          {builtIns.length === 0 ? (
+            <p className='px-2 py-1.5 text-xs text-muted-foreground'>Nothing to choose from.</p>
           ) : (
-            available.map(item => (
-              <button
-                key={item.id}
-                type='button'
-                onClick={() => {
-                  store.add(item.id);
-                  setOpen(false);
-                }}
-                className='flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left text-sm text-foreground transition-colors hover:bg-accent'
-                data-track-category={trackCategory}
-                data-track-name='AddBarItem'
-                data-track-metadata={JSON.stringify({ id: item.id })}
-              >
-                <span className='flex size-4 shrink-0 items-center justify-center text-muted-foreground'>
-                  {item.icon}
-                </span>
-                <span className='truncate'>{item.label}</span>
-              </button>
-            ))
+            builtIns.map(item => {
+              const checked = shown.has(item.id);
+              // A locked item is always present; it reads as checked so the
+              // list is honest, and simply cannot be toggled off.
+              const locked = store.locked.includes(item.id);
+              return (
+                <button
+                  key={item.id}
+                  type='button'
+                  role='switch'
+                  aria-checked={checked}
+                  disabled={locked}
+                  onClick={() => (checked ? store.remove(item.id) : store.add(item.id))}
+                  className={cn(
+                    'flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left text-sm text-foreground transition-colors',
+                    locked ? 'cursor-not-allowed opacity-50' : 'hover:bg-accent',
+                  )}
+                  title={locked ? `${item.label} can’t be removed` : undefined}
+                  data-track-category={trackCategory}
+                  data-track-name={checked ? 'RemoveBarItem' : 'AddBarItem'}
+                  data-track-metadata={JSON.stringify({ id: item.id })}
+                >
+                  <span className='flex size-4 shrink-0 items-center justify-center text-muted-foreground'>
+                    {item.icon}
+                  </span>
+                  <span className='min-w-0 flex-1 truncate'>{item.label}</span>
+                  <ToggleGlyph checked={checked} />
+                </button>
+              );
+            })
           )}
           <div className='my-1 border-t border-border' />
           <button
@@ -124,7 +140,11 @@ export const BarAddMenu = ({
         onOpenChange={setPickerOpen}
         addedAppIds={addedAppIds}
         isFull={appsFull}
-        onPick={app => {
+        onToggle={(app, next) => {
+          if (!next) {
+            store.remove(appItemId(app.id));
+            return;
+          }
           setAppSnapshot(app.id, { title: app.title, icon: app.icon });
           store.add(appItemId(app.id));
         }}

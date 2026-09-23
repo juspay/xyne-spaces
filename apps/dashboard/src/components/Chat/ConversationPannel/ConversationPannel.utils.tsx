@@ -12,7 +12,7 @@ import { useCanReadTicket } from '../../../hooks/usePermissions';
 import { ChannelScopeType } from '@xyne/shared';
 import { isDMChannel } from '../ChatDirectory/ChatDirectory.utils';
 import { AppIcon } from '../../AppIcon/AppIcon';
-import { channelTabsStore, useAppSnapshots, appIdOf, appItemId } from '../../../hooks/barItems';
+import { getChannelTabsStore, useAppSnapshots, appIdOf, appItemId } from '../../../hooks/barItems';
 
 export interface ConversationTabListType {
   label: string;
@@ -23,9 +23,9 @@ export interface ConversationTabListType {
 /** The tab every channel opens on and the only one a user cannot remove. */
 export const DEFAULT_CONVERSATION_TAB = 'messages';
 
-// Built-in tabs. The channel header renders the user's ordered selection of
-// these (channelTabsStore) plus any artifact apps they added; this is the full
-// set the picker offers.
+// Built-in tabs. In a customizable channel the header renders the user's
+// ordered selection of these plus any artifact apps they added; this is the
+// full set the picker offers, and the fixed list everywhere else.
 export const STATIC_TABS: ConversationTabListType[] = [
   {
     label: 'Messages ',
@@ -87,19 +87,33 @@ export const useAvailableBuiltInTabs = (
   );
 };
 
-// Hook to get conversation tabs based on the user's selection, permissions and
-// channel scope type.
+/**
+ * Whether this channel's tabs can be customized. Only real channels qualify,
+ * public and private alike — a DM, a group DM or a ticket/document channel
+ * shows the built-in tabs and offers no editing affordances.
+ */
+export const isChannelTabsCustomizable = (channelScopeType?: ChannelScopeType): boolean =>
+  channelScopeType === ChannelScopeType.DEFAULT;
+
+// Hook to get conversation tabs for this channel: the user's own ordered
+// selection where that is allowed, the built-in list everywhere else.
 //
 // Stable references matter here: a fresh `availableTabs` array and fresh
 // closures per render made ConversationPanelV2's memoized tab handler and
 // context value unstable, re-rendering every visible message bubble. Everything
 // is memoized on the store's own (stable-until-changed) snapshots.
-export const useConversationTabs = (channelScopeType?: ChannelScopeType) => {
-  const ids = channelTabsStore.useItems();
+export const useConversationTabs = (channelId: string, channelScopeType?: ChannelScopeType) => {
+  // Read unconditionally — a hook cannot be skipped for a DM. The store for a
+  // non-customizable channel is only ever read, never written, so subscribing
+  // to it costs a listener and nothing else.
+  const ids = getChannelTabsStore(channelId || 'unknown').useItems();
   const snapshots = useAppSnapshots();
   const ticketsAllowed = useTicketsTabAllowed(channelScopeType);
+  const builtInTabs = useAvailableBuiltInTabs(channelScopeType);
+  const customizable = isChannelTabsCustomizable(channelScopeType);
 
   const availableTabs = useMemo((): ConversationTabListType[] => {
+    if (!customizable) return builtInTabs;
     const tabs: ConversationTabListType[] = [];
     for (const id of ids) {
       const appId = appIdOf(id);
@@ -117,9 +131,9 @@ export const useConversationTabs = (channelScopeType?: ChannelScopeType) => {
       const tab = BUILT_IN_TABS.get(id);
       if (tab) tabs.push(tab);
     }
-    // `messages` is locked in channelTabsStore, so it is always among `ids`.
+    // `messages` is locked in every channel store, so it is always among `ids`.
     return tabs;
-  }, [ids, snapshots, ticketsAllowed]);
+  }, [customizable, builtInTabs, ids, snapshots, ticketsAllowed]);
 
   return useMemo(
     () => ({
