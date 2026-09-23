@@ -113,9 +113,20 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
   // Every field type is a valid scope key — the service derives its Vespa token from
   // the same buildFormFields the indexer uses — so the picker offers the whole list.
   const globalFields = useMemo(() => globalFieldsQuery.data ?? [], [globalFieldsQuery.data]);
-  const selectedDuplicateScopeFields = globalFields.filter(field =>
-    duplicateScopeFieldIds.includes(field.id),
+  // Chips are driven by the saved config, not by the field list: a configured field
+  // that has since been deleted still needs a chip, or its id is stranded — it keeps
+  // counting toward the cap and the backend reports it missing forever, which turns
+  // scoping off for the whole channel while this screen still reads "on".
+  const globalFieldById = useMemo(
+    () => new Map(globalFields.map(field => [field.id, field])),
+    [globalFields],
   );
+  const selectedDuplicateScopeFields = duplicateScopeFieldIds.map(id => ({
+    id,
+    field: globalFieldById.get(id),
+  }));
+  const hasUnresolvedScopeField =
+    !globalFieldsQuery.isPending && selectedDuplicateScopeFields.some(entry => !entry.field);
   const duplicateScopeFieldCapReached = duplicateScopeFieldIds.length >= MAX_DUPLICATE_SCOPE_FIELDS;
 
   useEffect(() => {
@@ -478,31 +489,45 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
             <div className='flex flex-col gap-[8px]'>
               <div className='text-desk-label'>Scope fields</div>
               <div className='flex w-full max-w-[500px] flex-wrap items-center gap-[6px]'>
-                {selectedDuplicateScopeFields.map(field => (
-                  <div
-                    key={field.id}
-                    className='inline-flex shrink-0 items-center gap-[4px] whitespace-nowrap rounded-[6px] bg-desk-accent-subtle py-[2px] pl-[6px] pr-[4px]'
-                  >
-                    <span className='text-[13px] font-medium leading-[18px] tracking-[-0.2px] text-desk-accent-foreground'>
-                      {field.fieldName}
-                    </span>
-                    <button
-                      type='button'
-                      onClick={() =>
-                        setDuplicateScopeFieldIds(
-                          duplicateScopeFieldIds.filter(id => id !== field.id),
-                        )
-                      }
-                      disabled={!canManage || !duplicateDetectionEnabled}
-                      className='text-desk-accent-foreground hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50'
-                      data-track-category='DeskSettings'
-                      data-track-name='RemoveDuplicateScopeField'
-                      aria-label={`Remove ${field.fieldName}`}
+                {selectedDuplicateScopeFields.map(({ id, field }) => {
+                  const label = field ? field.fieldName : 'Deleted field';
+                  return (
+                    <div
+                      key={id}
+                      title={field ? undefined : `This field no longer exists (${id})`}
+                      className={`inline-flex shrink-0 items-center gap-[4px] whitespace-nowrap rounded-[6px] py-[2px] pl-[6px] pr-[4px] ${
+                        field
+                          ? 'bg-desk-accent-subtle'
+                          : 'bg-destructive/10 line-through decoration-destructive/60'
+                      }`}
                     >
-                      <X size={14} />
-                    </button>
-                  </div>
-                ))}
+                      <span
+                        className={`text-[13px] font-medium leading-[18px] tracking-[-0.2px] ${
+                          field ? 'text-desk-accent-foreground' : 'text-destructive'
+                        }`}
+                      >
+                        {label}
+                      </span>
+                      <button
+                        type='button'
+                        onClick={() =>
+                          setDuplicateScopeFieldIds(
+                            duplicateScopeFieldIds.filter(selected => selected !== id),
+                          )
+                        }
+                        disabled={!canManage || !duplicateDetectionEnabled}
+                        className={`hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50 ${
+                          field ? 'text-desk-accent-foreground' : 'text-destructive'
+                        }`}
+                        data-track-category='DeskSettings'
+                        data-track-name='RemoveDuplicateScopeField'
+                        aria-label={`Remove ${label}`}
+                      >
+                        <X size={14} />
+                      </button>
+                    </div>
+                  );
+                })}
                 {globalFields.length > 0 && (
                   <SearchableMultiSelect
                     options={globalFields.map(field => {
@@ -516,7 +541,16 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
                       };
                     })}
                     selectedValues={duplicateScopeFieldIds}
-                    onSelectedValuesChange={setDuplicateScopeFieldIds}
+                    onSelectedValuesChange={next => {
+                      // The trigger is disabled at the cap, but the popover stays open,
+                      // so a 6th option is still clickable in the already-open list.
+                      // Reject it loudly instead of letting the setter quietly slice it off.
+                      if (next.length > MAX_DUPLICATE_SCOPE_FIELDS) {
+                        toast.error(`Select up to ${MAX_DUPLICATE_SCOPE_FIELDS} scope fields.`);
+                        return;
+                      }
+                      setDuplicateScopeFieldIds(next);
+                    }}
                     isOpen={scopeFieldPickerOpen && duplicateDetectionEnabled && canManage}
                     onOpenChange={open => {
                       if (open && (!duplicateDetectionEnabled || !canManage)) return;
@@ -546,6 +580,12 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
                   />
                 )}
               </div>
+              {hasUnresolvedScopeField && (
+                <div className='w-full max-w-[500px] text-[13px] leading-[18px] text-destructive'>
+                  A selected field no longer exists, so duplicate detection falls back to
+                  project-wide on this desk. Remove it to re-enable scoping.
+                </div>
+              )}
               {!globalFieldsQuery.isPending && globalFields.length === 0 && (
                 <div className='text-desk-helper w-full max-w-[500px]'>
                   No fields in this project yet. Add one on a ticket form first, then pick it here.
