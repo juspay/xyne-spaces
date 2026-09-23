@@ -244,7 +244,7 @@ export async function executeRunFromPayload(
   const state: RunExecutionState = hooks ? { hooks } : {};
 
   pinRunJudgeBackend(judgeBackend);
-  pinRunOptimizations(optimizations);
+  pinRunOptimizations(optimizations, agentConfig?.["optimizations"]);
 
   try {
     // Process in background

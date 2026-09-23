@@ -25,6 +25,8 @@ import { runWithSubagentMcpId } from "./subagent-mcp-context.js";
 import { ensureSessionDebugDir, sessionDir } from "./session-store.js";
 import { SUBAGENT_DEFINITIONS, findSubagentDefinitionForServer, isPresentationToolSource, getSandboxSession, probeSession, REPO_CONFIGS, buildSandboxStoreKey, type SubagentDefinition, type SetupStep } from "xyne-claw-shared";
 import { acquireFollowUpLock, isValidFollowUpHandle } from "./subagent-followup.js";
+import { optEnabled } from "./optimizations.js";
+import { looksReadOnly } from "./read-only-tools.js";
 import type { McpToolGroup } from "./mcp.js";
 import { resolveModel, applyCopilotProxyIfNeeded, capCustomToolOutput, pushDebugProgress, pushInvocation, type CopilotConfig, type ClaudeConfig, type CodexConfig, type DebugEventRecord, type ProgressDest, type ToolInvocation } from "./agent.js";
 import {
@@ -567,8 +569,11 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
   // from direct MCP tools. The "[Subagent]" marker is what the parent's
   // PARENT_PARALLELISM_PREAMBLE refers to when it says "subagent calls are
   // expensive" — without the tag the rule has no concrete anchor.
+  const directFirst = optEnabled("subagent_read_tools") && tools.some((t) => looksReadOnly(t.name))
+    ? "Slow: this runs a whole nested model. Its read tools are listed in your tool catalog — load them with load-tools and call them yourself first. Delegate here only for a write, or for open-ended research that needs many queries. "
+    : "";
   const taggedDescription =
-    `[Subagent — nested LLM run, expensive] ${def.description} ` +
+    `[Subagent — nested LLM run, expensive] ${directFirst}${def.description} ` +
     `(If you have multiple independent questions for this subagent, batch them into ONE call with a single combined question; ` +
     `if you must fire it more than once, fire ALL the calls in the SAME assistant turn so they run in parallel.)`;
   const tool: ToolDefinition & { progressLabels?: string[] } = {

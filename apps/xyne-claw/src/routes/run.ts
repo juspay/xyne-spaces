@@ -107,6 +107,7 @@ import {
   describeMcpServers,
   renderToolCatalogForPrompt,
   type FastToolRuntimeController,
+  type ToolCatalogEntry,
   type ToolCatalogItem,
 } from "../tool-catalog.js";
 import {
@@ -563,7 +564,7 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
 
   const experiment = normalizeExperimentContext(rawExperiment);
   pinRunJudgeBackend(judgeBackend);
-  pinRunOptimizations(optimizations);
+  pinRunOptimizations(optimizations, agentConfig?.["optimizations"]);
 
   // [AUTODBG] claw-side receipt of every /run forward (esp. automations). Confirms
   // the request crossed claw-auth → claw and which session id it arrived under
@@ -2224,6 +2225,7 @@ export async function processTask(
       // bigger prompt, not wider reach.
       catalogUnwrapped: paletteMode !== "off",
       catalogUnwrappedWrites: paletteMode !== "off" && optEnabled("lean_palette"),
+      includeSubagentReadTools: optEnabled("subagent_read_tools"),
     });
     const fastCatalogCandidateByName = new Map(fastCatalogCandidateItems.map((item) => [item.entry.name, item]));
     let fastCatalogItems: ToolCatalogItem[] = [];
@@ -3322,9 +3324,27 @@ export async function processTask(
       );
       fastCatalogNames = fastCatalogItems.map((item) => item.entry.name);
       const finalFastCatalogNameSet = new Set(fastCatalogNames);
+      const activeToolEntries: ToolCatalogEntry[] | undefined =
+        optEnabled("catalog_full_index") || optEnabled("subagent_read_tools")
+          ? allTools
+              .filter((tool) =>
+                !duplicatesMetaTool(tool.name) &&
+                tool.name !== "search-tools" &&
+                tool.name !== "load-tools" &&
+                !finalFastCatalogNameSet.has(tool.name) &&
+                (!fastCatalogCandidateByName.has(tool.name) || fastAlwaysActiveToolNames.has(tool.name)),
+              )
+              .map((tool) => ({
+                name: tool.name,
+                oneLineDescription: String(tool.description ?? "").replace(/\s+/g, " ").trim().slice(0, 300),
+                source: "active",
+                catalog: "active",
+              }))
+          : undefined;
       allTools = dedupeToolsByName([
         ...buildFastModeMetaTools({
           catalog: fastCatalogItems.map((item) => item.entry),
+          ...(activeToolEntries ? { activeTools: activeToolEntries } : {}),
           controller: fastToolController,
           // Injected here (needs the run's session) rather than imported by the
           // catalog module; absent without a session — scope:"claw" reports why.
@@ -3922,6 +3942,8 @@ export async function processTask(
           // Only fast mode actually turns delegation off; asserting it on a
           // normal run would be a lie the model acts on.
           subagentDelegationDisabled: fastModeEnabled,
+          fullIndex: optEnabled("catalog_full_index") || optEnabled("subagent_read_tools"),
+          preferDirect: optEnabled("subagent_read_tools"),
         })
       : "";
     if (fastModeCatalogPrompt) {

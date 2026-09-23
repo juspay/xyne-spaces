@@ -24,10 +24,10 @@ describe("optimization switches", () => {
     }
   });
 
-  const inRun = <T>(spec: unknown, fn: () => T): Promise<T> =>
+  const inRun = <T>(spec: unknown, fn: () => T, agentSpec?: unknown): Promise<T> =>
     new Promise((resolve) => {
       setImmediate(() => {
-        pinRunOptimizations(spec);
+        pinRunOptimizations(spec, agentSpec);
         resolve(fn());
       });
     });
@@ -77,5 +77,20 @@ describe("optimization switches", () => {
     process.env["XYNE_OPT_JEV_TOOL_SIFT"] = "1";
     expect(optEnabled("jev_tool_sift")).toBe(true);
     expect(await inRun({ jev_tool_sift: false }, () => optEnabled("jev_tool_sift"))).toBe(false);
+  });
+
+  it("applies an agent's own switches, beating env", async () => {
+    process.env["XYNE_OPT_ALL"] = "0";
+    expect(await inRun(undefined, () => optEnabled("subagent_read_tools"), { subagent_read_tools: true })).toBe(true);
+    expect(await inRun(undefined, () => optEnabled("catalog_full_index"), { subagent_read_tools: true })).toBe(false);
+  });
+
+  it("lets a per-run pin beat the agent's switches", async () => {
+    expect(await inRun({ subagent_read_tools: false }, () => optEnabled("subagent_read_tools"), { subagent_read_tools: true })).toBe(false);
+    expect(await inRun("none", effectiveOptimizations, { catalog_full_index: true })).toMatchObject({ catalog_full_index: false });
+  });
+
+  it("ignores a malformed agent spec", async () => {
+    expect(await inRun(undefined, () => optEnabled("subagent_read_tools"), ["subagent_read_tools"])).toBe(false);
   });
 });
