@@ -33,31 +33,24 @@
 # NOTE: the @juspay/xyne-call-guardians team needs at least read access to this
 # repository for these rules to take effect.
 #
-# Scoped deliberately to token issuance, join authorization, the API surface and
-# the client session core. Call UI under components/Call/** is NOT owned here —
-# gating routine UI work would make the team a bottleneck.
+# The backend has no call-specific directory — calls live alongside everything
+# else in services/, controllers/ and routes/ — so those are matched by prefix
+# rather than by folder. Patterns are case-sensitive: liveKit* on the backend
+# service, livekit* on the controllers and route.
 
-# LiveKit token minting, host controls and webhook authorization
-/apps/backend/src/services/liveKitService.ts @juspay/xyne-call-guardians
-/apps/backend/src/services/externalCallTokenService.ts @juspay/xyne-call-guardians
-/apps/backend/src/services/callHostControlService.ts @juspay/xyne-call-guardians
-/apps/backend/src/services/callHostControlUtils.ts @juspay/xyne-call-guardians
-/apps/backend/src/services/callShareService.ts @juspay/xyne-call-guardians
-/apps/backend/src/routes/livekitWebhook.ts @juspay/xyne-call-guardians
-/apps/backend/src/controllers/livekitWebhookController.ts @juspay/xyne-call-guardians
-/apps/backend/src/controllers/livekitWebhookACL.ts @juspay/xyne-call-guardians
+# Backend call services, controllers, routes and validators (incl. LiveKit)
+/apps/backend/src/services/call*.ts @juspay/xyne-call-guardians
+/apps/backend/src/services/liveKit*.ts @juspay/xyne-call-guardians
+/apps/backend/src/services/externalCall*.ts @juspay/xyne-call-guardians
+/apps/backend/src/services/recurringCall*.ts @juspay/xyne-call-guardians
+/apps/backend/src/controllers/call*.ts @juspay/xyne-call-guardians
+/apps/backend/src/controllers/scheduleCall*.ts @juspay/xyne-call-guardians
+/apps/backend/src/controllers/livekit*.ts @juspay/xyne-call-guardians
+/apps/backend/src/routes/call*.ts @juspay/xyne-call-guardians
+/apps/backend/src/routes/livekit*.ts @juspay/xyne-call-guardians
+/apps/backend/src/validators/call*.ts @juspay/xyne-call-guardians
 
-# Call API surface and lifecycle
-/apps/backend/src/routes/calls.ts @juspay/xyne-call-guardians
-/apps/backend/src/routes/callLobby.ts @juspay/xyne-call-guardians
-/apps/backend/src/controllers/callController.ts @juspay/xyne-call-guardians
-/apps/backend/src/controllers/callLobbyController.ts @juspay/xyne-call-guardians
-/apps/backend/src/controllers/callHostControlController.ts @juspay/xyne-call-guardians
-/apps/backend/src/validators/callValidator.ts @juspay/xyne-call-guardians
-
-# Client join path and LiveKit room session
+# Call client
 /apps/dashboard/src/services/Call/ @juspay/xyne-call-guardians
-/apps/dashboard/src/components/Call/CallViews/CustomLiveKitRoom.tsx @juspay/xyne-call-guardians
-/apps/dashboard/src/components/Call/CallStateTransition/ @juspay/xyne-call-guardians
-/apps/dashboard/src/hooks/useCallJoinOrInitiate.ts @juspay/xyne-call-guardians
-/apps/dashboard/src/hooks/useCallJoinState.ts @juspay/xyne-call-guardians
+/apps/dashboard/src/components/Call/ @juspay/xyne-call-guardians
+/apps/dashboard/src/hooks/useCall*.ts @juspay/xyne-call-guardians
