@@ -62,6 +62,13 @@ import { messageMetadataService } from '@/services/messageMetadataService';
 import { prefetchFilterData, type PrefetchedFilterData } from '@/services/notificationFilterService';
 import { getOrGenerateThreadSummary, isThreadSummaryEnabledForChannel, hasPendingRecommendations } from '@/services/threadSummaryService';
 import { prCheckApprovalService } from '@/services/prCheckApprovalService';
+import {
+  appMentionPayload,
+  deliverMentionsToAddedMembers,
+  mentionActivities,
+  mentionRecipients,
+  notifyMentioned,
+} from './mention-delivery';
 
 const messageAttachmentRepository = new MessageAttachmentRepository();
 const channelRepository = new ChannelRepository();
@@ -567,41 +574,26 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
     );
     const channelParticipantIds = new Set(channelParticipants.map(p => p.userId));
 
-    const validMentionedUsers = mentionedUsers
-      .filter(u => u.mentionSource === 'direct' || u.mentionSource === 'group')
-      .filter(user => channelParticipantIds.has(user.userId) && user.userId !== senderId)
-      .map(u => ({
-        userId: u.userId,
-        mentionSource: u.mentionSource
-      }))
+    const validMentionedUsers = mentionRecipients(mentionedUsers, {
+      participantIds: channelParticipantIds,
+      senderId,
+    });
 
     const mentionedAppUsersIds = validMentionedUsers.filter(u => appUserIds.includes(u.userId)).map(u => u.userId);
 
     if (mentionedAppUsersIds.length > 0) {
-      const attachments = message.hasAttachment
-        ? await messageAttachmentRepository.findByMessageId(messageId)
-        : [];
-
-      void this.handlleMessageAppEvents(AppEventType.APP_MENTION, {
-        conversationId,
+      void this.handlleMessageAppEvents(AppEventType.APP_MENTION, await appMentionPayload({
         messageId,
-        content: content,
-        cleanContent: cleanContent,
-        createdAt: message.createdAt,
-        userId: senderId,
-        senderName,
+        conversationId,
         channelId,
         channelName: channel?.name ?? channelId,
-        ...(attachments.length > 0 && {
-          attachments: attachments.map(att => ({
-            attachmentId: att.id,
-            fileName: att.originalFilename,
-            fileSize: att.size,
-            mimeType: att.mimetype,
-            fileUrl: att.url,
-          })),
-        }),
-      }, mentionedAppUsersIds);
+        content,
+        cleanContent,
+        createdAt: message.createdAt,
+        hasAttachment: message.hasAttachment,
+        senderId,
+        senderName,
+      }), mentionedAppUsersIds);
     }
 
     // Notify app users in the channel when any user is mentioned
@@ -653,21 +645,9 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
 
     if (validMentionedUsers.length > 0) {
       const isThreadActivity = conversation.initialMessageId !== messageId;
-      const activities = validMentionedUsers.map(user => ({
-        id: uuidv4(),
-        userId: user.userId,
-        actorId: senderId,
-        actorAction: user.mentionSource === 'direct' ? 'mentioned_user' as const : 'group_mention' as const,
-        // Dual-write: populate both old and new columns
-        actionSource: 'message' as const,
-        actionSourceId: messageId,
-        messageId: messageId,
-        channelId,
-        isThreadActivity,
-        classification: ActivityClassification.PENDING,
-      }));
-
-      await activityService.createActivities(activities);
+      await activityService.createActivities(
+        mentionActivities(validMentionedUsers, { messageId, channelId, senderId, isThreadActivity }),
+      );
     }
 
     // Uses isReply calculated earlier for thread context in notifications
@@ -746,50 +726,27 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
         channelParticipants,
         senderId
       );
-      const userEmailMap = new Map(
-        notificationUserIds
-          .map(id => channelParticipants.find(p => p.userId === id))
-          .filter(p => p?.user?.email)
-          .map(p => [p!.userId, p!.user.email])
-      );
-      const mentionedEmails = Array.from(userEmailMap.values());
-
-      // Send app notifications first and collect delivered user IDs.
-      // On failure, fall back to sending Slack to everyone (fail-open).
-      let slackRecipientEmails = mentionedEmails;
-      try {
-        const { deliveredUserIds } = await notificationService.createMentionNotifications(
-          notificationUserIds,
-          messageId,
-          conversationId,
-          channelId,
-          channelName,
-          senderId,
-          senderName,
-          cleanContent,
-          this.ctx.workspaceId,
-          mentionType,
-          isOneToOneDM,
-          !!isReply,
-          sender?.picture ?? '',
-          prefetchedData,
-        );
-
-        deliveredMentionUserIds = deliveredUserIds;
-        slackRecipientEmails = getSlackRecipientEmails(mentionedEmails, deliveredUserIds, userEmailMap);
-      } catch (error) {
-        logger.error('[SIDE-EFFECT] Spaces mention notifications failed — sending Slack to all recipients', { error });
-      }
-
-      await slackService.sendMentionNotifications(
-        slackRecipientEmails,
-        senderName,
-        channelName,
-        channelId,
-        conversationId,
+      deliveredMentionUserIds = await notifyMentioned(notificationUserIds, {
+        workspaceId: this.ctx.workspaceId,
         messageId,
-        mentionType
-      );
+        conversationId,
+        channelId,
+        channelName,
+        senderId,
+        senderName,
+        senderPicture: sender?.picture ?? '',
+        cleanContent,
+        isReply: !!isReply,
+        isDM: isOneToOneDM,
+        mentionType,
+        prefetchedData,
+        slackEmails: new Map(
+          notificationUserIds
+            .map(id => channelParticipants.find(p => p.userId === id))
+            .filter(p => p?.user?.email)
+            .map(p => [p!.userId, p!.user.email]),
+        ),
+      });
     }
 
     // Keyword-match notifications: delivered like a mention (activity feed +
@@ -2016,6 +1973,27 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
         messageId,
         error: error instanceof Error ? error.message : String(error),
       });
+    }
+
+    // The "not in channel" prompt is removed once acted on. Whoever it added to the
+    // channel now gets the mention they missed; after "ignore" nobody joined, so
+    // deliverMentionsToAddedMembers finds no member to serve and sends nothing.
+    const prompt = previousValue?.metadata as
+      | { messageSubtype?: string; sourceMessageId?: string; mentionedUsers?: Array<{ userId: string }> }
+      | null
+      | undefined;
+    if (previousValue?.msgType === MessageType.SYSTEM && prompt?.messageSubtype === 'user_not_in_channel' && prompt.sourceMessageId) {
+      await deliverMentionsToAddedMembers(
+        prompt.sourceMessageId,
+        new Set((prompt.mentionedUsers ?? []).map(u => u.userId)),
+        {
+          workspaceId: this.ctx.workspaceId,
+          emitAppMention: (payload, appUserIds) =>
+            void this.handlleMessageAppEvents(AppEventType.APP_MENTION, payload, appUserIds),
+          previewText: getNotificationPreviewContent,
+          dmChannelName: formatDmChannelName,
+        },
+      );
     }
 
     if (previousValue?.channelId && previousValue.conversationId && previousValue.msgType !== MessageType.SYSTEM) {

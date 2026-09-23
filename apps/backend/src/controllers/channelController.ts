@@ -2612,13 +2612,14 @@ export class ChannelController {
           orgRole: req.user!.orgRole,
           memberId: req.user!.memberId,
         });
-        for (const participant of result.addedParticipants) {
+        // Awaited so "added" lands before the mention the client's prompt delete delivers next.
+        await Promise.all(result.addedParticipants.map(participant =>
           handler.onInsert({
             entityId: participant.participantId,
             entityType: 'channel_participants',
             operation: 'insert'
-          }).catch(err => logger.error('Side-effect handler error: channel_participants onInsert', err));
-        }
+          }).catch(err => logger.error('Side-effect handler error: channel_participants onInsert', err))
+        ));
       }
 
       const response: AddGroupDmParticipantsResponse = {
