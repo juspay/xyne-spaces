@@ -1,3 +1,10 @@
+## [1.384.0](https://github.com/juspay/xyne-spaces/compare/v1.383.2...v1.384.0) (2026-09-23)
+
+
+### Features
+
+* Customizable UI Tabs - Toolbar, Inbox Menubar, and Channel Navbar with Apps support ([#2249](https://github.com/juspay/xyne-spaces/issues/2249)) ([e113d14](https://github.com/juspay/xyne-spaces/commit/e113d14f1c0070e9d3c66f0f5b845869f55c0843))
+
 ## [1.383.2](https://github.com/juspay/xyne-spaces/compare/v1.383.1...v1.383.2) (2026-09-23)
 
 
