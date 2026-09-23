@@ -2987,7 +2987,6 @@ export const queries: AnyQueryRegistry = defineQueries({
     }
   ),
 
-
   userScheduledCalls: defineQuery(() => {
     return zql.calls
       .where('status', CallStatus.SCHEDULED)

@@ -35,11 +35,6 @@ function defaultCallInvitation(timezone?: string | null): CallInvitationParams['
 }
 
 export class ScheduleCallController {
-  /**
-   * Whether a call gets a pill. Recurring series would drip one card per occurrence.
-   * The test is on `callOrigin`, not on having a channelId — `xyneManaged` calendar
-   * events carry a real one.
-   */
   private sendExternalInvitationInBackground(params: {
     invitationParams: CallInvitationParams;
     delivery?: ExternalInvitationDelivery;

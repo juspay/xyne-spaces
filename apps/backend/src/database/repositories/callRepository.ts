@@ -1656,6 +1656,7 @@ export class CallRepository {
         endsAt: true,
         status: true,
         channelId: true,
+        callOrigin: true,
         isRecurring: true,
         recurringSeriesId: true,
         callType: true,
@@ -1664,8 +1665,10 @@ export class CallRepository {
 
     // A series is materialized 60 days ahead and replenished forever, so a pill per
     // instance would drip cards into the channel indefinitely. Note-taker recordings
-    // are not meetings anyone joins. Enforced here rather than at the call sites: this
-    // is the single choke point, and it already has the row.
+    // are not meetings anyone joins. Calendar-origin calls are created and managed via
+    // upsertExternalCalendarCall, not scheduleCall; they must never gain a pill even
+    // if the move path reaches this function. Enforced here: single choke point.
+    if (snapshot.callOrigin !== CallOrigin.CHANNEL && snapshot.callOrigin !== CallOrigin.CONVERSATION) return null;
     if (snapshot.isRecurring || snapshot.recurringSeriesId) return null;
     if (snapshot.callType === CallType.HEADLESS) return null;
 
@@ -1804,7 +1807,7 @@ export class CallRepository {
     const { callId, callExternalId, callTitle, newChannelId, workspaceId, senderId, senderName } =
       params;
 
-    const conversationId = await DatabaseClient.getInstance().$transaction(async (tx) => {
+    const result = await DatabaseClient.getInstance().$transaction(async (tx) => {
       // Re-read inside the transaction: the caller's snapshot predates the update, and
       // a concurrent channel edit would otherwise have its new pill orphaned.
       const current = await tx.call.findUnique({
@@ -1813,19 +1816,26 @@ export class CallRepository {
       });
       const existingPillId = (current?.metadata as CallMetadata | null)?.channelPillMessageId;
 
+      let retiredConversationId: string | null = null;
+
       if (existingPillId) {
         const pill = await tx.message.findUnique({
           where: { messageId: existingPillId },
-          select: { conversation: { select: { initialMessageId: true } } },
+          select: { conversationId: true, conversation: { select: { initialMessageId: true } } },
         });
         if (pill && pill.conversation?.initialMessageId !== existingPillId) return null;
 
-        await this.retireScheduledCallPill(tx, {
-          messageId: existingPillId,
-          callExternalId,
-          movedToChannelId: newChannelId,
-          callTitle,
-        });
+        // pill is null → message was already deleted; nothing to retire, but the
+        // fresh pill should still be created in the destination channel.
+        if (pill) {
+          retiredConversationId = pill.conversationId;
+          await this.retireScheduledCallPill(tx, {
+            messageId: existingPillId,
+            callExternalId,
+            movedToChannelId: newChannelId,
+            callTitle,
+          });
+        }
       }
 
       const created = await this.createScheduledCallPill(tx, {
@@ -1836,11 +1846,19 @@ export class CallRepository {
         senderId,
         senderName,
       });
-      return created?.conversationId ?? null;
+      return { newConversationId: created?.conversationId ?? null, retiredConversationId };
     });
 
-    if (conversationId) {
-      await messageMetadataService.syncInitialMessageMd(conversationId);
+    if (result) {
+      // The channel timeline renders from the denormalized initial_message_md blob.
+      // Both the retired pill's conversation and the new pill's conversation need
+      // to be synced so Zero picks up the retirement and the fresh card.
+      if (result.retiredConversationId) {
+        await messageMetadataService.syncInitialMessageMd(result.retiredConversationId);
+      }
+      if (result.newConversationId) {
+        await messageMetadataService.syncInitialMessageMd(result.newConversationId);
+      }
     }
   }
 

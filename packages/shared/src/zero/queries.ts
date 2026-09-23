@@ -2473,7 +2473,6 @@ export const queries = defineQueries({
     },
   ),
 
-
   userScheduledCalls: defineQuery(() => {
     return zql.calls
       .where('status', CallStatus.SCHEDULED)

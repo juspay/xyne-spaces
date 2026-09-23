@@ -1,6 +1,7 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Calendar, Phone, XCircle } from 'lucide-react';
+import { Calendar, XCircle } from 'lucide-react';
+import { PhoneDefault } from '@xyne/icons';
 import { useCallJoinOrInitiate } from '../../../hooks/useCallJoinOrInitiate';
 import { useAllChannels } from '../../../hooks/useChannels';
 import { cn } from '../../../utils/classNames';
@@ -19,6 +20,10 @@ interface ScheduledCallPillProps {
   callId: string;
 }
 
+// Shared card base classes (layout, border, shape, transition).
+const CARD_BASE =
+  'relative flex items-center gap-3 w-full max-w-[560px] px-[13px] py-[10px] border rounded-[11px] transition-[border-color,box-shadow] duration-150';
+
 export function ScheduledCallPill({ message, callId }: ScheduledCallPillProps): React.JSX.Element {
   const navigate = useNavigate();
   const { joinCall } = useCallJoinOrInitiate();
@@ -32,15 +37,22 @@ export function ScheduledCallPill({ message, callId }: ScheduledCallPillProps): 
     const movedToName = channels.find(c => c.id === metadata.movedTo)?.name;
     return (
       <div className='xs-cc-scope'>
-        <div className='xs-cc xs-cc--flat' aria-disabled='true'>
-          <span className='xs-cc__glyph xs-cc__glyph--faint'>
+        <div
+          className={cn(
+            CARD_BASE,
+            'bg-[var(--cc-bg2)] border-[var(--cc-bd)] shadow-none',
+            'hover:border-[var(--cc-t6)] hover:shadow-none',
+          )}
+          aria-disabled='true'
+        >
+          <span className='flex-shrink-0 inline-flex self-start mt-[1px] text-[var(--cc-t6)]'>
             <XCircle size={ICON_SIZE} strokeWidth={1.8} aria-hidden='true' />
           </span>
-          <div className='xs-cc__body'>
-            <span className='xs-cc__title xs-cc__title--muted'>
+          <div className='flex-1 min-w-0 flex flex-col gap-[2px]'>
+            <span className='text-[13.5px] font-semibold tracking-[-0.2px] text-[var(--cc-t4)] whitespace-nowrap overflow-hidden text-ellipsis'>
               {metadata.movedCallTitle ?? 'Scheduled call'}
             </span>
-            <span className='xs-cc__meta xs-cc__meta--faint'>
+            <span className='flex gap-[5px] font-mono text-[11.5px] text-[var(--cc-t5)] whitespace-nowrap'>
               {movedToName ? `Moved to #${movedToName}` : 'Moved to another channel'}
             </span>
           </div>
@@ -53,11 +65,19 @@ export function ScheduledCallPill({ message, callId }: ScheduledCallPillProps): 
   if (!call) {
     return (
       <div className='xs-cc-scope'>
-        <div className='xs-cc xs-cc--flat'>
-          <span className='xs-cc__glyph xs-cc__glyph--faint'>
+        <div
+          className={cn(
+            CARD_BASE,
+            'bg-[var(--cc-bg2)] border-[var(--cc-bd)] shadow-none',
+            'hover:border-[var(--cc-t6)] hover:shadow-none',
+          )}
+        >
+          <span className='flex-shrink-0 inline-flex self-start mt-[1px] text-[var(--cc-t6)]'>
             <Calendar size={ICON_SIZE} strokeWidth={1.6} aria-hidden='true' />
           </span>
-          <span className='xs-cc__title xs-cc__title--muted'>Scheduled call</span>
+          <span className='flex-1 min-w-0 text-[13.5px] font-semibold tracking-[-0.2px] text-[var(--cc-t4)] whitespace-nowrap overflow-hidden text-ellipsis'>
+            Scheduled call
+          </span>
         </div>
       </div>
     );
@@ -90,20 +110,31 @@ export function ScheduledCallPill({ message, callId }: ScheduledCallPillProps): 
         scheduled a call{channelName ? ` in #${channelName}` : ''}
       </p>
 
-      <div className={cn('xs-cc', isActive && 'xs-cc--active', isSettled && 'xs-cc--flat')}>
+      <div
+        className={cn(
+          CARD_BASE,
+          isActive
+            ? 'bg-[var(--cc-call-bg)] border-[var(--cc-call-bd)] shadow-[0_1px_3px_rgba(20,22,26,0.07)] hover:border-[var(--cc-call-bd)] hover:shadow-[0_1px_3px_rgba(20,22,26,0.07)]'
+            : isSettled
+              ? 'bg-[var(--cc-bg2)] border-[var(--cc-bd)] shadow-none hover:border-[var(--cc-t6)] hover:shadow-none'
+              : 'bg-[var(--cc-bg)] border-[var(--cc-bd)] shadow-[0_1px_3px_rgba(20,22,26,0.07)] hover:border-[var(--cc-t6)] hover:shadow-[0_5px_18px_rgba(0,0,0,0.06)]',
+        )}
+      >
         {isActive ? (
-          <span className='xs-cc__dot' aria-hidden='true' />
+          <span
+            className='flex-shrink-0 self-start mt-[7px] w-[7px] h-[7px] rounded-full bg-[var(--cc-call)]'
+            aria-hidden='true'
+          />
         ) : (
           <span
             className={cn(
-              'xs-cc__glyph',
-              state === 'ENDED' && 'xs-cc__glyph--ended',
-              state === 'CANCELLED' && 'xs-cc__glyph--faint',
+              'flex-shrink-0 inline-flex self-start mt-[1px]',
+              state === 'ENDED' && 'text-[var(--cc-t5)]',
+              state === 'CANCELLED' && 'text-[var(--cc-t6)]',
+              state === 'SCHEDULED' && 'text-[var(--cc-t4)]',
             )}
           >
-            {state === 'ENDED' ? (
-              <Phone size={ICON_SIZE} strokeWidth={1.9} aria-hidden='true' />
-            ) : null}
+            {state === 'ENDED' ? <PhoneDefault size={ICON_SIZE} aria-hidden='true' /> : null}
             {state === 'CANCELLED' ? (
               <XCircle size={ICON_SIZE} strokeWidth={1.8} aria-hidden='true' />
             ) : null}
@@ -113,31 +144,45 @@ export function ScheduledCallPill({ message, callId }: ScheduledCallPillProps): 
           </span>
         )}
 
-        <div className='xs-cc__body'>
+        <div className='flex-1 min-w-0 flex flex-col gap-[2px]'>
           <span
             className={cn(
-              'xs-cc__title',
-              state === 'ENDED' && 'xs-cc__title--dim',
-              state === 'CANCELLED' && 'xs-cc__title--muted',
+              'text-[13.5px] font-semibold tracking-[-0.2px] whitespace-nowrap overflow-hidden text-ellipsis',
+              state === 'ENDED'
+                ? 'text-[var(--cc-t2)]'
+                : state === 'CANCELLED'
+                  ? 'text-[var(--cc-t4)]'
+                  : 'text-[var(--cc-t1)]',
             )}
           >
             {call.title ?? 'Scheduled Call'}
           </span>
 
-          <span className={cn('xs-cc__meta', state === 'CANCELLED' && 'xs-cc__meta--faint')}>
-            <span className={cn(isActive && 'xs-cc__status--call')}>
+          <span
+            className={cn(
+              'flex gap-[5px] font-mono text-[11.5px] whitespace-nowrap',
+              state === 'CANCELLED' ? 'text-[var(--cc-t5)]' : 'text-[var(--cc-t4)]',
+            )}
+          >
+            <span className={cn(isActive && 'text-[var(--cc-call-text)]')}>
               {PILL_STATUS_LABEL[state]} ·
             </span>
-            {when && (
-              <span className={cn(state === 'CANCELLED' && 'xs-cc__meta--struck')}>{when}</span>
-            )}
+            {when && <span className={cn(state === 'CANCELLED' && 'line-through')}>{when}</span>}
           </span>
         </div>
 
         <button
           type='button'
           onClick={isReschedule ? openInCalls : isOpenSummary ? openSummary : handleJoin}
-          className={cn('xs-cc__btn', isActive ? 'xs-cc__btn--call' : 'xs-cc__btn--secondary')}
+          className={cn(
+            'flex-shrink-0 inline-flex items-center justify-center gap-2 h-[30px] px-[13px]',
+            'border rounded-md text-[13px] font-semibold tracking-[-0.1px] cursor-pointer whitespace-nowrap',
+            'transition-[background,border-color,opacity] duration-[120ms]',
+            'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cc-call)]',
+            isActive
+              ? 'bg-[var(--cc-call)] text-white border-transparent hover:bg-[var(--cc-call-hover)]'
+              : 'bg-[var(--cc-bg)] text-[var(--cc-t1)] border-[var(--cc-bd)] hover:border-[var(--cc-t1)] hover:bg-[var(--cc-bg2)]',
+          )}
           data-track-category='CALLS'
           data-track-name={
             isReschedule
