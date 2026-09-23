@@ -12,7 +12,7 @@ UPDATE "public"."user_role_mappings" SET "entityId" = "workspaceId" WHERE "entit
 
 -- Swap the uniqueness constraint from (userId, roleId) to the scoped 4-column key.
 DROP INDEX IF EXISTS "public"."user_role_mappings_userId_roleId_key";
-CREATE UNIQUE INDEX "user_role_mappings_userId_roleId_entityType_entityId_key" ON "public"."user_role_mappings"("userId", "roleId", "entityType", "entityId");
+CREATE UNIQUE INDEX "user_role_mappings_userId_roleId_entityId_key" ON "public"."user_role_mappings"("userId", "roleId", "entityId");
 
 -- CreateIndex
 CREATE INDEX "user_role_mappings_entityType_entityId_idx" ON "public"."user_role_mappings"("entityType", "entityId");
