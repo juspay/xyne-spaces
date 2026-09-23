@@ -3,16 +3,18 @@ import { readFileSync } from 'node:fs';
 import { describe, it } from 'node:test';
 import {
   fieldTransitionPath,
+  hermiteSmoothstep,
   mouseTravelDurationMs,
   mouseTravelPath,
   mouseTravelTimes,
   pointerCaretPoint,
   pointerEntryPoint,
   pointerParkPoint,
+  travelArcHeight,
 } from './writingPointerPath.ts';
 
 void describe('mouseTravelPath', () => {
-  void it('curves off the straight line and ends on the target', () => {
+  void it('curves with an upward arc and ends on the target', () => {
     const from = { x: 0, y: 0 };
     const to = { x: 100, y: 200 };
     const path = mouseTravelPath(from, to);
@@ -23,26 +25,44 @@ void describe('mouseTravelPath', () => {
 
     const mid = path[Math.floor(path.length / 2)];
     assert.ok(mid);
-    const straightX = 50;
-    const straightY = 100;
-    const offLine = Math.hypot(mid.x - straightX, mid.y - straightY);
-    assert.ok(offLine > 8, `expected a curve, got deviation ${offLine}`);
+    const straightY = (from.y + to.y) / 2;
+    assert.ok(mid.y < straightY, `expected upward arc, mid.y=${mid.y} straightY=${straightY}`);
+    // Quadratic mid sits ~halfway to the control point (plus small entry nudge).
+    const expectedArc = travelArcHeight(Math.hypot(100, 200));
+    assert.ok(straightY - mid.y > expectedArc * 0.4);
+    assert.ok(straightY - mid.y < expectedArc * 0.7 + 6);
   });
 
-  void it('uses eased timing along the travel samples', () => {
+  void it('uses linear sample times (Hermite ease applied by Motion)', () => {
     const times = mouseTravelTimes(11);
     assert.equal(times[0], 0);
     assert.equal(times[times.length - 1], 1);
-    assert.ok((times[1] ?? 0) > 0);
-    assert.ok((times[times.length - 2] ?? 0) < 1);
+    assert.equal(times[5], 0.5);
   });
 
-  void it('scales duration with distance and stays in a human range', () => {
+  void it('applies Hermite smoothstep 3t²−2t³', () => {
+    assert.equal(hermiteSmoothstep(0), 0);
+    assert.equal(hermiteSmoothstep(1), 1);
+    assert.ok(Math.abs(hermiteSmoothstep(0.5) - 0.5) < 1e-9);
+    assert.ok(hermiteSmoothstep(0.25) > 0.1);
+    assert.ok(hermiteSmoothstep(0.25) < 0.25);
+  });
+
+  void it('scales duration with Clicky clamp(distance/800, 0.6, 1.4)s', () => {
     const short = mouseTravelDurationMs({ x: 0, y: 0 }, { x: 10, y: 10 });
-    const long = mouseTravelDurationMs({ x: 0, y: 0 }, { x: 400, y: 400 });
-    assert.ok(short >= 420);
-    assert.ok(long <= 760);
-    assert.ok(long > short);
+    const mid = mouseTravelDurationMs({ x: 0, y: 0 }, { x: 800, y: 0 });
+    const long = mouseTravelDurationMs({ x: 0, y: 0 }, { x: 2000, y: 0 });
+    assert.equal(short, 600);
+    assert.equal(mid, 1000);
+    assert.equal(long, 1400);
+    const reduced = mouseTravelDurationMs({ x: 0, y: 0 }, { x: 800, y: 0 }, 'reduced');
+    assert.ok(reduced < mid);
+    assert.equal(reduced, Math.round(1000 * 0.35));
+  });
+
+  void it('caps arc height at 80px', () => {
+    assert.equal(travelArcHeight(100), 20);
+    assert.equal(travelArcHeight(1000), 80);
   });
 
   void it('enters from above-left of the target', () => {
@@ -52,15 +72,14 @@ void describe('mouseTravelPath', () => {
     assert.ok(from.y < target.y);
   });
 
-  void it('arcs downward between fields instead of a straight drop', () => {
+  void it('arcs between fields with the same upward quadratic', () => {
     const from = { x: 180, y: 40 };
     const to = { x: 200, y: 120 };
     const path = fieldTransitionPath(from, to);
     const mid = path[Math.floor(path.length / 2)];
     assert.ok(mid);
-    const straightX = (from.x + to.x) / 2;
-    const offLine = Math.abs(mid.x - straightX);
-    assert.ok(offLine > 8, `expected a sideways arc, got deviation ${offLine}`);
+    const straightY = (from.y + to.y) / 2;
+    assert.ok(mid.y < straightY, `expected upward arc, got mid.y=${mid.y}`);
     assert.equal(path[path.length - 1]?.x, to.x);
     assert.equal(path[path.length - 1]?.y, to.y);
   });
@@ -69,7 +88,7 @@ void describe('mouseTravelPath', () => {
     const path = mouseTravelPath({ x: 0, y: 0 }, { x: 80, y: 40 }, 'reduced');
     assert.equal(path.length, 2);
     const duration = mouseTravelDurationMs({ x: 0, y: 0 }, { x: 80, y: 40 }, 'reduced');
-    assert.ok(duration <= 220);
+    assert.ok(duration <= 600 * 0.35 + 1);
   });
 
   void it('tracks caret on the text line without parking on the left title edge', () => {
@@ -91,6 +110,9 @@ void describe('mouseTravelPath', () => {
     assert.match(pointer, /useMotionValue/);
     assert.match(pointer, /pointerCaretPoint/);
     assert.match(pointer, /field-down/);
+    assert.match(pointer, /hermiteSmoothstep/);
+    assert.match(pointer, /SCALE_PEAK/);
+    assert.match(pointer, /data-pointer-settled/);
     assert.equal(/pointerWanderStops/.test(pointer), false);
     assert.equal(/pointerSettlePath/.test(pointer), false);
     assert.equal(/from 'framer-motion'/.test(pointer), false);

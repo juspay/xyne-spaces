@@ -4,6 +4,7 @@ import { useTheme } from '@/hooks/useTheme';
 import type { AgentCreateField, AgentCreateHubRow } from './types';
 import {
   caretTrackDurationMs,
+  hermiteSmoothstep,
   mouseTravelDurationMs,
   mouseTravelTimes,
   pickTravelPath,
@@ -19,8 +20,8 @@ import {
 const LIGHT_SRC = '/svgs/icons/pointer-cursor-light.svg';
 const DARK_SRC = '/svgs/icons/pointer-cursor-dark.svg';
 const SIZE = 20;
-const TRAVEL_EASE = [0.42, 0, 0.2, 1] as const;
 const FADE_SECONDS = 0.16;
+const SCALE_PEAK = 1.15;
 
 function measureBox(
   origin: HTMLElement,
@@ -70,9 +71,9 @@ interface WritingFieldPointerProps {
 }
 
 /**
- * Figma write pointer (Codex-style): travel once onto the active field, stay
- * put while text fills (subtle caret tracking), travel again only when the
- * write target changes.
+ * Figma write pointer (Codex-style + Clicky flight): travel once onto the
+ * active field along a distance-scaled upward arc, lightly pulse mid-flight,
+ * then hold at the caret while text fills. No wander loops.
  */
 export function WritingFieldPointer({
   field,
@@ -84,6 +85,7 @@ export function WritingFieldPointer({
   const x = useMotionValue(0);
   const y = useMotionValue(0);
   const opacity = useMotionValue(0);
+  const scale = useMotionValue(1);
   const lastPointRef = useRef<PointerPoint | null>(null);
   const activeFieldRef = useRef<AgentCreateField | null>(null);
   const activeHubRowRef = useRef<AgentCreateHubRow | null>(null);
@@ -99,6 +101,7 @@ export function WritingFieldPointer({
       x.stop();
       y.stop();
       opacity.stop();
+      scale.stop();
     };
 
     if (!field || !origin) {
@@ -107,11 +110,13 @@ export function WritingFieldPointer({
       setSettled(false);
       if (lastPointRef.current === null) {
         opacity.set(0);
+        scale.set(1);
         setShown(false);
         return;
       }
       if (reduceMotion) {
         opacity.set(0);
+        scale.set(1);
         setShown(false);
         return;
       }
@@ -121,6 +126,7 @@ export function WritingFieldPointer({
         onComplete: (): void => {
           if (!cancelled) {
             setShown(false);
+            scale.set(1);
           }
         },
       });
@@ -143,6 +149,7 @@ export function WritingFieldPointer({
         x.set(target.x);
         y.set(target.y);
         opacity.set(1);
+        scale.set(1);
         lastPointRef.current = target;
         setSettled(true);
         return (): void => {
@@ -177,17 +184,28 @@ export function WritingFieldPointer({
       const times = mouseTravelTimes(xs.length);
       const duration = mouseTravelDurationMs(from, to, kind) / 1000;
       lastPointRef.current = to;
+      // Path samples are already Hermite-spaced; keep Motion progress linear.
       animate(x, xs, {
         duration,
-        ease: TRAVEL_EASE,
+        ease: 'linear',
         times,
         onComplete: (): void => {
           if (!cancelled) {
+            scale.set(1);
             onDone();
           }
         },
       });
-      animate(y, ys, { duration, ease: TRAVEL_EASE, times });
+      animate(y, ys, { duration, ease: 'linear', times });
+      if (kind !== 'reduced') {
+        animate(scale, [1, SCALE_PEAK, 1], {
+          duration,
+          ease: hermiteSmoothstep,
+          times: [0, 0.5, 1],
+        });
+      } else {
+        scale.set(1);
+      }
     };
 
     const arrive = (): void => {
@@ -210,6 +228,7 @@ export function WritingFieldPointer({
         x.set(park.x);
         y.set(park.y);
         opacity.set(1);
+        scale.set(1);
         lastPointRef.current = park;
         activeFieldRef.current = field;
         activeHubRowRef.current = hubRow;
@@ -220,6 +239,7 @@ export function WritingFieldPointer({
       if (kind === 'entry' || !lastPointRef.current) {
         x.set(from.x);
         y.set(from.y);
+        scale.set(1);
       }
       animate(opacity, 1, { duration: FADE_SECONDS, ease: 'easeOut' });
       moveTo(from, target, kind, (): void => {
@@ -235,7 +255,7 @@ export function WritingFieldPointer({
       window.cancelAnimationFrame(frame);
       stopTravel();
     };
-  }, [field, hubRow, originRef, opacity, reduceMotion, x, y]);
+  }, [field, hubRow, originRef, opacity, reduceMotion, scale, x, y]);
 
   useEffect(() => {
     if (!field || !settled || reduceMotion || hubRow) return;
@@ -265,8 +285,8 @@ export function WritingFieldPointer({
         return;
       }
       const duration = caretTrackDurationMs(deltaX);
-      animate(x, next.x, { duration, ease: TRAVEL_EASE });
-      animate(y, next.y, { duration, ease: TRAVEL_EASE });
+      animate(x, next.x, { duration, ease: hermiteSmoothstep });
+      animate(y, next.y, { duration, ease: hermiteSmoothstep });
     };
 
     const tick = (): void => {
@@ -305,6 +325,7 @@ export function WritingFieldPointer({
         x,
         y,
         opacity,
+        scale,
         willChange: field ? 'transform' : 'auto',
       }}
     />
