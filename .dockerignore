@@ -74,6 +74,7 @@ tools
 scripts/*
 !scripts/setup-fake-gcs.sh
 !scripts/setup-fake-gcs-test.sh
+!scripts/validate-no-acl-bypass.sh
 
 # Sandbox artifacts
 .sandboxes
