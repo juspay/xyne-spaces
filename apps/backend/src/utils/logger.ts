@@ -2,6 +2,7 @@ import winston from 'winston';
 import { AsyncLocalStorage } from 'async_hooks';
 import fluentLogger from 'fluent-logger';
 import type { Socket } from 'net';
+import { shredRecordInPlace } from '@xyne/logger';
 import { config } from '@/config/env';
 
 export interface LogContext {
@@ -165,12 +166,20 @@ function decycle(value: unknown, ancestors: unknown[]): unknown {
 
 const sanitizeForFluent = winston.format((info) => decycle(info, []) as winston.Logform.TransformableInfo);
 
+// Redact secret values on every sink. In sharedFormat (before the per-transport
+// clone) so the Fluent sink is covered too, not just error messages. Values only,
+// so field names / level / timestamp stay intact => frozen Grafana contract unchanged.
+const shredSecrets = winston.format(
+  (info) => shredRecordInPlace(info as unknown as Record<string, unknown>) as unknown as winston.Logform.TransformableInfo
+);
+
 // Runs once at call time, before winston-transport's per-transport clone drops Error fields.
 const sharedFormat = winston.format.combine(
   winston.format.timestamp(),
   winston.format.errors({ stack: true }),
   normalizeErrors(),
-  injectContext()
+  injectContext(),
+  shredSecrets()
 );
 
 // sharedFormat's timestamp is UTC ISO for Fluent Bit; re-render local for console output.

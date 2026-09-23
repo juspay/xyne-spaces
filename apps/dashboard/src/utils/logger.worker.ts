@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { v4 as uuidv4 } from 'uuid';
+import { shred } from '@xyne/logger';
 import type { LogEvent } from './logger';
 
 export type LogLevel = 'DEBUG' | 'INFO' | 'WARN' | 'ERROR';
@@ -175,7 +176,10 @@ class LoggerWorker {
         this.droppedLogsCount++;
       }
 
-      this.logs.push(logEntry);
+      // Shred secret values out of every field before the entry is buffered
+      // for POST. Field names (the frozen analytics contract: event,
+      // platformName, emailId, pageUrl, …) are preserved — values only.
+      this.logs.push(shred(logEntry) as LogEntry);
     }
   }
 

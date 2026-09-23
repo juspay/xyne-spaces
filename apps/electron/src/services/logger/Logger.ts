@@ -8,6 +8,7 @@
 
 import log from 'electron-log/main';
 import { v4 as uuidv4 } from 'uuid';
+import { shred } from '@xyne/logger';
 import type { EnrollmentEventType } from './enrollment-events';
 import * as os from 'os';
 import { net, app } from 'electron';
@@ -272,14 +273,18 @@ class LoggerService {
       ...(normalizedFields || {}),
     };
 
+    // Shred secret values out of every field before it reaches any sink
+    // (log files + the POST buffer). Field names are preserved — values only.
+    const safeEntry = shred(logEntry) as LogEntry;
+
     // Write to main log (all levels)
-    log.info(`[${logType ?? 'EnrollmentLogger'}]`, JSON.stringify(logEntry));
-    
+    log.info(`[${logType ?? 'EnrollmentLogger'}]`, JSON.stringify(safeEntry));
+
     // Write to error log file (only error)
     if (level === LogLevel.ERROR) {
       errorLogger[level.toLowerCase() as 'warn' | 'error'](
         `[${logType ?? 'EnrollmentLogger'}]`,
-        JSON.stringify(logEntry)
+        JSON.stringify(safeEntry)
       );
     }
 
@@ -291,7 +296,7 @@ class LoggerService {
       this.droppedLogsCount++;
     }
 
-    this.logs.push(logEntry);
+    this.logs.push(safeEntry);
 
     // Auto-flush if batch size reached
     // if (this.logs.length >= this.maxBatchSize) {
