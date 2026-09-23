@@ -1,3 +1,10 @@
+## [1.379.1](https://github.com/juspay/xyne-spaces/compare/v1.379.0...v1.379.1) (2026-09-23)
+
+
+### Bug Fixes
+
+* making workspaceID column mandatory in the canvasComm… ([#2209](https://github.com/juspay/xyne-spaces/issues/2209)) ([6e5849c](https://github.com/juspay/xyne-spaces/commit/6e5849c6fa79b303b17844550493dbde4cae3e3b))
+
 ## [1.379.0](https://github.com/juspay/xyne-spaces/compare/v1.378.1...v1.379.0) (2026-09-23)
 
 
