@@ -129,6 +129,10 @@ export class Fanout {
    *  Admission DEFERS while a client's grant is absent here (cold at session start, or mid-clear
    *  rehydration): a NOT-EXISTS arm would fail OPEN on an empty cold snapshot. */
   readonly #grantHydrated = new Set<string>();
+  /** grantKey → when non-cleared entries FIRST flowed while unhydrated (P1(d) mixed-version
+   *  fallback clock — an old-version tap owner never emits the resync sentinel). */
+  readonly #grantUnhydratedSince = new Map<string, number>();
+  static readonly #GRANT_SENTINEL_FALLBACK_MS = 15_000;
   /** Memo bounds (both memos): workspace-sized instances (getUsersV2 ≈ full roster; row-level =
    *  every draft/bookmark in the workspace) are MBs per instance, and since emit-time decryption
    *  these rows are PLAINTEXT — the bound caps both RAM and decrypted content held at rest. */
@@ -299,6 +303,7 @@ export class Fanout {
         this.#grantToData.delete(grantKey);
         this.#grantMeta.delete(grantKey);
         this.#grantHydrated.delete(grantKey);
+        this.#grantUnhydratedSince.delete(grantKey);
         this.#cursors.delete(streamKey(grantKey)); // stop tailing the now-unreferenced grant stream
       }
     }
@@ -666,10 +671,30 @@ export class Fanout {
       // whose row hasn't landed). A normal membership delta on an already-hydrated grant re-gates.
       if (diff?.cleared) {
         this.#grantHydrated.delete(instanceKey);
+        this.#grantUnhydratedSince.delete(instanceKey);
         return;
       }
-      if (diff?.resynced) this.#grantHydrated.add(instanceKey);
-      else if (!this.#grantHydrated.has(instanceKey)) return; // partial rebuild before resync
+      if (diff?.resynced) {
+        this.#grantHydrated.add(instanceKey);
+        this.#grantUnhydratedSince.delete(instanceKey);
+      } else if (!this.#grantHydrated.has(instanceKey)) {
+        // Partial rebuild before the resync sentinel → defer (fail-closed)… but BOUNDED:
+        // in a MIXED-VERSION fleet (rolling deploy) an old-version tap owner never emits
+        // `{resynced}`, and an unbounded defer would silently pin this pod's clients
+        // unadmitted forever. If non-cleared entries have been flowing for longer than any
+        // real rebuild takes, adopt the stream as hydrated — loudly. A wrong adoption
+        // self-corrects at the next cleared/resync cycle; a permanent silent defer doesn't.
+        const since = this.#grantUnhydratedSince.get(instanceKey);
+        if (since === undefined) {
+          this.#grantUnhydratedSince.set(instanceKey, Date.now());
+          return;
+        }
+        if (Date.now() - since < Fanout.#GRANT_SENTINEL_FALLBACK_MS) return;
+        this.#grantUnhydratedSince.delete(instanceKey);
+        this.#grantHydrated.add(instanceKey);
+        logger.warn('sync_grant_sentinel_fallback', { instanceKey, waitedMs: Date.now() - since });
+        syncMetrics.count('sync_engine_admission_total', { result: 'grant_fallback' });
+      }
       // A PER-USER grant delta (`channel_participants{userId:U}`) can only change U's admission —
       // the instance IS the user, so re-gate only U on each affected data instance (O(subs_U)).
       // A PER-SCOPE grant delta (channels[C] visibility flip) affects everyone → re-gate all.

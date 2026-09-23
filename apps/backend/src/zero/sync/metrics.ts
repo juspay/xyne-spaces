@@ -13,7 +13,7 @@
 
 export type SyncCounterName =
   | 'sync_engine_subscribe_total' // {plane, queryName, outcome: accepted|refused_query|refused_role}
-  | 'sync_engine_admission_total' // {result: admit|deny}
+  | 'sync_engine_admission_total' // {result: admit|deny|grant_fallback}
   | 'sync_engine_frames_total' // {plane, type: snapshot|delta|current|revoke}
   | 'sync_engine_rows_emitted_total' // {plane, kind: upsert|delete}
   | 'sync_engine_hydrate_total' // {plane, mode: snapshot|resume}
