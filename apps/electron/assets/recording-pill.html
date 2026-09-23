@@ -192,7 +192,11 @@
       background: var(--green);
       transform-origin: center;
       animation: wave var(--dur) ease-in-out var(--delay) infinite;
+      /* The pill window is prewarmed at launch and only hidden (never destroyed),
+         so an unconditional animation repaints forever while invisible. */
+      animation-play-state: paused;
     }
+    .card.visible:not(.hiding) .waveform span { animation-play-state: running; }
     .waveform span:nth-child(1) { --dur: 1.15s; --delay: -0.9s;  }
     .waveform span:nth-child(2) { --dur: 0.85s; --delay: -0.35s; }
     .waveform span:nth-child(3) { --dur: 1.35s; --delay: -0.6s;  }
