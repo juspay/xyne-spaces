@@ -19,6 +19,8 @@ const INPUT_MODES: Array<{ value: InputMode; label: string }> = [
 
 const TRANSCRIPT_FILE_ACCEPT = '.txt,.vtt,.srt,.md,text/plain,text/vtt,text/markdown';
 const MAX_TRANSCRIPT_LENGTH = 500_000;
+// Room for MAX_TRANSCRIPT_LENGTH characters of multi-byte UTF-8.
+const MAX_TRANSCRIPT_FILE_BYTES = 2 * 1024 * 1024;
 
 const getFallbackReasonLabel = (reason: string | null): string => {
   if (reason === 'no_templates') return 'No templates are available in this workspace.';
@@ -53,9 +55,21 @@ export function SummaryTemplateSelectionTestPanel({
 
   const handleFileChange = async (file: File | undefined): Promise<void> => {
     if (!file) return;
-    const text = await file.text();
-    setUploaded({ name: file.name, text: text.slice(0, MAX_TRANSCRIPT_LENGTH) });
-    clearOutcome('upload');
+    const fail = (error: string): void => {
+      setUploaded(null);
+      setOutcomes(current => ({ ...current, upload: { error } }));
+    };
+    if (file.size > MAX_TRANSCRIPT_FILE_BYTES) {
+      fail('This file is too large. Upload a transcript under 2 MB.');
+      return;
+    }
+    try {
+      const text = await file.text();
+      setUploaded({ name: file.name, text: text.slice(0, MAX_TRANSCRIPT_LENGTH) });
+      clearOutcome('upload');
+    } catch {
+      fail('Unable to read this file. Try another transcript.');
+    }
   };
 
   const input =
