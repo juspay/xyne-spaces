@@ -111,6 +111,10 @@ const envSchema = Joi.object({
   // sync engine materializes as a single unfenced owner (correct for exactly one replica); ON
   // is required before running >1 sync-engine replica. Needs a non-evicting Redis (asserted).
   ENABLE_SYNC_ENGINE_MULTIPOD: Joi.boolean().default(false),
+  // Per-query serve modes (CAC overlay): ship-with JSON default + optional remote (CAC) endpoint.
+  SYNC_ENGINE_QUERY_MODES: Joi.string().optional(),
+  SYNC_ENGINE_MODES_URL: Joi.string().uri().optional(),
+  SYNC_ENGINE_MODES_POLL_MS: Joi.number().default(30000),
   ENABLE_CALENDAR_SYNC_WORKER: Joi.boolean().default(false),
 
   DESK_TICKET_DEBUG: Joi.boolean().default(false),
@@ -760,6 +764,11 @@ export const config = {
   enableEmailFetchWorker: envVars.ENABLE_EMAIL_FETCH_WORKER,
   enableSyncEngine: envVars.ENABLE_SYNC_ENGINE,
   enableSyncEngineMultiPod: envVars.ENABLE_SYNC_ENGINE_MULTIPOD,
+  syncEngineModes: {
+    json: envVars.SYNC_ENGINE_QUERY_MODES,
+    url: envVars.SYNC_ENGINE_MODES_URL,
+    pollMs: envVars.SYNC_ENGINE_MODES_POLL_MS,
+  },
   enableCalendarSyncWorker: envVars.ENABLE_CALENDAR_SYNC_WORKER,
   deskTicketDebug: envVars.DESK_TICKET_DEBUG as boolean,
   enableEmailClassificationWorker: envVars.ENABLE_EMAIL_CLASSIFICATION_WORKER,

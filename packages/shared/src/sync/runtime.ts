@@ -53,6 +53,10 @@ export function initSyncEngine(
   client.onServingChange(() => {
     for (const listener of servingListeners) listener();
   });
+  client.onModesChange(() => {
+    modesVersion += 1;
+    for (const listener of modesListeners) listener();
+  });
   // NOTE: don't call client.start() here — this runs from a mount effect that can fire
   // before the socket exists, and the dashboard transport's `on` no-ops on a null socket.
   // start() is called lazily on the first subscribe (socket present by then); its
@@ -63,6 +67,24 @@ export function initSyncEngine(
 
 export function getSyncHost(): IvmHost | null {
   return host;
+}
+
+const modesListeners = new Set<() => void>();
+let modesVersion = 0;
+
+/** Reactive version counter for the server-sent per-query modes (bumps on change). */
+export function getSyncModesVersion(): number {
+  return modesVersion;
+}
+
+export function subscribeSyncModes(cb: () => void): () => void {
+  modesListeners.add(cb);
+  return () => modesListeners.delete(cb);
+}
+
+/** The server-declared mode for a query ('serve'|'shadow'|'off'), or undefined pre-ready/legacy. */
+export function getSyncQueryMode(queryName: string): 'serve' | 'shadow' | 'off' | undefined {
+  return client?.queryMode(queryName);
 }
 
 export function getSyncClient(): SyncClient | null {

@@ -21,7 +21,8 @@ export type SyncCounterName =
   | 'sync_engine_decrypt_values_total' // {result: cache_hit|decrypted|failed}
   | 'sync_engine_tap_pokes_total' // {result: applied|cancelled}
   | 'sync_engine_tap_persist_total' // {result: ok|failed}
-  | 'sync_engine_tap_events_total'; // {event: reset|backoff|fatal|fence_lost}
+  | 'sync_engine_tap_events_total' // {event: reset|backoff|fatal|fence_lost}
+  | 'sync_engine_shadow_divergence_total'; // {queryName} — client-reported shadow-vs-zero mismatch
 
 export type SyncHistogramName =
   | 'sync_engine_subscribe_latency' // {plane}

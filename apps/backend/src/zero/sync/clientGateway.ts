@@ -12,6 +12,7 @@ import { resolveSharedBase, isWorkspacePartitioned } from './baseQueries';
 import { syncContext } from './serviceIdentity';
 import { obsEmit } from './obs';
 import { syncMetrics } from './metrics';
+import { modeFor, modesSnapshot } from './queryModes';
 
 /**
  * An authenticated app socket. Matches the shape websocketService's auth middleware
@@ -91,6 +92,13 @@ export function attachSyncHandlers(socket: SyncIoSocket): () => void {
     }
     subscribe(msg.queryName, msg.args, ack, msg.sinceOffset);
   });
+  socket.on('sync:shadow-divergence', (msg: { queryName?: string }) => {
+    // Client-reported shadow divergence (throttled client-side): the promotion/rollback signal
+    // for shadow-mode queries. queryName is metric-attributed only if registry-known (cardinality).
+    const q = typeof msg?.queryName === 'string' ? msg.queryName : 'unknown';
+    syncMetrics.count('sync_engine_shadow_divergence_total', { queryName: q });
+    obsEmit('sync-sub', { action: 'shadow-divergence', socketId: connId, userId, queryName: q });
+  });
   socket.on('sync:unsubscribe', (msg: SyncMessage) => {
     if (msg?.queryName && Array.isArray(msg.args)) unsubscribe(msg.queryName, msg.args);
   });
@@ -123,6 +131,18 @@ export function attachSyncHandlers(socket: SyncIoSocket): () => void {
       obsEmit('sync-sub', { action: 'reject', socketId: connId, userId, queryName, reason: 'guest-or-unknown-role' });
       socket.emit('sync:error', { queryName, message: 'sync engine does not serve guest-role principals' });
       syncMetrics.count('sync_engine_subscribe_total', { plane: isRowLevelQuery(queryName) ? 'rowlevel' : 'gate', queryName, outcome: 'refused_role' });
+      return;
+    }
+    // Runtime rollout gate (CAC overlay — see queryModes.ts): 'off' refuses → the client stays
+    // native for this query. Can only SUBTRACT from the compiled, CI-audited registries.
+    if (modeFor(queryName) === 'off') {
+      obsEmit('sync-sub', { action: 'reject', socketId: connId, userId, queryName, reason: 'mode-off' });
+      socket.emit('sync:error', { queryName, message: 'query disabled by config' });
+      syncMetrics.count('sync_engine_subscribe_total', {
+        plane: isRowLevelQuery(queryName) ? 'rowlevel' : 'gate',
+        queryName,
+        outcome: 'refused_config',
+      });
       return;
     }
     // Row-level queries take a wholly separate path: the workspace partition is forced from the SOCKET
@@ -376,7 +396,7 @@ export function attachSyncHandlers(socket: SyncIoSocket): () => void {
       return;
     }
     ready = true;
-    socket.emit('sync:ready');
+    socket.emit('sync:ready', { modes: modesSnapshot() });
     for (const p of pending) subscribe(p.queryName, p.args, p.ack, p.sinceOffset);
     pending.length = 0;
   };

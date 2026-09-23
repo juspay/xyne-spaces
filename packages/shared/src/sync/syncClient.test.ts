@@ -214,3 +214,39 @@ test('boot: sync:ready before the offset load must not emit an offset-less subsc
   assert.equal(subs.length, 1, 'exactly one subscribe after the offset load (no double-send)');
   assert.equal(subs[0].payload.sinceOffset, 'off-42', 'the subscribe carries the resume offset');
 });
+
+test('sync:ready payload carries per-query modes; queryMode resolves with default', () => {
+  const { client, fire } = makeClient();
+  assert.equal(client.queryMode('getUsersV2'), undefined, 'no modes before ready (legacy)');
+  let notified = 0;
+  client.onModesChange(() => { notified += 1; });
+  fire('sync:ready', { modes: { default: 'shadow', queries: { getUsersV2: 'serve', userDrafts: 'off' } } });
+  assert.equal(client.queryMode('getUsersV2'), 'serve');
+  assert.equal(client.queryMode('userDrafts'), 'off');
+  assert.equal(client.queryMode('channelLatestMultipleConversationsV4'), 'shadow', 'default covers the rest');
+  assert.equal(notified, 1);
+  // unchanged payload on reconnect → no re-notify
+  fire('sync:ready', { modes: { default: 'shadow', queries: { getUsersV2: 'serve', userDrafts: 'off' } } });
+  assert.equal(notified, 1, 'identical modes must not re-notify');
+});
+
+test('shadow-divergence beacon is throttled per query', () => {
+  const handlers = new Map<string, (payload: unknown) => void>();
+  const sent: Array<{ event: string; payload: unknown }> = [];
+  const transport: SyncTransport = {
+    emit: <P, A = void>(event: string, payload: P, _ack?: (r: A) => void) => {
+      sent.push({ event, payload });
+    },
+    on: <P>(event: string, handler: (payload: P) => void) =>
+      handlers.set(event, handler as (p: unknown) => void),
+    off: (event: string) => handlers.delete(event),
+  };
+  const client = new SyncClient({} as never, transport, {} as never);
+  client.start();
+  client.reportShadowDivergence('q1');
+  client.reportShadowDivergence('q1'); // throttled
+  client.reportShadowDivergence('q2'); // independent query
+  const beacons = sent.filter((s) => s.event === 'sync:shadow-divergence');
+  assert.equal(beacons.length, 2);
+  assert.deepEqual(beacons.map((b) => (b.payload as { queryName: string }).queryName), ['q1', 'q2']);
+});

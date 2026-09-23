@@ -84,6 +84,12 @@ interface RevokeMsg {
   instanceKey: string;
 }
 
+export type SyncQueryMode = 'serve' | 'shadow' | 'off';
+export interface SyncQueryModes {
+  default: SyncQueryMode;
+  queries: Record<string, SyncQueryMode>;
+}
+
 const subKey = (queryName: string, args: ReadonlyJSONValue[]): string =>
   `${queryName}:${JSON.stringify(args)}`;
 
@@ -189,7 +195,7 @@ export class SyncClient {
     this.#transport.on<DeltaMsg>(EVT.delta, this.#onDelta);
     this.#transport.on<{ instanceKey: string }>(EVT.current, this.#onCurrent);
     this.#transport.on<RevokeMsg>(EVT.revoke, this.#onRevoke);
-    this.#transport.on<void>(EVT.ready, this.#onReady);
+    this.#transport.on<{ modes?: SyncQueryModes } | undefined>(EVT.ready, this.#onReady);
     this.#transport.on<{ reason?: string }>(EVT.unavailable, this.#onUnavailable);
     this.#transport.on<{ queryName?: string; message?: string }>(EVT.error, this.#onError);
     this.#transport.on<void>(EVT.disconnect, this.#onDisconnect);
@@ -334,13 +340,45 @@ export class SyncClient {
     );
   }
 
+  #modes: SyncQueryModes | null = null;
+  readonly #modesListeners = new Set<() => void>();
+
+  #setModes(modes: SyncQueryModes): void {
+    const changed = JSON.stringify(this.#modes) !== JSON.stringify(modes);
+    this.#modes = modes;
+    if (changed) for (const cb of this.#modesListeners) cb();
+  }
+
+  /** Per-query serve mode from the server's ready payload; undefined until (or unless) sent. */
+  queryMode(queryName: string): SyncQueryMode | undefined {
+    if (!this.#modes) return undefined;
+    return this.#modes.queries[queryName] ?? this.#modes.default;
+  }
+
+  onModesChange(cb: () => void): () => void {
+    this.#modesListeners.add(cb);
+    return () => this.#modesListeners.delete(cb);
+  }
+
+  /** Throttled shadow-divergence beacon (the promotion/rollback signal for shadow mode). */
+  readonly #lastDivergenceAt = new Map<string, number>();
+  reportShadowDivergence(queryName: string): void {
+    const now = Date.now();
+    if (now - (this.#lastDivergenceAt.get(queryName) ?? 0) < 60_000) return;
+    this.#lastDivergenceAt.set(queryName, now);
+    this.#transport.emit('sync:shadow-divergence', { queryName });
+  }
+
   /**
    * The server has attached its sync handlers (fresh connection or reconnect) and has
    * no memory of our subscriptions — re-send them all. Emitted after the server's async
    * setup, so unlike `connect` the handlers are guaranteed registered here.
    */
-  readonly #onReady = (): void => {
+  readonly #onReady = (msg?: { modes?: SyncQueryModes }): void => {
     this.#connectionReady = true;
+    // Per-query serve modes ride the ready payload (CAC overlay; see backend queryModes.ts) —
+    // refreshed on every (re)connect. Absent on an older server → legacy routing (undefined).
+    if (msg?.modes) this.#setModes(msg.modes);
     // A fresh `sync:ready` means the server IS serving us now — clear any prior unavailable
     // (a reconnect can carry a changed role). Shared queries re-engage the engine on re-render.
     this.#setUnavailable(false);

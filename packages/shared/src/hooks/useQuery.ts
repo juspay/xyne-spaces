@@ -15,7 +15,8 @@ import type { UseQueryOptions, QueryResult } from '@rocicorp/zero/react';
 import { Event } from '../logger/events.js';
 import { useInstrumentation, useZero } from './useZero.js';
 import { isSharedQuery, isWorkspacePartitioned } from '../sync/registry.js';
-import { useSharedQuery, useSyncEngineReady, useSyncServing } from '../sync/useSharedQuery.js';
+import { useSharedQuery, useSyncEngineReady, useSyncServing, useSyncQueryMode } from '../sync/useSharedQuery.js';
+import { getSyncClient } from '../sync/runtime.js';
 import { obsEmit, isShadow } from '../sync/obs.js';
 import { useZeroFallbackConfig } from './ZeroFallbackContext.js';
 import { useFallbackQuery } from './useFallbackQuery.js';
@@ -330,13 +331,17 @@ export function useQuery<
   // has, a shared query is NOT routed to the engine at all — it stays on native Zero. This is the
   // role-agnostic connection-level fallback; the SWR handoff below is the per-query safety net.
   const serving = useSyncServing();
+  // Per-query serve mode from the server's ready payload (the CAC overlay): 'off' routes fully
+  // native, 'shadow' runs both and displays Zero, 'serve' displays sync. `undefined` = the server
+  // sent no modes (legacy) → registry routing + the global VITE_SYNC_SHADOW flag, as before.
+  const queryMode = useSyncQueryMode(query.query.queryName);
   const isShared = useMemo(
-    () => syncReady && serving && isSharedQuery(query.query.queryName),
-    [syncReady, serving, query.query.queryName],
+    () => syncReady && serving && isSharedQuery(query.query.queryName) && queryMode !== 'off',
+    [syncReady, serving, query.query.queryName, queryMode],
   );
   // Shadow-diff: keep Zero running alongside the sync result and DISPLAY Zero (known-good),
   // so we can measure where the sync result deviates without corrupting the UI.
-  const shadow = isShared && isShadow();
+  const shadow = isShared && (queryMode === undefined ? isShadow() : queryMode === 'shadow');
   // Workspace-partitioned queries: inject ctx.workspaceId into the args so the instance keys per
   // workspace and the override base partitions correctly. The caller never passes workspaceId (the
   // query stays argless); the backend independently FORCES it from the socket, so this only keeps the
@@ -425,6 +430,9 @@ export function useQuery<
         syncLen,
         ...(match ? {} : { zeroIds: shadowIds(zData), syncIds: shadowIds(sData) }),
       });
+      // Promotion/rollback signal: a settled divergence is reported to the backend (throttled
+      // per-query in the client) and lands as sync_engine_shadow_divergence_total{queryName}.
+      if (!match) getSyncClient()?.reportShadowDivergence(queryName);
     }, 600);
     return () => {
       if (shadowTimer.current) clearTimeout(shadowTimer.current);

@@ -17,6 +17,9 @@ import {
   subscribeSyncEngineReady,
   isSyncUnavailable,
   subscribeSyncServing,
+  subscribeSyncModes,
+  getSyncModesVersion,
+  getSyncQueryMode,
 } from './runtime.js';
 import { resolveBaseAst, astToFormat } from './registry.js';
 
@@ -33,6 +36,17 @@ export function useSyncEngineReady(): boolean {
 export function useSyncServing(): boolean {
   const unavailable = useSyncExternalStore(subscribeSyncServing, isSyncUnavailable, isSyncUnavailable);
   return !unavailable;
+}
+
+/**
+ * Reactive per-query serve mode from the server's ready payload (the CAC overlay):
+ * 'serve' (display sync), 'shadow' (run both, display Zero), 'off' (fully native), or
+ * undefined when the server hasn't sent modes (legacy → caller falls back to the global
+ * shadow flag). Re-renders when a reconnect delivers a changed config.
+ */
+export function useSyncQueryMode(queryName: string | undefined): 'serve' | 'shadow' | 'off' | undefined {
+  useSyncExternalStore(subscribeSyncModes, getSyncModesVersion, getSyncModesVersion);
+  return queryName ? getSyncQueryMode(queryName) : undefined;
 }
 
 export function useSharedQuery<TReturn>(
