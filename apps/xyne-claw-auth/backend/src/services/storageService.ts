@@ -34,6 +34,15 @@ function buildService(): StorageService {
         ? { accessKeyId: CONFIG.s3AccessKeyId, secretAccessKey: CONFIG.s3SecretAccessKey }
         : {}),
     },
+    azure: {
+      containerName: CONFIG.azureContainerName,
+      ...(CONFIG.azureAccountName ? { accountName: CONFIG.azureAccountName } : {}),
+      ...(CONFIG.azureEndpoint ? { endpoint: CONFIG.azureEndpoint } : {}),
+      ...(CONFIG.azureConnectionString
+        ? { connectionString: CONFIG.azureConnectionString }
+        : {}),
+      ...(CONFIG.azureSasToken ? { sasToken: CONFIG.azureSasToken } : {}),
+    },
   });
 }
 
@@ -44,7 +53,11 @@ class GCSService {
 
   private constructor() {
     this.bucketName =
-      CONFIG.storageProvider === "s3" ? CONFIG.s3BucketName : CONFIG.gcsBucketName;
+      CONFIG.storageProvider === "s3"
+        ? CONFIG.s3BucketName
+        : CONFIG.storageProvider === "azure"
+          ? CONFIG.azureContainerName
+          : CONFIG.gcsBucketName;
     this.storage = buildService();
   }
 

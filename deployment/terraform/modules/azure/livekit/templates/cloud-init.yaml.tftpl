@@ -1,0 +1,63 @@
+#cloud-config
+package_update: true
+packages:
+  - docker.io
+  - ca-certificates
+  - curl
+  - apt-transport-https
+  - lsb-release
+  - gnupg
+write_files:
+  - path: /usr/local/bin/xyne-secret
+    permissions: "0755"
+    content: |
+      set -eu
+      secret="$1"
+      out="$2"
+      tmp=$(mktemp)
+      az login --identity --client-id ${client_id} --allow-no-subscriptions --output none
+      az keyvault secret show --vault-name ${vault_name} --name "$secret" --query value --output tsv > "$tmp"
+      test -s "$tmp"
+      install -m 0600 "$tmp" "$out"
+      rm -f "$tmp"
+  - path: /usr/local/bin/xyne-turn-cert
+    permissions: "0755"
+    content: |
+      set -eu
+      mkdir -p /etc/livekit/turn
+      /bin/sh /usr/local/bin/xyne-secret "${turn_cert_secret}" /etc/livekit/turn/bundle.pem
+      awk '/BEGIN CERTIFICATE/,/END CERTIFICATE/' /etc/livekit/turn/bundle.pem > /etc/livekit/turn/cert.pem
+      awk '/BEGIN [A-Z ]*PRIVATE KEY/,/END [A-Z ]*PRIVATE KEY/' /etc/livekit/turn/bundle.pem > /etc/livekit/turn/key.pem
+      test -s /etc/livekit/turn/cert.pem
+      test -s /etc/livekit/turn/key.pem
+      chmod 0600 /etc/livekit/turn/cert.pem /etc/livekit/turn/key.pem
+  - path: /etc/systemd/system/livekit.service
+    permissions: "0644"
+    content: |
+      [Unit]
+      Description=LiveKit ${role}
+      After=docker.service network-online.target
+      Requires=docker.service
+      Wants=network-online.target
+
+      [Service]
+      Restart=always
+      RestartSec=5
+      TimeoutStartSec=600
+      ExecStartPre=/bin/mkdir -p /etc/livekit
+      ExecStartPre=/bin/sh /usr/local/bin/xyne-secret ${config_secret} /etc/livekit/config.yaml
+%{ if turn_cert_secret != "" ~}
+      ExecStartPre=/bin/sh /usr/local/bin/xyne-turn-cert
+%{ endif ~}
+      ExecStartPre=-/usr/bin/docker rm -f livekit
+      ExecStartPre=/usr/bin/docker pull ${image}
+      ExecStart=/usr/bin/docker run --rm --name livekit --network host ${docker_flags} ${image} ${container_args}
+      ExecStop=/usr/bin/docker stop livekit
+
+      [Install]
+      WantedBy=multi-user.target
+runcmd:
+  - curl -sL https://aka.ms/InstallAzureCLIDeb | bash
+  - systemctl enable --now docker
+  - systemctl daemon-reload
+  - systemctl enable --now livekit.service
