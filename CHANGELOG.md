@@ -1,3 +1,10 @@
+## [1.379.0](https://github.com/juspay/xyne-spaces/compare/v1.378.1...v1.379.0) (2026-09-23)
+
+
+### Features
+
+* prefill create-ticket context from ticket views ([#2224](https://github.com/juspay/xyne-spaces/issues/2224)) ([cfcb256](https://github.com/juspay/xyne-spaces/commit/cfcb2560be83c044c740efa1ef21bbc06675c824))
+
 ## [1.378.1](https://github.com/juspay/xyne-spaces/compare/v1.378.0...v1.378.1) (2026-09-23)
 
 
