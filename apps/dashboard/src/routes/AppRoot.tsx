@@ -1112,7 +1112,7 @@ export const router = createBrowserRouter(
                   // Outside the /ai subtree on purpose: a workspace that has
                   // disabled Xyne AI from the rail can still keep apps there.
                   path: 'app/:appId',
-                  element: <ArtifactAppHostRoute />,
+                  element: <ArtifactAppHostRoute placement={{ surface: 'toolbar' }} />,
                 },
                 {
                   path: 'slack-migration',
@@ -1308,7 +1308,7 @@ export const router = createBrowserRouter(
                         // the chat panel with the directory still alongside.
                         {
                           path: 'app/:appId',
-                          element: <ArtifactAppHostRoute />,
+                          element: <ArtifactAppHostRoute placement={{ surface: 'inbox' }} />,
                         },
                         // Channel routes (must come after specific routes)
                         {

@@ -37,6 +37,8 @@ import { useArtifactDataBridge, type PreviewClientRef } from './useArtifactDataB
 import { useArtifactAgentBridge } from './useArtifactAgentBridge';
 import { useArtifactDirectoryBridge } from './useArtifactDirectoryBridge';
 import { useArtifactRequestBridge } from './useArtifactRequestBridge';
+import { useArtifactContextBridge } from './useArtifactContextBridge';
+import type { XyneAppContext } from './artifactData.constants';
 import { ArtifactSavedIndicator } from './ArtifactSavedIndicator';
 import { ArtifactBootOverlay } from './ArtifactBootOverlay';
 import { ArtifactErrorOverlay } from './ArtifactErrorOverlay';
@@ -101,6 +103,8 @@ const ArtifactSandpack = memo(
     appId,
     attachmentId,
     fill,
+    contextRef,
+    pushContextRef,
   }: {
     payload: ReactArtifactPayload;
     theme: 'light' | 'dark';
@@ -114,6 +118,10 @@ const ArtifactSandpack = memo(
     attachmentId?: string;
     /** Stable ref object — passing a changing prop here would remount the sandbox. */
     refreshRef: MutableRefObject<(() => Promise<void>) | null>;
+    /** Also refs, for the same reason: the context changes (a channel switch)
+     *  must reach a RUNNING app as a message, not as a new prop that reboots it. */
+    contextRef: MutableRefObject<XyneAppContext | null>;
+    pushContextRef: MutableRefObject<(() => void) | null>;
     /** Drives the boot overlay's scale and surface. A plain boolean, so the
      *  memo's shallow compare still holds and the iframe is never torn down. */
     fill: boolean;
@@ -149,6 +157,10 @@ const ArtifactSandpack = memo(
     // app tunnels them here (it has no cookie), the host performs the real
     // same-origin fetch, allow-listed to /api/sdk and /claw.
     useArtifactRequestBridge({ previewRef, ...(appId ? { appId } : {}) });
+
+    // Where the app is open. Answered on request and pushed on change, so an app
+    // that stays alive across a channel switch follows the user.
+    useArtifactContextBridge({ previewRef, contextRef, pushRef: pushContextRef });
 
     const files = useMemo(() => toSandpackFiles(payload), [payload]);
     const customSetup = useMemo(
@@ -193,6 +205,7 @@ ArtifactSandpack.displayName = 'ArtifactSandpack';
  */
 export const ReactArtifactView = ({
   artifact,
+  hostContext,
   fill = false,
   onExpand,
   expandLabel = 'Open full screen',
@@ -207,6 +220,23 @@ export const ReactArtifactView = ({
   const [tab, setTab] = useState<'preview' | 'code' | 'settings'>('preview');
   const [refreshingData, setRefreshingData] = useState(false);
   const refreshRef = useRef<(() => Promise<void>) | null>(null);
+
+  // The context an app may ask for. Callers rebuild the object every render, so
+  // it is compared by VALUE here and only the refs cross into the memoized
+  // sandbox — a changing prop there would tear the iframe down.
+  const resolvedContext = useMemo(
+    (): XyneAppContext => hostContext ?? { v: 1, surface: 'chat', layout: 'fullscreen' },
+    [hostContext],
+  );
+  const contextKey = useMemo(() => JSON.stringify(resolvedContext), [resolvedContext]);
+  const contextRef = useRef<XyneAppContext | null>(resolvedContext);
+  const pushContextRef = useRef<(() => void) | null>(null);
+  useEffect(() => {
+    contextRef.current = resolvedContext;
+    pushContextRef.current?.();
+    // `contextKey` rather than the object: same content must not re-push.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [contextKey]);
   const auth = useAuthContextValues();
   const theme = useMemo(() => sandpackThemeName(), []);
   const { attachmentId, inlineData, savedAppId, versionId } = artifact;
@@ -450,6 +480,8 @@ export const ReactArtifactView = ({
           payload={payload}
           theme={theme}
           refreshRef={refreshRef}
+          contextRef={contextRef}
+          pushContextRef={pushContextRef}
           fill={fill}
           canWrite
           canInvokeAgents

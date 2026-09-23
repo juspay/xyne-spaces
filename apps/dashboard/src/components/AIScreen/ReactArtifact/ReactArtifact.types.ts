@@ -55,8 +55,16 @@ export interface SavedArtifactRef {
   manifest: ReactArtifactManifest;
 }
 
+import type { XyneAppContext } from './artifactData.constants';
+
 export interface ReactArtifactViewProps {
   artifact: ReactArtifactRef;
+  /**
+   * Where this app is open, handed to the app itself so it can lay itself out
+   * for the rail, the Inbox, a channel tab or the Agent Hub. Defaults to the
+   * `chat` surface — an artifact rendered inline in a conversation.
+   */
+  hostContext?: XyneAppContext;
   /** Fill the available height (side panel) instead of the fixed inline height. */
   fill?: boolean;
   /** Shows an expand affordance when the artifact can also open full-screen. */

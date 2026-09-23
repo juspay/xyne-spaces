@@ -1,4 +1,5 @@
 import { ReactElement, useCallback, useMemo, useState } from 'react';
+import { useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, Globe, Lock } from 'lucide-react';
 import { Button } from '../ui/Button/index';
@@ -12,9 +13,32 @@ import {
   updateArtifactAppIcon,
 } from '../../services/claw/artifactAppsService';
 import { clawErrorText } from '../../services/claw/clawRequest';
+import type { XyneAppContext, XyneContextChannel } from '../AIScreen/ReactArtifact';
+
+/**
+ * Where this host is mounted, as the app will be told. The channel case carries
+ * the channel so an app opened as a channel tab can scope itself to it; every
+ * other surface has nothing to add.
+ */
+export type ArtifactAppPlacement =
+  | { surface: 'toolbar' | 'inbox' | 'library' }
+  | { surface: 'channel'; channel: XyneContextChannel };
+
+/** A panel sits beside other chrome; the rail and the Agent Hub own the page. */
+const LAYOUT_BY_SURFACE = {
+  toolbar: 'fullscreen',
+  library: 'fullscreen',
+  inbox: 'panel',
+  channel: 'panel',
+} as const;
 
 interface ArtifactAppHostProps {
   appId: string;
+  /**
+   * Passed through to the app as its context, so one build can lay itself out
+   * differently in the rail, the Inbox, a channel tab and the Agent Hub.
+   */
+  placement: ArtifactAppPlacement;
   /**
    * Show the payload's own title inside the runner's header.
    *
@@ -43,9 +67,11 @@ interface ArtifactAppHostProps {
 export const ArtifactAppHost = ({
   appId,
   onBack,
+  placement,
   showPayloadTitle = false,
 }: ArtifactAppHostProps): ReactElement => {
   const queryClient = useQueryClient();
+  const { workspaceId } = useParams<{ workspaceId: string }>();
   const [error, setError] = useState<string | null>(null);
 
   const { data, isLoading, isError, refetch } = useQuery({
@@ -73,6 +99,19 @@ export const ArtifactAppHost = ({
       : app?.publishedVersionId;
     return versions.find(v => v.id === preferred) ?? versions[0];
   }, [app, versions]);
+
+  const hostContext = useMemo(
+    (): XyneAppContext => ({
+      v: 1,
+      appId,
+      layout: LAYOUT_BY_SURFACE[placement.surface],
+      ...(workspaceId ? { workspaceId } : {}),
+      ...(placement.surface === 'channel'
+        ? { surface: 'channel' as const, channel: placement.channel }
+        : { surface: placement.surface }),
+    }),
+    [appId, workspaceId, placement],
+  );
 
   // The viewer addresses the app by its own id; `attachmentId` is unused on this
   // path but keeps one ref shape across the chat and saved-app surfaces.
@@ -187,6 +226,7 @@ export const ArtifactAppHost = ({
         <ReactArtifactView
           artifact={artifact}
           fill
+          hostContext={hostContext}
           hideTitle={!showPayloadTitle}
           settingsSlot={
             <ArtifactAppSettings
