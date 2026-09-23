@@ -178,6 +178,7 @@ import {
   startPrefetchExtraction,
   type ExecutableTool,
 } from "../prefetch.js";
+import { answerFromContextEnabled, answerScopeFrom, buildAnswerContext } from "../answer-context.js";
 
 const clog = createLogger("run");
 const XYNE_CLAW_PACKAGE_DIR = fileURLToPath(new URL("../../", import.meta.url));
@@ -1492,9 +1493,12 @@ export async function processTask(
   },
   execution?: RunExecutionState,
 ): Promise<void> {
+  // Answer from Context: retrieve once before the only turn, then answer with no
+  // tools (see answer-context.ts). It replaces prefetch, whose id hints it makes moot.
+  const answerFromContext = answerFromContextEnabled(agentConfig);
   // Started here so the extractor overlaps session restore + MCP listing;
   // awaited once the tool palette exists. Never rejects (see prefetch.ts).
-  const prefetchSpecPromise = prefetchEnabled(agentConfig)
+  const prefetchSpecPromise = prefetchEnabled(agentConfig) && !answerFromContext
     ? startPrefetchExtraction(task)
     : null;
   let mcpCleanup: (() => Promise<void>) | undefined;
@@ -3785,6 +3789,23 @@ export async function processTask(
         : idLines.join("\n");
     }
 
+    // Answer from Context: the palette is final, so its search tools can run the
+    // question now — through their own `execute`, so ACL and KB grants apply.
+    if (answerFromContext) {
+      const retrieveStartedAt = Date.now();
+      const scope = answerScopeFrom(agentConfig);
+      const { block, sections } = await buildAnswerContext({
+        query: task,
+        scope,
+        tools: allTools as unknown as ExecutableTool[],
+        askerName: userName,
+        progressUrl,
+        sessionId,
+      });
+      fullContext = fullContext ? `${fullContext}\n\n${block}` : block;
+      log(`[answer-context] scope=${scope} sources=${sections.length} chars=${block.length} in ${Date.now() - retrieveStartedAt}ms`);
+    }
+
     // Resolve the prefetch spec now that the tool palette is final: the
     // resolvers ARE the agent's own Spaces tools, invoked through the same
     // `execute` closure the model would use, so ACL and permissions come along
@@ -4040,7 +4061,8 @@ export async function processTask(
         automationRun: isReadOnlyJob,
         userName,
         userEmail,
-        customTools: tools,
+        // Answer from Context answers in one turn from the retrieved block: no tools.
+        customTools: answerFromContext ? [] : tools,
         systemPromptOverride: effectiveSystemPrompt,
         cwd: workspaceDir,
         conversationId: sessionKey,
@@ -4081,7 +4103,7 @@ export async function processTask(
         ...(verifyResponses && !isCopilot
           ? { verifyResponsesRef: evidenceRef }
           : {}),
-        citationReflection,
+        citationReflection: answerFromContext ? false : citationReflection,
         autoToolCitations,
         // Thread invocations (Spaces/Slack replies — channelId present) keep a
         // clean posted reply = the last 2 assistant turns; ask-ai and every other

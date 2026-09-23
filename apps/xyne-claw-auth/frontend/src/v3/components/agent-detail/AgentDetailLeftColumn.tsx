@@ -1536,6 +1536,10 @@ interface Props {
    *  entities named in a question to ids before the agent's first turn. */
   draftPrefetchContext: boolean;
   onDraftPrefetchContextChange: (v: boolean) => void;
+  /** Answer from Context opt-in (agent.config.answerFromContext). Runs the question
+   *  as a search before the only turn; the agent answers from it with no tools. */
+  draftAnswerFromContext: boolean;
+  onDraftAnswerFromContextChange: (v: boolean) => void;
   // Post TODOs to Spaces opt-OUT (agent.config.postTodos). Default ON: the
   // live plan/TODO card from the todo-write tool is posted into the thread.
   // Turning it OFF sets postTodos=false, suppressing the card at claw-auth's
@@ -1758,6 +1762,8 @@ export function AgentDetailLeftColumn({
   onDraftSuggestGoalChange,
   draftPrefetchContext,
   onDraftPrefetchContextChange,
+  draftAnswerFromContext,
+  onDraftAnswerFromContextChange,
   draftPostTodos,
   onDraftPostTodosChange,
   draftPlanTracking,
@@ -2649,7 +2655,7 @@ export function AgentDetailLeftColumn({
         label="Behaviour"
         tech="rules & autonomy"
         subtitle="extra rules applied on every turn"
-        summary={behaviorCount > 0 || draftSuggestGoal || draftPrefetchContext || draftAutoGoal || draftPlanMode || !draftPostTodos || draftMaxDelegations !== MAX_DELEGATIONS_PER_RUN_BOUNDS.DEFAULT ? "Customised" : "Defaults"}
+        summary={behaviorCount > 0 || draftSuggestGoal || draftPrefetchContext || draftAnswerFromContext || draftAutoGoal || draftPlanMode || !draftPostTodos || draftMaxDelegations !== MAX_DELEGATIONS_PER_RUN_BOUNDS.DEFAULT ? "Customised" : "Defaults"}
         open={activeTab === "behavior"}
         onToggle={() => toggleSection("behavior")}
       />
@@ -2863,6 +2869,38 @@ export function AgentDetailLeftColumn({
                 aria-label="Enable Prefetch Context"
               />
               <span className="text-[12px] text-xyne-fg-primary">{draftPrefetchContext ? "On" : "Off"}</span>
+            </label>
+          </div>
+        </div>
+      )}
+
+      {/* Answer from Context — opt-IN switch (agent.config.answerFromContext).
+          Before the only turn, xyne-claw runs the question as a search (the
+          agent's own Spaces search + KB tools, so its ACL applies) and the agent
+          answers from the results with NO tools: one fast, single-turn answer
+          instead of the agentic loop. Replaces Prefetch Context for the run.
+          Built for the cmd+K AI tab. Off by default. */}
+      {(canEdit || draftAnswerFromContext) && (
+        <div className="rounded-xl border border-xyne-border bg-xyne-surface p-4">
+          <div className="flex items-start justify-between gap-4">
+            <div className="min-w-0 flex-1">
+              <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-xyne-fg-tertiary">Answer from Context</div>
+              <p className="text-[12px] leading-relaxed text-xyne-fg-secondary">
+                Search the workspace and knowledge base for the question first, then answer once from what was found, with no tools and no follow-up turns.
+                {" "}
+                <span className="text-xyne-fg-tertiary">Best for quick-answer surfaces like the cmd+K AI tab. Overrides Prefetch Context while on.</span>
+              </p>
+            </div>
+            <label className="flex shrink-0 items-center gap-2 select-none">
+              <input
+                type="checkbox"
+                checked={draftAnswerFromContext}
+                onChange={(e) => onDraftAnswerFromContextChange(e.target.checked)}
+                disabled={!canEdit}
+                className="h-4 w-4 cursor-pointer accent-xyne-accent disabled:cursor-not-allowed disabled:opacity-60"
+                aria-label="Enable Answer from Context"
+              />
+              <span className="text-[12px] text-xyne-fg-primary">{draftAnswerFromContext ? "On" : "Off"}</span>
             </label>
           </div>
         </div>
