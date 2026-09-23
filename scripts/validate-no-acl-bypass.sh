@@ -23,7 +23,7 @@ fi
 # Each entry: human label, grep -E pattern.
 declare -a LABELS=(
   "runAsSystem("
-  "\$queryRaw / \$executeRaw (incl. *Unsafe)"
+  "raw query/execute calls (incl. *Unsafe)"
 )
 declare -a PATTERNS=(
   'runAsSystem\('

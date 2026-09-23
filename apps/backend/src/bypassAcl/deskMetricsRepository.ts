@@ -16,6 +16,19 @@ import {
   UNCLASSIFIED_AI_CATEGORY,
 } from '@xyne/shared';
 import { logger } from '@/utils/logger';
+import { rawQuery } from './base';
+import type { TableName } from './base';
+
+/** Every table the raw window/aggregate SQL in this file reads, across all metric kinds. */
+const DESK_METRICS_TABLES: TableName[] = [
+  'Ticket',
+  'TicketActivity',
+  'User',
+  'Email',
+  'GlobalField',
+  'FormFields',
+  'FormEntityValues',
+];
 
 /**
  * Desk metrics — computed from ticket_activities (scoped by the denormalized
@@ -357,29 +370,33 @@ export class DeskMetricsRepository {
       agents,
       tagCategories,
       tagBreakdown,
-    ] = await Promise.all([
-      this.frtRtAggregates(db, cohortCte, frtStop, resolvedAtSql),
-      this.ticketRows(db, cohortCte, frtStop, resolvedAtSql),
-      this.emailRepliesCount(db, channelId, gte, lte, ticketScopeExists),
-      this.stageCounts(db, cohortCte),
-      this.priorityBreakdown(db, cohortCte),
-      this.csatStats(db, channelId, gte, lte, ticketScopeExists),
-      this.trendByDay(db, channelId, gte, lte, resolvedPredicate, ticketScopeExists),
-      this.agentPerformance(
-        db,
-        cohortCte,
-        frtStop,
-        resolvedAtSql,
-        reopenedSql,
-        channelId,
-        gte,
-        lte,
-        assigneeIds,
-        ticketScopeExists
-      ),
-      this.tagCategoryBreakdown(db, cohortCte),
-      this.tagBreakdown(db, cohortCte),
-    ]);
+    ] = await rawQuery(
+      DESK_METRICS_TABLES,
+      'desk metrics dashboard: window/aggregate SQL (FRT/RT, trend, tag and agent breakdowns) Prisma\'s query builder cannot express',
+      () => Promise.all([
+        this.frtRtAggregates(db, cohortCte, frtStop, resolvedAtSql),
+        this.ticketRows(db, cohortCte, frtStop, resolvedAtSql),
+        this.emailRepliesCount(db, channelId, gte, lte, ticketScopeExists),
+        this.stageCounts(db, cohortCte),
+        this.priorityBreakdown(db, cohortCte),
+        this.csatStats(db, channelId, gte, lte, ticketScopeExists),
+        this.trendByDay(db, channelId, gte, lte, resolvedPredicate, ticketScopeExists),
+        this.agentPerformance(
+          db,
+          cohortCte,
+          frtStop,
+          resolvedAtSql,
+          reopenedSql,
+          channelId,
+          gte,
+          lte,
+          assigneeIds,
+          ticketScopeExists
+        ),
+        this.tagCategoryBreakdown(db, cohortCte),
+        this.tagBreakdown(db, cohortCte),
+      ]),
+    );
 
     return {
       range: { from: gte.toISOString(), to: lte.toISOString() },
@@ -452,37 +469,41 @@ export class DeskMetricsRepository {
       customFieldBreakdown,
       aiCategoryCountRows,
       aiSubCategoryCountRows,
-    ] = await Promise.all([
-      needsAggregate ? this.frtRtAggregates(db, cohortCte, frtStop, resolvedAtSql) : null,
-      ticketLimit ? this.ticketRows(db, cohortCte, frtStop, resolvedAtSql, ticketLimit + 1) : null,
-      needsCounts ? this.emailRepliesCount(db, channelId, gte, lte, ticketScopeExists) : null,
-      needsCounts ? this.stageCounts(db, cohortCte) : null,
-      wanted.has('priority') ? this.priorityBreakdown(db, cohortCte) : null,
-      wanted.has('csat') ? this.csatStats(db, channelId, gte, lte, ticketScopeExists) : null,
-      wanted.has('trend')
-        ? this.trendByDay(db, channelId, gte, lte, resolvedPredicate, ticketScopeExists)
-        : null,
-      wanted.has('agents')
-        ? this.agentPerformance(
-            db,
-            cohortCte,
-            frtStop,
-            resolvedAtSql,
-            reopenedSql,
-            channelId,
-            gte,
-            lte,
-            assigneeIds,
-            ticketScopeExists
-          )
-        : null,
-      wanted.has('tags') ? this.tagCategoryBreakdown(db, cohortCte) : null,
-      wanted.has('tags') ? this.tagBreakdown(db, cohortCte) : null,
-      wanted.has('customFields') ? this.customFieldSummary(db, cohortCte) : null,
-      breakdownFields.length > 0 ? this.customFieldBreakdown(db, cohortCte, breakdownFields) : null,
-      wanted.has('aiCategories') ? this.aiCategoryCounts(db, cohortCte) : null,
-      wanted.has('aiCategories') ? this.aiSubCategoryCounts(db, cohortCte) : null,
-    ]);
+    ] = await rawQuery(
+      DESK_METRICS_TABLES,
+      'desk metrics dashboard (partial/agent view): same window/aggregate SQL as getMetrics, gated per requested metric',
+      () => Promise.all([
+        needsAggregate ? this.frtRtAggregates(db, cohortCte, frtStop, resolvedAtSql) : null,
+        ticketLimit ? this.ticketRows(db, cohortCte, frtStop, resolvedAtSql, ticketLimit + 1) : null,
+        needsCounts ? this.emailRepliesCount(db, channelId, gte, lte, ticketScopeExists) : null,
+        needsCounts ? this.stageCounts(db, cohortCte) : null,
+        wanted.has('priority') ? this.priorityBreakdown(db, cohortCte) : null,
+        wanted.has('csat') ? this.csatStats(db, channelId, gte, lte, ticketScopeExists) : null,
+        wanted.has('trend')
+          ? this.trendByDay(db, channelId, gte, lte, resolvedPredicate, ticketScopeExists)
+          : null,
+        wanted.has('agents')
+          ? this.agentPerformance(
+              db,
+              cohortCte,
+              frtStop,
+              resolvedAtSql,
+              reopenedSql,
+              channelId,
+              gte,
+              lte,
+              assigneeIds,
+              ticketScopeExists
+            )
+          : null,
+        wanted.has('tags') ? this.tagCategoryBreakdown(db, cohortCte) : null,
+        wanted.has('tags') ? this.tagBreakdown(db, cohortCte) : null,
+        wanted.has('customFields') ? this.customFieldSummary(db, cohortCte) : null,
+        breakdownFields.length > 0 ? this.customFieldBreakdown(db, cohortCte, breakdownFields) : null,
+        wanted.has('aiCategories') ? this.aiCategoryCounts(db, cohortCte) : null,
+        wanted.has('aiCategories') ? this.aiSubCategoryCounts(db, cohortCte) : null,
+      ]),
+    );
 
     const result: DeskMetricsPartial = {
       range: { from: gte.toISOString(), to: lte.toISOString() },
