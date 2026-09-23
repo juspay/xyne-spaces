@@ -1,3 +1,10 @@
+## [1.383.2](https://github.com/juspay/xyne-spaces/compare/v1.383.1...v1.383.2) (2026-09-23)
+
+
+### Bug Fixes
+
+* docker build fix ([#2252](https://github.com/juspay/xyne-spaces/issues/2252)) ([a4d56a4](https://github.com/juspay/xyne-spaces/commit/a4d56a43befb174381fe50292f6860a939d0d028))
+
 ## [1.383.1](https://github.com/juspay/xyne-spaces/compare/v1.383.0...v1.383.1) (2026-09-23)
 
 
