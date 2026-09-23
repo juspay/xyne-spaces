@@ -282,6 +282,11 @@ const tickIntervalFor = (pointCount: number): number => {
   return Math.floor(pointCount / 6);
 };
 
+// The same desk-wide number as the Avg Resolution KPI, just over time — so on desks saved
+// before this chart existed it follows whatever that KPI is set to.
+const inheritedVisibilityKey = (key: string): string | undefined =>
+  key === 'chart:resolutionTrend' ? 'kpi:avgResolution' : undefined;
+
 interface SeriesChart {
   rows: Array<Record<string, number | string>>;
   series: Array<{ name: string; color: string }>;
@@ -1518,7 +1523,13 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
   );
 
   // Guests see what the desk owner didn't turn off (Desk Settings → Metrics); others see everything.
-  const canSee = (key: string): boolean => !isGuest || data?.guestVisibility?.[key] !== false;
+  const canSee = (key: string): boolean => {
+    if (!isGuest) return true;
+    const visibility = data?.guestVisibility;
+    if (visibility?.[key] !== undefined) return visibility[key] !== false;
+    const inherited = inheritedVisibilityKey(key);
+    return inherited ? visibility?.[inherited] !== false : true;
+  };
 
   useEffect(() => {
     if (selectedTagCategory === null) {
@@ -1663,6 +1674,9 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
   const chartViewLabel = (view: ChartView): string =>
     (CHART_VIEW_LABELS as Record<string, string>)[view] ?? view.slice(view.indexOf(':') + 1);
   const isBreakdownView = !['priority', 'trend', 'assignee', 'tags'].includes(chartView);
+  // The dropdown card expands as setExpandedChart(chartView); the fixed card passes its own id.
+  // Without this the overlay would render the dropdown's breakdown on top of the fixed chart.
+  const expandedIsDropdownChart = expandedChart !== null && expandedChart === chartView;
 
   useEffect(() => {
     if (open) void refetch();
@@ -3282,7 +3296,9 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                   (selectedTagCategory
                     ? `Tags in "${selectedTagCategory}"`
                     : 'Tickets by tag category')}
-                {isBreakdownView && `Tickets by ${chartViewLabel(chartView)}`}
+                {expandedIsDropdownChart &&
+                  isBreakdownView &&
+                  `Tickets by ${chartViewLabel(chartView)}`}
               </h2>
               <button
                 type='button'
@@ -3295,7 +3311,8 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
               </button>
             </div>
             <div className='min-h-0 flex-1'>
-              {(expandedChart === 'priority' || isBreakdownView) &&
+              {expandedIsDropdownChart &&
+                (chartView === 'priority' || isBreakdownView) &&
                 (pieData.length === 0 ? (
                   <div className='flex h-full items-center justify-center text-sm text-muted-foreground'>
                     No tickets in range
