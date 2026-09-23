@@ -4036,6 +4036,7 @@ export default function SdlcScreen(): ReactElement {
                                   )}
                                   {isHubAdmin && (
                                     <SdlcArchiveMenu
+                                      title={canvas.title}
                                       archived={archived}
                                       trackingScope='HubKnowledge'
                                       className='-mr-1'

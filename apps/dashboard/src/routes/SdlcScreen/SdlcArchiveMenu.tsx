@@ -10,6 +10,7 @@ import { cn } from '../../utils/classNames';
 
 /** Archive/restore for a Hub Knowledge document or a Wiki page. Admins only. */
 export function SdlcArchiveMenu(props: {
+  title: string;
   archived: boolean;
   trackingScope: 'Wiki' | 'HubKnowledge';
   className?: string;
@@ -22,7 +23,7 @@ export function SdlcArchiveMenu(props: {
           type='button'
           // The row and the card both open the document on click.
           onClick={event => event.stopPropagation()}
-          aria-label={props.archived ? 'Restore' : 'Archive'}
+          aria-label={`${props.archived ? 'Restore' : 'Archive'} ${props.title}`}
           data-track-category='SdlcHub'
           data-track-name={`${props.trackingScope}ArchiveMenuOpened`}
           className={cn(

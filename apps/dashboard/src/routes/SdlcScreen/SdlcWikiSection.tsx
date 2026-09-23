@@ -158,6 +158,7 @@ function WikiFolderNode(props: {
               </button>
               {props.onArchivePage && (
                 <SdlcArchiveMenu
+                  title={page.title}
                   archived={page.archived}
                   trackingScope='Wiki'
                   onToggle={archived => props.onArchivePage?.(page, archived)}
