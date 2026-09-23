@@ -28,6 +28,7 @@ import { callSubject } from '@/utils/callTypeUtils';
 import { logDetailedSummaryFailed } from '@/services/detailedSummaryFailureLog';
 import { RECORDING_TITLE_PROMPT } from '@/services/recordingSummaryTemplates';
 import { acquireLock, releaseLock } from '@/utils/distributedLock';
+import { mapWithConcurrency } from '@/utils/concurrency';
 import { orgLLMCredentialService } from '@/services/orgLLMCredentialService';
 import { lockMessageContentAndMetadata } from '@/bypassAcl/rowLockServices';
 
@@ -865,6 +866,15 @@ export class TranscriptService {
     return buffer.toString('utf-8');
   }
 
+  async transcriptExists(callId: string): Promise<boolean> {
+    try {
+      return await this.transcriptStorage.fileExists(`attachments/${callId}_formatted.txt`);
+    } catch (error) {
+      logger.error(`Failed to check transcript existence for ${callId}:`, error);
+      return false;
+    }
+  }
+
   // fileExists()-only check, no download and no raw-JSONL fallback (unlike getIdentifiedTranscriptContent).
   // ponytail: formatted-file-only, add raw-JSONL fallback if that gap turns out to matter.
   async identifiedTranscriptExists(callId: string): Promise<boolean> {
@@ -937,67 +947,50 @@ export class TranscriptService {
    * @param gcsPath - The GCS path to the transcript file
    */
   async translateTranscriptAsync(callId: string, storagePath: string): Promise<void> {
-    try {
-      logger.info(`Starting background translation for call: ${callId}`);
+    return this.translateStoredTranscriptAsync(callId, storagePath, 'transcript');
+  }
 
-      // 1. Download raw transcript
+  
+  private async translateIdentifiedTranscriptAsync(callId: string, storagePath: string): Promise<void> {
+    return this.translateStoredTranscriptAsync(callId, storagePath, 'identified_transcript');
+  }
+
+  private async translateStoredTranscriptAsync(
+    callId: string,
+    storagePath: string,
+    type: TranscriptAttachmentMetadata['type'],
+  ): Promise<void> {
+    try {
+      logger.info(`[${callId}] transcript_translation_started`, { type });
+
       const buffer = await this.transcriptStorage.getFileBuffer(storagePath);
       const rawTranscript = buffer.toString('utf-8');
 
-      // 2. Translate the transcript
       const translatedTranscript = await this.postProcessTranscript(rawTranscript, callId);
 
-      // 3. Re-upload translated version (overwrites the same file)
       await this.transcriptStorage.uploadFileV2(Buffer.from(translatedTranscript, 'utf-8'), {
         path: storagePath,
         contentType: 'text/plain',
-        metadata: { callId, type: 'transcript', translated: 'true' },
+        metadata: { callId, type, translated: 'true' },
       });
 
-      // 4. Update database attachment metadata to mark as translated
-      const attachments = await repositories.messageAttachments.findByCallId(callId);
-
-      if (attachments.length > 0) {
-        const transcriptAttachment = attachments[0];
-        const current = await repositories.messageAttachments.findById(transcriptAttachment.id);
-        const currentMetadata = (current?.metadata as Record<string, any>) || {}; // eslint-disable-line @typescript-eslint/no-explicit-any
-
-        await repositories.messageAttachments.updateVersion(transcriptAttachment.id, {
-          ...currentMetadata,
-        });
-        logger.info(`Updated database attachment metadata for call: ${callId}`);
-      } else {
-        logger.warn(`No attachment found in database for call: ${callId}`);
+      // Only the plain transcript has a corresponding message_attachments row to bump.
+      if (type === 'transcript') {
+        const attachments = await repositories.messageAttachments.findByCallId(callId);
+        if (attachments.length > 0) {
+          const transcriptAttachment = attachments[0];
+          await repositories.messageAttachments.updateVersion(transcriptAttachment.id, {
+            ...((transcriptAttachment.metadata as Record<string, any>) || {}), // eslint-disable-line @typescript-eslint/no-explicit-any
+          });
+          logger.info(`[${callId}] transcript_translation_attachment_updated`, { type });
+        } else {
+          logger.warn(`[${callId}] transcript_translation_no_attachment_found`, { type });
+        }
       }
 
-      logger.info(`Successfully completed background translation for call: ${callId}`);
+      logger.info(`[${callId}] transcript_translation_completed`, { type });
     } catch (error) {
-      logger.error(`Failed to translate transcript in background for call ${callId}:`, error);
-    }
-  }
-
-  /**
-   * Same as translateTranscriptAsync but for the identified transcript GCS file.
-   * Overwrites the identified formatted .txt with the translated version.
-   */
-  private async translateIdentifiedTranscriptAsync(callId: string, gcsPath: string): Promise<void> {
-    try {
-      logger.info(`[${callId}] identified_translation_started`);
-
-      const buffer = await this.transcriptStorage.getFileBuffer(gcsPath);
-      const rawTranscript = buffer.toString('utf-8');
-
-      const translatedTranscript = await this.postProcessTranscript(rawTranscript, callId);
-
-      await this.transcriptStorage.uploadFileV2(Buffer.from(translatedTranscript, 'utf-8'), {
-        path: gcsPath,
-        contentType: 'text/plain',
-        metadata: { callId, type: 'identified_transcript', translated: 'true' },
-      });
-
-      logger.info(`[${callId}] identified_translation_completed`);
-    } catch (error) {
-      logger.error(`[${callId}] identified_translation_failed`, { error: error });
+      logger.error(`[${callId}] transcript_translation_failed`, { type, error });
     }
   }
 
@@ -1045,19 +1038,30 @@ Output ONLY the processed transcript, nothing else.`;
     transcript: string,
     targetLanguageName: string,
     notifyUserId: string,
+    actionUrl: string,
   ): void {
-    void this.translateTranscript(transcript, targetLanguageName, callId)
-      .then((text) => this.uploadTranslatedTranscript(callId, languageCode, text))
-      .then(() =>
-        notificationService.createNotification(notifyUserId, {
-          type: NotificationType.TRANSCRIPT_TRANSLATION_READY,
-          title: 'Translation ready',
-          message: `The ${targetLanguageName} translation is ready to view`,
-          relatedEntityType: 'call',
-          relatedEntityId: callId,
-          metadata: { callExternalId: callId, language: languageCode },
-        }),
-      )
+    const lockKey = `lock:transcript-translation:${callId}:${languageCode}`;
+    void acquireLock(lockKey, { ttlSeconds: 300 })
+      .then((lock) => {
+        if (!lock) {
+          logger.info(`[${callId}] translate_transcript_job_already_in_flight`, { language: languageCode });
+          return;
+        }
+        return this.translateTranscript(transcript, targetLanguageName, callId)
+          .then((text) => this.uploadTranslatedTranscript(callId, languageCode, text))
+          .then(() =>
+            notificationService.createNotification(notifyUserId, {
+              type: NotificationType.TRANSCRIPT_TRANSLATION_READY,
+              title: 'Translation ready',
+              message: `The ${targetLanguageName} translation is ready to view`,
+              relatedEntityType: 'call',
+              relatedEntityId: callId,
+              actionUrl,
+              metadata: { callExternalId: callId, language: languageCode },
+            }),
+          )
+          .finally(() => releaseLock(lock));
+      })
       .catch((error) => {
         logger.error(`[${callId}] translate_transcript_job_failed`, { language: languageCode, error });
       });
@@ -1114,10 +1118,7 @@ Output ONLY the processed transcript, nothing else.`;
         });
       }
 
-      const results: string[] = new Array(chunks.length);
-      let nextIndex = 0;
-
-      const processChunk = async (chunk: typeof chunks[0], index: number): Promise<void> => {
+      const processChunk = async (chunk: typeof chunks[0]): Promise<string> => {
         logger.info(
           `Processing chunk ${chunk.chunkIndex}/${totalChunks} via ${operation} (lines ${chunk.startLine}-${chunk.endLine})`
         );
@@ -1132,31 +1133,18 @@ Output ONLY the processed transcript, nothing else.`;
 
           if (!translated.ok) {
             logger.warn(`${operation}_chunk_failed | chunk=${chunk.chunkIndex}/${totalChunks} | reason=${translated.reason} | using_original=true`);
-            results[index] = chunk.chunkText;
-            return;
+            return chunk.chunkText;
           }
 
           logger.info(`Chunk ${chunk.chunkIndex}/${totalChunks} completed`);
-          results[index] = translated.content;
+          return translated.content;
         } catch (error) {
           logger.error(`Error processing chunk ${chunk.chunkIndex}:`, error);
-          results[index] = chunk.chunkText;
+          return chunk.chunkText;
         }
       };
 
-      // Worker-pool: run up to CHUNK_CONCURRENCY chunks at a time.
-      const workers = Array.from(
-        { length: Math.min(CHUNK_CONCURRENCY, chunks.length) },
-        async () => {
-          while (nextIndex < chunks.length) {
-            const currentIndex = nextIndex;
-            nextIndex += 1;
-            await processChunk(chunks[currentIndex], currentIndex);
-          }
-        }
-      );
-
-      await Promise.all(workers);
+      const results = await mapWithConcurrency(chunks, CHUNK_CONCURRENCY, processChunk);
 
       logger.info(`Successfully processed transcript via ${operation} in ${results.length} chunks`);
       return results.join('\n');

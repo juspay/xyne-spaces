@@ -389,12 +389,15 @@ class RecordingService {
   }
 
   /** Lightweight poll target — only what's needed to detect post-call audio landing. */
-  async getRecordingStatus(
-    callId: string,
-  ): Promise<{ hasRecording: boolean; durationMs: number | null }> {
+  async getRecordingStatus(callId: string) {
     const response: AxiosResponse<{
       success: true;
-      recording: { hasRecording: boolean; durationMs: number | null };
+      recording: {
+        hasRecording: boolean;
+        durationMs: number | null;
+        recordingType: RecordingType | null;
+        attachmentId: string | null;
+      };
     }> = await apiInstance.get(`/calls/recordings/${callId}?scope=status`);
     return response.data.recording;
   }
@@ -423,7 +426,7 @@ class RecordingService {
     return response.data;
   }
 
-  // `language: ORIGINAL_TRANSCRIPT_LANGUAGE` returns the transcript as recorded, no LLM call.
+  /** Translate a call's transcript into the requested language. */
   async translateTranscript(callId: string, language: string): Promise<TranscriptTranslation> {
     const response: AxiosResponse<{ success: true } & TranscriptTranslation> =
       await apiInstance.post(`/calls/${callId}/translate-transcript`, { language });

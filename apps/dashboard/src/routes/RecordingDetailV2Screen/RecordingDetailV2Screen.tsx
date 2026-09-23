@@ -215,6 +215,15 @@ export default function RecordingDetailV2Screen({
   const [selectedTranscriptLanguage, setSelectedTranscriptLanguage] = useState(
     ORIGINAL_TRANSCRIPT_LANGUAGE,
   );
+
+  // Deep link `?lang=…` opens the transcript panel on arrival
+  useEffect(() => {
+    const lang = new URLSearchParams(location.search).get('lang');
+    if (!lang) return;
+    setShowTranscriptPanel(true);
+    setSelectedTranscriptLanguage(lang);
+  }, [location.search]);
+
   const [showShareModal, setShowShareModal] = useState(false);
   const [showPostToChannelModal, setShowPostToChannelModal] = useState(false);
   const [showPostToEmailModal, setShowPostToEmailModal] = useState(false);
@@ -658,6 +667,8 @@ export default function RecordingDetailV2Screen({
                   ...current,
                   hasRecording: fresh.hasRecording,
                   durationMs: fresh.durationMs ?? current.durationMs,
+                  recordingType: fresh.recordingType ?? current.recordingType ?? null,
+                  attachmentId: fresh.attachmentId ?? current.attachmentId ?? null,
                 }
               : current,
           ),

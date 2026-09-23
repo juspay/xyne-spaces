@@ -1397,6 +1397,8 @@ export class CallController {
             durationMs: call.endedAt
               ? new Date(call.endedAt).getTime() - new Date(call.startedAt).getTime()
               : null,
+            recordingType: uploadedRecording?.recordingType ?? null,
+            attachmentId: uploadedRecording?.attachmentId ?? null,
           },
         });
         return;
@@ -1405,10 +1407,14 @@ export class CallController {
       // ?scope=metadata only needs presence, not text — skip the GCS reads below.
       let transcriptContent: string | null = null;
       let identifiedTranscriptContent: string | null = null;
+      let hasTranscript: boolean;
       let hasIdentifiedTranscript: boolean;
 
       if (scope === 'metadata') {
-        hasIdentifiedTranscript = await transcriptService.identifiedTranscriptExists(call.externalId);
+        [hasTranscript, hasIdentifiedTranscript] = await Promise.all([
+          transcriptService.transcriptExists(call.externalId),
+          transcriptService.identifiedTranscriptExists(call.externalId),
+        ]);
       } else {
         if (call.transcript) {
           try {
@@ -1425,10 +1431,9 @@ export class CallController {
         } catch (fetchError) {
           logger.warn(`Failed to fetch identified transcript: ${fetchError}`);
         }
+        hasTranscript = !!transcriptContent;
         hasIdentifiedTranscript = !!identifiedTranscriptContent;
       }
-
-      const hasTranscript = scope === 'metadata' ? !!call.transcript : !!transcriptContent;
 
       // Determine AI summary format (markdown if starts with ## or has no HTML tags)
       let aiSummaryFormat: 'markdown' | 'html' | undefined;
@@ -2035,12 +2040,15 @@ export class CallController {
         return;
       }
 
+      const basePath = isRecording(call) ? `/recordings/${call.externalId}` : `/calls/${call.id}/detail`;
+      const actionUrl = `${basePath}?${new URLSearchParams({ lang: languageCode })}`;
       transcriptService.translateTranscriptInBackground(
         call.externalId,
         languageCode,
         transcript,
         supportedLanguage!.label,
         userId,
+        actionUrl,
       );
 
       res.status(202).json({ success: true, status: 'pending' });
