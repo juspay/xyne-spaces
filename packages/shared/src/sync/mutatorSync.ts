@@ -14,6 +14,18 @@
  * server transaction (`tx.location === 'server'`) is never wrapped. Records on both the
  * optimistic and rebase runs (the host overlay REPLACES per mutationID). Retirement of the
  * overlay (on confirm-echo / reject) is the reconcile step, wired separately.
+ *
+ * CONTAINMENT CONTRACT (one-way): the wrapper's failure mode is "behave as if the wrapper
+ * was not there" for the USER'S MUTATION — every sync-side seam (proxy setup, the overlay
+ * fold) is guarded and degrades to the plain mutator, loudly, while Zero-side errors (the
+ * real write failing, the mutator's own throws) propagate UNTOUCHED. A contained fold
+ * failure leaves the host view stale → the shadow diff reports a divergence → that is the
+ * system working: mutation-path bugs become promotion-gate signal, never user write errors.
+ *
+ * Deliberate client-visible effect (the ONE, in every mode including shadow): the union-read
+ * serves a Zero-miss on a hosted table from the host — required for honest shadow comparison
+ * (mutators must read the same optimistic state the engine will show) and benign-direction
+ * (host state is closer to server truth than a miss).
  */
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { getSyncHost } from './runtime.js';
@@ -81,17 +93,49 @@ export function syncMutatorFn<T extends (opts: any) => Promise<any>>(fn: T): T {
     const host = getSyncHost();
     const tx = opts?.tx;
     if (!host || !tx || tx.location !== 'client') return fn(opts);
-    const ops: OptimisticOp[] = [];
-    const proxied = makeSyncTx(tx, host, hostedTables(), ops);
+    // Setup containment: a throw in proxy construction (hostedTables/makeSyncTx) must not
+    // reject the user's mutation — run it UN-proxied instead.
+    let ops: OptimisticOp[] = [];
+    let proxied = tx;
+    try {
+      ops = [];
+      proxied = makeSyncTx(tx, host, hostedTables(), ops);
+    } catch (e) {
+      obsEmit('mutation', { action: 'wrap-failed', mutationID: tx.mutationID, error: String(e) });
+      return fn(opts);
+    }
+    // The real Zero write runs inside `fn` via the proxy, which forwards to Zero FIRST and
+    // returns Zero's promise verbatim — the capture can never reject the write. Zero-side /
+    // mutator-own errors propagate from this await untouched (one-way containment).
     const result = await fn({ ...opts, tx: proxied });
     if (ops.length > 0) {
-      host.applyOptimistic(tx.mutationID, ops);
-      obsEmit('mutation', {
-        action: 'optimistic',
-        mutationID: tx.mutationID,
-        reason: tx.reason,
-        ops: ops.length,
-      });
+      // Fold containment: a throw here (row shape the normalizer/pkOf chokes on, any overlay
+      // bug) must never reject the user's already-succeeded mutation. Drop the possibly
+      // half-applied overlay (worse than none: it would mask rows wrongly and retirement
+      // would manage a corrupt entry) and report; the stale host view surfaces as a shadow
+      // divergence — the intended failure signal.
+      try {
+        host.applyOptimistic(tx.mutationID, ops);
+        obsEmit('mutation', {
+          action: 'optimistic',
+          mutationID: tx.mutationID,
+          reason: tx.reason,
+          ops: ops.length,
+        });
+      } catch (e) {
+        try {
+          host.dropOptimistic(tx.mutationID);
+        } catch {
+          /* the drop is best-effort cleanup of a failed fold */
+        }
+        obsEmit('mutation', {
+          action: 'fold-failed',
+          mutationID: tx.mutationID,
+          reason: tx.reason,
+          ops: ops.length,
+          error: String(e),
+        });
+      }
     }
     return result;
   }) as T;

@@ -418,7 +418,24 @@ export function useQuery<
       let match = zeroLen === syncLen;
       if (match) {
         try {
-          match = shadowStable(zData) === shadowStable(sData);
+          // Roster-sized results (getUsersV2 on a big workspace): a full 2× stringify per settle
+          // is main-thread jank (each live delta re-arms the debounce). Above the cap, compare
+          // the full id sequence + a deterministic row sample deeply; below it, full deep compare.
+          const DEEP_COMPARE_CAP = 1000;
+          if (Array.isArray(zData) && zData.length > DEEP_COMPARE_CAP) {
+            match = shadowStable(shadowIds(zData)) === shadowStable(shadowIds(sData));
+            if (match) {
+              const step = Math.max(1, Math.floor(zData.length / 50));
+              for (let i = 0; i < zData.length; i += step) {
+                if (shadowStable(zData[i]) !== shadowStable((sData as unknown[])[i])) {
+                  match = false;
+                  break;
+                }
+              }
+            }
+          } else {
+            match = shadowStable(zData) === shadowStable(sData);
+          }
         } catch {
           match = false;
         }
@@ -497,7 +514,10 @@ export function useQuery<
   // Shared queries return the hosted-IVM result directly (Zero disabled above).
   // Decryption of shared rows is a follow-up. In shadow mode we DISPLAY Zero (baseline)
   // and only observe the sync result via the diff above.
-  if (isShared) return shadow ? result : sharedResult ?? result;
+  // serve: TRUE stale-while-revalidate — display Zero (live, instantly cached) until the sync
+  // side is complete, then flip. Cold promotion to serve (no prior shadow soak) paints
+  // immediately instead of showing the sync side's pre-hydration loader.
+  if (isShared) return shadow ? result : sharedHydrated ? (sharedResult ?? result) : result;
 
   if (!shouldDecrypt) {
     return result;

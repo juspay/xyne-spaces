@@ -47,7 +47,14 @@ function log(level: 'warn' | 'error', msg: string, fields: Record<string, unknow
 function sanitize(raw: unknown, source: string): QueryModesConfig | null {
   if (!raw || typeof raw !== 'object') return null;
   const r = raw as { default?: unknown; queries?: unknown };
-  const def = typeof r.default === 'string' && MODES.has(r.default) ? (r.default as QueryMode) : 'shadow';
+  // An invalid/absent DEFAULT rejects the WHOLE payload (→ caller keeps last-good): coercing it
+  // would silently replace e.g. a fleet-wide 'serve' with 'shadow' — exactly the mass mode
+  // change the fail-static rule exists to prevent. Per-query invalids below only drop the entry.
+  if (!(typeof r.default === 'string' && MODES.has(r.default))) {
+    log('error', 'sync_query_modes_invalid_default', { source, value: r.default });
+    return null;
+  }
+  const def = r.default as QueryMode;
   const queries: Record<string, QueryMode> = {};
   if (r.queries && typeof r.queries === 'object') {
     for (const [name, mode] of Object.entries(r.queries as Record<string, unknown>)) {

@@ -8,7 +8,7 @@ import { deriveAclGate, NON_GUEST_ROLES } from './aclGate';
 import { queryMetaFor } from './queryMeta';
 import { grantQueryName, grantArgs } from './grantQueries';
 import { isRowLevelQuery, routeColumnOf, rowLevelEligibility } from './rowLevelQueries';
-import { resolveSharedBase, isWorkspacePartitioned } from './baseQueries';
+import { resolveSharedBase, isWorkspacePartitioned, SHARED_BASE_QUERIES } from './baseQueries';
 import { syncContext } from './serviceIdentity';
 import { obsEmit } from './obs';
 import { syncMetrics } from './metrics';
@@ -92,10 +92,24 @@ export function attachSyncHandlers(socket: SyncIoSocket): () => void {
     }
     subscribe(msg.queryName, msg.args, ack, msg.sinceOffset);
   });
+  // Per-socket rate limit for client-originated beacon frames: the client throttles itself,
+  // but the server must not trust that (a hostile/buggy client could spam the metric + log).
+  let beaconWindowStart = 0;
+  let beaconCount = 0;
   socket.on('sync:shadow-check', (msg: { queryName?: string; matched?: boolean; kind?: string }) => {
+    const now = Date.now();
+    if (now - beaconWindowStart > 60_000) {
+      beaconWindowStart = now;
+      beaconCount = 0;
+    }
+    if (++beaconCount > 30) return; // drop silently past the per-socket budget
     // Client-reported shadow comparison (throttled client-side). Matches are the DENOMINATOR —
     // a divergence rate needs one, and "no divergences" without checks is false confidence.
-    const q = typeof msg?.queryName === 'string' ? msg.queryName : 'unknown';
+    // The label is attributed ONLY for registry-known names — queryName is the one
+    // client-supplied string that reaches a Prometheus label, and label cardinality must not
+    // be client-mintable.
+    const raw = typeof msg?.queryName === 'string' ? msg.queryName : '';
+    const q = SHARED_BASE_QUERIES.has(raw) || isRowLevelQuery(raw) ? raw : 'unknown';
     const matched = msg?.matched === true;
     const kind = msg?.kind === 'length' || msg?.kind === 'content' ? msg.kind : undefined;
     syncMetrics.count('sync_engine_shadow_checks_total', {
