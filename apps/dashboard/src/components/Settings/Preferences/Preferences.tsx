@@ -74,6 +74,7 @@ import {
 import { useMaxCameraHeight, filterQualityOptionsByMax } from '../../../hooks/useMaxCameraQuality';
 import { useVisibleNavigationItems } from '../../../hooks/useVisibleNavigationItems';
 import { useToolbarItems } from '../../../hooks/useToolbarItems';
+import { AI_TOOLBAR_PATH, useAiLaunchPreference } from '../../../hooks/useAiLaunchPreference';
 import type { PreferenceSection, PreferencesProps, NavItem } from '.';
 import { disconnectCalendar } from '../../../services/clients/calendarApi';
 import { toast } from 'sonner';
@@ -1070,6 +1071,7 @@ const DeveloperSection: FC<{ state: PreferencesState }> = ({ state }) => {
 const ToolbarSection: FC<{ state: PreferencesState }> = () => {
   const items = useVisibleNavigationItems();
   const { toolbarPaths, setInToolbar } = useToolbarItems();
+  const { setAiInToolbar } = useAiLaunchPreference();
 
   return (
     <div className='space-y-4'>
@@ -1096,7 +1098,11 @@ const ToolbarSection: FC<{ state: PreferencesState }> = () => {
                 <Switch
                   aria-label={`Show ${item.label} in toolbar`}
                   checked={checked}
-                  onCheckedChange={value => setInToolbar(item.path, value)}
+                  onCheckedChange={value =>
+                    item.path === AI_TOOLBAR_PATH
+                      ? setAiInToolbar(value)
+                      : setInToolbar(item.path, value)
+                  }
                 />
               </div>
             </div>

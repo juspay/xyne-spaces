@@ -1,3 +1,5 @@
+import { resolve } from "node:path";
+
 export const SERVER = {
   port: Number(process.env["XYNE_CLAW_PORT"] ?? 3002),
   s2sKey: process.env["XYNE_CLAW_S2S_KEY"] ?? "",
@@ -32,8 +34,17 @@ export function isAllowedCallbackUrl(raw: string | undefined | null): boolean {
   }
 }
 
+const rawDataDir = process.env["XYNE_CLAW_DATA_DIR"]?.trim();
+
+/** True when the data dir was configured explicitly rather than defaulted. */
+export const DATA_DIR_IS_EXPLICIT = Boolean(rawDataDir);
+
+// Resolved to an absolute path at import time: the old relative "./data"
+// bound session storage to whatever cwd the process happened to start in,
+// so a container whose volume is mounted elsewhere silently wrote sessions
+// to its own writable layer and filled the node's disk (prod, 2026-09).
 export const PATHS = {
-  dataDir: process.env["XYNE_CLAW_DATA_DIR"] ?? "./data",
+  dataDir: resolve(rawDataDir || "./data"),
   agentDir: process.env["XYNE_CLAW_AGENT_DIR"] ?? "",
 } as const;
 
@@ -79,31 +90,19 @@ export const GCS = {
 } as const;
 
 /**
- * Object storage provider selection — 'gcs' (default), 's3' or 'azure'. Consumed
- * by storage.ts via the shared @xyne/storage factory. Env names match the Spaces
+ * Object storage provider selection — 'gcs' (default) or 's3'. Consumed by
+ * storage.ts via the shared @xyne/storage factory. Env names match the Spaces
  * backend (config/env.ts) and claw-auth so one set of envs configures all
  * three apps: STORAGE_PROVIDER, AWS_REGION, AWS_ACCESS_KEY_ID,
- * AWS_SECRET_ACCESS_KEY, S3_BUCKET_NAME, S3_ENDPOINT, AZURE_STORAGE_ACCOUNT,
- * AZURE_STORAGE_CONTAINER, AZURE_STORAGE_ENDPOINT,
- * AZURE_STORAGE_CONNECTION_STRING, AZURE_STORAGE_SAS_TOKEN.
- *
- * Azure needs no key in the normal path: with only AZURE_STORAGE_ACCOUNT set the
- * SDK's DefaultAzureCredential picks up the AKS workload-identity token.
+ * AWS_SECRET_ACCESS_KEY, S3_BUCKET_NAME, S3_ENDPOINT.
  */
 export const STORAGE = {
-  provider: (process.env["STORAGE_PROVIDER"] === "s3" || process.env["STORAGE_PROVIDER"] === "azure"
-    ? process.env["STORAGE_PROVIDER"]
-    : "gcs") as "gcs" | "s3" | "azure",
+  provider: (process.env["STORAGE_PROVIDER"] === "s3" ? "s3" : "gcs") as "gcs" | "s3",
   s3Region: process.env["AWS_REGION"] ?? "ap-south-1",
   s3BucketName: process.env["S3_BUCKET_NAME"] ?? GCS.bucketName,
   s3Endpoint: process.env["S3_ENDPOINT"] ?? "",
   s3AccessKeyId: process.env["AWS_ACCESS_KEY_ID"] ?? "",
   s3SecretAccessKey: process.env["AWS_SECRET_ACCESS_KEY"] ?? "",
-  azureAccountName: process.env["AZURE_STORAGE_ACCOUNT"] ?? "",
-  azureContainerName: process.env["AZURE_STORAGE_CONTAINER"] ?? GCS.bucketName,
-  azureEndpoint: process.env["AZURE_STORAGE_ENDPOINT"] ?? "",
-  azureConnectionString: process.env["AZURE_STORAGE_CONNECTION_STRING"] ?? "",
-  azureSasToken: process.env["AZURE_STORAGE_SAS_TOKEN"] ?? "",
 } as const;
 
 function normalizeFakeGcsHost(): string {

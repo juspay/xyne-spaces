@@ -74,6 +74,7 @@ that page is the spec.
 | `kube-system` | `aws-load-balancer-controller` (AWS), `kata-deploy` (sandbox) | Argo CD |
 | `cnpg-system` | the CloudNativePG operator (`postgres_mode = "incluster"`) | Argo CD |
 | `monitoring` | `victoria-metrics-k8s-stack`, `otel-collector` (`enable_monitoring`) | Argo CD |
+| `hindsight` | the upstream Hindsight chart and its own pgvector Postgres (`enable_hindsight`); claw's long-term memory, or point `hindsight.url` at one you already run | Argo CD |
 | `agent-sandbox-system` | the agent-sandbox controller when `addons.sandbox.controller.repoURL` is set | Argo CD |
 
 Outside the cluster: Postgres, Redis and the buckets on the cloud's private network; LiveKit
@@ -92,7 +93,8 @@ before starting the next.
 | -2 | `istio-ingressgateway`, `platform-config`, `cnpg-operator`, `minio`, `xyne-redis` | the gateway Service (one wave after the controller), the ClusterIssuer/Gateway/VirtualService, the data services the apps need |
 | -1 | `pg-cluster` | the CNPG `Cluster` needs the operator |
 | 0 | `xyne-backend`, `xyne-dashboard`, `xyne-zero`, `xyne-zero-replication`, `xyne-ysweet`, `xyne-worker-<name>`, and the optional apps | the application |
-| 1 | `xyne-vespa`, `xyne-vespa-content`, `xyne-vespa-feed`, `xyne-vespa-search`, `xyne-vespa-embedder`, `xyne-tei-batch-proxy`, `victoria-metrics`, `otel-collector`, `kata-deploy`, `agent-sandbox-controller`, `sandbox`, `xyne-sandbox-router`, `xyne-egress-proxy` | optional, consumed by the apps at run time, never a prerequisite |
+| 1 | `xyne-vespa`, `xyne-vespa-content`, `xyne-vespa-feed`, `xyne-vespa-search`, `xyne-vespa-embedder`, `xyne-tei-batch-proxy`, `victoria-metrics`, `otel-collector`, `kata-deploy`, `agent-sandbox-controller`, `xyne-sandbox-router`, `xyne-egress-proxy`, `hindsight` | optional, consumed by the apps at run time, never a prerequisite |
+| 2 | `sandbox` | the `SandboxTemplate` and `SandboxWarmPool`, one wave after the controller that owns their CRDs |
 | 2 | every `overlay.sources` entry | private additions see a finished install |
 
 Every Application has `automated: {prune: true, selfHeal: true}`, `CreateNamespace=true`,

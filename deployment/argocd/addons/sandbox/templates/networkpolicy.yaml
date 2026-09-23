@@ -30,6 +30,10 @@ spec:
           podSelector:
             matchLabels:
               {{- toYaml .Values.policy.dns.podSelector | nindent 14 }}
+        {{- range .Values.policy.dns.cidrs }}
+        - ipBlock:
+            cidr: {{ . }}
+        {{- end }}
       ports:
         - port: 53
           protocol: UDP

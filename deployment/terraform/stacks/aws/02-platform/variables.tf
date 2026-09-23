@@ -95,6 +95,19 @@ variable "enable_sandbox" {
   default = false
 }
 
+variable "enable_hindsight" {
+  type    = bool
+  default = false
+}
+
+variable "hindsight" {
+  type = object({
+    url    = optional(string, "")
+    tenant = optional(string, "default")
+  })
+  default = {}
+}
+
 variable "apps" {
   type = map(object({
     enabled   = optional(bool)
@@ -145,6 +158,8 @@ variable "app_secrets" {
     ysweet_server_token         = string
     transcription_agent_api_key = string
     litellm_api_key             = optional(string, "")
+    hindsight_api_key           = optional(string, "")
+    hindsight_llm_api_key       = optional(string, "")
     google_client_id            = optional(string, "")
     google_client_secret        = optional(string, "")
   })

@@ -2,7 +2,8 @@
  * Evals — judging: model lists, named judges CRUD, and background scoring jobs.
  */
 import { Router, type Request, type Response } from "express";
-import { evalRepository, userProviderCredentialsRepository } from "../../repositories/index.js";
+import { evalRepository, userProviderCredentialsRepository, agentRepository } from "../../repositories/index.js";
+import { resolveEvalTargets } from "../../lib/eval-run.js";
 import { getRequesterId, getOrgId } from "../../middleware/agent-acl.js";
 import { listEvalModels } from "../../services/evalJudgeClient.js";
 import { enqueueEvalJudge, getEvalJudgeStatus, cancelEvalJudge } from "../../queue/eval-judge-queue.js";
@@ -18,11 +19,11 @@ const router = Router();
 // + what an empty model resolves to (shown as "Default (kimi-latest)" in the UI).
 router.get("/models", async (_req: Request, res: Response) => {
   try {
-    const { models, defaultModel } = await listEvalModels();
-    res.json({ success: true, models, defaultModel });
+    const { models, defaultModel, judgeBackends, judgeBackendLabels, optimizations } = await listEvalModels();
+    res.json({ success: true, models, defaultModel, judgeBackends, judgeBackendLabels, optimizations });
   } catch (err) {
     log.error("[evals] listModels error:", err);
-    res.json({ success: true, models: [], defaultModel: "" });
+    res.json({ success: true, models: [], defaultModel: "", judgeBackends: [], judgeBackendLabels: {}, optimizations: [] });
   }
 });
 
@@ -38,7 +39,7 @@ router.get("/gen-models", async (req: Request, res: Response) => {
   try {
     const [creds, litellmInfo] = await Promise.all([
       userProviderCredentialsRepository.listByUser(userId).catch(() => []),
-      listEvalModels().catch(() => ({ models: [] as string[], defaultModel: "" })),
+      listEvalModels().catch(() => ({ models: [] as string[], defaultModel: "", judgeBackends: [] as string[] })),
     ]);
     const providers = creds
       .filter((c) => c.encryptedKey) // configured = has a stored key
@@ -47,6 +48,43 @@ router.get("/gen-models", async (req: Request, res: Response) => {
   } catch (err) {
     log.error("[evals] gen-models error:", err);
     res.status(500).json({ success: false, error: "Failed to list generation models" });
+  }
+});
+
+// GET /evals/agent-models/:slug — every provider THIS agent can actually run on
+// for the caller (its own agent-level providers first, then platform and the
+// caller's personal ones), each with the model it would use. The Run dialog
+// offers these as pins, so an arm never gets pinned to a provider the agent has
+// no credential for — that pin is dropped at dispatch and the run silently
+// falls back, which is the one thing an eval arm must not do.
+router.get("/agent-models/:slug", async (req: Request<{ slug: string }>, res: Response) => {
+  const userId = getRequesterId(req);
+  const orgId = getOrgId(req);
+  if (!userId || !orgId) {
+    res.status(401).json({ success: false, error: "Unauthenticated" });
+    return;
+  }
+  try {
+    const agent = await agentRepository.findBySlug(req.params.slug, orgId);
+    if (!agent) {
+      res.status(404).json({ success: false, error: "Agent not found" });
+      return;
+    }
+    const targets = await resolveEvalTargets({
+      userId,
+      agent: { id: agent.id, orgId: agent.orgId, slug: agent.slug },
+      agentRow: agent,
+      onlyConfigured: true,
+    });
+    res.json({
+      success: true,
+      defaultProvider: targets[0]?.provider ?? null,
+      defaultModel: targets[0]?.model ?? null,
+      models: targets.map((t, i) => ({ provider: t.provider, model: t.model ?? null, isDefault: i === 0 })),
+    });
+  } catch (err) {
+    log.error("[evals] agent-models error:", err);
+    res.status(500).json({ success: false, error: "Failed to list agent models" });
   }
 });
 

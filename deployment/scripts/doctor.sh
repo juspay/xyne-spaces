@@ -151,6 +151,41 @@ check_placeholders() {
   done < "$PLACEHOLDER_TMP"
 }
 
+# Reads one key from inside a named block, so a `url` nested in apps.*.values,
+# addon_values or overlay_sources is not mistaken for hindsight's own.
+tfvar_block_value() {
+  local file="$1" block="$2" key="$3"
+  [ -f "$file" ] || return 0
+  awk -v block="$block" -v key="$key" '
+    $0 ~ "^[[:space:]]*" block "[[:space:]]*=[[:space:]]*\\{" { inblock = 1; next }
+    inblock && /^[[:space:]]*\}/ { exit }
+    inblock && $0 ~ "^[[:space:]]*" key "[[:space:]]*=" {
+      sub(/^[^=]*=[[:space:]]*/, ""); gsub(/"/, ""); sub(/[[:space:]]*$/, ""); print; exit
+    }
+  ' "$file"
+}
+
+check_hindsight() {
+  local enabled url llm_key
+  [ -f "$PLATFORM_TFVARS" ] || return 0
+  enabled="$(tfvar_value "$PLATFORM_TFVARS" enable_hindsight)"
+  url="$(tfvar_block_value "$PLATFORM_TFVARS" hindsight url)"
+
+  if [ "$enabled" = "true" ]; then
+    record PASS "hindsight" "deployed by this install"
+    llm_key="$(tfvar_value "$PLATFORM_TFVARS" hindsight_llm_api_key)"
+    if [ -n "$llm_key" ]; then
+      record PASS "hindsight_llm_api_key" "set"
+    else
+      record WARN "hindsight_llm_api_key" "empty; Hindsight starts but cannot extract facts without an LLM key"
+    fi
+  elif [ -n "$url" ]; then
+    record PASS "hindsight" "using an existing instance at $url"
+  else
+    record WARN "hindsight" "no instance: claw long-term memory stays off (enable_hindsight, or hindsight.url)"
+  fi
+}
+
 check_network() {
   [ -f "$INFRA_TFVARS" ] || return 0
 
@@ -287,6 +322,7 @@ check_required_vars "$INFRA_STACK" "$INFRA_TFVARS"
 check_required_vars "$PLATFORM_STACK" "$PLATFORM_TFVARS"
 check_network
 check_ingress
+check_hindsight
 check_placeholders "$ENV_CONF"
 check_placeholders "$INFRA_TFVARS"
 check_placeholders "$PLATFORM_TFVARS"

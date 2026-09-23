@@ -1359,7 +1359,7 @@ export const canvasVersionTable = table('canvas_versions')
 export const canvasCommentThreadTable = table('canvas_comment_threads' /* CanvasCommentThread */)
   .columns({
     id: string(),
-    workspaceId: string().optional(), // denormalized tenant key (stamped on insert; nullable during backfill release)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     canvasId: string(),
     blockId: string(),
     anchorText: string().optional(),
@@ -1376,7 +1376,7 @@ export const canvasCommentThreadTable = table('canvas_comment_threads' /* Canvas
 export const canvasCommentTable = table('canvas_comments' /* CanvasComment */)
   .columns({
     id: string(),
-    workspaceId: string().optional(), // denormalized tenant key (stamped on insert; nullable during backfill release)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     threadId: string(),
     canvasId: string(),
     body: string(),
