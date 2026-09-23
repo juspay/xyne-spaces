@@ -67,4 +67,4 @@
 /apps/dashboard/src/hooks/useCallJoinState.ts @juspay/xyne-call-guardians
 
 # bypassAcl framework — the sole sanctioned location for the ACL-bypass primitives
-/apps/backend/src/bypassAcl/ @juspay/xyne-bypass-acl-guardians
+/apps/backend/src/bypassAcl/ @juspay/xyne-acl-guardians
