@@ -166,7 +166,7 @@ export interface CommitAnalysisParams {
   // the "🔥 Hotfix PRs" section instead of rebuilding the main analysis.
   hotfixSync?: boolean;
   // Multi-repo hotfix: restrict analysis to the merged repo's board(s) + post-merge head.
-  hotfixOverride?: { boardIds: string[]; mergeCommitSha: string };
+  hotfixOverride?: { boardIds: string[]; mergeCommitSha: string; branch: string };
   // Re-run keeps the deployed pointer frozen (it was set at create).
   isReRun?: boolean;
 }
@@ -302,7 +302,7 @@ export class CommitAnalysisController {
   private async deriveReleaseContexts(
     releaseTicketId: string,
     fallback: { deployedCommitId: string; newCommitId: string; branch: string },
-    hotfixOverride?: { boardIds: string[]; mergeCommitSha: string },
+    hotfixOverride?: { boardIds: string[]; mergeCommitSha: string; branch: string },
   ): Promise<{ contexts: ReleaseRepoContext[]; skipped: string[] }> {
     const ticket = await db.ticket.findUnique({
       where: { id: releaseTicketId },
@@ -333,7 +333,7 @@ export class CommitAnalysisController {
           boardId: r.mainReleaseBoardId,
           deployedCommitId: r.newCommit,
           newCommitId: hotfixOverride.mergeCommitSha,
-          branch: r.branch,
+          branch: hotfixOverride.branch,
         }));
     } else {
       // Plain re-run: every repo at its frozen range (idempotent).
