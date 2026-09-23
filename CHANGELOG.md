@@ -1,3 +1,10 @@
+## [1.384.1](https://github.com/juspay/xyne-spaces/compare/v1.384.0...v1.384.1) (2026-09-23)
+
+
+### Bug Fixes
+
+* new service of emailReadFlagBackfill ([#2254](https://github.com/juspay/xyne-spaces/issues/2254)) ([387306f](https://github.com/juspay/xyne-spaces/commit/387306fd94b77fac572d10872ac9cd09892d60e6))
+
 ## [1.384.0](https://github.com/juspay/xyne-spaces/compare/v1.383.2...v1.384.0) (2026-09-23)
 
 
