@@ -1,6 +1,7 @@
 import { fileURLToPath } from "node:url";
 import { resolve, dirname } from "node:path";
 import type { StdioMcpAdapter } from "../types.js";
+import { defaultSpacesUrl } from "./defaults.js";
 
 const SERVER_PATH = resolve(
   dirname(fileURLToPath(import.meta.url)),
@@ -19,7 +20,7 @@ export const xyneSpacesAdapter: StdioMcpAdapter = {
   // gated by design — that one acts as the bot identity, autonomously.
   writeTools: ["spaces-create-ticket", "spaces-create-bulk-tickets", "spaces-update-ticket", "spaces-update-bulk-tickets", "spaces-schedule-call", "spaces-start-call", "spaces-create-canvas", "spaces-edit-canvas", "user-send-message", "spaces-upload-to-kb"],
   credentialFields: [
-    { name: "url", label: "Xyne Spaces URL", type: "text", placeholder: "https://app.spaces.xyne.juspay.net" },
+    { name: "url", label: "Xyne Spaces URL", type: "text", placeholder: defaultSpacesUrl() },
     { name: "token", label: "Google Auth Token", type: "password", placeholder: "Paste your google_access_token" },
   ],
   buildCommand(credentials) {

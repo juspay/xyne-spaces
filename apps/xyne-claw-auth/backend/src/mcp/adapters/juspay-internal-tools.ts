@@ -1,9 +1,8 @@
 import type { HttpMcpAdapter } from "../types.js";
+import { defaultInternalToolsBaseUrl } from "./defaults.js";
 
 const TOKEN = process.env["JUSPAY_INTERNAL_TOOLS_VALIDATE_TOKEN"] ?? "";
-const BASE_URL =
-  process.env["JUSPAY_INTERNAL_TOOLS_BASE_URL"] ??
-  "http://juspay-internal-tools-ext.internal.svc.k8s.dozer.mum.juspay.net/";
+
 
 /**
  * Connects directly to the juspay-internal-tools Python MCP server's /tools
@@ -33,7 +32,7 @@ export const juspayInternalToolsAdapter: HttpMcpAdapter = {
   credentialFields: [],
   buildHttpUrl(_credentials) {
     return {
-      url: `${BASE_URL.replace(/\/$/, "")}/tools`,
+      url: `${defaultInternalToolsBaseUrl().replace(/\/$/, "")}/tools`,
       headers: {
         "x-api-key": TOKEN,
         "x-tools-needed": JSON.stringify(["curie","default", "admin_config"]),
