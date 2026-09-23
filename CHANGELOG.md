@@ -1,3 +1,16 @@
+## [1.374.0](https://github.com/juspay/xyne-spaces/compare/v1.373.0...v1.374.0) (2026-09-23)
+
+
+### Features
+
+* added info button on apps screen ([#2197](https://github.com/juspay/xyne-spaces/issues/2197)) ([2d0b26a](https://github.com/juspay/xyne-spaces/commit/2d0b26a5d1a5a3464fe88245f8b3811a9a196470))
+
+
+### Bug Fixes
+
+* cap channel selector options with useChannelSearch ([#2013](https://github.com/juspay/xyne-spaces/issues/2013)) ([e9ce169](https://github.com/juspay/xyne-spaces/commit/e9ce169e00b8bdb6381f370958150b45e57e75f8))
+* change zero fallback middleware ([#2211](https://github.com/juspay/xyne-spaces/issues/2211)) ([385b2d5](https://github.com/juspay/xyne-spaces/commit/385b2d55c1aefef8e8a48c470e56c5f7760a4ffe))
+
 ## [1.373.0](https://github.com/juspay/xyne-spaces/compare/v1.372.1...v1.373.0) (2026-09-23)
 
 
