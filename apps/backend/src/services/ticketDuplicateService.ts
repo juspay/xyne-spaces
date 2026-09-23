@@ -255,6 +255,80 @@ class TicketDuplicateService {
     );
   }
 
+  /**
+   * Re-run duplicate detection after AI classification has written form fields.
+   *
+   * Detection normally runs once, at ticket creation. For an email-created ticket that
+   * means no custom-field values exist yet, so a scoped channel falls back to a
+   * project-wide search. Classification is the only path where a machine writes to the
+   * ticket afterwards, so if it fills a configured scope key, a scoped pass can now find
+   * what the creation-time run could not.
+   *
+   * APPEND-ONLY: the creation-time result stands. createMany(skipDuplicates) plus the
+   * unique (source, target, relationType) constraint means re-running can add rows but
+   * never duplicates one, and it never removes a link a human may have acted on.
+   *
+   * No-ops unless the channel is scoped AND one of the fields classification just wrote
+   * is a configured scope key — otherwise the search would be identical to the one that
+   * already ran, and the LLM call would be spent for nothing.
+   */
+  async rerunDuplicateDetectionForTicket(params: {
+    ticketId: string;
+    updatedFieldIds: string[];
+  }): Promise<void> {
+    const { ticketId, updatedFieldIds } = params;
+    if (updatedFieldIds.length === 0) return;
+
+    try {
+      const ticket = await prisma.ticket.findUnique({
+        where: { id: ticketId },
+        select: {
+          id: true, title: true, description: true,
+          projectId: true, channelId: true, createdBy: true,
+        },
+      });
+      if (!ticket) return;
+
+      const scopeConfig = await this.resolveDuplicateScopeConfig(ticket.channelId);
+      if (!scopeConfig) return;
+
+      // updatedFieldIds come from resolveFormFieldDefinitionsForForm, which returns
+      // `globalFieldId ?? id` — so for global-backed fields they compare directly
+      // against the configured scope ids.
+      const movedScopeFields = updatedFieldIds.filter(id =>
+        scopeConfig.scopeFieldGlobalIds.includes(id),
+      );
+      if (movedScopeFields.length === 0) return;
+
+      const savedValues = await prisma.formEntityValues.findMany({
+        where: { entityId: ticketId, entityType: 'TICKET' },
+        orderBy: [{ version: 'desc' }, { updatedAt: 'desc' }],
+        distinct: ['fieldId'],
+        select: { fieldId: true, actualFieldValue: true },
+      });
+
+      logger.info('[TicketDuplicateService] Re-running duplicate detection after classification filled a scope field', {
+        ticketId, channelId: ticket.channelId, movedScopeFields,
+      });
+
+      await this.persistDuplicateReferences({
+        ticketId: ticket.id,
+        ticketCreatedBy: ticket.createdBy,
+        title: ticket.title,
+        description: ticket.description,
+        projectId: ticket.projectId,
+        userId: ticket.createdBy,
+        channelId: ticket.channelId,
+        scopeFieldValues: savedValues.map(v => ({ fieldId: v.fieldId, value: v.actualFieldValue })),
+      });
+    } catch (error) {
+      logger.error('[TicketDuplicateService] Duplicate detection re-run failed', {
+        ticketId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
   async checkDuplicates(params: {
     title: string;
     description: string;
