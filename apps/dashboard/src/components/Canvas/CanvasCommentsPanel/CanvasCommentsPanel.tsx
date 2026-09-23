@@ -118,7 +118,7 @@ interface CanvasCommentComposerProps {
   minHeightClassName: string;
   actions?: React.ReactNode;
   enableAttachments?: boolean;
-  onSubmit: (payload: CanvasCommentSubmitPayload) => void | Promise<void>;
+  onSubmit: (payload: CanvasCommentSubmitPayload) => void;
 }
 
 interface CanvasCommentThreadSectionProps {
@@ -292,7 +292,7 @@ function CanvasCommentComposer({
     }
   };
 
-  const handleSend = async (content: string, html: string, files: File[]): Promise<void> => {
+  const handleSend = (content: string, html: string, files: File[]): void => {
     const body = content.trim();
     if (!body && files.length === 0) return;
 
@@ -307,7 +307,7 @@ function CanvasCommentComposer({
       ...retainedFallbackMentionIds,
     ]);
     selectedMentionIdsRef.current.clear();
-    await onSubmit({ body, mentionedUserIds, files });
+    onSubmit({ body, mentionedUserIds, files });
   };
 
   return (
