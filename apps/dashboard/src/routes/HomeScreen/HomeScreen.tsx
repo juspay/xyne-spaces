@@ -2,13 +2,13 @@ import type { ReactElement } from 'react';
 import { Navigate, useParams } from 'react-router-dom';
 import { useAuth } from '../../hooks/useAuth';
 import { usePlatform } from '../../hooks/usePlatform';
-import { useAILandingDefault } from '../../hooks/useAILandingDefault';
+import { useAiLaunchPreference } from '../../hooks/useAiLaunchPreference';
 
 const HomeScreen = (): ReactElement => {
   const { isMobile } = usePlatform();
   const { isNewUser } = useAuth();
   const { workspaceId } = useParams<{ workspaceId?: string }>();
-  const { aiLandingDefault } = useAILandingDefault();
+  const { aiLandingDefault } = useAiLaunchPreference();
   const prefix = workspaceId ? `/${workspaceId}` : '';
 
   if (isNewUser) {
