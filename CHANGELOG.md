@@ -1,3 +1,10 @@
+## [1.376.0](https://github.com/juspay/xyne-spaces/compare/v1.375.0...v1.376.0) (2026-09-23)
+
+
+### Features
+
+* user-group mentions filter (frontend, backend, vespa… ([#2188](https://github.com/juspay/xyne-spaces/issues/2188)) ([2acce03](https://github.com/juspay/xyne-spaces/commit/2acce03d305d218b91a099c3601d250c8df09497))
+
 ## [1.375.0](https://github.com/juspay/xyne-spaces/compare/v1.374.0...v1.375.0) (2026-09-23)
 
 
