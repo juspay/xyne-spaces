@@ -17,7 +17,9 @@ function isActiveCall(call: Call, now = Date.now()): boolean {
     call.status === CallStatus.IN_PROGRESS ||
     (call.status === CallStatus.SCHEDULED &&
       Boolean(call.startsAt) &&
-      new Date(call.startsAt!).getTime() <= now)
+      new Date(call.startsAt!).getTime() <= now &&
+      Boolean(call.endsAt) &&
+      new Date(call.endsAt!).getTime() > now)
   );
 }
 

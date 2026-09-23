@@ -66,6 +66,7 @@ import { usePlatform } from '../../hooks/usePlatform';
 import MeetWithPanel from './MeetWithPanel';
 import { useOtherUserCalls } from '../../hooks/useOtherUserCalls';
 import { UpcomingCallsList } from '../../components/Call/UpcomingCallsList';
+import { CallListSkeleton } from './CallListSkeleton';
 import { useSearchMetrics } from '../../hooks/useSearchMetrics';
 import { getUserDisplayName } from '../../utils/userDisplayName';
 import { ChipType, TabType } from '../../components/Chat/ChatDirectory/ChannelCommandMenu.types';
@@ -1077,8 +1078,8 @@ const CallHistoryScreen = (): ReactElement => {
             {viewMode === 'list' ? (
               (!hasCallSearch && isScheduledCallsLoading) ||
               (hasCallSearch && isVespaCallSearching) ? (
-                <div className='py-10 flex items-center justify-center'>
-                  <Loader2 className='w-6 h-6 animate-spin text-muted-foreground' />
+                <div className='border border-border rounded-xl px-5 py-4'>
+                  <CallListSkeleton count={2} />
                 </div>
               ) : (
                 <UpcomingCallsList
@@ -1195,8 +1196,8 @@ const CallHistoryScreen = (): ReactElement => {
               {displayRecentCalls.length === 0 ? (
                 (!hasCallSearch && showRecentCallsLoader) ||
                 (hasCallSearch && isVespaCallSearching) ? (
-                  <div className='py-10 flex items-center justify-center'>
-                    <Loader2 className='w-6 h-6 animate-spin text-muted-foreground' />
+                  <div className='-mx-3'>
+                    <CallListSkeleton />
                   </div>
                 ) : hasCallSearch ? (
                   <NoFiltredCalls

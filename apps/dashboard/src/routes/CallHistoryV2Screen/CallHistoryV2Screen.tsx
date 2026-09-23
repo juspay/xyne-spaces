@@ -55,6 +55,7 @@ import { CallExternalChatDialog } from '../../components/Call/CallExternalChatDi
 import { ParticipantsModal } from '../CallHistoryScreen/ParticipantsModal';
 import { usePlatform } from '../../hooks/usePlatform';
 import { UpcomingCallsListV2 } from './components/UpcomingCallsListV2';
+import { RecentCallsSkeletonV2, UpcomingCallsSkeletonV2 } from './components/CallListSkeletonV2';
 import { useSearchMetrics } from '../../hooks/useSearchMetrics';
 import { getUserDisplayName } from '../../utils/userDisplayName';
 import { ChipType, TabType } from '../../components/Chat/ChatDirectory/ChannelCommandMenu.types';
@@ -625,9 +626,7 @@ const CallHistoryV2Screen = (): ReactElement => {
 
               {(!hasCallSearch && (isLoading || isScheduledCallsLoading)) ||
               (hasCallSearch && isVespaCallSearching) ? (
-                <div className='py-10 flex items-center justify-center'>
-                  <Loader2 className='w-6 h-6 animate-spin text-muted-foreground' />
-                </div>
+                <UpcomingCallsSkeletonV2 />
               ) : (
                 <UpcomingCallsListV2
                   calls={upcomingCalls}
@@ -696,9 +695,7 @@ const CallHistoryV2Screen = (): ReactElement => {
             {displayRecentCalls.length === 0 ? (
               (!hasCallSearch && showRecentCallsLoader) ||
               (hasCallSearch && isVespaCallSearching) ? (
-                <div className='py-10 flex items-center justify-center'>
-                  <Loader2 className='w-6 h-6 animate-spin text-muted-foreground' />
-                </div>
+                <RecentCallsSkeletonV2 />
               ) : hasCallFilters ? (
                 <NoFilteredCalls
                   isShortTitleSearch={titleSearchQuery.length > 0 && titleSearchQuery.length < 4}
