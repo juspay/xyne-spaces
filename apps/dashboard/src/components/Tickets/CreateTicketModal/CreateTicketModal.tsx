@@ -59,6 +59,7 @@ import { cn } from '../../../utils/classNames';
 import { mutators } from '../../../zero/mutators';
 import { surfaceMutationError } from '../../../utils/zeroMutationToast';
 import { queries } from '../../../zero/queries';
+import { useProjectTagOptions } from '../../../hooks/useProjectTagOptions';
 import { SubTicketCountIcon } from '../../../assets/icons';
 import Avatar from '../../ui/Avatar/Avatar';
 import { Button } from '../../ui/Button';
@@ -90,7 +91,6 @@ import {
 import { DatePicker } from '../../ui/DatePicker/DatePicker';
 import { TextShimmer } from '../../ui/ShimmerText';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
-import { useDebouncedValue } from '../../../hooks/useDebouncedValue';
 import type { BoardMetadata } from '../../Board/BoardTicketFormConfig';
 import { isReleaseBoard, isMainReleaseBoard } from '../../../utils/boardUtils';
 import { useDraftAttachments } from '../../../hooks/useDraft';
@@ -754,15 +754,18 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
 
   // Project-level tags — lazy-loaded when the label dropdown is first opened
   const [tagsQueried, setTagsQueried] = useState(false);
-  const [tagSearch, setTagSearch] = useState('');
-  const debouncedTagSearch = useDebouncedValue(tagSearch.trim(), 200);
-  const [projectTags] = useCachedQuery(
-    queries.projectTagsByProjectId({
-      projectId: selectedBoard?.projectId ?? '',
-      search: debouncedTagSearch,
-    }),
-    { enabled: tagsQueried && !!selectedBoard?.projectId },
-  );
+  // `onSearch` is renamed to setTagSearch so main's existing wiring below
+  // (onSearchChange={setTagSearch} and the clear-on-close) keeps working verbatim —
+  // the signatures are identical. The hook applies the term SERVER-side to the same
+  // projectTagsByProjectId query main added it to, and layers Vespa on top.
+  //
+  // autoLoadAll: EntityMultiSelector has no scroll container to page from here, and
+  // the query caps at 100 rows. Still lazy — `tagsQueried` only flips on first open.
+  const { availableTags, onSearch: setTagSearch } = useProjectTagOptions({
+    projectId: selectedBoard?.projectId,
+    enabled: tagsQueried && !!selectedBoard?.projectId,
+    autoLoadAll: true,
+  });
 
   const userGroupOptions = useUserGroups();
 
@@ -1788,20 +1791,6 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
         });
       });
   };
-
-  // get unique tags from project_tags
-  const availableTags = useMemo(() => {
-    if (!projectTags) return [];
-
-    const tagSet = new Set<string>();
-    projectTags.forEach(t => {
-      if (t?.name) {
-        tagSet.add(t.name);
-      }
-    });
-
-    return Array.from(tagSet).sort();
-  }, [projectTags]);
 
   // Helper functions for dynamic field value normalization
   const getSingleStringValue = (value: string | string[]): string => {

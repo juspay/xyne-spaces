@@ -2151,6 +2151,15 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
 
   // Accumulate tags from pagination
   useEffect(() => {
+    // Conclude nothing from an unsettled query. For cursor queries useCachedQuery
+    // returns the live Zero result so the caller sees the loading->complete
+    // lifecycle, which means currentPageTags is briefly empty between pages. The
+    // empty-page branch below reads that as "no more results" and latches
+    // hasMoreZeroTags to false, which used to kill paging permanently after the
+    // FIRST cursor-driven fetch — page 1 was immune only because tagsCursor was
+    // still null.
+    if (projectTagsDetails.type !== 'complete') return;
+
     if (!currentPageTags || currentPageTags.length === 0) {
       if (tagsCursor !== null) {
         // No more results from this page
@@ -2170,31 +2179,45 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
       const newTags = currentPageTags.filter(t => !existingIds.has(t.id));
       return [...prev, ...newTags];
     });
-  }, [currentPageTags, tagsCursor]);
+  }, [currentPageTags, tagsCursor, projectTagsDetails.type]);
 
   // Combine accumulated tags for display
   const projectTags = accumulatedTags;
 
-  // Handle load more tags (pagination)
-  const handleLoadMoreTags = useCallback(() => {
-    if (!hasMoreZeroTags || tagsSearchQuery.trim()) return;
-    const lastTag = accumulatedTags[accumulatedTags.length - 1];
-    if (lastTag) {
-      setTagsCursor({ name: lastTag.name, id: lastTag.id });
-    }
-  }, [hasMoreZeroTags, tagsSearchQuery, accumulatedTags]);
-
   // Fetch tags via Vespa search (only when there's a search query).
-  // projectId is singular, so a channel whose linked boards cross projects scopes by
-  // those boards instead — otherwise tag search silently covers one project out of N.
-  const { tags: vespaTags } = useVespaTagSearch({
-    ...(channelId && tagsProjectIds.length > 1
-      ? { boardIds: channelBoards.boardIds }
-      : { projectId: tagsProjectIds[0] }),
+  //
+  // This replaces main's `channelId && tagsProjectIds.length > 1 ? boardIds : ...`
+  // branch, which existed only because this hook took a SINGULAR projectId and so
+  // covered one project out of N. Two reasons the set is now the right scope:
+  //   - tagsProjectIds already resolves a channel to every one of its boards'
+  //     projects (projectIdsForBoardSelection above), so it covers the same ground;
+  //   - boardIds could not work here regardless — the backend now searches the
+  //     project_tag catalog, whose documents are project-scoped and carry no boardId.
+  const {
+    tags: vespaTags,
+    hasMore: hasMoreVespaTags,
+    loadMore: loadMoreVespaTags,
+  } = useVespaTagSearch({
+    projectIds: tagsProjectIds,
     searchQuery: tagsSearchQuery,
     enabled: tagsProjectIds.length > 0 && !!tagsSearchQuery.trim(),
     limit: 20,
   });
+
+  // Handle load more tags (pagination)
+  const handleLoadMoreTags = useCallback(() => {
+    // Two paging sources, matching the two result sources: while searching the
+    // list comes from Vespa (offset paging), otherwise from Zero (cursor paging).
+    if (tagsSearchQuery.trim()) {
+      loadMoreVespaTags();
+      return;
+    }
+    if (!hasMoreZeroTags) return;
+    const lastTag = accumulatedTags[accumulatedTags.length - 1];
+    if (lastTag) {
+      setTagsCursor({ name: lastTag.name, id: lastTag.id });
+    }
+  }, [hasMoreZeroTags, tagsSearchQuery, accumulatedTags, loadMoreVespaTags]);
 
   // Handle tag search callback
   const handleSearchTags = useCallback((query: string) => {
@@ -4352,7 +4375,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
       allowAllBoards: !channelId,
       availableTags,
       onLoadMoreTags: handleLoadMoreTags,
-      hasMoreTags: !tagsSearchQuery.trim() && hasMoreZeroTags,
+      hasMoreTags: tagsSearchQuery.trim() ? hasMoreVespaTags : hasMoreZeroTags,
       onSearchTags: handleSearchTags,
       availableStages,
       formMappings:
@@ -5477,7 +5500,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                           visibleColumns={visibleColumns}
                           availableTags={availableTags || []}
                           onLoadMoreTags={handleLoadMoreTags}
-                          hasMoreTags={!tagsSearchQuery.trim() && hasMoreZeroTags}
+                          hasMoreTags={tagsSearchQuery.trim() ? hasMoreVespaTags : hasMoreZeroTags}
                           onSearchTags={handleSearchTags}
                           keyPrefix={`${group.key}::`}
                           layoutScope={kanbanLayoutScope}
@@ -5512,7 +5535,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                   visibleColumns={visibleColumns}
                   availableTags={availableTags || []}
                   onLoadMoreTags={handleLoadMoreTags}
-                  hasMoreTags={!tagsSearchQuery.trim() && hasMoreZeroTags}
+                  hasMoreTags={tagsSearchQuery.trim() ? hasMoreVespaTags : hasMoreZeroTags}
                   onSearchTags={handleSearchTags}
                   slaPolicies={kanbanSlaPolicies}
                 />

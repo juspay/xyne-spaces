@@ -2,6 +2,7 @@ import { ReactElement, useEffect, useMemo, useRef } from 'react';
 import type { Ticket, TicketTag } from '@xyne/shared';
 import { type TicketPriority } from '@xyne/shared';
 import { queries } from '../../zero/queries';
+import { useProjectTagOptions } from '../../hooks/useProjectTagOptions';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
 import { useGetChannelUserStatus } from '../../hooks/useChannels';
 import { dataLoadDuration, safeRecordMetric } from '../../services/otel';
@@ -183,14 +184,11 @@ export const SupportTicketTable = ({
   }, [dynamicallyFilteredTickets]);
 
   const projectId = supportTickets?.[0]?.projectId ?? undefined;
-  const [projectTags] = useCachedQuery(
-    queries.projectTagsByProjectId({ projectId: projectId || '' }),
-    { enabled: !!projectId },
-  );
-  const availableTags = useMemo(() => {
-    if (!projectTags || projectTags.length === 0) return [];
-    return Array.from(new Set(projectTags.map(tag => tag.name))).sort();
-  }, [projectTags]);
+  const { availableTags } = useProjectTagOptions({
+    projectId,
+    enabled: !!projectId,
+    autoLoadAll: true,
+  });
 
   return (
     <TicketTable

@@ -3,8 +3,16 @@ import * as Popover from '@radix-ui/react-popover';
 import { MultipleCrossCancelDefault as X } from '@xyne/icons';
 import { cn } from '../../../utils/classNames';
 import { TagsListContent } from '../TagsListContent';
+import { useProjectTagOptions } from '../../../hooks/useProjectTagOptions';
 
 interface TagSelectorProps {
+  /**
+   * When set, the selector sources its own tags for THIS project and ignores the
+   * `availableTags` prop. Attaching a tag creates it in the ticket's project, so
+   * a multi-project view must not offer another project's tags here.
+   */
+  projectId?: string | undefined;
+  /** Used only when `projectId` is absent (e.g. the bulk toolbar, which spans projects). */
   availableTags: string[];
   selectedTags: string[];
   onTagsChange: (tags: string[]) => void;
@@ -21,6 +29,7 @@ interface TagSelectorProps {
 }
 
 export const TagSelector: React.FC<TagSelectorProps> = ({
+  projectId,
   availableTags,
   selectedTags,
   onTagsChange,
@@ -33,6 +42,14 @@ export const TagSelector: React.FC<TagSelectorProps> = ({
   onSearch,
 }) => {
   const [isOpen, setIsOpen] = useState(true);
+
+  // Scoped source. The hook is inert without a projectId, so callers that pass
+  // their own list (bulk actions) behave exactly as before.
+  const scoped = useProjectTagOptions({ projectId, enabled: !!projectId && isOpen });
+  const effectiveTags = projectId ? scoped.availableTags : availableTags;
+  const effectiveOnSearch = projectId ? scoped.onSearch : onSearch;
+  const effectiveHasMore = projectId ? scoped.hasMore : hasMore;
+  const effectiveLoadMore = projectId ? scoped.loadMore : onLoadMore;
 
   const toggle = (tag: string) => {
     const next = selectedTags.includes(tag)
@@ -104,14 +121,14 @@ export const TagSelector: React.FC<TagSelectorProps> = ({
           <TagsListContent
             selectedTags={selectedTags}
             onChange={onTagsChange}
-            availableTags={availableTags}
-            onLoadMore={onLoadMore}
-            hasMore={hasMore}
+            availableTags={effectiveTags}
+            onLoadMore={effectiveLoadMore}
+            hasMore={effectiveHasMore}
             showSelectAll={false}
             allowCreate={allowCreate}
             onCreateTag={onCreateTag}
             onTagToggled={handleTagToggled}
-            onSearch={onSearch}
+            onSearch={effectiveOnSearch}
           />
         </Popover.Content>
       </Popover.Portal>
