@@ -13,6 +13,10 @@ import {
 import { getAvailableTools, suggestTools } from '@/services/claw/clawToolsService';
 import { effectiveSlug, slugify } from '@/routes/ClawAgentsScreen/create/wizardState';
 import { parseGatewaySource } from '@/components/ClawAgents/gatewayKeys';
+import {
+  buildMcpCatalog,
+  enableEntry,
+} from '@/routes/AIScreen/library/shared/pickers/mcp/mcpCatalog';
 import { AgentCreateCanvas } from '@/components/flowUI/nodes/agent/create/AgentCreateCanvas';
 import {
   AgentCreateChatPanel,
@@ -23,8 +27,16 @@ import { DiscardDraftDialog } from '@/components/flowUI/nodes/agent/create/Disca
 import {
   applyCreateHubDraft,
   decideCreateCanvasAction,
+  resolveWalkCreateAction,
+  WALK_BUILTIN_HUB_USER_TEXT,
   type CreateCanvasSnapshot,
 } from '@/components/flowUI/nodes/agent/create/createChatMode';
+import {
+  buildBuiltinCatalog,
+  enableEntry as enableBuiltinEntry,
+} from '@/routes/AIScreen/library/shared/pickers/builtin/builtinCatalog';
+import { listAccessibleKnowledgeBase } from '@/services/claw/clawKnowledgeBaseService';
+import { listSkills } from '@/services/claw/clawSkillsService';
 import { sanitizeAgentCanvasName } from '@/components/flowUI/nodes/agent/create/canvasFromIdentity';
 import { toolboxFromSuggestion } from '@/components/flowUI/nodes/agent/create/toolboxFromSuggestion';
 import { toolIdsFromForm } from '@/components/flowUI/nodes/agent/create/types';
@@ -109,7 +121,9 @@ export function AgentCreateSplitPage({
     slug.length > 0 &&
     createForm.form.systemPrompt.trim().length > 0 &&
     createForm.conflicts.length === 0 &&
-    (scripted || !nameCheck.checking);
+    (scripted ||
+      !nameCheck.checking ||
+      (nameCheck.nameError === null && nameCheck.slugError === null));
 
   const canvasSnapshot: CreateCanvasSnapshot = {
     empty: canvasIsEmpty(createForm.form),
@@ -126,11 +140,13 @@ export function AgentCreateSplitPage({
       const canvasEmpty = canvasIsEmpty(createForm.form);
       const userText = turn.userText;
 
-      const action = decideCreateCanvasAction({
-        userText,
-        canvasEmpty,
-        marker: turn.marker,
-      });
+      const action =
+        resolveWalkCreateAction(userText) ??
+        decideCreateCanvasAction({
+          userText,
+          canvasEmpty,
+          marker: turn.marker,
+        });
 
       if (action.type === 'idle') {
         createForm.clearHighlights();
@@ -144,25 +160,33 @@ export function AgentCreateSplitPage({
 
       if (action.type === 'rename') {
         const sourceId = `hub-rename-${Date.now()}`;
+        const renameName = sanitizeAgentCanvasName(action.name);
+        const nameBeforeRename = createForm.form.name.trim();
         try {
           createForm.setWritingField('name');
           await sleep(48);
           const changedName = createForm.applyChatPatch(
             sourceId,
-            { name: sanitizeAgentCanvasName(action.name) },
+            { name: renameName },
             { highlight: false },
           );
           if (changedName.includes('name')) {
             await sleep(WRITE_MS);
           }
-          createForm.setWritingField('slug');
-          const changedSlug = createForm.applyChatPatch(
-            `${sourceId}-slug`,
-            { slug: slugify(action.name) },
-            { highlight: false },
-          );
-          if (changedSlug.includes('slug')) {
-            await sleep(WRITE_MS);
+          const nameLocked =
+            !changedName.includes('name') &&
+            nameBeforeRename.length > 0 &&
+            nameBeforeRename !== renameName;
+          if (!nameLocked) {
+            createForm.setWritingField('slug');
+            const changedSlug = createForm.applyChatPatch(
+              `${sourceId}-slug`,
+              { slug: slugify(action.name) },
+              { highlight: false },
+            );
+            if (changedSlug.includes('slug')) {
+              await sleep(WRITE_MS);
+            }
           }
           setPhase('draft');
         } finally {
@@ -191,6 +215,7 @@ export function AgentCreateSplitPage({
           existingSystemPrompt: createForm.form.systemPrompt,
           writeMs: WRITE_MS,
           sourceId,
+          toolsHubRow: userText === WALK_BUILTIN_HUB_USER_TEXT ? 'builtin' : 'mcp',
           generateAgentPrompt: async (intent, existingPrompt) =>
             generateAgentPrompt({
               intent,
@@ -203,6 +228,16 @@ export function AgentCreateSplitPage({
             ? {
                 fillTools: async (incoming: AgentCreateChatPatch) => {
                   try {
+                    if (userText === WALK_BUILTIN_HUB_USER_TEXT) {
+                      const catalog = await getAvailableTools().catch(() => null);
+                      if (!catalog) return;
+                      const built = buildBuiltinCatalog(catalog);
+                      const pick = built.find(entry => entry.tools.length > 0);
+                      if (pick) {
+                        incoming.tools = enableBuiltinEntry(createForm.form.tools, pick);
+                      }
+                      return;
+                    }
                     const [suggestion, catalog] = await Promise.all([
                       suggestTools({
                         systemPrompt:
@@ -212,11 +247,21 @@ export function AgentCreateSplitPage({
                       getAvailableTools().catch(() => null),
                     ]);
                     const beforeIds = toolIdsFromForm(createForm.form);
-                    incoming.tools = toolboxFromSuggestion(
+                    let selection = toolboxFromSuggestion(
                       createForm.form.tools,
                       suggestion,
                       catalog,
                     );
+                    if (catalog) {
+                      const mcpCatalog = buildMcpCatalog(catalog, []);
+                      const pick =
+                        mcpCatalog.find(entry => entry.isGateway && entry.selectable) ??
+                        mcpCatalog.find(entry => entry.selectable);
+                      if (pick) {
+                        selection = enableEntry(mcpCatalog, selection, pick);
+                      }
+                    }
+                    incoming.tools = selection;
                     const afterIds = toolIdsFromForm({ tools: incoming.tools });
                     if (
                       afterIds.length === beforeIds.length &&
@@ -245,6 +290,41 @@ export function AgentCreateSplitPage({
                     }
                   } catch {
                     // Prompt still applies if tool suggest fails.
+                  }
+                },
+              }
+            : {}),
+          ...(action.fields.includes('skills')
+            ? {
+                fillSkills: async (incoming: AgentCreateChatPatch) => {
+                  try {
+                    if (!user?.id) return;
+                    const skills = await listSkills(user.id);
+                    const pick = skills.find(skill => skill.slug) ?? skills[0];
+                    if (pick?.id) {
+                      const ids = new Set(createForm.form.selectedSkillIds);
+                      ids.add(pick.id);
+                      incoming.selectedSkillIds = [...ids];
+                    }
+                  } catch {
+                    // Hub row may stay empty if skills API fails.
+                  }
+                },
+              }
+            : {}),
+          ...(action.fields.includes('knowledge')
+            ? {
+                fillKnowledge: async (incoming: AgentCreateChatPatch) => {
+                  try {
+                    const { collections } = await listAccessibleKnowledgeBase();
+                    const pick =
+                      collections.find(collection => collection.id.trim().length > 0) ??
+                      collections[0];
+                    if (!pick?.id) return;
+                    incoming.selectedKbScope = 'COLLECTIONS';
+                    incoming.selectedKbResources = [{ collectionId: pick.id, fileId: null }];
+                  } catch {
+                    // Hub row may stay empty if KB API fails.
                   }
                 },
               }

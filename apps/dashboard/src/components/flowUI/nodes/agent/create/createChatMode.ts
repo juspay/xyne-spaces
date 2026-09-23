@@ -7,8 +7,46 @@ import {
   type CreateTurnField,
 } from './classifyCreateTurn.ts';
 import { buildDraftCanvasPatch, draftFromModelReply } from './canvasFromIdentity.ts';
-import type { AgentCreateChatPatch, AgentCreateField } from './types.ts';
+import type { AgentCreateChatPatch, AgentCreateField, AgentCreateHubRow } from './types.ts';
 import { slicePatch } from './mergeChatPatch.ts';
+
+async function revealTextField(args: {
+  field: AgentCreateField;
+  hubRow: AgentCreateHubRow | null;
+  text: string;
+  sourceId: string;
+  writeMs: number;
+  patchForText: (partial: string) => AgentCreateChatPatch;
+  setWritingField: (
+    field: AgentCreateField | null,
+    hubRow?: AgentCreateHubRow | null,
+  ) => void;
+  applyChatPatch: (
+    sourceId: string,
+    patch: AgentCreateChatPatch,
+    options: { highlight: boolean },
+  ) => AgentCreateField[];
+  sleep: (ms: number) => Promise<void>;
+}): Promise<void> {
+  const full = args.text;
+  if (!full) {
+    return;
+  }
+  args.setWritingField(args.field, args.hubRow);
+  await args.sleep(Math.max(48, Math.min(args.writeMs, 120)));
+  const chunk = full.length > 120 ? 3 : 1;
+  const steps = Math.ceil(full.length / chunk);
+  const stepMs = Math.max(18, Math.min(Math.floor(args.writeMs / Math.max(steps, 1)), 55));
+  for (let end = chunk; end <= full.length + chunk - 1; end += chunk) {
+    const partial = full.slice(0, Math.min(end, full.length));
+    args.applyChatPatch(`${args.sourceId}-${args.field}-${partial.length}`, args.patchForText(partial), {
+      highlight: false,
+    });
+    await args.sleep(stepMs);
+  }
+  await args.sleep(Math.max(48, Math.min(args.writeMs, 120)));
+  args.setWritingField(null);
+}
 
 function pickPatch(
   patch: AgentCreateChatPatch,
@@ -87,7 +125,11 @@ export async function revealCreatePatchFields(args: {
   incoming: AgentCreateChatPatch;
   sourceId: string;
   writeMs: number;
-  setWritingField: (field: AgentCreateField | null, hubRow?: 'mcp' | 'skills' | 'knowledge' | null) => void;
+  toolsHubRow?: AgentCreateHubRow;
+  setWritingField: (
+    field: AgentCreateField | null,
+    hubRow?: AgentCreateHubRow | null,
+  ) => void;
   applyChatPatch: (
     sourceId: string,
     patch: AgentCreateChatPatch,
@@ -100,29 +142,81 @@ export async function revealCreatePatchFields(args: {
   for (const field of reveal) {
     const slice = slicePatch(patch, field);
     if (Object.keys(slice).length === 0) continue;
-    const hubRow =
+    const hubRow: AgentCreateHubRow | null =
       field === 'tools'
-        ? 'mcp'
+        ? (args.toolsHubRow ?? 'mcp')
         : field === 'skills'
           ? 'skills'
           : field === 'knowledge'
             ? 'knowledge'
             : null;
+
+    if (field === 'name' && typeof slice.name === 'string') {
+      await revealTextField({
+        field,
+        hubRow,
+        text: slice.name,
+        sourceId: args.sourceId,
+        writeMs: args.writeMs,
+        patchForText: partial => ({ name: partial }),
+        setWritingField: args.setWritingField,
+        applyChatPatch: args.applyChatPatch,
+        sleep: args.sleep,
+      });
+      continue;
+    }
+    if (field === 'slug' && typeof slice.slug === 'string') {
+      await revealTextField({
+        field,
+        hubRow,
+        text: slice.slug,
+        sourceId: args.sourceId,
+        writeMs: args.writeMs,
+        patchForText: partial => ({ slug: partial }),
+        setWritingField: args.setWritingField,
+        applyChatPatch: args.applyChatPatch,
+        sleep: args.sleep,
+      });
+      continue;
+    }
+    if (field === 'description' && typeof slice.description === 'string') {
+      await revealTextField({
+        field,
+        hubRow,
+        text: slice.description,
+        sourceId: args.sourceId,
+        writeMs: args.writeMs,
+        patchForText: partial => ({ description: partial }),
+        setWritingField: args.setWritingField,
+        applyChatPatch: args.applyChatPatch,
+        sleep: args.sleep,
+      });
+      continue;
+    }
+    if (field === 'systemPrompt' && typeof slice.systemPrompt === 'string') {
+      await revealTextField({
+        field,
+        hubRow,
+        text: slice.systemPrompt,
+        sourceId: args.sourceId,
+        writeMs: args.writeMs,
+        patchForText: partial => ({ systemPrompt: partial }),
+        setWritingField: args.setWritingField,
+        applyChatPatch: args.applyChatPatch,
+        sleep: args.sleep,
+      });
+      continue;
+    }
+
     args.setWritingField(field, hubRow);
     await args.sleep(Math.max(48, Math.min(args.writeMs, 120)));
     const changed = args.applyChatPatch(`${args.sourceId}-${field}`, slice, { highlight: false });
     if (!changed.includes(field)) {
-      if (field !== 'name' && field !== 'tools') {
-        args.setWritingField(null);
-      }
+      args.setWritingField(null);
       continue;
     }
     await args.sleep(args.writeMs);
-    if (field === 'name') {
-      await args.sleep(Math.max(48, Math.min(args.writeMs, 120)));
-    } else if (field !== 'tools') {
-      args.setWritingField(null);
-    }
+    args.setWritingField(null);
   }
 }
 
@@ -228,6 +322,57 @@ function hubCapabilityFieldsFromEdit(
   return classification.fields;
 }
 
+export const WALK_STANDUP_USER_TEXT = 'I want a standup scribe for the eng team.';
+export const WALK_CHAT_RENAME_USER_TEXT = 'Walk chat rename: Agent Title From Chat.';
+export const WALK_SKILL_HUB_USER_TEXT = 'Walk: add one skill to the agent hub.';
+export const WALK_BUILTIN_HUB_USER_TEXT = 'Walk: add one builtin tool to the agent hub.';
+export const WALK_KNOWLEDGE_HUB_USER_TEXT = 'Walk: add one knowledge source to the agent hub.';
+
+/** Deterministic live-walk canvas actions (not the scripted route player). */
+export function resolveWalkCreateAction(userText: string): CreateCanvasAction | null {
+  const trimmed = userText.trim();
+  if (trimmed === WALK_STANDUP_USER_TEXT) {
+    return {
+      type: 'draft',
+      intent: 'standup scribe for the eng team',
+      visibleReply:
+        'Drafting a standup scribe for eng — **Standup Scribe** (@standup-scribe)\n' +
+        '**Description**: Captures daily standups for the eng team.\n' +
+        '**Instructions**:\nYou are Standup Scribe. Capture blockers, progress, and next steps for the eng team.\n' +
+        'XYNE_CREATE_DRAFT: standup scribe for the eng team',
+      fields: firstDraftFields(trimmed),
+    };
+  }
+  if (trimmed === WALK_CHAT_RENAME_USER_TEXT) {
+    return { type: 'rename', name: 'Agent Title From Chat' };
+  }
+  if (trimmed === WALK_SKILL_HUB_USER_TEXT) {
+    return {
+      type: 'draft',
+      intent: trimmed,
+      visibleReply: '',
+      fields: ['skills'],
+    };
+  }
+  if (trimmed === WALK_BUILTIN_HUB_USER_TEXT) {
+    return {
+      type: 'draft',
+      intent: trimmed,
+      visibleReply: '',
+      fields: ['tools'],
+    };
+  }
+  if (trimmed === WALK_KNOWLEDGE_HUB_USER_TEXT) {
+    return {
+      type: 'draft',
+      intent: trimmed,
+      visibleReply: '',
+      fields: ['knowledge'],
+    };
+  }
+  return null;
+}
+
 export function decideCreateCanvasAction(args: {
   userText: string;
   canvasEmpty: boolean;
@@ -329,8 +474,12 @@ export async function applyCreateHubDraft(args: {
   ) => AgentCreateField[];
   sleep: (ms: number) => Promise<void>;
   fillTools?: (incoming: AgentCreateChatPatch) => Promise<void>;
+  fillSkills?: (incoming: AgentCreateChatPatch) => Promise<void>;
+  fillKnowledge?: (incoming: AgentCreateChatPatch) => Promise<void>;
+  toolsHubRow?: AgentCreateHubRow;
 }): Promise<void> {
   const { action, canvasEmpty } = args;
+  const toolsHubRow = args.toolsHubRow ?? 'mcp';
   const generateInstructions = action.fields.includes('systemPrompt') || canvasEmpty;
   const preludeFields = CREATE_REVEAL_FIELD_ORDER.filter(
     field =>
@@ -353,6 +502,7 @@ export async function applyCreateHubDraft(args: {
       incoming: preludePatch,
       sourceId: args.sourceId,
       writeMs: args.writeMs,
+      toolsHubRow,
       setWritingField: args.setWritingField,
       applyChatPatch: args.applyChatPatch,
       sleep: args.sleep,
@@ -393,9 +543,21 @@ export async function applyCreateHubDraft(args: {
   }
 
   if (action.fields.includes('tools') && args.fillTools) {
-    args.setWritingField('tools', 'mcp');
+    args.setWritingField('tools', toolsHubRow);
     await args.sleep(Math.max(48, Math.min(args.writeMs, 120)));
     await args.fillTools(incoming);
+  }
+
+  if (action.fields.includes('skills') && args.fillSkills) {
+    args.setWritingField('skills', 'skills');
+    await args.sleep(Math.max(48, Math.min(args.writeMs, 120)));
+    await args.fillSkills(incoming);
+  }
+
+  if (action.fields.includes('knowledge') && args.fillKnowledge) {
+    args.setWritingField('knowledge', 'knowledge');
+    await args.sleep(Math.max(48, Math.min(args.writeMs, 120)));
+    await args.fillKnowledge(incoming);
   }
 
   const tailFields = CREATE_REVEAL_FIELD_ORDER.filter(
@@ -412,6 +574,7 @@ export async function applyCreateHubDraft(args: {
     incoming,
     sourceId: args.sourceId,
     writeMs: args.writeMs,
+    toolsHubRow,
     setWritingField: args.setWritingField,
     applyChatPatch: args.applyChatPatch,
     sleep: args.sleep,

@@ -75,7 +75,9 @@ export function McpCapabilityRow({
         className='flex items-center gap-1.5 rounded-lg px-1 py-0.5 text-xs leading-5 tracking-[-0.24px] text-muted-foreground transition-colors hover:text-foreground disabled:pointer-events-none disabled:opacity-50'
       >
         <Ai01 className='size-3.5 shrink-0' aria-hidden />
-        {suggestions.status === 'ready' ? 'Suggest again' : 'Suggest MCPs'}
+        {suggestions.status === 'ready' || selectedEntries.length > 0
+          ? 'Suggest again'
+          : 'Suggest MCPs'}
       </button>
     );
 
