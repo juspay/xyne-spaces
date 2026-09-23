@@ -470,10 +470,10 @@ const SearchResults = (): ReactElement => {
   // `@rockers` here but `@rock-team` in the popup.
   const mentionUserGroupName = useCallback(
     (id: string): string | undefined => {
-      const group = allUserGroups.find(g => g.id === id);
+      const group = userGroupsById.get(id);
       return group ? (group.alias ?? group.name) : undefined;
     },
-    [allUserGroups],
+    [userGroupsById],
   );
   const filterResolvers = useMemo(
     (): FilterResolvers => ({

@@ -166,7 +166,9 @@ export function useQuerySuggestions(
               })),
             ...userGroups.slice(0, MAX / 2).map(group => ({
               id: group.id,
-              label: `@${group.name}`,
+              // The `@`-handle (alias), matching the token this suggestion commits — else the
+              // dropdown reads `@Rock Team Engineering` but the chip lands `@rock-team`.
+              label: `@${group.alias ?? group.name}`,
               icon: { kind: 'userGroup' as const },
               apply: (currentFilters: SearchResultsFilters) =>
                 currentFilters.mentionUserGroupIds.includes(group.id)

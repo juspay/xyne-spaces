@@ -1344,13 +1344,6 @@ const ChannelCommandMenu = ({
   // row. Active in every cmd+K mode now (activeItemLabel is only set for a real openable row).
   const openTargetLabel = !searchText.trim() ? activeItemLabel : null;
 
-  // Resolves a picked user-group's id back to its `@`-handle (alias, falling back to name) for
-  // the top-bar tokens — a group chip carries only its id, and reads `@rock-team` like compose.
-  const userGroupNameById = useMemo(
-    () => new Map(allUserGroups.map(group => [group.id, group.alias ?? group.name])),
-    [allUserGroups],
-  );
-
   /**
    * The URL for the results screen: the palette's chips and scope turned back into filter
    * params. Goes through the filter registry, so this hand-off and the page's own reading
@@ -1386,7 +1379,10 @@ const ChannelCommandMenu = ({
         const found = channels.find(c => c.channel.id === id);
         return found ? formatChannelLabel(found) : undefined;
       },
-      userGroupName: id => userGroupNameById.get(id),
+      userGroupName: id => {
+        const group = userGroupsById.get(id);
+        return group ? (group.alias ?? group.name) : undefined;
+      },
     })
       // Prefix + value: the token splits them so the glyph can sit between, but the label
       // is one string and needs both, or it reads `Nasim Sheikh` instead of `from:Nasim`.
@@ -2311,8 +2307,13 @@ const ChannelCommandMenu = ({
     if (justCommittedMentionRef.current) return '';
     if (!mentionSearchType || !mentionActiveLabel) return '';
     const query = mentionSearchQuery.trim();
-    // @/# navigate on select; every other prefix builds a filter chip (a "select").
-    const action = userTrigger === '@' || channelTrigger === '#' ? 'Open' : 'Select';
+    // @/# navigate on select; every other prefix builds a filter chip (a "select"). A user-group
+    // under `@` has no open target — picking it builds a groupMentions chip — so it reads "Select".
+    const activeAtGroupRow =
+      mentionSearchType === ChipType.USER &&
+      atMentionItems[selectedMentionIndex]?.type === ChipType.USER_GROUP;
+    const action =
+      (userTrigger === '@' || channelTrigger === '#') && !activeAtGroupRow ? 'Open' : 'Select';
     // No value typed yet: at rest show only the action word ("from: - Select"), not the first
     // candidate's name - the resting highlight is arbitrary, so previewing it reads as if it were
     // already chosen. Once the user navigates, preview the actually-highlighted name.
@@ -2334,6 +2335,8 @@ const ChannelCommandMenu = ({
     userTrigger,
     channelTrigger,
     mentionActiveLabel,
+    atMentionItems,
+    selectedMentionIndex,
     // Not read by the memo body — forces a recompute when a chip lands; a ref change alone
     // never re-renders, so without this the memo could serve the stale pre-commit suffix.
     selectedMentions.length,
@@ -3807,15 +3810,10 @@ const ChannelCommandMenu = ({
     // Regular user mention search (@, from:, with:, assignee:) — plus user-groups under `@`.
     // People and groups share one interleaved list; the item's own type decides the chip.
     if (mentionSearchType === ChipType.USER) {
+      // Reuse the click handler so keyboard, click, and ghost all commit the same label —
+      // a group's `@`-handle (alias), a person's name.
       const item = atMentionItems[selectedMentionIndex];
-      if (item) {
-        void handleMentionSelect({
-          id: item.id,
-          name: item.name,
-          type: item.type,
-          ...(item.email ? { email: item.email } : {}),
-        });
-      }
+      if (item) handleAtMentionSelect(item);
     } else if (mentionSearchType === ChipType.CHANNEL && availableChannels[selectedMentionIndex]) {
       const { channel, displayName } = availableChannels[selectedMentionIndex];
       void handleMentionSelect({
@@ -5019,7 +5017,7 @@ const ChannelCommandMenu = ({
                                       ...prev,
                                       [group.key]: true,
                                     }));
-                                    // Clear the highlight — expanding shifts indices; avoids a double grey.
+                                    // Expanding shifts later rows' indices, so reset to the top.
                                     setSelectedMentionIndex(0);
                                   }}
                                   trackName={`MENTIONS_SHOW_MORE_${group.key.toUpperCase()}`}
