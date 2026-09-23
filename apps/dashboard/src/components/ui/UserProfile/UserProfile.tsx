@@ -7,7 +7,6 @@ import {
   Calendar,
   Cake,
   MessageSquare,
-  Headphones,
   Edit2,
   Check,
   Camera,
@@ -45,6 +44,7 @@ import { uploadProfilePicture } from '../../../services/userProfile/userProfileS
 import { queryClient } from '../../../services/clients/queryClient';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { useMettleEmployeeDetails } from '../../../hooks/useMettleEmployeeDetails';
+import { PhoneDefault } from '@xyne/icons';
 
 interface UserProfileProps {
   userId: string;
@@ -519,7 +519,7 @@ export const UserProfile: React.FC<UserProfileProps> = ({
                 className='flex items-center gap-2 px-4 py-2 border border-input bg-background hover:bg-accent text-foreground rounded-lg'
                 variant='outline'
               >
-                <Headphones className='size-4' />
+                <PhoneDefault className='size-4' />
                 <span>Huddle</span>
               </Button>
             </div>

@@ -11,7 +11,6 @@ import {
   Trash2,
   Link,
   Copy,
-  Headphones,
   Mic,
   Pin,
   CornerUpLeft,
@@ -50,6 +49,7 @@ import { ThreadTagMenuItems } from '../../tags/ThreadTagMenuItems';
 import { ConversationWithTicket } from '../../ui/MessageBubble/MessageBubble.types';
 import { MESSAGE_REMINDER_MENU_OPTIONS, type ReminderMenuOption } from '../utils/bookmarkUtils';
 import type { AppShortcutWithApp } from '../../../services/Apps/appsService';
+import { PhoneDefault } from '@xyne/icons';
 
 const REMINDER_TRACK_NAME_BY_OPTION: Record<ReminderMenuOption, string> = {
   '20mins': 'REMINDER_20_MINS',
@@ -340,7 +340,7 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
             data-track-name='INITIATE_CALL'
             data-track-metadata={actionTrackMetadata}
           >
-            <Headphones className='w-4 h-4' />
+            <PhoneDefault className='w-4 h-4' />
           </Button>
         </Tooltip>
       )}

@@ -21,7 +21,6 @@ import {
   ArrowRightLeft,
   Lightbulb,
   FileText,
-  Headphones,
   ShieldUser,
   AppWindow,
   Globe,
@@ -37,6 +36,7 @@ import {
   PieChart,
   ChevronRight,
 } from 'lucide-react';
+import { PhoneDefault } from '@xyne/icons';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -1605,7 +1605,7 @@ function genericScenes(visualKey: string): SceneConfig[] {
     },
     support: {
       title: 'Support',
-      icon: <Headphones size={10} />,
+      icon: <PhoneDefault size={10} />,
       lines: [
         'SRT-042 · Cannot log in · 2h left ⚠',
         'SRT-041 · Export CSV broken · 5h',

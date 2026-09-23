@@ -1,7 +1,7 @@
 import React from 'react';
 import { Dialog } from '../../ui/Dialog/Dialog';
 import { Button } from '../../ui/Button/Button';
-import HuddleIcon from '../../icons/HuddleIcon';
+import { PhoneDefault } from '@xyne/icons';
 
 interface ActionButton {
   label: string;
@@ -55,7 +55,7 @@ export const ActionModal: React.FC<ActionModalProps> = ({
         {showIcon && (
           <div className='w-10 h-10 rounded-xl bg-muted border border-border flex items-center justify-center mb-5'>
             <div className='scale-[1.25]'>
-              <HuddleIcon color={iconColor} />
+              <PhoneDefault size={16} color={iconColor} />
             </div>
           </div>
         )}

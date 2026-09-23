@@ -1,4 +1,4 @@
-import { PhoneDefault, CalendarDefault } from '@xyne/icons';
+import { PhoneDefault, CalendarDefault, ChevronDown } from '@xyne/icons';
 import { Button } from '../../ui/Button';
 import Tooltip from '../../ui/Tooltip';
 import {
@@ -36,30 +36,50 @@ export const ThreadCallButton = ({
 }: ThreadCallButtonProps) => {
   return (
     <DropdownMenu>
-      <Tooltip content={hasActiveCall ? 'Call already in progress' : callTooltip}>
-        <DropdownMenuTrigger asChild>
-          <Button
-            variant='ghost'
-            size='sm'
-            className='h-7 w-7 rounded-lg text-muted-foreground hover:text-foreground'
-            data-testid={testId}
-            {...(trackCategory && { 'data-track-category': trackCategory })}
-            {...(trackName && { 'data-track-name': trackName })}
-            {...(trackMetadata && {
-              'data-track-metadata': JSON.stringify(trackMetadata),
-            })}
-          >
-            <PhoneDefault size={16} />
-          </Button>
-        </DropdownMenuTrigger>
-      </Tooltip>
-      <DropdownMenuContent align='end' side='bottom'>
-        <DropdownMenuItem onSelect={onStartCall} disabled={hasActiveCall}>
-          <PhoneDefault size={14} className='mr-2' />
+      <DropdownMenuTrigger asChild>
+        <Button
+          variant='ghost'
+          size='sm'
+          className='group h-7 w-auto gap-0 rounded-lg border border-border p-0 text-muted-foreground hover:text-foreground data-[state=open]:bg-accent data-[state=open]:text-foreground'
+          data-testid={testId}
+          {...(trackCategory && { 'data-track-category': trackCategory })}
+          {...(trackName && { 'data-track-name': trackName })}
+          {...(trackMetadata && {
+            'data-track-metadata': JSON.stringify(trackMetadata),
+          })}
+        >
+          <Tooltip content={hasActiveCall ? 'Call already in progress' : callTooltip}>
+            <span className='flex h-full items-center'>
+              <span className='flex h-full items-center px-1.5'>
+                <PhoneDefault size={16} />
+              </span>
+              <span className='h-full w-px bg-border' />
+              <span className='flex h-full items-center px-1.5'>
+                <ChevronDown
+                  size={16}
+                  className='transition-transform duration-200 group-data-[state=open]:rotate-180'
+                />
+              </span>
+            </span>
+          </Tooltip>
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent
+        align='end'
+        side='bottom'
+        sideOffset={6}
+        className='rounded-xl p-1.5 shadow-sm text-muted-foreground'
+      >
+        <DropdownMenuItem
+          onSelect={onStartCall}
+          disabled={hasActiveCall}
+          className='gap-1.5 rounded-lg font-medium'
+        >
+          <PhoneDefault size={16} />
           Start call
         </DropdownMenuItem>
-        <DropdownMenuItem onSelect={onScheduleCall}>
-          <CalendarDefault size={14} className='mr-2' />
+        <DropdownMenuItem onSelect={onScheduleCall} className='gap-1.5 rounded-lg font-medium'>
+          <CalendarDefault size={16} />
           Schedule Call
         </DropdownMenuItem>
       </DropdownMenuContent>
