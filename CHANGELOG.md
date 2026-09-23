@@ -1,3 +1,10 @@
+## [1.378.1](https://github.com/juspay/xyne-spaces/compare/v1.378.0...v1.378.1) (2026-09-23)
+
+
+### Bug Fixes
+
+* moving runAsSystem to single place to increase visibility ([#2149](https://github.com/juspay/xyne-spaces/issues/2149)) ([794f8ee](https://github.com/juspay/xyne-spaces/commit/794f8eea63c984a2e2462625b9e3d867d36cd82e))
+
 ## [1.378.0](https://github.com/juspay/xyne-spaces/compare/v1.377.1...v1.378.0) (2026-09-23)
 
 
