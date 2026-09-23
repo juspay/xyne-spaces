@@ -1,3 +1,10 @@
+## [1.348.0-release-20260921.6](https://github.com/juspay/xyne-spaces/compare/v1.348.0-release-20260921.5...v1.348.0-release-20260921.6) (2026-09-23)
+
+
+### Features
+
+* exact channel name filter on app channel list ([#1935](https://github.com/juspay/xyne-spaces/issues/1935)) ([#2139](https://github.com/juspay/xyne-spaces/issues/2139)) ([34b3a0a](https://github.com/juspay/xyne-spaces/commit/34b3a0a64df03e274b91d2a775985bb80d4d2c2d))
+
 ## [1.348.0-release-20260921.5](https://github.com/juspay/xyne-spaces/compare/v1.348.0-release-20260921.4...v1.348.0-release-20260921.5) (2026-09-22)
 
 
