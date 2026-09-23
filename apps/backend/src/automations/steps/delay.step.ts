@@ -22,8 +22,8 @@ const IST_OFFSET_MS = 5.5 * HOUR_MS;
 const BusinessHoursSchema = z
   .object({
     days: z.array(z.enum(WEEKDAYS)).min(1).default(['MON', 'TUE', 'WED', 'THU', 'FRI']),
-    startHour: z.number().int().min(0).max(23).default(11).describe('Window start hour in IST (0-23)'),
-    endHour: z.number().int().min(1).max(24).default(19).describe('Window end hour in IST (1-24)'),
+    startHour: z.number().multipleOf(0.5).min(0).max(23.5).default(11).describe('IST start, e.g. 11.5 = 11:30'),
+    endHour: z.number().multipleOf(0.5).min(0.5).max(24).default(19).describe('IST end, e.g. 19.5 = 19:30'),
   })
   .refine((b) => b.startHour < b.endHour, { path: ['endHour'], message: 'endHour must be after startHour' });
 
