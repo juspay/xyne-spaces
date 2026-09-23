@@ -20,6 +20,7 @@
     "lint": "eslint .",
     "lint:errors-only": "eslint . --quiet",
     "lint:fix": "eslint . --fix",
+    "a11y:contrast": "node scripts/a11y-contrast-audit.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit --project tsconfig.app.json --pretty",
