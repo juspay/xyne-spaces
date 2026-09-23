@@ -41,8 +41,8 @@ const prisma = DatabaseClient.getInstance();
 type BatchTransaction = Parameters<Parameters<typeof prisma.$transaction>[0]>[0];
 
 /** Comfortable for a batch this size; Prisma's 5s default is not. */
-const BATCH_TRANSACTION_TIMEOUT_MS = 120_000;
-const BATCH_TRANSACTION_MAX_WAIT_MS = 15_000;
+const BATCH_TRANSACTION_TIMEOUT_MS = 30_000;
+const BATCH_TRANSACTION_MAX_WAIT_MS = 5_000;
 
 export interface BatchTicketInput {
   title: string;
