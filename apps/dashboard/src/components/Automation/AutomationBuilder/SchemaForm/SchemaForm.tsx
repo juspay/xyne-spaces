@@ -481,7 +481,9 @@ function Field({
     if (itemKind === 'string' && !itemIsRef) {
       const arrayValue = Array.isArray(value)
         ? (value as unknown[]).filter((v): v is string => typeof v === 'string')
-        : [];
+        : typeof value === 'string' && value.length > 0
+          ? [value]
+          : [];
       return (
         <div className='flex flex-col gap-1'>
           <FieldHeader label={labelText} description={description} />
