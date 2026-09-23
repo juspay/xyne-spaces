@@ -11,8 +11,36 @@ import type { SdlcMultirepoBackfillInput, SdlcMultirepoBackfillResult } from '@/
 import { repositoryHost } from '@/sdlc/vcs/repositoryHost';
 import { SDLC_VCS_EXTERNAL_SOURCE_TYPE } from '@/sdlc/vcs/SdlcVcsCredentialStore';
 import { SDLC_GITHUB_HOST } from '@xyne/shared';
+import { isTrackInChannel } from '@/sdlc/sdlcChannelMembership';
 
 const MULTIREPO_BACKFILL_TAG = '[SdlcMultirepoBackfill]';
+
+/**
+ * Relocated from sdlc/sdlcNavTarget.ts's placeInChannel. Checking whether a track sits in a
+ * caller-named channel needs an unscoped lookup because the CHANNEL -> TRACK edge is not keyed
+ * by the caller's own workspace context at this call site — same reasoning as isSdlcChannel
+ * above, just not memoized (this check is per call, not cacheable across callers).
+ */
+export function isTrackReachableInChannel(trackId: string, channelId: string): Promise<boolean> {
+  return asSystem(
+    ['SdlcEntityLink'],
+    'nav-target authorization: track-in-channel edge lookup ahead of any workspace scope',
+    () => isTrackInChannel(db, trackId, channelId),
+  );
+}
+
+/**
+ * Relocated from sdlc/sdlcNavTarget.ts's placeInChannel. Same reasoning as
+ * isTrackReachableInChannel: the ticket's channelId is read to authorize a nav target before any
+ * workspace scope is available for this call.
+ */
+export function ticketChannelIdForNavTarget(ticketId: string): Promise<{ channelId: string | null } | null> {
+  return asSystem(
+    ['Ticket'],
+    'nav-target authorization: ticket channelId lookup ahead of any workspace scope',
+    () => db.ticket.findUnique({ where: { id: ticketId }, select: { channelId: true } }),
+  );
+}
 
 /**
  * Relocated from routes/sdlcRepoCredentialBackfill.ts's backfill. Links GitHub repositories to

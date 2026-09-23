@@ -2,8 +2,8 @@ import { ChannelType } from '@xyne/shared';
 import { sdlcSectionForCanvas, type SdlcNavTarget, type SdlcSection } from '@xyne/shared/sdlc';
 import { db } from '@/database/client';
 import { memoizeAsSystem as memoize } from '@/bypassAcl/tenantUtils';
+import { isTrackReachableInChannel, ticketChannelIdForNavTarget } from '@/bypassAcl/sdlcServices';
 import { resolveFolderTrackId, resolveItemTrackId, resolveInheritedOwner } from './entityLinkService';
-import { isTrackInChannel } from './sdlcChannelMembership';
 
 export interface SdlcNavIds {
   channelId?: string | null;
@@ -165,11 +165,9 @@ async function resolveChannelId(ids: SdlcNavIds): Promise<string | null> {
 async function placeInChannel(place: SdlcLocation, channelId: string): Promise<boolean> {
   const { canvasId, trackId, ticketId } = place;
   if (canvasId) return (await canvasInfo(canvasId))?.channelId === channelId;
-  if (trackId) return runAsSystem(() => isTrackInChannel(db, trackId, channelId));
+  if (trackId) return isTrackReachableInChannel(trackId, channelId);
   if (ticketId) {
-    const ticket = await runAsSystem(() =>
-      db.ticket.findUnique({ where: { id: ticketId }, select: { channelId: true } }),
-    );
+    const ticket = await ticketChannelIdForNavTarget(ticketId);
     return ticket?.channelId === channelId;
   }
   return true;
