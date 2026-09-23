@@ -67,8 +67,38 @@ const LEADING_MENTIONS = /^(?:@[\w.\-]+(?:\s+[\w.\-]+)*\s*)+/;
 const TRAILING_COMMAND_TOKEN = /(?:^|\s)(\/(?:stop|help|clear))\s*$/i;
 const GOAL_OVERRIDABLE_PROVIDERS = new Set(["spaces", "litellm", "claude", "codex", "copilot"]);
 
+const ZERO_WIDTH = /[​-‍⁠﻿]/g;
+const TRAILING_MENTIONS = /(?:\s*@[\w.\-]+(?:\s+[\w.\-]+)*)+\s*$/;
+const ARGLESS_KINDS: ReadonlySet<SlashCommand["kind"]> = new Set<SlashCommand["kind"]>([
+  "goalStatus",
+  "goalClear",
+  "clear",
+  "queueShow",
+  "queueClear",
+  "help",
+  "status",
+  "debug",
+  "fastMode",
+]);
+
 export function parseSlashCommand(input: string | undefined | null): SlashCommand | null {
   if (!input) return null;
+  const cleaned = input.replace(ZERO_WIDTH, "");
+  const strict = parseSlashCommandStrict(cleaned);
+  if (strict) return strict;
+
+  const loose = cleaned
+    .trim()
+    .replace(LEADING_MENTIONS, "")
+    .replace(TRAILING_MENTIONS, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (loose[0] !== "/") return null;
+  const parsed = parseFromSlash(loose);
+  return parsed && ARGLESS_KINDS.has(parsed.kind) ? parsed : null;
+}
+
+function parseSlashCommandStrict(input: string): SlashCommand | null {
   const trimmed = input.trim().replace(LEADING_MENTIONS, "");
 
   // Primary: message begins with the command (all commands, args allowed).
