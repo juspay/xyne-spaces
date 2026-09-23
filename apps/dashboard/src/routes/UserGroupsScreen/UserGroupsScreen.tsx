@@ -54,7 +54,7 @@ const UserGroupsScreen = (): ReactElement => {
       alias?: string;
       description?: string;
       userIds?: string[];
-      userRoleUpdates?: Record<string, string>;
+      userRoleUpdates?: Record<string, string[]>;
     }) => {
       const response = await apiInstance.post('/user-groups', data);
       return response.data as { id: string };
@@ -69,7 +69,7 @@ const UserGroupsScreen = (): ReactElement => {
     alias?: string;
     description?: string;
     userIds?: string[];
-    userRoleUpdates?: Record<string, string>;
+    userRoleUpdates?: Record<string, string[]>;
   }): Promise<{ id: string }> => {
     return await createUserGroupMutation.mutateAsync(data);
   };
@@ -80,7 +80,7 @@ const UserGroupsScreen = (): ReactElement => {
       name?: string;
       alias?: string;
       description?: string;
-      userRoleUpdates?: Record<string, string>;
+      userRoleUpdates?: Record<string, string[]>;
     },
   ): Promise<void> => {
     const result = zero.mutate(

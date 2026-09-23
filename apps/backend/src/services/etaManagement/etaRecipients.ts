@@ -1,5 +1,6 @@
 import { db } from '@/database/client';
 import { getFormFieldUserActors } from '@/utils/ticketActorUtils';
+import { getGroupRoleIdsByUser } from '@/utils/roleFrameworkUtils';
 import { canUserModifyTicketControl } from './etaPermissions';
 
 /**
@@ -56,15 +57,19 @@ export async function resolveActionRecipients(
     return awarenessRecipients;
   }
 
-  const board = await db.board.findUnique({ where: { id: boardId }, select: { metadata: true } });
+  // Fixed query count regardless of recipient count: the board, the legacy
+  // membership batch, and the group's unioned role sets (two batched queries
+  // inside the helper). Notification fan-out can be large, so this must not scale
+  // with the recipient list.
+  const [board, mappings, groupRoleIdsByUser] = await Promise.all([
+    db.board.findUnique({ where: { id: boardId }, select: { metadata: true } }),
+    db.userGroupMapping.findMany({
+      where: { userGroupId: ticketUserGroupId, userId: { in: awarenessRecipients } },
+      select: { userId: true, roleId: true, responsibility: true },
+    }),
+    getGroupRoleIdsByUser(ticketUserGroupId),
+  ]);
 
-  // Two queries total regardless of recipient count: the board above, and every
-  // relevant membership in one batch below. Notification fan-out can be large, so
-  // this must not scale with the recipient list.
-  const mappings = await db.userGroupMapping.findMany({
-    where: { userGroupId: ticketUserGroupId, userId: { in: awarenessRecipients } },
-    select: { userId: true, roleId: true, responsibility: true },
-  });
   const mappingByUserId = new Map(
     mappings.map((m) => [
       m.userId,
@@ -77,6 +82,7 @@ export async function resolveActionRecipients(
       const permission = await canUserModifyTicketControl(userId, ticketUserGroupId, boardId, {
         getBoardMetadata: async () => board?.metadata ?? null,
         getUserGroupMapping: async (uid) => mappingByUserId.get(uid) ?? null,
+        getUserGroupRoleIds: async (uid) => Array.from(groupRoleIdsByUser.get(uid) ?? []),
       });
       return permission.allowed ? userId : null;
     }),

@@ -190,7 +190,7 @@ import { evaluateAssignmentRule, AssignmentType } from '@/utils/assignmentEngine
 import { syncUserWorkload } from '@/utils/workloadUtils';
 import { ticketAssignmentService, primaryUserIdOf } from '@/services/ticketAssignmentService';
 import { calculateETADeadline, calculateWorkingDurationMs } from '@/utils/etaCalculation';
-import { DEFAULT_ROLE_NAME_TO_ENUM } from '@/utils/roleFrameworkUtils';
+import { groupRoleMappingId } from '@/utils/roleFrameworkUtils';
 import { grantPermissionsForRole, syncResourceAdminAccess, syncOrgResourceAdminAccess } from '@/services/permissionMatrix';
 import {
   deleteDraftEntityAttachments,
@@ -8142,7 +8142,8 @@ export function createMutators(
           userResponsibilityUpdates: z
             .record(z.string(), z.nativeEnum(UserResponsibility))
             .optional(),
-          userRoleUpdates: z.record(z.string(), z.string()).optional(),
+          // Full desired set of group roles per user (multi-role -> user_role_mappings rows).
+          userRoleUpdates: z.record(z.string(), z.array(z.string())).optional(),
           timestamp: z.number(),
         }),
         async ({
@@ -8199,23 +8200,66 @@ export function createMutators(
           });
 
           if (userRoleUpdates) {
-            const roleIdsToUpdate = [...new Set(Object.values(userRoleUpdates))];
-            const roles = await tx.run(
-              zql.roles.where('id', 'IN', roleIdsToUpdate).where('workspaceId', userGroup.workspaceId),
-            );
-            for (const [userId, roleId] of Object.entries(userRoleUpdates)) {
+            // Reconcile each user's group roles: adds -> user_role_mappings(USER_GROUP);
+            // removes -> delete the URM row AND clear a matching legacy ugm.roleId so it can't
+            // linger in the union read as a ghost role.
+            const allDesiredRoleIds = [...new Set(Object.values(userRoleUpdates).flat())];
+            const validRoles = allDesiredRoleIds.length
+              ? await tx.run(
+                  zql.roles.where('id', 'IN', allDesiredRoleIds).where('workspaceId', userGroup.workspaceId),
+                )
+              : [];
+            const validRoleIds = new Set(validRoles.map(r => r.id));
+
+            for (const [userId, desiredRaw] of Object.entries(userRoleUpdates)) {
+              const desired = new Set(desiredRaw.filter(rid => validRoleIds.has(rid)));
+
               const mapping = await tx.run(
                 zql.user_group_mappings.where('userGroupId', userGroupId).where('userId', userId).one(),
               );
-              if (mapping) {
-                const role = roles.find(r => r.id === roleId);
-                const responsibility = role ? DEFAULT_ROLE_NAME_TO_ENUM[role.name] : null;
-                await tx.mutate.user_group_mappings.update({
-                  id: mapping.id,
-                  roleId,
-                  ...(responsibility ? { responsibility } : {}),
-                  updatedAt: timestamp,
-                });
+              if (!mapping) continue;
+
+              const urmRows = await tx.run(
+                zql.user_role_mappings
+                  .where('userId', userId)
+                  .where('entityType', 'USER_GROUP')
+                  .where('entityId', userGroupId),
+              );
+              const urmByRole = new Map(urmRows.map(r => [r.roleId, r]));
+              const legacyRoleId = mapping.roleId ?? null;
+              const current = new Set<string>(urmByRole.keys());
+              if (legacyRoleId) current.add(legacyRoleId);
+
+              for (const roleId of desired) {
+                if (!current.has(roleId)) {
+                  await tx.mutate.user_role_mappings.insert({
+                    workspaceId: userGroup.workspaceId,
+                    id: groupRoleMappingId(userGroupId, userId, roleId),
+                    userId,
+                    roleId,
+                    entityType: 'USER_GROUP',
+                    entityId: userGroupId,
+                    createdAt: timestamp,
+                    updatedAt: timestamp,
+                  });
+                }
+              }
+
+              for (const roleId of current) {
+                if (!desired.has(roleId)) {
+                  const urm = urmByRole.get(roleId);
+                  if (urm) {
+                    await tx.mutate.user_role_mappings.delete({ id: urm.id });
+                  }
+                  if (mapping.roleId === roleId) {
+                    await tx.mutate.user_group_mappings.update({
+                      id: mapping.id,
+                      roleId: null,
+                      responsibility: null,
+                      updatedAt: timestamp,
+                    });
+                  }
+                }
               }
             }
           }
@@ -8266,6 +8310,16 @@ export function createMutators(
             throw new Error(
               'Cannot delete user group with tickets in terminal status (CANCELLED or COMPLETED)',
             );
+          }
+
+          // Purge group-scoped role bindings first so deleting the group can't orphan grants.
+          const groupRoleRows = await tx.run(
+            zql.user_role_mappings
+              .where('entityType', 'USER_GROUP')
+              .where('entityId', userGroupId),
+          );
+          for (const row of groupRoleRows) {
+            await tx.mutate.user_role_mappings.delete({ id: row.id });
           }
 
           // First, delete all mappings associated with the user group
@@ -8354,29 +8408,40 @@ export function createMutators(
           const roles = distinctRoleIds.length
             ? await tx.run(zql.roles.where('id', 'IN', distinctRoleIds).where('workspaceId', userGroup.workspaceId))
             : [];
+          const validRoleIds = new Set(roles.map(r => r.id));
 
           for (const userId of userIdsToAdd) {
             const mappingId = mappingIds[userId];
             if (!mappingId) {
               throw new Error(`mappingId is required for user ${userId}`);
             }
-            const index = userIds.indexOf(userId);
-            const roleId = roleIds?.[index];
-            const role = roleId ? roles.find(r => r.id === roleId) : undefined;
-            const responsibility = role ? DEFAULT_ROLE_NAME_TO_ENUM[role.name] : undefined;
+            // Membership row no longer carries the role — roles live in user_role_mappings.
             await tx.mutate.user_group_mappings.insert({
               workspaceId: authData.workspaceId,
               id: uuidv4(),
               userGroupId,
               userId,
-              ...(roleId
-                ? { roleId, ...(responsibility ? { responsibility } : {}) }
-                : { responsibility: UserResponsibility.MEMBER }),
+              responsibility: UserResponsibility.MEMBER,
               onCallSetNumbers: [],
               isNotified: false,
               createdAt: timestamp,
               updatedAt: timestamp,
             });
+            // Optional role at add time -> user_role_mappings(USER_GROUP) row.
+            const index = userIds.indexOf(userId);
+            const roleId = roleIds?.[index];
+            if (roleId && validRoleIds.has(roleId)) {
+              await tx.mutate.user_role_mappings.insert({
+                workspaceId: userGroup.workspaceId,
+                id: groupRoleMappingId(userGroupId, userId, roleId),
+                userId,
+                roleId,
+                entityType: 'USER_GROUP',
+                entityId: userGroupId,
+                createdAt: timestamp,
+                updatedAt: timestamp,
+              });
+            }
           }
         },
       ),
@@ -8411,6 +8476,19 @@ export function createMutators(
                 id: mapping.id,
               });
               removedUserIds.push(mapping.userId);
+            }
+          }
+
+          // Purge each removed member's group-scoped role bindings so no grant is orphaned.
+          for (const removedUserId of removedUserIds) {
+            const roleRows = await tx.run(
+              zql.user_role_mappings
+                .where('userId', removedUserId)
+                .where('entityType', 'USER_GROUP')
+                .where('entityId', userGroupId),
+            );
+            for (const row of roleRows) {
+              await tx.mutate.user_role_mappings.delete({ id: row.id });
             }
           }
 
@@ -18730,8 +18808,13 @@ export function createMutators(
             throw new Error('Cannot add members to an inactive role');
           }
 
+          // Scope the dedup to WORKSPACE bindings — a USER_GROUP row for the same
+          // (user, role) must not suppress a direct workspace-role assignment.
           const existing = await tx.run(
-            zql.user_role_mappings.where('roleId', roleId).where('userId', 'IN', userIds),
+            zql.user_role_mappings
+              .where('roleId', roleId)
+              .where('entityType', 'WORKSPACE')
+              .where('userId', 'IN', userIds),
           );
           const existingUserIds = new Set(existing.map(m => m.userId));
           const toAdd = userIds.filter(userId => !existingUserIds.has(userId));
@@ -18747,6 +18830,8 @@ export function createMutators(
                 id: mappingId,
                 roleId,
                 userId,
+                entityType: 'WORKSPACE',
+                entityId: authData.workspaceId,
                 createdAt: timestamp,
                 updatedAt: timestamp,
               });

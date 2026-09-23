@@ -31,9 +31,15 @@ export class UserGroupController {
       }
 
       if (userRoleUpdates && typeof userRoleUpdates === 'object') {
-        for (const [userId, roleId] of Object.entries(userRoleUpdates)) {
-          if (typeof userId !== 'string' || typeof roleId !== 'string') {
-            res.status(400).json({ error: 'userRoleUpdates must be a map of userId to roleId' });
+        for (const [userId, roleIds] of Object.entries(userRoleUpdates)) {
+          if (
+            typeof userId !== 'string' ||
+            !Array.isArray(roleIds) ||
+            roleIds.some(roleId => typeof roleId !== 'string')
+          ) {
+            res
+              .status(400)
+              .json({ error: 'userRoleUpdates must be a map of userId to an array of roleIds' });
             return;
           }
         }

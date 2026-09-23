@@ -4071,6 +4071,18 @@ export const queries: AnyQueryRegistry = defineQueries({
     },
   ),
 
+  // Group-scoped role bindings for a user group. The UI unions these with the legacy
+  // user_group_mappings.roleId to show every role a member holds in the group.
+  getUserGroupRoleMappings: defineQuery(
+    z.object({ userGroupId: z.string() }),
+    ({ args: { userGroupId } }) => {
+      return zql.user_role_mappings
+        .where('entityType', 'USER_GROUP')
+        .where('entityId', userGroupId)
+        .related('role');
+    },
+  ),
+
   getUserGroupMappingsByUserId: defineQuery(({ ctx }) => {
     return zql.user_group_mappings.where('userId', ctx.userID);
   }),

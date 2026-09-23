@@ -4,12 +4,12 @@ import { toast } from 'sonner';
 import { Button } from '../../../ui/Button/Button';
 import Avatar from '../../../ui/Avatar/Avatar';
 import Input from '../../../ui/Input/Input';
-import { EntitySelector } from '../../../ui/EntitySelector/EntitySelector';
-import type { SelectorOption } from '../../../ui/EntitySelector/EntitySelector.types';
+import { SearchableMultiSelect } from '../../../ui/SearchableMultiSelect/SearchableMultiSelect';
+import type { SearchableMultiSelectOption } from '../../../ui/SearchableMultiSelect/SearchableMultiSelect.types';
 import type { User, Role } from '@xyne/shared';
 import { mutators } from '../../../../zero/mutators';
 import { v4 as uuidv4 } from 'uuid';
-import { Search, Trash2 } from 'lucide-react';
+import { Search, Trash2, X, Plus, ChevronDown } from 'lucide-react';
 import { useUserSearch } from '../../../../hooks/useUsers';
 import { useCachedQuery } from '../../../../hooks/useCachedQuery';
 import { queries } from '../../../../zero/queries';
@@ -23,7 +23,8 @@ import { RemoveMemberDialog } from './RemoveMemberDialog';
 
 interface UserListProps {
   users: User[];
-  roleIds: Map<string, string>;
+  // userId -> the full set of role ids that user holds in this group.
+  roleIds: Map<string, string[]>;
   onUserRemove?: () => void;
   onUsersAdded?: () => void;
   disabled?: boolean;
@@ -155,38 +156,14 @@ export const UserList = ({
     }
   };
 
-  const handleRoleChange = (userId: string, roleId: string | null): void => {
-    if (roleId === null) {
-      // Deselect: only supported in create mode (no clear-role mutator in edit mode)
-      if (isCreateMode) {
-        roleIds.delete(userId);
-        forceUpdate(n => n + 1);
-      }
-      return;
-    }
-
-    if (isCreateMode) {
-      roleIds.set(userId, roleId);
-      forceUpdate(n => n + 1);
-      return;
-    }
-
-    // Edit mode: persist via mutator
-    try {
-      zero.mutate(
-        mutators.userGroup.update({
-          userGroupId: userGroupId,
-          userRoleUpdates: { [userId]: roleId },
-          timestamp: Date.now(),
-        }),
-      );
-      roleIds.set(userId, roleId);
-      forceUpdate(n => n + 1);
-    } catch (error) {
-      toast.error(
-        error instanceof Error ? error.message : 'Failed to update user role. Please try again.',
-      );
-    }
+  // Update the local desired-role set only — nothing is persisted here. Role changes are
+  // batched and written in one shot when the user clicks "Update user group"
+  // (UserGroupForm.handleSubmit sends the full set per member; the mutator diffs it against
+  // each member's current roles). An empty array is kept (not deleted) so a member whose
+  // roles were fully cleared is still sent on submit and gets their removals applied.
+  const applyRoles = (userId: string, nextRoles: string[]): void => {
+    roleIds.set(userId, nextRoles);
+    forceUpdate(n => n + 1);
   };
 
   return (
@@ -227,7 +204,7 @@ export const UserList = ({
                 <div className='divide-y divide-border'>
                   {filteredUsers.map(user => {
                     const deactivated = isUserDeactivated(user);
-                    const selectedRoleId = roleIds.get(user.id);
+                    const selectedRoleIds = roleIds.get(user.id) ?? [];
                     return (
                       <div
                         key={user.id}
@@ -271,15 +248,13 @@ export const UserList = ({
                             </Button>
                           )}
 
-                          {/* Role Selector (searchable) */}
+                          {/* Roles (multi-select): chips + a dropdown you can multi-toggle in one open */}
                           {!disabled && (
-                            <div className='w-[160px] shrink-0'>
-                              <RoleSelector
-                                roles={roles ?? []}
-                                selectedRoleId={selectedRoleId}
-                                onSelect={roleId => handleRoleChange(user.id, roleId)}
-                              />
-                            </div>
+                            <MemberRoles
+                              roles={roles ?? []}
+                              selectedRoleIds={selectedRoleIds}
+                              onChange={next => applyRoles(user.id, next)}
+                            />
                           )}
                         </div>
                       </div>
@@ -366,35 +341,83 @@ export const UserList = ({
   );
 };
 
-interface RoleSelectorProps {
+interface MemberRolesProps {
   roles: Role[];
-  selectedRoleId: string | null | undefined;
-  onSelect: (roleId: string | null) => void;
+  selectedRoleIds: string[];
+  // Receives the FULL new set of role ids for the member (toggled in the dropdown or via a chip's X).
+  onChange: (roleIds: string[]) => void;
 }
 
-const RoleSelector = ({ roles, selectedRoleId, onSelect }: RoleSelectorProps): ReactElement => {
-  const options: SelectorOption[] = useMemo(
-    () =>
-      roles.map(r => ({
-        value: r.id,
-        label: r.name,
-        subtitle: r.description ?? null,
-        icon: null,
-      })),
+// Multi-role picker: assigned roles show as removable chips, and a single dropdown lets you
+// toggle many roles on/off in one open (checkbox-style, stays open) via SearchableMultiSelect.
+const MemberRoles = ({ roles, selectedRoleIds, onChange }: MemberRolesProps): ReactElement => {
+  const [open, setOpen] = useState(false);
+
+  const rolesById = useMemo(() => {
+    const map = new Map<string, Role>();
+    for (const r of roles) map.set(r.id, r);
+    return map;
+  }, [roles]);
+
+  // All roles are offered; selected ones render checked, so a single open can add and remove.
+  const options: SearchableMultiSelectOption[] = useMemo(
+    () => roles.map(r => ({ value: r.id, label: r.name })),
     [roles],
   );
 
+  const trigger = (
+    <button
+      type='button'
+      className='inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs text-muted-foreground hover:bg-muted'
+      data-testid='member-role-selector'
+      data-track-category='UserGroups'
+      data-track-name='OpenMemberRoleSelector'
+    >
+      <Plus className='w-3 h-3' />
+      {selectedRoleIds.length > 0 ? 'Add / edit' : 'Select roles'}
+      <ChevronDown className='w-3 h-3' />
+    </button>
+  );
+
   return (
-    <EntitySelector
-      options={options}
-      selectedValue={selectedRoleId ?? null}
-      onSelect={onSelect}
-      placeholder='Select role'
-      searchPlaceholder='Search roles...'
-      showSearch={true}
-      width='160px'
-      testId='member-role-selector'
-    />
+    <div className='flex flex-wrap items-center justify-end gap-1 max-w-[280px]'>
+      {selectedRoleIds.map(roleId => {
+        const role = rolesById.get(roleId);
+        return (
+          <span
+            key={roleId}
+            className='inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-foreground'
+            data-testid='member-role-chip'
+          >
+            {role?.name ?? roleId}
+            <button
+              type='button'
+              onClick={() => onChange(selectedRoleIds.filter(r => r !== roleId))}
+              className='text-muted-foreground hover:text-red-600'
+              aria-label={`Remove role ${role?.name ?? roleId}`}
+              data-testid='member-role-chip-remove'
+              data-track-category='UserGroups'
+              data-track-name='RemoveMemberRole'
+            >
+              <X className='w-3 h-3' />
+            </button>
+          </span>
+        );
+      })}
+      <SearchableMultiSelect
+        options={options}
+        selectedValues={selectedRoleIds}
+        onSelectedValuesChange={onChange}
+        trigger={trigger}
+        isOpen={open}
+        onOpenChange={setOpen}
+        searchPlaceholder='Search roles...'
+        searchAriaLabel='Search roles'
+        listAriaLabel='Roles'
+        emptyMessage='No roles found'
+        align='end'
+      />
+    </div>
   );
 };
 
