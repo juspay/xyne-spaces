@@ -19,9 +19,16 @@ import {
 } from 'lucide-react';
 import * as Tabs from '@radix-ui/react-tabs';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
-import { FormContextType, FormEntityType, type VCSProviderType } from '@xyne/shared';
+import {
+  FormContextType,
+  FormEntityType,
+  parseMigrationTags,
+  type VCSProviderType,
+} from '@xyne/shared';
 import { toast } from 'sonner';
+import { v4 as uuidv4 } from 'uuid';
 import { getApiErrorMessage } from '../../utils/apiError';
+import { surfaceMutationError } from '../../utils/zeroMutationToast';
 
 import { useCachedQuery } from '../../hooks/useCachedQuery';
 import { useZero } from '../../hooks/useZero';
@@ -31,7 +38,13 @@ import { useCanManageRelease } from '../../hooks/usePermissions';
 import { queries } from '../../zero/queries';
 import { mutators } from '../../zero/mutators';
 import { resolveDisplayFormFields } from '../../utils/board/resolveDisplayFormFields';
-import { ChangeSections, type ChangeSectionsGroup } from '../../components/Release/ChangeCards';
+import {
+  ChangeSections,
+  type ChangeSectionsGroup,
+  type MigrationMeta,
+  type RenderableFileGroup,
+} from '../../components/Release/ChangeCards';
+import { MigrationRiskSummary } from '../../components/Release/MigrationTags';
 import { ReleaseStagePicker } from '../../components/Release/ReleaseStagePicker';
 import { ReleaseDevTicketsTable } from '../../components/Release/ReleaseDevTicketsTable';
 import {
@@ -416,6 +429,23 @@ const ReleaseDetailScreen = (): ReactElement => {
     queries.releaseChangeLogValuesByReleaseId({ releaseId: releaseTicketId ?? '' }),
     { enabled: !!releaseTicketId && activeTab === 'migrations' },
   );
+  const migrationFormId = useMemo(
+    () =>
+      changeFormValues?.find(
+        fv => (fv.entityType as FormEntityType) === FormEntityType.RELEASE_MIGRATION_FORM,
+      )?.formId ?? null,
+    [changeFormValues],
+  );
+  const [migrationFormFields] = useCachedQuery(
+    queries.getFormFieldsByFormId({ formId: migrationFormId ?? '' }),
+    { enabled: !!migrationFormId },
+  );
+  const migrationFieldIds = useMemo(() => {
+    const byName = new Map(
+      (migrationFormFields ?? []).map(ff => [ff.globalField?.fieldName ?? ff.fieldName, ff.id]),
+    );
+    return { tags: byName.get('tags'), note: byName.get('note') };
+  }, [migrationFormFields]);
   const [stages] = useCachedQuery(queries.stagesByBoards({ projectId: projectId ?? '' }), {
     enabled: !!projectId,
   });
@@ -435,6 +465,55 @@ const ReleaseDetailScreen = (): ReactElement => {
     () => buildValuesByChangeId([...(changeFormValues ?? []), ...(changeLogValues ?? [])]),
     [changeFormValues, changeLogValues],
   );
+  const migrationValueIds = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const fv of changeFormValues ?? []) {
+      const name = fv.globalField?.fieldName ?? fv.formField?.fieldName;
+      if (name === 'tags' || name === 'note') map.set(`${fv.entityId}:${name}`, fv.id);
+    }
+    return map;
+  }, [changeFormValues]);
+
+  // Written to every commit row of the file; the card reads the union.
+  const handleMigrationMetaChange = useCallback(
+    (file: RenderableFileGroup, meta: MigrationMeta): void => {
+      const { tags: tagsFieldId, note: noteFieldId } = migrationFieldIds;
+      if (!migrationFormId || !tagsFieldId || !noteFieldId || !releaseTicketId) {
+        toast.error('Migration tags are not set up on this workspace yet.');
+        return;
+      }
+      const now = Date.now();
+      const writes = [
+        ['tags', tagsFieldId, meta.tags],
+        ['note', noteFieldId, meta.note ? [meta.note] : []],
+      ] as const;
+      for (const change of file.changes) {
+        for (const [fieldName, fieldId, value] of writes) {
+          const existingId = migrationValueIds.get(`${change.id}:${fieldName}`);
+          if (!existingId && value.length === 0) continue;
+          const mutation = existingId
+            ? mutators.formEntityValue.update({
+                formEntityValueId: existingId,
+                newValue: value,
+                updatedAt: now,
+              })
+            : mutators.formEntityValue.createV2({
+                id: uuidv4(),
+                entityId: change.id,
+                entityType: FormEntityType.RELEASE_MIGRATION_FORM,
+                fieldId,
+                formId: migrationFormId,
+                newValue: value,
+                timestamp: now,
+                contextId: releaseTicketId,
+              });
+          void surfaceMutationError(zero.mutate(mutation), `Failed to save migration ${fieldName}`);
+        }
+      }
+    },
+    [migrationFormId, migrationFieldIds, releaseTicketId, migrationValueIds, zero],
+  );
+
   const releaseVersion = useMemo(() => {
     const value = releaseFormValues?.find(
       fv => fv.formField?.fieldName === 'releaseVersion',
@@ -451,6 +530,18 @@ const ReleaseDetailScreen = (): ReactElement => {
   const migrationsByApp = useMemo(
     () => filterGroupsByKind(groupedByApp, 'MIGRATION'),
     [groupedByApp],
+  );
+
+  const migrationTagsByFile = useMemo(
+    () =>
+      migrationsByApp.flatMap(app =>
+        app.files.map(file => [
+          ...new Set(
+            file.changes.flatMap(c => parseMigrationTags(valuesByChangeId.get(c.id)?.['tags'])),
+          ),
+        ]),
+      ),
+    [migrationsByApp, valuesByChangeId],
   );
 
   // Tab badge: unique env var names across whole release. Reuses
@@ -1000,11 +1091,15 @@ const ReleaseDetailScreen = (): ReactElement => {
               </Tabs.Content>
 
               <Tabs.Content value='migrations' className='mt-6 outline-none space-y-6'>
+                <MigrationRiskSummary tagsByFile={migrationTagsByFile} />
                 <ChangeSections
                   groups={migrationsByApp}
                   kind='MIGRATION'
                   emptyMessage='No migration changes recorded for this release yet.'
                   valuesByChangeId={valuesByChangeId}
+                  {...(canManageRelease
+                    ? { onMigrationMetaChange: handleMigrationMetaChange }
+                    : {})}
                 />
               </Tabs.Content>
 

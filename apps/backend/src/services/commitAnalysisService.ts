@@ -5,7 +5,7 @@ import { DatabaseClient } from '@/database/client';
 import { ApplicationRepository } from '@/database/repositories/applicationRepository';
 import { logger } from '@/utils/logger';
 import { PullRequestInfo, DiffstatSummary, ChangeEntry } from '@/types/bitbucket';
-import { FormContextType, FormEntityType, BaseTicketType, BoardType, ChannelVisibility, TicketPriority, TicketStatusV2 } from '@xyne/shared';
+import { FormContextType, FormEntityType, BaseTicketType, BoardType, ChannelVisibility, TicketPriority, TicketStatusV2, suggestMigrationTags, isZeroBackedRepo, zeroSyncedTableNames } from '@xyne/shared';
 import { Application, } from '@prisma/client';
 import { XyneRelease } from './release/xyne/xyneRelease';
 import { ReleaseRepository } from '@/database/repositories/releaseRepository';
@@ -89,6 +89,14 @@ export function countDistinctMigrationFiles(
     (migrationLinks ?? []).map(link => `${link.diffUrl.replace(/\/commits?\/[^/#?]+/, '')}::${link.filePath}`),
   ).size;
 }
+
+const seedMigrationTags = (changeLog: string, repoUrl: string | null | undefined): { tags?: string[] } => {
+  const tags = suggestMigrationTags(
+    changeLog,
+    isZeroBackedRepo(repoUrl) ? zeroSyncedTableNames() : undefined,
+  );
+  return tags.length > 0 ? { tags } : {};
+};
 
 export class CommitAnalysisService {
   // Structurally typed so a BitbucketService or GitHubService can be passed —
@@ -858,6 +866,7 @@ export class CommitAnalysisService {
             changeLog: migDiffResult.changeLog,
             description: `Database migration file ${fileName} changed.`,
             query: migDiffResult.query,
+            ...seedMigrationTags(migDiffResult.changeLog, app?.repoUrl),
           }
         });
         await this.releaseRepository!.saveReleaseFormValues(
@@ -1030,6 +1039,7 @@ export class CommitAnalysisService {
             changeLog: migDiffResult.changeLog,
             description: `Database migration file ${fileName} changed.`,
             query: migDiffResult.query,
+            ...seedMigrationTags(migDiffResult.changeLog, app?.repoUrl),
           },
         });
 

@@ -37,6 +37,8 @@ export * from './utils/heic';
 export * from './utils/channel';
 export * from './utils/socialMedia';
 export * from './utils/csv';
+export * from './utils/migrationTags';
+export * from './utils/zeroTables';
 export * from './release/releaseReport';
 export * from './utils/notificationKeywords';
 export * from './utils/hostControls';

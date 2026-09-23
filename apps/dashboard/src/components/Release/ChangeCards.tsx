@@ -1,8 +1,19 @@
 /* eslint-disable local-rules/require-tracking-on-click */
 import { ReactElement, useMemo, useState } from 'react';
-import type { VCSProviderType } from '@xyne/shared';
+import {
+  analyzeMigrationSql,
+  isZeroBackedRepo,
+  parseMigrationTags,
+  zeroSyncedTableNames,
+  type MigrationFinding,
+  type MigrationTag,
+  type VCSProviderType,
+} from '@xyne/shared';
 import { cn } from '../../utils/classNames';
 import { RepoDot, ProviderBadge, repoColor, repoShortName } from './repoVisual';
+import { MigrationRiskAnalysis, MigrationTags } from './MigrationTags';
+
+export type MigrationMeta = { tags: MigrationTag[]; note: string };
 
 /**
  * Shared rendering for env/migration change groups used by:
@@ -54,6 +65,8 @@ interface ChangeSectionsProps {
   // ART detail page is already scoped to one dev ticket, so per-change
   // dev-ticket badges are redundant there. Pass true to suppress.
   hideDevTickets?: boolean;
+  // Migration cards only; absent → read-only.
+  onMigrationMetaChange?: (file: RenderableFileGroup, meta: MigrationMeta) => void;
 }
 
 // Strip git-diff metadata noise from a unified-diff string, returning the
@@ -122,6 +135,7 @@ export const ChangeSections = ({
   emptyMessage,
   valuesByChangeId,
   hideDevTickets = false,
+  onMigrationMetaChange,
 }: ChangeSectionsProps): ReactElement => {
   const byRepo = useMemo(() => {
     const map = new Map<string, ChangeSectionsGroup[]>();
@@ -171,6 +185,7 @@ export const ChangeSections = ({
                       repoUrl={app.repoUrl}
                       valuesByChangeId={valuesByChangeId}
                       hideDevTickets={hideDevTickets}
+                      {...(onMigrationMetaChange ? { onMigrationMetaChange } : {})}
                     />
                   ))}
                 </div>
@@ -189,6 +204,7 @@ interface ChangeCardProps {
   repoUrl: string | null;
   valuesByChangeId: Map<string, Record<string, string>>;
   hideDevTickets?: boolean;
+  onMigrationMetaChange?: (file: RenderableFileGroup, meta: MigrationMeta) => void;
 }
 
 /**
@@ -204,6 +220,7 @@ const ChangeCard = ({
   repoUrl,
   valuesByChangeId,
   hideDevTickets = false,
+  onMigrationMetaChange,
 }: ChangeCardProps): ReactElement => {
   const [open, setOpen] = useState(false);
   const isEnv = kind === 'ENV';
@@ -212,49 +229,78 @@ const ChangeCard = ({
   const latestCommitId = f.changes.at(-1)?.commitId ?? null;
   const fileUrl = buildFileUrl(repoUrl, f.filePath, latestCommitId);
   const changeCount = f.changes.length;
+  // Union of tags / first note across the file's commit rows.
+  const { tags, note, findings } = useMemo(() => {
+    if (isEnv) return { tags: [] as MigrationTag[], note: '', findings: [] as MigrationFinding[] };
+    const bags = f.changes.map(c => valuesByChangeId.get(c.id) ?? {});
+    const zeroTables = isZeroBackedRepo(repoUrl) ? zeroSyncedTableNames() : undefined;
+    const sqls = new Set(bags.flatMap(bag => (bag['changeLog'] ? [bag['changeLog']] : [])));
+    const findingsByKey = new Map(
+      [...sqls]
+        .flatMap(sql => analyzeMigrationSql(sql, zeroTables))
+        .map(finding => [`${finding.tag}:${finding.evidence}`, finding]),
+    );
+    return {
+      tags: [...new Set(bags.flatMap(bag => parseMigrationTags(bag['tags'])))],
+      note: bags.find(bag => bag['note'])?.['note'] ?? '',
+      findings: [...findingsByKey.values()],
+    };
+  }, [f.changes, isEnv, repoUrl, valuesByChangeId]);
 
   return (
     <div className='border border-border rounded-lg bg-background overflow-hidden'>
-      {/* Header — clickable to toggle. The filePath link inside still
-          navigates to Bitbucket without triggering expand (stopPropagation). */}
-      <button
-        type='button'
-        onClick={() => setOpen(prev => !prev)}
-        data-track-category='Release'
-        data-track-name='TOGGLE_CHANGE_CARD'
-        className='w-full flex items-center gap-2 px-4 py-3 hover:bg-muted/40 transition-colors text-left'
-      >
-        <span className='text-xs text-muted-foreground w-3 shrink-0'>{open ? '▼' : '▶'}</span>
-        <span
-          className={cn(
-            'text-xs px-2 py-0.5 rounded shrink-0',
-            isEnv
-              ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-200'
-              : 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-200',
-          )}
+      <div className='flex items-center gap-2 px-4 py-3 hover:bg-muted/40 transition-colors'>
+        <button
+          type='button'
+          onClick={() => setOpen(prev => !prev)}
+          data-track-category='Release'
+          data-track-name='TOGGLE_CHANGE_CARD'
+          className='flex flex-1 min-w-0 items-center gap-2 text-left'
         >
-          {isEnv ? 'env' : 'migration'}
-        </span>
-        {fileUrl ? (
-          <a
-            href={fileUrl}
-            target='_blank'
-            rel='noopener noreferrer'
-            onClick={e => e.stopPropagation()}
-            className='font-mono text-sm text-foreground hover:underline truncate'
+          <span className='text-xs text-muted-foreground w-3 shrink-0'>{open ? '▼' : '▶'}</span>
+          <span
+            className={cn(
+              'text-xs px-2 py-0.5 rounded shrink-0',
+              isEnv
+                ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-200'
+                : 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-200',
+            )}
           >
-            {f.filePath}
-          </a>
-        ) : (
-          <span className='font-mono text-sm text-foreground truncate'>{f.filePath}</span>
+            {isEnv ? 'env' : 'migration'}
+          </span>
+          {fileUrl ? (
+            <a
+              href={fileUrl}
+              target='_blank'
+              rel='noopener noreferrer'
+              onClick={e => e.stopPropagation()}
+              className='font-mono text-sm text-foreground hover:underline truncate'
+            >
+              {f.filePath}
+            </a>
+          ) : (
+            <span className='font-mono text-sm text-foreground truncate'>{f.filePath}</span>
+          )}
+        </button>
+        {!isEnv && (tags.length > 0 || onMigrationMetaChange) && (
+          <MigrationTags
+            tags={tags}
+            note={note}
+            findings={findings}
+            {...(onMigrationMetaChange
+              ? { onChange: (next: MigrationMeta) => onMigrationMetaChange(f, next) }
+              : {})}
+          />
         )}
-        <span className='ml-auto text-xs text-muted-foreground shrink-0'>
+        <span className='text-xs text-muted-foreground shrink-0'>
           {changeCount} commit{changeCount === 1 ? '' : 's'}
         </span>
-      </button>
+      </div>
+      {note && <p className='px-4 pb-2 -mt-1 text-xs italic text-muted-foreground'>📝 {note}</p>}
 
       {open && (
         <div className='border-t border-border px-4 py-3 space-y-4'>
+          <MigrationRiskAnalysis findings={findings} />
           {f.changes.map((change, idx) => (
             <ChangeBlock
               key={change.id}
