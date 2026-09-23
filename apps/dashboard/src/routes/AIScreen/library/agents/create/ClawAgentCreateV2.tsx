@@ -1,15 +1,22 @@
-import { useCallback, useMemo, useRef, useState, type ReactElement } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactElement,
+} from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { useMutation } from '@tanstack/react-query';
-import { toast } from 'sonner';
-import { Ai01, AtMark, PencilEditLine } from '@xyne/icons';
-import { Loader2 } from 'lucide-react';
+import { cn } from '@/utils/classNames';
+import { AtMark, PencilEditLine } from '@xyne/icons';
+import { ChevronLeft, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/Button/index';
 import { useAuth } from '@/hooks/useAuth';
 import { useAgentNameCheck } from '@/hooks/useAgentNameCheck';
 import { useCreateClawAgent } from '@/hooks/useCreateClawAgent';
-import { generateAgentPrompt } from '@/services/claw/clawAgentWizardService';
 import {
+  COLORS,
   INITIAL_WIZARD_STATE,
   effectiveSlug,
   slugify,
@@ -19,6 +26,7 @@ import type { Agent } from '@/services/claw/clawAuthAgentTypes';
 import { wizardStateFromAgent } from './agentDraft';
 import { useSaveClawAgent } from './useSaveClawAgent';
 import { AgentColorRow } from './AgentColorRow';
+import { LibraryIconTile } from '../../shared/components/LibraryCard';
 import { AutoWidthInput } from '../../shared/primitives/AutoWidthInput';
 import { BuiltinCapabilityRow } from '../../shared/pickers/builtin/BuiltinCapabilityRow';
 import { KnowledgeCapabilityRow } from '../../shared/pickers/knowledge/KnowledgeCapabilityRow';
@@ -27,9 +35,9 @@ import { SkillsCapabilityRow } from '../../shared/pickers/skill/SkillsCapability
 import { SubagentCapabilityRow } from '../../shared/pickers/subagent/SubagentCapabilityRow';
 import { CallableAgentCapabilityRow } from '../../shared/pickers/callableAgent/CallableAgentCapabilityRow';
 
-function inlineWidth(value: string, placeholder: string): string {
-  return `${Math.max(value.length, placeholder.length) - 2}ch`;
-}
+const PROMPT_MIN_HEIGHT = 72;
+const PROMPT_MAX_HEIGHT = 420;
+const PROMPT_FLASH_MS = 1400;
 
 interface DraftErrors {
   name?: string;
@@ -39,9 +47,21 @@ interface DraftErrors {
 
 interface ClawAgentCreateV2Props {
   agent?: Agent;
+  draft?: WizardState;
+  onDraftChange?: (patch: Partial<WizardState>) => void;
+  busy?: boolean;
+  dirty?: boolean;
+  instructionsPatchNonce?: number;
 }
 
-const ClawAgentCreateV2 = ({ agent }: ClawAgentCreateV2Props = {}): ReactElement => {
+const ClawAgentCreateV2 = ({
+  agent,
+  draft,
+  onDraftChange,
+  busy = false,
+  dirty = false,
+  instructionsPatchNonce = 0,
+}: ClawAgentCreateV2Props = {}): ReactElement => {
   const isEdit = agent !== undefined;
   const navigate = useNavigate();
   const { workspaceId } = useParams<{ workspaceId?: string }>();
@@ -51,37 +71,50 @@ const ClawAgentCreateV2 = ({ agent }: ClawAgentCreateV2Props = {}): ReactElement
   const builtBy = agent?.owner?.name ?? agent?.owner?.email ?? user?.name ?? user?.email ?? 'you';
 
   const scrollRef = useRef<HTMLDivElement>(null);
+  const nameRef = useRef<HTMLInputElement>(null);
+  const promptRef = useRef<HTMLTextAreaElement>(null);
   const [showErrors, setShowErrors] = useState(false);
 
-  const [state, setState] = useState<WizardState>(() =>
+  const [internalState, setInternalState] = useState<WizardState>(() =>
     agent ? wizardStateFromAgent(agent) : INITIAL_WIZARD_STATE,
   );
+  const state = draft ?? internalState;
   const update = useCallback(
-    (patch: Partial<WizardState>) => setState(prev => ({ ...prev, ...patch })),
-    [],
+    (patch: Partial<WizardState>) => {
+      if (onDraftChange) onDraftChange(patch);
+      else setInternalState(prev => ({ ...prev, ...patch }));
+    },
+    [onDraftChange],
   );
+
+  useLayoutEffect(() => {
+    const el = promptRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${Math.min(Math.max(el.scrollHeight, PROMPT_MIN_HEIGHT), PROMPT_MAX_HEIGHT)}px`;
+  }, [state.systemPrompt]);
+
+  const [promptFlash, setPromptFlash] = useState(false);
+  const seenPatchNonce = useRef(instructionsPatchNonce);
+  useEffect(() => {
+    if (instructionsPatchNonce === seenPatchNonce.current) return;
+    seenPatchNonce.current = instructionsPatchNonce;
+    setPromptFlash(true);
+    const timer = window.setTimeout(() => setPromptFlash(false), PROMPT_FLASH_MS);
+    return (): void => window.clearTimeout(timer);
+  }, [instructionsPatchNonce]);
+
+  const leavePath = isEdit ? `${libraryPath}/agent/${agent.slug}?tab=persona` : libraryPath;
+
+  const cycleColor = (): void => {
+    const index = (COLORS as readonly string[]).indexOf(state.color);
+    update({ color: COLORS[(index + 1) % COLORS.length] ?? COLORS[0] });
+  };
 
   const slug = effectiveSlug(state);
   const nameCheck = useAgentNameCheck(isEdit ? '' : state.name.trim(), slug);
   const createMutation = useCreateClawAgent();
   const saveMutation = useSaveClawAgent(agent);
-
-  const generate = useMutation({
-    mutationFn: generateAgentPrompt,
-    onSuccess: prompt => {
-      if (prompt) update({ systemPrompt: prompt });
-    },
-    onError: (err: Error) =>
-      toast.error('Could not generate a prompt', { description: err.message }),
-  });
-
-  const intent = state.systemPrompt.trim();
-  const canImprove = intent.length > 0 && !generate.isPending;
-
-  const runGenerate = (): void => {
-    if (!canImprove) return;
-    generate.mutate({ intent, agentName: state.name });
-  };
 
   const errors = useMemo<DraftErrors>(() => {
     const next: DraftErrors = {};
@@ -131,118 +164,149 @@ const ClawAgentCreateV2 = ({ agent }: ClawAgentCreateV2Props = {}): ReactElement
   };
 
   return (
-    <div
-      ref={scrollRef}
-      className='h-full overflow-y-auto no-scrollbar'
-      data-component='ClawAgentCreateV2'
-    >
-      <div className='mx-auto flex w-full max-w-[800px] flex-col gap-6 px-6 py-6'>
-        <h1 className='text-2xl font-semibold leading-[1.2] tracking-[-0.24px] text-foreground'>
-          {isEdit ? 'Edit agent' : 'Create agent'}
-        </h1>
+    <div className='flex h-full min-h-0 flex-col' data-component='ClawAgentCreateV2'>
+      <div ref={scrollRef} className='min-h-0 flex-1 overflow-y-auto no-scrollbar'>
+        <div className='mx-auto flex w-full max-w-[720px] flex-col px-6'>
+          <div className='sticky top-0 z-10 flex flex-col gap-6 bg-background pb-8 pt-6'>
+            <button
+              type='button'
+              onClick={() => void navigate(leavePath)}
+              data-track-category='Claw Agents'
+              data-track-name='Create agent v2: back'
+              className='-ml-1.5 flex w-fit items-center gap-1 rounded-lg px-1.5 py-1 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground'
+            >
+              <ChevronLeft className='size-4' aria-hidden />
+              Back
+            </button>
 
-        <div className='flex w-full flex-col gap-4'>
-          <div className='flex w-full items-start gap-4 py-4'>
-            <div className='flex min-w-0 flex-1 flex-col gap-1.5'>
-              <div className='flex w-full items-center gap-2'>
-                <AutoWidthInput
-                  value={state.name}
-                  onChange={next =>
-                    update({
-                      name: next,
-                      ...(state.slugManual ? {} : { slug: slugify(next) }),
-                    })
-                  }
-                  placeholder='Name your agent'
-                  aria-label='Agent name'
-                  aria-invalid={visibleErrors.name !== undefined}
-                  aria-describedby={visibleErrors.name ? 'agent-v2-name-error' : undefined}
-                  autoFocus
-                  data-track-category='Claw Agents'
-                  data-track-name='Create agent v2: name'
-                  className='text-base font-medium leading-6 tracking-[-0.1px] text-foreground placeholder:font-medium placeholder:text-muted-foreground/60'
+            <div className='flex w-full items-start gap-4'>
+              <button
+                type='button'
+                onClick={cycleColor}
+                aria-label='Change agent colour'
+                title='Change agent colour'
+                data-track-category='Claw Agents'
+                data-track-name='Create agent v2: cycle colour'
+                className='shrink-0 rounded-xl transition-transform hover:scale-105 active:scale-95 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2'
+              >
+                <LibraryIconTile
+                  name={state.name || 'Agent'}
+                  color={state.color || '#6366f1'}
+                  size='lg'
                 />
-                <PencilEditLine className='size-3 shrink-0 text-muted-foreground' aria-hidden />
-              </div>
+              </button>
 
-              {visibleErrors.name && (
-                <p id='agent-v2-name-error' className='text-xs text-destructive'>
-                  {visibleErrors.name}
-                </p>
-              )}
-
-              <div className='flex items-center gap-1.5'>
-                <div className='flex items-center gap-0.5 rounded-[10px] bg-muted py-0.5 pl-0.5 pr-1'>
-                  <AtMark className='size-4 shrink-0 text-muted-foreground' aria-hidden />
+              <div className='flex min-w-0 flex-1 flex-col gap-1.5'>
+                <div className='flex w-full items-center gap-2'>
                   <AutoWidthInput
-                    value={slug}
-                    onChange={raw => {
-                      const next = slugify(raw);
-                      update({ slugManual: next.length > 0, slug: next });
-                    }}
-                    placeholder='Agent handle'
-                    aria-label='Agent handle'
-                    aria-invalid={visibleErrors.slug !== undefined}
-                    aria-describedby={visibleErrors.slug ? 'agent-v2-slug-error' : undefined}
-                    style={{ width: inlineWidth(slug, 'Agent handle') }}
-                    className='text-sm font-medium leading-5 tracking-[-0.14px] text-foreground placeholder:font-medium placeholder:text-muted-foreground/60'
+                    value={state.name}
+                    onChange={next =>
+                      update({
+                        name: next,
+                        ...(state.slugManual ? {} : { slug: slugify(next) }),
+                      })
+                    }
+                    placeholder='Name your agent'
+                    aria-label='Agent name'
+                    aria-invalid={visibleErrors.name !== undefined}
+                    aria-describedby={visibleErrors.name ? 'agent-v2-name-error' : undefined}
+                    autoFocus
+                    ref={nameRef}
+                    data-track-category='Claw Agents'
+                    data-track-name='Create agent v2: name'
+                    className='text-base font-medium leading-6 tracking-[-0.1px] text-foreground placeholder:font-medium placeholder:text-muted-foreground/60'
                   />
+                  <button
+                    type='button'
+                    onClick={() => {
+                      const el = nameRef.current;
+                      if (!el) return;
+                      el.focus();
+                      el.setSelectionRange(el.value.length, el.value.length);
+                    }}
+                    aria-label='Rename agent'
+                    title='Rename agent'
+                    data-track-category='Claw Agents'
+                    data-track-name='Create agent v2: rename'
+                    className='flex size-6 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground'
+                  >
+                    <PencilEditLine className='size-3' aria-hidden />
+                  </button>
                 </div>
-                {nameCheck.checking && state.name.trim().length > 0 && (
-                  <Loader2 className='size-3.5 animate-spin text-muted-foreground' aria-hidden />
+
+                {visibleErrors.name && (
+                  <p id='agent-v2-name-error' className='text-xs text-destructive'>
+                    {visibleErrors.name}
+                  </p>
+                )}
+
+                <div className='flex items-center gap-1.5'>
+                  <div className='flex items-center gap-0.5 rounded-[10px] bg-muted py-0.5 pl-0.5 pr-1'>
+                    <AtMark className='size-4 shrink-0 text-muted-foreground' aria-hidden />
+                    <AutoWidthInput
+                      value={slug}
+                      onChange={raw => {
+                        const next = slugify(raw);
+                        update({ slugManual: next.length > 0, slug: next });
+                      }}
+                      placeholder='Agent handle'
+                      aria-label='Agent handle'
+                      aria-invalid={visibleErrors.slug !== undefined}
+                      aria-describedby={visibleErrors.slug ? 'agent-v2-slug-error' : undefined}
+                      className='text-sm font-normal leading-5 tracking-[-0.14px] text-foreground placeholder:font-medium placeholder:text-muted-foreground/60'
+                    />
+                  </div>
+                  {nameCheck.checking && state.name.trim().length > 0 && (
+                    <Loader2 className='size-3.5 animate-spin text-muted-foreground' aria-hidden />
+                  )}
+                </div>
+
+                {visibleErrors.slug && (
+                  <p id='agent-v2-slug-error' className='text-xs text-destructive'>
+                    {visibleErrors.slug}
+                  </p>
+                )}
+
+                {isEdit && (
+                  <p className='flex items-center gap-1.5 text-sm leading-[1.5] text-foreground'>
+                    Built by
+                    <span className='text-[color:var(--mention-color)]'>@{builtBy}</span>
+                  </p>
                 )}
               </div>
-
-              {visibleErrors.slug && (
-                <p id='agent-v2-slug-error' className='text-xs text-destructive'>
-                  {visibleErrors.slug}
-                </p>
-              )}
-
-              <p className='flex items-center gap-1.5 text-sm leading-[1.5] text-foreground'>
-                Built by
-                <span className='text-[color:var(--mention-color)]'>@{builtBy}</span>
-              </p>
             </div>
           </div>
 
-          <div className='flex w-full flex-col gap-8'>
-            <div className='flex w-full flex-col gap-3'>
-              <span className='text-sm font-medium leading-[1.2] tracking-[-0.1px] text-foreground'>
-                Color
-              </span>
-              <AgentColorRow color={state.color} onChange={color => update({ color })} />
-            </div>
+          <div className='flex w-full flex-col gap-7 pb-6'>
+            {isEdit && (
+              <div className='flex w-full flex-col gap-3'>
+                <span className='text-sm font-semibold leading-[1.2] tracking-[-0.1px] text-foreground'>
+                  Color
+                </span>
+                <AgentColorRow color={state.color} onChange={color => update({ color })} />
+              </div>
+            )}
 
-            <div className='flex w-full flex-col gap-3'>
-              <label
-                htmlFor='agent-v2-description'
-                className='text-sm font-medium leading-[1.2] tracking-[-0.1px] text-foreground'
-              >
-                Description
-              </label>
-              <textarea
-                id='agent-v2-description'
-                value={state.description}
-                onChange={e => update({ description: e.target.value })}
-                placeholder='Add a description so people and agents understand when to use it.'
-                data-track-category='Claw Agents'
-                data-track-name='Create agent v2: description'
-                className='h-[86px] w-full resize-y rounded-2xl border border-border bg-card p-4 text-sm leading-5 text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring'
-              />
-            </div>
-
-            <div className='flex w-full flex-col gap-3'>
+            <div className='mb-3 flex w-full flex-col gap-1.5'>
               <label
                 htmlFor='agent-v2-prompt'
-                className='text-sm font-medium leading-[1.2] tracking-[-0.1px] text-foreground'
+                className='text-sm font-semibold leading-[1.2] tracking-[-0.1px] text-foreground'
               >
-                What it does
+                Instructions
               </label>
 
-              <div className='w-full overflow-hidden rounded-2xl border border-border bg-card'>
+              <div
+                className={cn(
+                  'w-full overflow-hidden rounded-2xl border bg-card transition-colors duration-500',
+                  promptFlash
+                    ? 'border-primary/60 bg-primary/5'
+                    : 'border-border focus-within:border-ring',
+                )}
+              >
                 <textarea
                   id='agent-v2-prompt'
+                  ref={promptRef}
+                  rows={1}
                   value={state.systemPrompt}
                   onChange={e => update({ systemPrompt: e.target.value })}
                   placeholder='Ai drafted instructions will be updated here...'
@@ -250,26 +314,11 @@ const ClawAgentCreateV2 = ({ agent }: ClawAgentCreateV2Props = {}): ReactElement
                   aria-describedby={
                     visibleErrors.systemPrompt ? 'agent-v2-prompt-error' : undefined
                   }
+                  style={{ minHeight: PROMPT_MIN_HEIGHT, maxHeight: PROMPT_MAX_HEIGHT }}
                   data-track-category='Claw Agents'
                   data-track-name='Create agent v2: prompt'
-                  className='h-[250px] w-full resize-none bg-transparent p-4 text-sm leading-5 text-foreground placeholder:text-muted-foreground focus:outline-none'
+                  className='block w-full resize-none overflow-y-auto bg-transparent px-4 py-3 text-sm leading-6 text-foreground placeholder:text-muted-foreground focus:outline-none'
                 />
-
-                <div className='flex items-center justify-end bg-muted/60 p-2'>
-                  <Button
-                    variant='outline'
-                    size='sm'
-                    onClick={runGenerate}
-                    disabled={!canImprove}
-                    loading={generate.isPending}
-                    className='rounded-lg border-border bg-card text-foreground hover:bg-muted'
-                    data-track-category='Claw Agents'
-                    data-track-name='Create agent v2: improve prompt'
-                  >
-                    {!generate.isPending && <Ai01 className='size-4' aria-hidden />}
-                    Improve with AI
-                  </Button>
-                </div>
               </div>
 
               {visibleErrors.systemPrompt && (
@@ -288,10 +337,9 @@ const ClawAgentCreateV2 = ({ agent }: ClawAgentCreateV2Props = {}): ReactElement
                 systemPrompt: state.systemPrompt,
                 description: state.description,
               }}
+              showSuggestions={isEdit}
             />
 
-            {/* Delegation is a live grant against an existing agent, so this row
-                only appears once the agent exists (edit, not create). */}
             {agent && (
               <CallableAgentCapabilityRow
                 agentSlug={agent.slug}
@@ -312,6 +360,7 @@ const ClawAgentCreateV2 = ({ agent }: ClawAgentCreateV2Props = {}): ReactElement
                 systemPrompt: state.systemPrompt,
                 description: state.description,
               }}
+              showSuggestions={isEdit}
             />
 
             <BuiltinCapabilityRow
@@ -323,6 +372,7 @@ const ClawAgentCreateV2 = ({ agent }: ClawAgentCreateV2Props = {}): ReactElement
                 systemPrompt: state.systemPrompt,
                 description: state.description,
               }}
+              showSuggestions={isEdit}
             />
 
             <SkillsCapabilityRow
@@ -336,34 +386,30 @@ const ClawAgentCreateV2 = ({ agent }: ClawAgentCreateV2Props = {}): ReactElement
               grants={state.selectedKbResources}
               onGrantsChange={selectedKbResources => update({ selectedKbResources })}
             />
+
+            {createMutation.error && (
+              <p className='text-sm text-destructive'>{createMutation.error.message}</p>
+            )}
+
+            <div className='mt-5 flex w-full items-center justify-end gap-3'>
+              {!busy && dirty && (
+                <span className='mr-auto text-xs leading-5 text-muted-foreground'>
+                  Unsaved changes
+                </span>
+              )}
+
+              <Button
+                onClick={handleSubmit}
+                disabled={busy || Object.keys(errors).length > 0}
+                loading={isEdit ? saveMutation.saving : createMutation.isPending}
+                className='rounded-xl'
+                data-track-category='Claw Agents'
+                data-track-name={`Create agent v2: ${isEdit ? 'save' : 'create'}`}
+              >
+                {isEdit ? 'Save' : 'Save agent'}
+              </Button>
+            </div>
           </div>
-        </div>
-
-        {createMutation.error && (
-          <p className='text-sm text-destructive'>{createMutation.error.message}</p>
-        )}
-
-        <div className='flex w-full items-center justify-end gap-3'>
-          <Button
-            variant='ghost'
-            onClick={() =>
-              void navigate(isEdit ? `${libraryPath}/agent/${agent.slug}?tab=persona` : libraryPath)
-            }
-            className='h-auto rounded-xl px-3 py-2.5 text-[15px]'
-            data-track-category='Claw Agents'
-            data-track-name='Create agent v2: cancel'
-          >
-            Cancel
-          </Button>
-          <Button
-            onClick={handleSubmit}
-            loading={isEdit ? saveMutation.saving : createMutation.isPending}
-            className='h-auto rounded-xl bg-foreground px-3 py-2.5 text-[15px] text-background hover:bg-foreground/90'
-            data-track-category='Claw Agents'
-            data-track-name={`Create agent v2: ${isEdit ? 'save' : 'create'}`}
-          >
-            {isEdit ? 'Save' : 'Create'}
-          </Button>
         </div>
       </div>
     </div>

@@ -14,7 +14,6 @@ import type { Agent, UpdateAgentPayload } from '@/services/claw/clawAuthAgentTyp
 import {
   DetailCard,
   DetailEmpty,
-  DetailProse,
   DetailSection,
 } from '../../../shared/primitives/DetailPrimitives';
 
@@ -28,39 +27,6 @@ function focusAtEnd(el: HTMLTextAreaElement | null): void {
   el.scrollTop = el.scrollHeight;
 }
 
-function ClickToEdit({
-  enabled,
-  label,
-  onEdit,
-  children,
-}: {
-  enabled: boolean;
-  label: string;
-  onEdit: () => void;
-  children: ReactElement;
-}): ReactElement {
-  if (!enabled) return children;
-  return (
-    <div
-      role='button'
-      tabIndex={0}
-      aria-label={label}
-      onClick={onEdit}
-      onKeyDown={event => {
-        if (event.key === 'Enter' || event.key === ' ') {
-          event.preventDefault();
-          onEdit();
-        }
-      }}
-      data-track-category='Claw Agents'
-      data-track-name={`Agent detail v2: ${label}`}
-      className='w-full cursor-text rounded-2xl focus:outline-none focus-visible:ring-1 focus-visible:ring-ring'
-    >
-      {children}
-    </div>
-  );
-}
-
 export function AgentPersonaTabV2({
   agent,
   canEdit,
@@ -72,54 +38,38 @@ export function AgentPersonaTabV2({
 }): ReactElement {
   const queryClient = useQueryClient();
   const [loadedSlug, setLoadedSlug] = useState(agent.slug);
-  const [description, setDescription] = useState(agent.description);
   const [systemPrompt, setSystemPrompt] = useState(agent.systemPrompt);
-  const [editingDescription, setEditingDescription] = useState(false);
   const [editingPrompt, setEditingPrompt] = useState(false);
   const [saving, setSaving] = useState(false);
 
   if (loadedSlug !== agent.slug) {
     setLoadedSlug(agent.slug);
-    setDescription(agent.description);
     setSystemPrompt(agent.systemPrompt);
-    setEditingDescription(false);
     setEditingPrompt(false);
   }
 
-  const descriptionChanged = description !== agent.description;
-  const promptChanged = systemPrompt !== agent.systemPrompt;
-  const dirty = descriptionChanged || promptChanged;
+  const dirty = systemPrompt !== agent.systemPrompt;
 
   const collapseOnOutsideFocus = (event: FocusEvent<HTMLDivElement>): void => {
     const next = event.relatedTarget;
     if (next instanceof Node && event.currentTarget.contains(next)) return;
-    setEditingDescription(false);
     setEditingPrompt(false);
   };
 
   const cancel = (): void => {
-    setDescription(agent.description);
     setSystemPrompt(agent.systemPrompt);
-    setEditingDescription(false);
     setEditingPrompt(false);
   };
 
   const save = async (): Promise<void> => {
     if (!dirty || saving) return;
     setSaving(true);
-    const payload: UpdateAgentPayload = {
-      ...(descriptionChanged ? { description } : {}),
-      ...(promptChanged ? { systemPrompt } : {}),
-    };
+    const payload: UpdateAgentPayload = { systemPrompt: systemPrompt ?? '' };
     try {
       const updated = await updateClawAgent(agent.slug, payload);
       queryClient.setQueryData(clawAgentDetailKey(agent.slug), updated);
-      if (promptChanged) {
-        void queryClient.invalidateQueries({ queryKey: clawPromptVersionsKey(agent.slug) });
-      }
-      setDescription(updated.description);
+      void queryClient.invalidateQueries({ queryKey: clawPromptVersionsKey(agent.slug) });
       setSystemPrompt(updated.systemPrompt);
-      setEditingDescription(false);
       setEditingPrompt(false);
       toast.success('Changes saved');
     } catch (err) {
@@ -132,36 +82,27 @@ export function AgentPersonaTabV2({
   return (
     <div className='flex w-full flex-col gap-8'>
       <div className='flex w-full flex-col gap-8' onBlur={collapseOnOutsideFocus}>
-        <DetailSection label='Description' info='What this agent is for'>
-          {canEdit && editingDescription ? (
-            <textarea
-              value={description}
-              onChange={event => setDescription(event.target.value)}
-              placeholder='Add a description so people and agents understand when to use it.'
-              aria-label='Agent description'
-              ref={focusAtEnd}
-              data-track-category='Claw Agents'
-              data-track-name='Agent detail v2: edit description'
-              className={`${EDITOR} h-[86px] resize-y`}
-            />
-          ) : (
-            <ClickToEdit
-              enabled={canEdit}
-              label='Edit description'
-              onEdit={() => setEditingDescription(true)}
-            >
-              <DetailCard>
-                {description ? (
-                  <DetailProse>{description}</DetailProse>
-                ) : (
-                  <DetailEmpty>No description added</DetailEmpty>
-                )}
-              </DetailCard>
-            </ClickToEdit>
-          )}
-        </DetailSection>
-
-        <DetailSection label='System Prompt' info='The instructions this agent runs with'>
+        <DetailSection
+          label='Instructions'
+          info='The instructions this agent runs with'
+          trailingAlign='end'
+          {...(canEdit && !editingPrompt
+            ? {
+                trailing: (
+                  <Button
+                    variant='ghost'
+                    size='sm'
+                    onClick={() => setEditingPrompt(true)}
+                    className='h-7 rounded-lg text-xs'
+                    data-track-category='Claw Agents'
+                    data-track-name='Agent detail v2: edit system prompt'
+                  >
+                    Edit
+                  </Button>
+                ),
+              }
+            : {})}
+        >
           {canEdit && editingPrompt ? (
             <textarea
               value={systemPrompt}
@@ -169,28 +110,20 @@ export function AgentPersonaTabV2({
               placeholder='Describe how this agent should behave.'
               aria-label='Agent system prompt'
               ref={focusAtEnd}
-              style={{ height: PROSE_BOX_HEIGHT }}
+              style={{ minHeight: 96, maxHeight: PROSE_BOX_HEIGHT }}
               data-track-category='Claw Agents'
               data-track-name='Agent detail v2: edit system prompt'
-              className={`${EDITOR} resize-y`}
+              className={`${EDITOR} h-auto resize-y`}
             />
+          ) : systemPrompt ? (
+            <ProseBox fit>{systemPrompt}</ProseBox>
           ) : (
-            <ClickToEdit
-              enabled={canEdit}
-              label='Edit system prompt'
-              onEdit={() => setEditingPrompt(true)}
-            >
-              {systemPrompt ? (
-                <ProseBox>{systemPrompt}</ProseBox>
-              ) : (
-                <DetailCard>
-                  <DetailEmpty>No system prompt set</DetailEmpty>
-                </DetailCard>
-              )}
-            </ClickToEdit>
+            <DetailCard>
+              <DetailEmpty>No system prompt set</DetailEmpty>
+            </DetailCard>
           )}
 
-          {canEdit && (editingDescription || editingPrompt || dirty) && (
+          {canEdit && (editingPrompt || dirty) && (
             <div className='flex w-full items-center justify-end gap-2'>
               <Button
                 variant='ghost'

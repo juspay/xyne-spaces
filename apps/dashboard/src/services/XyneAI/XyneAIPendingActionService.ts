@@ -41,3 +41,22 @@ export async function respondToPendingAction(
   xyneAIStreamManager.resolvePendingAction(message.id, actionIndex, resolution);
   return resolution;
 }
+
+export function resolvePendingActionLocally(
+  message: Message,
+  action: PendingAction,
+  actionIndex: number,
+  resolution: PendingActionResolution,
+): void {
+  let sessionId = message.sessionId;
+  for (const state of xyneAIStreamManager.getAllActiveStreams().values()) {
+    if (!state.messages.some(candidate => candidate.id === message.id)) continue;
+    sessionId ||= state.sessionId;
+    break;
+  }
+  if (sessionId) {
+    const actionId = getPendingActionId(sessionId, message.id, action, actionIndex);
+    storePendingActionResolution(actionId, resolution);
+  }
+  xyneAIStreamManager.resolvePendingAction(message.id, actionIndex, resolution);
+}

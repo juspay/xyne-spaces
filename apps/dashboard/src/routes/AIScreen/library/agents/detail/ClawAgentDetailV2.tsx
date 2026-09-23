@@ -1,13 +1,13 @@
-import { useCallback, useState, type ReactElement } from 'react';
+import { type ReactElement } from 'react';
 import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { cn } from '@/utils/classNames';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { useClawAgentDetail } from '@/hooks/useClawAgentDetail';
 import { Pill } from '../../shared/primitives/Pill';
 import { LibraryIconTile } from '../../shared/components/LibraryCard';
-import { AgentCreatedBanner } from './AgentCreatedBanner';
 import { isSpacesRegistered } from './agentRegistration';
 import { AgentDetailHeaderV2 } from './AgentDetailHeaderV2';
+import { BUILDER_DRIVER_SLUG } from './AgentBuilderPanel';
 import { AgentPersonaTabV2 } from './persona/AgentPersonaTabV2';
 import { AgentActivityTabV2 } from './activity/AgentActivityTabV2';
 import { AgentBehaviourTabV2 } from './behaviour/AgentBehaviourTabV2';
@@ -48,13 +48,9 @@ const ClawAgentDetailV2 = (): ReactElement => {
       : null;
   const returnPath = navigationState?.returnTo ?? `${libraryPath}?tab=agents`;
   const tab = resolveTab(searchParams.get('tab'));
-  const justCreated = (location.state as { justCreated?: unknown } | null)?.justCreated === true;
-  const [bannerDismissed, setBannerDismissed] = useState(false);
-  const dismissBanner = useCallback(() => setBannerDismissed(true), []);
 
   const { data: agent, isLoading, isError } = useClawAgentDetail(slug);
   const pendingRegistration = agent !== undefined && !isSpacesRegistered(agent);
-  const showBanner = !bannerDismissed && (justCreated || pendingRegistration);
   const actions = useAgentDetailActions(agent);
   const { canOpenAgentChat, openAgentChat } = useOpenAgentChat();
 
@@ -69,12 +65,21 @@ const ClawAgentDetailV2 = (): ReactElement => {
     setSearchParams(params, { replace: true, state: navigationState });
   };
 
+  const openBuilder = (): void => {
+    const params = new URLSearchParams(searchParams);
+    params.set('build', '1');
+    setSearchParams(params, { replace: true, state: navigationState });
+  };
+
+  const builderOpen = searchParams.get('build') === '1';
+  const canBuild = agent !== undefined && agent.slug !== BUILDER_DRIVER_SLUG && !builderOpen;
+
   const updated = formatUpdated(agent?.updatedAt);
   const version = agent?.activePromptVersion;
 
   return (
     <div className='h-full overflow-y-auto no-scrollbar' data-component='ClawAgentDetailV2'>
-      <div className='mx-auto flex w-full max-w-[800px] flex-col gap-6 px-6 pb-6'>
+      <div className='mx-auto flex w-full max-w-[800px] flex-col gap-6 px-6'>
         <div className='bg-background sticky top-0 z-10 flex flex-col gap-6 pb-3 pt-6'>
           {agent && (
             <AgentDetailHeaderV2
@@ -82,6 +87,7 @@ const ClawAgentDetailV2 = (): ReactElement => {
               actions={actions}
               onChat={() => openAgentChat(agent.slug)}
               canChat={canOpenAgentChat}
+              onBuild={canBuild ? openBuilder : undefined}
               onBack={() => void navigate(returnPath)}
             />
           )}
@@ -121,42 +127,47 @@ const ClawAgentDetailV2 = (): ReactElement => {
           </p>
         ) : (
           <>
-            {showBanner && (
-              <AgentCreatedBanner
-                agent={agent}
-                pendingRegistration={pendingRegistration}
-                onDismiss={dismissBanner}
-              />
-            )}
+            <div className='flex w-full items-start gap-4'>
+              <LibraryIconTile name={agent.name} color={agent.color || '#6366f1'} size='lg' />
 
-            <div className='flex w-full items-start gap-3'>
-              <LibraryIconTile name={agent.name} color={agent.color || '#6366f1'} size='md' />
-
-              <div className='flex min-w-0 flex-1 flex-col gap-0.5 overflow-hidden'>
-                <div className='flex min-w-0 items-center gap-2'>
-                  <span className='truncate text-sm font-semibold leading-[22px] text-foreground'>
+              <div className='flex min-w-0 flex-1 flex-col gap-1 overflow-hidden'>
+                <div className='flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1'>
+                  <h2 className='truncate text-lg font-semibold leading-7 tracking-[-0.2px] text-foreground'>
                     {agent.name}
+                  </h2>
+                  <span className='truncate text-sm leading-6 text-muted-foreground'>
+                    @{agent.slug}
                   </span>
-                  <Pill tone={agent.enabled ? 'success' : 'neutral'}>
-                    {agent.enabled ? 'Enabled' : 'Disabled'}
-                  </Pill>
+                  <span className='self-center'>
+                    <Pill tone={agent.enabled ? 'success' : 'neutral'}>
+                      {agent.enabled ? 'Enabled' : 'Disabled'}
+                    </Pill>
+                  </span>
                 </div>
 
-                <div className='flex flex-wrap items-center gap-1.5 text-xs leading-[22px] text-foreground/80 opacity-70'>
-                  <span>@{agent.slug}</span>
-                  {version !== null && version !== undefined && (
-                    <>
-                      <span aria-hidden>·</span>
-                      <span>v{version}</span>
-                    </>
+                <div className='flex flex-wrap items-center gap-1.5 text-xs leading-5 text-muted-foreground'>
+                  {version !== null && version !== undefined && <span>v{version}</span>}
+                  {version !== null && version !== undefined && updated && (
+                    <span aria-hidden>·</span>
                   )}
-                  {updated && (
-                    <>
-                      <span aria-hidden>·</span>
-                      <span>Last updated on: {updated}</span>
-                    </>
-                  )}
+                  {updated && <span>Last updated on: {updated}</span>}
+                  <span aria-hidden>·</span>
+                  <button
+                    type='button'
+                    data-track-category='Claw Agents'
+                    data-track-name='Agent detail v2: version history'
+                    className='underline underline-offset-2 transition-colors hover:text-foreground'
+                  >
+                    Version history
+                  </button>
                 </div>
+
+                {pendingRegistration && (
+                  <p className='text-xs leading-[18px] text-muted-foreground/70'>
+                    Chat works now. An admin needs to register this agent before it can be
+                    @mentioned in Spaces.
+                  </p>
+                )}
               </div>
             </div>
 
@@ -181,6 +192,8 @@ const ClawAgentDetailV2 = (): ReactElement => {
             )}
           </>
         )}
+
+        <div className='h-12 shrink-0' aria-hidden />
       </div>
     </div>
   );

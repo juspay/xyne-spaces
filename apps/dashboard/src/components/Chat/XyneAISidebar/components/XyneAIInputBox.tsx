@@ -36,6 +36,9 @@ import Placeholder from '@tiptap/extension-placeholder';
 import LinkExtension from '@tiptap/extension-link';
 import { LinkSyncPlugin } from '../../../ui/TipTapExtensions/LinkSyncPlugin';
 import { toast } from 'sonner';
+import { useQuery } from '@tanstack/react-query';
+import { AgentGlyph } from '../../../AIScreen/AIAgentSelector';
+import { fetchAccessibleClawAgents } from '../../../../services/clawAgentListService';
 import { VoiceInput } from '../../../ui/InputBox/VoiceInput';
 import type { VoiceInputHandle } from '../../../ui/InputBox/VoiceInput';
 import { StopIcon } from './StopIcon';
@@ -114,6 +117,7 @@ const EMPTY_RECORDINGS: SelectedRecording[] = [];
 const EMPTY_ACTIVITIES: UserActivity[] = [];
 
 export interface XyneAIInputBoxProps {
+  placeholder?: string;
   channelId?: string | null;
   channelName?: string;
   channelDescription?: string;
@@ -170,6 +174,8 @@ export interface XyneAIInputBoxProps {
   onUserTagsChange?: (userTags: Record<string, UserTag>) => void;
   isOnboarding?: boolean;
   selectedAgentSlug?: string | null;
+  showAgentHeader?: boolean;
+  hideAgentName?: boolean;
   agents?: AgentOption[];
   onSelectAgent?: (slug: string | null) => void;
   /** Models the selected agent's LiteLLM key can serve. Empty ⇒ picker hides. */
@@ -236,6 +242,7 @@ export interface Attachment {
 export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxProps>(
   (
     {
+      placeholder,
       channelId,
       channelName: _channelName,
       scopeType: _scopeType,
@@ -289,6 +296,8 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
       onUserTagsChange,
       isOnboarding = false,
       selectedAgentSlug = null,
+      showAgentHeader = false,
+      hideAgentName = false,
       agents = [],
       onSelectAgent,
       models = [],
@@ -324,6 +333,19 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
     }, [onOpenContextModal]);
     const { isMobile, isMac } = usePlatform();
     const navigate = useNavigate();
+
+    const labelAskAi = showAgentHeader === true;
+    const agentLabelled =
+      Boolean(selectedAgentSlug) && (labelAskAi || selectedAgentSlug !== 'ask-ai');
+    const { data: accessibleAgents = [] } = useQuery({
+      queryKey: ['accessible-claw-agents'],
+      queryFn: fetchAccessibleClawAgents,
+      staleTime: 5 * 60 * 1000,
+      enabled: agentLabelled,
+    });
+    const activeAgent = agentLabelled
+      ? (accessibleAgents.find(a => a.slug === selectedAgentSlug) ?? null)
+      : null;
 
     // Voice input
     const voiceInputRef = React.useRef<VoiceInputHandle>(null);
@@ -978,7 +1000,7 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
           },
         }),
         Placeholder.configure({
-          placeholder: 'Ask Xyne AI',
+          placeholder: placeholder ?? 'Ask Xyne AI',
         }),
         LinkExtension.extend({
           inclusive: false,
@@ -1862,9 +1884,25 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
           <div
             className={`
             overflow-hidden transition-all flex flex-col relative bg-clip-padding
-            ${isMobile ? 'bg-background rounded-[26px] text-foreground shadow-sm' : 'bg-background rounded-2xl border border-chat-composer-border focus-within:border-chat-composer-border-active text-foreground shadow-none'}
+            ${isMobile ? 'bg-background rounded-[26px] text-foreground shadow-sm' : 'bg-background rounded-2xl border text-foreground shadow-none'}
+            ${
+              isMobile
+                ? ''
+                : activeAgent
+                  ? 'border-primary/30'
+                  : 'border-chat-composer-border focus-within:border-chat-composer-border-active'
+            }
           `}
           >
+            {activeAgent && !hideAgentName && (
+              <div className='flex items-center gap-2 bg-primary/15 px-3 py-1.5'>
+                <AgentGlyph color={activeAgent.color} name={activeAgent.name} size={18} />
+                <span className='min-w-0 truncate text-sm font-medium text-foreground'>
+                  {activeAgent.name}
+                </span>
+              </div>
+            )}
+
             {/* Input Area - Text only */}
             <div className='relative pt-1 pb-1 px-3'>
               {/* `[&_p.is-editor-empty:before]:hidden` kills the Placeholder
@@ -1942,7 +1980,7 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
                   >
                     <button
                       type='button'
-                      className={`flex items-center justify-center rounded hover:bg-accent transition-all duration-200 ease-in-out shrink-0 p-1.5`}
+                      className={`flex items-center justify-center rounded-full hover:bg-accent transition-all duration-200 ease-in-out shrink-0 p-1.5`}
                       aria-label='Add to conversation'
                       title='Add to conversation'
                       data-track-category='XyneAI'
@@ -1957,7 +1995,7 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
                   <button
                     type='button'
                     onClick={() => setShowContextPicker(prev => !prev)}
-                    className={`flex items-center justify-center rounded hover:bg-accent transition-all duration-200 ease-in-out shrink-0 p-1.5`}
+                    className={`flex items-center justify-center rounded-full hover:bg-accent transition-all duration-200 ease-in-out shrink-0 p-1.5`}
                     aria-label='Add context'
                     title={`Add context (${isMac ? '⌘⇧⌥' : 'Ctrl+Shift+Alt+'}/)`}
                     // Spared by the picker's outside-click handler, so this

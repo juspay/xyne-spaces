@@ -5405,3 +5405,12 @@ img.inline-emoji,
 [data-ticket-context-row] [role="combobox"] {
   height: 34px !important;
 }
+
+.agent-builder-pane .xyne-message-text,
+.agent-builder-pane .xyne-message-text p {
+  font-weight: 400;
+}
+.agent-builder-pane .xyne-user-bubble {
+  border-radius: 24px;
+  padding: 10px 16px;
+}

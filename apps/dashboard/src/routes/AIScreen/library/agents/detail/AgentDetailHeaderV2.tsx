@@ -8,7 +8,7 @@ import {
   ThreeDotsMenuHorizontal,
   UserDefault,
 } from '@xyne/icons';
-import { Loader2 } from 'lucide-react';
+import { Loader2, Wrench } from 'lucide-react';
 import { cn } from '@/utils/classNames';
 import { Tooltip } from '@/components/ui/Tooltip/Tooltip';
 import { Popover } from '@/components/ui/Popover/index';
@@ -99,6 +99,7 @@ interface AgentDetailHeaderV2Props {
   canChat: boolean;
   onBack: () => void;
   onChat: () => void;
+  onBuild?: (() => void) | undefined;
 }
 
 export function AgentDetailHeaderV2({
@@ -107,6 +108,7 @@ export function AgentDetailHeaderV2({
   canChat,
   onBack,
   onChat,
+  onBuild,
 }: AgentDetailHeaderV2Props): ReactElement {
   const [menuOpen, setMenuOpen] = useState(false);
   const [cloneOpen, setCloneOpen] = useState(false);
@@ -167,6 +169,14 @@ export function AgentDetailHeaderV2({
             hint='Ask an admin to make this agent global. It stays personal until they approve.'
             busy={busy.publishing}
             onClick={() => void actions.publish()}
+          />
+        )}
+
+        {canEdit && onBuild && (
+          <Action
+            label='Build with AI'
+            icon={<Wrench className='size-4' aria-hidden />}
+            onClick={onBuild}
           />
         )}
 
