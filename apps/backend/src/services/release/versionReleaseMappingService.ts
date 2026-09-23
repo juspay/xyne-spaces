@@ -1,12 +1,12 @@
 import { Application, Prisma, PullRequests } from '@prisma/client';
 import { ApplicationRepository } from '@/database/repositories/applicationRepository';
 import { DatabaseClient } from '@/database/client';
-import { BitbucketManager } from '@/git-providers/bitbucket/apis';
+import { getGitProvider } from '@/git-providers/factory';
 import { BitbucketService } from '@/services/bitbucketService';
 import { CommitAnalysisService, PullRequestDiffFile } from '@/services/commitAnalysisService';
 import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
-import { parseBitbucketRepoUrl } from '@/utils/repoUrlParser';
+import { parseBitbucketRepoUrl, parseGitHubRepoUrl } from '@/utils/repoUrlParser';
 import { BitbucketConfig } from '@/types/bitbucket';
 import {
   BaseTicketType,
@@ -51,7 +51,6 @@ function buildBitbucketServiceConfig(): BitbucketConfig {
 
 class VersionReleaseMappingService {
   private readonly applicationRepository = new ApplicationRepository();
-  private readonly bitbucketManager = new BitbucketManager();
   private readonly commitAnalysisService = new CommitAnalysisService(
     new BitbucketService(buildBitbucketServiceConfig()),
   );
@@ -268,14 +267,21 @@ class VersionReleaseMappingService {
   }
 
   private async getPullRequestDiffContext(pr: PullRequests): Promise<PullRequestDiffContext | null> {
-    const parsed = parseBitbucketRepoUrl(pr.repositoryUrl);
+    // GitHub's owner/repo and Bitbucket's projectKey/repoSlug occupy the same two
+    // positional args, so parse with the provider that actually hosts the PR —
+    // asking Bitbucket for a GitHub PR yields an empty diff and no affected apps.
+    const gitHubRepo = parseGitHubRepoUrl(pr.repositoryUrl);
+    const parsed = gitHubRepo
+      ? { projectKey: gitHubRepo.owner, repoSlug: gitHubRepo.repo }
+      : parseBitbucketRepoUrl(pr.repositoryUrl);
     if (!parsed) {
       logger.warn(`[VersionReleaseMapping] skipped PR ${pr.prUrl}: cannot parse repositoryUrl=${pr.repositoryUrl}`);
       return null;
     }
 
     try {
-      const diffFiles = await this.bitbucketManager.getPRDiff(parsed.projectKey, parsed.repoSlug, pr.prId);
+      const diffFiles = await getGitProvider(pr.repositoryUrl)
+        .getPRDiff(parsed.projectKey, parsed.repoSlug, pr.prId);
       return {
         pr,
         projectKey: parsed.projectKey,
