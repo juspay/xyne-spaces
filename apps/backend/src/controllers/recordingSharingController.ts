@@ -17,9 +17,7 @@ const RecordingSharingCommandSchema = z.discriminatedUnion('action', [
   z.object({
     action: z.literal('grant'),
     targets: z.array(TargetSchema).min(1).max(100),
-    access: z
-      .enum([EntityUserAccess.VIEW, EntityUserAccess.EDIT, EntityUserAccess.ADMIN])
-      .optional(),
+    access: z.enum([EntityUserAccess.VIEW, EntityUserAccess.EDIT]).optional(),
     // Optional rich-text share message.
     messageContent: z.string().trim().min(1).max(10000).optional(),
   }),

@@ -3141,6 +3141,18 @@ export const queries: AnyQueryRegistry = defineQueries({
         .where('workspaceId', ctx.workspaceId)
         .where('callType', CallType.HEADLESS)
         .where('createdByUserId', ctx.userID)
+        .related('shares', shares =>
+          shares
+            .where('shareableEntityType', ShareableEntityType.NOTE_TAKER)
+            .where('entityUserAccess', '!=', EntityUserAccess.REVOKED)
+            .where(({ or, cmp, exists }) =>
+              or(
+                cmp('userId', ctx.userID),
+                exists('userGroupMemberships', m => m.where('userId', ctx.userID)),
+                exists('channelMembers', m => m.where('userId', ctx.userID)),
+              ),
+            ),
+        )
         .orderBy('startedAt', 'desc')
         .orderBy('id', 'desc');
 
@@ -3173,6 +3185,18 @@ export const queries: AnyQueryRegistry = defineQueries({
         .where('createdByUserId', '!=', ctx.userID)
         .whereExists('shares', share =>
           share
+            .where('shareableEntityType', ShareableEntityType.NOTE_TAKER)
+            .where('entityUserAccess', '!=', EntityUserAccess.REVOKED)
+            .where(({ or, cmp, exists }) =>
+              or(
+                cmp('userId', ctx.userID),
+                exists('userGroupMemberships', m => m.where('userId', ctx.userID)),
+                exists('channelMembers', m => m.where('userId', ctx.userID)),
+              ),
+            ),
+        )
+        .related('shares', shares =>
+          shares
             .where('shareableEntityType', ShareableEntityType.NOTE_TAKER)
             .where('entityUserAccess', '!=', EntityUserAccess.REVOKED)
             .where(({ or, cmp, exists }) =>
@@ -3236,7 +3260,11 @@ export const queries: AnyQueryRegistry = defineQueries({
             .where('entityUserAccess', '!=', EntityUserAccess.REVOKED)
             .related('user')
             .related('userGroup')
-            .related('channel'),
+            .related('channel')
+            .related('userGroupMemberships', memberships =>
+              memberships.where('userId', ctx.userID),
+            )
+            .related('channelMembers', members => members.where('userId', ctx.userID)),
         )
         .one(),
   ),

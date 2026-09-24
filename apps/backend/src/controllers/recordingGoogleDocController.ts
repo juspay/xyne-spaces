@@ -4,11 +4,11 @@ import { google } from 'googleapis';
 import z from 'zod';
 import { db } from '@/database/client';
 import { repositories } from '@/database/repositories';
-import { callShareService } from '@/services/callShareService';
+import { callShareService, type AccessResolvableCall } from '@/services/callShareService';
 import { decrypt, encrypt } from '@/services/encryptionService';
 import { convertBlockNoteToMarkdown } from '@/services/canvasService';
 import { GoogleDocsApiError, googleDocsService } from '@/services/googleDocsService';
-import { callSubject } from '@/utils/callTypeUtils';
+import { callSubject, isRecording } from '@/utils/callTypeUtils';
 import { readFromYSweet } from '@/utils/ysweetUtils';
 import {
   appendRecordingGoogleDocLink,
@@ -107,6 +107,22 @@ async function recordCreatedGoogleDoc(
   });
 }
 
+/**
+ * Whether the caller may export this call's summary, and the 403 copy when they may not.
+ */
+async function checkExportAccess(
+  call: AccessResolvableCall,
+  userId: string,
+  workspaceId: string
+): Promise<string | null> {
+  if (isRecording(call)) {
+    return (await callShareService.hasAtLeast(call, userId, workspaceId, 'edit'))
+      ? null
+      : 'Only the recording owner or an editor can export it';
+  }
+  return call.createdByUserId === userId ? null : 'Only the call owner can export it';
+}
+
 export class RecordingGoogleDocController {
   context = async (req: Request, res: Response): Promise<void> => {
     try {
@@ -128,14 +144,9 @@ export class RecordingGoogleDocController {
         res.status(404).json({ success: false, error: 'Recording not found' });
         return;
       }
-      if (
-        call.createdByUserId !== userId ||
-        !(await callShareService.canView(call, userId, workspaceId))
-      ) {
-        res.status(403).json({
-          success: false,
-          error: `Only the ${callSubject(call)} owner can export it`,
-        });
+      const exportDenied = await checkExportAccess(call, userId, workspaceId);
+      if (exportDenied) {
+        res.status(403).json({ success: false, error: exportDenied });
         return;
       }
 
@@ -190,14 +201,9 @@ export class RecordingGoogleDocController {
         return;
       }
 
-      if (
-        call.createdByUserId !== userId ||
-        !(await callShareService.canView(call, userId, workspaceId))
-      ) {
-        res.status(403).json({
-          success: false,
-          error: `Only the ${callSubject(call)} owner can export it`,
-        });
+      const exportDenied = await checkExportAccess(call, userId, workspaceId);
+      if (exportDenied) {
+        res.status(403).json({ success: false, error: exportDenied });
         return;
       }
 
