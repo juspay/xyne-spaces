@@ -33,6 +33,7 @@ import { VespaOperationType } from './vespa-injection/core/mapper';
 import { wrapTransactionWithACL } from './acl';
 import { createZeroAuditJobs, flushAuditTrail } from './audit';
 import type { AuditJobsAccumulator } from './audit';
+import { decryptQueryResult } from './encryption-interceptor';
 import { config } from '@/config/env';
 import { checkRateLimit } from '@/services/zeroRateLimiter';
 import { superpositionClient } from '@/services/superpositionClient';
@@ -546,6 +547,9 @@ function buildQueryInternals(
  * read ACL is folded into the AST before any SQL is generated — there is no
  * second authorization path. `provider` is the caller's to choose: the replica
  * for ordinary reads, the primary when a read must not be stale.
+ *
+ * Rows come straight from pg, so server-encrypted fields are decrypted here; the
+ * Prisma extension and Zero's `run` proxy never see this path.
  */
 export async function runCatalogQuery(
   name: string,
@@ -568,7 +572,7 @@ export async function runCatalogQuery(
       executePostgresQuery(tx.dbTransaction, ast, format, schema, serverSchema),
     );
     conformToZeroShape(data, format as ZeroResultFormat);
-    return data;
+    return await decryptQueryResult(data, { queryName: name });
   } catch (error) {
     throw new CatalogQueryError('execute', `Catalog query "${name}" failed.`, error);
   }
@@ -672,8 +676,9 @@ export async function handleQueriesZqlToSql(request: Request): Promise<any> {
             };
           }
 
-          // Extract ZQL result from JSON-wrapped response
-          const data = extractZqlResult(pgArrayResult);
+          // Extract ZQL result from JSON-wrapped response. $queryRawUnsafe bypasses the
+          // Prisma encryption extension, so decrypt server-encrypted fields explicitly.
+          const data = await decryptQueryResult(extractZqlResult(pgArrayResult), { queryName: req.name });
 
           logger.info(`Converting ZQL to SQL: ${req.name}`);
           logger.info('Full SQL query:', sqlQuery.text);
