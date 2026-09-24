@@ -35,6 +35,7 @@ const PRODUCT_ALIASES: ReadonlyArray<{ re: RegExp; needles: readonly string[] }>
   { re: /\blinear\b/i, needles: ['linear'] },
   { re: /\bgmail\b/i, needles: ['gmail', 'google-mail'] },
   { re: /\boutlook\b/i, needles: ['outlook', 'microsoft'] },
+  { re: /\be-?mails?\b/i, needles: ['gmail', 'outlook', 'google-mail', 'email', 'mail'] },
   { re: /\bdiscord\b/i, needles: ['discord'] },
   { re: /\bteams\b/i, needles: ['teams', 'microsoft-teams'] },
   { re: /\bcalendar\b/i, needles: ['calendar', 'google-calendar'] },

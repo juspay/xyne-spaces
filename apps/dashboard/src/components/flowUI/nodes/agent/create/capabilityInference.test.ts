@@ -27,6 +27,12 @@ void describe('capabilityInference', () => {
     assert.ok(softProductNeedles('standup scribe for eng channel').includes('slack'));
   });
 
+  void it('soft-cues email from “emails the lead”', () => {
+    const needles = softProductNeedles('agent that emails the lead a digest');
+    assert.ok(needles.includes('gmail') || needles.includes('email'), JSON.stringify(needles));
+    assert.ok(inferNeededCapabilities('agent that emails the lead').includes('mcp'));
+  });
+
   void it('leaves vague make-an-agent empty', () => {
     assert.deepEqual(inferNeededCapabilities('make an agent'), []);
   });

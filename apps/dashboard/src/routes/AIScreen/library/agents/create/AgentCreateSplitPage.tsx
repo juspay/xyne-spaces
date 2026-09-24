@@ -43,7 +43,9 @@ import { listAccessibleKnowledgeBase } from '@/services/claw/clawKnowledgeBaseSe
 import { listSkills } from '@/services/claw/clawSkillsService';
 import { sanitizeAgentCanvasName } from '@/components/flowUI/nodes/agent/create/canvasFromIdentity';
 import { selectHubToolsForIntent } from '@/components/flowUI/nodes/agent/create/hubCatalogSelect';
+import { inferNeededCapabilities } from '@/components/flowUI/nodes/agent/create/capabilityInference';
 import {
+  canvasHasCapability,
   capabilityGapMessage,
   jobIntentFromForm,
   validateCanvasCapabilities,
@@ -109,6 +111,22 @@ export function AgentCreateSplitPage({
     if (!scripted) return undefined;
     return watchScriptedHubCatalog(queryClient, user?.id);
   }, [queryClient, scripted, user?.id]);
+
+  // Manual canvas picks clear a sticky Create block once chips cover job needs.
+  useEffect(() => {
+    if (!capabilityBlock) return;
+    const intent =
+      lastJobIntentRef.current || jobIntentFromForm('', createForm.form);
+    const needed = inferNeededCapabilities(intent);
+    if (needed.length === 0) {
+      setCapabilityBlock(false);
+      return;
+    }
+    if (needed.every(cls => canvasHasCapability(createForm.form, cls))) {
+      setCapabilityBlock(false);
+      setCreateError(null);
+    }
+  }, [capabilityBlock, createForm.form]);
 
   const scriptedPlayer = useScriptedCreatePlayer({
     enabled: scripted,
@@ -505,10 +523,7 @@ export function AgentCreateSplitPage({
       return;
     }
     setCapabilityBlock(false);
-    if (capResult.catalogMiss.length > 0) {
-      // Honest miss only — catalog cannot satisfy; allow create to proceed.
-      setCreateError(capabilityGapMessage(capResult));
-    }
+    // catalogMiss is honest-only — Create may proceed (draft already warned).
     const form = { ...createForm.getForm(), slug };
     try {
       const agent = await createAgent({

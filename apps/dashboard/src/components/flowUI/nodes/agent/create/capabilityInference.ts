@@ -1,6 +1,9 @@
 /**
  * Job-semantic capability inference for Hub create.
- * User not naming MCP/tools ≠ tools not needed — the drafted job drives this.
+ *
+ * Product bar: users often won't name MCP / Slack / builtins. Infer needed
+ * hubs from the job description so create can auto-select on the first go.
+ * User not naming a product ≠ that capability is not needed.
  */
 
 export type CapabilityClass = 'mcp' | 'builtin' | 'subagent' | 'skills' | 'knowledge';
@@ -12,7 +15,7 @@ export const SOFT_PRODUCT_CUES: ReadonlyArray<{ re: RegExp; needles: readonly st
     needles: ['slack'],
   },
   {
-    re: /\b(email|e-?mail|inbox|gmail|outlook|mail\b|digest)\b/i,
+    re: /\b(e-?mails?|inbox|gmail|outlook|mails?\b|digest)\b/i,
     needles: ['gmail', 'outlook', 'google-mail', 'email', 'mail'],
   },
   {
@@ -34,7 +37,7 @@ export const SOFT_PRODUCT_CUES: ReadonlyArray<{ re: RegExp; needles: readonly st
 
 /** Explicit product / MCP / tool nouns (legacy named path). */
 const EXPLICIT_TOOL_NOUN =
-  /\b(mcp|tools?|integrations?|servers?|slack|github|jira|notion|linear|gmail|outlook|email|e-?mail|discord|teams|calendars?|browse|web\s*search|x\.com|\btwitter\b|sub-?agents?|delegate|delegat(?:e|ion))\b/i;
+  /\b(mcp|tools?|integrations?|servers?|slack|github|jira|notion|linear|gmail|outlook|e-?mails?|discord|teams|calendars?|browse|web\s*search|x\.com|\btwitter\b|sub-?agents?|delegate|delegat(?:e|ion))\b/i;
 
 const BUILTIN_JOB =
   /\b(built-?ins?|browse|web\s*search|filesystem|terminal|research|researches|search(?:es|ing)?|look\s*up|competitor|on\s+the\s+web|web\s+research|code\s*search)\b/i;
@@ -49,7 +52,7 @@ const KNOWLEDGE_JOB =
 
 /** External IO / messaging / tickets — implies an MCP (or gateway) even without product names. */
 const MCP_JOB_IO =
-  /\b(post|posts|send|sends|notify|notifies|message|messages|channel|inbox|email|e-?mail|digest|standup|stand-?up|ticket|tickets|pull.?request|\bprs?\b|repo|repos|calendar|schedule)\b/i;
+  /\b(post|posts|send|sends|notify|notifies|message|messages|channel|inbox|e-?mails?|digest|standup|stand-?up|ticket|tickets|pull.?request|\bprs?\b|repo|repos|calendar|schedule)\b/i;
 
 export function softProductNeedles(intent: string): string[] {
   const needles: string[] = [];

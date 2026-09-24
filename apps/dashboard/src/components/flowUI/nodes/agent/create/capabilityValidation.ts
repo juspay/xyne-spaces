@@ -1,6 +1,10 @@
 /**
  * Post-bind capability validation — canvas chips are the source of truth.
- * Needed classes come from job semantics; missing chips → heal or block Create.
+ *
+ * Product bar: first-go accuracy is proactive infer + auto-select from the job
+ * description (see capabilityInference / hubCatalogSelect / fillTools). This
+ * module is the Create safety net — heal missing chips, then block only when
+ * the catalog could satisfy the job but the canvas still lacks them.
  */
 
 import type { AvailableTools } from '@/services/claw/clawToolsTypes';
@@ -155,8 +159,8 @@ export function capabilityGapMessage(result: CapabilityValidationResult): string
   if (result.healable.length === 0 && result.catalogMiss.length === 0) return null;
   if (result.healable.length > 0) {
     const labels = result.healable.join(', ');
-    return `Create blocked — canvas is missing required hubs (${labels}). Retry drafting or pick them on the canvas.`;
+    return `Still selecting ${labels} for this job — wait for chips on the canvas, or pick them yourself, before Create.`;
   }
   const labels = result.catalogMiss.join(', ');
-  return `Couldn't bind ${labels} — nothing matching in the catalog. You can still create, or connect those integrations first.`;
+  return `Couldn't auto-select ${labels} — nothing matching in the catalog. You can still create, or connect those integrations first.`;
 }
