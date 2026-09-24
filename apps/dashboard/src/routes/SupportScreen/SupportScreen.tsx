@@ -88,7 +88,6 @@ import {
   BarchartDefault as BarChart3,
   UserPlus,
   InformationCircle as InfoIcon,
-  FileText,
   File02Text,
   File02Plus,
 } from '@xyne/icons';
@@ -274,7 +273,6 @@ import {
   CloudAgentDock,
   setCloudAgentOpenTicket,
 } from '../../components/xyne-desk/CloudAgentDock/CloudAgentDock';
-import { getOzonetelToolbar } from '../../services/clients/telephonyApi';
 import CanvasScreen from '../../components/Canvas/CanvasScreen';
 import DeskCanvasList from '../../components/xyne-desk/DeskCanvasList';
 import { AddThreadToCanvasDialog } from '../../components/xyne-desk/AddThreadToCanvasDialog';
