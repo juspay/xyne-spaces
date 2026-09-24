@@ -181,9 +181,12 @@ export class DeskMetricsRepository {
       return Prisma.sql`(${statusArm} OR ${stageEntryPredicate(resolvedStageNames)})`;
     })();
 
+    // From range start, so an older ticket reopened in range doesn't count a pre-range resolution.
+    // Created-in-range tickets can't resolve before gte, so their value is unchanged.
     const resolvedAtSql = Prisma.sql`
       (SELECT MAX(ta."timestamp") FROM "public"."ticket_activities" ta
-        WHERE ta."ticketId" = c."ticketId" AND ${resolvedPredicate})`;
+        WHERE ta."ticketId" = c."ticketId" AND ${resolvedPredicate}
+          AND ta."timestamp" >= ${gte})`;
 
     const reopenedPredicate = Prisma.sql`(
       ta."activityType" = 'STATUS'
@@ -203,7 +206,7 @@ export class DeskMetricsRepository {
         AND ${reopenedPredicate}
     )`;
 
-    // Cohort: active tickets created in range, optionally scoped by the selected filters.
+    // Ticket scope filters (non-archived, attributes, custom fields, tags) for either cohort.
     let customFieldExists: Prisma.Sql = Prisma.sql``;
     if (customFieldFilter && customFieldFilter.keys.length > 0) {
       // One EXISTS per field, AND'd together — values within a field are OR'd, different fields are AND'd
@@ -316,21 +319,33 @@ export class DeskMetricsRepository {
       assigneeIds
     )} ${ticketAttributeExists} ${customFieldExists} ${tagExists}`;
 
-    // By resolved date: tickets whose latest resolution (the one RT uses) is in range. Tickets
-    // without TICKET_CREATED use tickets.createdAt.
+    // Active: tickets created in range, plus older ones whose stage or status changed in it
+    // (STATUS rows are only ever stage/status moves). No-op moves logged by automations and
+    // stage-reconstruction repairs (stamped with the run time) don't count. Scope filters run
+    // once per ticket, after DISTINCT. Tickets without TICKET_CREATED use tickets.createdAt.
     const cohortCte =
-      params.dateBasis === 'resolved'
+      params.dateBasis === 'active'
         ? Prisma.sql`
       cohort AS (
         SELECT r."ticketId", COALESCE(tc.created_at, t."createdAt") AS created_at,
           tc.created_at IS NOT NULL AS tracked
         FROM (
-          SELECT DISTINCT ta."ticketId"
-          FROM "public"."ticket_activities" ta
-          WHERE ta."channelId" = ${channelId}
-            AND ${resolvedPredicate}
-            AND ta."timestamp" >= ${gte} AND ta."timestamp" <= ${lte}
-            ${ticketScopeExists}
+          SELECT ta."ticketId"
+          FROM (
+            SELECT DISTINCT ta."ticketId"
+            FROM "public"."ticket_activities" ta
+            WHERE ta."channelId" = ${channelId}
+              AND ta."activityType" IN ('TICKET_CREATED', 'STAGE_NAME', 'STATUS')
+              AND ta."timestamp" >= ${gte} AND ta."timestamp" <= ${lte}
+              AND (
+                ta."activityType" = 'TICKET_CREATED'
+                OR (
+                  ta.value->>'oldValue' IS DISTINCT FROM ta.value->>'newValue'
+                  AND ta.value->>'source' IS DISTINCT FROM 'STAGE_RECONSTRUCTION'
+                )
+              )
+          ) ta
+          WHERE true ${ticketScopeExists}
         ) r
         JOIN "public"."tickets" t ON t.id = r."ticketId"
         LEFT JOIN LATERAL (
@@ -338,10 +353,6 @@ export class DeskMetricsRepository {
           FROM "public"."ticket_activities" ta
           WHERE ta."ticketId" = r."ticketId" AND ta."activityType" = 'TICKET_CREATED'
         ) tc ON true
-        WHERE NOT EXISTS (
-          SELECT 1 FROM "public"."ticket_activities" ta
-          WHERE ta."ticketId" = r."ticketId" AND ${resolvedPredicate} AND ta."timestamp" > ${lte}
-        )
       )`
         : Prisma.sql`
       cohort AS (
@@ -356,7 +367,7 @@ export class DeskMetricsRepository {
     // Tickets without TICKET_CREATED may have replies from before EMAIL_SENT was recorded, so
     // their first recorded reply isn't their first response. Stage moves were logged before that.
     const frtStop =
-      params.dateBasis === 'resolved' && includeEmailReply
+      params.dateBasis === 'active' && includeEmailReply
         ? Prisma.sql`CASE WHEN c.tracked THEN ${frtStopSql()} END`
         : frtStopSql();
 
@@ -1281,7 +1292,7 @@ export class DeskMetricsRepository {
     return rows[0]?.count ?? 0;
   }
 
-  /** Cohort-scoped: current stage of tickets created in the selected range. */
+  /** Cohort-scoped: current stage of tickets created in range (or also active in it). */
   private async stageCounts(
     db: ReturnType<DeskMetricsRepository['getDbInstance']>,
     cohortCte: Prisma.Sql

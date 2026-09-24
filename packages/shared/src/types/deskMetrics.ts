@@ -6,8 +6,8 @@
  * they cover activity recorded since the desk-metrics feature was deployed.
  */
 
-/** Which date the range picks tickets by: created (default) or latest resolution. */
-export type DeskMetricsDateBasis = 'created' | 'resolved';
+/** Which tickets the range picks: created in it (default), or also older ones active in it. */
+export type DeskMetricsDateBasis = 'created' | 'active';
 
 /** Per-ticket drill-down row (newest cohort tickets). */
 export interface DeskMetricsTicketRow {

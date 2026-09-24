@@ -59,7 +59,7 @@ export async function getAggregateDeskMetrics(
     timeRange,
     channelIds: channelIds.join(','),
   };
-  if (dateBasis === 'resolved') params['dateBasis'] = dateBasis;
+  if (dateBasis === 'active') params['dateBasis'] = dateBasis;
   if (assigneeIds && assigneeIds.length > 0) params['assigneeIds'] = JSON.stringify(assigneeIds);
   if (stageNames && stageNames.length > 0) params['stageNames'] = JSON.stringify(stageNames);
   if (priorities && priorities.length > 0) params['priorities'] = JSON.stringify(priorities);

@@ -148,7 +148,7 @@ export class DeskMetricsController {
       }
       const timeRange = rawTimeRange;
       const dateBasis: DeskMetricsDateBasis =
-        getStringQueryParam(req, 'dateBasis') === 'resolved' ? 'resolved' : 'created';
+        getStringQueryParam(req, 'dateBasis') === 'active' ? 'active' : 'created';
 
       const parseJsonStringArray = (raw?: string): string[] => {
         if (!raw) return [];

@@ -180,7 +180,7 @@ const readStorage = (key: string): StoredFilters => {
         : DEFAULT_STORED.rangeLabel,
       startTime: typeof p['startTime'] === 'string' ? p['startTime'] : DEFAULT_STORED.startTime,
       endTime: typeof p['endTime'] === 'string' ? p['endTime'] : DEFAULT_STORED.endTime,
-      dateBasis: p['dateBasis'] === 'resolved' ? 'resolved' : DEFAULT_STORED.dateBasis,
+      dateBasis: p['dateBasis'] === 'active' ? 'active' : DEFAULT_STORED.dateBasis,
       selectedAssigneeIds: isStringArray(p['selectedAssigneeIds'])
         ? p['selectedAssigneeIds']
         : typeof p['selectedAssigneeId'] === 'string'
