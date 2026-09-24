@@ -1305,9 +1305,8 @@ model AuditLog {
   actorUser User?            @relation(fields: [actorUserId], references: [id], onDelete: SetNull)
   changes   AuditLogChange[]
 
-  @@index([entityType, entityId, createdAt])
+  @@index([workspaceId, entityType, entityId, createdAt])
   @@index([actorUserId])
-  @@index([createdAt])
   @@map("audit_logs")
   @@schema("non_zero")
 }
@@ -1329,7 +1328,6 @@ model AuditLogChange {
   auditLog AuditLog @relation(fields: [auditLogId], references: [id], onDelete: Cascade)
 
   @@index([auditLogId])
-  @@index([tableName, recordId])
   @@map("audit_log_changes")
   @@schema("non_zero")
 }
