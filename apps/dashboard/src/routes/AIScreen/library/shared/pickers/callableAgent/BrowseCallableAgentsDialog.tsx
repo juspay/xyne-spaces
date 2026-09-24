@@ -185,6 +185,7 @@ export function BrowseCallableAgentsDialog({
                 key={`added-${entry.slug}`}
                 label={entry.name}
                 selected
+                onOpen={() => setOpenSlug(entry.slug)}
                 onToggle={() => onRemove(entry.slug)}
               />
             ))}

@@ -183,6 +183,7 @@ export function BrowseSubagentToolsDialog({
                 key={`selected-${group.source}`}
                 label={humanizeSource(group.source)}
                 selected
+                onOpen={() => setOpenSource(group.source)}
                 onToggle={() =>
                   onSelectionChange(setToolsSelected(selection, section.kind, group.tools, false))
                 }

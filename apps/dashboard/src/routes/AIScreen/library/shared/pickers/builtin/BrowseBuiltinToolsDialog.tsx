@@ -203,6 +203,7 @@ export function BrowseBuiltinToolsDialog({
                 key={`selected-${entry.source}`}
                 label={entry.label}
                 selected
+                onOpen={() => setOpenSource(entry.source)}
                 onToggle={() => onSelectionChange(disableEntry(selection, entry))}
               />
             ))}

@@ -180,6 +180,7 @@ export function BrowseSkillsDialog({
                 key={entry.id}
                 label={entry.label}
                 selected
+                onOpen={() => setOpenId(entry.id)}
                 onToggle={() => onChange(disableSkill(selectedIds, entry))}
               />
             ))}

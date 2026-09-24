@@ -193,6 +193,7 @@ export function BrowseSubagentsDialog({
                 key={`selected-${entry.name}`}
                 label={entry.name}
                 selected
+                onOpen={() => setOpenName(entry.name)}
                 onToggle={() => onSelectionChange(disableSubagent(selection, entry))}
               />
             ))}
