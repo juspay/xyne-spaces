@@ -97,6 +97,11 @@ export interface SummaryTemplateSelectionTestResult {
   reason: string | null;
 }
 
+export interface SummaryTemplateOutputTestResult {
+  summary: string;
+  citationSegments: CitationSegment[];
+}
+
 export interface RecordingUpdate {
   title?: string;
   labels?: string[];
@@ -606,6 +611,14 @@ class RecordingService {
     const response: AxiosResponse<{ success: boolean } & SummaryTemplateSelectionTestResult> =
       await apiInstance.post('/calls/summary-templates/ai/test-selection', input);
     return response.data;
+  }
+
+  async testSummaryTemplateOutput(
+    input: SummaryTemplateSelectionTestInput,
+  ): Promise<SummaryTemplateOutputTestResult> {
+    const response: AxiosResponse<{ success: boolean } & SummaryTemplateOutputTestResult> =
+      await apiInstance.post('/calls/summary-templates/ai/test-output', input);
+    return { summary: response.data.summary, citationSegments: response.data.citationSegments };
   }
 
   /**

@@ -251,6 +251,26 @@ export class SummaryTemplateService {
     return repositories.summaryTemplates.update(template.id, { systemPrompt });
   }
 
+  /**
+   * The system prompt a template would summarize with, generating one in memory (never
+   * persisted) when it has none of its own, as create/ensureGeneratedSystemPrompt would.
+   */
+  async resolveDraftSystemPrompt(
+    draft: Pick<SummaryTemplate, 'name' | 'autoTriggerPrompt' | 'sections' | 'systemPrompt'>,
+    requestId: string
+  ): Promise<string | null> {
+    const own = draft.systemPrompt.trim();
+    if (own && own !== DEFAULT_SYSTEM_PROMPT) return own;
+    return summaryTemplateAiService.generateSystemPrompt(
+      {
+        name: draft.name,
+        meetingContext: draft.autoTriggerPrompt,
+        sections: toPromptSections(draft.sections),
+      },
+      requestId
+    );
+  }
+
   async create(
     workspaceId: string,
     createdBy: string,

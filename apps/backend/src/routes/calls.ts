@@ -45,6 +45,7 @@ router.post('/summary-templates', summaryTemplateController.create);
 router.post('/summary-templates/ai/draft-context', summaryTemplateController.draftContext);
 router.post('/summary-templates/ai/suggest-sections', summaryTemplateController.suggestSections);
 router.post('/summary-templates/ai/test-selection', summaryTemplateController.testSelection);
+router.post('/summary-templates/ai/test-output', summaryTemplateController.testOutput);
 router.post(
   '/summary-templates/ai/generate-system-prompt',
   summaryTemplateController.generateSystemPrompt
