@@ -143,11 +143,40 @@ void describe('decideCreateCanvasAction', () => {
     assert.equal(hi.type, 'idle');
   });
 
-  void it('keeps ask-only turns idle so Create is not gated', () => {
+  void it('keeps ambiguous tracker asks idle so Create is not gated', () => {
     const ask = decideCreateCanvasAction({
       userText: 'build something that either files Jira or Linear tickets',
       canvasEmpty: true,
       marker: parseCreateChatAction('Which tracker should it write to?\nXYNE_CREATE_ASK'),
+    });
+    // Soft-cues jira/linear → tools field → risk/ambiguity ask still drafts hubs.
+    assert.equal(ask.type, 'draft');
+    if (ask.type === 'draft') {
+      assert.ok(ask.fields.includes('tools'));
+    }
+  });
+
+  void it('drafts hubs even when the model emits risk ASK on a named channel job', () => {
+    const ask = decideCreateCanvasAction({
+      userText:
+        'Create a scribe that posts daily summaries to the eng channel and researches competitors on the web.',
+      canvasEmpty: true,
+      marker: parseCreateChatAction(
+        'Can it post to the channel, or draft-only?\nXYNE_CREATE_ASK',
+      ),
+    });
+    assert.equal(ask.type, 'draft');
+    if (ask.type === 'draft') {
+      assert.ok(ask.fields.includes('tools'));
+      assert.ok(ask.fields.includes('systemPrompt'));
+    }
+  });
+
+  void it('keeps vague job-less asks idle', () => {
+    const ask = decideCreateCanvasAction({
+      userText: 'make an agent',
+      canvasEmpty: true,
+      marker: parseCreateChatAction('What job should it do?\nXYNE_CREATE_ASK'),
     });
     assert.equal(ask.type, 'idle');
   });

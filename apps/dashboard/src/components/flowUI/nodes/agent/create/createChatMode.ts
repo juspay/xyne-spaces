@@ -291,9 +291,9 @@ You author agents the same way as Xyne Agent, but this screen uses canvas marker
 When the user asks to create a new agent:
 1. If the ask is vague ("make an agent", "create a bot") with no job named: ask what job it should do. Emit XYNE_CREATE_ASK. Do not draft. At most two questions per turn.
 2. Once a job is named ("standup scribe for eng"): draft name, description, and a thin system prompt with Identity, numbered Operational Workflow, tool usage, Guardrails, decision rules, error recovery, and two contrastive examples. Prefer a procedure skill on the Skills row for long steps.
-3. If the job can send, delete, pay, force-push, or post publicly: ask one closed risk question (XYNE_CREATE_ASK) before drafting, then set permission accordingly (ask-first / read-only / can-write).
+3. If the job can send, delete, pay, force-push, or post publicly: prefer drafting with ask-first permission. Only emit XYNE_CREATE_ASK alone when the risk choice is ambiguous and no draft can proceed. If the user already said draft/review/ask-first/approve, emit XYNE_CREATE_DRAFT (do not ask). Never skip hub binds for a risk question when the job is already named.
 4. Emit XYNE_CREATE_DRAFT: <one-line intent> when drafting. Do not narrate "Drafted …" or paste Name/Description/Instructions into chat — the client writes the canvas.
-5. Do not claim the agent exists until the user hits Create. Do not mention markers. "Just draft" / "you pick" skips questions once.
+5. Do not claim hubs (MCP, tools, skills, knowledge) were selected unless the client will bind them. Do not claim the agent exists until the user hits Create. Do not mention markers. "Just draft" / "you pick" skips questions once.
 `;
 
 function markerLineRe(): RegExp {
@@ -324,7 +324,7 @@ ${HUB_AUTHORING_PROMPT_APPENDIX}
 Rules:
 1. Greetings, UI questions, explanations, and nonsense (random characters, gibberish): reply in chat only. End with XYNE_CREATE_IDLE. Do not draft.
 2. Vague create asks with no job ("make an agent", "create a bot"): ask "What job should it do?" Emit XYNE_CREATE_ASK. Do not draft. Later turns: at most two questions (who for, what it reads/writes, what it must never do).
-3. A named job ("standup scribe for eng", "agent that posts Slack digests"): draft. Emit XYNE_CREATE_DRAFT: <one-line intent>. If the job can send/delete/pay/force-push/post publicly, ask one closed risk question first (XYNE_CREATE_ASK).
+3. A named job ("standup scribe for eng", "agent that posts Slack digests"): draft. Emit XYNE_CREATE_DRAFT: <one-line intent>. If the user already said draft/review/ask-first, do not emit XYNE_CREATE_ASK alone — draft with ask-first permission. Only ask a risk question when the send/write choice is still ambiguous.
 4. First drafts fill name, handle, description, and instructions (Workflow + Guardrails required). The client binds Hub chips from the catalog — never claim MCP, subagent, skills, or knowledge are on the canvas; section lines after each write are the source of truth.
 5. Canvas edits (rename, shorter instructions, add Slack): emit DRAFT or RENAME as appropriate.
    Rename-only: XYNE_CREATE_RENAME: <new name>
@@ -613,6 +613,23 @@ export function decideCreateCanvasAction(args: {
           intent: userText.trim().slice(0, 500),
           visibleReply: marker.visible,
           fields: hubFields,
+        };
+      }
+    }
+    // Risk ask on a named empty-canvas job: still draft hubs (permission stays
+    // ask-first). Pure vague asks without capability cues remain idle.
+    if (marker.ask && canvasEmpty) {
+      const fields = firstDraftFields(userText);
+      if (
+        fields.includes('tools') ||
+        fields.includes('skills') ||
+        fields.includes('knowledge')
+      ) {
+        return {
+          type: 'draft',
+          intent: userText.trim().slice(0, 500),
+          visibleReply: marker.visible,
+          fields,
         };
       }
     }
