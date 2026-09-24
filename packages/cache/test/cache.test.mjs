@@ -46,3 +46,13 @@ test('a failed first fetch rejects (nothing stale to fall back on)', async () =>
   const cache = createCache({ max: 10, ttlMs: 60_000, fetch: async () => { throw new Error('down'); } });
   await assert.rejects(cache.get('a'), /down/);
 });
+
+test('onStatus reports miss, then hit, then stale after ttl', async () => {
+  const seen = [];
+  const cache = createCache({ max: 10, ttlMs: 20, fetch: async () => 'v', onStatus: (s) => seen.push(s.fetch) });
+  await cache.get('a');
+  await cache.get('a');
+  await sleep(30);
+  await cache.get('a');
+  assert.deepEqual(seen, ['miss', 'hit', 'stale']);
+});
