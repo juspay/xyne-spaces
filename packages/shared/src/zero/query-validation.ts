@@ -11,7 +11,8 @@ interface QueryAST {
 
 /**
  * Which channels a table's fields are encrypted at rest for:
- * `null` = never, `'all'` = every channel, `string[]` = only rows in those channels.
+ * `'all'` = every channel, `string[]` = only rows in those channels (`[]` = never).
+ * `null` is accepted for wire compatibility and means the same as `[]`.
  * Encryption-side only: decryption is driven by the `ENC:` prefix on the value,
  * so narrowing the scope leaves already-encrypted rows readable.
  */
@@ -24,9 +25,14 @@ export interface EncryptedTableConfig {
   channelIds: EncryptedChannelScope;
 }
 
-/** True when deciding needs the row's channelId, i.e. the scope is a channel list. */
+/** True when the scope encrypts nothing: `null` or an empty channel list. */
+export function isEncryptionScopeEmpty(scope: EncryptedChannelScope): boolean {
+  return scope === null || (Array.isArray(scope) && scope.length === 0);
+}
+
+/** True when deciding needs the row's channelId, i.e. the scope is a non-empty channel list. */
 export function encryptionScopeNeedsChannelId(scope: EncryptedChannelScope): boolean {
-  return Array.isArray(scope);
+  return Array.isArray(scope) && scope.length > 0;
 }
 
 /** Whether a row in `channelId` falls inside the table's encryption scope. */

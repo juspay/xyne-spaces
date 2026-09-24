@@ -9,6 +9,7 @@ export {
   validateQueryWhereClause,
   encryptionScopeNeedsChannelId,
   isChannelInEncryptionScope,
+  isEncryptionScopeEmpty,
   type EncryptedChannelScope,
   type EncryptedTableConfig,
 } from './query-validation';
