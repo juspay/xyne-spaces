@@ -3,6 +3,7 @@ import { describe, it } from 'node:test';
 import {
   inferNeededCapabilities,
   inferredCapabilityFields,
+  softBuiltinNeedles,
   softProductNeedles,
 } from './capabilityInference.ts';
 import {
@@ -11,6 +12,9 @@ import {
 } from './capabilityValidation.ts';
 import type { AvailableTools } from '@/services/claw/clawToolsTypes';
 import { EMPTY_CREATE_FORM, EMPTY_TOOLS } from './types.ts';
+
+const DESIGN_DIGEST_JOB =
+  'daily 12pm agent that emails and DMs Devesh the top 10 design posts from X.com via Spaces DM';
 
 void describe('capabilityInference', () => {
   void it('infers mcp+builtin+knowledge from job without MCP nouns', () => {
@@ -23,14 +27,42 @@ void describe('capabilityInference', () => {
     assert.deepEqual(inferredCapabilityFields(text), ['tools', 'knowledge']);
   });
 
-  void it('soft-cues Slack from standup/channel', () => {
+  void it('soft-cues Slack from standup (not bare DM)', () => {
     assert.ok(softProductNeedles('standup scribe for eng channel').includes('slack'));
+    assert.equal(softProductNeedles('DM Devesh the digest').includes('slack'), false);
   });
 
-  void it('soft-cues email from “emails the lead”', () => {
+  void it('soft-cues Spaces — not Slack — for Spaces DM + X.com digest', () => {
+    const needles = softProductNeedles(DESIGN_DIGEST_JOB);
+    assert.ok(
+      needles.some(n => /spaces/i.test(n)),
+      JSON.stringify(needles),
+    );
+    assert.equal(needles.includes('slack'), false, JSON.stringify(needles));
+    assert.ok(
+      needles.some(n => /twitter|x\.com/i.test(n)),
+      JSON.stringify(needles),
+    );
+  });
+
+  void it('soft-cues builtin email/DM/web needles for design digest', () => {
+    const builtins = softBuiltinNeedles(DESIGN_DIGEST_JOB);
+    assert.ok(builtins.some(n => /email|mail/i.test(n)), JSON.stringify(builtins));
+    assert.ok(builtins.some(n => /message|dm/i.test(n)), JSON.stringify(builtins));
+    assert.ok(builtins.some(n => /web|search|fetch/i.test(n)), JSON.stringify(builtins));
+    const needed = inferNeededCapabilities(DESIGN_DIGEST_JOB);
+    assert.ok(needed.includes('mcp'), JSON.stringify(needed));
+    assert.ok(needed.includes('builtin'), JSON.stringify(needed));
+  });
+
+  void it('does not soft-cue Gmail MCP from bare “emails the lead”', () => {
     const needles = softProductNeedles('agent that emails the lead a digest');
-    assert.ok(needles.includes('gmail') || needles.includes('email'), JSON.stringify(needles));
-    assert.ok(inferNeededCapabilities('agent that emails the lead').includes('mcp'));
+    assert.equal(needles.includes('gmail'), false, JSON.stringify(needles));
+    assert.ok(inferNeededCapabilities('agent that emails the lead').includes('builtin'));
+  });
+
+  void it('soft-cues Gmail when Gmail is named', () => {
+    assert.ok(softProductNeedles('send via Gmail').includes('gmail'));
   });
 
   void it('leaves vague make-an-agent empty', () => {

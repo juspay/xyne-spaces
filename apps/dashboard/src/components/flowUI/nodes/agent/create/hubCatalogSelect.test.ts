@@ -8,6 +8,9 @@ import {
 import type { AvailableTools, ToolSuggestion } from '@/services/claw/clawToolsTypes';
 import { EMPTY_TOOLS } from './types.ts';
 
+const DESIGN_DIGEST_JOB =
+  'Daily 12pm agent that emails and DMs Devesh the top 10 design posts from X.com via Spaces DM';
+
 function catalogWithSlackGithub(): AvailableTools {
   return {
     subagents: [],
@@ -44,6 +47,131 @@ function catalogWithSlackGithub(): AvailableTools {
         readTools: [
           { slug: 'jira:read', name: 'jira_read', description: '', riskLevel: 'read' },
         ],
+        writeTools: [],
+        usageCount: 1,
+      },
+    ],
+  };
+}
+
+function designDigestCatalog(): AvailableTools {
+  return {
+    subagents: [],
+    mcpServers: [],
+    writeTools: [],
+    customGroups: [
+      {
+        source: 'custom:send-email',
+        tools: [{ slug: 'send_email', name: 'Send email' }],
+      },
+      {
+        source: 'custom:send-message',
+        tools: [{ slug: 'send_message', name: 'Send message' }],
+      },
+      {
+        source: 'custom:web-search',
+        tools: [{ slug: 'web_search', name: 'Web search' }],
+      },
+      {
+        source: 'custom:webfetch',
+        tools: [{ slug: 'webfetch', name: 'webfetch' }],
+      },
+    ],
+    serverTools: {},
+    integrations: [
+      {
+        slug: 'slack',
+        label: 'Slack',
+        kind: 'mcp',
+        connected: true,
+        readTools: [{ slug: 'slack_list', name: 'slack_list', description: '', riskLevel: 'read' }],
+        writeTools: [
+          { slug: 'slack_post', name: 'slack_post', description: '', riskLevel: 'write' },
+        ],
+        usageCount: 3,
+      },
+      {
+        slug: 'x-ai-accounts',
+        label: 'X (AI accounts)',
+        kind: 'mcp',
+        connected: true,
+        readTools: [{ slug: 'x_search', name: 'x_search', description: '', riskLevel: 'read' }],
+        writeTools: [],
+        usageCount: 2,
+      },
+      {
+        slug: 'xyne-spaces',
+        label: 'Xyne Spaces',
+        kind: 'mcp',
+        connected: true,
+        readTools: [
+          { slug: 'spaces-search', name: 'spaces-search', description: '', riskLevel: 'read' },
+        ],
+        writeTools: [
+          {
+            slug: 'spaces-send-message',
+            name: 'spaces-send-message',
+            description: '',
+            riskLevel: 'write',
+          },
+        ],
+        usageCount: 5,
+      },
+      {
+        slug: 'xyne-spaces-app-tools',
+        label: 'Xyne Spaces App Tools',
+        kind: 'mcp',
+        connected: true,
+        readTools: [],
+        writeTools: [
+          {
+            slug: 'apps-send-message',
+            name: 'apps-send-message',
+            description: '',
+            riskLevel: 'write',
+          },
+        ],
+        usageCount: 4,
+      },
+      {
+        slug: 'custom:send-email',
+        label: 'Send email',
+        kind: 'custom',
+        connected: true,
+        readTools: [],
+        writeTools: [
+          { slug: 'send_email', name: 'Send email', description: '', riskLevel: 'write' },
+        ],
+        usageCount: 2,
+      },
+      {
+        slug: 'custom:send-message',
+        label: 'Send message',
+        kind: 'custom',
+        connected: true,
+        readTools: [],
+        writeTools: [
+          { slug: 'send_message', name: 'Send message', description: '', riskLevel: 'write' },
+        ],
+        usageCount: 2,
+      },
+      {
+        slug: 'custom:web-search',
+        label: 'Web Search',
+        kind: 'custom',
+        connected: true,
+        readTools: [
+          { slug: 'web_search', name: 'Web search', description: '', riskLevel: 'read' },
+        ],
+        writeTools: [],
+        usageCount: 2,
+      },
+      {
+        slug: 'custom:webfetch',
+        label: 'Webfetch',
+        kind: 'custom',
+        connected: true,
+        readTools: [{ slug: 'webfetch', name: 'webfetch', description: '', riskLevel: 'read' }],
         writeTools: [],
         usageCount: 1,
       },
@@ -158,7 +286,7 @@ void describe('hubCatalogSelect', () => {
     assert.ok(selection.custom.includes('web_search'));
   });
 
-  void it('soft-cues Slack + builtin from standup/channel/research without MCP nouns', () => {
+  void it('soft-cues Slack + builtin from standup/research without MCP nouns', () => {
     const catalog: AvailableTools = {
       ...catalogWithSlackGithub(),
       customGroups: [
@@ -183,7 +311,7 @@ void describe('hubCatalogSelect', () => {
       ],
     };
     const selection = applyLocalHubBinds(
-      'Create a scribe that posts daily summaries to the eng channel and researches competitors on the web',
+      'Create a scribe that posts daily summaries for standup and researches competitors on the web',
       catalog,
       { ...EMPTY_TOOLS, callableAgents: [] },
     );
@@ -192,5 +320,70 @@ void describe('hubCatalogSelect', () => {
       JSON.stringify(selection),
     );
     assert.ok(selection.custom.includes('web_search'), JSON.stringify(selection));
+  });
+
+  void it('design digest: X + Spaces MCP, no Slack; email/DM/web builtins bound', () => {
+    const catalog = designDigestCatalog();
+    const named = matchNamedMcpEntries(DESIGN_DIGEST_JOB, catalog);
+    assert.ok(
+      named.some(e => e.slug === 'x-ai-accounts'),
+      `expected X, got ${named.map(e => e.slug).join(',')}`,
+    );
+    assert.ok(
+      named.some(e => e.slug === 'xyne-spaces' || e.slug === 'xyne-spaces-app-tools'),
+      `expected Spaces, got ${named.map(e => e.slug).join(',')}`,
+    );
+    assert.equal(
+      named.some(e => e.slug === 'slack'),
+      false,
+      `Slack must not bind: ${named.map(e => e.slug).join(',')}`,
+    );
+
+    const selection = applyLocalHubBinds(DESIGN_DIGEST_JOB, catalog, {
+      ...EMPTY_TOOLS,
+      callableAgents: [],
+    });
+    assert.equal(
+      selection.direct.includes('slack_list') || selection.direct.includes('slack_post'),
+      false,
+      JSON.stringify(selection),
+    );
+    assert.ok(selection.direct.includes('x_search'), JSON.stringify(selection));
+    assert.ok(
+      selection.direct.includes('spaces-search') ||
+        selection.direct.includes('spaces-send-message') ||
+        selection.direct.includes('apps-send-message'),
+      JSON.stringify(selection),
+    );
+    assert.ok(selection.custom.includes('send_email'), JSON.stringify(selection));
+    assert.ok(selection.custom.includes('send_message'), JSON.stringify(selection));
+    assert.ok(
+      selection.custom.includes('web_search') || selection.custom.includes('webfetch'),
+      JSON.stringify(selection),
+    );
+  });
+
+  void it('suggest-tools cannot spray Slack onto an X + Spaces job', () => {
+    const catalog = designDigestCatalog();
+    const suggestion: ToolSuggestion = {
+      subagents: [],
+      integrations: [
+        { slug: 'slack', readTools: ['slack_list'], writeTools: ['slack_post'] },
+        { slug: 'x-ai-accounts', readTools: ['x_search'], writeTools: [] },
+      ],
+      reasoning: { slack: 'messaging', 'x-ai-accounts': 'posts' },
+    };
+    const selection = selectionFromCatalogSuggestion({
+      current: { ...EMPTY_TOOLS, callableAgents: [] },
+      suggestion,
+      catalog,
+      intent: DESIGN_DIGEST_JOB,
+    });
+    assert.equal(
+      selection.direct.includes('slack_list') || selection.direct.includes('slack_post'),
+      false,
+      JSON.stringify(selection),
+    );
+    assert.ok(selection.direct.includes('x_search'), JSON.stringify(selection));
   });
 });

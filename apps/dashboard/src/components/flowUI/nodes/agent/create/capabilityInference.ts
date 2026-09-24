@@ -3,20 +3,37 @@
  *
  * Product bar: users often won't name MCP / Slack / builtins. Infer needed
  * hubs from the job description so create can auto-select on the first go.
- * User not naming a product ≠ that capability is not needed.
+ * Prefer precision over recall for MCP — only bind products clearly implicated.
  */
 
 export type CapabilityClass = 'mcp' | 'builtin' | 'subagent' | 'skills' | 'knowledge';
 
-/** Soft product cues: job language → catalog needles (no hard product name required). */
+/**
+ * Soft product cues: job language → catalog needles (MCP/gateway).
+ * Precision rules:
+ * - Slack only from Slack/standup (not bare DM — Spaces DM ≠ Slack)
+ * - Spaces DM / Xyne Spaces → Spaces hubs
+ * - Bare email/digest prefers builtins (see BUILTIN cues); Gmail/Outlook MCP
+ *   only when those products are named
+ * - X/Twitter needles must not collapse to a bare "x" substring
+ */
 export const SOFT_PRODUCT_CUES: ReadonlyArray<{ re: RegExp; needles: readonly string[] }> = [
   {
-    re: /\b(slack|standup|stand-?up|channel|thread|dm\b|direct message)\b/i,
+    re: /\b(slack|standup|stand-?up)\b/i,
     needles: ['slack'],
   },
   {
-    re: /\b(e-?mails?|inbox|gmail|outlook|mails?\b|digest)\b/i,
-    needles: ['gmail', 'outlook', 'google-mail', 'email', 'mail'],
+    // "eng channel" / "#channel" Slack-style — not Spaces channels when Spaces is named.
+    re: /\b(?:eng|team|slack)\s+channel\b|\bchannel\s+(?:standup|digest|update|post)/i,
+    needles: ['slack'],
+  },
+  {
+    re: /\b(xyne\s*spaces|spaces?\s*dms?|\bin\s+spaces\b|\bspaces\s+(?:dm|dms|message|messages|channel))\b/i,
+    needles: ['spaces', 'xyne-spaces', 'xyne spaces', 'xyne-spaces-app'],
+  },
+  {
+    re: /\b(gmail|outlook|google\s*mail|google-mail)\b/i,
+    needles: ['gmail', 'outlook', 'google-mail'],
   },
   {
     re: /\b(github|gh\b|pull.?requests?|\bprs?\b|repos?(itory)?|code\s*review)\b/i,
@@ -31,16 +48,39 @@ export const SOFT_PRODUCT_CUES: ReadonlyArray<{ re: RegExp; needles: readonly st
     re: /\b(calendar|schedule|meeting|invite)\b/i,
     needles: ['calendar', 'google-calendar'],
   },
-  { re: /\b(x\.com|twitter|tweets?)\b/i, needles: ['twitter', 'x.com', 'x-'] },
+  {
+    // Do NOT include bare "x-" — normalizeToken("x-") === "x" matches Xyne Spaces.
+    re: /\b(x\.com|twitter|tweets?)\b/i,
+    needles: ['twitter', 'x.com'],
+  },
   { re: /\b(confluence|wiki)\b/i, needles: ['confluence'] },
+];
+
+/** Builtin capability cues — email / DM / web when those groups exist in catalog. */
+export const BUILTIN_SOFT_CUES: ReadonlyArray<{
+  re: RegExp;
+  needles: readonly string[];
+}> = [
+  {
+    re: /\b(e-?mails?|inbox|mails?\b|digest|send\s+email)\b/i,
+    needles: ['email', 'mail', 'gmail', 'send email', 'send-email'],
+  },
+  {
+    re: /\b(dm\b|dms\b|direct\s+messages?|send\s+messages?|spaces?\s*dms?)\b/i,
+    needles: ['message', 'dm', 'send message', 'send-message', 'chat'],
+  },
+  {
+    re: /\b(browse|web\s*search|web\s*fetch|webfetch|on\s+the\s+web|web\s+research|from\s+x\.com|from\s+twitter|look\s*up|competitor)\b/i,
+    needles: ['web', 'search', 'fetch', 'webfetch', 'browse', 'research'],
+  },
 ];
 
 /** Explicit product / MCP / tool nouns (legacy named path). */
 const EXPLICIT_TOOL_NOUN =
-  /\b(mcp|tools?|integrations?|servers?|slack|github|jira|notion|linear|gmail|outlook|e-?mails?|discord|teams|calendars?|browse|web\s*search|x\.com|\btwitter\b|sub-?agents?|delegate|delegat(?:e|ion))\b/i;
+  /\b(mcp|tools?|integrations?|servers?|slack|github|jira|notion|linear|gmail|outlook|e-?mails?|discord|teams|calendars?|browse|web\s*search|x\.com|\btwitter\b|spaces?\s*dms?|xyne\s*spaces|sub-?agents?|delegate|delegat(?:e|ion))\b/i;
 
 const BUILTIN_JOB =
-  /\b(built-?ins?|browse|web\s*search|filesystem|terminal|research|researches|search(?:es|ing)?|look\s*up|competitor|on\s+the\s+web|web\s+research|code\s*search)\b/i;
+  /\b(built-?ins?|browse|web\s*search|web\s*fetch|webfetch|filesystem|terminal|research|researches|search(?:es|ing)?|look\s*up|competitor|on\s+the\s+web|web\s+research|code\s*search|e-?mails?|inbox|mails?\b|digest|dm\b|dms\b|direct\s+messages?|send\s+(?:email|message)|from\s+x\.com|from\s+twitter)\b/i;
 
 const SUBAGENT_JOB =
   /\b(sub-?agents?|delegate|delegat(?:e|ion)|research\s+agent|web-?research)\b/i;
@@ -52,12 +92,40 @@ const KNOWLEDGE_JOB =
 
 /** External IO / messaging / tickets — implies an MCP (or gateway) even without product names. */
 const MCP_JOB_IO =
-  /\b(post|posts|send|sends|notify|notifies|message|messages|channel|inbox|e-?mails?|digest|standup|stand-?up|ticket|tickets|pull.?request|\bprs?\b|repo|repos|calendar|schedule)\b/i;
+  /\b(post|posts|send|sends|notify|notifies|message|messages|channel|inbox|e-?mails?|digest|standup|stand-?up|ticket|tickets|pull.?request|\bprs?\b|repo|repos|calendar|schedule|x\.com|twitter|spaces?\s*dms?|xyne\s*spaces)\b/i;
+
+const EXPLICIT_SLACK = /\bslack\b/i;
+const SPACES_MESSAGING =
+  /\b(xyne\s*spaces|spaces?\s*dms?|\bin\s+spaces\b|\bspaces\s+(?:dm|dms|message|messages))\b/i;
 
 export function softProductNeedles(intent: string): string[] {
   const needles: string[] = [];
   const seen = new Set<string>();
   for (const cue of SOFT_PRODUCT_CUES) {
+    if (!cue.re.test(intent)) continue;
+    for (const needle of cue.needles) {
+      const key = needle.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      needles.push(needle);
+    }
+  }
+  // Spaces DM / Xyne Spaces wins over Slack spray — drop Slack unless named.
+  if (SPACES_MESSAGING.test(intent) && !EXPLICIT_SLACK.test(intent)) {
+    return needles.filter(n => normalizeLoose(n) !== 'slack');
+  }
+  return needles;
+}
+
+function normalizeLoose(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, '');
+}
+
+/** Needles used to score/bind builtin catalog rows for this job. */
+export function softBuiltinNeedles(intent: string): string[] {
+  const needles: string[] = [];
+  const seen = new Set<string>();
+  for (const cue of BUILTIN_SOFT_CUES) {
     if (!cue.re.test(intent)) continue;
     for (const needle of cue.needles) {
       const key = needle.toLowerCase();
@@ -76,7 +144,8 @@ export function intentImpliesMcp(intent: string): boolean {
 }
 
 export function intentImpliesBuiltin(intent: string): boolean {
-  return BUILTIN_JOB.test(intent);
+  if (BUILTIN_JOB.test(intent)) return true;
+  return softBuiltinNeedles(intent).length > 0;
 }
 
 export function intentImpliesSubagent(intent: string): boolean {
