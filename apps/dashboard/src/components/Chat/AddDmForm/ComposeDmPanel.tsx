@@ -27,6 +27,7 @@ import { sendConversationWithAttachments, useExistingDmChannel } from './useExis
 import { useDebouncedDmCreation } from './useDebouncedDmCreation';
 import {
   useChannelSearch,
+  useChannelMentionSearch,
   useAllVisibleChannels,
   useGetChannelUserStatus,
 } from '../../../hooks/useChannels';
@@ -165,7 +166,7 @@ export const ComposeDmPanel: React.FC = () => {
 
   // Channel search for # mentions
   const [channelSearchQuery, setChannelSearchQuery] = useState('');
-  const channelResults = useChannelSearch(channelSearchQuery, 10);
+  const channelResults = useChannelMentionSearch(channelSearchQuery, 10);
 
   const handleMentionSearch = useCallback((query: string) => {
     setMentionSearchQuery(query);
@@ -178,16 +179,13 @@ export const ComposeDmPanel: React.FC = () => {
   const channelItems = useMemo(() => {
     if (!channelResults || channelResults.length === 0) return [];
 
-    // Filter channels to only show DEFAULT scope (exclude DM, GROUP_DM, TICKET, DOCUMENT)
-    return channelResults
-      .filter(channel => channel.scopeType === ChannelScopeType.DEFAULT)
-      .map(channel => ({
-        id: channel.id,
-        name: channel.name,
-        isPrivate: channel.visibility === ChannelVisibility.PRIVATE,
-        ...(channel.description && { description: channel.description }),
-        hasAccess: true,
-      }));
+    return channelResults.map(channel => ({
+      id: channel.id,
+      name: channel.name,
+      isPrivate: channel.visibility === ChannelVisibility.PRIVATE,
+      ...(channel.description && { description: channel.description }),
+      hasAccess: true,
+    }));
   }, [channelResults]);
 
   const mentionUserResults = useActiveUserSearch(mentionSearchQuery, 10);

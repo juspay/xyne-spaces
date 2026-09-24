@@ -2,12 +2,12 @@ import React, { useCallback, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import { X } from 'lucide-react';
 import { Hashtag, UserTwo } from '@xyne/icons';
-import { ChannelScopeType, ChannelVisibility, type User, type Channel } from '@xyne/shared';
+import { ChannelVisibility, type User, type Channel } from '@xyne/shared';
 import { InputBox } from '../../../ui/InputBox';
 import { useAuth } from '../../../../hooks/useAuth';
 import { useZero } from '../../../../hooks/useZero';
 import { useActiveUserSearch } from '../../../../hooks/useUsers';
-import { useChannelSearch } from '../../../../hooks/useChannels';
+import { useChannelMentionSearch } from '../../../../hooks/useChannels';
 import { channelService } from '../../../../services/Chat/channelService';
 import { mutators } from '../../../../zero/mutators';
 import { sendConversationWithAttachments } from '../../AddDmForm/useExistingDmChannel';
@@ -68,20 +68,18 @@ export const QuickDmComposer: React.FC<QuickDmComposerProps> = ({ target, onSent
 
   // #-mention channels.
   const [channelSearchQuery, setChannelSearchQuery] = useState('');
-  const channelResults = useChannelSearch(channelSearchQuery, MENTION_CHANNEL_LIMIT);
+  const channelResults = useChannelMentionSearch(channelSearchQuery, MENTION_CHANNEL_LIMIT);
   const handleChannelSearch = useCallback((query: string) => setChannelSearchQuery(query), []);
 
   const channelItems = useMemo(() => {
     if (!channelResults || channelResults.length === 0) return [];
-    return channelResults
-      .filter(channel => channel.scopeType === ChannelScopeType.DEFAULT)
-      .map(channel => ({
-        id: channel.id,
-        name: channel.name,
-        isPrivate: channel.visibility === ChannelVisibility.PRIVATE,
-        ...(channel.description && { description: channel.description }),
-        hasAccess: true,
-      }));
+    return channelResults.map(channel => ({
+      id: channel.id,
+      name: channel.name,
+      isPrivate: channel.visibility === ChannelVisibility.PRIVATE,
+      ...(channel.description && { description: channel.description }),
+      hasAccess: true,
+    }));
   }, [channelResults]);
 
   const handleSendMessage = useCallback(

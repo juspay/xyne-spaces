@@ -4,8 +4,8 @@ import { Link } from 'react-router-dom';
 import { Hash, Users, X } from 'lucide-react';
 import { LinkChainSlant } from '@xyne/icons';
 import type { MentionResult } from '@xyne/shared';
-import { ChannelScopeType, ChannelVisibility } from '@xyne/shared';
-import { useUserGroupSearch, useChannelSearch } from '@xyne/shared/hooks';
+import { ChannelVisibility } from '@xyne/shared';
+import { useUserGroupSearch, useChannelMentionSearch } from '@xyne/shared/hooks';
 import Avatar from '../ui/Avatar/Avatar';
 import { Button } from '../ui/Button/Button';
 import { InputBox } from '../ui/InputBox';
@@ -160,17 +160,15 @@ export const EntityShareModal: React.FC<EntityShareModalProps> = ({
   );
 
   const [channelMentionQuery, setChannelMentionQuery] = useState('');
-  const channelMentionResults = useChannelSearch(channelMentionQuery, 10);
+  const channelMentionResults = useChannelMentionSearch(channelMentionQuery, 10);
   const channelMentionItems = useMemo(
     () =>
-      channelMentionResults
-        .filter(channel => channel.scopeType === ChannelScopeType.DEFAULT)
-        .map(channel => ({
-          id: channel.id,
-          name: channel.name,
-          isPrivate: channel.visibility === ChannelVisibility.PRIVATE,
-          ...(channel.description && { description: channel.description }),
-        })),
+      channelMentionResults.map(channel => ({
+        id: channel.id,
+        name: channel.name,
+        isPrivate: channel.visibility === ChannelVisibility.PRIVATE,
+        ...(channel.description && { description: channel.description }),
+      })),
     [channelMentionResults],
   );
 
