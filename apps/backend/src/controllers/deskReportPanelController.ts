@@ -189,7 +189,13 @@ export class DeskReportPanelController {
         res.setHeader(
           'Content-Security-Policy',
           [
-            'sandbox allow-scripts',
+            // allow-same-origin keeps the served document on its real
+            // (first-party) origin so its authenticated <img> avatars
+            // (/api/users/<id>/picture) send cookies and stop 401ing when
+            // loaded cookielessly. Without it the sandbox forces an opaque
+            // origin. Every other sandbox restriction (top-level navigation,
+            // popups, forms) plus the CSP directives below are retained.
+            'sandbox allow-scripts allow-same-origin',
             "default-src 'none'",
             "script-src 'unsafe-inline'",
             "style-src 'unsafe-inline'",
