@@ -73,7 +73,8 @@ import { StageFormModal } from '../../components/Tickets/StageFormModal/StageFor
 import { useMachine } from '@xstate/react';
 import { getStorageKey, ticketFiltersMachine } from '../../machines/ticketFiltersMachine';
 import { setBoardNavParams } from '../../components/Tickets/boardNavStore';
-import type { KanbanTicketsPageBaseArgs } from './useKanbanTicketsPage';
+import { type KanbanTicketsPageBaseArgs, useKanbanVespaSearch } from './useKanbanTicketsPage';
+import { useTableVespaSearch } from './useTableTicketsPage';
 import type { FormFieldGroup, GroupByType, Stage } from './KanbanBoardScreen.types';
 import { useHeaderSavedFilters } from './useHeaderSavedFilters';
 import type { TicketFilters } from '../../components/Tickets/TicketFilters/types';
@@ -468,6 +469,77 @@ const availableColumns = [
   { key: 'merchantId', label: 'Merchant ID', icon: <Hashtag className='h-4 w-4' /> },
 ];
 
+const LIVE_FIELDS_CHUNK_SIZE = 100;
+// Vespa ticket search returns at most 400 rows.
+const LIVE_FIELDS_CHUNKS = 4;
+const NO_TICKET_IDS: string[] = [];
+
+/**
+ * Header counts group raw search rows, whose priority/assignee/status/stage come from the
+ * Vespa index: they lag edits, and a missing priority defaults to MEDIUM. Overlay the live
+ * Zero values (the same overlay the columns apply to their cards) before grouping, and drop
+ * rows the active filters exclude — the search only carries some of them, while the rows an
+ * opened group shows are filtered by all of them.
+ */
+const useLiveGroupingFields = (
+  rows: Ticket[] | null,
+  filters: TicketFilters,
+  currentUserId: string | undefined,
+): Ticket[] | null => {
+  const chunkIds: string[][] = [];
+  for (let i = 0; i < LIVE_FIELDS_CHUNKS; i += 1) {
+    const ids = rows?.slice(i * LIVE_FIELDS_CHUNK_SIZE, (i + 1) * LIVE_FIELDS_CHUNK_SIZE);
+    chunkIds.push(ids?.length ? ids.map(ticket => ticket.id) : NO_TICKET_IDS);
+  }
+  /* eslint-disable react-hooks/rules-of-hooks -- LIVE_FIELDS_CHUNKS is a module constant; hook count is fixed every render */
+  const chunkRows = chunkIds.map(
+    ids => useCachedQuery(queries.ticketsByIds({ ticketIds: ids }), { enabled: ids.length > 0 })[0],
+  );
+  /* eslint-enable react-hooks/rules-of-hooks */
+
+  return useMemo(() => {
+    if (!rows) return null;
+    const liveById = new Map<string, Ticket>();
+    for (const chunk of chunkRows) {
+      for (const row of chunk ?? []) liveById.set(row.id, row as Ticket);
+    }
+    // Tags and dynamic fields were already applied by the search; role assignments need
+    // relations these rows don't load.
+    const {
+      tags: _tags,
+      dynamicFields: _dynamicFields,
+      roleAssignments: _roles,
+      ...countFilters
+    } = filters;
+    const matchingIds = new Set(
+      applyTicketFilters(
+        [...liveById.values()],
+        countFilters,
+        undefined,
+        undefined,
+        undefined,
+        currentUserId,
+      ).map(ticket => ticket.id),
+    );
+    return rows.flatMap(ticket => {
+      const live = liveById.get(ticket.id);
+      if (live && !matchingIds.has(ticket.id)) return [];
+      return live
+        ? {
+            ...ticket,
+            priority: live.priority,
+            assignedTo: live.assignedTo,
+            createdBy: live.createdBy,
+            statusV2: live.statusV2,
+            stageName: live.stageName,
+            merchantId: live.merchantId,
+          }
+        : ticket;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- chunkRows is rebuilt each render; its items are stable query results
+  }, [rows, filters, currentUserId, ...chunkRows]);
+};
+
 const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   viewMode: viewModeProp,
   channelId,
@@ -673,7 +745,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
       (acc, ticket) => {
         const key =
           criterion === 'assignee'
-            ? (ticket.assignedTo ?? 'Unassigned')
+            ? ticket.assignedTo || 'Unassigned' // search rows carry '' when unassigned
             : criterion === 'createdBy'
               ? ticket.createdBy || 'Unknown'
               : criterion === 'status'
@@ -3907,6 +3979,50 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     ...(user?.id ? { currentUserId: user.id } : {}),
     enabled: shouldFetchKanbanCounts,
   });
+  // Run the search once here on every input, even when every group is collapsed; open
+  // groups/columns reuse this call through the shared search key. The results give the
+  // group headers their match counts.
+  const { vespaTicketSearch: tableSearch } = useTableVespaSearch({
+    ...navBaseArgs,
+    enabled: canUseTablePagination,
+  });
+  const tableSearchTickets = useLiveGroupingFields(
+    isTableLayout && hasSearchTerm ? tableSearch.searchResults : null,
+    deferredFilters,
+    user?.id,
+  );
+  // Form-field grouping is excluded — there each group's request really differs.
+  const kanbanBoardSearchEnabled =
+    canUseKanbanColumnPagination && hasSearchTerm && typeof groupBy !== 'object';
+  const kanbanBoardSearch = useKanbanVespaSearch(
+    {
+      ...navBaseArgs,
+      columnType: shouldUseStatusColumns ? 'status' : 'stage',
+      stageName: '',
+    },
+    kanbanBoardSearchEnabled,
+  );
+  // Kanban: counts only — cards keep rendering from the columns' live rows. Skipped when a
+  // filter isn't in the Vespa query, which would overcount.
+  const kanbanBoardSearchResults = useLiveGroupingFields(
+    kanbanBoardSearchEnabled ? kanbanBoardSearch.vespaTicketSearch.searchResults : null,
+    deferredFilters,
+    user?.id,
+  );
+  const kanbanSearchTickets = useMemo(() => {
+    if (!kanbanBoardSearchEnabled || !kanbanBoardSearch.filtersFitVespa) return null;
+    if (deferredFilters.ticketTypes?.length || !kanbanBoardSearchResults) return null;
+    const channelId = navBaseArgs.channelId;
+    return channelId
+      ? kanbanBoardSearchResults.filter(ticket => ticket.channelId === channelId)
+      : kanbanBoardSearchResults;
+  }, [
+    kanbanBoardSearchEnabled,
+    kanbanBoardSearch.filtersFitVespa,
+    kanbanBoardSearchResults,
+    deferredFilters.ticketTypes,
+    navBaseArgs.channelId,
+  ]);
   const lastKnownKanbanGroupsRef = useRef<{
     groups: typeof kanbanCounts.groups;
     /** groupBy that produced these groups — never serve across dimensions. */
@@ -4027,12 +4143,16 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   ]);
 
   const kanbanTicketsForGrouping = useMemo(() => {
+    if (tableSearchTickets) return tableSearchTickets;
     if (localTickets && localTickets.length > 0) return localTickets;
     const lastKnownKanbanTickets = lastKnownKanbanTicketsRef.current;
     // Use last known tickets as fallback when localTickets is empty/null.
     // This prevents the view from disappearing when filters are applied in group-by mode.
     // IMPORTANT: Apply current filters to fallback tickets so stale data doesn't show.
+    // Not during a kanban search: those tickets ignore the search text, and columns with no
+    // matches would render them. The board search already supplies the groups there.
     if (
+      !kanbanSearchTickets &&
       workspaceViewReady &&
       lastKnownKanbanTickets !== null &&
       lastKnownKanbanTickets.tickets.length > 0
@@ -4050,6 +4170,8 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     }
     return localTickets ?? [];
   }, [
+    kanbanSearchTickets,
+    tableSearchTickets,
     workspaceViewReady,
     localTickets,
     deferredFilters,
@@ -4061,6 +4183,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
 
   const processedGroups = useMemo(() => {
     const groupedRows = groupTickets(kanbanTicketsForGrouping, groupBy);
+    const searchCountRows = kanbanSearchTickets ? groupTickets(kanbanSearchTickets, groupBy) : null;
     const localEntries = Object.entries(groupedRows);
     const serverGroups =
       isKanbanLayout || isTableLayout
@@ -4091,6 +4214,13 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
             ...localEntries.filter(([groupName]) => !serverGroupKeys.has(groupName)),
           ]
         : localEntries;
+    // Kanban search: groups that have matches exist even while collapsed.
+    if (searchCountRows) {
+      const present = new Set(baseEntries.map(([groupName]) => groupName));
+      for (const groupName of Object.keys(searchCountRows)) {
+        if (!present.has(groupName)) baseEntries.push([groupName, groupedRows[groupName] ?? []]);
+      }
+    }
 
     // Table layout with a search term active from first render has neither
     // counts (disabled during search) nor loaded rows to derive groups from —
@@ -4158,7 +4288,9 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
         groupName === 'No Value' || groupName === 'Unassigned' || groupName === NO_MERCHANT_GROUP;
       const fallbackCount = isSpecialMissingGroup ? 0 : groupTickets.length;
       const count = hasSearchTerm
-        ? groupTickets.length
+        ? searchCountRows
+          ? (searchCountRows[groupName]?.length ?? 0)
+          : groupTickets.length
         : (serverCountGroup?.totalCount ?? fallbackCount);
 
       return {
@@ -4215,6 +4347,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
 
     return mapped;
   }, [
+    kanbanSearchTickets,
     localTickets,
     groupBy,
     kanbanTicketsForGrouping,
