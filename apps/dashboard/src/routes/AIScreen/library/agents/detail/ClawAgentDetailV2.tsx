@@ -1,5 +1,6 @@
 import { useCallback, useState, type ReactElement } from 'react';
 import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { PencilEditLine } from '@xyne/icons';
 import { cn } from '@/utils/classNames';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { useClawAgentDetail } from '@/hooks/useClawAgentDetail';
@@ -252,6 +253,7 @@ const ClawAgentDetailV2 = (): ReactElement => {
                       draft.dirty ? 'Agent detail v2: save edits' : 'Agent detail v2: start editing'
                     }
                   >
+                    {!draft.dirty && <PencilEditLine size={14} className='mr-1 shrink-0' />}
                     {draft.dirty ? 'Save' : 'Edit'}
                   </Button>
                 </div>

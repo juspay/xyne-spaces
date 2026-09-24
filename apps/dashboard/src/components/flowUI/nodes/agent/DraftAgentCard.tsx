@@ -46,6 +46,11 @@ export const DraftAgentCard: React.FC<{ node: FlowComponent; props: AgentDraftPr
   const decided = props.phase !== 'pending';
   const editor = useDraftAgentEditor(props, node.id);
 
+  // The identity the user last saved in the preview. Equal to props while the
+  // draft is untouched (and always, once decided), so the card, the preview and
+  // what gets created can never show three different names.
+  const agent = { ...props.agent, ...editor.identity };
+
   useEffect(() => {
     if (state.values[node.id] === undefined) {
       updateFieldValue(node.id, props.selected ?? capabilities.map(c => c.id));
@@ -61,9 +66,10 @@ export const DraftAgentCard: React.FC<{ node: FlowComponent; props: AgentDraftPr
     }
     setPending(actionId === 'agent-draft-approve' ? 'approve' : 'reject');
     try {
-      await executeAction({ type: 'submit', actionId });
-      // On a decision, drop the expanded view back to the thread.
-      setExpanded(false);
+      // Only on a decision that landed. A rejected create (a taken identifier,
+      // say) leaves the card live and the reason in a toast, so the preview has
+      // to stay open — that is where the fields it names are edited.
+      if (await executeAction({ type: 'submit', actionId })) setExpanded(false);
     } finally {
       setPending(null);
     }
@@ -204,10 +210,10 @@ export const DraftAgentCard: React.FC<{ node: FlowComponent; props: AgentDraftPr
         <div className='flex flex-col gap-3'>
           <div className='flex min-w-0 flex-col pl-1 gap-1'>
             <p className='break-words text-sm font-semibold leading-5 text-foreground'>
-              {props.agent.name}
+              {agent.name}
             </p>
             <span className='block truncate text-sm font-normal leading-5 tracking-[-0.07px] text-foreground'>
-              @{props.agent.slug}
+              @{agent.slug}
             </span>
           </div>
 
@@ -215,13 +221,13 @@ export const DraftAgentCard: React.FC<{ node: FlowComponent; props: AgentDraftPr
               <p>, for the same reason as the slug above: `.jp-message-html p + p`
               (global.css) would add its own 8px on top of this gap and win, since
               the card renders inside the message-content root. */}
-          {props.agent.description && (
+          {agent.description && (
             <div className='flex min-w-0 flex-col gap-1 px-1'>
               <p className='truncate text-sm font-semibold leading-5 text-foreground'>
                 Description
               </p>
               <span className='block break-words text-sm font-normal leading-5 tracking-[-0.07px] text-foreground'>
-                {props.agent.description}
+                {agent.description}
               </span>
             </div>
           )}
@@ -249,7 +255,7 @@ export const DraftAgentCard: React.FC<{ node: FlowComponent; props: AgentDraftPr
       <AgentPreview
         open={expanded}
         onOpenChange={setExpanded}
-        agent={props.agent}
+        agent={agent}
         editor={editor}
         note={props.note}
         statePill={statePill}
