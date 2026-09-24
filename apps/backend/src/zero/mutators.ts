@@ -172,6 +172,7 @@ import { addChannelParticipant, removeChannelParticipant } from '@/zero/utils/ch
 import { convert } from 'html-to-text';
 import { typingService } from '@/services/typingService';
 import { logger } from '@/utils/logger';
+import { queueScheduledCallPillSync } from '@/services/scheduledCallPillSync';
 import { config } from '@/config/env';
 import { processMeetLinksFromChatMessage } from '@/services/meetLinkService';
 import { bookmarkReminderService } from '@/services/bookmarkReminderService';
@@ -5260,6 +5261,12 @@ export function createMutators(
             id: call.id,
             status: CallStatus.CANCELLED,
             updatedAt: timestamp,
+          });
+          // Cancelling from the Calls screen goes through this mutator, not a REST
+          // route, so the channel pill has to be refreshed from here too.
+          const cancelledCallId = call.id;
+          asyncTasks.push(async () => {
+            queueScheduledCallPillSync(cancelledCallId, 'mutators.calls.cancel');
           });
           if (cancelEntireSeries && call.recurringSeriesId) {
             await tx.mutate.recurring_call_series.update({
