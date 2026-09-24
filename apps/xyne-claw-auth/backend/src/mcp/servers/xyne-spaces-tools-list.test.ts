@@ -638,3 +638,350 @@ describe("spaces-my-items", () => {
     expect(text).toMatchInlineSnapshot(`"No scheduled messages."`);
   });
 });
+
+// ── Automations ───────────────────────────────────────────────────────
+
+const automationRow = {
+  id: "auto-1",
+  workflowName: "Escalate P1s",
+  status: "ACTIVE",
+  eventType: "MESSAGE_RECEIVED",
+  context: JSON.stringify({
+    trigger: { type: "MESSAGE_RECEIVED", config: { channelIds: ["chan-1"] } },
+    steps: [{ id: "a", type: "RUN_AGENT" }, { id: "b", type: "SEND_MESSAGE" }],
+  }),
+  metadata: JSON.stringify({ description: "Ping oncall", createdById: "u1" }),
+  createdAt: "2026-01-01T00:00:00.000Z",
+  updatedAt: "2026-01-02T00:00:00.000Z",
+};
+
+const row = (patch: Record<string, unknown>) => ({ ...automationRow, ...patch });
+const listText = async (args: Record<string, unknown>) =>
+  (await (await loadTool("spaces-automations-list")).handler(args, ctx)).content[0]?.text ?? "";
+
+describe("spaces-automations-list", () => {
+  it("renders trigger, channels, step count and the author's name", async () => {
+    mockModels({ workflow: [automationRow], user: [{ id: "u1", name: "Asha", email: "asha@x.com" }] });
+    const text = await listText({});
+
+    expect(text).toContain("Escalate P1s [auto-1]");
+    expect(text).toContain("trigger: MESSAGE_RECEIVED · channels: chan-1 · steps: 2");
+    expect(text).toContain("author: Asha <asha@x.com> (u1)");
+  });
+
+  it("sends the screen's default statuses and server-side filters to the gateway", async () => {
+    mockModels({ workflow: [] });
+    await listText({ triggerTypes: ["TICKET_CREATED"], dateField: "updatedAt", from: "2026-01-01T00:00:00.000Z" });
+
+    const where = (mocks.interact.mock.calls[0]?.[0] as { where: Record<string, unknown> }).where;
+    expect(where.workflowType).toEqual({ equals: "Automations" });
+    expect(where.status).toEqual({ in: ["DRAFT", "PENDING_APPROVAL", "ACTIVE", "DISABLED"] });
+    expect(where.eventType).toEqual({ in: ["TICKET_CREATED"] });
+    expect(where.updatedAt).toEqual({ gte: "2026-01-01T00:00:00.000Z" });
+  });
+
+  it("filters like the Automations screen", async () => {
+    mockModels({
+      workflow: [
+        automationRow,
+        row({ id: "auto-2", workflowName: "Nightly digest", metadata: JSON.stringify({ createdById: "u1" }), context: JSON.stringify({ trigger: { type: "WEBHOOK" }, steps: [] }) }),
+        row({ id: "auto-3", status: "DRAFT", metadata: JSON.stringify({ createdById: "someone-else" }) }),
+      ],
+    });
+
+    // query matches the description too; another user's draft stays private.
+    const byDescription = await listText({ query: "oncall" });
+    expect(byDescription).toContain("[auto-1]");
+    expect(byDescription).not.toContain("[auto-2]");
+    expect(byDescription).not.toContain("[auto-3]");
+
+    // channelIds matches the trigger's own channels, like the screen's channel filter.
+    const byChannel = await listText({ channelIds: ["chan-1"] });
+    expect(byChannel).toContain("1 automation(s) match");
+    expect(byChannel).toContain("[auto-1]");
+  });
+});
+
+describe("spaces-automation-runs", () => {
+  it("warns that an empty result does not mean it never triggered", async () => {
+    mocks.spacesFetch.mockResolvedValueOnce({ data: { runs: [], nextCursor: null } });
+    const tool = await loadTool("spaces-automation-runs");
+    const text = (await tool.handler({ automationId: "auto-1", statuses: ["FAILED"] }, ctx)).content[0]?.text ?? "";
+
+    expect(text).toContain("No runs recorded");
+    expect(text).toContain("do not conclude");
+    expect(String(mocks.spacesFetch.mock.calls[0]?.[0])).toContain("status=FAILED");
+  });
+
+  it("merges several statuses newest first and sends from as epoch ms", async () => {
+    const run = (id: string, status: string, startedAt: string, completedAt: string | null) =>
+      ({ id, automationId: "auto-1", status, error: null, startedAt, completedAt });
+    mocks.spacesFetch
+      .mockResolvedValueOnce({ data: { runs: [run("r1", "FAILED", "2026-01-01T10:00:00.000Z", "2026-01-01T10:00:02.500Z")] } })
+      .mockResolvedValueOnce({ data: { runs: [run("r2", "COMPLETED", "2026-01-02T10:00:00.000Z", "2026-01-02T10:01:05.000Z")] } });
+    const tool = await loadTool("spaces-automation-runs");
+    const text = (
+      await tool.handler({ automationId: "auto-1", statuses: ["FAILED", "COMPLETED"], from: "2026-01-01T00:00:00.000Z" }, ctx)
+    ).content[0]?.text ?? "";
+
+    expect(text).toContain("2 run(s) — COMPLETED 1, FAILED 1");
+    expect(text.indexOf("r2")).toBeLessThan(text.indexOf("r1"));
+    expect(text).toContain("took 1m 5s");
+    expect(text).toContain("took 2.5s");
+    expect(String(mocks.spacesFetch.mock.calls[0]?.[0])).toContain(`from=${Date.parse("2026-01-01T00:00:00.000Z")}`);
+  });
+});
+
+describe("spaces-automation-run", () => {
+  it("surfaces a step's error unclipped even when the payload is truncated", async () => {
+    const reason = `connection refused ${"x".repeat(1200)}`;
+    mocks.spacesFetch.mockResolvedValueOnce({
+      data: {
+        run: { id: "run-2", automationId: "auto-1", status: "FAILED", error: "boom", startedAt: "t", completedAt: null },
+        state: null,
+        steps: [{ stepName: "webhook", status: "FAILED", data: { blob: "y".repeat(1500), error: reason } }],
+      },
+    });
+
+    const tool = await loadTool("spaces-automation-run");
+    const text = (await tool.handler({ runIds: ["run-2"] }, ctx)).content[0]?.text ?? "";
+
+    expect(text).toContain("ERROR: ");
+    expect(text).toContain(reason);
+    expect(text).toContain("[truncated,");
+  });
+
+  it("fetches several runs and reports a missing one without failing the rest", async () => {
+    mocks.spacesFetch
+      .mockResolvedValueOnce({
+        data: {
+          run: { id: "run-1", automationId: "auto-1", status: "COMPLETED", error: null, startedAt: "2026-01-01T00:00:00.000Z", completedAt: "2026-01-01T00:00:03.000Z" },
+          steps: [
+            { stepName: "step_0", status: "COMPLETED", data: {}, createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:01.000Z" },
+            { stepName: "step_1", status: "FAILED", data: { error: "bad" }, createdAt: "2026-01-01T00:00:01.000Z", updatedAt: "2026-01-01T00:00:03.000Z" },
+          ],
+        },
+      })
+      .mockRejectedValueOnce(Object.assign(new Error("Spaces API 404"), { status: 404 }));
+
+    const tool = await loadTool("spaces-automation-run");
+    const text = (await tool.handler({ runIds: ["run-1", "run-x"], onlyFailedSteps: true }, ctx)).content[0]?.text ?? "";
+
+    expect(text).toContain("took 3.0s");
+    expect(text).toContain("Steps (1 of 2 shown — filtered)");
+    expect(text).toContain("step_1 — FAILED · 2.0s");
+    expect(text).toContain("# Run run-x\nNot found in this workspace.");
+  });
+});
+
+describe("spaces-automation-versions", () => {
+  const version = (id: string, status: string, config: Record<string, unknown>, createdAt: string) => ({
+    id, name: "Escalate", description: null, status, config, createdById: "u1", createdAt, updatedAt: createdAt, automationSeriesId: "v1",
+  });
+  const v1 = version("v1", "ARCHIVED", {
+    trigger: { type: "MESSAGE_RECEIVED", config: { channelIds: ["c1"], senderFilters: [{ userId: "u9" }] } },
+    steps: [{ id: "s1", type: "SEND_MESSAGE", config: { text: "hi" } }],
+  }, "2026-01-01T00:00:00.000Z");
+  const v2 = version("v2", "ACTIVE", {
+    trigger: { type: "MESSAGE_RECEIVED", config: { channelIds: ["c1", "c2"], senderFilters: [{ userId: "u9" }] } },
+    steps: [{ id: "s1", type: "SEND_MESSAGE", config: { text: "hello" } }, { id: "s2", type: "DELAY", config: { amount: 1 } }],
+    schedule: { type: "SCHEDULED", field: "ticket.closedAt" },
+  }, "2026-02-01T00:00:00.000Z");
+  const run = async (args: Record<string, unknown>) => {
+    mocks.spacesFetch.mockResolvedValueOnce({ data: [v2, v1] });
+    mockModels({ user: [{ id: "u1", name: "Asha", email: "asha@x.com" }] });
+    return (await (await loadTool("spaces-automation-versions")).handler({ automationId: "v2", ...args }, ctx)).content[0]?.text ?? "";
+  };
+
+  it("lists versions with author and what changed", async () => {
+    const text = await run({});
+    expect(text).toContain("by Asha <asha@x.com> (u1)");
+    expect(text).toContain("changes: trigger channelIds:");
+    expect(text).toContain("first version");
+  });
+
+  it("compares two versions field by field", async () => {
+    const text = await run({ compareFrom: "v1", compareTo: "v2" });
+    expect(text).toContain('- trigger channelIds: ["c1"] → ["c1","c2"]');
+    expect(text).toContain('- step s1 config.text: "hi" → "hello"');
+    expect(text).toContain("- step added: s2 (DELAY)");
+    expect(text).toContain('- schedule: (none) → {"type":"SCHEDULED","field":"ticket.closedAt"}');
+    expect(text).not.toContain("senderFilters");
+  });
+
+  it("reports a Switch case condition change", async () => {
+    const sw = (value: string) => ({
+      trigger: { type: "TICKET_CREATED" },
+      steps: [{ id: "sw", type: "SWITCH", config: { cases: [{ condition: { field: "priority", value }, steps: [] }], default: [] } }],
+    });
+    mocks.spacesFetch.mockResolvedValueOnce({
+      data: [version("b", "DRAFT", sw("P2"), "2026-02-01T00:00:00.000Z"), version("a", "ACTIVE", sw("P1"), "2026-01-01T00:00:00.000Z")],
+    });
+    mockModels({ user: [] });
+    const tool = await loadTool("spaces-automation-versions");
+    const text = (await tool.handler({ automationId: "b", compareFrom: "a", compareTo: "b" }, ctx)).content[0]?.text ?? "";
+
+    expect(text).toContain('- step sw config.cases: [{"condition":{"field":"priority","value":"P1"}}] → [{"condition":{"field":"priority","value":"P2"}}]');
+  });
+
+  it("prints an ARCHIVED version's full config", async () => {
+    const text = await run({ versionId: "v1" });
+    expect(text).toContain("version v1");
+    expect(text).toContain("Status: ARCHIVED");
+    expect(text).toContain('Trigger: MESSAGE_RECEIVED — channelIds: c1; senderFilters: [{"userId":"u9"}]');
+    expect(text).toContain('"text": "hi"');
+  });
+});
+
+describe("spaces-automation-variables", () => {
+  it("descends into branches and prefers a step's own declared schema", async () => {
+    mocks.spacesFetch
+      .mockResolvedValueOnce({
+        data: {
+          id: "auto-1",
+          name: "Branchy",
+          config: {
+            trigger: { type: "TICKET_CREATED" },
+            steps: [
+              {
+                id: "cond_1",
+                type: "CONDITIONAL",
+                config: {
+                  if_true: [{ id: "notify_1", type: "NOTIFY_USER" }],
+                  if_false: [
+                    {
+                      id: "sw_1",
+                      type: "SWITCH",
+                      config: {
+                        cases: [{ steps: [{ id: "agent_1", type: "RUN_AGENT", config: { outputSchema: { verdict: "string" } } }] }],
+                        default: [{ id: "notify_2", type: "NOTIFY_USER" }],
+                      },
+                    },
+                  ],
+                },
+              },
+            ],
+          },
+        },
+      })
+      .mockResolvedValueOnce({ data: { outputSchema: { properties: { ticketId: {} } } } })
+      .mockResolvedValue({ data: { outputSchema: {} } });
+
+    const tool = await loadTool("spaces-automation-variables");
+    const text = (await tool.handler({ automationId: "auto-1" }, ctx)).content[0]?.text ?? "";
+
+    for (const id of ["cond_1", "notify_1", "sw_1", "agent_1", "notify_2"]) {
+      expect(text).toContain(`id: ${id}`);
+    }
+    expect(text).toContain("[in if_false › case[0]]");
+    expect(text).toContain("[in if_false › default]");
+    expect(text).toContain("{{trigger.ticketId}}");
+    expect(text).toContain("{{agent_1.output.verdict}}");
+  });
+});
+
+describe("spaces-automation-create / -update", () => {
+  it("creates a DRAFT and says it is not live", async () => {
+    mocks.spacesFetch.mockResolvedValueOnce({ data: { automation: { id: "auto-9", name: "X", status: "DRAFT" } } });
+    const tool = await loadTool("spaces-automation-create");
+    const text = (await tool.handler({ name: "X", config: { trigger: {}, steps: [] } }, ctx)).content[0]?.text ?? "";
+
+    expect(text).toContain("as DRAFT");
+    expect(text).toContain("NOT running yet");
+  });
+
+  it("assigns builder-style ids to steps without one, including inside branches", async () => {
+    mocks.spacesFetch.mockResolvedValueOnce({ data: { automation: { id: "auto-9", name: "X", status: "DRAFT" } } });
+    const tool = await loadTool("spaces-automation-create");
+    const config = {
+      trigger: { type: "WEBHOOK", config: {} },
+      steps: [
+        { id: "keep-me", type: "DELAY", config: { amount: 1 } },
+        { type: "CONDITIONAL", config: { condition: {}, if_true: [{ type: "DELAY", config: { amount: 2 } }] } },
+      ],
+    };
+    const text = (await tool.handler({ name: "X", config }, ctx)).content[0]?.text ?? "";
+
+    const sent = JSON.parse(String((mocks.spacesFetch.mock.calls[0]?.[1] as { body: string }).body)) as {
+      config: { steps: Array<{ id: string; config: { if_true?: Array<{ id: string }> } }> };
+    };
+    const [kept, conditional] = sent.config.steps;
+    expect(kept?.id).toBe("keep-me");
+    expect(conditional?.id).toMatch(/^stp_[0-9a-f]{32}$/);
+    expect(conditional?.config.if_true?.[0]?.id).toMatch(/^stp_[0-9a-f]{32}$/);
+    expect(text).toContain("Assigned ids to 2 step(s) that had none:");
+    expect(text).toContain(`(DELAY, in if_true) → ${conditional?.config.if_true?.[0]?.id}`);
+  });
+
+  it("refuses duplicate and reserved step ids without calling the backend", async () => {
+    const config = {
+      trigger: { type: "WEBHOOK", config: {} },
+      steps: [
+        { id: "wait", type: "DELAY", config: {} },
+        { id: "trigger", type: "DELAY", config: {} },
+        { id: "c1", type: "CONDITIONAL", config: { if_true: [{ id: "wait", type: "DELAY", config: {} }] } },
+      ],
+    };
+    const create = await (await loadTool("spaces-automation-create")).handler({ name: "X", config }, ctx);
+    const update = await (await loadTool("spaces-automation-update")).handler({ automationId: "auto-1", config }, ctx);
+
+    for (const result of [create, update]) {
+      expect(result.isError).toBe(true);
+      expect(result.content[0]?.text).toContain('"trigger" is reserved');
+      expect(result.content[0]?.text).toContain('"wait" is used by more than one step');
+    }
+    expect(mocks.spacesFetch).not.toHaveBeenCalled();
+  });
+
+  it("refuses a create with no config, without calling the backend", async () => {
+    const tool = await loadTool("spaces-automation-create");
+    expect((await tool.handler({ name: "x" }, ctx)).isError).toBe(true);
+    expect(mocks.spacesFetch).not.toHaveBeenCalled();
+  });
+
+  it("distinguishes an in-place draft edit from a new version", async () => {
+    mocks.spacesFetch.mockResolvedValueOnce({ data: { automation: { id: "auto-1", name: "R", status: "DRAFT" } } });
+    const tool = await loadTool("spaces-automation-update");
+    expect((await tool.handler({ automationId: "auto-1", name: "R" }, ctx)).content[0]?.text).toContain("in place");
+
+    mocks.spacesFetch.mockResolvedValueOnce({ data: { automation: { id: "auto-2", name: "R", status: "DRAFT" } } });
+    const text = (await tool.handler({ automationId: "auto-1", name: "R" }, ctx)).content[0]?.text ?? "";
+    expect(text).toContain("NEW DRAFT VERSION (auto-2)");
+  });
+});
+
+describe("spaces-automation-validate", () => {
+  it("reads the endpoint's `issues` field, not `errors`", async () => {
+    mocks.spacesFetch.mockResolvedValueOnce({
+      data: { valid: false, issues: [{ path: "steps.0.type", message: "unknown step" }] },
+    });
+
+    const tool = await loadTool("spaces-automation-validate");
+    const text = (await tool.handler({ config: { trigger: {}, steps: [] } }, ctx)).content[0]?.text ?? "";
+
+    expect(text).toContain("Config is INVALID.");
+    expect(text).toContain("unknown step");
+  });
+
+  it("marks a backend-valid config with a duplicate step id INVALID", async () => {
+    mocks.spacesFetch.mockResolvedValueOnce({ data: { valid: true, issues: [] } });
+    const tool = await loadTool("spaces-automation-validate");
+    const config = { trigger: {}, steps: [{ id: "a", type: "DELAY" }, { id: "a", type: "DELAY" }] };
+    const text = (await tool.handler({ config }, ctx)).content[0]?.text ?? "";
+
+    expect(text).toContain("Config is INVALID.");
+    expect(text).toContain('"a" is used by more than one step');
+  });
+});
+
+describe("spaces-automation-webhook-issue", () => {
+  it("returns the once-only URL", async () => {
+    mocks.spacesFetch.mockResolvedValueOnce({ data: { url: "https://x/series-1/s3cr3t", alreadyIssued: false } });
+    const tool = await loadTool("spaces-automation-webhook-issue");
+    const text = (await tool.handler({ automationId: "auto-1" }, ctx)).content[0]?.text ?? "";
+
+    expect(text).toContain("s3cr3t");
+    expect(text).toContain("shown ONCE");
+  });
+});
+

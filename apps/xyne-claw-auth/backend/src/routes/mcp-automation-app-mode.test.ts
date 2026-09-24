@@ -85,7 +85,15 @@ describe("non-automation runs", () => {
 describe("userOnly tools in app mode", () => {
   it("marks the tools whose handlers require a human session", () => {
     const userOnly = spacesTools.filter((t) => t.userOnly).map((t) => t.name).sort();
-    expect(userOnly).toEqual(["spaces-update-ticket", "spaces-upload-to-kb", "user-send-message"]);
+    expect(userOnly).toEqual([
+      ...["agents", "create", "get", "run", "runs", "schema", "submit", "update", "validate", "variables", "versions", "webhook", "webhook-issue"].map(
+        (t) => `spaces-automation-${t}`,
+      ),
+      "spaces-update-bulk-tickets",
+      "spaces-update-ticket",
+      "spaces-upload-to-kb",
+      "user-send-message",
+    ]);
   });
 
   it("hides them from the app-tools listing and rejects calls", () => {
