@@ -1,3 +1,10 @@
+## [1.391.1](https://github.com/juspay/xyne-spaces/compare/v1.391.0...v1.391.1) (2026-09-24)
+
+
+### Bug Fixes
+
+* route local harness calls through net.fetch so mTLS hosts work ([#2277](https://github.com/juspay/xyne-spaces/issues/2277)) ([e725e90](https://github.com/juspay/xyne-spaces/commit/e725e90ebafb123190ae12cc11a9247cc752be98))
+
 ## [1.391.0](https://github.com/juspay/xyne-spaces/compare/v1.390.0...v1.391.0) (2026-09-24)
 
 
