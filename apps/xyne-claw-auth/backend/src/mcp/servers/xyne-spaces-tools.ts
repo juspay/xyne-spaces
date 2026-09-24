@@ -9716,7 +9716,7 @@ const spacesAutomationValidate: ToolDef = {
   },
   handler: withToolErrors("Automation validate error", async (args) => {
     const config = args["config"];
-    if (!config || typeof config !== "object") return err("config must be an object");
+    if (!config || typeof config !== "object" || Array.isArray(config)) return err("config must be an object");
 
     const res = (await spacesFetch("/api/automations/validate", {
       method: "POST",
@@ -9821,7 +9821,7 @@ const spacesAutomationCreate: ToolDef = {
     const name = String(args["name"] ?? "").trim();
     const config = args["config"];
     if (!name) return err("name is required");
-    if (!config || typeof config !== "object") return err("config must be an object");
+    if (!config || typeof config !== "object" || Array.isArray(config)) return err("config must be an object");
     const idProblems = stepIdProblems(config);
     if (idProblems.length > 0) return err(stepIdError(idProblems));
     const assigned = assignMissingStepIds(config);
@@ -10097,11 +10097,13 @@ const spacesAutomationVersions: ToolDef = {
         return err(`${!to ? `compareTo ${toArg}` : fromArg ? `compareFrom ${fromArg}` : "An older version to compare with"} was not found. ${known}`);
       }
       if (from.id === to.id) return err("compareFrom and compareTo are the same version.");
-      const changes = diffAutomations(from, to);
+      // Versions are newest first; always diff older → newer so additions never read as removals.
+      const [older, newer] = versions.indexOf(from) > versions.indexOf(to) ? [from, to] : [to, from];
+      const changes = diffAutomations(older, newer);
       return ok(
         [
-          `Changes from ${from.id} (${from.status}, by ${author(from)}, ${from.createdAt})`,
-          `to ${to.id} (${to.status}, by ${author(to)}, ${to.createdAt}):`,
+          `Changes from ${older.id} (${older.status}, by ${author(older)}, ${older.createdAt})`,
+          `to ${newer.id} (${newer.status}, by ${author(newer)}, ${newer.createdAt}):`,
           ...(changes.length > 0 ? changes.map((c) => `- ${c}`) : ["- No differences in name, description, trigger or steps."]),
         ].join("\n"),
       );
