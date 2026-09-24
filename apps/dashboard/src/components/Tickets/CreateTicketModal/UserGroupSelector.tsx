@@ -59,11 +59,16 @@ export const UserGroupSelector: React.FC<UserGroupSelectorProps> = ({
 
   const groupIds = useMemo(() => activeGroups.map(group => group.id), [activeGroups]);
 
+  const [dropdownOpened, setDropdownOpened] = useState(false);
+  const shouldLoadAvailability = dropdownOpened && groupIds.length > 0;
+
   const [groupMembers, groupMembersDetails] = useCachedQuery(
     queries.getUserGroupMembersByGroupIds({ userGroupIds: groupIds }),
+    { enabled: shouldLoadAvailability },
   );
   const [assignmentStates, assignmentStatesDetails] = useCachedQuery(
     queries.getUserAssignmentStatesByGroupIds({ userGroupIds: groupIds }),
+    { enabled: shouldLoadAvailability },
   );
 
   // ==================== DATA TRANSFORMATION ====================
@@ -130,6 +135,11 @@ export const UserGroupSelector: React.FC<UserGroupSelectorProps> = ({
       noBorder={noBorder ?? false}
       onSearchChange={setSearchValue}
       disableClientFiltering={true}
+      onOpenChange={open => {
+        if (open && !dropdownOpened) {
+          setDropdownOpened(true);
+        }
+      }}
     />
   );
 };

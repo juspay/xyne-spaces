@@ -1786,6 +1786,7 @@ model Stage {
 
   @@index([boardId])
   @@index([boardId, sequenceNumber]) // for stagesByBoard
+  @@index([boardId, sequenceNumber, id])
   @@map("stages")
   @@schema("public")
 }
@@ -1827,6 +1828,7 @@ model StageTransition {
   @@index([fromStageId])
   @@index([boardId, toStageId])
   @@index([toStageId])
+  @@index([boardId, id])
   @@map("stage_transitions")
   @@schema("public")
 }
@@ -3906,6 +3908,7 @@ model StageApprovers {
   @@unique([transitionId, roleId, approverType])
   @@index([stageId])
   @@index([transitionId])
+  @@index([transitionId, id])
   @@map("stage_approvers")
   @@schema("public")
 }
@@ -4089,6 +4092,7 @@ model TicketStageRequest {
   @@index([stageId])
   @@index([formId])
   @@unique([ticketId, stageId])
+  @@index([ticketId, createdAt(sort: Desc), id])
   @@map("ticket_stage_requests")
   @@schema("public")
 }
