@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { ChevronDown, CalendarDefault } from '@xyne/icons';
 import { CallStatus } from '@xyne/shared';
@@ -12,14 +12,14 @@ const COLLAPSED_COUNT = 3;
 const COLLAPSE_TRANSITION = { duration: 0.26, ease: [0.4, 0, 0.2, 1] as const };
 
 function isActiveCall(call: Call, now = Date.now()): boolean {
-  return (
+  return Boolean(
     call.status === CallStatus.ACTIVE ||
     call.status === CallStatus.IN_PROGRESS ||
     (call.status === CallStatus.SCHEDULED &&
-      Boolean(call.startsAt) &&
-      new Date(call.startsAt!).getTime() <= now &&
-      Boolean(call.endsAt) &&
-      new Date(call.endsAt!).getTime() > now)
+      call.startsAt &&
+      new Date(call.startsAt).getTime() <= now &&
+      call.endsAt &&
+      new Date(call.endsAt).getTime() > now),
   );
 }
 
@@ -53,10 +53,16 @@ export function UpcomingCallsListV2({
   day,
 }: UpcomingCallsListV2Props): React.JSX.Element {
   const allUsers = useUsers();
+  const [now, setNow] = useState(() => Date.now());
 
-  const targetDay = useMemo(() => day ?? new Date(), [day]);
+  // Update "now" every minute so that active calls and empty-state messages update in real time without a full page refresh.
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 60_000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const targetDay = useMemo(() => day ?? new Date(now), [day, now]);
   const todaysCalls = useMemo(() => {
-    const now = Date.now();
     const relevant = calls.filter(
       call =>
         isActiveCall(call, now) || (call.startsAt && isSameDay(new Date(call.startsAt), targetDay)),
@@ -65,7 +71,7 @@ export function UpcomingCallsListV2({
     return [...relevant].sort(
       (a, b) => Number(isActiveCall(b, now)) - Number(isActiveCall(a, now)),
     );
-  }, [calls, targetDay]);
+  }, [calls, targetDay, now]);
 
   const [isExpanded, setIsExpanded] = useState(false);
   const isEmpty = todaysCalls.length === 0;

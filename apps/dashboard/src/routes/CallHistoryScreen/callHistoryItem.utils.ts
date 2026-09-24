@@ -313,7 +313,7 @@ export function buildParticipantSummary(
   otherParticipantCount: number,
 ): string {
   const [firstParticipantName, secondParticipantName] = displayNames;
-  if (!firstParticipantName || otherParticipantCount <= 1) {
+  if (!firstParticipantName || otherParticipantCount <= 1 || !secondParticipantName) {
     return firstParticipantName || 'Unknown';
   }
   if (otherParticipantCount === 2) {

@@ -102,17 +102,27 @@ const CallAskAIModal = ({
     [filtered],
   );
 
-  const filteredIds = useMemo(() => filtered.map(entry => entry.call.id), [filtered]);
-  const selectedFilteredCount = filteredIds.filter(id => selectedIds.has(id)).length;
+  const transcriptIds = useMemo(
+    () => new Set(calls.filter(call => Boolean(call.transcript)).map(call => call.id)),
+    [calls],
+  );
+  const selectableFilteredIds = useMemo(
+    () => filtered.map(entry => entry.call.id).filter(id => transcriptIds.has(id)),
+    [filtered, transcriptIds],
+  );
+  const selectedFilteredCount = selectableFilteredIds.filter(id => selectedIds.has(id)).length;
   const allFilteredSelected =
-    filteredIds.length > 0 && selectedFilteredCount === filteredIds.length;
+    selectableFilteredIds.length > 0 && selectedFilteredCount === selectableFilteredIds.length;
 
   const toggleCall = useCallback(
     (callId: string): void => {
       const isSelected = selectedIds.has(callId);
-      if (!isSelected && selectedIds.size >= MAX_SELECTED_CALLS) {
-        setLimitNotice(value => value + 1);
-        return;
+      if (!isSelected) {
+        if (!transcriptIds.has(callId)) return;
+        if (selectedIds.size >= MAX_SELECTED_CALLS) {
+          setLimitNotice(value => value + 1);
+          return;
+        }
       }
 
       setSelectedIds(previous => {
@@ -122,7 +132,7 @@ const CallAskAIModal = ({
         return next;
       });
     },
-    [selectedIds],
+    [selectedIds, transcriptIds],
   );
 
   /** Fills up to the cap rather than refusing outright, then says what it left out. */
@@ -131,13 +141,13 @@ const CallAskAIModal = ({
       const next = new Set(selectedIds);
 
       if (!checked) {
-        for (const id of filteredIds) next.delete(id);
+        for (const id of selectableFilteredIds) next.delete(id);
         setSelectedIds(next);
         return;
       }
 
       let refused = false;
-      for (const id of filteredIds) {
+      for (const id of selectableFilteredIds) {
         if (next.has(id)) continue;
         if (next.size >= MAX_SELECTED_CALLS) {
           refused = true;
@@ -149,7 +159,7 @@ const CallAskAIModal = ({
       setSelectedIds(next);
       if (refused) setLimitNotice(value => value + 1);
     },
-    [filteredIds, selectedIds],
+    [selectableFilteredIds, selectedIds],
   );
 
   const handleClose = useCallback((): void => {
@@ -223,7 +233,7 @@ const CallAskAIModal = ({
           <Checkbox
             checked={allFilteredSelected}
             onChange={handleToggleAll}
-            disabled={filteredIds.length === 0}
+            disabled={selectableFilteredIds.length === 0}
             label='Select all'
           />
           <span className='flex shrink-0 items-center gap-3 text-xs text-muted-foreground'>
@@ -237,7 +247,7 @@ const CallAskAIModal = ({
             >
               {selectedCount === 0
                 ? 'None selected'
-                : `${selectedCount} of ${calls.length} selected`}
+                : `${selectedCount} of ${transcriptIds.size} selected`}
             </motion.span>
             {selectedCount > 0 && (
               <button
@@ -279,7 +289,11 @@ const CallAskAIModal = ({
                     call={row.item}
                     participants={participantsByCallId.get(row.item.id) ?? []}
                     checked={selectedIds.has(row.item.id)}
-                    blocked={isAtLimit && !selectedIds.has(row.item.id)}
+                    hasTranscript={transcriptIds.has(row.item.id)}
+                    blocked={
+                      !transcriptIds.has(row.item.id) ||
+                      (isAtLimit && !selectedIds.has(row.item.id))
+                    }
                     onToggle={toggleCall}
                   />
                 ),
@@ -351,6 +365,7 @@ interface CallOptionProps {
   call: Call;
   participants: User[];
   checked: boolean;
+  hasTranscript: boolean;
   blocked: boolean;
   onToggle: (callId: string) => void;
 }
@@ -359,6 +374,7 @@ const CallOption = ({
   call,
   participants,
   checked,
+  hasTranscript,
   blocked,
   onToggle,
 }: CallOptionProps): ReactElement => {
@@ -406,7 +422,7 @@ const CallOption = ({
       </span>
 
       <span className='shrink-0 font-mono text-xs text-muted-foreground/70'>
-        {formatDuration(durationMs)}
+        {hasTranscript ? formatDuration(durationMs) : 'No transcript'}
       </span>
     </li>
   );

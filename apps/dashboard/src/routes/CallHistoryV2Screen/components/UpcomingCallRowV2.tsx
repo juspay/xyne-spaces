@@ -69,8 +69,8 @@ export function UpcomingCallRowV2({
     call.status === CallStatus.ACTIVE ||
     call.status === CallStatus.IN_PROGRESS ||
     (call.status === CallStatus.SCHEDULED &&
-      Boolean(call.startsAt) &&
-      new Date(call.startsAt!).getTime() <= Date.now());
+      call.startsAt &&
+      new Date(call.startsAt).getTime() <= Date.now());
   const isEnded = call.status === CallStatus.ENDED;
 
   const previewParticipantUsers = getPreviewParticipantUsers(

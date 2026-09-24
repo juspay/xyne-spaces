@@ -61,6 +61,7 @@ import { getUserDisplayName } from '../../utils/userDisplayName';
 import { ChipType, TabType } from '../../components/Chat/ChatDirectory/ChannelCommandMenu.types';
 import { type InitialQueryData } from '../../components/Chat/ChatDirectory/LexicalSearchInput';
 import { CallHistorySearchPanel } from '../CallHistoryScreen/CallHistorySearchPanel';
+import { useCalendarSync } from '../../hooks/useCalendarSync';
 import { Button } from '../../components/ui/Button/Button';
 import { Switch } from '../../components/ui/Switch';
 import { Popover } from '../../components/ui/Popover/Popover';
@@ -83,6 +84,15 @@ const CallHistoryV2Screen = (): ReactElement => {
   const { user } = useAuth();
   const navigate = useNavigate();
   const outlet = useOutlet();
+  useCalendarSync(user?.id);
+
+  // Ticks so the header's weekday/date doesn't go stale on a tab left open across
+  // midnight with no other re-render to catch it up.
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 60_000);
+    return () => clearInterval(timer);
+  }, []);
 
   const [isScheduleModalOpen, setIsScheduleModalOpen] = useState(false);
   const [isInstantCallModalOpen, setIsInstantCallModalOpen] = useState(false);
@@ -319,7 +329,20 @@ const CallHistoryV2Screen = (): ReactElement => {
   const callHistoryLoadStartTimeRef = useRef<number | null>(null);
   const [scrollContainer, setScrollContainer] = useState<HTMLDivElement | null>(null);
 
-  const showRecentCallsLoader = isLoading;
+  // Show a loader for at least 10 seconds (or until calls load) so the screen
+  // doesn't flash the empty state while the Zero query is still warming up.
+  const [showMinLoader, setShowMinLoader] = useState(true);
+  useEffect(() => {
+    if (!isLoading) {
+      setShowMinLoader(false);
+      return;
+    }
+    setShowMinLoader(true);
+    const timer = setTimeout(() => setShowMinLoader(false), 10000);
+    return () => clearTimeout(timer);
+  }, [isLoading]);
+
+  const showRecentCallsLoader = isLoading || (showMinLoader && (calls?.length ?? 0) === 0);
 
   const endedCallsCount = calls?.filter(c => c.status === CallStatus.ENDED).length ?? 0;
 
@@ -336,7 +359,7 @@ const CallHistoryV2Screen = (): ReactElement => {
       if (callHistoryLoadStartTimeRef.current !== null) {
         const duration = Date.now() - callHistoryLoadStartTimeRef.current;
         logger.info(Event.CALL_HISTORY_LOADED, {
-          source: 'CallHistoryScreen',
+          source: 'CallHistoryV2Screen',
           message: 'Call history loaded',
           durationMs: duration,
           url: window.location.href,
@@ -344,7 +367,7 @@ const CallHistoryV2Screen = (): ReactElement => {
 
         safeRecordMetric(() => {
           dataLoadDuration.record(duration, {
-            source: 'CallHistoryScreen',
+            source: 'CallHistoryV2Screen',
             event: Event.CALL_HISTORY_LOADED,
             platform: logger.platformName,
           });
@@ -356,7 +379,7 @@ const CallHistoryV2Screen = (): ReactElement => {
       if (callHistoryLoadStartTimeRef.current !== null) {
         const duration = Date.now() - callHistoryLoadStartTimeRef.current;
         logger.info(Event.CALL_HISTORY_LOADED, {
-          source: 'CallHistoryScreen',
+          source: 'CallHistoryV2Screen',
           message: 'Call history load failed',
           durationMs: duration,
           url: window.location.href,
@@ -364,7 +387,7 @@ const CallHistoryV2Screen = (): ReactElement => {
 
         safeRecordMetric(() => {
           dataLoadDuration.record(duration, {
-            source: 'CallHistoryScreen',
+            source: 'CallHistoryV2Screen',
             event: Event.CALL_HISTORY_LOADED,
             platform: logger.platformName,
           });
@@ -378,6 +401,12 @@ const CallHistoryV2Screen = (): ReactElement => {
 
   const hasCallSearch = !!titleSearchQuery || hasCallSearchFilters;
   const hasCallFilters = hasCallSearch || recentCallFilter !== 'all' || selectedLabels.length > 0;
+
+  // Clear label filters when a search is active, since the search results are Vespa rows with `labels: []` (mapVespaCallResultToCall) and filtering would wrongly empty the list.
+  useEffect(() => {
+    if (hasCallSearch) setSelectedLabels([]);
+  }, [hasCallSearch]);
+
   const lastCallSearchScrollTopRef = useRef(0);
   const handleCallHistoryScroll = useCallback(
     (event: UIEvent<HTMLDivElement>) => {
@@ -424,8 +453,9 @@ const CallHistoryV2Screen = (): ReactElement => {
     );
   }, [calls, hasCallSearch, showChannelCalls, user?.id, vespaRecentCallRows]);
 
-  const filteredRecentCallsNoGcal = filteredRecentCalls?.filter(
-    call => !isExternalCalendarEvent(call),
+  const filteredRecentCallsNoGcal = useMemo(
+    () => filteredRecentCalls?.filter(call => !isExternalCalendarEvent(call)),
+    [filteredRecentCalls],
   );
 
   // Options come off the Zero-backed list rather than the current view, so the
@@ -455,11 +485,14 @@ const CallHistoryV2Screen = (): ReactElement => {
   // rather than silently filtering everything away.
   const isLabelFilterDisabled = hasCallSearch;
 
-  const filteredMissedCalls = (
-    hasCallSearch
-      ? filteredRecentCalls?.filter(call => isMissedCallForUser(call, user?.id))
-      : missedCalls
-  )?.filter(call => !isExternalCalendarEvent(call));
+  const filteredMissedCalls = useMemo(
+    () =>
+      (hasCallSearch
+        ? filteredRecentCalls?.filter(call => isMissedCallForUser(call, user?.id))
+        : missedCalls
+      )?.filter(call => !isExternalCalendarEvent(call)),
+    [hasCallSearch, filteredRecentCalls, missedCalls, user?.id],
+  );
 
   const activeCallsForUpcoming = useMemo(() => {
     const now = Date.now();
@@ -547,11 +580,17 @@ const CallHistoryV2Screen = (): ReactElement => {
       initialContextSelections: {
         canvases: [],
         recordings: [],
-        calls: selected.map(call => ({
-          id: call.id,
-          title: call.title || 'Untitled call',
-          ...(call.channelId ? { channelId: call.channelId } : {}),
-        })),
+        calls: selected.map(call => {
+          const channelId = call.callUpdatesChannel ?? call.channelId;
+          const conversationId = (call.metadata as { conversationId?: string } | null)
+            ?.conversationId;
+          return {
+            id: call.id,
+            title: call.title || 'Untitled call',
+            ...(channelId ? { channelId } : {}),
+            ...(conversationId ? { conversationId } : {}),
+          };
+        }),
       },
     });
   }, []);
@@ -620,7 +659,7 @@ const CallHistoryV2Screen = (): ReactElement => {
                   Upcoming
                 </span>
                 <span className='text-xs text-muted-foreground/70'>
-                  {format(new Date(), 'EEE, MMMM d')}
+                  {format(new Date(now), 'EEE, MMMM d')}
                 </span>
               </div>
 
