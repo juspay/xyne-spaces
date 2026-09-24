@@ -6,6 +6,7 @@ import { logger } from '@/utils/logger';
 import { config as appConfig } from '@/config/env';
 import { TagMethod } from '@xyne/shared';
 import { DESK_EMAIL_SOURCE_TYPE, deskEmailConfigKey } from './deskEmail';
+import { advisoryXactLock } from '@/bypassAcl/lockServices';
 
 export const DESK_TICKET_SOURCE_TYPE = 'desk-ticket';
 
@@ -63,7 +64,9 @@ export async function syncTicketTagsForConversation(conversationId: string): Pro
 
   try {
     await db.$transaction(async (tx) => {
-      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${'tag-mirror:' + conversationId}))`;
+      await advisoryXactLock(tx, ['Ticket', 'Email', 'Tag'],
+        'ticket tag mirror: serialize the compare-and-swap of a ticket\'s mirrored tag rows',
+        'tag-mirror:' + conversationId);
 
       const ticket = await tx.ticket.findFirst({
         where: { conversationId },

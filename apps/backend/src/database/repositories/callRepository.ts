@@ -16,6 +16,8 @@ import {
   setSlashCommandArtifactLifecycle,
   type MessageArtifactLifecycleStatus,
 } from './messageArtifactRepository';
+import { advisoryXactLock } from '@/bypassAcl/lockServices';
+import { appendCallMarkedItem, clearCallGoogleCalendarPushState, setCallGoogleCalendarPushState } from '@/bypassAcl/callServices';
 
 export type { Call, CallParticipant };
 
@@ -426,11 +428,7 @@ export class CallRepository {
   }
 
   async appendMarkedItem(externalId: string, item: Prisma.InputJsonValue): Promise<boolean> {
-    const rowsUpdated = await DatabaseClient.getInstance().$executeRaw`
-      UPDATE "calls"
-      SET "markedItems" = "markedItems" || ${JSON.stringify(item)}::jsonb
-      WHERE "externalId" = ${externalId}
-    `;
+    const rowsUpdated = await appendCallMarkedItem(externalId, item);
     return rowsUpdated > 0;
   }
 
@@ -471,7 +469,9 @@ export class CallRepository {
     const lockKey = `call-recording-participants:${externalId}`;
 
     return DatabaseClient.getInstance().$transaction(async (tx) => {
-      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${lockKey}))`;
+      await advisoryXactLock(tx, ['Call'],
+        'call recording participants: serialize participant reconciliation for one call',
+        lockKey);
 
       const call = await tx.call.findUnique({
         where: { externalId },
@@ -498,7 +498,9 @@ export class CallRepository {
     const lockKey = `call-labels:${callId}`;
 
     await DatabaseClient.getInstance().$transaction(async (tx) => {
-      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${lockKey}))`;
+      await advisoryXactLock(tx, ['Call'],
+        'call labels: serialize label list read-modify-write for one call',
+        lockKey);
 
       const call = await tx.call.findUnique({ where: { id: callId }, select: { labels: true } });
       if (!call) return;
@@ -914,22 +916,12 @@ export class CallRepository {
     callId: string,
     state: GoogleCalendarPushState | null,
   ): Promise<void> {
-    const db = DatabaseClient.getInstance();
-
     if (state === null) {
-      await db.$executeRaw`
-        UPDATE "calls"
-        SET "metadata" = COALESCE("metadata", '{}'::jsonb) - 'googleCalendarPush'
-        WHERE "id" = ${callId}
-      `;
+      await clearCallGoogleCalendarPushState(callId);
       return;
     }
 
-    await db.$executeRaw`
-      UPDATE "calls"
-      SET "metadata" = COALESCE("metadata", '{}'::jsonb) || ${JSON.stringify({ googleCalendarPush: state })}::jsonb
-      WHERE "id" = ${callId}
-    `;
+    await setCallGoogleCalendarPushState(callId, state);
   }
 
   /**

@@ -1,6 +1,7 @@
+import type { Activity } from '@prisma/client';
 import { db } from '@/database/client';
-import { UserStatus } from '@xyne/shared';
-import { asSystem } from './base';
+import { ActivityClassification, ActivityClassificationJobType, UserStatus } from '@xyne/shared';
+import { asSystem, rawQuery } from './base';
 
 /**
  * Relocated from services/activity/activityService.ts's fillSdlcOwner. Stamps a conversation's
@@ -78,5 +79,71 @@ export function getWorkspaceActivityCountsQuery(memberId: string): Promise<
         count: countMap.get(u.id) ?? 0,
       }));
     },
+  );
+}
+
+/**
+ * Relocated from activityClassificationWorkerService. Claims a whole special-mention audience
+ * batch atomically with FOR UPDATE SKIP LOCKED; the worker sweeps every workspace, so there
+ * is no single tenant to scope to. SQL unchanged.
+ */
+export async function claimSpecialMentionAudienceActivitiesQuery() {
+  return rawQuery(
+    ['Activity'],
+    'activity classification worker: FOR UPDATE SKIP LOCKED claim so competing workers cannot double-process a batch',
+    () => db.$queryRaw<Activity[]>`
+      WITH batch AS (
+        SELECT "actionSourceId", "channelId"
+        FROM "activities"
+        WHERE "classification" = ${ActivityClassification.PENDING}
+          AND "classificationJobType" = ${ActivityClassificationJobType.SPECIAL_MENTION_AUDIENCE}
+        ORDER BY "createdAt" ASC
+        LIMIT 1
+        FOR UPDATE SKIP LOCKED
+      ),
+      claimed AS (
+        SELECT "id"
+        FROM "activities" a
+        JOIN batch b
+          ON a."actionSourceId" = b."actionSourceId"
+         AND a."channelId" = b."channelId"
+        WHERE a."classification" = ${ActivityClassification.PENDING}
+          AND a."classificationJobType" = ${ActivityClassificationJobType.SPECIAL_MENTION_AUDIENCE}
+        FOR UPDATE SKIP LOCKED
+      )
+      UPDATE "activities" a
+      SET "classification" = ${ActivityClassification.PROCESSING}
+      FROM claimed
+      WHERE a."id" = claimed."id"
+      RETURNING a.*;
+    `,
+  );
+}
+
+/**
+ * Relocated from activityClassificationWorkerService. Claims one batch of pending activities
+ * atomically with FOR UPDATE SKIP LOCKED; the worker sweeps every workspace, so there is no
+ * single tenant to scope to. SQL unchanged.
+ */
+export async function claimSingleActivitiesQuery(limit: number) {
+  return rawQuery(
+    ['Activity'],
+    'activity classification worker: FOR UPDATE SKIP LOCKED claim so competing workers cannot double-process a row',
+    () => db.$queryRaw<Activity[]>`
+      WITH cte AS (
+        SELECT "id"
+        FROM "activities"
+        WHERE "classification" = ${ActivityClassification.PENDING}
+          AND ("classificationJobType" IS NULL OR "classificationJobType" = ${ActivityClassificationJobType.SINGLE})
+        ORDER BY "createdAt" ASC
+        LIMIT ${limit}
+        FOR UPDATE SKIP LOCKED
+      )
+      UPDATE "activities" a
+      SET "classification" = ${ActivityClassification.PROCESSING}
+      FROM cte
+      WHERE a."id" = cte."id"
+      RETURNING a.*;
+    `,
   );
 }

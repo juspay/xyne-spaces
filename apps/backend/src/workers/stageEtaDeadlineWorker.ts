@@ -20,6 +20,8 @@ import {
   dispatchEtaNotifications,
   etaSignalsFromResult,
 } from '@/services/etaManagement';
+import { lockTicketMetadata } from '@/bypassAcl/rowLockServices';
+import { markTicketsStageOverdue } from '@/bypassAcl/ticketServices';
 
 interface TicketForReconciliation extends TicketWithStageInfo {
   boardId: string;
@@ -112,12 +114,7 @@ class StageEtaDeadlineWorker {
 
     for (let i = 0; i < overdueTicketIds.length; i += BATCH_SIZE) {
       const batchIds = overdueTicketIds.slice(i, i + BATCH_SIZE);
-      await db.$executeRaw`
-        UPDATE "tickets"
-        SET "isStageOverdue" = true
-        WHERE "id" IN (${Prisma.join(batchIds)})
-          AND ("isStageOverdue" = false OR "isStageOverdue" IS NULL)
-      `;
+      await markTicketsStageOverdue(batchIds);
       if (i + BATCH_SIZE < overdueTicketIds.length) {
         await sleep(BATCH_SLEEP_MS);
       }
@@ -366,12 +363,7 @@ class StageEtaDeadlineWorker {
           ticket.workspaceId,
           async () =>
             db.$transaction(async tx => {
-              const [locked] = await tx.$queryRaw<{ metadata: unknown }[]>`
-                SELECT "metadata"
-                FROM "tickets"
-                WHERE "id" = ${ticket.id}
-                FOR UPDATE
-              `;
+              const locked = await lockTicketMetadata(tx, ticket.id);
               const freshRisk = parseTicketEtaManagement(locked?.metadata).planningRisk;
               if (freshRisk.fingerprint !== currentTicketEtaManagement.planningRisk.fingerprint) {
                 return false;

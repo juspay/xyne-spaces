@@ -17,19 +17,20 @@ else
   RED=''; YELLOW=''; GREEN=''; RESET=''
 fi
 
-# Only runAsSystem is checked here for now — it's the only category fully relocated into
-# bypassAcl/ so far. runAsServiceActor, $queryRaw/$executeRaw, and .$transaction( are each
-# being done as separate PRs; add each back once its relocation lands:
-#   label "runAsServiceActor(",                    pattern 'runAsServiceActor\('
-#   label "\$queryRaw / \$executeRaw (incl. *Unsafe)", pattern '\$(query|execute)Raw(Unsafe)?'
-#   label ".\$transaction(",                        pattern '\.\$transaction\('
+# runAsSystem and the raw SQL primitives are checked here — both categories are fully
+# relocated into bypassAcl/. runAsServiceActor and .$transaction( are each being done as
+# separate PRs; add each back once its relocation lands:
+#   label "runAsServiceActor(",   pattern 'runAsServiceActor\('
+#   label ".\$transaction(",      pattern '\.\$transaction\('
 #
 # Each entry: human label, grep -E pattern.
 declare -a LABELS=(
   "runAsSystem("
+  "raw query/execute calls (incl. *Unsafe)"
 )
 declare -a PATTERNS=(
   'runAsSystem\('
+  '\$(query|execute)Raw(Unsafe)?'
 )
 
 violations=0
@@ -57,10 +58,9 @@ for i in "${!PATTERNS[@]}"; do
 done
 
 if [ "$violations" -gt 0 ]; then
-  echo "runAsSystem is a way to reach the database without going through the Prisma tenant ACL"
-  echo "extension (apps/backend/src/database/tenant/acl-extension.ts). (runAsServiceActor, raw"
-  echo "query/execute calls, and .\$transaction( are tracked separately and not checked by this"
-  echo "script for now.)"
+  echo "These are ways to reach the database without going through the Prisma tenant ACL"
+  echo "extension (apps/backend/src/database/tenant/acl-extension.ts). (runAsServiceActor and"
+  echo ".\$transaction( are tracked separately and not checked by this script for now.)"
   echo "Every call site must live in apps/backend/src/bypassAcl/, importable from elsewhere —"
   echo "see /ACL_BYPASS_AUDIT.md at the repo root for why, and /BYPASS_ACL_EXAMPLES.md for the"
   echo "relocation pattern."

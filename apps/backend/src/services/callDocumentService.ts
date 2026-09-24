@@ -75,6 +75,7 @@ interface CanvasSideEffectContext {
 
 import { executeStreamingLlmRequest, type SummaryModelType } from './callLlmRetry';
 import { initializeYSweetDoc, syncToYSweet } from '@/utils/ysweetUtils.js';
+import { lockMessageMetadata } from '@/bypassAcl/rowLockServices';
 
 export interface RecordingSummaryTemplateSelection<T extends SummaryTemplateCandidate = SummaryTemplate> {
   template: T | null;
@@ -2106,12 +2107,7 @@ A comprehensive detailed summary has been generated from this call.
           // Title generation and first-chunk Canvas publication can now update
           // this message concurrently. Lock the row and merge from the latest
           // metadata so neither write erases the other's key.
-          const [lockedMessage] = await tx.$queryRaw<Array<{ metadata: unknown }>>`
-            SELECT "metadata"
-            FROM "messages"
-            WHERE "messageId" = ${callMessage.messageId}
-            FOR UPDATE
-          `;
+          const lockedMessage = await lockMessageMetadata(tx, callMessage.messageId);
           if (!lockedMessage) {
             return;
           }

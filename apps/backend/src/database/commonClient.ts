@@ -3,6 +3,7 @@ import { logger } from '@/utils/logger';
 import { config } from '@/config/env';
 import { withRetry } from '@/utils/retry';
 import { installPrismaRetryMiddleware } from './retryMiddleware';
+import { pingDatabase } from '@/bypassAcl/healthServices';
 
 /**
  * Builds the common DB connection URL with pool settings from env config.
@@ -123,7 +124,7 @@ export class CommonDatabaseClient {
 
     try {
       const client = CommonDatabaseClient.getInstance();
-      await client.$queryRaw`SELECT 1`;
+      await pingDatabase(client);
       return true;
     } catch (error) {
       logger.error('Common database health check failed:', error);

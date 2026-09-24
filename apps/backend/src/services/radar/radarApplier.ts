@@ -3,6 +3,7 @@ import { DatabaseClient } from '@/database/client';
 import { logger } from '@/utils/logger';
 import type { ParserOperation } from '@/services/radar/radarParser';
 import type { RadarScope } from '@/services/radar/radarScope';
+import { removeExecutionItemPendingOn } from '@/bypassAcl/radarServices';
 
 /**
  * An operation plus, optionally, the conversation it belongs to. Manual bulk
@@ -168,16 +169,7 @@ class RadarApplier {
               // open and ownerless, which is the schema's stated rule — it
               // stays in its requester's Waiting On, because "nobody took
               // this" is not the same claim as "this is done".
-              const changed = await tx.$executeRaw`
-                UPDATE "non_zero"."execution_items"
-                SET "pendingOn" = array_remove("pendingOn", ${actorId}),
-                    "updatedAt" = NOW()
-                WHERE "id" = ${op.itemId}
-                  AND "workspaceId" = ${workspaceId}
-                  AND "conversationId" = ${conversationFor(op)}
-                  AND "status" = 'OPEN'
-                  AND ${actorId} = ANY("pendingOn")
-              `;
+              const changed = await removeExecutionItemPendingOn(tx, op.itemId as string, workspaceId, conversationFor(op), actorId);
               if (changed === 0) break;
               auditRows.push(this.auditRow(params, op, op.itemId as string, conversationFor(op)));
               result.dismissed++;
