@@ -75,34 +75,33 @@ interface CallHistorySearchPanelV2Props extends CallHistorySearchPanelBaseProps 
 
 type CallHistorySearchPanelProps = CallHistorySearchPanelV1Props | CallHistorySearchPanelV2Props;
 
-export function CallHistorySearchPanel({
-  variant = 'v1',
-  calendarProvider,
-  isSyncing,
-  syncMessage,
-  reauthCountdown,
-  onCalendarSync,
-  onOpenAskAI,
-  callMentionSearchType,
-  callMentionSearchQuery,
-  callSearchSelectedMentions,
-  callSearchInitialQuery,
-  filteredUserMentionResults,
-  channelMentionResults,
-  selectedMentionIndex,
-  setSelectedMentionIndex,
-  hasNavigatedMentions,
-  setHasNavigatedMentions,
-  onInsertMentionReady,
-  closeCallMentionSearch,
-  handleCallSearchChange,
-  handleCallUserSearch,
-  handleCallChannelSearch,
-  showChannelCalls,
-  setShowChannelCalls,
-  isMobile,
-  currentUserId,
-}: CallHistorySearchPanelProps): ReactElement {
+export function CallHistorySearchPanel(props: CallHistorySearchPanelProps): ReactElement {
+  const {
+    variant = 'v1',
+    calendarProvider,
+    isSyncing,
+    syncMessage,
+    reauthCountdown,
+    onCalendarSync,
+    onOpenAskAI,
+    callMentionSearchType,
+    callMentionSearchQuery,
+    callSearchSelectedMentions,
+    callSearchInitialQuery,
+    filteredUserMentionResults,
+    channelMentionResults,
+    selectedMentionIndex,
+    setSelectedMentionIndex,
+    hasNavigatedMentions,
+    setHasNavigatedMentions,
+    onInsertMentionReady,
+    closeCallMentionSearch,
+    handleCallSearchChange,
+    handleCallUserSearch,
+    handleCallChannelSearch,
+    isMobile,
+    currentUserId,
+  } = props;
   const insertMentionRef = useRef<
     ((item: { id: string; name: string; email?: string }) => void) | null
   >(null);
@@ -337,7 +336,7 @@ export function CallHistorySearchPanel({
             </Popover.Content>
           </Popover.Portal>
         </Popover.Root>
-        {!isV2 && (
+        {props.variant !== 'v2' && (
           <div className='flex items-center gap-3 shrink-0'>
             <Tooltip
               content='Show calls from your channels where you were not a direct participant'
@@ -353,8 +352,8 @@ export function CallHistorySearchPanel({
             </Tooltip>
             <Switch
               id='channel-calls-toggle'
-              checked={showChannelCalls ?? false}
-              onCheckedChange={setShowChannelCalls ?? (() => {})}
+              checked={props.showChannelCalls}
+              onCheckedChange={props.setShowChannelCalls}
             />
             <Tooltip
               content='Show calls from your channels where you were not a direct participant'

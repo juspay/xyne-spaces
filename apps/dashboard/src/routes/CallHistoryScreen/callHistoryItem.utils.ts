@@ -313,7 +313,7 @@ export function buildParticipantSummary(
   otherParticipantCount: number,
 ): string {
   const [firstParticipantName, secondParticipantName] = displayNames;
-  if (!firstParticipantName || otherParticipantCount <= 1) {
+  if (!firstParticipantName || otherParticipantCount <= 1 || !secondParticipantName) {
     return firstParticipantName || 'Unknown';
   }
   if (otherParticipantCount === 2) {
@@ -508,6 +508,18 @@ export function isScheduledCallJoinable(call: Call, now = Date.now()): boolean {
   if (call.status !== CallStatus.SCHEDULED || !call.startsAt) return false;
 
   return now >= new Date(call.startsAt).getTime();
+}
+
+export function isCallActive(call: Call, now = Date.now()): boolean {
+  return Boolean(
+    call.status === CallStatus.ACTIVE ||
+    call.status === CallStatus.IN_PROGRESS ||
+    (call.status === CallStatus.SCHEDULED &&
+      call.startsAt &&
+      new Date(call.startsAt).getTime() <= now &&
+      call.endsAt &&
+      new Date(call.endsAt).getTime() > now),
+  );
 }
 
 export function hasCallEnded(call: Call): call is Call & { endedAt: NonNullable<Call['endedAt']> } {

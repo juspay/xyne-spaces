@@ -1,27 +1,14 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { ChevronDown, CalendarDefault } from '@xyne/icons';
-import { CallStatus } from '@xyne/shared';
 import { isSameDay } from '../../../utils/dateUtils';
-import { type Call } from '../../CallHistoryScreen/callHistoryItem.utils';
+import { isCallActive, type Call } from '../../CallHistoryScreen/callHistoryItem.utils';
 import { useUsers } from '../../../hooks/useUsers';
 import { UpcomingCallRowV2 } from './UpcomingCallRowV2';
 
 /** Rows always visible before the "View N more" toggle appears. */
 const COLLAPSED_COUNT = 3;
 const COLLAPSE_TRANSITION = { duration: 0.26, ease: [0.4, 0, 0.2, 1] as const };
-
-function isActiveCall(call: Call, now = Date.now()): boolean {
-  return (
-    call.status === CallStatus.ACTIVE ||
-    call.status === CallStatus.IN_PROGRESS ||
-    (call.status === CallStatus.SCHEDULED &&
-      Boolean(call.startsAt) &&
-      new Date(call.startsAt!).getTime() <= now &&
-      Boolean(call.endsAt) &&
-      new Date(call.endsAt!).getTime() > now)
-  );
-}
 
 /** Empty-state greeting varies with how much of the day is still ahead. */
 function getEmptyStateTitle(now: Date): string {
@@ -53,19 +40,25 @@ export function UpcomingCallsListV2({
   day,
 }: UpcomingCallsListV2Props): React.JSX.Element {
   const allUsers = useUsers();
+  const [now, setNow] = useState(() => Date.now());
 
-  const targetDay = useMemo(() => day ?? new Date(), [day]);
+  // Update "now" every minute so that active calls and empty-state messages update in real time without a full page refresh.
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 60_000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const targetDay = useMemo(() => day ?? new Date(now), [day, now]);
   const todaysCalls = useMemo(() => {
-    const now = Date.now();
     const relevant = calls.filter(
       call =>
-        isActiveCall(call, now) || (call.startsAt && isSameDay(new Date(call.startsAt), targetDay)),
+        isCallActive(call, now) || (call.startsAt && isSameDay(new Date(call.startsAt), targetDay)),
     );
     // Active calls pinned to the top; everything else keeps its startsAt-ascending order.
     return [...relevant].sort(
-      (a, b) => Number(isActiveCall(b, now)) - Number(isActiveCall(a, now)),
+      (a, b) => Number(isCallActive(b, now)) - Number(isCallActive(a, now)),
     );
-  }, [calls, targetDay]);
+  }, [calls, targetDay, now]);
 
   const [isExpanded, setIsExpanded] = useState(false);
   const isEmpty = todaysCalls.length === 0;

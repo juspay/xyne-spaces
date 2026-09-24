@@ -414,7 +414,20 @@ const CallHistoryScreen = (): ReactElement => {
   const callHistoryLoadStartTimeRef = useRef<number | null>(null);
   const [scrollContainer, setScrollContainer] = useState<HTMLDivElement | null>(null);
 
-  const showRecentCallsLoader = isLoading;
+  // Show a loader for at least 10 seconds (or until calls load) so the screen
+  // doesn't flash the empty state while the Zero query is still warming up.
+  const [showMinLoader, setShowMinLoader] = useState(true);
+  useEffect(() => {
+    if (!isLoading) {
+      setShowMinLoader(false);
+      return;
+    }
+    setShowMinLoader(true);
+    const timer = setTimeout(() => setShowMinLoader(false), 10000);
+    return () => clearTimeout(timer);
+  }, [isLoading]);
+
+  const showRecentCallsLoader = isLoading || (showMinLoader && (calls?.length ?? 0) === 0);
 
   const endedCallsCount = calls?.filter(c => c.status === CallStatus.ENDED).length ?? 0;
 

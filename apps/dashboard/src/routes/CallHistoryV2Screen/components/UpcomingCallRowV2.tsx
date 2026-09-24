@@ -16,6 +16,7 @@ import {
   getPreviewParticipantUsers,
   getCallParticipantCount,
   canEditScheduledCallParticipants,
+  isCallActive,
   type Call,
 } from '../../CallHistoryScreen/callHistoryItem.utils';
 import { isDMChannel } from '../../../components/Chat/ChatDirectory/ChatDirectory.utils';
@@ -65,12 +66,7 @@ export function UpcomingCallRowV2({
   const currentCallId = useSelector(roomActor, state => state.context.externalId);
   const isUserInThisDevice = currentCallId === call.externalId;
 
-  const isActive =
-    call.status === CallStatus.ACTIVE ||
-    call.status === CallStatus.IN_PROGRESS ||
-    (call.status === CallStatus.SCHEDULED &&
-      Boolean(call.startsAt) &&
-      new Date(call.startsAt!).getTime() <= Date.now());
+  const isActive = isCallActive(call);
   const isEnded = call.status === CallStatus.ENDED;
 
   const previewParticipantUsers = getPreviewParticipantUsers(
