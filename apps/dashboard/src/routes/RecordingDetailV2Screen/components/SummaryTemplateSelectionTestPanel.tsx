@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactElement } from 'react';
 import { ArrowLeft, Spinner } from '@xyne/icons';
+import { SUMMARY_TEMPLATE_SELECTION_MAX_TRANSCRIPT_CHARS } from '@xyne/shared';
 import { XyneAIStar } from '../../../components/icons/xyne-ai';
 import { Button } from '../../../components/ui/Button/Button';
 import {
@@ -18,9 +19,10 @@ const INPUT_MODES: Array<{ value: InputMode; label: string }> = [
 ];
 
 const TRANSCRIPT_FILE_ACCEPT = '.txt,.vtt,.srt,.md,text/plain,text/vtt,text/markdown';
-const MAX_TRANSCRIPT_LENGTH = 500_000;
-// Room for MAX_TRANSCRIPT_LENGTH characters of multi-byte UTF-8.
-const MAX_TRANSCRIPT_FILE_BYTES = 2 * 1024 * 1024;
+const MAX_TRANSCRIPT_LENGTH = SUMMARY_TEMPLATE_SELECTION_MAX_TRANSCRIPT_CHARS;
+// Enough bytes for MAX_TRANSCRIPT_LENGTH characters even if every one is 4-byte UTF-8.
+const MAX_TRANSCRIPT_READ_BYTES = MAX_TRANSCRIPT_LENGTH * 4;
+const TRUNCATION_NOTE = `Only the first ${MAX_TRANSCRIPT_LENGTH.toLocaleString()} characters are used, the same as for real recordings.`;
 
 const getFallbackReasonLabel = (reason: string | null): string => {
   if (reason === 'no_templates') return 'No templates are available in this workspace.';
@@ -41,34 +43,44 @@ export function SummaryTemplateSelectionTestPanel({
 }: SummaryTemplateSelectionTestPanelProps): ReactElement {
   const [mode, setMode] = useState<InputMode>('paste');
   const [pastedTranscript, setPastedTranscript] = useState('');
-  const [uploaded, setUploaded] = useState<{ name: string; text: string } | null>(null);
+  const [pasteTruncated, setPasteTruncated] = useState(false);
+  const [uploaded, setUploaded] = useState<{
+    name: string;
+    text: string;
+    truncated: boolean;
+  } | null>(null);
   const [runningMode, setRunningMode] = useState<InputMode | null>(null);
   const [outcomes, setOutcomes] = useState<Partial<Record<InputMode, TestOutcome>>>({});
   const outcome = outcomes[mode];
   const clearOutcome = (forMode: InputMode): void =>
     setOutcomes(current => ({ ...current, [forMode]: undefined }));
   const fileInputRef = useRef<HTMLInputElement>(null);
+  // A result only describes the draft it was run against, so any edit invalidates it.
+  const draftKey = JSON.stringify(draft);
+  const draftKeyRef = useRef(draftKey);
 
   useEffect(() => {
+    draftKeyRef.current = draftKey;
     setOutcomes({});
-  }, [draft.id]);
+  }, [draftKey]);
 
   const handleFileChange = async (file: File | undefined): Promise<void> => {
     if (!file) return;
-    const fail = (error: string): void => {
-      setUploaded(null);
-      setOutcomes(current => ({ ...current, upload: { error } }));
-    };
-    if (file.size > MAX_TRANSCRIPT_FILE_BYTES) {
-      fail('This file is too large. Upload a transcript under 2 MB.');
-      return;
-    }
     try {
-      const text = await file.text();
-      setUploaded({ name: file.name, text: text.slice(0, MAX_TRANSCRIPT_LENGTH) });
+      // Read only as much as the prompt can use, so large files never load in full.
+      const text = await file.slice(0, MAX_TRANSCRIPT_READ_BYTES).text();
+      setUploaded({
+        name: file.name,
+        text: text.slice(0, MAX_TRANSCRIPT_LENGTH),
+        truncated: file.size > MAX_TRANSCRIPT_READ_BYTES || text.length > MAX_TRANSCRIPT_LENGTH,
+      });
       clearOutcome('upload');
     } catch {
-      fail('Unable to read this file. Try another transcript.');
+      setUploaded(null);
+      setOutcomes(current => ({
+        ...current,
+        upload: { error: 'Unable to read this file. Try another transcript.' },
+      }));
     }
   };
 
@@ -86,6 +98,7 @@ export function SummaryTemplateSelectionTestPanel({
   const runTest = async (): Promise<void> => {
     if (!input || !hasMeetingContext || runningMode) return;
     const testedMode = mode;
+    const testedDraftKey = draftKey;
     setRunningMode(testedMode);
     clearOutcome(testedMode);
     let next: TestOutcome;
@@ -94,7 +107,9 @@ export function SummaryTemplateSelectionTestPanel({
     } catch (err) {
       next = { error: getApiErrorMessage(err, 'Unable to test template selection.') };
     }
-    setOutcomes(current => ({ ...current, [testedMode]: next }));
+    if (draftKeyRef.current === testedDraftKey) {
+      setOutcomes(current => ({ ...current, [testedMode]: next }));
+    }
     setRunningMode(null);
   };
 
@@ -158,7 +173,9 @@ export function SummaryTemplateSelectionTestPanel({
           <textarea
             value={pastedTranscript}
             onChange={event => {
-              setPastedTranscript(event.target.value.slice(0, MAX_TRANSCRIPT_LENGTH));
+              const { value } = event.target;
+              setPastedTranscript(value.slice(0, MAX_TRANSCRIPT_LENGTH));
+              setPasteTruncated(value.length > MAX_TRANSCRIPT_LENGTH);
               clearOutcome('paste');
             }}
             rows={10}
@@ -167,6 +184,9 @@ export function SummaryTemplateSelectionTestPanel({
             data-track-category='SummaryTemplates'
             data-track-name='EditSelectionTestTranscript'
           />
+        )}
+        {mode === 'paste' && pasteTruncated && (
+          <p className='-mt-2 text-xs text-muted-foreground'>{TRUNCATION_NOTE}</p>
         )}
 
         {mode === 'upload' && (
@@ -191,7 +211,9 @@ export function SummaryTemplateSelectionTestPanel({
             </Button>
             {uploaded && (
               <p className='text-xs text-muted-foreground'>
-                {uploaded.text.length.toLocaleString()} characters loaded
+                {uploaded.truncated
+                  ? TRUNCATION_NOTE
+                  : `${uploaded.text.length.toLocaleString()} characters loaded`}
               </p>
             )}
           </div>

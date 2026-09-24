@@ -993,28 +993,17 @@ export class CallDocumentService {
     userId: string,
     callId: string,
   ): Promise<SummaryTemplate | null> {
-    const selection = await this.resolveRecordingSummaryTemplateSelection(
-      transcript,
+    const { templates, defaultTemplate } = await this.loadRecordingSummaryTemplateCandidates(
       workspaceId,
       userId,
+    );
+    const selection = await this.pickRecordingSummaryTemplate(
+      transcript,
+      templates,
+      defaultTemplate,
       callId,
     );
     return selection.template;
-  }
-
-  async resolveRecordingSummaryTemplateSelection(
-    transcript: string,
-    workspaceId: string,
-    userId: string,
-    callId: string,
-  ): Promise<RecordingSummaryTemplateSelection> {
-    const templates = await summaryTemplateService.list(workspaceId, userId);
-    const defaultTemplate = await summaryTemplateService.findAccessibleById(
-      DEFAULT_RECORDING_SUMMARY_TEMPLATE.id,
-      workspaceId,
-      userId,
-    );
-    return this.pickRecordingSummaryTemplate(transcript, templates, defaultTemplate, callId);
   }
 
   /**
@@ -1028,20 +1017,51 @@ export class CallDocumentService {
     callId: string,
     draft: SummaryTemplateCandidate,
   ): Promise<RecordingSummaryTemplateSelection<SummaryTemplateCandidate>> {
-    const templates = await summaryTemplateService.list(workspaceId, userId);
-    const defaultTemplate = await summaryTemplateService.findAccessibleById(
-      DEFAULT_RECORDING_SUMMARY_TEMPLATE.id,
+    const { templates, defaultTemplate } = await this.loadRecordingSummaryTemplateCandidates(
       workspaceId,
       userId,
     );
-    const draftId = templates.some(template => template.id === draft.id)
-      ? draft.id
-      : DRAFT_SUMMARY_TEMPLATE_ID;
-    const candidates: SummaryTemplateCandidate[] = [
-      ...templates.filter(template => template.id !== draftId),
-      { ...draft, id: draftId },
-    ];
-    return this.pickRecordingSummaryTemplate(transcript, candidates, defaultTemplate, callId);
+    const saved = templates.find(template => template.id === draft.id);
+    const draftCandidate: SummaryTemplateCandidate = saved
+      ? { ...draft, id: saved.id, version: saved.version }
+      : { ...draft, id: DRAFT_SUMMARY_TEMPLATE_ID };
+    const others: SummaryTemplateCandidate[] = templates.filter(
+      template => template.id !== draftCandidate.id,
+    );
+    // Slot the draft where summaryTemplateService.list's ordering (name asc, version desc,
+    // id asc) would put it, since candidate order in the prompt can sway the pick.
+    const insertAt = others.findIndex(
+      template =>
+        draftCandidate.name.localeCompare(template.name) < 0 ||
+        (draftCandidate.name === template.name &&
+          (draftCandidate.version > template.version ||
+            (draftCandidate.version === template.version &&
+              draftCandidate.id < template.id))),
+    );
+    const candidates = [...others];
+    candidates.splice(insertAt === -1 ? candidates.length : insertAt, 0, draftCandidate);
+    return this.pickRecordingSummaryTemplate(
+      transcript,
+      candidates,
+      defaultTemplate,
+      callId,
+      userId,
+    );
+  }
+
+  private async loadRecordingSummaryTemplateCandidates(
+    workspaceId: string,
+    userId: string,
+  ): Promise<{ templates: SummaryTemplate[]; defaultTemplate: SummaryTemplate | null }> {
+    const [templates, defaultTemplate] = await Promise.all([
+      summaryTemplateService.list(workspaceId, userId),
+      summaryTemplateService.findAccessibleById(
+        DEFAULT_RECORDING_SUMMARY_TEMPLATE.id,
+        workspaceId,
+        userId,
+      ),
+    ]);
+    return { templates, defaultTemplate };
   }
 
   private async pickRecordingSummaryTemplate<T extends SummaryTemplateCandidate>(
@@ -1049,6 +1069,7 @@ export class CallDocumentService {
     templates: T[],
     defaultTemplate: T | null,
     callId: string,
+    credentialUserId?: string,
   ): Promise<RecordingSummaryTemplateSelection<T>> {
     if (templates.length === 0) {
       return { template: defaultTemplate, fellBack: true, reason: 'no_templates' };
@@ -1058,6 +1079,7 @@ export class CallDocumentService {
       userPrompt: buildSummaryTemplateSelectionPrompt(transcript, templates),
       operation: 'recording_summary_template_selection',
       callId,
+      ...(credentialUserId ? { userId: credentialUserId } : {}),
     });
 
     if (result.ok) {
