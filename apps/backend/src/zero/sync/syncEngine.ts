@@ -2,7 +2,10 @@ import { logger } from '@/utils/logger';
 import { InstanceManager } from './instanceManager';
 import { disconnectSyncStore } from './redisStore';
 
-const zeroCacheUrl = (): string => process.env['ZERO_CACHE_UPSTREAM'] || 'http://localhost:4848';
+// Zero-cache the shared-query flow taps to materialize instances — scoped to THIS flow
+// (point at a dedicated zero-cache in prod; user-owned queries use the frontend's own URL).
+const zeroCacheUrl = (): string =>
+  process.env['SHARED_QUERY_ZERO_CACHE_URL'] || 'http://localhost:4848';
 
 /**
  * Process-level handle for the shared-base sync engine. `start`/`stop` are wired
