@@ -206,6 +206,7 @@ import sdlcRoutes from '@/routes/sdlc';
 import sdlcClawRoutes from '@/routes/sdlcClaw';
 import sdlcVcsInternalRoutes from '@/routes/sdlcVcsInternal';
 import sdlcAgentInternalRoutes from '@/routes/sdlcAgentInternal';
+import appsInternalRoutes from '@/routes/appsInternal';
 import { createSdkPublicRouter, createSdkRouter } from '@/api/sdk';
 import { errorHandler as sdkErrorHandler } from '@/api/sdk/handler';
 import sdkSsoRoutes from '@/routes/sdk-sso';
@@ -629,6 +630,8 @@ export class App {
     );
     this.app.use('/api/internal/sdlc/vcs', validateS2SKey, sdlcVcsInternalRoutes);
     this.app.use('/api/internal/sdlc/agent', validateS2SKey, sdlcAgentInternalRoutes);
+    this.app.use('/api/internal/apps', validateS2SKey, appsInternalRoutes);
+
     this.app.use('/api/internal/sdlc/wiki', validateS2SKey, sdlcWikiInternalRoutes);
     this.app.use(
       '/api/internal/sdlc/artifact-versions',
