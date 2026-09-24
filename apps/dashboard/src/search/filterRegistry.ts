@@ -405,7 +405,7 @@ function toggleEntry(opts: {
   id: string;
   label: string;
   param: string;
-  field: 'onlyMyChannels' | 'includeBotMessages' | 'exactMatch';
+  field: 'onlyMyChannels' | 'includeBotMessages' | 'exactMatch' | 'showArchived';
   /** Written only when it differs from this. */
   defaultValue: boolean;
   /** Short caption for the bar pill. */
@@ -792,6 +792,18 @@ export const FILTER_REGISTRY: FilterEntry[] = [
     defaultValue: false,
     barLabel: 'Bot',
     appliesTo: isMessageType,
+  }),
+  // Desk-only: by default archived tickets are hidden; this toggle brings them back.
+  // Scoped to `desk` so it never appears on other tabs, and the registry is unused by
+  // cmd+k, so it is full-page-only.
+  toggleEntry({
+    id: 'showArchived',
+    label: 'Show archived',
+    param: 'showArchived',
+    field: 'showArchived',
+    defaultValue: false,
+    barLabel: 'Archived',
+    appliesTo: d => d === 'desk',
   }),
   // Ticket-only filters last: they apply to one result type, so they sit below the
   // filters that work everywhere.

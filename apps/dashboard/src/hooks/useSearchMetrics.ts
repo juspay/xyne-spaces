@@ -99,6 +99,10 @@ interface UseSearchMetricsOptions {
   // Initial value for the "Include my channels" toggle. Defaults to false so the
   // full-page search is unaffected; the Cmd-K modal opts in with `true`.
   defaultOnlyMyChannels?: boolean;
+  // When true, the backend drops results resolving to an archived ticket. cmd+k passes
+  // `true` (always hide archived); the full-page Desk tab supplies it from its
+  // "Show archived" toggle. Other consumers default OFF, so their behavior is unchanged.
+  defaultExcludeArchived?: boolean;
   // Initial value for the "Include automations" toggle. Set when reopening the palette
   // from a search whose scope had it on, so the restored search matches what was run.
   defaultIncludeBotMessages?: boolean;
@@ -261,6 +265,9 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
   // Cmd-K "Include my channels" toggle. Modal opts in via `defaultOnlyMyChannels`;
   // other consumers (full-page search) default OFF so their behavior is unchanged.
   const [onlyMyChannels, setOnlyMyChannels] = useState(options.defaultOnlyMyChannels ?? false);
+  // When on, the backend hides results tied to an archived ticket. cmd+k sets this true;
+  // the full-page Desk tab drives it from its "Show archived" toggle. Off elsewhere.
+  const [excludeArchived, setExcludeArchived] = useState(options.defaultExcludeArchived ?? false);
   // Exact-match mode. Not derived from the query text: the quotes are added when the
   // request is built, so the box stays clean.
   const [exactMatch, setExactMatch] = useState(false);
@@ -996,6 +1003,9 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
               filterOnly: !searchText && !!hasFilters,
               includeBotMessages,
               onlyMyChannels,
+              // Only the Desk tab hides archived tickets; every other tab (Tickets, All, …)
+              // shows them, in both cmd+k and full-page search.
+              excludeArchived: excludeArchived && activeTab === TabType.DESK,
               exactMatch,
               ...(effectiveRankProfile && { rankProfile: effectiveRankProfile }),
               ...(includeDebugInfo && { includeDebugInfo: true }),
@@ -1323,6 +1333,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
       options.isCallSearchPage,
       includeBotMessages,
       onlyMyChannels,
+      excludeArchived,
       exactMatch,
       rankProfile,
       allDefaultRankProfile,
@@ -1340,6 +1351,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
     mentionsKey: string;
     includeBotMessages: boolean;
     onlyMyChannels: boolean;
+    excludeArchived: boolean;
     exactMatch: boolean;
     rankProfile: string;
     allDefaultRankProfile: string;
@@ -1352,6 +1364,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
     mentionsKey: '',
     includeBotMessages: false,
     onlyMyChannels: options.defaultOnlyMyChannels ?? false,
+    excludeArchived: options.defaultExcludeArchived ?? false,
     exactMatch: false,
     rankProfile: '',
     allDefaultRankProfile,
@@ -1388,6 +1401,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
       activeTab === lastSearchedParamsRef.current.activeTab &&
       includeBotMessages === lastSearchedParamsRef.current.includeBotMessages &&
       onlyMyChannels === lastSearchedParamsRef.current.onlyMyChannels &&
+      excludeArchived === lastSearchedParamsRef.current.excludeArchived &&
       currentMentionsKey === lastSearchedParamsRef.current.mentionsKey &&
       rankProfile === lastSearchedParamsRef.current.rankProfile &&
       allDefaultRankProfile === lastSearchedParamsRef.current.allDefaultRankProfile &&
@@ -1411,6 +1425,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
         activeTab,
         includeBotMessages,
         onlyMyChannels,
+        excludeArchived,
         exactMatch,
         rankProfile,
         allDefaultRankProfile,
@@ -1456,6 +1471,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
     performSearch,
     includeBotMessages,
     onlyMyChannels,
+    excludeArchived,
     exactMatch,
     rankProfile,
     allDefaultRankProfile,
@@ -1568,6 +1584,8 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
           filterOnly: !searchText && !!hasFilters,
           includeBotMessages,
           onlyMyChannels,
+          // Only the Desk tab hides archived tickets; every other tab shows them.
+          excludeArchived: excludeArchived && activeTab === TabType.DESK,
           exactMatch,
           ...(effectiveRankProfile && { rankProfile: effectiveRankProfile }),
           ...(includeDebugInfo && { includeDebugInfo: true }),
@@ -1734,6 +1752,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
     selectedMentions,
     includeBotMessages,
     onlyMyChannels,
+    excludeArchived,
     exactMatch,
     rankProfile,
     allDefaultRankProfile,
@@ -1839,6 +1858,8 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
     setIncludeBotMessages,
     onlyMyChannels,
     setOnlyMyChannels,
+    excludeArchived,
+    setExcludeArchived,
     exactMatch,
     setExactMatch,
     rankProfile,

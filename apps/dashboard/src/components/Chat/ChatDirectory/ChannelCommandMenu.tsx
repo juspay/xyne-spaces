@@ -871,6 +871,8 @@ const ChannelCommandMenu = ({
     // Classifying costs a request per settled query, so only surfaces that can show the
     // overview ask for it (the backend gates the feature itself on cmdk_ai_intent_config.enabled).
     classifyIntent: aiOverview,
+    // cmd+k never shows archived tickets. There is no toggle here to opt back in.
+    defaultExcludeArchived: true,
     buildMentionHighlights,
   });
 
