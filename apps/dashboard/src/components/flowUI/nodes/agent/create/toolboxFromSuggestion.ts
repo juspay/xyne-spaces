@@ -1,7 +1,6 @@
 import type { AvailableTools, ToolSuggestion } from '@/services/claw/clawToolsTypes';
 import { parseGatewaySource } from '@/components/ClawAgents/gatewayKeys';
 import type { AgentToolboxSelection } from '@/services/claw/clawToolsTypes';
-import { EMPTY_TOOLS } from './types';
 
 /** Additive merge of /suggest-tools into a toolbox selection (Hub ToolboxPicker). */
 export function toolboxFromSuggestion(

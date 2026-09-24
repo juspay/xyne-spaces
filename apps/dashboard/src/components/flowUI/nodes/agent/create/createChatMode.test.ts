@@ -22,9 +22,9 @@ void describe('parseCreateChatAction', () => {
     });
     assert.equal(q.startsWith('fdaas\n'), true);
     assert.match(q, /XYNE_CREATE_DRAFT/);
-    assert.match(q, /standup bot/);
+    assert.match(q, /standup scribe/);
     assert.match(q, /XYNE_CREATE_ASK/);
-    assert.match(q, /also suggest the matching Hub rows/);
+    assert.match(q, /never claim MCP, subagent, skills, or knowledge are on the canvas/i);
     assert.match(q, /# Agent authoring/);
     assert.match(q, /Ask AI chat/);
     assert.match(q, /not propose-agent cards/);
@@ -52,8 +52,29 @@ void describe('parseCreateChatAction', () => {
       'Also suggested MCP: Slack.',
     );
     assert.equal(
-      sectionCompleteChatLine({ field: 'tools', hubRow: 'mcp' }),
-      'Also suggested MCP on the canvas.',
+      sectionCompleteChatLine({
+        field: 'tools',
+        hubRow: 'subagent',
+        toolLabels: ['Slack', 'subagent:web-research'],
+      }),
+      'Also suggested MCP: Slack; subagent: web-research.',
+    );
+    assert.equal(
+      sectionCompleteChatLine({ field: 'tools', hubRow: 'subagent', toolLabels: [] }),
+      null,
+    );
+    assert.equal(
+      sectionCompleteChatLine({ field: 'tools', bindMiss: true, toolLabels: [] }),
+      "Couldn't bind tools — no catalog match.",
+    );
+    assert.equal(sectionCompleteChatLine({ field: 'skills' }), null);
+    assert.equal(
+      sectionCompleteChatLine({ field: 'skills', skillLabel: 'API design review' }),
+      'Also suggested skill: API design review.',
+    );
+    assert.equal(
+      sectionCompleteChatLine({ field: 'knowledge', bindMiss: true }),
+      "Couldn't bind knowledge — no collections available.",
     );
   });
 

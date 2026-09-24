@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
+  applyLocalHubBinds,
   matchNamedMcpEntries,
   selectionFromCatalogSuggestion,
 } from './hubCatalogSelect.ts';
@@ -107,5 +108,53 @@ void describe('hubCatalogSelect', () => {
     });
     assert.equal(selection.direct.length, 0);
     assert.equal((selection.gateway ?? []).length, 0);
+  });
+
+  void it('binds Slack MCP plus a catalog subagent when both are requested', () => {
+    const catalog: AvailableTools = {
+      ...catalogWithSlackGithub(),
+      subagents: [
+        {
+          name: 'web-research',
+          description: 'Web research helper',
+          serverType: 'custom',
+          progressLabel: 'Researching',
+        },
+        {
+          name: 'code-review',
+          description: 'Reviews diffs',
+          serverType: 'custom',
+          progressLabel: 'Reviewing',
+        },
+      ],
+      customGroups: [
+        {
+          source: 'custom:web-search',
+          tools: [{ slug: 'web_search', name: 'web_search' }],
+        },
+      ],
+      integrations: [
+        ...catalogWithSlackGithub().integrations,
+        {
+          slug: 'custom:web-search',
+          label: 'Web Search',
+          kind: 'custom',
+          connected: true,
+          readTools: [
+            { slug: 'web_search', name: 'web_search', description: '', riskLevel: 'read' },
+          ],
+          writeTools: [],
+          usageCount: 2,
+        },
+      ],
+    };
+    const selection = applyLocalHubBinds(
+      'use Slack MCP, a web-research subagent, and built-in web search',
+      catalog,
+      { ...EMPTY_TOOLS, callableAgents: [] },
+    );
+    assert.ok(selection.direct.includes('slack_list') || selection.direct.includes('slack_post'));
+    assert.ok(selection.subagents.includes('web-research'));
+    assert.ok(selection.custom.includes('web_search'));
   });
 });

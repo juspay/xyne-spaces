@@ -287,11 +287,34 @@ export function AgentCreateSplitPage({
                   try {
                     if (!user?.id) return;
                     const skills = await listSkills(user.id);
-                    const pick = skills.find(skill => skill.slug) ?? skills[0];
+                    if (skills.length === 0) return;
+                    const intent = [userText.trim(), action.intent.trim()]
+                      .filter(Boolean)
+                      .join('\n')
+                      .toLowerCase();
+                    const tokens = intent
+                      .split(/[^a-z0-9]+/)
+                      .filter(token => token.length >= 3);
+                    const ranked = skills
+                      .map(skill => {
+                        const hay = `${skill.name} ${skill.slug} ${skill.label} ${skill.description}`.toLowerCase();
+                        let score = 0;
+                        for (const token of tokens) {
+                          if (hay.includes(token)) score += token.length;
+                        }
+                        if (/\bresearch\b/.test(intent) && /\bresearch\b/.test(hay)) score += 20;
+                        return { skill, score };
+                      })
+                      .sort((a, b) => b.score - a.score);
+                    const pick =
+                      (ranked[0] && ranked[0].score > 0 ? ranked[0].skill : null) ??
+                      skills.find(skill => skill.slug) ??
+                      skills[0];
                     if (pick?.id) {
                       const ids = new Set(createForm.form.selectedSkillIds);
                       ids.add(pick.id);
                       incoming.selectedSkillIds = [...ids];
+                      return pick.label || pick.name || pick.slug;
                     }
                   } catch {
                     // Hub row may stay empty if skills API fails.
@@ -304,12 +327,30 @@ export function AgentCreateSplitPage({
                 fillKnowledge: async (incoming: AgentCreateChatPatch) => {
                   try {
                     const { collections } = await listAccessibleKnowledgeBase();
+                    if (collections.length === 0) return;
+                    const intent = [userText.trim(), action.intent.trim()]
+                      .filter(Boolean)
+                      .join('\n')
+                      .toLowerCase();
+                    const ranked = collections
+                      .map(collection => {
+                        const hay =
+                          `${collection.name ?? ''} ${collection.id}`.toLowerCase();
+                        let score = 0;
+                        if (/\b(docs?|documentation|product|knowledge|wiki)\b/.test(intent)) {
+                          if (/\b(docs?|product|wiki|knowledge)\b/.test(hay)) score += 10;
+                        }
+                        return { collection, score };
+                      })
+                      .sort((a, b) => b.score - a.score);
                     const pick =
+                      (ranked[0] && ranked[0].score > 0 ? ranked[0].collection : null) ??
                       collections.find(collection => collection.id.trim().length > 0) ??
                       collections[0];
                     if (!pick?.id) return;
                     incoming.selectedKbScope = 'COLLECTIONS';
                     incoming.selectedKbResources = [{ collectionId: pick.id, fileId: null }];
+                    return pick.name?.trim() || pick.id;
                   } catch {
                     // Hub row may stay empty if KB API fails.
                   }

@@ -5,7 +5,7 @@ import type { AgentCreateHubRow } from './types.ts';
 
 export function progressLabelForField(
   field: CreateTurnField,
-  hubRow: AgentCreateHubRow | null = null,
+  _hubRow: AgentCreateHubRow | null = null,
 ): string {
   switch (field) {
     case 'name':
@@ -17,9 +17,9 @@ export function progressLabelForField(
     case 'systemPrompt':
       return 'Writing instructions on canvas…';
     case 'tools':
-      if (hubRow === 'builtin') return 'Selecting tools on canvas…';
-      if (hubRow === 'subagent') return 'Selecting subagent on canvas…';
-      return 'Selecting MCP on canvas…';
+      // Prefer truthful generic copy — preferred hub row can be subagent while
+      // chips land on MCP (or multiple rows). Specificity comes from section acks.
+      return 'Selecting tools on canvas…';
     case 'skills':
       return 'Selecting skills on canvas…';
     case 'knowledge':

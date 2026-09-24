@@ -6,6 +6,10 @@
 
 import { parseGatewaySource } from '@/components/ClawAgents/gatewayKeys';
 import {
+  buildBuiltinCatalog,
+  enableEntry as enableBuiltinEntry,
+} from '@/routes/AIScreen/library/shared/pickers/builtin/builtinCatalog';
+import {
   buildMcpCatalog,
   enableEntry,
   type McpCatalogEntry,
@@ -86,6 +90,109 @@ export function intentNamesProduct(intent: string): boolean {
   );
 }
 
+/** User asked for a subagent / delegate (not only MCP). */
+export function intentImpliesSubagent(intent: string): boolean {
+  return /\b(sub-?agents?|delegate|delegat(?:e|ion))\b/i.test(intent);
+}
+
+/** User asked for built-in search / browse / filesystem tools. */
+export function intentImpliesBuiltin(intent: string): boolean {
+  return /\b(built-?ins?|browse|web\s*search|filesystem|terminal)\b/i.test(intent) ||
+    /\b(search|code)\s+tools?\b/i.test(intent);
+}
+
+function scoreNameAgainstIntent(name: string, intent: string): number {
+  const hay = normalizeToken(name);
+  if (!hay) return 0;
+  const tokens = intent
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter(token => token.length >= 3 && !/^(the|and|for|with|that|this|from|into|use|add)$/.test(token));
+  let score = 0;
+  for (const token of tokens) {
+    const needle = normalizeToken(token);
+    if (needle && hay.includes(needle)) score += needle.length;
+  }
+  return score;
+}
+
+/** Pick catalog subagent names when the utterance asks for one. */
+export function pickSubagentsForIntent(intent: string, catalog: AvailableTools): string[] {
+  if (!intentImpliesSubagent(intent) || catalog.subagents.length === 0) return [];
+  const ranked = [...catalog.subagents]
+    .map(entry => ({ name: entry.name, score: scoreNameAgainstIntent(`${entry.name} ${entry.description}`, intent) }))
+    .sort((a, b) => b.score - a.score);
+  const best = ranked[0];
+  if (best && best.score > 0) return [best.name];
+  return [catalog.subagents[0]!.name];
+}
+
+/** Enable builtin catalog rows when the utterance asks for built-ins. */
+export function pickBuiltinSelectionForIntent(
+  intent: string,
+  catalog: AvailableTools,
+  current: AgentToolboxSelection,
+): AgentToolboxSelection {
+  if (!intentImpliesBuiltin(intent)) return current;
+  const builtins = buildBuiltinCatalog(catalog);
+  if (builtins.length === 0) return current;
+  const ranked = builtins
+    .map(entry => ({
+      entry,
+      score: scoreNameAgainstIntent(`${entry.label} ${entry.source}`, intent),
+    }))
+    .sort((a, b) => b.score - a.score);
+  const pick =
+    ranked.find(row => row.score > 0)?.entry ??
+    builtins.find(entry => /search|web|browse/i.test(`${entry.label} ${entry.source}`)) ??
+    builtins.find(entry => entry.tools.length > 0);
+  if (!pick) return current;
+  return {
+    ...enableBuiltinEntry(current, pick),
+    callableAgents: current.callableAgents ?? [],
+  };
+}
+
+/** Merge named MCP + local subagent/builtin picks onto a selection. */
+export function applyLocalHubBinds(
+  intent: string,
+  catalog: AvailableTools,
+  current: AgentToolboxSelection,
+): AgentToolboxSelection {
+  let selection: AgentToolboxSelection = {
+    ...current,
+    callableAgents: current.callableAgents ?? [],
+  };
+  const named = matchNamedMcpEntries(intent, catalog);
+  if (named.length > 0) {
+    const mcpCatalog = buildMcpCatalog(catalog, []);
+    for (const entry of named) {
+      selection = {
+        ...enableEntry(mcpCatalog, selection, entry),
+        callableAgents: selection.callableAgents ?? [],
+      };
+    }
+  }
+  const subagents = pickSubagentsForIntent(intent, catalog);
+  if (subagents.length > 0) {
+    selection = {
+      ...selection,
+      subagents: [...new Set([...selection.subagents, ...subagents])],
+    };
+  }
+  selection = pickBuiltinSelectionForIntent(intent, catalog, selection);
+  return selection;
+}
+
+function selectionHasTools(selection: AgentToolboxSelection): boolean {
+  return (
+    selection.subagents.length > 0 ||
+    selection.direct.length > 0 ||
+    selection.custom.length > 0 ||
+    (selection.gateway ?? []).length > 0
+  );
+}
+
 /**
  * Resolve suggest-tools + named-product matches into a toolbox selection.
  * Prefer explicit name matches. Never bind a blind first-gateway / first
@@ -129,7 +236,7 @@ export function describeSelectedTools(
   const labels: string[] = [];
   if (!catalog) {
     return [
-      ...selection.subagents,
+      ...selection.subagents.map(name => `subagent:${name}`),
       ...selection.direct,
       ...(selection.gateway ?? []),
       ...selection.custom,
@@ -144,6 +251,7 @@ export function describeSelectedTools(
       }
       continue;
     }
+    if (integration.kind === 'builtin' || integration.kind === 'custom') continue;
     const toolNames = new Set([
       ...integration.readTools.map(t => t.name),
       ...integration.writeTools.map(t => t.name),
@@ -151,7 +259,18 @@ export function describeSelectedTools(
     const hit = selection.direct.some(id => toolNames.has(id));
     if (hit) labels.push(integration.label || integration.slug);
   }
-  for (const slug of selection.custom) labels.push(slug);
+  const builtins = buildBuiltinCatalog(catalog);
+  const coveredCustom = new Set<string>();
+  for (const entry of builtins) {
+    const hit = entry.tools.filter(tool => selection.custom.includes(tool.slug));
+    if (hit.length === 0) continue;
+    labels.push(`builtin:${entry.label || entry.source}`);
+    for (const tool of hit) coveredCustom.add(tool.slug);
+  }
+  for (const slug of selection.custom) {
+    if (coveredCustom.has(slug)) continue;
+    labels.push(slug);
+  }
   return [...new Set(labels)];
 }
 
@@ -168,7 +287,7 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise
       },
       error => {
         clearTimeout(timer);
-        reject(error);
+        reject(error instanceof Error ? error : new Error(String(error)));
       },
     );
   });
@@ -176,8 +295,10 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise
 
 /**
  * Shared Hub catalog select: prefer named product resolve against
- * `getAvailableTools` (same catalog list_available_tools exposes). Only call
- * suggest-tools when no named product matched — suggest hangs often.
+ * `getAvailableTools` (same catalog list_available_tools exposes). Always apply
+ * local subagent / builtin binds when the utterance asks for them — even when a
+ * named MCP match short-circuits suggest-tools. Only call suggest-tools when no
+ * named product matched and local binds left tools empty.
  * Returns null when catalog cannot be loaded.
  */
 export async function selectHubToolsForIntent(args: {
@@ -196,47 +317,48 @@ export async function selectHubToolsForIntent(args: {
     (await withTimeout(getAvailableTools(), CATALOG_MS, 'getAvailableTools').catch(() => null));
   if (!catalog) return null;
 
-  // Named products first — do not wait on suggest-tools for Slack/GitHub.
+  // Named MCP + local subagent/builtin picks first — do not wait on suggest-tools.
+  let selection = applyLocalHubBinds(args.intent, catalog, args.current);
   const named = matchNamedMcpEntries(args.intent, catalog);
-  if (named.length > 0) {
-    const mcpCatalog = buildMcpCatalog(catalog, []);
-    let selection: AgentToolboxSelection = {
+
+  // Suggest only when no named product and we still lack tools (or need more
+  // integration ids). Never drop already-bound local chips.
+  if (named.length === 0 && !selectionHasTools(selection)) {
+    const suggestion = await withTimeout(
+      suggestTools({
+        description: args.intent,
+        ...(args.systemPrompt ? { systemPrompt: args.systemPrompt } : {}),
+      }),
+      SUGGEST_MS,
+      'suggestTools',
+    ).catch(
+      (): ToolSuggestion => ({
+        subagents: [],
+        integrations: [],
+        reasoning: {},
+      }),
+    );
+    selection = selectionFromCatalogSuggestion({
+      current: selection,
+      suggestion,
+      catalog,
+      intent: args.intent,
+    });
+    // Re-apply local binds so suggest cannot wipe subagent/builtin intent picks.
+    selection = applyLocalHubBinds(args.intent, catalog, selection);
+  } else if (named.length === 0) {
+    // Local binds already filled something; optionally enrich via suggest without
+    // blocking forever — skip to keep Hub snappy (named-MCP path already skips).
+  }
+
+  // Named product in utterance but nothing matched and no other binds → empty.
+  if (named.length === 0 && intentNamesProduct(args.intent) && !selectionHasTools(selection)) {
+    selection = {
       ...args.current,
       callableAgents: args.current.callableAgents ?? [],
     };
-    for (const entry of named) {
-      selection = {
-        ...enableEntry(mcpCatalog, selection, entry),
-        callableAgents: selection.callableAgents ?? [],
-      };
-    }
-    return {
-      selection,
-      catalog,
-      labels: describeSelectedTools(selection, catalog),
-    };
   }
 
-  const suggestion = await withTimeout(
-    suggestTools({
-      description: args.intent,
-      ...(args.systemPrompt ? { systemPrompt: args.systemPrompt } : {}),
-    }),
-    SUGGEST_MS,
-    'suggestTools',
-  ).catch(
-    (): ToolSuggestion => ({
-      subagents: [],
-      integrations: [],
-      reasoning: {},
-    }),
-  );
-  const selection = selectionFromCatalogSuggestion({
-    current: args.current,
-    suggestion,
-    catalog,
-    intent: args.intent,
-  });
   return {
     selection,
     catalog,

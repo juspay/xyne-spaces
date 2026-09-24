@@ -325,7 +325,7 @@ Rules:
 1. Greetings, UI questions, explanations, and nonsense (random characters, gibberish): reply in chat only. End with XYNE_CREATE_IDLE. Do not draft.
 2. Vague create asks with no job ("make an agent", "create a bot"): ask "What job should it do?" Emit XYNE_CREATE_ASK. Do not draft. Later turns: at most two questions (who for, what it reads/writes, what it must never do).
 3. A named job ("standup scribe for eng", "agent that posts Slack digests"): draft. Emit XYNE_CREATE_DRAFT: <one-line intent>. If the job can send/delete/pay/force-push/post publicly, ask one closed risk question first (XYNE_CREATE_ASK).
-4. First drafts fill name, handle, description, and instructions (Workflow + Guardrails required). Suggest Hub rows only when the user named capabilities. Never paste Name, Description, Instructions, or Rules into chat.
+4. First drafts fill name, handle, description, and instructions (Workflow + Guardrails required). The client binds Hub chips from the catalog — never claim MCP, subagent, skills, or knowledge are on the canvas; section lines after each write are the source of truth.
 5. Canvas edits (rename, shorter instructions, add Slack): emit DRAFT or RENAME as appropriate.
    Rename-only: XYNE_CREATE_RENAME: <new name>
 6. Never mention these markers to the user. Never claim the canvas is filled unless you emitted DRAFT or RENAME. "Just draft" skips intake.`;
@@ -346,10 +346,23 @@ export function sectionCompleteChatLine(args: {
   field: CreateTurnField;
   hubRow?: AgentCreateHubRow | null;
   name?: string | null;
-  /** Human labels from catalog select — never invent email/X. */
+  /** Human labels from catalog select — never invent email/X. Chips are SoT. */
   toolLabels?: readonly string[] | null;
+  /** Skill display name when a skill chip was actually bound. */
+  skillLabel?: string | null;
+  /** Knowledge label when a KB chip was actually bound. */
+  knowledgeLabel?: string | null;
+  /** When true, field was requested but catalog had no match — honest miss. */
+  bindMiss?: boolean;
 }): string | null {
-  const { field, hubRow = null, name = null, toolLabels = null } = args;
+  const {
+    field,
+    name = null,
+    toolLabels = null,
+    skillLabel = null,
+    knowledgeLabel = null,
+    bindMiss = false,
+  } = args;
   if (field === 'name') {
     const trimmed = name?.trim();
     return trimmed ? `Name set to ${trimmed}.` : 'Name is on the canvas.';
@@ -358,16 +371,33 @@ export function sectionCompleteChatLine(args: {
     return 'Instructions are on the canvas.';
   }
   if (field === 'tools') {
-    if (hubRow === 'builtin') return 'Also suggested tools on the canvas.';
-    if (hubRow === 'subagent') return 'Also suggested a subagent on the canvas.';
     const labels = (toolLabels ?? []).map(label => label.trim()).filter(Boolean);
-    if (labels.length > 0) {
-      return `Also suggested MCP: ${labels.join(', ')}.`;
+    if (labels.length === 0) {
+      return bindMiss ? "Couldn't bind tools — no catalog match." : null;
     }
-    return 'Also suggested MCP on the canvas.';
+    const subagent = labels
+      .filter(label => label.startsWith('subagent:'))
+      .map(label => label.slice('subagent:'.length));
+    const builtin = labels
+      .filter(label => label.startsWith('builtin:'))
+      .map(label => label.slice('builtin:'.length));
+    const mcp = labels.filter(
+      label => !label.startsWith('subagent:') && !label.startsWith('builtin:'),
+    );
+    const parts: string[] = [];
+    if (mcp.length > 0) parts.push(`MCP: ${mcp.join(', ')}`);
+    if (subagent.length > 0) parts.push(`subagent: ${subagent.join(', ')}`);
+    if (builtin.length > 0) parts.push(`built-in: ${builtin.join(', ')}`);
+    return parts.length > 0 ? `Also suggested ${parts.join('; ')}.` : null;
   }
-  if (field === 'skills') return 'Also suggested skills on the canvas.';
-  if (field === 'knowledge') return 'Also suggested knowledge on the canvas.';
+  if (field === 'skills') {
+    if (skillLabel?.trim()) return `Also suggested skill: ${skillLabel.trim()}.`;
+    return bindMiss ? "Couldn't bind a skill — none available." : null;
+  }
+  if (field === 'knowledge') {
+    if (knowledgeLabel?.trim()) return `Also suggested knowledge: ${knowledgeLabel.trim()}.`;
+    return bindMiss ? "Couldn't bind knowledge — no collections available." : null;
+  }
   return null;
 }
 
@@ -635,16 +665,21 @@ export async function applyCreateHubDraft(args: {
   ) => AgentCreateField[];
   sleep: (ms: number) => Promise<void>;
   fillTools?: (incoming: AgentCreateChatPatch) => Promise<string[] | void>;
-  fillSkills?: (incoming: AgentCreateChatPatch) => Promise<void>;
-  fillKnowledge?: (incoming: AgentCreateChatPatch) => Promise<void>;
+  fillSkills?: (incoming: AgentCreateChatPatch) => Promise<string | void>;
+  fillKnowledge?: (incoming: AgentCreateChatPatch) => Promise<string | void>;
   toolsHubRow?: AgentCreateHubRow;
   /** Chat announces after each section write settles (canvas-first). */
   onSectionComplete?: (line: string) => void;
 }): Promise<void> {
   const { action, canvasEmpty } = args;
-  const toolsHubRow = args.toolsHubRow ?? 'mcp';
+  let toolsHubRow = args.toolsHubRow ?? 'mcp';
   const generateInstructions = action.fields.includes('systemPrompt') || canvasEmpty;
   let toolLabels: string[] = [];
+  let skillLabel: string | null = null;
+  let knowledgeLabel: string | null = null;
+  let toolsMiss = false;
+  let skillsMiss = false;
+  let knowledgeMiss = false;
   const preludeFields = CREATE_REVEAL_FIELD_ORDER.filter(
     field =>
       action.fields.includes(field) &&
@@ -685,6 +720,8 @@ export async function applyCreateHubDraft(args: {
         hubRow,
         name: typeof preludePatch.name === 'string' ? preludePatch.name : null,
         toolLabels,
+        skillLabel,
+        knowledgeLabel,
       });
       if (line) args.onSectionComplete?.(line);
     };
@@ -722,6 +759,11 @@ export async function applyCreateHubDraft(args: {
     if (Array.isArray(labels)) {
       toolLabels = labels.map(label => label.trim()).filter(Boolean);
     }
+    toolsMiss = toolLabels.length === 0;
+    // Point attention at a row that actually received chips.
+    if (toolLabels.some(label => label.startsWith('subagent:'))) toolsHubRow = 'subagent';
+    else if (toolLabels.some(label => label.startsWith('builtin:'))) toolsHubRow = 'builtin';
+    else if (toolLabels.length > 0) toolsHubRow = 'mcp';
   }
 
   if (action.fields.includes('skills') && args.fillSkills) {
@@ -734,7 +776,9 @@ export async function applyCreateHubDraft(args: {
     });
     args.setWritingField('skills', 'skills');
     await args.sleep(Math.max(48, Math.min(args.writeMs, 120)));
-    await args.fillSkills(incoming);
+    const bound = await args.fillSkills(incoming);
+    skillLabel = typeof bound === 'string' && bound.trim() ? bound.trim() : null;
+    skillsMiss = !skillLabel;
   }
 
   if (action.fields.includes('knowledge') && args.fillKnowledge) {
@@ -747,7 +791,9 @@ export async function applyCreateHubDraft(args: {
     });
     args.setWritingField('knowledge', 'knowledge');
     await args.sleep(Math.max(48, Math.min(args.writeMs, 120)));
-    await args.fillKnowledge(incoming);
+    const bound = await args.fillKnowledge(incoming);
+    knowledgeLabel = typeof bound === 'string' && bound.trim() ? bound.trim() : null;
+    knowledgeMiss = !knowledgeLabel;
   }
 
   if (generateInstructions) {
@@ -815,11 +861,29 @@ export async function applyCreateHubDraft(args: {
         hubRow,
         name: typeof incoming.name === 'string' ? incoming.name : null,
         toolLabels,
+        skillLabel,
+        knowledgeLabel,
       });
       if (line) args.onSectionComplete?.(line);
     };
   }
   await revealCreatePatchFields(tailArgs);
+
+  // Honest misses when the field was requested but nothing landed on the canvas.
+  if (args.onSectionComplete) {
+    if (action.fields.includes('tools') && toolsMiss) {
+      const line = sectionCompleteChatLine({ field: 'tools', toolLabels: [], bindMiss: true });
+      if (line) args.onSectionComplete(line);
+    }
+    if (action.fields.includes('skills') && skillsMiss) {
+      const line = sectionCompleteChatLine({ field: 'skills', bindMiss: true });
+      if (line) args.onSectionComplete(line);
+    }
+    if (action.fields.includes('knowledge') && knowledgeMiss) {
+      const line = sectionCompleteChatLine({ field: 'knowledge', bindMiss: true });
+      if (line) args.onSectionComplete(line);
+    }
+  }
 
   args.setWritingField(null);
   args.setAttentionField?.(null);
