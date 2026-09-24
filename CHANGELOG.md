@@ -1,3 +1,11 @@
+## [1.395.0](https://github.com/juspay/xyne-spaces/compare/v1.394.0...v1.395.0) (2026-09-24)
+
+
+### Features
+
+* adding resolvedat checkbox and resolved at column  ([#2232](https://github.com/juspay/xyne-spaces/issues/2232)) ([051efc1](https://github.com/juspay/xyne-spaces/commit/051efc1ba7699dce3080a5d82765a3dfec1069df))
+* api first zero next ([#2289](https://github.com/juspay/xyne-spaces/issues/2289)) ([5ce78a3](https://github.com/juspay/xyne-spaces/commit/5ce78a315828006caa73dd6b3887f4093ec82f47))
+
 ## [1.394.0](https://github.com/juspay/xyne-spaces/compare/v1.393.0...v1.394.0) (2026-09-24)
 
 
