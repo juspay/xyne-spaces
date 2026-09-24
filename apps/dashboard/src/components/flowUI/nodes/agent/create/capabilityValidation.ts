@@ -15,6 +15,7 @@ import { buildMcpCatalog } from '@/routes/AIScreen/library/shared/pickers/mcp/mc
 import type { AgentCreateFormState } from './types.ts';
 import {
   inferNeededCapabilities,
+  softBuiltinCuesForIntent,
   softProductNeedles,
   type CapabilityClass,
 } from './capabilityInference.ts';
@@ -96,8 +97,21 @@ export function catalogCanSatisfy(
         return hayNeedles.some(needle => needle && hay.includes(needle));
       });
     }
-    case 'builtin':
-      return Boolean(catalog && buildBuiltinCatalog(catalog).some(entry => entry.tools.length > 0));
+    case 'builtin': {
+      if (!catalog) return false;
+      const builtins = buildBuiltinCatalog(catalog);
+      if (builtins.length === 0) return false;
+      const cues = softBuiltinCuesForIntent(intent);
+      // No specific email/DM/web cue — any builtin row can satisfy a generic builtin job.
+      if (cues.length === 0) return true;
+      // Catalog can satisfy only if at least one cue category has a matching row.
+      return cues.some(cue =>
+        builtins.some(entry => {
+          const hay = `${entry.label} ${entry.source} ${entry.tools.map(t => `${t.slug} ${t.name}`).join(' ')}`;
+          return cue.entryRe.test(hay);
+        }),
+      );
+    }
     case 'subagent':
       return Boolean(catalog && catalog.subagents.length > 0);
     case 'skills':
