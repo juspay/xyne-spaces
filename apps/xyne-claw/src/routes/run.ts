@@ -58,6 +58,7 @@ import { loadCustomTools } from "../custom-tools.js";
 import { buildCopilotTool } from "../copilot.js";
 import { pinRunJudgeBackend } from "../judge-backend.js";
 import { optEnabled, pinRunOptimizations } from "../optimizations.js";
+import { activeToolCap, demotedCatalogItem, planActiveToolCap, readToolUsageRank } from "../active-tool-cap.js";
 import { buildExperimentTools, buildExperimentReviewTools, type ExperimentContext } from "../experiment.js";
 import {
   executeRunFromPayload,
@@ -2219,13 +2220,12 @@ export async function processTask(
       // here the palette has nothing to admit and load-tools nothing to load.
       // The palette itself still refuses wrappers (a wrapper grants a whole
       // server, not one tool).
-      includeSubagentTools: fastModeEnabled || paletteMode !== "off",
+      includeSubagentTools: fastModeEnabled || paletteMode !== "off" || optEnabled("subagent_read_tools"),
       // Without this, def-less servers' tools and in-process custom tools are
       // admitted straight into the always-active set instead of the catalog —
       // bigger prompt, not wider reach.
       catalogUnwrapped: paletteMode !== "off",
       catalogUnwrappedWrites: paletteMode !== "off" && optEnabled("lean_palette"),
-      includeSubagentReadTools: optEnabled("subagent_read_tools"),
     });
     const fastCatalogCandidateByName = new Map(fastCatalogCandidateItems.map((item) => [item.entry.name, item]));
     let fastCatalogItems: ToolCatalogItem[] = [];
@@ -3308,6 +3308,43 @@ export async function processTask(
     }
 
     allTools = dedupeToolsByName(allTools);
+    if (optEnabled("active_tool_cap")) {
+      const demotable = new Set(
+        [...directTools, ...remainingCustomTools, ...parentHoistedTools, ...kbHoistedTools].map((tool) => tool.name),
+      );
+      const capPlan = planActiveToolCap({
+        activeNames: allTools
+          .filter((tool) =>
+            !duplicatesMetaTool(tool.name) &&
+            (!fastCatalogCandidateByName.has(tool.name) ||
+              (fastAlwaysActiveToolNames.has(tool.name) && !paletteAdmittedNames.has(tool.name))),
+          )
+          .map((tool) => tool.name),
+        demotable,
+        pinned: new Set([
+          PROPOSE_PLAN_TOOL_NAME,
+          EMIT_BRIEF_TOOL_NAME,
+          "ask-user-question",
+          ...forcedTaskCommandTools,
+          ...(taskCommand?.requiredTool ? [taskCommand.requiredTool] : []),
+        ]),
+        usageRank: readToolUsageRank(agentConfig),
+        cap: activeToolCap(agentConfig),
+        fixedExtra: 7,
+      });
+      const toolByName = new Map(allTools.map((tool) => [tool.name, tool]));
+      for (const name of capPlan.demote) {
+        const tool = toolByName.get(name);
+        if (!tool) continue;
+        const item = demotedCatalogItem(tool, isWriteTool(tool, allGroups));
+        fastCatalogCandidateItems.push(item);
+        fastCatalogCandidateByName.set(name, item);
+        fastAlwaysActiveToolNames.delete(name);
+      }
+      log(
+        `[active-tool-cap] outcome=${capPlan.outcome} cap=${capPlan.cap} total=${capPlan.total} budget=${capPlan.budget} demoted=${capPlan.demote.length}${capPlan.demote.length ? ` (${capPlan.demote.join(", ")})` : ""}`,
+      );
+    }
     // Derived predicate, not a new config knob: the catalog machinery runs when
     // there is something to catalogue. `fastModeEnabled ||` keeps fast mode
     // byte-identical — a fast-mode run with an EMPTY catalog still gets its
@@ -3325,7 +3362,7 @@ export async function processTask(
       fastCatalogNames = fastCatalogItems.map((item) => item.entry.name);
       const finalFastCatalogNameSet = new Set(fastCatalogNames);
       const activeToolEntries: ToolCatalogEntry[] | undefined =
-        optEnabled("catalog_full_index") || optEnabled("subagent_read_tools")
+        optEnabled("catalog_full_index") || optEnabled("subagent_read_tools") || optEnabled("active_tool_cap")
           ? allTools
               .filter((tool) =>
                 !duplicatesMetaTool(tool.name) &&
@@ -3942,7 +3979,7 @@ export async function processTask(
           // Only fast mode actually turns delegation off; asserting it on a
           // normal run would be a lie the model acts on.
           subagentDelegationDisabled: fastModeEnabled,
-          fullIndex: optEnabled("catalog_full_index") || optEnabled("subagent_read_tools"),
+          fullIndex: optEnabled("catalog_full_index") || optEnabled("subagent_read_tools") || optEnabled("active_tool_cap"),
           preferDirect: optEnabled("subagent_read_tools"),
         })
       : "";

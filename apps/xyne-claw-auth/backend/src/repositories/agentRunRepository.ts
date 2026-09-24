@@ -1204,6 +1204,16 @@ export const agentRunRepository = {
       .sort((a, b) => (b.tokensIn + b.tokensOut) - (a.tokensIn + a.tokensOut));
   },
 
+  toolsUsedSince: async (agentSlug: string, orgId: string, since: Date, maxRuns: number): Promise<string[][]> => {
+    const rows = await prisma.agentRun.findMany({
+      where: { agentSlug, orgId, startedAt: { gte: since } },
+      select: { toolsUsed: true },
+      orderBy: { startedAt: "desc" },
+      take: maxRuns,
+    });
+    return rows.map((r) => r.toolsUsed);
+  },
+
   /** High-level global overview suitable for dashboard header cards. */
   globalOverviewStats: async (cutoff: Date | null) => {
     type Row = {
