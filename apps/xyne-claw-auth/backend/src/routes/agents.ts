@@ -23,6 +23,7 @@ import { checkHealth } from "../health.js";
 import { verifyMcpCredentials } from "../lib/mcp-credential-verify.js";
 import { validateCredentials } from "../validation.js";
 import { fetchAndStoreSigningSecretFromSpacesApi } from "../lib/spaces-app-secret.js";
+import { CLAW_APP_PERMISSIONS } from "../lib/provision-workspace-agents.js";
 import { redisService } from "../redis.js";
 import {
   requireClawAdmin,
@@ -2785,24 +2786,6 @@ router.post("/:slug/configure-webhook", requireAgentOwnerOrAdmin, async (req: Re
     res.status(500).json({ success: false, error: "Internal server error" });
   }
 });
-
-// Full app-permission set a Claw agent bot needs to operate against Spaces'
-// /api/apps/* routes (mirrors the `requirePermission(...)` gates: chat:write
-// for posting results/progress, channels/users/usergroups reads for resolving
-// mentions, tickets + files + im + email for the spaces tools). Granted as ONE
-// set so every spaces tool works; tighten per-agent later if needed.
-const CLAW_APP_PERMISSIONS = [
-  "chat:write",
-  "channels:read",
-  "users:read",
-  "usergroups:read",
-  "tickets:read",
-  "tickets:write",
-  "files:read",
-  "files:write",
-  "im:write",
-  "email:read",
-];
 
 // Final registration step: grant the bot its app permissions and re-install so
 // they take effect. Spaces loads an app's permissions per-request from
