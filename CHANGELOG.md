@@ -1,3 +1,10 @@
+## [1.391.2](https://github.com/juspay/xyne-spaces/compare/v1.391.1...v1.391.2) (2026-09-24)
+
+
+### Bug Fixes
+
+* bound the DM list scan to the caller's channels; unpin calls ACL flip ([#2269](https://github.com/juspay/xyne-spaces/issues/2269)) ([67733a6](https://github.com/juspay/xyne-spaces/commit/67733a69acfc5352f585204af1b76a91d6888fc0)), closes [#1867](https://github.com/juspay/xyne-spaces/issues/1867)
+
 ## [1.391.1](https://github.com/juspay/xyne-spaces/compare/v1.391.0...v1.391.1) (2026-09-24)
 
 

@@ -3505,11 +3505,16 @@ export const sdlcTrackTableRelationships = relationships(sdlcTrackTable, ({ many
   }),
 }));
 
-export const channelStatsTableRelationships = relationships(channelStatsTable, ({ one }) => ({
+export const channelStatsTableRelationships = relationships(channelStatsTable, ({ one, many }) => ({
   channel: one({
     sourceField: ['channelId'],
     destField: ['id'],
     destSchema: channelTable,
+  }),
+  participants: many({
+    sourceField: ['channelId'],
+    destField: ['channelId'],
+    destSchema: channelParticipantTable,
   }),
 }));
 
