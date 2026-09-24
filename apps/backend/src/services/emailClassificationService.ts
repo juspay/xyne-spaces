@@ -20,6 +20,7 @@ import type {
   PriorityClassificationResult,
 } from '../types/classification.js';
 import { orgLLMCredentialService } from '@/services/orgLLMCredentialService';
+import { ticketDuplicateService } from '@/services/ticketDuplicateService';
 import { ActivityType, OrgLLMServiceAccountPurpose, TicketPriority, FormContextType, FormEntityType, FormFieldType } from '@xyne/shared';
 
 const AGENT_NAME = 'EmailClassification';
@@ -284,7 +285,7 @@ export class EmailClassificationService {
     await this.repo.updateTicketClassificationData(ticketId, classificationData);
 
     // Populate Additional Form Fields generically from raw AI output
-    await this.populateFormFields(ticketId, result.rawOutput, {
+    const writtenFieldIds = await this.populateFormFields(ticketId, result.rawOutput, {
       // The category/sub-category keys already have dedicated storage (ticket.aiCategory /
       // aiSubCategory) and their own UI. Writing them into a same-named form field too would
       // silently clobber whatever else owns that field (e.g. an automation).
@@ -295,7 +296,22 @@ export class EmailClassificationService {
         ticketId,
         error: err instanceof Error ? err.message : err,
       });
+      return [] as string[];
     });
+
+    // Classification is the only path where a machine writes to a ticket AFTER creation,
+    // so it is the one point worth re-evaluating duplicates: detection already ran at
+    // creation (project-wide, since an inbound email carries no field values), and if the
+    // AI has now filled a scope key, a scoped pass can find what that run could not.
+    // Append-only — the creation-time result stands, this adds to it. No-ops unless a
+    // configured scope field actually moved, so the extra LLM call is never spent for
+    // nothing. Fire-and-forget: duplicate detection must never fail classification.
+    if (writtenFieldIds.length > 0) {
+      void ticketDuplicateService.rerunDuplicateDetectionForTicket({
+        ticketId,
+        updatedFieldIds: writtenFieldIds,
+      });
+    }
   }
 
   /**
@@ -351,12 +367,16 @@ export class EmailClassificationService {
    * Generic: looks up the form attached to the ticket's board, then matches
    * rawOutput keys against field names — no hardcoding required.
    */
+  /**
+   * Writes AI output into the ticket's form fields. Returns the ids of the fields it
+   * actually changed, so the caller can tell whether a duplicate-scope key moved.
+   */
   async populateFormFields(
     ticketId: string,
     rawOutput: ClassificationRawOutput,
     opts: { skipFieldNames?: (string | null | undefined)[]; actorId?: string | null } = {},
-  ): Promise<void> {
-    if (!rawOutput || Object.keys(rawOutput).length === 0) return;
+  ): Promise<string[]> {
+    if (!rawOutput || Object.keys(rawOutput).length === 0) return [];
 
     const db = DatabaseClient.getInstance();
 
@@ -365,7 +385,7 @@ export class EmailClassificationService {
       where: { id: ticketId },
       select: { boardId: true, workspaceId: true },
     });
-    if (!ticket?.boardId) return;
+    if (!ticket?.boardId) return [];
 
     // Find the form mapped to this board for TICKET entity
     const formMapping = await db.formContextMapping.findFirst({
@@ -375,11 +395,11 @@ export class EmailClassificationService {
         entityType: FormEntityType.TICKET,
       },
     });
-    if (!formMapping) return;
+    if (!formMapping) return [];
 
     // Get all fields for this form (resolved across global + legacy definitions)
     const formFields = await resolveFormFieldDefinitionsForForm(db, formMapping.formId);
-    if (formFields.length === 0) return;
+    if (formFields.length === 0) return [];
 
     const now = new Date();
     const skipKeys = new Set(AI_FORM_FIELD_SKIP_KEYS);
@@ -406,6 +426,7 @@ export class EmailClassificationService {
         .map(v => [v.fieldId, v.fieldValue]),
     );
     const changes: { fieldName: string; oldValue: string | null; newValue: string }[] = [];
+    const writtenFieldIds: string[] = [];
 
     for (const field of writableFields) {
       const aiValue = rawOutput[field.fieldName];
@@ -453,6 +474,7 @@ export class EmailClassificationService {
           },
         });
         changes.push({ fieldName: field.fieldName, oldValue: previousValue, newValue: valueStr });
+        writtenFieldIds.push(field.id);
       } catch (err) {
         logger.warn('[Classification] Failed to upsert form field value', {
           ticketId,
@@ -497,6 +519,8 @@ export class EmailClassificationService {
       fieldsMatched: writableFields.filter(f => rawOutput[f.fieldName] != null).length,
       totalFields: writableFields.length,
     });
+
+    return writtenFieldIds;
   }
 
   // ─── Private helpers ──────────────────────────────────────────────────────

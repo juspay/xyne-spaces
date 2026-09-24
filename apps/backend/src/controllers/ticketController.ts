@@ -60,7 +60,7 @@ import { maybeCreateEntryApprovalRequest } from '@/services/stageTransition/stag
 import { db } from '@/database/client';
 import { NAMESPACE } from '@/vespa/vespaConfig';
 import { DatabaseClient } from '@/database/client';
-import { ticketDuplicateService } from '@/services/ticketDuplicateService';
+import { ticketDuplicateService, type DuplicateScopeFieldValue } from '@/services/ticketDuplicateService';
 import { ticketBoardService } from '@/services/ticketBoardService';
 import { versionReleaseMappingService } from '@/services/release/versionReleaseMappingService';
 import { BaseTicketType,
@@ -386,6 +386,7 @@ export class TicketController {
       description,
       projectId,
       userId: createdBy,
+      channelId: ticket.channelId,
     }).catch((error: Error) => {
       logger.error('Failed to persist duplicate references for ticket', {
         ticketId: ticket.id,
@@ -878,6 +879,7 @@ export class TicketController {
       }
 
       let formFieldChangesForEmit: FormFieldChanges | undefined;
+      let duplicateScopeValues: DuplicateScopeFieldValue[] | undefined;
       if (formFields.length > 0) {
         const fieldsWithValues = formFields
           .filter((f: any) => dynamicFields[f.fieldName] !== undefined)
@@ -888,6 +890,7 @@ export class TicketController {
           }));
         if (fieldsWithValues.length > 0) {
           formFieldChangesForEmit = buildCreationFormFieldChanges(fieldsWithValues);
+          duplicateScopeValues = fieldsWithValues.map(fv => ({ fieldId: fv.fieldId, value: fv.actualFieldValue }));
         }
       }
 
@@ -1478,6 +1481,8 @@ export class TicketController {
         projectId,
         userId,
         parentTicketId,
+        channelId: ticket.channelId,
+        scopeFieldValues: duplicateScopeValues,
       }).catch(error => {
         logger.error('Failed to persist duplicate references for ticket', {
           ticketId: ticket.id,
