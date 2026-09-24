@@ -902,6 +902,7 @@ model User {
   workspace                 Workspace             @relation(fields: [workspaceId], references: [id])
   resourceAccess            ResourceAccess[]
   auditLogs                 ACLAuditLog[]
+  auditTrail                AuditLog[]
   sessions                  UserSession[]           // User can have multiple sessions (multi-device support)
   apiKeys                   ApiKey[]                // User can have multiple API keys
   presenceStatus            UserPresence?           // One-to-one relation with presence status
@@ -1291,6 +1292,51 @@ model ACLAuditLog {
   @@map("acl_audit_logs")
   @@schema("workflow")
 }
+
+model AuditLog {
+  id            String           @id @default(cuid())
+  actorUserId   String? // null when the actor is a system process, or after user deletion
+  action        String // coarse rollup for the feed badge (AuditAction).  /check
+  entityType    String // logical context, e.g. USER_GROUP_ASSIGNMENT_CONFIG
+  entityId      String // context id, e.g. userGroupId
+  summary       String // human-readable rollup for the audit feed
+  createdAt     DateTime         @default(now())
+  workspaceId   String // denormalized tenant key (stamped on insert)
+
+  // Relations
+  actorUser User?            @relation(fields: [actorUserId], references: [id], onDelete: SetNull)
+  changes   AuditLogChange[]
+
+  @@index([entityType, entityId, createdAt])
+  @@index([actorUserId])
+  @@index([createdAt])
+  @@map("audit_logs")
+  @@schema("public")
+}
+
+model AuditLogChange {
+  id          String   @id @default(cuid())
+  auditLogId  String
+  action      String // INSERT / UPDATE / DELETE for this record // check UPSERT
+  tableName   String // table that was mutated, e.g. user_assignment_states
+  recordId    String // PK of the mutated row
+  targetName  String // human label of the changed row, snapshotted at write time (survives renames/deletes)
+  field       String
+  oldValue    String? // stringified previous value
+  newValue    String? // stringified new value
+  createdAt   DateTime @default(now())
+  workspaceId String // denormalized tenant key (stamped on insert)
+
+  // Relations
+  auditLog AuditLog @relation(fields: [auditLogId], references: [id], onDelete: Cascade)
+
+  @@index([auditLogId])
+  @@index([tableName, recordId])
+  @@map("audit_log_changes")
+  @@schema("public")
+}
+
+indexes
 
 // PR Analytics models
 model PullRequests {

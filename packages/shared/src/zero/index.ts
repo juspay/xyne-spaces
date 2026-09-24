@@ -1,4 +1,5 @@
 export * from './acl';
+export * from './audit';
 
 export { schema, type Schema, type Context } from './schema';
 export { encryptedFieldsConfig, type EncryptedTableConfig } from './encrypted-fields';

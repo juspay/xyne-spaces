@@ -31,6 +31,7 @@ import { runWithContext } from '@/database/tenant/context';
 import { NAMESPACE } from '@/vespa/vespaConfig';
 import { VespaOperationType } from './vespa-injection/core/mapper';
 import { wrapTransactionWithACL } from './acl';
+import { createZeroAuditJobs, flushAuditTrail } from './audit';
 import { config } from '@/config/env';
 import { checkRateLimit } from '@/services/zeroRateLimiter';
 import { superpositionClient } from '@/services/superpositionClient';
@@ -266,15 +267,22 @@ export async function handleMutate(request: Request): Promise<unknown> {
             mutationAsyncTasks,
             mutationAwaitedPostCommitTasks,
           );
+          const mutationAuditJobs = createZeroAuditJobs(tx);
           const wrappedTx = wrapTransactionWithACL(
             tx,
             context,
             mutationVespaJobs,
             mutationSideEffectJobs,
             mutatorName,
+            mutationAuditJobs,
           );
           const mutator = mustGetMutator(mutators, mutatorName);
-          return mutator.fn({ tx: wrappedTx, args, ctx: context });
+          const mutatorResult = await mutator.fn({ tx: wrappedTx, args, ctx: context });
+          // Flush the audit trail on the raw transaction — same commit as the
+          // mutations it describes, still inside this callback so a mutator
+          // throw skips it entirely.
+          await flushAuditTrail(tx, { userId: context.userID, workspaceId: context.workspaceId }, mutationAuditJobs);
+          return mutatorResult;
         }).then((mutatorResult) => {
           // Zero resolves application failures as mutation results after rolling
           // back the transaction. Do not dispatch work staged by that rollback.
@@ -717,10 +725,21 @@ export async function runCatalogMutation(
   const mutator = mustGetCatalogMutator(mutators, name);
 
   await dbProvider.transaction(async (tx) => {
-    const wrappedTx = wrapTransactionWithACL(tx, ctx, vespaJobs, sideEffectJobs, name);
+    const auditJobs = createZeroAuditJobs(tx);
+    const wrappedTx = wrapTransactionWithACL(tx, ctx, vespaJobs, sideEffectJobs, name, auditJobs);
     // Args are validated by the mutator's own zod schema; the cast only satisfies
     // Zero's ReadonlyJSONValue parameter type.
     await mutator.fn({ tx: wrappedTx, args: args as never, ctx });
+    // Catalog mutations can run under service principals whose id is not a users
+    // row; audit failures here are logged rather than failing background work.
+    try {
+      await flushAuditTrail(tx, { userId: ctx.userID, workspaceId: ctx.workspaceId }, auditJobs);
+    } catch (error) {
+      logger.error('[AuditTrail] failed to flush audit for catalog mutation', {
+        mutator: name,
+        error: error instanceof Error ? error.message : error,
+      });
+    }
   });
 
   await Promise.allSettled(awaitedPostCommitTasks.map(task => task()));
