@@ -1071,6 +1071,7 @@ export class EmailService {
   private async createEmailAttachments(
     emailId: string,
     conversationId: string,
+    channelId: string | null,
     userId: string,
     workspaceId: string,
     uploadedFiles: UploadedFileResult[]
@@ -1093,6 +1094,7 @@ export class EmailService {
       createdBy: userId,
       storageProvider: config.fileStorage.provider,
       conversationId: conversationId,
+      channelId: channelId,
       workspaceId: workspaceId,
       metadata: file.metadata || {},
     }));
@@ -1421,7 +1423,7 @@ export class EmailService {
     });
 
     // Create MessageAttachment entries for email attachments
-    await this.createEmailAttachments(email.id, conversation.conversationId, userId, channel.workspaceId, uploadedFiles);
+    await this.createEmailAttachments(email.id, conversation.conversationId, conversation.channelId, userId, channel.workspaceId, uploadedFiles);
 
     // Process Google Meet links from email body and send to SAM 
     try {
@@ -1640,7 +1642,7 @@ export class EmailService {
       if (!channel?.workspaceId) {
         throw new Error(`workspaceId required: channel not found for email ${email.id} attachments`);
       }
-      await this.createEmailAttachments(email.id, conversation.conversationId, conversation.createdBy, channel.workspaceId, uploadedFiles);
+      await this.createEmailAttachments(email.id, conversation.conversationId, conversation.channelId, conversation.createdBy, channel.workspaceId, uploadedFiles);
 
       if (ticketRow) {
         void this.triggerAutoDraft({
@@ -2624,6 +2626,7 @@ export class EmailService {
           await this.createEmailAttachments(
             e.id,
             txResult.conversationId,
+            channel.id,
             userId,
             channel.workspaceId,
             e.uploadedFiles,

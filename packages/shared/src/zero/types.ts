@@ -123,6 +123,17 @@ export enum AttachmentEntityType {
   SDLC_HUB = 'SDLC_HUB',
 }
 
+export const UNSENT_ATTACHMENT_ENTITY_TYPES: AttachmentEntityType[] = [
+  AttachmentEntityType.DRAFT,
+  AttachmentEntityType.DELAYED_MESSAGE,
+];
+
+export const CHANNEL_VISIBLE_ATTACHMENT_ENTITY_TYPES: AttachmentEntityType[] = [
+  AttachmentEntityType.CHAT,
+  AttachmentEntityType.EMAIL,
+  AttachmentEntityType.TICKET,
+];
+
 // @ts-ignore TS1294
 export enum TicketEnvironment {
   DEVELOPMENT = 'DEVELOPMENT',

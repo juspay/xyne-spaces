@@ -32,6 +32,7 @@ import {
 import {
   ActivityClassification,
   AttachmentEntityType,
+  CHANNEL_VISIBLE_ATTACHMENT_ENTITY_TYPES,
   CallStatus,
   CanvasVisibility,
   ChannelRole,
@@ -3861,9 +3862,10 @@ export const queries = defineQueries({
       direction: z.literal('forward').or(z.literal('backward')),
     }),
     ({ args: { channelId, limit, start, direction } }) => {
-      let query = zql.message_attachments.whereExists('conversation', conv =>
-        conv.where('channelId', channelId),
-      );
+      let query = zql.message_attachments
+        .where('isDeleted', false)
+        .where('entityType', 'IN', CHANNEL_VISIBLE_ATTACHMENT_ENTITY_TYPES)
+        .where('channelId', channelId);
 
       if (start) {
         query = query.start(

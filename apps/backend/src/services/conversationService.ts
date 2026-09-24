@@ -492,6 +492,7 @@ export class ConversationService {
       const attachmentData: CreateMessageAttachmentInput[] = processedFiles.map((file) => ({
         entityId: message.messageId,
         entityType: AttachmentEntityType.CHAT,
+        channelId: channelId,
         originalFilename: file.originalName,
         size: file.fileSize,
         mimetype: file.mimeType,
@@ -726,6 +727,7 @@ export class ConversationService {
       const attachmentData: CreateMessageAttachmentInput[] = processedFiles.map((file) => ({
         entityId: message.messageId,
         entityType: AttachmentEntityType.CHAT,
+        channelId: conversation.channelId,
         originalFilename: file.originalName,
         size: file.fileSize,
         mimetype: file.mimeType,
@@ -966,6 +968,7 @@ export class ConversationService {
       const attachmentData: CreateMessageAttachmentInput[] = processedFiles.map((file) => ({
         entityId: message.messageId,
         entityType: AttachmentEntityType.CHAT,
+        channelId: conversation.channelId,
         originalFilename: file.originalName,
         size: file.fileSize,
         mimetype: file.mimeType,

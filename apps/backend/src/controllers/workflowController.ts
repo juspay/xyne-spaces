@@ -169,6 +169,7 @@ export class WorkflowController {
         uploadedByUserId: 'system',
         createdBy: 'system',
         conversationId: null,
+        channelId: null,
         workspaceId: config.defaultWorkspaceId,
         metadata: {
           workflowExecutionId: newExecutionId,

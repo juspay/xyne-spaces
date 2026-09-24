@@ -809,6 +809,7 @@ export class AttachmentController {
         createdBy: userId,
         storageProvider: config.fileStorage.provider,
         conversationId: null,
+        channelId: null,
         workspaceId,
         metadata: file.metadata || {},
       }));

@@ -22,7 +22,7 @@ const recordingMimetype = (recordingType: string): string =>
 
 type RecordingAttachmentTarget = Pick<
   CreateMessageAttachmentInput,
-  'entityType' | 'entityId' | 'conversationId' | 'workspaceId' | 'url' | 'size'
+  'entityType' | 'entityId' | 'conversationId' | 'channelId' | 'workspaceId' | 'url' | 'size'
 >;
 
 export interface StartRecordingResult {
@@ -445,6 +445,7 @@ class CallRecordingService {
         entityType: AttachmentEntityType.CHAT,
         entityId: message.messageId,
         conversationId: headMessage.conversationId,
+        channelId: call.channelId ?? null,
         workspaceId,
         url: recording.storagePath!,
         size: fileSize,
@@ -477,6 +478,7 @@ class CallRecordingService {
             entityType: AttachmentEntityType.RECORDING,
             entityId: recording.id,
             conversationId: null,
+            channelId: null,
             workspaceId: recording.workspaceId,
             url: storagePath,
             size,

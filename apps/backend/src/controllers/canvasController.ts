@@ -811,6 +811,7 @@ export class CanvasController {
         entityId: canvasId,
         entityType: AttachmentEntityType.CANVAS,
         conversationId: `canvas_${canvasId}`,
+        channelId: null,
         originalFilename: uploadedFile.originalName,
         size: uploadedFile.fileSize,
         mimetype: uploadedFile.mimeType,

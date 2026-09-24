@@ -28,6 +28,7 @@ import {
   schema,
   ChannelRole,
   AttachmentEntityType,
+  CHANNEL_VISIBLE_ATTACHMENT_ENTITY_TYPES,
   ChannelType,
   SDLC_MEMBERSHIP_RELATION,
   SDLC_CONTAINMENT_RELATION,
@@ -4447,9 +4448,10 @@ export const queries: AnyQueryRegistry = defineQueries({
       direction: z.literal('forward').or(z.literal('backward')),
     }),
     ({ args: { channelId, limit, start, direction } }) => {
-      let query = zql.message_attachments.whereExists('conversation', (conv) =>
-        conv.where('channelId', channelId)
-      );
+      let query = zql.message_attachments
+        .where('isDeleted', false)
+        .where('entityType', 'IN', CHANNEL_VISIBLE_ATTACHMENT_ENTITY_TYPES)
+        .where('channelId', channelId);
 
       if (start) {
         query = query.start(

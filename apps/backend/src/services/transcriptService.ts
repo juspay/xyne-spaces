@@ -500,6 +500,7 @@ export class TranscriptService {
           createdBy: call.createdByUserId,
           storageProvider: config.fileStorage.provider,
           conversationId: callMessage.conversationId,
+          channelId: call.channelId,
           workspaceId: channel.workspaceId,
           metadata: {
             callId,
@@ -530,7 +531,7 @@ export class TranscriptService {
       // 13. Attach identified transcript (real-name labelled) as a second attachment when available.
       // Written by the Python agent's RealtimeIdentifier during the call into
       // transcriptions/{callId}_identified.jsonl — may not exist if no voiceprints were enrolled.
-      void this.attachIdentifiedTranscriptIfExists(callId, messageId, call.createdByUserId, callMessage.conversationId, channel.workspaceId);
+      void this.attachIdentifiedTranscriptIfExists(callId, messageId, call.createdByUserId, callMessage.conversationId, call.channelId, channel.workspaceId);
     } catch (error) {
       logger.error(`[${callId}] transcript_processing_failed`, { message_id: messageId, error: error, stack: error instanceof Error ? error.stack : undefined });
       // Throw error to allow controller to return proper error response
@@ -685,6 +686,7 @@ export class TranscriptService {
     messageId: string,
     createdByUserId: string,
     conversationId: string,
+    channelId: string | null,
     workspaceId: string,
   ): Promise<void> {
     try {
@@ -751,6 +753,7 @@ export class TranscriptService {
           createdBy: createdByUserId,
           storageProvider: 'gcs',
           conversationId,
+          channelId,
           metadata: {
             callId,
             type: 'identified_transcript',

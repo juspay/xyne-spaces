@@ -124,6 +124,7 @@ export class DeskReportGenerationService {
     const pending = await messageAttachmentRepo.create({
       entityId: channelId,
       entityType: DESK_REPORT_ENTITY_TYPE,
+      channelId: null,
       originalFilename: `${channelName}-desk-report.html`,
       size: 0,
       mimetype: 'text/html',

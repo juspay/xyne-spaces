@@ -1193,6 +1193,7 @@ export class TicketController {
             createdBy: userId,
             storageProvider: config.fileStorage.provider,
             conversationId: conversationId,
+            channelId: channelId ?? null,
             workspaceId: ticketChannelWorkspaceId,
             metadata: file.metadata || {},
           }));
@@ -1254,6 +1255,7 @@ export class TicketController {
               },
               data: {
                 conversationId: conversationId,
+                channelId: channelId ?? null,
               },
             });
 
