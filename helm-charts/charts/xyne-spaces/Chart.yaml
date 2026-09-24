@@ -2,8 +2,8 @@ apiVersion: v2
 name: xyne-spaces
 description: Umbrella chart that installs the Xyne Spaces services together
 type: application
-version: 0.1.0-app.1.373.0-release-20260923.3
-appVersion: "1.373.0-release-20260923.3"
+version: 0.1.0-app.1.393.0
+appVersion: "1.393.0"
 keywords:
   - xyne
   - umbrella
@@ -12,94 +12,94 @@ sources:
   - https://github.com/juspay/xyne-spaces
 dependencies:
   - name: xyne-backend
-    version: 0.1.0-app.1.373.0-release-20260923.3
+    version: 0.1.0-app.1.393.0
     repository: file://../xyne-backend
     condition: xyne-backend.enabled
   - name: xyne-worker
-    version: 0.1.0-app.1.373.0-release-20260923.3
+    version: 0.1.0-app.1.393.0
     repository: file://../xyne-worker
     condition: xyne-worker.enabled
   - name: xyne-dashboard
-    version: 0.1.0-app.1.373.0-release-20260923.3
+    version: 0.1.0-app.1.393.0
     repository: file://../xyne-dashboard
     condition: xyne-dashboard.enabled
   - name: xyne-dashboard-external
-    version: 0.1.0-app.1.373.0-release-20260923.3
+    version: 0.1.0-app.1.393.0
     repository: file://../xyne-dashboard-external
     condition: xyne-dashboard-external.enabled
   - name: xyne-dashboard-edge
-    version: 0.1.0-app.1.373.0-release-20260923.3
+    version: 0.1.0-app.1.393.0
     repository: file://../xyne-dashboard-edge
     condition: xyne-dashboard-edge.enabled
   - name: xyne-zero
-    version: 0.1.0-app.1.373.0-release-20260923.3
+    version: 0.1.0-app.1.393.0
     repository: file://../xyne-zero
     condition: xyne-zero.enabled
   - name: xyne-zero
     alias: xyne-zero-replication
-    version: 0.1.0-app.1.373.0-release-20260923.3
+    version: 0.1.0-app.1.393.0
     repository: file://../xyne-zero
     condition: xyne-zero-replication.enabled
   - name: xyne-ysweet
-    version: 0.1.0-app.1.373.0-release-20260923.3
+    version: 0.1.0-app.1.393.0
     repository: file://../xyne-ysweet
     condition: xyne-ysweet.enabled
   - name: xyne-claw
-    version: 0.1.0-app.1.373.0-release-20260923.3
+    version: 0.1.0-app.1.393.0
     repository: file://../xyne-claw
     condition: xyne-claw.enabled
   - name: xyne-claw-auth
-    version: 0.1.0-app.1.373.0-release-20260923.3
+    version: 0.1.0-app.1.393.0
     repository: file://../xyne-claw-auth
     condition: xyne-claw-auth.enabled
   - name: xyne-claw-auth-frontend
-    version: 0.1.0-app.1.373.0-release-20260923.3
+    version: 0.1.0-app.1.393.0
     repository: file://../xyne-claw-auth-frontend
     condition: xyne-claw-auth-frontend.enabled
   - name: xyne-transcription-agent
-    version: 0.1.0-app.1.373.0-release-20260923.3
+    version: 0.1.0-app.1.393.0
     repository: file://../xyne-transcription-agent
     condition: xyne-transcription-agent.enabled
   - name: xyne-lighton-ocr
-    version: 0.1.0-app.1.373.0-release-20260923.3
+    version: 0.1.0-app.1.393.0
     repository: file://../xyne-lighton-ocr
     condition: xyne-lighton-ocr.enabled
   - name: xyne-vespa
-    version: 0.1.0-app.1.373.0-release-20260923.3
+    version: 0.1.0-app.1.393.0
     repository: file://../xyne-vespa
     condition: xyne-vespa.enabled
   - name: xyne-vespa
     alias: xyne-vespa-content
-    version: 0.1.0-app.1.373.0-release-20260923.3
+    version: 0.1.0-app.1.393.0
     repository: file://../xyne-vespa
     condition: xyne-vespa-content.enabled
   - name: xyne-vespa
     alias: xyne-vespa-feed
-    version: 0.1.0-app.1.373.0-release-20260923.3
+    version: 0.1.0-app.1.393.0
     repository: file://../xyne-vespa
     condition: xyne-vespa-feed.enabled
   - name: xyne-vespa
     alias: xyne-vespa-search
-    version: 0.1.0-app.1.373.0-release-20260923.3
+    version: 0.1.0-app.1.393.0
     repository: file://../xyne-vespa
     condition: xyne-vespa-search.enabled
   - name: xyne-vespa-embedder
-    version: 0.1.0-app.1.373.0-release-20260923.3
+    version: 0.1.0-app.1.393.0
     repository: file://../xyne-vespa-embedder
     condition: xyne-vespa-embedder.enabled
   - name: xyne-tei-batch-proxy
-    version: 0.1.0-app.1.373.0-release-20260923.3
+    version: 0.1.0-app.1.393.0
     repository: file://../xyne-tei-batch-proxy
     condition: xyne-tei-batch-proxy.enabled
   - name: xyne-redis
-    version: 0.1.0-app.1.373.0-release-20260923.3
+    version: 0.1.0-app.1.393.0
     repository: file://../xyne-redis
     condition: xyne-redis.enabled
   - name: xyne-sandbox-router
-    version: 0.1.0-app.1.373.0-release-20260923.3
+    version: 0.1.0-app.1.393.0
     repository: file://../xyne-sandbox-router
     condition: xyne-sandbox-router.enabled
   - name: xyne-egress-proxy
-    version: 0.1.0-app.1.373.0-release-20260923.3
+    version: 0.1.0-app.1.393.0
     repository: file://../xyne-egress-proxy
     condition: xyne-egress-proxy.enabled
