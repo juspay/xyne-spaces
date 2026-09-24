@@ -2625,18 +2625,6 @@ export const queries = defineQueries({
         .where('workspaceId', ctx.workspaceId)
         .where('callType', CallType.HEADLESS)
         .where('createdByUserId', ctx.userID)
-        .related('shares', shares =>
-          shares
-            .where('shareableEntityType', ShareableEntityType.NOTE_TAKER)
-            .where('entityUserAccess', '!=', EntityUserAccess.REVOKED)
-            .where(({ or, cmp, exists }) =>
-              or(
-                cmp('userId', ctx.userID),
-                exists('userGroupMemberships', m => m.where('userId', ctx.userID)),
-                exists('channelMembers', m => m.where('userId', ctx.userID)),
-              ),
-            ),
-        )
         .orderBy('startedAt', 'desc')
         .orderBy('id', 'desc');
 

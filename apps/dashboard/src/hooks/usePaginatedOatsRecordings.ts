@@ -5,7 +5,15 @@ import { useCachedQuery } from './useCachedQuery';
 import { useZero } from './useZero';
 
 export type OatsRecordingScope = 'all' | 'created' | 'shared';
-export type OatsRecordingEntry = QueryResultType<typeof queries.createdOatsRecordings>[number];
+/**
+ * A row from either tab. `shares` only comes down on the shared tab — a created
+ * recording is owned outright, so its level never depends on a grant.
+ */
+export type OatsRecordingEntry = QueryResultType<
+  typeof queries.createdOatsRecordings
+>[number] & {
+  shares?: QueryResultType<typeof queries.sharedOatsRecordings>[number]['shares'];
+};
 
 const FETCH_LIMIT = 20;
 
@@ -27,9 +35,13 @@ export function patchOatsRecordingLabels(recordingId: string, labels: string[]):
 }
 type RecordingCursor = { id: string; startedAt: number } | null;
 type SingleOatsRecordingScope = Exclude<OatsRecordingScope, 'all'>;
-type OatsRecordingQuery =
-  | ReturnType<typeof queries.createdOatsRecordings>
-  | ReturnType<typeof queries.sharedOatsRecordings>;
+/**
+ * Either tab's page query. The shared one returns the same row plus `shares`, so
+ * the created-row type is the safe common shape to expose: callers widen to
+ * `OatsRecordingEntry`, where `shares` is optional, and a row that does carry
+ * grants keeps them at runtime.
+ */
+type OatsRecordingQuery = ReturnType<typeof queries.createdOatsRecordings>;
 
 const recordingQuery = (
   scope: SingleOatsRecordingScope,
@@ -38,7 +50,11 @@ const recordingQuery = (
 ): OatsRecordingQuery =>
   scope === 'created'
     ? queries.createdOatsRecordings({ limit: FETCH_LIMIT, start, participantId })
-    : queries.sharedOatsRecordings({ limit: FETCH_LIMIT, start, participantId });
+    : (queries.sharedOatsRecordings({
+        limit: FETCH_LIMIT,
+        start,
+        participantId,
+      }) as unknown as OatsRecordingQuery);
 
 const mergeRecordingPages = (
   current: OatsRecordingEntry[],

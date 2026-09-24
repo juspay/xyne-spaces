@@ -10,7 +10,12 @@ import { useAuth } from './useAuth';
 
 type RecordingRow = NonNullable<QueryResultType<typeof queries.oatsRecordingByExternalId>>;
 type RecordingShareRow = RecordingRow['shares'][number];
-type RecordingListRow = QueryResultType<typeof queries.createdOatsRecordings>[number];
+type SharedListRow = QueryResultType<typeof queries.sharedOatsRecordings>[number];
+/**
+ * A row from either recordings tab. Only the shared tab carries `shares`; a
+ * created row resolves to `owner` off `createdByUserId` before grants are read.
+ */
+type RecordingListRow = Omit<SharedListRow, 'shares'> & { shares?: SharedListRow['shares'] };
 
 /** Only the fields access resolution reads, so a narrowed row can be passed in. */
 type AccessFields<TRow> = Pick<
@@ -81,9 +86,10 @@ export const useRecordingAccessLevel = (
 };
 
 /**
- * Same answer for a row from the recordings list. Those queries already narrow
- * `shares` to the ones reaching the viewer, so there is nothing left to filter —
- * which is why this cannot just call the hook above.
+ * Same answer for a row from the recordings list. `sharedOatsRecordings` already
+ * narrows `shares` to the ones reaching the viewer, so there is nothing left to
+ * filter — which is why this cannot just call the hook above. A created row has
+ * no `shares` at all and never needs one: the creator check answers it.
  */
 export const useRecordingListAccessLevel = (
   recording: AccessFields<RecordingListRow> | null | undefined,
