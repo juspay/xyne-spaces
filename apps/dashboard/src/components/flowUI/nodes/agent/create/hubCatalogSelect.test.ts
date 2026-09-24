@@ -361,6 +361,9 @@ void describe('hubCatalogSelect', () => {
       selection.custom.includes('web_search') || selection.custom.includes('webfetch'),
       JSON.stringify(selection),
     );
+    // Precision: do not spray unrelated custom groups.
+    assert.equal(selection.custom.includes('unrelated'), false);
+    assert.ok(selection.custom.length <= 4, JSON.stringify(selection));
   });
 
   void it('suggest-tools cannot spray Slack onto an X + Spaces job', () => {

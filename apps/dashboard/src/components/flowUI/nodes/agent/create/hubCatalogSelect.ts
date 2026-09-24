@@ -27,7 +27,7 @@ import { toolboxFromSuggestion } from './toolboxFromSuggestion.ts';
 import {
   intentImpliesBuiltin as jobImpliesBuiltin,
   intentImpliesSubagent as jobImpliesSubagent,
-  softBuiltinNeedles,
+  softBuiltinCuesForIntent,
   softProductNeedles,
   SOFT_PRODUCT_CUES,
 } from './capabilityInference.ts';
@@ -224,8 +224,8 @@ export function pickSubagentsForIntent(intent: string, catalog: AvailableTools):
 }
 
 /**
- * Enable every builtin catalog row that matches email / DM / web (or other)
- * job needles. Prefer binding all implicated groups over a single best hit.
+ * Enable builtin catalog rows that match email / DM / web job categories.
+ * One best entry per active cue category — never spray every custom:* row.
  */
 export function pickBuiltinSelectionForIntent(
   intent: string,
@@ -236,40 +236,45 @@ export function pickBuiltinSelectionForIntent(
   const builtins = buildBuiltinCatalog(catalog);
   if (builtins.length === 0) return current;
 
-  const needles = softBuiltinNeedles(intent);
   let selection = {
     ...current,
     callableAgents: current.callableAgents ?? [],
   };
 
-  const scored = builtins
-    .map(entry => ({
-      entry,
-      score:
-        scoreBuiltinAgainstNeedles(entry, needles) +
-        scoreNameAgainstIntent(
-          `${entry.label} ${entry.source} ${entry.tools.map(t => t.slug).join(' ')}`,
-          intent,
-        ),
-    }))
-    .filter(row => row.score > 0)
-    .sort((a, b) => b.score - a.score);
+  const cues = softBuiltinCuesForIntent(intent);
+  const pickedSources = new Set<string>();
 
-  if (scored.length > 0) {
-    for (const row of scored) {
-      selection = {
-        ...enableBuiltinEntry(selection, row.entry),
-        callableAgents: selection.callableAgents ?? [],
-      };
-    }
-    return selection;
+  for (const cue of cues) {
+    const ranked = builtins
+      .filter(entry => {
+        if (pickedSources.has(entry.source)) return false;
+        const hay = `${entry.label} ${entry.source} ${entry.tools.map(t => `${t.slug} ${t.name}`).join(' ')}`;
+        return cue.entryRe.test(hay);
+      })
+      .map(entry => ({
+        entry,
+        score: scoreBuiltinAgainstNeedles(entry, cue.needles),
+      }))
+      .filter(row => row.score > 0)
+      .sort((a, b) => b.score - a.score);
+
+    const best = ranked[0];
+    if (!best) continue;
+    pickedSources.add(best.entry.source);
+    selection = {
+      ...enableBuiltinEntry(selection, best.entry),
+      callableAgents: selection.callableAgents ?? [],
+    };
   }
 
-  // Fallback for generic "web search / research" with no needle hit: web/browse only.
-  if (/\b(web\s*search|browse|on\s+the\s+web|web\s+research|research(?:es|ing)?)\b/i.test(intent)) {
+  if (pickedSources.size > 0) return selection;
+
+  // Fallback for generic web-research with no category hit: web/browse/search only.
+  if (/\b(web\s*search|browse|on\s+the\s+web|web\s+research|researches?\b)\b/i.test(intent)) {
     const pick =
-      builtins.find(entry => /search|web|browse|fetch|research/i.test(`${entry.label} ${entry.source}`)) ??
-      null;
+      builtins.find(entry =>
+        /web[-_\s]?search|webfetch|browse|research\s*agent/i.test(`${entry.label} ${entry.source}`),
+      ) ?? null;
     if (pick) {
       return {
         ...enableBuiltinEntry(selection, pick),

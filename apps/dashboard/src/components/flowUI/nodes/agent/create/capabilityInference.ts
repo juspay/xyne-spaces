@@ -56,22 +56,31 @@ export const SOFT_PRODUCT_CUES: ReadonlyArray<{ re: RegExp; needles: readonly st
   { re: /\b(confluence|wiki)\b/i, needles: ['confluence'] },
 ];
 
-/** Builtin capability cues — email / DM / web when those groups exist in catalog. */
+/**
+ * Builtin capability cues — precision groups only.
+ * Needles are matched against builtin label/source/tool slugs; keep them
+ * specific so "agent" / "web" / "message" do not spray every custom:* row.
+ */
 export const BUILTIN_SOFT_CUES: ReadonlyArray<{
   re: RegExp;
   needles: readonly string[];
+  /** Prefer entries whose label/source matches this (category gate). */
+  entryRe: RegExp;
 }> = [
   {
     re: /\b(e-?mails?|inbox|mails?\b|digest|send\s+email)\b/i,
-    needles: ['email', 'mail', 'gmail', 'send email', 'send-email'],
+    needles: ['send email', 'send-email', 'send_email', 'email'],
+    entryRe: /send[-_\s]?email|e-?mail|^mail$|gmail/i,
   },
   {
     re: /\b(dm\b|dms\b|direct\s+messages?|send\s+messages?|spaces?\s*dms?)\b/i,
-    needles: ['message', 'dm', 'send message', 'send-message', 'chat'],
+    needles: ['send message', 'send-message', 'send_message'],
+    entryRe: /send[-_\s]?message/i,
   },
   {
-    re: /\b(browse|web\s*search|web\s*fetch|webfetch|on\s+the\s+web|web\s+research|from\s+x\.com|from\s+twitter|look\s*up|competitor)\b/i,
-    needles: ['web', 'search', 'fetch', 'webfetch', 'browse', 'research'],
+    re: /\b(browse|web\s*search|web\s*fetch|webfetch|on\s+the\s+web|web\s+research|from\s+x\.com|from\s+twitter|look\s*up|competitor|researches?\b)\b/i,
+    needles: ['web search', 'web-search', 'web_search', 'webfetch', 'web fetch'],
+    entryRe: /web[-_\s]?search|webfetch|web[-_\s]?fetch|^browse$|research\s*agent/i,
   },
 ];
 
@@ -135,6 +144,11 @@ export function softBuiltinNeedles(intent: string): string[] {
     }
   }
   return needles;
+}
+
+/** Active builtin cue categories for this job (precision gates for catalog rows). */
+export function softBuiltinCuesForIntent(intent: string): typeof BUILTIN_SOFT_CUES[number][] {
+  return BUILTIN_SOFT_CUES.filter(cue => cue.re.test(intent));
 }
 
 export function intentImpliesMcp(intent: string): boolean {

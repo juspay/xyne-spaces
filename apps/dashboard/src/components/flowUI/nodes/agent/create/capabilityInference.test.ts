@@ -47,9 +47,9 @@ void describe('capabilityInference', () => {
 
   void it('soft-cues builtin email/DM/web needles for design digest', () => {
     const builtins = softBuiltinNeedles(DESIGN_DIGEST_JOB);
-    assert.ok(builtins.some(n => /email|mail/i.test(n)), JSON.stringify(builtins));
-    assert.ok(builtins.some(n => /message|dm/i.test(n)), JSON.stringify(builtins));
-    assert.ok(builtins.some(n => /web|search|fetch/i.test(n)), JSON.stringify(builtins));
+    assert.ok(builtins.some(n => /email/i.test(n)), JSON.stringify(builtins));
+    assert.ok(builtins.some(n => /send[-_\s]?message/i.test(n)), JSON.stringify(builtins));
+    assert.ok(builtins.some(n => /web[-_\s]?search|webfetch/i.test(n)), JSON.stringify(builtins));
     const needed = inferNeededCapabilities(DESIGN_DIGEST_JOB);
     assert.ok(needed.includes('mcp'), JSON.stringify(needed));
     assert.ok(needed.includes('builtin'), JSON.stringify(needed));
