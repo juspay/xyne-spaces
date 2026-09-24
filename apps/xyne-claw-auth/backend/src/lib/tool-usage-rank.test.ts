@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 
-vi.mock("../repositories/agentRunRepository.js", () => ({ agentRunRepository: { toolUsageRank: vi.fn() } }));
+vi.mock("../repositories/agentRunRepository.js", () => ({ agentRunRepository: { toolsUsedSince: vi.fn() } }));
 vi.mock("../logger.js", () => ({ createLogger: () => ({ warn: vi.fn(), info: vi.fn() }) }));
 
-import { createToolUsageRankCache, TOOL_USAGE_RANK_LIMIT, TOOL_USAGE_WINDOW_MS, wantsToolUsageRank } from "./tool-usage-rank.js";
+import { createToolUsageRankCache, rankToolsByRuns, TOOL_USAGE_RANK_LIMIT, TOOL_USAGE_WINDOW_MS, wantsToolUsageRank } from "./tool-usage-rank.js";
 
 describe("tool usage rank cache", () => {
   it("asks for the last 7 days and caches per agent for an hour", async () => {
@@ -74,5 +74,27 @@ describe("which runs need the usage rank", () => {
     expect(wantsToolUsageRank(undefined, "all")).toBe(true);
     expect(wantsToolUsageRank(undefined, "+active_tool_cap")).toBe(true);
     expect(wantsToolUsageRank({ active_tool_cap: true }, "jev_tool_sift")).toBe(true);
+  });
+});
+
+describe("rankToolsByRuns", () => {
+  it("counts each tool once per run, most-used first", () => {
+    const runs = [
+      ["sandbox-run", "sandbox-run", "webfetch"],
+      ["sandbox-run", "grafana-query-logs"],
+      ["grafana-query-logs"],
+      ["grafana-query-logs", "webfetch"],
+    ];
+    expect(rankToolsByRuns(runs, 10)).toEqual(["grafana-query-logs", "sandbox-run", "webfetch"]);
+  });
+
+  it("breaks ties alphabetically and applies the limit", () => {
+    const runs = [["zeta", "alpha", "mid"], ["alpha", "mid"], ["zeta"]];
+    expect(rankToolsByRuns(runs, 2)).toEqual(["alpha", "mid"]);
+  });
+
+  it("ignores empty names and returns nothing for no runs", () => {
+    expect(rankToolsByRuns([["", "webfetch"]], 10)).toEqual(["webfetch"]);
+    expect(rankToolsByRuns([], 10)).toEqual([]);
   });
 });

@@ -1204,19 +1204,14 @@ export const agentRunRepository = {
       .sort((a, b) => (b.tokensIn + b.tokensOut) - (a.tokensIn + a.tokensOut));
   },
 
-  toolUsageRank: async (agentSlug: string, orgId: string, since: Date, limit: number): Promise<string[]> => {
-    type Row = { tool: string; runs: bigint };
-    const rows = await prisma.$queryRaw<Row[]>`
-      SELECT t.tool AS tool, COUNT(DISTINCT r.id) AS runs
-      FROM agent_runs r, unnest(r."toolsUsed") AS t(tool)
-      WHERE r."agentSlug" = ${agentSlug}
-        AND r."orgId" = ${orgId}
-        AND r."startedAt" >= ${since}
-      GROUP BY t.tool
-      ORDER BY runs DESC, t.tool ASC
-      LIMIT ${limit}
-    `;
-    return rows.map((r) => r.tool);
+  toolsUsedSince: async (agentSlug: string, orgId: string, since: Date, maxRuns: number): Promise<string[][]> => {
+    const rows = await prisma.agentRun.findMany({
+      where: { agentSlug, orgId, startedAt: { gte: since } },
+      select: { toolsUsed: true },
+      orderBy: { startedAt: "desc" },
+      take: maxRuns,
+    });
+    return rows.map((r) => r.toolsUsed);
   },
 
   /** High-level global overview suitable for dashboard header cards. */

@@ -6,6 +6,7 @@ const log = createLogger("tool-usage-rank");
 
 export const TOOL_USAGE_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 export const TOOL_USAGE_RANK_LIMIT = 100;
+export const TOOL_USAGE_MAX_RUNS = 5000;
 const CACHE_TTL_MS = 60 * 60 * 1000;
 const LOOKUP_TIMEOUT_MS = 1500;
 
@@ -53,8 +54,21 @@ export function createToolUsageRankCache(load: Loader, now: () => number = Date.
   return { lookup, clear: () => cache.clear() };
 }
 
-const shared = createToolUsageRankCache((agentSlug, orgId, since, limit) =>
-  agentRunRepository.toolUsageRank(agentSlug, orgId, since, limit),
+export function rankToolsByRuns(toolLists: string[][], limit: number): string[] {
+  const runs = new Map<string, number>();
+  for (const tools of toolLists) {
+    for (const tool of new Set(tools)) {
+      if (tool) runs.set(tool, (runs.get(tool) ?? 0) + 1);
+    }
+  }
+  return [...runs.entries()]
+    .sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0))
+    .slice(0, limit)
+    .map(([tool]) => tool);
+}
+
+const shared = createToolUsageRankCache(async (agentSlug, orgId, since, limit) =>
+  rankToolsByRuns(await agentRunRepository.toolsUsedSince(agentSlug, orgId, since, TOOL_USAGE_MAX_RUNS), limit),
 );
 
 const CAP_KEY = "active_tool_cap";
