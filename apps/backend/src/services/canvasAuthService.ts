@@ -5,10 +5,11 @@ import {
   GuestEntity,
   CanvasRole,
   ChannelRole,
+  ChannelType,
   WorkspaceRole,
   CanvasVisibility,
+  SDLC_HUB_KNOWLEDGE_FOLDER,
 } from '@xyne/shared';
-import { isBaselineCanvasType } from '@xyne/shared';
 import { logger } from '@/utils/logger';
 import { vespaQueue } from '@/queues/vespaQueue';
 import { fileSchema, SubApp } from '@/vespa/src/types';
@@ -228,9 +229,20 @@ class CanvasAuthService {
 
       const isCreator = canvas.createdBy === userId;
       const currentUserContext = await this.getCurrentUserContext(userId, dbClient);
-      const isSdlcBaseline = isBaselineCanvasType(canvas.sdlcArtifact?.artifactType);
-      const isSdlcBaselineChannelAdmin = Boolean(
-        isSdlcBaseline &&
+      const isHubKnowledge = canvas.folderId
+        ? Boolean(
+            await dbClient.canvasFolder.findFirst({
+              where: {
+                id: canvas.folderId,
+                name: SDLC_HUB_KNOWLEDGE_FOLDER,
+                channel: { type: ChannelType.SDLC },
+              },
+              select: { id: true },
+            })
+          )
+        : false;
+      const isHubKnowledgeChannelAdmin = Boolean(
+        isHubKnowledge &&
         canvas.channelId &&
         (await dbClient.channelParticipant.findFirst({
           where: { channelId: canvas.channelId, userId, role: ChannelRole.ADMIN },
@@ -282,7 +294,7 @@ class CanvasAuthService {
         groupParticipant as Parameters<typeof this.strongerRole>[0],
         channelParticipant
       );
-      const effectiveRole = isSdlcBaselineChannelAdmin
+      const effectiveRole = isHubKnowledgeChannelAdmin
         ? CanvasRole.EDITOR
         : (participant?.role ?? entityRole?.role);
       const hasOwnerRole = effectiveRole === CanvasRole.OWNER;
@@ -295,7 +307,7 @@ class CanvasAuthService {
         dbClient
       );
 
-      const canEdit = isCreator || hasOwnerRole || hasEditorRole || isSdlcBaselineChannelAdmin;
+      const canEdit = isCreator || hasOwnerRole || hasEditorRole || isHubKnowledgeChannelAdmin;
 
       const canView =
         canEdit || hasViewerRole || hasPublicVisibilityAccess || hasGuestContainerAccess;
@@ -384,7 +396,9 @@ class CanvasAuthService {
         loadChannel: (channelId) =>
           db.channel.findUnique({
             where: { id: channelId },
-            select: { projectId: true, isArchived: true },
+            // resolveCanvasHierarchy only needs to confirm the channel exists now
+            // (the project-mismatch check was removed); no channel.projectId read.
+            select: { id: true },
           }),
       });
 
@@ -414,21 +428,7 @@ class CanvasAuthService {
         if (!channelMembership) {
           throw new Error('User does not have permission to create canvas in this channel');
         }
-      } else if (resolvedProjectId) {
-        const projectChannelMembership = await db.channelParticipant.findFirst({
-          where: {
-            userId,
-            channel: {
-              projectId: resolvedProjectId,
-            },
-          },
-        });
-
-        if (!projectChannelMembership) {
-          throw new Error('User does not have permission to create canvas in this project');
-        }
       }
-
       const creator = await db.user.findUnique({
         where: { id: userId },
         select: { workspaceId: true },

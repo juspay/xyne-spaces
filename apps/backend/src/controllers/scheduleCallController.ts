@@ -20,6 +20,7 @@ import {
 import { CallVespaFeedSource, queueCallVespaFeed } from '@/services/callVespaQueue';
 import { queueCallCalendarPush, queueCallCalendarPushMany } from '@/queues/callCalendarPushQueue';
 import { buildCallInviteUrl } from '@/utils/urlUtils';
+import { messageMetadataService } from '@/services/messageMetadataService';
 
 // Number of milliseconds to buffer recurring call instances ahead of time (60 days)
 const INSTANCE_BUFFER_DAYS = 60 * 24 * 60 * 60 * 1000;
@@ -399,6 +400,8 @@ export class ScheduleCallController {
       }
 
       const db = DatabaseClient.getInstance();
+      const resolvedCallOrigin = conversationId ? CallOrigin.CONVERSATION : CallOrigin.CHANNEL;
+      let pillConversationId: string | undefined;
 
       const { participantUserIds } = await db.$transaction(async (tx) => {
         const result = await repositories.calls.createCallWithParticipants({
@@ -408,7 +411,7 @@ export class ScheduleCallController {
           createdByUserId: userId,
           channelId: finalChannelId!,
           callType: CallType.AUDIO,
-          callOrigin: conversationId ? CallOrigin.CONVERSATION : CallOrigin.CHANNEL,
+          callOrigin: resolvedCallOrigin,
           roomLink,
           timezone: 'UTC',
           isRecurring: false,
@@ -420,8 +423,31 @@ export class ScheduleCallController {
           ...(normalizedExternalInvitees.length && { externalInvitees: normalizedExternalInvitees }),
         }, tx);
 
+        // Same transaction as the call, so a pill can never outlive a failed insert.
+        const workspaceId = await repositories.channels.getWorkspaceId(finalChannelId!);
+        const pill = await repositories.calls.createScheduledCallPill(tx, {
+          callId,
+          callExternalId: externalId,
+          channelId: finalChannelId!,
+          workspaceId,
+          senderId: userId,
+          senderName: req.user?.displayName || req.user?.name || 'Someone',
+          ...(conversationId && { threadConversationId: conversationId }),
+        });
+        // Only a channel-root pill is its conversation's initialMessage.
+        if (pill && !conversationId) pillConversationId = pill.conversationId;
+
         return result;
       });
+
+      // Eager, so initial_message_md is populated before the response returns.
+      if (pillConversationId) {
+        try {
+          await messageMetadataService.syncInitialMessageMd(pillConversationId);
+        } catch (error) {
+          logger.error(`Failed to sync initial_message_md for call pill ${callId}:`, error);
+        }
+      }
 
       if (hasExternals) {
         this.sendExternalInvitationInBackground({
@@ -675,6 +701,24 @@ export class ScheduleCallController {
       });
 
       logger.info(`[updateScheduledCall] repo update complete | callId=${call.id} resolvedChannelId=${resolvedChannelId}`);
+
+      // The call changed channels: retire the old pill as "moved" and post a fresh one.
+      if (channelChanged && resolvedChannelId) {
+        try {
+          const organizer = await repositories.users.findById(call.createdByUserId);
+          await repositories.calls.moveScheduledCallPill({
+            callId: call.id,
+            callExternalId: call.externalId,
+            callTitle: call.title,
+            newChannelId: resolvedChannelId,
+            workspaceId: await repositories.channels.getWorkspaceId(resolvedChannelId),
+            senderId: call.createdByUserId,
+            senderName: organizer?.displayName || organizer?.name || 'Someone',
+          });
+        } catch (error) {
+          logger.error(`Failed to move scheduled call pill for call ${call.id}:`, error);
+        }
+      }
 
       queueCallCalendarPush(call.id, 'updateScheduledCall');
 

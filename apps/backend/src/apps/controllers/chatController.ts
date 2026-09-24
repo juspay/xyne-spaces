@@ -9,7 +9,8 @@ import { SlackAttachment } from '@/integrations/adapters/slack-webhook-tickets/u
 import { config } from '@/config/env';
 import { resolveChannelId } from '../utils/channelUtils';
 import { MessageType } from '@xyne/shared';
-import { validateFlowDefinition, formatValidationErrors } from '@xyne/shared';
+import { validateFlowDefinition, formatValidationErrors, MESSAGE_DELIVERY } from '@xyne/shared';
+import { deliverEphemeralMessage } from '../core/ephemeralDelivery';
 import { ContentFormat } from '../types';
 import { updateAppActionStatus } from '@/utils/appActionMarkdownUtils';
 import { sanitizeMessageContent, isAlphanumericId, encodeHtmlAttr } from '@/utils/contentUtils';
@@ -62,6 +63,53 @@ const PostMessageBodySchema = ChatActionBodySchema.extend({
 ).refine(
   data => !!data.channelId || !!data.channelName || !!data.conversationId,
   { message: 'Either channelId, channelName, or conversationId is required', path: ['channelId'] }
+);
+
+/**
+ * chat.postEphemeral's body — postMessage's fields plus `user` (the single
+ * recipient) and `messageDelivery`.
+ *
+ * Built from ChatActionBodySchema rather than PostMessageBodySchema because the
+ * latter is a ZodEffects (it ends in .refine) and has no .extend. The channel /
+ * flow fields are therefore repeated here rather than shared, which also keeps
+ * postMessage's own schema untouched by this feature.
+ */
+const EphemeralFlowInputSchema = z.object({
+  version: z.literal('2.0'),
+  screenId: z.string().optional(),
+  title: z.string().optional(),
+  components: z.array(z.record(z.any())).optional(),
+  data: z.record(z.unknown()).optional(),
+  state: z.object({
+    values: z.record(z.unknown()),
+    touched: z.record(z.boolean()),
+    errors: z.record(z.string()),
+    submitting: z.boolean(),
+    submitted: z.boolean(),
+    history: z.array(z.string()),
+    loadingComponentIds: z.array(z.string()).optional(),
+  }),
+});
+
+const PostEphemeralBodySchema = ChatActionBodySchema.extend({
+  channelId: z.string().min(1, 'Channel ID is required').trim().optional(),
+  channelName: z.string().min(1, 'Channel name is required').trim().optional(),
+  conversationId: z.string().trim().optional(),
+  user: z.string().min(1, 'user is required').trim(),
+  messageDelivery: z.enum(MESSAGE_DELIVERY).default('EPHEMERAL'),
+  flow: EphemeralFlowInputSchema.optional(),
+}).refine(
+  data => !!data.text || !!data.markdownText || !!data.flow || (data.attachments && data.attachments.length > 0),
+  { message: 'Either text, markdownText, flow, or attachments is required', path: ['text'] }
+).refine(
+  data => !!data.channelId || !!data.channelName || !!data.conversationId,
+  { message: 'Either channelId, channelName, or conversationId is required', path: ['channelId'] }
+).refine(
+  // A popup renders a screen; there is nothing to show without one. Rejecting
+  // here gives the app a 400 it can act on — otherwise it gets a 201 and the
+  // recipient gets an empty dialog, with no error anywhere to explain it.
+  data => data.messageDelivery !== 'OPENSCREEN' || !!data.flow,
+  { message: 'flow is required when messageDelivery is OPENSCREEN', path: ['flow'] }
 );
 
 const UpdateMessageBodySchema = ChatActionBodySchema.extend({
@@ -236,7 +284,11 @@ export class ChatController {
         return;
       }
 
-      const resolvedChannelId = await resolveChannelId(channelId, conversationId, channelName);
+      // A `channelId` that names a user was turned into the bot's DM channel by
+      // validateChannelAccessForPostWithDm; the internal S2S postAsUser route
+      // skips that middleware and resolves here as before.
+      const resolvedChannelId =
+        req._resolvedChannelId ?? (await resolveChannelId(channelId, conversationId, channelName));
 
       let content: string;
       let isMarkdown = !!markdownText || contentFormat === ContentFormat.MARKDOWN;
@@ -330,6 +382,144 @@ export class ChatController {
           });
           return;
         }
+      }
+
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  };
+
+  /**
+   * Post an ephemeral message — relayed to a single user over their user room and
+   * never written to the messages table.
+   * POST /api/apps/chat/postEphemeral
+   *
+   * Same body as postMessage plus:
+   * - user: string            — recipient's Xyne user id
+   * - messageDelivery: string — EPHEMERAL (default) renders a card; OPENSCREEN
+   *                             opens the flow as a popup wherever the recipient is
+   *
+   * The message vanishes on reload. An interactive `flow` stays actionable for the
+   * lifetime of its signed token (30 minutes) without anything being stored, because
+   * the token — not a DB row — is what tells FlowController which app owns the card.
+   *
+   * Delivery is best-effort and is NOT guaranteed by the 201: nothing is persisted,
+   * so a recipient with no live socket never receives it and there is nothing to
+   * catch up on when they reconnect.
+   *
+   * The minting and relaying live in core/ephemeralDelivery so this and the Slack
+   * adapter's chat.postEphemeral cannot drift apart on authorization.
+   */
+  postEphemeral = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const bodyResult = PostEphemeralBodySchema.safeParse(req.body);
+
+      if (!bodyResult.success) {
+        res.status(400).json({
+          error: `Validation error`,
+          code: 'VALIDATION_ERROR',
+          details: bodyResult.error.errors,
+        });
+        return;
+      }
+
+      const {
+        channelId, channelName, conversationId, user, messageDelivery,
+        text, markdownText, flow, attachments, metadata, contentFormat,
+      } = bodyResult.data;
+
+      const sender = req.user;
+      if (!sender) {
+        res.status(400).json({ error: 'userId is required', code: 'VALIDATION_ERROR' });
+        return;
+      }
+
+      const targetUser = await repositories.users.findById(user);
+      if (!targetUser) {
+        res.status(404).json({ error: `User not found: ${user}`, code: 'NOT_FOUND' });
+        return;
+      }
+
+      const resolvedChannelId = await resolveChannelId(channelId, conversationId, channelName);
+
+      // Verified token appId — authenticateApp sets req.auth from the validated
+      // token, so this is safe to sign into a capability.
+      const appId = (req as any).auth?.appId ?? (req.body as Record<string, unknown>).appId;
+      if (flow && (typeof appId !== 'string' || !appId)) {
+        res.status(400).json({ error: 'Invalid appId', code: 'VALIDATION_ERROR' });
+        return;
+      }
+
+      let content: string | undefined;
+      const isMarkdown = !!markdownText || contentFormat === ContentFormat.MARKDOWN;
+
+      if (!flow) {
+        if (markdownText) {
+          content = sanitizeMessageContent(markdownText);
+        } else if (contentFormat === ContentFormat.MARKDOWN) {
+          content = sanitizeMessageContent(text || '');
+        } else {
+          content = await this.processMessageContent(text, attachments, req.user?.workspaceId);
+        }
+      }
+
+      const result = await deliverEphemeralMessage({
+        channelId: resolvedChannelId,
+        conversationId,
+        recipientId: targetUser.id,
+        senderId: sender.id,
+        senderName: sender.name,
+        messageDelivery,
+        ...(flow && { appId: appId as string }),
+        // Normalised to a full FlowDefinition here: the body schema allows an app
+        // to omit screenId and loadingComponentIds, but validateFlowDefinition
+        // downstream does not.
+        ...(flow && {
+          flow: {
+            version: '2.0' as const,
+            screenId: flow.screenId ?? crypto.randomUUID(),
+            title: flow.title,
+            components: flow.components ?? [],
+            data: flow.data,
+            state: { ...flow.state, loadingComponentIds: flow.state.loadingComponentIds ?? [] },
+          },
+        }),
+        content,
+        isMarkdown,
+        metadata,
+      });
+
+      if (!result.ok) {
+        if (result.reason === 'not_in_channel') {
+          res.status(403).json({
+            error: 'Recipient is not a participant of this channel',
+            code: 'USER_NOT_IN_CHANNEL',
+          });
+          return;
+        }
+        res.status(400).json({
+          error: result.reason === 'invalid_app' ? 'Invalid appId' : 'Invalid flowJSON',
+          code: 'VALIDATION_ERROR',
+          ...(result.details && { details: result.details }),
+        });
+        return;
+      }
+
+      res.status(201).json({
+        messageId: result.messageId,
+        channelId: resolvedChannelId,
+        conversationId: conversationId ?? null,
+        visibleTo: targetUser.id,
+        messageDelivery,
+        ephemeral: true,
+        // Broadcast, not delivered: an offline recipient silently misses it.
+        delivery: 'best-effort',
+      });
+    } catch (error) {
+      logger.error('Error posting ephemeral message:', error);
+
+      if (error instanceof Error && error.message.includes('not found')) {
+        res.status(404).json({ error: error.message, code: 'NOT_FOUND' });
+        return;
       }
 
       res.status(500).json({ error: 'Internal server error' });

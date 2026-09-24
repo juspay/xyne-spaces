@@ -40,6 +40,9 @@ import {
   type UiWidget,
   type ToolExecutionContext,
   cleanupSdlcSandboxCredentialsForContext,
+  openPaletteAdmits,
+  openPaletteMode,
+  openPaletteModeFromTools,
 } from "xyne-claw-shared";
 import { SessionLockedError } from "../session-lock.js";
 import { SandboxUnavailableError } from "../sandbox-unavailable.js";
@@ -47,10 +50,14 @@ import { isSafeId } from "../safe-id.js";
 import { sanitizeCitations } from "../citation-sanitizer.js";
 import { validateS2SKey } from "../middleware/auth.js";
 import { transientProviderCallback } from "../transient-provider-callback.js";
-import { loadMcpToolsForUser } from "../mcp.js";
-import { packSdlcRunMeta, trustedSdlcToolBindings } from "xyne-claw-shared";
+import { loadMcpToolsForUser,
+  searchDeploymentTools,
+} from "../mcp.js";
+import { packSdlcRunMeta, SDLC_META_KEYS, trustedSdlcToolBindings } from "xyne-claw-shared";
 import { loadCustomTools } from "../custom-tools.js";
 import { buildCopilotTool } from "../copilot.js";
+import { pinRunJudgeBackend } from "../judge-backend.js";
+import { optEnabled, pinRunOptimizations } from "../optimizations.js";
 import { buildExperimentTools, buildExperimentReviewTools, type ExperimentContext } from "../experiment.js";
 import {
   executeRunFromPayload,
@@ -87,12 +94,20 @@ import {
   loadContext7Tools,
   type SkillTrigger,
 } from "../subagent-tools.js";
+import { createChildTaskRegistry } from "../child-tasks.js";
+import { childRunIdFor } from "../debug/index.js";
+import { buildChildTaskTools } from "../child-task-tools.js";
+import { reportDelegatedRunStart, reportDelegatedRunFinish } from "../delegated-run.js";
 import {
   buildFastModeDirectTools,
   buildFastModeMetaTools,
+  duplicatesMetaTool,
+  type DeploymentToolSearch,
   buildToolCatalog,
+  describeMcpServers,
   renderToolCatalogForPrompt,
   type FastToolRuntimeController,
+  type ToolCatalogEntry,
   type ToolCatalogItem,
 } from "../tool-catalog.js";
 import {
@@ -151,6 +166,7 @@ import { ingestAttachments } from "../attachment-ingest.js";
 import { metric } from "../metrics.js";
 import { runWithProviderFallback } from "../provider-fallback.js";
 import { isDraining } from "../drain.js";
+import { routeTaskMode } from "../mode-router.js";
 import {
   buildDesignSystemPromptInjection,
   parseTaskCommand,
@@ -533,6 +549,8 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
     detached,
     fastMode,
     resumedFromHandoff,
+    judgeBackend,
+    optimizations,
     memoryBankId,
     twinDestinations,
     senderName,
@@ -545,6 +563,8 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
   } = req.body as InternalRunPayload;
 
   const experiment = normalizeExperimentContext(rawExperiment);
+  pinRunJudgeBackend(judgeBackend);
+  pinRunOptimizations(optimizations, agentConfig?.["optimizations"]);
 
   // [AUTODBG] claw-side receipt of every /run forward (esp. automations). Confirms
   // the request crossed claw-auth → claw and which session id it arrived under
@@ -1641,7 +1661,12 @@ export async function processTask(
     // Parse command contracts before attachment ingestion. /record-skill keeps
     // the raw recording for a fixed-command sandbox analyzer rather than
     // spending ffmpeg CPU in the long-lived claw pod.
-    const taskCommand = parseTaskCommand(task);
+    const explicitTaskCommand = parseTaskCommand(task);
+    const routedMode = await routeTaskMode(task, explicitTaskCommand, abortSignal);
+    const taskCommand = routedMode.command;
+    if (routedMode.source === "model" && taskCommand) {
+      log(`[task-command] ${taskCommand.command} selected by the mode router`);
+    }
     const recordSkillCommand = taskCommand?.command === "/record-skill";
     const {
       derivedContextFiles,
@@ -1740,7 +1765,7 @@ export async function processTask(
     // ephemeral workspace teardown + resume) when a conversation is in play;
     // the workspace is still used for binary attachments. See toolOutputBaseDir.
     const mcpOutputDir = toolOutputBaseDir(conversationId, workspaceDir);
-    const trustedSdlcBindings = trustedSdlcToolBindings(agentConfig?.["sdlcContext"], channelId);
+    const trustedSdlcBindings = trustedSdlcToolBindings(agentConfig?.["sdlcContext"]);
     const {
       groups: mcpGroups,
       cleanup,
@@ -1819,7 +1844,6 @@ export async function processTask(
     // sandbox-routing gate in claw-shared honors it too — otherwise the tools
     // stay but the sandbox is still routed read-only. Default-off.
     if (agentConfig?.["allowWriteInReadOnlyJob"] === true) meta["allowWriteInReadOnlyJob"] = "true";
-    if (agentConfig?.["requireSdlcRepository"] === true) meta["requireSdlcRepository"] = "true";
     const sdlcContext = agentConfig?.["sdlcContext"];
     const trustedSdlcContext =
       sdlcContext && typeof sdlcContext === "object" && !Array.isArray(sdlcContext)
@@ -1868,7 +1892,8 @@ export async function processTask(
       const subagents = Array.isArray(toolsObj["subagents"])
         ? (toolsObj["subagents"] as unknown[]).filter((value): value is string => typeof value === "string")
         : [];
-      if (!subagents.includes("spaces")) {
+      const wrapperRedundant = optEnabled("lean_palette") && openPaletteModeFromTools(toolsObj) === "all";
+      if (!subagents.includes("spaces") && !wrapperRedundant) {
         effectiveConfig["tools"] = { ...toolsObj, subagents: [...subagents, "spaces"] };
       }
     }
@@ -2165,12 +2190,18 @@ export async function processTask(
     // individual tools from a subagent-backed connector was a silent no-op.
     const toolsConfigEarly = parseToolsConfig(effectiveConfig);
     const directPickSuffixes = toolsConfigEarly?.direct ?? [];
+    // Hoisted above the catalog build: the palette decides what gets catalogued,
+    // not just what survives filtering (see `includeSubagentTools` below).
+    const paletteMode = openPaletteModeFromTools(toolsConfigEarly);
 
     // Per-run registry for background (run_in_background) subagents. Shared by
     // reference with the subagent tools (via the progressCtx below) and with
     // runTask (opts), so a detached spawn registered inside a tool's execute()
     // is drained by runTask after the model loop settles. See agent.ts.
-    const backgroundSubagentRegistry: import("../subagent-tools.js").BackgroundSubagentRegistry = new Map();
+    const childTaskRegistry = createChildTaskRegistry();
+    // Filled in by runTask once this run's trace is open; the subagent tools
+    // below only close over the object.
+    const parentDebugHandle: import("../subagent-tools.js").ParentDebugHandle = {};
 
     const fastModeEnabled = effectiveFastMode(fastMode, agentConfig);
     const fastToolController: FastToolRuntimeController = {};
@@ -2183,11 +2214,25 @@ export async function processTask(
       groups: allGroups,
       customTools: customToolDefs,
       ...(customSubagents ? { customSubagents } : {}),
-      includeSubagentTools: fastModeEnabled,
+      // Also when the palette is open: with delegation ON a server's tools
+      // exist only behind its wrapper, so without their members catalogued
+      // here the palette has nothing to admit and load-tools nothing to load.
+      // The palette itself still refuses wrappers (a wrapper grants a whole
+      // server, not one tool).
+      includeSubagentTools: fastModeEnabled || paletteMode !== "off",
+      // Without this, def-less servers' tools and in-process custom tools are
+      // admitted straight into the always-active set instead of the catalog —
+      // bigger prompt, not wider reach.
+      catalogUnwrapped: paletteMode !== "off",
+      catalogUnwrappedWrites: paletteMode !== "off" && optEnabled("lean_palette"),
+      includeSubagentReadTools: optEnabled("subagent_read_tools"),
     });
     const fastCatalogCandidateByName = new Map(fastCatalogCandidateItems.map((item) => [item.entry.name, item]));
     let fastCatalogItems: ToolCatalogItem[] = [];
     let fastCatalogNames: string[] = [];
+    /** Tools the agent was NOT given, kept only by the open palette. They are
+     *  loadable on demand and must never be always-active. */
+    const paletteAdmittedNames = new Set<string>();
 
     const { subagentTools, directTools, remainingCustomTools } = fastModeEnabled
       ? {
@@ -2225,7 +2270,8 @@ export async function processTask(
             // hits Stop, instead of running for its full duration and orphaning
             // the result back to a parent that's already thrown RunCancelledError.
             ...(abortSignal ? { abortSignal } : {}),
-            backgroundRegistry: backgroundSubagentRegistry,
+            backgroundRegistry: childTaskRegistry,
+            parentDebug: parentDebugHandle,
           },
           undefined, // bonusToolsBySubagent — removed with the sandbox subagent
           customSubagents,
@@ -2329,7 +2375,7 @@ export async function processTask(
       });
     };
 
-    const buildNestedRunner = (): NestedAgentRunner => async ({ spec, question, childGovernor, signal, onProgress }) => {
+    const buildNestedRunner = (): NestedAgentRunner => async ({ spec, question, childGovernor, toolCallId, followUpId, signal, onProgress }) => {
       const calleeSessionToken = spec.sessionToken ?? sessionToken;
       const label = spec.progressLabels?.[0] ?? `Delegating to ${spec.name}...`;
       onProgress?.(label);
@@ -2393,6 +2439,7 @@ export async function processTask(
             : "spaces";
         const calleeDirectPickSuffixes = calleeToolsConfig?.direct ?? [];
         const calleeInnerTools: string[] = [];
+        const calleeDebugHandle: import("../subagent-tools.js").ParentDebugHandle = {};
         const calleeSubagents = buildSubagentTools(
           calleeGroups,
           calleeCustom.tools,
@@ -2420,6 +2467,7 @@ export async function processTask(
               userId,
             },
             ...(signal ? { abortSignal: signal } : {}),
+            parentDebug: calleeDebugHandle,
           },
           undefined,
           spec.customSubagents as import("../subagent-tools.js").CustomSubagentSpec[] | undefined,
@@ -2448,29 +2496,140 @@ export async function processTask(
         }
 
         const providerConfig = spec.provider ? spec.providerConfigs?.[spec.provider] : undefined;
-        const result = await runTask({
-          userId,
-          task: question,
-          userName,
-          userEmail,
-          customTools: calleePalette,
-          systemPromptOverride: spec.systemPrompt,
-          cwd: workspaceDir,
-          provider: spec.provider,
-          providerConfig,
-          progressUrl: undefined,
-          sessionId: `${sessionId}-a2a-${spec.slug}`,
-          skills: spec.skills,
-          abortSignal: signal,
-          progressMeta: {
-            ...(conversationId ? { conversationId } : {}),
-            agentSlug: spec.slug,
+
+        // A delegation is a real run in a thread of its OWN, keyed per follow-up
+        // handle so a follow-up resumes it. Filed under the CALLER's conversation
+        // it would point at a thread holding none of its messages. `a2a_` marks
+        // it machine-initiated the way `app_` marks artifact-app threads: real
+        // and openable, but kept out of the chat sidebar.
+        const calleeFollowUpId = followUpId ?? randomUUID();
+        const calleeChatConversationId = `a2a_${calleeFollowUpId}`;
+        const calleeConversationId =
+          buildSandboxStoreKey(userId, calleeChatConversationId, spec.slug) ?? calleeChatConversationId;
+
+        // File the callee's trace inside the CALLER's run, so reading the
+        // parent's trace already contains the delegated session.
+        const parentStoreKey =
+          parentDebugHandle.storeKey ??
+          (conversationId ? buildSandboxStoreKey(userId, conversationId, agentSlug) : undefined);
+        const calleeSessionId = `${sessionId}-a2a-${toolCallId}`;
+        const calleeRunId = childRunIdFor(Date.now(), spec.slug, toolCallId);
+        const calleeChildRun = parentStoreKey
+          ? {
+              storeKey: parentStoreKey,
+              runId: calleeRunId,
+              ...(parentDebugHandle.runId ? { parentRunId: parentDebugHandle.runId } : {}),
+              parentSessionId: sessionId,
+              parentToolCallId: toolCallId,
+              label: spec.slug,
+              kind: "agent" as const,
+              ...(parentDebugHandle.captureLevel ? { captureLevel: parentDebugHandle.captureLevel } : {}),
+              ...(progressUrl ? { liveMirror: progressUrl } : {}),
+            }
+          : undefined;
+
+        parentDebugHandle.recorder?.record(
+          "subagent_start",
+          {
+            subagentName: spec.slug,
+            childKind: "agent",
+            ...(calleeChildRun ? { childRunId: calleeRunId } : {}),
+            question,
+            questionChars: question.length,
+            provider: spec.provider ?? "spaces",
+            model: providerConfig?.model ?? "shared",
+            toolNames: calleePalette.map((t) => t.name),
           },
+          { toolCallId },
+        );
+
+        const calleeStartedAt = Date.now();
+        await reportDelegatedRunStart({
+          sessionId: calleeSessionId,
+          userId,
+          agentSlug: spec.slug,
+          task: question,
+          conversationId: calleeChatConversationId,
+          parentSessionId: sessionId,
+          ...(agentSlug ? { parentAgentSlug: agentSlug } : {}),
+          parentToolCallId: toolCallId,
         });
-        if (calleeInnerTools.length > 0) {
-          subagentInnerTools.push(...calleeInnerTools.map((toolName) => `${spec.slug}.${toolName}`));
+        try {
+          const result = await runTask({
+            userId,
+            task: question,
+            userName,
+            userEmail,
+            customTools: calleePalette,
+            systemPromptOverride: spec.systemPrompt,
+            cwd: workspaceDir,
+            provider: spec.provider,
+            providerConfig,
+            progressUrl: undefined,
+            conversationId: calleeConversationId,
+            sessionId: calleeSessionId,
+            skills: spec.skills,
+            abortSignal: signal,
+            parentDebug: calleeDebugHandle,
+            ...(calleeChildRun ? { childRun: calleeChildRun } : {}),
+            progressMeta: {
+              ...(conversationId ? { conversationId } : {}),
+              agentSlug: spec.slug,
+            },
+          });
+          if (calleeInnerTools.length > 0) {
+            subagentInnerTools.push(...calleeInnerTools.map((toolName) => `${spec.slug}.${toolName}`));
+          }
+          parentDebugHandle.recorder?.record(
+            "subagent_end",
+            {
+              subagentName: spec.slug,
+              childKind: "agent",
+              ...(calleeChildRun ? { childRunId: calleeRunId } : {}),
+              status: "completed",
+              durationMs: Date.now() - calleeStartedAt,
+              textLength: result.text.length,
+              toolsUsed: result.toolsUsed,
+            },
+            { toolCallId },
+          );
+          await reportDelegatedRunFinish({
+            sessionId: calleeSessionId,
+            status: "completed",
+            result: result.text,
+            ...(spec.provider ? { provider: spec.provider } : {}),
+            ...(providerConfig?.model ? { model: providerConfig.model } : {}),
+            toolsUsed: result.toolsUsed,
+            toolInvocations: result.toolInvocations,
+            tokenUsage: result.tokenUsage,
+            ...(result.latency ? { latency: result.latency } : {}),
+          });
+          return {
+            text: result.text,
+            toolsUsed: result.toolsUsed,
+            followUpId: calleeFollowUpId,
+          };
+        } catch (err) {
+          parentDebugHandle.recorder?.record(
+            "subagent_end",
+            {
+              subagentName: spec.slug,
+              childKind: "agent",
+              ...(calleeChildRun ? { childRunId: calleeRunId } : {}),
+              status: signal?.aborted ? "cancelled" : "error",
+              durationMs: Date.now() - calleeStartedAt,
+              providerError: err instanceof Error ? err.message : String(err),
+            },
+            { toolCallId },
+          );
+          await reportDelegatedRunFinish({
+            sessionId: calleeSessionId,
+            status: signal?.aborted ? "cancelled" : "failed",
+            error: err instanceof Error ? err.message : String(err),
+            ...(spec.provider ? { provider: spec.provider } : {}),
+          });
+          throw err;
         }
-        return { text: result.text, toolsUsed: result.toolsUsed };
       } finally {
         await calleeMcp.cleanup().catch(() => {});
       }
@@ -2536,15 +2695,30 @@ export async function processTask(
             delegationGovernor,
             hydrateOrchestratorCallee,
             buildNestedRunner(),
-            { ...(abortSignal ? { signal: abortSignal } : {}), onProgress: emitDelegationProgress },
+            {
+              ...(abortSignal ? { signal: abortSignal } : {}),
+              onProgress: emitDelegationProgress,
+              registry: childTaskRegistry,
+            },
           ) as unknown as ToolDefinition[]
         : buildCallableAgentTools(
             callableAgents as CallableAgentSpec[],
             delegationGovernor,
             buildNestedRunner(),
-            { ...(abortSignal ? { signal: abortSignal } : {}), onProgress: emitDelegationProgress },
+            {
+              ...(abortSignal ? { signal: abortSignal } : {}),
+              onProgress: emitDelegationProgress,
+              registry: childTaskRegistry,
+            },
           ) as unknown as ToolDefinition[]
       : [];
+
+    // Only worth exposing when something in this run can actually spawn
+    // background work to inspect.
+    const childTaskTools =
+      subagentTools.length > 0 || callableAgentTools.length > 0
+        ? buildChildTaskTools(childTaskRegistry)
+        : [];
 
     const fastAlwaysActiveToolNames = new Set([
       ...directTools,
@@ -2552,13 +2726,15 @@ export async function processTask(
       ...parentHoistedTools,
       ...kbHoistedTools,
       ...callableAgentTools,
+      ...childTaskTools,
     ].map((tool) => tool.name));
 
     let allTools = [
       ...subagentTools, // spaces, bitbucket, grafana, deepwiki, context7
-      ...fastMetaTools, // list-tools/load-tools in fast mode only
+      ...fastMetaTools, // search-tools/load-tools in fast mode only
       ...fastCatalogCandidateItems.map((item) => item.tool), // narrowed after all standard filters, dormant until load-tools activates them
       ...callableAgentTools, // A2A governed full-agent delegation tools
+      ...childTaskTools, // task-status / task-stop over background children
       ...directTools, // write tools (create-ticket, send-message)
       ...remainingCustomTools, // custom tools not wrapped in a subagent
       ...parentHoistedTools, // sandbox tools mounted directly on the parent
@@ -2590,7 +2766,8 @@ export async function processTask(
       const allowedCustom = expandCustomSelection(toolsConfigEarly.custom);
       const allowedGatewayServices = new Set(toolsConfigEarly.gateway ?? []);
 
-      allTools = allTools.filter((t) => {
+
+      const grantedByConfig = (t: (typeof allTools)[number]): boolean => {
         if (subagentTools.some((s) => s.name === t.name))
           return allowedSubagents.has(t.name);
         if (directTools.some((d) => d.name === t.name)) {
@@ -2663,10 +2840,34 @@ export async function processTask(
           return false;
         }
         return true;
+      };
+
+      /**
+       * Live gate for the open palette. `tool-resolution.ts::authorize()` has
+       * the same rule but no production caller yet — without this one, a tool
+       * the claw-auth gates admitted would just get dropped again below.
+       * Wrappers are excluded: one stands for a whole server, not a single tool.
+       */
+      const admittedByOpenPalette = (t: (typeof allTools)[number]): boolean => {
+        if (paletteMode === "off") return false;
+        if (subagentTools.some((s) => s.name === t.name)) return false;
+        return openPaletteAdmits(paletteMode, t.name, (t as { isWriteTool?: boolean }).isWriteTool);
+      };
+
+      const before = allTools.length;
+      allTools = allTools.filter((t) => {
+        if (grantedByConfig(t)) return true;
+        if (!admittedByOpenPalette(t)) return false;
+        // Palette-only grant: must land in the catalog, not always-active —
+        // see the fastCatalogItems filter below.
+        paletteAdmittedNames.add(t.name);
+        return true;
       });
+      const granted = allTools.filter(grantedByConfig).length;
 
       log(
-        `Agent tools config applied: ${allTools.length} tools after filtering`,
+        `Agent tools config applied: ${allTools.length} tools after filtering` +
+        (paletteMode === "off" ? "" : ` (open palette "${paletteMode}" admitted ${allTools.length - granted} beyond the grant, of ${before} offered)`),
       );
     }
 
@@ -2728,7 +2929,13 @@ export async function processTask(
     if (!planTrackingEnabled) log("[plan] planTracking=false — todo tools and primer suppressed");
     const planTools = remainingCustomTools.filter((t) => isPlanToolSlug(t.name));
     allTools = allTools.filter((t) => !isPlanToolSlug(t.name));
-    if (planToolsDefaultOn) allTools.push(...planTools);
+    if (planToolsDefaultOn) {
+      allTools.push(...planTools);
+      // The palette filter ran earlier and may have marked plan tools
+      // palette-only (they read as non-write); undo that so the framework
+      // default keeps them always-active, not stuck behind load-tools.
+      for (const t of planTools) paletteAdmittedNames.delete(t.name);
+    }
     // Plan mode swaps the live todo-write/todo-read tools OUT (they're already
     // filtered above; planToolsDefaultOn is false here) and the terminal
     // propose-plan tool IN — the ONLY exit in plan mode. It captures the plan
@@ -3039,6 +3246,10 @@ export async function processTask(
     // runs (reviewer agents). It wins over allowWriteInReadOnlyJob — explicit
     // read-only intent — and applies even to interactive (non-job) runs.
     const forceReadOnlySandbox = agentConfig?.["forceReadOnlySandbox"] === true;
+
+    // Default off. Read once here so the palette filter and the search tool's
+    // wording stay in sync.
+    const openPaletteEnabled = openPaletteMode(agentConfig) !== "off";
     if (forceReadOnlySandbox || (isReadOnlyJob && !allowWriteInReadOnlyJob)) {
       // Keep in sync with SBX_GIT.disabledTools (xyne-claw-shared/.../repo-configs.ts).
       const RO_DISABLED = new Set([
@@ -3101,20 +3312,50 @@ export async function processTask(
     // there is something to catalogue. `fastModeEnabled ||` keeps fast mode
     // byte-identical — a fast-mode run with an EMPTY catalog still gets its
     // (empty) meta-tools exactly as it did before, rather than silently losing
-    // list-tools/load-tools.
+    // search-tools/load-tools.
     const catalogActive = fastModeEnabled || fastCatalogCandidateItems.length > 0;
     if (catalogActive) {
       const registeredToolNames = new Set(allTools.map((tool) => tool.name));
       fastCatalogItems = fastCatalogCandidateItems.filter((item) =>
         registeredToolNames.has(item.entry.name) &&
-        !fastAlwaysActiveToolNames.has(item.entry.name),
+        // Palette-admitted tools can also be in the always-active list (def-less
+        // servers push everything to directTools) — palette wins, route to catalog.
+        (paletteAdmittedNames.has(item.entry.name) || !fastAlwaysActiveToolNames.has(item.entry.name)),
       );
       fastCatalogNames = fastCatalogItems.map((item) => item.entry.name);
       const finalFastCatalogNameSet = new Set(fastCatalogNames);
+      const activeToolEntries: ToolCatalogEntry[] | undefined =
+        optEnabled("catalog_full_index") || optEnabled("subagent_read_tools")
+          ? allTools
+              .filter((tool) =>
+                !duplicatesMetaTool(tool.name) &&
+                tool.name !== "search-tools" &&
+                tool.name !== "load-tools" &&
+                !finalFastCatalogNameSet.has(tool.name) &&
+                (!fastCatalogCandidateByName.has(tool.name) || fastAlwaysActiveToolNames.has(tool.name)),
+              )
+              .map((tool) => ({
+                name: tool.name,
+                oneLineDescription: String(tool.description ?? "").replace(/\s+/g, " ").trim().slice(0, 300),
+                source: "active",
+                catalog: "active",
+              }))
+          : undefined;
       allTools = dedupeToolsByName([
         ...buildFastModeMetaTools({
           catalog: fastCatalogItems.map((item) => item.entry),
+          ...(activeToolEntries ? { activeTools: activeToolEntries } : {}),
           controller: fastToolController,
+          // Injected here (needs the run's session) rather than imported by the
+          // catalog module; absent without a session — scope:"claw" reports why.
+          ...(sessionId && sessionToken
+            ? {
+                searchDeployment: (params: Parameters<DeploymentToolSearch>[0]) =>
+                  searchDeploymentTools(sessionId, sessionToken, params),
+              }
+            : {}),
+          openPalette: openPaletteEnabled,
+          mcpServers: describeMcpServers(allGroups),
           ...(fastCatalogItems.length === 0 && (customSubagents?.length ?? 0) > 0
             ? {
                 emptyCatalogNote:
@@ -3124,11 +3365,15 @@ export async function processTask(
             : {}),
         }),
         ...allTools.filter((tool) => {
+          // claw-auth's `search_tools` duplicates this meta-tool and, having no
+          // label, renders identically as "Search Tools" in the run trace. It's
+          // eager rather than catalogued, so it must be dropped here.
+          if (duplicatesMetaTool(tool.name)) return false;
           if (!fastCatalogCandidateByName.has(tool.name)) return true;
           return finalFastCatalogNameSet.has(tool.name) || fastAlwaysActiveToolNames.has(tool.name);
         }),
       ]);
-      fastMetaTools = allTools.filter((tool) => tool.name === "list-tools" || tool.name === "load-tools");
+      fastMetaTools = allTools.filter((tool) => tool.name === "search-tools" || tool.name === "load-tools");
     }
 
     const fastModeLoadedToolBudget = catalogActive
@@ -3352,12 +3597,16 @@ export async function processTask(
       // sandbox-* slug in tools.custom.
       return customList.some((s) => s.startsWith("sandbox-"));
     })();
+    const sdlcRepositoryAccessEnabled =
+      Boolean(meta[SDLC_META_KEYS.actorUserId]) &&
+      (((agentConfig?.["tools"] as Record<string, unknown> | undefined)?.["custom"] ?? []) as unknown[]).includes(
+        "sdlc-repository-access",
+      );
     if (sandboxEnabledForPrompt) {
-      const isSdlcRepositoryContext = Boolean(meta["sdlcRepositoryId"]);
       const sandboxLines: string[] = [
         "## Sandbox usage",
-        isSdlcRepositoryContext
-          ? "This SDLC repository uses one write-capable workspace. Capability is not authorization: inspect only unless the task explicitly requires implementation. Follow the repository's declared package manager and setup instructions. If a required package-manager command is unavailable, make one bounded attempt to install/enable it; use npm as a fallback only when the repository's scripts and lockfiles support npm. Do not loop on environment repair. If setup or verification still fails, stop cleanly and report the exact command/error, changes already completed, checks not run, and branch/commit/PR state."
+        sdlcRepositoryAccessEnabled
+          ? "SDLC hub repositories: call `sandbox-create`, then `sdlc-repository-access` with the repoId and that sessionId, and clone with the exact cloneUrl it returns. Git then works normally for fetch, commit and push, with commits made as the repository's credential account. Capability is not authorization: inspect only unless the task explicitly requires implementation. Follow the repository's declared package manager and setup instructions. If a required package-manager command is unavailable, make one bounded attempt to install/enable it; use npm as a fallback only when the repository's scripts and lockfiles support npm. Do not loop on environment repair. If setup or verification still fails, stop cleanly and report the exact command/error, changes already completed, checks not run, and branch/commit/PR state. Open pull requests for these repositories with `spaces-sdlc-create-pull-request`, not a github or bitbucket subagent."
           : "READ vs WRITE — this matters. For read-first repos (e.g. xyne-spaces) `sandbox-repo-setup` DEFAULTS to an instant READ-ONLY git sandbox (no wait): use it for reading, grepping, and inspecting code / PR review — which is almost everything. Only call `sandbox-repo-setup` with `write:true` when you must actually EDIT files, build, run tests, or commit — that claims a short-lived, auto-expiring writable dev sandbox. Do NOT request write just to look at code; default to read and escalate to write only when you're about to change something.",
         "Sandbox tools (sandbox-create, sandbox-run, sandbox-write-file, sandbox-read-file, sandbox-deliver-files, sandbox-pw-*) run code/commands in an isolated VM. Use them whenever you need execution, file generation, screenshots, or browser automation.",
         "- To send a file BACK to the user, you MUST call `sandbox-deliver-files` with the path(s). Returning file contents as text in your reply is NOT delivery — Spaces won't render it as an attachment.",
@@ -3673,7 +3922,7 @@ export async function processTask(
       ? `\n\n## Experiment mode\nYou are in a time-boxed experiment (epoch ${experiment.epoch}; deadline ${experiment.deadlineAt}; focus ${experiment.focus ?? "unspecified"}). You cannot finish early — end-experiment refuses before the deadline. Loop: read the ledger → declare a hypothesis (experiment-ledger action=hypothesis) → gather PROOF in the sandbox (failing test, benchmark delta, profile) → record the finding with its proof path. Never re-test refuted hypotheses. If your current lead dies, pick a different subsystem. Prose without a recorded finding is wasted time.`
       : "";
     const authoritativeSdlcContext = trustedSdlcContext
-      ? `\n\n## Authoritative SDLC Run Context\n\nThe platform verified this immutable run context. Use these exact IDs and repository coordinates; never infer or replace them. Runtime credentials are intentionally absent.\n\n\`\`\`json\n${JSON.stringify(trustedSdlcContext, null, 2)}\n\`\`\``
+      ? `\n\n## Authoritative SDLC Run Context\n\nThe platform verified this immutable run context. Use these exact IDs and repository coordinates; never infer or replace them. Runtime credentials are intentionally absent.\n\n\`\`\`json\n${JSON.stringify({ ...trustedSdlcContext, interactiveGrant: undefined }, null, 2)}\n\`\`\``
       : "";
     const effectiveSystemPrompt = ((channelId
       ? `${basePrompt}${citationGuide}${SPACES_MENTION_GUIDE}`
@@ -3693,6 +3942,8 @@ export async function processTask(
           // Only fast mode actually turns delegation off; asserting it on a
           // normal run would be a lie the model acts on.
           subagentDelegationDisabled: fastModeEnabled,
+          fullIndex: optEnabled("catalog_full_index") || optEnabled("subagent_read_tools"),
+          preferDirect: optEnabled("subagent_read_tools"),
         })
       : "";
     if (fastModeCatalogPrompt) {
@@ -3859,7 +4110,8 @@ export async function processTask(
         // surface keep ALL turns so the stored answer matches the streamed one.
         finalAnswerMaxTurns: channelId ? 2 : undefined,
         ...(isRegenerate ? { isRegenerate: true } : {}),
-        backgroundRegistry: backgroundSubagentRegistry,
+        backgroundRegistry: childTaskRegistry,
+        parentDebug: parentDebugHandle,
         fastMode: fastModeEnabled,
         ...(catalogActive ? { fastToolCatalogNames: fastCatalogNames } : {}),
         ...(catalogActive ? { fastToolController } : {}),
@@ -4314,8 +4566,20 @@ export async function processTask(
       pendingResponses.length === 0 &&
       pendingActions.length === 0 &&
       pendingQuestions.length === 0;
-    const emptyReason =
-      finalProducedNothing && providerFellBack ? "provider_capacity" : undefined;
+    // Reaching the success path having produced NOTHING — no text, no
+    // attachment, no pending anything — is an anomaly, not an outcome. A user
+    // stop is caught above (userCancelled) and a handoff throws, so the
+    // remaining cause is a turn that ended without writing: an aborted or
+    // stalled LLM request whose stopReason the loop treats as benign. Naming
+    // it here means the surfaces stop guessing why the answer was blank.
+    const emptyReason = finalProducedNothing
+      ? providerFellBack
+        ? "provider_capacity"
+        : "no_output"
+      : undefined;
+    if (emptyReason === "no_output") {
+      logErr(`[run] completed with no output at all session=${sessionId} agentSlug=${agentSlug ?? ""}`);
+    }
     const emptyReasonDetail =
       emptyReason && lastFallbackUnderlying
         ? lastFallbackUnderlying

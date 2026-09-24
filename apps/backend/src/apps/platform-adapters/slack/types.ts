@@ -31,6 +31,25 @@ export interface SlackChatPostMessageRequest {
 	username?: string;
 }
 
+export interface SlackChatPostEphemeralRequest {
+	channel: string;
+	/** Slack user id, or a Xyne user id — both resolve. Required. */
+	user: string;
+	text?: string;
+	blocks?: SlackBlock[];
+	attachments?: SlackAttachment[];
+	thread_ts?: string;
+	mrkdwn?: boolean;
+	metadata?: Record<string, unknown>;
+	// Fields accepted but ignored by Xyne
+	as_user?: boolean;
+	link_names?: boolean;
+	parse?: string;
+	icon_emoji?: string;
+	icon_url?: string;
+	username?: string;
+}
+
 export interface SlackChatUpdateRequest {
 	channel: string;
 	ts: string;
@@ -126,6 +145,17 @@ export interface SlackChatPostMessageResponse {
 	channel: string;
 	ts: string;
 	message: SlackMessageObject;
+}
+
+/**
+ * Slack answers chat.postEphemeral with `message_ts`, not the `ts` that
+ * chat.postMessage returns. Kept as-is so a Slack SDK client reads it back
+ * unchanged — and because the difference is meaningful here: the value names no
+ * stored row, so chat.update and chat.delete will not find it.
+ */
+export interface SlackChatPostEphemeralResponse {
+	ok: true;
+	message_ts: string;
 }
 
 export interface SlackChatUpdateResponse {

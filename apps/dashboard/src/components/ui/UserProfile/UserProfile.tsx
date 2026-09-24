@@ -21,7 +21,7 @@ import Avatar from '../Avatar/Avatar';
 import { StatusIndicator } from '../StatusIndicator';
 import { Button } from '../Button/Button';
 import { UpdateStatusModal } from '../../AppSidebar/UpdateStatusModal';
-import { isStatusExpired, formatExpiryTime } from '../../../utils/statusUtils';
+import { isStatusExpired, formatExpiryTime, resolveUserStatus } from '../../../utils/statusUtils';
 import { cn } from '../../../utils/classNames';
 import { renderEmoji } from '../../../utils/customEmojiUtils';
 import { queries } from '../../../zero/queries';
@@ -329,6 +329,8 @@ export const UserProfile: React.FC<UserProfileProps> = ({
   const statusExpiryAt = user?.statusExpiryAt;
   const hasStatus = statusEmoji && (!statusExpiryAt || !isStatusExpired(statusExpiryAt));
 
+  const displayStatus = resolveUserStatus(user);
+
   if (!user) {
     return (
       <div className={cn('p-6', className)}>
@@ -483,15 +485,15 @@ export const UserProfile: React.FC<UserProfileProps> = ({
           )}
 
           {/* Custom Status - Show for everyone if set */}
-          {hasStatus && !isOwnProfile && (
+          {displayStatus.hasStatus && !isOwnProfile && (
             <div className='mt-2'>
               <div className='flex items-center gap-2 text-sm text-foreground'>
-                <span className='text-base'>{renderEmoji(statusEmoji || '')}</span>
-                <span>{statusContent}</span>
+                <span className='text-base'>{renderEmoji(displayStatus.emoji)}</span>
+                <span>{displayStatus.content}</span>
               </div>
-              {statusExpiryAt && (
+              {displayStatus.expiryAt && (
                 <div className='text-xs text-muted-foreground mt-1'>
-                  {formatExpiryTime(statusExpiryAt, true)}
+                  {formatExpiryTime(displayStatus.expiryAt, true)}
                 </div>
               )}
             </div>

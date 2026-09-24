@@ -14,10 +14,12 @@ import {
   getRelevantAppsParam,
   filterChipToKind,
   type FilterKind,
+  type SelectedMention,
 } from '../components/Chat/ChatDirectory/ChannelCommandMenu.types';
 import { User } from '../machines/stateMachine';
 import { Channel } from '@xyne/shared';
 import { useUserSearch } from './useUsers';
+import type { MentionHighlightsBuilder } from '../search/mentionHighlights';
 import { ChannelCategory } from '../components/Chat/ChatDirectory/ChatDirectory.types';
 import { filterChannelsBySearchableNames } from '../utils/rankingUtils';
 import {
@@ -30,16 +32,14 @@ import {
 } from '../utils/searchFilterParser';
 import { sudoQueryService } from '../services/hyperAnalytics/sudoQueryService';
 import { affinityService } from '../services/affinityService';
-import { useCmdkDefaultRankProfiles } from './useCmdkSearchConfig';
+import { useCmdkDefaultRankProfiles, useCmdkFlatAllRankProfiles } from './useCmdkSearchConfig';
 import type { StructuredSearchFilters } from './useSearchResultsScreen';
 import { resolveDateKeyword } from '../search/filterModel';
 import { unwrapExactSearchQuery } from '../utils/exactSearch';
 
 type SearchTrigger = 'keyboard_shortcut' | 'click' | 'auto_focus';
 type SearchLocation = 'global' | 'channel' | 'dm';
-type QuerySource = 'KEYBOARD' | 'CLIPBOARD_PASTE';
-
-type SelectedMention = { id: string; type: ChipType; prefix?: string; name?: string };
+type QuerySource = 'KEYBOARD' | 'CLIPBOARD_PASTE' | 'RECENT';
 
 type MentionBuckets = {
   from: SelectedMention[];
@@ -49,6 +49,7 @@ type MentionBuckets = {
   mentions: SelectedMention[];
   in: SelectedMention[];
   channelMentions: SelectedMention[];
+  userGroupMentions: SelectedMention[];
 };
 
 /**
@@ -63,6 +64,7 @@ const FILTER_KIND_TO_BUCKET: Partial<Record<FilterKind, keyof MentionBuckets>> =
   in: 'in',
   mention: 'mentions',
   channelMention: 'channelMentions',
+  userGroupMention: 'userGroupMentions',
 };
 
 /**
@@ -78,6 +80,7 @@ function deriveMentionBuckets(selectedMentions: SelectedMention[]): MentionBucke
     mentions: [],
     in: [],
     channelMentions: [],
+    userGroupMentions: [],
   };
   for (const mention of selectedMentions) {
     const kind = filterChipToKind(mention);
@@ -104,6 +107,10 @@ interface UseSearchMetricsOptions {
   // flat ranked list — lets the ALL tab show a few of each type at once.
   // Ignored when the `unified` rank profile is selected, which needs a flat list.
   groupByDocType?: boolean;
+  // Builds the highlight-only `mentionHighlights` phrases from the active mention chips (see
+  // search/mentionHighlights). Injected by the surfaces that highlight results (full-screen +
+  // cmd+K) so this hook stays decoupled from user/group data; when absent, the chip's name is used.
+  buildMentionHighlights?: MentionHighlightsBuilder;
 }
 
 const BACKEND_RESULTS_LIMIT = 25;
@@ -188,6 +195,14 @@ function dateFiltersFromChips(mentions: SelectedMention[]): StructuredSearchFilt
 export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
   const context = useAuthContextValues();
   const defaultRankProfileFor = useCmdkDefaultRankProfiles();
+  // CAC-driven: which rank profiles render the ALL tab as one flat, score-ordered list.
+  const flatAllRankProfiles = useCmdkFlatAllRankProfiles();
+  // Stable identity for dep arrays / the duplicate-search guard: the CAC value arrives
+  // asynchronously, so a search that ran before it landed has to be re-dispatched.
+  const flatAllRankProfilesKey = useMemo(
+    () => [...flatAllRankProfiles].sort().join(','),
+    [flatAllRankProfiles],
+  );
 
   useEffect(() => {
     void affinityService.prefetch();
@@ -400,6 +415,14 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
     if (querySourceRef.current === 'CLIPBOARD_PASTE') {
       isModifiedRef.current = true;
     }
+  }, []);
+
+  /**
+   * Handle replay of a saved recent search
+   * Tags query_source as RECENT so this session's impression + session-end carry the origin.
+   */
+  const markRecentReplay = useCallback(() => {
+    querySourceRef.current = 'RECENT';
   }, []);
 
   /**
@@ -981,12 +1004,14 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
             const mentionUserMentions = buckets.mentions;
             const inChannels = buckets.in;
             const mentionChannels = buckets.channelMentions;
-            // Bare @user/#channel filters only exist on chat messages. `with:` also
-            // filters call participants on the Call History search page.
+            const mentionUserGroups = buckets.userGroupMentions;
+            // Bare @user/#channel and @user-group filters only exist on chat messages. `with:`
+            // also filters call participants on the Call History search page.
             const hasMessageOnlyMention =
               (!options.isCallSearchPage && withMentions.length > 0) ||
               mentionUserMentions.length > 0 ||
-              mentionChannels.length > 0;
+              mentionChannels.length > 0 ||
+              mentionUserGroups.length > 0;
 
             // Assignee filter doesn't apply to Messages/Attachments - return empty results
             if (
@@ -1109,12 +1134,23 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
               searchFilters.type = VespaDocTypes.MESSAGES;
               searchFilters.channelMentions = mentionChannels.map(m => m.id).join(',');
             }
+            // @user-group → messages that mention the group (message-only filter).
+            if (mentionUserGroups.length > 0) {
+              searchFilters.type = VespaDocTypes.MESSAGES;
+              searchFilters.groupMentions = mentionUserGroups.map(g => g.id).join(',');
+            }
 
-            // Mention names are highlight-only — sent separately from `q` (the id filters handle
-            // recall) so the backend can bold them without polluting the free-text query.
-            const mentionHighlights = [...mentionUserMentions, ...mentionChannels]
-              .map(m => m.name)
-              .filter((n): n is string => !!n);
+            // Highlight-only phrases: the injected builder resolves every display form a mention
+            // could render as; absent (ContextPicker/CallHistory), fall back to the chip's name.
+            const mentionHighlights = options.buildMentionHighlights
+              ? options.buildMentionHighlights(
+                  mentionUserMentions,
+                  mentionChannels,
+                  mentionUserGroups,
+                )
+              : [...mentionUserMentions, ...mentionChannels, ...mentionUserGroups]
+                  .map(m => m.name)
+                  .filter((n): n is string => !!n);
             if (mentionHighlights.length > 0) {
               searchFilters.mentionHighlights = mentionHighlights;
             }
@@ -1143,8 +1179,10 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
               const vespaResponse = await searchService.vespaSearch(
                 {
                   ...searchFilters,
-                  //unified rank profile filters
-                  ...(effectiveRankProfile === 'unified'
+                  // Flat (score-ordered) ALL tab for cross-schema-comparable rank profiles.
+                  // Mail is left out so page 1 matches the load-more continuation below,
+                  // which is pinned to chat/ticket/file (XYNE-54288).
+                  ...(flatAllRankProfiles.has(effectiveRankProfile)
                     ? {
                         groupBy: '',
                         apps: `${VespaApps.CHAT},${VespaApps.TICKET},${VespaApps.FILE}`,
@@ -1274,8 +1312,10 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
       exactMatch,
       rankProfile,
       allDefaultRankProfile,
+      flatAllRankProfiles,
       includeDebugInfo,
       structuredFilters,
+      options.buildMentionHighlights,
     ],
   );
 
@@ -1289,6 +1329,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
     exactMatch: boolean;
     rankProfile: string;
     allDefaultRankProfile: string;
+    flatAllRankProfilesKey: string;
     includeDebugInfo: boolean;
     structuredFiltersKey: string;
   }>({
@@ -1300,6 +1341,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
     exactMatch: false,
     rankProfile: '',
     allDefaultRankProfile,
+    flatAllRankProfilesKey: '',
     includeDebugInfo: false,
     structuredFiltersKey: '{}',
   });
@@ -1335,6 +1377,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
       currentMentionsKey === lastSearchedParamsRef.current.mentionsKey &&
       rankProfile === lastSearchedParamsRef.current.rankProfile &&
       allDefaultRankProfile === lastSearchedParamsRef.current.allDefaultRankProfile &&
+      flatAllRankProfilesKey === lastSearchedParamsRef.current.flatAllRankProfilesKey &&
       includeDebugInfo === lastSearchedParamsRef.current.includeDebugInfo &&
       structuredFiltersKey === lastSearchedParamsRef.current.structuredFiltersKey &&
       normalizedText !== ''
@@ -1357,6 +1400,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
         exactMatch,
         rankProfile,
         allDefaultRankProfile,
+        flatAllRankProfilesKey,
         includeDebugInfo,
         structuredFiltersKey,
         mentionsKey: currentMentionsKey,
@@ -1401,6 +1445,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
     exactMatch,
     rankProfile,
     allDefaultRankProfile,
+    flatAllRankProfilesKey,
     includeDebugInfo,
     structuredFiltersKey,
   ]);
@@ -1501,12 +1546,14 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
         const mentionUserMentions = buckets.mentions;
         const inChannels = buckets.in;
         const mentionChannels = buckets.channelMentions;
-        // Bare @user/#channel filters only exist on chat messages. `with:` also
-        // filters call participants on the Call History search page.
+        const mentionUserGroups = buckets.userGroupMentions;
+        // Bare @user/#channel and @user-group filters only exist on chat messages. `with:`
+        // also filters call participants on the Call History search page.
         const hasMessageOnlyMention =
           (!options.isCallSearchPage && withMentions.length > 0) ||
           mentionUserMentions.length > 0 ||
-          mentionChannels.length > 0;
+          mentionChannels.length > 0 ||
+          mentionUserGroups.length > 0;
 
         // Assignee filter doesn't apply to Messages/Attachments - return empty
         if (
@@ -1582,11 +1629,17 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
           searchFilters.type = VespaDocTypes.MESSAGES;
           searchFilters.channelMentions = mentionChannels.map(m => m.id).join(',');
         }
+        if (mentionUserGroups.length > 0) {
+          searchFilters.type = VespaDocTypes.MESSAGES;
+          searchFilters.groupMentions = mentionUserGroups.map(g => g.id).join(',');
+        }
 
-        // Highlight-only mention names — mirrors the initial search (see note there).
-        const mentionHighlights = [...mentionUserMentions, ...mentionChannels]
-          .map(m => m.name)
-          .filter((n): n is string => !!n);
+        // Highlight-only phrases — mirrors the initial search (injected builder, else chip name).
+        const mentionHighlights = options.buildMentionHighlights
+          ? options.buildMentionHighlights(mentionUserMentions, mentionChannels, mentionUserGroups)
+          : [...mentionUserMentions, ...mentionChannels, ...mentionUserGroups]
+              .map(m => m.name)
+              .filter((n): n is string => !!n);
         if (mentionHighlights.length > 0) {
           searchFilters.mentionHighlights = mentionHighlights;
         }
@@ -1628,6 +1681,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
       setIsLoadingMore(false);
     }
   }, [
+    options.buildMentionHighlights,
     isLoadingMore,
     paginationState,
     searchSessionId,
@@ -1753,6 +1807,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
     // Clipboard tracking callbacks
     onPasteDetected: handlePasteDetected,
     onManualKeystroke: handleManualKeystroke,
+    markRecentReplay,
 
     searchResults,
     isGrouped,

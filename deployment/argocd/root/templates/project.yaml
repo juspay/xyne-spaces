@@ -1,0 +1,28 @@
+{{- $a := .Values.addons }}
+{{- $namespaces := list .Values.global.namespace .Release.Namespace $a.lbController.namespace $a.externalDns.namespace $a.istio.namespace $a.istio.gatewayNamespace $a.certManager.namespace $a.cnpg.namespace $a.monitoring.namespace $a.sandbox.kata.namespace "agent-sandbox-system" }}
+{{- $namespaces = concat $namespaces .Values.argocd.extraDestinations | uniq }}
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: {{ .Values.argocd.project }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/part-of: xyne-spaces
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "-10"
+spec:
+  description: Xyne Spaces install
+  sourceRepos:
+    {{- toYaml .Values.argocd.sourceRepos | nindent 4 }}
+  destinations:
+    {{- range $namespaces }}
+    - server: https://kubernetes.default.svc
+      namespace: {{ . }}
+    {{- end }}
+  clusterResourceWhitelist:
+    - group: "*"
+      kind: "*"
+  namespaceResourceWhitelist:
+    - group: "*"
+      kind: "*"

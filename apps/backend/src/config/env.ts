@@ -72,13 +72,19 @@ const envSchema = Joi.object({
   FORCE_LOGOUT_BEFORE: Joi.number().optional(), // Unix timestamp (seconds) - reject tokens issued before this time
   SESSION_EXPIRY_DAYS: Joi.number().default(180), // Session + refresh-cookie expiry in days (default 1 year); also drives the xyne_last_workspace pointer
   // File Storage Configuration
-  STORAGE_PROVIDER: Joi.string().valid('gcs', 'local', 's3').default('gcs'),
+  STORAGE_PROVIDER: Joi.string().valid('gcs', 'local', 's3', 'azure').default('gcs'),
   // AWS S3 Configuration
   AWS_REGION: Joi.string().default('ap-south-1'),
   AWS_ACCESS_KEY_ID: Joi.string().allow('').default(''),
   AWS_SECRET_ACCESS_KEY: Joi.string().allow('').default(''),
   S3_BUCKET_NAME: Joi.string().allow('').default(''),
   S3_ENDPOINT: Joi.string().allow('').default(''), // for MinIO/LocalStack in dev
+  // Azure Blob Storage Configuration (Workload Identity)
+  AZURE_STORAGE_ACCOUNT: Joi.string().allow('').default(''),
+  AZURE_STORAGE_CONTAINER: Joi.string().allow('').default(''),
+  AZURE_STORAGE_ENDPOINT: Joi.string().allow('').default(''),
+  AZURE_STORAGE_CONNECTION_STRING: Joi.string().allow('').default(''),
+  AZURE_STORAGE_SAS_TOKEN: Joi.string().allow('').default(''),
   // Google Cloud Storage Configuration (Workload Identity)
   GCS_PROJECT_ID: Joi.string().allow('').default(''),
   GCS_BUCKET_NAME: Joi.string().allow('').default(''),
@@ -88,6 +94,7 @@ const envSchema = Joi.object({
   RUN_SLACK_MIGRATION_WORKERS: Joi.boolean().default(false),
   MIGRATION_INGEST_CONCURRENCY: Joi.number().default(3),          // conversations one worker ingests in parallel; total in-flight = processes × this. RESTART-required (Bull binds concurrency at .process())
   MIGRATION_WORKER_PROCESSES: Joi.number().default(1),            // worker PROCESSES forked inside the pod (the real CPU-parallelism knob). RESTART-required; 1 = single process (no fork)
+  MIGRATION_INGEST_CONTROL: Joi.boolean().default(false), // kill-switch: gates the start/stop-ingestion routes (and the dashboard button). Off = ingestion queue can't be toggled.
   GCS_BUNDLE_BUCKET_NAME: Joi.string().allow('').default(''),
   GCS_CANVAS_BUCKET_NAME: Joi.string().allow('').default(''),
   GCS_DOCS_BUCKET_NAME: Joi.string().allow('').default(''),
@@ -104,9 +111,11 @@ const envSchema = Joi.object({
   ENABLE_STAGE_ETA_DEADLINE_WORKER: Joi.boolean().default(false),
   ENABLE_ETA_DEADLINE_WORKER: Joi.boolean().default(false),
   ENABLE_AUTOMATION_WORKER: Joi.boolean().default(false),
+  AUTOMATION_WORKER_CONCURRENCY: Joi.number().integer().min(1).max(10).default(1),
   ENABLE_DELAYED_MESSAGE_WORKER: Joi.boolean().default(false),
   ENABLE_EMAIL_FETCH_WORKER: Joi.boolean().default(false),
   ENABLE_CALENDAR_SYNC_WORKER: Joi.boolean().default(false),
+  ENABLE_SOCIAL_MEDIA_SYNC_WORKER: Joi.boolean().default(false),
 
   DESK_TICKET_DEBUG: Joi.boolean().default(false),
   ENABLE_EMAIL_CLASSIFICATION_WORKER: Joi.boolean().default(false),
@@ -145,18 +154,6 @@ const envSchema = Joi.object({
   TAG_GENERATION_LLM_TIMEOUT_MS: Joi.number().integer().min(1000).default(120000),
   ENABLE_STITCH_WORKER: Joi.boolean().default(false),
   ENABLE_AI_PROVISIONING_WORKER: Joi.boolean().default(false),
-  ENABLE_SDLC_WORKER: Joi.boolean().default(false),
-  SDLC_GLOBAL_ACTIVE_LIMIT: Joi.number().integer().min(1).max(100).default(9),
-  SDLC_REPO_ACTIVE_LIMIT: Joi.number().integer().min(1).max(100).default(3),
-  SDLC_CAPACITY_WAIT_TIMEOUT_MS: Joi.number()
-    .integer()
-    .min(1000)
-    .default(24 * 60 * 60 * 1000),
-  SDLC_CAPACITY_RETRY_DELAY_MS: Joi.number().integer().min(1000).default(30_000),
-  SDLC_CLAW_RUN_TIMEOUT_MS: Joi.number()
-    .integer()
-    .min(60_000)
-    .default(3 * 60 * 60 * 1000),
   ENABLE_USER_AI_PROVISIONING: Joi.boolean().default(false),
   XYNE_CLAW_AUTH_INTERNAL_URL: Joi.string().uri().allow('').default(''),
   AI_PROVISIONING_QUEUE_ATTEMPTS: Joi.number().integer().min(1).default(3),
@@ -291,7 +288,7 @@ const envSchema = Joi.object({
   RECAP_GENERATION_CRON: Joi.string().default('15 0 * * *'), //5:45 IST daily
   RECAP_CLEANUP_CRON: Joi.string().default('30 23 * * *'), //5:00 IST daily
   RECAP_RETENTION_DAYS: Joi.number().default(30),
-  ENABLE_DESK_REPORT_SCHEDULER: Joi.boolean().default(true),
+  ENABLE_DESK_REPORT_SCHEDULER: Joi.boolean().default(false),
   DESK_REPORT_GENERATION_CRON: Joi.string().default('30 22 * * *'), //4:00 IST daily
   DESK_REPORT_CLEANUP_CRON: Joi.string().default('30 21 * * *'), //3:00 IST daily
   DESK_REPORT_RETENTION_DAYS: Joi.number().default(3),
@@ -475,9 +472,30 @@ const envSchema = Joi.object({
   // Stringified JSON mapping external webhook hosts to in-cluster pod base URLs.
   // e.g. {"claw.example.com":"http://claw-auth.svc.cluster.local:3003"}
   INTERNAL_APP_HOST_MAP: Joi.string().allow('').default(''),
+  // Comma-separated host suffixes refused for outbound external fetches (e.g. link
+  // preview). Include the leading dot, e.g. ".internal.example.net,.svc.cluster.local".
+  SSRF_BLOCKED_HOST_SUFFIXES: Joi.string().allow('').default(''),
+  // Optional forward-proxy for the link-preview outbound fetch. When set, the preview
+  // fetch is routed through it instead of connecting directly. Empty = direct (default).
+  LINK_PREVIEW_EGRESS_PROXY_URL: Joi.string().allow('').default(''),
   ENC_S2S_KEY: Joi.string().allow(''),
   ENCRYPTION_SERVICE_URL: Joi.string().uri().default('http://localhost:3012'),
   ENCRYPTION_REQUEST_TIMEOUT_MS: Joi.number().integer().min(1).default(5000),
+  // Shared s2s secret sent as X-Internal-Service-Secret to internal services.
+  INTERNAL_SERVICE_SECRET: Joi.string().allow('').default(''),
+  // mTLS certificate service (s2s). Empty url disables cert revocation.
+  MTLS_SERVICE_URL: Joi.string().uri().allow('').default(''),
+  MTLS_SERVICE_REQUEST_TIMEOUT_MS: Joi.number().integer().min(1).default(5000),
+  // Comma-separated Google OAuth error codes that, when returned by the client
+  // that owns a refresh token, mean the token is permanently revoked.
+  GOOGLE_AUTH_PERMANENT_ERRORS: Joi.string().default('invalid_grant,invalid_token'),
+  GOOGLE_AUTH_CLIENT_ERRORS: Joi.string().default('unauthorized_client,invalid_client'),
+  // Master switch for the session-refresh provider-revocation check (Google /
+  // Microsoft verification + account-deactivation cleanup). When false, refresh
+  // falls back to the legacy behaviour: session status + expiry only, no
+  // provider call and no deactivation. Kill switch if provider verification
+  // misbehaves in production.
+  ENABLE_PROVIDER_REVOCATION_CHECK: Joi.boolean().default(true),
   // Email fetch
   EMAIL_FETCH_BATCH_SIZE: Joi.number().integer().default(10),
   EMAIL_FETCH_BATCH_DELAY_MS: Joi.number().integer().default(5000),
@@ -696,6 +714,13 @@ export const config = {
     bucketName: envVars.S3_BUCKET_NAME,
     endpoint: envVars.S3_ENDPOINT,
   },
+  azure: {
+    accountName: envVars.AZURE_STORAGE_ACCOUNT,
+    containerName: envVars.AZURE_STORAGE_CONTAINER,
+    endpoint: envVars.AZURE_STORAGE_ENDPOINT,
+    connectionString: envVars.AZURE_STORAGE_CONNECTION_STRING,
+    sasToken: envVars.AZURE_STORAGE_SAS_TOKEN,
+  },
   llm: {
     litellmApiKey: envVars.LITELLM_API_KEY,
     litellmBaseUrl: envVars.LITELLM_BASE_URL,
@@ -729,6 +754,7 @@ export const config = {
   slackMigration: {
     ingestConcurrency: envVars.MIGRATION_INGEST_CONCURRENCY, // RESTART-required (Bull concurrency bound at .process())
     workerProcesses: envVars.MIGRATION_WORKER_PROCESSES,     // RESTART-required (fork count at boot)
+    ingestControlEnabled: envVars.MIGRATION_INGEST_CONTROL, // gate for the start/stop-ingestion routes + dashboard button
   },
   gcs: {
     projectId: envVars.GCS_PROJECT_ID,
@@ -754,6 +780,7 @@ export const config = {
   enableDelayedMessageWorker: envVars.ENABLE_DELAYED_MESSAGE_WORKER,
   enableEmailFetchWorker: envVars.ENABLE_EMAIL_FETCH_WORKER,
   enableCalendarSyncWorker: envVars.ENABLE_CALENDAR_SYNC_WORKER,
+  enableSocialMediaSyncWorker: envVars.ENABLE_SOCIAL_MEDIA_SYNC_WORKER,
   deskTicketDebug: envVars.DESK_TICKET_DEBUG as boolean,
   enableEmailClassificationWorker: envVars.ENABLE_EMAIL_CLASSIFICATION_WORKER,
   // Radar execution engine. Two switches: enqueue on message insert, and run
@@ -802,12 +829,6 @@ export const config = {
   tagGenerationLlmTimeoutMs: envVars.TAG_GENERATION_LLM_TIMEOUT_MS as number,
   enableStitchWorker: envVars.ENABLE_STITCH_WORKER,
   enableAiProvisioningWorker: envVars.ENABLE_AI_PROVISIONING_WORKER,
-  enableSdlcWorker: envVars.ENABLE_SDLC_WORKER as boolean,
-  sdlcGlobalActiveLimit: envVars.SDLC_GLOBAL_ACTIVE_LIMIT as number,
-  sdlcRepoActiveLimit: envVars.SDLC_REPO_ACTIVE_LIMIT as number,
-  sdlcCapacityWaitTimeoutMs: envVars.SDLC_CAPACITY_WAIT_TIMEOUT_MS as number,
-  sdlcCapacityRetryDelayMs: envVars.SDLC_CAPACITY_RETRY_DELAY_MS as number,
-  sdlcClawRunTimeoutMs: envVars.SDLC_CLAW_RUN_TIMEOUT_MS as number,
   aiProvisioning: {
     xyneClawAuthInternalUrl: envVars.XYNE_CLAW_AUTH_INTERNAL_URL as string,
     enableUserProvisioning: envVars.ENABLE_USER_AI_PROVISIONING as boolean,
@@ -1018,6 +1039,10 @@ export const config = {
   questionTimeoutMinutes: envVars.QUESTION_TIMEOUT_MINUTES,
   workerSchedulerEnabled: envVars.ENABLE_WORKER_SCHEDULER,
 
+  automations: {
+    workerConcurrency: envVars.AUTOMATION_WORKER_CONCURRENCY as number,
+  },
+
   workflows: {
     workerEnabled: envVars.ENABLE_WORKFLOWS_WORKER as boolean,
     workerConcurrency: envVars.WORKFLOWS_WORKER_CONCURRENCY as number,
@@ -1148,8 +1173,37 @@ export const config = {
     callbackUrl: (envVars.XYNE_CLAW_CALLBACK_URL || envVars.BACKEND_URL) as string,
   },
   internalS2sKey: envVars.INTERNAL_S2S_KEY as string,
+  internalServiceSecret: envVars.INTERNAL_SERVICE_SECRET as string,
+  mtlsService: {
+    url: envVars.MTLS_SERVICE_URL as string,
+    // Reuses the shared internal-service secret (X-Internal-Service-Secret).
+    s2sSecret: envVars.INTERNAL_SERVICE_SECRET as string,
+    requestTimeoutMs: envVars.MTLS_SERVICE_REQUEST_TIMEOUT_MS as number,
+  },
+  // Google OAuth error codes from the owning client that mean permanent revocation.
+  googleAuthPermanentErrors: (envVars.GOOGLE_AUTH_PERMANENT_ERRORS as string)
+    .split(',')
+    .map((code: string) => code.trim())
+    .filter(Boolean),
+  googleAuthClientErrors: (envVars.GOOGLE_AUTH_CLIENT_ERRORS as string)
+    .split(',')
+    .map((code: string) => code.trim())
+    .filter(Boolean),
+  // Kill switch for provider-revocation verification during session refresh.
+  enableProviderRevocationCheck: envVars.ENABLE_PROVIDER_REVOCATION_CHECK as boolean,
   apps: {
     internalHostMap: parseInternalAppHostMap(envVars.INTERNAL_APP_HOST_MAP as string),
+  },
+  ssrf: {
+    // Host suffixes refused for outbound external fetches.
+    blockedHostSuffixes: (envVars.SSRF_BLOCKED_HOST_SUFFIXES as string)
+      .split(',')
+      .map((s) => s.trim().toLowerCase())
+      .filter(Boolean),
+  },
+  linkPreview: {
+    // Optional forward-proxy for the link-preview fetch.
+    egressProxyUrl: (envVars.LINK_PREVIEW_EGRESS_PROXY_URL as string).trim(),
   },
   askAI: {
     version: envVars.ASK_AI_VERSION as 'v1' | 'v2',

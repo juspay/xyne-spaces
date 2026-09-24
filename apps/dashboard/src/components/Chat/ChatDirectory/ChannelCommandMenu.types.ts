@@ -157,6 +157,10 @@ export type VespaDocTypes = (typeof VespaDocTypes)[keyof typeof VespaDocTypes];
 export const ChipType = {
   USER: 'user',
   CHANNEL: 'channel',
+  // A user-group entity ("Frontend Team"). Like USER/CHANNEL it is a real chip type the
+  // `mentions:` typeahead can land: the backend matches messages that mention the group
+  // via the Vespa `groupMentions` field. `id` holds the userGroupId, `name` the label.
+  USER_GROUP: 'userGroup',
   // Value filter (not an entity): the exclusive priority chip. `id` holds the
   // canonical TicketPriority value (e.g. 'HIGH'), `name` the display label.
   PRIORITY: 'priority',
@@ -205,6 +209,9 @@ export interface ChipData {
   email?: string;
   photoLink?: string;
 }
+
+/** A selected mention/filter chip as the search hook holds it (a lean `ChipData`). */
+export type SelectedMention = { id: string; type: ChipType; prefix?: string; name?: string };
 
 export type { ContextItem };
 
@@ -272,6 +279,19 @@ export interface ChannelCommandMenuProps {
   hideTabs?: boolean;
   /** When true, enables desk ticket merge UI (only set when opened via the support screen search button) */
   deskMergeEnabled?: boolean;
+  /**
+   * How a chosen row is marked — a solid brand tick (`filled`, the default) or a
+   * bordered one (`outline`). Pick `outline` where the mark states a fact about
+   * a row you cannot act on, rather than offering a choice.
+   */
+  selectionVariant?: 'filled' | 'outline';
+  /**
+   * Collapse the tab strip to icons, showing only the active tab's label.
+   *
+   * For hosts that give the strip a column's width rather than a dialog's. Off
+   * by default: every existing caller keeps the full-label row it had.
+   */
+  compactTabs?: boolean;
 }
 
 /* ------------------------------------------------------------------------- *
@@ -298,7 +318,8 @@ export type FilterKind =
   | 'entity'
   | 'date'
   | 'mention' // bare @user
-  | 'channelMention'; // bare #channel
+  | 'channelMention' // bare #channel
+  | 'userGroupMention'; // picked @user-group
 
 /**
  * Which category tabs each filter's RESULTS fall into — NOT the category of the
@@ -347,6 +368,7 @@ export const FILTER_RELEVANCE: Record<FilterKind, TabType[]> = {
   // DM/channel instead. A prefixed @/# (from:/in:) goes by its prefix — see filterChipToKind.
   mention: [TabType.MESSAGES], // @user → `mentions` filter (else DM quick-switch)
   channelMention: [TabType.MESSAGES], // #channel → `channelMentions` filter (else channel quick-switch)
+  userGroupMention: [TabType.MESSAGES], // @user-group → `groupMentions` filter (messages-only)
 };
 
 /** Tabs with no Vespa app: ALL (no scoping) + client-side USERS/CHANNELS (see LOCAL_TYPES). */
@@ -423,7 +445,9 @@ export function filterChipToKind(chip: FilterChip): FilterKind | null {
   // than cast — an unrecognised prefix falls through to the bare-chip checks as before.
   // `mentions:` is the one prefix two chip types share, so it's routed by type first.
   if (chip.prefix === 'mentions:') {
-    return chip.type === ChipType.CHANNEL ? 'channelMention' : 'mention';
+    if (chip.type === ChipType.CHANNEL) return 'channelMention';
+    if (chip.type === ChipType.USER_GROUP) return 'userGroupMention';
+    return 'mention';
   }
   if (chip.prefix && isChipPrefix(chip.prefix)) return PREFIX_TO_KIND[chip.prefix];
   // Priority chip carries type 'priority' even without a prefix.
@@ -431,6 +455,7 @@ export function filterChipToKind(chip: FilterChip): FilterKind | null {
   // Bare @user / #channel chips (no prefix) scope to message content.
   if (chip.type === ChipType.USER) return 'mention';
   if (chip.type === ChipType.CHANNEL) return 'channelMention';
+  if (chip.type === ChipType.USER_GROUP) return 'userGroupMention';
   return null;
 }
 

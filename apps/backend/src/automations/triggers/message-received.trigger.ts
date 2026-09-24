@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { MessageType } from '@xyne/shared';
-import { BaseTrigger } from './base-trigger';
+import { BaseTrigger, type FilterMatchResult } from './base-trigger';
 import { TriggerCategory } from '../types/categories';
 import { eventRouter } from '../engine/event-router';
 import { repositories } from '@/database/repositories';
@@ -22,9 +22,13 @@ const MessageReceivedConfigSchema = z.object({
     .optional()
     .describe('Only fire when the sender is one of these users. Empty matches anyone.'),
   contentContains: z
-    .string()
-    .optional()
-    .describe('Case-insensitive substring of the message body. Empty matches any message.'),
+    .preprocess(
+      value => (typeof value === 'string' ? (value ? [value] : []) : value),
+      z.array(z.string()).optional(),
+    )
+    .describe(
+      'Fire when the message body contains ANY of these substrings. Press Enter after each one. Case-insensitive. Empty matches any message.',
+    ),
   messageTypes: z
     .array(z.nativeEnum(MessageType))
     .default([MessageType.USER])
@@ -39,6 +43,12 @@ const MessageReceivedConfigSchema = z.object({
     .array(z.string())
     .optional()
     .describe('Only fire when at least one of these user groups is mentioned. Empty matches any group mention; omit entirely to not filter on group mentions.'),
+  fireOnEdit: z
+    .boolean()
+    .default(false)
+    .describe(
+      'Also fire when an edit turns a non-matching message into a match. Only that transition fires. Needs a Content Contains value.',
+    ),
 });
 
 export const MessageReceivedOutputSchema = z.object({
@@ -62,6 +72,8 @@ export const MessageReceivedOutputSchema = z.object({
   conversationId: z.string(),
   msgType: z.nativeEnum(MessageType),
   deleted: z.boolean(),
+  isEdit: z.boolean().optional(),
+  previousContentMatched: z.boolean().optional(),
   mentionedUsers: z
     .array(
       z.object({
@@ -106,26 +118,66 @@ export class MessageReceivedTrigger extends BaseTrigger<typeof MessageReceivedCo
     return hydrateMessageReceivedPayload(payload as unknown as MessageReceivedEventPayload);
   }
 
+  /**
+   * Drop the pre-edit body and keep only whether it already satisfied this
+   * automation's content filter. The body itself is never persisted or logged.
+   */
+  override projectPayload(
+    config: Record<string, unknown>,
+    payload: Record<string, unknown>,
+  ): Record<string, unknown> | null {
+    const { _transient, ...rest } = payload as {
+      isEdit?: boolean;
+      _transient?: { previousContent?: string };
+    };
+    // Edits only matter to automations that opted in. Dropping here — rather than
+    // in matchFilters — keeps an in-place rewrite from spawning one SKIPPED
+    // execution, state row and queue job per automation in the workspace.
+    const cfg = this.configSchema.parse(config);
+    if (rest.isEdit && !cfg.fireOnEdit) return null;
+
+    const previousContent = _transient?.previousContent;
+    if (previousContent === undefined) return rest;
+    const needles = contentNeedles(cfg.contentContains);
+    // Mirror matchFilters: test decoded + raw so an encoded-card needle can't read as a non-match.
+    const prevTexts = [previousContent, toReadableMessageContent(previousContent)];
+    return {
+      ...rest,
+      previousContentMatched: needles.some(needle =>
+        prevTexts.some(text => !!text && text.toLowerCase().includes(needle.toLowerCase())),
+      ),
+    };
+  }
+
   override matchFilters(
     filter: Record<string, unknown>,
     payload: Record<string, unknown>,
   ): boolean {
+    return this.matchFiltersDetailed(filter, payload).matched;
+  }
+
+  override matchFiltersDetailed(
+    filter: Record<string, unknown>,
+    payload: Record<string, unknown>,
+  ): FilterMatchResult {
     const cfg = filter as MessageReceivedConfig;
     const p = payload as MessageReceivedPayload;
 
     // The message was deleted before we got to run — nothing to act on.
-    if (p.deleted) return false;
+    if (p.deleted) return { matched: false, failed: 'deleted' };
+    // Edits reach every candidate; only automations that opted in act on them.
+    if (p.isEdit && !cfg.fireOnEdit) return { matched: false, failed: 'fireOnEdit' };
     if (cfg.messageTypes && cfg.messageTypes.length > 0) {
-      if (!cfg.messageTypes.includes(p.msgType)) return false;
+      if (!cfg.messageTypes.includes(p.msgType)) return { matched: false, failed: 'messageTypes' };
     }
 
     const channelIds = (cfg.channelIds ?? []).map(id => id?.trim()).filter((id): id is string => !!id);
     const fromUserIds = (cfg.fromUserIds ?? []).map(id => id?.trim()).filter((id): id is string => !!id);
     if (channelIds.length > 0) {
-      if (!channelIds.includes(p.channelId)) return false;
+      if (!channelIds.includes(p.channelId)) return { matched: false, failed: 'channelIds' };
     }
     if (fromUserIds.length > 0) {
-      if (!fromUserIds.includes(p.authorId)) return false;
+      if (!fromUserIds.includes(p.authorId)) return { matched: false, failed: 'fromUserIds' };
     }
     // Match filters: contentContains, user mentions, group mentions.
     // These combine with OR logic when multiple are configured:
@@ -135,20 +187,27 @@ export class MessageReceivedTrigger extends BaseTrigger<typeof MessageReceivedCo
     //   - undefined  -> the filter was not configured, so it imposes no condition
     //   - []         -> explicitly "any mention"; the message must contain at least one mention
     //   - [ids...]   -> the message must mention at least one of the listed users/groups
-    const contentFilterConfigured = cfg.contentContains && cfg.contentContains.length > 0;
+    const needles = contentNeedles(cfg.contentContains);
+    const contentFilterConfigured = needles.length > 0;
     const userMentionFilterConfigured = cfg.mentionedUserIds !== undefined;
     const groupMentionFilterConfigured = cfg.mentionedGroupIds !== undefined;
 
     if (contentFilterConfigured || userMentionFilterConfigured || groupMentionFilterConfigured) {
-      const matchResults: boolean[] = [];
+      // Name each configured filter alongside its verdict so a rejection can say
+      // which ones were tried without re-deriving the config at the log site.
+      const matchResults: Array<{ name: string; passed: boolean }> = [];
 
       if (contentFilterConfigured) {
         // Decoded text and the stored blob: a filter written against a FlowJSON
         // card title or button label must keep firing after the decode.
-        const needle = cfg.contentContains!.toLowerCase();
-        const contentPasses = [p.message.content, p.message.rawContent]
-          .some(text => !!text && text.toLowerCase().includes(needle));
-        matchResults.push(contentPasses);
+        const texts = [p.message.content, p.message.rawContent];
+        const nowMatches = needles.some(needle =>
+          texts.some(text => !!text && text.toLowerCase().includes(needle.toLowerCase())),
+        );
+        // On an edit only the transition counts — an edit that leaves an
+        // already-matching message still matching must not re-run the automation.
+        const contentPasses = p.isEdit ? nowMatches && !p.previousContentMatched : nowMatches;
+        matchResults.push({ name: 'contentContains', passed: contentPasses });
       }
 
       if (userMentionFilterConfigured) {
@@ -164,7 +223,7 @@ export class MessageReceivedTrigger extends BaseTrigger<typeof MessageReceivedCo
           const messageMentionedIds = p.mentionedUserIds ?? [];
           userMentionPasses = explicitMentionedUserIds.some(id => messageMentionedIds.includes(id));
         }
-        matchResults.push(userMentionPasses);
+        matchResults.push({ name: 'mentionedUserIds', passed: userMentionPasses });
       }
 
       if (groupMentionFilterConfigured) {
@@ -180,15 +239,26 @@ export class MessageReceivedTrigger extends BaseTrigger<typeof MessageReceivedCo
           const messageMentionedGroupIds = p.mentionedGroupIds ?? [];
           groupMentionPasses = explicitMentionedGroupIds.some(id => messageMentionedGroupIds.includes(id));
         }
-        matchResults.push(groupMentionPasses);
+        matchResults.push({ name: 'mentionedGroupIds', passed: groupMentionPasses });
       }
 
       // At least one configured match filter must pass (OR logic)
-      if (!matchResults.some(Boolean)) return false;
+      if (!matchResults.some(r => r.passed)) {
+        return { matched: false, failed: matchResults.map(r => r.name).join('|') };
+      }
     }
 
-    return true;
+    return { matched: true };
   }
+}
+
+/** Configured needles, tolerating the legacy single-string shape. */
+function contentNeedles(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value.filter((v): v is string => typeof v === 'string' && v.trim().length > 0);
+  }
+  if (typeof value === 'string' && value.trim().length > 0) return [value];
+  return [];
 }
 
 export const messageReceivedTrigger = new MessageReceivedTrigger();
@@ -199,6 +269,8 @@ interface ReceivedMessage {
   channelId: string;
   msgType?: MessageType | undefined;
   userId: string;
+  isEdit?: boolean;
+  previousContent?: string;
 }
 
 /**
@@ -224,6 +296,10 @@ export async function emitMessageReceived(message: ReceivedMessage): Promise<voi
           channelId: message.channelId,
           authorId: message.userId,
           msgType: message.msgType ?? MessageType.USER,
+          ...(message.isEdit ? { isEdit: true } : {}),
+          ...(message.previousContent !== undefined
+            ? { _transient: { previousContent: message.previousContent } }
+            : {}),
         },
       },
       channel.workspaceId,

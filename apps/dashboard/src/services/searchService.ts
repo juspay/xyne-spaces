@@ -179,6 +179,10 @@ export class SearchService {
       params['channelMentions'] = filters.channelMentions;
     }
 
+    if (filters.groupMentions) {
+      params['groupMentions'] = filters.groupMentions;
+    }
+
     // Highlight-only display names; JSON-encoded since names can contain commas.
     if (filters.mentionHighlights && filters.mentionHighlights.length > 0) {
       params['mentionHighlights'] = JSON.stringify(filters.mentionHighlights);

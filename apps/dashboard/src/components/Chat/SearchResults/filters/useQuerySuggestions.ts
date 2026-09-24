@@ -11,6 +11,7 @@
 import { useMemo } from 'react';
 import { getUserDisplayName } from '../../../../utils/userDisplayName';
 import { useUserSearch, useUsers } from '../../../../hooks/useUsers';
+import { useUserGroupSearch } from '@xyne/shared/hooks';
 import { useAllVisibleChannels } from '../../../../hooks/useChannels';
 import { useAuthContextValues } from '../../../../hooks/useAuth';
 import { useCachedQuery } from '../../../../hooks/useCachedQuery';
@@ -31,6 +32,7 @@ export interface QuerySuggestion {
   icon:
     | { kind: 'user'; userId: string }
     | { kind: 'channel'; channelId: string }
+    | { kind: 'userGroup' }
     | { kind: 'value' };
   /** The filter change this suggestion makes, given the filters it's applied to. */
   apply: (filters: SearchResultsFilters) => Partial<SearchResultsFilters>;
@@ -89,6 +91,7 @@ export function useQuerySuggestions(
   // simply not read. They're all cached/shared, so this costs nothing extra.
   const users =
     useUserSearch(kind === 'people' || kind === 'mentions' ? typedQuery : '', MAX) ?? [];
+  const userGroups = useUserGroupSearch(kind === 'mentions' ? typedQuery : '', MAX) ?? [];
   const channels = useAllVisibleChannels();
   const [boards] = useCachedQuery(queries.getAllBoardsList());
   // A DM's `name` column is its participant ids, comma-joined — shown raw it's a cuid.
@@ -161,6 +164,17 @@ export function useQuerySuggestions(
                     ? {}
                     : { mentionChannelIds: [...currentFilters.mentionChannelIds, channel.id] },
               })),
+            ...userGroups.slice(0, MAX / 2).map(group => ({
+              id: group.id,
+              // The `@`-handle (alias), matching the token this suggestion commits — else the
+              // dropdown reads `@Rock Team Engineering` but the chip lands `@rock-team`.
+              label: `@${group.alias ?? group.name}`,
+              icon: { kind: 'userGroup' as const },
+              apply: (currentFilters: SearchResultsFilters) =>
+                currentFilters.mentionUserGroupIds.includes(group.id)
+                  ? {}
+                  : { mentionUserGroupIds: [...currentFilters.mentionUserGroupIds, group.id] },
+            })),
           ],
         };
       case 'boards': {
@@ -263,5 +277,16 @@ export function useQuerySuggestions(
       default:
         return null;
     }
-  }, [match, entry, typedQuery, typedSyntax, users, channels, boards, allUsers, currentUserId]);
+  }, [
+    match,
+    entry,
+    typedQuery,
+    typedSyntax,
+    users,
+    userGroups,
+    channels,
+    boards,
+    allUsers,
+    currentUserId,
+  ]);
 }

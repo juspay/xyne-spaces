@@ -144,6 +144,7 @@ export const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(
       canvasParticipants: preloadedParticipants,
       canvasCreatedBy,
       currentUserRole,
+      header,
     },
     ref,
   ) => {
@@ -611,6 +612,7 @@ export const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(
         <div className='relative flex min-h-0 flex-1 overflow-hidden'>
           <div className='thin-scrollbar relative min-h-0 flex-1 overflow-auto pt-8'>
             <CanvasWidthHandles surfaceRef={containerRef} />
+            {header}
             <CanvasMentionContext.Provider value={mentionContextValue}>
               <BlockNoteView
                 editor={asBlockNoteEditorForView(editor)}

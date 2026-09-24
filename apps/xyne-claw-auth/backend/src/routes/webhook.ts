@@ -7,6 +7,8 @@
 
 import { Router, type Request, type Response } from "express";
 import { errMsg } from "../lib/errors.js";
+import { ingestDeliveredArtifact } from "../lib/conversation-artifact-signals.js";
+import { deliveredDesignCommand, recordDeliveredArtifacts } from "../lib/delivered-artifacts.js";
 import crypto from "node:crypto";
 import { CONFIG } from "../config.js";
 import {
@@ -20,6 +22,7 @@ import {
   activeGoalRepository,
   experimentRepository,
   agentRequestRepository,
+  userProviderCredentialsRepository,
 } from "../repositories/index.js";
 import { buildAvailableToolsCatalog } from "./tools.js";
 import { isVisibleToUser, parseConnectorMeta } from "./servers.js";
@@ -30,6 +33,13 @@ import {
   resolveAgentCapabilities,
   toolIdsFromConfig,
   unknownToolsNote,
+  draftNote,
+  expandMcpRequests,
+  listCallableAgentOptions,
+  toConfigTools,
+  unknownMcpsNote,
+  unknownProvidersNote,
+  resolveDraftExtras,
   type DraftAgentSpec,
 } from "../lib/agent-card.js";
 import { getDigitalTwinAgent, type ResolvedAgent } from "../lib/digital-twin-agent.js";
@@ -38,6 +48,7 @@ import { resolveUserSpacesAuth } from "../surfaces/spaces/user-auth.js";
 import { IMMEDIATE_TASK_COMMAND_RE, RECORD_SKILL_COMMAND_RE, isVideoAttachment, videoFileExtension, SDLC_AGENT_SLUG } from "xyne-claw-shared";
 import { resolveAgentProviderConfigs } from "../lib/agent-provider-config.js";
 import { resolveProvidersForDispatch } from "../lib/provider-resolution.js";
+import { dispatchLocalHarnessRun, pinnedModelForProvider, resolveLocalHarnessTarget } from "../lib/local-harness.js";
 import { expandSpacesMentions, resolveUnboundMentions } from "../lib/mention-transform.js";
 import { type RunDispatchResult } from "../lib/dispatch-run.js";
 import { startRun } from "../lib/start-run.js";
@@ -104,6 +115,7 @@ import { renderMarkdownToHtml } from "../lib/result-html.js";
 import { sendStoredExternalResultCallback, isInternalCallbackOrigin, isAllowedExternalCallbackUrl, type ExternalResultCallbackConfig } from "../surfaces/external-api/delivery.js";
 import { encryptSurfaceSecret } from "../lib/surface-resolver.js";
 import { deliverSlackResult, type SlackDeliveryTarget } from "../surfaces/slack/delivery.js";
+import { deliverChannelResult } from "../surfaces/messaging/delivery.js";
 import { designShareUrl, upsertDesignShare } from "./design-shares.js";
 import {
   getActivePlanCard,
@@ -134,6 +146,7 @@ import {
   buildAgentSummaryFlow,
   buildMcpSuggestFlow,
   MAX_AGENT_LIST_CARDS,
+  buildProviderSuggestFlow,
   buildCodeFlow,
   buildDiffFlow,
   buildChartFlow,
@@ -142,7 +155,6 @@ import {
   prScreenId,
   isTwinDelivery,
   isUiWidget,
-  SDLC_REQUIRED_TOOLS,
 } from "xyne-claw-shared";
 import { scheduleProviderRetry } from "../queue/provider-retry-worker.js";
 import type { TwinDelivery, UiWidget, PrProvider, PrStatus } from "xyne-claw-shared";
@@ -151,6 +163,16 @@ import { isSupportedInboundAttachment } from "xyne-claw-shared";
 import type { Todo } from "xyne-claw-shared";
 import { tools as xyneSpacesTools } from "../mcp/servers/xyne-spaces-tools.js";
 import { connectorTypesFromText, connectorTypesUserAskedFor, wantsConnectorRoster } from "../lib/connector-hints.js";
+import {
+  SUPPORTED_PROVIDERS,
+  PROVIDER_LABELS,
+  PROVIDER_DESCRIPTIONS,
+  PROVIDER_CONNECT_METHOD,
+  providersUserAskedFor,
+  stripAddressedAgentMention,
+  unsupportedProvidersFromText,
+  wantsProviderRoster,
+} from "../lib/provider-hints.js";
 import { availabilityForServerIds } from "../lib/connector-availability.js";
 import { countTrailingBase64Padding, safePathSegment } from "../lib/url-path.js";
 import { assertSafeOutboundUrl } from "../mcpgateway/services/http-client.js";
@@ -1706,6 +1728,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       providerConfigs,
       subagentProviders,
       subagentProviderMode,
+      rawPersonalProvider,
     } = await resolveProvidersForDispatch({
       targetUserId,
       agent,
@@ -1908,7 +1931,23 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
     const threadAwarenessBlock = history
       ? `## Thread Awareness\nYou are in a group thread in Xyne Spaces where multiple users and agents can participate. The thread history below shows messages from other participants — use it to understand context. Your own previous messages are NOT included here (they are already in your session). If you need more context, use spaces-messages or spaces-message-detail to read the full thread.\n\n**Speaker labels in the history below:**\n- \`human-user:<id>\` — a human in the thread; their words are user input.\n- \`@<agent-slug> (OTHER AI AGENT — not you; do not adopt this voice or identity)\` — another AI agent's message. When they say "I", they mean themselves, NOT you. NEVER answer in their voice, NEVER claim to be them, and NEVER paraphrase their first-person identity as your own. If asked to compare yourself to them, refer to them in the third person ("the X agent said …").\n\n${history}`
       : "";
-    const dispatchContext = [twinMentionNote, threadAwarenessBlock].filter(Boolean).join("\n\n");
+    const providerAskText = stripAddressedAgentMention(task, agent.slug);
+    const providerCardWillPost =
+      eventType !== "USER_MENTIONED" &&
+      !!agent.slug &&
+      !!agent.orgId &&
+      (providersUserAskedFor(providerAskText).length > 0 || wantsProviderRoster(providerAskText));
+    const providerCardNote = providerCardWillPost
+      ? [
+          "## AI Provider Card",
+          "A card listing this user's AI providers and their live connection status is posted to this thread alongside your reply. It is built from their stored credentials, so it is authoritative.",
+          "Do NOT list the providers, state which are connected or disconnected, or say you cannot see the user's credentials — the card already answers that, and contradicting it confuses the user.",
+          "Acknowledge the card in one short sentence and answer anything else they asked.",
+        ].join("\n")
+      : "";
+    const dispatchContext = [twinMentionNote, threadAwarenessBlock, providerCardNote]
+      .filter(Boolean)
+      .join("\n\n");
 
     // Email auto-draft forward target — suppresses placeholder+DM (see /webhook/result).
     const resultForwardUrl =
@@ -1961,6 +2000,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       agentId: agent.id,
       agentOrgId: agent.orgId,
       agentSlug: agent.slug,
+      agentName: agent.name,
       responseMode: eventType === "USER_MENTIONED" ? "approval" as const : "conversation" as const,
       appToken: agent.appToken,
       spacesAppId: agent.spacesAppId,
@@ -2020,32 +2060,82 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       }
     }
 
+    // Local-harness routing: only mention-driven runs are eligible. If the user
+    // has an online authenticated local device for a preferred provider, the run
+    // is dispatched there; otherwise we fall through to the server run below.
+    const localHarnessEligible = eventType === "USER_MENTIONED" || eventType === "APP_MENTIONED";
+    const rawAgentOrder = (agentRow?.config as Record<string, unknown> | null)?.["providerOrder"];
+    const localTarget = localHarnessEligible
+      ? await resolveLocalHarnessTarget({
+          userId: targetUserId,
+          orgId: agent.orgId,
+          providerOrder: Array.isArray(rawAgentOrder)
+            ? rawAgentOrder.filter((p): p is string => typeof p === "string")
+            : [],
+          personalProvider: rawPersonalProvider,
+        }).catch((err: unknown) => {
+          log.warn("Local-harness resolution failed — using server run", {
+            error: err instanceof Error ? err.message : String(err),
+          });
+          return undefined;
+        })
+      : undefined;
+
     let body: RunDispatchResult;
-    try {
-      const started = await startRun(
-        {
-          body: dispatchPayload as unknown as Record<string, unknown>,
-          isInternalRun: true,
-          isInternalS2SCaller: true,
-          wantsSse: false,
-        },
-        {},
-      );
-      body = started.ok
-        ? {
-            success: true,
-            sessionId: started.sessionId,
-            status: 200,
-            ...(started.queued ? { queued: true } : {}),
-            ...(typeof started.queuePosition === "number" ? { queuePosition: started.queuePosition } : {}),
-          }
-        : { success: false, error: started.error, status: started.status };
-    } catch (err) {
-      if (globalTwinSlotToken !== null) void releaseTwinSlot(globalTwinSlotToken);
-      if (twinConvSlotToken !== null && payload.conversationId) {
-        await drainNextQueued(payload.conversationId, runAgentSlug, twinConvSlotToken, twinUserScope).catch(() => {});
+    if (localTarget) {
+      let dispatched: Awaited<ReturnType<typeof dispatchLocalHarnessRun>>;
+      try {
+        dispatched = await dispatchLocalHarnessRun({
+          target: localTarget,
+          userId: targetUserId,
+          orgId: agent.orgId,
+          conversationId: payload.conversationId,
+          agentSlug: runAgentSlug,
+          agentName: agentRow?.name ?? agent.slug,
+          systemPrompt: agentRow?.systemPrompt ?? "",
+          model: pinnedModelForProvider(agentRow?.config, localTarget.provider),
+          task,
+          context: dispatchContext || null,
+          progressUrl: `${CONFIG.internalUrl}/claw/api/v1/webhook/progress`,
+          callbackUrl: `${CONFIG.internalUrl}/claw/api/v1/webhook/result`,
+          serverFallbackBody: dispatchPayload as unknown as Record<string, unknown>,
+          continuation: { agentSlug: runAgentSlug },
+        });
+      } catch (err) {
+        if (globalTwinSlotToken !== null) void releaseTwinSlot(globalTwinSlotToken);
+        if (twinConvSlotToken !== null && payload.conversationId) {
+          await drainNextQueued(payload.conversationId, runAgentSlug, twinConvSlotToken, twinUserScope).catch(() => {});
+        }
+        throw err;
       }
-      throw err;
+      body = { success: true, sessionId: dispatched.sessionId, status: 200 };
+    } else {
+      try {
+        const started = await startRun(
+          {
+            body: dispatchPayload as unknown as Record<string, unknown>,
+            isInternalRun: true,
+            isInternalS2SCaller: true,
+            wantsSse: false,
+          },
+          {},
+        );
+        body = started.ok
+          ? {
+              success: true,
+              sessionId: started.sessionId,
+              status: 200,
+              ...(started.queued ? { queued: true } : {}),
+              ...(typeof started.queuePosition === "number" ? { queuePosition: started.queuePosition } : {}),
+            }
+          : { success: false, error: started.error, status: started.status };
+      } catch (err) {
+        if (globalTwinSlotToken !== null) void releaseTwinSlot(globalTwinSlotToken);
+        if (twinConvSlotToken !== null && payload.conversationId) {
+          await drainNextQueued(payload.conversationId, runAgentSlug, twinConvSlotToken, twinUserScope).catch(() => {});
+        }
+        throw err;
+      }
     }
 
     if (globalTwinSlotToken !== null) {
@@ -2076,6 +2166,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
               conversationId: payload.conversationId,
               channelId: payload.channelId,
               agentSlug: agent.slug,
+              agentName: agent.name,
               userId: agent.spacesAppUserId,
               toolLabel: initialProgressLabel,
               status: "working",
@@ -2505,6 +2596,7 @@ async function redispatchQueuedMessage(msg: QueuedMessage): Promise<void> {
       conversationId: msg.conversationId,
       channelId: msg.channelId,
       agentSlug: msg.agentSlug,
+      agentName: queuedContext.agentName,
       spacesAppUserId: agentRow.spacesAppUserId ?? "",
       appToken,
       toolLabel: "Picked up your new message — continuing from the summary above…",
@@ -2619,15 +2711,6 @@ export async function handleAutomationWebhook(
     workspaceId?: string | null;
     allowWriteInReadOnlyJob?: boolean;
     executionProfile?: "sdlc";
-    sdlcOperation?: "baseline" | "work" | "wiki";
-    sdlcWikiRole?:
-      | "BOOTSTRAP_SURVEY"
-      | "BOOTSTRAP_PAGE"
-      | "BOOTSTRAP_EDITOR"
-      | "BOOTSTRAP"
-      | "GENERATOR"
-      | "ARCHITECTURE_VALIDATOR"
-      | "CORRECTOR";
     sdlcContext?: Record<string, unknown>;
   };
 
@@ -2846,6 +2929,7 @@ export async function handleAutomationWebhook(
       agentId: agent.id,
       agentOrgId: agent.orgId,
       agentSlug: agent.slug,
+      agentName: agent.name,
       responseMode: "conversation",
       appToken,
       spacesAppId: agent.spacesAppId!,
@@ -2895,99 +2979,6 @@ export async function handleAutomationWebhook(
     s2sKeyMatches(req.headers["x-s2s-key"]);
   const baseAgentConfig = (agent.config as Record<string, unknown> | null) ?? {};
   const baseTools = (baseAgentConfig["tools"] as Record<string, unknown> | undefined) ?? {};
-  const wikiValidator =
-    payload.sdlcWikiRole === "BOOTSTRAP_EDITOR" ||
-    payload.sdlcWikiRole === "ARCHITECTURE_VALIDATOR";
-  const wikiSurvey = payload.sdlcWikiRole === "BOOTSTRAP_SURVEY";
-  const wikiPageWriter = payload.sdlcWikiRole === "BOOTSTRAP_PAGE";
-  const sdlcOutputFormat =
-    payload.sdlcOperation === "wiki" && wikiSurvey
-      ? {
-          type: "json",
-          schema: {
-            type: "object",
-            properties: {
-              repositorySummary: { type: "string" },
-              pages: {
-                type: "array",
-                items: {
-                  type: "object",
-                  properties: {
-                    path: { type: "string" },
-                    purpose: { type: "string" },
-                    concepts: { type: "array", items: { type: "string" } },
-                    priority: { type: "string", enum: ["HIGH", "MEDIUM", "LOW"] },
-                    archetype: {
-                      type: "string",
-                      enum: ["overview", "subsystem", "flow", "data-model", "interface", "operations", "decision"],
-                    },
-                    sourceAreas: { type: "array", items: { type: "string" } },
-                    relatedPages: { type: "array", items: { type: "string" } },
-                    tableCandidates: { type: "array", items: { type: "string" } },
-                    diagramCandidates: { type: "array", items: { type: "string" } },
-                  },
-                  required: ["path", "purpose", "concepts", "priority", "archetype", "sourceAreas", "relatedPages", "tableCandidates", "diagramCandidates"],
-                },
-              },
-            },
-            required: ["repositorySummary", "pages"],
-          },
-          requireToolsBeforeSubmit: [...SDLC_REQUIRED_TOOLS.wikiSurvey],
-        }
-      : payload.sdlcOperation === "wiki" && wikiValidator
-        ? {
-            type: "json",
-            schema: {
-              type: "object",
-              properties: {
-                complete: { type: "boolean" },
-                missingTopics: { type: "array", items: { type: "string" } },
-                issues: { type: "array", items: { type: "string" } },
-                suggestions: { type: "array", items: { type: "string" } },
-              },
-              required: ["complete", "missingTopics", "issues", "suggestions"],
-            },
-          }
-        : payload.sdlcOperation === "wiki"
-          ? {
-              type: "json",
-              schema: {
-                type: "object",
-                properties: { completed: { type: "boolean" } },
-                required: ["completed"],
-              },
-          requireToolsBeforeSubmit: wikiPageWriter
-            ? [...SDLC_REQUIRED_TOOLS.wikiPage]
-            : [...SDLC_REQUIRED_TOOLS.wikiFinalize],
-            }
-    : payload.sdlcOperation === "work"
-      ? {
-          type: "json",
-          schema: {
-            type: "object",
-            properties: {
-              summary: { type: "string" },
-              branchName: { type: "string" },
-              commitHash: { type: "string" },
-              pullRequestUrl: { type: "string" },
-            },
-            required: ["summary", "branchName", "commitHash", "pullRequestUrl"],
-          },
-          requireToolsBeforeSubmit: [...SDLC_REQUIRED_TOOLS.work],
-        }
-      : {
-          type: "json",
-          schema: {
-            type: "object",
-            properties: {
-              created: { type: "boolean" },
-              canvasId: { type: "string" },
-              artifactKind: { type: "string" },
-            },
-            required: ["created", "canvasId", "artifactKind"],
-          },
-          requireToolsBeforeSubmit: [...SDLC_REQUIRED_TOOLS.baseline],
-        };
   const forwardedAgentConfig: Record<string, unknown> | undefined =
     agent.config || payload.allowWriteInReadOnlyJob || sdlcProfile
       ? {
@@ -3005,7 +2996,6 @@ export async function handleAutomationWebhook(
                   ...((baseAgentConfig["toolPermissions"] as Record<string, unknown> | undefined) ?? {}),
                   ...SDLC_AGENT_TOOL_PROFILE.toolPermissions,
                 },
-                outputFormat: sdlcOutputFormat,
                 sdlcContext: payload.sdlcContext,
               }
             : {}),
@@ -3180,6 +3170,7 @@ export async function handleAutomationWebhook(
       conversationId: payload.conversationId ?? "",
       task: task!,
       agentSlug: agent.slug,
+      agentName: agent.name,
       responseMode: "conversation",
       appToken: decryptStoredField(agent.spacesAppToken!),
       spacesAppId: agent.spacesAppId!,
@@ -3349,38 +3340,42 @@ async function persistCallbackAttachments(
  * revocable from Studio, opaque-origin serving. Best-effort — a share failure
  * must never disturb the delivered result.
  */
-async function publishThreadArtifactShare(
+async function ingestDeliveredFiles(
   ctx: SessionContext,
   runOwnerId: string,
+  chatMessageId: string,
   created: Array<{ id: string; originalFilename: string; mimeType: string }>,
+): Promise<{ designShareUrl: string | null }> {
+  if (!ctx.conversationId || !runOwnerId || created.length === 0) return { designShareUrl: null };
+  return recordDeliveredArtifacts({
+    conversationId: ctx.conversationId,
+    userId: runOwnerId,
+    orgId: ctx.agentOrgId ?? null,
+    messageId: chatMessageId ?? null,
+    task: ctx.task ?? null,
+    attachments: created,
+    allowDesignShare: ctx.responseMode === "conversation",
+  });
+}
+
+async function publishThreadArtifactShare(
+  ctx: SessionContext,
+  designShareLink: string | null,
 ): Promise<void> {
   try {
-    const command = ctx.task?.trimStart().toLowerCase().match(/^\/(design|dashboard)(?:\s|$)/)?.[1];
-    if (!command) return;
+    const command = deliveredDesignCommand(ctx.task);
+    if (!command || !designShareLink) return;
     if (ctx.responseMode !== "conversation" || !ctx.conversationId || !ctx.agentOrgId) return;
-    const html = [...created].reverse().find((a) =>
-      a.mimeType.toLowerCase().includes("html") || a.originalFilename.toLowerCase().endsWith(".html"),
-    );
-    if (!html) return;
-    const share = await upsertDesignShare({
-      ownerUserId: runOwnerId,
-      orgId: ctx.agentOrgId,
-      conversationId: ctx.conversationId,
-      attachmentId: html.id,
-      title: html.originalFilename.replace(/\.html?$/i, ""),
-      expiresAt: null,
-    });
-    const link = designShareUrl(share.sharePath);
     await postAgentMessage(
       { spacesAppUserId: ctx.spacesAppUserId, appToken: ctx.appToken },
       {
         channelId: ctx.channelId,
         conversationId: ctx.conversationId,
-        markdownText: `🔗 **Live ${command}:** ${link}\nOpens the rendered snapshot in the browser — the same link updates with future revisions in this thread.`,
+        markdownText: `🔗 **Live ${command}:** ${designShareLink}\nOpens the rendered snapshot in the browser — the same link updates with future revisions in this thread.`,
         metadata: { contentFormat: "markdown" },
       }
     );
-    clog.info(`[webhook/result] posted design share link shareId=${share.id} conv=${ctx.conversationId}`);
+    clog.info(`[webhook/result] posted design share link conv=${ctx.conversationId}`);
   } catch (err) {
     clog.warn(`[webhook/result] design share publish failed (non-fatal): ${errMsg(err)}`);
   }
@@ -3574,6 +3569,15 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     pendingGoalSuggestion?: { condition: string; rationale: string };
     provider?: string;
     model?: string;
+    localHarness?: {
+      provider: string;
+      harnessName: string;
+      label: string;
+      ownerName: string;
+      deviceName?: string;
+    };
+    localHarnessUnreachable?: boolean;
+    localHarnessProvider?: string;
     fastMode?: boolean;
     // Conversation identity claw ships on every callback (see
     // xyne-claw/src/routes/run.ts:1040-1046). Used by the conv-keyed
@@ -3587,7 +3591,10 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     // below tell the user it was a provider capacity issue — with the safe
     // underlying detail (e.g. "HTTP 429 quota_exceeded") — instead of the
     // generic "I wasn't able to produce a response". See xyne-claw run.ts.
-    emptyReason?: "provider_capacity";
+    // "no_output" is the other shape: the run reached the success path having
+    // produced nothing at all — usually a turn that ended mid-thought without
+    // writing. Reported so a blank answer is diagnosable instead of a mystery.
+    emptyReason?: "provider_capacity" | "no_output";
     emptyReasonDetail?: string;
     // Digital Twin mention flow: the structured delivery produced by the
     // mandatory twin_deliver tool (react and/or reply, and where). Absent when
@@ -3821,6 +3828,16 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
       ...(ctx?.channelId ? { defaultChannelId: ctx.channelId } : {}),
     }, llmCitations)
     : payload.result ?? "";
+
+  if (ctx?.replyPrefix && resultWithCitations.trim()) {
+    // {provider}/{model} resolve from the RESULT, not from dispatch: a run that
+    // fell back to another provider must not be labelled with the pin it
+    // ignored, or the thread and the comparison report disagree.
+    const prefix = ctx.replyPrefix
+      .replace(/\{provider\}/g, typeof payload.provider === "string" && payload.provider ? payload.provider : "unknown")
+      .replace(/\{model\}/g, typeof payload.model === "string" && payload.model ? ` · \`${payload.model}\`` : "");
+    resultWithCitations = `${prefix}\n\n${resultWithCitations}`;
+  }
 
   // Memory footer: count successful memory-search tool invocations for the run
   // and append a single italic line. Tool-based recall replaced prefetch-and-inject
@@ -4143,6 +4160,45 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     return;
   }
 
+  // Messaging-channel runs (WhatsApp, Telegram, …): same finalisation, then
+  // the reply is queued to the account's outbox for the pod that owns it.
+  if (ctx?.channelDelivery) {
+    const channelTarget = ctx.channelDelivery;
+    const channelUserId = ctx.targetUserId ?? ctx.mentionedUserId ?? "";
+    const channelPendingActions = (payload as { pendingActions?: Array<Record<string, unknown>> }).pendingActions;
+    await deleteSession(sessionId);
+    // A run that produced nothing is not a success worth reporting as one.
+    // Downgrading here rather than in claw keeps the change to this surface:
+    // the person gets "couldn't complete — try again", which is both true and
+    // actionable, instead of a blank or a shrug.
+    if (payload.emptyReason === "no_output") {
+      clog.warn(`[webhook/result] channel run produced no output session=${sessionId}`);
+    }
+    await deliverChannelResult({
+      target: channelTarget,
+      status: payload.emptyReason === "no_output" ? "failed" : (payload.status ?? "failed"),
+      result: resultWithCitations,
+      ...(payload.attachments?.length ? { attachments: payload.attachments } : {}),
+    }).catch((err) => {
+      clog.warn(`[webhook/result] channel delivery failed for session ${sessionId}: ${errMsg(err)}`);
+    });
+    // A gated write needs a human even when the human is on WhatsApp. Queued
+    // AFTER the reply so the card lands under the text that explains it.
+    if (channelPendingActions?.length && channelUserId) {
+      const { enqueueApprovalCards } = await import("../surfaces/messaging/approvals.js");
+      await enqueueApprovalCards({
+        target: channelTarget,
+        userId: channelUserId,
+        pendingActions: channelPendingActions,
+        ...(ctx.conversationId ? { conversationId: ctx.conversationId } : {}),
+        ...(ctx.agentSlug ? { agentSlug: ctx.agentSlug } : {}),
+      }).catch((err) => {
+        clog.warn(`[webhook/result] channel approval cards failed for session ${sessionId}: ${errMsg(err)}`);
+      });
+    }
+    return;
+  }
+
   // The run is over and will NOT continue: every path that re-dispatches or
   // re-queues (handoff, broken-SSE retry, session_locked, recovery retry) has
   // already returned above. Settle the plan card here, so it covers a failed or
@@ -4322,9 +4378,12 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
       ctx.responseMode === "conversation"
     ) {
       const isQuota = /\b429\b|quota|rate.?limit|exceeded|out of credit/i.test(rawErr);
-      const notice = isQuota
-        ? "⚠️ I couldn't respond — the provider configured for this agent is out of quota / rate-limited right now. Please retry shortly, or switch the agent's provider in its settings."
-        : "⚠️ I couldn't complete this request due to an internal error. Please try again.";
+      const harnessLabel = payload.localHarnessProvider === "codex-cli" ? "Codex CLI" : "Claude Code";
+      const notice = payload.localHarnessUnreachable
+        ? `⚠️ I couldn't reach **${harnessLabel}** on your machine, and running this on Xyne's servers instead didn't start either. Open the Xyne desktop app (or turn off the local harness for this agent) and try again.`
+        : isQuota
+          ? "⚠️ I couldn't respond — the provider configured for this agent is out of quota / rate-limited right now. Please retry shortly, or switch the agent's provider in its settings."
+          : "⚠️ I couldn't complete this request due to an internal error. Please try again.";
       await postAgentMessage(
         { spacesAppUserId: ctx.spacesAppUserId, appToken: ctx.appToken },
         {
@@ -4398,8 +4457,11 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
         // run-stream (interactive chat) path persists them, but this branch
         // silently dropped them, so pipeline/automation runs never showed
         // their reports (e.g. the error-pipeline RCA .html) as attachments.
-        .then((msg) => persistCallbackAttachments(msg.id, runOwnerId, payload.attachments))
-        .then((created) => publishThreadArtifactShare(ctx, runOwnerId, created))
+        .then(async (msg) => ({ msg, created: await persistCallbackAttachments(msg.id, runOwnerId, payload.attachments) }))
+        .then(async ({ msg, created }) => {
+          const delivered = await ingestDeliveredFiles(ctx, runOwnerId, msg.id, created);
+          await publishThreadArtifactShare(ctx, delivered.designShareUrl);
+        })
         .catch((e) => log.warn("Failed to save assistant ChatMessage", { error: errMsg(e) }));
     }
     // Automation reply: resolve the agent's plain `@Name` mentions into
@@ -4470,6 +4532,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
       conversationId: ctx.conversationId,
       channelId: ctx.channelId,
       agentSlug: ctx.agentSlug,
+      agentName: ctx.agentName,
       userId: ctx.spacesAppUserId,
       status: "done",
     }, ctx.appToken).catch((err) =>
@@ -4496,8 +4559,11 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
       // Same as the forward branch: keep agent-produced files on the
       // transcript row (Spaces gets them as posted files, but the claw chat
       // UI reads chat_attachments).
-      .then((msg) => persistCallbackAttachments(msg.id, runOwnerId, payload.attachments))
-        .then((created) => publishThreadArtifactShare(ctx, runOwnerId, created))
+      .then(async (msg) => ({ msg, created: await persistCallbackAttachments(msg.id, runOwnerId, payload.attachments) }))
+      .then(async ({ msg, created }) => {
+        const delivered = await ingestDeliveredFiles(ctx, runOwnerId, msg.id, created);
+        await publishThreadArtifactShare(ctx, delivered.designShareUrl);
+      })
       .catch((e) => log.warn("Failed to save assistant ChatMessage", { error: errMsg(e) }));
   }
 
@@ -4798,6 +4864,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
             conversationId: ctx.conversationId,
             channelId: ctx.channelId,
             agentSlug: ctx.agentSlug,
+            agentName: ctx.agentName,
             spacesAppUserId: ctx.spacesAppUserId,
             appToken: ctx.appToken,
             toolLabel: "Starting the plan…",
@@ -4859,6 +4926,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
           toolIdsFromConfig(row.config),
           catalog,
           ctx.senderId,
+          await listCallableAgentOptions(ctx.agentOrgId, ctx.senderId, row.slug),
         );
         const ownerCredit = await agentOwnerCredit(row.ownerUserId);
         const flow = withSpacesAppId(
@@ -5032,6 +5100,74 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     }
   }
 
+  // AI provider suggestions. Unlike connectors the roster is a fixed list in
+  // code, so intent is read from the user's own message and the card is built
+  // without the model participating at all. A provider we do not offer is
+  // named back as unsupported rather than dropped, so the reply cannot promise
+  // a card that will never render.
+  if (agentCardDeliverable) {
+    try {
+      const askText = stripAddressedAgentMention(ctx.rootTask ?? ctx.task ?? "", ctx.agentSlug);
+      const namedProviders = providersUserAskedFor(askText);
+      const unsupported = unsupportedProvidersFromText(askText);
+      const providerRoster = wantsProviderRoster(askText);
+
+      if (namedProviders.length > 0 || providerRoster) {
+        const creds = await userProviderCredentialsRepository
+          .listByUser(ctx.senderId)
+          .catch(() => []);
+        const connectedByProvider = new Map(creds.map((c) => [c.provider, c] as const));
+
+        const shown = providerRoster ? [...SUPPORTED_PROVIDERS] : namedProviders;
+        const providers = shown.map((provider) => {
+          const cred = connectedByProvider.get(provider);
+          return {
+            provider,
+            name: PROVIDER_LABELS[provider] ?? provider,
+            ...(PROVIDER_DESCRIPTIONS[provider]
+              ? { description: PROVIDER_DESCRIPTIONS[provider] as string }
+              : {}),
+            connected: provider === "spaces" ? true : !!cred,
+            ...(cred?.sharedCredentialId ? { sharedName: "Shared with your org" } : {}),
+            ...(PROVIDER_CONNECT_METHOD[provider]
+              ? { connectMethod: PROVIDER_CONNECT_METHOD[provider] as "oauth" | "device" | "api_key" | "none" }
+              : {}),
+          };
+        });
+
+        const flow = withSpacesAppId(
+          buildProviderSuggestFlow({
+            providers,
+            title: providerRoster ? "AI providers you can connect" : "Connect this provider",
+            ...(providerRoster ? { browseAll: true, totalCount: SUPPORTED_PROVIDERS.length } : {}),
+            ...(unsupported.length > 0
+              ? { reason: `${unsupported.join(", ")} ${unsupported.length === 1 ? "is" : "are"} not available on Xyne.` }
+              : {}),
+            screenKey: `${ctx.senderId}-${shown.join("-")}`,
+            ...(ctx.agentSlug ? { agentSlug: ctx.agentSlug } : {}),
+            userId: ctx.senderId,
+            conversationId: ctx.conversationId,
+            channelId: ctx.channelId,
+          }),
+          ctx.spacesAppId,
+        );
+        await spacesAppFetch("/chat/postMessage", {
+          channelId: ctx.channelId,
+          conversationId: ctx.conversationId,
+          flow,
+          userId: ctx.spacesAppUserId,
+        }, ctx.appToken);
+        log.info(`[provider-suggest] posted ${providers.length} provider cards conv=${ctx.conversationId}`);
+      } else if (unsupported.length > 0) {
+        log.info(`[provider-suggest] unsupported only: ${unsupported.join(", ")} — no card`);
+      }
+    } catch (err) {
+      log.warn("Failed to post provider suggestions (non-fatal)", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
   if (pendingAgentCard?.variant === "summary" && agentCardDeliverable && ctx.agentOrgId) {
     try {
       const [total, globalCount, sampleAgents] = await Promise.all([
@@ -5199,7 +5335,17 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
       // Resolve the requested tools against THIS org's catalog. Unmatched
       // tokens are reported on the card and never persisted.
       const catalog = await buildAvailableToolsCatalog(undefined, orgId);
-      const resolved = await resolveAgentCapabilities(spec.tools ?? [], catalog, requesterId);
+      const callableOptions = await listCallableAgentOptions(orgId, requesterId, spec.slug);
+      const expandedMcps = expandMcpRequests(spec.mcps, catalog);
+      if (expandedMcps.unknown.length > 0) {
+        log.info(`[agent-card] draft ${spec.slug}: unmatched MCPs [${expandedMcps.unknown.join(", ")}]`);
+      }
+      const resolved = await resolveAgentCapabilities(
+        [...(spec.tools ?? []), ...expandedMcps.tokens],
+        catalog,
+        requesterId,
+        callableOptions,
+      );
       const note = unknownToolsNote(resolved.unknown);
       if (resolved.unknown.length > 0) {
         log.info(`[agent-card] draft ${spec.slug}: unmatched tools [${resolved.unknown.join(", ")}]`);
@@ -5243,14 +5389,21 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
         });
       }
 
-      const identity = identityFromDraftSpec(spec, resolved, ctx.agentSlug);
+      const draftExtras = await resolveDraftExtras(spec, orgId, requesterId);
+      const cardNote = draftNote(
+        note,
+        unknownMcpsNote(expandedMcps.unknown),
+        unknownProvidersNote(draftExtras.unknownProviders ?? []),
+      );
+      const identity = identityFromDraftSpec(spec, resolved, ctx.agentSlug, draftExtras);
       const flow = withSpacesAppId(
         buildAgentCardFlow(
           {
             variant: "draft",
             phase: "pending",
             agent: identity,
-            ...(note ? { note } : {}),
+            toolSelection: toConfigTools(resolved),
+            ...(cardNote ? { note: cardNote } : {}),
           },
           {
             requestId: outcome.request.id,
@@ -5522,8 +5675,12 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     // buildThreadCitationMeta). Used by the copilot/pendingResponses posts
     // below, which deliver the answer via a different path than the normal
     // conversation branch (convMetadata) and would otherwise ship no citations.
+    const runOriginMeta: Record<string, unknown> = payload.localHarness
+      ? { clawRunOrigin: { kind: "local-harness", ...payload.localHarness } }
+      : {};
+
     const buildPostMetadata = (text: string): Record<string, unknown> => {
-      const meta: Record<string, unknown> = { contentFormat: "markdown" };
+      const meta: Record<string, unknown> = { contentFormat: "markdown", ...runOriginMeta };
       const tc = buildThreadCitationMeta(citationInvocations, text);
       if (tc) {
         meta["clawCitations"] = tc.clawCitations;
@@ -5889,6 +6046,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
       );
       const convMetadata = {
         contentFormat: "markdown",
+        ...runOriginMeta,
         ...(threadCitationMeta
           ? {
               clawCitations: threadCitationMeta.clawCitations,
@@ -7124,6 +7282,7 @@ router.post("/progress", requireStrictS2S, async (req: Request, res: Response) =
         conversationId: ctx.conversationId,
         channelId: ctx.channelId,
         agentSlug: ctx.agentSlug,
+        agentName: ctx.agentName,
         userId: ctx.spacesAppUserId,
         toolLabel,
         status: "working",

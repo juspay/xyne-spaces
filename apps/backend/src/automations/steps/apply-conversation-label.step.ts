@@ -5,6 +5,7 @@ import { StepCategory } from '../types/categories';
 import type { AutomationContext } from '../types/context';
 import { variableRef } from '../engine/variable-ref';
 import { logger } from '@/utils/logger';
+import { websocketService } from '@/services/websocketService';
 import {
   applyConversationLabel,
   archiveConversationMailbox,
@@ -118,6 +119,10 @@ export class ApplyConversationLabelStep extends BaseActionStep<
         }
         return applied;
       });
+      // Broadcast only after commit so refetched label unread counts see the new mapping.
+      if (result.applied) {
+        websocketService.broadcastLabelUnreadCountsUpdate(channelId);
+      }
       logger.info(
         `[automations] APPLY_CONVERSATION_LABEL conversationId=${conversationId} label=${labelName} applied=${result.applied} alreadyPresent=${result.alreadyPresent}`,
       );

@@ -450,6 +450,8 @@ export class EmailAuthController {
             timestamp: new Date().toISOString(),
           }),
           ipAddress: req.ip || req.connection.remoteAddress || undefined,
+          // The user row may still say GOOGLE/MICROSOFT for an SSO account that set a password.
+          loginMethod: AuthProvider.EMAIL,
         });
 
         const jwtToken = jwtService.generateToken({
@@ -573,7 +575,7 @@ export class EmailAuthController {
       });
 
       // Revoke all active sessions for this user — forces re-auth everywhere
-      await this.userSessionService.revokeAllUserSessions(userId);
+      await this.userSessionService.revokeAllUserSessions(userId, 'PASSWORD_CHANGED');
 
       res.status(200).json({ success: true, message: 'Password changed successfully. Please log in again.' });
     } catch (error) {
@@ -756,7 +758,7 @@ export class EmailAuthController {
         select: { id: true },
       });
       for (const u of affectedUsers) {
-        await this.userSessionService.revokeAllUserSessions(u.id);
+        await this.userSessionService.revokeAllUserSessions(u.id, 'PASSWORD_RESET');
       }
 
       // Delete the code from Redis (it's been consumed)

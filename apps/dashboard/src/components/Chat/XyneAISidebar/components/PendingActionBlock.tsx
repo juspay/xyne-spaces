@@ -150,6 +150,7 @@ function PendingActionItem({
           type='button'
           data-track-category='XyneAI'
           data-track-name='approve-action'
+          data-track-metadata={JSON.stringify({ tool: action.tool, serverType: action.serverType })}
         >
           {state === 'running' ? (
             <Loader2 size={10} className='animate-spin' />
@@ -166,6 +167,7 @@ function PendingActionItem({
           type='button'
           data-track-category='XyneAI'
           data-track-name='decline-action'
+          data-track-metadata={JSON.stringify({ tool: action.tool, serverType: action.serverType })}
         >
           <X size={10} />
           Decline

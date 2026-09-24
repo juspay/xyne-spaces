@@ -146,229 +146,233 @@ export function CallableAgentDetailPanel({
   ].filter(Boolean);
 
   return (
-    <div className='flex min-h-0 flex-1 flex-col gap-8 overflow-y-auto px-[22px] pb-9 pt-2'>
-      <div className='flex w-full items-start gap-12'>
-        <div className='flex min-w-0 flex-1 items-center gap-2.5'>
-          <span
-            className='flex size-11 shrink-0 items-center justify-center rounded-xl border border-border bg-card text-muted-foreground shadow-sm'
-            aria-hidden
-          >
-            <UserBot className='size-6' />
-          </span>
-          <div className='flex min-w-0 flex-col gap-2.5 py-px'>
-            <span className='flex min-w-0 items-center gap-2'>
-              <span className='truncate text-sm font-semibold leading-5 tracking-[-0.28px] text-foreground'>
-                {entry.name}
+    <div className='flex min-h-0 flex-1 flex-col'>
+      <div className='flex shrink-0 flex-col gap-4 px-[22px] pb-4 pt-2'>
+        <div className='flex w-full items-start gap-12'>
+          <div className='flex min-w-0 flex-1 items-center gap-2.5'>
+            <span
+              className='flex size-11 shrink-0 items-center justify-center rounded-xl border border-border bg-card text-muted-foreground shadow-sm'
+              aria-hidden
+            >
+              <UserBot className='size-6' />
+            </span>
+            <div className='flex min-w-0 flex-col gap-2.5 py-px'>
+              <span className='flex min-w-0 items-center gap-2'>
+                <span className='truncate text-sm font-semibold leading-5 tracking-[-0.28px] text-foreground'>
+                  {entry.name}
+                </span>
+                {pill && (
+                  <Pill tone={pill.tone} size='sm'>
+                    {pill.label}
+                  </Pill>
+                )}
               </span>
-              {pill && (
-                <Pill tone={pill.tone} size='sm'>
-                  {pill.label}
-                </Pill>
-              )}
-            </span>
-            <span className='flex min-w-0 items-center gap-1.5 truncate text-xs font-semibold leading-4 tracking-[-0.24px] text-muted-foreground'>
-              {owner && (
-                <>
-                  Built by
-                  <span className='truncate text-[color:var(--mention-color)]'>
-                    @{owner.replace(/^@+/, '')}
-                  </span>
-                  ·
-                </>
-              )}
-              {meta.join(' · ')}
-            </span>
+              <span className='flex min-w-0 items-center gap-1.5 truncate text-xs font-semibold leading-4 tracking-[-0.24px] text-muted-foreground'>
+                {owner && (
+                  <>
+                    Built by
+                    <span className='truncate text-[color:var(--mention-color)]'>
+                      @{owner.replace(/^@+/, '')}
+                    </span>
+                    ·
+                  </>
+                )}
+                {meta.join(' · ')}
+              </span>
+            </div>
           </div>
+
+          <button
+            type='button'
+            onClick={() => (added ? onRemove() : onAdd(reason.trim()))}
+            disabled={busy || (!added && reasonTooShort)}
+            data-track-category='Claw Agents'
+            data-track-name={added ? 'RemoveCallableAgent' : 'RequestDelegation'}
+            className={cn(
+              'flex h-7 shrink-0 items-center justify-center rounded-lg border px-2 text-sm font-medium leading-[1.2] transition-colors',
+              'disabled:cursor-not-allowed disabled:opacity-50',
+              added
+                ? 'border-border bg-card text-foreground hover:bg-muted'
+                : 'border-transparent bg-primary text-primary-foreground hover:bg-primary/90',
+            )}
+          >
+            {added ? 'Remove' : entry.needsApproval ? 'Request access' : 'Add'}
+          </button>
         </div>
 
-        <button
-          type='button'
-          onClick={() => (added ? onRemove() : onAdd(reason.trim()))}
-          disabled={busy || (!added && reasonTooShort)}
-          data-track-category='Claw Agents'
-          data-track-name={added ? 'RemoveCallableAgent' : 'RequestDelegation'}
-          className={cn(
-            'flex h-7 shrink-0 items-center justify-center rounded-lg border px-2 text-sm font-medium leading-[1.2] transition-colors',
-            'disabled:cursor-not-allowed disabled:opacity-50',
-            added
-              ? 'border-border bg-card text-foreground hover:bg-muted'
-              : 'border-transparent bg-primary text-primary-foreground hover:bg-primary/90',
-          )}
-        >
-          {added ? 'Remove' : entry.needsApproval ? 'Request access' : 'Add'}
-        </button>
+        {description && (
+          <p className='w-full text-sm font-normal leading-5 tracking-[-0.28px] text-foreground'>
+            {description}
+          </p>
+        )}
       </div>
 
-      {description && (
-        <p className='w-full text-sm font-normal leading-5 tracking-[-0.28px] text-foreground'>
-          {description}
-        </p>
-      )}
-
-      <div className='flex w-full flex-col gap-4'>
-        {!added && entry.needsApproval && (
-          <>
-            <Section
-              label='Request access'
-              info='The owner sees this note when they review the request'
-            >
-              <div className='flex w-full flex-col gap-2'>
-                <Textarea
-                  value={reason}
-                  maxLength={REASON_MAX}
-                  onChange={event => setReason(event.target.value)}
-                  placeholder='Why does this agent need to be called?'
-                  rows={3}
-                />
-                <span className='text-xs leading-4 text-muted-foreground'>
-                  {owner || 'The owner'} approves before this agent can be called. It runs under
-                  whoever started the run, never with its own credentials.
-                </span>
-              </div>
-            </Section>
-            <Separator />
-          </>
-        )}
-
-        <Section label='Instructions' info='The system prompt this agent runs with'>
-          {systemPrompt ? (
-            <ScrollFadeBox height={PROMPT_MAX_HEIGHT} resetKeys={[entry.slug, systemPrompt]}>
-              <p className='whitespace-pre-wrap break-words text-sm font-normal leading-5 tracking-[-0.28px] text-foreground'>
-                {systemPrompt}
-              </p>
-            </ScrollFadeBox>
-          ) : (
-            <EmptyHint>{detail.isLoading ? 'Loading…' : 'No instructions shared'}</EmptyHint>
+      <div className='flex min-h-0 flex-1 flex-col gap-8 overflow-y-auto px-[22px] pb-9'>
+        <div className='flex w-full flex-col gap-4'>
+          {!added && entry.needsApproval && (
+            <>
+              <Section
+                label='Request access'
+                info='The owner sees this note when they review the request'
+              >
+                <div className='flex w-full flex-col gap-2'>
+                  <Textarea
+                    value={reason}
+                    maxLength={REASON_MAX}
+                    onChange={event => setReason(event.target.value)}
+                    placeholder='Why does this agent need to be called?'
+                    rows={3}
+                  />
+                  <span className='text-xs leading-4 text-muted-foreground'>
+                    {owner || 'The owner'} approves before this agent can be called. It runs under
+                    whoever started the run, never with its own credentials.
+                  </span>
+                </div>
+              </Section>
+              <Separator />
+            </>
           )}
-        </Section>
 
-        <Separator />
+          <Section label='Instructions' info='The system prompt this agent runs with'>
+            {systemPrompt ? (
+              <ScrollFadeBox height={PROMPT_MAX_HEIGHT} resetKeys={[entry.slug, systemPrompt]}>
+                <p className='whitespace-pre-wrap break-words text-sm font-normal leading-5 tracking-[-0.28px] text-foreground'>
+                  {systemPrompt}
+                </p>
+              </ScrollFadeBox>
+            ) : (
+              <EmptyHint>{detail.isLoading ? 'Loading…' : 'No instructions shared'}</EmptyHint>
+            )}
+          </Section>
 
-        <ChipSection
-          label='Subagents'
-          info='Specialists this agent can delegate a whole task to'
-          loading={detail.isLoading || subagentCatalog.loading}
-          emptyLabel='No subagents added yet.'
-          isEmpty={subagentEntries.length === 0}
-        >
-          {subagentEntries.map(item => (
-            <TokenChip
-              key={item.name}
-              icon={
-                <ChipIconTile>
-                  <UserBot className='size-4' />
-                </ChipIconTile>
-              }
-              label={item.name}
-              secondary={item.description}
-            />
-          ))}
-        </ChipSection>
+          <Separator />
 
-        <Separator />
+          <ChipSection
+            label='Subagents'
+            info='Specialists this agent can delegate a whole task to'
+            loading={detail.isLoading || subagentCatalog.loading}
+            emptyLabel='No subagents added yet.'
+            isEmpty={subagentEntries.length === 0}
+          >
+            {subagentEntries.map(item => (
+              <TokenChip
+                key={item.name}
+                icon={
+                  <ChipIconTile>
+                    <UserBot className='size-4' />
+                  </ChipIconTile>
+                }
+                label={item.name}
+                secondary={item.description}
+              />
+            ))}
+          </ChipSection>
 
-        <ChipSection
-          label='Agents'
-          info='Other agents this one can hand a task to'
-          loading={detail.isLoading}
-          emptyLabel='No agents added yet.'
-          isEmpty={callableAgents.length === 0}
-        >
-          {callableAgents.map(slug => (
-            <TokenChip
-              key={slug}
-              icon={
-                <ChipIconTile>
-                  <UserBot className='size-4' />
-                </ChipIconTile>
-              }
-              label={`@${slug}`}
-            />
-          ))}
-        </ChipSection>
+          <Separator />
 
-        <Separator />
+          <ChipSection
+            label='Agents'
+            info='Other agents this one can hand a task to'
+            loading={detail.isLoading}
+            emptyLabel='No agents added yet.'
+            isEmpty={callableAgents.length === 0}
+          >
+            {callableAgents.map(slug => (
+              <TokenChip
+                key={slug}
+                icon={
+                  <ChipIconTile>
+                    <UserBot className='size-4' />
+                  </ChipIconTile>
+                }
+                label={`@${slug}`}
+              />
+            ))}
+          </ChipSection>
 
-        <ChipSection
-          label='MCP Tools'
-          info='Tools it calls directly on connected integrations'
-          loading={detail.isLoading || mcp.loading}
-          emptyLabel='No MCP tools added yet.'
-          isEmpty={mcpEntries.length === 0}
-        >
-          {mcpEntries.map(item => (
-            <TokenChip
-              key={item.slug}
-              icon={
-                <ChipIconTile>
-                  <McpLogo type={item.iconType} name={item.label} size='sm' />
-                </ChipIconTile>
-              }
-              label={item.label}
-              secondary={toolCountLabel(selectedMcpTools(selection, item).length)}
-            />
-          ))}
-        </ChipSection>
+          <Separator />
 
-        <Separator />
+          <ChipSection
+            label='MCP Tools'
+            info='Tools it calls directly on connected integrations'
+            loading={detail.isLoading || mcp.loading}
+            emptyLabel='No MCP tools added yet.'
+            isEmpty={mcpEntries.length === 0}
+          >
+            {mcpEntries.map(item => (
+              <TokenChip
+                key={item.slug}
+                icon={
+                  <ChipIconTile>
+                    <McpLogo type={item.iconType} name={item.label} size='sm' />
+                  </ChipIconTile>
+                }
+                label={item.label}
+                secondary={toolCountLabel(selectedMcpTools(selection, item).length)}
+              />
+            ))}
+          </ChipSection>
 
-        <ChipSection
-          label='Built-In tools'
-          info='Tools that ship with the platform, no connection needed'
-          loading={detail.isLoading || builtin.loading}
-          emptyLabel='No built-in tools added yet.'
-          isEmpty={builtinEntries.length === 0}
-        >
-          {builtinEntries.map(item => (
-            <TokenChip
-              key={item.source}
-              icon={
-                <ChipIconTile>
-                  <Tools className='size-4' />
-                </ChipIconTile>
-              }
-              label={item.label}
-              secondary={toolCountLabel(selectedBuiltinTools(selection, item).length)}
-            />
-          ))}
-        </ChipSection>
+          <Separator />
 
-        <Separator />
+          <ChipSection
+            label='Built-In tools'
+            info='Tools that ship with the platform, no connection needed'
+            loading={detail.isLoading || builtin.loading}
+            emptyLabel='No built-in tools added yet.'
+            isEmpty={builtinEntries.length === 0}
+          >
+            {builtinEntries.map(item => (
+              <TokenChip
+                key={item.source}
+                icon={
+                  <ChipIconTile>
+                    <Tools className='size-4' />
+                  </ChipIconTile>
+                }
+                label={item.label}
+                secondary={toolCountLabel(selectedBuiltinTools(selection, item).length)}
+              />
+            ))}
+          </ChipSection>
 
-        <Section label='Skills' info='Reusable instructions this agent can follow'>
-          {skills.length > 0 ? (
-            <ChipRow>
-              {skills.map(skill => (
-                <TokenChip
-                  key={skill.id}
-                  icon={
-                    <ChipIconTile>
-                      <Staroflife className='size-4' />
-                    </ChipIconTile>
-                  }
-                  label={skill.skill.name}
-                  secondary={skill.skill.description}
-                />
-              ))}
-            </ChipRow>
-          ) : (
-            <EmptyHint>{detail.isLoading ? 'Loading…' : 'No skills added'}</EmptyHint>
-          )}
-        </Section>
+          <Separator />
 
-        <Separator />
+          <Section label='Skills' info='Reusable instructions this agent can follow'>
+            {skills.length > 0 ? (
+              <ChipRow>
+                {skills.map(skill => (
+                  <TokenChip
+                    key={skill.id}
+                    icon={
+                      <ChipIconTile>
+                        <Staroflife className='size-4' />
+                      </ChipIconTile>
+                    }
+                    label={skill.skill.name}
+                    secondary={skill.skill.description}
+                  />
+                ))}
+              </ChipRow>
+            ) : (
+              <EmptyHint>{detail.isLoading ? 'Loading…' : 'No skills added'}</EmptyHint>
+            )}
+          </Section>
 
-        <Section label='Knowledge' info='Sources this agent can read'>
-          {agent?.kbScope === 'USER' ? (
-            <EmptyHint>Matches the access of whoever runs it</EmptyHint>
-          ) : collections.length > 0 ? (
-            <EmptyHint>
-              {collections.length} {collections.length === 1 ? 'source' : 'sources'} added
-            </EmptyHint>
-          ) : (
-            <EmptyHint>{detail.isLoading ? 'Loading…' : 'No knowledge added'}</EmptyHint>
-          )}
-        </Section>
+          <Separator />
+
+          <Section label='Knowledge' info='Sources this agent can read'>
+            {agent?.kbScope === 'USER' ? (
+              <EmptyHint>Matches the access of whoever runs it</EmptyHint>
+            ) : collections.length > 0 ? (
+              <EmptyHint>
+                {collections.length} {collections.length === 1 ? 'source' : 'sources'} added
+              </EmptyHint>
+            ) : (
+              <EmptyHint>{detail.isLoading ? 'Loading…' : 'No knowledge added'}</EmptyHint>
+            )}
+          </Section>
+        </div>
       </div>
     </div>
   );
