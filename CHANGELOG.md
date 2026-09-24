@@ -1,3 +1,16 @@
+## [1.390.0](https://github.com/juspay/xyne-spaces/compare/v1.389.1...v1.390.0) (2026-09-24)
+
+
+### Features
+
+* add automation MCP tools for claw ([#2265](https://github.com/juspay/xyne-spaces/issues/2265)) ([61f9e60](https://github.com/juspay/xyne-spaces/commit/61f9e60aabf9b3ea7fcb291ca6abe6796e7cd994))
+* added ticket duplication scoping ([#2226](https://github.com/juspay/xyne-spaces/issues/2226)) ([daa57a4](https://github.com/juspay/xyne-spaces/commit/daa57a475327ea4e267e7c82d8240cdacd6926d1))
+
+
+### Bug Fixes
+
+* Passing automation creator ID to claw for privacy checks ([#2251](https://github.com/juspay/xyne-spaces/issues/2251)) ([516d7a2](https://github.com/juspay/xyne-spaces/commit/516d7a2d3d4fb2d83b2fca82baef03830b8ca19a))
+
 ## [1.389.1](https://github.com/juspay/xyne-spaces/compare/v1.389.0...v1.389.1) (2026-09-24)
 
 
