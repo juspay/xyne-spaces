@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import DOMPurify from 'dompurify';
 import {
   Code2,
@@ -27,6 +27,7 @@ import {
 } from '../../../../api/automationsApi';
 import { VariablePicker } from '../VariablePicker/VariablePicker';
 import type { VariablePickerSource } from '../VariablePicker/VariablePicker.types';
+import { inlineAuthenticatedImages } from '../../../../utils/inlineAuthenticatedImages';
 
 const MAX_FILES = 10;
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
@@ -510,6 +511,33 @@ function PaneHeader({ icon, label }: { icon: React.ReactNode; label: string }): 
   );
 }
 
+function HtmlTemplatePreview({ content }: { content: string }): React.ReactElement {
+  const [doc, setDoc] = useState('');
+
+  // Debounced: the editor re-renders on every keystroke, and inlining images
+  // does credentialed fetches. Inlining is required because the sandbox=''
+  // iframe below runs from an opaque origin — its <img> loads send no
+  // cookies, so authenticated-origin images would 401 (broken preview, and
+  // in Electron a session-killing 401).
+  useEffect(() => {
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      const sanitized = DOMPurify.sanitize(content, { WHOLE_DOCUMENT: true });
+      void inlineAuthenticatedImages(sanitized).then(({ html }) => {
+        if (!cancelled) setDoc(html);
+      });
+    }, 300);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [content]);
+
+  return (
+    <iframe title='HTML file preview' sandbox='' srcDoc={doc} className='min-h-0 flex-1 bg-white' />
+  );
+}
+
 function TemplatePreview({
   filename,
   content,
@@ -528,14 +556,7 @@ function TemplatePreview({
   }
 
   if (extension === '.html') {
-    return (
-      <iframe
-        title='HTML file preview'
-        sandbox=''
-        srcDoc={DOMPurify.sanitize(content, { WHOLE_DOCUMENT: true })}
-        className='min-h-0 flex-1 bg-white'
-      />
-    );
+    return <HtmlTemplatePreview content={content} />;
   }
 
   if (extension === '.md') {

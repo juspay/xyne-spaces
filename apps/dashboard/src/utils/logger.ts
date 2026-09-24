@@ -103,6 +103,11 @@ export type ZeroSocketState = (typeof ZeroSocketState)[keyof typeof ZeroSocketSt
 
 export const Event = {
   ...LoggerEvent,
+  // Session-teardown telemetry — every step of a logout must be attributable.
+  ELECTRON_TOKEN_EXPIRED_RECEIVED: 'electron_token_expired_received',
+  LOGOUT_STARTED: 'logout_started',
+  LOGOUT_REQUEST_COMPLETED: 'logout_request_completed',
+  LOGOUT_REQUEST_FAILED: 'logout_request_failed',
   CONVERSATION_PREFERCH_ERROR: 'conversation_prefetch_error',
   ATTACHMENT_FILES_SELECTED: 'attachment_files_selected',
   ATTACHMENT_VALIDATION_FAILED: 'attachment_validation_failed',
@@ -179,6 +184,7 @@ export const Event = {
   IDE_REPO_DELETED: 'ide_repo_deleted',
   API_ERROR_INTERCEPTOR_CAUGHT: 'api_error_interceptor_caught',
   AUTH_SESSION_EXPIRED: 'auth_session_expired',
+  AUTH_SESSION_401_TRANSIENT: 'auth_session_401_transient',
   API_NETWORK_ERROR: 'api_network_error',
   API_OPERATIONAL_ERROR: 'api_operational_error',
   CANVAS_PREFETCH_STARTED: 'canvas_prefetch_started',

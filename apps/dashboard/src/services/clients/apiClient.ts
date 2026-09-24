@@ -2,7 +2,7 @@ import axios, { AxiosInstance, InternalAxiosRequestConfig, AxiosResponse, AxiosE
 import { v4 as uuidv4 } from 'uuid';
 import { reactNativeBridge } from '../../utils/reactNativeBridge';
 import { API_BASE_URL, APP_BASE_PATH, isExternalApp } from '../../config';
-import { logger, Logger } from '../../utils/logger';
+import { logger, Logger, Event as LogEvents } from '../../utils/logger';
 import {
   httpRequestDuration,
   httpRequestTotal,
@@ -225,19 +225,51 @@ apiConfig.interceptors.response.use(
 
     // External guests have no session to lose, so a 401 must not log them out of the call.
     if (axiosError.response?.status === 401 && !isExternalApp) {
-      logger.warn(Logger.Event.AUTH_SESSION_EXPIRED, {
-        url: sanitizedUrl,
-        message: 'Received 401 Unauthorized. Logging out.',
-        serverError: responseData?.error,
-        serverMessage: responseData?.message,
-      });
+      // A single 401 from an arbitrary endpoint is not proof the session is dead:
+      // it can be a transient race or an endpoint-specific permission blip. The
+      // real session lives in httpOnly cookies the browser still holds, so before
+      // tearing everything down (which was causing phantom logouts) confirm the
+      // session is actually gone by asking the server directly. Only a
+      // confirmed-invalid session logs the user out; ambiguous failures (network
+      // errors, 5xx from the validate call) leave the session intact.
+      const failedUrl = config.url || '';
+      const isValidateCall = failedUrl.includes('/auth/validate');
+      let sessionConfirmedInvalid = isValidateCall;
 
-      clearAuthTokens();
+      if (!isValidateCall) {
+        try {
+          // Direct axios (not apiInstance) so this confirmation bypasses this very
+          // interceptor and cannot recurse.
+          await axios.get(`${BASE_URL}/auth/validate`, { withCredentials: true });
+          sessionConfirmedInvalid = false;
+        } catch (validateError) {
+          sessionConfirmedInvalid =
+            axios.isAxiosError(validateError) && validateError.response?.status === 401;
+        }
+      }
 
-      window.location.href = '/auth';
-      window.location.reload();
+      if (!sessionConfirmedInvalid) {
+        logger.warn(LogEvents.AUTH_SESSION_401_TRANSIENT, {
+          url: sanitizedUrl,
+          message: 'Received 401 but server session is still valid; ignoring transient 401.',
+          serverError: responseData?.error,
+          serverMessage: responseData?.message,
+        });
+      } else {
+        logger.warn(Logger.Event.AUTH_SESSION_EXPIRED, {
+          url: sanitizedUrl,
+          message: 'Received 401 Unauthorized and session confirmed invalid. Logging out.',
+          serverError: responseData?.error,
+          serverMessage: responseData?.message,
+        });
 
-      return Promise.reject(new Error('Session refresh failed - please re-authenticate'));
+        clearAuthTokens();
+
+        window.location.href = '/auth';
+        window.location.reload();
+
+        return Promise.reject(new Error('Session refresh failed - please re-authenticate'));
+      }
     } else if (!axiosError.response) {
       // Network error (backend down) - log but don't redirect
       logger.warn(Logger.Event.API_NETWORK_ERROR, {

@@ -7,6 +7,16 @@ import { apiInstance, BASE_URL } from '../../../services/clients/apiClient';
 import { showDownloadCompleteToast } from '../../../utils/downloadToast';
 import { globalClickTracker } from '../../../services/Analytics/globalClickTracker';
 import { errorKindOf } from '../DeskSettings/deskSettingsTracking';
+import { inlineAuthenticatedImages } from '../../../utils/inlineAuthenticatedImages';
+
+// srcDoc documents resolve relative URLs against the parent page — a <base>
+// keeps the report's relative stylesheets/links resolving against the report
+// URL, as they did when the iframe loaded it via src.
+const withBaseHref = (html: string, href: string): string => {
+  if (/<base\s/i.test(html)) return html;
+  const tag = `<base href="${href.replace(/"/g, '&quot;')}">`;
+  return /<head[^>]*>/i.test(html) ? html.replace(/<head[^>]*>/i, m => `${m}${tag}`) : `${tag}${html}`;
+};
 
 export interface DeskReportPanelProps {
   open: boolean;
@@ -52,6 +62,39 @@ export const DeskReportPanel: React.FC<DeskReportPanelProps> = ({
   const [submitting, setSubmitting] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [reportHtml, setReportHtml] = useState<string | null>(null);
+
+  // The report renders in a sandbox='allow-scripts' iframe, which runs from an
+  // opaque origin: subresource loads send no cookies, so authenticated-origin
+  // images inside the report would 401 (broken images, and in Electron a
+  // session-killing 401). Fetch the document with credentials here and inline
+  // those images before handing it to the iframe via srcDoc.
+  const reportUrl = report?.status !== 'pending' ? report?.url : null;
+  useEffect(() => {
+    if (!reportUrl) {
+      setReportHtml(null);
+      return;
+    }
+    let cancelled = false;
+    void (async (): Promise<void> => {
+      try {
+        const absoluteUrl = `${BASE_URL}${reportUrl}`;
+        const response = await apiInstance.get<string>(reportUrl, {
+          responseType: 'text',
+          // Keep the raw HTML — the default transform would try JSON.parse.
+          transformResponse: (raw: string): string => raw,
+        });
+        const { html } = await inlineAuthenticatedImages(response.data, absoluteUrl);
+        if (!cancelled) setReportHtml(withBaseHref(html, absoluteUrl));
+      } catch {
+        // Fall back to the iframe's src load below.
+        if (!cancelled) setReportHtml(null);
+      }
+    })();
+    return (): void => {
+      cancelled = true;
+    };
+  }, [reportUrl]);
 
   // Full-panel spinner only on first load — later refreshes update in place.
   const fetchLatest = useCallback(
@@ -287,7 +330,9 @@ export const DeskReportPanel: React.FC<DeskReportPanelProps> = ({
                 )}
                 <iframe
                   title='Desk report'
-                  src={report.url ? `${BASE_URL}${report.url}` : undefined}
+                  {...(reportHtml !== null
+                    ? { srcDoc: reportHtml }
+                    : { src: report.url ? `${BASE_URL}${report.url}` : undefined })}
                   sandbox='allow-scripts'
                   className='h-full w-full flex-1 border-0'
                 />
