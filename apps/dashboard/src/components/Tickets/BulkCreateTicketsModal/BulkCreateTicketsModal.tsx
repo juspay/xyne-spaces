@@ -52,6 +52,12 @@ export interface BulkCreateTicketsModalProps {
    * it or the caller supplied it.
    */
   onTicketCreated?: (ticket?: { id: string; conversationId?: string; xyneId?: string }) => void;
+  /**
+   * Called with the full batch result. Callers that drove the modal from a
+   * list (AI suggestions) need every created ticket, not just the parent, to
+   * mark their source rows as handled.
+   */
+  onBulkCreated?: (result: CreateBulkTicketResponse) => void;
 }
 
 interface BulkRow {
@@ -108,6 +114,7 @@ export const BulkCreateTicketsModal: React.FC<BulkCreateTicketsModalProps> = ({
   sourceMessageId,
   sourceConversationId,
   onTicketCreated,
+  onBulkCreated,
 }) => {
   const isAllParentsMode = mode === BulkTicketMode.ALL_PARENTS;
   const hasExistingParent = !!existingParentTicket;
@@ -379,6 +386,7 @@ export const BulkCreateTicketsModal: React.FC<BulkCreateTicketsModalProps> = ({
         const data = res.data as CreateBulkTicketResponse;
         const count = data.createdTickets.length;
         toast.success(`Created ${count} ticket${count !== 1 ? 's' : ''}`);
+        onBulkCreated?.(data);
         onClose();
         return;
       }
@@ -409,6 +417,7 @@ export const BulkCreateTicketsModal: React.FC<BulkCreateTicketsModalProps> = ({
         const data = res.data as CreateBulkTicketResponse;
         const subCount = data.createdTickets.length;
         toast.success(`Created ${subCount} sub-ticket${subCount !== 1 ? 's' : ''}`);
+        onBulkCreated?.(data);
         // The parent is the one the caller handed us, so these are real values.
         onTicketCreated?.({
           id: existingParentTicket.id,
@@ -469,6 +478,7 @@ export const BulkCreateTicketsModal: React.FC<BulkCreateTicketsModalProps> = ({
       const data = res.data as CreateBulkTicketResponse;
       const subCount = data.createdTickets.length;
       toast.success(`Created 1 ticket and ${subCount} sub-ticket${subCount !== 1 ? 's' : ''}`);
+      onBulkCreated?.(data);
       // The parent exists now, so the caller gets the real ticket to navigate to.
       onTicketCreated?.(data.parentTicketId ? { id: data.parentTicketId } : undefined);
       onClose();

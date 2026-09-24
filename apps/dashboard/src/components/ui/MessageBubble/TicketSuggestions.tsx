@@ -234,7 +234,53 @@ export const TicketSuggestions: React.FC<TicketSuggestionsProps> = ({
           existingParentTicket={existingParentTicket ?? undefined}
           sourceMessageId={existingParentTicket ? messageId : undefined}
           sourceConversationId={existingParentTicket ? undefined : conversationId}
-          onTicketCreated={() => {
+          onBulkCreated={result => {
+            // Without this the suggestions stay selectable and the bulk button
+            // stays live, so a second click recreates the whole batch — the
+            // single-ticket path is guarded server-side, this one is not.
+            // A batch that creates its own parent consumes suggestions[0] as
+            // that parent, so the children line up from index 1.
+            const parentConsumesFirst = !existingParentTicket;
+            void (async () => {
+              try {
+                if (parentConsumesFirst && result.parentTicketId && suggestions[0]) {
+                  await conversationService.markTicketSuggestionAsCreated(
+                    conversationId,
+                    messageId,
+                    {
+                      suggestionId: suggestions[0].suggestionId,
+                      ticketId: result.parentTicketId,
+                      xyneId: '',
+                      title: suggestions[0].title,
+                      ticketConversationId: '',
+                    },
+                  );
+                }
+                const offset = parentConsumesFirst ? 1 : 0;
+                for (const [index, created] of result.createdTickets.entries()) {
+                  const suggestion = suggestions[index + offset];
+                  if (!suggestion) continue;
+                  await conversationService.markTicketSuggestionAsCreated(
+                    conversationId,
+                    messageId,
+                    {
+                      suggestionId: suggestion.suggestionId,
+                      ticketId: created.id,
+                      xyneId: created.xyneId,
+                      title: created.title,
+                      ticketConversationId: created.conversationId,
+                    },
+                  );
+                }
+                setSelectedIds([]);
+              } catch (error) {
+                logger.error(LogEvent.FRONTEND_ERROR, {
+                  type: 'migrated_console_error',
+                  message: String('Failed to mark bulk suggestions as created:'),
+                  error,
+                });
+              }
+            })();
             setIsBulkModalOpen(false);
           }}
         />

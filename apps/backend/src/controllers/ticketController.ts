@@ -513,6 +513,7 @@ export class TicketController {
         tickets?: Array<Record<string, unknown>>;
         subTickets?: Array<Record<string, unknown>>;
         existingParentTicketId?: string;
+        sourceConversationId?: string;
         projectId?: string;
         channelId?: string;
         boardId?: string;
@@ -655,6 +656,7 @@ export class TicketController {
       const batchCtx = {
         createdBy: userId,
         workspaceId,
+        ...(body.sourceConversationId ? { sourceConversationId: body.sourceConversationId } : {}),
         fromTicketsTab: body.fromTicketsTab === true,
       };
 

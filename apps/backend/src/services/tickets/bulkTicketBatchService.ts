@@ -11,13 +11,16 @@ import {
   serializeTicketMd,
   buildInitialMessageMd,
   BulkTicketMode,
+  BoardType,
+  ActivityType,
   MessageType,
   ConversationParticipation,
 } from '@xyne/shared';
-import type { TicketCardSummary } from '@xyne/shared';
+import type { TicketCardSummary, BoardMetadata } from '@xyne/shared';
 import { DatabaseClient } from '@/database/client';
 import { EntitySequenceService } from '@/services/entitySequenceService';
 import { calculateETADeadline } from '@/utils/etaCalculation';
+import { evaluateAssignmentRule } from '@/utils/assignmentEngine';
 import {
   buildEtaActivityIntents,
   dispatchEtaNotifications,
@@ -27,12 +30,27 @@ import {
   resolveStepEstimate,
   writeEtaActivitiesPrisma,
 } from '@/services/etaManagement';
-import { emitTicketCreated } from '@/database/repositories/ticketRepository';
+import {
+  emitTicketCreated,
+  makeFallbackCountsSnapshot,
+} from '@/database/repositories/ticketRepository';
 import { maybeCreateEntryApprovalRequest } from '@/services/stageTransition/stageEntryApproval';
 import { ticketDuplicateService } from '@/services/ticketDuplicateService';
+import { ticketAssignmentService, primaryUserIdOf } from '@/services/ticketAssignmentService';
 import { dualWriteTicketTags } from '@/services/ticketTagDualWriteService';
 import { websocketService } from '@/services/websocketService';
-import { syncConversationSubTicketsMd } from '@/utils/ticketMd';
+import { userActivityTrackingService } from '@/services/userActivityTrackingService';
+import { messageClassificationQueue } from '@/queues/messageClassificationQueue';
+import { vespaQueue } from '@/queues/vespaQueue';
+import { ticketSchema } from '@/vespa/src/types';
+import {
+  syncConversationSubTicketsMd,
+  syncConversationTicketMdFromPrismaTicket,
+  linkSubTicketConversationToParent,
+} from '@/utils/ticketMd';
+import { recordTicketTimelineEvent } from '@/services/ticketTimelineEventService';
+import { resolveInheritedOwner, linkCreatedEntities } from '@/sdlc/entityLinkService';
+import { advisoryXactLock } from '@/bypassAcl/lockServices';
 import { logger } from '@/utils/logger';
 
 const prisma = DatabaseClient.getInstance();
@@ -65,6 +83,12 @@ export interface BatchTicketContext {
   createdBy: string;
   /** Tenant the batch belongs to; scopes the read that builds the response. */
   workspaceId: string;
+  /**
+   * Conversation the batch was started from, when there is one. Its SDLC owner
+   * is inherited by every ticket created here, the same way single-ticket
+   * creation inherits from the conversation it was raised in.
+   */
+  sourceConversationId?: string | undefined;
   fromTicketsTab?: boolean | undefined;
 }
 
@@ -81,9 +105,14 @@ interface PreparedRow {
   workspaceId: string;
   stageId: string;
   stageName: string;
-  kanbanPosition: string;
   statusV2: TicketStatusV2;
   priority: TicketPriority;
+  /** Resolved against the board type — see the FLOW rules in prepareRows. */
+  ticketType: string | null;
+  /** Resolved from the assignment rule when only a group was given. */
+  assignedTo: string | null;
+  /** Board wants role-driven assignment, which can only run post-commit. */
+  needsFullRoleAssignment: boolean;
   eta: Date | null;
   metadata: Prisma.InputJsonValue;
   stageEnteredAt: Date;
@@ -194,31 +223,65 @@ const loadSharedContext = async (rows: BatchTicketInput[]): Promise<SharedContex
 };
 
 /**
- * Kanban keys for the whole batch. New tickets go to the top of their column,
- * so each (board, stage) group needs a chain of N keys below the column's
- * current head — one `generateKeyBetween` per row would hand every row in the
- * group the same key.
+ * Kanban keys for the whole batch, allocated inside the caller's transaction.
+ *
+ * New tickets go to the top of their column, so each (board, stage) group needs
+ * a chain of N keys below the column's current head — one `generateKeyBetween`
+ * per row would hand every row in the group the same key.
+ *
+ * The column head is read under a per-column advisory lock held to commit.
+ * Without it two concurrent batches read the same head and mint identical
+ * fractional keys: `kanbanPosition` has no unique constraint, so nothing would
+ * reject them and the column's order becomes ambiguous. Reading inside the
+ * transaction alone is not enough — at READ COMMITTED both would still see the
+ * same row.
  */
 const allocateKanbanPositions = async (
-  groups: Array<{ boardId: string; stageName: string; count: number }>
-): Promise<Map<string, string[]>> => {
-  const entries = await Promise.all(
-    groups.map(async ({ boardId, stageName, count }) => {
-      const head = await prisma.ticket.findFirst({
-        where: { boardId, stageName, kanbanPosition: { not: null } },
-        orderBy: { kanbanPosition: 'asc' },
-        select: { kanbanPosition: true },
-      });
-      let keys: string[];
-      try {
-        keys = generateNKeysBetween(null, head?.kanbanPosition ?? null, count);
-      } catch {
-        keys = generateNKeysBetween(null, null, count);
-      }
-      return [`${boardId}::${stageName}`, keys] as const;
-    })
-  );
-  return new Map(entries);
+  tx: BatchTransaction,
+  prepared: PreparedRow[]
+): Promise<Map<number, string>> => {
+  const groups = new Map<string, PreparedRow[]>();
+  for (const row of prepared) {
+    const key = `${row.input.boardId}::${row.stageName}`;
+    const list = groups.get(key) ?? [];
+    list.push(row);
+    groups.set(key, list);
+  }
+
+  const positions = new Map<number, string>();
+  // Sequential, and in a stable key order: two batches touching the same pair of
+  // columns must take those locks in the same order or they can deadlock.
+  for (const groupKey of Array.from(groups.keys()).sort()) {
+    const rowsInGroup = groups.get(groupKey)!;
+    const first = rowsInGroup[0]!;
+
+    await advisoryXactLock(
+      tx as Prisma.TransactionClient,
+      ['Ticket'],
+      'serializes kanban position allocation per (board, stage) column',
+      groupKey
+    );
+
+    const head = await tx.ticket.findFirst({
+      where: {
+        boardId: first.input.boardId,
+        stageName: first.stageName,
+        kanbanPosition: { not: null },
+      },
+      orderBy: { kanbanPosition: 'asc' },
+      select: { kanbanPosition: true },
+    });
+
+    let keys: string[];
+    try {
+      keys = generateNKeysBetween(null, head?.kanbanPosition ?? null, rowsInGroup.length);
+    } catch {
+      keys = generateNKeysBetween(null, null, rowsInGroup.length);
+    }
+    rowsInGroup.forEach((row, i) => positions.set(row.index, keys[i]!));
+  }
+
+  return positions;
 };
 
 /**
@@ -229,7 +292,9 @@ const allocateKanbanPositions = async (
 const prepareRows = async (
   rows: BatchTicketInput[],
   ctx: BatchTicketContext,
-  shared: SharedContext
+  shared: SharedContext,
+  /** Indices that hang under a parent; only these escape the FLOW Epic rule. */
+  subTicketIndices: ReadonlySet<number>
 ): Promise<PreparedRow[]> => {
   // One sequence block per distinct project, handed out in row order.
   const sequenceCursors = new Map<string, number>();
@@ -243,8 +308,8 @@ const prepareRows = async (
     sequenceCursors.set(projectId, block.start);
   }
 
-  // Stage selection has to happen before kanban keys, since the key chains are
-  // grouped by the stage each row actually lands in.
+  // Stage selection drives which column a row lands in, which is what the
+  // commit-time kanban allocation groups by.
   const stageByRow = rows.map((row) => {
     const board = shared.boards.get(row.boardId);
     if (!board) throw new Error(`Board ${row.boardId} not found`);
@@ -253,20 +318,53 @@ const prepareRows = async (
         `No stages found for board ${row.boardId}. Board must have at least one stage.`
       );
     }
-    const named = row.stageName ? board.stages.find((s) => s.name === row.stageName) : undefined;
+    // A FLOW board always starts at TODO; the requested stage is ignored, the
+    // same normalization single-ticket creation applies.
+    const wantedStageName = board.boardType === BoardType.FLOW ? 'TODO' : row.stageName;
+    const named = wantedStageName
+      ? board.stages.find((s) => s.name === wantedStageName)
+      : undefined;
     return named ?? board.stages[0]!;
   });
 
-  const groupCounts = new Map<string, { boardId: string; stageName: string; count: number }>();
-  rows.forEach((row, i) => {
-    const key = `${row.boardId}::${stageByRow[i]!.name}`;
-    const existing = groupCounts.get(key);
-    if (existing) existing.count += 1;
-    else groupCounts.set(key, { boardId: row.boardId, stageName: stageByRow[i]!.name, count: 1 });
-  });
-
-  const kanbanKeys = await allocateKanbanPositions(Array.from(groupCounts.values()));
-  const kanbanCursors = new Map<string, number>();
+  // A row that names only a group has to be turned into a real assignee, exactly
+  // as single-ticket creation does — otherwise the ticket lands unassigned and
+  // no assignment rule ever runs. Boards configured for role-driven assignment
+  // defer instead: that path needs a committed ticket id.
+  const assignments = await Promise.all(
+    rows.map(async (row) => {
+      if (row.assignedTo || !row.userGroupId) {
+        return { assignedTo: row.assignedTo ?? null, needsFullRoleAssignment: false };
+      }
+      const board = shared.boards.get(row.boardId);
+      const boardMeta = board?.metadata as BoardMetadata | undefined;
+      if (
+        (Array.isArray(boardMeta?.assignmentRoles) && boardMeta.assignmentRoles.length > 0) ||
+        boardMeta?.fullRoleAssignment === true
+      ) {
+        return { assignedTo: null, needsFullRoleAssignment: true };
+      }
+      try {
+        const result = await evaluateAssignmentRule(
+          row.userGroupId,
+          row.boardId,
+          undefined,
+          undefined,
+          row.projectId
+        );
+        return { assignedTo: result.assignedUserId ?? null, needsFullRoleAssignment: false };
+      } catch (error) {
+        // Same posture as single creation: an assignment failure must not stop
+        // the ticket from being created.
+        logger.error('[BulkTicketBatch] Auto-assignment failed', {
+          userGroupId: row.userGroupId,
+          boardId: row.boardId,
+          error,
+        });
+        return { assignedTo: null, needsFullRoleAssignment: false };
+      }
+    })
+  );
 
   const batchStartedAt = new Date();
 
@@ -282,11 +380,6 @@ const prepareRows = async (
     if (!projectCode) throw new Error(`Project not found: ${input.projectId}`);
 
     const selectedStage = stageByRow[index]!;
-    const groupKey = `${input.boardId}::${selectedStage.name}`;
-    const cursor = kanbanCursors.get(groupKey) ?? 0;
-    kanbanCursors.set(groupKey, cursor + 1);
-    const kanbanPosition = kanbanKeys.get(groupKey)![cursor]!;
-
     const sequenceNumber = sequenceCursors.get(input.projectId)!;
     sequenceCursors.set(input.projectId, sequenceNumber + 1);
 
@@ -295,8 +388,18 @@ const prepareRows = async (
     const messageId = randomUUID();
     const participantId = randomUUID();
 
-    const statusV2 = (input.statusV2 as TicketStatusV2) || TicketStatusV2.TODO;
+    // FLOW boards drive status through the flow itself and expect their roots to
+    // be Epics; a sub-ticket hangs under a parent so it keeps its own type.
+    const { assignedTo, needsFullRoleAssignment } = assignments[index]!;
+    const isFlowBoard = board.boardType === BoardType.FLOW;
+    const statusV2 = isFlowBoard
+      ? TicketStatusV2.TODO
+      : (input.statusV2 as TicketStatusV2) || TicketStatusV2.TODO;
     const priority = (input.priority?.toUpperCase() as TicketPriority) || TicketPriority.MEDIUM;
+    const ticketType =
+      isFlowBoard && !subTicketIndices.has(index)
+        ? BaseTicketType.Epic
+        : (input.ticketType ?? null);
 
     // The stage visit row is only written when the stage tracks an ETA, but its
     // id must exist before evaluateEta runs — that call reads it as the active
@@ -358,13 +461,13 @@ const prepareRows = async (
       description,
       statusV2: statusV2 as TicketCardSummary['statusV2'],
       priority: priority as TicketCardSummary['priority'],
-      assignedTo: input.assignedTo ?? null,
+      assignedTo,
       createdBy: ctx.createdBy,
       createdAt: now.getTime(),
       eta: eta ? eta.getTime() : null,
       xyneId: formatXyneId(projectCode, sequenceNumber),
       stageName: selectedStage.name,
-      ticketType: input.ticketType ?? null,
+      ticketType,
       channelId: input.channelId,
       conversationId,
     });
@@ -397,9 +500,11 @@ const prepareRows = async (
       workspaceId: channel.workspaceId,
       stageId: selectedStage.id,
       stageName: selectedStage.name,
-      kanbanPosition,
       statusV2,
       priority,
+      ticketType,
+      assignedTo,
+      needsFullRoleAssignment,
       eta,
       metadata: metadata as Prisma.InputJsonValue,
       stageEnteredAt: now,
@@ -465,6 +570,10 @@ const commitRows = async (
     })),
   });
 
+  // Allocated here, not in prepareRows: the column head has to be read under a
+  // lock inside this transaction (see allocateKanbanPositions).
+  const kanbanPositions = await allocateKanbanPositions(tx, prepared);
+
   await tx.ticket.createMany({
     data: prepared.map((r) => ({
       id: r.ticketId,
@@ -472,7 +581,7 @@ const commitRows = async (
       description: r.description,
       createdBy: ctx.createdBy,
       updatedBy: ctx.createdBy,
-      assignedTo: r.input.assignedTo ?? null,
+      assignedTo: r.assignedTo,
       conversationId: r.conversationId,
       messageId: r.messageId,
       channelId: r.input.channelId,
@@ -487,8 +596,8 @@ const commitRows = async (
       ...(r.eta ? { eta: r.eta } : {}),
       metadata: r.metadata,
       merchantId: r.input.merchantId ?? null,
-      ticketType: r.input.ticketType ?? null,
-      kanbanPosition: r.kanbanPosition,
+      ticketType: r.ticketType,
+      kanbanPosition: kanbanPositions.get(r.index)!,
       createdAt: r.stageEnteredAt,
       lastEmailAt: r.stageEnteredAt,
     })),
@@ -552,7 +661,7 @@ const commitRows = async (
     });
   }
 
-  const hotfixRows = prepared.filter((r) => r.input.ticketType === BaseTicketType.Hotfix);
+  const hotfixRows = prepared.filter((r) => r.ticketType === BaseTicketType.Hotfix);
   if (hotfixRows.length > 0) {
     await tx.ticketTag.createMany({
       data: hotfixRows.map((r) => ({
@@ -588,7 +697,7 @@ const commitRows = async (
  */
 const fanOut = (prepared: PreparedRow[], ctx: BatchTicketContext): void => {
   const hotfixIds = prepared
-    .filter((r) => r.input.ticketType === BaseTicketType.Hotfix)
+    .filter((r) => r.ticketType === BaseTicketType.Hotfix)
     .map((r) => r.ticketId);
   for (const ticketId of hotfixIds) {
     void dualWriteTicketTags(ticketId, ['hotfix']).catch((error: unknown) => {
@@ -629,7 +738,7 @@ const fanOut = (prepared: PreparedRow[], ctx: BatchTicketContext): void => {
       void dispatchEtaNotifications(row.etaSignals, {
         ticketId: row.ticketId,
         createdBy: ctx.createdBy,
-        assignedTo: row.input.assignedTo ?? null,
+        assignedTo: row.assignedTo,
         ticketUserGroupId: row.input.userGroupId ?? null,
         boardId: row.input.boardId,
         actorId: ctx.createdBy,
@@ -641,33 +750,92 @@ const fanOut = (prepared: PreparedRow[], ctx: BatchTicketContext): void => {
       });
     }
 
-    // Counts come straight from the prepared row: a just-created ticket has no
-    // tags, assignments or form values to read back.
+    // Search indexing. Single creation queues this after the ticket and its form
+    // fields are committed; bulk has no form fields, so committing is enough.
+    vespaQueue
+      .addJob({
+        schema: ticketSchema,
+        jobType: 'feed',
+        docId: row.ticketId,
+        userId: ctx.createdBy,
+        workspaceId: row.workspaceId,
+      })
+      .catch((error: unknown) => {
+        logger.error('[BulkTicketBatch] Failed to queue Vespa job', {
+          ticketId: row.ticketId,
+          error,
+        });
+      });
+
+    // The creation message is written through Prisma, not a Zero mutator, so the
+    // vespa-injection handler that normally triggers classification never fires.
+    void messageClassificationQueue.enqueueForMessage(row.conversationId);
+
+    void userActivityTrackingService.trackTicketCreated(ctx.createdBy, {
+      ticketId: row.ticketId,
+      title: row.input.title,
+      boardId: row.input.boardId,
+      channelId: row.input.channelId,
+    });
+
+    // Same shape single-ticket creation emits. The counts client dereferences
+    // formFieldValues and roleAssignments without guards, so every field has to
+    // be present — a just-created ticket simply has nothing in them yet.
     websocketService.broadcastTicketCountsUpdate({
       operation: 'insert',
       ticket: {
-        id: row.ticketId,
-        workspaceId: row.workspaceId,
-        boardId: row.input.boardId,
-        channelId: row.input.channelId,
-        projectId: row.input.projectId,
-        stageName: row.stageName,
-        statusV2: row.statusV2,
-        priority: row.priority,
-        assignedTo: row.input.assignedTo ?? null,
-        createdBy: ctx.createdBy,
-        userGroupId: row.input.userGroupId ?? null,
-        ticketType: row.input.ticketType ?? null,
-        merchantId: row.input.merchantId ?? null,
-        isStageOverdue: false,
-        eta: row.eta?.getTime() ?? null,
-        createdAt: row.stageEnteredAt.getTime(),
-        prReviewers: [],
-        tags: row.input.ticketType === BaseTicketType.Hotfix ? ['hotfix'] : [],
-        assignments: [],
-        formValues: [],
-      } as Parameters<typeof websocketService.broadcastTicketCountsUpdate>[0]['ticket'],
+        ...makeFallbackCountsSnapshot({
+          id: row.ticketId,
+          workspaceId: row.workspaceId,
+          boardId: row.input.boardId,
+          channelId: row.input.channelId,
+          projectId: row.input.projectId,
+          stageName: row.stageName,
+          statusV2: row.statusV2,
+          priority: row.priority,
+          assignedTo: row.assignedTo,
+          createdBy: ctx.createdBy,
+          userGroupId: row.input.userGroupId ?? null,
+          ticketType: row.ticketType,
+          merchantId: row.input.merchantId ?? null,
+          eta: row.eta,
+          createdAt: row.stageEnteredAt,
+        }),
+        tags: row.ticketType === BaseTicketType.Hotfix ? ['hotfix'] : [],
+        formFieldValues: {},
+      },
     });
+  }
+
+  // Role-driven assignment needs a committed ticket, so it runs here rather than
+  // in prepareRows. Same shape as single creation: assign the roles, then make
+  // the primary role holder the ticket's assignee.
+  for (const row of prepared.filter((r) => r.needsFullRoleAssignment)) {
+    const userGroupId = row.input.userGroupId;
+    if (!userGroupId) continue;
+    void (async () => {
+      try {
+        const fullRoles = await ticketAssignmentService.assignFullRolesToTicket({
+          ticketId: row.ticketId,
+          userGroupId,
+          boardId: row.input.boardId,
+          createdBy: ctx.createdBy,
+          projectId: row.input.projectId,
+        });
+        const primaryUserId = primaryUserIdOf(fullRoles);
+        if (!primaryUserId) return;
+        const updated = await prisma.ticket.update({
+          where: { id: row.ticketId },
+          data: { assignedTo: primaryUserId },
+        });
+        await syncConversationTicketMdFromPrismaTicket(prisma, updated);
+      } catch (error) {
+        logger.error('[BulkTicketBatch] Full role assignment failed', {
+          ticketId: row.ticketId,
+          error,
+        });
+      }
+    })();
   }
 
   for (const channelId of distinct(prepared.map((r) => r.input.channelId))) {
@@ -717,7 +885,7 @@ const commitSubTicketLinks = async (
       updatedBy: ctx.createdBy,
       conversationId: parent.conversationId,
       workspaceId: parent.workspaceId,
-      assignedTo: child.input.assignedTo ?? null,
+      assignedTo: child.assignedTo,
       createdAt: child.stageEnteredAt,
       updatedAt: child.stageEnteredAt,
     })),
@@ -731,6 +899,43 @@ const commitSubTicketLinks = async (
       workspaceId: parent.workspaceId,
     })),
   });
+
+  // The rest of what subTicketService.createSubTicket does per child: the child's
+  // thread needs the parent's anchor card, and the parent's timeline needs a
+  // SUBTICKET_CREATED entry. Looped because both are inherently per-child.
+  for (const { child, subTicketId } of rows) {
+    await linkSubTicketConversationToParent(tx, child.ticketId, parent.id);
+
+    await recordTicketTimelineEvent(
+      {
+        activity: {
+          ticketId: parent.id,
+          updatedBy: ctx.createdBy,
+          activityType: ActivityType.SUBTICKET_CREATED,
+          workspaceId: parent.workspaceId,
+          value: {
+            subTicketId,
+            subTicketTitle: child.input.title,
+            subTicketXyneId: child.xyneId,
+          },
+          timestamp: child.stageEnteredAt,
+        },
+        ...(parent.conversationId
+          ? {
+              message: {
+                conversationId: parent.conversationId,
+                senderId: ctx.createdBy,
+                content: `Subticket ${child.xyneId} created: ${child.input.title}`,
+                activityType: ActivityType.SUBTICKET_CREATED,
+                workspaceId: parent.workspaceId,
+                createdAt: child.stageEnteredAt,
+              },
+            }
+          : {}),
+      },
+      tx as Prisma.TransactionClient
+    );
+  }
 };
 
 /**
@@ -758,10 +963,17 @@ export const createBulkTicketBatch = async (
   }
 
   const shared = await loadSharedContext(allRows);
+  // Which rows are sub-tickets: in parent-sub mode everything except a parent
+  // this batch is creating itself (that parent sits at index 0).
+  const subTicketIndices = new Set<number>(
+    request.mode === BulkTicketMode.PARENT_SUB
+      ? allRows.map((_, i) => i).filter((i) => !(request.parent && i === 0))
+      : []
+  );
   // Prepared as one list so the parent and its children share a single sequence
   // reservation and one kanban key chain per column, and so every derived id
   // comes from the same index space.
-  const prepared = await prepareRows(allRows, ctx, shared);
+  const prepared = await prepareRows(allRows, ctx, shared, subTicketIndices);
   const parentRow = request.parent ? prepared[0]! : null;
   const childRows = request.parent ? prepared.slice(1) : prepared;
 
@@ -786,6 +998,26 @@ export const createBulkTicketBatch = async (
   await prisma.$transaction(
     async (tx) => {
       await commitRows(tx, prepared, ctx);
+
+      // SDLC linking: the owner comes from the conversation the batch was raised
+      // in, not from the freshly created ones (those can't have a link yet).
+      if (ctx.sourceConversationId) {
+        const owner = await resolveInheritedOwner(tx, ctx.sourceConversationId);
+        if (owner) {
+          for (const row of prepared) {
+            await linkCreatedEntities(
+              tx,
+              {
+                owner,
+                channelId: row.input.channelId,
+                conversationId: row.conversationId,
+                ticketId: row.ticketId,
+              },
+              { workspaceId: row.workspaceId, userId: ctx.createdBy }
+            );
+          }
+        }
+      }
 
       if (request.mode === BulkTicketMode.PARENT_SUB && parentLink) {
         await commitSubTicketLinks(tx, parentLink, childRows, ctx);
