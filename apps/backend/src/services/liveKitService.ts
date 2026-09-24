@@ -98,6 +98,21 @@ export interface LiveKitRoomOptions {
   metadata?: string;
 }
 
+// Shared default for how long a LiveKit room stays alive with nobody in it.
+// Kept as one constant so callers that need to reason about this window
+// (e.g. the call-dedup Redis lock's TTL) can't silently drift out of sync
+// with the value actually passed to LiveKit.
+export const DEFAULT_ROOM_EMPTY_TIMEOUT_SECONDS = 120;
+
+// TTL for the Redis "a call is being created for this channel" claim used to
+// dedupe concurrent call-initiation requests (see callController.ts's
+// initiateCall and make-call.step.ts's MakeCallStep). Must outlive
+// DEFAULT_ROOM_EMPTY_TIMEOUT_SECONDS with margin: if nobody ever joins a
+// freshly-created room, the room itself can stay alive that long, so the
+// claim protecting against a duplicate must last at least as long, plus
+// slack for LiveKit's own cleanup sweep + webhook round-trip.
+export const PENDING_CALL_LOCK_TTL_SECONDS = DEFAULT_ROOM_EMPTY_TIMEOUT_SECONDS + 10;
+
 export interface LiveKitTokenOptions {
   userIdentity: string;
   roomName: string;
@@ -219,11 +234,11 @@ export class LiveKitService {
       await this.roomService.createRoom({
         name: options.name,
         maxParticipants: options.maxParticipants || 100,
-        emptyTimeout: options.emptyTimeout || 120,
+        emptyTimeout: options.emptyTimeout || DEFAULT_ROOM_EMPTY_TIMEOUT_SECONDS,
         metadata: options.metadata,
       });
 
-      logger.info(`[${options.name}] livekit_room_created | max_participants=${options.maxParticipants || 100}, empty_timeout=${options.emptyTimeout || 120}`);
+      logger.info(`[${options.name}] livekit_room_created | max_participants=${options.maxParticipants || 100}, empty_timeout=${options.emptyTimeout || DEFAULT_ROOM_EMPTY_TIMEOUT_SECONDS}`);
     } catch (error) {
       logger.error(`[${options.name}] livekit_room_creation_failed | error=${error}`);
       throw error;

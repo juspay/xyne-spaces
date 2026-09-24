@@ -4,9 +4,12 @@ import {
   allowedSourcesForHostControls,
   hasTurnedOffHostControl,
   getHostControls,
+  DEFAULT_ROOM_EMPTY_TIMEOUT_SECONDS,
+  PENDING_CALL_LOCK_TTL_SECONDS,
 } from '@/services/liveKitService';
 import { repositories } from '@/database/repositories';
 import { DatabaseClient, db } from '@/database/client';
+import { redisService } from '@/services/redisService';
 import { logger } from '@/utils/logger';
 import { v4 as uuidv4 } from 'uuid';
 import { transcriptService } from '@/services/transcriptService';
@@ -535,7 +538,7 @@ export class CallController {
         await livekitService.createRoom({
           name: callExternalId,
           maxParticipants: 100,
-          emptyTimeout: 120,
+          emptyTimeout: DEFAULT_ROOM_EMPTY_TIMEOUT_SECONDS,
           metadata: roomMetadata,
         });
         logger.info(`[${callExternalId}] livekit_room_created | user_id=${userId}, path=note_taker`);
@@ -619,6 +622,15 @@ export class CallController {
       const existingCall = conversationId
         ? await repositories.calls.findActiveCallByChannelIdAndConversationId(finalChannelId, conversationId)
         : await repositories.calls.findActiveCallByChannelId(finalChannelId);
+
+      // Race guard for concurrent INITIATE_CALL requests on the same channel/conversation (e.g.
+      // two users calling each other at the same moment). The `Call` DB row above is only created
+      // later by the LiveKit webhook once someone actually joins the room, so it can't catch a room
+      // created milliseconds earlier by a racing request. This Redis key is claimed synchronously
+      // (SET NX) right before a new room is created, and doubles as a pointer to the winning room
+      // so a losing racer joins it instead of creating a second one.
+      const dedupeScope = conversationId ? `${finalChannelId}:${conversationId}` : finalChannelId;
+      const pendingCallKey = `call:pending:${dedupeScope}`;
 
       // Fetch channel to get scopeType (needed for existing call path)
       stage = 'channel_lookup';
@@ -739,6 +751,63 @@ export class CallController {
       // No active call or existing call's room is gone - create a new LiveKit room
       // DB records will be created by webhook when first participant joins
       callExternalId = uuidv4();
+
+      stage = 'pending_call_lock';
+      const claimed = await redisService.set(pendingCallKey, callExternalId, PENDING_CALL_LOCK_TTL_SECONDS, true /* NX */);
+      if (!claimed) {
+        // Another request already claimed this channel/conversation a moment ago (classic
+        // "both users call each other at once" race) - try to join their room instead of
+        // creating a second one.
+        //
+        // The winner's own room isn't created until further below (after SDLC-link
+        // validation and agent-name resolution, both real async work), so a *single*
+        // getRoomInfo check here can land in that gap and see nothing yet - wrongly
+        // concluding the claim is stale and reclaiming it out from under the winner,
+        // recreating this exact race. Poll briefly instead of deciding off one check,
+        // mirroring joinCall's room-recreate wait below.
+        const winningExternalId = await redisService.get(pendingCallKey);
+        let winningRoom = winningExternalId ? await livekitService.getRoomInfo(winningExternalId) : null;
+        for (let attempt = 0; attempt < 5 && winningExternalId && !winningRoom; attempt++) {
+          await new Promise(resolve => setTimeout(resolve, 300));
+          winningRoom = await livekitService.getRoomInfo(winningExternalId);
+        }
+
+        if (winningExternalId && winningRoom) {
+          stage = 'pending_call_join';
+          const user = await db.user.findUnique({ where: { id: userId }, select: { picture: true } });
+          const token = await livekitService.generateAccessToken({
+            userIdentity: userId,
+            roomName: winningExternalId,
+            userName: userName || userEmail || 'Unknown',
+            metadata: JSON.stringify({ picture: user?.picture || null }),
+          });
+
+          logger.info(`[${winningExternalId}] joining_racing_call | user_id=${userId}, channel_id=${finalChannelId}, correlation_id=${correlationId}`);
+          void userActivityTrackingService.trackCallJoined(userId, {
+            callId: winningExternalId,
+            channelId: finalChannelId,
+          });
+
+          res.json({
+            success: true,
+            token,
+            livekitUrl: livekitService.getServerUrl(),
+            externalId: winningExternalId,
+            callId: winningExternalId,
+            roomLink: buildCallInviteUrl(winningExternalId),
+            channelId: finalChannelId,
+            scopeType: channel.scopeType,
+          });
+          return;
+        }
+
+        // Still no room after waiting out the winner's setup time - genuinely stale
+        // (crashed/errored before creating its room) or vanished. Reclaim the key for
+        // our own room rather than leaving the channel stuck.
+        logger.warn(`[${pendingCallKey}] pending_call_reclaimed | reason=winning_room_not_found_after_wait, winning_external_id=${winningExternalId ?? 'none'}`);
+        await redisService.set(pendingCallKey, callExternalId, PENDING_CALL_LOCK_TTL_SECONDS);
+      }
+
       logger.info(`[${callExternalId}] creating_new_livekit_room | user_id=${userId}, channel_id=${finalChannelId}, call_type=${callType}, correlation_id=${correlationId}`);
 
       // Fetch channel to get projectId and boardId for room metadata (only if not already fetched)
@@ -802,7 +871,7 @@ export class CallController {
       await livekitService.createRoom({
         name: callExternalId,
         maxParticipants: 100,
-        emptyTimeout: 120,
+        emptyTimeout: DEFAULT_ROOM_EMPTY_TIMEOUT_SECONDS,
         metadata: roomMetadata,
       });
 
@@ -1000,46 +1069,81 @@ export class CallController {
           return;
         }
 
-        // Resolved from the call's creator, not the joining participant — so the agent
-        // choice is deterministic regardless of which participant's join happens to
-        // trigger this block, rather than depending on join order.
-        const activeCall = call;
-        if (roomInfo) {
-          logger.info(`Found existing room ${callId}, deleting before creating new one`);
-          await livekitService.deleteRoom(callId);
-          logger.info(`Deleted existing room ${callId}`);
+        // Two people joining the same call at the same instant could otherwise interleave
+        // delete/create calls for this SAME room name (the room name here is fixed as
+        // `callId`, unlike initiateCall's race there's no new room to redirect a loser
+        // to), and could also double-dispatch the transcription agent - so guard the
+        // whole recreate+dispatch sequence with a short-lived claim.
+        const roomRecreateKey = `call:room-recreate:${callId}`;
+        const ROOM_RECREATE_LOCK_TTL_SECONDS = 10;
+        let claimedRecreateLock = true;
+        try {
+          claimedRecreateLock = await redisService.set(roomRecreateKey, '1', ROOM_RECREATE_LOCK_TTL_SECONDS, true /* NX */);
+        } catch (error) {
+          // Fail OPEN: this is the join path for every scheduled/recurring meeting - a
+          // Redis hiccup shouldn't block people from joining. Worst case without the
+          // lock is transient delete/create churn on this one room name, not duplicate
+          // rooms (LiveKit's createRoom is keyed by name).
+          logger.warn(`[${callId}] room_recreate_lock_unavailable | error=${error}`);
+          claimedRecreateLock = true;
         }
 
-        const joinAgentName = await livekitService.resolveAgentNameForUser(activeCall.createdByUserId);
+        if (claimedRecreateLock) {
+          // Resolved from the call's creator, not the joining participant — so the agent
+          // choice is deterministic regardless of which participant's join happens to
+          // trigger this block, rather than depending on join order.
+          const activeCall = call;
+          if (roomInfo) {
+            logger.info(`Found existing room ${callId}, deleting before creating new one`);
+            await livekitService.deleteRoom(callId);
+            logger.info(`Deleted existing room ${callId}`);
+          }
 
-        // Prepare room metadata
-        const roomMetadata = JSON.stringify({
-          channelId: channel.id,
-          createdBy: activeCall.createdByUserId,
-          ...(activeCall.status === CallStatus.SCHEDULED && { scheduledCallId: activeCall.id }),
-          ...(joinAgentName && { agentName: joinAgentName }),
-        });
+          const joinAgentName = await livekitService.resolveAgentNameForUser(activeCall.createdByUserId);
 
-        // Create LiveKit room
-        await livekitService.createRoom({
-          name: callId,
-          maxParticipants: 100,
-          emptyTimeout: 120,
-          metadata: roomMetadata,
-        });
-
-        if (joinAgentName) {
-          const dispatch = await livekitService.dispatchTranscriptionAgentForCall(callId, joinAgentName);
-          await repositories.calls.update(activeCall.id, {
-            metadata: {
-              ...(activeCall.metadata as Record<string, unknown> ?? {}),
-              agentName: joinAgentName,
-              ...(dispatch?.dispatchId && { dispatchId: dispatch.dispatchId }),
-              dispatchStatus: dispatch ? 'dispatched' : 'failed',
-            },
+          // Prepare room metadata
+          const roomMetadata = JSON.stringify({
+            channelId: channel.id,
+            createdBy: activeCall.createdByUserId,
+            ...(activeCall.status === CallStatus.SCHEDULED && { scheduledCallId: activeCall.id }),
+            ...(joinAgentName && { agentName: joinAgentName }),
           });
+
+          // Create LiveKit room
+          await livekitService.createRoom({
+            name: callId,
+            maxParticipants: 100,
+            emptyTimeout: DEFAULT_ROOM_EMPTY_TIMEOUT_SECONDS,
+            metadata: roomMetadata,
+          });
+
+          if (joinAgentName) {
+            const dispatch = await livekitService.dispatchTranscriptionAgentForCall(callId, joinAgentName);
+            await repositories.calls.update(activeCall.id, {
+              metadata: {
+                ...(activeCall.metadata as Record<string, unknown> ?? {}),
+                agentName: joinAgentName,
+                ...(dispatch?.dispatchId && { dispatchId: dispatch.dispatchId }),
+                dispatchStatus: dispatch ? 'dispatched' : 'failed',
+              },
+            });
+          } else {
+            logger.error(`[${callId}] transcription_agent_dispatch_skipped | reason=no_active_agent_name_configured`);
+          }
+
+          await redisService.del(roomRecreateKey).catch(() => undefined);
         } else {
-          logger.error(`[${callId}] transcription_agent_dispatch_skipped | reason=no_active_agent_name_configured`);
+          // Someone else is already recreating this room - wait briefly for it to appear
+          // rather than racing our own delete/create against theirs.
+          let recreatedRoom = null;
+          for (let attempt = 0; attempt < 3 && !recreatedRoom; attempt++) {
+            await new Promise(resolve => setTimeout(resolve, 200));
+            recreatedRoom = await livekitService.getRoomInfo(callId);
+          }
+          if (!recreatedRoom) {
+            res.status(503).json({ success: false, error: 'Call room is being prepared, please retry' });
+            return;
+          }
         }
       }
 
