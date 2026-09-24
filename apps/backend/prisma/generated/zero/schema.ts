@@ -115,6 +115,17 @@ export const ticketTable = table("tickets")
   })
   .primaryKey("id");
 
+export const ticketDescriptionTable = table("ticket_descriptions")
+  .columns({
+    ticketId: string(),
+    workspaceId: string(),
+    channelId: string(),
+    description: string(),
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey("ticketId");
+
 export const subTicketTable = table("sub_tickets")
   .columns({
     id: string(),
@@ -765,6 +776,26 @@ export const pullRequestsTable = table("pull_requests")
     updatedAt: number(),
     status: string(),
     ticketId: string().optional(),
+    botCommitCount: number().optional(),
+    humanCommitCount: number().optional(),
+    unknownCommitCount: number().optional(),
+    commitAnalysisStatus: string().optional(),
+    commitAnalysisError: string().optional(),
+    commitAnalyzedAt: number().optional(),
+  })
+  .primaryKey("id");
+
+export const commitTable = table("commits")
+  .columns({
+    id: string(),
+    workspaceId: string(),
+    commitSha: string(),
+    pullRequestId: string(),
+    agentSlug: string().optional(),
+    authorName: string(),
+    authorEmail: string(),
+    committedAt: number(),
+    createdAt: number(),
   })
   .primaryKey("id");
 
@@ -3247,6 +3278,24 @@ export const ticketTableRelationships = relationships(ticketTable, ({ one, many 
     sourceField: ["id"],
     destField: ["ticketId"],
     destSchema: emailReadTable,
+  }),
+  ticketDescription: one({
+    sourceField: ["id"],
+    destField: ["ticketId"],
+    destSchema: ticketDescriptionTable,
+  })
+}));
+
+export const ticketDescriptionTableRelationships = relationships(ticketDescriptionTable, ({ one }) => ({
+  ticket: one({
+    sourceField: ["ticketId"],
+    destField: ["id"],
+    destSchema: ticketTable,
+  }),
+  channel: one({
+    sourceField: ["channelId"],
+    destField: ["id"],
+    destSchema: channelTable,
   })
 }));
 
@@ -4265,6 +4314,11 @@ export const channelTableRelationships = relationships(channelTable, ({ one, man
     sourceField: ["id"],
     destField: ["channelId"],
     destSchema: collectionPermissionTable,
+  }),
+  ticketDescriptions: many({
+    sourceField: ["id"],
+    destField: ["channelId"],
+    destSchema: ticketDescriptionTable,
   })
 }));
 
@@ -5178,6 +5232,7 @@ export const schema = createSchema(
       toolTable,
       agentToolsMappingTable,
       ticketTable,
+      ticketDescriptionTable,
       subTicketTable,
       ticketSubTicketMappingTable,
       ticketAssignmentTable,
@@ -5221,6 +5276,7 @@ export const schema = createSchema(
       resourceAccessTable,
       aclAuditLogTable,
       pullRequestsTable,
+      commitTable,
       prThreadLinkTable,
       teamIntelligenceIngestionBatchV2Table,
       teamIntelligenceUserIngestionV2Table,
@@ -5368,6 +5424,7 @@ export const schema = createSchema(
       toolTableRelationships,
       agentToolsMappingTableRelationships,
       ticketTableRelationships,
+      ticketDescriptionTableRelationships,
       subTicketTableRelationships,
       ticketSubTicketMappingTableRelationships,
       ticketAssignmentTableRelationships,
@@ -5490,6 +5547,7 @@ export type Model = Row<typeof schema.tables.models>;
 export type Tool = Row<typeof schema.tables.tools>;
 export type AgentToolsMapping = Row<typeof schema.tables.agent_tools_mappings>;
 export type Ticket = Row<typeof schema.tables.tickets>;
+export type TicketDescription = Row<typeof schema.tables.ticket_descriptions>;
 export type SubTicket = Row<typeof schema.tables.sub_tickets>;
 export type TicketSubTicketMapping = Row<typeof schema.tables.ticket_sub_ticket_mappings>;
 export type TicketAssignment = Row<typeof schema.tables.ticket_assignments>;
@@ -5533,6 +5591,7 @@ export type Resource = Row<typeof schema.tables.resources>;
 export type ResourceAccess = Row<typeof schema.tables.resource_access>;
 export type ACLAuditLog = Row<typeof schema.tables.acl_audit_logs>;
 export type PullRequests = Row<typeof schema.tables.pull_requests>;
+export type Commit = Row<typeof schema.tables.commits>;
 export type PrThreadLink = Row<typeof schema.tables.pr_thread_links>;
 export type TeamIntelligenceIngestionBatchV2 = Row<typeof schema.tables.team_intelligence_ingestion_batches_v2>;
 export type TeamIntelligenceUserIngestionV2 = Row<typeof schema.tables.team_intelligence_user_ingestions_v2>;

@@ -618,4 +618,107 @@ export class BitbucketService {
       return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
     }
   }
+
+  /**
+   * Fetch all commits for a pull request (for bot attribution tracking)
+   * Returns full commit messages for Co-authored-by parsing
+   */
+  async getCommitsForPullRequest(
+    projectKey: string,
+    repositorySlug: string,
+    prId: number,
+  ): Promise<Array<{
+    sha: string;
+    authorName: string;
+    authorEmail: string;
+    message: string;
+    committedAt: Date;
+  }>> {
+    try {
+      const commits: Array<{
+        id: string;
+        author: {
+          displayName: string;
+          emailAddress: string;
+        };
+        message: string;
+        authorTimestamp: number;
+      }> = [];
+
+      let start = 0;
+      const LIMIT = 100;
+      const MAX_PAGES = 50;
+      let page = 0;
+
+      // Fetch all pages
+      while (page < MAX_PAGES) {
+        page++;
+        const endpoint = `/projects/${projectKey}/repos/${repositorySlug}/pull-requests/${prId}/commits?limit=${LIMIT}&start=${start}`;
+        const url = `${this.config.baseUrl}${endpoint}`;
+
+        const response = await fetch(url, {
+          method: 'GET',
+          headers: {
+            'Accept': 'application/json',
+            'Authorization': this.getAuthHeader(),
+          },
+          signal: AbortSignal.timeout(this.REQUEST_TIMEOUT_MS),
+        });
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new Error(
+            `Bitbucket: failed to fetch commits for PR #${prId} in ${projectKey}/${repositorySlug}: ` +
+            `${response.status} ${response.statusText} — ${errorText}`,
+          );
+        }
+
+        const data = await response.json() as {
+          values: typeof commits;
+          isLastPage: boolean;
+          nextPageStart?: number;
+        };
+
+        // Break if response structure is invalid
+        if (!data || !Array.isArray(data.values) || typeof data.isLastPage !== 'boolean') {
+          logger.warn(`Bitbucket: PR #${prId} unexpected response structure, stopping pagination`);
+          break;
+        }
+
+        commits.push(...data.values);
+
+        if (data.isLastPage) break;
+
+        // If nextPageStart is not provided or invalid, break to prevent infinite loop
+        if (!data.nextPageStart || data.nextPageStart === start) {
+          logger.warn(`Bitbucket: PR #${prId} pagination issue - nextPageStart not provided or unchanged, stopping`);
+          break;
+        }
+
+        start = data.nextPageStart;
+      }
+
+      if (page >= MAX_PAGES) {
+        logger.warn(`Bitbucket: PR #${prId} has more than ${MAX_PAGES * LIMIT} commits, truncated`);
+      }
+
+      logger.info(
+        `Bitbucket: fetched ${commits.length} commit(s) for PR #${prId} in ${projectKey}/${repositorySlug}`,
+      );
+
+      return commits.map((c) => ({
+        sha: c.id,
+        authorName: c.author.displayName,
+        authorEmail: c.author.emailAddress,
+        message: c.message, // FULL message for Co-authored-by parsing
+        committedAt: new Date(c.authorTimestamp),
+      }));
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      logger.error(
+        `Bitbucket: failed to fetch commits for PR #${prId} in ${projectKey}/${repositorySlug}: ${msg}`,
+      );
+      throw error;
+    }
+  }
 }

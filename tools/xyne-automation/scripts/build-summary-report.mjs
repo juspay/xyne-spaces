@@ -8,20 +8,46 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 const artifactDir = process.argv[2];
-if (!artifactDir) { console.error('usage: build-summary-report.mjs <artifactDir> [out.html]'); process.exit(2); }
+if (!artifactDir) {
+  console.error('usage: build-summary-report.mjs <artifactDir> [out.html]');
+  process.exit(2);
+}
 const outFile = process.argv[3] ?? path.join(artifactDir, 'report.html');
-const result = JSON.parse(fs.readFileSync(path.join(artifactDir, 'json-report', 'result.json'), 'utf8'));
+const result = JSON.parse(
+  fs.readFileSync(path.join(artifactDir, 'json-report', 'result.json'), 'utf8')
+);
 const meta = readJson(path.join(artifactDir, 'run-metadata.json')) ?? {};
 // Written by run-gauge.ts: scenarios re-run after the main pass, as "<spec>:<line>". Anything
 // in retriedAtEnd but not stillFailing recovered, and result.json still says "failed" for it.
-const recovery = readJson(path.join(artifactDir, 'retry-recovery.json')) ?? { retriedAtEnd: [], stillFailing: [] };
+const recovery = readJson(path.join(artifactDir, 'retry-recovery.json')) ?? {
+  retriedAtEnd: [],
+  stillFailing: [],
+};
 const specOf = (item) => item.replace(/:\d+$/, '');
 const inList = (list, spec) => list.map(specOf).some((p) => spec.fileName.endsWith(p));
-const recoveredAtEnd = (spec, sc) => sc.executionStatus === 'failed' && inList(recovery.retriedAtEnd, spec) && !inList(recovery.stillFailing, spec);
+const recoveredAtEnd = (spec, sc) =>
+  sc.executionStatus === 'failed' &&
+  inList(recovery.retriedAtEnd, spec) &&
+  !inList(recovery.stillFailing, spec);
 
-function readJson(p) { try { return JSON.parse(fs.readFileSync(p, 'utf8')); } catch { return null; } }
-const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const ms = (n) => (n >= 60000 ? `${Math.floor(n / 60000)}m ${Math.round((n % 60000) / 1000)}s` : n >= 1000 ? `${(n / 1000).toFixed(1)}s` : `${n}ms`);
+function readJson(p) {
+  try {
+    return JSON.parse(fs.readFileSync(p, 'utf8'));
+  } catch {
+    return null;
+  }
+}
+const esc = (s) =>
+  String(s ?? '').replace(
+    /[&<>"']/g,
+    (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]
+  );
+const ms = (n) =>
+  n >= 60000
+    ? `${Math.floor(n / 60000)}m ${Math.round((n % 60000) / 1000)}s`
+    : n >= 1000
+      ? `${(n / 1000).toFixed(1)}s`
+      : `${n}ms`;
 const specName = (s) => s.specHeading || path.basename(s.fileName);
 
 // Gauge stores screenshots as files (ScreenshotFile) in html-report/images, or inline base64 (screenshot).
@@ -37,33 +63,56 @@ function screenshotDataUri(r) {
 
 function failuresOf(scenario) {
   const out = [];
-  for (const it of [...(scenario.contexts ?? []), ...(scenario.items ?? []), ...(scenario.teardowns ?? [])]) {
-    if (it.itemType === 'step' && it.result?.status === 'failed') out.push({ step: it.stepText, ...it.result });
-    if (it.itemType === 'concept') for (const s of it.steps ?? []) if (s.result?.status === 'failed') out.push({ step: s.stepText, ...s.result });
+  for (const it of [
+    ...(scenario.contexts ?? []),
+    ...(scenario.items ?? []),
+    ...(scenario.teardowns ?? []),
+  ]) {
+    if (it.itemType === 'step' && it.result?.status === 'failed')
+      out.push({ step: it.stepText, ...it.result });
+    if (it.itemType === 'concept')
+      for (const s of it.steps ?? [])
+        if (s.result?.status === 'failed') out.push({ step: s.stepText, ...s.result });
   }
-  for (const k of ['beforeScenarioHookFailure', 'afterScenarioHookFailure']) if (scenario[k]) out.push({ step: k, ...scenario[k] });
+  for (const k of ['beforeScenarioHookFailure', 'afterScenarioHookFailure'])
+    if (scenario[k]) out.push({ step: k, ...scenario[k] });
   return out;
 }
 
 const specs = result.specResults ?? [];
 const allScenarios = specs.flatMap((s) => (s.scenarios ?? []).map((sc) => ({ spec: s, sc })));
 // retriesCount counts attempts: 1 = passed first time.
-const failed = allScenarios.filter(({ spec, sc }) => sc.executionStatus === 'failed' && !recoveredAtEnd(spec, sc));
-const retried = allScenarios.filter(({ spec, sc }) => (sc.retriesCount ?? 1) > 1 || recoveredAtEnd(spec, sc));
-const status = failed.length === 0 && !result.beforeSuiteHookFailure && !result.afterSuiteHookFailure ? 'passed' : 'failed';
-const passedCount = allScenarios.length - failed.length - allScenarios.filter(({ sc }) => sc.executionStatus === 'skipped').length;
-const hookFailures = ['beforeSuiteHookFailure', 'afterSuiteHookFailure'].filter((k) => result[k]).map((k) => ({ where: k, ...result[k] }));
+const failed = allScenarios.filter(
+  ({ spec, sc }) => sc.executionStatus === 'failed' && !recoveredAtEnd(spec, sc)
+);
+const retried = allScenarios.filter(
+  ({ spec, sc }) => (sc.retriesCount ?? 1) > 1 || recoveredAtEnd(spec, sc)
+);
+const status =
+  failed.length === 0 && !result.beforeSuiteHookFailure && !result.afterSuiteHookFailure
+    ? 'passed'
+    : 'failed';
+const passedCount =
+  allScenarios.length -
+  failed.length -
+  allScenarios.filter(({ sc }) => sc.executionStatus === 'skipped').length;
+const hookFailures = ['beforeSuiteHookFailure', 'afterSuiteHookFailure']
+  .filter((k) => result[k])
+  .map((k) => ({ where: k, ...result[k] }));
 
-const failureBlock = (spec, sc) => failuresOf(sc).map((f) => {
-  const shot = screenshotDataUri(f);
-  return `<div class="fail">
+const failureBlock = (spec, sc) =>
+  failuresOf(sc)
+    .map((f) => {
+      const shot = screenshotDataUri(f);
+      return `<div class="fail">
     <div class="crumb">${esc(specName(spec))} › <b>${esc(sc.scenarioHeading)}</b></div>
     <div class="step">✗ ${esc(f.step)}</div>
     ${f.errorMessage ? `<pre class="err">${esc(f.errorMessage.trim())}</pre>` : ''}
     ${shot ? `<a href="${shot}" target="_blank"><img class="shot" src="${shot}" alt="screenshot"></a>` : ''}
     ${f.stackTrace ? `<details><summary>stack trace</summary><pre class="stack">${esc(f.stackTrace.trim())}</pre></details>` : ''}
   </div>`;
-}).join('');
+    })
+    .join('');
 
 const scenarioRow = (spec, sc) => {
   const st = recoveredAtEnd(spec, sc) ? 'passed' : sc.executionStatus;
@@ -72,9 +121,11 @@ const scenarioRow = (spec, sc) => {
 };
 
 const specBlock = (spec) => {
-  const scs = spec.scenarios ?? [], total = scs.length;
+  const scs = spec.scenarios ?? [],
+    total = scs.length;
   const failing = scs.filter((sc) => sc.executionStatus === 'failed' && !recoveredAtEnd(spec, sc));
-  const fails = failing.length, st = fails > 0 ? 'failed' : spec.executionStatus === 'skipped' ? 'skipped' : 'passed';
+  const fails = failing.length,
+    st = fails > 0 ? 'failed' : spec.executionStatus === 'skipped' ? 'skipped' : 'passed';
   return `<details class="spec ${st}"${fails > 0 ? ' open' : ''}><summary><span class="dot"></span>${esc(specName(spec))}<span class="counts">${total - fails}/${total} passed</span><span class="t">${ms(spec.executionTime)}</span></summary>
     <ul>${scs.map((sc) => scenarioRow(spec, sc)).join('')}</ul>
     ${failing.map((sc) => failureBlock(spec, sc)).join('')}
@@ -117,4 +168,3 @@ ${specs.map(specBlock).join('')}
 </body></html>`;
 
 fs.writeFileSync(outFile, html);
-console.log(`${outFile} (${(html.length / 1024).toFixed(0)} KB, ${failed.length} failed, ${retried.length} retried)`);
