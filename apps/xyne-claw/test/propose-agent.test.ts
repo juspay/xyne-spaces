@@ -23,8 +23,30 @@ async function callTool(ref: ProposeAgentRef, abortRun: (() => void) | undefined
 const validDraft = {
   name: "Ticket Triage",
   description: "Triages incoming tickets",
-  systemPrompt:
-    "You are a triage agent. Read each ticket, classify it, and route it to the right owner.",
+  systemPrompt: `## Identity & tone
+You are a triage agent. Be direct.
+
+## Operational Workflow
+1. Read each ticket.
+2. Classify severity.
+3. Route to the right owner.
+
+## When to use each tool
+Use spaces to notify. Use web-search only for public docs.
+
+## Guardrails
+Never delete tickets. Do not invent severity.
+
+## Decision rules
+IF severity is critical THEN page on-call.
+
+## Error recovery
+If search fails, continue with the ticket body.
+
+## Contrastive examples
+Anti-pattern: Hello! I'd be delighted to help…
+Calibrated: Ticket #42 is P1 — routed to @oncall.
+`,
   tools: ["spaces", "web-search"],
 };
 
@@ -62,7 +84,16 @@ describe("rejections keep the turn alive so the model can retry", () => {
   test.each([
     ["missing name", { ...validDraft, name: "  " }, /name/i],
     ["missing description", { ...validDraft, description: "" }, /description/i],
-    ["stub system prompt", { ...validDraft, systemPrompt: "be helpful" }, /systemPrompt/i],
+    ["stub system prompt", { ...validDraft, systemPrompt: "be helpful" }, /systemPrompt|short/i],
+    [
+      "missing workflow",
+      {
+        ...validDraft,
+        systemPrompt:
+          "You are a triage agent that never deletes tickets and must not invent severity. Be direct and precise always.",
+      },
+      /Workflow/i,
+    ],
   ])("%s", async (_label, params, pattern) => {
     const ref: ProposeAgentRef = {};
     const abortRun = vi.fn();
@@ -74,6 +105,25 @@ describe("rejections keep the turn alive so the model can retry", () => {
     expect(res.details?.["error"]).toBe(true);
     expect(res.content[0]!.text).toMatch(pattern);
   });
+});
+
+test("defaults permissionMode to ask-first", async () => {
+  const ref: ProposeAgentRef = {};
+  await callTool(ref, undefined, validDraft);
+  expect(ref.value?.agent.permissionMode).toBe("ask-first");
+});
+
+test("accepts permissionMode and skillSlugs", async () => {
+  const ref: ProposeAgentRef = {};
+  await callTool(ref, undefined, {
+    ...validDraft,
+    permissionMode: "read-only",
+    skillSlugs: ["ticket-triage-procedure"],
+    deniedTools: ["jira.delete_issue"],
+  });
+  expect(ref.value?.agent.permissionMode).toBe("read-only");
+  expect(ref.value?.agent.skillSlugs).toEqual(["ticket-triage-procedure"]);
+  expect(ref.value?.agent.deniedTools).toEqual(["jira.delete_issue"]);
 });
 
 test("is idempotent — the first draft stands and repeats are no-ops", async () => {

@@ -289,10 +289,11 @@ export const HUB_AUTHORING_PROMPT_APPENDIX = `
 You author agents the same way as Xyne Agent, but this screen uses canvas markers — not propose-agent cards.
 
 When the user asks to create a new agent:
-1. Infer the job, a crisp name, a one-line description, and a real system prompt (role, procedure, which capabilities to use when, output format, limits) — not a one-liner.
-2. Prefer a usable draft over interviewing. Call nothing; tools are off here.
-3. Emit XYNE_CREATE_DRAFT: <one-line intent> as soon as the draft is decided. Do not narrate "Drafted …" or paste Name/Description/Instructions/Rules into chat — the client writes the canvas and announces each section after it lands.
-4. Do not claim the agent exists until the user hits Create. Do not mention markers.
+1. If the ask is vague ("make an agent", "create a bot") with no job named: ask what job it should do. Emit XYNE_CREATE_ASK. Do not draft. At most two questions per turn.
+2. Once a job is named ("standup scribe for eng"): draft name, description, and a thin system prompt with Identity, numbered Operational Workflow, tool usage, Guardrails, decision rules, error recovery, and two contrastive examples. Prefer a procedure skill on the Skills row for long steps.
+3. If the job can send, delete, pay, force-push, or post publicly: ask one closed risk question (XYNE_CREATE_ASK) before drafting, then set permission accordingly (ask-first / read-only / can-write).
+4. Emit XYNE_CREATE_DRAFT: <one-line intent> when drafting. Do not narrate "Drafted …" or paste Name/Description/Instructions into chat — the client writes the canvas.
+5. Do not claim the agent exists until the user hits Create. Do not mention markers. "Just draft" / "you pick" skips questions once.
 `;
 
 function markerLineRe(): RegExp {
@@ -320,16 +321,14 @@ Left pane is this conversation. The canvas on the right is the agent spec (name,
 ${canvas}
 ${HUB_AUTHORING_PROMPT_APPENDIX}
 
-Default to a usable draft. The user can discover and edit the rest on the canvas.
-
 Rules:
 1. Greetings, UI questions, explanations, and nonsense (random characters, gibberish): reply in chat only. End with XYNE_CREATE_IDLE. Do not draft.
-2. A job, even a thin one ("standup bot", "I wanna do A", "make an agent that …"): draft a usable agent from reasonable defaults. Emit XYNE_CREATE_DRAFT: <one-line intent> with little or no prose — the client fills the canvas and speaks after each section lands. Do not interview first. Do not say "Drafted … on the canvas."
-3. Ask 1–3 short questions only when a draft would be wrong without the answer (two contradictory jobs, which of two systems). Then emit XYNE_CREATE_ASK and do not draft. Unanswered questions never block Create.
-4. First drafts always fill name, handle, description, and instructions on the canvas. When the user clearly needs capabilities (Slack, email, X.com, browse/search, skills, knowledge, subagents), also suggest the matching Hub rows after identity — one section at a time. Vague “make a bot” stays identity-only. Never paste Name, Description, Instructions, or Rules into chat — the canvas is the source of truth.
+2. Vague create asks with no job ("make an agent", "create a bot"): ask "What job should it do?" Emit XYNE_CREATE_ASK. Do not draft. Later turns: at most two questions (who for, what it reads/writes, what it must never do).
+3. A named job ("standup scribe for eng", "agent that posts Slack digests"): draft. Emit XYNE_CREATE_DRAFT: <one-line intent>. If the job can send/delete/pay/force-push/post publicly, ask one closed risk question first (XYNE_CREATE_ASK).
+4. First drafts fill name, handle, description, and instructions (Workflow + Guardrails required). Suggest Hub rows only when the user named capabilities. Never paste Name, Description, Instructions, or Rules into chat.
 5. Canvas edits (rename, shorter instructions, add Slack): emit DRAFT or RENAME as appropriate.
    Rename-only: XYNE_CREATE_RENAME: <new name>
-6. Never mention these markers to the user. Never claim the canvas is filled unless you emitted DRAFT or RENAME.`;
+6. Never mention these markers to the user. Never claim the canvas is filled unless you emitted DRAFT or RENAME. "Just draft" skips intake.`;
 }
 
 export function createModeQuery(userText: string, snapshot: CreateCanvasSnapshot): string {

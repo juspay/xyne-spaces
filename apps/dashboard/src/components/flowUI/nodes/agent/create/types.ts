@@ -9,12 +9,15 @@ export type AgentCreateField =
   | 'systemPrompt'
   | 'tools'
   | 'skills'
-  | 'knowledge';
+  | 'knowledge'
+  | 'permissionMode';
 
 /** Hub capability row the write pointer should rest on during scripted fills. */
 export type AgentCreateHubRow = 'mcp' | 'builtin' | 'subagent' | 'skills' | 'knowledge';
 
 export type AgentCreatePhase = 'empty' | 'loading' | 'draft' | 'created' | 'rejected';
+
+export type AgentPermissionMode = 'ask-first' | 'read-only' | 'can-write';
 
 export interface AgentCreateFormState {
   name: string;
@@ -23,6 +26,7 @@ export interface AgentCreateFormState {
   description: string;
   systemPrompt: string;
   color: string;
+  permissionMode: AgentPermissionMode;
   tools: AgentToolboxSelection;
   selectedSkillIds: string[];
   selectedKbScope: 'COLLECTIONS' | 'USER';
@@ -36,6 +40,7 @@ export type AgentCreateChatPatch = Partial<
     | 'slug'
     | 'description'
     | 'systemPrompt'
+    | 'permissionMode'
     | 'tools'
     | 'selectedSkillIds'
     | 'selectedKbScope'
@@ -53,6 +58,7 @@ export interface AgentCreateCanvasValue {
   slug: string;
   description: string;
   systemPrompt: string;
+  permissionMode: AgentPermissionMode;
   selected: string[];
   toolIds: string[];
   skillIds: string[];
@@ -75,6 +81,7 @@ export const EMPTY_CREATE_FORM: AgentCreateFormState = {
   description: '',
   systemPrompt: '',
   color: COLORS[0],
+  permissionMode: 'ask-first',
   tools: EMPTY_TOOLS,
   selectedSkillIds: [],
   selectedKbScope: 'COLLECTIONS',
@@ -89,6 +96,7 @@ export function formFromWizardDefaults(): AgentCreateFormState {
     description: INITIAL_WIZARD_STATE.description,
     systemPrompt: INITIAL_WIZARD_STATE.systemPrompt,
     color: INITIAL_WIZARD_STATE.color,
+    permissionMode: 'ask-first',
     tools: { ...INITIAL_WIZARD_STATE.tools },
     selectedSkillIds: [...INITIAL_WIZARD_STATE.selectedSkillIds],
     selectedKbScope: INITIAL_WIZARD_STATE.selectedKbScope,
@@ -108,6 +116,7 @@ export function toCanvasValue(form: AgentCreateFormState): AgentCreateCanvasValu
     slug: form.slug,
     description: form.description,
     systemPrompt: form.systemPrompt,
+    permissionMode: form.permissionMode,
     selected: toolIds,
     toolIds,
     skillIds: form.selectedSkillIds,
@@ -122,6 +131,7 @@ export function isFormDirty(form: AgentCreateFormState, baseline: AgentCreateFor
     form.slug !== baseline.slug ||
     form.description !== baseline.description ||
     form.systemPrompt !== baseline.systemPrompt ||
+    form.permissionMode !== baseline.permissionMode ||
     JSON.stringify(toolIdsFromForm(form)) !== JSON.stringify(toolIdsFromForm(baseline)) ||
     JSON.stringify(form.selectedSkillIds) !== JSON.stringify(baseline.selectedSkillIds) ||
     form.selectedKbScope !== baseline.selectedKbScope ||

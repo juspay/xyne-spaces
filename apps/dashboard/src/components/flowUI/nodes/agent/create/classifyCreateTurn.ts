@@ -227,6 +227,30 @@ export function detectIntakeGaps(text: string): IntakeGap[] {
   return gaps;
 }
 
+/** Bare create asks with no job — ask first, do not draft. */
+export function isVagueAgentCreate(text: string): boolean {
+  const trimmed = text.trim();
+  if (!trimmed) return false;
+  // "make an agent", "create a bot", "I want an assistant" — no job noun.
+  if (
+    !/^(please\s+)?(can you\s+|could you\s+)?(make|create|build|i want|i need)\b.{0,48}\b(an?\s+)?(agent|bot|assistant)\b\.?$/i.test(
+      trimmed,
+    )
+  ) {
+    return false;
+  }
+  // A concrete role/job word means it is specific enough to draft.
+  if (JOB_VERB.test(trimmed)) return false;
+  if (
+    /\b(standup|stand-up|scribe|triage|reviewer|digest|monitor|onboarding|support|sales|billing|hr|legal|security|pr|pull.?request|release|notes?|calendar|inbox|email|slack|jira|github)\b/i.test(
+      trimmed,
+    )
+  ) {
+    return false;
+  }
+  return true;
+}
+
 export function planDescribe(text: string): DescribePlan {
   const trimmed = text.trim();
   if (!trimmed) return 'none';
@@ -238,9 +262,12 @@ export function planDescribe(text: string): DescribePlan {
   if (!agentRequest && words.length < 8) {
     return 'none';
   }
-  if (words.length <= 6) return 'ask';
-  if (/^(make|create|build|i want)\b.{0,48}\b(an?\s+)?(agent|bot|assistant)\b\.?$/i.test(trimmed)) {
+  if (isVagueAgentCreate(trimmed)) return 'ask';
+  if (words.length <= 6 && !hasJob && !/\b(standup|scribe|triage|digest|monitor)\b/i.test(trimmed)) {
     return 'ask';
+  }
+  if (/^(make|create|build|i want)\b.{0,48}\b(an?\s+)?(agent|bot|assistant)\b\.?$/i.test(trimmed)) {
+    if (isVagueAgentCreate(trimmed)) return 'ask';
   }
   if (hasJob && specified >= 2) return 'draft-then-ask';
   if (hasJob && words.length >= 12 && specified >= 1) return 'draft-then-ask';
@@ -248,6 +275,8 @@ export function planDescribe(text: string): DescribePlan {
     return gaps.length === 0 ? 'draft' : 'draft-then-ask';
   }
   if (words.length >= 20) return 'draft-then-ask';
+  // Named short job ("build a standup agent") → draft.
+  if (FIRST_DESCRIBE.test(trimmed) && !isVagueAgentCreate(trimmed)) return 'draft';
   return 'ask';
 }
 
@@ -304,6 +333,9 @@ export function classifyCreateTurn(
     return { kind: 'edit', fields: fieldsForExplicitEdit(trimmed) };
   }
   if (isFirstDescribe(trimmed) || (canvasEmpty && planDescribe(trimmed) !== 'none')) {
+    if (canvasEmpty && (isVagueAgentCreate(trimmed) || planDescribe(trimmed) === 'ask')) {
+      return { kind: 'clarify', fields: [] };
+    }
     return { kind: 'edit', fields: firstDraftFields(trimmed) };
   }
   // Filled-canvas capability follow-ups ("use Slack MCP") even without verbs.

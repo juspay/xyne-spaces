@@ -32,6 +32,13 @@ export function toolboxFromCapabilities(
 
 export function formFromIdentity(agent: AgentIdentity): AgentCreateFormState {
   const slug = agent.slug?.trim() || slugify(agent.name);
+  const permissionRow = agent.details?.find(row => /permission/i.test(row.label));
+  const permissionMode =
+    permissionRow?.value === 'Read only'
+      ? 'read-only'
+      : permissionRow?.value === 'Can write'
+        ? 'can-write'
+        : 'ask-first';
   return {
     ...EMPTY_CREATE_FORM,
     name: agent.name ?? '',
@@ -40,16 +47,19 @@ export function formFromIdentity(agent: AgentIdentity): AgentCreateFormState {
     description: agent.description ?? '',
     systemPrompt: agent.systemPrompt ?? '',
     color: agent.color?.trim() || EMPTY_CREATE_FORM.color,
+    permissionMode,
     tools: toolboxFromCapabilities(agent.capabilities),
   };
 }
 
 export function patchFromIdentity(agent: AgentIdentity): AgentCreateChatPatch {
+  const form = formFromIdentity(agent);
   return {
     name: agent.name,
     slug: agent.slug,
     description: agent.description ?? '',
     systemPrompt: agent.systemPrompt ?? '',
+    permissionMode: form.permissionMode,
     tools: toolboxFromCapabilities(agent.capabilities),
   };
 }
@@ -181,10 +191,19 @@ function instructionsFromModelReply(visibleReply: string): string {
 export function fallbackPromptFromIntent(intent: string): string {
   const name = nameFromIntent(intent) || 'this agent';
   const job = descriptionFromIntent(intent);
-  if (job) {
-    return `You are ${name}. ${job} Be clear, concise, and actionable.`;
-  }
-  return `You are ${name}. Help the user with their request. Be clear, concise, and actionable.`;
+  const role = job
+    ? `You are ${name}. ${job} Be clear, concise, and actionable.`
+    : `You are ${name}. Help the user with their request. Be clear, concise, and actionable.`;
+  return `${role}
+
+## Operational Workflow
+1. Clarify the request if it is ambiguous.
+2. Do the work using granted tools.
+3. Reply with the result in the expected format.
+
+## Guardrails
+Never invent facts. Do not take irreversible actions without asking first.
+`;
 }
 
 /** Fields the model stated explicitly in the visible reply (not XYNE_CREATE_DRAFT intent). */

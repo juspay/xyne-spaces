@@ -26,10 +26,11 @@ const AUTHORING_PROMPT_APPENDIX = `
 
 You can build and revise agents on this platform. When the user asks to create a new agent:
 
-1. Call \`list_available_tools\` (and \`list_agents\` / \`get_agent_config\` when useful) before drafting.
-2. Call \`propose-agent\` exactly once with the full draft (name, description, system prompt, tools). That posts a draft card for the user to Approve/Decline — nothing is created until they approve.
-3. Write a real system prompt — role, procedure, which tools to use when, output format, limits — not a one-liner.
-4. Do NOT use \`create-agent\` for brand-new agents (that is the legacy card). Do not claim the agent exists until they approve the draft card.
+1. If the ask is vague ("make an agent", "create a bot") with no job: ask what job it should do. At most two questions per turn. Do NOT call \`propose-agent\` yet.
+2. Once a job is named, call \`list_available_tools\` (and \`list_agents\` / \`get_agent_config\` when useful). If the job can send, delete, pay, force-push, or post publicly, ask one closed risk question first.
+3. Prefer a thin system prompt (Identity, numbered Operational Workflow, tool usage, Guardrails, decision rules, error recovery, two contrastive examples). Put long procedures in a skill via \`create-skill\`, then pass that slug in \`skillSlugs\`.
+4. Call \`propose-agent\` exactly once with name, description, systemPrompt, tools, optional \`permissionMode\` (ask-first | read-only | can-write; default ask-first), \`skillSlugs\`, and \`deniedTools\`. That posts a draft card — nothing is created until they approve.
+5. Do NOT use \`create-agent\` for brand-new agents (legacy card). Do not claim the agent exists until they approve.
 
 For clone/update of existing agents, subagents, skills, or MCP servers, use the matching write tool (\`clone-agent\`, \`update-agent\`, \`create-subagent\`, \`update-subagent\`, \`create-skill\`, \`update-skill\`, \`create-mcp\`). Those remain approval-gated.
 `;

@@ -15,10 +15,17 @@
  * card instead of being silently guessed into the wrong bucket.
  */
 
-import { agentIdentity, type AgentCapability, type AgentIdentity } from "xyne-claw-shared";
+import {
+  agentIdentity,
+  normalizePermissionMode,
+  permissionModeLabel,
+  type AgentCapability,
+  type AgentIdentity,
+  type AgentPermissionMode,
+} from "xyne-claw-shared";
 import { errMsg } from "./errors.js";
 import type { AvailableToolsCatalog } from "../routes/tools.js";
-import { agentRepository, agentRequestRepository } from "../repositories/index.js";
+import { agentRepository, agentRequestRepository, skillRepository } from "../repositories/index.js";
 import { availableServerTypesSafe } from "./connector-availability.js";
 import { writeAuditLog } from "./audit.js";
 import { createLogger } from "../logger.js";
@@ -219,6 +226,9 @@ export interface DraftAgentSpec {
   modelId?: string;
   color?: string;
   tools: string[];
+  permissionMode?: AgentPermissionMode;
+  skillSlugs?: string[];
+  deniedTools?: string[];
   /** The agent's own line for the thread, posted next to the card. Chat text
    *  only — deliberately NOT part of the identity, so it never renders on a
    *  re-drawn card after the decision. */
@@ -236,6 +246,16 @@ export function identityFromDraftSpec(
   resolved: ResolvedCapabilities,
   builtBy?: string,
 ): AgentIdentity {
+  const permissionMode = normalizePermissionMode(spec.permissionMode);
+  const details: NonNullable<AgentIdentity["details"]> = [
+    { label: "Permission", value: permissionModeLabel(permissionMode) },
+  ];
+  if (spec.skillSlugs && spec.skillSlugs.length > 0) {
+    details.push({ label: "Skills", value: spec.skillSlugs.join(", ") });
+  }
+  if (spec.deniedTools && spec.deniedTools.length > 0) {
+    details.push({ label: "Denied tools", value: spec.deniedTools.join(", ") });
+  }
   return agentIdentity({
     name: spec.name,
     slug: spec.slug,
@@ -245,6 +265,7 @@ export function identityFromDraftSpec(
     ...(spec.modelId ? { modelId: spec.modelId } : {}),
     ...(spec.color ? { color: spec.color } : {}),
     capabilities: resolved.capabilities,
+    details,
     // No Identifier/Model rows: the card renders slug + model in its header line,
     // and repeating them here showed the same two facts twice. `details` stays as
     // the extension point for rows that have nowhere else to go.
@@ -312,14 +333,23 @@ function parseDraftSpec(raw: string | null): DraftAgentSpec | null {
     const parsed = JSON.parse(raw) as Partial<DraftAgentSpec>;
     if (!parsed || typeof parsed.name !== "string" || typeof parsed.slug !== "string") return null;
     if (typeof parsed.systemPrompt !== "string" || parsed.systemPrompt.trim().length === 0) return null;
+    const skillSlugs = Array.isArray(parsed.skillSlugs)
+      ? parsed.skillSlugs.filter((t): t is string => typeof t === "string" && t.trim().length > 0).map((t) => t.trim())
+      : [];
+    const deniedTools = Array.isArray(parsed.deniedTools)
+      ? parsed.deniedTools.filter((t): t is string => typeof t === "string" && t.trim().length > 0).map((t) => t.trim())
+      : [];
     return {
       name: parsed.name,
       slug: parsed.slug,
       description: typeof parsed.description === "string" ? parsed.description : "",
       systemPrompt: parsed.systemPrompt,
+      permissionMode: normalizePermissionMode(parsed.permissionMode),
       ...(typeof parsed.modelId === "string" ? { modelId: parsed.modelId } : {}),
       ...(typeof parsed.color === "string" ? { color: parsed.color } : {}),
       tools: Array.isArray(parsed.tools) ? parsed.tools.filter((t): t is string => typeof t === "string") : [],
+      ...(skillSlugs.length > 0 ? { skillSlugs } : {}),
+      ...(deniedTools.length > 0 ? { deniedTools } : {}),
     };
   } catch {
     return null;
@@ -334,6 +364,7 @@ export interface AgentCreateCanvasOverlay {
   systemPrompt?: string;
   toolIds?: string[];
   skillIds?: string[];
+  permissionMode?: AgentPermissionMode;
   kbScope?: "COLLECTIONS" | "USER";
   knowledgeBase?: Array<{ collectionId: string; fileId?: string | null }>;
 }
@@ -366,6 +397,13 @@ export function parseAgentCanvasValue(raw: unknown): {
   }
   if (record["kbScope"] === "USER" || record["kbScope"] === "COLLECTIONS") {
     overlay.kbScope = record["kbScope"];
+  }
+  if (
+    record["permissionMode"] === "ask-first" ||
+    record["permissionMode"] === "read-only" ||
+    record["permissionMode"] === "can-write"
+  ) {
+    overlay.permissionMode = record["permissionMode"];
   }
   if (Array.isArray(record["knowledgeBase"])) {
     overlay.knowledgeBase = record["knowledgeBase"].flatMap((item) => {
@@ -401,6 +439,9 @@ export function applyCanvasOverlay(
   }
   if (typeof overlay.systemPrompt === "string" && overlay.systemPrompt.trim()) {
     next.systemPrompt = overlay.systemPrompt.trim().slice(0, 20_000);
+  }
+  if (overlay.permissionMode) {
+    next.permissionMode = normalizePermissionMode(overlay.permissionMode);
   }
   if (Array.isArray(overlay.toolIds)) {
     next.tools = overlay.toolIds
@@ -510,14 +551,39 @@ export async function resolveAgentDraft(
       };
     }
 
+    const denied = new Set((spec.deniedTools ?? []).map((t) => t.trim()).filter(Boolean));
     // The user's chip selection can only remove capabilities: intersect it with
     // what the catalog actually grants rather than trusting it as the source.
-    const grantedIds = parsedCanvas.overlay?.toolIds
-      ? spec.tools
-      : parsedCanvas.keptCapabilityIds
-        ? spec.tools.filter((token) => parsedCanvas.keptCapabilityIds!.includes(token))
-        : spec.tools;
+    const grantedIds = (
+      parsedCanvas.overlay?.toolIds
+        ? spec.tools
+        : parsedCanvas.keptCapabilityIds
+          ? spec.tools.filter((token) => parsedCanvas.keptCapabilityIds!.includes(token))
+          : spec.tools
+    ).filter((token) => !denied.has(token));
     const { identity, resolved } = await buildIdentity(grantedIds);
+
+    const permissionMode = normalizePermissionMode(spec.permissionMode);
+    if (permissionMode === "read-only") {
+      // read-only agents keep tools for reading; write tools are stripped at
+      // runtime via config.permissionMode — still store resolved tools so the
+      // agent can list them, but mark the mode for the gateway deny path.
+    }
+
+    const skillSlugs = [...new Set([...(spec.skillSlugs ?? [])])];
+    const skillIdsFromSlugs: string[] = [];
+    for (const skillSlug of skillSlugs) {
+      const skill = await skillRepository.findBySlug(skillSlug, request.orgId);
+      if (!skill) {
+        await agentRequestRepository.revertAgentCreateToPending(requestId).catch(() => {});
+        return {
+          ok: false,
+          code: 400,
+          error: `Skill @${skillSlug} was not found. Create the skill first, or remove it from the draft.`,
+        };
+      }
+      skillIdsFromSlugs.push(skill.id);
+    }
 
     const created = await agentRepository.create({
       slug: spec.slug,
@@ -527,7 +593,11 @@ export async function resolveAgentDraft(
       scope: "personal",
       color: spec.color?.trim() || "#6366f1",
       modelId: spec.modelId?.trim() ?? "",
-      config: { tools: toConfigTools(resolved) },
+      config: {
+        tools: toConfigTools(resolved),
+        permissionMode,
+        ...(denied.size > 0 ? { deniedTools: [...denied] } : {}),
+      },
       kbScope: parsedCanvas.overlay?.kbScope === "USER" ? "USER" : "COLLECTIONS",
       owner: { connect: { id: request.requesterId } },
       org: { connect: { id: request.orgId } },
@@ -536,12 +606,15 @@ export async function resolveAgentDraft(
     await agentRequestRepository.recordAgentCreateResult(requestId, created.id).catch(() => {});
 
     const overlay = parsedCanvas.overlay;
-    if (overlay?.skillIds && overlay.skillIds.length > 0) {
-      for (const skillId of overlay.skillIds) {
-        await agentRepository.upsertSkill(created.id, skillId).catch((err) => {
-          log.error(`[agent-card] skill attach failed for ${spec.slug} skill=${skillId}: ${errMsg(err)}`);
-        });
-      }
+    const skillIds = [
+      ...skillIdsFromSlugs,
+      ...(overlay?.skillIds ?? []).filter((id) => typeof id === "string" && id.length > 0),
+    ];
+    const uniqueSkillIds = [...new Set(skillIds)];
+    for (const skillId of uniqueSkillIds) {
+      await agentRepository.upsertSkill(created.id, skillId).catch((err) => {
+        log.error(`[agent-card] skill attach failed for ${spec.slug} skill=${skillId}: ${errMsg(err)}`);
+      });
     }
     if (
       overlay?.kbScope === "COLLECTIONS" &&
@@ -563,10 +636,15 @@ export async function resolveAgentDraft(
       eventType: "AGENT_CREATED",
       targetId: created.id,
       description: `agent-authored agent "${spec.name}" (${spec.slug}) approved from a draft card`,
-      metadata: { requestId, subagents: resolved.subagents, custom: resolved.custom },
+      metadata: {
+        requestId,
+        subagents: resolved.subagents,
+        custom: resolved.custom,
+        permissionMode,
+      },
     });
     log.info(
-      `[agent-card] created agent ${spec.slug} (id=${created.id}) owner=${request.requesterId} org=${request.orgId} tools=${resolved.subagents.length + resolved.custom.length}`,
+      `[agent-card] created agent ${spec.slug} (id=${created.id}) owner=${request.requesterId} org=${request.orgId} tools=${resolved.subagents.length + resolved.custom.length} permission=${permissionMode}`,
     );
 
     const note = unknownToolsNote(resolved.unknown);

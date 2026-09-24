@@ -35,7 +35,19 @@ void describe('classifyCreateTurn', () => {
     assert.equal(shouldGeneratePrompt(result, false, text), true);
   });
 
-  void it('maps a thin job to identity fields, not tools', () => {
+  void it('asks (does not draft) for vague make-an-agent', () => {
+    const result = classifyCreateTurn('make an agent', true);
+    assert.equal(result.kind, 'clarify');
+    assert.deepEqual(result.fields, []);
+    assert.equal(shouldGeneratePrompt(result, true, 'make an agent'), false);
+  });
+
+  void it('asks for create a bot with no job', () => {
+    const result = classifyCreateTurn('create a bot', true);
+    assert.equal(result.kind, 'clarify');
+  });
+
+  void it('maps a thin named job to identity fields, not tools', () => {
     const result = classifyCreateTurn('build a standup agent', true);
     assert.equal(result.kind, 'edit');
     assert.deepEqual(result.fields, ['name', 'slug', 'description', 'systemPrompt']);
@@ -69,13 +81,9 @@ void describe('classifyCreateTurn', () => {
     ]);
   });
 
-  void it('keeps vague make-a-bot identity-only', () => {
-    assert.deepEqual(firstDraftFields('make a bot'), [
-      'name',
-      'slug',
-      'description',
-      'systemPrompt',
-    ]);
+  void it('keeps vague make-a-bot as clarify (no draft)', () => {
+    const result = classifyCreateTurn('make a bot', true);
+    assert.equal(result.kind, 'clarify');
   });
 
   void it('adds tools only when the user named them', () => {

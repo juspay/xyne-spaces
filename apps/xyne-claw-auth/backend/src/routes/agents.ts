@@ -39,6 +39,8 @@ import { validateKbGrants } from "../lib/spaces-kb.js";
 import { ORG_SCOPED_SLUGS } from "../lib/org-scoped-slugs.js";
 import { getAdminOrgScope, getOrgNameMap, withOrgLabel } from "../lib/admin-org-scope.js";
 import { asyncHandler, ok, badRequest, unauthorized, forbidden, notFound, conflict, HttpError } from "../lib/http.js";
+import { exportAgentToml, importAgentToml } from "../lib/agent-toml-sync.js";
+import { parseToolsConfig } from "xyne-claw-shared";
 
 import { createLogger } from "../logger.js";
 const log = createLogger("agents");
@@ -477,6 +479,12 @@ router.post("/", asyncHandler(async (req: Request, res: Response) => {
     throw badRequest("systemPrompt is required");
   }
 
+  const { validateSystemPromptContract, normalizePermissionMode } = await import("xyne-claw-shared");
+  const promptCheck = validateSystemPromptContract(systemPrompt);
+  if (!promptCheck.ok) {
+    throw badRequest(promptCheck.error ?? "systemPrompt failed the authoring contract");
+  }
+
   const configCheck = validateAgentModelConfig(config);
   if (!configCheck.ok) {
     throw badRequest(configCheck.error);
@@ -507,6 +515,15 @@ router.post("/", asyncHandler(async (req: Request, res: Response) => {
     throw badRequest("orgId is required");
   }
 
+  const mergedConfig: Record<string, unknown> = {
+    ...(normalizedConfig ?? {}),
+  };
+  if (mergedConfig["permissionMode"] === undefined) {
+    mergedConfig["permissionMode"] = normalizePermissionMode(undefined);
+  } else {
+    mergedConfig["permissionMode"] = normalizePermissionMode(mergedConfig["permissionMode"]);
+  }
+
   const data: Prisma.AgentCreateInput = {
     slug: slug.trim(),
     name: name.trim(),
@@ -515,7 +532,7 @@ router.post("/", asyncHandler(async (req: Request, res: Response) => {
     scope: effectiveScope,
     color: color ?? "#6366f1",
     modelId: modelId ?? "",
-    config: (normalizedConfig ?? {}) as Prisma.InputJsonValue,
+    config: mergedConfig as Prisma.InputJsonValue,
     kbScope: effectiveKbScope,
     org: { connect: { id: createOrgId } },
   };
@@ -624,6 +641,162 @@ router.patch("/:slug/design-system", asyncHandler(async (req: Request<{ slug: st
   });
   ok(res, sanitizeAgent(updated as unknown as Record<string, unknown>));
 }));
+
+/** Export a declarative `.xyne/agents/<slug>.toml` projection (no secrets). */
+router.get(
+  "/:slug/toml",
+  requireAgentOwnerContributorOrAdmin,
+  asyncHandler(async (req: Request<{ slug: string }>, res: Response) => {
+    const orgId = getOrgId(req);
+    if (!orgId) throw badRequest("Organization context is required");
+    const existing = await agentRepository.findBySlugWithRelations(req.params.slug, orgId);
+    if (!existing) throw notFound("Agent not found");
+    const skillSlugs = (existing.skills ?? [])
+      .map((link) => link.skill?.slug)
+      .filter((s): s is string => typeof s === "string" && s.length > 0);
+    const collectionIds = (existing.collections ?? [])
+      .map((c) => c.collectionId)
+      .filter((id): id is string => typeof id === "string" && id.length > 0);
+    const toml = await exportAgentToml({
+      slug: existing.slug,
+      name: existing.name,
+      description: existing.description ?? "",
+      systemPrompt: existing.systemPrompt,
+      modelId: existing.modelId,
+      config: (existing.config as Record<string, unknown> | null) ?? {},
+      kbScope: existing.kbScope,
+      skillSlugs,
+      collectionIds,
+    });
+    res.type("text/plain").send(toml);
+  }),
+);
+
+/**
+ * Import a `.xyne/agents/*.toml` projection. Postgres stays source of truth.
+ * Secrets in the file are rejected. Non-admins cannot set scope=global.
+ * Explicit import only — no live two-way watcher. Personal agents stay personal
+ * unless an admin explicitly sets scope=global on the request body.
+ */
+router.post(
+  "/:slug/toml",
+  requireAgentOwnerOrAdmin,
+  asyncHandler(async (req: Request<{ slug: string }>, res: Response) => {
+    const orgId = getOrgId(req);
+    if (!orgId) throw badRequest("Organization context is required");
+    const requesterId = getRequesterId(req);
+    if (!requesterId) throw unauthorized("Authentication required");
+
+    const body = req.body as {
+      toml?: string;
+      scope?: string;
+      /** ISO timestamp from a prior GET — optimistic concurrency. */
+      expectedUpdatedAt?: string;
+    };
+    if (!body.toml || typeof body.toml !== "string") {
+      throw badRequest("toml string is required");
+    }
+    if (body.scope === "global") {
+      const admin = await isClawAdmin(requesterId);
+      if (!admin) {
+        throw forbidden("TOML import cannot set scope=global unless you are a claw admin");
+      }
+    }
+
+    const existing = await agentRepository.findBySlug(req.params.slug, orgId);
+    if (!existing) throw notFound("Agent not found");
+
+    // Personal agents stay personal unless an admin explicitly promotes.
+    if (existing.scope === "personal" && body.scope === "global") {
+      const admin = await isClawAdmin(requesterId);
+      if (!admin) {
+        throw forbidden("Non-admin cannot set scope=global on TOML import");
+      }
+    }
+
+    const currentConfig = (existing.config as Record<string, unknown> | null) ?? {};
+    const currentHash =
+      typeof currentConfig["tomlContentHash"] === "string" ? currentConfig["tomlContentHash"] : null;
+
+    const imported = await importAgentToml(body.toml, currentHash);
+    if (!imported.ok) throw badRequest(imported.error);
+    if (imported.noop) {
+      ok(res, { noop: true, message: "Export hash matches — no changes applied" });
+      return;
+    }
+
+    // Resolve skills before mutating the row so a missing skill fails cleanly.
+    const skillIds: string[] = [];
+    for (const skillSlug of imported.skillSlugs) {
+      const skill = await skillRepository.findBySlug(skillSlug, orgId);
+      if (!skill) {
+        throw badRequest(`Skill @${skillSlug} was not found — create it before importing`);
+      }
+      skillIds.push(skill.id);
+    }
+
+    const tools = (currentConfig["tools"] as Record<string, unknown> | undefined) ?? {};
+    const nextConfig: Record<string, unknown> = {
+      ...currentConfig,
+      tools: {
+        ...tools,
+        custom: imported.toolsAllow,
+      },
+      permissionMode: imported.permissionMode,
+      deniedTools: imported.deniedTools,
+      ...(imported.projection.content_hash
+        ? { tomlContentHash: imported.projection.content_hash }
+        : {}),
+    };
+
+    const expectedUpdatedAt = body.expectedUpdatedAt
+      ? new Date(body.expectedUpdatedAt)
+      : existing.updatedAt;
+    if (Number.isNaN(expectedUpdatedAt.getTime())) {
+      throw badRequest("expectedUpdatedAt must be a valid ISO timestamp");
+    }
+
+    const result = await prisma.agent.updateMany({
+      where: { id: existing.id, updatedAt: expectedUpdatedAt },
+      data: {
+        name: imported.projection.name,
+        description: imported.projection.description,
+        systemPrompt: imported.systemPrompt,
+        ...(imported.modelId !== undefined ? { modelId: imported.modelId } : {}),
+        kbScope: imported.kbScope,
+        config: nextConfig as Prisma.InputJsonValue,
+        ...(body.scope === "global" ? { scope: "global" } : {}),
+      },
+    });
+    if (result.count !== 1) {
+      throw conflict("Agent changed while importing TOML; re-export and retry");
+    }
+
+    const updated = await agentRepository.findById(existing.id);
+    if (!updated) throw notFound("Agent not found after TOML import");
+
+    for (const skillId of skillIds) {
+      await agentRepository.upsertSkill(updated.id, skillId);
+    }
+
+    if (imported.collectionIds.length > 0) {
+      await agentRepository.replaceCollections(
+        updated.id,
+        imported.collectionIds.map((collectionId) => ({ collectionId })),
+      );
+    }
+
+    await writeAuditLog({
+      actorUserId: requesterId,
+      eventType: "AGENT_UPDATED",
+      targetId: updated.id,
+      description: `Agent "${updated.name}" (${updated.slug}) updated from TOML import`,
+      metadata: { source: "toml-import", orgId },
+    });
+
+    ok(res, { noop: false, agent: sanitizeAgent(updated as unknown as Record<string, unknown>) });
+  }),
+);
 
 router.put("/:slug", async (req: Request<{ slug: string }>, res: Response) => {
   try {

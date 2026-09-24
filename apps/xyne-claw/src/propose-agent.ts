@@ -20,6 +20,12 @@
 
 import { Type } from "@sinclair/typebox";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
+import {
+  MAX_SYSTEM_PROMPT_CHARS,
+  normalizePermissionMode,
+  validateSystemPromptContract,
+  type AgentPermissionMode,
+} from "xyne-claw-shared";
 import { createLogger } from "./logger.js";
 
 const log = createLogger("propose-agent");
@@ -29,9 +35,10 @@ const MAX_NAME = 80;
 const MAX_SLUG = 80;
 const MAX_DESC = 300;
 /** The pod's cap. claw-auth persists this verbatim; the card truncates for display. */
-const MAX_SYSTEM_PROMPT = 20000;
+const MAX_SYSTEM_PROMPT = MAX_SYSTEM_PROMPT_CHARS;
 const MAX_TOOLS = 40;
-const MIN_SYSTEM_PROMPT = 40;
+const MAX_SKILLS = 20;
+const MAX_DENIED = 40;
 /** One or two sentences — this is a chat line, not a second description. */
 const MAX_SUMMARY = 400;
 
@@ -48,6 +55,12 @@ export interface ProposedAgentSpec {
    *  catalog and reports back anything it could not match — the pod deliberately
    *  does NOT guess, because only claw-auth knows what this org has. */
   tools: string[];
+  /** Permission mode stored on agent.config.permissionMode. Default ask-first. */
+  permissionMode?: AgentPermissionMode;
+  /** Skill slugs to attach on approve (must exist in the org). */
+  skillSlugs?: string[];
+  /** Tool slugs the agent must never receive, even if listed in tools. */
+  deniedTools?: string[];
   /** One line the agent says in the thread alongside the card. The card can only
    *  show WHAT was drafted; this is where the agent says why it made the calls it
    *  did. Optional — claw-auth falls back to a neutral line. */
@@ -105,10 +118,18 @@ export function buildProposeAgentTool(
       "subagent names or custom tool slugs, one per entry, no prose. Anything that does",
       "not match is dropped and reported on the card, so guessing costs the user a tool.",
       "",
-      "Write `systemPrompt` as the agent's real operating instructions, in the second",
-      "person ('You are …', 'When asked to …'): its role, what it should do step by step,",
-      "which tools to reach for and when, the output format it should produce, and what it",
-      "must NOT do. A one-line prompt makes a useless agent — be specific and concrete.",
+      "Write `systemPrompt` in the second person with these sections: Identity & tone;",
+      "Operational Workflow (numbered steps); When to use each tool; Guardrails (must not);",
+      "Decision rules; Error recovery; two Contrastive examples (robotic vs calibrated).",
+      "Keep the always-on prompt thin: put long procedures in a skill via create-skill, then",
+      "pass that slug in `skillSlugs`. A one-line prompt is rejected.",
+      "",
+      "If the user only said 'make an agent' with no job, do NOT call this tool — ask what",
+      "job it should do first (at most two questions). If the job can send, delete, pay,",
+      "force-push, or post publicly, ask one closed risk question before calling.",
+      "",
+      "`permissionMode`: ask-first (default), read-only, or can-write. Omit → ask-first.",
+      "`deniedTools`: exact slugs this agent must never receive.",
       "",
       "`description` is the single line shown in the agent picker — what it does, not how.",
       "",
@@ -139,7 +160,7 @@ export function buildProposeAgentTool(
         systemPrompt: {
           type: "string",
           description:
-            "The agent's full operating instructions (role, procedure, tool usage, output format, limits). Second person.",
+            "Thin operating instructions with Workflow + Guardrails sections (and preferred contrastive examples). Long procedures belong in a skill.",
         },
         modelId: {
           type: "string",
@@ -154,6 +175,21 @@ export function buildProposeAgentTool(
           type: "array",
           description:
             "Exact tool slugs / subagent names from list_available_tools. Grant only what the agent's job needs.",
+          items: { type: "string" },
+        },
+        permissionMode: {
+          type: "string",
+          description: "ask-first | read-only | can-write. Default ask-first.",
+        },
+        skillSlugs: {
+          type: "array",
+          description:
+            "Org skill slugs to attach on approve (from create-skill / list skills). Prefer one procedure skill.",
+          items: { type: "string" },
+        },
+        deniedTools: {
+          type: "array",
+          description: "Exact tool slugs this agent must never receive.",
           items: { type: "string" },
         },
         summary: {
@@ -202,10 +238,9 @@ export function buildProposeAgentTool(
 
       const systemPrompt =
         typeof p["systemPrompt"] === "string" ? p["systemPrompt"].trim().slice(0, MAX_SYSTEM_PROMPT) : "";
-      if (systemPrompt.length < MIN_SYSTEM_PROMPT) {
-        return reject(
-          `Rejected: \`systemPrompt\` is too short (${systemPrompt.length} chars). Write the agent's real operating instructions — role, procedure, which tools to use when, output format, and limits — then call propose-agent again.`,
-        );
+      const promptCheck = validateSystemPromptContract(systemPrompt);
+      if (!promptCheck.ok) {
+        return reject(`Rejected: ${promptCheck.error} Then call propose-agent again.`);
       }
 
       const slug = normalizeAgentSlug(
@@ -225,6 +260,19 @@ export function buildProposeAgentTool(
         .filter((t, i, arr) => arr.indexOf(t) === i)
         .slice(0, MAX_TOOLS);
 
+      const skillSlugs = (Array.isArray(p["skillSlugs"]) ? (p["skillSlugs"] as unknown[]) : [])
+        .filter((t): t is string => typeof t === "string" && t.trim().length > 0)
+        .map((t) => t.trim())
+        .filter((t, i, arr) => arr.indexOf(t) === i)
+        .slice(0, MAX_SKILLS);
+
+      const deniedTools = (Array.isArray(p["deniedTools"]) ? (p["deniedTools"] as unknown[]) : [])
+        .filter((t): t is string => typeof t === "string" && t.trim().length > 0)
+        .map((t) => t.trim())
+        .filter((t, i, arr) => arr.indexOf(t) === i)
+        .slice(0, MAX_DENIED);
+
+      const permissionMode = normalizePermissionMode(p["permissionMode"]);
       const modelId = typeof p["modelId"] === "string" ? p["modelId"].trim().slice(0, 120) : "";
       const color = typeof p["color"] === "string" ? p["color"].trim().slice(0, 32) : "";
       const summary = typeof p["summary"] === "string" ? p["summary"].trim().slice(0, MAX_SUMMARY) : "";
@@ -237,13 +285,16 @@ export function buildProposeAgentTool(
           description,
           systemPrompt,
           tools,
+          permissionMode,
+          ...(skillSlugs.length > 0 ? { skillSlugs } : {}),
+          ...(deniedTools.length > 0 ? { deniedTools } : {}),
           ...(modelId ? { modelId } : {}),
           ...(color ? { color } : {}),
           ...(summary ? { summary } : {}),
         },
       };
       log.info(
-        `[propose-agent] accepted name="${name}" slug=${slug} promptLen=${systemPrompt.length} tools=${tools.length}`,
+        `[propose-agent] accepted name="${name}" slug=${slug} promptLen=${systemPrompt.length} tools=${tools.length} permission=${permissionMode}`,
       );
 
       // Hard-stop the turn — nothing exists yet and nothing further can be done

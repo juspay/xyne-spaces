@@ -285,6 +285,10 @@ type SessionAgentToolsContext = {
    * (see buildSubagentToolRefs). Empty when the agent uses no custom subagents.
    */
   subagentToolRefs: SubagentToolRefs[];
+  /** ask-first | read-only | can-write from agent.config.permissionMode */
+  permissionMode: "ask-first" | "read-only" | "can-write";
+  /** Exact tool slugs that must never run for this agent. */
+  deniedTools: string[];
 };
 
 async function loadSessionAgentToolsContext(
@@ -305,9 +309,15 @@ async function loadSessionAgentToolsContext(
         })
       : null;
   if (!agent) return null;
-  const toolsConfig = parseToolsConfig(
-    (agent.config as Record<string, unknown> | null | undefined) ?? undefined,
-  );
+  const configRecord = (agent.config as Record<string, unknown> | null | undefined) ?? undefined;
+  const toolsConfig = parseToolsConfig(configRecord);
+  const { normalizePermissionMode } = await import("xyne-claw-shared");
+  const permissionMode = normalizePermissionMode(configRecord?.["permissionMode"]);
+  const deniedTools = Array.isArray(configRecord?.["deniedTools"])
+    ? (configRecord!["deniedTools"] as unknown[])
+        .filter((t): t is string => typeof t === "string" && t.trim().length > 0)
+        .map((t) => t.trim())
+    : [];
 
   let subagentToolRefs: SubagentToolRefs[] = [];
   const subagentNames = (toolsConfig?.subagents ?? []).filter(
@@ -336,6 +346,8 @@ async function loadSessionAgentToolsContext(
     slug: agent.slug,
     toolsConfig,
     subagentToolRefs,
+    permissionMode,
+    deniedTools,
   };
 }
 
@@ -1799,6 +1811,30 @@ router.post("/:sessionId/mcp/call", async (req: Request<{ sessionId: string }>, 
     // Write tools always require approval — cannot be overridden by agent config
     const definition = await resolveConnectorDefinition(serverType);
     const isWriteTool = definition?.writeTools?.includes(tool) ?? false;
+
+    // Agent-level deny list and read-only mode beat the approval card.
+    const denied = sessionAgentTools?.deniedTools ?? [];
+    if (denied.includes(tool) || denied.includes(`${serverType}/${tool}`)) {
+      log.info(`[mcp/call] denied ${serverType}/${tool} for agent=${agentSlug} (deniedTools)`);
+      res.json({
+        success: true,
+        data: {
+          content: `Blocked: ${tool} is on this agent's deny list and cannot run.`,
+        },
+      });
+      return;
+    }
+    if (sessionAgentTools?.permissionMode === "read-only" && isWriteTool) {
+      log.info(`[mcp/call] denied ${serverType}/${tool} for agent=${agentSlug} (permissionMode=read-only)`);
+      res.json({
+        success: true,
+        data: {
+          content: `Blocked: this agent is read-only and cannot call write tool ${tool}.`,
+        },
+      });
+      return;
+    }
+
     const effectivePermission = isWriteTool ? "ask" : (permission ?? "allow");
 
     log.info(

@@ -772,6 +772,36 @@ export async function prepareRun(
       effectivePrompt = eventType === "USER_MENTIONED" ? TWIN_PROMPT : ASSISTANT_PROMPT;
     }
 
+    // Product guidance chain (org → space → leaf), capped. Appended after the
+    // persona so team rules sit in the static prefix without replacing it.
+    const agentConfigRecord = (agent.config as Record<string, unknown> | null) ?? {};
+    const guidanceCfg = agentConfigRecord["guidance"] as
+      | { org?: string; space?: string; leaf?: string; orgLabel?: string; spaceLabel?: string; leafLabel?: string }
+      | undefined;
+    if (guidanceCfg && (guidanceCfg.org || guidanceCfg.space || guidanceCfg.leaf)) {
+      try {
+        const { compileRunGuidance } = await import("./run-guidance.js");
+        const compiled = compileRunGuidance({
+          orgGuidance: guidanceCfg.org,
+          spaceGuidance: guidanceCfg.space,
+          leafGuidance: guidanceCfg.leaf,
+          orgLabel: guidanceCfg.orgLabel,
+          spaceLabel: guidanceCfg.spaceLabel,
+          leafLabel: guidanceCfg.leafLabel,
+        });
+        if (compiled.text) {
+          effectivePrompt = `${(effectivePrompt ?? "").trimEnd()}\n\n## Team guidance\n${compiled.text}`;
+          if (compiled.truncated) {
+            log.warn(
+              `[run] guidance chain truncated for agent=${agentSlug} bytes=${compiled.bytes} layersKept=${compiled.layersKept}`,
+            );
+          }
+        }
+      } catch (err) {
+        log.warn(`[run] guidance compile failed: ${errMsg(err)}`);
+      }
+    }
+
     // Resolve attachedContext (+ the Spaces thread the assistant was opened
     // from) to actual content if Spaces auth is available. The thread arrives
     // as agentConfig.SPACES_CONVERSATION_ID — separate from the attachedContext

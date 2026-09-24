@@ -3072,6 +3072,15 @@ export async function processTask(
       }
     }
 
+    // Deterministic tool order keeps the prompt prefix stable when MCP lists change.
+    {
+      const { sortToolSlugsForPrefix } = await import("xyne-claw-shared");
+      const order = new Map(sortToolSlugsForPrefix(allTools.map((t) => t.name)).map((name, i) => [name, i]));
+      allTools = [...allTools].sort(
+        (a, b) => (order.get(a.name) ?? 0) - (order.get(b.name) ?? 0),
+      );
+    }
+
     // Daily brief is read-only: the agent GATHERS and EMITS, it must never mutate
     // (post a message, create a ticket, write a doc). Strip every write-flagged
     // tool + mutating sandbox tool, but KEEP all read tools and subagents so the
@@ -3626,6 +3635,9 @@ export async function processTask(
     // bracket+resolve-ID format, which confused agents into guessing IDs or, per
     // its own rule, refusing to emit `@Name` at all — starving the resolver.
     // Only relevant in a chat thread (channelId present).
+    // Prompt tiers: persona (systemPrompt) includes team guidance compiled in
+    // claw-auth start-run. Dynamic Vespa/tool output stays outside the persona.
+    // compactBeforeRun is the compaction switch — no second compaction service yet.
     const basePrompt = (systemPrompt ?? "").trimEnd();
     const citationGuide =
       agentSlug && CITATION_GUIDE_AGENT_SLUGS.has(agentSlug)
